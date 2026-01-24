@@ -2,7 +2,7 @@ package market
 
 import (
 	"context"
-	"github.com/rustyeddy/trader/pkg/broker"
+	"github.com/rustyeddy/trader/broker"
 )
 
 

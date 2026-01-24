@@ -1,6 +1,6 @@
 package sim
 
-import "github.com/rustyeddy/trader/pkg/market"
+import "github.com/rustyeddy/trader/market"
 
 func TradeMargin(
 	units float64,

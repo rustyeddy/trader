@@ -3,7 +3,7 @@ package sim
 import (
     "testing"
 
-    "github.com/rustyeddy/trader/pkg/broker"
+    "github.com/rustyeddy/trader/broker"
     "github.com/stretchr/testify/assert"
 )
 
