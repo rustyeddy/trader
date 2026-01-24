@@ -1,4 +1,4 @@
-// pkg/market/conversion.go
+// market/conversion.go
 package market
 
 import (

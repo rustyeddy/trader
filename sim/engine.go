@@ -111,7 +111,7 @@ func (e *Engine) Revalue() error {
 	return nil
 }
 
-// pkg/sim/engine.go
+// sim/engine.go
 func (e *Engine) UpdatePrice(p broker.Price) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

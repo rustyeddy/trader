@@ -1,4 +1,4 @@
-// pkg/sim/account.go
+// sim/account.go
 package sim
 
 import "github.com/rustyeddy/trader/broker"

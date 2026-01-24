@@ -1,4 +1,4 @@
-// pkg/sim/triggers.go
+// sim/triggers.go
 package sim
 
 func hitStopLoss(t *Trade, price float64) bool {

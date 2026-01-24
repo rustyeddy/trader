@@ -1,4 +1,4 @@
-// pkg/sim/pricing.go
+// sim/pricing.go
 package sim
 
 import (

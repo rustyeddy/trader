@@ -1,4 +1,4 @@
-// pkg/journal/csv.go
+// journal/csv.go
 package journal
 
 import (

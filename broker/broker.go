@@ -26,7 +26,7 @@ func (p Price) Mid() float64 {
 	return (p.Bid + p.Ask) / 2
 }
 
-// pkg/broker/models.go
+// broker/models.go
 type MarketOrderRequest struct {
 	Instrument string
 	Units      float64

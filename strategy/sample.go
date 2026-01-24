@@ -1,4 +1,4 @@
-// pkg/strategy/sample.go
+// strategy/sample.go
 package strategy
 
 import (
