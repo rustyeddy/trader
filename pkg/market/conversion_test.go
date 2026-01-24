@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/pkg/broker"
+	"github.com/stretchr/testify/assert"
 )
 
 type fakePriceSource struct {
@@ -18,13 +19,6 @@ func (f *fakePriceSource) GetPrice(ctx context.Context, instrument string) (brok
 	f.called++
 	f.lastInstrument = instrument
 	return f.price, f.err
-}
-
-func absFloat(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 func findByQuote(account string) (string, bool) {
@@ -59,12 +53,8 @@ func TestQuoteToAccountRate_UnknownInstrument(t *testing.T) {
 
 	ps := &fakePriceSource{}
 	rate, err := QuoteToAccountRate("NO_SUCH_INSTRUMENT", "USD", ps)
-	if err == nil {
-		t.Fatalf("expected error for unknown instrument")
-	}
-	if rate != 0 {
-		t.Fatalf("expected rate 0, got %v", rate)
-	}
+	assert.Error(t, err)
+	assert.Equal(t, 0.0, rate)
 }
 
 func TestQuoteToAccountRate_QuoteEqualsAccount(t *testing.T) {
@@ -77,15 +67,9 @@ func TestQuoteToAccountRate_QuoteEqualsAccount(t *testing.T) {
 
 	ps := &fakePriceSource{}
 	rate, err := QuoteToAccountRate(instrument, "USD", ps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rate != 1.0 {
-		t.Fatalf("expected rate 1.0, got %v", rate)
-	}
-	if ps.called != 0 {
-		t.Fatalf("expected no price lookup, got %d", ps.called)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, 1.0, rate)
+	assert.Equal(t, 0, ps.called)
 }
 
 func TestQuoteToAccountRate_BaseEqualsAccount(t *testing.T) {
@@ -100,20 +84,12 @@ func TestQuoteToAccountRate_BaseEqualsAccount(t *testing.T) {
 		price: broker.Price{Bid: 2.0, Ask: 4.0}, // mid = 3.0
 	}
 	rate, err := QuoteToAccountRate(instrument, "USD", ps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.NoError(t, err)
 
 	expected := 1.0 / ps.price.Mid()
-	if absFloat(rate-expected) > 1e-9 {
-		t.Fatalf("expected rate %v, got %v", expected, rate)
-	}
-	if ps.called != 1 {
-		t.Fatalf("expected 1 price lookup, got %d", ps.called)
-	}
-	if ps.lastInstrument != instrument {
-		t.Fatalf("expected instrument %s, got %s", instrument, ps.lastInstrument)
-	}
+	assert.InDelta(t, expected, rate, 1e-9)
+	assert.Equal(t, 1, ps.called)
+	assert.Equal(t, instrument, ps.lastInstrument)
 }
 
 func TestQuoteToAccountRate_CrossNotImplemented(t *testing.T) {
@@ -126,7 +102,5 @@ func TestQuoteToAccountRate_CrossNotImplemented(t *testing.T) {
 
 	ps := &fakePriceSource{}
 	_, err := QuoteToAccountRate(instrument, "USD", ps)
-	if err == nil {
-		t.Fatalf("expected error for cross conversion")
-	}
+	assert.Error(t, err)
 }
