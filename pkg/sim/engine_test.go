@@ -135,7 +135,7 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 		e, _ := newEngine(t, 100000)
 		setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
 		sl := 1.0990
-		openMarket(t, e, "EUR_USD", 100000, &sl, nil)
+		fill := openMarket(t, e, "EUR_USD", 100000, &sl, nil)
 
 		setPrice(t, e, "EUR_USD", 1.0990, 1.0992, t1)
 
@@ -144,7 +144,7 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 			t.Fatalf("get account: %v", err)
 		}
 
-		if len(e.trades) != 1 || e.trades["1"].Open {
+		if len(e.trades) != 1 || e.trades[fill.TradeID].Open {
 			t.Fatalf("expected trade to be closed")
 		}
 
@@ -163,7 +163,7 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 		e, _ := newEngine(t, 100000)
 		setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
 		sl := 1.1012
-		openMarket(t, e, "EUR_USD", -100000, &sl, nil)
+		fill := openMarket(t, e, "EUR_USD", -100000, &sl, nil)
 
 		setPrice(t, e, "EUR_USD", 1.1010, 1.1012, t1)
 
@@ -172,7 +172,7 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 			t.Fatalf("get account: %v", err)
 		}
 
-		if len(e.trades) != 1 || e.trades["1"].Open {
+		if len(e.trades) != 1 || e.trades[fill.TradeID].Open {
 			t.Fatalf("expected trade to be closed")
 		}
 

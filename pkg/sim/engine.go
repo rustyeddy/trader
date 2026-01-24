@@ -2,29 +2,29 @@ package sim
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/pkg/broker"
+	"github.com/rustyeddy/trader/pkg/id"
 	"github.com/rustyeddy/trader/pkg/journal"
 	"github.com/rustyeddy/trader/pkg/market"
 )
 
 type Engine struct {
-	mu     sync.Mutex
-	acct   broker.Account
-	prices *PriceStore
-	trades map[string]*Trade
-	nextID int
+	mu      sync.Mutex
+	acct    broker.Account
+	prices  *PriceStore
+	trades  map[string]*Trade
+	nextID  int
 	journal journal.Journal
 }
 
 func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 	return &Engine{
-		acct:   acct,
-		prices: NewPriceStore(),
-		trades: make(map[string]*Trade),
+		acct:    acct,
+		prices:  NewPriceStore(),
+		trades:  make(map[string]*Trade),
 		journal: j,
 	}
 }
@@ -39,7 +39,7 @@ func (e *Engine) GetPrice(ctx context.Context, instr string) (broker.Price, erro
 	return e.prices.Get(instr)
 }
 
-func (e *Engine) CreateMarketOrder(ctx context.Context,	req broker.MarketOrderRequest) (broker.OrderFill, error) {
+func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRequest) (broker.OrderFill, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -49,8 +49,7 @@ func (e *Engine) CreateMarketOrder(ctx context.Context,	req broker.MarketOrderRe
 		fillPrice = p.Bid
 	}
 
-	e.nextID++
-	id := fmt.Sprintf("%d", e.nextID)
+	id := id.New()
 
 	trade := &Trade{
 		ID:         id,
@@ -139,7 +138,7 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 			reason = "TakeProfit"
 		}
 		if reason != "" {
-			if err := e.closeTradeLocked(t, mark, p.Time, ""); err != nil {
+			if err := e.closeTradeLocked(t, mark, p.Time, reason); err != nil {
 				return err
 			}
 		}
@@ -169,7 +168,7 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 	return e.enforceMarginLocked()
 }
 
-func (e *Engine) closeTradeLocked(t *Trade,	closePrice float64,	closeTime time.Time, reason string) error {
+func (e *Engine) closeTradeLocked(t *Trade, closePrice float64, closeTime time.Time, reason string) error {
 
 	rate, err := market.QuoteToAccountRate(
 		t.Instrument,
