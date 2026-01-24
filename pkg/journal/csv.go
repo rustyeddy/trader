@@ -27,8 +27,21 @@ func NewCSV(tradesPath, equityPath string) (*CSVJournal, error) {
 	tw := csv.NewWriter(tf)
 	ew := csv.NewWriter(ef)
 
-	tw.Write([]string{"trade_id","instrument","units","entry_price","exit_price","open_time","close_time","realized_pl","reason"})
-	ew.Write([]string{"time","balance","equity","margin_used","free_margin","margin_level"})
+	if err := tw.Write([]string{"trade_id", "instrument", "units", "entry_price", "exit_price", "open_time", "close_time", "realized_pl", "reason"}); err != nil {
+		return nil, err
+	}
+	if err := ew.Write([]string{"time", "balance", "equity", "margin_used", "free_margin", "margin_level"}); err != nil {
+		return nil, err
+	}
+
+	tw.Flush()
+	if err := tw.Error(); err != nil {
+		return nil, err
+	}
+	ew.Flush()
+	if err := ew.Error(); err != nil {
+		return nil, err
+	}
 
 	return &CSVJournal{tw, ew, tf, ef}, nil
 }
@@ -61,14 +74,27 @@ func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
 	if err != nil {
 		return err
 	}
-	
+
 	j.equity.Flush()
 	return nil
 }
 
 func (j *CSVJournal) Close() error {
-	j.tf.Close()
-	j.ef.Close()
+	j.trades.Flush()
+	if err := j.trades.Error(); err != nil {
+		return err
+	}
+	j.equity.Flush()
+	if err := j.equity.Error(); err != nil {
+		return err
+	}
+
+	if err := j.tf.Close(); err != nil {
+		return err
+	}
+	if err := j.ef.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
