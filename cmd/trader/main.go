@@ -208,7 +208,11 @@ func runCmd(args []string) int {
 	ctx := context.Background()
 	acct, _ := engine.GetAccount(ctx)
 	price, _ := engine.GetPrice(ctx, cfg.Strategy.Instrument)
-	meta := market.Instruments[cfg.Strategy.Instrument]
+	meta, ok := market.Instruments[cfg.Strategy.Instrument]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown instrument: %s\n", cfg.Strategy.Instrument)
+		return 1
+	}
 
 	// Calculate position size
 	pipSize := 0.0001
