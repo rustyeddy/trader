@@ -11,9 +11,9 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/replay"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
-	"github.com/rustyeddy/trader/sim/replay"
 )
 
 func main() {

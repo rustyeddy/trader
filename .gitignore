@@ -30,7 +30,9 @@ go.work.sum
 # Build output
 bin/
 trader
-replay
+trader-bin
+/replay/replay
+/cmd/replay/replay
 
 # Journal output files
 *.csv

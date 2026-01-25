@@ -12,7 +12,7 @@ A professional-grade FX trading simulator and research platform for backtesting 
 - Stop-loss and take-profit enforcement on every price tick
 - Forced liquidation when margin requirements violated
 
-### Replay System (`sim/replay/`)
+### Replay System (`replay/`)
 - Replays historical tick data from CSV files
 - Supports scripted trading events (OPEN, CLOSE, OPEN_SLTP, CLOSE_ALL)
 - Tick-by-tick simulation with optional event execution

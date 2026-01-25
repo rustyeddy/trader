@@ -8,8 +8,8 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/replay"
 	"github.com/rustyeddy/trader/sim"
-	"github.com/rustyeddy/trader/sim/replay"
 )
 
 func main() {
