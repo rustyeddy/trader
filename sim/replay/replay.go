@@ -164,34 +164,12 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 			return fmt.Errorf("OPEN_SLTP: %w", err)
 		}
 
-		// IMPORTANT:
-		// This assumes your broker.MarketOrderRequest supports StopLoss/TakeProfit fields.
-		// If your struct uses different names/types, adjust these two lines accordingly.
 		req := broker.MarketOrderRequest{
 			Instrument: inst,
 			Units:      units,
+			StopLoss:   &sl,
+			TakeProfit: &tp,
 		}
-
-		// Common patterns are either:
-		//   StopLoss, TakeProfit float64 (with 0 meaning unset)
-		// or
-		//   StopLoss, TakeProfit *float64
-		//
-		// If yours are float64:
-		//   req.StopLoss = sl; req.TakeProfit = tp
-		//
-		// If yours are pointers:
-		//   req.StopLoss = &sl; req.TakeProfit = &tp
-		//
-		// ---- Choose ONE of the below blocks to match your codebase. ----
-
-		// Option A: pointer fields
-		req.StopLoss = &sl
-		req.TakeProfit = &tp
-
-		// Option B: float fields (uncomment if needed)
-		// req.StopLoss = sl
-		// req.TakeProfit = tp
 
 		_, err = engine.CreateMarketOrder(ctx, req)
 		return err
