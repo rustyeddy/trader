@@ -125,9 +125,9 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 
 	// Calculate quote to account rate
 	var quoteToAccount float64
-	if meta.Quote == "USD" {
+	if meta.QuoteCurrency == "USD" {
 		quoteToAccount = 1.0
-	} else if meta.Quote == "JPY" {
+	} else if meta.QuoteCurrency == "JPY" {
 		quoteToAccount = 1.0 / price.Mid()
 	}
 

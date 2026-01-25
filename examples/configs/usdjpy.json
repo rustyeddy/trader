@@ -1,0 +1,34 @@
+{
+  "account": {
+    "id": "SIM-JSON-001",
+    "currency": "USD",
+    "balance": 100000
+  },
+  "strategy": {
+    "risk_percent": 0.01,
+    "instrument": "USD_JPY",
+    "stop_pips": 25,
+    "target_pips": 50
+  },
+  "simulation": {
+    "initial_bid": 149.50,
+    "initial_ask": 149.52,
+    "price_steps": [
+      {
+        "bid": 149.70,
+        "ask": 149.72,
+        "delay": "1h"
+      },
+      {
+        "bid": 150.00,
+        "ask": 150.02,
+        "delay": "2h"
+      }
+    ]
+  },
+  "journal": {
+    "type": "csv",
+    "trades_file": "./usdjpy_trades.csv",
+    "equity_file": "./usdjpy_equity.csv"
+  }
+}

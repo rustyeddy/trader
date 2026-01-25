@@ -1,0 +1,21 @@
+# Conservative Trading Configuration
+# Lower risk, wider stops, smaller position sizes
+
+account:
+  id: "CONSERVATIVE-001"
+  currency: "USD"
+  balance: 50000
+
+strategy:
+  risk_percent: 0.005     # Risk only 0.5% per trade
+  instrument: "EUR_USD"
+  stop_pips: 30           # Wider 30 pip stop
+  target_pips: 90         # 90 pip target (3:1 R:R)
+
+simulation:
+  initial_bid: 1.0849
+  initial_ask: 1.0851
+
+journal:
+  type: "sqlite"
+  db_path: "./conservative_trades.sqlite"
