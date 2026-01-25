@@ -16,6 +16,7 @@ type Config struct {
 	Strategy   StrategyConfig   `json:"strategy" yaml:"strategy"`
 	Simulation SimulationConfig `json:"simulation" yaml:"simulation"`
 	Journal    JournalConfig    `json:"journal" yaml:"journal"`
+	Replay     *ReplayConfig    `json:"replay,omitempty" yaml:"replay,omitempty"`
 }
 
 // AccountConfig contains account initialization parameters
@@ -61,6 +62,13 @@ type JournalConfig struct {
 	TradesFile string `json:"trades_file,omitempty" yaml:"trades_file,omitempty"`
 	EquityFile string `json:"equity_file,omitempty" yaml:"equity_file,omitempty"`
 	DBPath     string `json:"db_path,omitempty" yaml:"db_path,omitempty"`
+}
+
+// ReplayConfig contains replay-specific parameters
+type ReplayConfig struct {
+	CSVFile       string `json:"csv_file" yaml:"csv_file"`             // Path to CSV file with tick data
+	TickThenEvent bool   `json:"tick_then_event" yaml:"tick_then_event"` // Process tick before event
+	CloseAtEnd    bool   `json:"close_at_end" yaml:"close_at_end"`     // Close all trades at end of replay
 }
 
 // LoadFromFile loads configuration from a file (JSON or YAML based on extension)

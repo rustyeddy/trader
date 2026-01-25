@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/sim/replay"
 )
 
 // If your journal uses a different driver name, adjust this.
@@ -78,8 +79,8 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 		Equity:   startBal,
 	}, j)
 
-	if err := ReplayCSV(ctx, csvPath, engine, ReplayOptions{TickThenEvent: true}); err != nil {
-		t.Fatalf("ReplayCSV: %v", err)
+	if err := replay.CSV(ctx, csvPath, engine, replay.Options{TickThenEvent: true}); err != nil {
+		t.Fatalf("replay.CSV: %v", err)
 	}
 
 	acct, _ := engine.GetAccount(ctx)

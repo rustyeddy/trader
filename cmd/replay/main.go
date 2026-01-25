@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"encoding/csv"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/sim/replay"
 )
 
 func main() {
@@ -43,7 +40,7 @@ func main() {
 		Equity:   100_000,
 	}, j)
 
-	err = ReplayCSV(ctx, *ticksPath, engine, ReplayOptions{TickThenEvent: true})
+	err = replay.CSV(ctx, *ticksPath, engine, replay.Options{TickThenEvent: true})
 	if err != nil {
 		panic(err)
 	}
@@ -58,70 +55,4 @@ func main() {
 	acct, _ := engine.GetAccount(ctx)
 	fmt.Printf("DONE balance=%.2f equity=%.2f marginUsed=%.2f\n",
 		acct.Balance, acct.Equity, acct.MarginUsed)
-}
-
-func replayTicks(path string, onTick func(broker.Price) error) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
-
-	// Read header (and tolerate files without it)
-	header, err := r.Read()
-	if err != nil {
-		return err
-	}
-
-	hasHeader := len(header) >= 4 && header[0] == "time" && header[1] == "instrument"
-	if !hasHeader {
-		// Treat the first row as a tick row.
-		if err := handleRow(header, onTick); err != nil {
-			return err
-		}
-	}
-
-	for {
-		row, err := r.Read()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if err := handleRow(row, onTick); err != nil {
-			return err
-		}
-	}
-}
-
-func handleRow(row []string, onTick func(broker.Price) error) error {
-	if len(row) < 4 {
-		return fmt.Errorf("bad row (need 4 columns): %v", row)
-	}
-
-	t, err := time.Parse(time.RFC3339, row[0])
-	if err != nil {
-		return fmt.Errorf("bad time %q: %w", row[0], err)
-	}
-	inst := row[1]
-
-	bid, err := strconv.ParseFloat(row[2], 64)
-	if err != nil {
-		return fmt.Errorf("bad bid %q: %w", row[2], err)
-	}
-	ask, err := strconv.ParseFloat(row[3], 64)
-	if err != nil {
-		return fmt.Errorf("bad ask %q: %w", row[3], err)
-	}
-
-	return onTick(broker.Price{
-		Time:       t,
-		Instrument: inst,
-		Bid:        bid,
-		Ask:        ask,
-	})
 }
