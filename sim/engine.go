@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -69,6 +70,71 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRe
 		Units:      req.Units,
 		Price:      fillPrice,
 	}, nil
+}
+
+// CloseTrade manually closes an open trade at the current market price.
+// - Longs close on BID
+// - Shorts close on ASK
+// It records a TradeRecord and an EquitySnapshot, just like UpdatePrice().
+func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) error {
+	_ = ctx // reserved for future cancellation checks
+
+	if reason == "" {
+		reason = "ManualClose"
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	t, ok := e.trades[tradeID]
+	if !ok {
+		return fmt.Errorf("close trade: trade %q not found", tradeID)
+	}
+	if !t.Open {
+		return fmt.Errorf("close trade: trade %q is already closed", tradeID)
+	}
+
+	p, err := e.prices.Get(t.Instrument)
+	if err != nil {
+		return fmt.Errorf("close trade: no price for %q: %w", t.Instrument, err)
+	}
+
+	// Correct side for closing
+	closePrice := p.Bid
+	if t.Units < 0 {
+		closePrice = p.Ask
+	}
+
+	closeTime := p.Time
+	if closeTime.IsZero() {
+		closeTime = time.Now()
+	}
+
+	if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
+		return err
+	}
+
+	// Revalue + margin, then snapshot (mirrors UpdatePrice())
+	if err := e.revalueLocked(); err != nil {
+		return err
+	}
+	if err := e.recomputeMarginLocked(); err != nil {
+		return err
+	}
+
+	if err := e.journal.RecordEquity(journal.EquitySnapshot{
+		Time:        closeTime,
+		Balance:     e.acct.Balance,
+		Equity:      e.acct.Equity,
+		MarginUsed:  e.acct.MarginUsed,
+		FreeMargin:  e.acct.FreeMargin,
+		MarginLevel: e.acct.MarginLevel,
+	}); err != nil {
+		return err
+	}
+
+	// Should be unnecessary after a close, but safe + consistent.
+	return e.enforceMarginLocked()
 }
 
 func (e *Engine) Revalue() error {
