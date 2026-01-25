@@ -94,7 +94,7 @@ func (c *Config) SaveToFile(path string) error {
 	var err error
 
 	// Determine format by extension
-	if len(path) > 5 && path[len(path)-5:] == ".yaml" || path[len(path)-4:] == ".yml" {
+	if (len(path) > 5 && path[len(path)-5:] == ".yaml") || (len(path) > 4 && path[len(path)-4:] == ".yml") {
 		data, err = yaml.Marshal(c)
 	} else {
 		data, err = json.MarshalIndent(c, "", "  ")
