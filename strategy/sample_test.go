@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader/pkg/broker"
-	"github.com/rustyeddy/trader/pkg/market"
-	"github.com/rustyeddy/trader/pkg/risk"
+	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/risk"
 	"github.com/stretchr/testify/assert"
 )
 

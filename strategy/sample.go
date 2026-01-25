@@ -1,12 +1,12 @@
-// pkg/strategy/sample.go
+// strategy/sample.go
 package strategy
 
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/pkg/broker"
-	"github.com/rustyeddy/trader/pkg/market"
-	"github.com/rustyeddy/trader/pkg/risk"
+	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/risk"
 )
 
 func TradeEURUSD(ctx context.Context, b broker.Broker) error {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/pkg/broker"
-	"github.com/rustyeddy/trader/pkg/journal"
+	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/journal"
 )
 
 type testJournal struct {

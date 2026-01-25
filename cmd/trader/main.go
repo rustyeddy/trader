@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rustyeddy/trader/pkg/journal"
+	"github.com/rustyeddy/trader/journal"
 )
 
 func main() {

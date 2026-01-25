@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rustyeddy/trader/pkg/broker"
-	"github.com/rustyeddy/trader/pkg/id"
-	"github.com/rustyeddy/trader/pkg/journal"
-	"github.com/rustyeddy/trader/pkg/market"
+	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/market"
 )
 
 type Engine struct {
@@ -111,7 +111,7 @@ func (e *Engine) Revalue() error {
 	return nil
 }
 
-// pkg/sim/engine.go
+// sim/engine.go
 func (e *Engine) UpdatePrice(p broker.Price) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

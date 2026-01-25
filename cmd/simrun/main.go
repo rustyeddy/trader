@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader/pkg/broker"
-	"github.com/rustyeddy/trader/pkg/journal"
-	"github.com/rustyeddy/trader/pkg/sim"
-	"github.com/rustyeddy/trader/pkg/strategy"
+	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func main() {

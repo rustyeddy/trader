@@ -1,4 +1,4 @@
-// pkg/journal/journal.go
+// journal/journal.go
 package journal
 
 import "time"

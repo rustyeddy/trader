@@ -1,4 +1,4 @@
-// pkg/journal/schema.go
+// journal/schema.go
 package journal
 
 const Schema = `

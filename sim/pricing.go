@@ -1,10 +1,10 @@
-// pkg/sim/pricing.go
+// sim/pricing.go
 package sim
 
 import (
 	"errors"
 	"sync"
-	"github.com/rustyeddy/trader/pkg/broker"
+	"github.com/rustyeddy/trader/broker"
 )
 
 type PriceStore struct {
