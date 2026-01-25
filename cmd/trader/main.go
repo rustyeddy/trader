@@ -308,7 +308,7 @@ func replayCmd(args []string) int {
 	var (
 		configPath = fs.String("config", "", "path to config file with replay settings")
 		ticksPath  = fs.String("ticks", "", "CSV file of ticks (time,instrument,bid,ask)")
-		dbPath     = fs.String("db", "./trader.db", "SQLite journal path")
+		dbPath     = fs.String("db", "./trader.sqlite", "SQLite journal path")
 		closeEnd   = fs.Bool("close-end", true, "close all open trades at end")
 	)
 	if err := fs.Parse(args); err != nil {
