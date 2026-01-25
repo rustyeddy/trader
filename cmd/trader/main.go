@@ -214,11 +214,8 @@ func runCmd(args []string) int {
 		return 1
 	}
 
-	// Calculate position size
-	pipSize := 0.0001
-	if meta.PipLocation == -2 {
-		pipSize = 0.01
-	}
+	// Calculate position size using dynamic pip size calculation
+	pipSize := risk.PipSize(meta.PipLocation)
 	stopPrice := price.Ask - (cfg.Strategy.StopPips * pipSize)
 
 	var quoteToAccount float64

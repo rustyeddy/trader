@@ -107,29 +107,30 @@ func main() {
 }
 
 func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy bool) {
-	acct, _ := engine.GetAccount(ctx)
-	price, _ := engine.GetPrice(ctx, instrument)
+	acct, err := engine.GetAccount(ctx)
+	if err != nil {
+		panic(err)
+	}
+	price, err := engine.GetPrice(ctx, instrument)
+	if err != nil {
+		panic(err)
+	}
 	meta := market.Instruments[instrument]
 
 	// Calculate position size (risk 1% per trade)
 	var stopPrice float64
 	var entryPrice float64
 
+	// Calculate pip size dynamically based on instrument
+	pipSize := risk.PipSize(meta.PipLocation)
+	pipDistance := 20.0 // 20 pips
+
 	if isBuy {
 		entryPrice = price.Ask
-		// Calculate stop based on instrument-specific pip sizing
-		pipSize := 0.0001
-		if meta.PipLocation == -2 {
-			pipSize = 0.01
-		}
-		stopPrice = entryPrice - (0.0020 / pipSize * pipSize)
+		stopPrice = entryPrice - (pipDistance * pipSize)
 	} else {
 		entryPrice = price.Bid
-		pipSize := 0.0001
-		if meta.PipLocation == -2 {
-			pipSize = 0.01
-		}
-		stopPrice = entryPrice + (0.0020 / pipSize * pipSize)
+		stopPrice = entryPrice + (pipDistance * pipSize)
 	}
 
 	// Calculate quote to account rate
@@ -172,7 +173,7 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 	fmt.Printf("  Units: %.0f\n", size.Units)
 	fmt.Printf("  Risk: $%.2f\n", size.RiskAmount)
 
-	_, err := engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
+	_, err = engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
 		Instrument: instrument,
 		Units:      units,
 		StopLoss:   &stopPrice,

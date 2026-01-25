@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"gopkg.in/yaml.v3"
 )
 
@@ -124,6 +125,16 @@ func (c *Config) Validate() error {
 	}
 	if c.Strategy.Instrument == "" {
 		return fmt.Errorf("strategy.instrument is required")
+	}
+	// Validate that the instrument exists in the market
+	if _, ok := market.Instruments[c.Strategy.Instrument]; !ok {
+		return fmt.Errorf("unknown instrument: %s", c.Strategy.Instrument)
+	}
+	if c.Strategy.StopPips <= 0 {
+		return fmt.Errorf("strategy.stop_pips must be positive")
+	}
+	if c.Strategy.TargetPips <= 0 {
+		return fmt.Errorf("strategy.target_pips must be positive")
 	}
 	if c.Simulation.InitialBid <= 0 || c.Simulation.InitialAsk <= 0 {
 		return fmt.Errorf("simulation initial prices must be positive")
