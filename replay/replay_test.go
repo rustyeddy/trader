@@ -87,13 +87,12 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 		t.Fatalf("expected balance to increase, start=%.2f end=%.2f", startBal, acct.Balance)
 	}
 
-	// Validate at least one trade row exists and close_reason indicates TP.
+	// Validate at least one trade row exists and reason indicates TP.
 	// This is intentionally tolerant because your table/column names may differ slightly.
 	db := openSQLite(t, dbPath)
 	defer db.Close()
 
-	// If your schema uses different table/column names, update this query.
-	// Common: trades(trade_id, close_reason, close_price, realized_pl, ...)
+	// Query the reason column from the trades table
 	rows, err := db.Query(`SELECT reason FROM trades`)
 	if err != nil {
 		t.Fatalf("query trades: %v", err)
