@@ -137,6 +137,92 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	return e.enforceMarginLocked()
 }
 
+// CloseAll manually closes all open trades at current market prices.
+// - Longs close on BID
+// - Shorts close on ASK
+// It records a single EquitySnapshot after all closes (plus individual TradeRecords via closeTradeLocked).
+func (e *Engine) CloseAll(ctx context.Context, reason string) error {
+	_ = ctx // reserved for future cancellation checks
+
+	if reason == "" {
+		reason = "ManualClose"
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Collect open trades first.
+	open := make([]*Trade, 0, len(e.trades))
+	for _, t := range e.trades {
+		if t != nil && t.Open {
+			open = append(open, t)
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+
+	// Preflight: ensure we have prices for all instruments we need to close.
+	need := map[string]struct{}{}
+	for _, t := range open {
+		need[t.Instrument] = struct{}{}
+	}
+	for inst := range need {
+		if _, err := e.prices.Get(inst); err != nil {
+			return fmt.Errorf("close all: no price for %q: %w", inst, err)
+		}
+	}
+
+	// Close each open trade using its instrument's latest price.
+	var snapshotTime time.Time
+	for _, t := range open {
+		p, _ := e.prices.Get(t.Instrument)
+
+		closePrice := p.Bid
+		if t.Units < 0 {
+			closePrice = p.Ask
+		}
+
+		closeTime := p.Time
+		if closeTime.IsZero() {
+			closeTime = time.Now()
+		}
+		if closeTime.After(snapshotTime) {
+			snapshotTime = closeTime
+		}
+
+		if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
+			return err
+		}
+	}
+
+	// Revalue + margin, then snapshot (mirrors UpdatePrice / CloseTrade behavior).
+	if err := e.revalueLocked(); err != nil {
+		return err
+	}
+	if err := e.recomputeMarginLocked(); err != nil {
+		return err
+	}
+
+	if snapshotTime.IsZero() {
+		snapshotTime = time.Now()
+	}
+
+	if err := e.journal.RecordEquity(journal.EquitySnapshot{
+		Time:        snapshotTime,
+		Balance:     e.acct.Balance,
+		Equity:      e.acct.Equity,
+		MarginUsed:  e.acct.MarginUsed,
+		FreeMargin:  e.acct.FreeMargin,
+		MarginLevel: e.acct.MarginLevel,
+	}); err != nil {
+		return err
+	}
+
+	// Should be unnecessary after closing everything, but consistent and safe.
+	return e.enforceMarginLocked()
+}
+
 func (e *Engine) Revalue() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
