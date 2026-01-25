@@ -1,1 +1,2 @@
-// +build ignore
+// This file is intentionally left without Go build tags.
+// Build constraints for examples should be placed in each .go file directly.
