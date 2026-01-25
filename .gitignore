@@ -36,6 +36,9 @@ replay
 *.csv
 *.sqlite
 
+# Allow example data files
+!examples/data/*.csv
+
 # Editor/IDE
 # .idea/
 # .vscode/
