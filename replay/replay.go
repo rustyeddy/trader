@@ -1,4 +1,4 @@
-package main
+package replay
 
 import (
 	"context"
@@ -14,15 +14,15 @@ import (
 	"github.com/rustyeddy/trader/sim"
 )
 
-// ReplayOptions controls how replay behaves.
-type ReplayOptions struct {
+// Options controls how replay behaves.
+type Options struct {
 	// If true: process tick first (UpdatePrice), then event.
 	// This is what you want most of the time, so OPEN uses current tick prices,
 	// and CLOSE_ALL closes at that tick's prices.
 	TickThenEvent bool
 }
 
-// ReplayCSV replays ticks from a CSV file and applies optional scripted events.
+// CSV replays ticks from a CSV file and applies optional scripted events.
 //
 // CSV formats supported:
 //
@@ -43,7 +43,7 @@ type ReplayOptions struct {
 // - This function calls engine.UpdatePrice() for each row.
 // - With TickThenEvent=true, UpdatePrice happens before the event.
 // - If you add additional event types later, extend handleEvent().
-func ReplayCSV(ctx context.Context, csvPath string, engine *sim.Engine, opts ReplayOptions) error {
+func CSV(ctx context.Context, csvPath string, engine *sim.Engine, opts Options) error {
 	f, err := os.Open(csvPath)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func ReplayCSV(ctx context.Context, csvPath string, engine *sim.Engine, opts Rep
 	}
 }
 
-func handleReplayRow(ctx context.Context, engine *sim.Engine, row []string, opts ReplayOptions) error {
+func handleReplayRow(ctx context.Context, engine *sim.Engine, row []string, opts Options) error {
 	// Minimum tick columns: time,instrument,bid,ask
 	if len(row) < 4 {
 		return fmt.Errorf("bad row (need at least 4 cols time,instrument,bid,ask): %v", row)
@@ -164,34 +164,12 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 			return fmt.Errorf("OPEN_SLTP: %w", err)
 		}
 
-		// IMPORTANT:
-		// This assumes your broker.MarketOrderRequest supports StopLoss/TakeProfit fields.
-		// If your struct uses different names/types, adjust these two lines accordingly.
 		req := broker.MarketOrderRequest{
 			Instrument: inst,
 			Units:      units,
+			StopLoss:   &sl,
+			TakeProfit: &tp,
 		}
-
-		// Common patterns are either:
-		//   StopLoss, TakeProfit float64 (with 0 meaning unset)
-		// or
-		//   StopLoss, TakeProfit *float64
-		//
-		// If yours are float64:
-		//   req.StopLoss = sl; req.TakeProfit = tp
-		//
-		// If yours are pointers:
-		//   req.StopLoss = &sl; req.TakeProfit = &tp
-		//
-		// ---- Choose ONE of the below blocks to match your codebase. ----
-
-		// Option A: pointer fields
-		req.StopLoss = &sl
-		req.TakeProfit = &tp
-
-		// Option B: float fields (uncomment if needed)
-		// req.StopLoss = sl
-		// req.TakeProfit = tp
 
 		_, err = engine.CreateMarketOrder(ctx, req)
 		return err

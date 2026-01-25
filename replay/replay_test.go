@@ -1,4 +1,4 @@
-package main
+package replay
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/replay"
 	"github.com/rustyeddy/trader/sim"
 )
 
@@ -79,8 +78,8 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 		Equity:   startBal,
 	}, j)
 
-	if err := replay.CSV(ctx, csvPath, engine, replay.Options{TickThenEvent: true}); err != nil {
-		t.Fatalf("replay.CSV: %v", err)
+	if err := CSV(ctx, csvPath, engine, Options{TickThenEvent: true}); err != nil {
+		t.Fatalf("CSV: %v", err)
 	}
 
 	acct, _ := engine.GetAccount(ctx)
@@ -88,13 +87,12 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 		t.Fatalf("expected balance to increase, start=%.2f end=%.2f", startBal, acct.Balance)
 	}
 
-	// Validate at least one trade row exists and close_reason indicates TP.
+	// Validate at least one trade row exists and reason indicates TP.
 	// This is intentionally tolerant because your table/column names may differ slightly.
 	db := openSQLite(t, dbPath)
 	defer db.Close()
 
-	// If your schema uses different table/column names, update this query.
-	// Common: trades(trade_id, close_reason, close_price, realized_pl, ...)
+	// Query the reason column from the trades table
 	rows, err := db.Query(`SELECT reason FROM trades`)
 	if err != nil {
 		t.Fatalf("query trades: %v", err)

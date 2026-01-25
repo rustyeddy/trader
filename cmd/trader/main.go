@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/replay"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -25,6 +26,8 @@ func main() {
 	switch sub {
 	case "run":
 		os.Exit(runCmd(os.Args[2:]))
+	case "replay":
+		os.Exit(replayCmd(os.Args[2:]))
 	case "config":
 		os.Exit(configCmd(os.Args[2:]))
 	case "journal":
@@ -44,11 +47,14 @@ func usage() {
 
 Commands:
   run      Run a simulation from a config file
+  replay   Replay historical tick data from CSV or config
   config   Generate or validate configuration files
   journal  Query trade journal data
 
 Usage:
   trader run -config PATH
+  trader replay -ticks PATH [-db PATH] [-close-end]
+  trader replay -config PATH
   trader config init [-output PATH]
   trader config validate -config PATH
   trader journal -db PATH trade <trade_id>
@@ -57,6 +63,8 @@ Usage:
 
 Examples:
   trader run -config examples/configs/basic.yaml
+  trader replay -ticks data/ticks.csv -db replay.sqlite
+  trader replay -config replay-config.yaml
   trader config init -output my-simulation.yaml
   trader journal -db ./trader.sqlite trade 3f2b5c12-....
   trader journal -db ./trader.sqlite today`)
@@ -282,6 +290,142 @@ func runCmd(args []string) int {
 	// Final account state
 	acct, _ = engine.GetAccount(ctx)
 	fmt.Printf("\nFinal Results:\n")
+	fmt.Printf("  Balance: $%.2f\n", acct.Balance)
+	fmt.Printf("  Equity: $%.2f\n", acct.Equity)
+	fmt.Printf("  Profit/Loss: $%.2f\n", acct.Equity-cfg.Account.Balance)
+	if cfg.Journal.Type == "csv" {
+		fmt.Printf("\nResults saved to:\n  - %s\n  - %s\n", cfg.Journal.TradesFile, cfg.Journal.EquityFile)
+	} else {
+		fmt.Printf("\nResults saved to: %s\n", cfg.Journal.DBPath)
+	}
+
+	return 0
+}
+
+func replayCmd(args []string) int {
+	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		configPath = fs.String("config", "", "path to config file with replay settings")
+		ticksPath  = fs.String("ticks", "", "CSV file of ticks (time,instrument,bid,ask)")
+		dbPath     = fs.String("db", "./trader.sqlite", "SQLite journal path")
+		closeEnd   = fs.Bool("close-end", true, "close all open trades at end")
+	)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	ctx := context.Background()
+
+	// Config-based replay
+	if *configPath != "" {
+		return replayFromConfig(ctx, *configPath)
+	}
+
+	// Direct CSV replay
+	if *ticksPath == "" {
+		fmt.Fprintln(os.Stderr, "error: either -config or -ticks flag is required")
+		fmt.Fprintln(os.Stderr, "usage: trader replay -ticks PATH [-db PATH] [-close-end]")
+		fmt.Fprintln(os.Stderr, "   or: trader replay -config PATH")
+		return 2
+	}
+
+	j, err := journal.NewSQLite(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create journal: %v\n", err)
+		return 1
+	}
+	defer j.Close()
+
+	engine := sim.NewEngine(broker.Account{
+		ID:       "SIM-REPLAY",
+		Currency: "USD",
+		Balance:  100_000,
+		Equity:   100_000,
+	}, j)
+
+	fmt.Printf("Replaying ticks from: %s\n", *ticksPath)
+	err = replay.CSV(ctx, *ticksPath, engine, replay.Options{TickThenEvent: true})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay error: %v\n", err)
+		return 1
+	}
+
+	if *closeEnd {
+		if err := engine.CloseAll(ctx, "EndOfReplay"); err != nil {
+			fmt.Fprintf(os.Stderr, "close all: %v\n", err)
+			return 1
+		}
+	}
+
+	acct, _ := engine.GetAccount(ctx)
+	fmt.Printf("\nReplay complete!\n")
+	fmt.Printf("  Balance: $%.2f\n", acct.Balance)
+	fmt.Printf("  Equity: $%.2f\n", acct.Equity)
+	fmt.Printf("  Margin Used: $%.2f\n", acct.MarginUsed)
+	fmt.Printf("\nResults saved to: %s\n", *dbPath)
+
+	return 0
+}
+
+func replayFromConfig(ctx context.Context, configPath string) int {
+	cfg, err := config.LoadFromFile(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		return 1
+	}
+
+	if cfg.Replay == nil || cfg.Replay.CSVFile == "" {
+		fmt.Fprintln(os.Stderr, "error: config must include replay.csv_file")
+		return 1
+	}
+
+	fmt.Printf("Replaying with config: %s\n", configPath)
+	fmt.Printf("  Account: %s (Balance: $%.2f %s)\n", cfg.Account.ID, cfg.Account.Balance, cfg.Account.Currency)
+	fmt.Printf("  CSV File: %s\n", cfg.Replay.CSVFile)
+	fmt.Println()
+
+	// Create journal
+	var j journal.Journal
+	if cfg.Journal.Type == "csv" {
+		j, err = journal.NewCSV(cfg.Journal.TradesFile, cfg.Journal.EquityFile)
+	} else {
+		j, err = journal.NewSQLite(cfg.Journal.DBPath)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create journal: %v\n", err)
+		return 1
+	}
+	defer j.Close()
+
+	// Initialize engine
+	engine := sim.NewEngine(broker.Account{
+		ID:       cfg.Account.ID,
+		Currency: cfg.Account.Currency,
+		Balance:  cfg.Account.Balance,
+		Equity:   cfg.Account.Balance,
+	}, j)
+
+	// Run replay
+	err = replay.CSV(ctx, cfg.Replay.CSVFile, engine, replay.Options{
+		TickThenEvent: cfg.Replay.TickThenEvent,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay error: %v\n", err)
+		return 1
+	}
+
+	// Close all trades at end if configured
+	if cfg.Replay.CloseAtEnd {
+		if err := engine.CloseAll(ctx, "EndOfReplay"); err != nil {
+			fmt.Fprintf(os.Stderr, "close all: %v\n", err)
+			return 1
+		}
+	}
+
+	// Final account state
+	acct, _ := engine.GetAccount(ctx)
+	fmt.Printf("\nReplay complete!\n")
 	fmt.Printf("  Balance: $%.2f\n", acct.Balance)
 	fmt.Printf("  Equity: $%.2f\n", acct.Equity)
 	fmt.Printf("  Profit/Loss: $%.2f\n", acct.Equity-cfg.Account.Balance)

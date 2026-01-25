@@ -10,12 +10,36 @@ This directory contains example trading strategies demonstrating how to use the 
 - **[multiple_trades.go](multiple_trades.go)** - Opening and managing multiple positions
 - **[risk_management.go](risk_management.go)** - Demonstrates proper risk-based position sizing
 
+### Configuration-Based Examples
+
+- **[configs/basic.yaml](configs/basic.yaml)** - Basic simulation configuration
+- **[configs/replay.yaml](configs/replay.yaml)** - Replay historical tick data with events
+- **[configs/aggressive.yaml](configs/aggressive.yaml)** - Higher risk trading configuration
+- **[configs/conservative.yaml](configs/conservative.yaml)** - Lower risk trading configuration
+
+### Sample Data
+
+- **[data/sample_ticks.csv](data/sample_ticks.csv)** - Sample tick data with trading events for replay
+
 ### Running Examples
 
-Each example is a standalone Go program that can be run with:
+Each Go example is a standalone program that can be run with:
 
 ```bash
 go run examples/basic_trade.go
+```
+
+Configuration-based simulations and replays use the trader CLI:
+
+```bash
+# Run a simulation from config
+./trader run -config examples/configs/basic.yaml
+
+# Replay historical data
+./trader replay -config examples/configs/replay.yaml
+
+# Direct CSV replay
+./trader replay -ticks examples/data/sample_ticks.csv -db results.db
 ```
 
 ## Creating Your Own Strategy
