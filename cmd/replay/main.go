@@ -13,14 +13,12 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
-	"github.com/rustyeddy/trader/strategy"
 )
 
 func main() {
 	var (
 		ticksPath = flag.String("ticks", "", "CSV file of ticks (time,instrument,bid,ask)")
 		dbPath    = flag.String("db", "./trader.db", "SQLite journal path")
-		openOnce  = flag.Bool("open-once", true, "open one starter trade at the beginning (demo)")
 		closeEnd  = flag.Bool("close-end", true, "close all open trades at end (ensures trade records exist)")
 	)
 	flag.Parse()
@@ -45,22 +43,8 @@ func main() {
 		Equity:   100_000,
 	}, j)
 
-	firstTick := true
-
-	if err := replayTicks(*ticksPath, func(p broker.Price) error {
-		// Feed tick into engine
-		if err := engine.UpdatePrice(p); err != nil {
-			return err
-		}
-
-		// Optional: open a starter trade once prices exist
-		if firstTick && *openOnce {
-			firstTick = false
-			// demo strategy uses EUR_USD; if your first tick isn't EUR_USD, just set open-once=false
-			_ = strategy.TradeEURUSD(ctx, engine)
-		}
-		return nil
-	}); err != nil {
+	err = ReplayCSV(ctx, *ticksPath, engine, ReplayOptions{TickThenEvent: true})
+	if err != nil {
 		panic(err)
 	}
 
