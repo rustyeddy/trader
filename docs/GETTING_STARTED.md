@@ -63,19 +63,71 @@ After running the simulation, check the generated CSV files:
 
 ## Building the CLI Tools
 
-The project includes two command-line tools:
+The project includes command-line tools for simulations, replay, and journal querying:
 
 ```bash
-# Build the simulation runner
-make build
+# Build the trader CLI
+go build -o trader ./cmd/trader
 
-# Run the built binary
-./bin/trader
+# Or use make
+make build
 ```
 
-### Using the Journal CLI
+### Using the Trader CLI
 
-Query your trading history using the trader CLI:
+The trader CLI provides several commands:
+
+#### Running Simulations
+
+```bash
+# Run a simulation from a config file
+./trader run -config examples/configs/basic.yaml
+```
+
+#### Replaying Historical Data
+
+The replay command allows you to replay historical tick data from CSV files:
+
+```bash
+# Direct CSV replay with default settings
+./trader replay -ticks data/ticks.csv -db replay.db
+
+# Replay from a configuration file
+./trader replay -config replay-config.yaml
+```
+
+CSV format for tick data:
+```csv
+time,instrument,bid,ask,event,arg1,arg2,arg3,arg4
+2026-01-24T09:30:00Z,EUR_USD,1.1000,1.1002,OPEN,EUR_USD,10000
+2026-01-24T09:30:05Z,EUR_USD,1.1010,1.1012,,,
+2026-01-24T09:30:10Z,EUR_USD,1.1020,1.1022,CLOSE_ALL,EndOfDay
+```
+
+Supported events:
+- `OPEN`: Open a market order (args: instrument, units)
+- `OPEN_SLTP`: Open with stop loss and take profit (args: instrument, units, stopLoss, takeProfit)
+- `CLOSE`: Close a specific trade (args: tradeID, reason)
+- `CLOSE_ALL`: Close all open trades (args: reason)
+
+Configuration-based replay example:
+```yaml
+account:
+  id: "REPLAY-001"
+  currency: "USD"
+  balance: 100000
+
+journal:
+  type: "sqlite"
+  db_path: "./replay.db"
+
+replay:
+  csv_file: "./data/ticks.csv"
+  tick_then_event: true
+  close_at_end: true
+```
+
+#### Querying the Journal
 
 ```bash
 # View a specific trade

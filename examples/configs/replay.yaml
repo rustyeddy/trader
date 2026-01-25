@@ -1,0 +1,25 @@
+# Replay Configuration Example
+
+account:
+  id: "REPLAY-001"
+  currency: "USD"
+  balance: 100000
+
+strategy:
+  risk_percent: 0.01      # Risk 1% per trade
+  instrument: "EUR_USD"
+  stop_pips: 20
+  target_pips: 40
+
+simulation:
+  initial_bid: 1.0849
+  initial_ask: 1.0851
+
+journal:
+  type: "sqlite"
+  db_path: "./replay-results.db"
+
+replay:
+  csv_file: "./examples/data/sample_ticks.csv"
+  tick_then_event: true   # Process price tick before executing events
+  close_at_end: true      # Close all open trades at end of replay

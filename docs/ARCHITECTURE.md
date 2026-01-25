@@ -12,6 +12,13 @@ A professional-grade FX trading simulator and research platform for backtesting 
 - Stop-loss and take-profit enforcement on every price tick
 - Forced liquidation when margin requirements violated
 
+### Replay System (`sim/replay/`)
+- Replays historical tick data from CSV files
+- Supports scripted trading events (OPEN, CLOSE, OPEN_SLTP, CLOSE_ALL)
+- Tick-by-tick simulation with optional event execution
+- Configurable via standalone CSV or configuration files
+- Integrates seamlessly with the trading engine and journal
+
 ### Risk Management (`risk/`)
 - Position sizing based on risk percentage of equity
 - Accounts for stop distance, pip values, and currency conversion
@@ -96,7 +103,8 @@ These always hold:
 ## Use Cases
 
 1. Backtest trading strategies on historical FX data
-2. Paper trade to validate strategies without capital risk
-3. Research position sizing and risk management approaches
-4. Analyze equity curves and drawdowns
-5. Learn FX trading mechanics with proper accounting
+2. Replay historical tick data with scripted trading events
+3. Paper trade to validate strategies without capital risk
+4. Research position sizing and risk management approaches
+5. Analyze equity curves and drawdowns
+6. Learn FX trading mechanics with proper accounting

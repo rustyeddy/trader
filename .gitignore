@@ -29,6 +29,8 @@ go.work.sum
 
 # Build output
 bin/
+trader
+replay
 
 # Journal output files
 *.csv
