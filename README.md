@@ -26,14 +26,14 @@ go run ./examples/basic_trade.go
 go run ./examples/risk_management.go
 ```
 
-**New to the project?** See [GETTING_STARTED.md](GETTING_STARTED.md) for a comprehensive guide.
+**New to the project?** See [GETTING_STARTED.md](docs/GETTING_STARTED.md) for a comprehensive guide.
 
 ## Documentation
 
-- **[Getting Started Guide](GETTING_STARTED.md)** - Installation, first steps, and core concepts
+- **[Getting Started Guide](docs/GETTING_STARTED.md)** - Installation, first steps, and core concepts
 - **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and component details
 - **[Examples](examples/)** - Sample trading strategies and use cases
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
+- **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
 
 ## Examples
 

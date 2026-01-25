@@ -105,4 +105,4 @@ _, err := engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
 
 ## Contributing
 
-Have a great strategy example? Please contribute it! See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+Have a great strategy example? Please contribute it! See [CONTRIBUTING.md](../docs/CONTRIBUTING.md) for guidelines.

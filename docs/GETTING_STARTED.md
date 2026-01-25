@@ -140,7 +140,7 @@ The platform enforces margin requirements:
 
 ## Next Steps
 
-1. **Read the Architecture**: See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design
+1. **Read the Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md) for system design
 2. **Explore Examples**: Check the `examples/` directory for sample strategies
 3. **Write Your Strategy**: Create custom trading logic in the `strategy/` package
 4. **Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines
