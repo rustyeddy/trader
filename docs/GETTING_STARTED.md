@@ -177,6 +177,6 @@ make cover
 
 ## Getting Help
 
-- Review the [README](README.md) for feature overview
+- Review the [README](../README.md) for feature overview
 - Check existing [Issues](https://github.com/rustyeddy/trader/issues) on GitHub
 - Open a new issue for bugs or feature requests
