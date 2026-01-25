@@ -11,6 +11,9 @@ import (
 // MA calculates the Simple Moving Average for the given period.
 // Returns an error if there aren't enough candles for the period.
 func MA(candles []market.Candle, period int) (float64, error) {
+	if period <= 0 {
+		return 0, fmt.Errorf("period must be positive, got %d", period)
+	}
 	if len(candles) < period {
 		return 0, fmt.Errorf("not enough candles: need %d, got %d", period, len(candles))
 	}
@@ -26,6 +29,9 @@ func MA(candles []market.Candle, period int) (float64, error) {
 // EMA calculates the Exponential Moving Average for the given period.
 // Returns an error if there aren't enough candles for the period.
 func EMA(candles []market.Candle, period int) (float64, error) {
+	if period <= 0 {
+		return 0, fmt.Errorf("period must be positive, got %d", period)
+	}
 	if len(candles) < period {
 		return 0, fmt.Errorf("not enough candles: need %d, got %d", period, len(candles))
 	}
@@ -51,6 +57,9 @@ func EMA(candles []market.Candle, period int) (float64, error) {
 // ATR calculates the Average True Range for the given period.
 // Returns an error if there aren't enough candles for the period.
 func ATR(candles []market.Candle, period int) (float64, error) {
+	if period <= 0 {
+		return 0, fmt.Errorf("period must be positive, got %d", period)
+	}
 	if len(candles) < period+1 {
 		return 0, fmt.Errorf("not enough candles: need %d, got %d", period+1, len(candles))
 	}

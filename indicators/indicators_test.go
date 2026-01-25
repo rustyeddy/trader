@@ -58,6 +58,18 @@ func TestMA(t *testing.T) {
 		_, err := MA([]market.Candle{}, 1)
 		assert.Error(t, err)
 	})
+
+	t.Run("zero period", func(t *testing.T) {
+		_, err := MA(candles, 0)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
+	})
+
+	t.Run("negative period", func(t *testing.T) {
+		_, err := MA(candles, -5)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
+	})
 }
 
 func TestEMA(t *testing.T) {
@@ -85,6 +97,18 @@ func TestEMA(t *testing.T) {
 		_, err := EMA(candles, 11)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not enough candles")
+	})
+
+	t.Run("zero period", func(t *testing.T) {
+		_, err := EMA(candles, 0)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
+	})
+
+	t.Run("negative period", func(t *testing.T) {
+		_, err := EMA(candles, -3)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
 	})
 }
 
@@ -138,6 +162,18 @@ func TestATR(t *testing.T) {
 		atr, err := ATR(shortCandles, 1)
 		assert.NoError(t, err)
 		assert.Greater(t, atr, 0.0)
+	})
+
+	t.Run("zero period", func(t *testing.T) {
+		_, err := ATR(candles, 0)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
+	})
+
+	t.Run("negative period", func(t *testing.T) {
+		_, err := ATR(candles, -2)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "period must be positive")
 	})
 }
 
