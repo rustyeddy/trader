@@ -117,10 +117,19 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 
 	if isBuy {
 		entryPrice = price.Ask
-		stopPrice = price.Ask - (0.0020 * price.Ask / 1.0851) // Adjust for instrument
+		// Calculate stop based on instrument-specific pip sizing
+		pipSize := 0.0001
+		if meta.PipLocation == -2 {
+			pipSize = 0.01
+		}
+		stopPrice = entryPrice - (0.0020 / pipSize * pipSize)
 	} else {
 		entryPrice = price.Bid
-		stopPrice = price.Bid + (0.0020 * price.Bid / 1.0851)
+		pipSize := 0.0001
+		if meta.PipLocation == -2 {
+			pipSize = 0.01
+		}
+		stopPrice = entryPrice + (0.0020 / pipSize * pipSize)
 	}
 
 	// Calculate quote to account rate
@@ -129,6 +138,9 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 		quoteToAccount = 1.0
 	} else if meta.QuoteCurrency == "JPY" {
 		quoteToAccount = 1.0 / price.Mid()
+	} else {
+		// For other currencies, default to 1.0 (assumes quote currency = account currency)
+		quoteToAccount = 1.0
 	}
 
 	size := risk.Calculate(risk.Inputs{

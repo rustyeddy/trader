@@ -222,6 +222,9 @@ func runCmd(args []string) int {
 		quoteToAccount = 1.0
 	} else if meta.QuoteCurrency == "JPY" {
 		quoteToAccount = 1.0 / price.Mid()
+	} else {
+		// For other currencies, default to 1.0 (assumes quote currency = account currency)
+		quoteToAccount = 1.0
 	}
 
 	size := risk.Calculate(risk.Inputs{
