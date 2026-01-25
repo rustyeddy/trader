@@ -1,0 +1,29 @@
+# Aggressive Trading Configuration
+# Higher risk, tighter stops, larger position sizes
+
+account:
+  id: "AGGRESSIVE-001"
+  currency: "USD"
+  balance: 100000
+
+strategy:
+  risk_percent: 0.02      # Risk 2% per trade (higher risk!)
+  instrument: "EUR_USD"
+  stop_pips: 15           # Tight 15 pip stop
+  target_pips: 30         # 30 pip target (2:1 R:R)
+
+simulation:
+  initial_bid: 1.0849
+  initial_ask: 1.0851
+  price_steps:
+    - bid: 1.0860
+      ask: 1.0862
+      delay: "30m"
+    - bid: 1.0880
+      ask: 1.0882
+      delay: "1h"
+
+journal:
+  type: "csv"
+  trades_file: "./aggressive_trades.csv"
+  equity_file: "./aggressive_equity.csv"

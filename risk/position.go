@@ -24,6 +24,12 @@ func pipSize(loc int) float64 {
 	return math.Pow(10, float64(loc))
 }
 
+// PipSize returns the pip size for a given pip location.
+// This is a public helper function for calculating pip sizes.
+func PipSize(loc int) float64 {
+	return pipSize(loc)
+}
+
 func Calculate(in Inputs) Result {
 	pip := pipSize(in.PipLocation)
 	stopPips := math.Abs(in.EntryPrice-in.StopPrice) / pip
