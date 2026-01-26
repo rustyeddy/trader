@@ -43,13 +43,14 @@ func main() {
 	fmt.Printf("Starting Equity: $%.2f\n\n", acct.Equity)
 
 	// Demonstrate different risk percentages
-	fmt.Println("=== Position Sizing with Different Risk Levels ===\n")
+	fmt.Println("=== Position Sizing with Different Risk Levels ===")
+	fmt.Println()
 
 	meta := market.Instruments["EUR_USD"]
 	price, _ := engine.GetPrice(ctx, "EUR_USD")
 	entryPrice := price.Ask
 
-	riskLevels := []float64{0.005, 0.01, 0.02} // 0.5%, 1%, 2%
+	riskLevels := []float64{0.005, 0.01, 0.02}         // 0.5%, 1%, 2%
 	stopDistances := []float64{0.0010, 0.0020, 0.0030} // 10, 20, 30 pips
 
 	for _, riskPct := range riskLevels {
@@ -77,7 +78,8 @@ func main() {
 	}
 
 	// Demonstrate currency conversion for JPY pairs
-	fmt.Println("=== Position Sizing with JPY Quote Currency ===\n")
+	fmt.Println("=== Position Sizing with JPY Quote Currency ===")
+	fmt.Println()
 
 	engine.Prices().Set(broker.Price{
 		Instrument: "USD_JPY",
@@ -111,8 +113,10 @@ func main() {
 	fmt.Printf("  Risk Amount: $%.2f\n\n", jpySize.RiskAmount)
 
 	// Demonstrate why larger stops = smaller positions
-	fmt.Println("=== Why Stop Distance Matters ===\n")
-	fmt.Println("With the same 1% risk ($1,000), wider stops require smaller positions:\n")
+	fmt.Println("=== Why Stop Distance Matters ===")
+	fmt.Println()
+	fmt.Println("With the same 1% risk ($1,000), wider stops require smaller positions:")
+	fmt.Println()
 
 	fmt.Println("Stop Distance | Units Traded | Why?")
 	fmt.Println("------------- | ------------ | ----")

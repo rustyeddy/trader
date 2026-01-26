@@ -2,7 +2,9 @@
 
 ## What This Codebase Does
 
-A professional-grade FX trading simulator and research platform for backtesting strategies with realistic accounting, risk management, and margin enforcement.
+A professional-grade FX trading simulator and research platform for
+backtesting strategies with realistic accounting, risk management, and
+margin enforcement.
 
 ## Core Components
 
