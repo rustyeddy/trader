@@ -213,10 +213,10 @@ func TestIndicatorsWithRealWorldData(t *testing.T) {
 
 	t.Run("MA trends upward with rising prices", func(t *testing.T) {
 		ma5, _ := MA(candles[:8], 5)
-		ma10, _ := MA(candles, 5)
+		ma5Later, _ := MA(candles, 5)
 		
 		// MA should increase as prices rise
-		assert.Greater(t, ma10, ma5)
+		assert.Greater(t, ma5Later, ma5)
 	})
 
 	t.Run("EMA reacts faster than MA", func(t *testing.T) {
