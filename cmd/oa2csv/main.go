@@ -218,10 +218,12 @@ func fetchCandles(
 	q.Set("granularity", granularity)
 	q.Set("price", price)
 	q.Set("from", from.UTC().Format(time.RFC3339Nano))
+	// Use count-based pagination to respect max=5000, and let "to" be a hard cap
+	q.Set("count", "5000")
+	//q.Set("count", "0")
 	q.Set("includeFirst", "true")
-	// Use "to" parameter instead of count - they are mutually exclusive
-	// The API will return up to 5000 candles automatically
-	q.Set("to", to.UTC().Format(time.RFC3339Nano))
+	// Optional "to" cap to prevent extra beyond our window
+	//q.Set("to", to.UTC().Format(time.RFC3339Nano))
 
 	u.RawQuery = q.Encode()
 
