@@ -19,12 +19,20 @@ A professional-grade FX trading simulator and research platform written in Go.
 ## Quick Start
 
 ```bash
-# Run a simple simulation
-go run ./cmd/simrun
+# Build the CLI
+make build
 
-# Try the examples
-go run ./examples/basic_trade.go
-go run ./examples/risk_management.go
+# Run a demo
+./bin/trader demo basic
+
+# Run a simple simulation
+./bin/trader run -config examples/configs/basic.yaml
+
+# Try backtesting
+./bin/trader backtest -ticks examples/data/sample_ticks.csv -strategy noop
+
+# See all commands
+./bin/trader --help
 ```
 
 **New to the project?** See [GETTING_STARTED.md](docs/GETTING_STARTED.md) for a comprehensive guide.
@@ -36,16 +44,69 @@ go run ./examples/risk_management.go
 - **[Examples](examples/)** - Sample trading strategies and use cases
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
 
+## CLI Commands
+
+The `trader` CLI provides a comprehensive set of commands:
+
+### Core Commands
+- **run** - Run simulations from config files
+- **backtest** - Test trading strategies with historical data
+- **replay** - Replay tick data from CSV files
+- **demo** - Run example simulations (basic, risk, simrun)
+
+### Utility Commands
+- **config** - Generate or validate configuration files
+- **journal** - Query trade journal data
+- **oa2csv** - Download OANDA candle data to CSV
+
+### Examples
+
+```bash
+# Run a simulation
+./bin/trader run -config examples/configs/basic.yaml
+
+# Backtest an EMA crossover strategy
+./bin/trader backtest -ticks data/eurusd.csv -strategy ema-cross -fast 20 -slow 50
+
+# Replay historical data
+./bin/trader replay -ticks examples/data/sample_ticks.csv
+
+# Run demos to learn the system
+./bin/trader demo basic
+./bin/trader demo risk
+
+# Manage configurations
+./bin/trader config init -output my-config.yaml
+./bin/trader config validate -config my-config.yaml
+
+# Query trade journal
+./bin/trader journal today
+./bin/trader journal trade <trade-id>
+
+# Download OANDA data
+./bin/trader oa2csv -token YOUR_TOKEN -instrument EUR_USD \
+  -from 2024-01-01T00:00:00Z -to 2025-01-01T00:00:00Z
+```
+
 ## Examples
 
 Explore practical examples in the `examples/` directory:
 
-- **basic_trade.go** - Simple single trade with stop loss and take profit
-- **multiple_trades.go** - Managing multiple positions simultaneously  
-- **risk_management.go** - Demonstrates proper position sizing
+- **basic/** - Simple single trade with stop loss and take profit
+- **multiple/** - Managing multiple positions simultaneously  
+- **risk/** - Demonstrates proper position sizing
 - **oanda/** - Download historic candles from OANDA account
+- **simrun/** - Simple simulation runner
+
+You can run these as standalone programs or through the CLI:
 
 ```bash
+# Run demos via CLI
+./bin/trader demo basic
+./bin/trader demo risk
+./bin/trader demo simrun
+
+# Or run examples directly
 go run ./examples/basic/main.go
 go run ./examples/oanda/main.go  # Requires OANDA_TOKEN env var
 ```

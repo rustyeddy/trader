@@ -1,13 +1,13 @@
 APP := trader
 BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
-CMD := cmd/trader
+CMD := cmd/trader-cobra
 
 .PHONY: build test cover cover-html clean
 
 build:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN) $(CMD)
+	go build -o $(BIN) ./$(CMD)
 
 test:
 	go test ./...
