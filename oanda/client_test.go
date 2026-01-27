@@ -321,6 +321,101 @@ func TestGetCandles_Errors(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "API error")
 	})
+
+	t.Run("count with from/to is mutually exclusive", func(t *testing.T) {
+		client := NewClient("test-token", true)
+		from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		_, err := client.GetCandles(context.Background(), CandlesRequest{
+			Instrument: "EUR_USD",
+			Count:      100,
+			From:       &from,
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+
+	t.Run("BidAsk price component not implemented", func(t *testing.T) {
+		mockResponse := candlesResponse{
+			Instrument:  "EUR_USD",
+			Granularity: "M5",
+			Candles: []apiCandle{
+				{
+					Complete: true,
+					Volume:   100,
+					Time:     "2024-01-01T10:00:00.000000000Z",
+					Mid: candleData{
+						O: "1.0850",
+						H: "1.0860",
+						L: "1.0840",
+						C: "1.0855",
+					},
+				},
+			},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(mockResponse)
+		}))
+		defer server.Close()
+
+		client := &Client{
+			baseURL:    server.URL,
+			token:      "test-token",
+			httpClient: &http.Client{Timeout: 5 * time.Second},
+		}
+
+		_, err := client.GetCandles(context.Background(), CandlesRequest{
+			Instrument:  "EUR_USD",
+			Price:       BidAsk,
+			Granularity: M5,
+			Count:       10,
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not yet implemented")
+	})
+
+	t.Run("missing price data", func(t *testing.T) {
+		mockResponse := candlesResponse{
+			Instrument:  "EUR_USD",
+			Granularity: "M5",
+			Candles: []apiCandle{
+				{
+					Complete: true,
+					Volume:   100,
+					Time:     "2024-01-01T10:00:00.000000000Z",
+					// Only has Mid data, no Bid data
+					Mid: candleData{
+						O: "1.0850",
+						H: "1.0860",
+						L: "1.0840",
+						C: "1.0855",
+					},
+				},
+			},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(mockResponse)
+		}))
+		defer server.Close()
+
+		client := &Client{
+			baseURL:    server.URL,
+			token:      "test-token",
+			httpClient: &http.Client{Timeout: 5 * time.Second},
+		}
+
+		_, err := client.GetCandles(context.Background(), CandlesRequest{
+			Instrument:  "EUR_USD",
+			Price:       BidPrice, // Requesting Bid but only Mid is present
+			Granularity: M5,
+			Count:       10,
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+	})
 }
 
 func TestGetCandles_DefaultValues(t *testing.T) {

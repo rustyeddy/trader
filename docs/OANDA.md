@@ -68,7 +68,7 @@ The OANDA API supports many instruments. Common examples:
 oanda.MidPrice  // Average of bid and ask (default)
 oanda.BidPrice  // Bid prices only
 oanda.AskPrice  // Ask prices only
-oanda.BidAsk    // Both bid and ask (separate candles)
+oanda.BidAsk    // Both bid and ask (not yet implemented)
 ```
 
 ### Granularities
