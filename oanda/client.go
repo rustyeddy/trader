@@ -157,7 +157,8 @@ func (c *Client) GetCandles(ctx context.Context, req CandlesRequest) ([]market.C
 	}
 
 	// Build URL
-	apiURL := fmt.Sprintf("%s/v3/instruments/%s/candles?%s", c.baseURL, req.Instrument, params.Encode())
+	instrumentPath := url.PathEscape(req.Instrument)
+	apiURL := fmt.Sprintf("%s/v3/instruments/%s/candles?%s", c.baseURL, instrumentPath, params.Encode())
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
