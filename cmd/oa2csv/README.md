@@ -8,5 +8,5 @@ go run ./cmd/oanda2csv \
   -price BA \
   -from 2024-01-01T00:00:00Z \
   -to   2025-01-01T00:00:00Z \
-  -out  data/eurusd_h1_ticks.csv
+  -out  data/eurusd-h1-ticks.csv
 ```

@@ -220,9 +220,10 @@ func fetchCandles(
 	q.Set("from", from.UTC().Format(time.RFC3339Nano))
 	// Use count-based pagination to respect max=5000, and let "to" be a hard cap
 	q.Set("count", "5000")
+	//q.Set("count", "0")
 	q.Set("includeFirst", "true")
 	// Optional "to" cap to prevent extra beyond our window
-	q.Set("to", to.UTC().Format(time.RFC3339Nano))
+	//q.Set("to", to.UTC().Format(time.RFC3339Nano))
 
 	u.RawQuery = q.Encode()
 
