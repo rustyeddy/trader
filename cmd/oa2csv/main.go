@@ -37,35 +37,47 @@ type ohlc struct {
 	C string `json:"c"`
 }
 
+// Config holds all configuration parameters for the oa2csv tool.
+type Config struct {
+	Env          string
+	Token        string
+	Instrument   string
+	Granularity  string
+	Price        string
+	FromStr      string
+	ToStr        string
+	OutPath      string
+	CompleteOnly bool
+}
+
 func main() {
-	var (
-		env          = flag.String("env", "practice", "OANDA environment: practice or live")
-		token        = flag.String("token", "", "OANDA personal access token (or set OANDA_TOKEN env var)")
-		instrument   = flag.String("instrument", "EUR_USD", "Instrument, e.g. EUR_USD")
-		granularity  = flag.String("granularity", "H1", "Candlestick granularity, e.g. H1, H4, D")
-		price        = flag.String("price", "BA", "Price components: BA (bid/ask) or M (mid)")
-		fromStr      = flag.String("from", "", "RFC3339 start time, e.g. 2024-01-01T00:00:00Z")
-		toStr        = flag.String("to", "", "RFC3339 end time, e.g. 2025-01-01T00:00:00Z")
-		outPath      = flag.String("out", "oanda_ticks.csv", "Output CSV path (time,instrument,bid,ask)")
-		completeOnly = flag.Bool("complete-only", true, "Only write complete candles")
-	)
+	cfg := &Config{}
+	flag.StringVar(&cfg.Env, "env", "practice", "OANDA environment: practice or live")
+	flag.StringVar(&cfg.Token, "token", "", "OANDA personal access token (or set OANDA_TOKEN env var)")
+	flag.StringVar(&cfg.Instrument, "instrument", "EUR_USD", "Instrument, e.g. EUR_USD")
+	flag.StringVar(&cfg.Granularity, "granularity", "H1", "Candlestick granularity, e.g. H1, H4, D")
+	flag.StringVar(&cfg.Price, "price", "BA", "Price components: BA (bid/ask) or M (mid)")
+	flag.StringVar(&cfg.FromStr, "from", "", "RFC3339 start time, e.g. 2024-01-01T00:00:00Z")
+	flag.StringVar(&cfg.ToStr, "to", "", "RFC3339 end time, e.g. 2025-01-01T00:00:00Z")
+	flag.StringVar(&cfg.OutPath, "out", "oanda_ticks.csv", "Output CSV path (time,instrument,bid,ask)")
+	flag.BoolVar(&cfg.CompleteOnly, "complete-only", true, "Only write complete candles")
 	flag.Parse()
 
-	if *token == "" {
-		*token = os.Getenv("OANDA_TOKEN")
+	if cfg.Token == "" {
+		cfg.Token = os.Getenv("OANDA_TOKEN")
 	}
-	if *token == "" {
+	if cfg.Token == "" {
 		fatalf("missing token: pass -token or set OANDA_TOKEN")
 	}
-	if *fromStr == "" || *toStr == "" {
+	if cfg.FromStr == "" || cfg.ToStr == "" {
 		fatalf("missing time range: both -from and -to are required")
 	}
 
-	from, err := time.Parse(time.RFC3339, *fromStr)
+	from, err := time.Parse(time.RFC3339, cfg.FromStr)
 	if err != nil {
 		fatalf("bad -from: %v", err)
 	}
-	to, err := time.Parse(time.RFC3339, *toStr)
+	to, err := time.Parse(time.RFC3339, cfg.ToStr)
 	if err != nil {
 		fatalf("bad -to: %v", err)
 	}
@@ -73,13 +85,13 @@ func main() {
 		fatalf("-from must be before -to")
 	}
 
-	baseURL := baseForEnv(*env)
+	baseURL := baseForEnv(cfg.Env)
 	if baseURL == "" {
-		fatalf("unknown -env %q (use practice or live)", *env)
+		fatalf("unknown -env %q (use practice or live)", cfg.Env)
 	}
 
 	// Create output CSV
-	f, err := os.Create(*outPath)
+	f, err := os.Create(cfg.OutPath)
 	if err != nil {
 		fatalf("create output: %v", err)
 	}
@@ -110,7 +122,7 @@ func main() {
 			break
 		}
 
-		resp, err := fetchCandles(ctx, client, baseURL, *token, *instrument, *granularity, *price, cur, to)
+		resp, err := fetchCandles(ctx, client, baseURL, cfg.Token, cfg.Instrument, cfg.Granularity, cfg.Price, cur, to)
 		if err != nil {
 			fatalf("fetch: %v", err)
 		}
@@ -120,7 +132,7 @@ func main() {
 
 		lastT := time.Time{}
 		for _, c := range resp.Candles {
-			if *completeOnly && !c.Complete {
+			if cfg.CompleteOnly && !c.Complete {
 				continue
 			}
 			t, err := parseOandaTime(c.Time)
@@ -137,14 +149,14 @@ func main() {
 			}
 			seen[tsKey] = struct{}{}
 
-			bid, ask, err := pickBidAsk(*price, c)
+			bid, ask, err := pickBidAsk(cfg.Price, c)
 			if err != nil {
 				fatalf("pick prices at %s: %v", tsKey, err)
 			}
 
 			if err := w.Write([]string{
 				t.Format(time.RFC3339Nano),
-				*instrument,
+				cfg.Instrument,
 				fmtFloat(bid),
 				fmtFloat(ask),
 			}); err != nil {
@@ -173,7 +185,7 @@ func main() {
 		total = total
 	}
 
-	fmt.Fprintf(os.Stderr, "Wrote %d rows to %s\n", total, *outPath)
+	fmt.Fprintf(os.Stderr, "Wrote %d rows to %s\n", total, cfg.OutPath)
 }
 
 func baseForEnv(env string) string {
