@@ -113,5 +113,6 @@ func main() {
 	fmt.Println("Days:    D (daily)")
 	fmt.Println("Weeks:   W (weekly)")
 	fmt.Println("Months:  M (monthly)")
-	fmt.Println("\nAvailable Price Components: M (mid), B (bid), A (ask), BA (bid & ask)")
+	fmt.Println("\nAvailable Price Components: M (mid), B (bid), A (ask)")
+	fmt.Println("Note: BA (bid & ask) is not yet implemented")
 }

@@ -57,7 +57,7 @@ The example demonstrates:
 - **M (Midpoint)**: Average of bid and ask prices
 - **B (Bid)**: Bid prices only
 - **A (Ask)**: Ask prices only
-- **BA (Bid & Ask)**: Both bid and ask prices (returns separate candles)
+- **BA (Bid & Ask)**: Not yet implemented
 
 ## Example Output
 

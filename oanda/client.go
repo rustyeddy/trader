@@ -137,10 +137,14 @@ func (c *Client) GetCandles(ctx context.Context, req CandlesRequest) ([]market.C
 	}
 	params.Set("granularity", string(req.Granularity))
 
-	// Set count or time range
+	// Set count or time range (mutually exclusive)
 	if req.Count > 0 {
 		if req.Count > 5000 {
 			return nil, fmt.Errorf("count cannot exceed 5000")
+		}
+		// Validate mutual exclusivity
+		if req.From != nil || req.To != nil {
+			return nil, fmt.Errorf("count is mutually exclusive with from/to time range")
 		}
 		params.Set("count", fmt.Sprintf("%d", req.Count))
 	} else {
@@ -209,8 +213,15 @@ func (c *Client) GetCandles(ctx context.Context, req CandlesRequest) ([]market.C
 			priceData = ac.Bid
 		case AskPrice:
 			priceData = ac.Ask
+		case BidAsk:
+			return nil, fmt.Errorf("BidAsk price component is not yet implemented")
 		default: // MidPrice
 			priceData = ac.Mid
+		}
+
+		// Validate that the requested price data is present
+		if priceData.O == "" || priceData.H == "" || priceData.L == "" || priceData.C == "" {
+			return nil, fmt.Errorf("missing %v price data for candle at %s", req.Price, ac.Time)
 		}
 
 		// Parse OHLC values
