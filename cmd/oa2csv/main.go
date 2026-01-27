@@ -109,7 +109,7 @@ func main() {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Pagination approach:
-	// - Request up to 5000 candles with from + count.
+	// - Request candles with from + to time range (API returns up to 5000 candles per request).
 	// - Advance "from" by 1ns past the last candle time to avoid duplicates.
 	// - Stop once last candle time >= to or no candles returned.
 	seen := make(map[string]struct{}, 1024)
