@@ -33,6 +33,7 @@ trader
 trader-bin
 /replay/replay
 /cmd/replay/replay
+main
 
 # Journal output files
 *.csv
