@@ -114,15 +114,31 @@ go run ./examples/oanda/main.go  # Requires OANDA_TOKEN env var
 ## Building
 
 ```bash
+# Build the CLI
+make build
+
+# The binary will be at bin/trader
+./bin/trader --help
+
 # Run tests
 make test
-
-# Build the CLI tools
-make build
 
 # Generate coverage report
 make cover
 ```
+
+## Migration from Previous CLI
+
+If you were using the old separate CLI binaries, here's the migration guide:
+
+**Old commands** → **New commands**
+- `./cmd/backtest/backtest -ticks data.csv` → `trader backtest -t data.csv`
+- `./cmd/oa2csv/oa2csv -token TOKEN` → `trader oa2csv --token TOKEN`
+- `./cmd/replay/replay -ticks data.csv` → `trader replay -t data.csv`
+- `./cmd/trader run -config cfg.yaml` → `trader run -f cfg.yaml`
+- `go run ./examples/basic/main.go` → `trader demo basic`
+
+See [CLI_ARCHITECTURE.md](docs/CLI_ARCHITECTURE.md) for complete CLI documentation.
 
 Core invariants (non-negotiable)
 
