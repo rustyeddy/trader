@@ -78,7 +78,8 @@ func init() {
 func runDemoBasic(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	fmt.Println("=== Basic Trade Demo ===\n")
+	fmt.Println("=== Basic Trade Demo ===")
+	fmt.Println()
 
 	j, err := journal.NewCSV("./demo-trades.csv", "./demo-equity.csv")
 	if err != nil {
@@ -126,7 +127,8 @@ func runDemoBasic(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Position Sizing:\n")
 	fmt.Printf("  Risk Amount: $%.2f (1%% of equity)\n", size.RiskAmount)
 	fmt.Printf("  Stop Distance: %.1f pips\n", size.StopPips)
-	fmt.Printf("  Position Size: %.0f units\n\n", size.Units)
+	fmt.Printf("  Position Size: %.0f units\n", size.Units)
+	fmt.Println()
 
 	targetPrice := price.Ask + 0.0040
 
@@ -180,7 +182,7 @@ func runDemoBasic(cmd *cobra.Command, args []string) error {
 }
 
 func runDemoRisk(cmd *cobra.Command, args []string) error {
-	fmt.Println("=== Risk Management Demo ===\n")
+	fmt.Println("=== Risk Management Demo ===")
 	fmt.Println("Demonstrating position sizing for EUR_USD trade")
 	fmt.Println()
 
@@ -210,7 +212,8 @@ func runDemoRisk(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Instrument: EUR_USD\n")
 	fmt.Printf("  Entry Price: %.4f\n", entryPrice)
 	fmt.Printf("  Stop Loss: %.4f\n", stopPrice)
-	fmt.Printf("  Stop Distance: %.1f pips\n\n", stopPips)
+	fmt.Printf("  Stop Distance: %.1f pips\n", stopPips)
+	fmt.Println()
 
 	fmt.Printf("Calculated Position:\n")
 	fmt.Printf("  Position Size: %.0f units\n", size.Units)
@@ -239,7 +242,8 @@ func runDemoRisk(cmd *cobra.Command, args []string) error {
 	fmt.Printf("USD/JPY Trade Setup:\n")
 	fmt.Printf("  Entry Price: %.2f\n", entryJPY)
 	fmt.Printf("  Stop Loss: %.2f\n", stopPriceJPY)
-	fmt.Printf("  Stop Distance: %.1f pips\n\n", stopPipsJPY)
+	fmt.Printf("  Stop Distance: %.1f pips\n", stopPipsJPY)
+	fmt.Println()
 
 	fmt.Printf("Calculated Position:\n")
 	fmt.Printf("  Position Size: %.0f units\n", sizeJPY.Units)
@@ -254,7 +258,8 @@ func runDemoRisk(cmd *cobra.Command, args []string) error {
 func runDemoSimrun(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	fmt.Println("=== Simple Simulation Demo ===\n")
+	fmt.Println("=== Simple Simulation Demo ===")
+	fmt.Println()
 
 	j, err := journal.NewCSV("./simrun-trades.csv", "./simrun-equity.csv")
 	if err != nil {
