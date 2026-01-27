@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -244,7 +245,5 @@ func (c *Client) GetCandles(ctx context.Context, req CandlesRequest) ([]market.C
 
 // parseFloat parses a string to float64
 func parseFloat(s string) (float64, error) {
-	var f float64
-	_, err := fmt.Sscanf(s, "%f", &f)
-	return f, err
+	return strconv.ParseFloat(s, 64)
 }
