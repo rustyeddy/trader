@@ -1,7 +1,7 @@
 APP := trader
-CMD := ./cmd/simrun
 BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
+CMD := cmd/trader
 
 .PHONY: build test cover cover-html clean
 
