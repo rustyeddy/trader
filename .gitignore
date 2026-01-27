@@ -34,6 +34,7 @@ trader-bin
 /replay/replay
 /cmd/replay/replay
 oa2csv
+backtest
 main
 
 # Journal output files
