@@ -16,6 +16,32 @@ import (
 	"github.com/rustyeddy/trader/sim"
 )
 
+// Config holds all command-line flag values for the backtest application.
+type Config struct {
+	// Data and persistence
+	TicksPath string
+	DBPath    string
+
+	// Account configuration
+	Balance float64
+	AcctID  string
+
+	// Simulation control
+	CloseEnd bool
+
+	// Strategy configuration
+	StratName  string
+	Instrument string
+	Units      float64
+
+	// EMA-cross strategy parameters
+	Fast     int
+	Slow     int
+	RiskPct  float64
+	StopPips float64
+	RR       float64
+}
+
 // TickStrategy is the minimal interface a backtest strategy must implement.
 // It is called once per CSV row (tick).
 type TickStrategy interface {
@@ -91,33 +117,34 @@ func (s *OpenOnceStrategy) OnTick(ctx context.Context, b broker.Broker, tick bro
 // -----------------------------------------------------------------------------
 
 func main() {
-	var (
-		ticksPath = flag.String("ticks", "", "path to tick CSV (time,instrument,bid,ask[,event...])")
-		dbPath    = flag.String("db", "./backtest.sqlite", "path to SQLite journal DB")
-		balance   = flag.Float64("balance", 100_000, "starting account balance/equity")
-		acctID    = flag.String("account", "SIM-BACKTEST", "account ID for journaling")
-		closeEnd  = flag.Bool("close-end", true, "close all open trades at end of replay")
+	cfg := Config{}
 
-		stratName  = flag.String("strategy", "noop", "strategy name (noop, open-once, ema-cross)")
-		instrument = flag.String("instrument", "EUR_USD", "strategy instrument (used by some strategies)")
-		units      = flag.Float64("units", 10_000, "order units (used by some strategies)")
+	// Define flags using Config fields
+	flag.StringVar(&cfg.TicksPath, "ticks", "", "path to tick CSV (time,instrument,bid,ask[,event...])")
+	flag.StringVar(&cfg.DBPath, "db", "./backtest.sqlite", "path to SQLite journal DB")
+	flag.Float64Var(&cfg.Balance, "balance", 100_000, "starting account balance/equity")
+	flag.StringVar(&cfg.AcctID, "account", "SIM-BACKTEST", "account ID for journaling")
+	flag.BoolVar(&cfg.CloseEnd, "close-end", true, "close all open trades at end of replay")
 
-		fast     = flag.Int("fast", 20, "ema-cross: fast EMA period")
-		slow     = flag.Int("slow", 50, "ema-cross: slow EMA period")
-		riskPct  = flag.Float64("risk", 0.005, "ema-cross: risk percent per trade (0.005 = 0.5%)")
-		stopPips = flag.Float64("stop-pips", 20, "ema-cross: stop loss in pips")
+	flag.StringVar(&cfg.StratName, "strategy", "noop", "strategy name (noop, open-once, ema-cross)")
+	flag.StringVar(&cfg.Instrument, "instrument", "EUR_USD", "strategy instrument (used by some strategies)")
+	flag.Float64Var(&cfg.Units, "units", 10_000, "order units (used by some strategies)")
 
-		rr = flag.Float64("rr", 2.0, "ema-cross: take profit as R multiple (e.g. 2.0)")
-	)
+	flag.IntVar(&cfg.Fast, "fast", 20, "ema-cross: fast EMA period")
+	flag.IntVar(&cfg.Slow, "slow", 50, "ema-cross: slow EMA period")
+	flag.Float64Var(&cfg.RiskPct, "risk", 0.005, "ema-cross: risk percent per trade (0.005 = 0.5%)")
+	flag.Float64Var(&cfg.StopPips, "stop-pips", 20, "ema-cross: stop loss in pips")
+	flag.Float64Var(&cfg.RR, "rr", 2.0, "ema-cross: take profit as R multiple (e.g. 2.0)")
+
 	flag.Parse()
 
-	if *ticksPath == "" {
+	if cfg.TicksPath == "" {
 		fmt.Fprintln(os.Stderr, "error: -ticks is required")
 		fmt.Fprintln(os.Stderr, "usage: backtest -ticks PATH [-db PATH] [-strategy noop|open-once]")
 		os.Exit(2)
 	}
 
-	j, err := journal.NewSQLite(*dbPath)
+	j, err := journal.NewSQLite(cfg.DBPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
 		os.Exit(1)
@@ -125,25 +152,25 @@ func main() {
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
-		ID:       *acctID,
+		ID:       cfg.AcctID,
 		Currency: "USD",
-		Balance:  *balance,
-		Equity:   *balance,
+		Balance:  cfg.Balance,
+		Equity:   cfg.Balance,
 	}, j)
 
-	strat, err := strategyByName(*stratName, *instrument, *units, *fast, *slow, *riskPct, *stopPips, *rr)
+	strat, err := strategyByName(cfg.StratName, cfg.Instrument, cfg.Units, cfg.Fast, cfg.Slow, cfg.RiskPct, cfg.StopPips, cfg.RR)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "strategy: %v\n", err)
 		os.Exit(2)
 	}
 
 	ctx := context.Background()
-	if err := replayCSVWithStrategy(ctx, *ticksPath, engine, strat); err != nil {
+	if err := replayCSVWithStrategy(ctx, cfg.TicksPath, engine, strat); err != nil {
 		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
 		os.Exit(1)
 	}
 
-	if *closeEnd {
+	if cfg.CloseEnd {
 		_ = engine.CloseAll(ctx, "EndOfReplay")
 	}
 
