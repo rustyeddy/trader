@@ -10,6 +10,7 @@ A professional-grade FX trading simulator and research platform written in Go.
 - Paper trading engine
 - Trade journal (CSV / SQLite)
 - Equity curve tracking
+- OANDA API integration for historic candle data
 
 ## Supported Instruments
 - EUR_USD
@@ -42,9 +43,11 @@ Explore practical examples in the `examples/` directory:
 - **basic_trade.go** - Simple single trade with stop loss and take profit
 - **multiple_trades.go** - Managing multiple positions simultaneously  
 - **risk_management.go** - Demonstrates proper position sizing
+- **oanda/** - Download historic candles from OANDA account
 
 ```bash
-go run ./examples/basic_trade.go
+go run ./examples/basic/main.go
+go run ./examples/oanda/main.go  # Requires OANDA_TOKEN env var
 ```
 
 ## Building
