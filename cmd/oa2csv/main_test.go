@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,23 +80,23 @@ func TestFetchCandles_NoCountWithTimeRange(t *testing.T) {
 	}
 
 	// Check that the URL contains expected parameters
-	if !contains(capturedURL, "from=") {
+	if !strings.Contains(capturedURL, "from=") {
 		t.Error("URL should contain 'from' parameter")
 	}
-	if !contains(capturedURL, "to=") {
+	if !strings.Contains(capturedURL, "to=") {
 		t.Error("URL should contain 'to' parameter")
 	}
 	
 	// Most importantly: verify that count is NOT set
-	if contains(capturedURL, "count=") {
+	if strings.Contains(capturedURL, "count=") {
 		t.Error("URL should NOT contain 'count' parameter when using time range (from/to). This causes 'Maximum value for count exceeded' error.")
 	}
 
 	// Verify other expected parameters
-	if !contains(capturedURL, "granularity=H1") {
+	if !strings.Contains(capturedURL, "granularity=H1") {
 		t.Error("URL should contain granularity parameter")
 	}
-	if !contains(capturedURL, "price=M") {
+	if !strings.Contains(capturedURL, "price=M") {
 		t.Error("URL should contain price parameter")
 	}
 }
@@ -197,21 +198,7 @@ func TestFetchCandles_ErrorResponse(t *testing.T) {
 		t.Fatal("Expected error for 400 response")
 	}
 
-	if !contains(err.Error(), "400") {
+	if !strings.Contains(err.Error(), "400") {
 		t.Errorf("Error should mention status code 400: %v", err)
 	}
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
