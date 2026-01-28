@@ -7,7 +7,7 @@ assignees: ["copilot"]
 
 ## Coverage status
 - Package: `internal/cli`
-- Coverage: no unit tests (coverage below 80%)
+- Coverage: 0% (no unit tests)
 - Target: >= 80%
 
 ## Task
