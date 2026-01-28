@@ -52,6 +52,7 @@ func TestDownloadCandlesToCSV_MissingInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var buf bytes.Buffer
 			_, err := tt.client.DownloadCandlesToCSV(context.Background(), tt.opts, &buf)
 			require.Error(t, err)
