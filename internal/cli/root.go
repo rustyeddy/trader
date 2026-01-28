@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/internal/cli/backtest"
 	"github.com/rustyeddy/trader/internal/cli/config"
+	"github.com/rustyeddy/trader/internal/cli/data"
 	"github.com/rustyeddy/trader/internal/cli/replay"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,7 @@ func NewRootCmd() *cobra.Command {
 	// Subcommands
 	cmd.AddCommand(
 		backtest.New(rc),
+		data.New(rc),
 		replay.New(rc),
 	)
 
