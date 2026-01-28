@@ -20,5 +20,8 @@ cover-html:
 	go test ./... -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
 
+test-blackbox:
+	go test ./... -tags=blackbox
+
 clean:
 	@rm -rf $(BIN_DIR) coverage.out coverage.html

@@ -26,6 +26,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 		count   int
 
 		outPath string
+		baseURL string
 	)
 
 	cmd := &cobra.Command{
@@ -88,9 +89,16 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 				return fmt.Errorf("provide either --count or both --from and --to")
 			}
 
-			baseURL, err := oanda.BaseURL(env)
-			if err != nil {
-				return err
+			resolvedBaseURL := baseURL
+			if resolvedBaseURL == "" {
+				resolvedBaseURL = strings.TrimSpace(os.Getenv("OANDA_BASE_URL"))
+			}
+			if resolvedBaseURL == "" {
+				var err error
+				resolvedBaseURL, err = oanda.BaseURL(env)
+				if err != nil {
+					return err
+				}
 			}
 
 			f, err := os.Create(outPath)
@@ -100,7 +108,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 			defer f.Close()
 
 			client := &oanda.Client{
-				BaseURL: baseURL,
+				BaseURL: resolvedBaseURL,
 				Token:   token,
 			}
 
@@ -134,6 +142,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&toStr, "to", "", "RFC3339 end time (exclusive)")
 	cmd.Flags().IntVar(&count, "count", 0, "Number of candles (alternative to from/to)")
 
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Override OANDA base URL (for testing)")
 	cmd.Flags().StringVar(&outPath, "out", "", "Output CSV path")
 
 	return cmd

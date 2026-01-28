@@ -23,6 +23,7 @@ func newOandaTicksCmd(rc *config.RootConfig) *cobra.Command {
 
 		durationStr string
 		maxTicks    int
+		baseURL     string
 	)
 
 	cmd := &cobra.Command{
@@ -72,9 +73,17 @@ func newOandaTicksCmd(rc *config.RootConfig) *cobra.Command {
 				defer cancel()
 			}
 
-			baseURL, err := oanda.BaseURL(env)
-			if err != nil {
-				return err
+			// Resolve base URL: flag > env var > env-derived
+			resolvedBaseURL := baseURL
+			if resolvedBaseURL == "" {
+				resolvedBaseURL = strings.TrimSpace(os.Getenv("OANDA_BASE_URL"))
+			}
+			if resolvedBaseURL == "" {
+				var err error
+				resolvedBaseURL, err = oanda.BaseURL(env)
+				if err != nil {
+					return err
+				}
 			}
 
 			f, err := os.Create(outPath)
@@ -84,7 +93,7 @@ func newOandaTicksCmd(rc *config.RootConfig) *cobra.Command {
 			defer f.Close()
 
 			client := &oanda.Client{
-				BaseURL: baseURL,
+				BaseURL: resolvedBaseURL,
 				Token:   token,
 			}
 
@@ -108,6 +117,7 @@ func newOandaTicksCmd(rc *config.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&accountID, "account", "", "OANDA account id (or env OANDA_ACCOUNT_ID)")
 	cmd.Flags().StringVar(&instruments, "instruments", "EUR_USD", "Comma-separated instruments (e.g. EUR_USD,USD_JPY)")
 	cmd.Flags().StringVar(&outPath, "out", "", "Output CSV path")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Override OANDA base URL (for testing)")
 
 	cmd.Flags().StringVar(&durationStr, "duration", "", "Stop after duration (e.g. 30s, 5m). If empty, runs until max ticks or Ctrl-C")
 	cmd.Flags().IntVar(&maxTicks, "max", 0, "Stop after N ticks (0 = unlimited until duration/Ctrl-C)")
