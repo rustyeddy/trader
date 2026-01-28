@@ -2,7 +2,6 @@
 name: "Increase coverage for internal/cli"
 about: "Create unit tests for internal/cli to reach 80% coverage"
 title: "Test coverage: internal/cli below 80%"
-assignees: ["copilot"]
 ---
 
 ## Coverage status
@@ -15,6 +14,7 @@ assignees: ["copilot"]
 - Use `testify` for all new unit tests.
 - Do not change existing behavior.
 - Prefer testing cobra command wiring, subcommand presence, and flag defaults.
+- Assign this issue to `copilot`.
 
 ## Acceptance criteria
 - `go test ./...` passes.

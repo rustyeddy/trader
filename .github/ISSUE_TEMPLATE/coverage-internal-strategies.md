@@ -2,7 +2,6 @@
 name: "Increase coverage for internal/strategies"
 about: "Create unit tests for internal/strategies to reach 80% coverage"
 title: "Test coverage: internal/strategies below 80%"
-assignees: ["copilot"]
 ---
 
 ## Coverage status
@@ -14,6 +13,7 @@ assignees: ["copilot"]
 - Add or extend unit tests for `internal/strategies` to raise coverage to at least 80%.
 - Use `testify` for all new unit tests.
 - Do not change existing behavior.
+- Assign this issue to `copilot`.
 
 ## Acceptance criteria
 - `go test ./...` passes.
