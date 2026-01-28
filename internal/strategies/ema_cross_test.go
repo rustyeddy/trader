@@ -164,7 +164,13 @@ func TestEmaCrossStrategy_Integration_NoCross(t *testing.T) {
 		},
 	}
 
-	// Initialize market instruments
+	// Save original market instruments and restore after test
+	originalInstruments := market.Instruments
+	t.Cleanup(func() {
+		market.Instruments = originalInstruments
+	})
+
+	// Initialize market instruments for test
 	if market.Instruments == nil {
 		market.Instruments = make(map[string]market.InstrumentMeta)
 	}
@@ -215,6 +221,8 @@ func TestEmaCrossStrategy_OnTick_CrossDetection(t *testing.T) {
 	
 	// Verify that the strategy is tracking state properly
 	// After decreasing prices, fast EMA should be below slow EMA (negative diff)
+	// Note: We're testing internal state here to verify EMA calculation is working.
+	// This ensures the cross detection logic will function correctly in real scenarios.
 	assert.True(t, strat.lastDiff < 0, "Expected negative diff after decreasing prices")
 	
 	// Feed one more decreasing price - should not trigger a cross since trend continues

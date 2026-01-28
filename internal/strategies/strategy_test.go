@@ -20,6 +20,12 @@ func (m *mockStrategy) OnTick(ctx context.Context, b broker.Broker, tick broker.
 }
 
 func TestRegister(t *testing.T) {
+	// Save original registry and restore after test
+	originalRegistry := registry
+	t.Cleanup(func() {
+		registry = originalRegistry
+	})
+
 	// Clear registry before test
 	registry = make(map[string]TickStrategy)
 
@@ -32,6 +38,12 @@ func TestRegister(t *testing.T) {
 }
 
 func TestGetStrategy_NotFound(t *testing.T) {
+	// Save original registry and restore after test
+	originalRegistry := registry
+	t.Cleanup(func() {
+		registry = originalRegistry
+	})
+
 	// Clear registry before test
 	registry = make(map[string]TickStrategy)
 
