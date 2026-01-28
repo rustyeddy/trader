@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -136,7 +135,7 @@ func TestDownloadCandlesToCSV_RejectsBA(t *testing.T) {
 			"candles": []map[string]any{
 				{
 					"complete": true,
-					"time":     time.Now().UTC().Format(time.RFC3339Nano),
+					"time":     "2024-01-01T00:00:00Z",
 					"volume":   1,
 					"bid": map[string]string{
 						"o": "1.1", "h": "1.2", "l": "1.0", "c": "1.15",
@@ -172,4 +171,116 @@ func TestDownloadCandlesToCSV_RejectsBA(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "price=BA not supported")
 	require.Equal(t, 0, written)
+}
+
+func TestDownloadCandlesToCSV_BidPrice(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v3/instruments/EUR_USD/candles", r.URL.Path)
+		require.Equal(t, "M1", r.URL.Query().Get("granularity"))
+		require.Equal(t, "B", r.URL.Query().Get("price"))
+		require.Equal(t, "1", r.URL.Query().Get("count"))
+
+		resp := map[string]any{
+			"instrument":  "EUR_USD",
+			"granularity": "M1",
+			"candles": []map[string]any{
+				{
+					"complete": true,
+					"time":     "2024-01-01T00:00:00Z",
+					"volume":   10,
+					"bid": map[string]string{
+						"o": "1.1", "h": "1.2", "l": "1.0", "c": "1.15",
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	client := Client{
+		BaseURL: srv.URL,
+		Token:   "token",
+	}
+
+	var buf bytes.Buffer
+	written, err := client.DownloadCandlesToCSV(
+		context.Background(),
+		CandlesOptions{
+			Instrument:  "EUR_USD",
+			Granularity: "M1",
+			Price:       "B",
+			Count:       1,
+		},
+		&buf,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, written)
+
+	r := csv.NewReader(bytes.NewReader(buf.Bytes()))
+	rows, err := r.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, []string{"time", "instrument", "granularity", "complete", "volume", "o", "h", "l", "c"}, rows[0])
+	require.Equal(t, []string{"2024-01-01T00:00:00Z", "EUR_USD", "M1", "true", "10", "1.1", "1.2", "1.0", "1.15"}, rows[1])
+}
+
+func TestDownloadCandlesToCSV_AskPrice(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v3/instruments/EUR_USD/candles", r.URL.Path)
+		require.Equal(t, "M1", r.URL.Query().Get("granularity"))
+		require.Equal(t, "A", r.URL.Query().Get("price"))
+		require.Equal(t, "1", r.URL.Query().Get("count"))
+
+		resp := map[string]any{
+			"instrument":  "EUR_USD",
+			"granularity": "M1",
+			"candles": []map[string]any{
+				{
+					"complete": false,
+					"time":     "2024-01-01T00:01:00Z",
+					"volume":   5,
+					"ask": map[string]string{
+						"o": "1.2", "h": "1.3", "l": "1.1", "c": "1.25",
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	client := Client{
+		BaseURL: srv.URL,
+		Token:   "token",
+	}
+
+	var buf bytes.Buffer
+	written, err := client.DownloadCandlesToCSV(
+		context.Background(),
+		CandlesOptions{
+			Instrument:  "EUR_USD",
+			Granularity: "M1",
+			Price:       "A",
+			Count:       1,
+		},
+		&buf,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, written)
+
+	r := csv.NewReader(bytes.NewReader(buf.Bytes()))
+	rows, err := r.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, []string{"time", "instrument", "granularity", "complete", "volume", "o", "h", "l", "c"}, rows[0])
+	require.Equal(t, []string{"2024-01-01T00:01:00Z", "EUR_USD", "M1", "false", "5", "1.2", "1.3", "1.1", "1.25"}, rows[1])
 }
