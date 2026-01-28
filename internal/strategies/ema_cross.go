@@ -1,4 +1,4 @@
-package main
+package strategies
 
 import (
 	"context"
@@ -37,7 +37,7 @@ type EmaCrossStrategy struct {
 	openUnits   float64 // >0 long, <0 short
 }
 
-func NewEmaCrossStrategy(instrument string, fast, slow int, riskPct, stopPips, rr float64) *EmaCrossStrategy {
+func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float64) *EmaCrossStrategy {
 	if rr <= 0 {
 		rr = 2.0
 	}
@@ -107,13 +107,12 @@ func (s *EmaCrossStrategy) OnTick(ctx context.Context, b broker.Broker, tick bro
 	}
 }
 
-func (s *EmaCrossStrategy) onSignal(
-	ctx context.Context,
+func (s *EmaCrossStrategy) onSignal(ctx context.Context,
 	b broker.Broker,
 	now time.Time,
 	signal string,
-	dir int, // +1 long, -1 short
-) error {
+	dir int) error { // +1 long, -1 short
+
 	// If we already have a position in the same direction, do nothing (enter only on cross).
 	if s.openTradeID != "" {
 		if (s.openUnits > 0 && dir > 0) || (s.openUnits < 0 && dir < 0) {
