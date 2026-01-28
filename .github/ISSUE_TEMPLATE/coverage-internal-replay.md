@@ -1,0 +1,20 @@
+---
+name: "Increase coverage for internal/replay"
+about: "Create unit tests for internal/replay to reach 80% coverage"
+title: "Test coverage: internal/replay below 80%"
+assignees: ["copilot"]
+---
+
+## Coverage status
+- Package: `internal/replay`
+- Coverage: 55.7% (from `go test ./... -cover`)
+- Target: >= 80%
+
+## Task
+- Add or extend unit tests for `internal/replay` to raise coverage to at least 80%.
+- Use `testify` for all new unit tests.
+- Do not change existing behavior.
+
+## Acceptance criteria
+- `go test ./...` passes.
+- `internal/replay` coverage is >= 80%.
