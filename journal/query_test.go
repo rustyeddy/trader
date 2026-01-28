@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -371,7 +372,7 @@ func TestListTradesClosedBetweenMultipleInstruments(t *testing.T) {
 	instruments := []string{"EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD", "USD_CAD"}
 	for i, instrument := range instruments {
 		trade := TradeRecord{
-			TradeID:    "T" + string(rune('1'+i)),
+			TradeID:    fmt.Sprintf("T%d", i+1),
 			Instrument: instrument,
 			Units:      1000,
 			EntryPrice: 1.0,
