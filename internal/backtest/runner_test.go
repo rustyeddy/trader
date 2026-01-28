@@ -10,6 +10,8 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockTickFeed is a simple in-memory feed for testing
@@ -77,12 +79,8 @@ func TestRunner_Run_Validation(t *testing.T) {
 		}
 
 		_, err := r.Run(ctx, nil)
-		if err == nil {
-			t.Error("expected error for missing Engine")
-		}
-		if err != nil && err.Error() != "backtest: Engine is required" {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.Error(t, err)
+		assert.Equal(t, "backtest: Engine is required", err.Error())
 	})
 
 	t.Run("missing feed", func(t *testing.T) {
@@ -91,9 +89,7 @@ func TestRunner_Run_Validation(t *testing.T) {
 		tmp := t.TempDir()
 		dbPath := filepath.Join(tmp, "test.sqlite")
 		j, err := journal.NewSQLite(dbPath)
-		if err != nil {
-			t.Fatalf("NewSQLite: %v", err)
-		}
+		require.NoError(t, err)
 		defer j.Close()
 
 		engine := sim.NewEngine(broker.Account{
@@ -110,12 +106,8 @@ func TestRunner_Run_Validation(t *testing.T) {
 		}
 
 		_, err = r.Run(ctx, nil)
-		if err == nil {
-			t.Error("expected error for missing Feed")
-		}
-		if err != nil && err.Error() != "backtest: Feed is required" {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.Error(t, err)
+		assert.Equal(t, "backtest: Feed is required", err.Error())
 	})
 
 	t.Run("missing strategy", func(t *testing.T) {
@@ -124,9 +116,7 @@ func TestRunner_Run_Validation(t *testing.T) {
 		tmp := t.TempDir()
 		dbPath := filepath.Join(tmp, "test.sqlite")
 		j, err := journal.NewSQLite(dbPath)
-		if err != nil {
-			t.Fatalf("NewSQLite: %v", err)
-		}
+		require.NoError(t, err)
 		defer j.Close()
 
 		engine := sim.NewEngine(broker.Account{
@@ -143,12 +133,8 @@ func TestRunner_Run_Validation(t *testing.T) {
 		}
 
 		_, err = r.Run(ctx, nil)
-		if err == nil {
-			t.Error("expected error for missing Strategy")
-		}
-		if err != nil && err.Error() != "backtest: Strategy is required" {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.Error(t, err)
+		assert.Equal(t, "backtest: Strategy is required", err.Error())
 	})
 }
 
@@ -160,9 +146,7 @@ func TestRunner_Run_Success(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	startBal := 10000.0
@@ -204,34 +188,22 @@ func TestRunner_Run_Success(t *testing.T) {
 	}
 
 	result, err := r.Run(ctx, j)
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify feed was closed
-	if !feed.closed {
-		t.Error("expected feed to be closed")
-	}
+	assert.True(t, feed.closed, "expected feed to be closed")
 
 	// Verify strategy received all ticks
-	if strategy.tickCount != len(ticks) {
-		t.Errorf("strategy.tickCount = %d, want %d", strategy.tickCount, len(ticks))
-	}
+	assert.Equal(t, len(ticks), strategy.tickCount)
 
 	// Verify result
-	if result.Balance != startBal {
-		t.Errorf("result.Balance = %v, want %v", result.Balance, startBal)
-	}
+	assert.Equal(t, startBal, result.Balance)
 
 	expectedStart := time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)
 	expectedEnd := time.Date(2026, 1, 24, 9, 30, 10, 0, time.UTC)
 
-	if !result.Start.Equal(expectedStart) {
-		t.Errorf("result.Start = %v, want %v", result.Start, expectedStart)
-	}
-	if !result.End.Equal(expectedEnd) {
-		t.Errorf("result.End = %v, want %v", result.End, expectedEnd)
-	}
+	assert.True(t, result.Start.Equal(expectedStart))
+	assert.True(t, result.End.Equal(expectedEnd))
 }
 
 func TestRunner_Run_EmptyFeed(t *testing.T) {
@@ -242,9 +214,7 @@ func TestRunner_Run_EmptyFeed(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
@@ -264,22 +234,14 @@ func TestRunner_Run_EmptyFeed(t *testing.T) {
 	}
 
 	result, err := r.Run(ctx, j)
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// No ticks means no strategy calls
-	if strategy.tickCount != 0 {
-		t.Errorf("strategy.tickCount = %d, want 0", strategy.tickCount)
-	}
+	assert.Equal(t, 0, strategy.tickCount)
 
 	// Start and End should be zero
-	if !result.Start.IsZero() {
-		t.Errorf("result.Start = %v, want zero", result.Start)
-	}
-	if !result.End.IsZero() {
-		t.Errorf("result.End = %v, want zero", result.End)
-	}
+	assert.True(t, result.Start.IsZero())
+	assert.True(t, result.End.IsZero())
 }
 
 func TestRunner_Run_FeedError(t *testing.T) {
@@ -290,9 +252,7 @@ func TestRunner_Run_FeedError(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
@@ -312,9 +272,7 @@ func TestRunner_Run_FeedError(t *testing.T) {
 	}
 
 	_, err = r.Run(ctx, j)
-	if err == nil {
-		t.Error("expected error from feed")
-	}
+	assert.Error(t, err)
 }
 
 func TestRunner_Run_StrategyError(t *testing.T) {
@@ -325,9 +283,7 @@ func TestRunner_Run_StrategyError(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
@@ -356,9 +312,7 @@ func TestRunner_Run_StrategyError(t *testing.T) {
 	}
 
 	_, err = r.Run(ctx, j)
-	if err == nil {
-		t.Error("expected error from strategy")
-	}
+	assert.Error(t, err)
 }
 
 func TestRunner_Run_CloseEnd(t *testing.T) {
@@ -369,9 +323,7 @@ func TestRunner_Run_CloseEnd(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	startBal := 10000.0
@@ -405,9 +357,7 @@ func TestRunner_Run_CloseEnd(t *testing.T) {
 	}
 
 	_, err = r.Run(ctx, j)
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test passes if CloseAll doesn't panic or error
 	// The actual behavior of CloseAll is tested in the engine tests
@@ -421,9 +371,7 @@ func TestRunner_Run_CloseEndDefaultReason(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
@@ -456,9 +404,7 @@ func TestRunner_Run_CloseEndDefaultReason(t *testing.T) {
 	}
 
 	_, err = r.Run(ctx, j)
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestRunner_Run_WithoutJournal(t *testing.T) {
@@ -469,9 +415,7 @@ func TestRunner_Run_WithoutJournal(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "test.sqlite")
 	j, err := journal.NewSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
+	require.NoError(t, err)
 	defer j.Close()
 
 	engine := sim.NewEngine(broker.Account{
@@ -501,18 +445,10 @@ func TestRunner_Run_WithoutJournal(t *testing.T) {
 
 	// Run without journal (nil)
 	result, err := r.Run(ctx, nil)
-	if err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Trade counts should be zero when no journal is provided
-	if result.Trades != 0 {
-		t.Errorf("result.Trades = %d, want 0", result.Trades)
-	}
-	if result.Wins != 0 {
-		t.Errorf("result.Wins = %d, want 0", result.Wins)
-	}
-	if result.Losses != 0 {
-		t.Errorf("result.Losses = %d, want 0", result.Losses)
-	}
+	assert.Equal(t, 0, result.Trades)
+	assert.Equal(t, 0, result.Wins)
+	assert.Equal(t, 0, result.Losses)
 }
