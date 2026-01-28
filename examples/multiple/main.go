@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/internal/risk"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
 
@@ -155,9 +155,9 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 
 	targetPrice := entryPrice
 	if isBuy {
-		targetPrice = entryPrice + (entryPrice - stopPrice) * 2 // 2:1 R:R
+		targetPrice = entryPrice + (entryPrice-stopPrice)*2 // 2:1 R:R
 	} else {
-		targetPrice = entryPrice - (stopPrice - entryPrice) * 2
+		targetPrice = entryPrice - (stopPrice-entryPrice)*2
 	}
 
 	units := size.Units

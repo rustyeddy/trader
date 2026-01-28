@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/internal/risk"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
 
