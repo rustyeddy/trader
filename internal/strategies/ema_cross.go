@@ -239,6 +239,8 @@ func (s *EmaCrossStrategy) openPosition(ctx context.Context, b broker.Broker, no
 
 // OnTradeClosed implements TradeClosedListener.
 // It's called by the engine when a trade is auto-closed (e.g., stop loss or take profit).
+// Note: This method is not safe for concurrent use. Strategies should only be used
+// in a single-threaded context (e.g., in the backtest runner's sequential loop).
 func (s *EmaCrossStrategy) OnTradeClosed(tradeID string, reason string) {
 	// If this was our open trade, clear our internal state
 	if s.openTradeID == tradeID {

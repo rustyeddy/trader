@@ -19,11 +19,12 @@ type Engine struct {
 	trades   map[string]*Trade
 	nextID   int
 	journal  journal.Journal
-	listener TradeClosedListener // optional callback for auto-closed trades
+	listener tradeClosedListener // optional callback for auto-closed trades
 }
 
-// TradeClosedListener is notified when the engine auto-closes a trade.
-type TradeClosedListener interface {
+// tradeClosedListener is notified when the engine auto-closes a trade.
+// This is an internal interface; external code should use strategies.TradeClosedListener.
+type tradeClosedListener interface {
 	OnTradeClosed(tradeID string, reason string)
 }
 
@@ -37,7 +38,8 @@ func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 }
 
 // SetTradeClosedListener sets an optional listener to be notified when trades are auto-closed.
-func (e *Engine) SetTradeClosedListener(listener TradeClosedListener) {
+// The listener will be called after the trade is closed and the lock is released to avoid deadlocks.
+func (e *Engine) SetTradeClosedListener(listener tradeClosedListener) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.listener = listener
@@ -97,18 +99,20 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
+	
 	t, ok := e.trades[tradeID]
 	if !ok {
+		e.mu.Unlock()
 		return fmt.Errorf("close trade: trade %q not found", tradeID)
 	}
 	if !t.Open {
+		e.mu.Unlock()
 		return fmt.Errorf("close trade: trade %q is already closed", tradeID)
 	}
 
 	p, err := e.prices.Get(t.Instrument)
 	if err != nil {
+		e.mu.Unlock()
 		return fmt.Errorf("close trade: no price for %q: %w", t.Instrument, err)
 	}
 
@@ -124,14 +128,17 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	}
 
 	if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
 	// Revalue + margin, then snapshot (mirrors UpdatePrice())
 	if err := e.revalueLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 	if err := e.recomputeMarginLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
@@ -143,11 +150,24 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 		FreeMargin:  e.acct.FreeMargin,
 		MarginLevel: e.acct.MarginLevel,
 	}); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
 	// Should be unnecessary after a close, but safe + consistent.
-	return e.enforceMarginLocked()
+	// Note: liquidations during manual close are rare but possible
+	liquidatedTradeIDs, err := e.enforceMarginLocked()
+	
+	e.mu.Unlock()
+	
+	// Notify listener about any liquidations that occurred
+	if e.listener != nil {
+		for _, tradeID := range liquidatedTradeIDs {
+			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+		}
+	}
+	
+	return err
 }
 
 // CloseAll manually closes all open trades at current market prices.
@@ -162,8 +182,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
+	
 	// Collect open trades first.
 	open := make([]*Trade, 0, len(e.trades))
 	for _, t := range e.trades {
@@ -172,6 +191,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		}
 	}
 	if len(open) == 0 {
+		e.mu.Unlock()
 		return nil
 	}
 
@@ -182,6 +202,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 	for inst := range need {
 		if _, err := e.prices.Get(inst); err != nil {
+			e.mu.Unlock()
 			return fmt.Errorf("close all: no price for %q: %w", inst, err)
 		}
 	}
@@ -205,15 +226,18 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		}
 
 		if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
+			e.mu.Unlock()
 			return err
 		}
 	}
 
 	// Revalue + margin, then snapshot (mirrors UpdatePrice / CloseTrade behavior).
 	if err := e.revalueLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 	if err := e.recomputeMarginLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
@@ -229,11 +253,23 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		FreeMargin:  e.acct.FreeMargin,
 		MarginLevel: e.acct.MarginLevel,
 	}); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
 	// Should be unnecessary after closing everything, but consistent and safe.
-	return e.enforceMarginLocked()
+	liquidatedTradeIDs, err := e.enforceMarginLocked()
+	
+	e.mu.Unlock()
+	
+	// Notify listener about any liquidations that occurred
+	if e.listener != nil {
+		for _, tradeID := range liquidatedTradeIDs {
+			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+		}
+	}
+	
+	return err
 }
 
 func (e *Engine) Revalue() error {
@@ -279,9 +315,14 @@ func (e *Engine) Revalue() error {
 // sim/engine.go
 func (e *Engine) UpdatePrice(p broker.Price) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
+	
 	e.prices.Set(p)
+
+	// Collect trades to auto-close
+	var closedTrades []struct {
+		tradeID string
+		reason  string
+	}
 
 	for _, t := range e.trades {
 		if !t.Open || t.Instrument != p.Instrument {
@@ -305,20 +346,24 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 		if reason != "" {
 			tradeID := t.ID
 			if err := e.closeTradeLocked(t, mark, p.Time, reason); err != nil {
+				e.mu.Unlock()
 				return err
 			}
-			// Notify listener about auto-close (outside lock would be safer, but for now keep it simple)
-			if e.listener != nil {
-				e.listener.OnTradeClosed(tradeID, reason)
-			}
+			// Collect for notification after lock is released
+			closedTrades = append(closedTrades, struct {
+				tradeID string
+				reason  string
+			}{tradeID, reason})
 		}
 	}
 
 	// Revalue + margin
 	if err := e.revalueLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 	if err := e.recomputeMarginLocked(); err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
@@ -331,11 +376,27 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 		MarginLevel: e.acct.MarginLevel,
 	})
 	if err != nil {
+		e.mu.Unlock()
 		return err
 	}
 
-	// Forced liquidation if needed
-	return e.enforceMarginLocked()
+	// Forced liquidation if needed (returns liquidated trade IDs)
+	liquidatedTradeIDs, err := e.enforceMarginLocked()
+	
+	e.mu.Unlock()
+	
+	// Notify listener about auto-closed trades after releasing lock to avoid deadlocks
+	if e.listener != nil {
+		for _, ct := range closedTrades {
+			e.listener.OnTradeClosed(ct.tradeID, ct.reason)
+		}
+		// Also notify about liquidations
+		for _, tradeID := range liquidatedTradeIDs {
+			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+		}
+	}
+	
+	return err
 }
 
 func (e *Engine) closeTradeLocked(t *Trade, closePrice float64, closeTime time.Time, reason string) error {
@@ -449,14 +510,16 @@ func (e *Engine) recomputeMarginLocked() error {
 	return nil
 }
 
-func (e *Engine) enforceMarginLocked() error {
+func (e *Engine) enforceMarginLocked() ([]string, error) {
+	var liquidatedTradeIDs []string
+	
 	for {
 		if e.acct.MarginUsed <= 0 {
-			return nil
+			return liquidatedTradeIDs, nil
 		}
 
 		if e.acct.Equity >= e.acct.MarginUsed {
-			return nil
+			return liquidatedTradeIDs, nil
 		}
 
 		// Find worst open trade
@@ -489,7 +552,7 @@ func (e *Engine) enforceMarginLocked() error {
 		}
 
 		if worst == nil {
-			return nil
+			return liquidatedTradeIDs, nil
 		}
 
 		// Force close
@@ -499,16 +562,18 @@ func (e *Engine) enforceMarginLocked() error {
 			closePrice = p.Ask
 		}
 
+		tradeID := worst.ID
 		if err := e.closeTradeLocked(worst, closePrice, p.Time, "LIQUIDATION"); err != nil {
-			return err
+			return liquidatedTradeIDs, err
 		}
+		liquidatedTradeIDs = append(liquidatedTradeIDs, tradeID)
 
 		// Revalue after liquidation
 		if err := e.revalueLocked(); err != nil {
-			return err
+			return liquidatedTradeIDs, err
 		}
 		if err := e.recomputeMarginLocked(); err != nil {
-			return err
+			return liquidatedTradeIDs, err
 		}
 	}
 }

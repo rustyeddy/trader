@@ -67,9 +67,7 @@ func (r *Runner) Run(ctx context.Context, j *journal.SQLiteJournal) (Result, err
 	defer r.Feed.Close()
 
 	// Wire up strategy listener if it implements the interface
-	if listener, ok := r.Strategy.(interface {
-		OnTradeClosed(tradeID string, reason string)
-	}); ok {
+	if listener, ok := r.Strategy.(strategies.TradeClosedListener); ok {
 		r.Engine.SetTradeClosedListener(listener)
 	}
 
