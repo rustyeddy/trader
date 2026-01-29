@@ -2,6 +2,7 @@
 name: "Increase coverage for sim"
 about: "Create unit tests for sim to reach 80% coverage"
 title: "Test coverage: sim below 80%"
+assignees: ["copilot"]
 ---
 
 ## Coverage status

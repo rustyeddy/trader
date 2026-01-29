@@ -2,6 +2,7 @@
 name: "Increase coverage for cmd/trader"
 about: "Create unit tests for cmd/trader to reach 80% coverage"
 title: "Test coverage: cmd/trader below 80%"
+assignees: ["copilot"]
 ---
 
 ## Coverage status

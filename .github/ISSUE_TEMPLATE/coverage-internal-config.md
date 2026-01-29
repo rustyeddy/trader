@@ -2,6 +2,7 @@
 name: "Increase coverage for internal/config"
 about: "Create unit tests for internal/config to reach 80% coverage"
 title: "Test coverage: internal/config below 80%"
+assignees: ["copilot"]
 ---
 
 ## Coverage status

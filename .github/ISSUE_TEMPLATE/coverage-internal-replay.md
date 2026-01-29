@@ -2,6 +2,7 @@
 name: "Increase coverage for internal/replay"
 about: "Create unit tests for internal/replay to reach 80% coverage"
 title: "Test coverage: internal/replay below 80%"
+assignees: ["copilot"]
 ---
 
 ## Coverage status
