@@ -10,6 +10,8 @@ import (
 )
 
 func TestOandACandles(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := dir + "/candles.csv"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// assert r.URL.Path == "/v3/instruments/EUR_USD/candles"

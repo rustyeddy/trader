@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	traderBin = filepath.Join(tmp, "trader")
 
 	// Build the binary once for all tests.
-	cmd := exec.Command("go", "build", "-o", traderBin, "./cmd/trader")
+	cmd := exec.Command("go", "build", "-o", traderBin, "../../cmd/trader")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
