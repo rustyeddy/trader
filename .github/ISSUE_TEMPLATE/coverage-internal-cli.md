@@ -15,7 +15,6 @@ assignees: ["copilot"]
 - Use `testify` for all new unit tests.
 - Do not change existing behavior.
 - Prefer testing cobra command wiring, subcommand presence, and flag defaults.
-- Assign this issue to `copilot`.
 
 ## Acceptance criteria
 - `go test ./...` passes.

@@ -15,7 +15,6 @@ assignees: ["copilot"]
 - Use `testify` for all new unit tests.
 - Do not change existing behavior.
 - Consider verifying `main` delegates to `cli.Execute` via minimal seams or refactors that preserve behavior.
-- Assign this issue to `copilot`.
 
 ## Acceptance criteria
 - `go test ./...` passes.

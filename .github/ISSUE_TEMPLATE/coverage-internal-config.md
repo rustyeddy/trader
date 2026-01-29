@@ -14,7 +14,6 @@ assignees: ["copilot"]
 - Add or extend unit tests for `internal/config` to raise coverage to at least 80%.
 - Use `testify` for all new unit tests.
 - Do not change existing behavior.
-- Assign this issue to `copilot`.
 
 ## Acceptance criteria
 - `go test ./...` passes.
