@@ -13,12 +13,18 @@ import (
 )
 
 type Engine struct {
-	mu      sync.Mutex
-	acct    broker.Account
-	prices  *PriceStore
-	trades  map[string]*Trade
-	nextID  int
-	journal journal.Journal
+	mu       sync.Mutex
+	acct     broker.Account
+	prices   *PriceStore
+	trades   map[string]*Trade
+	nextID   int
+	journal  journal.Journal
+	listener TradeClosedListener // optional callback for auto-closed trades
+}
+
+// TradeClosedListener is notified when the engine auto-closes a trade.
+type TradeClosedListener interface {
+	OnTradeClosed(tradeID string, reason string)
 }
 
 func NewEngine(acct broker.Account, j journal.Journal) *Engine {
@@ -28,6 +34,13 @@ func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 		trades:  make(map[string]*Trade),
 		journal: j,
 	}
+}
+
+// SetTradeClosedListener sets an optional listener to be notified when trades are auto-closed.
+func (e *Engine) SetTradeClosedListener(listener TradeClosedListener) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.listener = listener
 }
 
 func (e *Engine) GetAccount(ctx context.Context) (broker.Account, error) {
@@ -290,8 +303,13 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 			reason = "TakeProfit"
 		}
 		if reason != "" {
+			tradeID := t.ID
 			if err := e.closeTradeLocked(t, mark, p.Time, reason); err != nil {
 				return err
+			}
+			// Notify listener about auto-close (outside lock would be safer, but for now keep it simple)
+			if e.listener != nil {
+				e.listener.OnTradeClosed(tradeID, reason)
 			}
 		}
 	}

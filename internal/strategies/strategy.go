@@ -20,6 +20,13 @@ type TickStrategy interface {
 	OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error
 }
 
+// TradeClosedListener is an optional interface that strategies can implement
+// to be notified when the engine auto-closes one of their trades (e.g., due to stop loss or take profit).
+// This allows strategies to update their internal state accordingly.
+type TradeClosedListener interface {
+	OnTradeClosed(tradeID string, reason string)
+}
+
 func Register(name string, strat TickStrategy) {
 	registry[name] = strat
 }

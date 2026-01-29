@@ -239,3 +239,39 @@ func TestEmaCrossStrategy_OnTick_CrossDetection(t *testing.T) {
 	assert.True(t, strat.haveLastDiff)
 	assert.Equal(t, "", strat.openTradeID)
 }
+
+func TestEmaCrossStrategy_OnTradeClosed(t *testing.T) {
+	// Test that OnTradeClosed properly clears internal state
+	strat := NewEmaCross("EUR_USD", 20, 50, 0.01, 20, 2.0)
+	
+	// Simulate a trade being opened
+	strat.openTradeID = "test-trade-123"
+	strat.openUnits = 100000.0
+	
+	// Verify state is set
+	assert.Equal(t, "test-trade-123", strat.openTradeID)
+	assert.Equal(t, 100000.0, strat.openUnits)
+	
+	// Call OnTradeClosed
+	strat.OnTradeClosed("test-trade-123", "StopLoss")
+	
+	// Verify state is cleared
+	assert.Equal(t, "", strat.openTradeID)
+	assert.Equal(t, 0.0, strat.openUnits)
+}
+
+func TestEmaCrossStrategy_OnTradeClosed_WrongTradeID(t *testing.T) {
+	// Test that OnTradeClosed with wrong trade ID doesn't clear state
+	strat := NewEmaCross("EUR_USD", 20, 50, 0.01, 20, 2.0)
+	
+	// Simulate a trade being opened
+	strat.openTradeID = "test-trade-123"
+	strat.openUnits = 100000.0
+	
+	// Call OnTradeClosed with different trade ID
+	strat.OnTradeClosed("different-trade-456", "StopLoss")
+	
+	// Verify state is NOT cleared (because it's a different trade)
+	assert.Equal(t, "test-trade-123", strat.openTradeID)
+	assert.Equal(t, 100000.0, strat.openUnits)
+}

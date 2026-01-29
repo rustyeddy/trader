@@ -452,3 +452,80 @@ func TestRunner_Run_WithoutJournal(t *testing.T) {
 	assert.Equal(t, 0, result.Wins)
 	assert.Equal(t, 0, result.Losses)
 }
+
+// strategyWithListener is a test strategy that implements TradeClosedListener
+type strategyWithListener struct {
+	tickCount    int
+	closedTrades []string
+}
+
+func (s *strategyWithListener) OnTick(ctx context.Context, b broker.Broker, p broker.Price) error {
+	s.tickCount++
+	return nil
+}
+
+func (s *strategyWithListener) OnTradeClosed(tradeID string, reason string) {
+	s.closedTrades = append(s.closedTrades, tradeID)
+}
+
+func TestRunner_Run_WiresUpTradeClosedListener(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.sqlite")
+	j, err := journal.NewSQLite(dbPath)
+	require.NoError(t, err)
+	defer j.Close()
+
+	engine := sim.NewEngine(broker.Account{
+		ID:       "TEST",
+		Currency: "USD",
+		Balance:  10000,
+		Equity:   10000,
+	}, j)
+
+	// Create a trade that will be auto-closed by stop loss
+	err = engine.UpdatePrice(broker.Price{
+		Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+		Instrument: "EUR_USD",
+		Bid:        1.1000,
+		Ask:        1.1002,
+	})
+	require.NoError(t, err)
+
+	stopLoss := 1.0950
+	fill, err := engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
+		Instrument: "EUR_USD",
+		Units:      1000,
+		StopLoss:   &stopLoss,
+	})
+	require.NoError(t, err)
+
+	// Create ticks that will trigger the stop loss
+	ticks := []broker.Price{
+		{
+			Time:       time.Date(2026, 1, 24, 9, 31, 0, 0, time.UTC),
+			Instrument: "EUR_USD",
+			Bid:        1.0949, // Below stop loss
+			Ask:        1.0951,
+		},
+	}
+
+	feed := newMockTickFeed(ticks)
+	strategy := &strategyWithListener{}
+
+	r := &Runner{
+		Engine:   engine,
+		Feed:     feed,
+		Strategy: strategy,
+	}
+
+	_, err = r.Run(ctx, j)
+	require.NoError(t, err)
+
+	// Verify the strategy was notified about the auto-closed trade
+	require.Equal(t, 1, len(strategy.closedTrades), "strategy should be notified of auto-closed trade")
+	assert.Equal(t, fill.TradeID, strategy.closedTrades[0])
+}

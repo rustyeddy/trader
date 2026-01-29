@@ -247,3 +247,120 @@ func TestForcedLiquidationWorstTradeFirst(t *testing.T) {
 		t.Fatalf("expected liquidation trade record")
 	}
 }
+
+// mockListener implements TradeClosedListener for testing
+type mockListener struct {
+	closedTrades []struct {
+		tradeID string
+		reason  string
+	}
+}
+
+func (m *mockListener) OnTradeClosed(tradeID string, reason string) {
+	m.closedTrades = append(m.closedTrades, struct {
+		tradeID string
+		reason  string
+	}{tradeID, reason})
+}
+
+func TestEngine_TradeClosedListener_StopLoss(t *testing.T) {
+	e, _ := newEngine(t, 100000)
+	listener := &mockListener{}
+	e.SetTradeClosedListener(listener)
+
+	// Set initial price
+	setPrice(t, e, "EUR_USD", 1.0850, 1.0852, time.Now())
+
+	// Open a long trade with stop loss
+	stop := 1.0800
+	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+		Instrument: "EUR_USD",
+		Units:      10000,
+		StopLoss:   &stop,
+	})
+	if err != nil {
+		t.Fatalf("CreateMarketOrder failed: %v", err)
+	}
+
+	// Verify no listener calls yet
+	if len(listener.closedTrades) != 0 {
+		t.Fatalf("expected 0 listener calls, got %d", len(listener.closedTrades))
+	}
+
+	// Update price to hit stop loss
+	setPrice(t, e, "EUR_USD", 1.0799, 1.0801, time.Now().Add(time.Minute))
+
+	// Verify listener was called with stop loss
+	if len(listener.closedTrades) != 1 {
+		t.Fatalf("expected 1 listener call, got %d", len(listener.closedTrades))
+	}
+	if listener.closedTrades[0].tradeID != fill.TradeID {
+		t.Errorf("expected tradeID %s, got %s", fill.TradeID, listener.closedTrades[0].tradeID)
+	}
+	if listener.closedTrades[0].reason != "StopLoss" {
+		t.Errorf("expected reason StopLoss, got %s", listener.closedTrades[0].reason)
+	}
+}
+
+func TestEngine_TradeClosedListener_TakeProfit(t *testing.T) {
+	e, _ := newEngine(t, 100000)
+	listener := &mockListener{}
+	e.SetTradeClosedListener(listener)
+
+	// Set initial price
+	setPrice(t, e, "EUR_USD", 1.0850, 1.0852, time.Now())
+
+	// Open a long trade with take profit
+	tp := 1.0900
+	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+		Instrument: "EUR_USD",
+		Units:      10000,
+		TakeProfit: &tp,
+	})
+	if err != nil {
+		t.Fatalf("CreateMarketOrder failed: %v", err)
+	}
+
+	// Update price to hit take profit
+	setPrice(t, e, "EUR_USD", 1.0901, 1.0903, time.Now().Add(time.Minute))
+
+	// Verify listener was called with take profit
+	if len(listener.closedTrades) != 1 {
+		t.Fatalf("expected 1 listener call, got %d", len(listener.closedTrades))
+	}
+	if listener.closedTrades[0].tradeID != fill.TradeID {
+		t.Errorf("expected tradeID %s, got %s", fill.TradeID, listener.closedTrades[0].tradeID)
+	}
+	if listener.closedTrades[0].reason != "TakeProfit" {
+		t.Errorf("expected reason TakeProfit, got %s", listener.closedTrades[0].reason)
+	}
+}
+
+func TestEngine_TradeClosedListener_NotCalledOnManualClose(t *testing.T) {
+	e, _ := newEngine(t, 100000)
+	listener := &mockListener{}
+	e.SetTradeClosedListener(listener)
+
+	// Set initial price
+	setPrice(t, e, "EUR_USD", 1.0850, 1.0852, time.Now())
+
+	// Open a trade
+	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+		Instrument: "EUR_USD",
+		Units:      10000,
+	})
+	if err != nil {
+		t.Fatalf("CreateMarketOrder failed: %v", err)
+	}
+
+	// Manually close the trade
+	err = e.CloseTrade(context.Background(), fill.TradeID, "ManualClose")
+	if err != nil {
+		t.Fatalf("CloseTrade failed: %v", err)
+	}
+
+	// Verify listener was NOT called (manual close doesn't trigger listener)
+	if len(listener.closedTrades) != 0 {
+		t.Fatalf("expected 0 listener calls for manual close, got %d", len(listener.closedTrades))
+	}
+}
