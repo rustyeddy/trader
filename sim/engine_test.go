@@ -364,3 +364,36 @@ func TestEngine_TradeClosedListener_NotCalledOnManualClose(t *testing.T) {
 		t.Fatalf("expected 0 listener calls for manual close, got %d", len(listener.closedTrades))
 	}
 }
+
+func TestEngine_TradeClosedListener_Liquidation(t *testing.T) {
+	// Start with low balance to trigger liquidation
+	e, _ := newEngine(t, 10000)
+	listener := &mockListener{}
+	e.SetTradeClosedListener(listener)
+
+	// Set initial price
+	setPrice(t, e, "EUR_USD", 1.0850, 1.0852, time.Now())
+
+	// Open a large position that will cause margin issues
+	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+		Instrument: "EUR_USD",
+		Units:      1000000, // Very large position
+	})
+	if err != nil {
+		t.Fatalf("CreateMarketOrder failed: %v", err)
+	}
+
+	// Move price against the position to trigger liquidation
+	setPrice(t, e, "EUR_USD", 1.0700, 1.0702, time.Now().Add(time.Minute))
+
+	// Verify listener was called with liquidation
+	if len(listener.closedTrades) != 1 {
+		t.Fatalf("expected 1 listener call for liquidation, got %d", len(listener.closedTrades))
+	}
+	if listener.closedTrades[0].tradeID != fill.TradeID {
+		t.Errorf("expected tradeID %s, got %s", fill.TradeID, listener.closedTrades[0].tradeID)
+	}
+	if listener.closedTrades[0].reason != "LIQUIDATION" {
+		t.Errorf("expected reason LIQUIDATION, got %s", listener.closedTrades[0].reason)
+	}
+}

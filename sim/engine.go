@@ -158,12 +158,15 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	// Note: liquidations during manual close are rare but possible
 	liquidatedTradeIDs, err := e.enforceMarginLocked()
 	
+	// Capture listener before releasing lock to avoid race
+	listener := e.listener
+	
 	e.mu.Unlock()
 	
 	// Notify listener about any liquidations that occurred
-	if e.listener != nil {
+	if listener != nil {
 		for _, tradeID := range liquidatedTradeIDs {
-			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+			listener.OnTradeClosed(tradeID, "LIQUIDATION")
 		}
 	}
 	
@@ -260,12 +263,15 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	// Should be unnecessary after closing everything, but consistent and safe.
 	liquidatedTradeIDs, err := e.enforceMarginLocked()
 	
+	// Capture listener before releasing lock to avoid race
+	listener := e.listener
+	
 	e.mu.Unlock()
 	
 	// Notify listener about any liquidations that occurred
-	if e.listener != nil {
+	if listener != nil {
 		for _, tradeID := range liquidatedTradeIDs {
-			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+			listener.OnTradeClosed(tradeID, "LIQUIDATION")
 		}
 	}
 	
@@ -383,16 +389,19 @@ func (e *Engine) UpdatePrice(p broker.Price) error {
 	// Forced liquidation if needed (returns liquidated trade IDs)
 	liquidatedTradeIDs, err := e.enforceMarginLocked()
 	
+	// Capture listener before releasing lock to avoid race
+	listener := e.listener
+	
 	e.mu.Unlock()
 	
 	// Notify listener about auto-closed trades after releasing lock to avoid deadlocks
-	if e.listener != nil {
+	if listener != nil {
 		for _, ct := range closedTrades {
-			e.listener.OnTradeClosed(ct.tradeID, ct.reason)
+			listener.OnTradeClosed(ct.tradeID, ct.reason)
 		}
 		// Also notify about liquidations
 		for _, tradeID := range liquidatedTradeIDs {
-			e.listener.OnTradeClosed(tradeID, "LIQUIDATION")
+			listener.OnTradeClosed(tradeID, "LIQUIDATION")
 		}
 	}
 	
