@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -21,6 +22,11 @@ type Engine struct {
 	journal journal.Journal
 }
 
+var (
+	ErrTradeNotFound      = errors.New("trade not found")
+	ErrTradeAlreadyClosed = errors.New("trade already closed")
+)
+
 func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 	return &Engine{
 		acct:    acct,
@@ -34,7 +40,17 @@ func (e *Engine) GetAccount(ctx context.Context) (broker.Account, error) {
 	return e.acct, nil
 }
 
-func (e *Engine) Prices() *PriceStore { return e.prices }
+func (e *Engine) Prices() *PriceStore {
+	return e.prices
+}
+
+// IsTradeOpen reports whether the given trade exists and is currently open.
+func (e *Engine) IsTradeOpen(tradeID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	t, ok := e.trades[tradeID]
+	return ok && t != nil && t.Open
+}
 
 func (e *Engine) GetPrice(ctx context.Context, instr string) (broker.Price, error) {
 	return e.prices.Get(instr)
@@ -88,10 +104,10 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 
 	t, ok := e.trades[tradeID]
 	if !ok {
-		return fmt.Errorf("close trade: trade %q not found", tradeID)
+		return fmt.Errorf("close trade: %w: %q", ErrTradeNotFound, tradeID)
 	}
 	if !t.Open {
-		return fmt.Errorf("close trade: trade %q is already closed", tradeID)
+		return fmt.Errorf("close trade: %w: %q", ErrTradeAlreadyClosed, tradeID)
 	}
 
 	p, err := e.prices.Get(t.Instrument)
