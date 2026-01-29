@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 )
 
 func TestOandACandles(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "candles.csv")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// assert r.URL.Path == "/v3/instruments/EUR_USD/candles"
@@ -28,5 +31,5 @@ func TestOandACandles(t *testing.T) {
 		"--out", csvPath,
 	)
 
-	fmt.Printf("otuput: %s\n", out)
+	fmt.Printf("output: %s\n", out)
 }
