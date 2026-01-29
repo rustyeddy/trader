@@ -31,5 +31,5 @@ func TestOandACandles(t *testing.T) {
 		"--out", csvPath,
 	)
 
-	fmt.Printf("otuput: %s\n", out)
+	fmt.Printf("output: %s\n", out)
 }
