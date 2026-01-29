@@ -2,6 +2,7 @@ package strategies
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/internal/risk"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/sim"
 )
 
 // EmaCrossStrategy trades a single instrument using a fast/slow EMA crossover.
@@ -53,6 +55,22 @@ func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float6
 
 		fast: indicators.NewEMA(fast),
 		slow: indicators.NewEMA(slow),
+	}
+}
+
+// syncOpenState clears strategy position state if the engine has already closed the trade
+// (e.g. StopLoss/TakeProfit).
+func (s *EmaCrossStrategy) syncOpenState(b broker.Broker) {
+	if s.openTradeID == "" {
+		return
+	}
+	// Only the sim engine currently knows trade state; if the broker doesn't support it,
+	// we fall back to best-effort close handling.
+	if eng, ok := b.(interface{ IsTradeOpen(string) bool }); ok {
+		if !eng.IsTradeOpen(s.openTradeID) {
+			s.openTradeID = ""
+			s.openUnits = 0
+		}
 	}
 }
 
@@ -113,6 +131,9 @@ func (s *EmaCrossStrategy) onSignal(ctx context.Context,
 	signal string,
 	dir int) error { // +1 long, -1 short
 
+	// Engine may have auto-closed our trade via StopLoss/TakeProfit.
+	s.syncOpenState(b)
+
 	// If we already have a position in the same direction, do nothing (enter only on cross).
 	if s.openTradeID != "" {
 		if (s.openUnits > 0 && dir > 0) || (s.openUnits < 0 && dir < 0) {
@@ -129,7 +150,14 @@ func (s *EmaCrossStrategy) onSignal(ctx context.Context,
 
 		exitReason := "ExitOn" + signal
 		if err := closer.CloseTrade(ctx, s.openTradeID, exitReason); err != nil {
-			return err
+			// The engine may have already closed the trade (StopLoss/TakeProfit),
+			// so treat that as a no-op and just sync our state.
+			if errors.Is(err, sim.ErrTradeAlreadyClosed) || errors.Is(err, sim.ErrTradeNotFound) {
+				s.openTradeID = ""
+				s.openUnits = 0
+			} else {
+				return err
+			}
 		}
 
 		// Clear position state
