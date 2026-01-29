@@ -104,10 +104,10 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 
 	t, ok := e.trades[tradeID]
 	if !ok {
-		return fmt.Errorf("close trade: %w: %q", ErrTradeNotFound, tradeID)
+		return fmt.Errorf("close trade %q: %w", tradeID, ErrTradeNotFound)
 	}
 	if !t.Open {
-		return fmt.Errorf("close trade: %w: %q", ErrTradeAlreadyClosed, tradeID)
+		return fmt.Errorf("close trade %q: %w", tradeID, ErrTradeAlreadyClosed)
 	}
 
 	p, err := e.prices.Get(t.Instrument)
