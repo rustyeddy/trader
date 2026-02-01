@@ -46,7 +46,7 @@ func StrategyByName(name string, instrument string, units float64, fast, slow in
 		}, nil
 
 	case "ema-cross", "emacross":
-		return NewEmaCross(instrument, fast, slow, riskPct, stopPips, rr), nil
+		return NewEmaCross(EMACrossConfigDefaults()), nil
 
 	default:
 		return nil, fmt.Errorf("unknown strategy %q (supported: noop, open-once)", name)

@@ -23,69 +23,25 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 		ticksPath string
 		fromStr   string
 		toStr     string
+		from      time.Time
+		to        time.Time
 
 		// Account
 		startingBalance float64
 		accountID       string
 		closeEnd        bool
+
+		checkInputs func() error
 	)
 
 	cmd := &cobra.Command{
 		Use:   "ema-cross",
 		Short: "EMA(20/50) crossover backtest",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if ticksPath == "" {
-				return fmt.Errorf("-ticks is required")
-			}
-			if instrument == "" {
-				return fmt.Errorf("-instrument is required")
-			}
-			if fast <= 0 || slow <= 0 || fast >= slow {
-				return fmt.Errorf("require 0 < fast < slow (got %d/%d)", fast, slow)
-			}
-			if riskPct <= 0 || riskPct >= 1 {
-				return fmt.Errorf("invalid -risk (got %v)", riskPct)
-			}
-			if stopPips <= 0 {
-				return fmt.Errorf("invalid -stop-pips")
-			}
-			if rr <= 0 {
-				return fmt.Errorf("invalid -rr")
-			}
-			if startingBalance <= 0 {
-				return fmt.Errorf("invalid -starting-balance")
-			}
-			if accountID == "" {
-				return fmt.Errorf("invalid -account")
-			}
 
-			var (
-				from time.Time
-				to   time.Time
-				err  error
-			)
-
-			if fromStr != "" {
-				from, err = time.Parse(time.RFC3339, fromStr)
-				if err != nil {
-					from, err = time.Parse(time.RFC3339Nano, fromStr)
-					if err != nil {
-						return fmt.Errorf("bad -from: %w", err)
-					}
-				}
-			}
-
-			if toStr != "" {
-				to, err = time.Parse(time.RFC3339, toStr)
-				if err != nil {
-					to, err = time.Parse(time.RFC3339Nano, toStr)
-					if err != nil {
-						return fmt.Errorf("bad -to: %w", err)
-					}
-				}
-			}
-			if !from.IsZero() && !to.IsZero() && !from.Before(to) {
-				return fmt.Errorf("-from must be before -to")
+			err := checkInputs()
+			if err != nil {
+				return err
 			}
 
 			// ---------------------------
@@ -111,8 +67,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				return err
 			}
 
-			strat := strategies.NewEmaCross(instrument, fast, slow, riskPct, stopPips, rr)
-
+			strat := strategies.NewEmaCross(cfg)
 			runner := &backtest.Runner{
 				Engine:   engine,
 				Feed:     feed,
@@ -141,13 +96,65 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 		},
 	}
 
+	checkInputs = func() error {
+		if ticksPath == "" {
+			return fmt.Errorf("-ticks is required")
+		}
+		if cfg.Instrument == "" {
+			return fmt.Errorf("-instrument is required")
+		}
+		if cfg.FastPeriod <= 0 || cfg.SlowPeriod <= 0 || cfg.FastPeriod >= cfg.SlowPeriod {
+			return fmt.Errorf("require 0 < fast < slow (got %d/%d)", cfg.FastPeriod, cfg.SlowPeriod)
+		}
+		if cfg.RiskPct <= 0 || cfg.RiskPct >= 1 {
+			return fmt.Errorf("invalid -risk (got %v)", cfg.RiskPct)
+		}
+		if cfg.StopPips <= 0 {
+			return fmt.Errorf("invalid -stop-pips")
+		}
+		if cfg.RR <= 0 {
+			return fmt.Errorf("invalid -rr")
+		}
+		if startingBalance <= 0 {
+			return fmt.Errorf("invalid -starting-balance")
+		}
+		if accountID == "" {
+			return fmt.Errorf("invalid -account")
+		}
+
+		var err error
+		if fromStr != "" {
+			from, err = time.Parse(time.RFC3339, fromStr)
+			if err != nil {
+				from, err = time.Parse(time.RFC3339Nano, fromStr)
+				if err != nil {
+					return fmt.Errorf("bad -from: %w", err)
+				}
+			}
+		}
+
+		if toStr != "" {
+			to, err = time.Parse(time.RFC3339, toStr)
+			if err != nil {
+				to, err = time.Parse(time.RFC3339Nano, toStr)
+				if err != nil {
+					return fmt.Errorf("bad -to: %w", err)
+				}
+			}
+		}
+		if !from.IsZero() && !to.IsZero() && !from.Before(to) {
+			return fmt.Errorf("-from must be before -to")
+		}
+		return nil
+	}
+
 	// set flags for EMACrossConfig
 	cmd.Flags().StringVar(&cfg.Instrument, "instrument", cfg.Instrument, "Instrument")
 	cmd.Flags().IntVar(&cfg.FastPeriod, "fast", cfg.FastPeriod, "Fast EMA period")
 	cmd.Flags().IntVar(&cfg.SlowPeriod, "slow", cfg.SlowPeriod, "Slow EMA period")
 
 	// Risk
-	cmd.Flags().Float64Var(&cfg.RiskPct, "risk", cfg.RickPct, "Risk per trade (0.005 = 0.5%)")
+	cmd.Flags().Float64Var(&cfg.RiskPct, "risk", cfg.RiskPct, "Risk per trade (0.005 = 0.5%)")
 	cmd.Flags().Float64Var(&cfg.StopPips, "stop-pips", cfg.StopPips, "Stop loss in pips")
 	cmd.Flags().Float64Var(&cfg.RR, "rr", cfg.RR, "Risk-reward multiple")
 

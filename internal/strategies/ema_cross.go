@@ -45,32 +45,23 @@ type EMACrossConfig struct {
 
 func EMACrossConfigDefaults() *EMACrossConfig {
 	return &EMACrossConfig{
+		Instrument: "EUR_USD",
 		FastPeriod: 10,
 		SlowPeriod: 30,
-
-		Instrument: "EUR_USD",
-		RickPct:    0.005,
+		RiskPct:    0.005,
 		StopPips:   20,
 		RR:         2.0,
 	}
 }
 
-func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float64) *EMACross {
-	if rr <= 0 {
-		rr = 2.0
+func NewEmaCross(cfg *EMACrossConfig) *EMACross {
+	if cfg.RR <= 0 {
+		cfg.RR = 2.0
 	}
 	return &EMACross{
-		Instrument: instrument,
-
-		FastPeriod: fast,
-		SlowPeriod: slow,
-
-		RiskPct:  riskPct,
-		StopPips: stopPips,
-		RR:       rr,
-
-		fast: indicators.NewEMA(fast),
-		slow: indicators.NewEMA(slow),
+		EMACrossConfig: EMACrossConfigDefaults(),
+		fast:           indicators.NewEMA(cfg.FastPeriod),
+		slow:           indicators.NewEMA(cfg.SlowPeriod),
 	}
 }
 
