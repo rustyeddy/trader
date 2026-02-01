@@ -114,40 +114,40 @@ func (e *ExponentialMA) Value() float64 {
 	return e.ema
 }
 
-// AverageTrueRange is a streaming Average True Range indicator
-type AverageTrueRange struct {
-	period       int
-	atr          float64
-	count        int
-	warmupSum    float64
-	prevCandle   market.Candle
-	hasPrevious  bool
+// ATR is a streaming Average True Range indicator
+type ATR struct {
+	period      int
+	atr         float64
+	count       int
+	warmupSum   float64
+	prevCandle  market.Candle
+	hasPrevious bool
 }
 
 // NewATR creates a new Average True Range indicator with the given period
-func NewATR(period int) *AverageTrueRange {
-	return &AverageTrueRange{
+func NewATR(period int) *ATR {
+	return &ATR{
 		period: period,
 	}
 }
 
-func (a *AverageTrueRange) Name() string {
+func (a *ATR) Name() string {
 	return fmt.Sprintf("ATR(%d)", a.period)
 }
 
-func (a *AverageTrueRange) Warmup() int {
+func (a *ATR) Warmup() int {
 	// Need period+1 candles because TR requires previous candle
 	return a.period + 1
 }
 
-func (a *AverageTrueRange) Reset() {
+func (a *ATR) Reset() {
 	a.atr = 0
 	a.count = 0
 	a.warmupSum = 0
 	a.hasPrevious = false
 }
 
-func (a *AverageTrueRange) Update(c market.Candle) {
+func (a *ATR) Update(c market.Candle) {
 	if !a.hasPrevious {
 		// First candle, just store it
 		a.prevCandle = c
@@ -157,7 +157,7 @@ func (a *AverageTrueRange) Update(c market.Candle) {
 
 	// Calculate true range
 	tr := calculateTrueRange(c, a.prevCandle)
-	
+
 	if a.count < a.period {
 		// During warmup, accumulate sum for initial ATR
 		a.warmupSum += tr
@@ -174,11 +174,11 @@ func (a *AverageTrueRange) Update(c market.Candle) {
 	a.prevCandle = c
 }
 
-func (a *AverageTrueRange) Ready() bool {
+func (a *ATR) Ready() bool {
 	return a.count >= a.period
 }
 
-func (a *AverageTrueRange) Value() float64 {
+func (a *ATR) Value() float64 {
 	if !a.Ready() {
 		return 0
 	}

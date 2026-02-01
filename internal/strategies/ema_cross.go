@@ -19,15 +19,8 @@ import (
 // - Reverses on opposite cross (close then open)
 // - Uses risk.Calculate for sizing (fixed stop in pips)
 // - Exit reasons recorded in journal via CloseTrade(reason)
-type EmaCrossStrategy struct {
-	Instrument string
-
-	FastPeriod int // 20
-	SlowPeriod int // 50
-
-	RiskPct  float64 // 0.005 (0.5%)
-	StopPips float64 // e.g. 20
-	RR       float64 // take-profit multiple of risk, e.g. 2.0
+type EMACross struct {
+	*EMACrossConfig
 
 	fast *indicators.ExponentialMA
 	slow *indicators.ExponentialMA
@@ -39,11 +32,34 @@ type EmaCrossStrategy struct {
 	openUnits   float64 // >0 long, <0 short
 }
 
-func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float64) *EmaCrossStrategy {
+type EMACrossConfig struct {
+	Instrument string
+
+	FastPeriod int // 20
+	SlowPeriod int // 50
+
+	RiskPct  float64 // 0.005 (0.5%)
+	StopPips float64 // e.g. 20
+	RR       float64 // take-profit multiple of risk, e.g. 2.0
+}
+
+func EMACrossConfigDefaults() *EMACrossConfig {
+	return &EMACrossConfig{
+		FastPeriod: 10,
+		SlowPeriod: 30,
+
+		Instrument: "EUR_USD",
+		RickPct:    0.005,
+		StopPips:   20,
+		RR:         2.0,
+	}
+}
+
+func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float64) *EMACross {
 	if rr <= 0 {
 		rr = 2.0
 	}
-	return &EmaCrossStrategy{
+	return &EMACross{
 		Instrument: instrument,
 
 		FastPeriod: fast,
@@ -60,7 +76,7 @@ func NewEmaCross(instrument string, fast, slow int, riskPct, stopPips, rr float6
 
 // syncOpenState clears strategy position state if the engine has already closed the trade
 // (e.g. StopLoss/TakeProfit).
-func (s *EmaCrossStrategy) syncOpenState(b broker.Broker) {
+func (s *EMACross) syncOpenState(b broker.Broker) {
 	if s.openTradeID == "" {
 		return
 	}
@@ -74,7 +90,7 @@ func (s *EmaCrossStrategy) syncOpenState(b broker.Broker) {
 	}
 }
 
-func (s *EmaCrossStrategy) OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error {
+func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error {
 	if tick.Instrument != s.Instrument {
 		return nil
 	}
@@ -125,7 +141,7 @@ func (s *EmaCrossStrategy) OnTick(ctx context.Context, b broker.Broker, tick bro
 	}
 }
 
-func (s *EmaCrossStrategy) onSignal(ctx context.Context,
+func (s *EMACross) onSignal(ctx context.Context,
 	b broker.Broker,
 	now time.Time,
 	signal string,
@@ -169,7 +185,7 @@ func (s *EmaCrossStrategy) onSignal(ctx context.Context,
 	return s.openPosition(ctx, b, now, signal, dir)
 }
 
-func (s *EmaCrossStrategy) openPosition(ctx context.Context, b broker.Broker, now time.Time, signal string, dir int) error {
+func (s *EMACross) openPosition(ctx context.Context, b broker.Broker, now time.Time, signal string, dir int) error {
 	acct, err := b.GetAccount(ctx)
 	if err != nil {
 		return err

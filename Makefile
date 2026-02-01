@@ -23,5 +23,9 @@ cover-html:
 test-blackbox:
 	go test ./... -tags=blackbox
 
+install: build
+	cp $(CMD) /home/rusty/bin/$(APP)
+
+
 clean:
 	@rm -rf $(BIN_DIR) coverage.out coverage.html

@@ -5,14 +5,20 @@ import (
 	"time"
 )
 
+type Broker interface {
+	GetAccount(ctx context.Context) (Account, error)
+	GetPrice(ctx context.Context, instrument string) (Price, error)
+	CreateMarketOrder(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
+}
+
 type Account struct {
-	ID       string
-	Currency string
-	Balance  float64
-	Equity   float64
-	MarginUsed   float64
-	FreeMargin   float64
-	MarginLevel  float64
+	ID          string
+	Currency    string
+	Balance     float64
+	Equity      float64
+	MarginUsed  float64
+	FreeMargin  float64
+	MarginLevel float64
 }
 
 type Price struct {
@@ -39,10 +45,4 @@ type OrderFill struct {
 	Instrument string
 	Units      float64
 	Price      float64
-}
-
-type Broker interface {
-	GetAccount(ctx context.Context) (Account, error)
-	GetPrice(ctx context.Context, instrument string) (Price, error)
-	CreateMarketOrder(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
 }

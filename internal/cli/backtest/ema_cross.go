@@ -17,22 +17,17 @@ import (
 
 func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 	var (
+		cfg = strategies.EMACrossConfigDefaults()
+
+		// prices
 		ticksPath string
+		fromStr   string
+		toStr     string
 
-		instrument string
-		fast       int
-		slow       int
-
-		riskPct  float64
-		stopPips float64
-		rr       float64
-
+		// Account
 		startingBalance float64
 		accountID       string
 		closeEnd        bool
-
-		fromStr string
-		toStr   string
 	)
 
 	cmd := &cobra.Command{
@@ -146,15 +141,17 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 		},
 	}
 
+	// set flags for EMACrossConfig
+	cmd.Flags().StringVar(&cfg.Instrument, "instrument", cfg.Instrument, "Instrument")
+	cmd.Flags().IntVar(&cfg.FastPeriod, "fast", cfg.FastPeriod, "Fast EMA period")
+	cmd.Flags().IntVar(&cfg.SlowPeriod, "slow", cfg.SlowPeriod, "Slow EMA period")
+
+	// Risk
+	cmd.Flags().Float64Var(&cfg.RiskPct, "risk", cfg.RickPct, "Risk per trade (0.005 = 0.5%)")
+	cmd.Flags().Float64Var(&cfg.StopPips, "stop-pips", cfg.StopPips, "Stop loss in pips")
+	cmd.Flags().Float64Var(&cfg.RR, "rr", cfg.RR, "Risk-reward multiple")
+
 	cmd.Flags().StringVar(&ticksPath, "ticks", "", "Tick CSV (time,instrument,bid,ask)")
-	cmd.Flags().StringVar(&instrument, "instrument", "EUR_USD", "Instrument")
-
-	cmd.Flags().IntVar(&fast, "fast", 20, "Fast EMA period")
-	cmd.Flags().IntVar(&slow, "slow", 50, "Slow EMA period")
-
-	cmd.Flags().Float64Var(&riskPct, "risk", 0.005, "Risk per trade (0.005 = 0.5%)")
-	cmd.Flags().Float64Var(&stopPips, "stop-pips", 20, "Stop loss in pips")
-	cmd.Flags().Float64Var(&rr, "rr", 2.0, "Risk-reward multiple")
 
 	cmd.Flags().Float64Var(&startingBalance, "starting-balance", 100000, "Starting balance")
 	cmd.Flags().StringVar(&accountID, "account", "SIM-BACKTEST", "Account ID")
