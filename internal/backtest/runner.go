@@ -26,19 +26,6 @@ type RunnerOptions struct {
 	CloseReason string
 }
 
-// Result is a lightweight summary of a backtest run.
-type Result struct {
-	Balance float64
-	Equity  float64
-
-	Trades int
-	Wins   int
-	Losses int
-
-	Start time.Time
-	End   time.Time
-}
-
 // Runner drives an engine forward using a feed and strategy.
 type Runner struct {
 	Engine   *sim.Engine

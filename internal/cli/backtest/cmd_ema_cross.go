@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/internal/backtest"
 	"github.com/rustyeddy/trader/internal/cli/config"
+	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/internal/strategies"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
@@ -38,16 +39,10 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 		Use:   "ema-cross",
 		Short: "EMA(20/50) crossover backtest",
 		RunE: func(cmd *cobra.Command, args []string) error {
-
 			err := checkInputs()
 			if err != nil {
 				return err
 			}
-
-			// ---------------------------
-			// WIRING (this is where it goes)
-			// ---------------------------
-			ctx := context.Background()
 
 			j, err := journal.NewSQLite(rc.DBPath)
 			if err != nil {
@@ -78,6 +73,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				},
 			}
 
+			ctx := context.Background()
 			result, err := runner.Run(ctx, j)
 			if err != nil {
 				return err
@@ -92,9 +88,80 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				result.Losses,
 			)
 
-			return nil
+			jbytes, err := cfg.JSON()
+			if err != nil {
+				fmt.Println("ERROR create JSON from config ", err)
+			}
+
+			btr := journal.BacktestRun{
+				RunID:     id.New(),
+				Created:   time.Now(),
+				Timeframe: "TODO",
+				Dataset:   ticksPath,
+
+				Strategy: "EMA-Cross",
+				Config:   jbytes,
+
+				Instrument: cfg.Instrument,
+				RiskPct:    cfg.RiskPct,
+				StopPips:   cfg.StopPips,
+				RR:         cfg.RR,
+
+				Start: time.Time{}, // TODO
+				End:   time.Time{}, // TODO
+
+				Trades: result.Trades,
+				Wins:   result.Wins,
+				Losses: result.Losses,
+
+				StartBalance: startingBalance,
+				EndBalance:   result.Balance,
+
+				// Derived values
+				NetPL:        result.Balance - startingBalance,
+				ReturnPct:    (result.Balance - startingBalance) / startingBalance,
+				WinRate:      float64(result.Wins) / float64(result.Trades),
+				ProfitFactor: 9.99,
+				MaxDDPct:     9.99,
+
+				GitCommit: "TODO",
+				OrgPath:   "backtest.org",
+				EquityPNG: "TODO",
+			}
+
+			fmt.Printf("BTR: %+v\n", btr)
+
+			err = j.RecordBacktest(ctx, btr)
+			if err != nil {
+				return err
+			}
+
+			err = btr.WriteBacktestOrg()
+			if err != nil {
+				return err
+			}
+			return err
 		},
 	}
+
+	// set flags for EMACrossConfig
+	cmd.Flags().StringVar(&cfg.Instrument, "instrument", cfg.Instrument, "Instrument")
+	cmd.Flags().IntVar(&cfg.FastPeriod, "fast", cfg.FastPeriod, "Fast EMA period")
+	cmd.Flags().IntVar(&cfg.SlowPeriod, "slow", cfg.SlowPeriod, "Slow EMA period")
+
+	// Risk
+	cmd.Flags().Float64Var(&cfg.RiskPct, "risk", cfg.RiskPct, "Risk per trade (0.005 = 0.5%)")
+	cmd.Flags().Float64Var(&cfg.StopPips, "stop-pips", cfg.StopPips, "Stop loss in pips")
+	cmd.Flags().Float64Var(&cfg.RR, "rr", cfg.RR, "Risk-reward multiple")
+
+	cmd.Flags().StringVar(&ticksPath, "ticks", "", "Tick CSV (time,instrument,bid,ask)")
+
+	cmd.Flags().Float64Var(&startingBalance, "starting-balance", 100000, "Starting balance")
+	cmd.Flags().StringVar(&accountID, "account", "SIM-BACKTEST", "Account ID")
+	cmd.Flags().BoolVar(&closeEnd, "close-end", true, "Close open trades at end")
+
+	cmd.Flags().StringVar(&fromStr, "from", "", "Optional RFC3339 start time")
+	cmd.Flags().StringVar(&toStr, "to", "", "Optional RFC3339 end time")
 
 	checkInputs = func() error {
 		if ticksPath == "" {
@@ -147,25 +214,6 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 		}
 		return nil
 	}
-
-	// set flags for EMACrossConfig
-	cmd.Flags().StringVar(&cfg.Instrument, "instrument", cfg.Instrument, "Instrument")
-	cmd.Flags().IntVar(&cfg.FastPeriod, "fast", cfg.FastPeriod, "Fast EMA period")
-	cmd.Flags().IntVar(&cfg.SlowPeriod, "slow", cfg.SlowPeriod, "Slow EMA period")
-
-	// Risk
-	cmd.Flags().Float64Var(&cfg.RiskPct, "risk", cfg.RiskPct, "Risk per trade (0.005 = 0.5%)")
-	cmd.Flags().Float64Var(&cfg.StopPips, "stop-pips", cfg.StopPips, "Stop loss in pips")
-	cmd.Flags().Float64Var(&cfg.RR, "rr", cfg.RR, "Risk-reward multiple")
-
-	cmd.Flags().StringVar(&ticksPath, "ticks", "", "Tick CSV (time,instrument,bid,ask)")
-
-	cmd.Flags().Float64Var(&startingBalance, "starting-balance", 100000, "Starting balance")
-	cmd.Flags().StringVar(&accountID, "account", "SIM-BACKTEST", "Account ID")
-	cmd.Flags().BoolVar(&closeEnd, "close-end", true, "Close open trades at end")
-
-	cmd.Flags().StringVar(&fromStr, "from", "", "Optional RFC3339 start time")
-	cmd.Flags().StringVar(&toStr, "to", "", "Optional RFC3339 end time")
 
 	return cmd
 }

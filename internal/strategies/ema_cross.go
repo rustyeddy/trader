@@ -2,6 +2,7 @@ package strategies
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -33,14 +34,18 @@ type EMACross struct {
 }
 
 type EMACrossConfig struct {
-	Instrument string
+	FastPeriod int `json:"fast-period"` // 20
+	SlowPeriod int `json:"slow-period"` // 50
 
-	FastPeriod int // 20
-	SlowPeriod int // 50
+	Instrument string  `json:"instrument"`
+	RiskPct    float64 `json:"risk-percent"` // 0.005 (0.5%)
+	StopPips   float64 `json:"stopPips"`     // e.g. 20
+	RR         float64 `json:"risk-reward"`  // take-profit multiple of risk, e.g. 2.0
+}
 
-	RiskPct  float64 // 0.005 (0.5%)
-	StopPips float64 // e.g. 20
-	RR       float64 // take-profit multiple of risk, e.g. 2.0
+func (e *EMACrossConfig) JSON() ([]byte, error) {
+	return json.Marshal(e)
+
 }
 
 func EMACrossConfigDefaults() *EMACrossConfig {
@@ -59,7 +64,7 @@ func NewEmaCross(cfg *EMACrossConfig) *EMACross {
 		cfg.RR = 2.0
 	}
 	return &EMACross{
-		EMACrossConfig: EMACrossConfigDefaults(),
+		EMACrossConfig: cfg,
 		fast:           indicators.NewEMA(cfg.FastPeriod),
 		slow:           indicators.NewEMA(cfg.SlowPeriod),
 	}
@@ -255,19 +260,21 @@ func (s *EMACross) openPosition(ctx context.Context, b broker.Broker, now time.T
 	s.openUnits = units
 
 	// Entry "reason" — journal currently records exit reasons, so we print the entry reason.
-	fmt.Printf(
-		"%s ENTRY %s %s units=%.0f entry=%.5f stop=%.5f tp=%.5f riskPct=%.4f stopPips=%.1f riskAmt=%.2f\n",
-		now.UTC().Format(time.RFC3339),
-		s.Instrument,
-		signal,
-		units,
-		entry,
-		stop,
-		tp,
-		s.RiskPct,
-		s.StopPips,
-		size.RiskAmount,
-	)
-
+	verbose := true
+	if verbose {
+		fmt.Printf(
+			"%s ENTRY %s %s units=%.0f entry=%.5f stop=%.5f tp=%.5f riskPct=%.4f stopPips=%.1f riskAmt=%.2f\n",
+			now.UTC().Format(time.RFC3339),
+			s.Instrument,
+			signal,
+			units,
+			entry,
+			stop,
+			tp,
+			s.RiskPct,
+			s.StopPips,
+			size.RiskAmount,
+		)
+	}
 	return nil
 }

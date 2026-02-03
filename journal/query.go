@@ -65,6 +65,49 @@ func (j *SQLiteJournal) ListTradesClosedBetween(start, end time.Time) ([]TradeRe
 		}
 		out = append(out, rec)
 	}
+
+	/* Can add this
+	GrossProfit = sum(realized_pl where >0)
+	GrossLoss = abs(sum(realized_pl where <0))
+	ProfitFactor = GrossProfit / GrossLoss (if GrossLoss > 0)
+	*/
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (j *SQLiteJournal) ListEquityBetween(start, end time.Time) ([]TradeRecord, error) {
+
+	rows, err := j.db.Query(`
+		SELECT time, balance, equity, margin_used, free_margin, margin_level
+		FROM equity
+		WHERE time >= ? AND time < ?
+		ORDER BY time ASC;`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []TradeRecord
+	for rows.Next() {
+		var rec TradeRecord
+		if err := rows.Scan(
+			&rec.TradeID,
+			&rec.Instrument,
+			&rec.Units,
+			&rec.EntryPrice,
+			&rec.ExitPrice,
+			&rec.OpenTime,
+			&rec.CloseTime,
+			&rec.RealizedPL,
+			&rec.Reason,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}

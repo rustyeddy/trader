@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"context"
 	"database/sql"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -42,6 +43,32 @@ func (j *SQLiteJournal) RecordEquity(e EquitySnapshot) error {
 		e.Time, e.Balance, e.Equity, e.MarginUsed, e.FreeMargin, e.MarginLevel,
 	)
 	return err
+}
+
+func (j *SQLiteJournal) RecordBacktest(ctx context.Context, btr BacktestRun) error {
+
+	return nil
+}
+
+func (j *SQLiteJournal) GetBacktestRun(ctx context.Context, runID string) (btr BacktestRun, err error) {
+
+	return
+}
+
+func (j *SQLiteJournal) ListTradesByRunID(ctx context.Context, runID string) (tr []TradeRecord, err error) {
+
+	return
+}
+
+func (j *SQLiteJournal) ListEquityByRunID(ctx context.Context, runID string) (eq []EquitySnapshot, err error) {
+
+	return
+}
+
+// ExportBacktestOrg loads everything and returns the Org block.
+func (j *SQLiteJournal) ExportBacktestOrg(ctx context.Context, runID string) (ostr string, err error) {
+
+	return
 }
 
 func (j *SQLiteJournal) Close() error {
