@@ -1,13 +1,13 @@
-package cli
+package main
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/rustyeddy/trader/internal/cli/backtest"
-	"github.com/rustyeddy/trader/internal/cli/config"
-	"github.com/rustyeddy/trader/internal/cli/data"
-	"github.com/rustyeddy/trader/internal/cli/replay"
+	"github.com/rustyeddy/trader/cli/backtest"
+	"github.com/rustyeddy/trader/cli/config"
+	"github.com/rustyeddy/trader/cli/data"
+	"github.com/rustyeddy/trader/cli/replay"
 	"github.com/spf13/cobra"
 )
 
@@ -56,4 +56,8 @@ func Execute() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+func main() {
+	Execute()
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/internal/id"
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 )

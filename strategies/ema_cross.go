@@ -10,8 +10,8 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/indicators"
-	"github.com/rustyeddy/trader/internal/risk"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
 

@@ -1,7 +1,7 @@
 package trades
 
 import (
-	"github.com/rustyeddy/trader/internal/cli/config"
+	"github.com/rustyeddy/trader/cli/config"
 	"github.com/spf13/cobra"
 )
 

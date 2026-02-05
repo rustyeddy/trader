@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/internal/strategies"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/strategies"
 )
 
 // TickFeed yields broker.Price rows (typically from a dataset) one at a time.

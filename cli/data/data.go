@@ -3,7 +3,7 @@ package data
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/internal/cli/config"
+	"github.com/rustyeddy/trader/cli/config"
 )
 
 func New(rc *config.RootConfig) *cobra.Command {

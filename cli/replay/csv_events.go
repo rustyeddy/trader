@@ -128,7 +128,7 @@ func inRange(t, from, to time.Time) bool {
 	return true
 }
 
-// parseTickRowCompat duplicates minimal parsing so internal/replay doesn't import internal/backtest.
+// parseTickRowCompat duplicates minimal parsing soreplay doesn't import backtest.
 // (Avoids internal package coupling.)
 func parseTickRowCompat(row []string) (broker.Price, bool, error) {
 	// time,instrument,bid,ask
