@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/internal/backtest"
 	"github.com/rustyeddy/trader/internal/cli/config"
 	"github.com/rustyeddy/trader/internal/id"
 	"github.com/rustyeddy/trader/internal/strategies"
