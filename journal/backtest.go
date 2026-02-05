@@ -14,9 +14,6 @@ type BacktestRun struct {
 	Created   time.Time
 	Timeframe string
 	Dataset   string
-	// DatasetID     string
-	// DatasetPath   string
-	// DatasetSHA256 string
 
 	// Instrument traded in this backtest
 	Instrument string
@@ -85,24 +82,24 @@ func (v *BacktestRun) WriteBacktestOrg() error {
 }
 
 const BacktestOrgTemplate = `
-* BACKTEST: EMA-Cross {{.Config.Instrument}} {{if .Timeframe}}{{.Timeframe}}{{else}}(timeframe?){{end}}
+* BACKTEST: EMA-Cross {{.Instrument}} {{if .Timeframe}}{{.Timeframe}}{{else}}(timeframe?){{end}}
 :PROPERTIES:
 :RUN_ID:      {{if .RunID}}{{.RunID}}{{else}}(run-id?){{end}}
 :STRATEGY:    ema_cross
 :TIMEFRAME:   {{if .Timeframe}}{{.Timeframe}}{{else}}(timeframe?){{end}}
-:INSTRUMENT:  {{.Config.Instrument}}
+:INSTRUMENT:  {{.Instrument}}
 :DATASET:     {{if .Dataset}}{{.Dataset}}{{else}}(dataset?){{end}}
-:START_DATE:  {{.Result.Start.Format "2006-01-02"}}
-:END_DATE:    {{.Result.End.Format "2006-01-02"}}
-:START_BAL:   {{printf "%.2f" .StartBal}}
-:END_BAL:     {{printf "%.2f" .EndBal}}
+:START_DATE:  {{.Start.Format "2006-01-02"}}
+:END_DATE:    {{.End.Format "2006-01-02"}}
+:START_BAL:   {{printf "%.2f" .StartBalance}}
+:END_BAL:     {{printf "%.2f" .EndBalance}}
 :NET_PL:      {{printf "%.2f" .NetPL}}
 :RETURN_PCT:  {{printf "%.2f" .ReturnPct}}
 :MAX_DD_PCT:  {{if ne .MaxDDPct 0.0}}{{printf "%.2f" .MaxDDPct}}{{else}}(max-dd?){{end}}
-:TRADES:      {{.Result.Trades}}
-:WINS:        {{.Result.Wins}}
-:LOSSES:      {{.Result.Losses}}
-:WIN_RATE:    {{printf "%.2f" .WinRatePct}}
+:TRADES:      {{.Trades}}
+:WINS:        {{.Wins}}
+:LOSSES:      {{.Losses}}
+:WIN_RATE:    {{printf "%.2f" .WinRate}}
 :PROFIT_FAC:  {{if ne .ProfitFactor 0.0}}{{printf "%.2f" .ProfitFactor}}{{else}}(profit-factor?){{end}}
 :CREATED:     [{{(orTime .Created).Format "2006-01-02 Mon 15:04"}}]
 :END:
@@ -110,22 +107,21 @@ const BacktestOrgTemplate = `
 ** Strategy Parameters
 | Parameter        | Value |
 |------------------+-------|
-| Fast EMA         | {{.Config.FastPeriod}} |
-| Slow EMA         | {{.Config.SlowPeriod}} |
-| Stop (pips)      | {{printf "%.1f" .Config.StopPips}} |
-| R:R              | {{printf "%.2f" .Config.RR}} |
-| Risk per Trade % | {{printf "%.2f" (mul100 .Config.RiskPct)}} |
+| Config		   | {{printf "%s" .Config}} |
+| Stop (pips)      | {{printf "%.1f" .StopPips}} |
+| R:R              | {{printf "%.2f" .RR}} |
+| Risk per Trade % | {{printf "%.2f" (mul100 .RiskPct)}} |
 
 ** Performance Summary
 - Net P/L:          *{{printf "%.2f" .NetPL}}*
 - Return:           *{{printf "%.2f" .ReturnPct}}%*
 - Max Drawdown:     *{{if ne .MaxDDPct 0.0}}{{printf "%.2f" .MaxDDPct}}{{else}}(max-dd?){{end}}%*
-- Win Rate:         *{{printf "%.2f" .WinRatePct}}%*
+- Win Rate:         *{{printf "%.2f" .WinRate*100}}%*
 - Profit Factor:    *{{if ne .ProfitFactor 0.0}}{{printf "%.2f" .ProfitFactor}}{{else}}(profit-factor?){{end}}*
 
 ** Equity Curve
-{{- if .EquityCurveImage }}
-[[file:{{.EquityCurveImage}}]]
+{{- if .EquityPNG }}
+[[file:{{.EquityPNG}}]]
 {{- else }}
 # (optional) insert an exported equity curve image here
 {{- end }}
@@ -133,9 +129,9 @@ const BacktestOrgTemplate = `
 ** Trade Distribution
 | Outcome | Count |
 |---------+-------|
-| Wins    | {{.Result.Wins}} |
-| Losses  | {{.Result.Losses}} |
-| Total   | {{.Result.Trades}} |
+| Wins    | {{.Wins}} |
+| Losses  | {{.Losses}} |
+| Total   | {{.Trades}} |
 
 {{- if .Notes }}
 ** Observations

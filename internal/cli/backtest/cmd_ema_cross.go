@@ -3,6 +3,7 @@ package backtest
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -129,8 +130,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				EquityPNG: "TODO",
 			}
 
-			fmt.Printf("BTR: %+v\n", btr)
-
+			backtest.PrintBacktestRun(os.Stdout, btr)
 			err = j.RecordBacktest(ctx, btr)
 			if err != nil {
 				return err
