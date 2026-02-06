@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/rustyeddy/trader/cli/backtest"
-	"github.com/rustyeddy/trader/cli/config"
-	"github.com/rustyeddy/trader/cli/data"
-	"github.com/rustyeddy/trader/cli/replay"
+	"github.com/rustyeddy/trader/cmd/backtest"
+	"github.com/rustyeddy/trader/cmd/config"
+	"github.com/rustyeddy/trader/cmd/data"
+	"github.com/rustyeddy/trader/cmd/replay"
 	"github.com/spf13/cobra"
 )
 

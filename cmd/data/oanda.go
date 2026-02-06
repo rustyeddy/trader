@@ -3,7 +3,7 @@ package data
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/cli/config"
+	"github.com/rustyeddy/trader/cmd/config"
 )
 
 func newOandaCmd(rc *config.RootConfig) *cobra.Command {

@@ -163,10 +163,9 @@ func (s *EMACross) onSignal(ctx context.Context,
 		exitReason := "ExitOn" + signal
 		if err := closer.CloseTrade(ctx, s.openTradeID, exitReason); err != nil {
 			// The engine may have already closed the trade (StopLoss/TakeProfit),
-			// so treat that as a no-op and just sync our state.
+			// so treat that as a no-op and just sync our state below.
 			if errors.Is(err, sim.ErrTradeAlreadyClosed) || errors.Is(err, sim.ErrTradeNotFound) {
-				s.openTradeID = ""
-				s.openUnits = 0
+				// No-op: state will be cleared unconditionally after this block.
 			} else {
 				return err
 			}
