@@ -94,7 +94,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				fmt.Println("ERROR create JSON from config ", err)
 			}
 
-			btr := journal.BacktestRun{
+			btr := backtest.BacktestRun{
 				RunID:     id.New(),
 				Created:   time.Now(),
 				Timeframe: "TODO",
@@ -108,8 +108,8 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				StopPips:   cfg.StopPips,
 				RR:         cfg.RR,
 
-				Start: time.Time{}, // TODO
-				End:   time.Time{}, // TODO
+				Start: result.Start,
+				End:   result.End,
 
 				Trades: result.Trades,
 				Wins:   result.Wins,
@@ -131,7 +131,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 			}
 
 			backtest.PrintBacktestRun(os.Stdout, btr)
-			err = j.RecordBacktest(ctx, btr)
+			err = backtest.RecordBacktest(ctx, btr)
 			if err != nil {
 				return err
 			}

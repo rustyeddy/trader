@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/broker/oanda"
 	"github.com/rustyeddy/trader/cli/config"
-	"github.com/rustyeddy/trader/oanda"
 )
 
 func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {

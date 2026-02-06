@@ -41,7 +41,7 @@ type Runner struct {
 //
 // If j is not nil, a simple trades/wins/losses summary is computed from the journal
 // over the observed dataset time range.
-func (r *Runner) Run(ctx context.Context, j *journal.SQLiteJournal) (Result, error) {
+func (r *Runner) Run(ctx context.Context, j *journal.SQLite) (Result, error) {
 	if r.Engine == nil {
 		return Result{}, fmt.Errorf("backtest: Engine is required")
 	}

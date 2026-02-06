@@ -3,18 +3,20 @@ package journal
 
 import "time"
 
+// This could go into trade or market
 type TradeRecord struct {
-	TradeID     string
-	Instrument  string
-	Units       float64
-	EntryPrice  float64
-	ExitPrice   float64
-	OpenTime    time.Time
-	CloseTime   time.Time
-	RealizedPL  float64
-	Reason      string
+	TradeID    string
+	Instrument string
+	Units      float64
+	EntryPrice float64
+	ExitPrice  float64
+	OpenTime   time.Time
+	CloseTime  time.Time
+	RealizedPL float64
+	Reason     string
 }
 
+// This could go into broker
 type EquitySnapshot struct {
 	Time        time.Time
 	Balance     float64

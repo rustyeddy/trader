@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"io"
 	"time"
-
-	"github.com/rustyeddy/trader/journal"
 )
 
-func PrintBacktestRun(w io.Writer, r journal.BacktestRun) {
+func PrintBacktestRun(w io.Writer, r BacktestRun) {
 	fmt.Fprintln(w, "==================================================")
 	fmt.Fprintln(w, " Backtest Result")
 	fmt.Fprintln(w, "==================================================")

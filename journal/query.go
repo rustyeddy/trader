@@ -7,7 +7,7 @@ import (
 )
 
 // GetTrade returns a single trade record by ID.
-func (j *SQLiteJournal) GetTrade(tradeID string) (TradeRecord, error) {
+func (j *SQLite) GetTrade(tradeID string) (TradeRecord, error) {
 	var rec TradeRecord
 
 	row := j.db.QueryRow(`
@@ -36,7 +36,7 @@ func (j *SQLiteJournal) GetTrade(tradeID string) (TradeRecord, error) {
 }
 
 // ListTradesClosedBetween returns trades whose close_time is within [start, end).
-func (j *SQLiteJournal) ListTradesClosedBetween(start, end time.Time) ([]TradeRecord, error) {
+func (j *SQLite) ListTradesClosedBetween(start, end time.Time) ([]TradeRecord, error) {
 	rows, err := j.db.Query(`
 		SELECT trade_id, instrument, units, entry_price, exit_price, open_time, close_time, realized_pl, reason
 		FROM trades
@@ -78,7 +78,7 @@ func (j *SQLiteJournal) ListTradesClosedBetween(start, end time.Time) ([]TradeRe
 	return out, nil
 }
 
-func (j *SQLiteJournal) ListEquityBetween(start, end time.Time) ([]TradeRecord, error) {
+func (j *SQLite) ListEquityBetween(start, end time.Time) ([]TradeRecord, error) {
 
 	rows, err := j.db.Query(`
 		SELECT time, balance, equity, margin_used, free_margin, margin_level
