@@ -1,7 +1,7 @@
 // Package indicators provides technical analysis indicators for trading
 package indicators
 
-import "github.com/rustyeddy/trader/market"
+import "github.com/rustyeddy/trader/pricing"
 
 // Indicator computes a single streaming value from candles.
 // It is deterministic and safe to use in live, replay, and backtests.
@@ -17,7 +17,7 @@ type Indicator interface {
 	Reset()
 
 	// Update consumes the next *closed* candle and updates internal state.
-	Update(c market.Candle)
+	Update(c pricing.Candle)
 
 	// Ready reports whether Value() is meaningful (warmup completed).
 	Ready() bool

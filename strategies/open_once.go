@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 // OpenOnceStrategy opens a single market order the first time it sees a tick
@@ -16,7 +17,7 @@ type OpenOnceStrategy struct {
 	opened bool
 }
 
-func (s *OpenOnceStrategy) OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error {
+func (s *OpenOnceStrategy) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
 	if s.opened {
 		return nil
 	}

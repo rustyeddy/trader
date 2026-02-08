@@ -11,12 +11,13 @@ import (
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 type Engine struct {
 	mu      sync.Mutex
 	acct    broker.Account
-	prices  *PriceStore
+	ticks   *pricing.TickStore
 	trades  map[string]*Trade
 	nextID  int
 	journal journal.Journal
@@ -30,7 +31,7 @@ var (
 func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 	return &Engine{
 		acct:    acct,
-		prices:  NewPriceStore(),
+		ticks:   pricing.NewTickStore(),
 		trades:  make(map[string]*Trade),
 		journal: j,
 	}
@@ -40,8 +41,8 @@ func (e *Engine) GetAccount(ctx context.Context) (broker.Account, error) {
 	return e.acct, nil
 }
 
-func (e *Engine) Prices() *PriceStore {
-	return e.prices
+func (e *Engine) Prices() *pricing.TickStore {
+	return e.ticks
 }
 
 // IsTradeOpen reports whether the given trade exists and is currently open.
@@ -52,15 +53,15 @@ func (e *Engine) IsTradeOpen(tradeID string) bool {
 	return ok && t != nil && t.Open
 }
 
-func (e *Engine) GetPrice(ctx context.Context, instr string) (broker.Price, error) {
-	return e.prices.Get(instr)
+func (e *Engine) GetTick(ctx context.Context, instr string) (pricing.Tick, error) {
+	return e.ticks.Get(instr)
 }
 
 func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRequest) (broker.OrderFill, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	p, _ := e.prices.Get(req.Instrument)
+	p, _ := e.ticks.Get(req.Instrument)
 	fillPrice := p.Ask
 	if req.Units < 0 {
 		fillPrice = p.Bid
@@ -110,7 +111,7 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 		return fmt.Errorf("close trade: %w: %q", ErrTradeAlreadyClosed, tradeID)
 	}
 
-	p, err := e.prices.Get(t.Instrument)
+	p, err := e.ticks.Get(t.Instrument)
 	if err != nil {
 		return fmt.Errorf("close trade: no price for %q: %w", t.Instrument, err)
 	}
@@ -184,7 +185,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		need[t.Instrument] = struct{}{}
 	}
 	for inst := range need {
-		if _, err := e.prices.Get(inst); err != nil {
+		if _, err := e.ticks.Get(inst); err != nil {
 			return fmt.Errorf("close all: no price for %q: %w", inst, err)
 		}
 	}
@@ -192,7 +193,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	// Close each open trade using its instrument's latest price.
 	var snapshotTime time.Time
 	for _, t := range open {
-		p, _ := e.prices.Get(t.Instrument)
+		p, _ := e.ticks.Get(t.Instrument)
 
 		closePrice := p.Bid
 		if t.Units < 0 {
@@ -250,7 +251,7 @@ func (e *Engine) Revalue() error {
 			continue
 		}
 
-		p, err := e.prices.Get(t.Instrument)
+		p, err := e.ticks.Get(t.Instrument)
 		if err != nil {
 			return err
 		}
@@ -280,11 +281,11 @@ func (e *Engine) Revalue() error {
 }
 
 // sim/engine.go
-func (e *Engine) UpdatePrice(p broker.Price) error {
+func (e *Engine) UpdatePrice(p pricing.Tick) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.prices.Set(p)
+	e.ticks.Set(p)
 
 	for _, t := range e.trades {
 		if !t.Open || t.Instrument != p.Instrument {
@@ -379,7 +380,7 @@ func (e *Engine) revalueLocked() error {
 			continue
 		}
 
-		p, err := e.prices.Get(t.Instrument)
+		p, err := e.ticks.Get(t.Instrument)
 		if err != nil {
 			return err
 		}
@@ -413,7 +414,7 @@ func (e *Engine) recomputeMarginLocked() error {
 			continue
 		}
 
-		p, err := e.prices.Get(t.Instrument)
+		p, err := e.ticks.Get(t.Instrument)
 		if err != nil {
 			return err
 		}
@@ -466,7 +467,7 @@ func (e *Engine) enforceMarginLocked() error {
 				continue
 			}
 
-			p, _ := e.prices.Get(t.Instrument)
+			p, _ := e.ticks.Get(t.Instrument)
 			mark := p.Bid
 			if t.Units < 0 {
 				mark = p.Ask
@@ -491,7 +492,7 @@ func (e *Engine) enforceMarginLocked() error {
 		}
 
 		// Force close
-		p, _ := e.prices.Get(worst.Instrument)
+		p, _ := e.ticks.Get(worst.Instrument)
 		closePrice := p.Bid
 		if worst.Units < 0 {
 			closePrice = p.Ask

@@ -13,6 +13,7 @@ func New(rc *config.RootConfig) *cobra.Command {
 
 	cmd.AddCommand(
 		newEmaCrossCmd(rc),
+		newEMAADXCmd(rc),
 	)
 
 	return cmd

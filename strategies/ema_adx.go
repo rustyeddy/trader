@@ -21,11 +21,15 @@ import (
 // - Reverses on opposite cross (close then open)
 // - Uses risk.Calculate for sizing (fixed stop in pips)
 // - Exit reasons recorded in journal via CloseTrade(reason)
-type EMACross struct {
-	*EMACrossConfig
+type EMAADX struct {
+	*EMAADXConfig
 
 	fast *indicators.ExponentialMA
 	slow *indicators.ExponentialMA
+	adx  *indicators.ADX
+
+	pendingDir    int
+	pendingSignal string
 
 	lastDiff     float64
 	haveLastDiff bool
@@ -34,7 +38,7 @@ type EMACross struct {
 	openUnits   float64 // >0 long, <0 short
 }
 
-type EMACrossConfig struct {
+type EMAADXConfig struct {
 	FastPeriod int `json:"fast-period"` // 20
 	SlowPeriod int `json:"slow-period"` // 50
 
@@ -44,12 +48,12 @@ type EMACrossConfig struct {
 	RR         float64 `json:"risk-reward"`  // take-profit multiple of risk, e.g. 2.0
 }
 
-func (e *EMACrossConfig) JSON() ([]byte, error) {
+func (e *EMAADXConfig) JSON() ([]byte, error) {
 	return json.Marshal(e)
 }
 
-func EMACrossConfigDefaults() *EMACrossConfig {
-	return &EMACrossConfig{
+func EMAADXConfigDefaults() *EMAADXConfig {
+	return &EMAADXConfig{
 		Instrument: "EUR_USD",
 		FastPeriod: 10,
 		SlowPeriod: 30,
@@ -59,20 +63,21 @@ func EMACrossConfigDefaults() *EMACrossConfig {
 	}
 }
 
-func NewEmaCross(cfg *EMACrossConfig) *EMACross {
+func NewEMAADX(cfg *EMAADXConfig) *EMAADX {
 	if cfg.RR <= 0 {
 		cfg.RR = 2.0
 	}
-	return &EMACross{
-		EMACrossConfig: cfg,
-		fast:           indicators.NewEMA(cfg.FastPeriod),
-		slow:           indicators.NewEMA(cfg.SlowPeriod),
+	return &EMAADX{
+		EMAADXConfig: cfg,
+		fast:         indicators.NewEMA(cfg.FastPeriod),
+		slow:         indicators.NewEMA(cfg.SlowPeriod),
+		adx:          indicators.NewADX(14),
 	}
 }
 
 // syncOpenState clears strategy position state if the engine has already closed the trade
 // (e.g. StopLoss/TakeProfit).
-func (s *EMACross) syncOpenState(b broker.Broker) {
+func (s *EMAADX) syncOpenState(b broker.Broker) {
 	if s.openTradeID == "" {
 		return
 	}
@@ -86,58 +91,64 @@ func (s *EMACross) syncOpenState(b broker.Broker) {
 	}
 }
 
-func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
-	if tick.Instrument != s.Instrument {
-		return nil
-	}
-
-	// Treat each tick as a "candle" with OHLC = mid; good enough for first pass.
-	mid := tick.Mid()
-	c := pricing.Candle{
-		Open:  mid,
-		High:  mid,
-		Low:   mid,
-		Close: mid,
-		Time:  tick.Time,
-	}
-
+func (s *EMAADX) OnCandle(ctx context.Context, b broker.Broker, c pricing.Candle) error {
 	s.fast.Update(c)
 	s.slow.Update(c)
+	s.adx.Update(c) // <-- real ADX
 
-	// Wait until both EMAs are warmed up.
-	if !s.fast.Ready() || !s.slow.Ready() {
+	if !s.fast.Ready() || !s.slow.Ready() || !s.adx.Ready() {
 		return nil
 	}
 
 	diff := s.fast.Value() - s.slow.Value()
 
-	// Need a previous diff to detect a cross.
 	if !s.haveLastDiff {
 		s.lastDiff = diff
 		s.haveLastDiff = true
 		return nil
 	}
 
-	// Cross logic:
-	// - Bull cross: diff goes from <=0 to >0
-	// - Bear cross: diff goes from >=0 to <0
 	bullCross := diff > 0 && s.lastDiff <= 0
 	bearCross := diff < 0 && s.lastDiff >= 0
 
-	// Update lastDiff early/always to avoid repeated triggers if we return.
 	s.lastDiff = diff
+
+	// ADX regime filter
+	if s.adx.Value() < 25 {
+		return nil
+	}
 
 	switch {
 	case bullCross:
-		return s.onSignal(ctx, b, tick.Time, "BullCross", +1)
+		s.pendingDir = +1
+		s.pendingSignal = "BullCrossADX"
 	case bearCross:
-		return s.onSignal(ctx, b, tick.Time, "BearCross", -1)
-	default:
-		return nil
+		s.pendingDir = -1
+		s.pendingSignal = "BearCrossADX"
 	}
+
+	return nil
 }
 
-func (s *EMACross) onSignal(ctx context.Context,
+func (s *EMAADX) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
+	if tick.Instrument != s.Instrument {
+		return nil
+	}
+
+	if s.pendingDir == 0 {
+		return nil
+	}
+
+	dir := s.pendingDir
+	signal := s.pendingSignal
+
+	s.pendingDir = 0
+	s.pendingSignal = ""
+
+	return s.onSignal(ctx, b, tick.Time, signal, dir)
+}
+
+func (s *EMAADX) onSignal(ctx context.Context,
 	b broker.Broker,
 	now time.Time,
 	signal string,
@@ -180,7 +191,7 @@ func (s *EMACross) onSignal(ctx context.Context,
 	return s.openPosition(ctx, b, now, signal, dir)
 }
 
-func (s *EMACross) openPosition(ctx context.Context, b broker.Broker, now time.Time, signal string, dir int) error {
+func (s *EMAADX) openPosition(ctx context.Context, b broker.Broker, now time.Time, signal string, dir int) error {
 	acct, err := b.GetAccount(ctx)
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -33,7 +34,7 @@ func main() {
 		Equity:   100_000,
 	}, j)
 
-	engine.Prices().Set(broker.Price{
+	engine.Prices().Set(pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0849,
 		Ask:        1.0851,
@@ -47,7 +48,7 @@ func main() {
 	fmt.Println()
 
 	meta := market.Instruments["EUR_USD"]
-	price, _ := engine.GetPrice(ctx, "EUR_USD")
+	price, _ := engine.GetTick(ctx, "EUR_USD")
 	entryPrice := price.Ask
 
 	riskLevels := []float64{0.005, 0.01, 0.02}         // 0.5%, 1%, 2%
@@ -81,13 +82,13 @@ func main() {
 	fmt.Println("=== Position Sizing with JPY Quote Currency ===")
 	fmt.Println()
 
-	engine.Prices().Set(broker.Price{
+	engine.Prices().Set(pricing.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.50,
 		Ask:        149.52,
 	})
 
-	jpyPrice, _ := engine.GetPrice(ctx, "USD_JPY")
+	jpyPrice, _ := engine.GetTick(ctx, "USD_JPY")
 	jpyMeta := market.Instruments["USD_JPY"]
 	jpyEntry := jpyPrice.Ask
 	jpyStop := jpyEntry - 0.50 // 50 pips

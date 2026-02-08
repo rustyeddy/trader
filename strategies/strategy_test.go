@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ type mockStrategy struct {
 	tickCount int
 }
 
-func (m *mockStrategy) OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error {
+func (m *mockStrategy) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
 	m.tickCount++
 	return nil
 }
@@ -103,7 +104,7 @@ func TestStrategyByName_EmaCross(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, strat)
 
-			emaCross, ok := strat.(*EmaCrossStrategy)
+			emaCross, ok := strat.(*EMACross)
 			require.True(t, ok, "expected *EmaCrossStrategy")
 			assert.Equal(t, "EUR_USD", emaCross.Instrument)
 			assert.Equal(t, 20, emaCross.FastPeriod)

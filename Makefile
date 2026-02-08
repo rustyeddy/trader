@@ -1,7 +1,7 @@
 APP := trader
 BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
-CMD := cmd/trader/main.go
+CMD := cmd/main.go
 
 .PHONY: build test cover cover-html clean
 

@@ -3,12 +3,12 @@ package indicators
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 // MA calculates the Simple Moving Average for the given period.
 // Returns an error if there aren't enough candles for the period.
-func MA(candles []market.Candle, period int) (float64, error) {
+func MA(candles []pricing.Candle, period int) (float64, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}
@@ -26,7 +26,7 @@ func MA(candles []market.Candle, period int) (float64, error) {
 
 // EMA calculates the Exponential Moving Average for the given period.
 // Returns an error if there aren't enough candles for the period.
-func EMA(candles []market.Candle, period int) (float64, error) {
+func EMA(candles []pricing.Candle, period int) (float64, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}

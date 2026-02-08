@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newTestSQLite(t *testing.T) (*SQLiteJournal, string) {
+func newTestSQLite(t *testing.T) (*SQLite, string) {
 	t.Helper()
 
 	dir := t.TempDir()

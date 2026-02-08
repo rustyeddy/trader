@@ -9,6 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/sim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,18 +17,18 @@ import (
 
 // mockTickFeed is a simple in-memory feed for testing
 type mockTickFeed struct {
-	ticks  []broker.Price
+	ticks  []pricing.Tick
 	index  int
 	closed bool
 }
 
-func newMockTickFeed(ticks []broker.Price) *mockTickFeed {
+func newMockTickFeed(ticks []pricing.Tick) *mockTickFeed {
 	return &mockTickFeed{ticks: ticks}
 }
 
-func (m *mockTickFeed) Next() (broker.Price, bool, error) {
+func (m *mockTickFeed) Next() (pricing.Tick, bool, error) {
 	if m.index >= len(m.ticks) {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 	p := m.ticks[m.index]
 	m.index++
@@ -42,8 +43,8 @@ func (m *mockTickFeed) Close() error {
 // errorTickFeed returns an error on Next()
 type errorTickFeed struct{}
 
-func (e *errorTickFeed) Next() (broker.Price, bool, error) {
-	return broker.Price{}, false, errors.New("mock error")
+func (e *errorTickFeed) Next() (pricing.Tick, bool, error) {
+	return pricing.Tick{}, false, errors.New("mock error")
 }
 
 func (e *errorTickFeed) Close() error {
@@ -56,7 +57,7 @@ type mockStrategy struct {
 	shouldErr bool
 }
 
-func (m *mockStrategy) OnTick(ctx context.Context, b broker.Broker, p broker.Price) error {
+func (m *mockStrategy) OnTick(ctx context.Context, b broker.Broker, p pricing.Tick) error {
 	m.tickCount++
 	if m.shouldErr {
 		return errors.New("strategy error")
@@ -157,7 +158,7 @@ func TestRunner_Run_Success(t *testing.T) {
 		Equity:   startBal,
 	}, j)
 
-	ticks := []broker.Price{
+	ticks := []pricing.Tick{
 		{
 			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
 			Instrument: "EUR_USD",
@@ -293,7 +294,7 @@ func TestRunner_Run_StrategyError(t *testing.T) {
 		Equity:   10000,
 	}, j)
 
-	ticks := []broker.Price{
+	ticks := []pricing.Tick{
 		{
 			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
 			Instrument: "EUR_USD",
@@ -334,7 +335,7 @@ func TestRunner_Run_CloseEnd(t *testing.T) {
 		Equity:   startBal,
 	}, j)
 
-	ticks := []broker.Price{
+	ticks := []pricing.Tick{
 		{
 			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
 			Instrument: "EUR_USD",
@@ -381,7 +382,7 @@ func TestRunner_Run_CloseEndDefaultReason(t *testing.T) {
 		Equity:   10000,
 	}, j)
 
-	ticks := []broker.Price{
+	ticks := []pricing.Tick{
 		{
 			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
 			Instrument: "EUR_USD",
@@ -425,7 +426,7 @@ func TestRunner_Run_WithoutJournal(t *testing.T) {
 		Equity:   10000,
 	}, j)
 
-	ticks := []broker.Price{
+	ticks := []pricing.Tick{
 		{
 			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
 			Instrument: "EUR_USD",

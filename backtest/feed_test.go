@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,14 +19,14 @@ func TestParseTickRow(t *testing.T) {
 		row       []string
 		wantOk    bool
 		wantErr   bool
-		checkFunc func(t *testing.T, p broker.Price)
+		checkFunc func(t *testing.T, p pricing.Tick)
 	}{
 		{
 			name:    "valid row",
 			row:     []string{"2026-01-24T09:30:00Z", "EUR_USD", "1.1000", "1.1002"},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p broker.Price) {
+			checkFunc: func(t *testing.T, p pricing.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
 				assert.Equal(t, 1.1000, p.Bid)
 				assert.Equal(t, 1.1002, p.Ask)
@@ -37,7 +37,7 @@ func TestParseTickRow(t *testing.T) {
 			row:     []string{"2026-01-24T09:30:00.123456789Z", "GBP_USD", "1.2500", "1.2502"},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p broker.Price) {
+			checkFunc: func(t *testing.T, p pricing.Tick) {
 				assert.Equal(t, "GBP_USD", p.Instrument)
 			},
 		},
@@ -46,7 +46,7 @@ func TestParseTickRow(t *testing.T) {
 			row:     []string{" 2026-01-24T09:30:00Z ", " EUR_USD ", " 1.1000 ", " 1.1002 "},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p broker.Price) {
+			checkFunc: func(t *testing.T, p pricing.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
 			},
 		},
@@ -258,7 +258,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		defer feed.Close()
 
 		// Read all ticks
-		var ticks []broker.Price
+		var ticks []pricing.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -317,7 +317,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []broker.Price
+		var ticks []pricing.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -347,7 +347,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []broker.Price
+		var ticks []pricing.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -376,7 +376,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []broker.Price
+		var ticks []pricing.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)

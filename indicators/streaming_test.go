@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSimpleMAStreaming(t *testing.T) {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	candles := []market.Candle{
+	candles := []pricing.Candle{
 		{Open: 100, High: 105, Low: 99, Close: 102, Time: baseTime, Volume: 1000},
 		{Open: 102, High: 107, Low: 101, Close: 105, Time: baseTime.Add(time.Hour), Volume: 1100},
 		{Open: 105, High: 108, Low: 104, Close: 106, Time: baseTime.Add(2 * time.Hour), Volume: 1200},
@@ -71,7 +71,7 @@ func TestSimpleMAStreaming(t *testing.T) {
 
 func TestExponentialMAStreaming(t *testing.T) {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	candles := []market.Candle{
+	candles := []pricing.Candle{
 		{Close: 102, Time: baseTime},
 		{Close: 105, Time: baseTime.Add(time.Hour)},
 		{Close: 106, Time: baseTime.Add(2 * time.Hour)},
@@ -133,7 +133,7 @@ func TestExponentialMAStreaming(t *testing.T) {
 
 func TestAverageTrueRangeStreaming(t *testing.T) {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	candles := []market.Candle{
+	candles := []pricing.Candle{
 		{High: 10, Low: 8, Close: 9, Time: baseTime},
 		{High: 11, Low: 9, Close: 10, Time: baseTime.Add(time.Hour)},
 		{High: 12, Low: 10, Close: 11, Time: baseTime.Add(2 * time.Hour)},
@@ -185,7 +185,7 @@ func TestAverageTrueRangeStreaming(t *testing.T) {
 		}
 
 		// Compare with batch function
-		batchResult, _ := ATR(candles, 3)
+		batchResult, _ := ATRFunc(candles, 3)
 		assert.InDelta(t, batchResult, atr.Value(), 0.001)
 	})
 }
@@ -194,11 +194,11 @@ func TestIndicatorInterface(t *testing.T) {
 	// Test that all indicators implement the Indicator interface
 	var _ Indicator = &SimpleMA{}
 	var _ Indicator = &ExponentialMA{}
-	var _ Indicator = &AverageTrueRange{}
+	var _ Indicator = &ATR{}
 
 	t.Run("all indicators have consistent interface", func(t *testing.T) {
 		baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		candles := []market.Candle{
+		candles := []pricing.Candle{
 			{High: 105, Low: 99, Close: 102, Time: baseTime},
 			{High: 107, Low: 101, Close: 105, Time: baseTime.Add(time.Hour)},
 			{High: 108, Low: 104, Close: 106, Time: baseTime.Add(2 * time.Hour)},
@@ -236,7 +236,7 @@ func TestIndicatorInterface(t *testing.T) {
 
 func TestStreamingVsBatchConsistency(t *testing.T) {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	candles := []market.Candle{
+	candles := []pricing.Candle{
 		{High: 105, Low: 99, Close: 102, Time: baseTime},
 		{High: 107, Low: 101, Close: 105, Time: baseTime.Add(time.Hour)},
 		{High: 108, Low: 104, Close: 106, Time: baseTime.Add(2 * time.Hour)},
@@ -272,7 +272,7 @@ func TestStreamingVsBatchConsistency(t *testing.T) {
 		for _, c := range candles {
 			atr.Update(c)
 		}
-		batchResult, _ := ATR(candles, 5)
+		batchResult, _ := ATRFunc(candles, 5)
 		assert.InDelta(t, batchResult, atr.Value(), 0.001)
 	})
 }

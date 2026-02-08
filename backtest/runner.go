@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/sim"
 	"github.com/rustyeddy/trader/strategies"
 )
@@ -14,7 +14,7 @@ import (
 // TickFeed yields broker.Price rows (typically from a dataset) one at a time.
 // Implementations should be deterministic and return (ok=false, err=nil) at EOF.
 type TickFeed interface {
-	Next() (p broker.Price, ok bool, err error)
+	Next() (p pricing.Tick, ok bool, err error)
 	Close() error
 }
 

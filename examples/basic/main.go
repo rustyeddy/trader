@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -40,7 +41,7 @@ func main() {
 	// Set initial market price for EUR/USD
 	initialBid := 1.0849
 	initialAsk := 1.0851
-	engine.Prices().Set(broker.Price{
+	engine.Prices().Set(pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        initialBid,
 		Ask:        initialAsk,
@@ -58,7 +59,7 @@ func main() {
 
 	// Get instrument metadata
 	meta := market.Instruments["EUR_USD"]
-	price, _ := engine.GetPrice(ctx, "EUR_USD")
+	price, _ := engine.GetTick(ctx, "EUR_USD")
 
 	// Calculate position size based on risk
 	// Risk 1% of equity with a 20 pip stop loss
@@ -107,7 +108,7 @@ func main() {
 	newBid := 1.0890
 	newAsk := 1.0892
 
-	err = engine.UpdatePrice(broker.Price{
+	err = engine.UpdatePrice(pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        newBid,
 		Ask:        newAsk,

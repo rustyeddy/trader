@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 type EventRow struct {
-	Price broker.Price
+	Tick  pricing.Tick
 	Event string
 	P1    string
 	P2    string
@@ -108,7 +108,7 @@ func (f *CSVEventsFeed) Next() (EventRow, bool, error) {
 		}
 
 		return EventRow{
-			Price: p,
+			Tick:  p,
 			Event: ev,
 			P1:    p1,
 			P2:    p2,
@@ -130,37 +130,37 @@ func inRange(t, from, to time.Time) bool {
 
 // parseTickRowCompat duplicates minimal parsing soreplay doesn't import backtest.
 // (Avoids internal package coupling.)
-func parseTickRowCompat(row []string) (broker.Price, bool, error) {
+func parseTickRowCompat(row []string) (pricing.Tick, bool, error) {
 	// time,instrument,bid,ask
 	ts := strings.TrimSpace(row[0])
 	if ts == "" {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		t2, err2 := time.Parse(time.RFC3339Nano, ts)
 		if err2 != nil {
-			return broker.Price{}, false, fmt.Errorf("bad time %q: %w", ts, err)
+			return pricing.Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
 		}
 		t = t2
 	}
 
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 
 	// float parsing kept local to avoid import sprawl
 	bid, err := parseFloat(row[2])
 	if err != nil {
-		return broker.Price{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
+		return pricing.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
 	}
 	ask, err := parseFloat(row[3])
 	if err != nil {
-		return broker.Price{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
+		return pricing.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return broker.Price{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
+	return pricing.Tick{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
 }
 
 func parseFloat(s string) (float64, error) {

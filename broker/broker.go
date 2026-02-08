@@ -2,12 +2,13 @@ package broker
 
 import (
 	"context"
-	"time"
+
+	"github.com/rustyeddy/trader/pricing"
 )
 
 type Broker interface {
 	GetAccount(ctx context.Context) (Account, error)
-	GetPrice(ctx context.Context, instrument string) (Price, error)
+	GetTick(ctx context.Context, instrument string) (pricing.Tick, error)
 	CreateMarketOrder(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
 }
 
@@ -19,17 +20,6 @@ type Account struct {
 	MarginUsed  float64
 	FreeMargin  float64
 	MarginLevel float64
-}
-
-type Price struct {
-	Instrument string
-	Bid        float64
-	Ask        float64
-	time.Time
-}
-
-func (p Price) Mid() float64 {
-	return (p.Bid + p.Ask) / 2
 }
 
 // broker/models.go

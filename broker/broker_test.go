@@ -3,6 +3,8 @@ package broker
 import (
 	"math"
 	"testing"
+
+	"github.com/rustyeddy/trader/pricing"
 )
 
 func TestPriceMid(t *testing.T) {
@@ -27,7 +29,7 @@ func TestPriceMid(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := Price{Bid: tt.bid, Ask: tt.ask}
+			p := pricing.Tick{Bid: tt.bid, Ask: tt.ask}
 			got := p.Mid()
 			if math.Abs(got-tt.expected) > tol {
 				t.Fatalf("Mid() = %v, expected %v", got, tt.expected)

@@ -7,12 +7,22 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewEmaCross(t *testing.T) {
 	t.Run("with valid rr", func(t *testing.T) {
-		strat := NewEmaCross("EUR_USD", 20, 50, 0.01, 20, 2.5)
+		cfg := &EMACrossConfig{
+			Instrument: "EUR_USD",
+			FastPeriod: 20,
+			SlowPeriod: 50,
+			RiskPct:    0.01,
+			StopPips:   20,
+			RR:         2.5,
+		}
+
+		strat := NewEmaCross(cfg)
 		assert.NotNil(t, strat)
 		assert.Equal(t, "EUR_USD", strat.Instrument)
 		assert.Equal(t, 20, strat.FastPeriod)
@@ -28,20 +38,38 @@ func TestNewEmaCross(t *testing.T) {
 	})
 
 	t.Run("with zero or negative rr defaults to 2.0", func(t *testing.T) {
+		cfg := &EMACrossConfig{
+			Instrument: "EUR_USD",
+			FastPeriod: 20,
+			SlowPeriod: 50,
+			RiskPct:    0.01,
+			StopPips:   20,
+		}
+
 		tests := []float64{0, -1, -2.5}
 		for _, rr := range tests {
-			strat := NewEmaCross("EUR_USD", 20, 50, 0.01, 20, rr)
+			cfg.RR = rr
+			strat := NewEmaCross(cfg)
 			assert.Equal(t, 2.0, strat.RR, "RR should default to 2.0 when <= 0")
 		}
 	})
 }
 
 func TestEmaCrossStrategy_OnTick_WrongInstrument(t *testing.T) {
-	strat := NewEmaCross("EUR_USD", 20, 50, 0.01, 20, 2.0)
+	cfg := &EMACrossConfig{
+		Instrument: "EUR_USD",
+		FastPeriod: 20,
+		SlowPeriod: 50,
+		RiskPct:    0.01,
+		StopPips:   20,
+		RR:         2.0,
+	}
+
+	strat := NewEmaCross(cfg)
 	ctx := context.Background()
 
 	// Tick with different instrument should be ignored
-	tick := broker.Price{
+	tick := pricing.Tick{
 		Instrument: "GBP_USD",
 		Bid:        1.2500,
 		Ask:        1.2502,
@@ -53,13 +81,22 @@ func TestEmaCrossStrategy_OnTick_WrongInstrument(t *testing.T) {
 }
 
 func TestEmaCrossStrategy_OnTick_WarmupPhase(t *testing.T) {
-	strat := NewEmaCross("EUR_USD", 3, 5, 0.01, 20, 2.0)
+	cfg := &EMACrossConfig{
+		Instrument: "EUR_USD",
+		FastPeriod: 3,
+		SlowPeriod: 5,
+		RiskPct:    0.01,
+		StopPips:   20,
+		RR:         2.0,
+	}
+
+	strat := NewEmaCross(cfg)
 	ctx := context.Background()
 
 	// During warmup, EMAs are not ready yet
 	// Should process ticks without errors but not generate signals
 	for i := 0; i < 4; i++ {
-		tick := broker.Price{
+		tick := pricing.Tick{
 			Instrument: "EUR_USD",
 			Bid:        1.0850 + float64(i)*0.0001,
 			Ask:        1.0852 + float64(i)*0.0001,
@@ -76,12 +113,21 @@ func TestEmaCrossStrategy_OnTick_WarmupPhase(t *testing.T) {
 }
 
 func TestEmaCrossStrategy_OnTick_BuildsLastDiff(t *testing.T) {
-	strat := NewEmaCross("EUR_USD", 2, 3, 0.01, 20, 2.0)
+	cfg := &EMACrossConfig{
+		Instrument: "EUR_USD",
+		FastPeriod: 2,
+		SlowPeriod: 3,
+		RiskPct:    0.01,
+		StopPips:   20,
+		RR:         2.0,
+	}
+
+	strat := NewEmaCross(cfg)
 	ctx := context.Background()
 
 	// Feed enough ticks to warm up EMAs
 	for i := 0; i < 5; i++ {
-		tick := broker.Price{
+		tick := pricing.Tick{
 			Instrument: "EUR_USD",
 			Bid:        1.0850 + float64(i)*0.0001,
 			Ask:        1.0852 + float64(i)*0.0001,
@@ -98,7 +144,7 @@ func TestEmaCrossStrategy_OnTick_BuildsLastDiff(t *testing.T) {
 // mockBrokerForEmaCross is a more comprehensive mock for testing EmaCross
 type mockBrokerForEmaCross struct {
 	account        broker.Account
-	price          broker.Price
+	price          pricing.Tick
 	accountErr     error
 	priceErr       error
 	createOrderErr error
@@ -115,9 +161,9 @@ func (m *mockBrokerForEmaCross) GetAccount(ctx context.Context) (broker.Account,
 	return m.account, nil
 }
 
-func (m *mockBrokerForEmaCross) GetPrice(ctx context.Context, instrument string) (broker.Price, error) {
+func (m *mockBrokerForEmaCross) GetTick(ctx context.Context, instrument string) (pricing.Tick, error) {
 	if m.priceErr != nil {
-		return broker.Price{}, m.priceErr
+		return pricing.Tick{}, m.priceErr
 	}
 	return m.price, nil
 }
@@ -141,13 +187,21 @@ func (m *mockBrokerForEmaCross) CloseTrade(ctx context.Context, tradeID string, 
 	return nil
 }
 
-func (m *mockBrokerForEmaCross) UpdatePrice(p broker.Price) error {
+func (m *mockBrokerForEmaCross) UpdatePrice(p pricing.Tick) error {
 	return nil
 }
 
 func TestEmaCrossStrategy_Integration_NoCross(t *testing.T) {
 	// Test that no trades are opened when EMAs don't cross
-	strat := NewEmaCross("EUR_USD", 2, 3, 0.01, 20, 2.0)
+	cfg := &EMACrossConfig{
+		Instrument: "EUR_USD",
+		FastPeriod: 2,
+		SlowPeriod: 3,
+		RiskPct:    0.01,
+		StopPips:   20,
+		RR:         2.0,
+	}
+	strat := NewEmaCross(cfg)
 	ctx := context.Background()
 
 	mock := &mockBrokerForEmaCross{
@@ -157,7 +211,7 @@ func TestEmaCrossStrategy_Integration_NoCross(t *testing.T) {
 			Balance:  100000,
 			Equity:   100000,
 		},
-		price: broker.Price{
+		price: pricing.Tick{
 			Instrument: "EUR_USD",
 			Bid:        1.0850,
 			Ask:        1.0852,
@@ -183,7 +237,7 @@ func TestEmaCrossStrategy_Integration_NoCross(t *testing.T) {
 
 	// Feed ticks with gradually increasing prices (no cross)
 	for i := 0; i < 10; i++ {
-		tick := broker.Price{
+		tick := pricing.Tick{
 			Instrument: "EUR_USD",
 			Bid:        1.0850 + float64(i)*0.0001,
 			Ask:        1.0852 + float64(i)*0.0001,
@@ -200,13 +254,22 @@ func TestEmaCrossStrategy_Integration_NoCross(t *testing.T) {
 
 func TestEmaCrossStrategy_OnTick_CrossDetection(t *testing.T) {
 	// Test cross detection logic with minimal periods
-	strat := NewEmaCross("EUR_USD", 2, 4, 0.01, 20, 2.0)
+	cfg := &EMACrossConfig{
+		Instrument: "EUR_USD",
+		FastPeriod: 2,
+		SlowPeriod: 4,
+		RiskPct:    0.01,
+		StopPips:   20,
+		RR:         2.0,
+	}
+
+	strat := NewEmaCross(cfg)
 	ctx := context.Background()
 
 	// Feed decreasing prices first to establish EMAs with fast < slow
 	prices := []float64{1.0900, 1.0890, 1.0880, 1.0870, 1.0860}
 	for i, price := range prices {
-		tick := broker.Price{
+		tick := pricing.Tick{
 			Instrument: "EUR_USD",
 			Bid:        price,
 			Ask:        price + 0.0002,
@@ -218,15 +281,15 @@ func TestEmaCrossStrategy_OnTick_CrossDetection(t *testing.T) {
 
 	// At this point both EMAs should be ready and haveLastDiff should be true
 	assert.True(t, strat.haveLastDiff)
-	
+
 	// Verify that the strategy is tracking state properly
 	// After decreasing prices, fast EMA should be below slow EMA (negative diff)
 	// Note: We're testing internal state here to verify EMA calculation is working.
 	// This ensures the cross detection logic will function correctly in real scenarios.
 	assert.True(t, strat.lastDiff < 0, "Expected negative diff after decreasing prices")
-	
+
 	// Feed one more decreasing price - should not trigger a cross since trend continues
-	tick := broker.Price{
+	tick := pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0850,
 		Ask:        1.0852,
@@ -234,7 +297,7 @@ func TestEmaCrossStrategy_OnTick_CrossDetection(t *testing.T) {
 	}
 	err := strat.OnTick(ctx, nil, tick)
 	assert.NoError(t, err)
-	
+
 	// Should still have lastDiff tracking enabled and no position opened
 	assert.True(t, strat.haveLastDiff)
 	assert.Equal(t, "", strat.openTradeID)

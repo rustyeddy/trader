@@ -4,18 +4,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/stretchr/testify/assert"
 )
 
 type fakePriceSource struct {
-	price          broker.Price
+	price          pricing.Tick
 	err            error
 	called         int
 	lastInstrument string
 }
 
-func (f *fakePriceSource) GetPrice(ctx context.Context, instrument string) (broker.Price, error) {
+func (f *fakePriceSource) GetTick(ctx context.Context, instrument string) (pricing.Tick, error) {
 	f.called++
 	f.lastInstrument = instrument
 	return f.price, f.err
@@ -81,7 +81,7 @@ func TestQuoteToAccountRate_BaseEqualsAccount(t *testing.T) {
 	}
 
 	ps := &fakePriceSource{
-		price: broker.Price{Bid: 2.0, Ask: 4.0}, // mid = 3.0
+		price: pricing.Tick{Bid: 2.0, Ask: 4.0}, // mid = 3.0
 	}
 	rate, err := QuoteToAccountRate(instrument, "USD", ps)
 	assert.NoError(t, err)

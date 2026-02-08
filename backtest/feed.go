@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 // CSVTicksFeed reads canonical tick CSV rows:
@@ -49,14 +49,14 @@ func (f *CSVTicksFeed) Close() error {
 	return nil
 }
 
-func (f *CSVTicksFeed) Next() (broker.Price, bool, error) {
+func (f *CSVTicksFeed) Next() (pricing.Tick, bool, error) {
 	for {
 		row, err := f.r.Read()
 		if err == io.EOF {
-			return broker.Price{}, false, nil
+			return pricing.Tick{}, false, nil
 		}
 		if err != nil {
-			return broker.Price{}, false, err
+			return pricing.Tick{}, false, err
 		}
 		if len(row) == 0 {
 			continue
@@ -72,7 +72,7 @@ func (f *CSVTicksFeed) Next() (broker.Price, bool, error) {
 
 		p, ok, err := parseTickRow(row)
 		if err != nil {
-			return broker.Price{}, false, err
+			return pricing.Tick{}, false, err
 		}
 		if !ok {
 			continue
@@ -84,41 +84,41 @@ func (f *CSVTicksFeed) Next() (broker.Price, bool, error) {
 	}
 }
 
-func parseTickRow(row []string) (broker.Price, bool, error) {
+func parseTickRow(row []string) (pricing.Tick, bool, error) {
 	// Need at least: time,instrument,bid,ask
 	if len(row) < 4 {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 
 	ts := strings.TrimSpace(row[0])
 	if ts == "" {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 	// Accept RFC3339 or RFC3339Nano.
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		t2, err2 := time.Parse(time.RFC3339Nano, ts)
 		if err2 != nil {
-			return broker.Price{}, false, fmt.Errorf("bad time %q: %w", ts, err)
+			return pricing.Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
 		}
 		t = t2
 	}
 
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
-		return broker.Price{}, false, nil
+		return pricing.Tick{}, false, nil
 	}
 
 	bid, err := strconv.ParseFloat(strings.TrimSpace(row[2]), 64)
 	if err != nil {
-		return broker.Price{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
+		return pricing.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
 	}
 	ask, err := strconv.ParseFloat(strings.TrimSpace(row[3]), 64)
 	if err != nil {
-		return broker.Price{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
+		return pricing.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return broker.Price{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
+	return pricing.Tick{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
 }
 
 func inRange(t, from, to time.Time) bool {

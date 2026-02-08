@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -37,14 +38,14 @@ func main() {
 	}, j)
 
 	// Set initial prices for both instruments
-	engine.Prices().Set(broker.Price{
+	engine.Prices().Set(pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0849,
 		Ask:        1.0851,
 		Time:       time.Now(),
 	})
 
-	engine.Prices().Set(broker.Price{
+	engine.Prices().Set(pricing.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.50,
 		Ask:        149.52,
@@ -75,7 +76,7 @@ func main() {
 
 	// EUR/USD moves up (profitable)
 	fmt.Println("\nEUR/USD moves up...")
-	err = engine.UpdatePrice(broker.Price{
+	err = engine.UpdatePrice(pricing.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0890,
 		Ask:        1.0892,
@@ -87,7 +88,7 @@ func main() {
 
 	// USD/JPY moves down slightly (small loss)
 	fmt.Println("USD/JPY moves down...")
-	err = engine.UpdatePrice(broker.Price{
+	err = engine.UpdatePrice(pricing.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.30,
 		Ask:        149.32,
@@ -111,7 +112,7 @@ func openTrade(ctx context.Context, engine *sim.Engine, instrument string, isBuy
 	if err != nil {
 		panic(err)
 	}
-	price, err := engine.GetPrice(ctx, instrument)
+	price, err := engine.GetTick(ctx, instrument)
 	if err != nil {
 		panic(err)
 	}

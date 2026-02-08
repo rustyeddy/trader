@@ -97,7 +97,7 @@ func newEventsCmd(rc *config.RootConfig) *cobra.Command {
 					break
 				}
 
-				if err := engine.UpdatePrice(row.Price); err != nil {
+				if err := engine.UpdatePrice(row.Tick); err != nil {
 					return err
 				}
 

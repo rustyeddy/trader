@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 type StrategyRegistry map[string]TickStrategy
@@ -17,7 +18,7 @@ var (
 // TickStrategy is the minimal interface a backtest strategy must implement.
 // It is called once per CSV row (tick).
 type TickStrategy interface {
-	OnTick(ctx context.Context, b broker.Broker, tick broker.Price) error
+	OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error
 }
 
 func Register(name string, strat TickStrategy) {
@@ -46,7 +47,15 @@ func StrategyByName(name string, instrument string, units float64, fast, slow in
 		}, nil
 
 	case "ema-cross", "emacross":
-		return NewEmaCross(EMACrossConfigDefaults()), nil
+		cfg := &EMACrossConfig{
+			Instrument: instrument,
+			FastPeriod: fast,
+			SlowPeriod: slow,
+			RiskPct:    riskPct,
+			StopPips:   stopPips,
+			RR:         rr,
+		}
+		return NewEmaCross(cfg), nil
 
 	default:
 		return nil, fmt.Errorf("unknown strategy %q (supported: noop, open-once)", name)

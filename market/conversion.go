@@ -4,11 +4,13 @@ package market
 import (
 	"context"
 	"fmt"
+
+	"github.com/rustyeddy/trader/pricing"
 )
 
 func QuoteToAccountRate(instrument string,
-					    accountCurrency string,
-						prices PriceSource)	(float64, error) {
+	accountCurrency string,
+	prices pricing.TickSource) (float64, error) {
 
 	meta, ok := Instruments[instrument]
 	if !ok {
@@ -22,7 +24,7 @@ func QuoteToAccountRate(instrument string,
 
 	// Case 2: USD is base (USD_JPY, USD_CHF, etc.)
 	if meta.BaseCurrency == accountCurrency {
-		px, err := prices.GetPrice(context.Background(), instrument)
+		px, err := prices.GetTick(context.Background(), instrument)
 		if err != nil {
 			return 0, err
 		}
