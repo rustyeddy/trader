@@ -15,8 +15,9 @@ import (
 
 func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 	var (
+		config oanda.Config
+
 		env        string
-		token      string
 		instrument string
 		gran       string
 		price      string // M|B|A|BA
@@ -35,10 +36,10 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = rc
 
-			if token == "" {
-				token = strings.TrimSpace(os.Getenv("OANDA_TOKEN"))
+			if config.Token == "" {
+				config.Token = strings.TrimSpace(os.Getenv("OANDA_TOKEN"))
 			}
-			if token == "" {
+			if config.Token == "" {
 				return fmt.Errorf("missing token: set --token or env OANDA_TOKEN")
 			}
 			if env == "" {
@@ -51,7 +52,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 				return fmt.Errorf("missing --granularity (e.g. M1, H1, D)")
 			}
 			if price == "" {
-				price = "M"
+				price = "BA"
 			}
 			if outPath == "" {
 				return fmt.Errorf("missing --out")
@@ -109,7 +110,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 
 			client := &oanda.Client{
 				BaseURL: resolvedBaseURL,
-				Token:   token,
+				Token:   config.Token,
 			}
 
 			ctx := context.Background()
@@ -132,7 +133,7 @@ func newOandaCandlesCmd(rc *config.RootConfig) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().StringVar(&token, "token", "", "OANDA API token (or env OANDA_TOKEN)")
+	cmd.Flags().StringVar(&config.Token, "token", "", "OANDA API token (or env OANDA_TOKEN)")
 
 	cmd.Flags().StringVar(&instrument, "instrument", "EUR_USD", "Instrument (e.g. EUR_USD)")
 	cmd.Flags().StringVar(&gran, "granularity", "H1", "Granularity (e.g. S5, M1, H1, D)")

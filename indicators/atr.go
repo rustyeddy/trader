@@ -7,7 +7,7 @@ import (
 	"github.com/rustyeddy/trader/pricing"
 )
 
-// func trueRange(prevClose, high, low float64) float64 {
+// func trueRange(prevClose, high, low int32) int32 {
 // 	a := high - low
 // 	b := math.Abs(high - prevClose)
 // 	c := math.Abs(low - prevClose)
@@ -16,7 +16,7 @@ import (
 
 // ATR calculates the Average True Range for the given period.
 // Returns an error if there aren't enough candles for the period.
-func ATRFunc(candles []pricing.Candle, period int) (float64, error) {
+func ATRFunc(candles []pricing.Candle, period int) (int32, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}
@@ -25,7 +25,7 @@ func ATRFunc(candles []pricing.Candle, period int) (float64, error) {
 	}
 
 	// Calculate true ranges
-	trueRanges := make([]float64, 0, len(candles)-1)
+	trueRanges := make([]int32, 0, len(candles)-1)
 	for i := 1; i < len(candles); i++ {
 		tr := trueRange(candles[i], candles[i-1])
 		trueRanges = append(trueRanges, tr)
@@ -36,11 +36,11 @@ func ATRFunc(candles []pricing.Candle, period int) (float64, error) {
 	for i := 0; i < period; i++ {
 		sum += trueRanges[i]
 	}
-	atr := sum / float64(period)
+	atr := sum / int32(period)
 
 	// Smooth remaining values using Wilder's method
 	for i := period; i < len(trueRanges); i++ {
-		atr = (atr*float64(period-1) + trueRanges[i]) / float64(period)
+		atr = (atr*int32(period-1) + trueRanges[i]) / int32(period)
 	}
 
 	return atr, nil
@@ -49,9 +49,9 @@ func ATRFunc(candles []pricing.Candle, period int) (float64, error) {
 // ATR is a streaming Average True Range indicator
 type ATR struct {
 	period      int
-	atr         float64
+	atr         int32
 	count       int
-	warmupSum   float64
+	warmupSum   int32
 	prevCandle  pricing.Candle
 	hasPrevious bool
 }
@@ -96,18 +96,18 @@ func (a *ATR) Update(c pricing.Candle) {
 		a.count++
 		if a.count == a.period {
 			// Initialize ATR with average of true ranges
-			a.atr = a.warmupSum / float64(a.period)
+			a.atr = a.warmupSum / int32(a.period)
 		}
 	} else {
 		// Apply Wilder's smoothing
-		a.atr = (a.atr*float64(a.period-1) + tr) / float64(a.period)
+		a.atr = (a.atr*int32(a.period-1) + tr) / int32(a.period)
 	}
 
 	a.prevCandle = c
 	return
 }
 
-func (a *ATR) Calculate(candles []pricing.Candle) (v float64) {
+func (a *ATR) Calculate(candles []pricing.Candle) (v int32) {
 	for _, c := range candles {
 		a.Update(c)
 		v = a.Value()
@@ -119,7 +119,7 @@ func (a *ATR) Ready() bool {
 	return a.count >= a.period
 }
 
-func (a *ATR) Value() float64 {
+func (a *ATR) Value() int32 {
 	if !a.Ready() {
 		return 0
 	}
@@ -127,7 +127,7 @@ func (a *ATR) Value() float64 {
 }
 
 // trueRange calculates the True Range for a candle given the previous candle
-func trueRange(current, previous pricing.Candle) float64 {
+func trueRange(current, previous pricing.Candle) int32 {
 	highLow := current.High - current.Low
 	highClose := math.Abs(current.High - previous.Close)
 	lowClose := math.Abs(current.Low - previous.Close)

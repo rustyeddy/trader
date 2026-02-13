@@ -19,12 +19,12 @@ type ADX struct {
 	havePrev bool
 
 	// Wilder-smoothed values after warmup:
-	tr14  float64
-	pdm14 float64
-	mdm14 float64
+	tr14  int32
+	pdm14 int32
+	mdm14 int32
 
-	adx   float64
-	dxSum float64
+	adx   int32
+	dxSum int32
 
 	// count of candles processed (including the first prev seed)
 	count int
@@ -35,7 +35,7 @@ func NewADX(period int) *ADX {
 	return &ADX{Period: period}
 }
 
-func (a *ADX) Value() float64 {
+func (a *ADX) Value() int32 {
 	return a.adx
 }
 
@@ -48,7 +48,7 @@ func (a *ADX) Ready() bool {
 // - Need Period candles to initialize smoothed TR/+DM/-DM
 // - Then Period DX values to initialize ADX
 // Total: 2*Period candles after the initial prev seed.
-func (a *ADX) Update(c pricing.Candle) (float64, bool) {
+func (a *ADX) Update(c pricing.Candle) (int32, bool) {
 	// Seed previous candle
 	if !a.havePrev {
 		a.prev = c
@@ -58,10 +58,10 @@ func (a *ADX) Update(c pricing.Candle) (float64, bool) {
 	}
 
 	// 1) Compute directional movement using current vs previous highs/lows
-	upMove := c.High - a.prev.High
-	downMove := a.prev.Low - c.Low
+	upMove := c.H - a.prev.H
+	downMove := a.prev.L - c.L
 
-	var pdm, mdm float64
+	var pdm, mdm int32
 	if upMove > downMove && upMove > 0 {
 		pdm = upMove
 	}
@@ -70,7 +70,7 @@ func (a *ADX) Update(c pricing.Candle) (float64, bool) {
 	}
 
 	// 2) True Range (TR)
-	// tr := trueRange(a.prev.Close, c.High, c.Low)
+	// tr := trueRange(a.prev.Close, c.H, c.L)
 	tr := trueRange(c, a.prev)
 
 	a.prev = c
@@ -86,7 +86,7 @@ func (a *ADX) Update(c pricing.Candle) (float64, bool) {
 		// When we have Period samples of TR/DM (i.e. count == Period+1),
 		// convert sums to simple averages to seed Wilder smoothing.
 		if a.count == a.Period+1 {
-			p := float64(a.Period)
+			p := int32(a.Period)
 			a.tr14 /= p
 			a.pdm14 /= p
 			a.mdm14 /= p
@@ -95,7 +95,7 @@ func (a *ADX) Update(c pricing.Candle) (float64, bool) {
 	}
 
 	// 3) Wilder smoothing for TR/+DM/-DM
-	p := float64(a.Period)
+	p := int32(a.Period)
 	a.tr14 = (a.tr14*(p-1) + tr) / p
 	a.pdm14 = (a.pdm14*(p-1) + pdm) / p
 	a.mdm14 = (a.mdm14*(p-1) + mdm) / p
@@ -113,7 +113,7 @@ func (a *ADX) Update(c pricing.Candle) (float64, bool) {
 		return 0, false
 	}
 
-	dx := 100.0 * math.Abs(pdi-mdi) / den
+	dx := 100 * math.Abs(pdi-mdi) / den
 
 	// Warmup Phase B: seed ADX with average of first Period DX values.
 	// We begin producing DX after count > Period+1.

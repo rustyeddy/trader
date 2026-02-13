@@ -7,28 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
+	"os"
 	"strings"
 	"time"
 )
-
-type Client struct {
-	BaseURL string // e.g. https://api-fxpractice.oanda.com
-	Token   string
-	HTTP    *http.Client
-}
-
-func BaseURL(env string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(env)) {
-	case "practice", "demo":
-		return "https://api-fxpractice.oanda.com", nil
-	case "live", "trade":
-		return "https://api-fxtrade.oanda.com", nil
-	default:
-		return "", fmt.Errorf("unknown OANDA env %q (want practice|live)", env)
-	}
-}
 
 type PricingStreamOptions struct {
 	AccountID   string
@@ -73,36 +55,16 @@ func (c *Client) StreamPricingToCSV(
 		return 0, fmt.Errorf("oanda: missing Instruments")
 	}
 
-	httpClient := c.HTTP
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-
-	u, err := url.Parse(c.BaseURL)
+	o := make(map[string]string)
+	o["instruments"] = strings.Join(opts.Instruments, ",")
+	o["accountID"] = os.Getenv("OANA_ACCTID")
+	path := fmt.Sprintf("/v3/accounts/%s/pricing/stream", o["accountID"])
+	body, err := c.Get(ctx, path, o)
 	if err != nil {
 		return 0, err
 	}
-	u.Path = fmt.Sprintf("/v3/accounts/%s/pricing/stream", opts.AccountID)
-	q := u.Query()
-	q.Set("instruments", strings.Join(opts.Instruments, ","))
-	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return 0, fmt.Errorf("oanda pricing stream http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
+	defer body.Close()
 
 	cw := csv.NewWriter(w)
 	// header
@@ -114,12 +76,11 @@ func (c *Client) StreamPricingToCSV(
 		return 0, err
 	}
 
-	sc := bufio.NewScanner(resp.Body)
+	sc := bufio.NewScanner(body)
 	// OANDA stream messages can be long; bump max token
 	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 
 	written := 0
-
 	for sc.Scan() {
 		select {
 		case <-ctx.Done():

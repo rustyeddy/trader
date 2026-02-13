@@ -1,4 +1,3 @@
-// market/instruments.go
 package market
 
 type InstrumentMeta struct {
