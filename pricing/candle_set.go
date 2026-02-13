@@ -304,6 +304,81 @@ func (cs *CandleSet) Stats() GapStats {
 	return s
 }
 
+func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
+	if cs.Timeframe != 60 {
+		panic("AggregateH1 requires M1 source")
+	}
+
+	tfIn := int64(cs.Timeframe)
+	tfOut := int64(3600)
+
+	start := (cs.Start / tfOut) * tfOut
+	end := cs.Start + int64(len(cs.Candles)-1)*tfIn
+
+	nHours := int((end-start)/tfOut) + 1
+
+	h1 := &CandleSet{
+		Instrument: cs.Instrument,
+		Start:      start,
+		Timeframe:  3600,
+		Scale:      cs.Scale,
+		Source:     cs.Source + " H1",
+		Candles:    make([]Candle, nHours),
+		Valid:      make([]uint64, (nHours+63)/64),
+	}
+
+	for h := 0; h < nHours; h++ {
+
+		hourStart := start + int64(h)*tfOut
+		firstIdx := int((hourStart - cs.Start) / tfIn)
+
+		validCount := 0
+		var o, hval, lval, c int32
+		firstSet := false
+
+		for m := 0; m < 60; m++ {
+			idx := firstIdx + m
+			if idx < 0 || idx >= len(cs.Candles) {
+				continue
+			}
+			if !bitIsSet(cs.Valid, idx) {
+				continue
+			}
+
+			bar := cs.Candles[idx]
+
+			if !firstSet {
+				o = bar.O
+				hval = bar.H
+				lval = bar.L
+				firstSet = true
+			}
+
+			if bar.H > hval {
+				hval = bar.H
+			}
+			if bar.L < lval {
+				lval = bar.L
+			}
+
+			c = bar.C
+			validCount++
+		}
+
+		if validCount >= minValid {
+			h1.Candles[h] = Candle{
+				O: o,
+				H: hval,
+				L: lval,
+				C: c,
+			}
+			bitSet(h1.Valid, h)
+		}
+	}
+
+	return h1
+}
+
 func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 	cs.BuildGapReport()
 	s := cs.Stats()
