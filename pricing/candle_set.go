@@ -210,6 +210,10 @@ func (cs *CandleSet) buildDenseFromFile() error {
 		return err
 	}
 
+	cs.duplicates = int(duplicates)
+	cs.outOfRange = int(outOfRange)
+	cs.badLines = int(badLines)
+
 	if duplicates > 0 || outOfRange > 0 || badLines > 0 {
 		fmt.Fprintf(os.Stderr,
 			"ingest warnings: duplicates=%d outOfRange=%d badLines=%d\n",
@@ -250,22 +254,25 @@ func (cs *CandleSet) BuildGapReport() {
 }
 
 func (cs *CandleSet) classifyGap(startIdx, length int) string {
-	tf := int64(cs.Timeframe)
+	tf := int64(cs.Timeframe) // seconds per bar (60 for M1, 3600 for H1)
 
 	startUnix := cs.Start + int64(startIdx)*tf
 	t := time.Unix(startUnix, 0).UTC()
 	wd := t.Weekday()
 
-	// FX weekend gap is usually ~48 hours (2880 minutes)
-	if length >= 60*24 { // >= 24 hours
+	gapSeconds := int64(length) * tf
+	gapMinutes := gapSeconds / 60
+
+	// Weekend-ish if gap >= 24h and starts Fri/Sat/Sun (UTC heuristic)
+	if gapMinutes >= 60*24 {
 		if wd == time.Friday || wd == time.Saturday || wd == time.Sunday {
 			return "weekend"
 		}
 		return "suspicious"
 	}
 
-	// mid-week large gap
-	if length >= 10 {
+	// Anything >= 10 minutes missing is worth flagging (tune as you like)
+	if gapMinutes >= 10 {
 		return "suspicious"
 	}
 
@@ -274,6 +281,10 @@ func (cs *CandleSet) classifyGap(startIdx, length int) string {
 
 func (cs *CandleSet) Stats() GapStats {
 	var s GapStats
+
+	if len(cs.Gaps) == 0 {
+		cs.BuildGapReport()
+	}
 
 	n := len(cs.Candles)
 	s.TotalMinutes = n
@@ -303,18 +314,24 @@ func (cs *CandleSet) Stats() GapStats {
 
 	return s
 }
-
 func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	if cs.Timeframe != 60 {
 		panic("AggregateH1 requires M1 source")
 	}
 
-	tfIn := int64(cs.Timeframe)
+	// Defensive: never allow 0 (would mark empty hours valid)
+	if minValid < 1 {
+		minValid = 1
+	}
+	if minValid > 60 {
+		minValid = 60
+	}
+
+	tfIn := int64(cs.Timeframe) // 60
 	tfOut := int64(3600)
 
 	start := (cs.Start / tfOut) * tfOut
 	end := cs.Start + int64(len(cs.Candles)-1)*tfIn
-
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
@@ -328,12 +345,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	}
 
 	for h := 0; h < nHours; h++ {
-
 		hourStart := start + int64(h)*tfOut
 		firstIdx := int((hourStart - cs.Start) / tfIn)
 
 		validCount := 0
-		var o, hval, lval, c int32
+		var o, hi, lo, cl int32
 		firstSet := false
 
 		for m := 0; m < 60; m++ {
@@ -349,34 +365,38 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 
 			if !firstSet {
 				o = bar.O
-				hval = bar.H
-				lval = bar.L
+				hi = bar.H
+				lo = bar.L
 				firstSet = true
+			} else {
+				if bar.H > hi {
+					hi = bar.H
+				}
+				if bar.L < lo {
+					lo = bar.L
+				}
 			}
-
-			if bar.H > hval {
-				hval = bar.H
-			}
-			if bar.L < lval {
-				lval = bar.L
-			}
-
-			c = bar.C
+			cl = bar.C
 			validCount++
 		}
 
-		if validCount >= minValid {
-			h1.Candles[h] = Candle{
-				O: o,
-				H: hval,
-				L: lval,
-				C: c,
-			}
+		// Critical: require at least one real minute AND threshold
+		if firstSet && validCount >= minValid {
+			h1.Candles[h] = Candle{O: o, H: hi, L: lo, C: cl}
 			bitSet(h1.Valid, h)
 		}
 	}
 
 	return h1
+}
+
+func (cs *CandleSet) F(v int32) float64 {
+	return float64(v) / float64(cs.Scale)
+}
+
+func (cs *CandleSet) I(f float64) int32 {
+	// round to nearest scaled int
+	return int32(f*float64(cs.Scale) + 0.5)
 }
 
 func (cs *CandleSet) PrintStats(f io.WriteCloser) {

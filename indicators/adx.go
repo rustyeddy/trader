@@ -1,67 +1,83 @@
 package indicators
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/rustyeddy/trader/pricing"
 )
 
 // ADX implements Wilder's Average Directional Index (trend strength).
-// Usage:
 //
-//	adx := indicators.NewADX(14)
-//	val, ok := adx.Update(candle)
-//	if ok && val >= 20 { ... }
+// Output is the conventional 0..100 ADX value (float64), independent of the
+// candle price scale.
+//
+// Warmup:
+//  - Need 1 candle to seed prev
+//  - Need Period TR/+DM/-DM samples to seed Wilder smoothing
+//  - Need Period DX samples to seed ADX
+// Total warmup: 2*Period + 1
+//
+// References: J. Welles Wilder, "New Concepts in Technical Trading Systems".
 type ADX struct {
-	Period int
+	period int
 
 	prev     pricing.Candle
 	havePrev bool
 
-	// Wilder-smoothed values after warmup:
-	tr14  int32
-	pdm14 int32
-	mdm14 int32
+	// initial sums for seeding Wilder smoothing
+	initCount int
+	sumTR     float64
+	sumPDM    float64
+	sumMDM    float64
 
-	adx   int32
-	dxSum int32
+	// Wilder-smoothed values
+	trN  float64
+	pdmN float64
+	mdmN float64
 
-	// count of candles processed (including the first prev seed)
-	count int
+	// ADX seeding
+	dxCount int
+	dxSum   float64
+
+	adx   float64
 	ready bool
 }
 
 func NewADX(period int) *ADX {
-	return &ADX{Period: period}
+	return &ADX{period: period}
 }
 
-func (a *ADX) Value() int32 {
+func (a *ADX) Name() string { return fmt.Sprintf("ADX(%d)", a.period) }
+
+func (a *ADX) Warmup() int { return 2*a.period + 1 }
+
+func (a *ADX) Reset() {
+	*a = ADX{period: a.period}
+}
+
+func (a *ADX) Ready() bool { return a.ready }
+
+func (a *ADX) Value() float64 {
+	if !a.ready {
+		return 0
+	}
 	return a.adx
 }
 
-func (a *ADX) Ready() bool {
-	return a.ready
-}
-
-// Update consumes the next candle and returns (adx, ready).
-// ready becomes true after enough candles to compute a stable ADX:
-// - Need Period candles to initialize smoothed TR/+DM/-DM
-// - Then Period DX values to initialize ADX
-// Total: 2*Period candles after the initial prev seed.
-func (a *ADX) Update(c pricing.Candle) (int32, bool) {
-	// Seed previous candle
+func (a *ADX) Update(c pricing.Candle) {
 	if !a.havePrev {
 		a.prev = c
 		a.havePrev = true
-		a.count = 1
-		return 0, false
+		return
 	}
 
-	// 1) Compute directional movement using current vs previous highs/lows
-	upMove := c.H - a.prev.H
-	downMove := a.prev.L - c.L
+	// Directional Movement
+	upMove := float64(c.H - a.prev.H)
+	downMove := float64(a.prev.L - c.L)
 
-	var pdm, mdm int32
+	pdm := 0.0
+	mdm := 0.0
 	if upMove > downMove && upMove > 0 {
 		pdm = upMove
 	}
@@ -69,74 +85,65 @@ func (a *ADX) Update(c pricing.Candle) (int32, bool) {
 		mdm = downMove
 	}
 
-	// 2) True Range (TR)
-	// tr := trueRange(a.prev.Close, c.H, c.L)
-	tr := trueRange(c, a.prev)
+	// True Range
+	tr := trueRangeF(c, a.prev)
 
+	// advance prev
 	a.prev = c
-	a.count++
 
-	// Warmup Phase A: accumulate initial averages up to Period
-	// We start collecting on the second candle, so "samples" for TR/DM begin at count=2.
-	if a.count <= a.Period+1 {
-		a.tr14 += tr
-		a.pdm14 += pdm
-		a.mdm14 += mdm
+	p := float64(a.period)
 
-		// When we have Period samples of TR/DM (i.e. count == Period+1),
-		// convert sums to simple averages to seed Wilder smoothing.
-		if a.count == a.Period+1 {
-			p := int32(a.Period)
-			a.tr14 /= p
-			a.pdm14 /= p
-			a.mdm14 /= p
+	// Phase A: seed Wilder smoothing with average of first Period TR/DM samples
+	if a.initCount < a.period {
+		a.sumTR += tr
+		a.sumPDM += pdm
+		a.sumMDM += mdm
+		a.initCount++
+
+		if a.initCount == a.period {
+			a.trN = a.sumTR / p
+			a.pdmN = a.sumPDM / p
+			a.mdmN = a.sumMDM / p
 		}
-		return 0, false
+		return
 	}
 
-	// 3) Wilder smoothing for TR/+DM/-DM
-	p := int32(a.Period)
-	a.tr14 = (a.tr14*(p-1) + tr) / p
-	a.pdm14 = (a.pdm14*(p-1) + pdm) / p
-	a.mdm14 = (a.mdm14*(p-1) + mdm) / p
+	// Wilder smoothing
+	a.trN = (a.trN*(p-1) + tr) / p
+	a.pdmN = (a.pdmN*(p-1) + pdm) / p
+	a.mdmN = (a.mdmN*(p-1) + mdm) / p
 
-	// Guard: avoid divide-by-zero if data is pathological
-	if a.tr14 == 0 {
-		return 0, false
+	if a.trN <= 0 {
+		return
 	}
 
-	// 4) DI and DX
-	pdi := 100.0 * (a.pdm14 / a.tr14)
-	mdi := 100.0 * (a.mdm14 / a.tr14)
+	pdi := 100.0 * (a.pdmN / a.trN)
+	mdi := 100.0 * (a.mdmN / a.trN)
 	den := pdi + mdi
 	if den == 0 {
-		return 0, false
+		return
 	}
 
-	dx := 100 * math.Abs(pdi-mdi) / den
+	dx := 100.0 * math.Abs(pdi-mdi) / den
 
-	// Warmup Phase B: seed ADX with average of first Period DX values.
-	// We begin producing DX after count > Period+1.
-	//
-	// First DX occurs at count == Period+2.
-	// After collecting Period DX values (count == 2*Period+1), we seed ADX.
-	firstDXCount := a.Period + 2
-	seedADXCount := 2*a.Period + 1
-
+	// Phase B: seed ADX with average of first Period DX values
 	if !a.ready {
-		// accumulate DX for seeding
-		if a.count >= firstDXCount && a.count <= seedADXCount {
-			a.dxSum += dx
-		}
-		if a.count == seedADXCount {
+		a.dxSum += dx
+		a.dxCount++
+		if a.dxCount == a.period {
 			a.adx = a.dxSum / p
 			a.ready = true
-			return a.adx, true
 		}
-		return 0, false
+		return
 	}
 
-	// 5) Wilder smoothing for ADX
+	// Wilder smoothing for ADX
 	a.adx = (a.adx*(p-1) + dx) / p
-	return a.adx, true
+}
+
+func trueRangeF(cur, prev pricing.Candle) float64 {
+	highLow := float64(cur.H - cur.L)
+	highClose := math.Abs(float64(cur.H - prev.C))
+	lowClose := math.Abs(float64(cur.L - prev.C))
+	return math.Max(highLow, math.Max(highClose, lowClose))
 }

@@ -39,6 +39,7 @@ type EMACrossConfig struct {
 	SlowPeriod int `json:"slow-period"` // 50
 
 	Instrument string  `json:"instrument"`
+	Scale      int32   `json:"scale"`       // fixed-point scale for derived tick-candles (default 1_000_000)
 	RiskPct    float64 `json:"risk-percent"` // 0.005 (0.5%)
 	StopPips   float64 `json:"stopPips"`     // e.g. 20
 	RR         float64 `json:"risk-reward"`  // take-profit multiple of risk, e.g. 2.0
@@ -51,6 +52,7 @@ func (e *EMACrossConfig) JSON() ([]byte, error) {
 func EMACrossConfigDefaults() *EMACrossConfig {
 	return &EMACrossConfig{
 		Instrument: "EUR_USD",
+		Scale:      1000000,
 		FastPeriod: 10,
 		SlowPeriod: 30,
 		RiskPct:    0.005,
@@ -63,6 +65,10 @@ func NewEmaCross(cfg *EMACrossConfig) *EMACross {
 	if cfg.RR <= 0 {
 		cfg.RR = 2.0
 	}
+	if cfg.Scale == 0 {
+		cfg.Scale = 1000000
+	}
+
 	return &EMACross{
 		EMACrossConfig: cfg,
 		fast:           indicators.NewEMA(cfg.FastPeriod),
@@ -93,13 +99,8 @@ func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tic
 
 	// Treat each tick as a "candle" with OHLC = mid; good enough for first pass.
 	mid := tick.Mid()
-	c := pricing.Candle{
-		Open:  mid,
-		High:  mid,
-		Low:   mid,
-		Close: mid,
-		Time:  tick.Time,
-	}
+	px := int32(mid*float64(s.Scale) + 0.5)
+	c := pricing.Candle{O: px, H: px, L: px, C: px}
 
 	s.fast.Update(c)
 	s.slow.Update(c)
