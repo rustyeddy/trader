@@ -234,7 +234,7 @@ If Copilot Chat fails in Codespaces with a 400 error referencing `context_manage
 1. Update the **GitHub Copilot** extension inside the Codespace and reload the window.
 2. Rebuild or restart the Codespace to ensure the latest server components are picked up.
 3. If you enabled experimental Copilot context features in settings, disable them and reload.
-4. Sign out/in to refresh Copilot authentication; if the error persists, check GitHub status for Copilot incidents.
+4. Sign out of GitHub in the Codespace (Accounts menu) and sign back in to refresh Copilot authentication; if the error persists, check GitHub status for Copilot incidents.
 
 ## Getting Help
 
