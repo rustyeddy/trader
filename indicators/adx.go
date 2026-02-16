@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 // ADX implements Wilder's Average Directional Index (trend strength).
@@ -13,16 +13,17 @@ import (
 // candle price scale.
 //
 // Warmup:
-//  - Need 1 candle to seed prev
-//  - Need Period TR/+DM/-DM samples to seed Wilder smoothing
-//  - Need Period DX samples to seed ADX
+//   - Need 1 candle to seed prev
+//   - Need Period TR/+DM/-DM samples to seed Wilder smoothing
+//   - Need Period DX samples to seed ADX
+//
 // Total warmup: 2*Period + 1
 //
 // References: J. Welles Wilder, "New Concepts in Technical Trading Systems".
 type ADX struct {
 	period int
 
-	prev     pricing.Candle
+	prev     market.Candle
 	havePrev bool
 
 	// initial sums for seeding Wilder smoothing
@@ -65,7 +66,7 @@ func (a *ADX) Value() float64 {
 	return a.adx
 }
 
-func (a *ADX) Update(c pricing.Candle) {
+func (a *ADX) Update(c market.Candle) {
 	if !a.havePrev {
 		a.prev = c
 		a.havePrev = true
@@ -141,7 +142,7 @@ func (a *ADX) Update(c pricing.Candle) {
 	a.adx = (a.adx*(p-1) + dx) / p
 }
 
-func trueRangeF(cur, prev pricing.Candle) float64 {
+func trueRangeF(cur, prev market.Candle) float64 {
 	highLow := float64(cur.H - cur.L)
 	highClose := math.Abs(float64(cur.H - prev.C))
 	lowClose := math.Abs(float64(cur.L - prev.C))

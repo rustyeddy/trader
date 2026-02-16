@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 type StrategyRegistry map[string]TickStrategy
@@ -18,7 +18,7 @@ var (
 // TickStrategy is the minimal interface a backtest strategy must implement.
 // It is called once per CSV row (tick).
 type TickStrategy interface {
-	OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error
+	OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error
 }
 
 func Register(name string, strat TickStrategy) {

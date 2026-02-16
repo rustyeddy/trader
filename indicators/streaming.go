@@ -3,7 +3,7 @@ package indicators
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 // SimpleMA is a streaming Simple Moving Average indicator.
@@ -13,13 +13,13 @@ import (
 // Convert to real price with: price = value / scale.
 type SimpleMA struct {
 	period  int
-	candles []pricing.Candle
+	candles []market.Candle
 }
 
 func NewMA(period int) *SimpleMA {
 	return &SimpleMA{
 		period:  period,
-		candles: make([]pricing.Candle, 0, period),
+		candles: make([]market.Candle, 0, period),
 	}
 }
 
@@ -28,7 +28,7 @@ func (m *SimpleMA) Warmup() int  { return m.period }
 
 func (m *SimpleMA) Reset() { m.candles = m.candles[:0] }
 
-func (m *SimpleMA) Update(c pricing.Candle) {
+func (m *SimpleMA) Update(c market.Candle) {
 	m.candles = append(m.candles, c)
 	if len(m.candles) > m.period {
 		m.candles = m.candles[1:]
@@ -76,7 +76,7 @@ func (e *ExponentialMA) Reset() {
 	e.warmupSum = 0
 }
 
-func (e *ExponentialMA) Update(c pricing.Candle) {
+func (e *ExponentialMA) Update(c market.Candle) {
 	closeV := float64(c.C)
 	if e.count < e.period {
 		e.warmupSum += closeV

@@ -3,14 +3,14 @@ package indicators
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 // ATRFunc calculates the Average True Range (Wilder) for the given period.
 //
 // IMPORTANT: prices are assumed to be fixed-point int32 (scaled). The returned
 // value is in the SAME scaled units (e.g. if scale=1e6, ATR=200 means 0.000200).
-func ATRFunc(candles []pricing.Candle, period int) (int32, error) {
+func ATRFunc(candles []market.Candle, period int) (int32, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}
@@ -43,7 +43,7 @@ type ATR struct {
 	atr         int32
 	count       int
 	warmupSum   int64
-	prevCandle  pricing.Candle
+	prevCandle  market.Candle
 	hasPrevious bool
 }
 
@@ -65,7 +65,7 @@ func (a *ATR) Reset() {
 	a.hasPrevious = false
 }
 
-func (a *ATR) Update(c pricing.Candle) {
+func (a *ATR) Update(c market.Candle) {
 	if !a.hasPrevious {
 		a.prevCandle = c
 		a.hasPrevious = true
@@ -101,7 +101,7 @@ func (a *ATR) Value() float64 {
 
 // trueRange calculates the True Range for a candle given the previous candle.
 // Returns TR in scaled price units.
-func trueRange(cur, prev pricing.Candle) int32 {
+func trueRange(cur, prev market.Candle) int32 {
 	highLow := int64(cur.H - cur.L)
 	highClose := abs64(int64(cur.H) - int64(prev.C))
 	lowClose := abs64(int64(cur.L) - int64(prev.C))

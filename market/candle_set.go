@@ -1,9 +1,10 @@
-package pricing
+package market
 
 import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -14,13 +15,13 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 const layout = "20060102 150405"
 
 type CandleSet struct {
-	Instrument string
-	Start      int64 // unix seconds for candle open
-	Timeframe  int32
-	Scale      int32
-	Source     string
-	Candles    []Candle
-	Valid      []uint64
+	*Instrument
+	Start     int64 // unix seconds for candle open
+	Timeframe int32
+	Scale     int32
+	Source    string
+	Candles   []Candle
+	Valid     []uint64
 
 	Filepath   string
 	Gaps       []Gap
@@ -397,6 +398,27 @@ func (cs *CandleSet) F(v int32) float64 {
 func (cs *CandleSet) I(f float64) int32 {
 	// round to nearest scaled int
 	return int32(f*float64(cs.Scale) + 0.5)
+}
+
+// size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
+func (cs *CandleSet) PipSize() float64 {
+	i := cs.Instrument
+	return math.Pow10(i.PipLocation) // PipLocation is negative
+}
+
+// number of encoded integer units per pip, e.g. if cs.Scale=1e6 and pip=1e-4 => 100 units/pip
+func (cs *CandleSet) UnitsPerPip() float64 {
+	return float64(cs.Scale) * cs.PipSize()
+}
+
+// convert encoded delta (int32) to pips
+func (cs *CandleSet) DeltaToPips(delta int32) float64 {
+	return float64(delta) / cs.UnitsPerPip()
+}
+
+// convert pips to encoded delta (int32)
+func (cs *CandleSet) PipsToDelta(pips float64) int32 {
+	return int32(pips*cs.UnitsPerPip() + 0.5)
 }
 
 func (cs *CandleSet) PrintStats(f io.WriteCloser) {

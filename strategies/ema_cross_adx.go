@@ -11,7 +11,6 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -91,7 +90,7 @@ func (s *EMAADX) syncOpenState(b broker.Broker) {
 	}
 }
 
-func (s *EMAADX) OnCandle(ctx context.Context, b broker.Broker, c pricing.Candle) error {
+func (s *EMAADX) OnCandle(ctx context.Context, b broker.Broker, c market.Candle) error {
 	s.fast.Update(c)
 	s.slow.Update(c)
 	s.adx.Update(c) // <-- real ADX
@@ -130,7 +129,7 @@ func (s *EMAADX) OnCandle(ctx context.Context, b broker.Broker, c pricing.Candle
 	return nil
 }
 
-func (s *EMAADX) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
+func (s *EMAADX) OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error {
 	if tick.Instrument != s.Instrument {
 		return nil
 	}

@@ -3,14 +3,14 @@ package indicators
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 // MA calculates the Simple Moving Average for the given period.
 //
 // Prices are fixed-point int32; the returned value is in the same scaled units
 // as float64.
-func MA(candles []pricing.Candle, period int) (float64, error) {
+func MA(candles []market.Candle, period int) (float64, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}
@@ -29,7 +29,7 @@ func MA(candles []pricing.Candle, period int) (float64, error) {
 //
 // Prices are fixed-point int32; the returned value is in the same scaled units
 // as float64.
-func EMA(candles []pricing.Candle, period int) (float64, error) {
+func EMA(candles []market.Candle, period int) (float64, error) {
 	if period <= 0 {
 		return 0, fmt.Errorf("period must be positive, got %d", period)
 	}

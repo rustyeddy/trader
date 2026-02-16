@@ -11,7 +11,6 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -39,7 +38,7 @@ type EMACrossConfig struct {
 	SlowPeriod int `json:"slow-period"` // 50
 
 	Instrument string  `json:"instrument"`
-	Scale      int32   `json:"scale"`       // fixed-point scale for derived tick-candles (default 1_000_000)
+	Scale      int32   `json:"scale"`        // fixed-point scale for derived tick-candles (default 1_000_000)
 	RiskPct    float64 `json:"risk-percent"` // 0.005 (0.5%)
 	StopPips   float64 `json:"stopPips"`     // e.g. 20
 	RR         float64 `json:"risk-reward"`  // take-profit multiple of risk, e.g. 2.0
@@ -92,7 +91,7 @@ func (s *EMACross) syncOpenState(b broker.Broker) {
 	}
 }
 
-func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tick) error {
+func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error {
 	if tick.Instrument != s.Instrument {
 		return nil
 	}
@@ -100,7 +99,7 @@ func (s *EMACross) OnTick(ctx context.Context, b broker.Broker, tick pricing.Tic
 	// Treat each tick as a "candle" with OHLC = mid; good enough for first pass.
 	mid := tick.Mid()
 	px := int32(mid*float64(s.Scale) + 0.5)
-	c := pricing.Candle{O: px, H: px, L: px, C: px}
+	c := market.Candle{O: px, H: px, L: px, C: px}
 
 	s.fast.Update(c)
 	s.slow.Update(c)
