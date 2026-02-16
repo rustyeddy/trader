@@ -6,8 +6,6 @@ import (
 
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/config"
-	"github.com/rustyeddy/trader/cmd/data"
-	"github.com/rustyeddy/trader/cmd/replay"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +21,7 @@ func NewRootCmd() *cobra.Command {
 
 	// Global / persistent flags
 	cmd.PersistentFlags().StringVar(&rc.ConfigPath, "config", "", "Path to config file (optional)")
-	cmd.PersistentFlags().StringVar(&rc.DBPath, "db", "./trader.sqlite", "SQLite journal database")
+	cmd.PersistentFlags().StringVar(&rc.DBPath, "db", "./trader.db", "SQLite journal database")
 	cmd.PersistentFlags().StringVar(&rc.LogLevel, "log-level", "info", "Log level: debug|info|warn|error")
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
@@ -35,9 +33,7 @@ func NewRootCmd() *cobra.Command {
 
 	// Subcommands
 	cmd.AddCommand(
-		backtest.New(rc),
-		data.New(rc),
-		replay.New(rc),
+		backtest.CMDBacktest,
 	)
 
 	cmd.AddCommand(&cobra.Command{

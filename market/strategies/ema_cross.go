@@ -24,6 +24,7 @@ type EMACross struct {
 }
 
 type EMACrossConfig struct {
+	StrategyConfig
 	FastPeriod int
 	SlowPeriod int
 	Scale      int32

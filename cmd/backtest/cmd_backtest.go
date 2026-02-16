@@ -1,19 +1,25 @@
 package backtest
 
 import (
-	"github.com/rustyeddy/trader/cmd/config"
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
-func New(rc *config.RootConfig) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "backtest",
-		Short: "Run backtests on historical data",
-	}
+func init() {
+	CMDBacktest.AddCommand(CMDBacktestEMACross)
+}
 
-	// cmd.AddCommand(
-	// 	newEmaCrossCmd(rc),
-	// )
+var CMDBacktest = &cobra.Command{
+	Use:   "backtest",
+	Short: "Run backtests on historical data",
+	RunE: func(cmd *cobra.Command, args []string) error {
 
-	return cmd
+		fmt.Println("")
+		fmt.Println("***********************************")
+		fmt.Println("TODO: list out backtest strategies")
+		fmt.Println("***********************************")
+
+		return nil
+	},
 }
