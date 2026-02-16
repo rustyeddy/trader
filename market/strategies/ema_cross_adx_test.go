@@ -21,7 +21,7 @@ func feedSignalsADX(s *EMACrossADX, scale int32, candles []market.Candle) []Deci
 	out := make([]Decision, 0, 16)
 	for _, c := range candles {
 		d := s.Update(c, scale)
-		if d.Signal != Hold {
+		if d.Signal() != Hold {
 			out = append(out, d)
 		}
 	}
@@ -110,12 +110,11 @@ func TestEMACrossADX_TrendAllowsSignals(t *testing.T) {
 
 	// Expect at least BUY then SELL.
 	require.GreaterOrEqual(t, len(events), 2, "expected at least BUY then SELL in a strong trend series")
-
-	require.Equal(t, Buy, events[0].Signal, "first signal should be BUY (cross up after baseline)")
+	require.Equal(t, Buy, events[0].Signal(), "first signal should be BUY (cross up after baseline)")
 
 	foundSell := false
 	for i := 1; i < len(events); i++ {
-		if events[i].Signal == Sell {
+		if events[i].Signal() == Sell {
 			foundSell = true
 			break
 		}
@@ -159,7 +158,7 @@ func TestEMACrossADX_DIConfirmationDoesNotIncreaseSignals(t *testing.T) {
 
 	// (Optional sanity) Both strategies must only emit BUY/SELL (never HOLD here).
 	for _, e := range events1 {
-		require.True(t, e.Signal == Buy || e.Signal == Sell)
+		require.True(t, e.Signal() == Buy || e.Signal() == Sell)
 	}
 }
 
@@ -211,7 +210,7 @@ func TestEMACrossADX_CloseOnlyCandles_NoPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		for _, v := range closes {
 			d := s.Update(mkClose(scale, v), scale)
-			if d.Signal != Hold {
+			if d.Signal() != Hold {
 				events = append(events, d)
 			}
 		}

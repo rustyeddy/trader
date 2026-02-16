@@ -92,9 +92,9 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 
 	// If EMAs aren't ready, we can't do cross logic.
 	if !x.fast.Ready() || !x.slow.Ready() {
-		return Decision{
-			Signal: Hold,
-			Reason: "warming up EMAs",
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "warming up EMAs",
 			Fast:   x.fast.Float64(),
 			Slow:   x.slow.Float64(),
 			Close:  close,
@@ -103,9 +103,9 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 
 	// Optionally require ADX to be ready before any signals.
 	if x.requireADXReady && !x.adx.Ready() {
-		return Decision{
-			Signal: Hold,
-			Reason: "warming up ADX",
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "warming up ADX",
 			Fast:   x.fast.Float64(),
 			Slow:   x.slow.Float64(),
 			Close:  close,
@@ -118,9 +118,9 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 
 	// Optional noise filter on EMA spread
 	if x.minSpread > 0 && abs(diff) < x.minSpread {
-		return Decision{
-			Signal: Hold,
-			Reason: "min-spread filter",
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "min-spread filter",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -139,17 +139,17 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	if x.prevRel == 0 {
 		if rel != 0 {
 			x.prevRel = rel
-			return Decision{
-				Signal: Hold,
-				Reason: "baseline set",
+			return EMACrossADXDecision{
+				signal: Hold,
+				reason: "baseline set",
 				Fast:   fv,
 				Slow:   sv,
 				Close:  close,
 			}
 		}
-		return Decision{
-			Signal: Hold,
-			Reason: "baseline pending",
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "baseline pending",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -160,9 +160,9 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	if x.adx.Ready() && adxVal < x.adxThreshold {
 		// ADX gate: trend too weak
 		x.prevRel = rel
-		return Decision{
-			Signal: Hold,
-			Reason: "ADX below threshold",
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "ADX below threshold",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -173,22 +173,39 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	if x.prevRel == -1 && rel == +1 {
 		if x.requireDI && x.adx.Ready() && !(x.adx.PlusDI() > x.adx.MinusDI()) {
 			x.prevRel = rel
-			return Decision{Signal: Hold, Reason: "DI confirmation failed (buy)", Fast: fv, Slow: sv, Close: close}
+			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (buy)", Fast: fv, Slow: sv, Close: close}
 		}
 		x.prevRel = rel
-		return Decision{Signal: Buy, Reason: "EMA cross up + ADX gate", Fast: fv, Slow: sv, Close: close}
+		return EMACrossADXDecision{signal: Buy, reason: "EMA cross up + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
 	// Cross down: above -> below
 	if x.prevRel == +1 && rel == -1 {
 		if x.requireDI && x.adx.Ready() && !(x.adx.MinusDI() > x.adx.PlusDI()) {
 			x.prevRel = rel
-			return Decision{Signal: Hold, Reason: "DI confirmation failed (sell)", Fast: fv, Slow: sv, Close: close}
+			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (sell)", Fast: fv, Slow: sv, Close: close}
 		}
 		x.prevRel = rel
-		return Decision{Signal: Sell, Reason: "EMA cross down + ADX gate", Fast: fv, Slow: sv, Close: close}
+		return EMACrossADXDecision{signal: Sell, reason: "EMA cross down + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
 	x.prevRel = rel
-	return Decision{Signal: Hold, Reason: "no cross", Fast: fv, Slow: sv, Close: close}
+	return EMACrossADXDecision{signal: Hold, reason: "no cross", Fast: fv, Slow: sv, Close: close}
+}
+
+type EMACrossADXDecision struct {
+	signal Signal
+	reason string
+
+	Fast  float64
+	Slow  float64
+	Close float64
+}
+
+func (x EMACrossADXDecision) Signal() Signal {
+	return x.signal
+}
+
+func (x EMACrossADXDecision) Reason() string {
+	return x.reason
 }

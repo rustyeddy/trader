@@ -1,15 +1,12 @@
-package market
+package pricing
 
 import (
 	"bufio"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/market"
 )
 
 var estNoDST = time.FixedZone("EST", -5*60*60)
@@ -17,13 +14,13 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 const layout = "20060102 150405"
 
 type CandleSet struct {
-	*market.Instrument
-	Start     int64 // unix seconds for candle open
-	Timeframe int32
-	Scale     int32
-	Source    string
-	Candles   []Candle
-	Valid     []uint64
+	Instrument string
+	Start      int64 // unix seconds for candle open
+	Timeframe  int32
+	Scale      int32
+	Source     string
+	Candles    []Candle
+	Valid      []uint64
 
 	Filepath   string
 	Gaps       []Gap
@@ -213,10 +210,6 @@ func (cs *CandleSet) buildDenseFromFile() error {
 		return err
 	}
 
-	cs.duplicates = int(duplicates)
-	cs.outOfRange = int(outOfRange)
-	cs.badLines = int(badLines)
-
 	if duplicates > 0 || outOfRange > 0 || badLines > 0 {
 		fmt.Fprintf(os.Stderr,
 			"ingest warnings: duplicates=%d outOfRange=%d badLines=%d\n",
@@ -257,12 +250,13 @@ func (cs *CandleSet) BuildGapReport() {
 }
 
 func (cs *CandleSet) classifyGap(startIdx, length int) string {
-	tf := int64(cs.Timeframe) // seconds per bar (60 for M1, 3600 for H1)
+	tf := int64(cs.Timeframe) // seconds per bar
 
 	startUnix := cs.Start + int64(startIdx)*tf
 	t := time.Unix(startUnix, 0).UTC()
 	wd := t.Weekday()
 
+	// Classify by duration (not number of bars), so this works for M1 and H1.
 	gapSeconds := int64(length) * tf
 	gapMinutes := gapSeconds / 60
 
@@ -274,7 +268,7 @@ func (cs *CandleSet) classifyGap(startIdx, length int) string {
 		return "suspicious"
 	}
 
-	// Anything >= 10 minutes missing is worth flagging (tune as you like)
+	// Mid-week gaps >= 10 minutes are suspicious
 	if gapMinutes >= 10 {
 		return "suspicious"
 	}
@@ -284,10 +278,6 @@ func (cs *CandleSet) classifyGap(startIdx, length int) string {
 
 func (cs *CandleSet) Stats() GapStats {
 	var s GapStats
-
-	if len(cs.Gaps) == 0 {
-		cs.BuildGapReport()
-	}
 
 	n := len(cs.Candles)
 	s.TotalMinutes = n
@@ -317,12 +307,13 @@ func (cs *CandleSet) Stats() GapStats {
 
 	return s
 }
+
 func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	if cs.Timeframe != 60 {
 		panic("AggregateH1 requires M1 source")
 	}
 
-	// Defensive: never allow 0 (would mark empty hours valid)
+	// Defensive: prevent marking empty hours as valid.
 	if minValid < 1 {
 		minValid = 1
 	}
@@ -330,11 +321,12 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		minValid = 60
 	}
 
-	tfIn := int64(cs.Timeframe) // 60
+	tfIn := int64(cs.Timeframe)
 	tfOut := int64(3600)
 
 	start := (cs.Start / tfOut) * tfOut
 	end := cs.Start + int64(len(cs.Candles)-1)*tfIn
+
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
@@ -348,11 +340,12 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	}
 
 	for h := 0; h < nHours; h++ {
+
 		hourStart := start + int64(h)*tfOut
 		firstIdx := int((hourStart - cs.Start) / tfIn)
 
 		validCount := 0
-		var o, hi, lo, cl int32
+		var o, hval, lval, c int32
 		firstSet := false
 
 		for m := 0; m < 60; m++ {
@@ -368,27 +361,36 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 
 			if !firstSet {
 				o = bar.O
-				hi = bar.H
-				lo = bar.L
+				hval = bar.H
+				lval = bar.L
 				firstSet = true
-			} else {
-				if bar.H > hi {
-					hi = bar.H
-				}
-				if bar.L < lo {
-					lo = bar.L
-				}
 			}
-			cl = bar.C
+
+			if bar.H > hval {
+				hval = bar.H
+			}
+			if bar.L < lval {
+				lval = bar.L
+			}
+
+			c = bar.C
 			validCount++
 		}
 
-		// Critical: require at least one real minute AND threshold
+		// Require at least one real minute, and threshold.
 		if firstSet && validCount >= minValid {
-			h1.Candles[h] = Candle{O: o, H: hi, L: lo, C: cl}
+			h1.Candles[h] = Candle{
+				O: o,
+				H: hval,
+				L: lval,
+				C: c,
+			}
 			bitSet(h1.Valid, h)
 		}
 	}
+
+	// Build gap report once so callers can immediately Stats()/PrintStats().
+	h1.BuildGapReport()
 
 	return h1
 }
@@ -400,27 +402,6 @@ func (cs *CandleSet) F(v int32) float64 {
 func (cs *CandleSet) I(f float64) int32 {
 	// round to nearest scaled int
 	return int32(f*float64(cs.Scale) + 0.5)
-}
-
-// size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
-func (cs *CandleSet) PipSize() float64 {
-	i := cs.Instrument
-	return math.Pow10(i.PipLocation) // PipLocation is negative
-}
-
-// number of encoded integer units per pip, e.g. if cs.Scale=1e6 and pip=1e-4 => 100 units/pip
-func (cs *CandleSet) UnitsPerPip() float64 {
-	return float64(cs.Scale) * cs.PipSize()
-}
-
-// convert encoded delta (int32) to pips
-func (cs *CandleSet) DeltaToPips(delta int32) float64 {
-	return float64(delta) / cs.UnitsPerPip()
-}
-
-// convert pips to encoded delta (int32)
-func (cs *CandleSet) PipsToDelta(pips float64) int32 {
-	return int32(pips*cs.UnitsPerPip() + 0.5)
 }
 
 func (cs *CandleSet) PrintStats(f io.WriteCloser) {

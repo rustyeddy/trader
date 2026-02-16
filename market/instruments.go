@@ -1,6 +1,6 @@
 package market
 
-type Instrument struct {
+type InstrumentMeta struct {
 	Name                string
 	BaseCurrency        string
 	QuoteCurrency       string
@@ -10,7 +10,7 @@ type Instrument struct {
 	MarginRate          float64
 }
 
-var Instruments = map[string]*Instrument{
+var Instruments = map[string]InstrumentMeta{
 	"EUR_USD": {
 		Name:                "EUR_USD",
 		BaseCurrency:        "EUR",

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,8 +23,8 @@ func (m *mockBroker) GetAccount(ctx context.Context) (broker.Account, error) {
 	return broker.Account{}, nil
 }
 
-func (m *mockBroker) GetTick(ctx context.Context, instrument string) (pricing.Tick, error) {
-	return pricing.Tick{}, nil
+func (m *mockBroker) GetTick(ctx context.Context, instrument string) (market.Tick, error) {
+	return market.Tick{}, nil
 }
 
 func (m *mockBroker) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRequest) (broker.OrderFill, error) {
@@ -36,7 +36,7 @@ func (m *mockBroker) CreateMarketOrder(ctx context.Context, req broker.MarketOrd
 	return broker.OrderFill{TradeID: "test-trade-1"}, nil
 }
 
-func (m *mockBroker) UpdatePrice(p pricing.Tick) error {
+func (m *mockBroker) UpdatePrice(p market.Tick) error {
 	return nil
 }
 
@@ -50,7 +50,7 @@ func TestOpenOnceStrategy_OnTick_Success(t *testing.T) {
 	}
 
 	// First tick should open the order
-	tick := pricing.Tick{
+	tick := market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0850,
 		Ask:        1.0852,
@@ -81,7 +81,7 @@ func TestOpenOnceStrategy_OnTick_WrongInstrument(t *testing.T) {
 	}
 
 	// Tick with different instrument should be ignored
-	tick := pricing.Tick{
+	tick := market.Tick{
 		Instrument: "GBP_USD",
 		Bid:        1.2500,
 		Ask:        1.2502,
@@ -103,7 +103,7 @@ func TestOpenOnceStrategy_OnTick_ZeroUnits(t *testing.T) {
 		Units:      0, // Zero units should cause error
 	}
 
-	tick := pricing.Tick{
+	tick := market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0850,
 		Ask:        1.0852,
@@ -127,7 +127,7 @@ func TestOpenOnceStrategy_OnTick_BrokerError(t *testing.T) {
 		Units:      1000,
 	}
 
-	tick := pricing.Tick{
+	tick := market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0850,
 		Ask:        1.0852,
@@ -150,7 +150,7 @@ func TestOpenOnceStrategy_OnTick_NegativeUnits(t *testing.T) {
 		Units:      -500, // Negative units for short position
 	}
 
-	tick := pricing.Tick{
+	tick := market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0850,
 		Ask:        1.0852,

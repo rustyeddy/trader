@@ -13,8 +13,8 @@ import (
 	"github.com/rustyeddy/trader/cmd/config"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/market/strategies"
 	"github.com/rustyeddy/trader/sim"
-	"github.com/rustyeddy/trader/strategies"
 )
 
 func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {

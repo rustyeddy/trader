@@ -7,34 +7,6 @@ import (
 	"github.com/rustyeddy/trader/market/indicators"
 )
 
-type Signal int
-
-const (
-	Hold Signal = iota
-	Buy
-	Sell
-)
-
-func (s Signal) String() string {
-	switch s {
-	case Buy:
-		return "BUY"
-	case Sell:
-		return "SELL"
-	default:
-		return "HOLD"
-	}
-}
-
-type Decision struct {
-	Signal Signal
-	Reason string
-	// Optional: expose debug values for journaling/backtests
-	Fast  float64
-	Slow  float64
-	Close float64
-}
-
 // EMACross generates signals when a fast EMA crosses a slow EMA.
 // It uses a small state machine to avoid repeated signals while EMAs stay crossed.
 type EMACross struct {
@@ -44,11 +16,11 @@ type EMACross struct {
 	// state: previous relationship between fast and slow
 	// -1 => fast below slow, 0 => unknown/not-ready, +1 => fast above slow
 	prevRel int
-
-	name string
+	name    string
 
 	// optional filters
 	minSpread float64 // require |fast-slow| >= minSpread (in price units) to signal
+	scale     float64
 }
 
 type EMACrossConfig struct {
@@ -99,18 +71,18 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c market.Candle, scale int32) Decision {
+func (x *EMACross) Update(c market.Candle) Decision {
 	// Update indicators first
 	x.fast.Update(c)
 	x.slow.Update(c)
 
-	close := float64(c.C) / float64(scale)
+	close := float64(c.C) / float64(x.scale)
 
 	// Not ready? no signal yet.
 	if !x.Ready() {
-		return Decision{
-			Signal: Hold,
-			Reason: "warming up",
+		return EMACrossDecision{
+			signal: Hold,
+			reason: "warming up",
 			Fast:   x.fast.Float64(),
 			Slow:   x.slow.Float64(),
 			Close:  close,
@@ -123,9 +95,9 @@ func (x *EMACross) Update(c market.Candle, scale int32) Decision {
 
 	// Optional noise filter
 	if x.minSpread > 0 && abs(diff) < x.minSpread {
-		return Decision{
-			Signal: Hold,
-			Reason: "min-spread filter",
+		return EMACrossDecision{
+			signal: Hold,
+			reason: "min-spread filter",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -142,9 +114,9 @@ func (x *EMACross) Update(c market.Candle, scale int32) Decision {
 	// First time ready: establish baseline relationship, don't fire.
 	if x.prevRel == 0 {
 		x.prevRel = rel
-		return Decision{
-			Signal: Hold,
-			Reason: "baseline set",
+		return EMACrossDecision{
+			signal: Hold,
+			reason: "baseline set",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -154,9 +126,9 @@ func (x *EMACross) Update(c market.Candle, scale int32) Decision {
 	// Cross up: below -> above
 	if x.prevRel == -1 && rel == +1 {
 		x.prevRel = rel
-		return Decision{
-			Signal: Buy,
-			Reason: "fast EMA crossed above slow EMA",
+		return EMACrossDecision{
+			signal: Buy,
+			reason: "fast EMA crossed above slow EMA",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -166,9 +138,9 @@ func (x *EMACross) Update(c market.Candle, scale int32) Decision {
 	// Cross down: above -> below
 	if x.prevRel == +1 && rel == -1 {
 		x.prevRel = rel
-		return Decision{
-			Signal: Sell,
-			Reason: "fast EMA crossed below slow EMA",
+		return EMACrossDecision{
+			signal: Sell,
+			reason: "fast EMA crossed below slow EMA",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
@@ -177,11 +149,28 @@ func (x *EMACross) Update(c market.Candle, scale int32) Decision {
 
 	// No cross; maintain state
 	x.prevRel = rel
-	return Decision{
-		Signal: Hold,
-		Reason: "no cross",
+	return EMACrossDecision{
+		signal: Hold,
+		reason: "no cross",
 		Fast:   fv,
 		Slow:   sv,
 		Close:  close,
 	}
+}
+
+type EMACrossDecision struct {
+	signal Signal
+	reason string
+
+	Fast  float64
+	Slow  float64
+	Close float64
+}
+
+func (x EMACrossDecision) Signal() Signal {
+	return x.signal
+}
+
+func (x EMACrossDecision) Reason() string {
+	return x.reason
 }

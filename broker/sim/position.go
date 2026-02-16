@@ -1,7 +1,5 @@
 package sim
 
-import "github.com/rustyeddy/trader/market"
-
 type Position struct {
 	Side  int   // +1 long, -1 short
 	Entry int32 // scaled price
@@ -10,7 +8,7 @@ type Position struct {
 	Open  bool
 }
 
-func (p *Position) CheckExit(c market.Candle) (exitPrice int32, hit bool) {
+func (p *Position) CheckExit(c Candle) (exitPrice int32, hit bool) {
 	if !p.Open {
 		return 0, false
 	}

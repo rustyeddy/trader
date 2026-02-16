@@ -11,12 +11,13 @@ import (
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/pricing"
 )
 
 type Engine struct {
 	mu      sync.Mutex
 	acct    broker.Account
-	ticks   *market.TickStore
+	ticks   *pricing.TickStore
 	trades  map[string]*Trade
 	nextID  int
 	journal journal.Journal
@@ -30,7 +31,7 @@ var (
 func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 	return &Engine{
 		acct:    acct,
-		ticks:   market.NewTickStore(),
+		ticks:   pricing.NewTickStore(),
 		trades:  make(map[string]*Trade),
 		journal: j,
 	}
@@ -40,7 +41,7 @@ func (e *Engine) GetAccount(ctx context.Context) (broker.Account, error) {
 	return e.acct, nil
 }
 
-func (e *Engine) Prices() *market.TickStore {
+func (e *Engine) Prices() *pricing.TickStore {
 	return e.ticks
 }
 
@@ -52,7 +53,7 @@ func (e *Engine) IsTradeOpen(tradeID string) bool {
 	return ok && t != nil && t.Open
 }
 
-func (e *Engine) GetTick(ctx context.Context, instr string) (market.Tick, error) {
+func (e *Engine) GetTick(ctx context.Context, instr string) (pricing.Tick, error) {
 	return e.ticks.Get(instr)
 }
 
@@ -280,7 +281,7 @@ func (e *Engine) Revalue() error {
 }
 
 // sim/engine.go
-func (e *Engine) UpdatePrice(p market.Tick) error {
+func (e *Engine) UpdatePrice(p pricing.Tick) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

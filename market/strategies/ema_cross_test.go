@@ -9,8 +9,8 @@ import (
 func feedSignals(s *EMACross, scale int32, closes []float64) []Decision {
 	out := make([]Decision, 0, 8)
 	for _, c := range closes {
-		d := s.Update(mkClose(scale, c), scale)
-		if d.Signal != Hold {
+		d := s.Update(mkClose(scale, c))
+		if d.Signal() != Hold {
 			out = append(out, d)
 		}
 	}
@@ -73,11 +73,11 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown(t *testing.T) {
 	// Expect at least BUY then SELL (baseline-first means no signal on baseline set)
 	require.GreaterOrEqual(t, len(events), 2, "expected at least BUY then SELL")
 
-	require.Equal(t, Buy, events[0].Signal, "first signal should be BUY (cross up after baseline)")
+	require.Equal(t, Buy, events[0].Signal(), "first signal should be BUY (cross up after baseline)")
 
 	foundSell := false
 	for i := 1; i < len(events); i++ {
-		if events[i].Signal == Sell {
+		if events[i].Signal() == Sell {
 			foundSell = true
 			break
 		}
