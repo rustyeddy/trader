@@ -229,7 +229,7 @@ make cover
 
 ### Codespaces Copilot Error: Unsupported parameter `context_management`
 
-If Copilot Chat fails in Codespaces with a 400 error referencing `context_management`:
+If Copilot Chat fails in Codespaces with a 400 error referencing `context_management`, it usually means the Copilot client is newer than the server components in your Codespace (or an experimental setting enabled a feature the server does not recognize).
 
 1. Update the **GitHub Copilot** extension inside the Codespace and reload the window.
 2. Rebuild or restart the Codespace to ensure the latest server components are picked up.
