@@ -5,11 +5,10 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
-	"github.com/rustyeddy/trader/sim"
 )
 
 // This example demonstrates proper risk management principles.
@@ -34,7 +33,7 @@ func main() {
 		Equity:   100_000,
 	}, j)
 
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0849,
 		Ask:        1.0851,
@@ -82,7 +81,7 @@ func main() {
 	fmt.Println("=== Position Sizing with JPY Quote Currency ===")
 	fmt.Println()
 
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.50,
 		Ask:        149.52,

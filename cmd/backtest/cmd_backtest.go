@@ -11,11 +11,9 @@ func New(rc *config.RootConfig) *cobra.Command {
 		Short: "Run backtests on historical data",
 	}
 
-	cmd.AddCommand(
-		newEmaCrossCmd(rc),
-		newEMAADXCmd(rc),
-		newH1EmaCrossCmd(rc),
-	)
+	// cmd.AddCommand(
+	// 	newEmaCrossCmd(rc),
+	// )
 
 	return cmd
 }

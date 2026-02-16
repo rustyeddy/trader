@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
-	"github.com/rustyeddy/trader/sim"
 )
 
 // This example demonstrates a simple single trade with stop loss and take profit.
@@ -41,7 +40,7 @@ func main() {
 	// Set initial market price for EUR/USD
 	initialBid := 1.0849
 	initialAsk := 1.0851
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        initialBid,
 		Ask:        initialAsk,
@@ -108,7 +107,7 @@ func main() {
 	newBid := 1.0890
 	newAsk := 1.0892
 
-	err = engine.UpdatePrice(pricing.Tick{
+	err = engine.UpdatePrice(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        newBid,
 		Ask:        newAsk,

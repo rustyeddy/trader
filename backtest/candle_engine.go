@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 )
 
 // CandleStrategy is called once per *valid* candle (Iterator() skips invalid bars).
@@ -19,7 +18,7 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c pricing.Candle) *OrderRequest
+	OnBar(ctx *CandleContext, c market.Candle) *OrderRequest
 }
 
 type Side int8
@@ -38,7 +37,7 @@ type OrderRequest struct {
 }
 
 type CandleContext struct {
-	CS      *pricing.CandleSet
+	CS      *market.CandleSet
 	Idx     int
 	Time    time.Time
 	GapBars int // missing bars between this and previous valid bar
@@ -70,7 +69,7 @@ type Trade struct {
 }
 
 type CandleEngine struct {
-	CS         *pricing.CandleSet
+	CS         *market.CandleSet
 	AccountCCY string
 
 	Balance float64
@@ -78,7 +77,7 @@ type CandleEngine struct {
 	Trades  []Trade
 }
 
-func NewCandleEngine(cs *pricing.CandleSet, startingBalance float64, accountCCY string) *CandleEngine {
+func NewCandleEngine(cs *market.CandleSet, startingBalance float64, accountCCY string) *CandleEngine {
 	return &CandleEngine{
 		CS:         cs,
 		AccountCCY: accountCCY,
@@ -148,7 +147,7 @@ func (e *CandleEngine) Run(strat CandleStrategy) error {
 	return nil
 }
 
-func (e *CandleEngine) openPosition(idx int, t time.Time, c pricing.Candle, req *OrderRequest) {
+func (e *CandleEngine) openPosition(idx int, t time.Time, c market.Candle, req *OrderRequest) {
 	// Fill model: enter at bar close.
 	entry := c.C
 
@@ -177,7 +176,7 @@ func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
 
 	// If quote currency matches account, treat pnlQuote as account currency.
 	pnlAcct := pnlQuote
-	if meta, ok := market.Instruments[e.CS.Instrument]; ok {
+	if meta, ok := market.Instruments[e.CS.Name]; ok {
 		if e.AccountCCY != "" && meta.QuoteCurrency != "" && meta.QuoteCurrency != e.AccountCCY {
 			// TODO: add FX conversion using a price source. For now, leave as quote currency.
 			pnlAcct = pnlQuote
@@ -199,7 +198,7 @@ func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p Position, c pricing.Candle) (exitPx int32, reason string, hit bool) {
+func checkExit(p Position, c market.Candle) (exitPx int32, reason string, hit bool) {
 	if !p.Open {
 		return 0, "", false
 	}

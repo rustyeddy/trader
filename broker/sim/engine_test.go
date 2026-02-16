@@ -8,7 +8,7 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 type testJournal struct {
@@ -46,7 +46,7 @@ func newEngine(t *testing.T, balance float64) (*Engine, *testJournal) {
 
 func setPrice(t *testing.T, e *Engine, instr string, bid, ask float64, tm time.Time) {
 	t.Helper()
-	err := e.UpdatePrice(pricing.Tick{
+	err := e.UpdatePrice(market.Tick{
 		Instrument: instr,
 		Bid:        bid,
 		Ask:        ask,

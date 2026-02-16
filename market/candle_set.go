@@ -8,8 +8,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/market"
 )
 
 var estNoDST = time.FixedZone("EST", -5*60*60)
@@ -17,7 +15,7 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 const layout = "20060102 150405"
 
 type CandleSet struct {
-	*market.Instrument
+	*InstrumentMeta
 	Start     int64 // unix seconds for candle open
 	Timeframe int32
 	Scale     int32
@@ -338,7 +336,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
-		Instrument: cs.Instrument,
+		InstrumentMeta: cs.InstrumentMeta,
 		Start:      start,
 		Timeframe:  3600,
 		Scale:      cs.Scale,
@@ -404,7 +402,7 @@ func (cs *CandleSet) I(f float64) int32 {
 
 // size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
 func (cs *CandleSet) PipSize() float64 {
-	i := cs.Instrument
+	i := cs.InstrumentMeta
 	return math.Pow10(i.PipLocation) // PipLocation is negative
 }
 

@@ -10,16 +10,21 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/cmd/config"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market/strategies"
-	"github.com/rustyeddy/trader/sim"
 )
 
 func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 	var (
-		cfg = strategies.EMACrossConfigDefaults()
+		cfg = strategies.EMACrossConfig{
+			FastPeriod: 8,
+			SlowPeriod: 21,
+			Scale:      1000000,
+			MinSpread:  0.0,
+		}
 
 		// prices
 		ticksPath string
@@ -63,7 +68,7 @@ func newEmaCrossCmd(rc *config.RootConfig) *cobra.Command {
 				return err
 			}
 
-			strat := strategies.NewEmaCross(cfg)
+			strat := strategies.NewEMACross(cfg)
 			runner := &backtest.Runner{
 				Engine:   engine,
 				Feed:     feed,

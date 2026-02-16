@@ -102,7 +102,7 @@ candles, err := client.GetCandles(ctx, oanda.CandlesRequest{
 ```go
 import (
     "github.com/rustyeddy/trader/oanda"
-    "github.com/rustyeddy/trader/sim"
+    "github.com/rustyeddy/trader/broker/sim"
 )
 
 func backtest() {

@@ -4,7 +4,6 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 )
 
 // H1EMACross is a minimal, candle-driven EMA cross strategy for H1 backtests.
@@ -84,11 +83,11 @@ func (s *H1EMACross) Reset() {
 	s.lastDiff = 0
 }
 
-func (s *H1EMACross) OnBar(ctx *CandleContext, c pricing.Candle) *OrderRequest {
+func (s *H1EMACross) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
 	if ctx == nil || ctx.CS == nil {
 		return nil
 	}
-	if ctx.CS.Instrument != "" && s.Instrument != "" && ctx.CS.Instrument != s.Instrument {
+	if ctx.CS.Name != "" && s.Instrument != "" && ctx.CS.Name != s.Instrument {
 		// single-instrument strategy
 		return nil
 	}
