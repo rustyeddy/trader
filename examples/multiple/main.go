@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/pricing"
 	"github.com/rustyeddy/trader/risk"
-	"github.com/rustyeddy/trader/sim"
 )
 
 // This example demonstrates managing multiple positions simultaneously.
@@ -38,14 +37,14 @@ func main() {
 	}, j)
 
 	// Set initial prices for both instruments
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0849,
 		Ask:        1.0851,
 		Time:       time.Now(),
 	})
 
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.50,
 		Ask:        149.52,
@@ -76,7 +75,7 @@ func main() {
 
 	// EUR/USD moves up (profitable)
 	fmt.Println("\nEUR/USD moves up...")
-	err = engine.UpdatePrice(pricing.Tick{
+	err = engine.UpdatePrice(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0890,
 		Ask:        1.0892,
@@ -88,7 +87,7 @@ func main() {
 
 	// USD/JPY moves down slightly (small loss)
 	fmt.Println("USD/JPY moves down...")
-	err = engine.UpdatePrice(pricing.Tick{
+	err = engine.UpdatePrice(market.Tick{
 		Instrument: "USD_JPY",
 		Bid:        149.30,
 		Ask:        149.32,

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/pricing"
-	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/broker/sim"
+	"github.com/rustyeddy/trader/market"
 )
 
 // Options controls how replay behaves.
@@ -105,7 +105,7 @@ func handleReplayRow(ctx context.Context, engine *sim.Engine, row []string, opts
 		return fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	price := pricing.Tick{
+	price := market.Tick{
 		Time:       t,
 		Instrument: inst,
 		Bid:        bid,

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/pricing"
-	"github.com/rustyeddy/trader/sim"
+	"github.com/rustyeddy/trader/market"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	}, j)
 
 	// Seed an initial price (include Time so snapshots are non-zero timestamps)
-	engine.Prices().Set(pricing.Tick{
+	engine.Prices().Set(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0849,
 		Ask:        1.0851,
@@ -47,7 +47,7 @@ func main() {
 
 	// Move the market a bit and record an equity snapshot (UpdatePrice does snapshotting)
 	t2 := time.Now().Add(10 * time.Second)
-	if err := engine.UpdatePrice(pricing.Tick{
+	if err := engine.UpdatePrice(market.Tick{
 		Instrument: "EUR_USD",
 		Bid:        1.0860,
 		Ask:        1.0862,

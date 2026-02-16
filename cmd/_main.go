@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/replay"
 	"github.com/rustyeddy/trader/risk"
-	"github.com/rustyeddy/trader/sim"
 )
 
 func main() {

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/sim"
 )
 
 // If your journal uses a different driver name, adjust this.

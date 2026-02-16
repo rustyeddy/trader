@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/rustyeddy/trader/pricing"
+	"github.com/rustyeddy/trader/market"
 )
 
 func TestPriceMid(t *testing.T) {
@@ -29,7 +29,7 @@ func TestPriceMid(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := pricing.Tick{Bid: tt.bid, Ask: tt.ask}
+			p := market.Tick{Bid: tt.bid, Ask: tt.ask}
 			got := p.Mid()
 			if math.Abs(got-tt.expected) > tol {
 				t.Fatalf("Mid() = %v, expected %v", got, tt.expected)

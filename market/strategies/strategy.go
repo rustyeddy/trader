@@ -1,6 +1,9 @@
 package strategies
 
 import (
+	"context"
+
+	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -10,13 +13,19 @@ var (
 	registry = make(map[string]Strategy)
 )
 
-// TickStrategy is the minimal interface a backtest strategy must implement.
-// It is called once per CSV row (tick).
+// Strategy is the interface for candle-based strategies.
 type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
 	Update(c market.Candle) Decision
+}
+
+// TickStrategy is the minimal interface a tick-based backtest strategy must implement.
+// It is called once per tick.
+type TickStrategy interface {
+	Name() string
+	OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error
 }
 
 type Signal int
