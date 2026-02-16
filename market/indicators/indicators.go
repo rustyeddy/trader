@@ -23,12 +23,18 @@ type Indicator interface {
 	Ready() bool
 }
 
-type ValueF64 interface {
+type Float64 interface {
 	// Value returns the current indicator value. If !Ready(), it should return 0
 	// (or the last computed value) — callers should always check Ready().
-	Value() float64
+	Float64() float64
 }
 
-type ValueI32 interface {
-	Value() int32
+type Float64s interface {
+	// Value returns the current indicator value. If !Ready(), it should return 0
+	// (or the last computed value) — callers should always check Ready().
+	Float64() []float64
+}
+
+type Price interface {
+	Price() market.Price
 }

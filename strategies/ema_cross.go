@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/market/indicators"
 	"github.com/rustyeddy/trader/risk"
 	"github.com/rustyeddy/trader/sim"
 )
@@ -23,8 +23,8 @@ import (
 type EMACross struct {
 	*EMACrossConfig
 
-	fast *indicators.ExponentialMA
-	slow *indicators.ExponentialMA
+	fast *indicators.EMA
+	slow *indicators.EMA
 
 	lastDiff     float64
 	haveLastDiff bool
@@ -51,7 +51,7 @@ func (e *EMACrossConfig) JSON() ([]byte, error) {
 func EMACrossConfigDefaults() *EMACrossConfig {
 	return &EMACrossConfig{
 		Instrument: "EUR_USD",
-		Scale:      1000000,
+		Scale:      1_000_000,
 		FastPeriod: 10,
 		SlowPeriod: 30,
 		RiskPct:    0.005,
@@ -70,8 +70,8 @@ func NewEmaCross(cfg *EMACrossConfig) *EMACross {
 
 	return &EMACross{
 		EMACrossConfig: cfg,
-		fast:           indicators.NewEMA(cfg.FastPeriod),
-		slow:           indicators.NewEMA(cfg.SlowPeriod),
+		fast:           indicators.NewEMA(cfg.FastPeriod, cfg.Scale),
+		slow:           indicators.NewEMA(cfg.SlowPeriod, cfg.Scale),
 	}
 }
 
