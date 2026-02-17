@@ -2,10 +2,14 @@ package market
 
 import (
 	"bufio"
+	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,7 +19,7 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 const layout = "20060102 150405"
 
 type CandleSet struct {
-	*InstrumentMeta
+	*Instrument
 	Start     int64 // unix seconds for candle open
 	Timeframe int32
 	Scale     int32
@@ -58,6 +62,10 @@ func NewCandleSet(fname string) (cs *CandleSet, err error) {
 		prev:      -1,
 	}
 
+	if err := cs.ParseFilename(cs.Filepath); err != nil {
+		return nil, err
+	}
+
 	if err := cs.buildDenseFromFile(); err != nil {
 		return nil, err
 	}
@@ -68,6 +76,22 @@ func NewCandleSet(fname string) (cs *CandleSet, err error) {
 
 func (cs *CandleSet) Time(idx int) time.Time {
 	return time.Unix(cs.Start+int64(idx)*int64(cs.Timeframe), 0).UTC()
+}
+
+func (cs *CandleSet) ParseFilename(fname string) (err error) {
+	parts := strings.Split(fname, "_")
+	i := Instruments[parts[2]]
+	cs.Instrument = &i
+	cs.Timeframe, err = TFStringToSeconds(parts[3])
+
+	extension := filepath.Ext(parts[4])
+	name := strings.TrimSuffix(parts[4], extension)
+	year, err := strconv.Atoi(name)
+	if err != nil {
+		return fmt.Errorf("invalid year: %w", err)
+	}
+	cs.Start = time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	return err
 }
 
 // scanBounds finds min/max timestamps (UTC unix seconds) in one pass.
@@ -336,7 +360,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
-		InstrumentMeta: cs.InstrumentMeta,
+		Instrument: cs.Instrument,
 		Start:      start,
 		Timeframe:  3600,
 		Scale:      cs.Scale,
@@ -402,7 +426,7 @@ func (cs *CandleSet) I(f float64) int32 {
 
 // size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
 func (cs *CandleSet) PipSize() float64 {
-	i := cs.InstrumentMeta
+	i := cs.Instrument
 	return math.Pow10(i.PipLocation) // PipLocation is negative
 }
 
@@ -438,6 +462,152 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 	fmt.Fprintf(f, "Longest Gap: %d minutes (%s)\n",
 		s.LongestGap, s.LongestGapKind)
 	fmt.Fprintln(f, "--------------------------")
+}
+
+func (cs *CandleSet) Filename() string {
+	fname := cs.Instrument.Name
+	tfstr, err := SecondsToTFString(cs.Timeframe)
+	if err != nil {
+		return "unknown"
+	}
+	year := time.Unix(cs.Start, 0).UTC().Year()
+	fname += "-" + strconv.Itoa(year)
+	fname += "-" + tfstr
+	return fname
+}
+
+// WriteCSV writes candles as:
+// RFC3339Time;Open;High;Low;Close;Valid
+// No header line is written.
+func (cs *CandleSet) WriteCSV(path string) error {
+	if cs == nil {
+		return errors.New("nil CandleSet")
+	}
+	if len(cs.Candles) == 0 {
+		// Still create an empty file (often useful for pipelines)
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		return f.Close()
+	}
+
+	fname := cs.Filename()
+	path = path + "/" + fname + ".csv"
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Buffered writer for performance.
+	bw := bufio.NewWriterSize(f, 256*1024)
+	defer bw.Flush()
+
+	w := csv.NewWriter(bw)
+	w.Comma = ','
+	// We intentionally do not write a header.
+	defer w.Flush()
+
+	// Duration between candle opens, in seconds.
+	step := timeframeSeconds(cs.Timeframe)
+	if step <= 0 {
+		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
+	}
+
+	// If Valid is provided, we’ll use it. If not (or too short), treat all as valid=1.
+	hasValid := len(cs.Valid) > 0
+
+	for i := 0; i < len(cs.Candles); i++ {
+		openUnix := cs.Start + int64(i)*step
+		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
+
+		c := cs.Candles[i]
+
+		valid := uint64(1)
+		if hasValid && i < len(cs.Valid) {
+			valid = cs.Valid[i]
+		}
+
+		rec := []string{
+			t,
+			formatNumber(c.O, cs.Scale),
+			formatNumber(c.H, cs.Scale),
+			formatNumber(c.L, cs.Scale),
+			formatNumber(c.C, cs.Scale),
+			strconv.FormatUint(valid, 10),
+		}
+
+		if err := w.Write(rec); err != nil {
+			return err
+		}
+	}
+
+	// Check any buffered error from csv.Writer.
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// timeframeSeconds converts your int32 timeframe to seconds.
+// If your Timeframe is already "seconds per candle", just return int64(tf).
+func timeframeSeconds(tf int32) int64 {
+	// Many codebases store timeframe as seconds (e.g., 60, 300, 3600).
+	// If yours uses an enum (M1/H1/D1), replace this mapping accordingly.
+	return int64(tf)
+}
+
+//	func PriceToFloat(price int32, scale int32) float64 {
+//		return float64(price) / math.Pow10(int(scale))
+//	}
+func formatNumber(price int32, scale int32) string {
+	// For floats, this uses default formatting; adjust if you need fixed decimals.
+	return fmt.Sprintf("%f", float64(price)/float64(scale))
+}
+
+// Optional helper: write to any io.Writer (useful for tests, pipes, gzip, etc.)
+func (cs *CandleSet) WriteCSVTo(w io.Writer) error {
+	if cs == nil {
+		return errors.New("nil CandleSet")
+	}
+	cw := csv.NewWriter(w)
+	cw.Comma = ';'
+	defer cw.Flush()
+
+	step := timeframeSeconds(cs.Timeframe)
+	if step <= 0 {
+		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
+	}
+
+	hasValid := len(cs.Valid) > 0
+
+	for i := 0; i < len(cs.Candles); i++ {
+		openUnix := cs.Start + int64(i)*step
+		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
+
+		c := cs.Candles[i]
+		valid := uint64(1)
+		if hasValid && i < len(cs.Valid) {
+			valid = cs.Valid[i]
+		}
+
+		if err := cw.Write([]string{
+			t,
+			formatNumber(c.O, cs.Scale),
+			formatNumber(c.H, cs.Scale),
+			formatNumber(c.L, cs.Scale),
+			formatNumber(c.C, cs.Scale),
+			strconv.FormatUint(valid, 10),
+		}); err != nil {
+			return err
+		}
+	}
+
+	cw.Flush()
+	return cw.Error()
 }
 
 type Iterator struct {
