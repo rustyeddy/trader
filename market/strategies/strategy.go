@@ -13,8 +13,6 @@ type Strategy interface {
 	Reset()
 	Ready() bool
 	Update(c market.Candle) Decision
-
-	New(cfg any) Strategy
 }
 
 // TickStrategy is the minimal interface a tick-based backtest strategy must implement.
@@ -62,4 +60,15 @@ func (s Signal) String() string {
 type Decision interface {
 	Signal() Signal
 	Reason() string
+}
+
+type DefaultDecision struct {
+}
+
+func (d DefaultDecision) Signal() Signal {
+	return Hold
+}
+
+func (d DefaultDecision) Reason() string {
+	return "jbc"
 }

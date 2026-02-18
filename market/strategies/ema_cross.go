@@ -53,6 +53,7 @@ func NewEMACross(cfg EMACrossConfig) *EMACross {
 		slow:      s,
 		prevRel:   0,
 		minSpread: cfg.MinSpread,
+		scale:     float64(cfg.Scale), // <-- REQUIRE
 		name:      fmt.Sprintf("EMA_CROSS(%d,%d)", cfg.FastPeriod, cfg.SlowPeriod),
 	}
 }
