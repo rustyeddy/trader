@@ -8,9 +8,14 @@ import (
 )
 
 func parseToUnix(s string) (int64, error) {
-	t, err := time.ParseInLocation(layout, strings.TrimSpace(s), estNoDST)
+	// First try parsting rfc3339
+	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return 0, err
+		t, err = time.ParseInLocation(layout, strings.TrimSpace(s), estNoDST)
+		if err != nil {
+			fmt.Printf("Error parsing date: %v\n", err)
+			return 0, err
+		}
 	}
 	u := t.UTC().Unix()
 	if u%60 != 0 {

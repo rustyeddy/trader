@@ -79,18 +79,21 @@ func (cs *CandleSet) Time(idx int) time.Time {
 }
 
 func (cs *CandleSet) ParseFilename(fname string) (err error) {
-	parts := strings.Split(fname, "_")
-	i := Instruments[parts[2]]
-	cs.Instrument = &i
-	cs.Timeframe, err = TFStringToSeconds(parts[3])
+	base := filepath.Base(fname)
+	ext := filepath.Ext(base)
+	name := base[:len(base)-len(ext)]
 
-	extension := filepath.Ext(parts[4])
-	name := strings.TrimSuffix(parts[4], extension)
-	year, err := strconv.Atoi(name)
+	parts := strings.Split(name, "-")
+	i := Instruments[parts[0]]
+	cs.Instrument = &i
+	cs.Timeframe, err = TFStringToSeconds(parts[2])
+
+	year, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("invalid year: %w", err)
 	}
 	cs.Start = time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+
 	return err
 }
 
@@ -506,7 +509,7 @@ func (cs *CandleSet) WriteCSV(path string) error {
 	defer bw.Flush()
 
 	w := csv.NewWriter(bw)
-	w.Comma = ','
+	w.Comma = ';'
 	// We intentionally do not write a header.
 	defer w.Flush()
 
