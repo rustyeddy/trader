@@ -1,0 +1,21 @@
+* Trader - The Plan
+
+The plan is to build an automated trading system that makes money. The
+elements to do this are:
+
+* Ingest historic data
+** Translate incoming into internal (normalized) format
+*** Acquire meta data
+Instrument, time frame (1M, 1H, 1D, etc) and date range (e.g. 2023)
+*** Grok incoming format
+**** Dukascopy
+**** OandA
+*** Convert to our ~normalized~ format
+**** OHLC int32
+**** CandleSet is a range of OHLC
+The range can be seconds to days.
+*** Save converted version of data
+
+
+
+

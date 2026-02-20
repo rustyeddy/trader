@@ -1,0 +1,27 @@
+* Software Design
+
+* Incoming
+** Original Data
+Store original data in compressed original format
+
+** Normalized Form
+OHLC, Candles and CandleSets.
+
+* Indicators
+** Take CandleSets
+** Take Single Candle Update
+** Produce Single, 2 or ? outputs
+
+* Strategy
+** What to look for
+** When to open a position
+** When to close a position
+
+* Execution
+
+** Account & Risk Management
+
+** When to trade
+                        { ...        }
+Incoming -> Strategy -> { Indicators } -> Decision
+                        {  ...       }

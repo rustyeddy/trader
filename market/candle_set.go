@@ -84,14 +84,27 @@ func (cs *CandleSet) ParseFilename(fname string) (err error) {
 	name := base[:len(base)-len(ext)]
 
 	parts := strings.Split(name, "-")
-	i := Instruments[parts[0]]
-	cs.Instrument = &i
-	cs.Timeframe, err = TFStringToSeconds(parts[2])
-
-	year, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return fmt.Errorf("invalid year: %w", err)
+	if len(parts) == 1 {
+		parts = strings.Split(name, "_")
 	}
+	fmt.Printf("PARTS: %+v\n", parts)
+
+	var year int
+	switch parts[0] {
+	case "DAT":
+		cs.Instrument = Instruments[parts[2]]
+		cs.Timeframe, err = TFStringToSeconds(parts[3])
+
+	default:
+		cs.Instrument = Instruments[parts[0]]
+		cs.Timeframe, err = TFStringToSeconds(parts[2])
+		year, err = strconv.Atoi(parts[4])
+		if err != nil {
+			return fmt.Errorf("invalid year: %w", err)
+		}
+
+	}
+
 	cs.Start = time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 
 	return err

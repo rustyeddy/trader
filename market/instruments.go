@@ -10,7 +10,7 @@ type Instrument struct {
 	MarginRate          float64
 }
 
-var Instruments = map[string]Instrument{
+var Instruments = map[string]*Instrument{
 	"EUR_USD": {
 		Name:                "EUR_USD",
 		BaseCurrency:        "EUR",
