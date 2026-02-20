@@ -32,6 +32,4 @@ var Instruments = map[string]*Instrument{
 }
 
 func init() {
-	Instruments["EURUSD"] = Instruments["EUR_USD"]
-	Instruments["USDJPY"] = Instruments["USD_JPY"]
 }

@@ -12,7 +12,7 @@ type Position struct {
 	Open  bool
 }
 
-func (p *Position) CheckExit(c market.Candle) (exitPrice int32, hit bool) {
+func (p *Position) CheckExit(c market.OHLC) (exitPrice int32, hit bool) {
 	if !p.Open {
 		return 0, false
 	}

@@ -28,7 +28,7 @@ type ADX struct {
 
 	// candle tracking
 	seen    int
-	prev    market.Candle
+	prev    market.OHLC
 	hasPrev bool
 	ready   bool
 	adx     float64
@@ -80,7 +80,7 @@ func (a *ADX) Reset() {
 }
 
 // Update consumes the next closed candle.
-func (a *ADX) Update(c market.Candle) {
+func (a *ADX) Update(c market.OHLC) {
 	a.seen++
 
 	// Need a previous candle to form a "period"

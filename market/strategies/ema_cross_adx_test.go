@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mkOHLC(scale int32, o, h, l, c float64) market.Candle {
+func mkOHLC(scale int32, o, h, l, c float64) market.OHLC {
 	toP := func(x float64) market.Price { return market.Price(x*float64(scale) + 0.5) }
-	return market.Candle{
+	return market.OHLC{
 		O: toP(o),
 		H: toP(h),
 		L: toP(l),
@@ -17,7 +17,7 @@ func mkOHLC(scale int32, o, h, l, c float64) market.Candle {
 	}
 }
 
-func feedSignalsADX(s *EMACrossADX, scale int32, candles []market.Candle) []Decision {
+func feedSignalsADX(s *EMACrossADX, scale int32, candles []market.OHLC) []Decision {
 	out := make([]Decision, 0, 16)
 	for _, c := range candles {
 		d := s.Update(c, scale)
@@ -28,8 +28,8 @@ func feedSignalsADX(s *EMACrossADX, scale int32, candles []market.Candle) []Deci
 	return out
 }
 
-func flatCandles(scale int32, n int, price float64) []market.Candle {
-	cs := make([]market.Candle, 0, n)
+func flatCandles(scale int32, n int, price float64) []market.OHLC {
+	cs := make([]market.OHLC, 0, n)
 	for i := 0; i < n; i++ {
 		// Completely flat OHLC => TR=0 => ADX should remain near 0 after ready.
 		cs = append(cs, mkOHLC(scale, price, price, price, price))
@@ -37,8 +37,8 @@ func flatCandles(scale int32, n int, price float64) []market.Candle {
 	return cs
 }
 
-func trendingCandles(scale int32, n int, start float64, step float64, halfRange float64) []market.Candle {
-	cs := make([]market.Candle, 0, n)
+func trendingCandles(scale int32, n int, start float64, step float64, halfRange float64) []market.OHLC {
+	cs := make([]market.OHLC, 0, n)
 	p := start
 	for i := 0; i < n; i++ {
 		o := p
@@ -53,8 +53,8 @@ func trendingCandles(scale int32, n int, start float64, step float64, halfRange 
 
 // Builds a sequence that (1) warms up, (2) establishes a baseline BELOW (fast<slow),
 // (3) trends up to cross above, (4) trends down to cross below.
-func baselineThenCrossUpThenDownOHLC(scale int32) []market.Candle {
-	out := make([]market.Candle, 0, 300)
+func baselineThenCrossUpThenDownOHLC(scale int32) []market.OHLC {
+	out := make([]market.OHLC, 0, 300)
 
 	// Warmup flat
 	out = append(out, flatCandles(scale, 60, 1.0000)...)

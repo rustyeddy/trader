@@ -73,7 +73,7 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c market.Candle) Decision {
+func (x *EMACross) Update(c market.OHLC) Decision {
 	// Update indicators first
 	x.fast.Update(c)
 	x.slow.Update(c)

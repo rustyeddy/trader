@@ -20,7 +20,7 @@ func init() {
 
 func TestIterator(t *testing.T) {
 
-	expected := Candle{O: 1035030, H: 1035140, L: 1035030, C: 1035140}
+	expected := OHLC{O: 1035030, H: 1035140, L: 1035030, C: 1035140}
 	it := cs.Iterator()
 	it.Next()
 	assert.Equal(t, int64(1735768800), it.StartTime())

@@ -24,7 +24,7 @@ type CandleSet struct {
 	Timeframe int32
 	Scale     int32
 	Source    string
-	Candles   []Candle
+	Candles   []OHLC
 	Valid     []uint64
 
 	Filepath   string
@@ -181,7 +181,7 @@ func (cs *CandleSet) buildDenseFromFile() error {
 	n := int((end-start)/tf) + 1
 
 	cs.Start = start
-	cs.Candles = make([]Candle, n)
+	cs.Candles = make([]OHLC, n)
 	cs.Valid = make([]uint64, (n+63)/64)
 
 	f, err := os.Open(cs.Filepath)
@@ -237,7 +237,7 @@ func (cs *CandleSet) buildDenseFromFile() error {
 			fmt.Fprintf(os.Stderr, "error %s\n", err)
 			continue
 		}
-		candle := Candle{
+		candle := OHLC{
 			O: prices[0],
 			H: prices[1],
 			L: prices[2],
@@ -381,7 +381,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		Timeframe:  3600,
 		Scale:      cs.Scale,
 		Source:     cs.Source + " H1",
-		Candles:    make([]Candle, nHours),
+		Candles:    make([]OHLC, nHours),
 		Valid:      make([]uint64, (nHours+63)/64),
 	}
 
@@ -423,7 +423,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 
 		// Critical: require at least one real minute AND threshold
 		if firstSet && validCount >= minValid {
-			h1.Candles[h] = Candle{O: o, H: hi, L: lo, C: cl}
+			h1.Candles[h] = OHLC{O: o, H: hi, L: lo, C: cl}
 			bitSet(h1.Valid, h)
 		}
 	}
@@ -652,7 +652,7 @@ func (it *Iterator) Next() bool {
 	}
 }
 
-func (it *Iterator) Candle() Candle {
+func (it *Iterator) Candle() OHLC {
 	return it.cs.Candles[it.idx]
 }
 

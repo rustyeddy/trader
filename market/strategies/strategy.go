@@ -12,7 +12,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(c market.Candle) Decision
+	Update(c market.OHLC) Decision
 }
 
 // TickStrategy is the minimal interface a tick-based backtest strategy must implement.

@@ -8,8 +8,8 @@ import (
 )
 
 // helper to create a candle with close only
-func candle(close float64, scale int32) market.Candle {
-	return market.Candle{
+func candle(close float64, scale int32) market.OHLC {
+	return market.OHLC{
 		C: market.Price(close * float64(scale)),
 	}
 }

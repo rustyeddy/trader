@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mkCandle(scale int32, o, h, l, c float64) market.Candle {
+func mkCandle(scale int32, o, h, l, c float64) market.OHLC {
 	toP := func(x float64) market.Price { return market.Price(x*float64(scale) + 0.5) }
-	return market.Candle{
+	return market.OHLC{
 		O: toP(o),
 		H: toP(h),
 		L: toP(l),

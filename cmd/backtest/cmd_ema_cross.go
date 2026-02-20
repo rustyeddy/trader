@@ -139,12 +139,12 @@ type emaCrossAdapter struct {
 
 func (a *emaCrossAdapter) Name() string { return a.S.Name() }
 func (a *emaCrossAdapter) Reset()       { a.S.Reset() }
-func (a *emaCrossAdapter) Update(c market.Candle) strategies.Decision {
+func (a *emaCrossAdapter) Update(c market.OHLC) strategies.Decision {
 	dec := strategies.DefaultDecision{}
 	return dec
 }
 
-func (a *emaCrossAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *bt.OrderRequest {
+func (a *emaCrossAdapter) OnBar(ctx *bt.CandleContext, c market.OHLC) *bt.OrderRequest {
 	d := a.S.Update(c)
 	if d.Signal() == strategies.Hold {
 		return nil

@@ -18,7 +18,7 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c market.Candle) *OrderRequest
+	OnBar(ctx *CandleContext, c market.OHLC) *OrderRequest
 }
 
 type Side int8
@@ -147,7 +147,7 @@ func (e *CandleEngine) Run(strat CandleStrategy) error {
 	return nil
 }
 
-func (e *CandleEngine) openPosition(idx int, t time.Time, c market.Candle, req *OrderRequest) {
+func (e *CandleEngine) openPosition(idx int, t time.Time, c market.OHLC, req *OrderRequest) {
 	// Fill model: enter at bar close.
 	entry := c.C
 
@@ -198,7 +198,7 @@ func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p Position, c market.Candle) (exitPx int32, reason string, hit bool) {
+func checkExit(p Position, c market.OHLC) (exitPx int32, reason string, hit bool) {
 	if !p.Open {
 		return 0, "", false
 	}

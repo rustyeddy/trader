@@ -83,7 +83,7 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
+func (x *EMACrossADX) Update(c market.OHLC, scale int32) Decision {
 	x.fast.Update(c)
 	x.slow.Update(c)
 	x.adx.Update(c)
