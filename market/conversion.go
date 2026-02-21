@@ -28,7 +28,7 @@ func QuoteToAccountRate(instrument string,
 		}
 		// USD_JPY mid gives JPY per USD
 		// We want USD per JPY
-		return 1.0 / px.Mid(), nil
+		return float64(1.0) / float64(px.Mid()), nil
 	}
 
 	// Case 3: Cross currency (future-proofing)

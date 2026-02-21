@@ -12,7 +12,7 @@ import (
 // for the configured instrument. It's meant as a wiring test.
 type OpenOnceStrategy struct {
 	Instrument string
-	Units      float64
+	Units      market.Units
 
 	opened bool
 }

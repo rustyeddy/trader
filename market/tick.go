@@ -4,28 +4,29 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 )
 
 type TickSource interface {
 	GetTick(ctx context.Context, instrument string) (Tick, error)
 }
 
+type BA struct {
+	Bid Price
+	Ask Price
+}
+
 type Tick struct {
 	Instrument string
-	Time       time.Time
-	Bid        float64
-	Ask        float64
+	Time       Timestamp
+	BA
 }
 
-func (t Tick) Mid() float64 {
-	if t.Bid == 0 && t.Ask == 0 {
-		return 0
-	}
-	return (t.Bid + t.Ask) / 2
+func (t Tick) Mid() Price {
+	mid := Price((int64(t.Bid) + int64(t.Ask)) / 2)
+	return mid
 }
 
-func (t Tick) Spread() float64 {
+func (t Tick) Spread() Price {
 	return t.Ask - t.Bid
 }
 

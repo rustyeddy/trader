@@ -12,8 +12,10 @@ func TestPriceStore_SetGet(t *testing.T) {
 	ps := NewTickStore()
 	p := Tick{
 		Instrument: "EUR_USD",
-		Bid:        1.1,
-		Ask:        1.2,
+		BA: BA{
+			Bid: 11,
+			Ask: 12,
+		},
 	}
 
 	ps.Set(p)

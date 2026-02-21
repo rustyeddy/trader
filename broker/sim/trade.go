@@ -1,25 +1,28 @@
 package sim
 
-import "time"
+import (
+	"github.com/rustyeddy/trader/market"
+	_ "github.com/rustyeddy/trader/market"
+)
 
 type Trade struct {
 	ID         string
 	Instrument string
-	Units      float64
-	EntryPrice float64
-	OpenTime   time.Time
+	Units      market.Units
+	EntryPrice market.Price
+	OpenTime   market.Timestamp
 
-	StopLoss   *float64
-	TakeProfit *float64
+	StopLoss   *market.Price
+	TakeProfit *market.Price
 
 	// Realized
-	ClosePrice float64
-	CloseTime  time.Time
-	RealizedPL float64 // account currency
+	ClosePrice market.Price
+	CloseTime  market.Price
+	RealizedPL market.Cash // account currency
 	Open       bool
 }
 
-func (t *Trade) triggerStopLoss(price float64) bool {
+func (t *Trade) triggerStopLoss(price int32) bool {
 	if t.StopLoss == nil {
 		return false
 	}
@@ -29,7 +32,7 @@ func (t *Trade) triggerStopLoss(price float64) bool {
 	return price >= *t.StopLoss
 }
 
-func (t *Trade) triggerTakeProfit(price float64) bool {
+func (t *Trade) triggerTakeProfit(price int32) bool {
 	if t.TakeProfit == nil {
 		return false
 	}

@@ -10,6 +10,17 @@ type Instrument struct {
 	MarginRate          float64
 }
 
+var InstrumentList = []string{
+	"EURUSD",
+	"GBPUSD",
+	"USDJPY",
+	"USDCHF",
+	"AUDUSD",
+	"USDCAD",
+	"NZDUSD",
+	"XAUUSD",
+}
+
 var Instruments = map[string]*Instrument{
 	"EUR_USD": {
 		Name:                "EUR_USD",

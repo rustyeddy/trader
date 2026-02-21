@@ -1,29 +1,31 @@
 // journal/journal.go
 package journal
 
-import "time"
+import (
+	"github.com/rustyeddy/trader/market"
+)
 
 // This could go into trade or market
 type TradeRecord struct {
 	TradeID    string
 	Instrument string
-	Units      float64
-	EntryPrice float64
-	ExitPrice  float64
-	OpenTime   time.Time
-	CloseTime  time.Time
-	RealizedPL float64
+	Units      market.Units
+	EntryPrice market.Price
+	ExitPrice  market.Price
+	OpenTime   market.Timestamp
+	CloseTime  market.Timestamp
+	RealizedPL market.Cash
 	Reason     string
 }
 
 // This could go into broker
 type EquitySnapshot struct {
-	Time        time.Time
-	Balance     float64
-	Equity      float64
-	MarginUsed  float64
-	FreeMargin  float64
-	MarginLevel float64
+	Time        market.Timestamp
+	Balance     market.Cash
+	Equity      market.Cash
+	MarginUsed  market.Cash
+	FreeMargin  market.Cash
+	MarginLevel market.Cash
 }
 
 type Journal interface {

@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"math"
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
@@ -12,26 +11,33 @@ func TestPriceMid(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		bid      float64
-		ask      float64
-		expected float64
+		bid      market.Price
+		ask      market.Price
+		expected market.Price
 	}{
-		{"simple", 1.0, 3.0, 2.0},
-		{"same", 2.5, 2.5, 2.5},
-		{"zero", 0.0, 0.0, 0.0},
-		{"negative", -2.0, 2.0, 0.0},
-		{"fractional", 1.1, 1.3, 1.2},
+		{"simple", 10, 30, 20},
+		{"same", 25, 25, 25},
+		{"zero", 00, 00, 00},
+		{"negative", -20, 20, 00},
+		{"fractional", 11, 13, 12},
 	}
 
-	const tol = 1e-9
+	const tol = 0
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := market.Tick{Bid: tt.bid, Ask: tt.ask}
+			p := market.Tick{
+				BA: market.BA{Bid: tt.bid, Ask: tt.ask},
+			}
 			got := p.Mid()
-			if math.Abs(got-tt.expected) > tol {
+			v := got - tt.expected
+			if v < 0 {
+				v = -v
+			}
+
+			if v > tol {
 				t.Fatalf("Mid() = %v, expected %v", got, tt.expected)
 			}
 		})

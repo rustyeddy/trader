@@ -5,7 +5,6 @@ import (
 	"encoding/csv"
 	"os"
 	"strconv"
-	"time"
 )
 
 type CSVJournal struct {
@@ -50,12 +49,12 @@ func (j *CSVJournal) RecordTrade(t TradeRecord) error {
 	j.trades.Write([]string{
 		t.TradeID,
 		t.Instrument,
-		f(t.Units),
-		f(t.EntryPrice),
-		f(t.ExitPrice),
-		t.OpenTime.Format(time.RFC3339),
-		t.CloseTime.Format(time.RFC3339),
-		f(t.RealizedPL),
+		t.Units.String(),
+		t.EntryPrice.String(),
+		t.ExitPrice.String(),
+		t.OpenTime.String(),
+		t.CloseTime.String(),
+		t.RealizedPL.String(),
 		t.Reason,
 	})
 	j.trades.Flush()
@@ -64,12 +63,12 @@ func (j *CSVJournal) RecordTrade(t TradeRecord) error {
 
 func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
 	err := j.equity.Write([]string{
-		e.Time.Format(time.RFC3339),
-		f(e.Balance),
-		f(e.Equity),
-		f(e.MarginUsed),
-		f(e.FreeMargin),
-		f(e.MarginLevel),
+		e.Time.String(),
+		e.Balance.String(),
+		e.Equity.String(),
+		e.MarginUsed.String(),
+		e.FreeMargin.String(),
+		e.MarginLevel.String(),
 	})
 	if err != nil {
 		return err

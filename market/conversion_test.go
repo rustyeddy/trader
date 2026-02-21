@@ -80,7 +80,12 @@ func TestQuoteToAccountRate_BaseEqualsAccount(t *testing.T) {
 	}
 
 	ps := &fakePriceSource{
-		price: Tick{Bid: 2.0, Ask: 4.0}, // mid = 3.0
+		price: Tick{
+			BA: BA{
+				Bid: 2.0,
+				Ask: 4.0, // mid = 3.0
+			},
+		},
 	}
 	rate, err := QuoteToAccountRate(instrument, "USD", ps)
 	assert.NoError(t, err)

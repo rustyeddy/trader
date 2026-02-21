@@ -122,8 +122,8 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	}
 
 	closeTime := p.Time
-	if closeTime.IsZero() {
-		closeTime = time.Now()
+	if closeTime == 0 {
+		closeTime = market.Timestamp(time.Now().Unix())
 	}
 
 	if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
@@ -190,7 +190,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	// Close each open trade using its instrument's latest price.
-	var snapshotTime time.Time
+	var snapshotTime market.Timestamp
 	for _, t := range open {
 		p, _ := e.ticks.Get(t.Instrument)
 
@@ -200,10 +200,10 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		}
 
 		closeTime := p.Time
-		if closeTime.IsZero() {
-			closeTime = time.Now()
+		if closeTime == 0 {
+			closeTime = market.Timestamp(time.Now().Unix())
 		}
-		if closeTime.After(snapshotTime) {
+		if closeTime > snapshotTime {
 			snapshotTime = closeTime
 		}
 
@@ -220,8 +220,8 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		return err
 	}
 
-	if snapshotTime.IsZero() {
-		snapshotTime = time.Now()
+	if snapshotTime == 0 {
+		snapshotTime = market.Timestamp(time.Now().Unix())
 	}
 
 	if err := e.journal.RecordEquity(journal.EquitySnapshot{
@@ -336,7 +336,7 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 	return e.enforceMarginLocked()
 }
 
-func (e *Engine) closeTradeLocked(t *Trade, closePrice float64, closeTime time.Time, reason string) error {
+func (e *Engine) closeTradeLocked(t *Trade, closePrice market.Price, closeTime market.Timestamp, reason string) error {
 
 	rate, err := market.QuoteToAccountRate(
 		t.Instrument,

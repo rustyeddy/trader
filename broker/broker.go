@@ -15,24 +15,24 @@ type Broker interface {
 type Account struct {
 	ID          string
 	Currency    string
-	Balance     float64
-	Equity      float64
-	MarginUsed  float64
-	FreeMargin  float64
-	MarginLevel float64
+	Balance     market.Cash
+	Equity      market.Cash
+	MarginUsed  market.Cash
+	FreeMargin  market.Cash
+	MarginLevel market.Cash
 }
 
 // broker/models.go
 type MarketOrderRequest struct {
 	Instrument string
-	Units      float64
-	StopLoss   *float64
-	TakeProfit *float64
+	Units      market.Units
+	StopLoss   *market.Price
+	TakeProfit *market.Price
 }
 
 type OrderFill struct {
 	TradeID    string
 	Instrument string
-	Units      float64
-	Price      float64
+	Units      market.Units
+	market.Price
 }

@@ -32,7 +32,7 @@ func parseEST(s string) (time.Time, error) {
 	return t.UTC(), nil // normalize immediately
 }
 
-func fastPrice(s string) (int32, error) {
+func fastPrice(s string) (Price, error) {
 	// "1.035030" → "1035030"
 	buf := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -44,7 +44,7 @@ func fastPrice(s string) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	return int32(v), nil
+	return Price(v), nil
 }
 
 func bitIsSet(bits []uint64, i int) bool {

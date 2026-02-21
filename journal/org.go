@@ -3,7 +3,6 @@ package journal
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 // FormatTradeOrg renders a TradeRecord as an Org-mode block suitable for pasting into a journal.
@@ -12,8 +11,8 @@ import (
 func FormatTradeOrg(t TradeRecord) string {
 	heading := fmt.Sprintf("** Trade: %s (%s)", t.Instrument, shortID(t.TradeID))
 	// Use RFC3339 for copy/paste friendliness.
-	open := t.OpenTime.UTC().Format(time.RFC3339)
-	close := t.CloseTime.UTC().Format(time.RFC3339)
+	open := t.OpenTime.String()
+	close := t.CloseTime.String()
 
 	var b strings.Builder
 	b.WriteString(heading)
