@@ -16,7 +16,7 @@ func MoneyFromFloat(f float64) Money {
 }
 
 func (m Money) String() string {
-	return fmt.Sprintf("%f", m)
+	return fmt.Sprintf("%f", float64(m))
 }
 
 func (m Money) Float64() float64 {
