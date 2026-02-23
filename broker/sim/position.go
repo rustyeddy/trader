@@ -2,17 +2,18 @@ package sim
 
 import (
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type Position struct {
-	Side  int   // +1 long, -1 short
-	Entry int32 // scaled price
-	Stop  int32 // scaled price
-	Take  int32 // scaled price
+	Side  types.Units // +1 long, -1 short
+	Entry types.Price // scaled price
+	Stop  types.Price // scaled price
+	Take  types.Price // scaled price
 	Open  bool
 }
 
-func (p *Position) CheckExit(c market.OHLC) (exitPrice int32, hit bool) {
+func (p *Position) CheckExit(c market.OHLC) (exitPrice types.Price, hit bool) {
 	if !p.Open {
 		return 0, false
 	}

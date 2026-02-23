@@ -1,28 +1,25 @@
 package sim
 
-import (
-	"github.com/rustyeddy/trader/market"
-	_ "github.com/rustyeddy/trader/market"
-)
+import "github.com/rustyeddy/trader/types"
 
 type Trade struct {
 	ID         string
 	Instrument string
-	Units      market.Units
-	EntryPrice market.Price
-	OpenTime   market.Timestamp
+	Units      types.Units
+	EntryPrice types.Price
+	OpenTime   types.Timestamp
 
-	StopLoss   *market.Price
-	TakeProfit *market.Price
+	StopLoss   *types.Price
+	TakeProfit *types.Price
 
 	// Realized
-	ClosePrice market.Price
-	CloseTime  market.Price
-	RealizedPL market.Cash // account currency
+	ClosePrice types.Price
+	CloseTime  types.Timestamp
+	RealizedPL types.Money // account currency
 	Open       bool
 }
 
-func (t *Trade) triggerStopLoss(price int32) bool {
+func (t *Trade) triggerStopLoss(price types.Price) bool {
 	if t.StopLoss == nil {
 		return false
 	}
@@ -32,7 +29,7 @@ func (t *Trade) triggerStopLoss(price int32) bool {
 	return price >= *t.StopLoss
 }
 
-func (t *Trade) triggerTakeProfit(price int32) bool {
+func (t *Trade) triggerTakeProfit(price types.Price) bool {
 	if t.TakeProfit == nil {
 		return false
 	}
@@ -42,7 +39,7 @@ func (t *Trade) triggerTakeProfit(price int32) bool {
 	return price <= *t.TakeProfit
 }
 
-func (t *Trade) UnrealizedPL(currentPrice float64, quoteToAccount float64) float64 {
-	plQuote := t.Units * (currentPrice - t.EntryPrice)
-	return plQuote * quoteToAccount
+func (t *Trade) UnrealizedPL(currentPrice types.Price, quoteToAccount types.Price) types.Money {
+	plQuote := types.Money(t.Units) * types.Money(currentPrice-t.EntryPrice)
+	return types.Money(plQuote * types.Money(quoteToAccount))
 }

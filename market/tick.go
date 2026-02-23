@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 type TickSource interface {
@@ -11,22 +13,23 @@ type TickSource interface {
 }
 
 type BA struct {
-	Bid Price
-	Ask Price
+	Bid types.Price
+	Ask types.Price
 }
 
 type Tick struct {
 	Instrument string
-	Time       Timestamp
+	Timestamp  types.Timestamp
 	BA
 }
 
-func (t Tick) Mid() Price {
-	mid := Price((int64(t.Bid) + int64(t.Ask)) / 2)
-	return mid
+func (t Tick) Mid() types.Price {
+	sum := int64(t.Bid) + int64(t.Ask)
+	mid := (sum + 1) / 2 // round half up
+	return types.Price(mid)
 }
 
-func (t Tick) Spread() Price {
+func (t Tick) Spread() types.Price {
 	return t.Ask - t.Bid
 }
 

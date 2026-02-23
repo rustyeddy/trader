@@ -6,13 +6,14 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // OpenOnceStrategy opens a single market order the first time it sees a tick
 // for the configured instrument. It's meant as a wiring test.
 type OpenOnceStrategy struct {
 	Instrument string
-	Units      market.Units
+	Units      types.Units
 
 	opened bool
 }

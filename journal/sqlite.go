@@ -39,7 +39,7 @@ func (j *SQLite) RecordEquity(e EquitySnapshot) error {
 		INSERT INTO equity
 		(time, balance, equity, margin_used, free_margin, margin_level)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		e.Time, e.Balance, e.Equity, e.MarginUsed, e.FreeMargin, e.MarginLevel,
+		e.Timestamp, e.Balance, e.Equity, e.MarginUsed, e.FreeMargin, e.MarginLevel,
 	)
 	return err
 }

@@ -3,7 +3,6 @@ package backtest
 import (
 	"fmt"
 	"io"
-	"time"
 )
 
 func PrintBacktestRun(w io.Writer, r BacktestRun) {
@@ -12,7 +11,7 @@ func PrintBacktestRun(w io.Writer, r BacktestRun) {
 	fmt.Fprintln(w, "==================================================")
 
 	fmt.Fprintf(w, "Run ID:        %s\n", r.RunID)
-	fmt.Fprintf(w, "Created:       %s\n", r.Created.Format(time.RFC3339))
+	fmt.Fprintf(w, "Created:       %s\n", r.Created.Time())
 	fmt.Fprintf(w, "Strategy:      %s\n", r.Strategy)
 	fmt.Fprintf(w, "Instrument:    %s\n", r.Instrument)
 	fmt.Fprintf(w, "Timeframe:     %s\n", r.Timeframe)
@@ -25,8 +24,8 @@ func PrintBacktestRun(w io.Writer, r BacktestRun) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Period")
 	fmt.Fprintln(w, "--------------------------------------------------")
-	fmt.Fprintf(w, "Start:         %s\n", r.Start.Format(time.RFC3339))
-	fmt.Fprintf(w, "End:           %s\n", r.End.Format(time.RFC3339))
+	fmt.Fprintf(w, "Start:         %s\n", r.Start.Time())
+	fmt.Fprintf(w, "End:           %s\n", r.End.Time())
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Strategy Configuration")

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 // GetTrade returns a single trade record by ID.
@@ -36,7 +38,7 @@ func (j *SQLite) GetTrade(tradeID string) (TradeRecord, error) {
 }
 
 // ListTradesClosedBetween returns trades whose close_time is within [start, end).
-func (j *SQLite) ListTradesClosedBetween(start, end time.Time) ([]TradeRecord, error) {
+func (j *SQLite) ListTradesClosedBetween(start, end types.Timestamp) ([]TradeRecord, error) {
 	rows, err := j.db.Query(`
 		SELECT trade_id, instrument, units, entry_price, exit_price, open_time, close_time, realized_pl, reason
 		FROM trades

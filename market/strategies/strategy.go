@@ -5,6 +5,7 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Strategy is the interface for candle-based strategies.
@@ -30,10 +31,10 @@ type Price interface {
 }
 
 type StrategyConfig struct {
-	Balance float64
-	Stop    int32 // pips
-	Take    int32 // pips
-	RR      float64
+	Balance types.Money
+	Stop    types.Price // pips
+	Take    types.Price // pips
+	RR      types.Rate
 
 	File string // string to the file
 }

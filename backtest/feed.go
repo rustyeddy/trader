@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CSVTicksFeed reads canonical tick CSV rows:
@@ -24,13 +25,13 @@ import (
 type CSVTicksFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from time.Time
-	to   time.Time
+	from types.Timestamp
+	to   types.Timestamp
 
 	sawFirst bool
 }
 
-func NewCSVTicksFeed(path string, from, to time.Time) (*CSVTicksFeed, error) {
+func NewCSVTicksFeed(path string, from, to types.Timestamp) (*CSVTicksFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func (f *CSVTicksFeed) Next() (market.Tick, bool, error) {
 		if !ok {
 			continue
 		}
-		if !inRange(p.Time, f.from, f.to) {
+		if !inRange(p.Timestamp, f.from, f.to) {
 			continue
 		}
 		return p, true, nil
@@ -104,6 +105,7 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 		t = t2
 	}
 
+	tstamp := types.Timestamp(t.Unix())
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
 		return market.Tick{}, false, nil
@@ -118,10 +120,17 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 		return market.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return market.Tick{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
+	return market.Tick{
+		Timestamp:  tstamp,
+		Instrument: inst,
+		BA: market.BA{
+			Bid: types.Price(bid),
+			Ask: types.Price(ask),
+		},
+	}, true, nil
 }
 
-func inRange(t, from, to time.Time) bool {
+func inRange(t, from, to types.Timestamp) bool {
 	if !from.IsZero() && t.Before(from) {
 		return false
 	}

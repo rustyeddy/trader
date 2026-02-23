@@ -6,25 +6,27 @@ import (
 	"os"
 	"text/template"
 	"time"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 // Result is a lightweight summary of a backtest run.
 type Result struct {
-	Balance float64
-	Equity  float64
+	Balance types.Money
+	Equity  types.Money
 
 	Trades int
 	Wins   int
 	Losses int
 
-	Start time.Time
-	End   time.Time
+	Start types.Timestamp
+	End   types.Timestamp
 }
 
 // BacktestRunRow mirrors backtest_runs table.
 type BacktestRun struct {
 	RunID     string
-	Created   time.Time
+	Created   types.Timestamp
 	Timeframe string
 	Dataset   string
 
@@ -34,13 +36,13 @@ type BacktestRun struct {
 	Config     []byte // strategy config
 
 	// Risk Management
-	RiskPct  float64 // 0.005 (0.5%)
-	StopPips float64 // e.g. 20
-	RR       float64 // take-profit multiple of risk, e.g. 2.0
+	RiskPct  types.Rate  // 0.005 (0.5%)
+	StopPips types.Price // e.g. 20
+	RR       types.Rate  // take-profit multiple of risk, e.g. 2.0
 
 	// Account and price timeframe
-	Start time.Time
-	End   time.Time
+	Start types.Timestamp
+	End   types.Timestamp
 
 	// Results
 	Trades int
@@ -48,15 +50,15 @@ type BacktestRun struct {
 	Losses int
 
 	// account info
-	StartBalance float64
-	EndBalance   float64
+	StartBalance types.Money
+	EndBalance   types.Money
 
 	// Derived / computed in Go
-	NetPL        float64
-	ReturnPct    float64
-	WinRate      float64
-	ProfitFactor float64
-	MaxDDPct     float64
+	NetPL        types.Money
+	ReturnPct    types.Rate
+	WinRate      types.Rate
+	ProfitFactor types.Rate
+	MaxDDPct     types.Rate
 
 	GitCommit string
 	OrgPath   string

@@ -7,6 +7,7 @@ import (
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -17,9 +18,13 @@ var CMDBacktestEMACross = &cobra.Command{
 }
 
 var (
-	stopPips int32 = 20
-	takePips int32 = 40
-	units    int32 = 1000
+	stopPips32 int32 = 20
+	takePips32 int32 = 40
+	units32    int32 = 1000
+
+	stopPips types.Price
+	takePips types.Price
+	units    types.Units
 
 	cfg = strategies.EMACrossConfig{}
 )
@@ -29,7 +34,7 @@ func init() {
 		Balance: 1000,
 		Stop:    20,
 		Take:    40,
-		RR:      0.02,
+		RR:      types.RateFromFloat(0.02),
 		File:    "testdata/DAT_ASCII_EURUSD_M1_2025.csv",
 	}
 	cfg.StrategyConfig = scfg
@@ -38,13 +43,17 @@ func init() {
 	cmd.Flags().StringVar(&cfg.File, "file", "", "Path to Dukascopy-style M1 candles file (semicolon-separated)")
 	cmd.Flags().IntVar(&cfg.FastPeriod, "fast", 12, "Fast EMA period")
 	cmd.Flags().IntVar(&cfg.SlowPeriod, "slow", 26, "Slow EMA period")
-	cmd.Flags().Int32Var(&stopPips, "stop", stopPips, "Stop loss in pips")
-	cmd.Flags().Int32Var(&takePips, "take", takePips, "Take profit in pips")
-	cmd.Flags().Int32Var(&units, "units", units, "Position size in units (e.g., 1000 for 1 micro-lot EUR/USD)")
+	cmd.Flags().Int32Var(&stopPips32, "stop", stopPips32, "Stop loss in pips")
+	cmd.Flags().Int32Var(&takePips32, "take", takePips32, "Take profit in pips")
+	cmd.Flags().Int32Var(&units32, "units", units32, "Position size in units (e.g., 1000 for 1 micro-lot EUR/USD)")
 	cmd.Flags().Float64Var(&cfg.MinSpread, "min-spread", 0, "Min |fast-slow| required to signal; 0 disables")
 }
 
 func RunEMACross(cmd *cobra.Command, args []string) error {
+	stopPips := types.Price(stopPips32)
+	takePips := types.Price(takePips32)
+	units := types.Units(units32)
+
 	file := cfg.File
 	if file == "" {
 		file = "../testdata/DAT_ASCII_EURUSD_M1_2025.csv"
@@ -68,7 +77,7 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("unknown instrument %q", h1.Name)
 	}
-	pipScaled, err := bt.PipScaled(h1.Scale, meta.PipLocation)
+	pipScaled := bt.PipScaled(meta.PipLocation)
 	if err != nil {
 		return err
 	}
@@ -98,15 +107,15 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	start := h1.Time(0)
-	end := h1.Time(len(h1.Candles) - 1)
+	start := types.FromTime(h1.Time(0))
+	end := types.FromTime(h1.Time(len(h1.Candles) - 1))
 
 	run := bt.BacktestRun{
 		Timeframe:    "H1",
 		Dataset:      file,
 		Instrument:   h1.Name,
 		Strategy:     strat.Name(),
-		StopPips:     float64(stopPips),
+		StopPips:     types.Price(stopPips),
 		RR:           cfg.RR,
 		Start:        start,
 		End:          end,
@@ -118,10 +127,18 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 		NetPL:        eng.Balance - cfg.Balance,
 	}
 	if cfg.Balance != 0 {
-		run.ReturnPct = (run.NetPL / cfg.Balance) * 100
+		v, err := types.MulDiv64(int64(run.NetPL), int64(cfg.Balance), int64(types.MoneyScale))
+		if err != nil {
+			return err
+		}
+		run.ReturnPct = types.Rate(v * 100)
 	}
 	if run.Trades > 0 {
-		run.WinRate = (float64(run.Wins) / float64(run.Trades)) * 100
+		v, err := types.MulDiv64(int64(run.Wins), int64(run.Trades), int64(1))
+		if err != nil {
+			return err
+		}
+		run.WinRate = types.Rate(v * 100)
 	}
 
 	bt.PrintBacktestRun(os.Stdout, run)
@@ -131,10 +148,10 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 type emaCrossAdapter struct {
 	S *strategies.EMACross
 
-	Units     int32
-	StopPips  int32
-	TakePips  int32
-	PipScaled int32
+	Units     types.Units
+	StopPips  types.Price
+	TakePips  types.Price
+	PipScaled types.Price
 }
 
 func (a *emaCrossAdapter) Name() string { return a.S.Name() }
@@ -151,8 +168,8 @@ func (a *emaCrossAdapter) OnBar(ctx *bt.CandleContext, c market.OHLC) *bt.OrderR
 	}
 
 	entry := c.C
-	stopDist := a.StopPips * a.PipScaled
-	takeDist := a.TakePips * a.PipScaled
+	stopDist := a.StopPips * types.Price(a.PipScaled)
+	takeDist := a.TakePips * types.Price(a.PipScaled)
 
 	req := &bt.OrderRequest{
 		Units:  a.Units,

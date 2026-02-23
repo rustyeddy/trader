@@ -1,4 +1,4 @@
-package id
+package types
 
 import (
 	cryptoRand "crypto/rand"
@@ -21,7 +21,7 @@ func init() {
 	// We use ulid.Monotonic so IDs generated within the same millisecond remain
 	// lexicographically increasing.
 	var seed int64
-	_ = binary.Read(cryptoRand.Reader, binary.LittleEndian, &seed)
+	binary.Read(cryptoRand.Reader, binary.LittleEndian, &seed)
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}

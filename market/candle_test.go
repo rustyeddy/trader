@@ -23,7 +23,7 @@ func TestIterator(t *testing.T) {
 	expected := OHLC{O: 1035030, H: 1035140, L: 1035030, C: 1035140}
 	it := cs.Iterator()
 	it.Next()
-	assert.Equal(t, int64(1735768800), it.StartTime())
+	assert.Equal(t, Timestamp(1735768800), it.StartTime())
 
 	ca := it.Candle()
 	assert.Equal(t, expected, ca)

@@ -12,25 +12,27 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 type OHLC struct {
-	O Price
-	H Price
-	L Price
-	C Price
+	O types.Price
+	H types.Price
+	L types.Price
+	C types.Price
 }
 
 type Candle struct {
 	Instrument string
-	TimeStamp  uint64
+	TimeStamp  types.Timestamp
 	OHLC
 }
 
 type CandleSet struct {
 	*Instrument
-	Start     int64 // unix seconds for candle open
-	Timeframe int32
+	Start     types.Timestamp // unix seconds for candle open
+	Timeframe types.Timestamp
 	Scale     int32
 	Source    string
 	Candles   []OHLC
@@ -88,7 +90,11 @@ func NewCandleSet(fname string) (cs *CandleSet, err error) {
 }
 
 func (cs *CandleSet) Time(idx int) time.Time {
-	return time.Unix(cs.Start+int64(idx)*int64(cs.Timeframe), 0).UTC()
+	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
+}
+
+func (cs *CandleSet) Timestamp(idx int) types.Timestamp {
+	return types.Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
 func (cs *CandleSet) ParseFilename(fname string) (err error) {
@@ -118,14 +124,14 @@ func (cs *CandleSet) ParseFilename(fname string) (err error) {
 
 	}
 
-	cs.Start = time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	cs.Start = types.Timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix())
 
 	return err
 }
 
 // scanBounds finds min/max timestamps (UTC unix seconds) in one pass.
 // This is robust even if the file has weird lines or isn’t strictly sorted.
-func (cs *CandleSet) scanBounds() (minTs, maxTs int64, err error) {
+func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
 	f, err := os.Open(cs.Filepath)
 	if err != nil {
 		return 0, 0, err
@@ -187,9 +193,9 @@ func (cs *CandleSet) buildDenseFromFile() error {
 		return err
 	}
 
-	tf := int64(cs.Timeframe)
-	start := (minTs / tf) * tf
-	end := (maxTs / tf) * tf
+	tf := types.Timestamp(cs.Timeframe)
+	start := types.Timestamp((minTs / tf) * tf)
+	end := types.Timestamp((maxTs / tf) * tf)
 
 	n := int((end-start)/tf) + 1
 
@@ -239,7 +245,7 @@ func (cs *CandleSet) buildDenseFromFile() error {
 			continue
 		}
 
-		prices := make([]Price, 4)
+		prices := make([]types.Price, 4)
 		for i := 1; i < 5; i++ {
 			if prices[i-1], err = fastPrice(parts[i]); err != nil {
 				err = fmt.Errorf("failed to convert %s to int32\n", parts[i])
@@ -310,7 +316,7 @@ func (cs *CandleSet) BuildGapReport() {
 func (cs *CandleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe) // seconds per bar (60 for M1, 3600 for H1)
 
-	startUnix := cs.Start + int64(startIdx)*tf
+	startUnix := int64(cs.Start) + int64(startIdx)*tf
 	t := time.Unix(startUnix, 0).UTC()
 	wd := t.Weekday()
 
@@ -381,11 +387,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		minValid = 60
 	}
 
-	tfIn := int64(cs.Timeframe) // 60
-	tfOut := int64(3600)
+	tfIn := cs.Timeframe // 60
+	tfOut := types.Timestamp(3600)
 
 	start := (cs.Start / tfOut) * tfOut
-	end := cs.Start + int64(len(cs.Candles)-1)*tfIn
+	end := cs.Start + types.Timestamp(len(cs.Candles)-1)*tfIn
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
@@ -399,11 +405,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	}
 
 	for h := 0; h < nHours; h++ {
-		hourStart := start + int64(h)*tfOut
+		hourStart := start + types.Timestamp(h)*tfOut
 		firstIdx := int((hourStart - cs.Start) / tfIn)
 
 		validCount := 0
-		var o, hi, lo, cl Price
+		var o, hi, lo, cl types.Price
 		firstSet := false
 
 		for m := 0; m < 60; m++ {
@@ -499,7 +505,7 @@ func (cs *CandleSet) Filename() string {
 	if err != nil {
 		return "unknown"
 	}
-	year := time.Unix(cs.Start, 0).UTC().Year()
+	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 	fname += "-" + strconv.Itoa(year)
 	fname += "-" + tfstr
 	return fname
@@ -549,7 +555,7 @@ func (cs *CandleSet) WriteCSV(path string) error {
 	hasValid := len(cs.Valid) > 0
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := cs.Start + int64(i)*step
+		openUnix := int64(cs.Start) + int64(i)*int64(step)
 		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
 
 		c := cs.Candles[i]
@@ -583,16 +589,16 @@ func (cs *CandleSet) WriteCSV(path string) error {
 
 // timeframeSeconds converts your int32 timeframe to seconds.
 // If your Timeframe is already "seconds per candle", just return int64(tf).
-func timeframeSeconds(tf int32) int64 {
+func timeframeSeconds(tf types.Timestamp) types.Timestamp {
 	// Many codebases store timeframe as seconds (e.g., 60, 300, 3600).
 	// If yours uses an enum (M1/H1/D1), replace this mapping accordingly.
-	return int64(tf)
+	return types.Timestamp(tf)
 }
 
 //	func PriceToFloat(price int32, scale int32) float64 {
 //		return float64(price) / math.Pow10(int(scale))
 //	}
-func formatNumber(price Price, scale int32) string {
+func formatNumber(price types.Price, scale int32) string {
 	// For floats, this uses default formatting; adjust if you need fixed decimals.
 	return fmt.Sprintf("%f", float64(price)/float64(scale))
 }
@@ -614,7 +620,7 @@ func (cs *CandleSet) WriteCSVTo(w io.Writer) error {
 	hasValid := len(cs.Valid) > 0
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := cs.Start + int64(i)*step
+		openUnix := int64(cs.Start) + int64(i)*int64(step)
 		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
 
 		c := cs.Candles[i]
@@ -673,10 +679,14 @@ func (it *Iterator) Index() int {
 	return it.idx
 }
 
+func (it *Iterator) Timestamp() types.Timestamp {
+	return it.cs.Timestamp(it.idx)
+}
+
 func (it *Iterator) Time() time.Time {
 	return it.cs.Time(it.idx)
 }
 
-func (it *Iterator) StartTime() int64 {
+func (it *Iterator) StartTime() types.Timestamp {
 	return it.cs.Start
 }

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/market/strategies"
-	"github.com/rustyeddy/trader/broker/sim"
+	"github.com/rustyeddy/trader/types"
 )
 
 // TickFeed yields broker.Price rows (typically from a dataset) one at a time.
@@ -53,7 +54,7 @@ func (r *Runner) Run(ctx context.Context, j *journal.SQLite) (Result, error) {
 	}
 	defer r.Feed.Close()
 
-	var start, end time.Time
+	var start, end types.Timestamp
 
 	for {
 		p, ok, err := r.Feed.Next()
@@ -64,11 +65,11 @@ func (r *Runner) Run(ctx context.Context, j *journal.SQLite) (Result, error) {
 			break
 		}
 
-		if start.IsZero() || p.Time.Before(start) {
-			start = p.Time
+		if start.IsZero() || p.Timestamp.Before(start) {
+			start = p.Timestamp
 		}
-		if end.IsZero() || p.Time.After(end) {
-			end = p.Time
+		if end.IsZero() || p.Timestamp.After(end) {
+			end = p.Timestamp
 		}
 
 		if err := r.Engine.UpdatePrice(p); err != nil {

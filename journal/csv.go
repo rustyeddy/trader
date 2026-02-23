@@ -63,7 +63,7 @@ func (j *CSVJournal) RecordTrade(t TradeRecord) error {
 
 func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
 	err := j.equity.Write([]string{
-		e.Time.String(),
+		e.Timestamp.String(),
 		e.Balance.String(),
 		e.Equity.String(),
 		e.MarginUsed.String(),

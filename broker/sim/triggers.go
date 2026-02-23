@@ -1,7 +1,11 @@
 // sim/triggers.go
 package sim
 
-func hitStopLoss(t *Trade, price float64) bool {
+import (
+	"github.com/rustyeddy/trader/types"
+)
+
+func hitStopLoss(t *Trade, price types.Price) bool {
 	if t.StopLoss == nil {
 		return false
 	}
@@ -11,7 +15,7 @@ func hitStopLoss(t *Trade, price float64) bool {
 	return price >= *t.StopLoss
 }
 
-func hitTakeProfit(t *Trade, price float64) bool {
+func hitTakeProfit(t *Trade, price types.Price) bool {
 	if t.TakeProfit == nil {
 		return false
 	}

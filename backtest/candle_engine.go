@@ -2,10 +2,9 @@ package backtest
 
 import (
 	"fmt"
-	"math"
-	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CandleStrategy is called once per *valid* candle (Iterator() skips invalid bars).
@@ -30,41 +29,41 @@ const (
 
 type OrderRequest struct {
 	Side   Side
-	Units  int32 // base units, e.g. 1000
-	Stop   int32 // scaled price (0 = none)
-	Take   int32 // scaled price (0 = none)
+	Units  types.Units // base units, e.g. 1000
+	Stop   types.Price // scaled price (0 = none)
+	Take   types.Price // scaled price (0 = none)
 	Reason string
 }
 
 type CandleContext struct {
-	CS      *market.CandleSet
-	Idx     int
-	Time    time.Time
-	GapBars int // missing bars between this and previous valid bar
+	CS        *market.CandleSet
+	Idx       int
+	Timestamp types.Timestamp
+	GapBars   int // missing bars between this and previous valid bar
 
 	Pos     *Position
-	Balance *float64
+	Balance *types.Money
 }
 
 type Position struct {
 	Open       bool
 	Side       Side
-	EntryPrice int32
-	Units      int32
-	Stop       int32
-	Take       int32
+	EntryPrice types.Price
+	Units      types.Units
+	Stop       types.Price
+	Take       types.Price
 	EntryIdx   int
-	EntryTime  time.Time
+	EntryTime  types.Timestamp
 }
 
 type Trade struct {
-	EntryTime  time.Time
-	ExitTime   time.Time
+	EntryTime  types.Timestamp
+	ExitTime   types.Timestamp
 	Side       Side
-	EntryPrice int32
-	ExitPrice  int32
-	Units      int32
-	PNL        float64 // account currency (best-effort)
+	EntryPrice types.Price
+	ExitPrice  types.Price
+	Units      types.Units
+	PNL        types.Money // account currency (best-effort)
 	Reason     string
 }
 
@@ -72,12 +71,12 @@ type CandleEngine struct {
 	CS         *market.CandleSet
 	AccountCCY string
 
-	Balance float64
+	Balance types.Money
 	Pos     Position
 	Trades  []Trade
 }
 
-func NewCandleEngine(cs *market.CandleSet, startingBalance float64, accountCCY string) *CandleEngine {
+func NewCandleEngine(cs *market.CandleSet, startingBalance types.Money, accountCCY string) *CandleEngine {
 	return &CandleEngine{
 		CS:         cs,
 		AccountCCY: accountCCY,
@@ -103,7 +102,7 @@ func (e *CandleEngine) Run(strat CandleStrategy) error {
 
 	for it.Next() {
 		idx := it.Index()
-		t := it.Time()
+		t := it.Timestamp()
 		c := it.Candle()
 
 		gapBars := 0
@@ -113,12 +112,12 @@ func (e *CandleEngine) Run(strat CandleStrategy) error {
 		prevIdx = idx
 
 		ctx := &CandleContext{
-			CS:      e.CS,
-			Idx:     idx,
-			Time:    t,
-			GapBars: gapBars,
-			Pos:     &e.Pos,
-			Balance: &e.Balance,
+			CS:        e.CS,
+			Idx:       idx,
+			Timestamp: t,
+			GapBars:   gapBars,
+			Pos:       &e.Pos,
+			Balance:   &e.Balance,
 		}
 
 		// 1) Handle exits on this bar.
@@ -147,7 +146,7 @@ func (e *CandleEngine) Run(strat CandleStrategy) error {
 	return nil
 }
 
-func (e *CandleEngine) openPosition(idx int, t time.Time, c market.OHLC, req *OrderRequest) {
+func (e *CandleEngine) openPosition(idx int, t types.Timestamp, c market.OHLC, req *OrderRequest) {
 	// Fill model: enter at bar close.
 	entry := c.C
 
@@ -163,7 +162,7 @@ func (e *CandleEngine) openPosition(idx int, t time.Time, c market.OHLC, req *Or
 	}
 }
 
-func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
+func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason string) {
 	p := e.Pos
 	e.Pos.Open = false
 
@@ -183,7 +182,7 @@ func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
 		}
 	}
 
-	e.Balance += pnlAcct
+	e.Balance += types.Money(pnlAcct)
 	e.Trades = append(e.Trades, Trade{
 		EntryTime:  p.EntryTime,
 		ExitTime:   t,
@@ -191,14 +190,14 @@ func (e *CandleEngine) closePosition(t time.Time, exit int32, reason string) {
 		EntryPrice: p.EntryPrice,
 		ExitPrice:  exit,
 		Units:      p.Units,
-		PNL:        pnlAcct,
+		PNL:        types.Money(pnlAcct),
 		Reason:     reason,
 	})
 }
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p Position, c market.OHLC) (exitPx int32, reason string, hit bool) {
+func checkExit(p Position, c market.OHLC) (exitPx types.Price, reason string, hit bool) {
 	if !p.Open {
 		return 0, "", false
 	}
@@ -237,19 +236,10 @@ func checkExit(p Position, c market.OHLC) (exitPx int32, reason string, hit bool
 
 // PipScaled returns the pip size in *scaled* int32 units, based on the instrument pip location.
 // Example: EUR_USD pipLocation=-4, scale=1_000_000 => pipScaled=100.
-func PipScaled(scale int32, pipLocation int) (int32, error) {
-	if scale <= 0 {
-		return 0, fmt.Errorf("invalid scale %d", scale)
+func PipScaled(pipLocation int) types.Price {
+	pow := int64(1)
+	for i := 0; i < -pipLocation; i++ {
+		pow *= 10
 	}
-	// pipLocation is negative for FX.
-	if pipLocation >= 0 {
-		// Not expected for FX in our metadata.
-		return 0, fmt.Errorf("unsupported pipLocation %d", pipLocation)
-	}
-
-	den := int32(math.Pow10(-pipLocation))
-	if den <= 0 {
-		return 0, fmt.Errorf("bad pipLocation %d", pipLocation)
-	}
-	return scale / den, nil
+	return types.Price(types.PriceScale / pow)
 }

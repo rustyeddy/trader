@@ -1,13 +1,13 @@
 package sim
 
-import "github.com/rustyeddy/trader/market"
+import "github.com/rustyeddy/trader/types"
 
-func pnlUnits(side int, entry, exit int32) int64 {
+func pnlUnits(side int, entry, exit int32) types.Units {
 	// positive is profit in scaled price units
-	return int64(side) * int64(exit-entry)
+	return types.Units(side) * types.Units(exit-entry)
 }
 
-func UnrealizedPL(t Trade, currentPrice market.Price, quoteToAccount market.Price) market.Cash {
-	plQuote := t.Units * (currentPrice - t.EntryPrice)
-	return Cash(plQuote * quoteToAccount)
+func UnrealizedPL(t Trade, currentPrice types.Price, quoteToAccount types.Rate) types.Money {
+	plQuote := types.Money(t.Units) * types.Money(currentPrice-t.EntryPrice)
+	return types.Money(int64(plQuote) * int64(quoteToAccount))
 }

@@ -1,7 +1,10 @@
 // Package indicators provides technical analysis indicators for trading
 package indicators
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 // Indicator computes a single streaming value from candles.
 // It is deterministic and safe to use in live, replay, and backtests.
@@ -36,5 +39,5 @@ type Float64s interface {
 }
 
 type Price interface {
-	Price() market.Price
+	Price() types.Price
 }

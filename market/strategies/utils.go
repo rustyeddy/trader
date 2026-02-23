@@ -1,6 +1,9 @@
 package strategies
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 func abs(x float64) float64 {
 	if x < 0 {
@@ -10,6 +13,6 @@ func abs(x float64) float64 {
 }
 
 func mkClose(scale int32, close float64) market.OHLC {
-	toP := func(x float64) market.Price { return market.Price(x*float64(scale) + 0.5) }
+	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
 	return market.OHLC{C: toP(close)}
 }

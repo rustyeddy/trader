@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/broker"
-	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type Engine struct {
@@ -66,7 +66,7 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRe
 		fillPrice = p.Bid
 	}
 
-	id := id.New()
+	id := types.New()
 
 	trade := &Trade{
 		ID:         id,
@@ -75,7 +75,7 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRe
 		EntryPrice: fillPrice,
 		StopLoss:   req.StopLoss,
 		TakeProfit: req.TakeProfit,
-		OpenTime:   p.Time,
+		OpenTime:   p.Timestamp,
 		Open:       true,
 	}
 	e.trades[id] = trade
@@ -121,9 +121,9 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 		closePrice = p.Ask
 	}
 
-	closeTime := p.Time
+	closeTime := p.Timestamp
 	if closeTime == 0 {
-		closeTime = market.Timestamp(time.Now().Unix())
+		closeTime = types.Timestamp(time.Now().Unix())
 	}
 
 	if err := e.closeTradeLocked(t, closePrice, closeTime, reason); err != nil {
@@ -139,7 +139,7 @@ func (e *Engine) CloseTrade(ctx context.Context, tradeID string, reason string) 
 	}
 
 	if err := e.journal.RecordEquity(journal.EquitySnapshot{
-		Time:        closeTime,
+		Timestamp:   closeTime,
 		Balance:     e.acct.Balance,
 		Equity:      e.acct.Equity,
 		MarginUsed:  e.acct.MarginUsed,
@@ -190,7 +190,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	// Close each open trade using its instrument's latest price.
-	var snapshotTime market.Timestamp
+	var snapshotTime types.Timestamp
 	for _, t := range open {
 		p, _ := e.ticks.Get(t.Instrument)
 
@@ -199,9 +199,9 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 			closePrice = p.Ask
 		}
 
-		closeTime := p.Time
+		closeTime := p.Timestamp
 		if closeTime == 0 {
-			closeTime = market.Timestamp(time.Now().Unix())
+			closeTime = types.Timestamp(time.Now().Unix())
 		}
 		if closeTime > snapshotTime {
 			snapshotTime = closeTime
@@ -221,11 +221,11 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	if snapshotTime == 0 {
-		snapshotTime = market.Timestamp(time.Now().Unix())
+		snapshotTime = types.Timestamp(time.Now().Unix())
 	}
 
 	if err := e.journal.RecordEquity(journal.EquitySnapshot{
-		Time:        snapshotTime,
+		Timestamp:   snapshotTime,
 		Balance:     e.acct.Balance,
 		Equity:      e.acct.Equity,
 		MarginUsed:  e.acct.MarginUsed,
@@ -263,11 +263,7 @@ func (e *Engine) Revalue() error {
 			mark = p.Ask
 		}
 
-		rate, err := market.QuoteToAccountRate(
-			t.Instrument,
-			e.acct.Currency,
-			e,
-		)
+		rate, err := e.acct.QuoteToRate(context.TODO(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
@@ -306,7 +302,7 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 			reason = "TakeProfit"
 		}
 		if reason != "" {
-			if err := e.closeTradeLocked(t, mark, p.Time, reason); err != nil {
+			if err := e.closeTradeLocked(t, mark, p.Timestamp, reason); err != nil {
 				return err
 			}
 		}
@@ -321,7 +317,7 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 	}
 
 	err := e.journal.RecordEquity(journal.EquitySnapshot{
-		Time:        p.Time,
+		Timestamp:   p.Timestamp,
 		Balance:     e.acct.Balance,
 		Equity:      e.acct.Equity,
 		MarginUsed:  e.acct.MarginUsed,
@@ -336,13 +332,9 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 	return e.enforceMarginLocked()
 }
 
-func (e *Engine) closeTradeLocked(t *Trade, closePrice market.Price, closeTime market.Timestamp, reason string) error {
+func (e *Engine) closeTradeLocked(t *Trade, closePrice types.Price, closeTime types.Timestamp, reason string) error {
 
-	rate, err := market.QuoteToAccountRate(
-		t.Instrument,
-		e.acct.Currency,
-		e,
-	)
+	rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
 	if err != nil {
 		return err
 	}
@@ -389,11 +381,7 @@ func (e *Engine) revalueLocked() error {
 			mark = p.Ask
 		}
 
-		rate, err := market.QuoteToAccountRate(
-			t.Instrument,
-			e.acct.Currency,
-			e,
-		)
+		rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
@@ -406,7 +394,7 @@ func (e *Engine) revalueLocked() error {
 }
 
 func (e *Engine) recomputeMarginLocked() error {
-	var used float64
+	var used types.Money
 
 	for _, t := range e.trades {
 		if !t.Open {
@@ -418,21 +406,16 @@ func (e *Engine) recomputeMarginLocked() error {
 			return err
 		}
 
-		rate, err := market.QuoteToAccountRate(
-			t.Instrument,
-			e.acct.Currency,
-			e,
-		)
+		rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
 
-		used += TradeMargin(
-			t.Units,
-			p.Mid(), // margin uses mid
-			t.Instrument,
-			rate,
-		)
+		u, err := broker.TradeMargin(t.Units, p.Mid(), t.Instrument, rate)
+		if err != nil {
+			return err
+		}
+		used += u
 	}
 
 	e.acct.MarginUsed = used
@@ -459,7 +442,7 @@ func (e *Engine) enforceMarginLocked() error {
 
 		// Find worst open trade
 		var worst *Trade
-		var worstPL float64
+		var worstPL types.Money
 
 		for _, t := range e.trades {
 			if !t.Open {
@@ -472,11 +455,10 @@ func (e *Engine) enforceMarginLocked() error {
 				mark = p.Ask
 			}
 
-			rate, _ := market.QuoteToAccountRate(
-				t.Instrument,
-				e.acct.Currency,
-				e,
-			)
+			rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
+			if err != nil {
+				return err
+			}
 
 			pl := UnrealizedPL(*t, mark, rate)
 
@@ -497,7 +479,7 @@ func (e *Engine) enforceMarginLocked() error {
 			closePrice = p.Ask
 		}
 
-		if err := e.closeTradeLocked(worst, closePrice, p.Time, "LIQUIDATION"); err != nil {
+		if err := e.closeTradeLocked(worst, closePrice, p.Timestamp, "LIQUIDATION"); err != nil {
 			return err
 		}
 
