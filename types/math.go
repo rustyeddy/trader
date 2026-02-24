@@ -14,6 +14,10 @@ func MulDiv64(a, b, den int64) (int64, error) {
 	}
 
 	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	// bits.Div64 panics if hi >= den (quotient overflows uint64); catch it early.
+	if hi >= uint64(den) {
+		return 0, fmt.Errorf("MulDiv64Ceil: overflow result")
+	}
 	q, r := bits.Div64(hi, lo, uint64(den))
 
 	// If remainder != 0, bump q by 1 (ceiling)
