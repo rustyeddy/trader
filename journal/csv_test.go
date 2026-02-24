@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -55,15 +56,20 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 	open := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	closeT := time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)
 
+	units := types.Units(123456)
+	entryPrice := types.PriceFromFloat(1.2345678)
+	exitPrice := types.PriceFromFloat(1.3456789)
+	realizedPL := types.MoneyFromFloat(-12.5)
+
 	err = j.RecordTrade(TradeRecord{
 		TradeID:    "T1",
 		Instrument: "EUR_USD",
-		Units:      123.456,
-		EntryPrice: 1.2345678,
-		ExitPrice:  1.3456789,
-		OpenTime:   open,
-		CloseTime:  closeT,
-		RealizedPL: -12.5,
+		Units:      units,
+		EntryPrice: entryPrice,
+		ExitPrice:  exitPrice,
+		OpenTime:   types.FromTime(open),
+		CloseTime:  types.FromTime(closeT),
+		RealizedPL: realizedPL,
 		Reason:     "test",
 	})
 	assert.NoError(t, err)
@@ -82,12 +88,12 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 	want := []string{
 		"T1",
 		"EUR_USD",
-		"123.456000",
-		"1.234568",
-		"1.345679",
-		open.Format(time.RFC3339),
-		closeT.Format(time.RFC3339),
-		"-12.500000",
+		units.String(),
+		entryPrice.String(),
+		exitPrice.String(),
+		types.FromTime(open).String(),
+		types.FromTime(closeT).String(),
+		realizedPL.String(),
 		"test",
 	}
 	assert.Equal(t, want, row)
@@ -105,13 +111,19 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 
 	ts := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
 
+	balance := types.MoneyFromFloat(1000.1)
+	equity := types.MoneyFromFloat(999.9)
+	marginUsed := types.MoneyFromFloat(10.5)
+	freeMargin := types.MoneyFromFloat(989.4)
+	marginLevel := types.MoneyFromFloat(99.99)
+
 	err = j.RecordEquity(EquitySnapshot{
-		Time:        ts,
-		Balance:     1000.1,
-		Equity:      999.9,
-		MarginUsed:  10.5,
-		FreeMargin:  989.4,
-		MarginLevel: 99.99,
+		Timestamp:   types.FromTime(ts),
+		Balance:     balance,
+		Equity:      equity,
+		MarginUsed:  marginUsed,
+		FreeMargin:  freeMargin,
+		MarginLevel: marginLevel,
 	})
 	assert.NoError(t, err)
 
@@ -127,12 +139,12 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 	assert.NoError(t, err)
 
 	want := []string{
-		ts.Format(time.RFC3339),
-		"1000.100000",
-		"999.900000",
-		"10.500000",
-		"989.400000",
-		"99.990000",
+		types.FromTime(ts).String(),
+		balance.String(),
+		equity.String(),
+		marginUsed.String(),
+		freeMargin.String(),
+		marginLevel.String(),
 	}
 	assert.Equal(t, want, row)
 }

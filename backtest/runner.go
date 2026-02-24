@@ -65,10 +65,10 @@ func (r *Runner) Run(ctx context.Context, j *journal.SQLite) (Result, error) {
 			break
 		}
 
-		if start.IsZero() || p.Timestamp.Before(start) {
+		if start.IsZero() || p.Timestamp < start {
 			start = p.Timestamp
 		}
-		if end.IsZero() || p.Timestamp.After(end) {
+		if end.IsZero() || p.Timestamp > end {
 			end = p.Timestamp
 		}
 
@@ -94,7 +94,7 @@ func (r *Runner) Run(ctx context.Context, j *journal.SQLite) (Result, error) {
 	losses := 0
 	trades := 0
 
-	if j != nil && !start.IsZero() && !end.IsZero() && start.Before(end) {
+	if j != nil && !start.IsZero() && !end.IsZero() && start < end {
 		// include trades that close exactly at end by extending window slightly
 		recs, err := j.ListTradesClosedBetween(start, end.Add(time.Nanosecond))
 		if err == nil {

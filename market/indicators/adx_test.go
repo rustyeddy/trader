@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
 func mkCandle(scale int32, o, h, l, c float64) market.OHLC {
-	toP := func(x float64) market.Price { return market.Price(x*float64(scale) + 0.5) }
+	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
 	return market.OHLC{
 		O: toP(o),
 		H: toP(h),

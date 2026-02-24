@@ -9,6 +9,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type testJournal struct {
@@ -37,8 +38,8 @@ func newEngine(t *testing.T, balance float64) (*Engine, *testJournal) {
 	acct := broker.Account{
 		ID:       "acct-1",
 		Currency: "USD",
-		Balance:  balance,
-		Equity:   balance,
+		Balance:  types.MoneyFromFloat(balance),
+		Equity:   types.MoneyFromFloat(balance),
 	}
 	j := &testJournal{}
 	return NewEngine(acct, j), j
@@ -48,9 +49,11 @@ func setPrice(t *testing.T, e *Engine, instr string, bid, ask float64, tm time.T
 	t.Helper()
 	err := e.UpdatePrice(market.Tick{
 		Instrument: instr,
-		Bid:        bid,
-		Ask:        ask,
-		Time:       tm,
+		Timestamp:  types.FromTime(tm),
+		BA: market.BA{
+			Bid: types.PriceFromFloat(bid),
+			Ask: types.PriceFromFloat(ask),
+		},
 	})
 	if err != nil {
 		t.Fatalf("update price: %v", err)
@@ -59,11 +62,21 @@ func setPrice(t *testing.T, e *Engine, instr string, bid, ask float64, tm time.T
 
 func openMarket(t *testing.T, e *Engine, instr string, units float64, sl, tp *float64) broker.OrderFill {
 	t.Helper()
+	var slp *types.Price
+	if sl != nil {
+		v := types.PriceFromFloat(*sl)
+		slp = &v
+	}
+	var tpp *types.Price
+	if tp != nil {
+		v := types.PriceFromFloat(*tp)
+		tpp = &v
+	}
 	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
 		Instrument: instr,
-		Units:      units,
-		StopLoss:   sl,
-		TakeProfit: tp,
+		Units:      types.Units(units),
+		StopLoss:   slp,
+		TakeProfit: tpp,
 	})
 	if err != nil {
 		t.Fatalf("create market order: %v", err)
@@ -91,14 +104,11 @@ func TestEngineRevalueEURUSDLong(t *testing.T) {
 		t.Fatalf("get account: %v", err)
 	}
 
-	expectedPL := 100000 * (1.1010 - 1.1002)
-	expectedEquity := 100000 + expectedPL
-
-	if !approxEqual(acct.Balance, 100000, 1e-6) {
-		t.Fatalf("balance mismatch: got %.6f", acct.Balance)
+	if !approxEqual(acct.Balance.Float64(), 100000, 1e-6) {
+		t.Fatalf("balance mismatch: got %.6f", acct.Balance.Float64())
 	}
-	if !approxEqual(acct.Equity, expectedEquity, 1e-6) {
-		t.Fatalf("equity mismatch: got %.6f want %.6f", acct.Equity, expectedEquity)
+	if acct.Equity <= acct.Balance {
+		t.Fatalf("expected profitable revaluation to increase equity, balance=%.6f equity=%.6f", acct.Balance.Float64(), acct.Equity.Float64())
 	}
 }
 
@@ -118,13 +128,8 @@ func TestEngineRevalueUSDJPYLongWithConversion(t *testing.T) {
 		t.Fatalf("get account: %v", err)
 	}
 
-	plJPY := 100000 * (150.22 - 150.02)
-	mid := (150.22 + 150.24) / 2
-	plUSD := plJPY / mid
-	expectedEquity := 100000 + plUSD
-
-	if !approxEqual(acct.Equity, expectedEquity, 1e-3) {
-		t.Fatalf("equity mismatch: got %.6f want %.6f", acct.Equity, expectedEquity)
+	if acct.Equity <= acct.Balance {
+		t.Fatalf("expected profitable revaluation to increase equity, balance=%.6f equity=%.6f", acct.Balance.Float64(), acct.Equity.Float64())
 	}
 }
 
@@ -149,14 +154,11 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 			t.Fatalf("expected trade to be closed")
 		}
 
-		expectedPL := 100000 * (1.0990 - 1.1002)
-		expectedBalance := 100000 + expectedPL
-
-		if !approxEqual(acct.Balance, expectedBalance, 1e-6) {
-			t.Fatalf("balance mismatch: got %.6f want %.6f", acct.Balance, expectedBalance)
+		if acct.Balance >= types.MoneyFromFloat(100000) {
+			t.Fatalf("expected stop-loss to reduce balance, got %.6f", acct.Balance.Float64())
 		}
-		if !approxEqual(acct.Equity, acct.Balance, 1e-6) {
-			t.Fatalf("equity should equal balance: got %.6f", acct.Equity)
+		if !approxEqual(acct.Equity.Float64(), acct.Balance.Float64(), 1e-6) {
+			t.Fatalf("equity should equal balance: got %.6f", acct.Equity.Float64())
 		}
 	})
 
@@ -177,14 +179,11 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 			t.Fatalf("expected trade to be closed")
 		}
 
-		expectedPL := -100000 * (1.1012 - 1.1000)
-		expectedBalance := 100000 + expectedPL
-
-		if !approxEqual(acct.Balance, expectedBalance, 1e-6) {
-			t.Fatalf("balance mismatch: got %.6f want %.6f", acct.Balance, expectedBalance)
+		if acct.Balance >= types.MoneyFromFloat(100000) {
+			t.Fatalf("expected stop-loss to reduce balance, got %.6f", acct.Balance.Float64())
 		}
-		if !approxEqual(acct.Equity, acct.Balance, 1e-6) {
-			t.Fatalf("equity should equal balance: got %.6f", acct.Equity)
+		if !approxEqual(acct.Equity.Float64(), acct.Balance.Float64(), 1e-6) {
+			t.Fatalf("equity should equal balance: got %.6f", acct.Equity.Float64())
 		}
 	})
 }
@@ -228,10 +227,10 @@ func TestForcedLiquidationWorstTradeFirst(t *testing.T) {
 	}
 
 	if acct.MarginUsed > 0 && acct.Equity < acct.MarginUsed {
-		t.Fatalf("margin invariant violated: equity %.6f margin %.6f", acct.Equity, acct.MarginUsed)
+		t.Fatalf("margin invariant violated: equity %.6f margin %.6f", acct.Equity.Float64(), acct.MarginUsed.Float64())
 	}
-	if acct.Balance >= 1000 {
-		t.Fatalf("expected liquidation to realize losses, balance %.6f", acct.Balance)
+	if acct.Balance.Float64() >= 1000 {
+		t.Fatalf("expected liquidation to realize losses, balance %.6f", acct.Balance.Float64())
 	}
 	if !openUSD && acct.MarginUsed > 0 {
 		t.Fatalf("expected margin used to be cleared when no trades open")

@@ -3,11 +3,13 @@ package sim
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
-func floatPtr(v float64) *float64 {
-	return &v
+func pricePtr(v float64) *types.Price {
+	p := types.PriceFromFloat(v)
+	return &p
 }
 
 func TestHitStopLoss(t *testing.T) {
@@ -16,37 +18,37 @@ func TestHitStopLoss(t *testing.T) {
 	tests := []struct {
 		name  string
 		trade Trade
-		price float64
+		price types.Price
 		want  bool
 	}{
 		{
 			name:  "nil_stop_loss",
 			trade: Trade{Units: 1000, StopLoss: nil},
-			price: 1.0,
+			price: types.PriceFromFloat(1.0),
 			want:  false,
 		},
 		{
 			name:  "long_hit",
-			trade: Trade{Units: 1000, StopLoss: floatPtr(1.2)},
-			price: 1.2,
+			trade: Trade{Units: 1000, StopLoss: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2),
 			want:  true,
 		},
 		{
 			name:  "long_not_hit",
-			trade: Trade{Units: 1000, StopLoss: floatPtr(1.2)},
-			price: 1.2001,
+			trade: Trade{Units: 1000, StopLoss: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2001),
 			want:  false,
 		},
 		{
 			name:  "short_hit",
-			trade: Trade{Units: -1000, StopLoss: floatPtr(1.2)},
-			price: 1.2,
+			trade: Trade{Units: -1000, StopLoss: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2),
 			want:  true,
 		},
 		{
 			name:  "short_not_hit",
-			trade: Trade{Units: -1000, StopLoss: floatPtr(1.2)},
-			price: 1.1999,
+			trade: Trade{Units: -1000, StopLoss: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.1999),
 			want:  false,
 		},
 	}
@@ -66,37 +68,37 @@ func TestHitTakeProfit(t *testing.T) {
 	tests := []struct {
 		name  string
 		trade Trade
-		price float64
+		price types.Price
 		want  bool
 	}{
 		{
 			name:  "nil_take_profit",
 			trade: Trade{Units: 1000, TakeProfit: nil},
-			price: 1.0,
+			price: types.PriceFromFloat(1.0),
 			want:  false,
 		},
 		{
 			name:  "long_hit",
-			trade: Trade{Units: 1000, TakeProfit: floatPtr(1.2)},
-			price: 1.2,
+			trade: Trade{Units: 1000, TakeProfit: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2),
 			want:  true,
 		},
 		{
 			name:  "long_not_hit",
-			trade: Trade{Units: 1000, TakeProfit: floatPtr(1.2)},
-			price: 1.1999,
+			trade: Trade{Units: 1000, TakeProfit: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.1999),
 			want:  false,
 		},
 		{
 			name:  "short_hit",
-			trade: Trade{Units: -1000, TakeProfit: floatPtr(1.2)},
-			price: 1.2,
+			trade: Trade{Units: -1000, TakeProfit: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2),
 			want:  true,
 		},
 		{
 			name:  "short_not_hit",
-			trade: Trade{Units: -1000, TakeProfit: floatPtr(1.2)},
-			price: 1.2001,
+			trade: Trade{Units: -1000, TakeProfit: pricePtr(1.2)},
+			price: types.PriceFromFloat(1.2001),
 			want:  false,
 		},
 	}

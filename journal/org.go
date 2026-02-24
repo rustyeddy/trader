@@ -3,6 +3,8 @@ package journal
 import (
 	"fmt"
 	"strings"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 // FormatTradeOrg renders a TradeRecord as an Org-mode block suitable for pasting into a journal.
@@ -21,12 +23,12 @@ func FormatTradeOrg(t TradeRecord) string {
 	b.WriteString(fmt.Sprintf(":TRADE_ID: %s\n", t.TradeID))
 	b.WriteString(fmt.Sprintf(":ID: %s\n", t.TradeID))
 	b.WriteString(fmt.Sprintf(":INSTRUMENT: %s\n", t.Instrument))
-	b.WriteString(fmt.Sprintf(":UNITS: %.0f\n", t.Units))
-	b.WriteString(fmt.Sprintf(":ENTRY_PRICE: %.5f\n", t.EntryPrice))
-	b.WriteString(fmt.Sprintf(":EXIT_PRICE: %.5f\n", t.ExitPrice))
+	b.WriteString(fmt.Sprintf(":UNITS: %d\n", t.Units))
+	b.WriteString(fmt.Sprintf(":ENTRY_PRICE: %.5f\n", float64(t.EntryPrice)/float64(types.PriceScale)))
+	b.WriteString(fmt.Sprintf(":EXIT_PRICE: %.5f\n", float64(t.ExitPrice)/float64(types.PriceScale)))
 	b.WriteString(fmt.Sprintf(":OPEN_TIME: %s\n", open))
 	b.WriteString(fmt.Sprintf(":CLOSE_TIME: %s\n", close))
-	b.WriteString(fmt.Sprintf(":REALIZED_PL: %.2f\n", t.RealizedPL))
+	b.WriteString(fmt.Sprintf(":REALIZED_PL: %.2f\n", t.RealizedPL.Float64()))
 	b.WriteString(fmt.Sprintf(":REASON: %s\n", t.Reason))
 	b.WriteString(":END:\n")
 	b.WriteString("\n")

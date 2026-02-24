@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -150,7 +151,7 @@ func TestRunner_Run_Success(t *testing.T) {
 	require.NoError(t, err)
 	defer j.Close()
 
-	startBal := 10000.0
+	startBal := types.Money(10000)
 	engine := sim.NewEngine(broker.Account{
 		ID:       "TEST",
 		Currency: "USD",
@@ -160,22 +161,19 @@ func TestRunner_Run_Success(t *testing.T) {
 
 	ticks := []market.Tick{
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1000,
-			Ask:        1.1002,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1000), Ask: types.PriceFromFloat(1.1002)},
 		},
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1010,
-			Ask:        1.1012,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1010), Ask: types.PriceFromFloat(1.1012)},
 		},
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 10, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 10, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1020,
-			Ask:        1.1022,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1020), Ask: types.PriceFromFloat(1.1022)},
 		},
 	}
 
@@ -203,8 +201,8 @@ func TestRunner_Run_Success(t *testing.T) {
 	expectedStart := time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)
 	expectedEnd := time.Date(2026, 1, 24, 9, 30, 10, 0, time.UTC)
 
-	assert.True(t, result.Start.Equal(expectedStart))
-	assert.True(t, result.End.Equal(expectedEnd))
+	assert.True(t, result.Start.Time().Equal(expectedStart))
+	assert.True(t, result.End.Time().Equal(expectedEnd))
 }
 
 func TestRunner_Run_EmptyFeed(t *testing.T) {
@@ -296,10 +294,9 @@ func TestRunner_Run_StrategyError(t *testing.T) {
 
 	ticks := []market.Tick{
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1000,
-			Ask:        1.1002,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1000), Ask: types.PriceFromFloat(1.1002)},
 		},
 	}
 
@@ -327,7 +324,7 @@ func TestRunner_Run_CloseEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer j.Close()
 
-	startBal := 10000.0
+	startBal := types.Money(10000)
 	engine := sim.NewEngine(broker.Account{
 		ID:       "TEST",
 		Currency: "USD",
@@ -337,10 +334,9 @@ func TestRunner_Run_CloseEnd(t *testing.T) {
 
 	ticks := []market.Tick{
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1000,
-			Ask:        1.1002,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1000), Ask: types.PriceFromFloat(1.1002)},
 		},
 	}
 
@@ -384,10 +380,9 @@ func TestRunner_Run_CloseEndDefaultReason(t *testing.T) {
 
 	ticks := []market.Tick{
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1000,
-			Ask:        1.1002,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1000), Ask: types.PriceFromFloat(1.1002)},
 		},
 	}
 
@@ -428,10 +423,9 @@ func TestRunner_Run_WithoutJournal(t *testing.T) {
 
 	ticks := []market.Tick{
 		{
-			Time:       time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC),
+			Timestamp:  types.FromTime(time.Date(2026, 1, 24, 9, 30, 0, 0, time.UTC)),
 			Instrument: "EUR_USD",
-			Bid:        1.1000,
-			Ask:        1.1002,
+			BA: market.BA{Bid: types.PriceFromFloat(1.1000), Ask: types.PriceFromFloat(1.1002)},
 		},
 	}
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -59,12 +60,12 @@ func TestSQLiteRecordTrade(t *testing.T) {
 	rec := TradeRecord{
 		TradeID:    "T1",
 		Instrument: "EUR_USD",
-		Units:      123.456,
-		EntryPrice: 1.2345678,
-		ExitPrice:  1.3456789,
-		OpenTime:   open,
-		CloseTime:  closeT,
-		RealizedPL: -12.5,
+		Units:      123456,
+		EntryPrice: types.PriceFromFloat(1.2345678),
+		ExitPrice:  types.PriceFromFloat(1.3456789),
+		OpenTime:   types.FromTime(open),
+		CloseTime:  types.FromTime(closeT),
+		RealizedPL: types.MoneyFromFloat(-12.5),
 		Reason:     "test",
 	}
 
@@ -96,12 +97,12 @@ func TestSQLiteRecordTrade(t *testing.T) {
 
 	assert.Equal(t, rec.TradeID, tradeID)
 	assert.Equal(t, rec.Instrument, instrument)
-	assert.InDelta(t, rec.Units, units, 1e-6)
-	assert.InDelta(t, rec.EntryPrice, entry, 1e-9)
-	assert.InDelta(t, rec.ExitPrice, exit, 1e-9)
-	assert.True(t, openTime.Equal(rec.OpenTime))
-	assert.True(t, closeTime.Equal(rec.CloseTime))
-	assert.InDelta(t, rec.RealizedPL, realizedPL, 1e-6)
+	assert.InDelta(t, float64(rec.Units), units, 1e-6)
+	assert.InDelta(t, float64(rec.EntryPrice), entry, 1e-9)
+	assert.InDelta(t, float64(rec.ExitPrice), exit, 1e-9)
+	assert.True(t, openTime.Equal(rec.OpenTime.Time()))
+	assert.True(t, closeTime.Equal(rec.CloseTime.Time()))
+	assert.InDelta(t, float64(rec.RealizedPL), realizedPL, 1e-6)
 	assert.Equal(t, rec.Reason, reason)
 }
 
@@ -112,12 +113,12 @@ func TestSQLiteRecordEquity(t *testing.T) {
 
 	ts := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
 	rec := EquitySnapshot{
-		Time:        ts,
-		Balance:     1000.1,
-		Equity:      999.9,
-		MarginUsed:  10.5,
-		FreeMargin:  989.4,
-		MarginLevel: 99.99,
+		Timestamp:   types.FromTime(ts),
+		Balance:     types.MoneyFromFloat(1000.1),
+		Equity:      types.MoneyFromFloat(999.9),
+		MarginUsed:  types.MoneyFromFloat(10.5),
+		FreeMargin:  types.MoneyFromFloat(989.4),
+		MarginLevel: types.MoneyFromFloat(99.99),
 	}
 
 	assert.NoError(t, j.RecordEquity(rec))
@@ -143,10 +144,10 @@ func TestSQLiteRecordEquity(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	assert.True(t, gotTime.Equal(rec.Time))
-	assert.InDelta(t, rec.Balance, balance, 1e-6)
-	assert.InDelta(t, rec.Equity, equity, 1e-6)
-	assert.InDelta(t, rec.MarginUsed, marginUsed, 1e-6)
-	assert.InDelta(t, rec.FreeMargin, freeMargin, 1e-6)
-	assert.InDelta(t, rec.MarginLevel, marginLevel, 1e-6)
+	assert.True(t, gotTime.Equal(rec.Timestamp.Time()))
+	assert.InDelta(t, float64(rec.Balance), balance, 1e-6)
+	assert.InDelta(t, float64(rec.Equity), equity, 1e-6)
+	assert.InDelta(t, float64(rec.MarginUsed), marginUsed, 1e-6)
+	assert.InDelta(t, float64(rec.FreeMargin), freeMargin, 1e-6)
+	assert.InDelta(t, float64(rec.MarginLevel), marginLevel, 1e-6)
 }

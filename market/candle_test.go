@@ -1,29 +1,33 @@
 package market
 
 import (
+	"os"
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
-var cs *CandleSet
-
-func init() {
-	var err error
-
+func loadCandleSet(t *testing.T) *CandleSet {
+	t.Helper()
 	fname := "../testdata/DAT_ASCII_EURUSD_M1_2025.csv"
-	cs, err = NewCandleSet(fname)
-	if err != nil {
-		panic(err)
+	if _, err := os.Stat(fname); err != nil {
+		t.Skip("candle test dataset missing")
 	}
+	set, err := NewCandleSet(fname)
+	if err != nil {
+		t.Fatalf("failed to load candle set: %v", err)
+	}
+	return set
 }
 
 func TestIterator(t *testing.T) {
+	cs := loadCandleSet(t)
 
 	expected := OHLC{O: 1035030, H: 1035140, L: 1035030, C: 1035140}
 	it := cs.Iterator()
 	it.Next()
-	assert.Equal(t, Timestamp(1735768800), it.StartTime())
+	assert.Equal(t, types.Timestamp(1735768800), it.StartTime())
 
 	ca := it.Candle()
 	assert.Equal(t, expected, ca)
@@ -37,6 +41,7 @@ func TestIterator(t *testing.T) {
 }
 
 func TestReadCandleSetFile(t *testing.T) {
+	cs := loadCandleSet(t)
 	s := cs.Stats()
 	assert.Equal(t, 524158, s.TotalMinutes)
 	assert.Equal(t, 372024, s.PresentMinutes)
@@ -47,6 +52,7 @@ func TestReadCandleSetFile(t *testing.T) {
 }
 
 func TestAggregateH1(t *testing.T) {
+	cs := loadCandleSet(t)
 	h1 := cs.AggregateH1(50)
 	h1.BuildGapReport()
 	s := h1.Stats()

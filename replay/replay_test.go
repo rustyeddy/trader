@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/types"
 )
 
 // If your journal uses a different driver name, adjust this.
@@ -70,7 +71,7 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 	}
 	defer j.Close()
 
-	startBal := 100_000.0
+	startBal := types.Money(100_000)
 	engine := sim.NewEngine(broker.Account{
 		ID:       "SIM-TEST",
 		Currency: "USD",
@@ -84,7 +85,7 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 
 	acct, _ := engine.GetAccount(ctx)
 	if acct.Balance <= startBal {
-		t.Fatalf("expected balance to increase, start=%.2f end=%.2f", startBal, acct.Balance)
+		t.Fatalf("expected balance to increase, start=%.2f end=%.2f", startBal.Float64(), acct.Balance.Float64())
 	}
 
 	// Validate at least one trade row exists and reason indicates TP.

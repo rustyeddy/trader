@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func TestPriceMid(t *testing.T) {
@@ -11,9 +12,9 @@ func TestPriceMid(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		bid      market.Price
-		ask      market.Price
-		expected market.Price
+		bid      types.Price
+		ask      types.Price
+		expected types.Price
 	}{
 		{"simple", 10, 30, 20},
 		{"same", 25, 25, 25},

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,11 +20,11 @@ func TestFormatTradeOrg(t *testing.T) {
 		TradeID:    "trade-12345678-abcd",
 		Instrument: "EUR_USD",
 		Units:      1000,
-		EntryPrice: 1.08500,
-		ExitPrice:  1.08750,
-		OpenTime:   open,
-		CloseTime:  close,
-		RealizedPL: 250.00,
+		EntryPrice: types.PriceFromFloat(1.08500),
+		ExitPrice:  types.PriceFromFloat(1.08750),
+		OpenTime:   types.FromTime(open),
+		CloseTime:  types.FromTime(close),
+		RealizedPL: types.MoneyFromFloat(250.00),
 		Reason:     "trend-following",
 	}
 
@@ -59,11 +60,11 @@ func TestFormatTradeOrgShortID(t *testing.T) {
 		TradeID:    "short",
 		Instrument: "GBP_USD",
 		Units:      500,
-		EntryPrice: 1.25000,
-		ExitPrice:  1.25100,
-		OpenTime:   time.Now(),
-		CloseTime:  time.Now(),
-		RealizedPL: 50.00,
+		EntryPrice: types.PriceFromFloat(1.25000),
+		ExitPrice:  types.PriceFromFloat(1.25100),
+		OpenTime:   types.FromTime(time.Now()),
+		CloseTime:  types.FromTime(time.Now()),
+		RealizedPL: types.MoneyFromFloat(50.00),
 		Reason:     "test",
 	}
 
@@ -78,11 +79,11 @@ func TestFormatTradeOrgNegativePL(t *testing.T) {
 		TradeID:    "loss-trade",
 		Instrument: "USD_JPY",
 		Units:      2000,
-		EntryPrice: 150.50,
-		ExitPrice:  150.25,
-		OpenTime:   time.Now(),
-		CloseTime:  time.Now(),
-		RealizedPL: -500.00,
+		EntryPrice: types.PriceFromFloat(150.50),
+		ExitPrice:  types.PriceFromFloat(150.25),
+		OpenTime:   types.FromTime(time.Now()),
+		CloseTime:  types.FromTime(time.Now()),
+		RealizedPL: types.MoneyFromFloat(-500.00),
 		Reason:     "stop-loss",
 	}
 
@@ -103,22 +104,22 @@ func TestFormatTradesOrg(t *testing.T) {
 			TradeID:    "trade-001",
 			Instrument: "EUR_USD",
 			Units:      1000,
-			EntryPrice: 1.08000,
-			ExitPrice:  1.08200,
-			OpenTime:   open1,
-			CloseTime:  close1,
-			RealizedPL: 200.00,
+			EntryPrice: types.PriceFromFloat(1.08000),
+			ExitPrice:  types.PriceFromFloat(1.08200),
+			OpenTime:   types.FromTime(open1),
+			CloseTime:  types.FromTime(close1),
+			RealizedPL: types.MoneyFromFloat(200.00),
 			Reason:     "breakout",
 		},
 		{
 			TradeID:    "trade-002",
 			Instrument: "GBP_USD",
 			Units:      500,
-			EntryPrice: 1.25000,
-			ExitPrice:  1.24800,
-			OpenTime:   open2,
-			CloseTime:  close2,
-			RealizedPL: -100.00,
+			EntryPrice: types.PriceFromFloat(1.25000),
+			ExitPrice:  types.PriceFromFloat(1.24800),
+			OpenTime:   types.FromTime(open2),
+			CloseTime:  types.FromTime(close2),
+			RealizedPL: types.MoneyFromFloat(-100.00),
 			Reason:     "reversal",
 		},
 	}
@@ -150,11 +151,11 @@ func TestFormatTradesOrgSingle(t *testing.T) {
 		TradeID:    "single",
 		Instrument: "USD_CAD",
 		Units:      750,
-		EntryPrice: 1.35000,
-		ExitPrice:  1.35100,
-		OpenTime:   time.Now(),
-		CloseTime:  time.Now(),
-		RealizedPL: 75.00,
+		EntryPrice: types.PriceFromFloat(1.35000),
+		ExitPrice:  types.PriceFromFloat(1.35100),
+		OpenTime:   types.FromTime(time.Now()),
+		CloseTime:  types.FromTime(time.Now()),
+		RealizedPL: types.MoneyFromFloat(75.00),
 		Reason:     "momentum",
 	}
 
@@ -217,11 +218,11 @@ func TestFormatTradeOrgStructure(t *testing.T) {
 		TradeID:    "structure-test",
 		Instrument: "AUD_USD",
 		Units:      100,
-		EntryPrice: 0.65000,
-		ExitPrice:  0.65500,
-		OpenTime:   time.Now(),
-		CloseTime:  time.Now(),
-		RealizedPL: 50.00,
+		EntryPrice: types.PriceFromFloat(0.65000),
+		ExitPrice:  types.PriceFromFloat(0.65500),
+		OpenTime:   types.FromTime(time.Now()),
+		CloseTime:  types.FromTime(time.Now()),
+		RealizedPL: types.MoneyFromFloat(50.00),
 		Reason:     "test",
 	}
 

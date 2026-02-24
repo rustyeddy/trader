@@ -8,6 +8,7 @@ import (
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,22 +47,21 @@ func TestOpenOnceStrategy_OnTick_Success(t *testing.T) {
 
 	strat := &OpenOnceStrategy{
 		Instrument: "EUR_USD",
-		Units:      1000,
+		Units:      types.Units(1000),
 	}
 
 	// First tick should open the order
 	tick := market.Tick{
 		Instrument: "EUR_USD",
-		Bid:        1.0850,
-		Ask:        1.0852,
-		Time:       time.Now(),
+		Timestamp:  types.FromTime(time.Now()),
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0850), Ask: types.PriceFromFloat(1.0852)},
 	}
 
 	err := strat.OnTick(ctx, mock, tick)
 	require.NoError(t, err)
 	assert.True(t, mock.createOrderCalled)
 	assert.Equal(t, "EUR_USD", mock.lastRequest.Instrument)
-	assert.Equal(t, 1000.0, mock.lastRequest.Units)
+	assert.Equal(t, types.Units(1000), mock.lastRequest.Units)
 	assert.True(t, strat.opened)
 
 	// Second tick should do nothing (already opened)
@@ -77,15 +77,14 @@ func TestOpenOnceStrategy_OnTick_WrongInstrument(t *testing.T) {
 
 	strat := &OpenOnceStrategy{
 		Instrument: "EUR_USD",
-		Units:      1000,
+		Units:      types.Units(1000),
 	}
 
 	// Tick with different instrument should be ignored
 	tick := market.Tick{
 		Instrument: "GBP_USD",
-		Bid:        1.2500,
-		Ask:        1.2502,
-		Time:       time.Now(),
+		Timestamp:  types.FromTime(time.Now()),
+		BA:         market.BA{Bid: types.PriceFromFloat(1.2500), Ask: types.PriceFromFloat(1.2502)},
 	}
 
 	err := strat.OnTick(ctx, mock, tick)
@@ -105,9 +104,8 @@ func TestOpenOnceStrategy_OnTick_ZeroUnits(t *testing.T) {
 
 	tick := market.Tick{
 		Instrument: "EUR_USD",
-		Bid:        1.0850,
-		Ask:        1.0852,
-		Time:       time.Now(),
+		Timestamp:  types.FromTime(time.Now()),
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0850), Ask: types.PriceFromFloat(1.0852)},
 	}
 
 	err := strat.OnTick(ctx, mock, tick)
@@ -124,14 +122,13 @@ func TestOpenOnceStrategy_OnTick_BrokerError(t *testing.T) {
 
 	strat := &OpenOnceStrategy{
 		Instrument: "EUR_USD",
-		Units:      1000,
+		Units:      types.Units(1000),
 	}
 
 	tick := market.Tick{
 		Instrument: "EUR_USD",
-		Bid:        1.0850,
-		Ask:        1.0852,
-		Time:       time.Now(),
+		Timestamp:  types.FromTime(time.Now()),
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0850), Ask: types.PriceFromFloat(1.0852)},
 	}
 
 	err := strat.OnTick(ctx, mock, tick)
@@ -147,19 +144,18 @@ func TestOpenOnceStrategy_OnTick_NegativeUnits(t *testing.T) {
 
 	strat := &OpenOnceStrategy{
 		Instrument: "EUR_USD",
-		Units:      -500, // Negative units for short position
+		Units:      types.Units(-500), // Negative units for short position
 	}
 
 	tick := market.Tick{
 		Instrument: "EUR_USD",
-		Bid:        1.0850,
-		Ask:        1.0852,
-		Time:       time.Now(),
+		Timestamp:  types.FromTime(time.Now()),
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0850), Ask: types.PriceFromFloat(1.0852)},
 	}
 
 	err := strat.OnTick(ctx, mock, tick)
 	require.NoError(t, err)
 	assert.True(t, mock.createOrderCalled)
-	assert.Equal(t, -500.0, mock.lastRequest.Units)
+	assert.Equal(t, types.Units(-500), mock.lastRequest.Units)
 	assert.True(t, strat.opened)
 }

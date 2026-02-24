@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type EventRow struct {
@@ -24,13 +25,13 @@ type EventRow struct {
 type CSVEventsFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from time.Time
-	to   time.Time
+	from types.Timestamp
+	to   types.Timestamp
 
 	sawFirst bool
 }
 
-func NewCSVEventsFeed(path string, from, to time.Time) (*CSVEventsFeed, error) {
+func NewCSVEventsFeed(path string, from, to types.Timestamp) (*CSVEventsFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -82,7 +83,7 @@ func (f *CSVEventsFeed) Next() (EventRow, bool, error) {
 		if !ok {
 			continue
 		}
-		if !inRange(p.Time, f.from, f.to) {
+		if !inRange(p.Timestamp, f.from, f.to) {
 			continue
 		}
 
@@ -118,11 +119,11 @@ func (f *CSVEventsFeed) Next() (EventRow, bool, error) {
 	}
 }
 
-func inRange(t, from, to time.Time) bool {
-	if !from.IsZero() && t.Before(from) {
+func inRange(t, from, to types.Timestamp) bool {
+	if !from.IsZero() && t < from {
 		return false
 	}
-	if !to.IsZero() && !t.Before(to) {
+	if !to.IsZero() && t >= to {
 		return false
 	}
 	return true
@@ -150,7 +151,6 @@ func parseTickRowCompat(row []string) (market.Tick, bool, error) {
 		return market.Tick{}, false, nil
 	}
 
-	// float parsing kept local to avoid import sprawl
 	bid, err := parseFloat(row[2])
 	if err != nil {
 		return market.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
@@ -160,7 +160,14 @@ func parseTickRowCompat(row []string) (market.Tick, bool, error) {
 		return market.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return market.Tick{Time: t, Instrument: inst, Bid: bid, Ask: ask}, true, nil
+	return market.Tick{
+		Timestamp:  types.FromTime(t),
+		Instrument: inst,
+		BA: market.BA{
+			Bid: types.PriceFromFloat(bid),
+			Ask: types.PriceFromFloat(ask),
+		},
+	}, true, nil
 }
 
 func parseFloat(s string) (float64, error) {

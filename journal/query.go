@@ -11,6 +11,8 @@ import (
 // GetTrade returns a single trade record by ID.
 func (j *SQLite) GetTrade(tradeID string) (TradeRecord, error) {
 	var rec TradeRecord
+	var units, entryPrice, exitPrice, realizedPL float64
+	var openTime, closeTime time.Time
 
 	row := j.db.QueryRow(`
 		SELECT trade_id, instrument, units, entry_price, exit_price, open_time, close_time, realized_pl, reason
@@ -20,12 +22,12 @@ func (j *SQLite) GetTrade(tradeID string) (TradeRecord, error) {
 	err := row.Scan(
 		&rec.TradeID,
 		&rec.Instrument,
-		&rec.Units,
-		&rec.EntryPrice,
-		&rec.ExitPrice,
-		&rec.OpenTime,
-		&rec.CloseTime,
-		&rec.RealizedPL,
+		&units,
+		&entryPrice,
+		&exitPrice,
+		&openTime,
+		&closeTime,
+		&realizedPL,
 		&rec.Reason,
 	)
 	if err != nil {
@@ -34,6 +36,12 @@ func (j *SQLite) GetTrade(tradeID string) (TradeRecord, error) {
 		}
 		return TradeRecord{}, err
 	}
+	rec.Units = types.Units(units)
+	rec.EntryPrice = types.Price(entryPrice)
+	rec.ExitPrice = types.Price(exitPrice)
+	rec.OpenTime = types.FromTime(openTime)
+	rec.CloseTime = types.FromTime(closeTime)
+	rec.RealizedPL = types.Money(realizedPL)
 	return rec, nil
 }
 
@@ -52,19 +60,27 @@ func (j *SQLite) ListTradesClosedBetween(start, end types.Timestamp) ([]TradeRec
 	var out []TradeRecord
 	for rows.Next() {
 		var rec TradeRecord
+		var units, entryPrice, exitPrice, realizedPL float64
+		var openTime, closeTime time.Time
 		if err := rows.Scan(
 			&rec.TradeID,
 			&rec.Instrument,
-			&rec.Units,
-			&rec.EntryPrice,
-			&rec.ExitPrice,
-			&rec.OpenTime,
-			&rec.CloseTime,
-			&rec.RealizedPL,
+			&units,
+			&entryPrice,
+			&exitPrice,
+			&openTime,
+			&closeTime,
+			&realizedPL,
 			&rec.Reason,
 		); err != nil {
 			return nil, err
 		}
+		rec.Units = types.Units(units)
+		rec.EntryPrice = types.Price(entryPrice)
+		rec.ExitPrice = types.Price(exitPrice)
+		rec.OpenTime = types.FromTime(openTime)
+		rec.CloseTime = types.FromTime(closeTime)
+		rec.RealizedPL = types.Money(realizedPL)
 		out = append(out, rec)
 	}
 

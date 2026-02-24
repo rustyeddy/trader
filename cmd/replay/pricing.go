@@ -12,6 +12,7 @@ import (
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/cmd/config"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/types"
 )
 
 func newPricingCmd(rc *config.RootConfig) *cobra.Command {
@@ -79,11 +80,11 @@ func newPricingCmd(rc *config.RootConfig) *cobra.Command {
 			engine := sim.NewEngine(broker.Account{
 				ID:       accountID,
 				Currency: "USD",
-				Balance:  startingBalance,
-				Equity:   startingBalance,
+				Balance:  types.MoneyFromFloat(startingBalance),
+				Equity:   types.MoneyFromFloat(startingBalance),
 			}, j)
 
-			feed, err := backtest.NewCSVTicksFeed(ticksPath, from, to)
+			feed, err := backtest.NewCSVTicksFeed(ticksPath, types.FromTime(from), types.FromTime(to))
 			if err != nil {
 				return err
 			}
@@ -107,7 +108,7 @@ func newPricingCmd(rc *config.RootConfig) *cobra.Command {
 			}
 
 			acct, _ := engine.GetAccount(ctx)
-			fmt.Printf("Done. balance=%.2f equity=%.2f\n", acct.Balance, acct.Equity)
+			fmt.Printf("Done. balance=%.2f equity=%.2f\n", acct.Balance.Float64(), acct.Equity.Float64())
 			return nil
 		},
 	}

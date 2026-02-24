@@ -124,17 +124,17 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 		Timestamp:  tstamp,
 		Instrument: inst,
 		BA: market.BA{
-			Bid: types.Price(bid),
-			Ask: types.Price(ask),
+			Bid: types.PriceFromFloat(bid),
+			Ask: types.PriceFromFloat(ask),
 		},
 	}, true, nil
 }
 
 func inRange(t, from, to types.Timestamp) bool {
-	if !from.IsZero() && t.Before(from) {
+	if !from.IsZero() && t < from {
 		return false
 	}
-	if !to.IsZero() && !t.Before(to) {
+	if !to.IsZero() && t >= to {
 		return false
 	}
 	return true

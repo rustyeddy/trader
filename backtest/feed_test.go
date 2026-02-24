@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,8 +29,8 @@ func TestParseTickRow(t *testing.T) {
 			wantErr: false,
 			checkFunc: func(t *testing.T, p market.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
-				assert.Equal(t, 1.1000, p.Bid)
-				assert.Equal(t, 1.1002, p.Ask)
+				assert.Equal(t, types.PriceFromFloat(1.1000), p.Bid)
+				assert.Equal(t, types.PriceFromFloat(1.1002), p.Ask)
 			},
 		},
 		{
@@ -125,65 +126,65 @@ func TestInRange(t *testing.T) {
 
 	tests := []struct {
 		name string
-		t    time.Time
-		from time.Time
-		to   time.Time
+		t    types.Timestamp
+		from types.Timestamp
+		to   types.Timestamp
 		want bool
 	}{
 		{
 			name: "no range",
-			t:    base,
-			from: time.Time{},
-			to:   time.Time{},
+			t:    types.FromTime(base),
+			from: 0,
+			to:   0,
 			want: true,
 		},
 		{
 			name: "within range",
-			t:    base,
-			from: before,
-			to:   after,
+			t:    types.FromTime(base),
+			from: types.FromTime(before),
+			to:   types.FromTime(after),
 			want: true,
 		},
 		{
 			name: "before range",
-			t:    before,
-			from: base,
-			to:   after,
+			t:    types.FromTime(before),
+			from: types.FromTime(base),
+			to:   types.FromTime(after),
 			want: false,
 		},
 		{
 			name: "after range",
-			t:    after,
-			from: before,
-			to:   base,
+			t:    types.FromTime(after),
+			from: types.FromTime(before),
+			to:   types.FromTime(base),
 			want: false,
 		},
 		{
 			name: "at from boundary",
-			t:    base,
-			from: base,
-			to:   after,
+			t:    types.FromTime(base),
+			from: types.FromTime(base),
+			to:   types.FromTime(after),
 			want: true,
 		},
 		{
 			name: "at to boundary",
-			t:    base,
-			from: before,
-			to:   base,
+			t:    types.FromTime(base),
+			from: types.FromTime(before),
+			to:   types.FromTime(base),
 			want: false,
 		},
 		{
 			name: "only from constraint",
-			t:    after,
-			from: base,
-			to:   time.Time{},
+			t:    types.FromTime(after),
+			from: types.FromTime(base),
+			to:   0,
 			want: true,
 		},
 		{
 			name: "only to constraint",
-			t:    before,
-			from: time.Time{},
-			to:   base,
+			t:    types.FromTime(before),
+			from: 0,
+			to:   types.FromTime(base),
 			want: true,
 		},
 	}
@@ -213,7 +214,7 @@ func TestCSVTicksFeed_NewAndClose(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 
@@ -224,7 +225,7 @@ func TestCSVTicksFeed_NewAndClose(t *testing.T) {
 	t.Run("nonexistent file", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := NewCSVTicksFeed("/nonexistent/path.csv", time.Time{}, time.Time{})
+		_, err := NewCSVTicksFeed("/nonexistent/path.csv", 0, 0)
 		assert.Error(t, err)
 	})
 
@@ -253,7 +254,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 
@@ -270,7 +271,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 
 		assert.Len(t, ticks, 3)
 		if len(ticks) >= 1 {
-			assert.Equal(t, 1.1000, ticks[0].Bid)
+			assert.Equal(t, types.PriceFromFloat(1.1000), ticks[0].Bid)
 		}
 	})
 
@@ -285,7 +286,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 
@@ -310,8 +311,8 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		from := time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC)
-		to := time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC)
+		from := types.FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC))
+		to := types.FromTime(time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC))
 
 		feed, err := NewCSVTicksFeed(csvPath, from, to)
 		require.NoError(t, err)
@@ -343,7 +344,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 
@@ -372,7 +373,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 
@@ -397,7 +398,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(csvPath, []byte(""), 0o644))
 
-		feed, err := NewCSVTicksFeed(csvPath, time.Time{}, time.Time{})
+		feed, err := NewCSVTicksFeed(csvPath, 0, 0)
 		require.NoError(t, err)
 		defer feed.Close()
 

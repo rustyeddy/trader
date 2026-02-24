@@ -13,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Options controls how replay behaves.
@@ -106,10 +107,12 @@ func handleReplayRow(ctx context.Context, engine *sim.Engine, row []string, opts
 	}
 
 	price := market.Tick{
-		Time:       t,
+		Timestamp:  types.FromTime(t),
 		Instrument: inst,
-		Bid:        bid,
-		Ask:        ask,
+		BA: market.BA{
+			Bid: types.PriceFromFloat(bid),
+			Ask: types.PriceFromFloat(ask),
+		},
 	}
 
 	// Optional event columns: event,arg1,arg2,arg3,arg4...
@@ -154,7 +157,7 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 		}
 		_, err = engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
 			Instrument: inst,
-			Units:      units,
+			Units:      types.Units(units),
 		})
 		return err
 
@@ -167,10 +170,12 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 
 		req := broker.MarketOrderRequest{
 			Instrument: inst,
-			Units:      units,
-			StopLoss:   &sl,
-			TakeProfit: &tp,
+			Units:      types.Units(units),
 		}
+		slp := types.PriceFromFloat(sl)
+		tpp := types.PriceFromFloat(tp)
+		req.StopLoss = &slp
+		req.TakeProfit = &tpp
 
 		_, err = engine.CreateMarketOrder(ctx, req)
 		return err

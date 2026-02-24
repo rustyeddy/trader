@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
 // helper to create a candle with close only
 func candle(close float64, scale int32) market.OHLC {
 	return market.OHLC{
-		C: market.Price(close * float64(scale)),
+		C: types.Price(close * float64(scale)),
 	}
 }
 

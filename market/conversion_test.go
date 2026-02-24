@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,7 +91,7 @@ func TestQuoteToAccountRate_BaseEqualsAccount(t *testing.T) {
 	rate, err := QuoteToAccountRate(instrument, "USD", ps)
 	assert.NoError(t, err)
 
-	expected := 1.0 / ps.price.Mid()
+	expected := 1.0 / (float64(ps.price.Mid()) / float64(types.PriceScale))
 	assert.InDelta(t, expected, rate, 1e-9)
 	assert.Equal(t, 1, ps.called)
 	assert.Equal(t, instrument, ps.lastInstrument)
