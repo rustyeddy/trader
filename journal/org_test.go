@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,8 @@ func TestFormatTradeOrg(t *testing.T) {
 
 	// Check heading
 	assert.Contains(t, result, "** Trade: EUR_USD (trade-12)")
+
+	fmt.Printf("results: %s\n", result)
 
 	// Check properties drawer
 	assert.Contains(t, result, ":PROPERTIES:")

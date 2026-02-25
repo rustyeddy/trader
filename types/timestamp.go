@@ -33,6 +33,7 @@ func (t Timestamp) Add(i time.Duration) Timestamp {
 }
 
 func (t Timestamp) String() string {
-	to := time.Unix(t.Int64(), 0)
-	return to.Format(time.RFC3339)
+	return time.Unix(t.Int64(), 0).
+		UTC().
+		Format(time.RFC3339)
 }
