@@ -37,3 +37,14 @@ func (t Timestamp) String() string {
 		UTC().
 		Format(time.RFC3339)
 }
+
+// daysInMonth returns the number of days in a given month.
+// month0 is 0-indexed: 0=Jan, 11=Dec.
+func DaysInMonth(year int, month0 int) int {
+	// Convert to Go's 1-indexed month
+	month := time.Month(month0 + 1)
+
+	// Trick: day 0 of next month = last day of this month
+	t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
+	return t.Day()
+}

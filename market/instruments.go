@@ -2,6 +2,18 @@ package market
 
 import "github.com/rustyeddy/trader/types"
 
+type Symbol string
+
+const (
+	EUR_USD Symbol = "EUR_USD"
+	GBP_USD Symbol = "GBP_USD"
+	USD_JPY Symbol = "USD_JPY"
+	USD_CHF Symbol = "USD_CHF"
+	AUD_USD Symbol = "AUD_USD"
+	USD_CAD Symbol = "USD_CAD"
+	NZD_USD Symbol = "NZD_USD"
+)
+
 type Instrument struct {
 	Name                string
 	BaseCurrency        string
@@ -13,14 +25,13 @@ type Instrument struct {
 }
 
 var InstrumentList = []string{
-	"EUR_USD",
-	"GBP_USD",
-	"USD_JPY",
-	"USD_CHF",
-	"AUD_USD",
-	"USD_CAD",
-	"NZD_USD",
-	"XAU_USD",
+	"EURUSD",
+	"GBPUSD",
+	"USDJPY",
+	"USDCHF",
+	"AUDUSD",
+	"USDCAD",
+	"NZDUSD",
 }
 
 var Instruments = map[string]*Instrument{

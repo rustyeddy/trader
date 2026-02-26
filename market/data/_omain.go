@@ -1,4 +1,4 @@
-package data
+package main
 
 import (
 	"compress/gzip"
@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,29 +18,23 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-const defaultBase = "https://datafeed.dukascopy.com/datafeed"
+func init() {
+	// flag.StringVar(&ds.instrument, "instrument", "", "Instrument to download (EURUSD)")
+	// flag.StringVar(&ds.start, "start", "", "Start of download")
+	// flag.StringVar(&ds.end, "end", "", "End of download")
+	// flag.StringVar(&ds.one, "one", "", "One specific download")
+	// flag.StringVar(&ds.basedir, "basedir", "../../trading/data/prices/raw/dukas", "Where to store data after download")
+	// flag.StringVar(&ds.baseurl, "baseurl", "https://datafeed.dukascopy.com/datafeed/", "Dukas url")
 
-type job struct {
-	url  string
-	dst  string // .bi5 path
-	flat string // .bin output path
+	// flag.IntVar(&ds.workers, "workers", max(4, runtime.NumCPU()), "Parallel workers")
+	// flag.DurationVar(&ds.timeout, "timeout", 45*time.Second, "HTTP timeout")
+	// flag.DurationVar(&ds.sleep, "sleep", 50*time.Millisecond, "Polite delay per request")
 }
 
-func main() {
-	var (
-		base    = flag.String("base", defaultBase, "Dukascopy base URL")
-		symbol  = flag.String("symbol", "EURUSD", "Symbol like EURUSD, USDJPY")
-		start   = flag.String("start", "", "Start (UTC) like 2026-01-01T00")
-		end     = flag.String("end", "", "End (UTC, exclusive) like 2026-01-02T00")
-		one     = flag.String("one", "", "Single hour (UTC) like 2026-01-01T13 (overrides start/end)")
-		outDir  = flag.String("out", "./dukas", "Output directory")
-		workers = flag.Int("workers", max(4, runtime.NumCPU()), "Parallel workers")
-		timeout = flag.Duration("timeout", 45*time.Second, "HTTP timeout")
-		sleep   = flag.Duration("sleep", 50*time.Millisecond, "Polite delay per request")
-	)
+func omain() {
 	flag.Parse()
 
-	sym := strings.ToUpper(strings.TrimSpace(*symbol))
+	sym := strings.ToUpper(strings.TrimSpace(ds.Instrument))
 	if sym == "" {
 		fatalf("symbol required")
 	}
@@ -49,21 +42,21 @@ func main() {
 	var t0, t1 time.Time
 	var err error
 
-	if *one != "" {
-		t0, err = time.ParseInLocation("2006-01-02T15", *one, time.UTC)
+	if ds.One != "" {
+		t0, err = time.ParseInLocation("2006-01-02", ds.One, time.UTC)
 		if err != nil {
 			fatalf("bad --one: %v", err)
 		}
 		t1 = t0.Add(time.Hour)
 	} else {
-		if *start == "" || *end == "" {
+		if ds.Start == "" || ds.End == "" {
 			fatalf("either --one or both --start and --end required")
 		}
-		t0, err = time.ParseInLocation("2006-01-02T15", *start, time.UTC)
+		t0, err = time.ParseInLocation("2006-01-02", ds.Start, time.UTC)
 		if err != nil {
 			fatalf("bad --start: %v", err)
 		}
-		t1, err = time.ParseInLocation("2006-01-02T15", *end, time.UTC)
+		t1, err = time.ParseInLocation("2006-01-02", ds.End, time.UTC)
 		if err != nil {
 			fatalf("bad --end: %v", err)
 		}
@@ -75,16 +68,17 @@ func main() {
 	// Build jobs
 	var jobs []job
 	for t := t0; t.Before(t1); t = t.Add(time.Hour) {
-		url := dukasTickURL(*base, sym, t)
-		bi5Path := filepath.Join(*outDir, sym, fmt.Sprintf("%04d", t.Year()), fmt.Sprintf("%02d", t.Month()), fmt.Sprintf("%02d", t.Day()), fmt.Sprintf("%02d", t.Hour())+"h_ticks.bi5")
+		url := dukasTickURL(ds.BaseURL, sym, t)
+		bi5Path := filepath.Join(ds.Basedir, sym, fmt.Sprintf("%04d", t.Year()), fmt.Sprintf("%02d", t.Month()), fmt.Sprintf("%02d", t.Day()), fmt.Sprintf("%02d", t.Hour())+"h_ticks.bi5")
+
 		binPath := strings.TrimSuffix(bi5Path, ".bi5") + ".bin"
 		jobs = append(jobs, job{url: url, dst: bi5Path, flat: binPath})
 	}
 
 	fmt.Printf("Symbol: %s\nRange:  %s -> %s (hours=%d)\nOut:    %s\n\n",
-		sym, t0.Format(time.RFC3339), t1.Format(time.RFC3339), len(jobs), *outDir)
+		sym, t0.Format(time.RFC3339), t1.Format(time.RFC3339), len(jobs), ds.Basedir)
 
-	client := &http.Client{Timeout: *timeout}
+	client := &http.Client{Timeout: ds.timeout}
 	ctx := context.Background()
 
 	// Worker pool
@@ -93,12 +87,12 @@ func main() {
 	var mu sync.Mutex
 	var ok, miss, fail int
 
-	for i := 0; i < *workers; i++ {
+	for i := 0; i < ds.workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				time.Sleep(*sleep)
+				time.Sleep(ds.sleep)
 
 				// Download (skip if already present)
 				downloaded, status, err := downloadIfMissing(ctx, client, j.url, j.dst)
@@ -135,7 +129,12 @@ func main() {
 				}
 
 				// Optional: print checksum of decompressed output (handy for cache validation)
-				sum, _ := sha256File(j.flat)
+				sum, err := sha256File(j.flat)
+				if err != nil {
+					fmt.Printf("FAIL sha256File %s %s\n", j.dst, err)
+					continue
+				}
+
 				mu.Lock()
 				ok++
 				mu.Unlock()
@@ -149,7 +148,6 @@ func main() {
 	}
 	close(jobCh)
 	wg.Wait()
-
 	fmt.Printf("\nDone. ok=%d miss(404)=%d fail=%d\n", ok, miss, fail)
 }
 
@@ -198,16 +196,16 @@ func downloadIfMissing(ctx context.Context, client *http.Client, url, dst string
 	_, copyErr := io.Copy(f, resp.Body)
 	closeErr := f.Close()
 	if copyErr != nil {
-		_ = os.Remove(tmp)
+		os.Remove(tmp)
 		return false, resp.StatusCode, copyErr
 	}
 	if closeErr != nil {
-		_ = os.Remove(tmp)
+		os.Remove(tmp)
 		return false, resp.StatusCode, closeErr
 	}
 
 	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+		os.Remove(tmp)
 		return false, resp.StatusCode, err
 	}
 	return true, resp.StatusCode, nil
