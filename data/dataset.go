@@ -1,9 +1,10 @@
-package main
+package data
 
 import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -15,63 +16,69 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
 )
 
-const defaultBase = "https://datafeed.dukascopy.com/datafeed"
-
-type dataManager struct {
-	datasets map[string]*dataset
-}
-
 type dataset struct {
-	instrument string // EURUSD, USDJPY, etc.
-	start      string
-	end        string
-	basedir    string // root where data is to be stored
-	baseurl    string // base url for the data
-	one        string // one signle download
+	symbol    string    // EURUSD, USDJPY, etc.
+	start     time.Time // 1/1/2003
+	end       time.Time // time.Now
+	datafiles []*datafile
 
-	datafiles []datafile
+	// maybe belong to client and filesystem
+	basedir string // root where data is to be stored (need this here?)
+	baseurl string // base url for the data
+	one     string // one signle download
 
+	// todo: these all need to go into the client, as well as datafile
 	workers int
 	timeout time.Duration
 	sleep   time.Duration
 }
 
-func (ds *dataset) planFiles(base string) {
-	ds.basedir = base
+const defaultBase = "https://datafeed.dukascopy.com/datafeed"
 
-	ds.datafiles = make([]datafile, 0, (2025-2016+1)*12*31*24)
+var ErrRetryable = errors.New("retryable")
 
-	for year := 2025; year > 2003; year-- {
-		for month := 0; month < 12; month++ {
-			ndays := types.DaysInMonth(year, month)
-			for day := 1; day <= ndays; day++ {
-				for hour := 0; hour < 24; hour++ {
+func newDataset(sym string, start, end time.Time, basedir string) *dataset {
+	if start.After(end) {
+		panic("start data is after the end date")
+	}
+	if end.After(time.Now()) {
+		panic("end date is in the future")
+	}
+	return &dataset{
+		symbol:  sym,
+		start:   start,
+		end:     end,
+		basedir: basedir,
+	}
+}
 
-					ds.datafiles = append(ds.datafiles, datafile{
-						instrument: ds.instrument,
-						basedir:    base,
-						year:       year,
-						month:      month, // still 0-indexed for Dukascopy
-						day:        day,
-						hour:       hour,
-					})
+func (ds *dataset) buildDatafiles(ctx context.Context, candleQ, dlQ chan *datafile) {
+	duration := ds.end.Sub(ds.start)
+	hours := duration.Hours()
+	ds.datafiles = make([]*datafile, 0, int(hours)+1)
 
-				}
-			}
+	// for t := ds.start; !t.After(ds.end); t = t.Add(time.Hour) {
+	for t := ds.end; !t.Before(ds.start); t = t.Add(-time.Hour) {
+		df := datafile{
+			symbol:  ds.symbol,
+			Time:    t,
+			basedir: ds.basedir,
+		}
+		ds.datafiles = append(ds.datafiles, &df)
+		if df.fileExists() {
+			candleQ <- &df
+		} else {
+			dlQ <- &df
 		}
 	}
 }
 
 type datafile struct {
-	instrument string
-	year       int
-	month      int
-	day        int
-	hour       int
+	symbol string
+	time.Time
 
 	basedir string
 	bytes   int64
@@ -80,31 +87,40 @@ type datafile struct {
 
 const tickPathLen = 5
 
+func newDatafile(base string, sym string, t time.Time) *datafile {
+	ds := &datafile{
+		symbol:  sym,
+		Time:    t,
+		basedir: base,
+	}
+	return ds
+}
+
 func (d *datafile) URL() string {
 	return fmt.Sprintf(
 		"https://datafeed.dukascopy.com/datafeed/%s/%04d/%02d/%02d/%02dh_ticks.bi5",
-		d.instrument,
-		d.year,
-		d.month,
-		d.day,
-		d.hour)
+		d.symbol,
+		d.Time.Year(),
+		d.Time.Month()-1,
+		d.Time.Day(),
+		d.Time.Hour())
 }
 
 func (d *datafile) Path() string {
 	return filepath.Join(
 		d.basedir,
-		d.instrument,
-		fmt.Sprintf("%04d", d.year),
-		fmt.Sprintf("%02d", d.month),
-		fmt.Sprintf("%02d", d.day),
-		fmt.Sprintf("%02dh_ticks.bi5", d.hour),
+		d.symbol,
+		fmt.Sprintf("%04d", d.Time.Year()),
+		fmt.Sprintf("%02d", d.Time.Month()),
+		fmt.Sprintf("%02d", d.Time.Day()),
+		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
 	)
 }
 
 func (d *datafile) PathBin() string {
 	return filepath.Join(d.basedir, fmt.Sprintf(
 		"%s/%04d/%02d/%02d/%02dh_ticks.bin",
-		d.instrument, d.year, d.month, d.day, d.hour,
+		d.symbol, d.Time.Year(), d.Time.Month(), d.Time.Day(), d.Time.Hour(),
 	))
 }
 
@@ -117,29 +133,12 @@ func (d *datafile) parsePath(path string) (err error) {
 	if filepath.Ext(path) != ".bi5" {
 		return fmt.Errorf("error expecting file extension (.bi5) got (%s)", path)
 	}
-	fname := parts[nparts-1]
-	d.hour, err = strconv.Atoi(fname[:2])
-	if err != nil {
-		return err
-	}
-	d.day, err = strconv.Atoi(parts[nparts-2])
-	if err != nil {
-		return err
-	}
-	d.month, err = strconv.Atoi(parts[nparts-3])
-	if err != nil {
-		return err
-	}
-	d.year, err = strconv.Atoi(parts[nparts-4])
-	if err != nil {
-		return err
-	}
-	d.instrument = parts[nparts-5]
+	d.symbol = parts[nparts-5]
 	d.basedir = filepath.Join(parts[:nparts-5]...)
 	return nil
 }
 
-func (d *datafile) rawFileExists() bool {
+func (d *datafile) fileExists() bool {
 	p := d.Path()
 	info, err := os.Stat(p)
 	if os.IsNotExist(err) {
@@ -158,9 +157,9 @@ func (d *datafile) rawFileExists() bool {
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
 // it will return.
-func (d *datafile) download(ctx context.Context) error {
+func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	// Skip if present
-	if d.rawFileExists() {
+	if d.fileExists() {
 		return nil
 	}
 
@@ -174,7 +173,8 @@ func (d *datafile) download(ctx context.Context) error {
 		return fmt.Errorf("new request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", d.URL(), err)
 	}
@@ -325,7 +325,7 @@ func (d *datafile) ForEachTick(ctx context.Context, fn func(Tick) error) error {
 		}
 
 		// Optional sanity guard for EURUSD-ish scaled 1e5:
-		// (disable if you want multi-instrument generic)
+		// (disable if you want multi-symbol generic)
 		// if t.Ask < 50000 || t.Ask > 250000 { ... }
 
 		if err := fn(t); err != nil {

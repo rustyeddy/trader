@@ -27,6 +27,9 @@ type Candle struct {
 	Instrument string
 	TimeStamp  types.Timestamp
 	OHLC
+	Ticks     int32 // number of ticks per candle
+	AvgSpread int32
+	MaxSpread int32
 }
 
 type CandleSet struct {
