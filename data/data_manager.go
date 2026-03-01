@@ -3,7 +3,6 @@ package data
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 )
 
@@ -22,9 +21,10 @@ func (dm *DataManager) dataset(sym string) *dataset {
 	return dm.data[sym]
 }
 
-// BuildDatasets builds a dataset for each instrument and processes their
-// datafiles concurrently. It returns once all sender goroutines have
-// finished (either by completing all work or by context cancellation).
+// buildDatasets will produce the existing and missing datasets for
+// each of the instruments. The missing files will need to be
+// downloaded, the existing files can be checked for candles.  If the
+// candles do not already exist then they will be created.
 func (dm *DataManager) BuildDatasets(ctx context.Context) {
 	if dm.data == nil {
 		dm.data = make(map[string]*dataset)
@@ -35,6 +35,8 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 
 	candleQ := make(chan *datafile)
 	dlQ := make(chan *datafile)
+	defer close(candleQ)
+	defer close(dlQ)
 
 	go func() {
 		for df := range dlQ {
@@ -51,20 +53,12 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 		}
 	}()
 
-	// Use a WaitGroup so channels are closed only after all senders finish,
-	// preventing a send-on-closed-channel panic.
-	var wg sync.WaitGroup
 	for _, ds := range dm.data {
-		wg.Add(1)
-		go func(d *dataset) {
-			defer wg.Done()
-			d.buildDatafiles(ctx, candleQ, dlQ)
-		}(ds)
+		go ds.buildDatafiles(ctx, candleQ, dlQ)
 	}
 
-	wg.Wait()
-	close(candleQ)
-	close(dlQ)
+	// wait until we recieve a done signal, when we do we'll close out
+	<-ctx.Done()
 }
 
 // walk the missing datafiles for each of the symbols datasets and

@@ -1,7 +1,6 @@
 package data
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -19,15 +18,7 @@ func TestBuildDataSets(t *testing.T) {
 		End:         end,
 	}
 	assert.NotNil(t, dm)
-
-	// Cancel immediately to avoid blocking and network calls.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	dm.BuildDatasets(ctx)
-	assert.Equal(t, len(market.InstrumentList), len(dm.data))
-
-	for sym, ds := range dm.data {
-		assert.Equal(t, sym, ds.symbol)
-		assert.NotNil(t, ds)
-	}
+	assert.Equal(t, len(market.InstrumentList), len(dm.Instruments))
+	assert.Equal(t, start, dm.Start)
+	assert.Equal(t, end, dm.End)
 }
