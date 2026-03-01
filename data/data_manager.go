@@ -7,13 +7,34 @@ import (
 	"time"
 )
 
+// DataManager is responsible for identifing data files that are
+// missing accross all instruments. For missing datasets, ensure they
+// are downloaded, for datasets that are downloaded, make sure they
+// are made into candles.
 type DataManager struct {
 	Start       time.Time
 	End         time.Time
 	Basedir     string
 	Instruments []string
+	*downloader
 
 	data map[string]*dataset
+}
+
+// Init will get DataManager ready to go.
+func (dm *DataManager) Init() {
+	if dm.data == nil {
+		dm.data = make(map[string]*dataset)
+		for _, sym := range dm.Instruments {
+			dm.data[sym] = newDataset(sym, dm.Start, dm.End, dm.Basedir)
+		}
+	}
+
+	if dm.downloader == nil {
+		dm.downloader = &downloader{
+			Client: newHTTPClient(),
+		}
+	}
 }
 
 // dataset returns the dataset for the given instrument represented by
@@ -27,12 +48,7 @@ func (dm *DataManager) dataset(sym string) *dataset {
 // downloaded, the existing files can be checked for candles.  If the
 // candles do not already exist then they will be created.
 func (dm *DataManager) BuildDatasets(ctx context.Context) {
-	if dm.data == nil {
-		dm.data = make(map[string]*dataset)
-		for _, sym := range dm.Instruments {
-			dm.data[sym] = newDataset(sym, dm.Start, dm.End, dm.Basedir)
-		}
-	}
+	dm.Init()
 
 	candleQ := make(chan *datafile)
 	dlQ := make(chan *datafile)
@@ -41,9 +57,11 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 
 	go func() {
 		for df := range dlQ {
-			err := df.download(ctx, newHTTPClient())
+			// err := df.download(ctx, newHTTPClient())
+			err := dm.download(ctx, df)
 			if err != nil {
-				fmt.Printf("ERROR downloading %s\n", df.Path())
+				df.err = err
+				fmt.Printf(" ERROR downloading %s\n", df.Path())
 			}
 		}
 	}()
@@ -59,9 +77,8 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ds.buildDatafiles(ctx, candleQ, dlQ)				
-		}
-
+			ds.buildDatafiles(ctx, candleQ, dlQ)
+		}()
 	}
 	wg.Wait()
 }
@@ -69,5 +86,6 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 // walk the missing datafiles for each of the symbols datasets and
 // queue them up for download.
 func (dm *DataManager) buildCandles(df *datafile) {
-	fmt.Printf("Build candle from: %s\n", df.Path())
+	// TODO Get this running
+	// fmt.Printf("Build candle from: %s\n", df.Path())
 }

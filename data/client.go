@@ -65,7 +65,7 @@ func DownloadFiles(ctx context.Context, files []*datafile, workers, reqPerSec in
 
 			for f := range jobs {
 				// Skip if already valid
-				if f.fileExists() {
+				if f.Exists() {
 					results <- Result{File: f, Err: nil}
 					continue
 				}

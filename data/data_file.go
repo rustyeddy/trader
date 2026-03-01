@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,76 +18,10 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-type dataset struct {
-	symbol    string    // EURUSD, USDJPY, etc.
-	start     time.Time // 1/1/2003
-	end       time.Time // time.Now
-	datafiles []*datafile
-
-	// maybe belong to client and filesystem
-	basedir string // root where data is to be stored (need this here?)
-	baseurl string // base url for the data
-	one     string // one signle download
-
-	// todo: these all need to go into the client, as well as datafile
-	workers int
-	timeout time.Duration
-	sleep   time.Duration
-}
-
-const defaultBase = "https://datafeed.dukascopy.com/datafeed"
-
-var ErrRetryable = errors.New("retryable")
-
-func newDataset(sym string, start, end time.Time, basedir string) *dataset {
-	if start.After(end) {
-		panic("start data is after the end date")
-	}
-	if end.After(time.Now()) {
-		panic("end date is in the future")
-	}
-	return &dataset{
-		symbol:  sym,
-		start:   start,
-		end:     end,
-		basedir: basedir,
-	}
-}
-
-func (ds *dataset) buildDatafiles(ctx context.Context, candleQ, dlQ chan *datafile) {
-	duration := ds.end.Sub(ds.start)
-	hours := duration.Hours()
-	ds.datafiles = make([]*datafile, 0, int(hours)+1)
-
-	// for t := ds.start; !t.After(ds.end); t = t.Add(time.Hour) {
-	for t := ds.end; !t.Before(ds.start); t = t.Add(-time.Hour) {
-		df := datafile{
-			symbol:  ds.symbol,
-			Time:    t,
-			basedir: ds.basedir,
-		}
-		ds.datafiles = append(ds.datafiles, &df)
-
-		if df.fileExists() {
-			select {
-			case <-ctx.Done():
-				return
-			case candleQ <- &df:
-
-			}
-		} else {
-			select {
-			case <-ctx.Done():
-				return
-			case dlQ <- &df:
-			}
-		}
-	}
-}
-
 type datafile struct {
 	symbol string
 	time.Time
+	err error
 
 	basedir string
 	bytes   int64
@@ -148,7 +81,7 @@ func (d *datafile) parsePath(path string) (err error) {
 	return nil
 }
 
-func (d *datafile) fileExists() bool {
+func (d *datafile) Exists() bool {
 	p := d.Path()
 	info, err := os.Stat(p)
 	if os.IsNotExist(err) {
@@ -164,12 +97,32 @@ func (d *datafile) fileExists() bool {
 	return err == nil && !info.IsDir()
 }
 
+// fileIsValid ensures that the file actually exists and is either
+// a empty Weekend file or it is a complete non-corrupt lzh compressed
+// dukas binary file format.
+func (d *datafile) IsValid() bool {
+	valid := true
+
+	// 1. verify file exists
+
+	// 2. if file is 0 sized makesure it is during the closing hours
+	// over the weekend
+
+	// 3. Decompress the file to ensure it is not corrupt
+
+	// 4. Validate the file against the filename timestamp
+
+	return valid
+}
+
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
 // it will return.
 func (d *datafile) download(ctx context.Context, client *http.Client) error {
-	// Skip if present
-	if d.fileExists() {
+
+	// Skip if present.
+	// TODO before the file is written we need to make sure it is a valid file.
+	if d.Exists() && d.IsValid() {
 		return nil
 	}
 
@@ -177,7 +130,13 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	fmt.Printf("Downloading: %s...", d.URL())
+	fmt.Printf("Download %s %d-%02d-%02d:%02d... ",
+		d.symbol,
+		d.Time.Year(),
+		d.Time.Month()-1,
+		d.Time.Day(),
+		d.Time.Hour())
+
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, d.URL(), nil)
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
@@ -237,11 +196,11 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	d.bytes = info.Size()
 	d.modtime = info.ModTime()
 
-	fmt.Printf("%d bytes\n", n)
+	fmt.Printf("%6d bytes\n", n)
 
 	// Optional: sanity-check bytes against what we copied
 	if d.bytes != n || n == 0 {
-		fmt.Printf("Failed to download: %s\n", d.URL())
+		// fmt.Printf("Failed to download: %s\n", d.URL())
 	}
 
 	return nil
