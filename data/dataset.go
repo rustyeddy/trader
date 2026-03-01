@@ -68,10 +68,20 @@ func (ds *dataset) buildDatafiles(ctx context.Context, candleQ, dlQ chan *datafi
 			basedir: ds.basedir,
 		}
 		ds.datafiles = append(ds.datafiles, &df)
+
 		if df.fileExists() {
-			candleQ <- &df
+			select {
+			case <-ctx.Done():
+				return
+			case candleQ <- &df:
+
+			}
 		} else {
-			dlQ <- &df
+			select {
+			case <-ctx.Done():
+				return
+			case dlQ <- &df:
+			}
 		}
 	}
 }

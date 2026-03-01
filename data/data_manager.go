@@ -15,20 +15,6 @@ type DataManager struct {
 	data map[string]*dataset
 }
 
-// func NewDataManager(cfg *Config) *DataManager {
-// 	dm := &DataManager{
-// 		start:   cfg.start,
-// 		end:     cfg.end,
-// 		basedir: cfg.basedir + cfg.dukasdir,
-// 		data:    make(map[string]*dataset),
-// 	}
-
-// 	for _, sym := range market.InstrumentList {
-// 		dm.data[sym] = newDataset(sym, dm.start, dm.end)
-// 	}
-// 	return dm
-// }
-
 // dataset returns the dataset for the given instrument represented by
 // symbol
 func (dm *DataManager) dataset(sym string) *dataset {
