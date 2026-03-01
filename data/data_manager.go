@@ -73,8 +73,6 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 
 	// wait until we recieve a done signal, when we do we'll close out
 	<-ctx.Done()
-	close(candleQ)
-	close(dlQ)
 }
 
 // walk the missing datafiles for each of the symbols datasets and
