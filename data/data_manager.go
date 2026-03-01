@@ -16,21 +16,6 @@ type DataManager struct {
 	data map[string]*dataset
 }
 
-// NewDataManager creates a DataManager for the given instruments and time range,
-// pre-populating the dataset map. Call BuildDatasets to download and process data.
-func NewDataManager(instruments []string, start, end time.Time) *DataManager {
-	dm := &DataManager{
-		Start:       start,
-		End:         end,
-		Instruments: instruments,
-		data:        make(map[string]*dataset),
-	}
-	for _, sym := range instruments {
-		dm.data[sym] = newDataset(sym, start, end, "")
-	}
-	return dm
-}
-
 // dataset returns the dataset for the given instrument represented by
 // symbol
 func (dm *DataManager) dataset(sym string) *dataset {
