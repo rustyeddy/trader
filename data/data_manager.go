@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -53,12 +54,16 @@ func (dm *DataManager) BuildDatasets(ctx context.Context) {
 		}
 	}()
 
+	var wg sync.WaitGroup
 	for _, ds := range dm.data {
-		go ds.buildDatafiles(ctx, candleQ, dlQ)
-	}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ds.buildDatafiles(ctx, candleQ, dlQ)				
+		}
 
-	// wait until we recieve a done signal, when we do we'll close out
-	<-ctx.Done()
+	}
+	wg.Wait()
 }
 
 // walk the missing datafiles for each of the symbols datasets and

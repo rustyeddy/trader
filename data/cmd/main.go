@@ -18,8 +18,8 @@ type Config struct {
 
 var (
 	config = &Config{
-		Start:    time.Date(2020, 01, 01, 0, 0, 0, 0, time.UTC),
-		End:      time.Now(),
+		Start:    time.Date(2003, 01, 01, 0, 0, 0, 0, time.UTC),
+		End:      time.Now().AddDate(0, 0, -1), // start from yesterday (the last fullday)
 		Symbols:  "EURUSD,USDJPY,GBPUSD",
 		Basedir:  "../../tmp/",
 		Dukasdir: "dukas/",
