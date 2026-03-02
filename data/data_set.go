@@ -36,32 +36,30 @@ func newDataset(sym string, start, end time.Time, basedir string) *dataset {
 	}
 }
 
-func (ds *dataset) buildDatafiles(ctx context.Context, candleQ, dlQ chan *datafile) {
+func (ds *dataset) buildDatafiles(ctx context.Context, candleQ chan<- *datafile, dlQ chan<- *datafile) {
 	duration := ds.end.Sub(ds.start)
-	hours := duration.Hours()
-	ds.datafiles = make([]*datafile, 0, int(hours)+1)
+	hours := int(duration.Hours())
+	ds.datafiles = make([]*datafile, 0, hours+1)
 
-	// for t := ds.start; !t.After(ds.end); t = t.Add(time.Hour) {
 	for t := ds.end; !t.Before(ds.start); t = t.Add(-time.Hour) {
-		df := datafile{
-			symbol:  ds.symbol,
-			Time:    t,
-			basedir: ds.basedir,
-		}
-		ds.datafiles = append(ds.datafiles, &df)
+		df := newDatafile(ds.basedir, ds.symbol, t) // <-- new pointer each loop
+		ds.datafiles = append(ds.datafiles, df)
 
-		if df.Exists() {
+		// IsValid will remove the file if it is true
+		if df.IsValid(ctx) == nil {
+			if df.bytes == 0 {
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case candleQ <- &df:
-
+			case candleQ <- df:
 			}
 		} else {
 			select {
 			case <-ctx.Done():
 				return
-			case dlQ <- &df:
+			case dlQ <- df:
 			}
 		}
 	}

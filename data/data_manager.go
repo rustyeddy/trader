@@ -3,6 +3,10 @@ package data
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -37,12 +41,6 @@ func (dm *DataManager) Init() {
 	}
 }
 
-// dataset returns the dataset for the given instrument represented by
-// symbol
-func (dm *DataManager) dataset(sym string) *dataset {
-	return dm.data[sym]
-}
-
 // buildDatasets will produce the existing and missing datasets for
 // each of the instruments. The missing files will need to be
 // downloaded, the existing files can be checked for candles.  If the
@@ -50,42 +48,117 @@ func (dm *DataManager) dataset(sym string) *dataset {
 func (dm *DataManager) BuildDatasets(ctx context.Context) {
 	dm.Init()
 
-	candleQ := make(chan *datafile)
-	dlQ := make(chan *datafile)
-	defer close(candleQ)
-	defer close(dlQ)
+	// Buffered channels help reduce scheduling stalls when producers are fast.
+	// Start worker pools FIRST so producers can enqueue immediately.
+	candleQ := make(chan *datafile, 1024)
+	candleWG := dm.startCandleMaker(ctx, candleQ) // e.g. 4 candle builders
+
+	dlQ := make(chan *datafile, 1024)
+	dlWG := dm.downloader.startDownloader(ctx, dlQ, candleQ) // e.g. 8 downloaders
+
+	// Producers: scan/build datafiles and enqueue work.
+	var prodWG sync.WaitGroup
+	for _, ds := range dm.data {
+		ds := ds // IMPORTANT: capture loop var
+		prodWG.Add(1)
+		go func() {
+			defer prodWG.Done()
+			ds.buildDatafiles(ctx, candleQ, dlQ)
+		}()
+	}
+
+	prodWG.Wait()
+	close(dlQ)     // no more download jobs coming from producers
+	dlWG.Wait()    // wait for downloads to finish (and enqueue candles)
+	close(candleQ) // now safe: no more candle jobs will be produced
+	candleWG.Wait()
+}
+
+// ValidateDatasets will walk the entire directory tree, identify invalid
+// datafiles then delete them
+func (dm *DataManager) populateFromPath(ctx context.Context, tickQ chan *datafile) error {
+	var valid, invalid int
+
+	// Call filepath.WalkDir with the root and an anonymous callback function
+	err := filepath.WalkDir(dm.Basedir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Handle the error for the specific path, but continue the walk
+			fmt.Printf("preventing error at path %s: %v\n", path, err)
+			return err
+		}
+
+		// Check if it's a file and print its path
+		if d.IsDir() {
+			return nil
+		}
+
+		df, err := datafileFromPath(path)
+		if err != nil {
+			return nil
+		}
+
+		if !df.Exists() {
+			return nil
+		}
+
+		if df.bytes == 0 {
+			return nil
+		}
+
+		if err = df.IsValid(ctx); err != nil {
+			invalid++
+			fmt.Printf("removing invalid %s - %s\n", path, err)
+			os.Remove(path)
+			return nil
+		}
+
+		tickQ <- df
+		valid++
+		return nil // Returning nil continues the walk
+	})
+
+	if err != nil {
+		log.Fatalf("error walking the path %s: %v\n", dm.Basedir, err)
+		return err
+	}
+	fmt.Printf("valid: %d / invalid %d\n", valid, invalid)
+	return nil
+}
+
+func (dm *DataManager) Validate(ctx context.Context) error {
+	q := make(chan *datafile)
 
 	go func() {
-		for df := range dlQ {
-			// err := df.download(ctx, newHTTPClient())
-			err := dm.download(ctx, df)
-			if err != nil {
-				df.err = err
-				fmt.Printf(" ERROR downloading %s\n", df.Path())
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-q:
+				fmt.Println("valid!")
 			}
 		}
 	}()
 
-	go func() {
-		for df := range candleQ {
-			dm.buildCandles(df)
-		}
-	}()
-
-	var wg sync.WaitGroup
-	for _, ds := range dm.data {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ds.buildDatafiles(ctx, candleQ, dlQ)
-		}()
+	if err := dm.populateFromPath(ctx, q); err != nil {
+		return err
 	}
-	wg.Wait()
+	return nil
 }
 
 // walk the missing datafiles for each of the symbols datasets and
 // queue them up for download.
-func (dm *DataManager) buildCandles(df *datafile) {
-	// TODO Get this running
-	// fmt.Printf("Build candle from: %s\n", df.Path())
+func (dm *DataManager) BuildCandles(ctx context.Context) error {
+
+	// Buffered channels help reduce scheduling stalls when producers are fast.
+	// Start worker pools FIRST so producers can enqueue immediately.
+	candleQ := make(chan *datafile, 1024)
+	wg := dm.startCandleMaker(ctx, candleQ) // e.g. 4 candle builders
+	err := dm.populateFromPath(ctx, candleQ)
+	if err != nil {
+		return err
+	}
+
+	wg.Wait()
+	return nil
 }

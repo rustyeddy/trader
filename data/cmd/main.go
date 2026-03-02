@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -27,79 +29,35 @@ var (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Please give me a command (validate|build)")
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
+
 	dm := &data.DataManager{
 		Start:       config.Start,
 		End:         config.End,
 		Basedir:     config.Basedir + config.Dukasdir,
 		Instruments: strings.Split(config.Symbols, ","),
 	}
+	dm.Init()
 
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
+	switch os.Args[1] {
+	case "validate":
+		dm.Validate(ctx)
 
-	dm.BuildDatasets(ctx)
+	case "build":
+		// Assume M1
+		dm.BuildDatasets(ctx)
+
+	case "candles":
+		dm.BuildCandles(ctx)
+
+	default:
+		fmt.Printf("I don't know what this means", os.Args[1])
+		os.Exit(1)
+	}
 }
-
-// func createCandles(basedir string) {
-// 	symbols := make(map[string]*data.Dataset)
-// 	for _, inst := range market.InstrumentList {
-// 		symbols[inst] = nil
-// 	}
-
-// 	var wg sync.WaitGroup
-// 	err := filepath.WalkDir(basedir, func(path string, d fs.DirEntry, err error) error {
-// 		if err != nil {
-// 			fmt.Printf("preventing walk into a directory: %v\n", err)
-// 			return err
-// 		}
-
-// 		// 2. Process the file or directory
-// 		if d.IsDir() {
-// 			return nil
-// 		}
-// 		df := &data.datafile{}
-// 		err = df.parsePath(path)
-// 		if err != nil {
-// 			return err
-// 		}
-
-// 		m1Q := make(chan Tick)
-// 		go func() {
-// 			wg.Add(1)
-// 			m1maker(m1Q)
-// 			defer wg.Done()
-// 		}()
-
-// 		// fmt.Println(df.Path())
-// 		ctx, _ := context.WithCancel(context.TODO())
-// 		err = df.ForEachTick(ctx, func(t data.Tick) error {
-// 			m1Q <- t
-
-// 			// fmt.Printf("ITs a tick %+v\n", t)
-// 			return nil
-// 		})
-// 		// fmt.Printf("ticks: %d\n", ticks)
-
-// 		// 3. Return nil to continue the traversal
-// 		return nil
-// 	})
-
-// 	wg.Wait()
-// 	if err != nil {
-// 		log.Fatalf("error during directory traversal: %s", err)
-// 	}
-// }
-
-// func m1maker(m1Q <-chan data.Tick) {
-
-// 	for t := range m1Q {
-// 		fmt.Printf("TICK: %+v\n", t)
-// 	}
-
-// }
-
-// func panicErr(err error) {
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// }

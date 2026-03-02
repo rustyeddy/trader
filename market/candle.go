@@ -25,11 +25,14 @@ type OHLC struct {
 
 type Candle struct {
 	Instrument string
-	TimeStamp  types.Timestamp
+	Timestamp  types.Timestamp
 	OHLC
 	Ticks     int32 // number of ticks per candle
-	AvgSpread int32
-	MaxSpread int32
+	AvgSpread types.Price
+	MaxSpread types.Price
+
+	// ticks []Tick we can store all ticks if we need better execution
+	// accuracy
 }
 
 type CandleSet struct {

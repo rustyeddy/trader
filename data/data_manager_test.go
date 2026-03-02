@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,4 +33,20 @@ func TestBuildDataSets(t *testing.T) {
 	// the data from each slice to the respective queue
 	dlQ := dm.download(ctx)
 	candleQ := dm.download(ctx)
+}
+
+func TestPathRoundTrip(t *testing.T) {
+	orig := "../../tmp/dukas/EURUSD/2025/02/03/11h_ticks.bi5"
+
+	df, err := ParseDatafilePath(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconstructed := df.Path()
+
+	if filepath.Clean(orig) != filepath.Clean(reconstructed) {
+		t.Fatalf("round trip mismatch:\norig: %s\nnew : %s",
+			orig, reconstructed)
+	}
 }

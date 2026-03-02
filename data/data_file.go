@@ -1,21 +1,19 @@
 package data
 
 import (
-	"bufio"
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/ulikunitz/xz/lzma"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type datafile struct {
@@ -23,12 +21,29 @@ type datafile struct {
 	time.Time
 	err error
 
-	basedir string
-	bytes   int64
-	modtime time.Time
+	basedir     string
+	bytes       int64
+	modtime     time.Time
+	weekend     bool
+	totalspread int64
+
+	*dataset
+
+	m1 market.Candle
 }
 
 const tickPathLen = 5
+
+var (
+	ErrPathTooShort    = errors.New("path too short")
+	ErrInvalidFilename = errors.New("invalid tick filename")
+	ErrPartialFile     = errors.New("temporary partial file")
+	ErrInvalidYear     = errors.New("invalid year")
+	ErrInvalidMonth    = errors.New("invalid month")
+	ErrInvalidDay      = errors.New("invalid day")
+	ErrInvalidHour     = errors.New("invalid hour")
+	ErrHourOutOfRange  = errors.New("hour out of range")
+)
 
 func newDatafile(base string, sym string, t time.Time) *datafile {
 	ds := &datafile{
@@ -37,6 +52,66 @@ func newDatafile(base string, sym string, t time.Time) *datafile {
 		basedir: base,
 	}
 	return ds
+}
+
+func datafileFromPath(fullPath string) (*datafile, error) {
+	clean := filepath.Clean(fullPath)
+
+	if strings.HasSuffix(clean, ".part") {
+		return nil, fmt.Errorf("%w: %s", ErrPartialFile, fullPath)
+	}
+
+	parts := strings.Split(clean, string(filepath.Separator))
+	if len(parts) < 6 {
+		return nil, fmt.Errorf("%w: %s", ErrPathTooShort, fullPath)
+	}
+
+	filename := parts[len(parts)-1]
+	dayStr := parts[len(parts)-2]
+	monStr := parts[len(parts)-3]
+	yearStr := parts[len(parts)-4]
+	symbol := parts[len(parts)-5]
+
+	if !strings.HasSuffix(filename, "h_ticks.bi5") {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidFilename, filename)
+	}
+
+	hourStr := strings.TrimSuffix(filename, "h_ticks.bi5")
+
+	year, err := strconv.Atoi(yearStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidYear, err)
+	}
+
+	month, err := strconv.Atoi(monStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidMonth, err)
+	}
+
+	day, err := strconv.Atoi(dayStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidDay, err)
+	}
+
+	hour, err := strconv.Atoi(hourStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidHour, err)
+	}
+
+	if hour < 0 || hour > 23 {
+		return nil, fmt.Errorf("%w: %d", ErrHourOutOfRange, hour)
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+
+	baseParts := parts[:len(parts)-5]
+	basedir := filepath.Join(baseParts...)
+
+	return &datafile{
+		symbol:  symbol,
+		Time:    t,
+		basedir: basedir,
+	}, nil
 }
 
 func (d *datafile) URL() string {
@@ -67,20 +142,6 @@ func (d *datafile) PathBin() string {
 	))
 }
 
-func (d *datafile) parsePath(path string) (err error) {
-	parts := strings.Split(path, "/")
-	nparts := len(parts)
-	if nparts < tickPathLen {
-		return fmt.Errorf("path not long enough %s", path)
-	}
-	if filepath.Ext(path) != ".bi5" {
-		return fmt.Errorf("error expecting file extension (.bi5) got (%s)", path)
-	}
-	d.symbol = parts[nparts-5]
-	d.basedir = filepath.Join(parts[:nparts-5]...)
-	return nil
-}
-
 func (d *datafile) Exists() bool {
 	p := d.Path()
 	info, err := os.Stat(p)
@@ -97,24 +158,6 @@ func (d *datafile) Exists() bool {
 	return err == nil && !info.IsDir()
 }
 
-// fileIsValid ensures that the file actually exists and is either
-// a empty Weekend file or it is a complete non-corrupt lzh compressed
-// dukas binary file format.
-func (d *datafile) IsValid() bool {
-	valid := true
-
-	// 1. verify file exists
-
-	// 2. if file is 0 sized makesure it is during the closing hours
-	// over the weekend
-
-	// 3. Decompress the file to ensure it is not corrupt
-
-	// 4. Validate the file against the filename timestamp
-
-	return valid
-}
-
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
 // it will return.
@@ -122,20 +165,13 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 
 	// Skip if present.
 	// TODO before the file is written we need to make sure it is a valid file.
-	if d.Exists() && d.IsValid() {
+	if d.Exists() && d.IsValid(ctx) == nil {
 		return nil
 	}
 
 	// Correctness-first timeout
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-
-	fmt.Printf("Download %s %d-%02d-%02d:%02d... ",
-		d.symbol,
-		d.Time.Year(),
-		d.Time.Month()-1,
-		d.Time.Day(),
-		d.Time.Hour())
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, d.URL(), nil)
 	if err != nil {
@@ -159,15 +195,14 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	}
 
 	tmp := dst + ".part"
-
 	f, err := os.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
 
-	n, copyErr := io.Copy(f, resp.Body)
 	// Important: flush + close BEFORE rename/stat
-	syncErr := f.Sync() // optional but helpful for “why is size 0?”
+	n, copyErr := io.Copy(f, resp.Body)
+	syncErr := f.Sync()
 	closeErr := f.Close()
 
 	if copyErr != nil || syncErr != nil || closeErr != nil {
@@ -196,109 +231,168 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	d.bytes = info.Size()
 	d.modtime = info.ModTime()
 
+	fmt.Printf("Download %s %d-%02d-%02d:%02d... ",
+		d.symbol,
+		d.Time.Year(),
+		d.Time.Month()-1,
+		d.Time.Day(),
+		d.Time.Hour())
 	fmt.Printf("%6d bytes\n", n)
 
 	// Optional: sanity-check bytes against what we copied
 	if d.bytes != n || n == 0 {
 		// fmt.Printf("Failed to download: %s\n", d.URL())
 	}
-
 	return nil
 }
 
-type Tick struct {
-	TsUnixMS int64
-	Ask      int32
-	Bid      int32
-	AskVol   float32
-	BidVol   float32
-}
-
-var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
-
-func (d *datafile) baseHourUnixMS() (int64, error) {
-	p := d.Path()
-	m := rePath.FindStringSubmatch(p)
-	if m == nil {
-		return 0, fmt.Errorf("cannot parse datetime from path: %s", p)
+// fileIsValid ensures that the file actually exists and is either
+// a empty Weekend file or it is a complete non-corrupt lzh compressed
+// dukas binary file format.
+func (d *datafile) IsValid(ctx context.Context) error {
+	// 1. verify file exists
+	if !d.Exists() {
+		return fmt.Errorf("file does not exist")
 	}
-	year, _ := strconv.Atoi(m[1])
-	mon, _ := strconv.Atoi(m[2])
-	day, _ := strconv.Atoi(m[3])
-	hh, _ := strconv.Atoi(m[4])
 
-	t := time.Date(year, time.Month(mon), day, hh, 0, 0, 0, time.UTC)
-	return t.UnixMilli(), nil
-}
+	if d.bytes == 0 {
+		return nil
+	}
 
-// ForEachTick decompresses BI5 and streams decoded ticks to fn.
-// It does not write decompressed data to disk.
-func (d *datafile) ForEachTick(ctx context.Context, fn func(Tick) error) error {
-	path := d.Path()
+	if d.Time.IsZero() {
+		if market.IsFXMarketClosed(d.Time.UTC()) {
+			return nil
+		}
+		return fmt.Errorf("empty file outside market-closed hours: %s", d.Path())
+	}
 
 	baseUnixMS, err := d.baseHourUnixMS()
 	if err != nil {
 		return err
 	}
+	hourStart := baseUnixMS
+	hourEnd := baseUnixMS + 3600_000
+	err = d.forEachTick(ctx, func(t Tick) error {
+		if t.Timestamp < hourStart || t.Timestamp >= hourEnd {
+			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s", t, hourStart, hourEnd, d.Path())
+		}
+		return nil
+	})
+	return nil
+}
 
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
+func floorToMinuteUnixMS(ts types.Timestamp) types.Timestamp {
+	return (ts / 60_000) * 60_000
+}
+
+// Add consumes a tick.
+// If it completes a candle (tick belongs to a new minute), it returns (finishedCandle, true, nil)
+// and starts a new candle seeded with this tick.
+// Otherwise it returns (_, false, nil).
+func (df *datafile) Add(t Tick) (market.Candle, bool, error) {
+	if t.Timestamp <= 0 {
+		return market.Candle{}, false, fmt.Errorf("bad tick timestamp: %d", t.Timestamp)
 	}
-	defer f.Close()
 
-	zr, err := lzma.NewReader(bufio.NewReaderSize(f, 1<<20))
-	if err != nil {
-		return fmt.Errorf("lzma reader %s: %w", path, err)
+	mid := t.Mid()
+	minute := floorToMinuteUnixMS(t.Timestamp)
+	spread := t.Spread()
+
+	// First tick initializes the first candle
+	if df.m1.Ticks == 0 {
+		df.m1 = market.Candle{
+			Instrument: df.symbol,
+			Timestamp:  minute,
+			OHLC: market.OHLC{
+				O: mid,
+				H: mid,
+				L: mid,
+				C: mid,
+			},
+			Ticks:     1,
+			MaxSpread: spread,
+		}
+		df.totalspread = int64(spread)
+		return market.Candle{}, false, nil
 	}
 
-	const recSize = 20
-	buf := make([]byte, recSize)
+	// Same minute: update OHLC
+	if minute == df.m1.Timestamp {
+		if mid > df.m1.H {
+			df.m1.H = mid
+		}
+		if mid < df.m1.L {
+			df.m1.L = mid
+		}
+		df.m1.C = mid
+		df.m1.Ticks++
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if df.m1.MaxSpread < spread {
+			df.m1.MaxSpread = spread
 		}
+		df.totalspread += int64(spread)
+		return market.Candle{}, false, nil
+	}
 
-		_, err := io.ReadFull(zr, buf)
-		if err == io.EOF {
-			return nil
-		}
-		if err == io.ErrUnexpectedEOF {
-			return fmt.Errorf("truncated tick record in %s", path)
-		}
+	// If ticks are not ordered, you can either error or ignore.
+	if minute < df.m1.Timestamp {
+		return market.Candle{}, false, fmt.Errorf("out-of-order tick: tick minute %d < current %d",
+			minute, df.m1.Timestamp)
+	}
+
+	// New minute: finalize previous candle, start a new one with this tick
+	finished := df.m1
+	ticks := int64(finished.Ticks)
+	finished.AvgSpread = types.Price((df.totalspread + ticks/2) / ticks)
+
+	df.m1 = market.Candle{
+		Instrument: df.symbol,
+		Timestamp:  minute,
+		OHLC: market.OHLC{
+			O: mid,
+			H: mid,
+			L: mid,
+			C: mid,
+		},
+		Ticks:     1,
+		MaxSpread: spread,
+	}
+	df.totalspread = int64(spread)
+	return finished, true, nil
+}
+
+// Flush returns the in-progress candle at end-of-stream (if any).
+func (df *datafile) Flush() (market.Candle, bool) {
+	if df.m1.Ticks == 0 {
+		return market.Candle{}, false
+	}
+	c := df.m1
+	ticks := int64(c.Ticks)
+	c.AvgSpread = types.Price((df.totalspread + ticks/2) / ticks)
+	df.totalspread = 0
+	df.m1 = market.Candle{}
+	return c, true
+}
+
+func (df *datafile) buildM1(ctx context.Context) ([]market.Candle, error) {
+	out := make([]market.Candle, 0, 60) // one hour -> ~60 minutes
+
+	err := df.forEachTick(ctx, func(t Tick) error {
+		c, done, err := df.Add(t)
 		if err != nil {
-			return fmt.Errorf("read tick record %s: %w", path, err)
-		}
-
-		msOffset := binary.BigEndian.Uint32(buf[0:4])
-		askU := binary.BigEndian.Uint32(buf[4:8])
-		bidU := binary.BigEndian.Uint32(buf[8:12])
-
-		askVol := math.Float32frombits(binary.BigEndian.Uint32(buf[12:16]))
-		bidVol := math.Float32frombits(binary.BigEndian.Uint32(buf[16:20]))
-
-		// Quick sanity guard: offset must fit in the hour.
-		if msOffset >= 3600*1000 {
-			return fmt.Errorf("bad msOffset=%d in %s (decoder misaligned?)", msOffset, path)
-		}
-
-		t := Tick{
-			TsUnixMS: baseUnixMS + int64(msOffset),
-			Ask:      int32(askU),
-			Bid:      int32(bidU),
-			AskVol:   askVol,
-			BidVol:   bidVol,
-		}
-
-		// Optional sanity guard for EURUSD-ish scaled 1e5:
-		// (disable if you want multi-symbol generic)
-		// if t.Ask < 50000 || t.Ask > 250000 { ... }
-
-		if err := fn(t); err != nil {
 			return err
 		}
+		if done {
+			out = append(out, c)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+
+	if c, ok := df.Flush(); ok {
+		out = append(out, c)
+	}
+	return out, nil
 }

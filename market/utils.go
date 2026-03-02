@@ -9,6 +9,26 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+// Simple closure window heuristic in UTC.
+// FX typically "closes" late Friday -> late Sunday (exact hour depends).
+// This conservative rule treats all of Saturday as closed, and Sunday before 22:00 UTC as closed.
+// Adjust if you want a stricter/exact schedule.
+func IsFXMarketClosed(t time.Time) bool {
+	wd := t.Weekday()
+	switch wd {
+	case time.Saturday:
+		return true
+	case time.Sunday:
+		// Common retail convention: market opens around 22:00 UTC Sunday.
+		return t.Hour() < 22
+	case time.Friday:
+		// Common retail convention: market closes around 22:00 UTC Friday.
+		return t.Hour() >= 22
+	default:
+		return false
+	}
+}
+
 func parseToUnix(s string) (types.Timestamp, error) {
 	// First try parsing rfc3339
 	t, err := time.Parse(time.RFC3339, s)
