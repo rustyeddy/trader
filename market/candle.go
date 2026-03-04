@@ -16,32 +16,25 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-type OHLC struct {
-	O types.Price
-	H types.Price
-	L types.Price
-	C types.Price
-}
-
 type Candle struct {
-	Instrument string
-	Timestamp  types.Timestamp
-	OHLC
+	Open      types.Price
+	High      types.Price
+	Low       types.Price
+	Close     types.Price
 	Ticks     int32 // number of ticks per candle
 	AvgSpread types.Price
 	MaxSpread types.Price
-
-	// ticks []Tick we can store all ticks if we need better execution
-	// accuracy
 }
 
+// CandleSet contains 1 month of M1, 1 Year of H1 and 1 Year of D1
+// Candles.
 type CandleSet struct {
 	*Instrument
 	Start     types.Timestamp // unix seconds for candle open
 	Timeframe types.Timestamp
 	Scale     int32
 	Source    string
-	Candles   []OHLC
+	Candles   []Candle
 	Valid     []uint64
 
 	Filepath   string
@@ -206,7 +199,7 @@ func (cs *CandleSet) buildDenseFromFile() error {
 	n := int((end-start)/tf) + 1
 
 	cs.Start = start
-	cs.Candles = make([]OHLC, n)
+	cs.Candles = make([]Candle, n)
 	cs.Valid = make([]uint64, (n+63)/64)
 
 	f, err := os.Open(cs.Filepath)
@@ -262,11 +255,11 @@ func (cs *CandleSet) buildDenseFromFile() error {
 			fmt.Fprintf(os.Stderr, "error %s\n", err)
 			continue
 		}
-		candle := OHLC{
-			O: prices[0],
-			H: prices[1],
-			L: prices[2],
-			C: prices[3],
+		candle := Candle{
+			Open:  prices[0],
+			High:  prices[1],
+			Low:   prices[2],
+			Close: prices[3],
 		}
 		cs.Candles[idx] = candle
 		bitSet(cs.Valid, idx)
@@ -406,7 +399,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		Timeframe:  3600,
 		Scale:      cs.Scale,
 		Source:     cs.Source + " H1",
-		Candles:    make([]OHLC, nHours),
+		Candles:    make([]Candle, nHours),
 		Valid:      make([]uint64, (nHours+63)/64),
 	}
 
@@ -430,25 +423,25 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 			bar := cs.Candles[idx]
 
 			if !firstSet {
-				o = bar.O
-				hi = bar.H
-				lo = bar.L
+				o = bar.Open
+				hi = bar.High
+				lo = bar.Low
 				firstSet = true
 			} else {
-				if bar.H > hi {
-					hi = bar.H
+				if bar.High > hi {
+					hi = bar.High
 				}
-				if bar.L < lo {
-					lo = bar.L
+				if bar.Low < lo {
+					lo = bar.Low
 				}
 			}
-			cl = bar.C
+			cl = bar.Close
 			validCount++
 		}
 
 		// Critical: require at least one real minute AND threshold
 		if firstSet && validCount >= minValid {
-			h1.Candles[h] = OHLC{O: o, H: hi, L: lo, C: cl}
+			h1.Candles[h] = Candle{Open: o, High: hi, Low: lo, Close: cl}
 			bitSet(h1.Valid, h)
 		}
 	}
@@ -456,11 +449,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	return h1
 }
 
-func (cs *CandleSet) F(v int32) float64 {
+func (cs *CandleSet) Flot64(v int32) float64 {
 	return float64(v) / float64(cs.Scale)
 }
 
-func (cs *CandleSet) I(f float64) int32 {
+func (cs *CandleSet) Int32(f float64) int32 {
 	// round to nearest scaled int
 	return int32(f*float64(cs.Scale) + 0.5)
 }
@@ -573,10 +566,10 @@ func (cs *CandleSet) WriteCSV(path string) error {
 
 		rec := []string{
 			t,
-			formatNumber(c.O, cs.Scale),
-			formatNumber(c.H, cs.Scale),
-			formatNumber(c.L, cs.Scale),
-			formatNumber(c.C, cs.Scale),
+			formatNumber(c.Open, cs.Scale),
+			formatNumber(c.High, cs.Scale),
+			formatNumber(c.Low, cs.Scale),
+			formatNumber(c.Close, cs.Scale),
 			strconv.FormatUint(valid, 10),
 		}
 
@@ -637,10 +630,10 @@ func (cs *CandleSet) WriteCSVTo(w io.Writer) error {
 
 		if err := cw.Write([]string{
 			t,
-			formatNumber(c.O, cs.Scale),
-			formatNumber(c.H, cs.Scale),
-			formatNumber(c.L, cs.Scale),
-			formatNumber(c.C, cs.Scale),
+			formatNumber(c.Open, cs.Scale),
+			formatNumber(c.High, cs.Scale),
+			formatNumber(c.Low, cs.Scale),
+			formatNumber(c.Close, cs.Scale),
 			strconv.FormatUint(valid, 10),
 		}); err != nil {
 			return err
@@ -677,7 +670,7 @@ func (it *Iterator) Next() bool {
 	}
 }
 
-func (it *Iterator) Candle() OHLC {
+func (it *Iterator) Candle() Candle {
 	return it.cs.Candles[it.idx]
 }
 

@@ -231,7 +231,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	d.bytes = info.Size()
 	d.modtime = info.ModTime()
 
-	fmt.Printf("Download %s %d-%02d-%02d:%02d... ",
+	fmt.Printf("%s %d-%02d-%02d:%02d... ",
 		d.symbol,
 		d.Time.Year(),
 		d.Time.Month()-1,
@@ -285,81 +285,79 @@ func floorToMinuteUnixMS(ts types.Timestamp) types.Timestamp {
 	return (ts / 60_000) * 60_000
 }
 
-// Add consumes a tick.
-// If it completes a candle (tick belongs to a new minute), it returns (finishedCandle, true, nil)
-// and starts a new candle seeded with this tick.
-// Otherwise it returns (_, false, nil).
-func (df *datafile) Add(t Tick) (market.Candle, bool, error) {
-	if t.Timestamp <= 0 {
-		return market.Candle{}, false, fmt.Errorf("bad tick timestamp: %d", t.Timestamp)
-	}
+// // Add consumes a tick.
+// // If it completes a candle (tick belongs to a new minute), it returns (finishedCandle, true, nil)
+// // and starts a new candle seeded with this tick.
+// // Otherwise it returns (_, false, nil).
+// func (df *datafile) Add(t Tick) (market.Candle, bool, error) {
+// 	if t.Timestamp <= 0 {
+// 		return market.Candle{}, false, fmt.Errorf("bad tick timestamp: %d", t.Timestamp)
+// 	}
 
-	mid := t.Mid()
-	minute := floorToMinuteUnixMS(t.Timestamp)
-	spread := t.Spread()
+// 	mid := t.Mid()
+// 	minute := floorToMinuteUnixMS(t.Timestamp)
+// 	spread := t.Spread()
 
-	// First tick initializes the first candle
-	if df.m1.Ticks == 0 {
-		df.m1 = market.Candle{
-			Instrument: df.symbol,
-			Timestamp:  minute,
-			OHLC: market.OHLC{
-				O: mid,
-				H: mid,
-				L: mid,
-				C: mid,
-			},
-			Ticks:     1,
-			MaxSpread: spread,
-		}
-		df.totalspread = int64(spread)
-		return market.Candle{}, false, nil
-	}
+// 	// First tick initializes the first candle
+// 	if df.m1.Ticks == 0 {
+// 		df.m1 = market.Candle{
+// 			OHLC: market.OHLC{
+// 				Open:  mid,
+// 				High:  mid,
+// 				Low:   mid,
+// 				Close: mid,
+// 			},
+// 			Ticks:     1,
+// 			MaxSpread: spread,
+// 		}
+// 		df.totalspread = int64(spread)
+// 		return market.Candle{}, false, nil
+// 	}
 
-	// Same minute: update OHLC
-	if minute == df.m1.Timestamp {
-		if mid > df.m1.H {
-			df.m1.H = mid
-		}
-		if mid < df.m1.L {
-			df.m1.L = mid
-		}
-		df.m1.C = mid
-		df.m1.Ticks++
+// 	// Same minute: update OHLC
+// 	if minute == df.m1.Timestamp {
+// 		if mid > df.m1.High {
+// 			df.m1.High = mid
+// 		}
+// 		if mid < df.m1.Low {
+// 			df.m1.Low = mid
+// 		}
+// 		df.m1.Close = mid
+// 		df.m1.Ticks++
 
-		if df.m1.MaxSpread < spread {
-			df.m1.MaxSpread = spread
-		}
-		df.totalspread += int64(spread)
-		return market.Candle{}, false, nil
-	}
+// 		if df.m1.MaxSpread < spread {
+// 			df.m1.MaxSpread = spread
+// 		}
+// 		df.totalspread += int64(spread)
+// 		return market.Candle{}, false, nil
+// 	}
 
-	// If ticks are not ordered, you can either error or ignore.
-	if minute < df.m1.Timestamp {
-		return market.Candle{}, false, fmt.Errorf("out-of-order tick: tick minute %d < current %d",
-			minute, df.m1.Timestamp)
-	}
+// 	// If ticks are not ordered, you can either error or ignore.
+// 	if minute < df.m1.Timestamp {
+// 		return market.Candle{}, false, fmt.Errorf("out-of-order tick: tick minute %d < current %d",
+// 			minute, df.m1.Timestamp)
+// 	}
 
-	// New minute: finalize previous candle, start a new one with this tick
-	finished := df.m1
-	ticks := int64(finished.Ticks)
-	finished.AvgSpread = types.Price((df.totalspread + ticks/2) / ticks)
+// 	// New minute: finalize previous candle, start a new one with this tick
+// 	finished := df.m1
+// 	ticks := int64(finished.Ticks)
+// 	finished.AvgSpread = types.Price((df.totalspread + ticks/2) / ticks)
 
-	df.m1 = market.Candle{
-		Instrument: df.symbol,
-		Timestamp:  minute,
-		OHLC: market.OHLC{
-			O: mid,
-			H: mid,
-			L: mid,
-			C: mid,
-		},
-		Ticks:     1,
-		MaxSpread: spread,
-	}
-	df.totalspread = int64(spread)
-	return finished, true, nil
-}
+// 	df.m1 = market.Candle{
+// 		Instrument: df.symbol,
+// 		Timestamp:  minute,
+// 		OHLC: market.OHLC{
+// 			O: mid,
+// 			H: mid,
+// 			L: mid,
+// 			C: mid,
+// 		},
+// 		Ticks:     1,
+// 		MaxSpread: spread,
+// 	}
+// 	df.totalspread = int64(spread)
+// 	return finished, true, nil
+// }
 
 // Flush returns the in-progress candle at end-of-stream (if any).
 func (df *datafile) Flush() (market.Candle, bool) {
@@ -374,25 +372,9 @@ func (df *datafile) Flush() (market.Candle, bool) {
 	return c, true
 }
 
-func (df *datafile) buildM1(ctx context.Context) ([]market.Candle, error) {
-	out := make([]market.Candle, 0, 60) // one hour -> ~60 minutes
-
-	err := df.forEachTick(ctx, func(t Tick) error {
-		c, done, err := df.Add(t)
-		if err != nil {
-			return err
-		}
-		if done {
-			out = append(out, c)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if c, ok := df.Flush(); ok {
-		out = append(out, c)
-	}
-	return out, nil
+func (df *datafile) HourStart() types.Timestamp {
+	// Use df.Time (hour open) as canonical. Ensure UTC + zeroed mins/secs.
+	t := df.Time.UTC()
+	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
+	return types.Timestamp(t.UnixMilli())
 }

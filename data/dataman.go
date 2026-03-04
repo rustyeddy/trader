@@ -152,9 +152,10 @@ func (dm *DataManager) BuildCandles(ctx context.Context) error {
 
 	// Buffered channels help reduce scheduling stalls when producers are fast.
 	// Start worker pools FIRST so producers can enqueue immediately.
-	candleQ := make(chan *datafile, 1024)
-	wg := dm.startCandleMaker(ctx, candleQ) // e.g. 4 candle builders
-	err := dm.populateFromPath(ctx, candleQ)
+
+	tickq := make(chan *datafile, 1024)
+	wg := dm.startCandleMaker(ctx, tickq) // e.g. 4 candle builders
+	err := dm.populateFromPath(ctx, tickq)
 	if err != nil {
 		return err
 	}

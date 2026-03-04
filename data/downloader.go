@@ -14,18 +14,6 @@ type downloader struct {
 	candleMakers int
 }
 
-// func (dl *downloader) download(ctx context.Context, dlQ chan *datafile) {
-// 	go func() {
-// 		for df := range dlQ {
-// 			err := df.download(ctx, dl.Client)
-// 			if err != nil {
-// 				df.err = err
-// 				fmt.Printf(" ERROR downloading %s\n", df.Path())
-// 			}
-// 		}
-// 	}()
-// }
-
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed
 // or ctx is cancelled. It returns a WaitGroup you can Wait() on.
 func (dl *downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile, candleQ chan<- *datafile) *sync.WaitGroup {
@@ -99,8 +87,9 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 						df.modtime = time.Time{}
 						continue
 					}
+					// TODO: return CandleSet from buildM1
 					_ = candles
-					// TODO: ADD CANDLESET HERE
+					fmt.Printf("Candle count: %d\n", len(candles.Candles))
 				}
 			}
 		}()
