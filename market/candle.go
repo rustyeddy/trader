@@ -21,9 +21,9 @@ type Candle struct {
 	High      types.Price
 	Low       types.Price
 	Close     types.Price
-	Ticks     int32 // number of ticks per candle
 	AvgSpread types.Price
 	MaxSpread types.Price
+	Ticks     int32 // number of ticks per candle
 }
 
 // CandleSet contains 1 month of M1, 1 Year of H1 and 1 Year of D1

@@ -9,10 +9,10 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-func (df *datafile) hourStart() types.Timestamp {
+func (df *datafile) hourStart() types.Timemilli {
 	t := df.Time.UTC()
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	return types.Timestamp(t.Unix())
+	return types.Timemilli(t.UnixMilli())
 }
 
 // NOTE: If Tick.Timestamp is already unix seconds, remove the /1000 conversion below.
@@ -50,7 +50,7 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 		cur.AvgSpread = types.Price((spreadSum + ticks/2) / ticks)
 
 		cs.Candles[curIdx] = cur
-		bitSet(cs.Valid, curIdx) // use your local/exported helper
+		bitSet(cs.Valid, curIdx)
 
 		prevClose = cur.Close
 		havePrevClose = true
@@ -69,9 +69,9 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 	}
 
 	err := df.forEachTick(ctx, func(t Tick) error {
-		ts := t.Timestamp
+		ts := t.Timemilli
 		if ts <= 0 {
-			return fmt.Errorf("bad tick timestamp: %d", t.Timestamp)
+			return fmt.Errorf("bad tick timestamp: %d", t.Timemilli)
 		}
 
 		minuteOpen := ts.FloorToMinute()

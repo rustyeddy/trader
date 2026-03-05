@@ -18,7 +18,7 @@ import (
 )
 
 type Tick struct {
-	types.Timestamp
+	types.Timemilli
 	Ask    types.Price
 	Bid    types.Price
 	AskVol float32
@@ -33,13 +33,13 @@ func (t Tick) Spread() types.Price {
 	return t.Ask - t.Bid
 }
 
-func (t Tick) Minute() types.Timestamp {
-	return types.Timestamp((t.Timestamp / 60_000) * 60_000)
+func (t Tick) Minute() types.Timemilli {
+	return types.Timemilli((t.Timemilli / 60_000) * 60_000)
 }
 
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
-func (d *datafile) baseHourUnixMS() (types.Timestamp, error) {
+func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
 	p := d.Path()
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
@@ -51,7 +51,7 @@ func (d *datafile) baseHourUnixMS() (types.Timestamp, error) {
 	hh, _ := strconv.Atoi(m[4])
 
 	t := time.Date(year, time.Month(mon), day, hh, 0, 0, 0, time.UTC)
-	return types.Timestamp(t.UnixMilli()), nil
+	return types.Timemilli(t.UnixMilli()), nil
 }
 
 // ForEachTick decompresses BI5 and streams decoded ticks to fn.
@@ -109,7 +109,7 @@ func (d *datafile) forEachTick(ctx context.Context, fn func(Tick) error) error {
 		}
 
 		t := Tick{
-			Timestamp: baseUnixMS + types.Timestamp(msOffset),
+			Timemilli: baseUnixMS + types.Timemilli(msOffset),
 			Ask:       types.Price(askU),
 			Bid:       types.Price(bidU),
 			AskVol:    askVol,
