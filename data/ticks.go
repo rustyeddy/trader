@@ -110,8 +110,8 @@ func (d *datafile) forEachTick(ctx context.Context, fn func(Tick) error) error {
 
 		t := Tick{
 			Timemilli: baseUnixMS + types.Timemilli(msOffset),
-			Ask:       types.Price(askU),
-			Bid:       types.Price(bidU),
+			Ask:       types.Price(askU * 10),
+			Bid:       types.Price(bidU * 10),
 			AskVol:    askVol,
 			BidVol:    bidVol,
 		}

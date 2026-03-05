@@ -509,8 +509,115 @@ func (cs *CandleSet) Filename() string {
 	return fname
 }
 
+// Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
+// Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
+func (cs *CandleSet) Aggregate(outTF types.Timestamp, source string) (*CandleSet, error) {
+	if cs == nil {
+		return nil, fmt.Errorf("nil input candleset")
+	}
+	if cs.Timeframe <= 0 || outTF <= 0 {
+		return nil, fmt.Errorf("bad timeframe cs=%d out=%d", cs.Timeframe, outTF)
+	}
+	if outTF%cs.Timeframe != 0 {
+		return nil, fmt.Errorf("outTF %d must be multiple of csTF %d", outTF, cs.Timeframe)
+	}
+
+	ratio := int(outTF / cs.Timeframe)
+	outLen := (len(cs.Candles) + ratio - 1) / ratio
+
+	out := &CandleSet{
+		Instrument: cs.Instrument,
+		Start:      cs.Start,
+		Timeframe:  outTF,
+		Scale:      cs.Scale,
+		Source:     source,
+		Candles:    make([]Candle, outLen),
+		Valid:      make([]uint64, (outLen+63)/64),
+	}
+
+	hasValidBits := len(cs.Valid) > 0
+
+	isValid := func(i int) bool {
+		if !hasValidBits {
+			return true
+		}
+		return (cs.Valid[i>>6] & (1 << uint(i&63))) != 0
+	}
+	setValid := func(i int) {
+		out.Valid[i>>6] |= 1 << uint(i&63)
+	}
+
+	for oi := 0; oi < outLen; oi++ {
+		start := oi * ratio
+		end := start + ratio
+		if end > len(cs.Candles) {
+			end = len(cs.Candles)
+		}
+
+		var (
+			outC      Candle
+			haveAny   bool
+			openSet   bool
+			sumTicks  int64
+			sumSpread int64 // sum(AvgSpread * Ticks)
+		)
+
+		for ii := start; ii < end; ii++ {
+			c := cs.Candles[ii]
+			valid := isValid(ii)
+
+			// Skip completely empty/invalid candles.
+			if !valid && c.Ticks == 0 {
+				continue
+			}
+
+			if !openSet {
+				outC.Open = c.Open
+				outC.High = c.High
+				outC.Low = c.Low
+				openSet = true
+			} else {
+				if c.High > outC.High {
+					outC.High = c.High
+				}
+				if c.Low < outC.Low {
+					outC.Low = c.Low
+				}
+			}
+
+			outC.Close = c.Close
+
+			if c.MaxSpread > outC.MaxSpread {
+				outC.MaxSpread = c.MaxSpread
+			}
+
+			t := int64(c.Ticks)
+			sumTicks += t
+			if t > 0 {
+				sumSpread += int64(c.AvgSpread) * t
+			}
+
+			haveAny = true
+		}
+
+		if !haveAny {
+			continue
+		}
+
+		outC.Ticks = int32(sumTicks)
+		if sumTicks > 0 {
+			outC.AvgSpread = types.Price((sumSpread + sumTicks/2) / sumTicks)
+		}
+
+		out.Candles[oi] = outC
+		setValid(oi)
+	}
+
+	return out, nil
+}
+
 // WriteCSV writes candles as:
-// RFC3339Time;Open;High;Low;Close;Valid
+// RFC3339Time;Open;High;Low;Close;Ticks;Valid
 // No header line is written.
 func (cs *CandleSet) WriteCSV(path string) error {
 	if cs == nil {
@@ -544,23 +651,19 @@ func (cs *CandleSet) WriteCSV(path string) error {
 	defer w.Flush()
 
 	// Duration between candle opens, in seconds.
-	step := timeframeSeconds(cs.Timeframe)
+	step := cs.Timeframe.Int64()
 	if step <= 0 {
 		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
 	}
-
-	// If Valid is provided, we’ll use it. If not (or too short), treat all as valid=1.
-	hasValid := len(cs.Valid) > 0
 
 	for i := 0; i < len(cs.Candles); i++ {
 		openUnix := int64(cs.Start) + int64(i)*int64(step)
 		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
 
 		c := cs.Candles[i]
-
-		valid := uint64(1)
-		if hasValid && i < len(cs.Valid) {
-			valid = cs.Valid[i]
+		valid := 1
+		if len(cs.Valid) > 0 && !bitIsSet(cs.Valid, i) {
+			valid = 0
 		}
 
 		rec := []string{
@@ -569,7 +672,10 @@ func (cs *CandleSet) WriteCSV(path string) error {
 			formatNumber(c.High, cs.Scale),
 			formatNumber(c.Low, cs.Scale),
 			formatNumber(c.Close, cs.Scale),
-			strconv.FormatUint(valid, 10),
+			formatNumber(c.AvgSpread, cs.Scale),
+			formatNumber(c.MaxSpread, cs.Scale),
+			strconv.FormatInt(int64(c.Ticks), 10),
+			strconv.Itoa(valid),
 		}
 
 		if err := w.Write(rec); err != nil {
@@ -583,14 +689,6 @@ func (cs *CandleSet) WriteCSV(path string) error {
 		return err
 	}
 	return bw.Flush()
-}
-
-// timeframeSeconds converts your int32 timeframe to seconds.
-// If your Timeframe is already "seconds per candle", just return int64(tf).
-func timeframeSeconds(tf types.Timestamp) types.Timestamp {
-	// Many codebases store timeframe as seconds (e.g., 60, 300, 3600).
-	// If yours uses an enum (M1/H1/D1), replace this mapping accordingly.
-	return types.Timestamp(tf)
 }
 
 //	func PriceToFloat(price int32, scale int32) float64 {
@@ -610,7 +708,7 @@ func (cs *CandleSet) WriteCSVTo(w io.Writer) error {
 	cw.Comma = ';'
 	defer cw.Flush()
 
-	step := timeframeSeconds(cs.Timeframe)
+	step := cs.Timeframe.Int64()
 	if step <= 0 {
 		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
 	}

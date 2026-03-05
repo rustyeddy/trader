@@ -78,7 +78,8 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 					if !ok || df.bytes == 0 {
 						return
 					}
-					candles, err := df.buildM1(ctx)
+
+					m1, err := df.buildM1(ctx)
 					if err != nil {
 						fmt.Printf("\terror building candle %s: %v\n", df.Path(), err)
 						df.err = err
@@ -87,7 +88,20 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 						df.modtime = time.Time{}
 						continue
 					}
-					candles.WriteCSV(".")
+
+					m1.WriteCSV(".")
+					h1, err := m1.Aggregate(3600, "Dukascopy H1 (from M1)")
+					if err != nil {
+						panic(err)
+					}
+					h1.WriteCSV(".")
+
+					d1, err := h1.Aggregate(86400, "Dukascopy D1 (from H1)")
+					if err != nil {
+						panic(err)
+					}
+					d1.WriteCSV(".")
+
 					// candles.PrintStats(os.Stdout)
 					// fmt.Printf("Candle count: %d\n", len(candles.Candles))
 					// fmt.Printf("+v\n", candles)
