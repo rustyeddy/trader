@@ -26,7 +26,7 @@ type Candle struct {
 	Ticks     int32 // number of ticks per candle
 }
 
-// CandleSet contains 1 month of M1, 1 Year of H1 and 1 Year of D1
+// CandleSet contains 1 month of M1, 1 Year of H1 and 1 Year of D1gr
 // Candles.
 type CandleSet struct {
 	*Instrument
@@ -105,7 +105,6 @@ func (cs *CandleSet) ParseFilename(fname string) (err error) {
 	if len(parts) == 1 {
 		parts = strings.Split(name, "_")
 	}
-	fmt.Printf("PARTS: %+v\n", parts)
 
 	var year int
 	switch parts[0] {

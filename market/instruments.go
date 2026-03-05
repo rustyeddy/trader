@@ -24,14 +24,14 @@ type Instrument struct {
 	MarginRate          types.Rate
 }
 
-var InstrumentList = []string{
-	"EURUSD",
-	"GBPUSD",
-	"USDJPY",
-	"USDCHF",
-	"AUDUSD",
-	"USDCAD",
-	"NZDUSD",
+var InstrumentList_ = []string{
+	"EUR_USD",
+	"GBP_USD",
+	"USD_JPY",
+	"USD_CHF",
+	"AUD_USD",
+	"USD_CAD",
+	"NZD_USD",
 }
 
 var Instruments = map[string]*Instrument{
@@ -107,4 +107,34 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(50_000), // 5% (20:1 typical retail gold)
 	},
+}
+
+var Symmap = map[string]string{
+	"EUR_USD": "EURUSD",
+	"GBP_USD": "GBPUSD",
+	"USD_JPY": "USDJPY",
+	"USD_CHF": "USDCHF",
+	"AUD_USD": "AUDUSD",
+	"USD_CAD": "USDCAD",
+	"NZD_USD": "NZDUSD",
+	"EURUSD":  "EUR_USD",
+	"GBPUSD":  "GBP_USD",
+	"USDJPY":  "USD_JPY",
+	"USDCHF":  "USD_CHF",
+	"AUDUSD":  "AUD_USD",
+	"USDCAD":  "USD_CAD",
+	"NZDUSD":  "NZD_USD",
+}
+
+func GetInstrument(symbol string) *Instrument {
+	if inst, ok := Instruments[symbol]; ok {
+		return inst
+	} else {
+		if symbol, ok = Symmap[symbol]; ok {
+			if inst, ok = Instruments[symbol]; ok {
+				return inst
+			}
+		}
+	}
+	return nil
 }

@@ -87,9 +87,10 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 						df.modtime = time.Time{}
 						continue
 					}
-					// TODO: return CandleSet from buildM1
-					_ = candles
-					fmt.Printf("Candle count: %d\n", len(candles.Candles))
+					candles.WriteCSV(".")
+					// candles.PrintStats(os.Stdout)
+					// fmt.Printf("Candle count: %d\n", len(candles.Candles))
+					// fmt.Printf("+v\n", candles)
 				}
 			}
 		}()
