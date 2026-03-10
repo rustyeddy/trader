@@ -300,13 +300,6 @@ func (df *datafile) Flush() (market.Candle, bool) {
 	return c, true
 }
 
-func (df *datafile) HourStart() types.Timemilli {
-	// Use df.Time (hour open) as canonical. Ensure UTC + zeroed mins/secs.
-	t := df.Time
-	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	return types.Timemilli(t.UnixMilli())
-}
-
 func (df *datafile) hourStart() types.Timemilli {
 	t := df.Time
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)

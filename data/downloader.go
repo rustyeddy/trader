@@ -67,9 +67,15 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 	wg.Add(dm.candleMakers)
 
 	for i := 0; i < dm.candleMakers; i++ {
+
+		// move this to datafile.go
 		go func() {
 			defer wg.Done()
 
+			cstore := CandleStore{
+				Basedir: "../../tmp",
+				Source:  "dukas",
+			}
 			for {
 				select {
 				case <-ctx.Done():
@@ -88,23 +94,8 @@ func (dm *DataManager) startCandleMaker(ctx context.Context, candleQ <-chan *dat
 						df.modtime = time.Time{}
 						continue
 					}
-
-					m1.WriteCSV(".")
-					h1, err := m1.Aggregate(3600, "Dukascopy H1 (from M1)")
-					if err != nil {
-						panic(err)
-					}
-					h1.WriteCSV(".")
-
-					d1, err := h1.Aggregate(86400, "Dukascopy D1 (from H1)")
-					if err != nil {
-						panic(err)
-					}
-					d1.WriteCSV(".")
-
-					// candles.PrintStats(os.Stdout)
-					// fmt.Printf("Candle count: %d\n", len(candles.Candles))
-					// fmt.Printf("+v\n", candles)
+					// writeQ <- m1
+					fmt.Println(cstore.CandlePath(m1.Instrument.Name, "M1", m1.Time(1).Year()))
 				}
 			}
 		}()

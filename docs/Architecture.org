@@ -1,0 +1,120 @@
+* Data Architecture
+
+
+** DataManager
+
+Orchestrator, lifecycle and policy
+
+What does DataManager do?
+
+*** What instruments do we support?
+The 7 major currency pairs
+*** What date range do we require? (Yesterday - 2008)
+*** What dates (sources) are we missing?
+*** What derived candles are missing (or stale)?
+*** What order should data be built
+*** How do we reconcile ticks -> M1 -> H1 -> D1
+
+DataManager does
+
+*** Enumerate required work
+
+Identify the data we need and what's missing.
+
+*** call download/acquisition
+
+Call downloader to download raw Dukascopy data.
+
+*** call decoders
+
+Translate from raw compressed format .bi5 (lzh) current Tick format
+into candles. 
+
+*** Aggregation
+
+**** Consume: external raw data: Dukascopy  ( -> dukas)
+**** Convert: raw data to internal Candle   (dukas -> candle.m1)
+**** Aggregate: Candle -> Candle (eg. tick -> m1, m1 -> h1, h1 - d1)
+**** Store: save the CandleSet to file in .csv form
+**** TODO Index: develop a path manager to ensure directory structure.
+**** TODO Validate existing data and report missing data
+
+
+DataManager should *NOT* 
+
+*** Know anything about fileformats .csv, .bi5, etc.
+*** No candle math
+
+** CandleSet
+
+In memory cononical candle representation.
+
+
+*** Represents a series of candle ticks. Each CandleSet represents
+
+**** One instrument (EURUSD)
+**** One timeframe (m1, h1, d1, etc)
+**** One contiguous dense range
+**** candles, validity map and metadata
+  
+*** Responsibilities
+
+**** Time(i)
+**** Timestamp(i)
+**** Aggregate()
+**** Gap reporting + stats
+**** Candle Iterator
+**** Candles are 
+
+*** Should NOT
+
+**** know anything about files, paths or downloading
+**** know how discover missing years
+**** know raw file formats
+
+** datafile
+
+Source File decoder, very narrow and concrete.
+
+*** Responsibilities
+
+**** one raw source file
+**** decodes ticks
+**** validate it's own local assumptions
+**** TODO Tick iterator
+**** build M1 candles from ticks
+
+
+*** Should *NOT*
+
+**** Anything about csv format
+**** Know about the majors or instruments
+**** Anything about historical completeness
+**** Aggregating timeframes
+
+** CandleStore / Store
+
+All about persistence not orchestration.
+
+*** Responsibilities
+
+**** where is it?
+**** does it exist?
+**** read it
+**** write it
+
+*** Will do
+
+**** Canonical paths
+**** Ensure filesystem and directory structure
+**** Read/Write CandleSet files
+**** List Available years timeframe (same as datamanager)
+**** TODO atomic writes / temp files / metadata files
+
+*** Will NOT do
+
+**** Decide what should exist
+**** decide what to build next
+**** decode raw ticks
+**** compute aggregates.
+

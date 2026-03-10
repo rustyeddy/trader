@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type Timestamp int64
 type Timemilli int64
@@ -72,3 +75,57 @@ func DaysInMonth(year int, month0 int) int {
 	t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
 	return t.Day()
 }
+
+type TimeRange struct {
+	Start Timestamp // inclusive
+	End   Timestamp // exclusive
+	TF    Timeframe // m1, h1, d1
+}
+
+func (r TimeRange) Valid() bool {
+	return r.Start > 0 && r.End > r.Start
+}
+
+func (r TimeRange) Contains(ts Timestamp) bool {
+	return ts >= r.Start && ts < r.End
+}
+
+func (r TimeRange) Overlaps(other TimeRange) bool {
+	return r.Start < other.End && other.Start < r.End
+}
+
+func (r TimeRange) Covers(other TimeRange) bool {
+	return r.Start <= other.Start && r.End >= other.End
+}
+
+func (r TimeRange) String() string {
+	return fmt.Sprintf("[%s, %s)",
+		time.Unix(int64(r.Start), 0).UTC().Format(time.RFC3339),
+		time.Unix(int64(r.End), 0).UTC().Format(time.RFC3339))
+}
+
+func YearRange(year int) TimeRange {
+	start := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(year+1, 1, 1, 0, 0, 0, 0, time.UTC)
+	return TimeRange{
+		Start: Timestamp(start.Unix()),
+		End:   Timestamp(end.Unix()),
+	}
+}
+
+// func (r Range) Count() int
+// func (r Range) Duration() int64
+// func (r Range) Align() Range
+// func (r Range) CandleStart(ts types.Timestamp) types.Timestamp
+// func (r Range) IndexOf(ts types.Timestamp) (int, error)
+// func (r Range) TimestampAt(i int) types.Timestamp
+
+// func Floor(ts types.Timestamp, tf Timeframe) types.Timestamp
+// func Ceil(ts types.Timestamp, tf Timeframe) types.Timestamp
+// func AlignStart(ts types.Timestamp, tf Timeframe) types.Timestamp
+// func Next(ts types.Timestamp, tf Timeframe) types.Timestamp
+// func Prev(ts types.Timestamp, tf Timeframe) types.Timestamp
+
+// func YearRange(year int, tf Timeframe) Range
+// func MonthRange(year int, month time.Month, tf Timeframe) Range
+// func DayRange(year int, month time.Month, day int, tf Timeframe) Range

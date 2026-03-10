@@ -26,8 +26,7 @@ type Candle struct {
 	Ticks     int32 // number of ticks per candle
 }
 
-// CandleSet contains 1 month of M1, 1 Year of H1 and 1 Year of D1gr
-// Candles.
+// CandleSet contains a dense set of candles.
 type CandleSet struct {
 	*Instrument
 	Start     types.Timestamp // unix seconds for candle open
@@ -67,23 +66,24 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
+// TODO replace with a call to datastore or data manager
 func NewCandleSet(fname string) (cs *CandleSet, err error) {
-	cs = &CandleSet{
-		Filepath:  fname,
-		Source:    "Dukascopy",
-		Timeframe: 60,
-		Scale:     1_000_000,
-		prev:      -1,
-	}
+	// 	cs = &CandleSet{
+	// 		Filepath:  fname,
+	// 		Source:    "Dukascopy",
+	// 		Timeframe: 60,
+	// 		Scale:     1_000_000,
+	// 		prev:      -1,
+	// 	}
 
-	if err := cs.ParseFilename(cs.Filepath); err != nil {
-		return nil, err
-	}
+	// 	if err := cs.parseFilename(cs.Filepath); err != nil {
+	// 		return nil, err
+	// 	}
 
-	if err := cs.buildDenseFromFile(); err != nil {
-		return nil, err
-	}
-	cs.BuildGapReport()
+	// 	if err := cs.buildDenseFromFile(); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	cs.BuildGapReport()
 
 	return cs, nil
 }
@@ -96,39 +96,23 @@ func (cs *CandleSet) Timestamp(idx int) types.Timestamp {
 	return types.Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
-func (cs *CandleSet) ParseFilename(fname string) (err error) {
-	base := filepath.Base(fname)
-	ext := filepath.Ext(base)
-	name := base[:len(base)-len(ext)]
+func (cs *CandleSet) Filename() string {
+	inst := strings.ToLower(cs.Instrument.Name)
 
-	parts := strings.Split(name, "-")
-	if len(parts) == 1 {
-		parts = strings.Split(name, "_")
+	tfstr, err := SecondsToTFString(cs.Timeframe)
+	if err != nil {
+		tfstr = "unknown"
 	}
+	tfstr = strings.ToLower(tfstr)
 
-	var year int
-	switch parts[0] {
-	case "DAT":
-		cs.Instrument = Instruments[parts[2]]
-		cs.Timeframe, err = TFStringToSeconds(parts[3])
+	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
-	default:
-		cs.Instrument = Instruments[parts[0]]
-		cs.Timeframe, err = TFStringToSeconds(parts[2])
-		year, err = strconv.Atoi(parts[4])
-		if err != nil {
-			return fmt.Errorf("invalid year: %w", err)
-		}
-
+	if tfstr == "d1" {
+		return fmt.Sprintf("%s-%s-all", inst, tfstr)
 	}
-
-	cs.Start = types.Timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Unix())
-
-	return err
+	return fmt.Sprintf("%s-%s-%d", inst, tfstr, year)
 }
 
-// scanBounds finds min/max timestamps (UTC unix seconds) in one pass.
-// This is robust even if the file has weird lines or isn’t strictly sorted.
 func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
 	f, err := os.Open(cs.Filepath)
 	if err != nil {
@@ -139,16 +123,15 @@ func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	minTs = 0
-	maxTs = 0
-
 	for sc.Scan() {
-		line := sc.Text()
-		if strings.HasPrefix(line, "time;") || strings.HasPrefix(line, "Time;") {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") ||
+			strings.HasPrefix(line, "time;") || strings.HasPrefix(line, "Time;") {
 			continue
 		}
+
 		parts := strings.Split(line, ";")
-		if len(parts) < 6 {
+		if len(parts) < 9 {
 			continue
 		}
 
@@ -177,6 +160,7 @@ func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
 // BuildDenseFromFile allocates a dense grid covering [minTs..maxTs] at cs.Timeframe seconds,
 // fills Candles and sets Valid bits when a candle exists in the file.
 // Missing minutes naturally remain invalid (Valid bit = 0).
+
 func (cs *CandleSet) buildDenseFromFile() error {
 	if cs.Timeframe == 0 {
 		cs.Timeframe = 60
@@ -215,12 +199,14 @@ func (cs *CandleSet) buildDenseFromFile() error {
 	var badLines int64
 
 	for sc.Scan() {
-		line := sc.Text()
-		if strings.HasPrefix(line, "time;") || strings.HasPrefix(line, "Time;") {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") ||
+			strings.HasPrefix(line, "time;") || strings.HasPrefix(line, "Time;") {
 			continue
 		}
+
 		parts := strings.Split(line, ";")
-		if len(parts) < 6 {
+		if len(parts) < 9 {
 			badLines++
 			continue
 		}
@@ -239,29 +225,65 @@ func (cs *CandleSet) buildDenseFromFile() error {
 
 		if bitIsSet(cs.Valid, idx) {
 			duplicates++
-			// keep-first policy (ignore later duplicates)
 			continue
 		}
 
-		prices := make([]types.Price, 4)
-		for i := 1; i < 5; i++ {
-			if prices[i-1], err = fastPrice(parts[i]); err != nil {
-				err = fmt.Errorf("failed to convert %s to int32\n", parts[i])
-				break
-			}
-		}
+		open, err := fastPrice(parts[1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error %s\n", err)
+			badLines++
 			continue
 		}
-		candle := Candle{
-			Open:  prices[0],
-			High:  prices[1],
-			Low:   prices[2],
-			Close: prices[3],
+		high, err := fastPrice(parts[2])
+		if err != nil {
+			badLines++
+			continue
 		}
-		cs.Candles[idx] = candle
-		bitSet(cs.Valid, idx)
+		low, err := fastPrice(parts[3])
+		if err != nil {
+			badLines++
+			continue
+		}
+		closep, err := fastPrice(parts[4])
+		if err != nil {
+			badLines++
+			continue
+		}
+		avgSpread, err := fastPrice(parts[5])
+		if err != nil {
+			badLines++
+			continue
+		}
+		maxSpread, err := fastPrice(parts[6])
+		if err != nil {
+			badLines++
+			continue
+		}
+
+		ticks64, err := strconv.ParseInt(parts[7], 10, 32)
+		if err != nil {
+			badLines++
+			continue
+		}
+
+		valid64, err := strconv.ParseUint(parts[8], 10, 64)
+		if err != nil {
+			badLines++
+			continue
+		}
+
+		cs.Candles[idx] = Candle{
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     closep,
+			AvgSpread: avgSpread,
+			MaxSpread: maxSpread,
+			Ticks:     int32(ticks64),
+		}
+
+		if valid64 != 0 {
+			bitSet(cs.Valid, idx)
+		}
 	}
 
 	if err := sc.Err(); err != nil {
@@ -497,18 +519,6 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 	fmt.Fprintln(f, "--------------------------")
 }
 
-func (cs *CandleSet) Filename() string {
-	fname := cs.Instrument.Name
-	tfstr, err := SecondsToTFString(cs.Timeframe)
-	if err != nil {
-		return "unknown"
-	}
-	year := time.Unix(int64(cs.Start), 0).UTC().Year()
-	fname += "-" + strconv.Itoa(year)
-	fname += "-" + tfstr
-	return fname
-}
-
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
 // Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
 func (cs *CandleSet) Aggregate(outTF types.Timestamp, source string) (*CandleSet, error) {
@@ -616,24 +626,37 @@ func (cs *CandleSet) Aggregate(outTF types.Timestamp, source string) (*CandleSet
 	return out, nil
 }
 
-// WriteCSV writes candles as:
-// RFC3339Time;Open;High;Low;Close;Ticks;Valid
-// No header line is written.
+func (cs *CandleSet) writeMetadata(w io.Writer) error {
+	tfstr, err := SecondsToTFString(cs.Timeframe)
+	if err != nil {
+		return err
+	}
+	year := time.Unix(int64(cs.Start), 0).UTC().Year()
+
+	_, err = fmt.Fprintf(w,
+		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+		cs.Source,
+		cs.Instrument.Name,
+		tfstr,
+		year,
+		cs.Scale,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(w, "time;O;H;L;C;AvgSpread;MaxSpread;Ticks;Valid")
+	return err
+}
+
 func (cs *CandleSet) WriteCSV(path string) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
-	if len(cs.Candles) == 0 {
-		// Still create an empty file (often useful for pipelines)
-		f, err := os.Create(path)
-		if err != nil {
-			return err
-		}
-		return f.Close()
-	}
 
-	fname := cs.Filename()
-	path = path + "/" + fname + ".csv"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 
 	f, err := os.Create(path)
 	if err != nil {
@@ -641,23 +664,24 @@ func (cs *CandleSet) WriteCSV(path string) error {
 	}
 	defer f.Close()
 
-	// Buffered writer for performance.
 	bw := bufio.NewWriterSize(f, 256*1024)
 	defer bw.Flush()
 
+	if err := cs.writeMetadata(bw); err != nil {
+		return err
+	}
+
 	w := csv.NewWriter(bw)
 	w.Comma = ';'
-	// We intentionally do not write a header.
 	defer w.Flush()
 
-	// Duration between candle opens, in seconds.
 	step := cs.Timeframe.Int64()
 	if step <= 0 {
-		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
+		return fmt.Errorf("invalid Timeframe=%d", cs.Timeframe)
 	}
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*int64(step)
+		openUnix := int64(cs.Start) + int64(i)*step
 		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
 
 		c := cs.Candles[i]
@@ -677,13 +701,11 @@ func (cs *CandleSet) WriteCSV(path string) error {
 			strconv.FormatInt(int64(c.Ticks), 10),
 			strconv.Itoa(valid),
 		}
-
 		if err := w.Write(rec); err != nil {
 			return err
 		}
 	}
 
-	// Check any buffered error from csv.Writer.
 	w.Flush()
 	if err := w.Error(); err != nil {
 		return err
@@ -695,50 +717,11 @@ func (cs *CandleSet) WriteCSV(path string) error {
 //		return float64(price) / math.Pow10(int(scale))
 //	}
 func formatNumber(price types.Price, scale int32) string {
-	// For floats, this uses default formatting; adjust if you need fixed decimals.
-	return fmt.Sprintf("%f", float64(price)/float64(scale))
-}
-
-// Optional helper: write to any io.Writer (useful for tests, pipes, gzip, etc.)
-func (cs *CandleSet) WriteCSVTo(w io.Writer) error {
-	if cs == nil {
-		return errors.New("nil CandleSet")
+	decimals := 0
+	for s := scale; s > 1; s /= 10 {
+		decimals++
 	}
-	cw := csv.NewWriter(w)
-	cw.Comma = ';'
-	defer cw.Flush()
-
-	step := cs.Timeframe.Int64()
-	if step <= 0 {
-		return fmt.Errorf("invalid Timeframe=%d (seconds must be > 0)", cs.Timeframe)
-	}
-
-	hasValid := len(cs.Valid) > 0
-
-	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*int64(step)
-		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
-
-		c := cs.Candles[i]
-		valid := uint64(1)
-		if hasValid && i < len(cs.Valid) {
-			valid = cs.Valid[i]
-		}
-
-		if err := cw.Write([]string{
-			t,
-			formatNumber(c.Open, cs.Scale),
-			formatNumber(c.High, cs.Scale),
-			formatNumber(c.Low, cs.Scale),
-			formatNumber(c.Close, cs.Scale),
-			strconv.FormatUint(valid, 10),
-		}); err != nil {
-			return err
-		}
-	}
-
-	cw.Flush()
-	return cw.Error()
+	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
 type Iterator struct {

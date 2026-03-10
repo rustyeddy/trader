@@ -20,10 +20,18 @@ type DataManager struct {
 	End         time.Time
 	Basedir     string
 	Instruments []string
-	*downloader
 
+	*downloader
 	data map[string]*dataset
 }
+
+// What instruments are supported (Instruments)
+
+// ========================================================================
+//
+//	Original code
+//
+// ========================================================================
 
 // Init will get DataManager ready to go.
 func (dm *DataManager) Init() {
