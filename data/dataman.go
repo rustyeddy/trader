@@ -3,12 +3,12 @@ package data
 import (
 	"context"
 	"fmt"
-	"io/fs"
-	"log"
-	"os"
-	"path/filepath"
-	"sync"
+	"slices"
+	"sort"
 	"time"
+
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // DataManager is responsible for identifing data files that are
@@ -21,153 +21,195 @@ type DataManager struct {
 	Basedir     string
 	Instruments []string
 
-	*downloader
-	data map[string]*dataset
+	DukasRoot  string
+	Candlesdir string
+
+	*Downloader
+	Store *CandleStore
 }
-
-// What instruments are supported (Instruments)
-
-// ========================================================================
-//
-//	Original code
-//
-// ========================================================================
 
 // Init will get DataManager ready to go.
 func (dm *DataManager) Init() {
-	if dm.data == nil {
-		dm.data = make(map[string]*dataset)
-		for _, sym := range dm.Instruments {
-			dm.data[sym] = newDataset(sym, dm.Start, dm.End, dm.Basedir)
-		}
-	}
-
-	if dm.downloader == nil {
-		dm.downloader = &downloader{
+	if dm.Downloader == nil {
+		dm.Downloader = &Downloader{
 			Client: newHTTPClient(),
 		}
 	}
-}
-
-// buildDatasets will produce the existing and missing datasets for
-// each of the instruments. The missing files will need to be
-// downloaded, the existing files can be checked for candles.  If the
-// candles do not already exist then they will be created.
-func (dm *DataManager) BuildDatasets(ctx context.Context) {
-	dm.Init()
-
-	// Buffered channels help reduce scheduling stalls when producers are fast.
-	// Start worker pools FIRST so producers can enqueue immediately.
-	candleQ := make(chan *datafile, 1024)
-	candleWG := dm.startCandleMaker(ctx, candleQ) // e.g. 4 candle builders
-
-	dlQ := make(chan *datafile, 1024)
-	dlWG := dm.downloader.startDownloader(ctx, dlQ, candleQ) // e.g. 8 downloaders
-
-	// Producers: scan/build datafiles and enqueue work.
-	var prodWG sync.WaitGroup
-	for _, ds := range dm.data {
-		ds := ds // IMPORTANT: capture loop var
-		prodWG.Add(1)
-		go func() {
-			defer prodWG.Done()
-			ds.buildDatafiles(ctx, candleQ, dlQ)
-		}()
+	if dm.Store == nil {
+		dm.Store = &CandleStore{
+			Basedir: "../../tmp/candles",
+			Source:  "Dukascopy",
+		}
 	}
-
-	prodWG.Wait()
-	close(dlQ)     // no more download jobs coming from producers
-	dlWG.Wait()    // wait for downloads to finish (and enqueue candles)
-	close(candleQ) // now safe: no more candle jobs will be produced
-	candleWG.Wait()
 }
 
-// ValidateDatasets will walk the entire directory tree, identify invalid
-// datafiles then delete them
-func (dm *DataManager) populateFromPath(ctx context.Context, tickQ chan *datafile) error {
-	var valid, invalid int
-
-	// Call filepath.WalkDir with the root and an anonymous callback function
-	err := filepath.WalkDir(dm.Basedir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Handle the error for the specific path, but continue the walk
-			fmt.Printf("preventing error at path %s: %v\n", path, err)
-			return err
-		}
-
-		// Check if it's a file and print its path
-		if d.IsDir() {
-			return nil
-		}
-
-		df, err := datafileFromPath(path)
-		if err != nil {
-			return nil
-		}
-
-		if !df.Exists() {
-			return nil
-		}
-
-		if df.bytes == 0 {
-			return nil
-		}
-
-		if err = df.IsValid(ctx); err != nil {
-			invalid++
-			fmt.Printf("removing invalid %s - %s\n", path, err)
-			os.Remove(path)
-			return nil
-		}
-
-		tickQ <- df
-		valid++
-		return nil // Returning nil continues the walk
-	})
-
+func (dm *DataManager) Sync(ctx context.Context) error {
+	// 1. Build inventory
+	inv, err := dm.BuildInventory(ctx)
 	if err != nil {
-		log.Fatalf("error walking the path %s: %v\n", dm.Basedir, err)
-		return err
+		return fmt.Errorf("build inventory: %w", err)
 	}
-	fmt.Printf("valid: %d / invalid %d\n", valid, invalid)
+
+	// 2. Plan missing raw tick downloads
+	plan, err := dm.Plan(ctx, inv)
+	if err != nil {
+		return fmt.Errorf("build plan: %w", err)
+	}
+
+	download := false
+	if download {
+		if err := dm.ExecuteDownloads(ctx, plan); err != nil {
+			return fmt.Errorf("execute downloads: %w", err)
+		}
+
+		// 4. Refresh inventory after downloads
+		inv, err = dm.BuildInventory(ctx)
+		if err != nil {
+			return fmt.Errorf("refresh inventory: %w", err)
+		}
+	}
+
+	// 5. Plan/build M1 from available raw tick hours
+	if err := dm.BuildM1(ctx, plan); err != nil {
+		return fmt.Errorf("build M1: %w", err)
+	}
+
 	return nil
 }
 
-func (dm *DataManager) Validate(ctx context.Context) error {
-	q := make(chan *datafile)
+func (dm *DataManager) BuildInventory(ctx context.Context) (*Inventory, error) {
+	b := NewInventoryBuilder(dm.DukasRoot, dm.Store.Basedir)
 
+	inv, err := b.Build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (dm *DataManager) Plan(ctx context.Context, inv *Inventory) (plan *Plan, err error) {
+	plan = &Plan{}
+
+	start := types.FromTime(dm.Start)
+	end := types.FromTime(dm.End)
+	r := types.NewTimeRange(start, end)
+
+	for _, sym := range dm.Instruments {
+		var df *datafile
+		for ts := r.Start; ts < r.End; ts += 3600 {
+			t := time.Unix(int64(ts), 0).UTC()
+			df = newDatafile(dm.DukasRoot, sym, t)
+
+			if !df.Exists() {
+				plan.downloads = append(plan.downloads, df)
+				continue
+			}
+
+			if df.bytes <= 0 {
+				// Check for the weekend
+				continue
+			}
+			plan.buildM1 = append(plan.buildM1, df)
+		}
+		// fmt.Printf("the plan: %s downloads: %d - candles: %d\n", sym, len(plan.downloads), len(plan.buildM1))
+	}
+	slices.Reverse(plan.buildM1)
+	return plan, nil
+}
+
+func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
+	if len(plan.downloads) == 0 {
+		return nil
+	}
+
+	q := make(chan *datafile, 1024)
+	dlWG := dm.Downloader.startDownloader(ctx, q)
 	go func() {
-		for {
+		defer close(q)
+		for _, df := range plan.downloads {
 			select {
 			case <-ctx.Done():
 				return
-
-			case <-q:
-				fmt.Println("valid!")
+			case q <- df:
 			}
 		}
 	}()
 
-	if err := dm.populateFromPath(ctx, q); err != nil {
-		return err
-	}
+	dlWG.Wait()
 	return nil
 }
 
-// walk the missing datafiles for each of the symbols datasets and
-// queue them up for download.
-func (dm *DataManager) BuildCandles(ctx context.Context) error {
+func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
+	fmt.Println("BUILDM1")
 
-	// Buffered channels help reduce scheduling stalls when producers are fast.
-	// Start worker pools FIRST so producers can enqueue immediately.
+	sort.Slice(plan.buildM1, func(i, j int) bool {
+		a, b := plan.buildM1[i], plan.buildM1[j]
 
-	tickq := make(chan *datafile, 1024)
-	wg := dm.startCandleMaker(ctx, tickq) // e.g. 4 candle builders
-	err := dm.populateFromPath(ctx, tickq)
-	if err != nil {
+		if a.Instrument() != b.Instrument() {
+			return a.Instrument() < b.Instrument()
+		}
+		return a.Time.Before(b.Time)
+	})
+	slices.Reverse(plan.buildM1)
+
+	var cur *market.CandleSet
+	hours := 0
+
+	flush := func() error {
+		if cur == nil {
+			return nil
+		}
+		return dm.Store.WriteCSV(cur)
+	}
+
+	for _, df := range plan.buildM1 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		hourSet, err := df.buildM1(ctx)
+		if err != nil {
+			return fmt.Errorf("buildM1 failed for %s: %w", df.Path(), err)
+		}
+		if hourSet == nil {
+			continue
+		}
+		hours++
+
+		// TODO create an index for the instrument, time frame and range
+		monthStart := market.FloorToMonthUTC(hourSet.Start)
+		// Do a better job of ensuring we have not gotten out of order
+		if cur == nil ||
+			cur.Instrument.Name != hourSet.Instrument.Name ||
+			cur.Start != monthStart {
+
+			if err := flush(); err != nil {
+				return err
+			}
+
+			cur, err = market.NewMonthlyCandleSet(
+				hourSet.Instrument,
+				hourSet.Timeframe,
+				monthStart,
+				hourSet.Scale,
+				hourSet.Source,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := cur.Merge(hourSet); err != nil {
+			return fmt.Errorf("merge hour set failed: %w", err)
+		}
+	}
+
+	if err := flush(); err != nil {
 		return err
 	}
 
-	wg.Wait()
+	fmt.Printf("Hours processed: %d\n", hours)
 	return nil
 }

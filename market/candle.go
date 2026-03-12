@@ -2,13 +2,10 @@ package market
 
 import (
 	"bufio"
-	"encoding/csv"
-	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -66,26 +63,134 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
-// TODO replace with a call to datastore or data manager
-func NewCandleSet(fname string) (cs *CandleSet, err error) {
-	// 	cs = &CandleSet{
-	// 		Filepath:  fname,
-	// 		Source:    "Dukascopy",
-	// 		Timeframe: 60,
-	// 		Scale:     1_000_000,
-	// 		prev:      -1,
-	// 	}
+func NewMonthlyCandleSet(
+	inst *Instrument,
+	tf types.Timestamp,
+	monthStart types.Timestamp,
+	scale int32,
+	source string,
+) (*CandleSet, error) {
+	if inst == nil {
+		return nil, fmt.Errorf("nil instrument")
+	}
+	if tf <= 0 {
+		return nil, fmt.Errorf("invalid timeframe: %d", tf)
+	}
 
-	// 	if err := cs.parseFilename(cs.Filepath); err != nil {
-	// 		return nil, err
-	// 	}
+	startTime := time.Unix(int64(monthStart), 0).UTC()
+	if startTime.Second() != 0 || startTime.Nanosecond() != 0 {
+		return nil, fmt.Errorf("monthStart not aligned to minute boundary: %d", monthStart)
+	}
+	if startTime.Day() != 1 || startTime.Hour() != 0 || startTime.Minute() != 0 {
+		return nil, fmt.Errorf("monthStart not aligned to start of month: %s", startTime.Format(time.RFC3339))
+	}
 
-	// 	if err := cs.buildDenseFromFile(); err != nil {
-	// 		return nil, err
-	// 	}
-	// 	cs.BuildGapReport()
+	endTime := startTime.AddDate(0, 1, 0)
+	spanSec := int64(endTime.Sub(startTime).Seconds())
+	n := int(spanSec / int64(tf))
+	if n <= 0 {
+		return nil, fmt.Errorf("computed invalid candle count: %d", n)
+	}
 
-	return cs, nil
+	return &CandleSet{
+		Instrument: inst,
+		Start:      monthStart,
+		Timeframe:  tf,
+		Scale:      scale,
+		Source:     source,
+		Candles:    make([]Candle, n),
+		Valid:      make([]uint64, (n+63)/64),
+	}, nil
+}
+
+func (cs *CandleSet) AddCandle(ts types.Timestamp, c Candle) error {
+	if cs == nil {
+		return fmt.Errorf("nil CandleSet")
+	}
+	if cs.Timeframe <= 0 {
+		return fmt.Errorf("invalid timeframe: %d", cs.Timeframe)
+	}
+	if ts < cs.Start {
+		cs.outOfRange++
+		return fmt.Errorf("timestamp %d before set start %d", ts, cs.Start)
+	}
+
+	off := ts - cs.Start
+	if off%cs.Timeframe != 0 {
+		return fmt.Errorf("timestamp %d not aligned to timeframe %d", ts, cs.Timeframe)
+	}
+
+	idx := int(off / cs.Timeframe)
+	if idx < 0 || idx >= len(cs.Candles) {
+		cs.outOfRange++
+		return fmt.Errorf("timestamp %d out of range for set starting %d", ts, cs.Start)
+	}
+
+	if cs.IsValid(idx) {
+		cs.duplicates++
+		// overwrite policy for now
+	}
+
+	cs.Candles[idx] = c
+	cs.SetValid(idx)
+	cs.prev = int64(ts)
+	return nil
+}
+
+func (cs *CandleSet) Merge(src *CandleSet) error {
+	if cs == nil || src == nil {
+		return fmt.Errorf("nil CandleSet in merge")
+	}
+	if cs.Timeframe != src.Timeframe {
+		return fmt.Errorf("timeframe mismatch dst=%d src=%d", cs.Timeframe, src.Timeframe)
+	}
+	if cs.Scale != src.Scale {
+		return fmt.Errorf("scale mismatch dst=%d src=%d", cs.Scale, src.Scale)
+	}
+	if cs.Instrument == nil || src.Instrument == nil {
+		return fmt.Errorf("nil instrument in merge")
+	}
+
+	// Adjust this comparison to whatever your Instrument identity actually is.
+	if cs.Instrument.Name != src.Instrument.Name {
+		return fmt.Errorf("instrument mismatch dst=%q src=%q", cs.Instrument.Name, src.Instrument.Name)
+	}
+
+	for i := range src.Candles {
+		if !src.IsValid(i) {
+			continue
+		}
+		ts := src.Start + types.Timestamp(i)*src.Timeframe
+		if err := cs.AddCandle(ts, src.Candles[i]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (cs *CandleSet) SetValid(idx int) {
+	cs.Valid[idx/64] |= uint64(1) << uint(idx%64)
+}
+
+func (cs *CandleSet) IsValid(idx int) bool {
+	return cs.Valid[idx/64]&(uint64(1)<<uint(idx%64)) != 0
+}
+
+func (cs *CandleSet) CountValid() int {
+	n := 0
+	for i := range cs.Candles {
+		if cs.IsValid(i) {
+			n++
+		}
+	}
+	return n
+}
+
+func FloorToMonthUTC(ts types.Timestamp) types.Timestamp {
+	t := time.Unix(int64(ts), 0).UTC()
+	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return types.Timestamp(first.Unix())
 }
 
 func (cs *CandleSet) Time(idx int) time.Time {
@@ -111,6 +216,14 @@ func (cs *CandleSet) Filename() string {
 		return fmt.Sprintf("%s-%s-all", inst, tfstr)
 	}
 	return fmt.Sprintf("%s-%s-%d", inst, tfstr, year)
+}
+
+func setValid(valid []uint64, idx int) {
+	valid[idx/64] |= 1 << (idx % 64)
+}
+
+func isValid(valid []uint64, idx int) bool {
+	return valid[idx/64]&(1<<(idx%64)) != 0
 }
 
 func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
@@ -624,104 +737,6 @@ func (cs *CandleSet) Aggregate(outTF types.Timestamp, source string) (*CandleSet
 	}
 
 	return out, nil
-}
-
-func (cs *CandleSet) writeMetadata(w io.Writer) error {
-	tfstr, err := SecondsToTFString(cs.Timeframe)
-	if err != nil {
-		return err
-	}
-	year := time.Unix(int64(cs.Start), 0).UTC().Year()
-
-	_, err = fmt.Fprintf(w,
-		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
-		cs.Source,
-		cs.Instrument.Name,
-		tfstr,
-		year,
-		cs.Scale,
-	)
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Fprintln(w, "time;O;H;L;C;AvgSpread;MaxSpread;Ticks;Valid")
-	return err
-}
-
-func (cs *CandleSet) WriteCSV(path string) error {
-	if cs == nil {
-		return errors.New("nil CandleSet")
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	bw := bufio.NewWriterSize(f, 256*1024)
-	defer bw.Flush()
-
-	if err := cs.writeMetadata(bw); err != nil {
-		return err
-	}
-
-	w := csv.NewWriter(bw)
-	w.Comma = ';'
-	defer w.Flush()
-
-	step := cs.Timeframe.Int64()
-	if step <= 0 {
-		return fmt.Errorf("invalid Timeframe=%d", cs.Timeframe)
-	}
-
-	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*step
-		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
-
-		c := cs.Candles[i]
-		valid := 1
-		if len(cs.Valid) > 0 && !bitIsSet(cs.Valid, i) {
-			valid = 0
-		}
-
-		rec := []string{
-			t,
-			formatNumber(c.Open, cs.Scale),
-			formatNumber(c.High, cs.Scale),
-			formatNumber(c.Low, cs.Scale),
-			formatNumber(c.Close, cs.Scale),
-			formatNumber(c.AvgSpread, cs.Scale),
-			formatNumber(c.MaxSpread, cs.Scale),
-			strconv.FormatInt(int64(c.Ticks), 10),
-			strconv.Itoa(valid),
-		}
-		if err := w.Write(rec); err != nil {
-			return err
-		}
-	}
-
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return err
-	}
-	return bw.Flush()
-}
-
-//	func PriceToFloat(price int32, scale int32) float64 {
-//		return float64(price) / math.Pow10(int(scale))
-//	}
-func formatNumber(price types.Price, scale int32) string {
-	decimals := 0
-	for s := scale; s > 1; s /= 10 {
-		decimals++
-	}
-	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
 type Iterator struct {

@@ -8,15 +8,23 @@ import (
 	"time"
 )
 
-type downloader struct {
+type Downloader struct {
 	*http.Client
 	downloaders  int
 	candleMakers int
 }
 
+func NewDownloader() *Downloader {
+	return &Downloader{
+		Client:       newHTTPClient(),
+		downloaders:  8,
+		candleMakers: 4,
+	}
+}
+
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed
 // or ctx is cancelled. It returns a WaitGroup you can Wait() on.
-func (dl *downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile, candleQ chan<- *datafile) *sync.WaitGroup {
+func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile) *sync.WaitGroup {
 	if dl.downloaders <= 0 {
 		dl.downloaders = 8
 	}
@@ -48,7 +56,6 @@ func (dl *downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile,
 					select {
 					case <-ctx.Done():
 						return
-					case candleQ <- df:
 					}
 				}
 			}

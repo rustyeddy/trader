@@ -82,6 +82,14 @@ type TimeRange struct {
 	TF    Timeframe // m1, h1, d1
 }
 
+func NewTimeRange(start Timestamp, end Timestamp) *TimeRange {
+	r := &TimeRange{
+		Start: Timestamp(start),
+		End:   Timestamp(end),
+	}
+	return r
+}
+
 func (r TimeRange) Valid() bool {
 	return r.Start > 0 && r.End > r.Start
 }

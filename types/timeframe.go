@@ -26,6 +26,12 @@ const (
 
 func (tf Timeframe) String() string {
 	switch tf {
+	case TF0:
+		return "tf0"
+
+	case Ticks:
+		return "ticks"
+
 	case M1:
 		return "m1"
 

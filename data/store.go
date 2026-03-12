@@ -1,7 +1,11 @@
 package data
 
 import (
+	"bufio"
+	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CandleStore enforces a file naming convention like:
@@ -21,6 +28,20 @@ type CandleStore struct {
 	Basedir string // e.g. "data/candles"
 	Source  string // e.g. "dukascopy" (used as subdir by default)
 }
+
+// func (s CandleStore) NewWriter() (io.Writer, error) {
+// 	// 1. Create the file
+// 	file, err := os.Create("output.csv")
+// 	if err != nil {
+// 		log.Fatalf("failed to create file: %v", err)
+// 	}
+// 	// Ensure the file is closed at the end of the main function
+// 	defer file.Close()
+
+// 	// 2. Create a new csv.Writer from the file
+// 	writer := csv.NewWriter(file)
+// 	return writer, nil
+// }
 
 func (s CandleStore) CandlePath(instrument, tf string, year int) string {
 
@@ -56,6 +77,101 @@ func (s CandleStore) Exists(instrument, tf string, year int) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func (store *CandleStore) writeMetadata(cs *market.CandleSet, w io.Writer) error {
+	tfstr := cs.Timeframe.String()
+	year := time.Unix(int64(cs.Start), 0).UTC().Year()
+
+	_, err := fmt.Fprintf(w,
+		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+		cs.Source,
+		cs.Instrument.Name,
+		tfstr,
+		year,
+		cs.Scale,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(w, "time;O;H;L;C;AvgSpread;MaxSpread;Ticks;Valid")
+	return err
+}
+
+func (store *CandleStore) WriteCSV(cs *market.CandleSet) error {
+	if cs == nil {
+		return errors.New("nil CandleSet")
+	}
+	path := cs.Filename() + ".csv"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	bw := bufio.NewWriterSize(f, 256*1024)
+	defer bw.Flush()
+
+	if err := store.writeMetadata(cs, bw); err != nil {
+		return err
+	}
+
+	w := csv.NewWriter(bw)
+	w.Comma = ';'
+	defer w.Flush()
+
+	step := cs.Timeframe.Int64()
+	if step <= 0 {
+		return fmt.Errorf("invalid Timeframe=%d", cs.Timeframe)
+	}
+
+	for i := 0; i < len(cs.Candles); i++ {
+		openUnix := int64(cs.Start) + int64(i)*step
+		t := time.Unix(openUnix, 0).UTC().Format(time.RFC3339)
+
+		c := cs.Candles[i]
+		valid := 1
+		if len(cs.Valid) > 0 && !bitIsSet(cs.Valid, i) {
+			valid = 0
+		}
+
+		rec := []string{
+			t,
+			formatNumber(c.Open, cs.Scale),
+			formatNumber(c.High, cs.Scale),
+			formatNumber(c.Low, cs.Scale),
+			formatNumber(c.Close, cs.Scale),
+			formatNumber(c.AvgSpread, cs.Scale),
+			formatNumber(c.MaxSpread, cs.Scale),
+			strconv.FormatInt(int64(c.Ticks), 10),
+			strconv.Itoa(valid),
+		}
+		if err := w.Write(rec); err != nil {
+			return err
+		}
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+//	func PriceToFloat(price int32, scale int32) float64 {
+//		return float64(price) / math.Pow10(int(scale))
+//	}
+func formatNumber(price types.Price, scale int32) string {
+	decimals := 0
+	for s := scale; s > 1; s /= 10 {
+		decimals++
+	}
+	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
 // ListAvailableYears returns sorted years for which files exist for instrument+tf.

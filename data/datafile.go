@@ -27,8 +27,6 @@ type datafile struct {
 	weekend     bool
 	totalspread int64
 
-	*dataset
-
 	m1 market.Candle
 }
 
@@ -116,6 +114,10 @@ func datafileFromPath(fullPath string) (*datafile, error) {
 	}, nil
 }
 
+func (d *datafile) Instrument() string {
+	return d.symbol
+}
+
 func (d *datafile) URL() string {
 	return fmt.Sprintf(
 		"https://datafeed.dukascopy.com/datafeed/%s/%04d/%02d/%02d/%02dh_ticks.bi5",
@@ -137,6 +139,7 @@ func (d *datafile) Path() string {
 	)
 }
 
+// PathBin() TODO move to the Store. Store owns the filesystem
 func (d *datafile) PathBin() string {
 	return filepath.Join(d.basedir, fmt.Sprintf(
 		"%s/%04d/%02d/%02d/%02dh_ticks.bin",

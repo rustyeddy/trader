@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -70,14 +71,6 @@ func (inv *Inventory) Get(key AssetKey) (Asset, bool) {
 	return a, ok
 }
 
-// func NewInventory() *Inventory
-// func (inv *Inventory) Put(a Asset)
-// func (inv *Inventory) Get(key AssetKey) (Asset, bool)
-// func (inv *Inventory) Has(source, instrument string, kind DataKind, tf Timeframe, year int) bool
-// func (inv *Inventory) Years(source, instrument string, kind DataKind, tf Timeframe) []int
-// func (inv *Inventory) LatestYear(source, instrument string, kind DataKind, tf Timeframe) (int, bool)
-// func (inv *Inventory) MissingYears(source, instrument string, kind DataKind, tf Timeframe, fromYear, toYear int) []int
-// func (inv *Inventory) StaleDerived(source, instrument string, tf Timeframe, year int) (bool, error)
 func (inv *Inventory) Has(source, instrument string, kind DataKind, tf types.Timeframe, year int) bool {
 	if kind == TickData {
 		tf = types.TF0
@@ -180,7 +173,7 @@ func NewInventoryBuilder(ticksRoot, candlesRoot string) *InventoryBuilder {
 	}
 }
 
-func (b *InventoryBuilder) Build() (*Inventory, error) {
+func (b *InventoryBuilder) Build(ctx context.Context) (*Inventory, error) {
 	inv := NewInventory()
 
 	if b.TicksRoot != "" {
@@ -190,8 +183,9 @@ func (b *InventoryBuilder) Build() (*Inventory, error) {
 	}
 	if b.CandlesRoot != "" {
 		if err := b.scanCandles(inv); err != nil {
+			// if the candles file does not exist we just assume no candles
+			// exist, so it is not an error.
 			if errors.Is(err, os.ErrNotExist) {
-				// Handle the specific ENOENT case
 				return inv, nil
 			}
 			return nil, err
