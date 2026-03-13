@@ -24,7 +24,7 @@ func NewDownloader() *Downloader {
 
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed
 // or ctx is cancelled. It returns a WaitGroup you can Wait() on.
-func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile) *sync.WaitGroup {
+func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan AssetKey) *sync.WaitGroup {
 	if dl.downloaders <= 0 {
 		dl.downloaders = 8
 	}
@@ -40,11 +40,12 @@ func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan *datafile)
 				select {
 				case <-ctx.Done():
 					return
-				case df, ok := <-dlQ:
+				case key, ok := <-dlQ:
 					if !ok {
 						return // channel closed, we're done
 					}
-
+					println("rusty", key.Path)
+					df := newDatafile(key.Path, key.Instrument, key.Time())
 					if err := df.download(ctx, dl.Client); err != nil {
 						df.err = err
 						fmt.Printf("\terror downloading %s: %v\n", df.Path(), err)

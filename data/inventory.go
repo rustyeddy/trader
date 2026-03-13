@@ -17,15 +17,16 @@ import (
 type DataKind uint8
 
 const (
-	TickData DataKind = iota + 1
-	CandleData
+	KindUnknown DataKind = iota
+	KindTick
+	KindCandle
 )
 
 func (k DataKind) String() string {
 	switch k {
-	case TickData:
+	case KindTick:
 		return "ticks"
-	case CandleData:
+	case KindCandle:
 		return "candles"
 	default:
 		return "unknown"
@@ -37,7 +38,159 @@ type AssetKey struct {
 	Instrument string
 	Kind       DataKind
 	TF         types.Timeframe
-	Year       int
+
+	Year  int
+	Month int
+	Day   int
+	Hour  int
+
+	Path string
+}
+
+// compare returns:
+//
+//	-1 if ak < k
+//	 0 if ak == k
+//	 1 if ak > k
+func (ak AssetKey) compare(k AssetKey) int {
+	if ak.Source < k.Source {
+		return -1
+	}
+	if ak.Source > k.Source {
+		return 1
+	}
+
+	if ak.Instrument < k.Instrument {
+		return -1
+	}
+	if ak.Instrument > k.Instrument {
+		return 1
+	}
+
+	if ak.Kind < k.Kind {
+		return -1
+	}
+	if ak.Kind > k.Kind {
+		return 1
+	}
+
+	if ak.TF < k.TF {
+		return -1
+	}
+	if ak.TF > k.TF {
+		return 1
+	}
+
+	if ak.Year < k.Year {
+		return -1
+	}
+	if ak.Year > k.Year {
+		return 1
+	}
+
+	if ak.Month < k.Month {
+		return -1
+	}
+	if ak.Month > k.Month {
+		return 1
+	}
+
+	if ak.Day < k.Day {
+		return -1
+	}
+	if ak.Day > k.Day {
+		return 1
+	}
+
+	if ak.Hour < k.Hour {
+		return -1
+	}
+	if ak.Hour > k.Hour {
+		return 1
+	}
+
+	// Optional: compare path last, though ideally it should not be here.
+	if ak.Path < k.Path {
+		return -1
+	}
+	if ak.Path > k.Path {
+		return 1
+	}
+
+	return 0
+}
+
+func (ak AssetKey) before(k AssetKey) bool {
+	return ak.compare(k) < 0
+}
+
+func (ak AssetKey) after(k AssetKey) bool {
+	return ak.compare(k) > 0
+}
+
+// Time returns the UTC time represented by the key.
+// Missing fields are normalized to the earliest valid value.
+//
+// Examples:
+//
+//	Year=2024, Month=0, Day=0, Hour=0 -> 2024-01-01 00:00:00 UTC
+//	Year=2024, Month=5, Day=0, Hour=0 -> 2024-05-01 00:00:00 UTC
+//	Year=2024, Month=5, Day=7, Hour=13 -> 2024-05-07 13:00:00 UTC
+func (ak AssetKey) Time() time.Time {
+	year := ak.Year
+	if year <= 0 {
+		year = 1970
+	}
+
+	month := ak.Month
+	if month < 1 || month > 12 {
+		month = 1
+	}
+
+	day := ak.Day
+	if day < 1 || day > 31 {
+		day = 1
+	}
+
+	hour := ak.Hour
+	if hour < 0 || hour > 23 {
+		hour = 0
+	}
+
+	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+}
+
+// IsForexMarketClosed reports whether spot FX is closed at time t.
+//
+// Common retail FX convention:
+//   - Opens Sunday 17:00 New York time
+//   - Closes Friday 17:00 New York time
+//
+// This function ignores special holiday closures for now.
+// It converts t into America/New_York and applies the weekly session rules.
+func IsForexMarketClosed(t time.Time) bool {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		// conservative fallback: use UTC if timezone load fails
+		loc = time.UTC
+	}
+
+	nt := t.In(loc)
+	wd := nt.Weekday()
+	h := nt.Hour()
+
+	switch wd {
+	case time.Saturday:
+		return true
+	case time.Sunday:
+		// closed until 17:00 NY time
+		return h < 17
+	case time.Friday:
+		// closed from 17:00 NY time onward
+		return h >= 17
+	default:
+		return false
+	}
 }
 
 type Asset struct {
@@ -71,8 +224,13 @@ func (inv *Inventory) Get(key AssetKey) (Asset, bool) {
 	return a, ok
 }
 
+func (inv *Inventory) HasComplete(key AssetKey) bool {
+	a, ok := inv.assets[key]
+	return ok && a.Exists && a.Complete
+}
+
 func (inv *Inventory) Has(source, instrument string, kind DataKind, tf types.Timeframe, year int) bool {
-	if kind == TickData {
+	if kind == KindTick {
 		tf = types.TF0
 	}
 
@@ -135,7 +293,7 @@ func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe
 	child, ok := inv.Get(AssetKey{
 		Source:     normalizeSource(source),
 		Instrument: normalizeInstrument(instrument),
-		Kind:       CandleData,
+		Kind:       KindCandle,
 		TF:         tf,
 		Year:       year,
 	})
@@ -146,7 +304,7 @@ func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe
 	parent, ok := inv.Get(AssetKey{
 		Source:     normalizeSource(source),
 		Instrument: normalizeInstrument(instrument),
-		Kind:       CandleData,
+		Kind:       KindCandle,
 		TF:         parentTF,
 		Year:       year,
 	})
@@ -155,6 +313,17 @@ func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe
 	}
 
 	return parent.UpdatedAt.After(child.UpdatedAt), nil
+}
+
+func (inv *Inventory) NeedsDownload(key AssetKey) bool {
+	a, ok := inv.assets[key]
+	if !ok {
+		return true
+	}
+	if !a.Exists || !a.Complete {
+		return true
+	}
+	return false
 }
 
 func normalizeSource(s string) string {
@@ -254,7 +423,7 @@ func (b *InventoryBuilder) scanTicks(inv *Inventory) error {
 			Key: AssetKey{
 				Source:     "dukascopy",
 				Instrument: inst,
-				Kind:       TickData,
+				Kind:       KindTick,
 				TF:         types.TF0,
 				Year:       year,
 			},
@@ -309,7 +478,7 @@ func (b *InventoryBuilder) scanCandles(inv *Inventory) error {
 			Key: AssetKey{
 				Source:     source,
 				Instrument: inst,
-				Kind:       CandleData,
+				Kind:       KindCandle,
 				TF:         tf,
 				Year:       year,
 			},
@@ -361,4 +530,28 @@ func parseCandlePath(path string) (source string, instrument string, tf types.Ti
 	}
 
 	return source, instrument, tf, y, true
+}
+
+func isMajorForexHolidayClosed(t time.Time) bool {
+	month := t.Month()
+	day := t.Day()
+	h := t.Hour()
+
+	// Full closures.
+	if month == time.January && day == 1 {
+		return true // New Year's Day
+	}
+	if month == time.December && day == 25 {
+		return true // Christmas Day
+	}
+
+	// Practical early-close heuristics.
+	if month == time.December && day == 24 && h >= 13 {
+		return true // Christmas Eve afternoon
+	}
+	if month == time.December && day == 31 && h >= 13 {
+		return true // New Year's Eve afternoon
+	}
+
+	return false
 }

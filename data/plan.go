@@ -1,6 +1,9 @@
 package data
 
 type Plan struct {
-	downloads []*datafile
-	buildM1   []*datafile
+	Download       []AssetKey
+	BuildM1        []AssetKey
+	BuildH1        []AssetKey
+	BuildD1        []AssetKey
+	TickHoursReady []AssetKey
 }

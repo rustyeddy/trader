@@ -21,8 +21,8 @@ type DataManager struct {
 	Basedir     string
 	Instruments []string
 
-	DukasRoot  string
-	Candlesdir string
+	DukasRoot   string
+	CandlesRoot string
 
 	*Downloader
 	Store *CandleStore
@@ -56,7 +56,7 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 		return fmt.Errorf("build plan: %w", err)
 	}
 
-	download := false
+	download := true
 	if download {
 		if err := dm.ExecuteDownloads(ctx, plan); err != nil {
 			return fmt.Errorf("execute downloads: %w", err)
@@ -87,50 +87,69 @@ func (dm *DataManager) BuildInventory(ctx context.Context) (*Inventory, error) {
 	return inv, nil
 }
 
-func (dm *DataManager) Plan(ctx context.Context, inv *Inventory) (plan *Plan, err error) {
-	plan = &Plan{}
+func (dm *DataManager) Plan(ctx context.Context, inv *Inventory) (*Plan, error) {
+	plan := &Plan{}
 
 	start := types.FromTime(dm.Start)
 	end := types.FromTime(dm.End)
 	r := types.NewTimeRange(start, end)
 
+	var tickHoursReady []AssetKey
+
 	for _, sym := range dm.Instruments {
-		var df *datafile
 		for ts := r.Start; ts < r.End; ts += 3600 {
 			t := time.Unix(int64(ts), 0).UTC()
-			df = newDatafile(dm.DukasRoot, sym, t)
 
-			if !df.Exists() {
-				plan.downloads = append(plan.downloads, df)
+			if IsForexMarketClosed(t) {
 				continue
 			}
 
-			if df.bytes <= 0 {
-				// Check for the weekend
+			key := AssetKey{
+				Source:     "dukascopy",
+				Instrument: sym,
+				Kind:       KindTick,
+				TF:         types.H1,
+				Year:       t.Year(),
+				Month:      int(t.Month()),
+				Day:        t.Day(),
+				Hour:       t.Hour(),
+			}
+
+			asset, ok := inv.Get(key)
+			if !ok || !asset.Exists || !asset.Complete || asset.Size <= 0 {
+				plan.Download = append(plan.Download, key)
 				continue
 			}
-			plan.buildM1 = append(plan.buildM1, df)
+
+			tickHoursReady = append(tickHoursReady, key)
 		}
-		// fmt.Printf("the plan: %s downloads: %d - candles: %d\n", sym, len(plan.downloads), len(plan.buildM1))
 	}
-	slices.Reverse(plan.buildM1)
+
+	plan.BuildM1 = GroupTickHoursIntoM1Builds(tickHoursReady, inv)
 	return plan, nil
 }
 
+func GroupTickHoursIntoM1Builds(hours []AssetKey, inv *Inventory) []AssetKey {
+	out := make([]AssetKey, 0, len(hours))
+	out = append(out, hours...)
+	return out
+}
+
 func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
-	if len(plan.downloads) == 0 {
+	if len(plan.Download) == 0 {
 		return nil
 	}
 
-	q := make(chan *datafile, 1024)
+	q := make(chan AssetKey, 1024)
 	dlWG := dm.Downloader.startDownloader(ctx, q)
 	go func() {
 		defer close(q)
-		for _, df := range plan.downloads {
+		for _, df := range plan.Download {
 			select {
 			case <-ctx.Done():
 				return
 			case q <- df:
+				fmt.Println("rusty q <- df")
 			}
 		}
 	}()
@@ -140,17 +159,15 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 }
 
 func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
-	fmt.Println("BUILDM1")
+	sort.Slice(plan.BuildM1, func(i, j int) bool {
+		a, b := plan.BuildM1[i], plan.BuildM1[j]
 
-	sort.Slice(plan.buildM1, func(i, j int) bool {
-		a, b := plan.buildM1[i], plan.buildM1[j]
-
-		if a.Instrument() != b.Instrument() {
-			return a.Instrument() < b.Instrument()
+		if a.Instrument != b.Instrument {
+			return a.Instrument < b.Instrument
 		}
-		return a.Time.Before(b.Time)
+		return a.before(b)
 	})
-	slices.Reverse(plan.buildM1)
+	slices.Reverse(plan.BuildM1)
 
 	var cur *market.CandleSet
 	hours := 0
@@ -162,13 +179,14 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		return dm.Store.WriteCSV(cur)
 	}
 
-	for _, df := range plan.buildM1 {
+	for _, key := range plan.BuildM1 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
+		df := newDatafile(dm.DukasRoot, key.Instrument, key.Time())
 		hourSet, err := df.buildM1(ctx)
 		if err != nil {
 			return fmt.Errorf("buildM1 failed for %s: %w", df.Path(), err)

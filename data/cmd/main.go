@@ -61,8 +61,9 @@ func main() {
 			Basedir: config.Candledir,
 			Source:  "Dukascopy",
 		},
-		DukasRoot:  "../../tmp/dukas",
-		Downloader: data.NewDownloader(),
+		DukasRoot:   "../../tmp/dukas",
+		CandlesRoot: "../../tmp/candles",
+		Downloader:  data.NewDownloader(),
 	}
 	dm.Init()
 	if err := dm.Sync(ctx); err != nil {
