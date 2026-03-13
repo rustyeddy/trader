@@ -144,12 +144,11 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 	dlWG := dm.Downloader.startDownloader(ctx, q)
 	go func() {
 		defer close(q)
-		for _, df := range plan.Download {
+		for _, key := range plan.Download {
 			select {
 			case <-ctx.Done():
 				return
-			case q <- df:
-				fmt.Println("rusty q <- df")
+			case q <- key:
 			}
 		}
 	}()

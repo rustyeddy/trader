@@ -365,96 +365,101 @@ func (b *InventoryBuilder) Build(ctx context.Context) (*Inventory, error) {
 }
 
 func (b *InventoryBuilder) scanTicks(inv *Inventory) error {
-	type tickYearAgg struct {
-		pathCount int
-		firstPath string
-		minYear   int
-		maxYear   int
-		modTime   time.Time
-		size      int64
-	}
-
-	agg := map[string]*tickYearAgg{}
-
-	err := filepath.Walk(b.TicksRoot, func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(b.TicksRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if info == nil || info.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".bi5") {
 			return nil
 		}
 
-		inst, year, ok := parseTickPath(path)
+		inst, year, month, day, hour, ok := parseTickPath(path)
 		if !ok {
 			return nil
 		}
 
-		key := fmt.Sprintf("%s|%d", inst, year)
-		a := agg[key]
-		if a == nil {
-			a = &tickYearAgg{
-				firstPath: path,
-				minYear:   year,
-				maxYear:   year,
-				modTime:   info.ModTime(),
-			}
-			agg[key] = a
-		}
-		a.pathCount++
-		a.size += info.Size()
-		if info.ModTime().After(a.modTime) {
-			a.modTime = info.ModTime()
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	for key, a := range agg {
-		parts := strings.Split(key, "|")
-		inst := parts[0]
-		year, _ := strconv.Atoi(parts[1])
+		start := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+		end := start.Add(time.Hour)
 
 		inv.Put(Asset{
 			Key: AssetKey{
 				Source:     "dukascopy",
 				Instrument: inst,
 				Kind:       KindTick,
-				TF:         types.TF0,
+				TF:         types.H1, // storage granularity of tick files is one hour
 				Year:       year,
+				Month:      month,
+				Day:        day,
+				Hour:       hour,
 			},
-			Path:       a.firstPath,
-			Range:      types.YearRange(year),
-			UpdatedAt:  a.modTime,
-			Complete:   true, // can later validate expected hour count
-			Descriptor: fmt.Sprintf("dukascopy raw bi5 files (%d files)", a.pathCount),
+			Path:      path,
+			Range:     types.NewTimeRange(types.FromTime(start), types.FromTime(end)),
+			Exists:    true,
+			Complete:  info.Size() > 0, // minimal heuristic only
+			Size:      info.Size(),
+			UpdatedAt: info.ModTime(),
+			Descriptor: fmt.Sprintf(
+				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
+				year, month, day, hour,
+			),
 		})
-	}
 
-	return nil
+		return nil
+	})
 }
+func parseTickPath(path string) (inst string, year, month, day, hour int, ok bool) {
+	clean := filepath.ToSlash(path)
 
-func parseTickPath(path string) (instrument string, year int, ok bool) {
-	p := filepath.ToSlash(path)
-	parts := strings.Split(p, "/")
+	// Example expected tail:
+	// EURUSD/2025/01/02/13h_ticks.bi5
+	parts := strings.Split(clean, "/")
 	if len(parts) < 5 {
-		return "", 0, false
+		return "", 0, 0, 0, 0, false
 	}
 
-	// Expect .../<instrument>/<year>/<month>/<day>/<file>
 	n := len(parts)
-	instrument = normalizeInstrument(parts[n-5])
 
-	y, err := strconv.Atoi(parts[n-4])
+	file := parts[n-1]
+	dayStr := parts[n-2]
+	monthStr := parts[n-3]
+	yearStr := parts[n-4]
+	inst = parts[n-5]
+
+	year, err := strconv.Atoi(yearStr)
 	if err != nil {
-		return "", 0, false
+		return "", 0, 0, 0, 0, false
 	}
 
-	return instrument, y, true
+	month, err = strconv.Atoi(monthStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	day, err = strconv.Atoi(dayStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	// Dukascopy commonly uses "13h_ticks.bi5"
+	base := strings.ToLower(file)
+	if !strings.HasSuffix(base, "h_ticks.bi5") {
+		return "", 0, 0, 0, 0, false
+	}
+
+	hourStr := strings.TrimSuffix(base, "h_ticks.bi5")
+	hour, err = strconv.Atoi(hourStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
+		return "", 0, 0, 0, 0, false
+	}
+
+	return inst, year, month, day, hour, true
 }
 
 func (b *InventoryBuilder) scanCandles(inv *Inventory) error {

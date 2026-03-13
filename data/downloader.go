@@ -44,20 +44,14 @@ func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan AssetKey) 
 					if !ok {
 						return // channel closed, we're done
 					}
-					println("rusty", key.Path)
 					df := newDatafile(key.Path, key.Instrument, key.Time())
 					if err := df.download(ctx, dl.Client); err != nil {
 						df.err = err
 						fmt.Printf("\terror downloading %s: %v\n", df.Path(), err)
 						continue
 					}
-					if df.bytes == 0 {
-						continue
-					}
-					select {
-					case <-ctx.Done():
-						return
-					}
+				case <-ctx.Done():
+					return
 				}
 			}
 		}(i)
