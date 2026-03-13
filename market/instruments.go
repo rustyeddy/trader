@@ -24,6 +24,16 @@ type Instrument struct {
 	MarginRate          types.Rate
 }
 
+var InstrumentList = []string{
+	"EURUSD",
+	"GBPUSD",
+	"USDJPY",
+	"USDCHF",
+	"AUDUSD",
+	"USDCAD",
+	"NZDUSD",
+}
+
 var InstrumentList_ = []string{
 	"EUR_USD",
 	"GBP_USD",
