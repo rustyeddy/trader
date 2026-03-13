@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"log"
 	"slices"
 	"sort"
 	"time"
@@ -30,11 +31,6 @@ type DataManager struct {
 
 // Init will get DataManager ready to go.
 func (dm *DataManager) Init() {
-	if dm.Downloader == nil {
-		dm.Downloader = &Downloader{
-			Client: newHTTPClient(),
-		}
-	}
 	if dm.Store == nil {
 		dm.Store = &CandleStore{
 			Basedir: "../../tmp/candles",
@@ -44,11 +40,17 @@ func (dm *DataManager) Init() {
 }
 
 func (dm *DataManager) Sync(ctx context.Context) error {
+
+	log.Print("Building inventory...")
+
 	// 1. Build inventory
 	inv, err := dm.BuildInventory(ctx)
 	if err != nil {
 		return fmt.Errorf("build inventory: %w", err)
 	}
+
+	fmt.Println(" done. ")
+	log.Print("Planning...")
 
 	// 2. Plan missing raw tick downloads
 	plan, err := dm.Plan(ctx, inv)
@@ -56,8 +58,18 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 		return fmt.Errorf("build plan: %w", err)
 	}
 
+	log.Println(" done. ")
+	plan.Log()
+
+	log.Print("Downloading...")
+	// we've got to build m1
+
 	download := true
 	if download {
+		if dm.Downloader == nil {
+			dm.Downloader = NewDownloader(dm.DukasRoot)
+		}
+
 		if err := dm.ExecuteDownloads(ctx, plan); err != nil {
 			return fmt.Errorf("execute downloads: %w", err)
 		}
@@ -69,6 +81,8 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 		}
 	}
 
+	log.Println("buildng M1...")
+
 	// 5. Plan/build M1 from available raw tick hours
 	if err := dm.BuildM1(ctx, plan); err != nil {
 		return fmt.Errorf("build M1: %w", err)
@@ -78,7 +92,7 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 }
 
 func (dm *DataManager) BuildInventory(ctx context.Context) (*Inventory, error) {
-	b := NewInventoryBuilder(dm.DukasRoot, dm.Store.Basedir)
+	b := NewInventoryBuilder(dm.DukasRoot, dm.CandlesRoot)
 
 	inv, err := b.Build(ctx)
 	if err != nil {
@@ -120,7 +134,6 @@ func (dm *DataManager) Plan(ctx context.Context, inv *Inventory) (*Plan, error) 
 				plan.Download = append(plan.Download, key)
 				continue
 			}
-
 			tickHoursReady = append(tickHoursReady, key)
 		}
 	}
@@ -144,6 +157,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 	dlWG := dm.Downloader.startDownloader(ctx, q)
 	go func() {
 		defer close(q)
+		slices.Reverse(plan.Download)
 		for _, key := range plan.Download {
 			select {
 			case <-ctx.Done():

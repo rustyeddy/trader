@@ -19,24 +19,25 @@ type Config struct {
 	types.Timeframe `"json":timeframe`
 	Basedir         string `"json":basedir`
 	Dukasdir        string `"json":dukasdir`
-	Candledir       string `"json":candledir`
+	CandleRoot      string `"json":candleroot`
 }
 
 var (
 	config = &Config{
-		Symbols:   "EURUSD,USDJPY,GBPUSD",
-		Start:     "",
-		End:       "",
-		Timeframe: types.D1,
-		Basedir:   "../../tmp/",
-		Dukasdir:  "dukas/",
+		Symbols:    "EURUSD,USDJPY,GBPUSD",
+		Start:      "",
+		End:        "",
+		Timeframe:  types.D1,
+		Basedir:    "../../tmp/",
+		Dukasdir:   "dukas/",
+		CandleRoot: "candles/",
 	}
 )
 
 func init() {
 	flag.StringVar(&config.Start, "start", "2025-01-01T00:00:00Z", "start of range")
 	flag.StringVar(&config.End, "end", "2025-01-01T00:00:00Z", "end of range")
-	flag.StringVar(&config.Symbols, "symbols", "USDJPY,GBPUSD", "Instruments to download")
+	flag.StringVar(&config.Symbols, "symbols", "USDJPY,GBPUSD,EURUSD", "Instruments to download")
 	flag.StringVar(&config.Basedir, "basedir", "../../tmp/dukas", "Basedirectory")
 }
 
@@ -58,12 +59,10 @@ func main() {
 		Basedir:     config.Basedir + config.Dukasdir,
 		Instruments: strings.Split(config.Symbols, ","),
 		Store: &data.CandleStore{
-			Basedir: config.Candledir,
-			Source:  "Dukascopy",
+			Source: "Dukascopy",
 		},
 		DukasRoot:   "../../tmp/dukas",
 		CandlesRoot: "../../tmp/candles",
-		Downloader:  data.NewDownloader(),
 	}
 	dm.Init()
 	if err := dm.Sync(ctx); err != nil {

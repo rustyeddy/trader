@@ -43,8 +43,6 @@ type AssetKey struct {
 	Month int
 	Day   int
 	Hour  int
-
-	Path string
 }
 
 // compare returns:
@@ -106,14 +104,6 @@ func (ak AssetKey) compare(k AssetKey) int {
 		return -1
 	}
 	if ak.Hour > k.Hour {
-		return 1
-	}
-
-	// Optional: compare path last, though ideally it should not be here.
-	if ak.Path < k.Path {
-		return -1
-	}
-	if ak.Path > k.Path {
 		return 1
 	}
 
@@ -410,6 +400,7 @@ func (b *InventoryBuilder) scanTicks(inv *Inventory) error {
 		return nil
 	})
 }
+
 func parseTickPath(path string) (inst string, year, month, day, hour int, ok bool) {
 	clean := filepath.ToSlash(path)
 

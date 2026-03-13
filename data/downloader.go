@@ -12,13 +12,15 @@ type Downloader struct {
 	*http.Client
 	downloaders  int
 	candleMakers int
+	basePath     string
 }
 
-func NewDownloader() *Downloader {
+func NewDownloader(basedir string) *Downloader {
 	return &Downloader{
 		Client:       newHTTPClient(),
 		downloaders:  8,
 		candleMakers: 4,
+		basePath:     basedir,
 	}
 }
 
@@ -44,7 +46,7 @@ func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan AssetKey) 
 					if !ok {
 						return // channel closed, we're done
 					}
-					df := newDatafile(key.Path, key.Instrument, key.Time())
+					df := newDatafile(dl.basePath, key.Instrument, key.Time())
 					if err := df.download(ctx, dl.Client); err != nil {
 						df.err = err
 						fmt.Printf("\terror downloading %s: %v\n", df.Path(), err)
