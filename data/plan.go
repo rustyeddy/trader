@@ -7,7 +7,7 @@ import (
 )
 
 type Plan struct {
-	Download []AssetKey
+	Download []Key
 	BuildM1  []BuildTask
 	BuildH1  []BuildTask
 	BuildD1  []BuildTask
@@ -22,9 +22,9 @@ func (p Plan) Log() {
 }
 
 type BuildTask struct {
-	Target AssetKey
+	Target Key
 	Range  types.TimeRange
-	Inputs []AssetKey
+	Inputs []Key
 	Kind   BuildKind
 }
 
@@ -35,39 +35,39 @@ const (
 )
 
 type WorkState struct {
-	activeDownloads map[AssetKey]struct{}
-	activeBuilds    map[AssetKey]struct{}
+	activeDownloads map[Key]struct{}
+	activeBuilds    map[Key]struct{}
 }
 
 func NewWorkState() *WorkState {
 	return &WorkState{
-		activeDownloads: make(map[AssetKey]struct{}),
-		activeBuilds:    make(map[AssetKey]struct{}),
+		activeDownloads: make(map[Key]struct{}),
+		activeBuilds:    make(map[Key]struct{}),
 	}
 }
 
-func (ws *WorkState) IsDownloadQueuedOrActive(k AssetKey) bool {
+func (ws *WorkState) IsDownloadQueuedOrActive(k Key) bool {
 	_, ok := ws.activeDownloads[k]
 	return ok
 }
 
-func (ws *WorkState) IsBuildQueuedOrActive(k AssetKey) bool {
+func (ws *WorkState) IsBuildQueuedOrActive(k Key) bool {
 	_, ok := ws.activeBuilds[k]
 	return ok
 }
 
-func (ws *WorkState) MarkDownload(k AssetKey) {
+func (ws *WorkState) MarkDownload(k Key) {
 	ws.activeDownloads[k] = struct{}{}
 }
 
-func (ws *WorkState) MarkBuild(k AssetKey) {
+func (ws *WorkState) MarkBuild(k Key) {
 	ws.activeBuilds[k] = struct{}{}
 }
 
-func (ws *WorkState) ClearDownload(k AssetKey) {
+func (ws *WorkState) ClearDownload(k Key) {
 	delete(ws.activeDownloads, k)
 }
 
-func (ws *WorkState) ClearBuild(k AssetKey) {
+func (ws *WorkState) ClearBuild(k Key) {
 	delete(ws.activeBuilds, k)
 }

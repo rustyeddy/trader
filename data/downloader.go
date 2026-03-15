@@ -21,7 +21,7 @@ func NewDownloader(basedir string) *Downloader {
 	}
 }
 
-func (dl *Downloader) download(ctx context.Context, key AssetKey) error {
+func (dl *Downloader) download(ctx context.Context, key Key) error {
 	df := newDatafile(dl.basePath, key.Instrument, key.Time())
 
 	if err := df.download(ctx, dl.Client); err != nil {
@@ -34,7 +34,7 @@ func (dl *Downloader) download(ctx context.Context, key AssetKey) error {
 
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed
 // or ctx is cancelled. It returns a WaitGroup you can Wait() on.
-func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan AssetKey) *sync.WaitGroup {
+func (dl *Downloader) startDownloader(ctx context.Context, dlQ <-chan Key) *sync.WaitGroup {
 	if dl.downloaders <= 0 {
 		dl.downloaders = 8
 	}

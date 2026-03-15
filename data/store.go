@@ -28,7 +28,7 @@ type Store struct {
 	Basedir string // e.g. "data/candles"
 }
 
-func (s *Store) PathForAsset(k AssetKey) string {
+func (s *Store) PathForAsset(k Key) string {
 	switch {
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		return s.pathForMonthlyCandle(k)
@@ -41,7 +41,7 @@ func (s *Store) PathForAsset(k AssetKey) string {
 	}
 }
 
-func (s *Store) pathForMonthlyCandle(k AssetKey) string {
+func (s *Store) pathForMonthlyCandle(k Key) string {
 	instrument := strings.ToLower(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
@@ -61,7 +61,7 @@ func (s *Store) pathForMonthlyCandle(k AssetKey) string {
 	)
 }
 
-func (s *Store) pathForHourlyTick(k AssetKey) string {
+func (s *Store) pathForHourlyTick(k Key) string {
 	instrument := strings.ToLower(k.Instrument)
 
 	return filepath.Join(
@@ -75,7 +75,15 @@ func (s *Store) pathForHourlyTick(k AssetKey) string {
 	)
 }
 
-func (s *Store) RelDir(key MonthKey) string {
+func (k Key) IsMonthlyCandle() bool {
+	return k.Kind == KindCandle && k.Day == 0 && k.Hour == 0
+}
+
+func (k Key) IsHourlyTick() bool {
+	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
+}
+
+func (s *Store) RelDir(key Key) string {
 	return filepath.Join(
 		strings.ToUpper(key.Instrument),
 		strings.ToUpper(key.TF.String()),
@@ -83,7 +91,7 @@ func (s *Store) RelDir(key MonthKey) string {
 	)
 }
 
-func (s Store) Exists(key AssetKey) (bool, error) {
+func (s Store) Exists(key Key) (bool, error) {
 	p := s.PathForAsset(key)
 	_, err := os.Stat(p)
 	if err == nil {
@@ -261,14 +269,12 @@ func (s Store) LatestCompleteYear(instrument, tf string) (int, error) {
 		y := years[i]
 		for m := 0; m < 12; m++ {
 
-			ak := AssetKey{
-				MonthKey: MonthKey{
-					Instrument: instrument,
-					Kind:       KindCandle,
-					TF:         types.TF(tf),
-					Year:       y,
-					Month:      m,
-				},
+			ak := Key{
+				Instrument: instrument,
+				Kind:       KindCandle,
+				TF:         types.TF(tf),
+				Year:       y,
+				Month:      m,
 			}
 			ok, err := s.Exists(ak)
 			if err != nil || !ok {

@@ -200,8 +200,8 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 	return nil
 }
 
-func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws *WorkState) []AssetKey {
-	var out []AssetKey
+func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws *WorkState) []Key {
+	var out []Key
 
 	for ts := r.Start; ts < r.End; ts += 3600 {
 		t := time.Unix(int64(ts), 0).UTC()
@@ -210,17 +210,15 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 			continue
 		}
 
-		key := AssetKey{
-			Source: "dukascopy",
-			MonthKey: MonthKey{
-				Instrument: sym,
-				Kind:       KindTick,
-				TF:         types.H1,
-				Year:       t.Year(),
-				Month:      int(t.Month()),
-			},
-			Day:  t.Day(),
-			Hour: t.Hour(),
+		key := Key{
+			Source:     "dukascopy",
+			Instrument: sym,
+			Kind:       KindTick,
+			TF:         types.H1,
+			Year:       t.Year(),
+			Month:      int(t.Month()),
+			Day:        t.Day(),
+			Hour:       t.Hour(),
 		}
 
 		if ws.IsDownloadQueuedOrActive(key) {
@@ -255,16 +253,14 @@ func (dm *DataManager) PlanM1Builds(
 		default:
 		}
 
-		target := AssetKey{
-			Source: "derived",
-			MonthKey: MonthKey{
-				Instrument: sym,
-				Kind:       KindTick,
-				TF:         types.H1,
-				Year:       day.Year(),
-				Month:      int(day.Month()),
-			},
-			Day: day.Day(),
+		target := Key{
+			Source:     "derived",
+			Instrument: sym,
+			Kind:       KindTick,
+			TF:         types.H1,
+			Year:       day.Year(),
+			Month:      int(day.Month()),
+			Day:        day.Day(),
 		}
 
 		if ws.IsBuildQueuedOrActive(target) {
@@ -317,7 +313,7 @@ func (dm *DataManager) consumeHourIntoM1(
 	})
 }
 
-func m1TargetNeedsBuild(target AssetKey, inputs []AssetKey, inv *Inventory) bool {
+func m1TargetNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
 	targetAsset, ok := inv.Get(target)
 	if !ok || !targetAsset.Exists || !targetAsset.Complete || targetAsset.Size <= 0 {
 		return true
@@ -336,7 +332,7 @@ func m1TargetNeedsBuild(target AssetKey, inputs []AssetKey, inv *Inventory) bool
 
 	return false
 }
-func (dm *DataManager) m1Path(key AssetKey) string {
+func (dm *DataManager) m1Path(key Key) string {
 	return filepath.Join(
 		dm.CandleRoot,
 		key.Instrument,
@@ -362,8 +358,8 @@ func eachUTCDateInRange(r types.TimeRange) []time.Time {
 	return out
 }
 
-func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]AssetKey, bool) {
-	var inputs []AssetKey
+func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Key, bool) {
+	var inputs []Key
 
 	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
 	dayEnd := dayStart.Add(24 * time.Hour)
@@ -373,17 +369,15 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Asset
 			continue
 		}
 
-		key := AssetKey{
-			Source: "dukascopy",
-			MonthKey: MonthKey{
-				Instrument: sym,
-				Kind:       KindTick,
-				TF:         types.H1,
-				Year:       t.Year(),
-				Month:      int(t.Month()),
-			},
-			Day:  t.Day(),
-			Hour: t.Hour(),
+		key := Key{
+			Source:     "dukascopy",
+			Instrument: sym,
+			Kind:       KindTick,
+			TF:         types.H1,
+			Year:       t.Year(),
+			Month:      int(t.Month()),
+			Day:        t.Day(),
+			Hour:       t.Hour(),
 		}
 
 		asset, ok := inv.Get(key)
@@ -405,7 +399,7 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Asset
 // 	end := types.FromTime(dm.End)
 // 	r := types.NewTimeRange(start, end)
 
-// 	var tickHoursReady []AssetKey
+// 	var tickHoursReady []Key
 
 // 	for _, sym := range dm.Instruments {
 // 		for ts := r.Start; ts < r.End; ts += 3600 {
@@ -415,7 +409,7 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Asset
 // 				continue
 // 			}
 
-// 			key := AssetKey{
+// 			key := Key{
 // 				Source:     "dukascopy",
 // 				Instrument: sym,
 // 				Kind:       KindTick,
@@ -439,8 +433,8 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Asset
 // 	return plan, nil
 // }
 
-func GroupTickHoursIntoM1Builds(hours []AssetKey, inv *Inventory) []AssetKey {
-	out := make([]AssetKey, 0, len(hours))
+func GroupTickHoursIntoM1Builds(hours []Key, inv *Inventory) []Key {
+	out := make([]Key, 0, len(hours))
 	out = append(out, hours...)
 	return out
 }
@@ -450,7 +444,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 		return nil
 	}
 
-	q := make(chan AssetKey, 1024)
+	q := make(chan Key, 1024)
 	dlWG := dm.Downloader.startDownloader(ctx, q)
 	go func() {
 		defer close(q)
