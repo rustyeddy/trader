@@ -1,0 +1,23 @@
+* Trader Design
+
+* Data Design
+
+
+* Storage
+
+** Path Conventions
+
+This belongs to store.
+
+- Basedir .../
+- Ticks     dukas/EURUSD/m1/2024/02/03/04h_ticks.bi5
+- Candles candles/EURUSD/m1/2024/02/eurusd-m1-02-03.csv
+
+  
+** Storage and API
+
+- Storing data in files on disk can be hourly, well it will be however
+  we can get it.  But in the case of Dukascopy it is in hourly hunks.
+
+** The Monthly Data
+

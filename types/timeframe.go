@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 type Timeframe int64
 
 const (
@@ -23,6 +25,29 @@ const (
 // func (tf Timeframe) ParentOf(child Timeframe) bool
 
 // func (tf Timeframe) Ratio(child Timeframe) (int, error)
+
+func TF(t string) Timeframe {
+	t = strings.ToLower(t)
+
+	switch t {
+	default:
+	case "tf0":
+		return TF0
+
+	case "ticks":
+		return Ticks
+
+	case "m1":
+		return M1
+
+	case "h1":
+		return H1
+
+	case "d1":
+		return D1
+	}
+	return TF0
+}
 
 func (tf Timeframe) String() string {
 	switch tf {

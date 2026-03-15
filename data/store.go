@@ -19,56 +19,72 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-// CandleStore enforces a file naming convention like:
+// Store enforces a file naming convention like:
 //
-//	GBPUSD-M1-2026.csv
-//	GBPUSD-H1-2026.csv
-//	GBPUSD-D1-all.csv
-type CandleStore struct {
+//	GBPUSD-M1-2026-01.csv
+//	GBPUSD-H1-2026-02.csv
+//	GBPUSD-D1-2026-02.csv
+type Store struct {
 	Basedir string // e.g. "data/candles"
-	Source  string // e.g. "dukascopy" (used as subdir by default)
 }
 
-// func (s CandleStore) NewWriter() (io.Writer, error) {
-// 	// 1. Create the file
-// 	file, err := os.Create("output.csv")
-// 	if err != nil {
-// 		log.Fatalf("failed to create file: %v", err)
-// 	}
-// 	// Ensure the file is closed at the end of the main function
-// 	defer file.Close()
+func (s *Store) PathForAsset(k AssetKey) string {
+	switch {
+	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
+		return s.pathForMonthlyCandle(k)
 
-// 	// 2. Create a new csv.Writer from the file
-// 	writer := csv.NewWriter(file)
-// 	return writer, nil
-// }
+	case k.Kind == KindTick && k.Day > 0 && k.Hour >= 0:
+		return s.pathForHourlyTick(k)
 
-func (s CandleStore) CandlePath(instrument, tf string, year int) string {
-
-	instrument = normalizeInstrument(instrument)
-	tf = normalizeTF(tf)
-
-	tfLower := strings.ToLower(tf)
-	instLower := strings.ToLower(instrument)
-
-	var name string
-	if year <= 0 {
-		name = fmt.Sprintf("%s-%s-all.csv", instLower, tfLower)
-	} else {
-		name = fmt.Sprintf("%s-%s-%d.csv", instLower, tfLower, year)
+	default:
+		panic(fmt.Sprintf("unsupported asset key for path: %+v", k))
 	}
+}
+
+func (s *Store) pathForMonthlyCandle(k AssetKey) string {
+	instrument := strings.ToLower(k.Instrument)
+	tf := strings.ToLower(k.TF.String())
+
+	filename := fmt.Sprintf("%s-%s-%04d-%02d.csv",
+		instrument,
+		tf,
+		k.Year,
+		k.Month,
+	)
 
 	return filepath.Join(
 		s.Basedir,
-		s.Source,
 		instrument,
 		tf,
-		name,
+		fmt.Sprintf("%04d", k.Year),
+		filename,
 	)
 }
 
-func (s CandleStore) Exists(instrument, tf string, year int) (bool, error) {
-	p := s.CandlePath(instrument, tf, year)
+func (s *Store) pathForHourlyTick(k AssetKey) string {
+	instrument := strings.ToLower(k.Instrument)
+
+	return filepath.Join(
+		s.Basedir,
+		instrument,
+		"tick",
+		fmt.Sprintf("%04d", k.Year),
+		fmt.Sprintf("%02d", k.Month),
+		fmt.Sprintf("%02d", k.Day),
+		fmt.Sprintf("%02d.bi5", k.Hour),
+	)
+}
+
+func (s *Store) RelDir(key MonthKey) string {
+	return filepath.Join(
+		strings.ToUpper(key.Instrument),
+		strings.ToUpper(key.TF.String()),
+		fmt.Sprintf("%04d", key.Year),
+	)
+}
+
+func (s Store) Exists(key AssetKey) (bool, error) {
+	p := s.PathForAsset(key)
 	_, err := os.Stat(p)
 	if err == nil {
 		return true, nil
@@ -79,7 +95,7 @@ func (s CandleStore) Exists(instrument, tf string, year int) (bool, error) {
 	return false, err
 }
 
-func (store *CandleStore) writeMetadata(cs *market.CandleSet, w io.Writer) error {
+func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 	tfstr := cs.Timeframe.String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -99,10 +115,12 @@ func (store *CandleStore) writeMetadata(cs *market.CandleSet, w io.Writer) error
 	return err
 }
 
-func (store *CandleStore) WriteCSV(cs *market.CandleSet) error {
+func (store *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
+
+	// TODO Fix the filename and consistency
 	path := cs.Filename() + ".csv"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -176,7 +194,7 @@ func formatNumber(price types.Price, scale int32) string {
 
 // ListAvailableYears returns sorted years for which files exist for instrument+tf.
 // It ignores "-all.csv".
-func (s CandleStore) ListAvailableYears(instrument, tf string) ([]int, error) {
+func (s Store) ListAvailableYears(instrument, tf string) ([]int, error) {
 	dir := s.baseScanDir()
 	instrument = normalizeInstrument(instrument)
 	tf = normalizeTF(tf)
@@ -226,7 +244,7 @@ func (s CandleStore) ListAvailableYears(instrument, tf string) ([]int, error) {
 // - For current year: only considered complete if "now" is after Jan 1 of next year.
 // - For past years: if file exists, it's complete.
 // - For tf=D1 and you store "-all.csv", use year=0 and this function isn't needed.
-func (s CandleStore) LatestCompleteYear(instrument, tf string) (int, error) {
+func (s Store) LatestCompleteYear(instrument, tf string) (int, error) {
 	years, err := s.ListAvailableYears(instrument, tf)
 	if err != nil {
 		return 0, err
@@ -241,11 +259,22 @@ func (s CandleStore) LatestCompleteYear(instrument, tf string) (int, error) {
 	// walk backwards
 	for i := len(years) - 1; i >= 0; i-- {
 		y := years[i]
-		ok, err := s.Exists(instrument, tf, y)
-		if err != nil || !ok {
-			continue
-		}
+		for m := 0; m < 12; m++ {
 
+			ak := AssetKey{
+				MonthKey: MonthKey{
+					Instrument: instrument,
+					Kind:       KindCandle,
+					TF:         types.TF(tf),
+					Year:       y,
+					Month:      m,
+				},
+			}
+			ok, err := s.Exists(ak)
+			if err != nil || !ok {
+				continue
+			}
+		}
 		// Only mark current year complete if we've actually passed it.
 		if y == currentYear {
 			continue
@@ -261,10 +290,7 @@ func (s CandleStore) LatestCompleteYear(instrument, tf string) (int, error) {
 	return 0, fmt.Errorf("no complete year available yet for %s %s (only current year present)", instrument, tf)
 }
 
-func (s CandleStore) baseScanDir() string {
-	if s.Source != "" {
-		return filepath.Join(s.Basedir, s.Source)
-	}
+func (s Store) baseScanDir() string {
 	return s.Basedir
 }
 

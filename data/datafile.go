@@ -264,7 +264,7 @@ func (d *datafile) IsValid(ctx context.Context) error {
 		return nil
 	}
 
-	if d.Time.IsZero() {
+	if !d.Time.IsZero() {
 		if market.IsFXMarketClosed(d.Time.UTC()) {
 			return nil
 		}

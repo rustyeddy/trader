@@ -58,11 +58,11 @@ func main() {
 		End:         time.Now().AddDate(0, 0, -1), // start from yesterday (the last fullday)
 		Basedir:     config.Basedir + config.Dukasdir,
 		Instruments: strings.Split(config.Symbols, ","),
-		Store: &data.CandleStore{
-			Source: "Dukascopy",
+		Store: &data.Store{
+			Basedir: "../../tmp",
 		},
-		DukasRoot:   "../../tmp/dukas",
-		CandlesRoot: "../../tmp/candles",
+		DukasRoot:  "../../tmp/dukas",
+		CandleRoot: "../../tmp/candles",
 	}
 	dm.Init()
 	if err := dm.Sync(ctx); err != nil {

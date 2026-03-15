@@ -33,15 +33,15 @@ func (t Timestamp) IsZero() bool {
 }
 
 func (t Timestamp) Before(ts Timestamp) bool {
-	return ts < t
-}
-
-func (t Timestamp) After(ts Timestamp) bool {
 	return t < ts
 }
 
-func (t Timestamp) Add(i time.Duration) Timestamp {
-	return t + Timestamp(i)
+func (t Timestamp) After(ts Timestamp) bool {
+	return t > ts
+}
+
+func (t Timestamp) Add(d time.Duration) Timestamp {
+	return t + Timestamp(d/time.Second)
 }
 
 func (t Timestamp) String() string {
@@ -119,6 +119,29 @@ func YearRange(year int) TimeRange {
 		Start: Timestamp(start.Unix()),
 		End:   Timestamp(end.Unix()),
 	}
+}
+
+type YearMonth struct {
+	Year  int
+	Month int
+}
+
+func MonthsInRange(r TimeRange) []YearMonth {
+	start := time.Unix(int64(r.Start), 0).UTC()
+	end := time.Unix(int64(r.End), 0).UTC()
+
+	cur := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC)
+	last := time.Date(end.Year(), end.Month(), 1, 0, 0, -1, 0, time.UTC)
+
+	var out []YearMonth
+	for !cur.After(last) {
+		out = append(out, YearMonth{
+			Year:  cur.Year(),
+			Month: int(cur.Month()),
+		})
+		cur = cur.AddDate(0, 1, 0)
+	}
+	return out
 }
 
 // func (r Range) Count() int

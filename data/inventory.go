@@ -33,16 +33,19 @@ func (k DataKind) String() string {
 	}
 }
 
-type AssetKey struct {
-	Source     string
+type MonthKey struct {
 	Instrument string
 	Kind       DataKind
 	TF         types.Timeframe
+	Year       int
+	Month      int
+}
 
-	Year  int
-	Month int
-	Day   int
-	Hour  int
+type AssetKey struct {
+	MonthKey
+	Source string
+	Day    int
+	Hour   int
 }
 
 // compare returns:
@@ -189,10 +192,19 @@ type Asset struct {
 	Range      types.TimeRange
 	Exists     bool
 	Complete   bool
+	Buildable  bool
 	Size       int64
 	UpdatedAt  time.Time
 	SourceAge  time.Time // optional: mtime of prerequisite/source
 	Descriptor string
+
+	MissingInputs int
+	Reason        string
+}
+
+func (a Asset) Clone() Asset {
+	out := a
+	return out
 }
 
 type Inventory struct {
@@ -206,6 +218,9 @@ func NewInventory() *Inventory {
 }
 
 func (inv *Inventory) Put(a Asset) {
+	if inv.assets == nil {
+		inv.assets = make(map[AssetKey]Asset)
+	}
 	inv.assets[a.Key] = a
 }
 
@@ -219,17 +234,29 @@ func (inv *Inventory) HasComplete(key AssetKey) bool {
 	return ok && a.Exists && a.Complete
 }
 
+func (inv *Inventory) MissingComplete(keys []AssetKey) []AssetKey {
+	out := make([]AssetKey, 0)
+	for _, k := range keys {
+		if !inv.HasComplete(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func (inv *Inventory) Has(source, instrument string, kind DataKind, tf types.Timeframe, year int) bool {
 	if kind == KindTick {
 		tf = types.TF0
 	}
 
 	_, ok := inv.assets[AssetKey{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       kind,
-		TF:         tf,
-		Year:       year,
+		Source: normalizeSource(source),
+		MonthKey: MonthKey{
+			Instrument: normalizeInstrument(instrument),
+			Kind:       kind,
+			TF:         tf,
+			Year:       year,
+		},
 	}]
 	return ok
 }
@@ -281,27 +308,30 @@ func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe
 	}
 
 	child, ok := inv.Get(AssetKey{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       KindCandle,
-		TF:         tf,
-		Year:       year,
+		Source: normalizeSource(source),
+		MonthKey: MonthKey{
+			Instrument: normalizeInstrument(instrument),
+			Kind:       KindCandle,
+			TF:         tf,
+			Year:       year,
+		},
 	})
 	if !ok {
 		return false, fmt.Errorf("missing child asset")
 	}
 
 	parent, ok := inv.Get(AssetKey{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       KindCandle,
-		TF:         parentTF,
-		Year:       year,
+		Source: normalizeSource(source),
+		MonthKey: MonthKey{
+			Instrument: normalizeInstrument(instrument),
+			Kind:       KindCandle,
+			TF:         parentTF,
+			Year:       year,
+		},
 	})
 	if !ok {
 		return false, fmt.Errorf("missing parent asset")
 	}
-
 	return parent.UpdatedAt.After(child.UpdatedAt), nil
 }
 
@@ -314,6 +344,22 @@ func (inv *Inventory) NeedsDownload(key AssetKey) bool {
 		return true
 	}
 	return false
+}
+
+func (inv *Inventory) Clone() *Inventory {
+	if inv == nil {
+		return nil
+	}
+
+	out := &Inventory{
+		assets: make(map[AssetKey]Asset, len(inv.assets)),
+	}
+
+	for k, v := range inv.assets {
+		out.assets[k] = v
+	}
+
+	return out
 }
 
 func normalizeSource(s string) string {
@@ -376,19 +422,21 @@ func (b *InventoryBuilder) scanTicks(inv *Inventory) error {
 
 		inv.Put(Asset{
 			Key: AssetKey{
-				Source:     "dukascopy",
-				Instrument: inst,
-				Kind:       KindTick,
-				TF:         types.H1, // storage granularity of tick files is one hour
-				Year:       year,
-				Month:      month,
-				Day:        day,
-				Hour:       hour,
+				Source: "dukascopy",
+				MonthKey: MonthKey{
+					Instrument: inst,
+					Kind:       KindTick,
+					TF:         types.H1, // storage granularity of tick files is one hour
+					Year:       year,
+					Month:      month,
+				},
+				Day:  day,
+				Hour: hour,
 			},
 			Path:      path,
 			Range:     types.NewTimeRange(types.FromTime(start), types.FromTime(end)),
 			Exists:    true,
-			Complete:  info.Size() > 0, // minimal heuristic only
+			Complete:  info.Size() > 0, // TODO FIX THIS - minimal heuristic only
 			Size:      info.Size(),
 			UpdatedAt: info.ModTime(),
 			Descriptor: fmt.Sprintf(
@@ -462,21 +510,26 @@ func (b *InventoryBuilder) scanCandles(inv *Inventory) error {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".csv") {
+			fmt.Println("Found file that is not .csv", path)
 			return nil
 		}
 
-		source, inst, tf, year, ok := parseCandlePath(path)
+		source, inst, tf, year, month, day, ok := parseCandlePath(path)
 		if !ok {
 			return nil
 		}
 
 		inv.Put(Asset{
 			Key: AssetKey{
-				Source:     source,
-				Instrument: inst,
-				Kind:       KindCandle,
-				TF:         tf,
-				Year:       year,
+				Source: source,
+				MonthKey: MonthKey{
+					Instrument: inst,
+					Kind:       KindCandle,
+					TF:         tf,
+					Year:       year,
+					Month:      month,
+				},
+				Day: day,
 			},
 			Path:       path,
 			Range:      types.YearRange(year),
@@ -489,11 +542,11 @@ func (b *InventoryBuilder) scanCandles(inv *Inventory) error {
 	})
 }
 
-func parseCandlePath(path string) (source string, instrument string, tf types.Timeframe, year int, ok bool) {
+func parseCandlePath(path string) (source string, instrument string, tf types.Timeframe, year, month, day int, ok bool) {
 	p := filepath.ToSlash(path)
 	parts := strings.Split(p, "/")
 	if len(parts) < 4 {
-		return "", "", types.TF0, 0, false
+		return "", "", types.TF0, 0, 0, 0, false
 	}
 
 	// Expect .../<source>/<instrument>/<tf>/<file>.csv
@@ -510,22 +563,22 @@ func parseCandlePath(path string) (source string, instrument string, tf types.Ti
 	case "D1":
 		tf = types.D1
 	default:
-		return "", "", types.TF0, 0, false
+		return "", "", types.TF0, 0, 0, 0, false
 	}
 
 	base := strings.ToLower(strings.TrimSuffix(parts[n-1], ".csv"))
 	// e.g. eurusd-m1-2026
 	nameParts := strings.Split(base, "-")
 	if len(nameParts) < 3 {
-		return "", "", types.TF0, 0, false
+		return "", "", types.TF0, 0, 0, 0, false
 	}
 
 	y, err := strconv.Atoi(nameParts[len(nameParts)-1])
 	if err != nil {
-		return "", "", types.TF0, 0, false
+		return "", "", types.TF0, 0, 0, 0, false
 	}
 
-	return source, instrument, tf, y, true
+	return source, instrument, tf, y, 0, 0, true
 }
 
 func isMajorForexHolidayClosed(t time.Time) bool {
@@ -550,4 +603,137 @@ func isMajorForexHolidayClosed(t time.Time) bool {
 	}
 
 	return false
+}
+
+func RequiredTickHoursForMonth(source, instrument string, year, month int) []AssetKey {
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+
+	out := make([]AssetKey, 0, 24*31)
+
+	for t := start; t.Before(end); t = t.Add(time.Hour) {
+		if IsForexMarketClosed(t) {
+			continue
+		}
+
+		out = append(out, AssetKey{
+			Source: source,
+			MonthKey: MonthKey{
+				Instrument: instrument,
+				Kind:       KindTick,
+				Year:       t.Year(),
+				Month:      int(t.Month()),
+			},
+			Day:  t.Day(),
+			Hour: t.Hour(),
+		})
+	}
+
+	return out
+}
+
+type BuildStatus int
+
+const (
+	BuildUnknown BuildStatus = iota
+	BuildReady
+	BuildBlocked
+	BuildExistsComplete
+)
+
+type BuildDecision struct {
+	Target   AssetKey
+	Status   BuildStatus
+	Required []AssetKey
+	Missing  []AssetKey
+	Reason   string
+}
+
+func AssessM1Month(inv *Inventory, tickSource, candleSource, instrument string, year, month int) BuildDecision {
+	target := AssetKey{
+		Source: candleSource,
+		MonthKey: MonthKey{
+			Instrument: instrument,
+			Kind:       KindCandle,
+			TF:         types.M1,
+			Year:       year,
+			Month:      month,
+		},
+	}
+
+	if inv.HasComplete(target) {
+		return BuildDecision{
+			Target: target,
+			Status: BuildExistsComplete,
+			Reason: "M1 month already complete",
+		}
+	}
+
+	required := RequiredTickHoursForMonth(tickSource, instrument, year, month)
+	missing := inv.MissingComplete(required)
+
+	if len(missing) > 0 {
+		return BuildDecision{
+			Target:   target,
+			Status:   BuildBlocked,
+			Required: required,
+			Missing:  missing,
+			Reason:   "missing required tick hours",
+		}
+	}
+
+	return BuildDecision{
+		Target:   target,
+		Status:   BuildReady,
+		Required: required,
+		Reason:   "all required tick hours available",
+	}
+}
+
+func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month int) BuildDecision {
+	target := AssetKey{
+		Source: candleSource,
+		MonthKey: MonthKey{
+			Instrument: instrument,
+			Kind:       KindCandle,
+			TF:         types.H1,
+			Year:       year,
+			Month:      month,
+		},
+	}
+
+	if inv.HasComplete(target) {
+		return BuildDecision{
+			Target: target,
+			Status: BuildExistsComplete,
+			Reason: "H1 month already complete",
+		}
+	}
+
+	req := AssetKey{
+		Source: candleSource,
+		MonthKey: MonthKey{
+			Instrument: instrument,
+			Kind:       KindCandle,
+			TF:         types.M1,
+			Year:       year,
+			Month:      month,
+		},
+	}
+
+	if !inv.HasComplete(req) {
+		return BuildDecision{
+			Target:  target,
+			Status:  BuildBlocked,
+			Missing: []AssetKey{req},
+			Reason:  "missing complete M1 month",
+		}
+	}
+
+	return BuildDecision{
+		Target:   target,
+		Status:   BuildReady,
+		Required: []AssetKey{req},
+		Reason:   "complete M1 month available",
+	}
 }

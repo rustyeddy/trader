@@ -1,0 +1,280 @@
+* trader/data cleanup checklist
+** Goal
+The immediate goal is to incrementally clean up the current candle
+storage, inventory, planner, and build-loop issues.
+
+For each fix:
+- make one focused change
+- compile
+- run
+- verify behavior
+- then move to the next item
+
+Only after cleanup is stable should we move on to improving build-task
+accuracy, planner correctness, and pipeline efficiency.
+
+** Cleanup strategy
+*** Rules
+- [ ] Make one change at a time
+- [ ] Compile after every change
+- [ ] Run after every change
+- [ ] Do not mix cleanup with feature improvements
+- [ ] Prefer deleting duplicate code over keeping parallel paths alive
+- [ ] Keep notes on any behavior changes observed after each cleanup item
+
+*** Current guiding principle
+Clean up and stabilize first.
+Then improve planning accuracy, build correctness, and performance.
+
+* TODO Cleanup backlog
+
+** TODO Choose and document the candle storage convention
+:PROPERTIES:
+:ID: trader-cleanup-storage-convention
+:END:
+- Decide that candle CSVs are stored monthly
+- Store under:
+  - ~instrument/timeframe/year/eurusd-m1-2025-08.csv~
+- Keep filenames redundant so the candle set is identifiable from filename alone
+- Make this the canonical convention for:
+  - store
+  - inventory
+  - planner targets
+  - rebuild logic
+  - path construction
+
+Notes:
+- This is the foundation item because several other mismatches come from competing storage models.
+
+** TODO Move all candle CSV read/write logic into =data/store.go=
+:PROPERTIES:
+:ID: trader-cleanup-store-single-owner
+:END:
+- Make =store.go= the single owner of candle CSV reading
+- Make =store.go= the single owner of candle CSV writing
+- Make =store.go= the single owner of candle path construction
+- Remove candle CSV path-building from other files where possible
+- Remove duplicate candle CSV helper logic outside the store
+
+Notes:
+- After this, all candle file access should go through the store layer.
+
+** TODO Remove =M1CSVWriter= and temporary candle writer helpers
+:PROPERTIES:
+:ID: trader-cleanup-remove-m1csvwriter
+:END:
+- Delete =M1CSVWriter=
+- Delete helper code that only exists to support =M1CSVWriter=
+- Delete or simplify any temporary build-task code that writes candles outside the store
+- Ensure there is only one candle writing path
+
+Notes:
+- The temporary writer path has drifted away from real =market.CandleSet= handling.
+- Prefer using the existing store and CandleSet machinery.
+
+** TODO Fix =store.WriteCSV()= to use the canonical storage layout
+:PROPERTIES:
+:ID: trader-cleanup-fix-store-writecsv
+:END:
+- Update =store.WriteCSV()= to write monthly candle files
+- Use the agreed path structure:
+  - ~instrument/timeframe/year/eurusd-m1-2025-08.csv~
+- Ensure =WriteCSV()= uses =Store.Basedir=
+- Ensure =WriteCSV()= does not bypass the store path builder
+- Ensure write locations are not dependent on current working directory
+- Verify output filenames match inventory expectations exactly
+
+Notes:
+- This is a critical correctness item because the current write path appears inconsistent.
+
+** TODO Reconcile =dm.CandleRoot= vs =dm.Store.Basedir=
+:PROPERTIES:
+:ID: trader-cleanup-reconcile-roots
+:END:
+- Decide which one is the real source of truth
+- Prefer one canonical candle root
+- Remove one of the two if possible
+- If both remain temporarily, make one derive directly from the other
+- Audit all candle read/write code to ensure only the canonical root is used
+
+Notes:
+- Split ownership of candle roots will keep causing bugs and confusion.
+
+** TODO Update inventory candle scanning to understand monthly candle files
+:PROPERTIES:
+:ID: trader-cleanup-inventory-monthly-candles
+:END:
+- Make inventory scan candle assets as monthly files
+- Ensure inventory returns candle assets with =Month=
+- Keep candle storage path as:
+  - ~inst/tf/year/...monthly file...~
+- Parse month from the candle filename
+- Ensure inventory key shape matches the file naming convention
+- Verify candle inventory records correctly capture:
+  - instrument
+  - timeframe
+  - year
+  - month
+  - path
+  - exists
+  - size
+  - completeness if applicable
+
+Notes:
+- Inventory must match the real candle file layout exactly or planner/build logic will drift.
+
+** TODO Align planner candle targets with the monthly storage model
+:PROPERTIES:
+:ID: trader-cleanup-planner-monthly-targets
+:END:
+- Make planner M1 targets monthly rather than daily/yearly mismatches
+- Ensure target keys match inventory candle asset keys
+- Ensure target keys include =Month=
+- Review =PlanM1Builds()=
+- Review =m1TargetNeedsBuild()=
+- Remove assumptions that do not match monthly storage
+- Verify planner and inventory speak the same candle-asset language
+
+Notes:
+- Planner, store, and inventory must agree on target granularity.
+
+** TODO Decide which M1 build path is the keeper and remove the competing path
+:PROPERTIES:
+:ID: trader-cleanup-pick-one-m1-path
+:END:
+- Identify the currently duplicated M1 build paths
+- Choose one implementation path to keep
+- Prefer the path that already matches:
+  - =market.CandleSet=
+  - =store.WriteCSV()=
+  - existing merge logic
+- Delete or comment out the other path
+- Remove dead code and temporary abstractions left behind
+
+Notes:
+- Keeping two competing M1 build paths is making cleanup harder.
+
+** TODO Add a proper =sync.WaitGroup= for the =plan.BuildM1= loop
+:PROPERTIES:
+:ID: trader-cleanup-buildm1-waitgroup
+:END:
+- Add a =sync.WaitGroup= around the M1 build goroutines
+- Wait for all build workers before returning from =Sync()=
+- Ensure =Sync()= does not report success while builds are still running
+- Keep =ws.MarkBuild()= and =ws.ClearBuild()= consistent with the new lifecycle
+
+Notes:
+- This is a correctness issue, not just cleanup.
+
+** TODO Add build error collection/reporting for the =plan.BuildM1= loop
+:PROPERTIES:
+:ID: trader-cleanup-buildm1-errors
+:END:
+- Collect build errors from goroutines
+- Return or report build failures rather than dropping them silently
+- Decide whether one build failure should:
+  - stop all other builds, or
+  - be collected and reported after all builds complete
+- Ensure context cancellation behavior is deliberate and documented
+
+Notes:
+- Silent build failures will undermine trust in the pipeline.
+
+** TODO Keep recent downloads first and document why
+:PROPERTIES:
+:ID: trader-cleanup-download-reverse-comment
+:END:
+- Keep =slices.Reverse(plan.Download)= intentionally
+- Add a short code comment explaining the purpose:
+  - downloads take weeks
+  - recent years are more immediately useful
+  - prioritize recent data first
+
+Notes:
+- This is not a bug; it should just be documented so it does not look accidental later.
+
+** TODO Fix printing of =Money= and =Price=
+:PROPERTIES:
+:ID: trader-cleanup-money-price-string
+:END:
+- Fix =Money.String()= to print descaled values
+- Fix =Price.String()= to print descaled values
+- Review whether any debug/log output depends on raw scaled integer formatting
+- Decide where raw scaled values are still desired
+- Make human-readable output the default for normal printing
+
+Notes:
+- This is not pipeline-critical, but it improves debugging and reduces confusion.
+
+** TODO Audit candle file naming and parsing for redundancy and consistency
+:PROPERTIES:
+:ID: trader-cleanup-filename-consistency
+:END:
+- Ensure candle filenames always include:
+  - instrument
+  - timeframe
+  - year
+  - month
+- Ensure scanner/parser expects the exact same filename pattern
+- Ensure no alternative candle filename conventions remain in code
+- Remove legacy or conflicting naming helpers
+
+Notes:
+- This supports both inventory correctness and human readability.
+
+** TODO Audit all candle path construction and remove duplicates
+:PROPERTIES:
+:ID: trader-cleanup-candle-path-audit
+:END:
+- Search for every place candle file paths are constructed
+- Replace them with store-owned helpers
+- Remove duplicate path logic
+- Ensure path generation is deterministic and centralized
+
+Notes:
+- This reduces drift and makes future changes much easier.
+
+* Suggested working order
+
+** TODO Work in this order unless a compile error forces a slight change
+:PROPERTIES:
+:ID: trader-cleanup-working-order
+:END:
+1. Choose and document the candle storage convention
+2. Move all candle CSV read/write logic into =store.go=
+3. Remove =M1CSVWriter= and temporary writer helpers
+4. Fix =store.WriteCSV()=
+5. Reconcile =dm.CandleRoot= vs =dm.Store.Basedir=
+6. Update inventory to understand monthly candle files
+7. Align planner candle targets with monthly storage
+8. Pick one M1 build path and remove the other
+9. Add proper wait group handling for =plan.BuildM1=
+10. Add build error collection/reporting
+11. Fix =Money.String()= and =Price.String()=
+12. Add/keep comment explaining reversed download priority
+13. Audit candle path and filename construction for leftovers
+
+* Per-item workflow template
+
+** TODO Use this workflow for each cleanup item
+:PROPERTIES:
+:ID: trader-cleanup-item-workflow
+:END:
+- [ ] Make one focused change
+- [ ] Compile
+- [ ] Run
+- [ ] Verify expected behavior
+- [ ] Check for unintended side effects
+- [ ] Commit or checkpoint if the result is good
+- [ ] Then move to the next item
+
+* Cleanup notes
+
+** Notes
+- Recent-download-first behavior is intentional and should remain.
+- Cleanup now; performance and build-task efficiency later.
+- After cleanup stabilizes, next work can focus on:
+  - improving planner/build task accuracy
+  - improving incremental rebuild logic
+  - improving concurrency and throughput
+  - reducing duplicated scans and unnecessary rebuilds
