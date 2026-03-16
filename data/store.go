@@ -48,7 +48,7 @@ func (s *Store) PathForAsset(k Key) string {
 }
 
 func (s *Store) pathForMonthlyCandle(k Key) string {
-	instrument := strings.ToLower(k.Instrument)
+	instrument := normalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
 	filename := fmt.Sprintf("%s-%s-%04d-%02d.csv",
@@ -68,7 +68,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
-	instrument := strings.ToLower(k.Instrument)
+	instrument := normalizeInstrument(k.Instrument)
 
 	return filepath.Join(
 		s.Basedir,
@@ -83,7 +83,7 @@ func (s *Store) pathForHourlyTick(k Key) string {
 
 func (s *Store) RelDir(key Key) string {
 	return filepath.Join(
-		strings.ToUpper(key.Instrument),
+		normalizeInstrument(key.Instrument),
 		strings.ToUpper(key.TF.String()),
 		fmt.Sprintf("%04d", key.Year),
 	)
@@ -149,7 +149,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 
 		key := Key{
 			Source:     source,
-			Instrument: inst,
+			Instrument: normalizeInstrument(inst),
 			Kind:       k,
 			TF:         tf,
 			Year:       year,
@@ -431,7 +431,7 @@ func (s Store) LatestCompleteYear(instrument, tf string) (int, error) {
 		for m := 0; m < 12; m++ {
 
 			ak := Key{
-				Instrument: instrument,
+				Instrument: normalizeInstrument(instrument),
 				Kind:       KindCandle,
 				TF:         types.TF(tf),
 				Year:       y,
@@ -466,11 +466,11 @@ func normalizeTF(tf string) string {
 	// allow "60" etc if you ever pass seconds
 	switch tf {
 	case "60":
-		return "M1"
+		return "m1"
 	case "3600":
-		return "H1"
+		return "h1"
 	case "86400":
-		return "D1"
+		return "d1"
 	}
 	return tf
 }

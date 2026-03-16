@@ -192,8 +192,8 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 		}
 
 		key := Key{
-			Source:     "Dukascopy",
-			Instrument: sym,
+			Source:     "dukascopy",
+			Instrument: normalizeInstrument(sym),
 			Kind:       KindTick,
 			TF:         types.Ticks,
 			Year:       t.Year(),
@@ -235,8 +235,8 @@ func (dm *DataManager) PlanM1Builds(
 		target := Key{
 			Source:     "derived",
 			Instrument: sym,
-			Kind:       KindTick,
-			TF:         types.H1,
+			Kind:       KindCandle,
+			TF:         types.M1,
 			Year:       day.Year(),
 			Month:      int(day.Month()),
 			Day:        day.Day(),
@@ -342,9 +342,9 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Key, 
 
 		key := Key{
 			Source:     "dukascopy",
-			Instrument: sym,
+			Instrument: normalizeInstrument(sym),
 			Kind:       KindTick,
-			TF:         types.H1,
+			TF:         types.Ticks,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
 			Day:        t.Day(),

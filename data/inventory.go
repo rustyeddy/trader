@@ -380,7 +380,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 
 		out = append(out, Key{
 			Source:     source,
-			Instrument: instrument,
+			Instrument: normalizeInstrument(instrument),
 			Kind:       KindTick,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
@@ -412,7 +412,7 @@ type BuildDecision struct {
 func AssessM1Month(inv *Inventory, tickSource, candleSource, instrument string, year, month int) BuildDecision {
 	target := Key{
 		Source:     candleSource,
-		Instrument: instrument,
+		Instrument: normalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.M1,
 		Year:       year,
@@ -451,7 +451,7 @@ func AssessM1Month(inv *Inventory, tickSource, candleSource, instrument string, 
 func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month int) BuildDecision {
 	target := Key{
 		Source:     candleSource,
-		Instrument: instrument,
+		Instrument: normalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.H1,
 		Year:       year,
@@ -468,7 +468,7 @@ func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month 
 
 	req := Key{
 		Source:     candleSource,
-		Instrument: instrument,
+		Instrument: normalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.M1,
 		Year:       year,
