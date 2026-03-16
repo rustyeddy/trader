@@ -57,12 +57,13 @@ func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
 // ForEachTick decompresses BI5 and streams decoded ticks to fn.
 // It does not write decompressed data to disk.
 func (d *datafile) forEachTick(ctx context.Context, fn func(Tick) error) error {
-	path := d.Path()
-
 	baseUnixMS, err := d.baseHourUnixMS()
 	if err != nil {
 		return err
 	}
+
+	key := d.Key()
+	path := store.PathForAsset(key)
 
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {

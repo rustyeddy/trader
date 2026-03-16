@@ -50,7 +50,7 @@ func BuildHourJobs(base, instr string, start, end time.Time) []*datafile {
 	end = end.UTC().Truncate(time.Hour)
 
 	for t.Before(end) {
-		out = append(out, newDatafile(base, instr, t)) // you implement
+		out = append(out, newDatafile(instr, t)) // you implement
 		t = t.Add(time.Hour)
 	}
 	return out

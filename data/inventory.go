@@ -1,13 +1,8 @@
 package data
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -147,6 +142,14 @@ func (ak Key) Time() time.Time {
 	}
 
 	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+}
+
+func (k Key) IsMonthlyCandle() bool {
+	return k.Kind == KindCandle && k.Day == 0 && k.Hour == 0
+}
+
+func (k Key) IsHourlyTick() bool {
+	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
 // IsForexMarketClosed reports whether spot FX is closed at time t.
@@ -336,235 +339,8 @@ func (inv *Inventory) NeedsDownload(key Key) bool {
 	return false
 }
 
-func (inv *Inventory) Clone() *Inventory {
-	if inv == nil {
-		return nil
-	}
-
-	out := &Inventory{
-		assets: make(map[Key]Asset, len(inv.assets)),
-	}
-
-	for k, v := range inv.assets {
-		out.assets[k] = v
-	}
-
-	return out
-}
-
 func normalizeSource(s string) string {
 	return strings.TrimSpace(strings.ToLower(s))
-}
-
-type InventoryBuilder struct {
-	TicksRoot   string // e.g. ../../tmp/dukas
-	CandlesRoot string // e.g. data/candles
-}
-
-func NewInventoryBuilder(ticksRoot, candlesRoot string) *InventoryBuilder {
-	return &InventoryBuilder{
-		TicksRoot:   ticksRoot,
-		CandlesRoot: candlesRoot,
-	}
-}
-
-func (b *InventoryBuilder) Build(ctx context.Context) (*Inventory, error) {
-	inv := NewInventory()
-
-	if b.TicksRoot != "" {
-		if err := b.scanTicks(inv); err != nil {
-			return nil, err
-		}
-	}
-	if b.CandlesRoot != "" {
-		if err := b.scanCandles(inv); err != nil {
-			// if the candles file does not exist we just assume no candles
-			// exist, so it is not an error.
-			if errors.Is(err, os.ErrNotExist) {
-				return inv, nil
-			}
-			return nil, err
-		}
-	}
-
-	return inv, nil
-}
-
-func (b *InventoryBuilder) scanTicks(inv *Inventory) error {
-	return filepath.Walk(b.TicksRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info == nil || info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(strings.ToLower(info.Name()), ".bi5") {
-			return nil
-		}
-
-		inst, year, month, day, hour, ok := parseTickPath(path)
-		if !ok {
-			return nil
-		}
-
-		start := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-		end := start.Add(time.Hour)
-
-		inv.Put(Asset{
-			Key: Key{
-				Source:     "dukascopy",
-				Instrument: inst,
-				Kind:       KindTick,
-				TF:         types.H1, // storage granularity of tick files is one hour
-				Year:       year,
-				Month:      month,
-				Day:        day,
-				Hour:       hour,
-			},
-			Path:      path,
-			Range:     types.NewTimeRange(types.FromTime(start), types.FromTime(end)),
-			Exists:    true,
-			Complete:  info.Size() > 0, // TODO FIX THIS - minimal heuristic only
-			Size:      info.Size(),
-			UpdatedAt: info.ModTime(),
-			Descriptor: fmt.Sprintf(
-				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
-				year, month, day, hour,
-			),
-		})
-
-		return nil
-	})
-}
-
-func parseTickPath(path string) (inst string, year, month, day, hour int, ok bool) {
-	clean := filepath.ToSlash(path)
-
-	// Example expected tail:
-	// EURUSD/2025/01/02/13h_ticks.bi5
-	parts := strings.Split(clean, "/")
-	if len(parts) < 5 {
-		return "", 0, 0, 0, 0, false
-	}
-
-	n := len(parts)
-
-	file := parts[n-1]
-	dayStr := parts[n-2]
-	monthStr := parts[n-3]
-	yearStr := parts[n-4]
-	inst = parts[n-5]
-
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		return "", 0, 0, 0, 0, false
-	}
-
-	month, err = strconv.Atoi(monthStr)
-	if err != nil {
-		return "", 0, 0, 0, 0, false
-	}
-
-	day, err = strconv.Atoi(dayStr)
-	if err != nil {
-		return "", 0, 0, 0, 0, false
-	}
-
-	// Dukascopy commonly uses "13h_ticks.bi5"
-	base := strings.ToLower(file)
-	if !strings.HasSuffix(base, "h_ticks.bi5") {
-		return "", 0, 0, 0, 0, false
-	}
-
-	hourStr := strings.TrimSuffix(base, "h_ticks.bi5")
-	hour, err = strconv.Atoi(hourStr)
-	if err != nil {
-		return "", 0, 0, 0, 0, false
-	}
-
-	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
-		return "", 0, 0, 0, 0, false
-	}
-
-	return inst, year, month, day, hour, true
-}
-
-func (b *InventoryBuilder) scanCandles(inv *Inventory) error {
-	return filepath.Walk(b.CandlesRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(strings.ToLower(info.Name()), ".csv") {
-			fmt.Println("Found file that is not .csv", path)
-			return nil
-		}
-
-		source, inst, tf, year, month, day, ok := parseCandlePath(path)
-		if !ok {
-			return nil
-		}
-
-		inv.Put(Asset{
-			Key: Key{
-				Source:     source,
-				Instrument: inst,
-				Kind:       KindCandle,
-				TF:         tf,
-				Year:       year,
-				Month:      month,
-				Day:        day,
-			},
-			Path:       path,
-			Range:      types.YearRange(year),
-			Size:       info.Size(),
-			UpdatedAt:  info.ModTime(),
-			Complete:   true,
-			Descriptor: "yearly candle csv",
-		})
-		return nil
-	})
-}
-
-func parseCandlePath(path string) (source string, instrument string, tf types.Timeframe, year, month, day int, ok bool) {
-	p := filepath.ToSlash(path)
-	parts := strings.Split(p, "/")
-	if len(parts) < 4 {
-		return "", "", types.TF0, 0, 0, 0, false
-	}
-
-	// Expect .../<source>/<instrument>/<tf>/<file>.csv
-	n := len(parts)
-	source = normalizeSource(parts[n-4])
-	instrument = normalizeInstrument(parts[n-3])
-
-	tfStr := strings.ToUpper(parts[n-2])
-	switch tfStr {
-	case "M1":
-		tf = types.M1
-	case "H1":
-		tf = types.H1
-	case "D1":
-		tf = types.D1
-	default:
-		return "", "", types.TF0, 0, 0, 0, false
-	}
-
-	base := strings.ToLower(strings.TrimSuffix(parts[n-1], ".csv"))
-	// e.g. eurusd-m1-2026
-	nameParts := strings.Split(base, "-")
-	if len(nameParts) < 3 {
-		return "", "", types.TF0, 0, 0, 0, false
-	}
-
-	y, err := strconv.Atoi(nameParts[len(nameParts)-1])
-	if err != nil {
-		return "", "", types.TF0, 0, 0, 0, false
-	}
-
-	return source, instrument, tf, y, 0, 0, true
 }
 
 func isMajorForexHolidayClosed(t time.Time) bool {

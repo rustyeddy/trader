@@ -19,6 +19,12 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+var (
+	store = &Store{
+		Basedir: "../../tmp",
+	}
+)
+
 // Store enforces a file naming convention like:
 //
 //	GBPUSD-M1-2026-01.csv
@@ -66,21 +72,13 @@ func (s *Store) pathForHourlyTick(k Key) string {
 
 	return filepath.Join(
 		s.Basedir,
+		"dukascopy",
 		instrument,
-		"tick",
 		fmt.Sprintf("%04d", k.Year),
 		fmt.Sprintf("%02d", k.Month),
 		fmt.Sprintf("%02d", k.Day),
-		fmt.Sprintf("%02d.bi5", k.Hour),
+		fmt.Sprintf("%02dh_ticks.bi5", k.Hour),
 	)
-}
-
-func (k Key) IsMonthlyCandle() bool {
-	return k.Kind == KindCandle && k.Day == 0 && k.Hour == 0
-}
-
-func (k Key) IsHourlyTick() bool {
-	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
 func (s *Store) RelDir(key Key) string {
@@ -101,6 +99,169 @@ func (s Store) Exists(key Key) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func (s *Store) scanFiles(inv *Inventory) error {
+	return filepath.Walk(s.Basedir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+
+		var source, inst, descriptor string
+		var year, month, day, hour int
+		var ok bool
+		var k DataKind
+		var tf types.Timeframe
+		var rng types.TimeRange
+		name := strings.ToLower(info.Name())
+		switch {
+		case strings.HasSuffix(name, ".bi5"):
+			inst, year, month, day, hour, ok = parseTickPath(path)
+			if !ok {
+				return nil
+			}
+
+			source = "dukascopy"
+			start := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+			end := start.Add(time.Hour)
+			k = KindTick
+			tf = types.Ticks
+			descriptor = fmt.Sprintf(
+				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
+				year, month, day, hour)
+			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end))
+
+		case strings.HasSuffix(name, ".csv"):
+			source, inst, tf, year, month, day, ok = parseCandlePath(path)
+			if !ok {
+				return nil
+			}
+			k = KindCandle
+			rng = types.YearRange(year)
+			descriptor = "Candles"
+
+		default:
+			return nil
+		}
+
+		key := Key{
+			Source:     source,
+			Instrument: inst,
+			Kind:       k,
+			TF:         tf,
+			Year:       year,
+			Month:      month,
+			Day:        day,
+			Hour:       hour,
+		}
+
+		asset := Asset{
+			Key:        key,
+			Path:       path,
+			Range:      rng,
+			Exists:     true,
+			Complete:   info.Size() > 0, // TODO FIX THIS - minimal heuristic only
+			Size:       info.Size(),
+			UpdatedAt:  info.ModTime(),
+			Descriptor: descriptor,
+		}
+		inv.Put(asset)
+		return nil
+	})
+}
+
+func parseTickPath(path string) (inst string, year, month, day, hour int, ok bool) {
+	clean := filepath.ToSlash(path)
+
+	// Example expected tail:
+	// EURUSD/2025/01/02/13h_ticks.bi5
+	parts := strings.Split(clean, "/")
+	if len(parts) < 5 {
+		return "", 0, 0, 0, 0, false
+	}
+
+	n := len(parts)
+
+	file := parts[n-1]
+	dayStr := parts[n-2]
+	monthStr := parts[n-3]
+	yearStr := parts[n-4]
+	inst = parts[n-5]
+
+	year, err := strconv.Atoi(yearStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	month, err = strconv.Atoi(monthStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	day, err = strconv.Atoi(dayStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	// Dukascopy commonly uses "13h_ticks.bi5"
+	base := strings.ToLower(file)
+	if !strings.HasSuffix(base, "h_ticks.bi5") {
+		return "", 0, 0, 0, 0, false
+	}
+
+	hourStr := strings.TrimSuffix(base, "h_ticks.bi5")
+	hour, err = strconv.Atoi(hourStr)
+	if err != nil {
+		return "", 0, 0, 0, 0, false
+	}
+
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
+		return "", 0, 0, 0, 0, false
+	}
+
+	return inst, year, month, day, hour, true
+}
+
+func parseCandlePath(path string) (source string, instrument string, tf types.Timeframe, year, month, day int, ok bool) {
+	p := filepath.ToSlash(path)
+	parts := strings.Split(p, "/")
+	if len(parts) < 4 {
+		return "", "", types.TF0, 0, 0, 0, false
+	}
+
+	// Expect .../<source>/<instrument>/<tf>/<file>.csv
+	n := len(parts)
+	source = normalizeSource(parts[n-4])
+	instrument = normalizeInstrument(parts[n-3])
+
+	tfStr := strings.ToUpper(parts[n-2])
+	switch tfStr {
+	case "M1":
+		tf = types.M1
+	case "H1":
+		tf = types.H1
+	case "D1":
+		tf = types.D1
+	default:
+		return "", "", tf, 0, 0, 0, false
+	}
+
+	base := strings.ToLower(strings.TrimSuffix(parts[n-1], ".csv"))
+	// e.g. eurusd-m1-2026
+	nameParts := strings.Split(base, "-")
+	if len(nameParts) < 3 {
+		return "", "", types.TF0, 0, 0, 0, false
+	}
+
+	y, err := strconv.Atoi(nameParts[len(nameParts)-1])
+	if err != nil {
+		return "", "", types.TF0, 0, 0, 0, false
+	}
+
+	return source, instrument, tf, y, 0, 0, true
 }
 
 func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {

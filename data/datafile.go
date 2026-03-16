@@ -43,15 +43,28 @@ var (
 	ErrHourOutOfRange  = errors.New("hour out of range")
 )
 
-func newDatafile(base string, sym string, t time.Time) *datafile {
+func newDatafile(sym string, t time.Time) *datafile {
 	// Canonicalize to UTC wall-clock hour (matches Dukascopy folder semantics).
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
 	ds := &datafile{
-		symbol:  sym,
-		Time:    t,
-		basedir: base,
+		symbol: sym,
+		Time:   t,
 	}
 	return ds
+}
+
+func (d datafile) Key() Key {
+
+	return Key{
+		Instrument: d.symbol,
+		Source:     "dukascopy",
+		Kind:       KindTick,
+		TF:         types.Ticks,
+		Year:       d.Time.Year(),
+		Month:      int(d.Time.Month()),
+		Day:        d.Time.Day(),
+		Hour:       d.Time.Hour(),
+	}
 }
 
 func datafileFromPath(fullPath string) (*datafile, error) {
@@ -147,35 +160,21 @@ func (d *datafile) PathBin() string {
 	))
 }
 
-func (d *datafile) Exists() bool {
-	p := d.Path()
-	info, err := os.Stat(p)
-	if os.IsNotExist(err) {
-		return false
-	}
-	if err != nil || info.IsDir() {
-		return false
-	}
-	d.bytes = info.Size()
-	d.modtime = info.ModTime()
-
-	// Also check if it's a directory, as Stat returns info for both
-	return err == nil && !info.IsDir()
-}
-
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
 // it will return.
 func (d *datafile) download(ctx context.Context, client *http.Client) error {
+	k := d.Key()
 
 	// Skip if present.
 	// TODO before the file is written we need to make sure it is a valid file.
-	if d.Exists() && d.IsValid(ctx) == nil {
+	ok, err := store.Exists(k)
+	if ok {
 		return nil
 	}
 
 	// Correctness-first timeout
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, d.URL(), nil)
@@ -194,7 +193,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 		return fmt.Errorf("GET %s: http %d", d.URL(), resp.StatusCode)
 	}
 
-	dst := d.Path()
+	dst := store.PathForAsset(k)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
@@ -256,8 +255,9 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 // dukas binary file format.
 func (d *datafile) IsValid(ctx context.Context) error {
 	// 1. verify file exists
-	if !d.Exists() {
-		return fmt.Errorf("file does not exist")
+	ok, err := store.Exists(d.Key())
+	if err != nil || !ok {
+		return err
 	}
 
 	if d.bytes == 0 {
@@ -324,7 +324,7 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 		Start:      hourStart.Sec(), // Timemilli -> Timestamp (seconds)
 		Timeframe:  60,
 		Scale:      1_000_000,
-		Source:     "Dukascopy M1",
+		Source:     "dukascopy",
 		Candles:    make([]market.Candle, minutesPerHour),
 		Valid:      make([]uint64, (minutesPerHour+63)/64),
 	}

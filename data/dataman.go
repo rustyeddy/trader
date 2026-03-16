@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -22,23 +22,13 @@ type DataManager struct {
 	End         time.Time
 	Basedir     string
 	Instruments []string
-
-	DukasRoot  string
-	CandleRoot string
-
-	*Downloader
-	Store *Store
+	*downloader
 }
 
 // Init will get DataManager ready to go.
 func (dm *DataManager) Init() {
-	if dm.Downloader == nil {
-		dm.Downloader = NewDownloader(dm.DukasRoot)
-	}
-	if dm.Store == nil {
-		dm.Store = &Store{
-			Basedir: "../../tmp/candles",
-		}
+	if dm.downloader == nil {
+		dm.downloader = NewDownloader()
 	}
 }
 
@@ -61,46 +51,37 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 	}
 
 	plan.Log()
-	log.Print("Downloading...")
+	var wg sync.WaitGroup
 
 	download := true
 	if download {
+		log.Print("Downloading...")
+		wg.Add(1)
+		defer wg.Done()
 		if err := dm.ExecuteDownloads(ctx, plan); err != nil {
 			return fmt.Errorf("execute downloads: %w", err)
 		}
 	}
 
-	// for _, k := range plan.Download {
-	// 	ws.MarkDownload(k)
-	// 	go func(key AssetKey) {
-	// 		defer ws.ClearDownload(key)
-	// 		_ = dm.downloadHour(ctx, key)
-	// 	}(k)
-	// }
+	build := false
+	if build {
+		log.Println("buildng M1...")
+		wg.Add(1)
+		defer wg.Done()
 
-	// for _, task := range plan.BuildM1 {
-	// 	ws.MarkBuild(task.Target)
-	// 	go func(bt BuildTask) {
-	// 		defer ws.ClearBuild(bt.Target)
-	// 		_ = dm.buildM1Task(ctx, bt)
-	// 	}(task)
-	// }
-
-	log.Println("buildng M1...")
-
-	// 5. Plan/build M1 from available raw tick hours
-	if err := dm.BuildM1(ctx, plan); err != nil {
-		return fmt.Errorf("build M1: %w", err)
+		// 5. Plan/build M1 from available raw tick hours
+		if err := dm.BuildM1(ctx, plan); err != nil {
+			log.Printf("build M1: %w", err)
+		}
 	}
 
+	wg.Wait()
 	return nil
 }
 
 func (dm *DataManager) BuildInventory(ctx context.Context) (*Inventory, error) {
-	b := NewInventoryBuilder(dm.DukasRoot, dm.CandleRoot)
-
-	inv, err := b.Build(ctx)
-	if err != nil {
+	inv := NewInventory()
+	if err := store.scanFiles(inv); err != nil {
 		return nil, err
 	}
 	return inv, nil
@@ -145,7 +126,7 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		if cur == nil {
 			return nil
 		}
-		return dm.Store.WriteCSV(cur)
+		return store.WriteCSV(cur)
 	}
 
 	for _, key := range plan.BuildM1 {
@@ -155,7 +136,7 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		default:
 		}
 
-		df := newDatafile(dm.DukasRoot, key.Target.Instrument, key.Target.Time())
+		df := newDatafile(key.Target.Instrument, key.Target.Time())
 		hourSet, err := df.buildM1(ctx)
 		if err != nil {
 			return fmt.Errorf("buildM1 failed for %s: %w", df.Path(), err)
@@ -211,10 +192,10 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 		}
 
 		key := Key{
-			Source:     "dukascopy",
+			Source:     "Dukascopy",
 			Instrument: sym,
 			Kind:       KindTick,
-			TF:         types.H1,
+			TF:         types.Ticks,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
 			Day:        t.Day(),
@@ -226,11 +207,9 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 		}
 
 		asset, ok := inv.Get(key)
-		ready := ok && asset.Exists && asset.Complete && asset.Size > 0
-		if ready {
+		if ok && asset.Exists && asset.Complete && asset.Size > 0 {
 			continue
 		}
-
 		out = append(out, key)
 	}
 
@@ -297,7 +276,7 @@ func (dm *DataManager) consumeHourIntoM1(
 	ctx context.Context,
 	df *datafile,
 	builder *DenseM1Builder,
-	w *M1CSVWriter,
+	w *Store,
 ) error {
 	return df.forEachTick(ctx, func(t Tick) error {
 		candles, err := builder.Add(t)
@@ -305,11 +284,12 @@ func (dm *DataManager) consumeHourIntoM1(
 			return err
 		}
 		for _, c := range candles {
-			if err := w.Write(c); err != nil {
-				return err
-			}
+			println("TODO -- dataman - consumeHourIntoM1")
+			_ = c
+			continue
 		}
-		return nil
+		// err := w.WriteCSV(candles)
+		return err
 	})
 }
 
@@ -332,16 +312,7 @@ func m1TargetNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
 
 	return false
 }
-func (dm *DataManager) m1Path(key Key) string {
-	return filepath.Join(
-		dm.CandleRoot,
-		key.Instrument,
-		"M1",
-		fmt.Sprintf("%04d", key.Year),
-		fmt.Sprintf("%02d", key.Month),
-		fmt.Sprintf("%02d.csv", key.Day),
-	)
-}
+
 func eachUTCDateInRange(r types.TimeRange) []time.Time {
 	start := time.Unix(int64(r.Start), 0).UTC()
 	end := time.Unix(int64(r.End), 0).UTC()
@@ -392,47 +363,6 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Key, 
 	return inputs, true
 }
 
-// func (dm *DataManager) Plan(ctx context.Context, inv *Inventory) (*Plan, error) {
-// 	plan := &Plan{}
-
-// 	start := types.FromTime(dm.Start)
-// 	end := types.FromTime(dm.End)
-// 	r := types.NewTimeRange(start, end)
-
-// 	var tickHoursReady []Key
-
-// 	for _, sym := range dm.Instruments {
-// 		for ts := r.Start; ts < r.End; ts += 3600 {
-// 			t := time.Unix(int64(ts), 0).UTC()
-
-// 			if IsForexMarketClosed(t) {
-// 				continue
-// 			}
-
-// 			key := Key{
-// 				Source:     "dukascopy",
-// 				Instrument: sym,
-// 				Kind:       KindTick,
-// 				TF:         types.H1,
-// 				Year:       t.Year(),
-// 				Month:      int(t.Month()),
-// 				Day:        t.Day(),
-// 				Hour:       t.Hour(),
-// 			}
-
-// 			asset, ok := inv.Get(key)
-// 			if !ok || !asset.Exists || !asset.Complete || asset.Size <= 0 {
-// 				plan.Download = append(plan.Download, key)
-// 				continue
-// 			}
-// 			tickHoursReady = append(tickHoursReady, key)
-// 		}
-// 	}
-
-// 	plan.BuildM1 = GroupTickHoursIntoM1Builds(tickHoursReady, inv)
-// 	return plan, nil
-// }
-
 func GroupTickHoursIntoM1Builds(hours []Key, inv *Inventory) []Key {
 	out := make([]Key, 0, len(hours))
 	out = append(out, hours...)
@@ -445,7 +375,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 	}
 
 	q := make(chan Key, 1024)
-	dlWG := dm.Downloader.startDownloader(ctx, q)
+	wg := dm.downloader.startDownloader(ctx, q)
 	go func() {
 		defer close(q)
 		slices.Reverse(plan.Download)
@@ -458,7 +388,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 		}
 	}()
 
-	dlWG.Wait()
+	wg.Wait()
 	return nil
 }
 
