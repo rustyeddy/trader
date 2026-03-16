@@ -32,9 +32,7 @@ func (dm *DataManager) Init() {
 }
 
 func (dm *DataManager) Sync(ctx context.Context) error {
-
 	log.Print("Building inventory...")
-
 	// 1. Build inventory
 	inv, err := dm.BuildInventory(ctx)
 	if err != nil {
@@ -42,7 +40,6 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 	}
 
 	log.Print("Planning...")
-
 	ws := NewWorkState()
 	plan, err := dm.Plan(ctx, inv, ws)
 	if err != nil {
@@ -88,7 +85,6 @@ func (dm *DataManager) BuildInventory(ctx context.Context) (*Inventory, error) {
 
 func (dm *DataManager) Plan(ctx context.Context, inv *Inventory, ws *WorkState) (*Plan, error) {
 	plan := &Plan{}
-
 	start := types.FromTime(dm.Start)
 	end := types.FromTime(dm.End)
 	r := types.NewTimeRange(start, end)
@@ -271,27 +267,6 @@ func (dm *DataManager) PlanM1Builds(
 	return tasks, nil
 }
 
-func (dm *DataManager) consumeHourIntoM1(
-	ctx context.Context,
-	df *datafile,
-	builder *DenseM1Builder,
-	w *Store,
-) error {
-	return df.forEachTick(ctx, func(t Tick) error {
-		candles, err := builder.Add(t)
-		if err != nil {
-			return err
-		}
-		for _, c := range candles {
-			println("TODO -- dataman - consumeHourIntoM1")
-			_ = c
-			continue
-		}
-		// err := w.WriteCSV(candles)
-		return err
-	})
-}
-
 func m1TargetNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
 	targetAsset, ok := inv.Get(target)
 	if !ok || !targetAsset.Exists || !targetAsset.Complete || targetAsset.Size <= 0 {
@@ -362,12 +337,6 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Key, 
 	return inputs, true
 }
 
-func GroupTickHoursIntoM1Builds(hours []Key, inv *Inventory) []Key {
-	out := make([]Key, 0, len(hours))
-	out = append(out, hours...)
-	return out
-}
-
 func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 	if len(plan.Download) == 0 {
 		return nil
@@ -389,144 +358,4 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 
 	wg.Wait()
 	return nil
-}
-
-// func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
-// 	sort.Slice(plan.BuildM1, func(i, j int) bool {
-// 		a, b := plan.BuildM1[i], plan.BuildM1[j]
-
-// 		if a.Instrument != b.Instrument {
-// 			return a.Instrument < b.Instrument
-// 		}
-// 		return a.before(b)
-// 	})
-// 	slices.Reverse(plan.BuildM1)
-
-// 	var cur *market.CandleSet
-// 	hours := 0
-
-// 	flush := func() error {
-// 		if cur == nil {
-// 			return nil
-// 		}
-// 		return dm.Store.WriteCSV(cur)
-// 	}
-
-// 	for _, key := range plan.BuildM1 {
-// 		select {
-// 		case <-ctx.Done():
-// 			return ctx.Err()
-// 		default:
-// 		}
-
-// 		df := newDatafile(dm.DukasRoot, key.Instrument, key.Time())
-// 		hourSet, err := df.buildM1(ctx)
-// 		if err != nil {
-// 			return fmt.Errorf("buildM1 failed for %s: %w", df.Path(), err)
-// 		}
-// 		if hourSet == nil {
-// 			continue
-// 		}
-// 		hours++
-
-// 		// TODO create an index for the instrument, time frame and range
-// 		monthStart := market.FloorToMonthUTC(hourSet.Start)
-// 		// Do a better job of ensuring we have not gotten out of order
-// 		if cur == nil ||
-// 			cur.Instrument.Name != hourSet.Instrument.Name ||
-// 			cur.Start != monthStart {
-
-// 			if err := flush(); err != nil {
-// 				return err
-// 			}
-
-// 			cur, err = market.NewMonthlyCandleSet(
-// 				hourSet.Instrument,
-// 				hourSet.Timeframe,
-// 				monthStart,
-// 				hourSet.Scale,
-// 				hourSet.Source,
-// 			)
-// 			if err != nil {
-// 				return err
-// 			}
-// 		}
-
-// 		if err := cur.Merge(hourSet); err != nil {
-// 			return fmt.Errorf("merge hour set failed: %w", err)
-// 		}
-// 	}
-
-// 	if err := flush(); err != nil {
-// 		return err
-// 	}
-
-// 	fmt.Printf("Hours processed: %d\n", hours)
-// 	return nil
-// }
-
-type DenseM1Builder struct {
-	cur     market.Candle
-	haveCur bool
-}
-
-func NewDenseM1Builder() *DenseM1Builder {
-	return &DenseM1Builder{}
-}
-
-func floorToMinute(ts types.Timemilli) types.Timemilli {
-	return ts - (ts % 60)
-}
-
-func midPrice(t Tick) types.Price {
-	return types.Price((int64(t.Bid) + int64(t.Ask)) / 2)
-}
-
-func (b *DenseM1Builder) Add(t Tick) ([]market.Candle, error) {
-	// minute := floorToMinute(t.Timemilli)
-	price := midPrice(t)
-
-	if !b.haveCur {
-		b.cur = market.Candle{
-			Open:  price,
-			High:  price,
-			Low:   price,
-			Close: price,
-		}
-		b.haveCur = true
-		return nil, nil
-	}
-
-	// if minute < b.cur.Timestamp {
-	// 	return nil, fmt.Errorf("out-of-order tick")
-	// }
-
-	// if minute == b.cur.Timemilli {
-	if price > b.cur.High {
-		b.cur.High = price
-	}
-	if price < b.cur.Low {
-		b.cur.Low = price
-	}
-	b.cur.Close = price
-	return nil, nil
-	// }
-
-	out := []market.Candle{b.cur}
-
-	b.cur = market.Candle{
-		Open:  price,
-		High:  price,
-		Low:   price,
-		Close: price,
-	}
-
-	return out, nil
-}
-
-func (b *DenseM1Builder) Flush() ([]market.Candle, error) {
-	if !b.haveCur {
-		return nil, nil
-	}
-	return []market.Candle{b.cur}, nil
 }
