@@ -24,7 +24,7 @@ func (dl *downloader) download(ctx context.Context, key Key) error {
 
 	if err := df.download(ctx, dl.Client); err != nil {
 		df.err = err
-		return fmt.Errorf("download %s: %w", df.Path(), err)
+		return fmt.Errorf("download %s: %w", store.PathForAsset(df.key), err)
 	}
 
 	return nil

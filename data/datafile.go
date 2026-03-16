@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -17,6 +15,8 @@ import (
 )
 
 type datafile struct {
+	key Key
+
 	symbol string
 	time.Time
 	err error
@@ -46,16 +46,15 @@ var (
 func newDatafile(sym string, t time.Time) *datafile {
 	// Canonicalize to UTC wall-clock hour (matches Dukascopy folder semantics).
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	ds := &datafile{
+	df := &datafile{
 		symbol: sym,
 		Time:   t,
 	}
-	return ds
+	return df
 }
 
 func (d datafile) Key() Key {
-
-	return Key{
+	d.key = Key{
 		Instrument: d.symbol,
 		Source:     "dukascopy",
 		Kind:       KindTick,
@@ -65,67 +64,9 @@ func (d datafile) Key() Key {
 		Day:        d.Time.Day(),
 		Hour:       d.Time.Hour(),
 	}
+	return d.key
 }
 
-func datafileFromPath(fullPath string) (*datafile, error) {
-	clean := filepath.Clean(fullPath)
-
-	if strings.HasSuffix(clean, ".part") {
-		return nil, fmt.Errorf("%w: %s", ErrPartialFile, fullPath)
-	}
-
-	parts := strings.Split(clean, string(filepath.Separator))
-	if len(parts) < 6 {
-		return nil, fmt.Errorf("%w: %s", ErrPathTooShort, fullPath)
-	}
-
-	filename := parts[len(parts)-1]
-	dayStr := parts[len(parts)-2]
-	monStr := parts[len(parts)-3]
-	yearStr := parts[len(parts)-4]
-	symbol := parts[len(parts)-5]
-
-	if !strings.HasSuffix(filename, "h_ticks.bi5") {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidFilename, filename)
-	}
-
-	hourStr := strings.TrimSuffix(filename, "h_ticks.bi5")
-
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidYear, err)
-	}
-
-	month, err := strconv.Atoi(monStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidMonth, err)
-	}
-
-	day, err := strconv.Atoi(dayStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidDay, err)
-	}
-
-	hour, err := strconv.Atoi(hourStr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidHour, err)
-	}
-
-	if hour < 0 || hour > 23 {
-		return nil, fmt.Errorf("%w: %d", ErrHourOutOfRange, hour)
-	}
-
-	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-
-	baseParts := parts[:len(parts)-5]
-	basedir := filepath.Join(baseParts...)
-
-	return &datafile{
-		symbol:  symbol,
-		Time:    t,
-		basedir: basedir,
-	}, nil
-}
 
 func (d *datafile) Instrument() string {
 	return d.symbol
@@ -141,24 +82,24 @@ func (d *datafile) URL() string {
 		d.Time.Hour())
 }
 
-func (d *datafile) Path() string {
-	return filepath.Join(
-		d.basedir,
-		d.symbol,
-		fmt.Sprintf("%04d", d.Time.Year()),
-		fmt.Sprintf("%02d", d.Time.Month()),
-		fmt.Sprintf("%02d", d.Time.Day()),
-		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
-	)
-}
+// func (d *datafile) Path() string {
+// 	return filepath.Join(
+// 		d.basedir,
+// 		d.symbol,
+// 		fmt.Sprintf("%04d", d.Time.Year()),
+// 		fmt.Sprintf("%02d", d.Time.Month()),
+// 		fmt.Sprintf("%02d", d.Time.Day()),
+// 		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
+// 	)
+// }
 
 // PathBin() TODO move to the Store. Store owns the filesystem
-func (d *datafile) PathBin() string {
-	return filepath.Join(d.basedir, fmt.Sprintf(
-		"%s/%04d/%02d/%02d/%02dh_ticks.bin",
-		d.symbol, d.Time.Year(), d.Time.Month(), d.Time.Day(), d.Time.Hour(),
-	))
-}
+// func (d *datafile) PathBin() string {
+// 	return filepath.Join(d.basedir, fmt.Sprintf(
+// 		"%s/%04d/%02d/%02d/%02dh_ticks.bin",
+// 		d.symbol, d.Time.Year(), d.Time.Month(), d.Time.Day(), d.Time.Hour(),
+// 	))
+// }
 
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
@@ -264,11 +205,12 @@ func (d *datafile) IsValid(ctx context.Context) error {
 		return nil
 	}
 
+	path := store.PathForAsset(d.key)
 	if !d.Time.IsZero() {
 		if market.IsFXMarketClosed(d.Time.UTC()) {
 			return nil
 		}
-		return fmt.Errorf("empty file outside market-closed hours: %s", d.Path())
+		return fmt.Errorf("empty file outside market-closed hours: %s", path)
 	}
 
 	baseUnixMS, err := d.baseHourUnixMS()
@@ -279,7 +221,8 @@ func (d *datafile) IsValid(ctx context.Context) error {
 	hourEnd := baseUnixMS + 3600_000
 	err = d.forEachTick(ctx, func(t Tick) error {
 		if t.Timemilli < hourStart || t.Timemilli >= hourEnd {
-			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s", t, hourStart, hourEnd, d.Path())
+			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s",
+				t, hourStart, hourEnd, path)
 		}
 		return nil
 	})

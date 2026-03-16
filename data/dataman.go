@@ -139,7 +139,7 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		df := newDatafile(key.Target.Instrument, key.Target.Time())
 		hourSet, err := df.buildM1(ctx)
 		if err != nil {
-			return fmt.Errorf("buildM1 failed for %s: %w", df.Path(), err)
+			return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(df.key), err)
 		}
 		if hourSet == nil {
 			continue

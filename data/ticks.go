@@ -40,7 +40,7 @@ func (t Tick) Minute() types.Timemilli {
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
 func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
-	p := d.Path()
+	p := store.PathForAsset(d.key)
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
 		return 0, fmt.Errorf("cannot parse datetime from path: %s", p)
