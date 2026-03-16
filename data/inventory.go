@@ -39,6 +39,10 @@ type Key struct {
 	Hour       int
 }
 
+func (k Key) Path() string {
+	return store.PathForAsset(k)
+}
+
 // compare returns:
 //
 //	-1 if ak < k

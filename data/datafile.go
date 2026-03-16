@@ -82,25 +82,7 @@ func (d *datafile) URL() string {
 		d.Time.Hour())
 }
 
-// func (d *datafile) Path() string {
-// 	return filepath.Join(
-// 		d.basedir,
-// 		d.symbol,
-// 		fmt.Sprintf("%04d", d.Time.Year()),
-// 		fmt.Sprintf("%02d", d.Time.Month()),
-// 		fmt.Sprintf("%02d", d.Time.Day()),
-// 		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
-// 	)
-// }
-
-// PathBin() TODO move to the Store. Store owns the filesystem
-// func (d *datafile) PathBin() string {
-// 	return filepath.Join(d.basedir, fmt.Sprintf(
-// 		"%s/%04d/%02d/%02d/%02dh_ticks.bin",
-// 		d.symbol, d.Time.Year(), d.Time.Month(), d.Time.Day(), d.Time.Hour(),
-// 	))
-// }
-
+// TODO Move to downloader.go
 // download will first check to see if this particular tick data has
 // already been downloaded from Dukascopy, if so just return.  If not
 // it will return.
@@ -134,7 +116,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 		return fmt.Errorf("GET %s: http %d", d.URL(), resp.StatusCode)
 	}
 
-	dst := store.PathForAsset(k)
+	dst := k.Path()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
@@ -196,7 +178,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 // dukas binary file format.
 func (d *datafile) IsValid(ctx context.Context) error {
 	// 1. verify file exists
-	ok, err := store.Exists(d.Key())
+	ok, err := store.Exists(d.key)
 	if err != nil || !ok {
 		return err
 	}
@@ -205,7 +187,7 @@ func (d *datafile) IsValid(ctx context.Context) error {
 		return nil
 	}
 
-	path := store.PathForAsset(d.key)
+	path := d.key.Path()
 	if !d.Time.IsZero() {
 		if market.IsFXMarketClosed(d.Time.UTC()) {
 			return nil
@@ -227,10 +209,6 @@ func (d *datafile) IsValid(ctx context.Context) error {
 		return nil
 	})
 	return nil
-}
-
-func floorToMinuteUnixMS(ts types.Timemilli) types.Timemilli {
-	return (ts / 60_000) * 60_000
 }
 
 // Flush returns the in-progress candle at end-of-stream (if any).
@@ -408,6 +386,7 @@ func isZeroCandle(c market.Candle) bool {
 	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
 }
 
+// TODO move these somewhere
 // If you can't access market's bitSet/bitIsSet because they are unexported,
 // include these tiny helpers in the data package (or export them from market).
 func bitIsSet(bits []uint64, idx int) bool {
