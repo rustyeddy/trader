@@ -355,17 +355,6 @@ func (store *Store) WriteCSV(cs *market.CandleSet) error {
 	return bw.Flush()
 }
 
-//	func PriceToFloat(price int32, scale int32) float64 {
-//		return float64(price) / math.Pow10(int(scale))
-//	}
-func formatNumber(price types.Price, scale int32) string {
-	decimals := 0
-	for s := scale; s > 1; s /= 10 {
-		decimals++
-	}
-	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
-}
-
 // ListAvailableYears returns sorted years for which files exist for instrument+tf.
 // It ignores "-all.csv".
 func (s Store) ListAvailableYears(instrument, tf string) ([]int, error) {
@@ -464,6 +453,17 @@ func (s Store) LatestCompleteYear(instrument, tf string) (int, error) {
 
 func (s Store) baseScanDir() string {
 	return s.Basedir
+}
+
+//	func PriceToFloat(price int32, scale int32) float64 {
+//		return float64(price) / math.Pow10(int(scale))
+//	}
+func formatNumber(price types.Price, scale int32) string {
+	decimals := 0
+	for s := scale; s > 1; s /= 10 {
+		decimals++
+	}
+	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
 func normalizeTF(tf string) string {

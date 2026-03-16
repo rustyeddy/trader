@@ -19,6 +19,7 @@ func NewDownloader() *downloader {
 	}
 }
 
+// TODO move df.download() to here
 func (dl *downloader) download(ctx context.Context, key Key) error {
 	df := newDatafile(key.Instrument, key.Time())
 

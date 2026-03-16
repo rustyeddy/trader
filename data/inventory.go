@@ -156,39 +156,6 @@ func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
-// IsForexMarketClosed reports whether spot FX is closed at time t.
-//
-// Common retail FX convention:
-//   - Opens Sunday 17:00 New York time
-//   - Closes Friday 17:00 New York time
-//
-// This function ignores special holiday closures for now.
-// It converts t into America/New_York and applies the weekly session rules.
-func IsForexMarketClosed(t time.Time) bool {
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		// conservative fallback: use UTC if timezone load fails
-		loc = time.UTC
-	}
-
-	nt := t.In(loc)
-	wd := nt.Weekday()
-	h := nt.Hour()
-
-	switch wd {
-	case time.Saturday:
-		return true
-	case time.Sunday:
-		// closed until 17:00 NY time
-		return h < 17
-	case time.Friday:
-		// closed from 17:00 NY time onward
-		return h >= 17
-	default:
-		return false
-	}
-}
-
 type Asset struct {
 	Key        Key
 	Path       string
@@ -347,30 +314,6 @@ func normalizeSource(s string) string {
 	return strings.TrimSpace(strings.ToLower(s))
 }
 
-func isMajorForexHolidayClosed(t time.Time) bool {
-	month := t.Month()
-	day := t.Day()
-	h := t.Hour()
-
-	// Full closures.
-	if month == time.January && day == 1 {
-		return true // New Year's Day
-	}
-	if month == time.December && day == 25 {
-		return true // Christmas Day
-	}
-
-	// Practical early-close heuristics.
-	if month == time.December && day == 24 && h >= 13 {
-		return true // Christmas Eve afternoon
-	}
-	if month == time.December && day == 31 && h >= 13 {
-		return true // New Year's Eve afternoon
-	}
-
-	return false
-}
-
 func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
@@ -494,4 +437,64 @@ func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month 
 		Required: []Key{req},
 		Reason:   "complete M1 month available",
 	}
+}
+
+
+
+// TODO Move to timestamp
+// IsForexMarketClosed reports whether spot FX is closed at time t.
+//
+// Common retail FX convention:
+//   - Opens Sunday 17:00 New York time
+//   - Closes Friday 17:00 New York time
+//
+// This function ignores special holiday closures for now.
+// It converts t into America/New_York and applies the weekly session rules.
+func IsForexMarketClosed(t time.Time) bool {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		// conservative fallback: use UTC if timezone load fails
+		loc = time.UTC
+	}
+
+	nt := t.In(loc)
+	wd := nt.Weekday()
+	h := nt.Hour()
+
+	switch wd {
+	case time.Saturday:
+		return true
+	case time.Sunday:
+		// closed until 17:00 NY time
+		return h < 17
+	case time.Friday:
+		// closed from 17:00 NY time onward
+		return h >= 17
+	default:
+		return false
+	}
+}
+
+func isMajorForexHolidayClosed(t time.Time) bool {
+	month := t.Month()
+	day := t.Day()
+	h := t.Hour()
+
+	// Full closures.
+	if month == time.January && day == 1 {
+		return true // New Year's Day
+	}
+	if month == time.December && day == 25 {
+		return true // Christmas Day
+	}
+
+	// Practical early-close heuristics.
+	if month == time.December && day == 24 && h >= 13 {
+		return true // Christmas Eve afternoon
+	}
+	if month == time.December && day == 31 && h >= 13 {
+		return true // New Year's Eve afternoon
+	}
+
+	return false
 }
