@@ -20,7 +20,6 @@ import (
 type DataManager struct {
 	Start       time.Time
 	End         time.Time
-	Basedir     string
 	Instruments []string
 	*downloader
 }

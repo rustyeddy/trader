@@ -56,7 +56,6 @@ func main() {
 	dm := &data.DataManager{
 		Start:       time.Date(2004, 01, 01, 0, 0, 0, 0, time.UTC),
 		End:         time.Now().AddDate(0, 0, -1), // start from yesterday (the last fullday)
-		Basedir:     config.Basedir + config.Dukasdir,
 		Instruments: strings.Split(config.Symbols, ","),
 	}
 	dm.Init()
