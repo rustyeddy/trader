@@ -31,8 +31,8 @@ func TestBuildDataSets(t *testing.T) {
 
 	// now we have missing and existing lists we need to start sending
 	// the data from each slice to the respective queue
-	dlQ := dm.download(ctx)
-	candleQ := dm.download(ctx)
+	_ = dm.download(ctx)
+	_ = dm.download(ctx)
 }
 
 func TestPathRoundTrip(t *testing.T) {
