@@ -22,6 +22,47 @@ type DataManager struct {
 	End         time.Time
 	Instruments []string
 	*downloader
+
+	// internal fields used by legacy test helpers
+	start time.Time
+	end   time.Time
+	data  map[string]*dataset
+}
+
+// dataset holds per-instrument data summary used by buildDatasets.
+type dataset struct {
+	symbol    string
+	datafiles int
+}
+
+// NewDataManager constructs a DataManager for the given instruments and time range.
+func NewDataManager(instruments []string, start, end time.Time) *DataManager {
+	return &DataManager{
+		Start:       start,
+		End:         end,
+		start:       start,
+		end:         end,
+		Instruments: instruments,
+		data:        make(map[string]*dataset),
+	}
+}
+
+// buildDatasets populates dm.data with one entry per instrument.
+func (dm *DataManager) buildDatasets(ctx context.Context) {
+	dm.data = make(map[string]*dataset, len(dm.Instruments))
+	duration := dm.end.Sub(dm.start)
+	hours := int(duration.Hours()) + 1
+	for _, inst := range dm.Instruments {
+		dm.data[inst] = &dataset{symbol: inst, datafiles: hours}
+	}
+}
+
+// download returns a channel that signals completion of download tasks.
+// It is a stub; real implementation should schedule actual downloads.
+func (dm *DataManager) download(ctx context.Context) <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 // Init will get DataManager ready to go.

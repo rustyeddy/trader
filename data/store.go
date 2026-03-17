@@ -2,10 +2,8 @@ package data
 
 import (
 	"bufio"
-	"encoding/csv"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -308,118 +306,98 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	}
 	defer f.Close()
 
-	// Derive CandleSet parameters from the key.
+	// Build CandleSet structure from key parameters.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	startTS := types.Timestamp(monthStart.Unix())
+	start := types.FromTime(monthStart)
 	tf := types.Timestamp(key.TF)
-	if tf <= 0 {
-		return nil, fmt.Errorf("invalid candle timeframe %d: must be > 0", key.TF)
-	}
-	// Enforce a minimum supported candle timeframe (e.g., 1 minute in seconds).
-	if tf < 60 {
-		return nil, fmt.Errorf("unsupported candle timeframe %d: must be at least 60 seconds", key.TF)
-	}
+	step := int64(tf)
 
-	nSlots := 0
-	if tf > 0 {
-		monthEnd := monthStart.AddDate(0, 1, 0)
-		spanSec := int64(monthEnd.Sub(monthStart).Seconds())
-		nSlots = int(spanSec / int64(tf))
-	}
+	endTime := monthStart.AddDate(0, 1, 0)
+	spanSec := int64(endTime.Sub(monthStart).Seconds())
+	n := int(spanSec / step)
 
-	inst := market.GetInstrument(normalizeInstrument(key.Instrument))
+	instName := normalizeInstrument(key.Instrument)
+	inst := market.GetInstrument(instName)
 	if inst == nil {
-		inst = &market.Instrument{Name: normalizeInstrument(key.Instrument)}
+		inst = &market.Instrument{Name: instName}
 	}
 
-	cs = &market.CandleSet{
+	cs := &market.CandleSet{
 		Instrument: inst,
-		Start:      startTS,
+		Start:      start,
 		Timeframe:  tf,
-		Scale:      1,
-	}
-	if nSlots > 0 {
-		cs.Candles = make([]market.Candle, nSlots)
-		cs.Valid = make([]uint64, (nSlots+63)/64)
+		Candles:    make([]market.Candle, n),
+		Valid:      make([]uint64, (n+63)/64),
 	}
 
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
+	scanner := bufio.NewScanner(f)
 	rowNum := 0
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-
-		// Skip empty lines and comment lines.
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		// Skip header line (first non-comment field is "timestamp" or "time").
-		first := strings.ToLower(strings.SplitN(line, ",", 2)[0])
-		if first == "timestamp" || first == "time" {
+		fields := strings.Split(line, ",")
+		if looksLikeHeader(fields) {
 			continue
 		}
-
 		rowNum++
 
-		parts := strings.Split(line, ",")
-		if len(parts) != 9 {
-			return nil, fmt.Errorf("csv %q row %d: expected 9 fields, got %d", path, rowNum, len(parts))
-		}
-		dataRow++
-
-		tsUnix, parseErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, parseErr)
+		if len(fields) < 9 {
+			return nil, fmt.Errorf("csv %q row %d: expected 9 fields, got %d", path, rowNum, len(fields))
 		}
 
-		// Validate timestamp alignment to timeframe.
-		if tf > 0 && (tsUnix-int64(startTS))%int64(tf) != 0 {
-			return nil, fmt.Errorf("csv %q row %d: timestamp %d not aligned to timeframe %d", path, rowNum, tsUnix, tf)
+		ts, err := strconv.ParseInt(strings.TrimSpace(fields[0]), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, err)
 		}
 
-		highv, parseErr := parsePrice(strings.TrimSpace(parts[1]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, parseErr)
+		offset := ts - int64(start)
+		if offset < 0 || offset%step != 0 {
+			return nil, fmt.Errorf("csv %q row %d: timestamp %d not aligned to timeframe %d", path, rowNum, ts, step)
+		}
+		idx := int(offset / step)
+		if idx >= n {
+			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		openv, parseErr := parsePrice(strings.TrimSpace(parts[2]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, parseErr)
+		highv, err := parsePrice(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
+		}
+		openv, err := parsePrice(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
+		}
+		lowv, err := parsePrice(fields[3])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
+		}
+		closev, err := parsePrice(fields[4])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
+		}
+		avgSpread, err := parsePrice(fields[5])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
+		}
+		maxSpread, err := parsePrice(fields[6])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
 
-		lowv, parseErr := parsePrice(strings.TrimSpace(parts[3]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, parseErr)
+		ticks, err := strconv.ParseInt(strings.TrimSpace(fields[7]), 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse ticks: %w", path, rowNum, err)
 		}
 
-		closev, parseErr := parsePrice(strings.TrimSpace(parts[4]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, parseErr)
+		flags, err := strconv.ParseUint(strings.TrimSpace(fields[8]), 0, 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		avgSpread, parseErr := parsePrice(strings.TrimSpace(parts[5]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, parseErr)
-		}
-
-		maxSpread, parseErr := parsePrice(strings.TrimSpace(parts[6]))
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, parseErr)
-		}
-
-		ticks, parseErr := strconv.ParseInt(strings.TrimSpace(parts[7]), 10, 32)
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse ticks: %w", path, rowNum, parseErr)
-		}
-
-		flags, parseErr := strconv.ParseUint(strings.TrimSpace(parts[8]), 0, 64)
-		if parseErr != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, parseErr)
-		}
-
-		c := market.Candle{
+		cs.Candles[idx] = market.Candle{
 			High:      highv,
 			Open:      openv,
 			Low:       lowv,
@@ -427,6 +405,30 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 			AvgSpread: avgSpread,
 			MaxSpread: maxSpread,
 			Ticks:     int32(ticks),
+		}
+		if flags&0x0001 != 0 {
+			cs.SetValid(idx)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan csv %q: %w", path, err)
+	}
+
+	return cs, nil
+}
+
+// parsePrice parses a CSV field as a raw types.Price (int32) value.
+func parsePrice(s string) (types.Price, error) {
+	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return types.Price(v), nil
+}
+
+func looksLikeHeader(rec []string) bool {
+	if len(rec) == 0 {
+		return false
 		}
 
 		if tf > 0 && nSlots > 0 {
@@ -458,7 +460,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	return cs, nil
 }
 
-func (store *Store) WriteCSV(cs *market.CandleSet) error {
+func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
 		return errors.New("nil candle set")
 	}
@@ -491,11 +493,10 @@ func (store *Store) WriteCSV(cs *market.CandleSet) error {
 	defer f.Close()
 
 	bw := bufio.NewWriterSize(f, 256*1024)
-	defer bw.Flush()
 
-	if err := store.writeMetadata(cs, bw); err != nil {
-		return err
-	}
+	fmt.Fprintf(bw, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+		cs.Source, cs.Instrument.Name, types.Timeframe(cs.Timeframe).String(), start.Year(), cs.Scale)
+	fmt.Fprintln(bw, "Timestamp,High,Open,Low,Close,AvgSpread,MaxSpread,Ticks,Flags")
 
 	w := csv.NewWriter(bw)
 	defer w.Flush()
@@ -525,12 +526,11 @@ func (store *Store) WriteCSV(cs *market.CandleSet) error {
 		if err := w.Write(rec); err != nil {
 			return err
 		}
+		ts := int64(cs.Start) + int64(i)*step
+		fmt.Fprintf(bw, "%d,%d,%d,%d,%d,%d,%d,%d,0x%04X\n",
+			ts, c.High, c.Open, c.Low, c.Close, c.AvgSpread, c.MaxSpread, c.Ticks, uint64(0x0001))
 	}
 
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return err
-	}
 	return bw.Flush()
 }
 
