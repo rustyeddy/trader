@@ -270,7 +270,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 }
 
 func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
-	tfstr := cs.Timeframe.String()
+	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
 	_, err := fmt.Fprintf(w,
@@ -291,10 +291,10 @@ func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 
 func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	if key.Kind != KindCandle {
-		return nil, fmt.Errorf("ReadCSV only supports candle keys, got: %v", key.Kind)
+		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
 	if key.Month < 1 || key.Month > 12 {
-		return nil, fmt.Errorf("invalid candle key date: month=%d out of range", key.Month)
+		return nil, fmt.Errorf("invalid candle key date: month %d out of range", key.Month)
 	}
 
 	path := store.PathForAsset(key)
@@ -356,6 +356,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 		if len(parts) < 9 {
 			return nil, fmt.Errorf("csv %q row %d: expected 9 fields, got %d", path, rowNum, len(parts))
 		}
+		dataRow++
 
 		tsUnix, parseErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
 		if parseErr != nil {
@@ -446,24 +447,6 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	return cs, nil
 }
 
-// parsePrice parses a decimal string into a types.Price by stripping the
-// decimal point and interpreting the result as a raw integer.  This is
-// compatible with formatNumber, which writes prices in that form.
-// E.g. "0.00101" → types.Price(101), "110" → types.Price(110).
-func parsePrice(s string) (types.Price, error) {
-	buf := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] != '.' {
-			buf = append(buf, s[i])
-		}
-	}
-	v, err := strconv.ParseInt(string(buf), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return types.Price(v), nil
-}
-
 func (store *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
 		return errors.New("nil candle set")
@@ -471,17 +454,19 @@ func (store *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs.Instrument == nil {
 		return errors.New("nil candle set instrument")
 	}
-	if cs.Timeframe <= 0 {
-		return errors.New("invalid candle set timeframe")
+
+	step := cs.Timeframe.Int64()
+	if step <= 0 {
+		return fmt.Errorf("invalid candle set timeframe: %d", cs.Timeframe)
 	}
 
-	startTime := time.Unix(int64(cs.Start), 0).UTC()
+	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: cs.Instrument.Name,
+		Instrument: normalizeInstrument(cs.Instrument.Name),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
-		Year:       startTime.Year(),
-		Month:      int(startTime.Month()),
+		Year:       start.Year(),
+		Month:      int(start.Month()),
 	}
 	path := store.PathForAsset(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -517,12 +502,12 @@ func (store *Store) WriteCSV(cs *market.CandleSet) error {
 
 		rec := []string{
 			strconv.FormatInt(openUnix, 10),
-			formatNumber(c.High, cs.Scale),
-			formatNumber(c.Open, cs.Scale),
-			formatNumber(c.Low, cs.Scale),
-			formatNumber(c.Close, cs.Scale),
-			formatNumber(c.AvgSpread, cs.Scale),
-			formatNumber(c.MaxSpread, cs.Scale),
+			strconv.FormatInt(int64(c.High), 10),
+			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.Low), 10),
+			strconv.FormatInt(int64(c.Close), 10),
+			strconv.FormatInt(int64(c.AvgSpread), 10),
+			strconv.FormatInt(int64(c.MaxSpread), 10),
 			strconv.FormatInt(int64(c.Ticks), 10),
 			fmt.Sprintf("0x%04x", flags),
 		}
