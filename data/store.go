@@ -296,6 +296,9 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	if key.Month < 1 || key.Month > 12 {
 		return nil, fmt.Errorf("invalid candle key date: month %d out of range", key.Month)
 	}
+	if key.Day != 0 || key.Hour != 0 {
+		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
+	}
 
 	path := store.PathForAsset(key)
 
