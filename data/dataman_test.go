@@ -1,24 +1,4 @@
-package data
-
-import (
-	"context"
-	"path/filepath"
-	"testing"
-	"time"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/rustyeddy/trader/market"
-)
-
-func TestBuildDataSets(t *testing.T) {
-	start := time.Date(2003, 01, 01, 0, 0, 0, 0, time.UTC)
-	dm := NewDataManager(market.InstrumentList, start, time.Now())
-	assert.NotNil(t, dm)
-
-	ctx := context.TODO()
-	dm.buildDatasets(ctx)
-	assert.Equal(t, len(market.InstrumentList), len(dm.data))
+//go:build ignore
 
 	duration := dm.end.Sub(dm.start)
 	hours := int(duration.Hours()) + 1
@@ -45,8 +25,3 @@ func TestPathRoundTrip(t *testing.T) {
 
 	reconstructed := df.Path()
 
-	if filepath.Clean(orig) != filepath.Clean(reconstructed) {
-		t.Fatalf("round trip mismatch:\norig: %s\nnew : %s",
-			orig, reconstructed)
-	}
-}

@@ -267,12 +267,35 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	return k, true
 }
 
-func (store *Store) ReadCSV(key Key) (*market.CandleSet, error) {
+func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
+	tfstr := types.Timeframe(cs.Timeframe).String()
+	year := time.Unix(int64(cs.Start), 0).UTC().Year()
+
+	_, err := fmt.Fprintf(w,
+		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+		cs.Source,
+		cs.Instrument.Name,
+		tfstr,
+		year,
+		cs.Scale,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(w, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags")
+	return err
+}
+
+func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
 	if key.Month < 1 || key.Month > 12 {
-		return nil, fmt.Errorf("invalid candle key date: month %d out of range [1,12]", key.Month)
+		return nil, fmt.Errorf("invalid candle key date: month %d out of range", key.Month)
+	}
+	if key.Day != 0 || key.Hour != 0 {
+		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
 	}
 
 	path := store.PathForAsset(key)
@@ -406,9 +429,35 @@ func parsePrice(s string) (types.Price, error) {
 func looksLikeHeader(rec []string) bool {
 	if len(rec) == 0 {
 		return false
+		}
+
+		if tf > 0 && nSlots > 0 {
+			idx := int((types.Timestamp(tsUnix) - startTS) / tf)
+			if idx >= 0 && idx < len(cs.Candles) {
+				cs.Candles[idx] = c
+				if flags != 0 {
+					cs.SetValid(idx)
+				}
+			}
+		} else {
+			cs.Candles = append(cs.Candles, c)
+			if flags != 0 {
+				// Extend Valid slice if needed.
+				idx := len(cs.Candles) - 1
+				needed := (idx/64 + 1)
+				for len(cs.Valid) < needed {
+					cs.Valid = append(cs.Valid, 0)
+				}
+				cs.SetValid(idx)
+			}
+		}
 	}
-	s := strings.ToLower(strings.TrimSpace(rec[0]))
-	return s == "timestamp" || s == "time" || s == "date"
+
+	if scanErr := sc.Err(); scanErr != nil {
+		return nil, fmt.Errorf("scan csv %q: %w", path, scanErr)
+	}
+
+	return cs, nil
 }
 
 func (s *Store) WriteCSV(cs *market.CandleSet) error {
@@ -418,20 +467,21 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs.Instrument == nil {
 		return errors.New("nil candle set instrument")
 	}
-	if cs.Timeframe <= 0 {
-		return errors.New("invalid candle set timeframe")
+
+	step := cs.Timeframe.Int64()
+	if step <= 0 {
+		return fmt.Errorf("invalid candle set timeframe: %d", cs.Timeframe)
 	}
 
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: cs.Instrument.Name,
+		Instrument: normalizeInstrument(cs.Instrument.Name),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
-
-	path := s.PathForAsset(key)
+	path := store.PathForAsset(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -448,10 +498,33 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 		cs.Source, cs.Instrument.Name, types.Timeframe(cs.Timeframe).String(), start.Year(), cs.Scale)
 	fmt.Fprintln(bw, "Timestamp,High,Open,Low,Close,AvgSpread,MaxSpread,Ticks,Flags")
 
-	step := int64(cs.Timeframe)
-	for i, c := range cs.Candles {
-		if !cs.IsValid(i) {
-			continue
+	w := csv.NewWriter(bw)
+	defer w.Flush()
+
+	step := cs.Timeframe.Int64()
+
+	for i := 0; i < len(cs.Candles); i++ {
+		openUnix := int64(cs.Start) + int64(i)*step
+
+		c := cs.Candles[i]
+		var flags uint64
+		if len(cs.Valid) > 0 && bitIsSet(cs.Valid, i) {
+			flags = 0x0001
+		}
+
+		rec := []string{
+			strconv.FormatInt(openUnix, 10),
+			strconv.FormatInt(int64(c.High), 10),
+			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.Low), 10),
+			strconv.FormatInt(int64(c.Close), 10),
+			strconv.FormatInt(int64(c.AvgSpread), 10),
+			strconv.FormatInt(int64(c.MaxSpread), 10),
+			strconv.FormatInt(int64(c.Ticks), 10),
+			fmt.Sprintf("0x%04x", flags),
+		}
+		if err := w.Write(rec); err != nil {
+			return err
 		}
 		ts := int64(cs.Start) + int64(i)*step
 		fmt.Fprintf(bw, "%d,%d,%d,%d,%d,%d,%d,%d,0x%04X\n",
