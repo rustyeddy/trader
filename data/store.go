@@ -309,6 +309,13 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	startTS := types.Timestamp(monthStart.Unix())
 	tf := types.Timestamp(key.TF)
+	if tf <= 0 {
+		return nil, fmt.Errorf("invalid candle timeframe %d: must be > 0", key.TF)
+	}
+	// Enforce a minimum supported candle timeframe (e.g., 1 minute in seconds).
+	if tf < 60 {
+		return nil, fmt.Errorf("unsupported candle timeframe %d: must be at least 60 seconds", key.TF)
+	}
 
 	nSlots := 0
 	if tf > 0 {
