@@ -80,7 +80,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	require.NoError(t, s.WriteCSV(cs))
 
 	// Verify that WriteCSV created a CSV file at the expected location
-	filename := cs.Filename() + ".csv"
+	filename := s.PathForAsset(keyForSet(cs))
 	info, err := os.Stat(filename)
 	require.NoError(t, err, "expected CSV file to be written at %q", filename)
 	require.False(t, info.IsDir(), "expected %q to be a file, not a directory", filename)
@@ -104,8 +104,8 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	raw := fmt.Sprintf(
-		"time;O;H;L;C;avgspread;maxspread;ticks;Valid\n%s;100;110;90;105;2;4;9;1\n",
-		ts.Format(time.RFC3339),
+		"# schema=v1 source=test instrument=EURUSD tf=M1 year=2026 scale=1000000\nTimestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n%d,110,100,90,105,2,4,9,0x0001\n",
+		ts.Unix(),
 	)
 	require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
 
@@ -207,11 +207,11 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 
 	t.Run("nil instrument", func(t *testing.T) {
 		t.Parallel()
-		require.Panics(t, func() {
-			_ = s.WriteCSV(&market.CandleSet{
-				Timeframe: types.Timestamp(types.M1),
-			})
+		err := s.WriteCSV(&market.CandleSet{
+			Timeframe: types.Timestamp(types.M1),
 		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "nil candle set instrument")
 	})
 
 	t.Run("invalid timeframe", func(t *testing.T) {

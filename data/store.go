@@ -2,8 +2,10 @@ package data
 
 import (
 	"bufio"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -322,7 +324,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 		inst = &market.Instrument{Name: instName}
 	}
 
-	cs := &market.CandleSet{
+	cs = &market.CandleSet{
 		Instrument: inst,
 		Start:      start,
 		Timeframe:  tf,
@@ -429,40 +431,15 @@ func parsePrice(s string) (types.Price, error) {
 func looksLikeHeader(rec []string) bool {
 	if len(rec) == 0 {
 		return false
-		}
-
-		if tf > 0 && nSlots > 0 {
-			idx := int((types.Timestamp(tsUnix) - startTS) / tf)
-			if idx >= 0 && idx < len(cs.Candles) {
-				cs.Candles[idx] = c
-				if flags != 0 {
-					cs.SetValid(idx)
-				}
-			}
-		} else {
-			cs.Candles = append(cs.Candles, c)
-			if flags != 0 {
-				// Extend Valid slice if needed.
-				idx := len(cs.Candles) - 1
-				needed := (idx/64 + 1)
-				for len(cs.Valid) < needed {
-					cs.Valid = append(cs.Valid, 0)
-				}
-				cs.SetValid(idx)
-			}
-		}
 	}
 
-	if scanErr := sc.Err(); scanErr != nil {
-		return nil, fmt.Errorf("scan csv %q: %w", path, scanErr)
-	}
-
-	return cs, nil
+	h := strings.ToLower(strings.TrimSpace(rec[0]))
+	return h == "timestamp" || h == "time"
 }
 
 func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
-		return errors.New("nil candle set")
+		return errors.New("nil CandleSet")
 	}
 	if cs.Instrument == nil {
 		return errors.New("nil candle set instrument")
@@ -481,7 +458,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
-	path := store.PathForAsset(key)
+	path := s.PathForAsset(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -494,14 +471,12 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 
 	bw := bufio.NewWriterSize(f, 256*1024)
 
-	fmt.Fprintf(bw, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
-		cs.Source, cs.Instrument.Name, types.Timeframe(cs.Timeframe).String(), start.Year(), cs.Scale)
-	fmt.Fprintln(bw, "Timestamp,High,Open,Low,Close,AvgSpread,MaxSpread,Ticks,Flags")
+	if err := s.writeMetadata(cs, bw); err != nil {
+		return err
+	}
 
 	w := csv.NewWriter(bw)
 	defer w.Flush()
-
-	step := cs.Timeframe.Int64()
 
 	for i := 0; i < len(cs.Candles); i++ {
 		openUnix := int64(cs.Start) + int64(i)*step
@@ -526,9 +501,10 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 		if err := w.Write(rec); err != nil {
 			return err
 		}
-		ts := int64(cs.Start) + int64(i)*step
-		fmt.Fprintf(bw, "%d,%d,%d,%d,%d,%d,%d,%d,0x%04X\n",
-			ts, c.High, c.Open, c.Low, c.Close, c.AvgSpread, c.MaxSpread, c.Ticks, uint64(0x0001))
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
 	}
 
 	return bw.Flush()
