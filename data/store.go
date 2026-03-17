@@ -439,7 +439,7 @@ func looksLikeHeader(rec []string) bool {
 
 func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
-		return errors.New("nil candle set")
+		return errors.New("nil CandleSet")
 	}
 	if cs.Instrument == nil {
 		return errors.New("nil candle set instrument")
