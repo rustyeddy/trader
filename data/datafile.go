@@ -212,7 +212,7 @@ func (d *datafile) IsValid(ctx context.Context) error {
 	err = d.forEachTick(ctx, func(t Tick) error {
 		if t.Timemilli < hourStart || t.Timemilli >= hourEnd {
 			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s",
-				t, hourStart, hourEnd, path)
+				t.Timemilli, hourStart, hourEnd, path)
 		}
 		return nil
 	})

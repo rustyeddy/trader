@@ -65,7 +65,7 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 
 		// 5. Plan/build M1 from available raw tick hours
 		if err := dm.BuildM1(ctx, plan); err != nil {
-			log.Printf("build M1: %w", err)
+			log.Printf("build M1: %v", err)
 		}
 	}
 
