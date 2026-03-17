@@ -353,7 +353,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 		rowNum++
 
 		parts := strings.Split(line, ",")
-		if len(parts) < 9 {
+		if len(parts) != 9 {
 			return nil, fmt.Errorf("csv %q row %d: expected 9 fields, got %d", path, rowNum, len(parts))
 		}
 		dataRow++
