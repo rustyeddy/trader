@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -78,6 +79,45 @@ func (d *datafile) Key() Key {
 
 func (d *datafile) Instrument() string {
 	return d.symbol
+}
+
+// Path returns the file system path for this tick datafile.
+func (d *datafile) Path() string {
+	return filepath.Join(
+		d.basedir,
+		"dukas",
+		d.symbol,
+		fmt.Sprintf("%04d", d.Time.Year()),
+		fmt.Sprintf("%02d", int(d.Time.Month())),
+		fmt.Sprintf("%02d", d.Time.Day()),
+		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
+	)
+}
+
+// ParseDatafilePath parses a Dukascopy tick file path into a datafile.
+// Expected format: .../dukas/<SYMBOL>/<YYYY>/<MM>/<DD>/<HH>h_ticks.bi5
+func ParseDatafilePath(path string) (*datafile, error) {
+	k, ok := parseTickPath(path)
+	if !ok {
+		return nil, fmt.Errorf("invalid datafile path: %q", path)
+	}
+	t := time.Date(k.Year, time.Month(k.Month), k.Day, k.Hour, 0, 0, 0, time.UTC)
+
+	// Derive basedir as everything before .../dukas/...
+	clean := filepath.ToSlash(path)
+	idx := strings.LastIndex(clean, "/dukas/")
+	basedir := ""
+	if idx >= 0 {
+		basedir = filepath.FromSlash(clean[:idx])
+	}
+
+	df := &datafile{
+		key:     k,
+		symbol:  k.Instrument,
+		Time:    t,
+		basedir: basedir,
+	}
+	return df, nil
 }
 
 func (d *datafile) URL() string {
@@ -212,7 +252,7 @@ func (d *datafile) IsValid(ctx context.Context) error {
 	err = d.forEachTick(ctx, func(t Tick) error {
 		if t.Timemilli < hourStart || t.Timemilli >= hourEnd {
 			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s",
-				t, hourStart, hourEnd, path)
+				t.Timemilli, hourStart, hourEnd, path)
 		}
 		return nil
 	})
