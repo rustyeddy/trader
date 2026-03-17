@@ -336,6 +336,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 		Instrument: inst,
 		Start:      startTS,
 		Timeframe:  tf,
+		Scale:      1,
 	}
 	if nSlots > 0 {
 		cs.Candles = make([]market.Candle, nSlots)
