@@ -56,23 +56,25 @@ func newDatafile(sym string, t time.Time) *datafile {
 		symbol: sym,
 		Time:   t,
 	}
+	df.Key()
 	return df
 }
 
-func (d datafile) Key() Key {
-	d.key = Key{
-		Instrument: d.symbol,
-		Source:     "dukascopy",
-		Kind:       KindTick,
-		TF:         types.Ticks,
-		Year:       d.Time.Year(),
-		Month:      int(d.Time.Month()),
-		Day:        d.Time.Day(),
-		Hour:       d.Time.Hour(),
+func (d *datafile) Key() Key {
+	if d.key.Instrument == "" {
+		d.key = Key{
+			Instrument: d.symbol,
+			Source:     "dukascopy",
+			Kind:       KindTick,
+			TF:         types.Ticks,
+			Year:       d.Time.Year(),
+			Month:      int(d.Time.Month()),
+			Day:        d.Time.Day(),
+			Hour:       d.Time.Hour(),
+		}
 	}
 	return d.key
 }
-
 
 func (d *datafile) Instrument() string {
 	return d.symbol
@@ -389,7 +391,7 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 }
 
 func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
-	p := store.PathForAsset(d.key)
+	p := store.PathForAsset(d.Key())
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
 		return 0, fmt.Errorf("cannot parse datetime from path: %s", p)

@@ -63,13 +63,8 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
-func NewMonthlyCandleSet(
-	inst *Instrument,
-	tf types.Timestamp,
-	monthStart types.Timestamp,
-	scale int32,
-	source string,
-) (*CandleSet, error) {
+func NewMonthlyCandleSet(inst *Instrument, tf types.Timestamp, monthStart types.Timestamp,
+	scale int32, source string) (*CandleSet, error) {
 	if inst == nil {
 		return nil, fmt.Errorf("nil instrument")
 	}

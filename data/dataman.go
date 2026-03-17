@@ -31,7 +31,7 @@ func (dm *DataManager) Init() {
 	}
 }
 
-func (dm *DataManager) Sync(ctx context.Context) error {
+func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	log.Print("Building inventory...")
 	// 1. Build inventory
 	inv, err := dm.BuildInventory(ctx)
@@ -49,7 +49,6 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 	plan.Log()
 	var wg sync.WaitGroup
 
-	download := true
 	if download {
 		log.Print("Downloading...")
 		wg.Add(1)
@@ -59,7 +58,6 @@ func (dm *DataManager) Sync(ctx context.Context) error {
 		}
 	}
 
-	build := false
 	if build {
 		log.Println("buildng M1...")
 		wg.Add(1)

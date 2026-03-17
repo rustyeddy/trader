@@ -28,6 +28,7 @@ Then improve planning accuracy, build correctness, and performance.
 
 * TODO Cleanup backlog
 
+** TODO Move datafile.download to downloader.go
 ** TODO Choose and document the candle storage convention
 :PROPERTIES:
 :ID: trader-cleanup-storage-convention
@@ -59,7 +60,7 @@ Notes:
 Notes:
 - After this, all candle file access should go through the store layer.
 
-** TODO Remove =M1CSVWriter= and temporary candle writer helpers
+** DONE Remove =M1CSVWriter= and temporary candle writer helpers
 :PROPERTIES:
 :ID: trader-cleanup-remove-m1csvwriter
 :END:
@@ -72,7 +73,7 @@ Notes:
 - The temporary writer path has drifted away from real =market.CandleSet= handling.
 - Prefer using the existing store and CandleSet machinery.
 
-** TODO Fix =store.WriteCSV()= to use the canonical storage layout
+** DONE Fix =store.WriteCSV()= to use the canonical storage layout
 :PROPERTIES:
 :ID: trader-cleanup-fix-store-writecsv
 :END:
@@ -87,7 +88,7 @@ Notes:
 Notes:
 - This is a critical correctness item because the current write path appears inconsistent.
 
-** TODO Reconcile =dm.CandleRoot= vs =dm.Store.Basedir=
+** DONE Reconcile =dm.CandleRoot= vs =dm.Store.Basedir=
 :PROPERTIES:
 :ID: trader-cleanup-reconcile-roots
 :END:
@@ -95,7 +96,8 @@ Notes:
 - Prefer one canonical candle root
 - Remove one of the two if possible
 - If both remain temporarily, make one derive directly from the other
-- Audit all candle read/write code to ensure only the canonical root is used
+
+** DONE Audit all candle read/write code to ensure only the canonical root is used
 
 Notes:
 - Split ownership of candle roots will keep causing bugs and confusion.

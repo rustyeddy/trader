@@ -20,6 +20,8 @@ type Config struct {
 	Basedir         string `"json":basedir`
 	Dukasdir        string `"json":dukasdir`
 	CandleRoot      string `"json":candleroot`
+	Download        bool
+	Candles         bool
 }
 
 var (
@@ -31,6 +33,8 @@ var (
 		Basedir:    "../../tmp/",
 		Dukasdir:   "dukas/",
 		CandleRoot: "candles/",
+		Download:   false,
+		Candles:    false,
 	}
 )
 
@@ -39,6 +43,8 @@ func init() {
 	flag.StringVar(&config.End, "end", "2025-01-01T00:00:00Z", "end of range")
 	flag.StringVar(&config.Symbols, "symbols", "USDJPY,GBPUSD,EURUSD", "Instruments to download")
 	flag.StringVar(&config.Basedir, "basedir", "../../tmp/dukas", "Basedirectory")
+	flag.BoolVar(&config.Download, "download", false, "Download missing tick files")
+	flag.BoolVar(&config.Candles, "candles", false, "Download missing tick files")
 }
 
 func main() {
@@ -59,7 +65,7 @@ func main() {
 		Instruments: strings.Split(config.Symbols, ","),
 	}
 	dm.Init()
-	if err := dm.Sync(ctx); err != nil {
+	if err := dm.Sync(ctx, config.Download, config.Candles); err != nil {
 		log.Fatal(err)
 	}
 	elapsed := time.Since(start)

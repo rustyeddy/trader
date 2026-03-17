@@ -117,14 +117,13 @@ func (s *Store) scanFiles(inv *Inventory) error {
 		var key Key
 		switch {
 		case strings.HasSuffix(name, ".bi5"):
-			key, ok  = parseTickPath(path)
+			key, ok = parseTickPath(path)
 			if !ok {
 				return nil
 			}
 
 			start := key.Time()
 			end := start.Add(time.Hour)
-
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
@@ -133,6 +132,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
 			if !ok {
+				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
 			rng = types.YearRange(key.Year)
@@ -178,9 +178,9 @@ func parseTickPath(path string) (Key, bool) {
 
 	k = Key{
 		Instrument: normalizeInstrument(inst),
-		Source: normalizeSource("dukascopy"),
-		Kind: KindTick,
-		TF: types.Ticks,
+		Source:     normalizeSource("dukascopy"),
+		Kind:       KindTick,
+		TF:         types.Ticks,
 	}
 
 	year, err := strconv.Atoi(yearStr)
@@ -188,7 +188,7 @@ func parseTickPath(path string) (Key, bool) {
 		return k, false
 	}
 	k.Year = year
-	
+
 	month, err := strconv.Atoi(monthStr)
 	if err != nil {
 		return k, false
@@ -231,16 +231,16 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	n := len(parts)
 	k = Key{
 		Instrument: normalizeInstrument(parts[n-3]),
-		Source: normalizeSource(parts[n-4]),
+		Source:     normalizeSource(parts[n-4]),
 	}
 
 	tfStr := strings.ToUpper(parts[n-2])
 	switch tfStr {
-	case "M1":
+	case "M1", "m1": // XXX normalize these!!
 		k.TF = types.M1
-	case "H1":
+	case "H1", "h1":
 		k.TF = types.H1
-	case "D1":
+	case "D1", "d1":
 		k.TF = types.D1
 	default:
 		return k, false
@@ -287,6 +287,119 @@ func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 
 	_, err = fmt.Fprintln(w, "time;O;H;L;C;AvgSpread;MaxSpread;Ticks;Valid")
 	return err
+}
+
+func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
+	path := store.PathForAsset(key) // adjust if your path method is named differently
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open csv %q: %w", path, err)
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+
+	cs = &market.CandleSet{}
+	rowNum := 0
+	for {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read csv %q: %w", path, err)
+		}
+		rowNum++
+
+		if len(rec) == 0 {
+			continue
+		}
+		if len(rec) == 1 && strings.TrimSpace(rec[0]) == "" {
+			continue
+		}
+
+		// skip header
+		if rowNum == 1 && strings.EqualFold(strings.TrimSpace(rec[0]), "timestamp") {
+			continue
+		}
+
+		if len(rec) < 9 {
+			return nil, fmt.Errorf("csv %q row %d: expected 9 fields, got %d", path, rowNum, len(rec))
+		}
+
+		ts, err := strconv.ParseInt(strings.TrimSpace(rec[0]), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, err)
+		}
+
+		openv, err := strconv.ParseFloat(strings.TrimSpace(rec[1]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
+		}
+
+		highv, err := strconv.ParseFloat(strings.TrimSpace(rec[2]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
+		}
+
+		lowv, err := strconv.ParseFloat(strings.TrimSpace(rec[3]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
+		}
+
+		closev, err := strconv.ParseFloat(strings.TrimSpace(rec[4]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
+		}
+
+		avgSpread, err := strconv.ParseFloat(strings.TrimSpace(rec[5]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
+		}
+
+		maxSpread, err := strconv.ParseFloat(strings.TrimSpace(rec[6]), 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
+		}
+
+		ticks, err := strconv.ParseInt(strings.TrimSpace(rec[7]), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse ticks: %w", path, rowNum, err)
+		}
+
+		valid, err := strconv.ParseBool(strings.TrimSpace(rec[8]))
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse valid: %w", path, rowNum, err)
+		}
+
+		c := market.Candle{
+			OHLC: market.OHLC{
+				O: openv,
+				H: highv,
+				L: lowv,
+				C: closev,
+			},
+			AvgSpread: avgSpread,
+			MaxSpread: maxSpread,
+			Ticks:     int(ticks),
+			Valid:     valid,
+		}
+
+		// adjust to match your CandleSet structure
+		cs.Candles = append(cs.Candles, c)
+	}
+
+	return cs, nil
+}
+
+func looksLikeHeader(rec []string) bool {
+	if len(rec) == 0 {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(rec[0]))
+	return s == "timestamp" || s == "time" || s == "date"
 }
 
 func (store *Store) WriteCSV(cs *market.CandleSet) error {
