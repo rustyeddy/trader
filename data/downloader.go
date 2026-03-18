@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 type downloader struct {
@@ -20,15 +21,43 @@ func NewDownloader() *downloader {
 }
 
 // TODO move df.download() to here
+func (dl *downloader) downloadOld(ctx context.Context, key Key) error {
+
+	// if err := df.download(ctx, dl.Client); err != nil {
+	// 	df.err = err
+	// 	return fmt.Errorf("download %s: %w", store.PathForAsset(df.key), err)
+	// }
+
+	return nil
+}
+
 func (dl *downloader) download(ctx context.Context, key Key) error {
 	df := newDatafile(key.Instrument, key.Time())
 
-	if err := df.download(ctx, dl.Client); err != nil {
-		df.err = err
-		return fmt.Errorf("download %s: %w", store.PathForAsset(df.key), err)
+	// Correctness-first timeout
+	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	url := df.URL()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
 	}
 
-	return nil
+	// resp, err := http.DefaultClient.Do(req)
+	resp, err := dl.Client.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: http %d", url, resp.StatusCode)
+	}
+
+	// TODO 1. Log error, 2. Makesure inventory is updated
+	err = store.SaveFile(key, resp.Body)
+	return err
 }
 
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed

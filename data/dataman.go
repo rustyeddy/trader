@@ -91,7 +91,6 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) (err erro
 
 	plan.Log()
 	var wg sync.WaitGroup
-
 	if download {
 		log.Print("Downloading...")
 		wg.Add(1)

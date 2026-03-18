@@ -277,7 +277,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			return nil
 		}
 
-		asset := Asset{
+		asset := &Asset{
 			Key:        key,
 			Path:       path,
 			Range:      rng,
@@ -437,15 +437,6 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	return cs, nil
 }
 
-// parsePrice parses a CSV field as a raw types.Price (int32) value.
-func parsePrice(s string) (types.Price, error) {
-	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return types.Price(v), nil
-}
-
 func looksLikeHeader(rec []string) bool {
 	if len(rec) == 0 {
 		return false
@@ -537,101 +528,84 @@ func (s *Store) IsUsableTickFile(k Key) bool {
 	return true
 }
 
-// // ListAvailableYears returns sorted years for which files exist for instrument+tf.
-// // It ignores "-all.csv".
-// func (s Store) ListAvailableYears1(instrument, tf string) ([]int, error) {
-// 	dir := s.baseScanDir()
-// 	instrument = normalizeInstrument(instrument)
-// 	tf = normalizeTF(tf)
+func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
+	dst := key.Path()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+	}
 
-// 	re := regexp.MustCompile(fmt.Sprintf(`^%s-%s-(\d{4})\.csv$`,
-// 		regexp.QuoteMeta(instrument),
-// 		regexp.QuoteMeta(tf),
-// 	))
+	tmp := dst + ".part"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
 
-// 	years := make([]int, 0, 16)
-// 	seen := map[int]struct{}{}
+	// Important: flush + close BEFORE rename/stat
+	n, copyErr := io.Copy(f, r)
+	syncErr := f.Sync()
+	closeErr := f.Close()
 
-// 	err := fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
-// 		if err != nil {
-// 			return err
-// 		}
-// 		if d.IsDir() {
-// 			return nil
-// 		}
-// 		base := filepath.Base(path)
-// 		m := re.FindStringSubmatch(base)
-// 		if len(m) != 2 {
-// 			return nil
-// 		}
-// 		y, err := strconv.Atoi(m[1])
-// 		if err != nil {
-// 			return nil
-// 		}
-// 		if _, ok := seen[y]; !ok {
-// 			seen[y] = struct{}{}
-// 			years = append(years, y)
-// 		}
-// 		return nil
-// 	})
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	if copyErr != nil || syncErr != nil || closeErr != nil {
+		_ = os.Remove(tmp)
+		if copyErr != nil {
+			return fmt.Errorf("write %s: wrote %d bytes: %w", tmp, n, copyErr)
+		}
+		if syncErr != nil {
+			return fmt.Errorf("sync %s: wrote %d bytes: %w", tmp, n, syncErr)
+		}
+		return fmt.Errorf("close %s: wrote %d bytes: %w", tmp, n, closeErr)
+	}
 
-// 	sort.Ints(years)
-// 	return years, nil
-// }
+	// Atomic move into place
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
+	}
 
-// // LatestCompleteYear returns the latest year that *looks complete* for the given timeframe,
-// // based on current UTC time and the presence of the year file.
-// //
-// // Rules:
-// // - For current year: only considered complete if "now" is after Jan 1 of next year.
-// // - For past years: if file exists, it's complete.
-// // - For tf=D1 and you store "-all.csv", use year=0 and this function isn't needed.
-// func (s Store) LatestCompleteYear1(instrument, tf string) (int, error) {
-// 	years, err := s.ListAvailableYears1(instrument, tf)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	if len(years) == 0 {
-// 		return 0, fmt.Errorf("no candle files found for %s %s", instrument, tf)
-// 	}
+	// Trust the filesystem for bytes/modtime
+	info, err := os.Stat(dst)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", dst, err)
+	}
 
-// 	now := time.Now().UTC()
-// 	currentYear := now.Year()
+	var a *Asset
+	var ok bool
+	if a, ok = inv.Get(key); !ok {
+		a = &Asset{
+			Key:    key,
+			Path:   dst,
+			Exists: true,
+		}
+	}
+	a.Complete = info.Size() > 0 // TODO FIX THIS - minimal heuristic only
+	a.Size = info.Size()
+	a.UpdatedAt = info.ModTime()
+	a.Size = info.Size()
 
-// 	// walk backwards
-// 	for i := len(years) - 1; i >= 0; i-- {
-// 		y := years[i]
-// 		for m := 0; m < 12; m++ {
+	start := key.Time()
+	end := start.Add(time.Hour)
+	a.Range = types.NewTimeRange(types.FromTime(start), types.FromTime(end))
+	a.Descriptor = fmt.Sprintf(
+		"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
+		key.Year, key.Month, key.Day, key.Hour)
 
-// 			ak := Key{
-// 				Instrument: normalizeInstrument(instrument),
-// 				Kind:       KindCandle,
-// 				TF:         types.TF(tf),
-// 				Year:       y,
-// 				Month:      m,
-// 			}
-// 			ok, err := s.Exists(ak)
-// 			if err != nil || !ok {
-// 				continue
-// 			}
-// 		}
-// 		// Only mark current year complete if we've actually passed it.
-// 		if y == currentYear {
-// 			continue
-// 		}
-// 		// If someone has future years (unlikely), ignore them.
-// 		if y > currentYear {
-// 			continue
-// 		}
-// 		return y, nil
-// 	}
+	inv.Put(a)
 
-// 	// If only current year exists, it's not "complete" yet.
-// 	return 0, fmt.Errorf("no complete year available yet for %s %s (only current year present)", instrument, tf)
-// }
+	start = a.Range.Start.Time()
+	fmt.Printf("%s %d-%02d-%02d:%02d... ",
+		a.Key.Instrument,
+		start.Year(),
+		start.Month(),
+		start.Day(),
+		start.Hour())
+	fmt.Printf("%6d bytes\n", a.Size)
+
+	// Optional: sanity-check bytes against what we copied
+	if a.Size != n || n == 0 {
+		// fmt.Printf("Failed to download: %s\n", d.URL())
+	}
+	return nil
+}
 
 func (s Store) baseScanDir() string {
 	return s.basedir
@@ -648,6 +622,17 @@ func formatNumber(price types.Price, scale int32) string {
 	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
+// parsePrice parses a CSV field as a raw types.Price (int32) value.
+// TODO MOVE TO Type
+func parsePrice(s string) (types.Price, error) {
+	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return types.Price(v), nil
+}
+
+// TODO move to Types
 func normalizeTF(tf string) string {
 	tf = strings.TrimSpace(strings.ToUpper(tf))
 	// allow "60" etc if you ever pass seconds
@@ -662,6 +647,7 @@ func normalizeTF(tf string) string {
 	return tf
 }
 
+// Move to Market.
 func normalizeInstrument(sym string) string {
 	sym = strings.TrimSpace(sym)
 	sym = strings.ReplaceAll(sym, "_", "")

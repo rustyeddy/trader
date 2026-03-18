@@ -27,7 +27,6 @@ type datafile struct {
 	time.Time
 	err error
 
-	basedir     string
 	bytes       int64
 	modtime     time.Time
 	weekend     bool
@@ -104,7 +103,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	}
 
 	// Correctness-first timeout
-	reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, d.URL(), nil)
@@ -123,60 +122,6 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 		return fmt.Errorf("GET %s: http %d", d.URL(), resp.StatusCode)
 	}
 
-	dst := k.Path()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
-	}
-
-	tmp := dst + ".part"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", tmp, err)
-	}
-
-	// Important: flush + close BEFORE rename/stat
-	n, copyErr := io.Copy(f, resp.Body)
-	syncErr := f.Sync()
-	closeErr := f.Close()
-
-	if copyErr != nil || syncErr != nil || closeErr != nil {
-		_ = os.Remove(tmp)
-		if copyErr != nil {
-			return fmt.Errorf("write %s: wrote %d bytes: %w", tmp, n, copyErr)
-		}
-		if syncErr != nil {
-			return fmt.Errorf("sync %s: wrote %d bytes: %w", tmp, n, syncErr)
-		}
-		return fmt.Errorf("close %s: wrote %d bytes: %w", tmp, n, closeErr)
-	}
-
-	// Atomic move into place
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
-	}
-
-	// Trust the filesystem for bytes/modtime
-	info, err := os.Stat(dst)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", dst, err)
-	}
-
-	d.bytes = info.Size()
-	d.modtime = info.ModTime()
-
-	fmt.Printf("%s %d-%02d-%02d:%02d... ",
-		d.symbol,
-		d.Time.Year(),
-		d.Time.Month(),
-		d.Time.Day(),
-		d.Time.Hour())
-	fmt.Printf("%6d bytes\n", n)
-
-	// Optional: sanity-check bytes against what we copied
-	if d.bytes != n || n == 0 {
-		// fmt.Printf("Failed to download: %s\n", d.URL())
-	}
 	return nil
 }
 

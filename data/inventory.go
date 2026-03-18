@@ -182,23 +182,23 @@ func (a Asset) Clone() Asset {
 }
 
 type Inventory struct {
-	assets map[Key]Asset
+	assets map[Key]*Asset
 }
 
 func NewInventory() *Inventory {
 	return &Inventory{
-		assets: make(map[Key]Asset),
+		assets: make(map[Key]*Asset),
 	}
 }
 
-func (inv *Inventory) Put(a Asset) {
+func (inv *Inventory) Put(a *Asset) {
 	if inv.assets == nil {
-		inv.assets = make(map[Key]Asset)
+		inv.assets = make(map[Key]*Asset)
 	}
 	inv.assets[a.Key] = a
 }
 
-func (inv *Inventory) Get(key Key) (Asset, bool) {
+func (inv *Inventory) Get(key Key) (*Asset, bool) {
 	a, ok := inv.assets[key]
 	return a, ok
 }
