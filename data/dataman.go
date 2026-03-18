@@ -250,13 +250,9 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 	return out
 }
 
-func (dm *DataManager) PlanM1Builds(
-	ctx context.Context,
-	sym string,
-	r types.TimeRange,
-	inv *Inventory,
-	ws *WorkState,
-) ([]BuildTask, error) {
+func (dm *DataManager) PlanM1Builds(ctx context.Context, sym string, r types.TimeRange,
+	inv *Inventory, ws *WorkState) ([]BuildTask, error) {
+
 	var tasks []BuildTask
 
 	for _, day := range eachUTCDateInRange(r) {
@@ -273,7 +269,6 @@ func (dm *DataManager) PlanM1Builds(
 			TF:         types.M1,
 			Year:       day.Year(),
 			Month:      int(day.Month()),
-			Day:        day.Day(),
 		}
 
 		if ws.IsBuildQueuedOrActive(target) {
@@ -282,6 +277,7 @@ func (dm *DataManager) PlanM1Builds(
 
 		inputs, ok := requiredTickHoursForDay(sym, day, inv)
 		if !ok {
+			log.Printf("Incomplete day %s - %s", sym, day)
 			continue // not fully buildable yet
 		}
 

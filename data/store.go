@@ -48,28 +48,102 @@ func (s *Store) PathForAsset(k Key) string {
 }
 
 func (s *Store) pathForMonthlyCandle(k Key) string {
+	source := normalizeSource(k.Source)
+	if source == "" {
+		source = "unknown"
+	}
 	instrument := normalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
-	filename := fmt.Sprintf("%s-%s-%04d-%02d.csv",
+	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
 		instrument,
-		tf,
 		k.Year,
 		k.Month,
+		tf,
 	)
 
 	return filepath.Join(
 		s.Basedir,
+		source,
 		instrument,
-		tf,
 		fmt.Sprintf("%04d", k.Year),
-		filename,
-	)
+		fmt.Sprintf("%02d", k.Month),
+		tf,
+		filename)
+}
+
+func parseCandlePath(path string) (k Key, ok bool) {
+	p := filepath.ToSlash(path)
+	parts := strings.Split(p, "/")
+	if len(parts) < 6 {
+		return k, false
+	}
+
+	//         n-7+       n-6        n-5       n-4    n-3    n-2      n-1
+	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<tf>/<filename>.csv
+	n := len(parts)
+	k = Key{
+		Instrument: normalizeInstrument(parts[n-5]),
+		Source:     normalizeSource(parts[n-6]),
+		Kind:       KindCandle,
+	}
+
+	year, err := strconv.Atoi(parts[n-4])
+	if err != nil {
+		return k, false
+	}
+	month, err := strconv.Atoi(parts[n-3])
+	if err != nil || month < 1 || month > 12 {
+		return k, false
+	}
+
+	tfStr := strings.ToUpper(parts[n-2])
+	switch tfStr {
+	case "M1", "m1": // XXX normalize these!!
+		k.TF = types.M1
+	case "H1", "h1":
+		k.TF = types.H1
+	case "D1", "d1":
+		k.TF = types.D1
+	default:
+		return k, false
+	}
+
+	fname := strings.ToLower(strings.TrimSuffix(parts[n-1], ".csv"))
+
+	//                0    1    2  3
+	// <filename>: iiijjj-yyyy-mm-tf.csv
+	//
+	// e.g. EURUSD-2026-03-m1.csv
+	nameParts := strings.Split(fname, "-")
+	if len(nameParts) != 4 {
+		return k, false
+	}
+
+	fileInst := normalizeInstrument(nameParts[0])
+	fileYear, err := strconv.Atoi(nameParts[1])
+	if err != nil {
+		return k, false
+	}
+
+	fileMonth, err := strconv.Atoi(nameParts[2])
+	if err != nil || fileMonth < 1 || fileMonth > 12 {
+		return k, false
+	}
+	fileTF := strings.ToLower(nameParts[3])
+	if fileInst != k.Instrument || fileYear != year || fileMonth != month || fileTF != tfStr {
+		return k, false
+	}
+
+	k.Month = month
+	k.Year = year
+	return k, true
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
 	instrument := normalizeInstrument(k.Instrument)
 
+	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
 	return filepath.Join(
 		s.Basedir,
 		"dukascopy",
@@ -79,6 +153,70 @@ func (s *Store) pathForHourlyTick(k Key) string {
 		fmt.Sprintf("%02d", k.Day),
 		fmt.Sprintf("%02dh_ticks.bi5", k.Hour),
 	)
+}
+
+func parseTickPath(path string) (Key, bool) {
+	var k Key
+
+	clean := filepath.ToSlash(path)
+
+	// Example expected tail:
+	//   n-5   -4  -3 -2    -1
+	// EURUSD/2025/01/02/13h_ticks.bi5
+	parts := strings.Split(clean, "/")
+	if len(parts) < 5 {
+		return k, false
+	}
+
+	n := len(parts)
+	file := parts[n-1]
+	dayStr := parts[n-2]
+	monthStr := parts[n-3]
+	yearStr := parts[n-4]
+	inst := parts[n-5]
+
+	k = Key{
+		Instrument: normalizeInstrument(inst),
+		Source:     normalizeSource("dukascopy"),
+		Kind:       KindTick,
+		TF:         types.Ticks,
+	}
+
+	year, err := strconv.Atoi(yearStr)
+	if err != nil {
+		return k, false
+	}
+	k.Year = year
+
+	month, err := strconv.Atoi(monthStr)
+	if err != nil {
+		return k, false
+	}
+	k.Month = month
+
+	day, err := strconv.Atoi(dayStr)
+	if err != nil {
+		return k, false
+	}
+	k.Day = day
+
+	// Dukascopy commonly uses "13h_ticks.bi5"
+	base := strings.ToLower(file)
+	if !strings.HasSuffix(base, "h_ticks.bi5") {
+		return k, false
+	}
+
+	hourStr := strings.TrimSuffix(base, "h_ticks.bi5")
+	hour, err := strconv.Atoi(hourStr)
+	if err != nil {
+		return k, false
+	}
+	k.Hour = hour
+
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
+		return k, false
+	}
+	return k, true
 }
 
 func (s *Store) RelDir(key Key) string {
@@ -155,118 +293,6 @@ func (s *Store) scanFiles(inv *Inventory) error {
 		inv.Put(asset)
 		return nil
 	})
-}
-
-func parseTickPath(path string) (Key, bool) {
-	var k Key
-
-	clean := filepath.ToSlash(path)
-
-	// Example expected tail:
-	// EURUSD/2025/01/02/13h_ticks.bi5
-	parts := strings.Split(clean, "/")
-	if len(parts) < 5 {
-		return k, false
-	}
-
-	n := len(parts)
-	file := parts[n-1]
-	dayStr := parts[n-2]
-	monthStr := parts[n-3]
-	yearStr := parts[n-4]
-	inst := parts[n-5]
-
-	k = Key{
-		Instrument: normalizeInstrument(inst),
-		Source:     normalizeSource("dukascopy"),
-		Kind:       KindTick,
-		TF:         types.Ticks,
-	}
-
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		return k, false
-	}
-	k.Year = year
-
-	month, err := strconv.Atoi(monthStr)
-	if err != nil {
-		return k, false
-	}
-	k.Month = month
-
-	day, err := strconv.Atoi(dayStr)
-	if err != nil {
-		return k, false
-	}
-	k.Day = day
-
-	// Dukascopy commonly uses "13h_ticks.bi5"
-	base := strings.ToLower(file)
-	if !strings.HasSuffix(base, "h_ticks.bi5") {
-		return k, false
-	}
-
-	hourStr := strings.TrimSuffix(base, "h_ticks.bi5")
-	hour, err := strconv.Atoi(hourStr)
-	if err != nil {
-		return k, false
-	}
-	k.Hour = hour
-
-	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
-		return k, false
-	}
-	return k, true
-}
-
-func parseCandlePath(path string) (k Key, ok bool) {
-	p := filepath.ToSlash(path)
-	parts := strings.Split(p, "/")
-	if len(parts) < 4 {
-		return k, false
-	}
-
-	// Expect .../<source>/<instrument>/<tf>/<file>.csv
-	n := len(parts)
-	k = Key{
-		Instrument: normalizeInstrument(parts[n-3]),
-		Source:     normalizeSource(parts[n-4]),
-	}
-
-	tfStr := strings.ToUpper(parts[n-2])
-	switch tfStr {
-	case "M1", "m1": // XXX normalize these!!
-		k.TF = types.M1
-	case "H1", "h1":
-		k.TF = types.H1
-	case "D1", "d1":
-		k.TF = types.D1
-	default:
-		return k, false
-	}
-
-	base := strings.ToLower(strings.TrimSuffix(parts[n-1], ".csv"))
-
-	// e.g. eurusd-m1-2026-03.csv
-	nameParts := strings.Split(base, "-")
-	if len(nameParts) < 4 {
-		return k, false
-	}
-
-	y, err := strconv.Atoi(nameParts[len(nameParts)-1])
-	if err != nil {
-		return k, false
-	}
-	k.Year = y
-
-	println("TODO ENSURE MONTH PARSING IS CORRECT")
-	m, err := strconv.Atoi(nameParts[len(nameParts)])
-	if err != nil {
-		return k, false
-	}
-	k.Month = m
-	return k, true
 }
 
 func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
@@ -453,6 +479,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
 		Instrument: normalizeInstrument(cs.Instrument.Name),
+		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),

@@ -42,6 +42,7 @@ func keyForSet(cs *market.CandleSet) Key {
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	return Key{
 		Instrument: cs.Instrument.Name,
+		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),
@@ -93,6 +94,7 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 	s := newTestStore(t)
 	key := Key{
 		Instrument: "EUR_USD",
+		Source:     "test",
 		Kind:       KindCandle,
 		TF:         types.M1,
 		Year:       2026,
@@ -134,6 +136,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 
 		_, err := s.ReadCSV(Key{
 			Instrument: "EURUSD",
+			Source:     "test",
 			Kind:       KindTick,
 			TF:         types.Ticks,
 			Year:       2026,
@@ -150,6 +153,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 
 		_, err := s.ReadCSV(Key{
 			Instrument: "EURUSD",
+			Source:     "test",
 			Kind:       KindCandle,
 			TF:         types.M1,
 			Year:       2026,
@@ -161,7 +165,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 	t.Run("rejects short row", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t)
-		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+		key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
 		path := s.PathForAsset(key)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
