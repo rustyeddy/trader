@@ -529,6 +529,14 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	return bw.Flush()
 }
 
+func (s *Store) IsUsableTickFile(k Key) bool {
+	a, ok := inv.Get(k)
+	if !ok || !a.Exists || !a.Complete || a.Size <= 0 {
+		return false
+	}
+	return true
+}
+
 // // ListAvailableYears returns sorted years for which files exist for instrument+tf.
 // // It ignores "-all.csv".
 // func (s Store) ListAvailableYears1(instrument, tf string) ([]int, error) {

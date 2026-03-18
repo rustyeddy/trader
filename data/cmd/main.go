@@ -40,7 +40,7 @@ var (
 func init() {
 	flag.StringVar(&config.Start, "start", "2025-01-01T00:00:00Z", "start of range")
 	flag.StringVar(&config.End, "end", "2025-01-01T00:00:00Z", "end of range")
-	flag.StringVar(&config.Symbols, "symbols", "USDJPY,GBPUSD,EURUSD", "Instruments to download")
+	flag.StringVar(&config.Symbols, "symbols", "USDCHF", "Instruments to download")
 	flag.BoolVar(&config.Download, "download", false, "Download missing tick files")
 	flag.BoolVar(&config.Candles, "candles", false, "Download missing tick files")
 }

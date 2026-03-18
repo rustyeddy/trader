@@ -74,10 +74,10 @@ func (dm *DataManager) Init() {
 	}
 }
 
-func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
+func (dm *DataManager) Sync(ctx context.Context, download, build bool) (err error) {
 	log.Print("Building inventory...")
 	// 1. Build inventory
-	inv, err := dm.BuildInventory(ctx)
+	inv, err = dm.BuildInventory(ctx)
 	if err != nil {
 		return fmt.Errorf("build inventory: %w", err)
 	}
@@ -243,12 +243,11 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 			Hour:       t.Hour(),
 		}
 
-		if ws.IsDownloadQueuedOrActive(key) {
+		if ok := store.IsUsableTickFile(key); ok {
 			continue
 		}
 
-		asset, ok := inv.Get(key)
-		if ok && asset.Exists && asset.Complete && asset.Size > 0 {
+		if ws.IsDownloadQueuedOrActive(key) {
 			continue
 		}
 		out = append(out, key)
@@ -447,6 +446,10 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context, plan *Plan) error {
 		defer close(q)
 		slices.Reverse(plan.Download)
 		for _, key := range plan.Download {
+
+			if ok := store.IsUsableTickFile(key); ok {
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return

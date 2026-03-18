@@ -99,9 +99,8 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 
 	// Skip if present.
 	// TODO before the file is written we need to make sure it is a valid file.
-	ok, err := store.Exists(k)
-	if ok {
-		return nil
+	if ok := store.IsUsableTickFile(k); ok {
+		return fmt.Errorf("file aready exists %s", k.Path())
 	}
 
 	// Correctness-first timeout
@@ -169,7 +168,7 @@ func (d *datafile) download(ctx context.Context, client *http.Client) error {
 	fmt.Printf("%s %d-%02d-%02d:%02d... ",
 		d.symbol,
 		d.Time.Year(),
-		d.Time.Month()-1,
+		d.Time.Month(),
 		d.Time.Day(),
 		d.Time.Hour())
 	fmt.Printf("%6d bytes\n", n)
