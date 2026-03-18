@@ -27,6 +27,8 @@ type DataManager struct {
 	start time.Time
 	end   time.Time
 	data  map[string]*dataset
+
+	incomplete int // incomplete days
 }
 
 // dataset holds per-instrument data summary used by buildDatasets.
@@ -108,6 +110,7 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 		if err := dm.BuildM1(ctx, plan); err != nil {
 			log.Printf("build M1: %v", err)
 		}
+		fmt.Printf("incomplete days: %d\n", dm.incomplete)
 	}
 
 	wg.Wait()
@@ -151,64 +154,68 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		}
 		return a.Target.before(b.Target)
 	})
-	slices.Reverse(plan.BuildM1)
 
-	var cur *market.CandleSet
 	hours := 0
 
-	flush := func() error {
-		if cur == nil {
-			return nil
-		}
-		return store.WriteCSV(cur)
-	}
-
-	for _, key := range plan.BuildM1 {
+	for _, task := range plan.BuildM1 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		df := newDatafile(key.Target.Instrument, key.Target.Time())
-		hourSet, err := df.buildM1(ctx)
-		if err != nil {
-			return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(df.key), err)
-		}
-		if hourSet == nil {
+		if len(task.Inputs) == 0 {
 			continue
 		}
-		hours++
 
-		// TODO create an index for the instrument, time frame and range
-		monthStart := market.FloorToMonthUTC(hourSet.Start)
-		// Do a better job of ensuring we have not gotten out of order
-		if cur == nil ||
-			cur.Instrument.Name != hourSet.Instrument.Name ||
-			cur.Start != monthStart {
+		sort.Slice(task.Inputs, func(i, j int) bool {
+			return task.Inputs[i].before(task.Inputs[j])
+		})
 
-			if err := flush(); err != nil {
-				return err
+		monthStart := time.Date(
+			task.Target.Year,
+			time.Month(task.Target.Month),
+			1,
+			0, 0, 0, 0,
+			time.UTC,
+		)
+
+		cur, err := market.NewMonthlyCandleSet(
+			normalizeInstrument(task.Target.Instrument),
+			types.M1,
+			types.FromTime(monthStart),
+			types.PriceScale, // keep your current candle price scale expectation
+			"candles",
+		)
+		if err != nil {
+			return fmt.Errorf("new monthly candle set for %v: %w", task.Target, err)
+		}
+
+		for _, in := range task.Inputs {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
 			}
 
-			cur, err = market.NewMonthlyCandleSet(
-				hourSet.Instrument,
-				hourSet.Timeframe,
-				monthStart,
-				hourSet.Scale,
-				hourSet.Source,
-			)
+			df := newDatafile(in.Instrument, in.Time())
+			hourSet, err := df.buildM1(ctx)
 			if err != nil {
-				return err
+				return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(in), err)
 			}
+			if hourSet == nil {
+				continue
+			}
+
+			if err := cur.Merge(hourSet); err != nil {
+				return fmt.Errorf("merge hour set into month %v failed: %w", task.Target, err)
+			}
+			hours++
 		}
 
-		if err := cur.Merge(hourSet); err != nil {
-			return fmt.Errorf("merge hour set failed: %w", err)
+		if err := store.WriteCSV(cur); err != nil {
+			return fmt.Errorf("write monthly M1 csv for %v: %w", task.Target, err)
 		}
-	}
-	if err := flush(); err != nil {
-		return err
 	}
 
 	fmt.Printf("Hours processed: %d\n", hours)
@@ -250,10 +257,21 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 	return out
 }
 
-func (dm *DataManager) PlanM1Builds(ctx context.Context, sym string, r types.TimeRange,
-	inv *Inventory, ws *WorkState) ([]BuildTask, error) {
+func (dm *DataManager) PlanM1Builds(
+	ctx context.Context,
+	sym string,
+	r types.TimeRange,
+	inv *Inventory,
+	ws *WorkState,
+) ([]BuildTask, error) {
+	type monthAccum struct {
+		target Key
+		inputs []Key
+		start  time.Time
+		end    time.Time
+	}
 
-	var tasks []BuildTask
+	months := make(map[Key]*monthAccum)
 
 	for _, day := range eachUTCDateInRange(r) {
 		select {
@@ -263,12 +281,14 @@ func (dm *DataManager) PlanM1Builds(ctx context.Context, sym string, r types.Tim
 		}
 
 		target := Key{
-			Source:     "derived",
-			Instrument: sym,
+			Source:     "candles",
+			Instrument: normalizeInstrument(sym),
 			Kind:       KindCandle,
 			TF:         types.M1,
 			Year:       day.Year(),
 			Month:      int(day.Month()),
+			Day:        0,
+			Hour:       0,
 		}
 
 		if ws.IsBuildQueuedOrActive(target) {
@@ -277,27 +297,71 @@ func (dm *DataManager) PlanM1Builds(ctx context.Context, sym string, r types.Tim
 
 		inputs, ok := requiredTickHoursForDay(sym, day, inv)
 		if !ok {
-			log.Printf("Incomplete day %s - %s", sym, day)
-			continue // not fully buildable yet
+			continue // this day is not fully buildable yet
 		}
-
-		if !m1TargetNeedsBuild(target, inputs, inv) {
+		if len(inputs) == 0 {
 			continue
 		}
 
-		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
-		dayEnd := dayStart.Add(24 * time.Hour)
+		acc, exists := months[target]
+		if !exists {
+			monthStart := time.Date(day.Year(), day.Month(), 1, 0, 0, 0, 0, time.UTC)
+			monthEnd := monthStart.AddDate(0, 1, 0)
+
+			acc = &monthAccum{
+				target: target,
+				start:  monthStart,
+				end:    monthEnd,
+			}
+			months[target] = acc
+		}
+
+		acc.inputs = append(acc.inputs, inputs...)
+	}
+
+	if len(months) == 0 {
+		return nil, nil
+	}
+
+	var tasks []BuildTask
+	for _, acc := range months {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		if len(acc.inputs) == 0 {
+			continue
+		}
+
+		sort.Slice(acc.inputs, func(i, j int) bool {
+			return acc.inputs[i].before(acc.inputs[j])
+		})
+
+		if !m1TargetNeedsBuild(acc.target, acc.inputs, inv) {
+			continue
+		}
 
 		tasks = append(tasks, BuildTask{
-			Target: target,
+			Target: acc.target,
 			Range: types.NewTimeRange(
-				types.FromTime(dayStart),
-				types.FromTime(dayEnd),
+				types.FromTime(acc.start),
+				types.FromTime(acc.end),
 			),
-			Inputs: inputs,
+			Inputs: acc.inputs,
 			Kind:   BuildKindM1FromTicks,
 		})
 	}
+
+	sort.Slice(tasks, func(i, j int) bool {
+		a, b := tasks[i], tasks[j]
+
+		if a.Target.Instrument != b.Target.Instrument {
+			return a.Target.Instrument < b.Target.Instrument
+		}
+		return a.Target.before(b.Target)
+	})
 
 	return tasks, nil
 }

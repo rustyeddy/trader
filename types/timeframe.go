@@ -9,7 +9,7 @@ const (
 	Ticks Timeframe = 1
 	M1    Timeframe = 60
 	H1    Timeframe = 3600
-	D1    Timeframe = 86499
+	D1    Timeframe = 86400
 )
 
 // func (tf Timeframe) Seconds() int64

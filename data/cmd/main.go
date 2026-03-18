@@ -30,7 +30,6 @@ var (
 		Start:      "",
 		End:        "",
 		Timeframe:  types.D1,
-		Basedir:    "../../tmp/",
 		Dukasdir:   "dukas/",
 		CandleRoot: "candles/",
 		Download:   false,
@@ -42,19 +41,13 @@ func init() {
 	flag.StringVar(&config.Start, "start", "2025-01-01T00:00:00Z", "start of range")
 	flag.StringVar(&config.End, "end", "2025-01-01T00:00:00Z", "end of range")
 	flag.StringVar(&config.Symbols, "symbols", "USDJPY,GBPUSD,EURUSD", "Instruments to download")
-	flag.StringVar(&config.Basedir, "basedir", "../../tmp/dukas", "Basedirectory")
 	flag.BoolVar(&config.Download, "download", false, "Download missing tick files")
 	flag.BoolVar(&config.Candles, "candles", false, "Download missing tick files")
 }
 
 func main() {
 	start := time.Now()
-
 	flag.Parse()
-	// if len(os.Args) < 2 {
-	// 	fmt.Println("Please give me a command (validate|build)")
-	// 	os.Exit(1)
-	// }
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()

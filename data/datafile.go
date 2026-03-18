@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -79,45 +78,6 @@ func (d *datafile) Key() Key {
 
 func (d *datafile) Instrument() string {
 	return d.symbol
-}
-
-// Path returns the file system path for this tick datafile.
-func (d *datafile) Path() string {
-	return filepath.Join(
-		d.basedir,
-		"dukas",
-		d.symbol,
-		fmt.Sprintf("%04d", d.Time.Year()),
-		fmt.Sprintf("%02d", int(d.Time.Month())),
-		fmt.Sprintf("%02d", d.Time.Day()),
-		fmt.Sprintf("%02dh_ticks.bi5", d.Time.Hour()),
-	)
-}
-
-// ParseDatafilePath parses a Dukascopy tick file path into a datafile.
-// Expected format: .../dukas/<SYMBOL>/<YYYY>/<MM>/<DD>/<HH>h_ticks.bi5
-func ParseDatafilePath(path string) (*datafile, error) {
-	k, ok := parseTickPath(path)
-	if !ok {
-		return nil, fmt.Errorf("invalid datafile path: %q", path)
-	}
-	t := time.Date(k.Year, time.Month(k.Month), k.Day, k.Hour, 0, 0, 0, time.UTC)
-
-	// Derive basedir as everything before .../dukas/...
-	clean := filepath.ToSlash(path)
-	idx := strings.LastIndex(clean, "/dukas/")
-	basedir := ""
-	if idx >= 0 {
-		basedir = filepath.FromSlash(clean[:idx])
-	}
-
-	df := &datafile{
-		key:     k,
-		symbol:  k.Instrument,
-		Time:    t,
-		basedir: basedir,
-	}
-	return df, nil
 }
 
 func (d *datafile) URL() string {
@@ -284,15 +244,15 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 	const minutesPerHour = 60
 	hourStart := df.hourStart()
 
-	inst := market.GetInstrument(df.symbol)
-	if inst == nil {
+	inst := df.symbol
+	if inst == "" {
 		return nil, fmt.Errorf("Didnot find and instrument with the symbol %s\n", df.symbol)
 	}
 	cs := &market.CandleSet{
 		Instrument: inst,            // adjust if your lookup differs
 		Start:      hourStart.Sec(), // Timemilli -> Timestamp (seconds)
 		Timeframe:  60,
-		Scale:      1_000_000,
+		Scale:      types.PriceScale,
 		Source:     "dukascopy",
 		Candles:    make([]market.Candle, minutesPerHour),
 		Valid:      make([]uint64, (minutesPerHour+63)/64),

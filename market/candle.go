@@ -25,13 +25,13 @@ type Candle struct {
 
 // CandleSet contains a dense set of candles.
 type CandleSet struct {
-	*Instrument
-	Start     types.Timestamp // unix seconds for candle open
-	Timeframe types.Timestamp
-	Scale     int32
-	Source    string
-	Candles   []Candle
-	Valid     []uint64
+	Instrument string
+	Start      types.Timestamp // unix seconds for candle open
+	Timeframe  types.Timeframe
+	Scale      types.Scale6
+	Source     string
+	Candles    []Candle
+	Valid      []uint64
 
 	Filepath   string
 	Gaps       []Gap
@@ -63,10 +63,10 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
-func NewMonthlyCandleSet(inst *Instrument, tf types.Timestamp, monthStart types.Timestamp,
-	scale int32, source string) (*CandleSet, error) {
-	if inst == nil {
-		return nil, fmt.Errorf("nil instrument")
+func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Timestamp,
+	scale types.Scale6, source string) (*CandleSet, error) {
+	if inst == "" {
+		return nil, fmt.Errorf("blank instrument")
 	}
 	if tf <= 0 {
 		return nil, fmt.Errorf("invalid timeframe: %d", tf)
@@ -110,12 +110,14 @@ func (cs *CandleSet) AddCandle(ts types.Timestamp, c Candle) error {
 		return fmt.Errorf("timestamp %d before set start %d", ts, cs.Start)
 	}
 
+	tf := types.Timestamp(cs.Timeframe)
+
 	off := ts - cs.Start
-	if off%cs.Timeframe != 0 {
+	if off%tf != 0 {
 		return fmt.Errorf("timestamp %d not aligned to timeframe %d", ts, cs.Timeframe)
 	}
 
-	idx := int(off / cs.Timeframe)
+	idx := int(off / tf)
 	if idx < 0 || idx >= len(cs.Candles) {
 		cs.outOfRange++
 		return fmt.Errorf("timestamp %d out of range for set starting %d", ts, cs.Start)
@@ -142,20 +144,20 @@ func (cs *CandleSet) Merge(src *CandleSet) error {
 	if cs.Scale != src.Scale {
 		return fmt.Errorf("scale mismatch dst=%d src=%d", cs.Scale, src.Scale)
 	}
-	if cs.Instrument == nil || src.Instrument == nil {
+	if cs.Instrument == "" || src.Instrument == "" {
 		return fmt.Errorf("nil instrument in merge")
 	}
 
 	// Adjust this comparison to whatever your Instrument identity actually is.
-	if cs.Instrument.Name != src.Instrument.Name {
-		return fmt.Errorf("instrument mismatch dst=%q src=%q", cs.Instrument.Name, src.Instrument.Name)
+	if cs.Instrument != src.Instrument {
+		return fmt.Errorf("instrument mismatch dst=%q src=%q", cs.Instrument, src.Instrument)
 	}
 
 	for i := range src.Candles {
 		if !src.IsValid(i) {
 			continue
 		}
-		ts := src.Start + types.Timestamp(i)*src.Timeframe
+		ts := src.Start + types.Timestamp(i)*types.Timestamp(src.Timeframe)
 		if err := cs.AddCandle(ts, src.Candles[i]); err != nil {
 			return err
 		}
@@ -197,12 +199,9 @@ func (cs *CandleSet) Timestamp(idx int) types.Timestamp {
 }
 
 func (cs *CandleSet) Filename() string {
-	inst := strings.ToLower(cs.Instrument.Name)
+	inst := strings.ToLower(cs.Instrument)
 
-	tfstr, err := SecondsToTFString(cs.Timeframe)
-	if err != nil {
-		tfstr = "unknown"
-	}
+	tfstr := cs.Timeframe.String()
 	tfstr = strings.ToLower(tfstr)
 
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
@@ -515,7 +514,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		minValid = 60
 	}
 
-	tfIn := cs.Timeframe // 60
+	tfIn := types.Timestamp(cs.Timeframe) // 60
 	tfOut := types.Timestamp(3600)
 
 	start := (cs.Start / tfOut) * tfOut
@@ -589,7 +588,10 @@ func (cs *CandleSet) Int32(f float64) int32 {
 
 // size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
 func (cs *CandleSet) PipSize() float64 {
-	i := cs.Instrument
+	i, ok := Instruments[cs.Instrument]
+	if !ok {
+		return 0.0
+	}
 	return math.Pow10(i.PipLocation) // PipLocation is negative
 }
 
@@ -629,7 +631,7 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
 // Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
-func (cs *CandleSet) Aggregate(outTF types.Timestamp, source string) (*CandleSet, error) {
+func (cs *CandleSet) Aggregate(outTF types.Timeframe, source string) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}

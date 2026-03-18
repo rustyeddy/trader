@@ -6,13 +6,24 @@ import (
 )
 
 type Dollars float64
-
 type Money int64
+type Price int32
 
-const MoneyScale = 1_000_000 // or 100000
+type Scale6 int32
+type Scale7 int32
+
+const (
+	PriceScale Scale6 = 100_000
+	MoneyScale Scale7 = 1_000_000
+)
+
+func (s Scale6) Int32() int32 { return int32(s) }
+func (s Scale6) Int64() int64 { return int64(s) }
+func (s Scale7) Int32() int32 { return int32(s) }
+func (s Scale7) Int64() int64 { return int64(s) }
 
 func MoneyFromFloat(f float64) Money {
-	return Money(math.Round(f * MoneyScale))
+	return Money(math.Round(f * float64(MoneyScale)))
 }
 
 func (m Money) String() string {
@@ -20,16 +31,13 @@ func (m Money) String() string {
 }
 
 func (m Money) Float64() float64 {
-	return float64(m) / MoneyScale
+	return float64(m) / float64(MoneyScale)
 }
 
 // Price represents scaled int price ticks
-type Price int32
-
-const PriceScale = 1_000_000
 
 func PriceFromFloat(f float64) Price {
-	return Price(math.Round(f * PriceScale))
+	return Price(math.Round(f * float64(PriceScale)))
 }
 
 func (p Price) String() string {

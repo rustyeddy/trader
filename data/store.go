@@ -6,11 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +18,7 @@ import (
 
 var (
 	store = &Store{
-		Basedir: "../../tmp",
+		basedir: "../../tmp",
 	}
 )
 
@@ -31,7 +28,7 @@ var (
 //	GBPUSD-H1-2026-02.csv
 //	GBPUSD-D1-2026-02.csv
 type Store struct {
-	Basedir string // e.g. "data/candles"
+	basedir string // e.g. "data/candles"
 }
 
 func (s *Store) PathForAsset(k Key) string {
@@ -63,7 +60,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 	)
 
 	return filepath.Join(
-		s.Basedir,
+		s.basedir,
 		source,
 		instrument,
 		fmt.Sprintf("%04d", k.Year),
@@ -97,13 +94,13 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 
-	tfStr := strings.ToUpper(parts[n-2])
+	tfStr := strings.ToLower(parts[n-2])
 	switch tfStr {
-	case "M1", "m1": // XXX normalize these!!
+	case "m1": // XXX normalize these!!
 		k.TF = types.M1
-	case "H1", "h1":
+	case "h1":
 		k.TF = types.H1
-	case "D1", "d1":
+	case "d1":
 		k.TF = types.D1
 	default:
 		return k, false
@@ -145,7 +142,7 @@ func (s *Store) pathForHourlyTick(k Key) string {
 
 	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
 	return filepath.Join(
-		s.Basedir,
+		s.basedir,
 		"dukascopy",
 		instrument,
 		fmt.Sprintf("%04d", k.Year),
@@ -240,7 +237,7 @@ func (s Store) Exists(key Key) (bool, error) {
 }
 
 func (s *Store) scanFiles(inv *Inventory) error {
-	return filepath.Walk(s.Basedir, func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(s.basedir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -302,7 +299,7 @@ func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 	_, err := fmt.Fprintf(w,
 		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
 		cs.Source,
-		cs.Instrument.Name,
+		cs.Instrument,
 		tfstr,
 		year,
 		cs.Scale,
@@ -337,7 +334,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	// Build CandleSet structure from key parameters.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	start := types.FromTime(monthStart)
-	tf := types.Timestamp(key.TF)
+	tf := key.TF
 	step := int64(tf)
 
 	endTime := monthStart.AddDate(0, 1, 0)
@@ -345,13 +342,8 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	n := int(spanSec / step)
 
 	instName := normalizeInstrument(key.Instrument)
-	inst := market.GetInstrument(instName)
-	if inst == nil {
-		inst = &market.Instrument{Name: instName}
-	}
-
 	cs = &market.CandleSet{
-		Instrument: inst,
+		Instrument: instName,
 		Start:      start,
 		Timeframe:  tf,
 		Candles:    make([]market.Candle, n),
@@ -467,18 +459,18 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
-	if cs.Instrument == nil {
+	if cs.Instrument == "" {
 		return errors.New("nil candle set instrument")
 	}
 
-	step := cs.Timeframe.Int64()
+	step := cs.Timeframe
 	if step <= 0 {
 		return fmt.Errorf("invalid candle set timeframe: %d", cs.Timeframe)
 	}
 
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: normalizeInstrument(cs.Instrument.Name),
+		Instrument: normalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
@@ -506,7 +498,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	defer w.Flush()
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*step
+		openUnix := int64(cs.Start) + int64(i)*int64(step)
 
 		c := cs.Candles[i]
 		var flags uint64
@@ -537,104 +529,104 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	return bw.Flush()
 }
 
-// ListAvailableYears returns sorted years for which files exist for instrument+tf.
-// It ignores "-all.csv".
-func (s Store) ListAvailableYears(instrument, tf string) ([]int, error) {
-	dir := s.baseScanDir()
-	instrument = normalizeInstrument(instrument)
-	tf = normalizeTF(tf)
+// // ListAvailableYears returns sorted years for which files exist for instrument+tf.
+// // It ignores "-all.csv".
+// func (s Store) ListAvailableYears1(instrument, tf string) ([]int, error) {
+// 	dir := s.baseScanDir()
+// 	instrument = normalizeInstrument(instrument)
+// 	tf = normalizeTF(tf)
 
-	re := regexp.MustCompile(fmt.Sprintf(`^%s-%s-(\d{4})\.csv$`,
-		regexp.QuoteMeta(instrument),
-		regexp.QuoteMeta(tf),
-	))
+// 	re := regexp.MustCompile(fmt.Sprintf(`^%s-%s-(\d{4})\.csv$`,
+// 		regexp.QuoteMeta(instrument),
+// 		regexp.QuoteMeta(tf),
+// 	))
 
-	years := make([]int, 0, 16)
-	seen := map[int]struct{}{}
+// 	years := make([]int, 0, 16)
+// 	seen := map[int]struct{}{}
 
-	err := fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		base := filepath.Base(path)
-		m := re.FindStringSubmatch(base)
-		if len(m) != 2 {
-			return nil
-		}
-		y, err := strconv.Atoi(m[1])
-		if err != nil {
-			return nil
-		}
-		if _, ok := seen[y]; !ok {
-			seen[y] = struct{}{}
-			years = append(years, y)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
+// 	err := fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if d.IsDir() {
+// 			return nil
+// 		}
+// 		base := filepath.Base(path)
+// 		m := re.FindStringSubmatch(base)
+// 		if len(m) != 2 {
+// 			return nil
+// 		}
+// 		y, err := strconv.Atoi(m[1])
+// 		if err != nil {
+// 			return nil
+// 		}
+// 		if _, ok := seen[y]; !ok {
+// 			seen[y] = struct{}{}
+// 			years = append(years, y)
+// 		}
+// 		return nil
+// 	})
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	sort.Ints(years)
-	return years, nil
-}
+// 	sort.Ints(years)
+// 	return years, nil
+// }
 
-// LatestCompleteYear returns the latest year that *looks complete* for the given timeframe,
-// based on current UTC time and the presence of the year file.
-//
-// Rules:
-// - For current year: only considered complete if "now" is after Jan 1 of next year.
-// - For past years: if file exists, it's complete.
-// - For tf=D1 and you store "-all.csv", use year=0 and this function isn't needed.
-func (s Store) LatestCompleteYear(instrument, tf string) (int, error) {
-	years, err := s.ListAvailableYears(instrument, tf)
-	if err != nil {
-		return 0, err
-	}
-	if len(years) == 0 {
-		return 0, fmt.Errorf("no candle files found for %s %s", instrument, tf)
-	}
+// // LatestCompleteYear returns the latest year that *looks complete* for the given timeframe,
+// // based on current UTC time and the presence of the year file.
+// //
+// // Rules:
+// // - For current year: only considered complete if "now" is after Jan 1 of next year.
+// // - For past years: if file exists, it's complete.
+// // - For tf=D1 and you store "-all.csv", use year=0 and this function isn't needed.
+// func (s Store) LatestCompleteYear1(instrument, tf string) (int, error) {
+// 	years, err := s.ListAvailableYears1(instrument, tf)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	if len(years) == 0 {
+// 		return 0, fmt.Errorf("no candle files found for %s %s", instrument, tf)
+// 	}
 
-	now := time.Now().UTC()
-	currentYear := now.Year()
+// 	now := time.Now().UTC()
+// 	currentYear := now.Year()
 
-	// walk backwards
-	for i := len(years) - 1; i >= 0; i-- {
-		y := years[i]
-		for m := 0; m < 12; m++ {
+// 	// walk backwards
+// 	for i := len(years) - 1; i >= 0; i-- {
+// 		y := years[i]
+// 		for m := 0; m < 12; m++ {
 
-			ak := Key{
-				Instrument: normalizeInstrument(instrument),
-				Kind:       KindCandle,
-				TF:         types.TF(tf),
-				Year:       y,
-				Month:      m,
-			}
-			ok, err := s.Exists(ak)
-			if err != nil || !ok {
-				continue
-			}
-		}
-		// Only mark current year complete if we've actually passed it.
-		if y == currentYear {
-			continue
-		}
-		// If someone has future years (unlikely), ignore them.
-		if y > currentYear {
-			continue
-		}
-		return y, nil
-	}
+// 			ak := Key{
+// 				Instrument: normalizeInstrument(instrument),
+// 				Kind:       KindCandle,
+// 				TF:         types.TF(tf),
+// 				Year:       y,
+// 				Month:      m,
+// 			}
+// 			ok, err := s.Exists(ak)
+// 			if err != nil || !ok {
+// 				continue
+// 			}
+// 		}
+// 		// Only mark current year complete if we've actually passed it.
+// 		if y == currentYear {
+// 			continue
+// 		}
+// 		// If someone has future years (unlikely), ignore them.
+// 		if y > currentYear {
+// 			continue
+// 		}
+// 		return y, nil
+// 	}
 
-	// If only current year exists, it's not "complete" yet.
-	return 0, fmt.Errorf("no complete year available yet for %s %s (only current year present)", instrument, tf)
-}
+// 	// If only current year exists, it's not "complete" yet.
+// 	return 0, fmt.Errorf("no complete year available yet for %s %s (only current year present)", instrument, tf)
+// }
 
 func (s Store) baseScanDir() string {
-	return s.Basedir
+	return s.basedir
 }
 
 //	func PriceToFloat(price int32, scale int32) float64 {
