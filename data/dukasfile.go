@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,7 +19,7 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-type datafile struct {
+type dukasfile struct {
 	key Key
 
 	symbol string
@@ -48,10 +47,10 @@ var (
 	ErrHourOutOfRange  = errors.New("hour out of range")
 )
 
-func newDatafile(sym string, t time.Time) *datafile {
+func newDatafile(sym string, t time.Time) *dukasfile {
 	// Canonicalize to UTC wall-clock hour (matches Dukascopy folder semantics).
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	df := &datafile{
+	df := &dukasfile{
 		symbol: sym,
 		Time:   t,
 	}
@@ -59,7 +58,7 @@ func newDatafile(sym string, t time.Time) *datafile {
 	return df
 }
 
-func (d *datafile) Key() Key {
+func (d *dukasfile) Key() Key {
 	if d.key.Instrument == "" {
 		d.key = Key{
 			Instrument: d.symbol,
@@ -75,11 +74,11 @@ func (d *datafile) Key() Key {
 	return d.key
 }
 
-func (d *datafile) Instrument() string {
+func (d *dukasfile) Instrument() string {
 	return d.symbol
 }
 
-func (d *datafile) URL() string {
+func (d *dukasfile) URL() string {
 	return fmt.Sprintf(
 		"https://datafeed.dukascopy.com/datafeed/%s/%04d/%02d/%02d/%02dh_ticks.bi5",
 		d.symbol,
@@ -89,46 +88,10 @@ func (d *datafile) URL() string {
 		d.Time.Hour())
 }
 
-// TODO Move to downloader.go
-// download will first check to see if this particular tick data has
-// already been downloaded from Dukascopy, if so just return.  If not
-// it will return.
-func (d *datafile) download(ctx context.Context, client *http.Client) error {
-	k := d.Key()
-
-	// Skip if present.
-	// TODO before the file is written we need to make sure it is a valid file.
-	if ok := store.IsUsableTickFile(k); ok {
-		return fmt.Errorf("file aready exists %s", k.Path())
-	}
-
-	// Correctness-first timeout
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, d.URL(), nil)
-	if err != nil {
-		return fmt.Errorf("new request: %w", err)
-	}
-
-	// resp, err := http.DefaultClient.Do(req)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", d.URL(), err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: http %d", d.URL(), resp.StatusCode)
-	}
-
-	return nil
-}
-
 // fileIsValid ensures that the file actually exists and is either
 // a empty Weekend file or it is a complete non-corrupt lzh compressed
 // dukas binary file format.
-func (d *datafile) IsValid(ctx context.Context) error {
+func (d *dukasfile) IsValid(ctx context.Context) error {
 	// 1. verify file exists
 	ok, err := store.Exists(d.key)
 	if err != nil || !ok {
@@ -164,7 +127,7 @@ func (d *datafile) IsValid(ctx context.Context) error {
 }
 
 // Flush returns the in-progress candle at end-of-stream (if any).
-func (df *datafile) Flush() (market.Candle, bool) {
+func (df *dukasfile) Flush() (market.Candle, bool) {
 	if df.m1.Ticks == 0 {
 		return market.Candle{}, false
 	}
@@ -176,7 +139,7 @@ func (df *datafile) Flush() (market.Candle, bool) {
 	return c, true
 }
 
-func (df *datafile) hourStart() types.Timemilli {
+func (df *dukasfile) hourStart() types.Timemilli {
 	t := df.Time
 	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
 	return types.Timemilli(t.UnixMilli())
@@ -184,7 +147,7 @@ func (df *datafile) hourStart() types.Timemilli {
 
 // NOTE: If Tick.Timestamp is already unix seconds, remove the /1000 conversion below.
 // This implementation assumes Tick.Timestamp is unix milliseconds.
-func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
+func (df *dukasfile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 	const minutesPerHour = 60
 	hourStart := df.hourStart()
 
@@ -334,7 +297,7 @@ func (df *datafile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 	return cs, nil
 }
 
-func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
+func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
 	p := store.PathForAsset(d.Key())
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
@@ -351,7 +314,7 @@ func (d *datafile) baseHourUnixMS() (types.Timemilli, error) {
 
 // ForEachTick decompresses BI5 and streams decoded ticks to fn.
 // It does not write decompressed data to disk.
-func (d *datafile) forEachTick(ctx context.Context, fn func(Tick) error) error {
+func (d *dukasfile) forEachTick(ctx context.Context, fn func(Tick) error) error {
 	baseUnixMS, err := d.baseHourUnixMS()
 	if err != nil {
 		return err

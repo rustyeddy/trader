@@ -277,7 +277,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			return nil
 		}
 
-		asset := &Asset{
+		asset := Asset{
 			Key:        key,
 			Path:       path,
 			Range:      rng,
@@ -568,10 +568,10 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
 		return fmt.Errorf("stat %s: %w", dst, err)
 	}
 
-	var a *Asset
+	var a Asset
 	var ok bool
 	if a, ok = inv.Get(key); !ok {
-		a = &Asset{
+		a = Asset{
 			Key:    key,
 			Path:   dst,
 			Exists: true,

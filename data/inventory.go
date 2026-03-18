@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/types"
@@ -182,25 +183,47 @@ func (a Asset) Clone() Asset {
 }
 
 type Inventory struct {
-	assets map[Key]*Asset
+	assets map[Key]Asset
+	mu     sync.RWMutex
 }
 
 func NewInventory() *Inventory {
 	return &Inventory{
-		assets: make(map[Key]*Asset),
+		assets: make(map[Key]Asset),
 	}
 }
 
-func (inv *Inventory) Put(a *Asset) {
+func (inv *Inventory) Put(a Asset) {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
 	if inv.assets == nil {
-		inv.assets = make(map[Key]*Asset)
+		inv.assets = make(map[Key]Asset)
 	}
 	inv.assets[a.Key] = a
 }
 
-func (inv *Inventory) Get(key Key) (*Asset, bool) {
+func (inv *Inventory) Get(key Key) (Asset, bool) {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
 	a, ok := inv.assets[key]
 	return a, ok
+}
+
+func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	a, ok := inv.assets[key]
+	if !ok {
+		return fmt.Errorf("asset not found: %v", key)
+	}
+	if err := fn(&a); err != nil {
+		return err
+	}
+	inv.assets[key] = a
+	return nil
 }
 
 func (inv *Inventory) HasComplete(key Key) bool {
