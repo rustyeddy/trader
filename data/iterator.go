@@ -1,0 +1,357 @@
+package data
+
+type Iterator[T any] interface {
+	Next() bool
+	Item() T
+	Err() error
+	Close() error
+}
+
+type TickIterator = Iterator[Tick]
+
+// type CandleIterator = Iterator[market.Candle]
+
+type funcIterator[T any] struct {
+	nextFn  func() (T, bool, error)
+	closeFn func() error
+
+	cur    T
+	err    error
+	done   bool
+	closed bool
+}
+
+func NewFuncIterator[T any](nextFn func() (T, bool, error), closeFn func() error) Iterator[T] {
+	if closeFn == nil {
+		closeFn = func() error { return nil }
+	}
+	return &funcIterator[T]{
+		nextFn:  nextFn,
+		closeFn: closeFn,
+	}
+}
+
+func (it *funcIterator[T]) Next() bool {
+	if it.closed || it.done || it.err != nil {
+		var zero T
+		it.cur = zero
+		return false
+	}
+
+	item, ok, err := it.nextFn()
+	if err != nil {
+		it.err = err
+		var zero T
+		it.cur = zero
+		return false
+	}
+	if !ok {
+		it.done = true
+		var zero T
+		it.cur = zero
+		return false
+	}
+
+	it.cur = item
+	return true
+}
+
+func (it *funcIterator[T]) Item() T {
+	return it.cur
+}
+
+func (it *funcIterator[T]) Err() error {
+	return it.err
+}
+
+func (it *funcIterator[T]) Close() error {
+	if it.closed {
+		return nil
+	}
+	it.closed = true
+	return it.closeFn()
+}
+
+// type chainedIterator[T any] struct {
+// 	iters  []Iterator[T]
+// 	idx    int
+// 	cur    T
+// 	err    error
+// 	closed bool
+// }
+
+// func NewChainedIterator[T any](iters ...Iterator[T]) Iterator[T] {
+// 	return &chainedIterator[T]{
+// 		iters: iters,
+// 	}
+// }
+
+// func (it *chainedIterator[T]) Next() bool {
+// 	if it.closed || it.err != nil {
+// 		var zero T
+// 		it.cur = zero
+// 		return false
+// 	}
+
+// 	for it.idx < len(it.iters) {
+// 		curIt := it.iters[it.idx]
+// 		if curIt.Next() {
+// 			it.cur = curIt.Item()
+// 			return true
+// 		}
+// 		if err := curIt.Err(); err != nil {
+// 			it.err = err
+// 			var zero T
+// 			it.cur = zero
+// 			return false
+// 		}
+// 		if err := curIt.Close(); err != nil {
+// 			it.err = err
+// 			var zero T
+// 			it.cur = zero
+// 			return false
+// 		}
+// 		it.idx++
+// 	}
+
+// 	var zero T
+// 	it.cur = zero
+// 	return false
+// }
+
+// func (it *chainedIterator[T]) Item() T {
+// 	return it.cur
+// }
+
+// func (it *chainedIterator[T]) Err() error {
+// 	return it.err
+// }
+
+// func (it *chainedIterator[T]) Close() error {
+// 	if it.closed {
+// 		return nil
+// 	}
+// 	it.closed = true
+
+// 	var firstErr error
+// 	for _, sub := range it.iters {
+// 		if sub == nil {
+// 			continue
+// 		}
+// 		if err := sub.Close(); err != nil && firstErr == nil {
+// 			firstErr = err
+// 		}
+// 	}
+// 	return firstErr
+// }
+
+// type filteredIterator[T any] struct {
+// 	base Iterator[T]
+// 	keep func(T) bool
+
+// 	cur T
+// }
+
+// func NewFilteredIterator[T any](base Iterator[T], keep func(T) bool) Iterator[T] {
+// 	return &filteredIterator[T]{
+// 		base: base,
+// 		keep: keep,
+// 	}
+// }
+
+// func (it *filteredIterator[T]) Next() bool {
+// 	for it.base.Next() {
+// 		item := it.base.Item()
+// 		if it.keep(item) {
+// 			it.cur = item
+// 			return true
+// 		}
+// 	}
+// 	var zero T
+// 	it.cur = zero
+// 	return false
+// }
+
+// func (it *filteredIterator[T]) Item() T {
+// 	return it.cur
+// }
+
+// func (it *filteredIterator[T]) Err() error {
+// 	return it.base.Err()
+// }
+
+// func (it *filteredIterator[T]) Close() error {
+// 	return it.base.Close()
+// }
+
+// type bi5TickIterator struct {
+// 	file     *os.File
+// 	reader   io.Reader
+// 	baseTime int64
+// 	scale    int32
+
+// 	cur    Tick
+// 	err    error
+// 	done   bool
+// 	closed bool
+// }
+
+// func (it *bi5TickIterator) Next() bool {
+// 	if it.closed || it.done || it.err != nil {
+// 		var zero Tick
+// 		it.cur = zero
+// 		return false
+// 	}
+
+// 	tick, ok, err := readNextBI5Tick(it.reader, it.baseTime)
+// 	if err != nil {
+// 		it.err = err
+// 		var zero Tick
+// 		it.cur = zero
+// 		return false
+// 	}
+// 	if !ok {
+// 		it.done = true
+// 		var zero Tick
+// 		it.cur = zero
+// 		return false
+// 	}
+
+// 	it.cur = tick
+// 	return true
+// }
+
+// func (it *bi5TickIterator) Item() Tick {
+// 	return it.cur
+// }
+
+// func (it *bi5TickIterator) Err() error {
+// 	return it.err
+// }
+
+// func (it *bi5TickIterator) Close() error {
+// 	if it.closed {
+// 		return nil
+// 	}
+// 	it.closed = true
+// 	if it.file != nil {
+// 		return it.file.Close()
+// 	}
+// 	return nil
+// }
+
+// const bi5RecordSize = 20
+
+// func readNextBI5Tick(r io.Reader, baseTimeMS int64) (Tick, bool, error) {
+// 	var rec [bi5RecordSize]byte
+
+// 	_, err := io.ReadFull(r, rec[:])
+// 	if err != nil {
+// 		if errors.Is(err, io.EOF) {
+// 			return Tick{}, false, nil
+// 		}
+// 		if errors.Is(err, io.ErrUnexpectedEOF) {
+// 			return Tick{}, false, io.ErrUnexpectedEOF
+// 		}
+// 		return Tick{}, false, err
+// 	}
+
+// 	msOffset := binary.BigEndian.Uint32(rec[0:4])
+// 	askRaw := binary.BigEndian.Uint32(rec[4:8])
+// 	bidRaw := binary.BigEndian.Uint32(rec[8:12])
+// 	askVolBits := binary.BigEndian.Uint32(rec[12:16])
+// 	bidVolBits := binary.BigEndian.Uint32(rec[16:20])
+
+// 	t := Tick{
+// 		Timemilli: types.Timemilli(baseTimeMS + int64(msOffset)),
+// 		Bid:       types.Price(bidRaw),
+// 		Ask:       types.Price(askRaw),
+// 		AskVol:    math.Float32frombits(askVolBits),
+// 		BidVol:    math.Float32frombits(bidVolBits),
+// 	}
+
+// 	return t, true, nil
+// }
+
+// func (s *Store) OpenTickIterator(key Key) (TickIterator, error) {
+// 	if key.Kind != KindTick {
+// 		return nil, fmt.Errorf("OpenTickIterator: key is not KindTick: %+v", key)
+// 	}
+// 	if key.TF != types.Ticks {
+// 		return nil, fmt.Errorf("OpenTickIterator: key timeframe is not ticks: %+v", key)
+// 	}
+
+// 	path := s.PathForAsset(key)
+
+// 	f, err := os.Open(path)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("open tick file %s: %w", path, err)
+// 	}
+
+// 	lr, err := lzma.NewReader(f)
+// 	if err != nil {
+// 		_ = f.Close()
+// 		return nil, fmt.Errorf("open lzma reader for %s: %w", path, err)
+// 	}
+
+// 	base := time.Date(
+// 		key.Year,
+// 		time.Month(key.Month),
+// 		key.Day,
+// 		key.Hour,
+// 		0, 0, 0,
+// 		time.UTC,
+// 	)
+
+// 	it := &bi5TickIterator{
+// 		file:     f,
+// 		reader:   bufio.NewReader(lr),
+// 		baseTime: base.UnixMilli(),
+// 		scale:    int32(types.PriceScale), // or your chosen price scale constant
+// 	}
+
+// 	return it, nil
+// }
+
+// type sliceIterator[T any] struct {
+// 	items  []T
+// 	idx    int
+// 	cur    T
+// 	closed bool
+// }
+
+// func NewSliceIterator[T any](items []T) Iterator[T] {
+// 	return &sliceIterator[T]{
+// 		items: items,
+// 		idx:   0,
+// 	}
+// }
+
+// func (it *sliceIterator[T]) Next() bool {
+// 	if it.closed {
+// 		var zero T
+// 		it.cur = zero
+// 		return false
+// 	}
+// 	if it.idx >= len(it.items) {
+// 		var zero T
+// 		it.cur = zero
+// 		return false
+// 	}
+// 	it.cur = it.items[it.idx]
+// 	it.idx++
+// 	return true
+// }
+
+// func (it *sliceIterator[T]) Item() T {
+// 	return it.cur
+// }
+
+// func (it *sliceIterator[T]) Err() error {
+// 	return nil
+// }
+
+// func (it *sliceIterator[T]) Close() error {
+// 	it.closed = true
+// 	return nil
+// }
