@@ -23,6 +23,10 @@ type Candle struct {
 	Ticks     int32 // number of ticks per candle
 }
 
+func (c *Candle) IsZero() bool {
+	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
+}
+
 // CandleSet contains a dense set of candles.
 type CandleSet struct {
 	Instrument string

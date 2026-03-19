@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -18,9 +19,45 @@ const (
 	KindCandle
 )
 
+const (
+	SourceDukascopy = "dukascopy"
+	SourceCandles   = "candles"
+)
+
+type AssetFlags uint32
+
+const (
+	FlagUsable AssetFlags = 1 << iota
+	FlagKnownClosed
+	FlagDoNotDownload
+	FlagDownloadFailed
+	FlagManualSkip
+)
+
+type Asset struct {
+	Key        Key
+	Path       string
+	Range      types.TimeRange
+	Exists     bool
+	Complete   bool
+	Buildable  bool
+	Size       int64
+	UpdatedAt  time.Time
+	SourceAge  time.Time // optional: mtime of prerequisite/source
+	Descriptor string
+	Flags      AssetFlags
+
+	MissingInputs int
+	Reason        string
+}
+
 var (
 	inv *Inventory
 )
+
+func normalizeSource(s string) string {
+	return strings.TrimSpace(strings.ToLower(s))
+}
 
 func (k DataKind) String() string {
 	switch k {
@@ -31,6 +68,182 @@ func (k DataKind) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+type Inventory struct {
+	assets map[Key]Asset
+	mu     sync.RWMutex
+}
+
+func NewInventory() *Inventory {
+	return &Inventory{
+		assets: make(map[Key]Asset),
+	}
+}
+
+func (inv *Inventory) Put(a Asset) {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	if inv.assets == nil {
+		inv.assets = make(map[Key]Asset)
+	}
+	inv.assets[a.Key] = a
+}
+
+func (inv *Inventory) Get(key Key) (Asset, bool) {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	a, ok := inv.assets[key]
+	return a, ok
+}
+
+func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	a, ok := inv.assets[key]
+	if !ok {
+		return fmt.Errorf("asset not found: %v", key)
+	}
+	if err := fn(&a); err != nil {
+		return err
+	}
+	inv.assets[key] = a
+	return nil
+}
+
+func (inv *Inventory) Delete(key Key) {
+	delete(inv.assets, key)
+}
+
+func (inv *Inventory) List() ([]Key, []Asset) {
+	n := len(inv.assets)
+	keys := make([]Key, n)
+	vals := make([]Asset, n)
+
+	var i int
+	for k, v := range inv.assets {
+		keys[i], vals[i] = k, v
+		i++
+	}
+
+	return keys, vals
+}
+
+func (inv *Inventory) Keys() []Key {
+	keys, _ := inv.List()
+	return keys
+}
+
+func (inv *Inventory) Assets() []Asset {
+	_, assets := inv.List()
+	return assets
+}
+
+func (inv *Inventory) MonthKeysFor(instrument string, kind DataKind, tf types.Timeframe) (keys []Key) {
+	return keys
+}
+
+func (inv *Inventory) AssetsForMonth(key []Key) (assets []Asset) {
+
+	return assets
+}
+
+func (inv *Inventory) HasComplete(key Key) bool {
+	a, ok := inv.assets[key]
+	return ok && a.Exists && a.Complete
+}
+
+func (inv *Inventory) MissingComplete(keys []Key) []Key {
+	out := make([]Key, 0)
+	for _, k := range keys {
+		if !inv.HasComplete(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func (inv *Inventory) Has(key Key) bool {
+	if key.Kind == KindTick {
+		key.TF = types.TF0
+	}
+
+	_, ok := inv.assets[key]
+	return ok
+}
+
+func (inv *Inventory) Years(source, instrument string, kind DataKind, tf types.Timeframe) []int {
+	source = normalizeSource(source)
+	instrument = market.NormalizeInstrument(instrument)
+
+	var years []int
+	for k := range inv.assets {
+		if k.Source == source &&
+			k.Instrument == instrument &&
+			k.Kind == kind &&
+			k.TF == tf {
+			years = append(years, k.Year)
+		}
+	}
+	sort.Ints(years)
+	return years
+}
+
+func (inv *Inventory) LatestYear(source, instrument string, kind DataKind, tf types.Timeframe) (int, bool) {
+	years := inv.Years(source, instrument, kind, tf)
+	if len(years) == 0 {
+		return 0, false
+	}
+	return years[len(years)-1], true
+}
+
+func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe, year int) (bool, error) {
+	var parentTF types.Timeframe
+	switch tf {
+	case types.H1:
+		parentTF = types.M1
+	case types.D1:
+		parentTF = types.H1
+	default:
+		return false, fmt.Errorf("timeframe %s has no derived parent", tf.String())
+	}
+
+	child, ok := inv.Get(Key{
+		Source:     normalizeSource(source),
+		Instrument: market.NormalizeInstrument(instrument),
+		Kind:       KindCandle,
+		TF:         tf,
+		Year:       year,
+	})
+	if !ok {
+		return false, fmt.Errorf("missing child asset")
+	}
+
+	parent, ok := inv.Get(Key{
+		Source:     normalizeSource(source),
+		Instrument: market.NormalizeInstrument(instrument),
+		Kind:       KindCandle,
+		TF:         parentTF,
+		Year:       year,
+	})
+	if !ok {
+		return false, fmt.Errorf("missing parent asset")
+	}
+	return parent.UpdatedAt.After(child.UpdatedAt), nil
+}
+
+func (inv *Inventory) NeedsDownload(key Key) bool {
+	a, ok := inv.assets[key]
+	if !ok {
+		return true
+	}
+	if !a.Exists || !a.Complete {
+		return true
+	}
+	return false
 }
 
 type Key struct {
@@ -102,7 +315,6 @@ func (ak Key) compare(k Key) int {
 	if ak.Day > k.Day {
 		return 1
 	}
-
 	if ak.Hour < k.Hour {
 		return -1
 	}
@@ -160,187 +372,6 @@ func (k Key) IsMonthlyCandle() bool {
 func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
-
-type Asset struct {
-	Key        Key
-	Path       string
-	Range      types.TimeRange
-	Exists     bool
-	Complete   bool
-	Buildable  bool
-	Size       int64
-	UpdatedAt  time.Time
-	SourceAge  time.Time // optional: mtime of prerequisite/source
-	Descriptor string
-
-	MissingInputs int
-	Reason        string
-}
-
-func (a Asset) Clone() Asset {
-	out := a
-	return out
-}
-
-type Inventory struct {
-	assets map[Key]Asset
-	mu     sync.RWMutex
-}
-
-func NewInventory() *Inventory {
-	return &Inventory{
-		assets: make(map[Key]Asset),
-	}
-}
-
-func (inv *Inventory) Put(a Asset) {
-	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
-	if inv.assets == nil {
-		inv.assets = make(map[Key]Asset)
-	}
-	inv.assets[a.Key] = a
-}
-
-func (inv *Inventory) Get(key Key) (Asset, bool) {
-	inv.mu.RLock()
-	defer inv.mu.RUnlock()
-
-	a, ok := inv.assets[key]
-	return a, ok
-}
-
-func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
-	inv.mu.Lock()
-	defer inv.mu.Unlock()
-
-	a, ok := inv.assets[key]
-	if !ok {
-		return fmt.Errorf("asset not found: %v", key)
-	}
-	if err := fn(&a); err != nil {
-		return err
-	}
-	inv.assets[key] = a
-	return nil
-}
-
-func (inv *Inventory) HasComplete(key Key) bool {
-	a, ok := inv.assets[key]
-	return ok && a.Exists && a.Complete
-}
-
-func (inv *Inventory) MissingComplete(keys []Key) []Key {
-	out := make([]Key, 0)
-	for _, k := range keys {
-		if !inv.HasComplete(k) {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
-func (inv *Inventory) Has(source, instrument string, kind DataKind, tf types.Timeframe, year int) bool {
-	if kind == KindTick {
-		tf = types.TF0
-	}
-
-	_, ok := inv.assets[Key{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       kind,
-		TF:         tf,
-		Year:       year,
-	}]
-	return ok
-}
-
-func (inv *Inventory) Years(source, instrument string, kind DataKind, tf types.Timeframe) []int {
-	source = normalizeSource(source)
-	instrument = normalizeInstrument(instrument)
-
-	var years []int
-	for k := range inv.assets {
-		if k.Source == source &&
-			k.Instrument == instrument &&
-			k.Kind == kind &&
-			k.TF == tf {
-			years = append(years, k.Year)
-		}
-	}
-	sort.Ints(years)
-	return years
-}
-
-func (inv *Inventory) LatestYear(source, instrument string, kind DataKind, tf types.Timeframe) (int, bool) {
-	years := inv.Years(source, instrument, kind, tf)
-	if len(years) == 0 {
-		return 0, false
-	}
-	return years[len(years)-1], true
-}
-
-func (inv *Inventory) MissingYears(source, instrument string, kind DataKind, tf types.Timeframe, startYear, endYear int) []int {
-	var missing []int
-	for y := startYear; y <= endYear; y++ {
-		if !inv.Has(source, instrument, kind, tf, y) {
-			missing = append(missing, y)
-		}
-	}
-	return missing
-}
-
-func (inv *Inventory) StaleDerived(source, instrument string, tf types.Timeframe, year int) (bool, error) {
-	var parentTF types.Timeframe
-	switch tf {
-	case types.H1:
-		parentTF = types.M1
-	case types.D1:
-		parentTF = types.H1
-	default:
-		return false, fmt.Errorf("timeframe %s has no derived parent", tf.String())
-	}
-
-	child, ok := inv.Get(Key{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       KindCandle,
-		TF:         tf,
-		Year:       year,
-	})
-	if !ok {
-		return false, fmt.Errorf("missing child asset")
-	}
-
-	parent, ok := inv.Get(Key{
-		Source:     normalizeSource(source),
-		Instrument: normalizeInstrument(instrument),
-		Kind:       KindCandle,
-		TF:         parentTF,
-		Year:       year,
-	})
-	if !ok {
-		return false, fmt.Errorf("missing parent asset")
-	}
-	return parent.UpdatedAt.After(child.UpdatedAt), nil
-}
-
-func (inv *Inventory) NeedsDownload(key Key) bool {
-	a, ok := inv.assets[key]
-	if !ok {
-		return true
-	}
-	if !a.Exists || !a.Complete {
-		return true
-	}
-	return false
-}
-
-func normalizeSource(s string) string {
-	return strings.TrimSpace(strings.ToLower(s))
-}
-
 func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
@@ -354,7 +385,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 
 		out = append(out, Key{
 			Source:     source,
-			Instrument: normalizeInstrument(instrument),
+			Instrument: market.NormalizeInstrument(instrument),
 			Kind:       KindTick,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
@@ -386,7 +417,7 @@ type BuildDecision struct {
 func AssessM1Month(inv *Inventory, tickSource, candleSource, instrument string, year, month int) BuildDecision {
 	target := Key{
 		Source:     candleSource,
-		Instrument: normalizeInstrument(instrument),
+		Instrument: market.NormalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.M1,
 		Year:       year,
@@ -425,7 +456,7 @@ func AssessM1Month(inv *Inventory, tickSource, candleSource, instrument string, 
 func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month int) BuildDecision {
 	target := Key{
 		Source:     candleSource,
-		Instrument: normalizeInstrument(instrument),
+		Instrument: market.NormalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.H1,
 		Year:       year,
@@ -442,7 +473,7 @@ func AssessH1Month(inv *Inventory, candleSource, instrument string, year, month 
 
 	req := Key{
 		Source:     candleSource,
-		Instrument: normalizeInstrument(instrument),
+		Instrument: market.NormalizeInstrument(instrument),
 		Kind:       KindCandle,
 		TF:         types.M1,
 		Year:       year,

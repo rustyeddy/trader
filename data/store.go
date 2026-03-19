@@ -49,7 +49,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 	if source == "" {
 		source = "unknown"
 	}
-	instrument := normalizeInstrument(k.Instrument)
+	instrument := market.NormalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
 	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
@@ -80,7 +80,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<tf>/<filename>.csv
 	n := len(parts)
 	k = Key{
-		Instrument: normalizeInstrument(parts[n-5]),
+		Instrument: market.NormalizeInstrument(parts[n-5]),
 		Source:     normalizeSource(parts[n-6]),
 		Kind:       KindCandle,
 	}
@@ -117,7 +117,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 
-	fileInst := normalizeInstrument(nameParts[0])
+	fileInst := market.NormalizeInstrument(nameParts[0])
 	fileYear, err := strconv.Atoi(nameParts[1])
 	if err != nil {
 		return k, false
@@ -138,7 +138,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
-	instrument := normalizeInstrument(k.Instrument)
+	instrument := market.NormalizeInstrument(k.Instrument)
 
 	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
 	return filepath.Join(
@@ -173,7 +173,7 @@ func parseTickPath(path string) (Key, bool) {
 	inst := parts[n-5]
 
 	k = Key{
-		Instrument: normalizeInstrument(inst),
+		Instrument: market.NormalizeInstrument(inst),
 		Source:     normalizeSource("dukascopy"),
 		Kind:       KindTick,
 		TF:         types.Ticks,
@@ -218,7 +218,7 @@ func parseTickPath(path string) (Key, bool) {
 
 func (s *Store) RelDir(key Key) string {
 	return filepath.Join(
-		normalizeInstrument(key.Instrument),
+		market.NormalizeInstrument(key.Instrument),
 		strings.ToUpper(key.TF.String()),
 		fmt.Sprintf("%04d", key.Year),
 	)
@@ -341,7 +341,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	spanSec := int64(endTime.Sub(monthStart).Seconds())
 	n := int(spanSec / step)
 
-	instName := normalizeInstrument(key.Instrument)
+	instName := market.NormalizeInstrument(key.Instrument)
 	cs = &market.CandleSet{
 		Instrument: instName,
 		Start:      start,
@@ -382,27 +382,27 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := parsePrice(fields[1])
+		highv, err := types.ParsePrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
-		openv, err := parsePrice(fields[2])
+		openv, err := types.ParsePrice(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := parsePrice(fields[3])
+		lowv, err := types.ParsePrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := parsePrice(fields[4])
+		closev, err := types.ParsePrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := parsePrice(fields[5])
+		avgSpread, err := types.ParsePrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := parsePrice(fields[6])
+		maxSpread, err := types.ParsePrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
@@ -461,7 +461,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: normalizeInstrument(cs.Instrument),
+		Instrument: market.NormalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
@@ -609,48 +609,4 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
 
 func (s Store) baseScanDir() string {
 	return s.basedir
-}
-
-//	func PriceToFloat(price int32, scale int32) float64 {
-//		return float64(price) / math.Pow10(int(scale))
-//	}
-func formatNumber(price types.Price, scale int32) string {
-	decimals := 0
-	for s := scale; s > 1; s /= 10 {
-		decimals++
-	}
-	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
-}
-
-// parsePrice parses a CSV field as a raw types.Price (int32) value.
-// TODO MOVE TO Type
-func parsePrice(s string) (types.Price, error) {
-	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return types.Price(v), nil
-}
-
-// TODO move to Types
-func normalizeTF(tf string) string {
-	tf = strings.TrimSpace(strings.ToUpper(tf))
-	// allow "60" etc if you ever pass seconds
-	switch tf {
-	case "60":
-		return "m1"
-	case "3600":
-		return "h1"
-	case "86400":
-		return "d1"
-	}
-	return tf
-}
-
-// Move to Market.
-func normalizeInstrument(sym string) string {
-	sym = strings.TrimSpace(sym)
-	sym = strings.ReplaceAll(sym, "_", "")
-	sym = strings.ReplaceAll(sym, "/", "")
-	return strings.ToUpper(sym)
 }

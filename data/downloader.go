@@ -20,17 +20,6 @@ func NewDownloader() *downloader {
 	}
 }
 
-// TODO move df.download() to here
-func (dl *downloader) downloadOld(ctx context.Context, key Key) error {
-
-	// if err := df.download(ctx, dl.Client); err != nil {
-	// 	df.err = err
-	// 	return fmt.Errorf("download %s: %w", store.PathForAsset(df.key), err)
-	// }
-
-	return nil
-}
-
 func (dl *downloader) download(ctx context.Context, key Key) error {
 	df := newDatafile(key.Instrument, key.Time())
 

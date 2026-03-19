@@ -260,7 +260,7 @@ func (df *dukasfile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 
 		if havePrevClose {
 			for m := curIdx + 1; m < idx; m++ {
-				if !bitIsSet(cs.Valid, m) && isZeroCandle(cs.Candles[m]) {
+				if !bitIsSet(cs.Valid, m) && cs.Candles[m].IsZero() {
 					fillFlat(m, prevClose)
 				}
 			}
@@ -288,7 +288,7 @@ func (df *dukasfile) buildM1(ctx context.Context) (*market.CandleSet, error) {
 
 	if havePrevClose && curIdx >= 0 {
 		for m := curIdx + 1; m < minutesPerHour; m++ {
-			if !bitIsSet(cs.Valid, m) && isZeroCandle(cs.Candles[m]) {
+			if !bitIsSet(cs.Valid, m) && cs.Candles[m].IsZero() {
 				fillFlat(m, prevClose)
 			}
 		}
@@ -312,6 +312,8 @@ func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
 	return types.Timemilli(t.UnixMilli()), nil
 }
 
+// TODO modify this function to have Store pass an io.ReaderCloser
+// type.  That will keep all file and path relate functionality in Store.
 // ForEachTick decompresses BI5 and streams decoded ticks to fn.
 // It does not write decompressed data to disk.
 func (d *dukasfile) forEachTick(ctx context.Context, fn func(Tick) error) error {
@@ -383,10 +385,6 @@ func (d *dukasfile) forEachTick(ctx context.Context, fn func(Tick) error) error 
 			return err
 		}
 	}
-}
-
-func isZeroCandle(c market.Candle) bool {
-	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
 }
 
 // TODO move these somewhere

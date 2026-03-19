@@ -49,6 +49,21 @@ func TF(t string) Timeframe {
 	return TF0
 }
 
+// TODO move to Types
+func NormalizeTF(tf string) string {
+	tf = strings.TrimSpace(strings.ToUpper(tf))
+	// allow "60" etc if you ever pass seconds
+	switch tf {
+	case "60":
+		return "m1"
+	case "3600":
+		return "h1"
+	case "86400":
+		return "d1"
+	}
+	return tf
+}
+
 func (tf Timeframe) String() string {
 	switch tf {
 	case TF0:

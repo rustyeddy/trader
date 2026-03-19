@@ -1,6 +1,10 @@
 package market
 
-import "github.com/rustyeddy/trader/types"
+import (
+	"strings"
+
+	"github.com/rustyeddy/trader/types"
+)
 
 type Symbol string
 
@@ -147,4 +151,12 @@ func GetInstrument(symbol string) *Instrument {
 		}
 	}
 	return nil
+}
+
+// Move to Market.
+func NormalizeInstrument(sym string) string {
+	sym = strings.TrimSpace(sym)
+	sym = strings.ReplaceAll(sym, "_", "")
+	sym = strings.ReplaceAll(sym, "/", "")
+	return strings.ToUpper(sym)
 }

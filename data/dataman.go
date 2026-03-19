@@ -22,19 +22,6 @@ type DataManager struct {
 	End         time.Time
 	Instruments []string
 	*downloader
-
-	// internal fields used by legacy test helpers
-	start time.Time
-	end   time.Time
-	data  map[string]*dataset
-
-	incomplete int // incomplete days
-}
-
-// dataset holds per-instrument data summary used by buildDatasets.
-type dataset struct {
-	symbol    string
-	datafiles int
 }
 
 // NewDataManager constructs a DataManager for the given instruments and time range.
@@ -42,29 +29,8 @@ func NewDataManager(instruments []string, start, end time.Time) *DataManager {
 	return &DataManager{
 		Start:       start,
 		End:         end,
-		start:       start,
-		end:         end,
 		Instruments: instruments,
-		data:        make(map[string]*dataset),
 	}
-}
-
-// buildDatasets populates dm.data with one entry per instrument.
-func (dm *DataManager) buildDatasets(ctx context.Context) {
-	dm.data = make(map[string]*dataset, len(dm.Instruments))
-	duration := dm.end.Sub(dm.start)
-	hours := int(duration.Hours()) + 1
-	for _, inst := range dm.Instruments {
-		dm.data[inst] = &dataset{symbol: inst, datafiles: hours}
-	}
-}
-
-// download returns a channel that signals completion of download tasks.
-// It is a stub; real implementation should schedule actual downloads.
-func (dm *DataManager) download(ctx context.Context) <-chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
 }
 
 // Init will get DataManager ready to go.
@@ -76,6 +42,7 @@ func (dm *DataManager) Init() {
 
 func (dm *DataManager) Sync(ctx context.Context, download, build bool) (err error) {
 	log.Print("Building inventory...")
+
 	// 1. Build inventory
 	inv, err = dm.BuildInventory(ctx)
 	if err != nil {
@@ -109,7 +76,6 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) (err erro
 		if err := dm.BuildM1(ctx, plan); err != nil {
 			log.Printf("build M1: %v", err)
 		}
-		fmt.Printf("incomplete days: %d\n", dm.incomplete)
 	}
 
 	wg.Wait()
@@ -155,7 +121,6 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 	})
 
 	hours := 0
-
 	for _, task := range plan.BuildM1 {
 		select {
 		case <-ctx.Done():
@@ -180,7 +145,7 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		)
 
 		cur, err := market.NewMonthlyCandleSet(
-			normalizeInstrument(task.Target.Instrument),
+			market.NormalizeInstrument(task.Target.Instrument),
 			types.M1,
 			types.FromTime(monthStart),
 			types.PriceScale, // keep your current candle price scale expectation
@@ -233,7 +198,7 @@ func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws 
 
 		key := Key{
 			Source:     "dukascopy",
-			Instrument: normalizeInstrument(sym),
+			Instrument: market.NormalizeInstrument(sym),
 			Kind:       KindTick,
 			TF:         types.Ticks,
 			Year:       t.Year(),
@@ -280,7 +245,7 @@ func (dm *DataManager) PlanM1Builds(
 
 		target := Key{
 			Source:     "candles",
-			Instrument: normalizeInstrument(sym),
+			Instrument: market.NormalizeInstrument(sym),
 			Kind:       KindCandle,
 			TF:         types.M1,
 			Year:       day.Year(),
@@ -384,6 +349,7 @@ func m1TargetNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
 	return false
 }
 
+// Move this to the Range type
 func eachUTCDateInRange(r types.TimeRange) []time.Time {
 	start := time.Unix(int64(r.Start), 0).UTC()
 	end := time.Unix(int64(r.End), 0).UTC()
@@ -413,7 +379,7 @@ func requiredTickHoursForDay(sym string, day time.Time, inv *Inventory) ([]Key, 
 
 		key := Key{
 			Source:     "dukascopy",
-			Instrument: normalizeInstrument(sym),
+			Instrument: market.NormalizeInstrument(sym),
 			Kind:       KindTick,
 			TF:         types.Ticks,
 			Year:       t.Year(),
