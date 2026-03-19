@@ -1,22 +1,14 @@
 package data
 
 import (
-	"bufio"
-
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"math"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
-	"github.com/ulikunitz/xz/lzma"
 )
 
 type dukasfile struct {
@@ -312,79 +304,26 @@ func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
 	return types.Timemilli(t.UnixMilli()), nil
 }
 
-// TODO modify this function to have Store pass an io.ReaderCloser
-// type.  That will keep all file and path relate functionality in Store.
-// ForEachTick decompresses BI5 and streams decoded ticks to fn.
-// It does not write decompressed data to disk.
 func (d *dukasfile) forEachTick(ctx context.Context, fn func(Tick) error) error {
-	baseUnixMS, err := d.baseHourUnixMS()
+	it, err := store.OpenTickIterator(d.Key())
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 
-	key := d.Key()
-	path := store.PathForAsset(key)
-
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	zr, err := lzma.NewReader(bufio.NewReaderSize(f, 1<<20))
-	if err != nil {
-		return fmt.Errorf("lzma reader %s: %w", path, err)
-	}
-
-	const recSize = 20
-	buf := make([]byte, recSize)
-
-	for {
+	for it.Next() {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		_, err := io.ReadFull(zr, buf)
-		if err == io.EOF {
-			return nil
-		}
-		if err == io.ErrUnexpectedEOF {
-			return fmt.Errorf("truncated tick record in %s", path)
-		}
-		if err != nil {
-			return fmt.Errorf("read tick record %s: %w", path, err)
-		}
-
-		msOffset := binary.BigEndian.Uint32(buf[0:4])
-		askU := binary.BigEndian.Uint32(buf[4:8])
-		bidU := binary.BigEndian.Uint32(buf[8:12])
-
-		askVol := math.Float32frombits(binary.BigEndian.Uint32(buf[12:16]))
-		bidVol := math.Float32frombits(binary.BigEndian.Uint32(buf[16:20]))
-
-		// Quick sanity guard: offset must fit in the hour.
-		if msOffset >= 3600*1000 {
-			return fmt.Errorf("bad msOffset=%d in %s (decoder misaligned?)", msOffset, path)
-		}
-
-		t := Tick{
-			Timemilli: baseUnixMS + types.Timemilli(msOffset),
-			Ask:       types.Price(askU * 10),
-			Bid:       types.Price(bidU * 10),
-			AskVol:    askVol,
-			BidVol:    bidVol,
-		}
-
-		// Optional sanity guard for EURUSD-ish scaled 1e5:
-		// (disable if you want multi-symbol generic)
-		// if t.Ask < 50000 || t.Ask > 250000 { ... }
-
-		if err := fn(t); err != nil {
+		if err := fn(it.Item()); err != nil {
 			return err
 		}
 	}
+
+	return it.Err()
 }
 
 // TODO move these somewhere

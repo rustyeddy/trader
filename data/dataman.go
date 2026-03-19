@@ -114,10 +114,10 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 	sort.Slice(plan.BuildM1, func(i, j int) bool {
 		a, b := plan.BuildM1[i], plan.BuildM1[j]
 
-		if a.Target.Instrument != b.Target.Instrument {
-			return a.Target.Instrument < b.Target.Instrument
+		if a.Key.Instrument != b.Key.Instrument {
+			return a.Key.Instrument < b.Key.Instrument
 		}
-		return a.Target.before(b.Target)
+		return a.Key.before(b.Key)
 	})
 
 	hours := 0
@@ -137,53 +137,97 @@ func (dm *DataManager) BuildM1(ctx context.Context, plan *Plan) error {
 		})
 
 		monthStart := time.Date(
-			task.Target.Year,
-			time.Month(task.Target.Month),
+			task.Key.Year,
+			time.Month(task.Key.Month),
 			1,
 			0, 0, 0, 0,
 			time.UTC,
 		)
 
 		cur, err := market.NewMonthlyCandleSet(
-			market.NormalizeInstrument(task.Target.Instrument),
+			market.NormalizeInstrument(task.Key.Instrument),
 			types.M1,
 			types.FromTime(monthStart),
 			types.PriceScale, // keep your current candle price scale expectation
 			"candles",
 		)
 		if err != nil {
-			return fmt.Errorf("new monthly candle set for %v: %w", task.Target, err)
+			return fmt.Errorf("new monthly candle set for %v: %w", task.Key, err)
 		}
 
-		for _, in := range task.Inputs {
+		for _, k := range task.Inputs {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
 
-			df := newDatafile(in.Instrument, in.Time())
-			hourSet, err := df.buildM1(ctx)
+			it, err := store.OpenTickIterator(k)
 			if err != nil {
-				return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(in), err)
+				return fmt.Errorf("Failed to get tick iterator %w", err)
+			}
+
+			hourSet, err := buildHourM1FromTickIterator(ctx, k, it)
+			if err != nil {
+				return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(k), err)
 			}
 			if hourSet == nil {
 				continue
 			}
-
 			if err := cur.Merge(hourSet); err != nil {
-				return fmt.Errorf("merge hour set into month %v failed: %w", task.Target, err)
+				return fmt.Errorf("merge hour set into month %v failed: %w", task.Key, err)
 			}
 			hours++
 		}
 
 		if err := store.WriteCSV(cur); err != nil {
-			return fmt.Errorf("write monthly M1 csv for %v: %w", task.Target, err)
+			return fmt.Errorf("write monthly M1 csv for %v: %w", task.Key, err)
 		}
 	}
 
 	fmt.Printf("Hours processed: %d\n", hours)
 	return nil
+}
+
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]) (*market.CandleSet, error) {
+	hourStart := time.Date(
+		key.Year,
+		time.Month(key.Month),
+		key.Day,
+		key.Hour,
+		0, 0, 0, time.UTC,
+	)
+
+	cs, err := market.NewMonthlyCandleSet(
+		market.NormalizeInstrument(key.Instrument),
+		types.M1,
+		types.FromTime(hourStart),
+		types.PriceScale,
+		SourceCandles,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	for it.Next() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		t := it.Item()
+
+		// whatever your current tick->candle accumulation logic is
+		// add tick to cs / builder here
+		_ = t
+	}
+
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+
+	return cs, nil
 }
 
 func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws *WorkState) []Key {
@@ -302,12 +346,12 @@ func (dm *DataManager) PlanM1Builds(
 			return acc.inputs[i].before(acc.inputs[j])
 		})
 
-		if !m1TargetNeedsBuild(acc.target, acc.inputs, inv) {
+		if !m1KeyNeedsBuild(acc.target, acc.inputs, inv) {
 			continue
 		}
 
 		tasks = append(tasks, BuildTask{
-			Target: acc.target,
+			Key: acc.target,
 			Range: types.NewTimeRange(
 				types.FromTime(acc.start),
 				types.FromTime(acc.end),
@@ -320,16 +364,16 @@ func (dm *DataManager) PlanM1Builds(
 	sort.Slice(tasks, func(i, j int) bool {
 		a, b := tasks[i], tasks[j]
 
-		if a.Target.Instrument != b.Target.Instrument {
-			return a.Target.Instrument < b.Target.Instrument
+		if a.Key.Instrument != b.Key.Instrument {
+			return a.Key.Instrument < b.Key.Instrument
 		}
-		return a.Target.before(b.Target)
+		return a.Key.before(b.Key)
 	})
 
 	return tasks, nil
 }
 
-func m1TargetNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
+func m1KeyNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {
 	targetAsset, ok := inv.Get(target)
 	if !ok || !targetAsset.Exists || !targetAsset.Complete || targetAsset.Size <= 0 {
 		return true

@@ -2,10 +2,12 @@ package data
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
+	"github.com/ulikunitz/xz/lzma"
 )
 
 var (
@@ -609,4 +612,84 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
 
 func (s Store) baseScanDir() string {
 	return s.basedir
+}
+
+func (s *Store) OpenTickIterator(key Key) (Iterator[Tick], error) {
+	if key.Kind != KindTick {
+		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
+	}
+	if key.TF != types.Ticks {
+		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
+	}
+
+	if ok := s.IsUsableTickFile(key); !ok {
+		return nil, fmt.Errorf("tick file not usable: %+v", key)
+	}
+
+	path := s.PathForAsset(key)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+
+	zr, err := lzma.NewReader(bufio.NewReaderSize(f, 1<<20))
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
+	}
+
+	baseUnixMS := types.Timemilli(time.Date(
+		key.Year,
+		time.Month(key.Month),
+		key.Day,
+		key.Hour,
+		0, 0, 0, time.UTC,
+	).UnixMilli())
+
+	nextFn := func() (Tick, bool, error) {
+		return readNextBI5Tick(zr, path, baseUnixMS)
+	}
+
+	closeFn := func() error {
+		return f.Close()
+	}
+	return NewFuncIterator(nextFn, closeFn), nil
+}
+
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS types.Timemilli) (Tick, bool, error) {
+	const recSize = 20
+
+	var buf [recSize]byte
+
+	_, err := io.ReadFull(r, buf[:])
+	if err == io.EOF {
+		return Tick{}, false, nil
+	}
+	if err == io.ErrUnexpectedEOF {
+		return Tick{}, false, fmt.Errorf("truncated tick record in %s", path)
+	}
+	if err != nil {
+		return Tick{}, false, fmt.Errorf("read tick record %s: %w", path, err)
+	}
+
+	msOffset := binary.BigEndian.Uint32(buf[0:4])
+	askU := binary.BigEndian.Uint32(buf[4:8])
+	bidU := binary.BigEndian.Uint32(buf[8:12])
+
+	askVol := math.Float32frombits(binary.BigEndian.Uint32(buf[12:16]))
+	bidVol := math.Float32frombits(binary.BigEndian.Uint32(buf[16:20]))
+
+	if msOffset >= 3600*1000 {
+		return Tick{}, false, fmt.Errorf("bad msOffset=%d in %s (decoder misaligned?)", msOffset, path)
+	}
+
+	t := Tick{
+		Timemilli: baseUnixMS + types.Timemilli(msOffset),
+		Ask:       types.Price(askU * 10),
+		Bid:       types.Price(bidU * 10),
+		AskVol:    askVol,
+		BidVol:    bidVol,
+	}
+
+	return t, true, nil
 }

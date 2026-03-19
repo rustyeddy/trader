@@ -22,7 +22,7 @@ func (p Plan) Log() {
 }
 
 type BuildTask struct {
-	Target Key
+	Key
 	Range  types.TimeRange
 	Inputs []Key
 	Kind   BuildKind
