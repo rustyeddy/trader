@@ -581,7 +581,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	return h1
 }
 
-func (cs *CandleSet) Flot64(v int32) float64 {
+func (cs *CandleSet) Float64(v int32) float64 {
 	return float64(v) / float64(cs.Scale)
 }
 
@@ -635,7 +635,7 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
 // Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
-func (cs *CandleSet) Aggregate(outTF types.Timeframe, source string) (*CandleSet, error) {
+func (cs *CandleSet) Aggregate(outTF types.Timeframe) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -654,7 +654,7 @@ func (cs *CandleSet) Aggregate(outTF types.Timeframe, source string) (*CandleSet
 		Start:      cs.Start,
 		Timeframe:  outTF,
 		Scale:      cs.Scale,
-		Source:     source,
+		Source:     "candles",
 		Candles:    make([]Candle, outLen),
 		Valid:      make([]uint64, (outLen+63)/64),
 	}

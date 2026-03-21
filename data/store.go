@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -68,7 +69,6 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 		instrument,
 		fmt.Sprintf("%04d", k.Year),
 		fmt.Sprintf("%02d", k.Month),
-		tf,
 		filename)
 }
 
@@ -79,33 +79,21 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 
-	//         n-7+       n-6        n-5       n-4    n-3    n-2      n-1
-	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<tf>/<filename>.csv
+	//         n-6+       n-5        n-4       n-3    n-2       n-1
+	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<filename>.csv
 	n := len(parts)
 	k = Key{
-		Instrument: market.NormalizeInstrument(parts[n-5]),
-		Source:     normalizeSource(parts[n-6]),
+		Instrument: market.NormalizeInstrument(parts[n-4]),
+		Source:     normalizeSource(parts[n-5]),
 		Kind:       KindCandle,
 	}
 
-	year, err := strconv.Atoi(parts[n-4])
+	year, err := strconv.Atoi(parts[n-3])
 	if err != nil {
 		return k, false
 	}
-	month, err := strconv.Atoi(parts[n-3])
+	month, err := strconv.Atoi(parts[n-2])
 	if err != nil || month < 1 || month > 12 {
-		return k, false
-	}
-
-	tfStr := strings.ToLower(parts[n-2])
-	switch tfStr {
-	case "m1": // XXX normalize these!!
-		k.TF = types.M1
-	case "h1":
-		k.TF = types.H1
-	case "d1":
-		k.TF = types.D1
-	default:
 		return k, false
 	}
 
@@ -131,7 +119,18 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 	fileTF := strings.ToLower(nameParts[3])
-	if fileInst != k.Instrument || fileYear != year || fileMonth != month || fileTF != tfStr {
+	if fileInst != k.Instrument || fileYear != year || fileMonth != month || fileTF == "" {
+		return k, false
+	}
+
+	switch fileTF {
+	case "m1": // XXX normalize these!!
+		k.TF = types.M1
+	case "h1":
+		k.TF = types.H1
+	case "d1":
+		k.TF = types.D1
+	default:
 		return k, false
 	}
 
@@ -299,14 +298,8 @@ func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
-	_, err := fmt.Fprintf(w,
-		"# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
-		cs.Source,
-		cs.Instrument,
-		tfstr,
-		year,
-		cs.Scale,
-	)
+	_, err := fmt.Fprintf(w, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+		cs.Source, cs.Instrument, tfstr, year, cs.Scale)
 	if err != nil {
 		return err
 	}
@@ -483,7 +476,6 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	defer f.Close()
 
 	bw := bufio.NewWriterSize(f, 256*1024)
-
 	if err := s.writeMetadata(cs, bw); err != nil {
 		return err
 	}
@@ -520,6 +512,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 		return err
 	}
 
+	log.Printf("writing path: %s", path)
 	return bw.Flush()
 }
 
@@ -610,6 +603,10 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
 	return nil
 }
 
+func (s Store) Delete(k Key) error {
+	return os.Remove(k.Path())
+}
+
 func (s Store) baseScanDir() string {
 	return s.basedir
 }
@@ -622,8 +619,13 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[Tick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
+	if types.IsForexMarketClosed(key.Time()) {
+		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
+	}
+
 	if ok := s.IsUsableTickFile(key); !ok {
-		return nil, fmt.Errorf("tick file not usable: %+v", key)
+		store.Delete(key)
+		// return nil, fmt.Errorf("tick file not usable: %+v", key)
 	}
 
 	path := s.PathForAsset(key)

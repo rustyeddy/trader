@@ -2,8 +2,6 @@ package data
 
 import (
 	"log"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type Plan struct {
@@ -23,7 +21,7 @@ func (p Plan) Log() {
 
 type BuildTask struct {
 	Key
-	Range  types.TimeRange
+	// Range  types.TimeRange
 	Inputs []Key
 	Kind   BuildKind
 }
@@ -31,7 +29,9 @@ type BuildTask struct {
 type BuildKind string
 
 const (
-	BuildKindM1FromTicks BuildKind = "m1_from_ticks"
+	BuildM1 BuildKind = "m1_from_ticks"
+	BuildH1 BuildKind = "h1_from_m1"
+	BuildD1 BuildKind = "d1_from_h1"
 )
 
 type WorkState struct {

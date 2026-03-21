@@ -65,6 +65,10 @@ func (s Timestamp) FloorToHour() Timestamp   { return (s / 3_600) * 3_600 }
 func (ms Timemilli) FloorToMinute() Timemilli { return (ms / 60_000) * 60_000 }
 func (ms Timemilli) FloorToHour() Timemilli   { return (ms / 3_600_000) * 3_600_000 }
 
+func TimeMilliFromTime(t time.Time) Timemilli {
+	return Timemilli(t.UnixMilli())
+}
+
 // daysInMonth returns the number of days in a given month.
 // month0 is 0-indexed: 0=Jan, 11=Dec.
 func DaysInMonth(year int, month0 int) int {
@@ -160,3 +164,49 @@ func MonthsInRange(r TimeRange) []YearMonth {
 // func YearRange(year int, tf Timeframe) Range
 // func MonthRange(year int, month time.Month, tf Timeframe) Range
 // func DayRange(year int, month time.Month, day int, tf Timeframe) Range
+
+var newYorkLoc = func() *time.Location {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}()
+
+func IsForexMarketClosed(t time.Time) bool {
+	nt := t.In(newYorkLoc)
+	wd := nt.Weekday()
+	h := nt.Hour()
+
+	switch wd {
+	case time.Saturday:
+		return true
+	case time.Sunday:
+		return h < 17
+	case time.Friday:
+		return h >= 17
+	default:
+		return isMajorForexHolidayClosed(nt)
+	}
+}
+
+func isMajorForexHolidayClosed(t time.Time) bool {
+	month := t.Month()
+	day := t.Day()
+	h := t.Hour()
+
+	if month == time.January && day == 1 {
+		return true
+	}
+	if month == time.December && day == 25 {
+		return true
+	}
+	if month == time.December && day == 24 && h >= 13 {
+		return true
+	}
+	if month == time.December && day == 31 && h >= 13 {
+		return true
+	}
+
+	return false
+}
