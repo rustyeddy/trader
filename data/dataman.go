@@ -501,141 +501,35 @@ func buildH1(ctx context.Context, k Key, inputs []Key) (err error) {
 	return err
 }
 
-func buildD1(ctx context.Context, k Key, inputs []Key) (err error) {
+func buildD1(ctx context.Context, k Key, inputs []Key) error {
 	if k.TF != types.D1 {
-		return fmt.Errorf("buildD1 wrong timeframe: %v\n", k.TF)
+		return fmt.Errorf("buildD1 wrong timeframe: %v", k.TF)
+	}
+	if len(inputs) != 1 {
+		return fmt.Errorf("buildD1 expected 1 input, got %d", len(inputs))
 	}
 
-	if len(inputs) > 1 {
-		return fmt.Errorf("buildD1 inputs are > 1: %d", len(inputs))
+	kh1 := inputs[0]
+	if kh1.TF != types.H1 {
+		return fmt.Errorf("buildD1 expected H1 input, got %v", kh1.TF)
 	}
 
-	kh1 := k
-	kh1.TF = types.H1
 	cs, err := store.ReadCSV(kh1)
 	if err != nil {
 		return err
 	}
-	d1, err := cs.Aggregate(kh1.TF)
+
+	d1, err := cs.Aggregate(types.D1) // or cs.Aggregate(k.TF)
 	if err != nil {
 		return err
 	}
 
-	// we were successful, now write to file and remove from want list
-	err = store.WriteCSV(d1)
-	if err != nil {
+	if err := store.WriteCSV(d1); err != nil {
 		return err
 	}
 
 	wants.Delete(k)
-
-	return err
-}
-
-func (dm *DataManager) BuildM11(ctx context.Context, plan *Plan) error {
-	sort.Slice(plan.BuildM1, func(i, j int) bool {
-		a, b := plan.BuildM1[i], plan.BuildM1[j]
-
-		if a.Key.Instrument != b.Key.Instrument {
-			return a.Key.Instrument < b.Key.Instrument
-		}
-		return a.Key.before(b.Key)
-	})
-
-	hours := 0
-	for _, task := range plan.BuildM1 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if len(task.Inputs) < 1 {
-			continue
-		}
-
-		sort.Slice(task.Inputs, func(i, j int) bool {
-			return task.Inputs[i].before(task.Inputs[j])
-		})
-
-		monthStart := time.Date(task.Key.Year, time.Month(task.Key.Month), 1, 0, 0, 0, 0, time.UTC)
-		cur, err := market.NewMonthlyCandleSet(
-			market.NormalizeInstrument(task.Key.Instrument),
-			types.M1,
-			types.FromTime(monthStart),
-			types.PriceScale, // keep your current candle price scale expectation
-			"candles",
-		)
-		if err != nil {
-			return fmt.Errorf("new monthly candle set for %v: %w", task.Key, err)
-		}
-
-		for _, k := range task.Inputs {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			it, err := store.OpenTickIterator(k)
-			if err != nil {
-				return fmt.Errorf("Failed to get tick iterator %w", err)
-			}
-
-			hourSet, err := buildHourM1FromTickIterator(ctx, k, it)
-			if err != nil {
-				return fmt.Errorf("buildM1 failed for %s: %w", store.PathForAsset(k), err)
-			}
-			if hourSet == nil {
-				continue
-			}
-			if err := cur.Merge(hourSet); err != nil {
-				return fmt.Errorf("merge hour set into month %v failed: %w", task.Key, err)
-			}
-			hours++
-		}
-
-		if err := store.WriteCSV(cur); err != nil {
-			return fmt.Errorf("write monthly M1 csv for %v: %w", task.Key, err)
-		}
-	}
-
-	fmt.Printf("Hours processed: %d\n", hours)
 	return nil
-}
-
-func planMissingTickDownloads(sym string, r types.TimeRange, inv *Inventory, ws *WorkState) []Key {
-	var out []Key
-
-	for ts := r.Start; ts < r.End; ts += 3600 {
-		t := time.Unix(int64(ts), 0).UTC()
-
-		if types.IsForexMarketClosed(t) {
-			continue
-		}
-
-		key := Key{
-			Source:     "dukascopy",
-			Instrument: market.NormalizeInstrument(sym),
-			Kind:       KindTick,
-			TF:         types.Ticks,
-			Year:       t.Year(),
-			Month:      int(t.Month()),
-			Day:        t.Day(),
-			Hour:       t.Hour(),
-		}
-
-		if ok := store.IsUsableTickFile(key); ok {
-			continue
-		}
-
-		if ws.IsDownloadQueuedOrActive(key) {
-			continue
-		}
-		out = append(out, key)
-	}
-
-	return out
 }
 
 func m1KeyNeedsBuild(target Key, inputs []Key, inv *Inventory) bool {

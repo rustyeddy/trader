@@ -75,7 +75,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 func parseCandlePath(path string) (k Key, ok bool) {
 	p := filepath.ToSlash(path)
 	parts := strings.Split(p, "/")
-	if len(parts) < 6 {
+	if len(parts) < 5 {
 		return k, false
 	}
 
