@@ -51,9 +51,9 @@ func (e *EMA) Reset() {
 	e.ready = false
 }
 
-func (e *EMA) Update(c market.OHLC) {
+func (e *EMA) Update(c market.Candle) {
 	// Convert scaled integer close into float price units.
-	x := float64(c.C) / e.scale
+	x := float64(c.Close) / e.scale
 
 	e.seen++
 	if e.seen == 1 {

@@ -17,7 +17,7 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c market.OHLC) *OrderRequest
+	OnBar(ctx *CandleContext, c market.Candle) *OrderRequest
 }
 
 type Side int8
@@ -36,10 +36,12 @@ type OrderRequest struct {
 }
 
 type CandleContext struct {
-	CS        *market.CandleSet
-	Idx       int
-	Timestamp types.Timestamp
-	GapBars   int // missing bars between this and previous valid bar
+	CS         *market.CandleSet
+	BarIndex   int
+	Instrument string
+	Idx        int
+	Timestamp  types.Timestamp
+	GapBars    int // missing bars between this and previous valid bar
 
 	Pos     *Position
 	Balance *types.Money
@@ -68,87 +70,95 @@ type Trade struct {
 }
 
 type CandleEngine struct {
-	CS         *market.CandleSet
+	Instrument string
+	types.Timeframe
+
 	AccountCCY string
+	Scale      types.Scale6
 
 	Balance types.Money
 	Pos     Position
 	Trades  []Trade
 }
 
-func NewCandleEngine(cs *market.CandleSet, startingBalance types.Money, accountCCY string) *CandleEngine {
+func NewCandleEngine(
+	instrument string,
+	tf types.Timeframe,
+	scale types.Scale6,
+	startingBalance types.Money,
+	accountCCY string,
+) *CandleEngine {
 	return &CandleEngine{
-		CS:         cs,
+		Instrument: instrument,
+		Timeframe:  tf,
+		Scale:      scale,
 		AccountCCY: accountCCY,
 		Balance:    startingBalance,
 	}
 }
 
-func (e *CandleEngine) Run(strat CandleStrategy) error {
-	if e.CS == nil {
-		return fmt.Errorf("candle backtest: nil CandleSet")
-	}
-	if e.CS.Timeframe != 3600 {
-		return fmt.Errorf("candle backtest: expected H1 CandleSet (3600s), got %d", e.CS.Timeframe)
+func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
+	if feed == nil {
+		return fmt.Errorf("candle backtest: nil feed")
 	}
 	if strat == nil {
 		return fmt.Errorf("candle backtest: nil strategy")
 	}
+	defer feed.Close()
 
 	strat.Reset()
 
-	it := e.CS.Iterator()
-	prevIdx := -1
+	barIndex := 0
+	var prevTS types.Timestamp
 
-	for it.Next() {
-		idx := it.Index()
-		t := it.Timestamp()
-		c := it.Candle()
+	for feed.Next() {
+		ts := feed.Timestamp()
+		c := feed.Candle()
 
 		gapBars := 0
-		if prevIdx != -1 {
-			gapBars = idx - prevIdx - 1
+		if prevTS != 0 {
+			delta := int64(ts - prevTS)
+			if delta > int64(e.Timeframe) {
+				gapBars = int(delta/int64(e.Timeframe)) - 1
+			}
 		}
-		prevIdx = idx
+		prevTS = ts
 
 		ctx := &CandleContext{
-			CS:        e.CS,
-			Idx:       idx,
-			Timestamp: t,
-			GapBars:   gapBars,
-			Pos:       &e.Pos,
-			Balance:   &e.Balance,
+			Instrument: e.Instrument,
+			Timestamp:  ts,
+			Idx:        barIndex,
+			BarIndex:   barIndex,
+			GapBars:    gapBars,
+			Pos:        &e.Pos,
+			Balance:    &e.Balance,
 		}
+		barIndex++
 
-		// 1) Handle exits on this bar.
 		if e.Pos.Open {
 			if exitPx, reason, hit := checkExit(e.Pos, c); hit {
-				e.closePosition(t, exitPx, reason)
+				e.closePosition(ts, exitPx, reason)
 			}
 		}
 
-		// 2) Strategy entry.
 		req := strat.OnBar(ctx, c)
-		if req == nil {
-			continue
-		}
-		if e.Pos.Open {
-			// One position at a time (for now)
-			continue
-		}
-		if req.Units == 0 {
+		if req == nil || e.Pos.Open || req.Units == 0 {
 			continue
 		}
 
-		e.openPosition(idx, t, c, req)
+		e.openPosition(ctx.BarIndex, ts, c, req)
+	}
+
+	if err := feed.Err(); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (e *CandleEngine) openPosition(idx int, t types.Timestamp, c market.OHLC, req *OrderRequest) {
+func (e *CandleEngine) openPosition(idx int, t types.Timestamp, c market.Candle, req *OrderRequest) {
 	// Fill model: enter at bar close.
-	entry := c.C
+	entry := c.Close
 
 	e.Pos = Position{
 		Open:       true,
@@ -171,11 +181,11 @@ func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason
 	pnlScaled := int64(p.Side) * deltaScaled * int64(p.Units)
 
 	// Convert scaled PnL to float quote currency
-	pnlQuote := float64(pnlScaled) / float64(e.CS.Scale)
+	pnlQuote := float64(pnlScaled) / float64(e.Scale)
 
 	// If quote currency matches account, treat pnlQuote as account currency.
 	pnlAcct := pnlQuote
-	if meta, ok := market.Instruments[e.CS.Name]; ok {
+	if meta, ok := market.Instruments[e.Instrument]; ok {
 		if e.AccountCCY != "" && meta.QuoteCurrency != "" && meta.QuoteCurrency != e.AccountCCY {
 			// TODO: add FX conversion using a price source. For now, leave as quote currency.
 			pnlAcct = pnlQuote
@@ -197,7 +207,7 @@ func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p Position, c market.OHLC) (exitPx types.Price, reason string, hit bool) {
+func checkExit(p Position, c market.Candle) (exitPx types.Price, reason string, hit bool) {
 	if !p.Open {
 		return 0, "", false
 	}
@@ -207,8 +217,8 @@ func checkExit(p Position, c market.OHLC) (exitPx types.Price, reason string, hi
 
 	switch p.Side {
 	case Long:
-		stopHit := hasStop && c.L <= p.Stop
-		takeHit := hasTake && c.H >= p.Take
+		stopHit := hasStop && c.Low <= p.Stop
+		takeHit := hasTake && c.High >= p.Take
 		if stopHit && takeHit {
 			return p.Stop, "STOP&TAKE same bar (stop-first)", true
 		}
@@ -219,8 +229,8 @@ func checkExit(p Position, c market.OHLC) (exitPx types.Price, reason string, hi
 			return p.Take, "TAKE", true
 		}
 	case Short:
-		stopHit := hasStop && c.H >= p.Stop
-		takeHit := hasTake && c.L <= p.Take
+		stopHit := hasStop && c.High >= p.Stop
+		takeHit := hasTake && c.Low <= p.Take
 		if stopHit && takeHit {
 			return p.Stop, "STOP&TAKE same bar (stop-first)", true
 		}
@@ -241,5 +251,5 @@ func PipScaled(pipLocation int) types.Price {
 	for i := 0; i < -pipLocation; i++ {
 		pow *= 10
 	}
-	return types.Price(types.PriceScale / pow)
+	return types.Price(types.PriceScale / types.Scale6(pow))
 }

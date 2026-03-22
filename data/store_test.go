@@ -14,13 +14,13 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	return &Store{Basedir: t.TempDir()}
+	return &Store{basedir: t.TempDir()}
 }
 
 func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.Month, tf types.Timeframe) *market.CandleSet {
 	t.Helper()
 
-	instName := normalizeInstrument(instrument)
+	instName := market.NormalizeInstrument(instrument)
 	inst := market.GetInstrument(instName)
 	if inst == nil {
 		inst = &market.Instrument{Name: instName}
@@ -28,8 +28,8 @@ func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.M
 
 	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
 	cs, err := market.NewMonthlyCandleSet(
-		inst,
-		types.Timestamp(tf),
+		inst.Name,
+		tf,
 		types.FromTime(start),
 		1_000_000,
 		"test",
@@ -41,7 +41,7 @@ func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.M
 func keyForSet(cs *market.CandleSet) Key {
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	return Key{
-		Instrument: cs.Instrument.Name,
+		Instrument: cs.Instrument,
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
@@ -212,7 +212,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 	t.Run("nil instrument", func(t *testing.T) {
 		t.Parallel()
 		err := s.WriteCSV(&market.CandleSet{
-			Timeframe: types.Timestamp(types.M1),
+			Timeframe: types.M1,
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "nil candle set instrument")
@@ -221,7 +221,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 	t.Run("invalid timeframe", func(t *testing.T) {
 		t.Parallel()
 		err := s.WriteCSV(&market.CandleSet{
-			Instrument: &market.Instrument{Name: "EURUSD"},
+			Instrument: "EURUSD",
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid candle set timeframe")

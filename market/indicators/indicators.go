@@ -20,7 +20,7 @@ type Indicator interface {
 	Reset()
 
 	// Update consumes the next *closed* candle and updates internal state.
-	Update(c market.OHLC)
+	Update(c market.Candle)
 
 	// Ready reports whether Value() is meaningful (warmup completed).
 	Ready() bool

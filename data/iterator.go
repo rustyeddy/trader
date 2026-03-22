@@ -1,5 +1,10 @@
 package data
 
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
+
 type Iterator[T any] interface {
 	Next() bool
 	Item() T
@@ -8,8 +13,6 @@ type Iterator[T any] interface {
 }
 
 type TickIterator = Iterator[Tick]
-
-// type CandleIterator = Iterator[market.Candle]
 
 type funcIterator[T any] struct {
 	nextFn  func() (T, bool, error)
@@ -70,6 +73,165 @@ func (it *funcIterator[T]) Close() error {
 	}
 	it.closed = true
 	return it.closeFn()
+}
+
+type CandleIterator interface {
+	Next() bool
+	Candle() market.Candle
+	Timestamp() types.Timestamp
+	Err() error
+	Close() error
+}
+
+type candleSetIterator struct {
+	base     *market.Iterator
+	rng      types.TimeRange
+	useRange bool
+
+	cur    market.Candle
+	ts     types.Timestamp
+	err    error
+	done   bool
+	closed bool
+}
+
+func NewCandleSetIterator(cs *market.CandleSet, rng types.TimeRange) CandleIterator {
+	return &candleSetIterator{
+		base:     cs.Iterator(),
+		rng:      rng,
+		useRange: rng.Valid(),
+	}
+}
+
+func (it *candleSetIterator) Next() bool {
+	if it.closed || it.done || it.err != nil {
+		it.cur = market.Candle{}
+		it.ts = 0
+		return false
+	}
+
+	for it.base.Next() {
+		ts := it.base.Timestamp()
+		if it.useRange && !it.rng.Contains(ts) {
+			continue
+		}
+
+		it.cur = it.base.Candle()
+		it.ts = ts
+		return true
+	}
+
+	it.done = true
+	it.cur = market.Candle{}
+	it.ts = 0
+	return false
+}
+
+func (it *candleSetIterator) Candle() market.Candle {
+	return it.cur
+}
+
+func (it *candleSetIterator) Timestamp() types.Timestamp {
+	return it.ts
+}
+
+func (it *candleSetIterator) Err() error {
+	return it.err
+}
+
+func (it *candleSetIterator) Close() error {
+	if it.closed {
+		return nil
+	}
+	it.closed = true
+	return nil
+}
+
+type chainedCandleIterator struct {
+	iters  []CandleIterator
+	idx    int
+	cur    market.Candle
+	ts     types.Timestamp
+	err    error
+	closed bool
+}
+
+func NewChainedCandleIterator(iters ...CandleIterator) CandleIterator {
+	return &chainedCandleIterator{
+		iters: iters,
+	}
+}
+
+func (it *chainedCandleIterator) Next() bool {
+	if it.closed || it.err != nil {
+		it.cur = market.Candle{}
+		it.ts = 0
+		return false
+	}
+
+	for it.idx < len(it.iters) {
+		curIt := it.iters[it.idx]
+		if curIt == nil {
+			it.idx++
+			continue
+		}
+
+		if curIt.Next() {
+			it.cur = curIt.Candle()
+			it.ts = curIt.Timestamp()
+			return true
+		}
+
+		if err := curIt.Err(); err != nil {
+			it.err = err
+			it.cur = market.Candle{}
+			it.ts = 0
+			return false
+		}
+
+		if err := curIt.Close(); err != nil {
+			it.err = err
+			it.cur = market.Candle{}
+			it.ts = 0
+			return false
+		}
+
+		it.idx++
+	}
+
+	it.cur = market.Candle{}
+	it.ts = 0
+	return false
+}
+
+func (it *chainedCandleIterator) Candle() market.Candle {
+	return it.cur
+}
+
+func (it *chainedCandleIterator) Timestamp() types.Timestamp {
+	return it.ts
+}
+
+func (it *chainedCandleIterator) Err() error {
+	return it.err
+}
+
+func (it *chainedCandleIterator) Close() error {
+	if it.closed {
+		return nil
+	}
+	it.closed = true
+
+	var firstErr error
+	for _, sub := range it.iters {
+		if sub == nil {
+			continue
+		}
+		if err := sub.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // type chainedIterator[T any] struct {

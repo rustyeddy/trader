@@ -20,12 +20,6 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-var (
-	store = &Store{
-		basedir: "../../tmp",
-	}
-)
-
 // Store enforces a file naming convention like:
 //
 //	GBPUSD-M1-2026-01.csv
@@ -272,7 +266,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = types.YearRange(key.Year)
+			rng = types.MonthRange(key.Year, key.Month)
 			descriptor = "Candles"
 
 		default:
@@ -340,8 +334,10 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	instName := market.NormalizeInstrument(key.Instrument)
 	cs = &market.CandleSet{
 		Instrument: instName,
+		Source:     "candles",
 		Start:      start,
 		Timeframe:  tf,
+		Scale:      types.PriceScale,
 		Candles:    make([]market.Candle, n),
 		Valid:      make([]uint64, (n+63)/64),
 	}
@@ -516,24 +512,16 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 	return bw.Flush()
 }
 
-func (s *Store) IsUsableTickFile(k Key) bool {
-	a, ok := inv.Get(k)
-	if !ok || !a.Exists || !a.Complete || a.Size <= 0 {
-		return false
-	}
-	return true
-}
-
-func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
+func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	dst := key.Path()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
 
 	tmp := dst + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", tmp, err)
+		return "", fmt.Errorf("create %s: %w", tmp, err)
 	}
 
 	// Important: flush + close BEFORE rename/stat
@@ -544,63 +532,20 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) error {
 	if copyErr != nil || syncErr != nil || closeErr != nil {
 		_ = os.Remove(tmp)
 		if copyErr != nil {
-			return fmt.Errorf("write %s: wrote %d bytes: %w", tmp, n, copyErr)
+			return "", fmt.Errorf("write %s: wrote %d bytes: %w", tmp, n, copyErr)
 		}
 		if syncErr != nil {
-			return fmt.Errorf("sync %s: wrote %d bytes: %w", tmp, n, syncErr)
+			return "", fmt.Errorf("sync %s: wrote %d bytes: %w", tmp, n, syncErr)
 		}
-		return fmt.Errorf("close %s: wrote %d bytes: %w", tmp, n, closeErr)
+		return "", fmt.Errorf("close %s: wrote %d bytes: %w", tmp, n, closeErr)
 	}
 
 	// Atomic move into place
 	if err := os.Rename(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
+		return "", fmt.Errorf("rename %s -> %s: %w", tmp, dst, err)
 	}
-
-	// Trust the filesystem for bytes/modtime
-	info, err := os.Stat(dst)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", dst, err)
-	}
-
-	var a Asset
-	var ok bool
-	if a, ok = inv.Get(key); !ok {
-		a = Asset{
-			Key:    key,
-			Path:   dst,
-			Exists: true,
-		}
-	}
-	a.Complete = info.Size() > 0 // TODO FIX THIS - minimal heuristic only
-	a.Size = info.Size()
-	a.UpdatedAt = info.ModTime()
-	a.Size = info.Size()
-
-	start := key.Time()
-	end := start.Add(time.Hour)
-	a.Range = types.NewTimeRange(types.FromTime(start), types.FromTime(end))
-	a.Descriptor = fmt.Sprintf(
-		"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
-		key.Year, key.Month, key.Day, key.Hour)
-
-	inv.Put(a)
-
-	start = a.Range.Start.Time()
-	fmt.Printf("%s %d-%02d-%02d:%02d... ",
-		a.Key.Instrument,
-		start.Year(),
-		start.Month(),
-		start.Day(),
-		start.Hour())
-	fmt.Printf("%6d bytes\n", a.Size)
-
-	// Optional: sanity-check bytes against what we copied
-	if a.Size != n || n == 0 {
-		// fmt.Printf("Failed to download: %s\n", d.URL())
-	}
-	return nil
+	return dst, nil
 }
 
 func (s Store) Delete(k Key) error {
@@ -609,6 +554,15 @@ func (s Store) Delete(k Key) error {
 
 func (s Store) baseScanDir() string {
 	return s.basedir
+}
+
+func (s *Store) IsUsableTickFile(k Key) bool {
+	p := s.PathForAsset(k)
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir() && info.Size() > 0
 }
 
 func (s *Store) OpenTickIterator(key Key) (Iterator[Tick], error) {
@@ -623,7 +577,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[Tick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
 	}
 
-	if ok := s.IsUsableTickFile(key); !ok {
+	if ok := store.IsUsableTickFile(key); !ok {
 		store.Delete(key)
 		// return nil, fmt.Errorf("tick file not usable: %+v", key)
 	}

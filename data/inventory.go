@@ -154,7 +154,7 @@ const (
 )
 
 type BuildDecision struct {
-	Target   Key
+	Key
 	Status   BuildStatus
 	Required []Key
 	Missing  []Key

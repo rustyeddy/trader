@@ -9,6 +9,10 @@ type Plan struct {
 	BuildM1  []BuildTask
 	BuildH1  []BuildTask
 	BuildD1  []BuildTask
+
+	BlockedM1 []BuildDecision
+	BlockedH1 []BuildDecision
+	BlockedD1 []BuildDecision
 }
 
 func (p Plan) Log() {

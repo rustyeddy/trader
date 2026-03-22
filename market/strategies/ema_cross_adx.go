@@ -83,12 +83,12 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c market.OHLC, scale int32) Decision {
+func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	x.fast.Update(c)
 	x.slow.Update(c)
 	x.adx.Update(c)
 
-	close := float64(c.C) / float64(scale)
+	close := float64(c.Close) / float64(scale)
 
 	// If EMAs aren't ready, we can't do cross logic.
 	if !x.fast.Ready() || !x.slow.Ready() {

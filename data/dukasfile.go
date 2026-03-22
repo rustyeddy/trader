@@ -2,7 +2,6 @@ package data
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -25,19 +24,6 @@ type dukasfile struct {
 
 	m1 market.Candle
 }
-
-const tickPathLen = 5
-
-var (
-	ErrPathTooShort    = errors.New("path too short")
-	ErrInvalidFilename = errors.New("invalid tick filename")
-	ErrPartialFile     = errors.New("temporary partial file")
-	ErrInvalidYear     = errors.New("invalid year")
-	ErrInvalidMonth    = errors.New("invalid month")
-	ErrInvalidDay      = errors.New("invalid day")
-	ErrInvalidHour     = errors.New("invalid hour")
-	ErrHourOutOfRange  = errors.New("hour out of range")
-)
 
 func newDatafile(sym string, t time.Time) *dukasfile {
 	// Canonicalize to UTC wall-clock hour (matches Dukascopy folder semantics).
@@ -108,185 +94,20 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 	}
 	hourStart := baseUnixMS
 	hourEnd := baseUnixMS + 3600_000
-	err = d.forEachTick(ctx, func(t Tick) error {
+
+	it, err := store.OpenTickIterator(d.Key())
+	if err != nil {
+		return err
+	}
+	for it.Next() {
+		t := it.Item()
+
 		if t.Timemilli < hourStart || t.Timemilli >= hourEnd {
 			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s",
 				t.Timemilli, hourStart, hourEnd, path)
 		}
-		return nil
-	})
+	}
 	return nil
-}
-
-// Flush returns the in-progress candle at end-of-stream (if any).
-func (df *dukasfile) Flush() (market.Candle, bool) {
-	if df.m1.Ticks == 0 {
-		return market.Candle{}, false
-	}
-	c := df.m1
-	ticks := int64(c.Ticks)
-	c.AvgSpread = types.Price((df.totalspread + ticks/2) / ticks)
-	df.totalspread = 0
-	df.m1 = market.Candle{}
-	return c, true
-}
-
-func (df *dukasfile) hourStart() types.Timemilli {
-	t := df.Time
-	t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	return types.Timemilli(t.UnixMilli())
-}
-
-// NOTE: If Tick.Timestamp is already unix seconds, remove the /1000 conversion below.
-// This implementation assumes Tick.Timestamp is unix milliseconds.
-func (df *dukasfile) buildM1(ctx context.Context) (*market.CandleSet, error) {
-	const minutesPerHour = 60
-	hourStart := df.hourStart()
-
-	inst := df.symbol
-	if inst == "" {
-		return nil, fmt.Errorf("Didnot find and instrument with the symbol %s\n", df.symbol)
-	}
-	cs := &market.CandleSet{
-		Instrument: inst,            // adjust if your lookup differs
-		Start:      hourStart.Sec(), // Timemilli -> Timestamp (seconds)
-		Timeframe:  60,
-		Scale:      types.PriceScale,
-		Source:     "dukascopy",
-		Candles:    make([]market.Candle, minutesPerHour),
-		Valid:      make([]uint64, (minutesPerHour+63)/64),
-	}
-
-	var (
-		curIdx        = -1
-		cur           market.Candle
-		spreadSum     int64
-		havePrevClose bool
-		prevClose     types.Price
-	)
-
-	finalize := func() error {
-		if curIdx < 0 {
-			return nil
-		}
-		if cur.Ticks <= 0 {
-			return nil
-		}
-		ticks := int64(cur.Ticks)
-		cur.AvgSpread = types.Price((spreadSum + ticks/2) / ticks)
-
-		cs.Candles[curIdx] = cur
-		bitSet(cs.Valid, curIdx)
-
-		prevClose = cur.Close
-		havePrevClose = true
-		return nil
-	}
-
-	fillFlat := func(idx int, px types.Price) {
-		// Fill OHLC but do NOT set Valid bit.
-		cs.Candles[idx] = market.Candle{
-			Open:  px,
-			High:  px,
-			Low:   px,
-			Close: px,
-			Ticks: 0,
-		}
-	}
-
-	err := df.forEachTick(ctx, func(t Tick) error {
-		ts := t.Timemilli
-		if ts <= 0 {
-			return fmt.Errorf("bad tick timestamp: %d", t.Timemilli)
-		}
-
-		// They should all agree to within [hourStart, hourStart+3600000).
-		minuteOpen := ts.FloorToMinute()
-		idx := int((minuteOpen - hourStart) / types.MinuteInMS) // 60_000
-		if idx < 0 || idx >= minutesPerHour {
-			return fmt.Errorf("tick outside hour window: minute=%d hourStart=%d idx=%d",
-				minuteOpen, hourStart, idx)
-		}
-
-		mid := t.Mid()
-		spread := t.Spread()
-
-		if curIdx == -1 {
-			curIdx = idx
-			cur = market.Candle{
-				Open:      mid,
-				High:      mid,
-				Low:       mid,
-				Close:     mid,
-				Ticks:     1,
-				MaxSpread: spread,
-			}
-			spreadSum = int64(spread)
-			return nil
-		}
-
-		if idx == curIdx {
-			if mid > cur.High {
-				cur.High = mid
-			}
-			if mid < cur.Low {
-				cur.Low = mid
-			}
-			cur.Close = mid
-			cur.Ticks++
-
-			if spread > cur.MaxSpread {
-				cur.MaxSpread = spread
-			}
-			spreadSum += int64(spread)
-			return nil
-		}
-
-		if idx < curIdx {
-			return fmt.Errorf("out-of-order tick minute: idx %d < curIdx %d", idx, curIdx)
-		}
-
-		if err := finalize(); err != nil {
-			return err
-		}
-
-		if havePrevClose {
-			for m := curIdx + 1; m < idx; m++ {
-				if !bitIsSet(cs.Valid, m) && cs.Candles[m].IsZero() {
-					fillFlat(m, prevClose)
-				}
-			}
-		}
-
-		curIdx = idx
-		cur = market.Candle{
-			Open:      mid,
-			High:      mid,
-			Low:       mid,
-			Close:     mid,
-			Ticks:     1,
-			MaxSpread: spread,
-		}
-		spreadSum = int64(spread)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := finalize(); err != nil {
-		return nil, err
-	}
-
-	if havePrevClose && curIdx >= 0 {
-		for m := curIdx + 1; m < minutesPerHour; m++ {
-			if !bitIsSet(cs.Valid, m) && cs.Candles[m].IsZero() {
-				fillFlat(m, prevClose)
-			}
-		}
-	}
-
-	return cs, nil
 }
 
 func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
@@ -304,7 +125,7 @@ func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
 	return types.Timemilli(t.UnixMilli()), nil
 }
 
-func (d *dukasfile) forEachTick(ctx context.Context, fn func(Tick) error) error {
+func (d *dukasfile) forEachTick1(ctx context.Context, fn func(Tick) error) error {
 	it, err := store.OpenTickIterator(d.Key())
 	if err != nil {
 		return err

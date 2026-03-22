@@ -28,7 +28,7 @@ type ADX struct {
 
 	// candle tracking
 	seen    int
-	prev    market.OHLC
+	prev    market.Candle
 	hasPrev bool
 	ready   bool
 	adx     float64
@@ -80,7 +80,7 @@ func (a *ADX) Reset() {
 }
 
 // Update consumes the next closed candle.
-func (a *ADX) Update(c market.OHLC) {
+func (a *ADX) Update(c market.Candle) {
 	a.seen++
 
 	// Need a previous candle to form a "period"
@@ -91,12 +91,12 @@ func (a *ADX) Update(c market.OHLC) {
 	}
 
 	// Convert scaled ints -> float price units
-	prevH := float64(a.prev.H) / a.scale
-	prevL := float64(a.prev.L) / a.scale
-	prevC := float64(a.prev.C) / a.scale
+	prevH := float64(a.prev.High) / a.scale
+	prevL := float64(a.prev.Low) / a.scale
+	prevC := float64(a.prev.Close) / a.scale
 
-	h := float64(c.H) / a.scale
-	l := float64(c.L) / a.scale
+	h := float64(c.High) / a.scale
+	l := float64(c.Low) / a.scale
 
 	// True Range (Wilder)
 	tr := max3(h-l, math.Abs(h-prevC), math.Abs(l-prevC))

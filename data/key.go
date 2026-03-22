@@ -133,6 +133,32 @@ func (k Key) IsMonthlyCandle() bool {
 func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
+
+func (k Key) Range() types.TimeRange {
+	start := k.Time().UTC()
+
+	switch {
+	case k.Kind == KindTick && k.Hour >= 0:
+		end := start.Add(time.Hour)
+		return types.TimeRange{
+			Start: types.Timestamp(start.Unix()),
+			End:   types.Timestamp(end.Unix()),
+			TF:    types.Ticks,
+		}
+
+	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
+		end := start.AddDate(0, 1, 0)
+		return types.TimeRange{
+			Start: types.Timestamp(start.Unix()),
+			End:   types.Timestamp(end.Unix()),
+			TF:    k.TF,
+		}
+
+	default:
+		return types.TimeRange{}
+	}
+}
+
 func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)

@@ -2,11 +2,20 @@ package data
 
 type Want struct {
 	Key
+	WantReason
 }
 
 type Wantlist struct {
 	items Keymap[Want]
 }
+
+type WantReason string
+
+const (
+	WantMissing    WantReason = "missing"
+	WantIncomplete WantReason = "incomplete"
+	WantStale      WantReason = "stale"
+)
 
 func NewWantlist() *Wantlist {
 	return &Wantlist{

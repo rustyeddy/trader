@@ -1,6 +1,7 @@
 package data
 
 var (
-	inv   *Inventory
-	wants = NewWantlist()
+	store = &Store{
+		basedir: "../../tmp",
+	}
 )

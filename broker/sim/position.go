@@ -13,25 +13,25 @@ type Position struct {
 	Open  bool
 }
 
-func (p *Position) CheckExit(c market.OHLC) (exitPrice types.Price, hit bool) {
+func (p *Position) CheckExit(c market.Candle) (exitPrice types.Price, hit bool) {
 	if !p.Open {
 		return 0, false
 	}
 
 	if p.Side > 0 {
 		// long: stop hit if low <= stop, take hit if high >= take
-		if c.L <= p.Stop {
+		if c.Low <= p.Stop {
 			return p.Stop, true
 		}
-		if c.H >= p.Take {
+		if c.High >= p.Take {
 			return p.Take, true
 		}
 	} else {
 		// short: stop hit if high >= stop, take hit if low <= take
-		if c.H >= p.Stop {
+		if c.High >= p.Stop {
 			return p.Stop, true
 		}
-		if c.L <= p.Take {
+		if c.Low <= p.Take {
 			return p.Take, true
 		}
 	}
