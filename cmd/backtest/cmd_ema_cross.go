@@ -1,9 +1,6 @@
 package backtest
 
 import (
-	"fmt"
-	"os"
-
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/market/strategies"
@@ -50,98 +47,98 @@ func init() {
 }
 
 func RunEMACross(cmd *cobra.Command, args []string) error {
-	stopPips := types.Price(stopPips32)
-	takePips := types.Price(takePips32)
-	units := types.Units(units32)
+	// stopPips := types.Price(stopPips32)
+	// takePips := types.Price(takePips32)
+	// units := types.Units(units32)
 
-	file := cfg.File
-	if file == "" {
-		file = "../testdata/DAT_ASCII_EURUSD_M1_2025.csv"
-	}
+	// file := cfg.File
+	// if file == "" {
+	// 	file = "../testdata/DAT_ASCII_EURUSD_M1_2025.csv"
+	// }
 
-	cs, err := market.NewCandleSet(file)
-	if err != nil {
-		return err
-	}
+	// cs, err := market.NewCandleSet(file)
+	// if err != nil {
+	// 	return err
+	// }
 
-	// CandleEngine expects H1.
-	h1 := cs
-	if cs.Timeframe == 60 {
-		h1 = cs.AggregateH1(50)
-	}
+	// // CandleEngine expects H1.
+	// h1 := cs
+	// if cs.Timeframe == 60 {
+	// 	h1 = cs.AggregateH1(50)
+	// }
 
-	// Strategy needs scale for int32->float math in indicators.
-	cfg.Scale = h1.Scale
+	// // Strategy needs scale for int32->float math in indicators.
+	// cfg.Scale = h1.Scale
 
-	meta, ok := market.Instruments[h1.Name]
-	if !ok {
-		return fmt.Errorf("unknown instrument %q", h1.Name)
-	}
-	pipScaled := bt.PipScaled(meta.PipLocation)
-	if err != nil {
-		return err
-	}
+	// meta, ok := market.Instruments[h1.Name]
+	// if !ok {
+	// 	return fmt.Errorf("unknown instrument %q", h1.Name)
+	// }
+	// pipScaled := bt.PipScaled(meta.PipLocation)
+	// if err != nil {
+	// 	return err
+	// }
 
-	strat := strategies.NewEMACross(cfg)
-	eng := bt.NewCandleEngine(h1, cfg.Balance, meta.QuoteCurrency)
+	// strat := strategies.NewEMACross(cfg)
+	// eng := bt.NewCandleEngine(h1, cfg.Balance, meta.QuoteCurrency)
 
-	adapter := &emaCrossAdapter{
-		S:         strat,
-		Units:     units,
-		StopPips:  stopPips,
-		TakePips:  takePips,
-		PipScaled: pipScaled,
-	}
+	// adapter := &emaCrossAdapter{
+	// 	S:         strat,
+	// 	Units:     units,
+	// 	StopPips:  stopPips,
+	// 	TakePips:  takePips,
+	// 	PipScaled: pipScaled,
+	// }
 
-	if err := eng.Run(adapter); err != nil {
-		return err
-	}
+	// if err := eng.Run(adapter); err != nil {
+	// 	return err
+	// }
 
-	// Minimal summary (no DB write yet)
-	wins, losses := 0, 0
-	for _, tr := range eng.Trades {
-		if tr.PNL > 0 {
-			wins++
-		} else {
-			losses++
-		}
-	}
+	// // Minimal summary (no DB write yet)
+	// wins, losses := 0, 0
+	// for _, tr := range eng.Trades {
+	// 	if tr.PNL > 0 {
+	// 		wins++
+	// 	} else {
+	// 		losses++
+	// 	}
+	// }
 
-	start := types.FromTime(h1.Time(0))
-	end := types.FromTime(h1.Time(len(h1.Candles) - 1))
+	// start := types.FromTime(h1.Time(0))
+	// end := types.FromTime(h1.Time(len(h1.Candles) - 1))
 
-	run := bt.BacktestRun{
-		Timeframe:    "H1",
-		Dataset:      file,
-		Instrument:   h1.Name,
-		Strategy:     strat.Name(),
-		StopPips:     types.Price(stopPips),
-		RR:           cfg.RR,
-		Start:        start,
-		End:          end,
-		Trades:       len(eng.Trades),
-		Wins:         wins,
-		Losses:       losses,
-		StartBalance: cfg.Balance,
-		EndBalance:   eng.Balance,
-		NetPL:        eng.Balance - cfg.Balance,
-	}
-	if cfg.Balance != 0 {
-		v, err := types.MulDiv64(int64(run.NetPL), int64(cfg.Balance), int64(types.MoneyScale))
-		if err != nil {
-			return err
-		}
-		run.ReturnPct = types.Rate(v * 100)
-	}
-	if run.Trades > 0 {
-		v, err := types.MulDiv64(int64(run.Wins), int64(run.Trades), int64(1))
-		if err != nil {
-			return err
-		}
-		run.WinRate = types.Rate(v * 100)
-	}
+	// run := bt.BacktestRun{
+	// 	Timeframe:    "H1",
+	// 	Dataset:      file,
+	// 	Instrument:   h1.Name,
+	// 	Strategy:     strat.Name(),
+	// 	StopPips:     types.Price(stopPips),
+	// 	RR:           cfg.RR,
+	// 	Start:        start,
+	// 	End:          end,
+	// 	Trades:       len(eng.Trades),
+	// 	Wins:         wins,
+	// 	Losses:       losses,
+	// 	StartBalance: cfg.Balance,
+	// 	EndBalance:   eng.Balance,
+	// 	NetPL:        eng.Balance - cfg.Balance,
+	// }
+	// if cfg.Balance != 0 {
+	// 	v, err := types.MulDiv64(int64(run.NetPL), int64(cfg.Balance), int64(types.MoneyScale))
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	run.ReturnPct = types.Rate(v * 100)
+	// }
+	// if run.Trades > 0 {
+	// 	v, err := types.MulDiv64(int64(run.Wins), int64(run.Trades), int64(1))
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	run.WinRate = types.Rate(v * 100)
+	// }
 
-	bt.PrintBacktestRun(os.Stdout, run)
+	// bt.PrintBacktestRun(os.Stdout, run)
 	return nil
 }
 
@@ -156,18 +153,18 @@ type emaCrossAdapter struct {
 
 func (a *emaCrossAdapter) Name() string { return a.S.Name() }
 func (a *emaCrossAdapter) Reset()       { a.S.Reset() }
-func (a *emaCrossAdapter) Update(c market.OHLC) strategies.Decision {
+func (a *emaCrossAdapter) Update(c market.Candle) strategies.Decision {
 	dec := strategies.DefaultDecision{}
 	return dec
 }
 
-func (a *emaCrossAdapter) OnBar(ctx *bt.CandleContext, c market.OHLC) *bt.OrderRequest {
+func (a *emaCrossAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *bt.OrderRequest {
 	d := a.S.Update(c)
 	if d.Signal() == strategies.Hold {
 		return nil
 	}
 
-	entry := c.C
+	entry := c.Close
 	stopDist := a.StopPips * types.Price(a.PipScaled)
 	takeDist := a.TakePips * types.Price(a.PipScaled)
 

@@ -7,6 +7,10 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+type CandleSource interface {
+	Candles(ctx context.Context, req data.CandleRequest) (data.CandleIterator, error)
+}
+
 type CandleRunRequest struct {
 	DataRequest     data.CandleRequest
 	StartingBalance types.Money
@@ -16,11 +20,11 @@ type CandleRunRequest struct {
 
 func RunCandles(
 	ctx context.Context,
-	dm *data.DataManager,
+	src CandleSource,
 	req CandleRunRequest,
 	strat CandleStrategy,
 ) (*CandleEngine, error) {
-	it, err := dm.Candles(ctx, req.DataRequest)
+	it, err := src.Candles(ctx, req.DataRequest)
 	if err != nil {
 		return nil, err
 	}
