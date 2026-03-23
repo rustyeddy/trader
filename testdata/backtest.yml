@@ -1,0 +1,34 @@
+version: 1
+
+defaults:
+  starting_balance: 10000
+  account_ccy: USD
+  scale: 100000
+  strict: true
+
+runs:
+  - name: eurusd_h1_ema_fast
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-06-30
+    strategy:
+      kind: ema-cross
+      params:
+        fast: 10
+        slow: 20
+        units: 1000
+
+  - name: eurusd_h1_ema_slow
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-06-30
+    strategy:
+      kind: ema-cross
+      params:
+        fast: 20
+        slow: 50
+        units: 1000
