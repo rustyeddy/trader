@@ -13,6 +13,8 @@ func PrintBacktestRun(w io.Writer, r BacktestRun) {
 	fmt.Fprintln(w, "==================================================")
 
 	fmt.Fprintf(w, "Run ID:        %s\n", r.RunID)
+	fmt.Fprintf(w, "Run Name:      %s\n", r.Name)
+	fmt.Fprintf(w, "Kind:          %s\n", r.Kind)
 	fmt.Fprintf(w, "Created:       %s\n", r.Created.Time())
 	fmt.Fprintf(w, "Strategy:      %s\n", r.Strategy)
 	fmt.Fprintf(w, "Instrument:    %s\n", r.Instrument)
@@ -33,7 +35,7 @@ func PrintBacktestRun(w io.Writer, r BacktestRun) {
 	fmt.Fprintln(w, "Strategy Configuration")
 	fmt.Fprintln(w, "--------------------------------------------------")
 	fmt.Fprintf(w, "Risk per Trade: %.2f%%\n", float64(r.RiskPct)*100/float64(types.RateScale))
-	fmt.Fprintf(w, "Stop Loss:     %.1f pips\n", float64(r.StopPips)/float64(types.PriceScale))
+	fmt.Fprintf(w, "Stop Loss:     %.1f pips\n", float64(r.StopPips))
 	fmt.Fprintf(w, "Risk/Reward:   %.2f\n", float64(r.RR)/float64(types.RateScale))
 
 	fmt.Fprintln(w)

@@ -49,8 +49,8 @@ var InstrumentList_ = []string{
 }
 
 var Instruments = map[string]*Instrument{
-	"EUR_USD": {
-		Name:                "EUR_USD",
+	"EURUSD": {
+		Name:                "EURUSD",
 		BaseCurrency:        "EUR",
 		QuoteCurrency:       "USD",
 		PipLocation:         -4,
@@ -58,17 +58,17 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000), // 2% (50:1)
 	},
-	"GBP_USD": {
-		Name:                "GBP_USD",
+	"GBPUSD": {
+		Name:                "GBPUSD",
 		BaseCurrency:        "GBP",
 		QuoteCurrency:       "USD",
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          types.Rate(20000),
 	},
-	"USD_JPY": {
-		Name:                "USD_JPY",
+	"USDJPY": {
+		Name:                "USDJPY",
 		BaseCurrency:        "USD",
 		QuoteCurrency:       "JPY",
 		PipLocation:         -2,
@@ -76,8 +76,8 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000),
 	},
-	"USD_CHF": {
-		Name:                "USD_CHF",
+	"USDCHF": {
+		Name:                "USDCHF",
 		BaseCurrency:        "USD",
 		QuoteCurrency:       "CHF",
 		PipLocation:         -4,
@@ -85,8 +85,8 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000),
 	},
-	"AUD_USD": {
-		Name:                "AUD_USD",
+	"AUDUSD": {
+		Name:                "AUDUSD",
 		BaseCurrency:        "AUD",
 		QuoteCurrency:       "USD",
 		PipLocation:         -4,
@@ -94,8 +94,8 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000),
 	},
-	"USD_CAD": {
-		Name:                "USD_CAD",
+	"USDCAD": {
+		Name:                "USDCAD",
 		BaseCurrency:        "USD",
 		QuoteCurrency:       "CAD",
 		PipLocation:         -4,
@@ -103,8 +103,8 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000),
 	},
-	"NZD_USD": {
-		Name:                "NZD_USD",
+	"NZDUSD": {
+		Name:                "NZDUSD",
 		BaseCurrency:        "NZD",
 		QuoteCurrency:       "USD",
 		PipLocation:         -4,
@@ -112,8 +112,8 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          types.Rate(20_000),
 	},
-	"XAU_USD": {
-		Name:                "XAU_USD",
+	"XAUUSD": {
+		Name:                "XAUUSD",
 		BaseCurrency:        "XAU",
 		QuoteCurrency:       "USD",
 		PipLocation:         -2, // Gold pip = 0.01
