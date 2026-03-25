@@ -111,9 +111,17 @@ func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
 	barIndex := 0
 	var prevTS types.Timestamp
 
+	var lastTS types.Timestamp
+	var lastC market.Candle
+	haveLast := false
+
 	for feed.Next() {
 		ts := feed.Timestamp()
 		c := feed.Candle()
+
+		lastTS = ts
+		lastC = c
+		haveLast = true
 
 		gapBars := 0
 		if prevTS != 0 {
@@ -151,6 +159,10 @@ func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
 
 	if err := feed.Err(); err != nil {
 		return err
+	}
+
+	if e.Pos.Open && haveLast {
+		e.closePosition(lastTS, lastC.Close, "end_of_data")
 	}
 
 	return nil
@@ -192,7 +204,8 @@ func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason
 		}
 	}
 
-	e.Balance += types.Money(pnlAcct)
+	pnlMoney := types.MoneyFromFloat(pnlAcct)
+	e.Balance += pnlMoney
 	e.Trades = append(e.Trades, Trade{
 		EntryTime:  p.EntryTime,
 		ExitTime:   t,
@@ -200,7 +213,7 @@ func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason
 		EntryPrice: p.EntryPrice,
 		ExitPrice:  exit,
 		Units:      p.Units,
-		PNL:        types.Money(pnlAcct),
+		PNL:        pnlMoney,
 		Reason:     reason,
 	})
 }

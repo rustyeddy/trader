@@ -3,8 +3,11 @@ version: 1
 defaults:
   starting_balance: 10000
   account_ccy: USD
-  scale: 100000
   strict: true
+  stop_pips: 20
+  take_pips: 40
+  risk_pct: 0.5
+  rr: 2.0
 
 runs:
   - name: eurusd_h1_ema_fast

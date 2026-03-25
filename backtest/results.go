@@ -26,6 +26,8 @@ type Result struct {
 // BacktestRunRow mirrors backtest_runs table.
 type BacktestRun struct {
 	RunID     string
+	Name      string
+	Kind      string
 	Created   types.Timestamp
 	Timeframe string
 	Dataset   string

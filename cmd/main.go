@@ -35,7 +35,7 @@ func NewRootCmd() *cobra.Command {
 
 	// Subcommands
 	cmd.AddCommand(
-		backtest.CMDBacktest,
+		backtest.New(rc),
 		data.New(rc),
 		replay.New(rc),
 	)

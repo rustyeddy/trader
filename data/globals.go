@@ -2,6 +2,6 @@ package data
 
 var (
 	store = &Store{
-		basedir: "../../tmp",
+		basedir: "/home/rusty/src/trader/tmp",
 	}
 )
