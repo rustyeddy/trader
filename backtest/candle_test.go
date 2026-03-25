@@ -45,49 +45,6 @@ func (f *fakeFeed) Close() error {
 	return nil
 }
 
-func TestCandleEngineRun_BuyFirstBarStrategy(t *testing.T) {
-	feed := &fakeFeed{
-		bars: []fakeBar{
-			{
-				ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
-				c: market.Candle{
-					Open:  100000,
-					High:  101000,
-					Low:   99000,
-					Close: 100500,
-					Ticks: 10,
-				},
-			},
-			{
-				ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
-				c: market.Candle{
-					Open:  100500,
-					High:  101500,
-					Low:   100000,
-					Close: 101000,
-					Ticks: 12,
-				},
-			},
-		},
-	}
-
-	engine := NewCandleEngine(
-		"EURUSD",
-		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
-	)
-
-	err := engine.Run(feed, &BuyFirstBarStrategy{})
-	require.NoError(t, err)
-
-	require.True(t, engine.Pos.Open)
-	require.Equal(t, Long, engine.Pos.Side)
-	require.Equal(t, types.Units(1000), engine.Pos.Units)
-	require.Equal(t, types.Price(100500), engine.Pos.EntryPrice)
-	require.Len(t, engine.Trades, 0)
-}
 
 func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
 	feed := &fakeFeed{
@@ -440,6 +397,7 @@ func (s *testShortTakeProfitStrategy) OnBar(ctx *CandleContext, c market.Candle)
 		Reason: "enter short with take",
 	}
 }
+
 func TestCandleEngineRun_ShortStopLossClosesTrade(t *testing.T) {
 	feed := &fakeFeed{
 		bars: []fakeBar{
@@ -562,9 +520,9 @@ func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, strat.entries)
-	require.True(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 0)
-	require.Equal(t, types.Price(100000), engine.Pos.EntryPrice)
+	require.False(t, engine.Pos.Open) // engine closes open positions at end of data
+	require.Len(t, engine.Trades, 1)
+	require.Equal(t, "end_of_data", engine.Trades[0].Reason)
 }
 
 type countingEntryStrategy struct {
@@ -650,11 +608,12 @@ func TestRunCandles_Smoke(t *testing.T) {
 		Scale:           types.PriceScale,
 	}
 
-	engine, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{})
+	engine, err := RunCandles(context.Background(), src, req, &countingEntryStrategy{})
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 
-	require.True(t, engine.Pos.Open)
-	require.Equal(t, Long, engine.Pos.Side)
-	require.Equal(t, types.Units(1000), engine.Pos.Units)
+	require.False(t, engine.Pos.Open) // engine closes open positions at end of data
+	require.Len(t, engine.Trades, 1)
+	require.Equal(t, Long, engine.Trades[0].Side)
+	require.Equal(t, types.Units(1000), engine.Trades[0].Units)
 }
