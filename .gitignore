@@ -49,5 +49,4 @@ main
 *.sqlite
 *.db
 cli
-cmd
 tmp

@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ADX computes the Average Directional Index (Wilder) over candle OHLC.
@@ -52,7 +53,7 @@ type ADX struct {
 	dxCount int
 }
 
-func NewADX(period int, scale int32) *ADX {
+func NewADX(period int, scale types.Scale6) *ADX {
 	if period <= 0 {
 		panic("ADX period must be > 0")
 	}

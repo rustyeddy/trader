@@ -5,16 +5,14 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/market/indicators"
+	"github.com/rustyeddy/trader/types"
 )
 
 type EMACrossADX struct {
-	fast *indicators.EMA
-	slow *indicators.EMA
+	core emaCrossCore
 	adx  *indicators.ADX
 
-	// prevRel tracks prior fast/slow relationship: -1 below, +1 above, 0 unknown
-	prevRel int
-
+	// these are the config
 	adxThreshold    float64
 	requireDI       bool
 	requireADXReady bool
@@ -24,16 +22,14 @@ type EMACrossADX struct {
 }
 
 type EMACrossADXConfig struct {
-	FastPeriod int
-	SlowPeriod int
-	ADXPeriod  int
-	Scale      int32
-
-	ADXThreshold    float64 // e.g. 20.0 or 25.0
-	RequireDI       bool    // if true, confirm direction with DI (+DI>-DI for buy, opposite for sell)
-	RequireADXReady bool    // if true, don't signal until ADX ready (recommended)
-
-	MinSpread float64 // optional; 0 disables
+	FastPeriod      int
+	SlowPeriod      int
+	ADXPeriod       int
+	Scale           types.Scale6
+	MinSpread       float64
+	ADXThreshold    float64
+	RequireDI       bool
+	RequireADXReady bool
 }
 
 func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
@@ -51,30 +47,33 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 	}
 
 	return &EMACrossADX{
-		fast:            indicators.NewEMA(cfg.FastPeriod, cfg.Scale),
-		slow:            indicators.NewEMA(cfg.SlowPeriod, cfg.Scale),
+		core: emaCrossCore{
+			fast: indicators.NewEMA(cfg.FastPeriod, cfg.Scale),
+			slow: indicators.NewEMA(cfg.SlowPeriod, cfg.Scale),
+
+			prevRel:   0,
+			minSpread: cfg.MinSpread,
+			name:      fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
+		},
 		adx:             indicators.NewADX(cfg.ADXPeriod, cfg.Scale),
-		prevRel:         0,
 		adxThreshold:    cfg.ADXThreshold,
 		requireDI:       cfg.RequireDI,
 		requireADXReady: cfg.RequireADXReady,
-		minSpread:       cfg.MinSpread,
-		name:            fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 	}
 }
 
 func (x *EMACrossADX) Name() string { return x.name }
 
 func (x *EMACrossADX) Reset() {
-	x.fast.Reset()
-	x.slow.Reset()
+	x.core.fast.Reset()
+	x.core.slow.Reset()
 	x.adx.Reset()
-	x.prevRel = 0
+	x.core.prevRel = 0
 }
 
 func (x *EMACrossADX) Ready() bool {
 	// EMA readiness is required. ADX readiness depends on config.
-	if !x.fast.Ready() || !x.slow.Ready() {
+	if !x.core.fast.Ready() || !x.core.slow.Ready() {
 		return false
 	}
 	if x.requireADXReady && !x.adx.Ready() {
@@ -83,20 +82,20 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
-	x.fast.Update(c)
-	x.slow.Update(c)
+func (x *EMACrossADX) Update(c market.Candle) Decision {
+	x.core.fast.Update(c)
+	x.core.slow.Update(c)
 	x.adx.Update(c)
 
-	close := float64(c.Close) / float64(scale)
+	close := float64(c.Close) / float64(x.core.scale)
 
 	// If EMAs aren't ready, we can't do cross logic.
-	if !x.fast.Ready() || !x.slow.Ready() {
+	if !x.core.fast.Ready() || !x.core.slow.Ready() {
 		return EMACrossADXDecision{
 			signal: Hold,
 			reason: "warming up EMAs",
-			Fast:   x.fast.Float64(),
-			Slow:   x.slow.Float64(),
+			Fast:   x.core.fast.Float64(),
+			Slow:   x.core.slow.Float64(),
 			Close:  close,
 		}
 	}
@@ -106,18 +105,18 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 		return EMACrossADXDecision{
 			signal: Hold,
 			reason: "warming up ADX",
-			Fast:   x.fast.Float64(),
-			Slow:   x.slow.Float64(),
+			Fast:   x.core.fast.Float64(),
+			Slow:   x.core.slow.Float64(),
 			Close:  close,
 		}
 	}
 
-	fv := x.fast.Float64()
-	sv := x.slow.Float64()
+	fv := x.core.fast.Float64()
+	sv := x.core.slow.Float64()
 	diff := fv - sv
 
 	// Optional noise filter on EMA spread
-	if x.minSpread > 0 && abs(diff) < x.minSpread {
+	if x.core.minSpread > 0 && abs(diff) < x.core.minSpread {
 		return EMACrossADXDecision{
 			signal: Hold,
 			reason: "min-spread filter",
@@ -136,9 +135,9 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 
 	// Baseline behavior: don't emit on first usable relationship.
 	// If rel==0, keep waiting.
-	if x.prevRel == 0 {
+	if x.core.prevRel == 0 {
 		if rel != 0 {
-			x.prevRel = rel
+			x.core.prevRel = rel
 			return EMACrossADXDecision{
 				signal: Hold,
 				reason: "baseline set",
@@ -159,7 +158,7 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	adxVal := x.adx.Float64()
 	if x.adx.Ready() && adxVal < x.adxThreshold {
 		// ADX gate: trend too weak
-		x.prevRel = rel
+		x.core.prevRel = rel
 		return EMACrossADXDecision{
 			signal: Hold,
 			reason: "ADX below threshold",
@@ -170,26 +169,26 @@ func (x *EMACrossADX) Update(c market.Candle, scale int32) Decision {
 	}
 
 	// Cross up: below -> above
-	if x.prevRel == -1 && rel == +1 {
+	if x.core.prevRel == -1 && rel == +1 {
 		if x.requireDI && x.adx.Ready() && !(x.adx.PlusDI() > x.adx.MinusDI()) {
-			x.prevRel = rel
+			x.core.prevRel = rel
 			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (buy)", Fast: fv, Slow: sv, Close: close}
 		}
-		x.prevRel = rel
+		x.core.prevRel = rel
 		return EMACrossADXDecision{signal: Buy, reason: "EMA cross up + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
 	// Cross down: above -> below
-	if x.prevRel == +1 && rel == -1 {
+	if x.core.prevRel == +1 && rel == -1 {
 		if x.requireDI && x.adx.Ready() && !(x.adx.MinusDI() > x.adx.PlusDI()) {
-			x.prevRel = rel
+			x.core.prevRel = rel
 			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (sell)", Fast: fv, Slow: sv, Close: close}
 		}
-		x.prevRel = rel
+		x.core.prevRel = rel
 		return EMACrossADXDecision{signal: Sell, reason: "EMA cross down + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
-	x.prevRel = rel
+	x.core.prevRel = rel
 	return EMACrossADXDecision{signal: Hold, reason: "no cross", Fast: fv, Slow: sv, Close: close}
 }
 

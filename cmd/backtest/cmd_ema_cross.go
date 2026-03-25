@@ -164,7 +164,7 @@ func runEMACrossFromFlags() (bt.BacktestRun, error) {
 		return bt.BacktestRun{}, fmt.Errorf("unknown instrument %q", instrument)
 	}
 
-	cfg.Scale = int32(types.PriceScale)
+	cfg.Scale = types.PriceScale
 
 	req := bt.CandleRunRequest{
 		DataRequest: data.CandleRequest{

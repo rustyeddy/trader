@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // EMA computes an Exponential Moving Average over candle closes.
@@ -25,7 +26,7 @@ type EMA struct {
 	name string
 }
 
-func NewEMA(period int, scale int32) *EMA {
+func NewEMA(period int, scale types.Scale6) *EMA {
 	if period <= 0 {
 		panic("EMA period must be > 0")
 	}
