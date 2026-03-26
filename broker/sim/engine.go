@@ -66,7 +66,7 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRe
 		fillPrice = p.Bid
 	}
 
-	id := types.New()
+	id := types.NewULID()
 
 	trade := &Trade{
 		ID:         id,

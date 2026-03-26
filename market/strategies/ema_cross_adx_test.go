@@ -8,20 +8,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mkOHLC(scale int32, o, h, l, c float64) market.OHLC {
+func mkOHLC(scale int32, o, h, l, c float64) market.Candle {
 	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
-	return market.OHLC{
-		O: toP(o),
-		H: toP(h),
-		L: toP(l),
-		C: toP(c),
+	return market.Candle{
+		Open:  toP(o),
+		High:  toP(h),
+		Low:   toP(l),
+		Close: toP(c),
 	}
 }
 
 func feedSignalsADX(s *EMACrossADX, scale int32, candles []market.OHLC) []Decision {
 	out := make([]Decision, 0, 16)
 	for _, c := range candles {
-		d := s.Update(c, scale)
+		d := s.Update(c)
 		if d.Signal() != Hold {
 			out = append(out, d)
 		}
@@ -210,7 +210,7 @@ func TestEMACrossADX_CloseOnlyCandles_NoPanic(t *testing.T) {
 	var events []Decision
 	require.NotPanics(t, func() {
 		for _, v := range closes {
-			d := s.Update(mkClose(scale, v), scale)
+			d := s.Update(mkClose(scale, v))
 			if d.Signal() != Hold {
 				events = append(events, d)
 			}

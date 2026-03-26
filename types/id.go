@@ -33,7 +33,7 @@ func init() {
 //
 // ULIDs are lexicographically sortable by generation time, which makes them
 // ideal for journaling/trading records and SQLite indexes.
-func New() string {
+func NewULID() string {
 	mu.Lock()
 	defer mu.Unlock()
 

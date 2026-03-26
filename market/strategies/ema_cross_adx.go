@@ -16,12 +16,12 @@ type EMACrossADX struct {
 	adxThreshold    float64
 	requireDI       bool
 	requireADXReady bool
-
-	minSpread float64 // optional EMA diff filter in price units
-	name      string
+	pendingRel      int
 }
 
 type EMACrossADXConfig struct {
+	StrategyConfig
+
 	FastPeriod      int
 	SlowPeriod      int
 	ADXPeriod       int
@@ -53,6 +53,7 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 
 			prevRel:   0,
 			minSpread: cfg.MinSpread,
+			scale:     cfg.Scale,
 			name:      fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
 		adx:             indicators.NewADX(cfg.ADXPeriod, cfg.Scale),
@@ -62,13 +63,16 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 	}
 }
 
-func (x *EMACrossADX) Name() string { return x.name }
+func (x *EMACrossADX) Name() string {
+	return x.core.name
+}
 
 func (x *EMACrossADX) Reset() {
 	x.core.fast.Reset()
 	x.core.slow.Reset()
 	x.adx.Reset()
 	x.core.prevRel = 0
+	x.pendingRel = 0
 }
 
 func (x *EMACrossADX) Ready() bool {
@@ -134,7 +138,6 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 	}
 
 	// Baseline behavior: don't emit on first usable relationship.
-	// If rel==0, keep waiting.
 	if x.core.prevRel == 0 {
 		if rel != 0 {
 			x.core.prevRel = rel
@@ -155,41 +158,103 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 		}
 	}
 
-	adxVal := x.adx.Float64()
-	if x.adx.Ready() && adxVal < x.adxThreshold {
-		// ADX gate: trend too weak
-		x.core.prevRel = rel
+	// Detect a fresh cross and mark it pending.
+	if x.core.prevRel == -1 && rel == +1 {
+		x.pendingRel = +1
+	}
+	if x.core.prevRel == +1 && rel == -1 {
+		x.pendingRel = -1
+	}
+
+	// Always track the current EMA relationship.
+	x.core.prevRel = rel
+
+	// No pending trend change to confirm.
+	if x.pendingRel == 0 {
 		return EMACrossADXDecision{
 			signal: Hold,
-			reason: "ADX below threshold",
+			reason: "no cross",
 			Fast:   fv,
 			Slow:   sv,
 			Close:  close,
 		}
 	}
 
-	// Cross up: below -> above
-	if x.core.prevRel == -1 && rel == +1 {
-		if x.requireDI && x.adx.Ready() && !(x.adx.PlusDI() > x.adx.MinusDI()) {
-			x.core.prevRel = rel
-			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (buy)", Fast: fv, Slow: sv, Close: close}
+	// Require ADX readiness if configured.
+	if x.requireADXReady && !x.adx.Ready() {
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "waiting for ADX readiness",
+			Fast:   fv,
+			Slow:   sv,
+			Close:  close,
 		}
-		x.core.prevRel = rel
-		return EMACrossADXDecision{signal: Buy, reason: "EMA cross up + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
-	// Cross down: above -> below
-	if x.core.prevRel == +1 && rel == -1 {
-		if x.requireDI && x.adx.Ready() && !(x.adx.MinusDI() > x.adx.PlusDI()) {
-			x.core.prevRel = rel
-			return EMACrossADXDecision{signal: Hold, reason: "DI confirmation failed (sell)", Fast: fv, Slow: sv, Close: close}
+	// Require ADX strength once ready.
+	if x.adx.Ready() && x.adx.Float64() < x.adxThreshold {
+		return EMACrossADXDecision{
+			signal: Hold,
+			reason: "waiting for ADX threshold",
+			Fast:   fv,
+			Slow:   sv,
+			Close:  close,
 		}
-		x.core.prevRel = rel
-		return EMACrossADXDecision{signal: Sell, reason: "EMA cross down + ADX gate", Fast: fv, Slow: sv, Close: close}
 	}
 
-	x.core.prevRel = rel
-	return EMACrossADXDecision{signal: Hold, reason: "no cross", Fast: fv, Slow: sv, Close: close}
+	// Require DI confirmation if configured.
+	if x.requireDI && x.adx.Ready() {
+		if x.pendingRel == +1 && !(x.adx.PlusDI() > x.adx.MinusDI()) {
+			return EMACrossADXDecision{
+				signal: Hold,
+				reason: "waiting for DI confirmation (buy)",
+				Fast:   fv,
+				Slow:   sv,
+				Close:  close,
+			}
+		}
+		if x.pendingRel == -1 && !(x.adx.MinusDI() > x.adx.PlusDI()) {
+			return EMACrossADXDecision{
+				signal: Hold,
+				reason: "waiting for DI confirmation (sell)",
+				Fast:   fv,
+				Slow:   sv,
+				Close:  close,
+			}
+		}
+	}
+
+	// Confirmation passed: emit the pending signal once.
+	if x.pendingRel == +1 {
+		x.pendingRel = 0
+		return EMACrossADXDecision{
+			signal: Buy,
+			reason: "EMA cross up + ADX confirmed",
+			Fast:   fv,
+			Slow:   sv,
+			Close:  close,
+		}
+	}
+
+	if x.pendingRel == -1 {
+		x.pendingRel = 0
+		return EMACrossADXDecision{
+			signal: Sell,
+			reason: "EMA cross down + ADX confirmed",
+			Fast:   fv,
+			Slow:   sv,
+			Close:  close,
+		}
+	}
+
+	return EMACrossADXDecision{
+		signal: Hold,
+		reason: "no cross",
+		Fast:   fv,
+		Slow:   sv,
+		Close:  close,
+	}
+
 }
 
 type EMACrossADXDecision struct {
