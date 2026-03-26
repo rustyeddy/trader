@@ -194,11 +194,10 @@ func runCandleStrategy(
 	}
 
 	run := bt.BacktestRun{
-		RunID:   meta.RunID,
-		Name:    meta.RunName,
-		Kind:    meta.Kind,
-		Created: meta.Created,
-
+		RunID:        meta.RunID,
+		Name:         meta.RunName,
+		Kind:         meta.Kind,
+		Created:      meta.Created,
 		Timeframe:    strings.ToUpper(opts.Timeframe),
 		Dataset:      fmt.Sprintf("%s %s %s..%s", instrument, strings.ToUpper(opts.Timeframe), opts.From, opts.To),
 		Instrument:   instrument,
