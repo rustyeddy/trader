@@ -70,7 +70,7 @@ func TestValidate(t *testing.T) {
 			name: "negative stop pips",
 			config: &Config{
 				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EUR_USD", StopPips: -10, TargetPips: 40},
+				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: -10, TargetPips: 40},
 				Simulation: SimulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
 				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
@@ -81,7 +81,7 @@ func TestValidate(t *testing.T) {
 			name: "zero target pips",
 			config: &Config{
 				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EUR_USD", StopPips: 20, TargetPips: 0},
+				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 0},
 				Simulation: SimulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
 				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
@@ -92,7 +92,7 @@ func TestValidate(t *testing.T) {
 			name: "ask <= bid",
 			config: &Config{
 				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EUR_USD", StopPips: 20, TargetPips: 40},
+				Strategy:   StrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
 				Simulation: SimulationConfig{InitialBid: 1.0850, InitialAsk: 1.0849},
 				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},

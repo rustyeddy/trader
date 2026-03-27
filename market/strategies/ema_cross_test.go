@@ -3,13 +3,14 @@ package strategies
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
-func feedSignals(s *EMACross, scale int32, closes []float64) []Decision {
+func feedSignals(s *EMACross, closes []float64) []Decision {
 	out := make([]Decision, 0, 8)
 	for _, c := range closes {
-		d := s.Update(mkClose(scale, c))
+		d := s.Update(mkClose(c))
 		if d.Signal() != Hold {
 			out = append(out, d)
 		}
@@ -18,25 +19,21 @@ func feedSignals(s *EMACross, scale int32, closes []float64) []Decision {
 }
 
 func TestEMACross_WarmupNoSignals(t *testing.T) {
-	scale := int32(10000)
-
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      scale,
+		Scale:      types.PriceScale,
 	})
 
-	events := feedSignals(s, scale, []float64{1.0000, 1.0001, 1.0002, 1.0003})
+	events := feedSignals(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
 	require.Len(t, events, 0)
 }
 
 func TestEMACross_BaselineThenCrossUpThenCrossDown(t *testing.T) {
-	scale := int32(10000)
-
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      scale,
+		Scale:      types.PriceScale,
 		MinSpread:  0,
 	})
 
@@ -68,7 +65,7 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown(t *testing.T) {
 		closes = append(closes, p)
 	}
 
-	events := feedSignals(s, scale, closes)
+	events := feedSignals(s, closes)
 
 	// Expect at least BUY then SELL (baseline-first means no signal on baseline set)
 	require.GreaterOrEqual(t, len(events), 2, "expected at least BUY then SELL")
@@ -86,12 +83,10 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown(t *testing.T) {
 }
 
 func TestEMACross_MinSpreadFiltersNoise(t *testing.T) {
-	scale := int32(10000)
-
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      scale,
+		Scale:      types.PriceScale,
 		MinSpread:  0.0010, // big filter
 	})
 
@@ -104,17 +99,15 @@ func TestEMACross_MinSpreadFiltersNoise(t *testing.T) {
 		1.0002, 1.0001, 1.0000, 0.9999, 1.0000, 1.0001,
 	)
 
-	events := feedSignals(s, scale, closes)
+	events := feedSignals(s, closes)
 	require.Len(t, events, 0)
 }
 
 func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
-	scale := int32(10000)
-
 	cfg := EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      scale,
+		Scale:      types.PriceScale,
 		MinSpread:  0,
 	}
 	s := NewEMACross(cfg)
@@ -128,11 +121,11 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 		1.0014, 1.0012, 1.0010, 1.0008, 1.0006, 1.0004, 1.0002, 1.0000,
 	)
 
-	events1 := feedSignals(s, scale, closes)
+	events1 := feedSignals(s, closes)
 	require.NotEmpty(t, events1)
 
 	s.Reset()
 
-	events2 := feedSignals(s, scale, closes)
+	events2 := feedSignals(s, closes)
 	require.Equal(t, events1, events2, "after reset, strategy should emit identical signals")
 }

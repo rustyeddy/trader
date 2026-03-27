@@ -13,13 +13,13 @@ import (
 )
 
 type Config struct {
-	Symbols         string `"json":symbols`
-	Start           string `"json":start`
-	End             string `"json":end`
-	types.Timeframe `"json":timeframe`
-	Basedir         string `"json":basedir`
-	Dukasdir        string `"json":dukasdir`
-	CandleRoot      string `"json":candleroot`
+	Symbols         string `json:"symbols"`
+	Start           string `json:"start"`
+	End             string `json:"end"`
+	types.Timeframe `json:"timeframe"`
+	Basedir         string `json:"basedir"`
+	Dukasdir        string `json:"dukasdir"`
+	CandleRoot      string `json:"candleroot"`
 	Download        bool
 	Candles         bool
 }

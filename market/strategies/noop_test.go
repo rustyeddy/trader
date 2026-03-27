@@ -12,6 +12,6 @@ func TestNoopStrategyUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	// NoopStrategy should do nothing and return no error
-	err := strat.Update(ctx, nil)
-	assert.NoError(t, err)
+	dec := strat.Update(ctx, nil)
+	assert.NotNil(t, dec)
 }

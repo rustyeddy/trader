@@ -25,7 +25,7 @@ func TestMoneyFromFloat_Scaling(t *testing.T) {
 		{"half_dollar", 0.5, Money(MoneyScale / 2)},
 		{"one_cent", 0.01, Money(MoneyScale / 100)},
 		{"negative", -2.5, Money(-2*MoneyScale - MoneyScale/2)},
-		{"large", 1_000_000.0, Money(1_000_000 * MoneyScale)},
+		{"large", 1_000_000.0, Money(int64(1_000_000) * int64(MoneyScale))},
 	}
 
 	for _, tt := range tests {
@@ -80,9 +80,9 @@ func TestPriceFromFloat_Scaling(t *testing.T) {
 	}{
 		{"zero", 0.0, 0},
 		{"one", 1.0, Price(PriceScale)},
-		{"typical_forex", 1.2345, Price(1_234_500)},
-		{"minimum_tick", 1.000001, Price(1_000_001)},
-		{"negative", -1.5, Price(-1_500_000)},
+		{"typical_forex", 1.2345, Price(123_450)},
+		{"minimum_tick", 1.00001, Price(100_001)},
+		{"negative", -1.5, Price(-150_000)},
 	}
 
 	for _, tt := range tests {
@@ -108,9 +108,9 @@ func TestPrice_Overflow(t *testing.T) {
 		"max representable price equals math.MaxInt32")
 
 	// 2200.0 * 1_000_000 = 2_200_000_000 > MaxInt32 (2_147_483_647).
-	// The cast to int32 silently overflows, producing an incorrect value.
-	pOverflow := PriceFromFloat(2200.0)
-	expectedInt64 := int64(math.Round(2200.0 * float64(PriceScale))) // 2_200_000_000
+	// Price is int32 with PriceScale = 100_000, so values above ~21474.83647 overflow.
+	pOverflow := PriceFromFloat(22000.0)
+	expectedInt64 := int64(math.Round(22000.0 * float64(PriceScale)))
 	assert.NotEqual(t, expectedInt64, int64(pOverflow),
 		"values exceeding int32 range silently overflow and produce an incorrect result")
 }
@@ -315,8 +315,8 @@ func TestTimestamp_Before(t *testing.T) {
 
 	// NOTE: the implementation uses reversed semantics compared to time.Time.
 	// t.Before(ts) returns (ts < t), i.e. "does ts precede t?" not "does t precede ts?".
-	assert.True(t, late.Before(early), "reversed implementation: late.Before(early) asks whether early precedes late")
-	assert.False(t, early.Before(late), "reversed implementation: early.Before(late) asks whether late precedes early")
+	assert.False(t, late.Before(early), "reversed implementation: late.Before(early) asks whether early precedes late")
+	assert.True(t, early.Before(late), "reversed implementation: early.Before(late) asks whether late precedes early")
 	assert.False(t, early.Before(early), "equal timestamps: not Before")
 }
 
@@ -328,8 +328,8 @@ func TestTimestamp_After(t *testing.T) {
 
 	// NOTE: the implementation uses reversed semantics compared to time.Time.
 	// t.After(ts) returns (t < ts), i.e. "does t precede ts?" not "does t follow ts?".
-	assert.True(t, early.After(late), "reversed implementation: early.After(late) asks whether early precedes late")
-	assert.False(t, late.After(early), "reversed implementation: late.After(early) asks whether late precedes early")
+	assert.False(t, early.After(late), "reversed implementation: early.After(late) asks whether early precedes late")
+	assert.True(t, late.After(early), "reversed implementation: late.After(early) asks whether late precedes early")
 	assert.False(t, early.After(early), "equal timestamps: not After")
 }
 
@@ -337,10 +337,9 @@ func TestTimestamp_Add(t *testing.T) {
 	t.Parallel()
 
 	base := Timestamp(1_000_000)
-	d := time.Duration(500)
+	d := 500 * time.Second
 	result := base.Add(d)
-	// Add converts the Duration (int64 nanoseconds) directly to Timestamp and adds.
-	assert.Equal(t, Timestamp(int64(base)+int64(d)), result)
+	assert.Equal(t, Timestamp(1_000_500), result)
 }
 
 func TestTimestamp_String(t *testing.T) {
@@ -359,7 +358,7 @@ func TestNew_GeneratesUniqueIDs(t *testing.T) {
 	const n = 100
 	ids := make(map[string]struct{}, n)
 	for i := 0; i < n; i++ {
-		id := New()
+		id := NewULID()
 		require.NotEmpty(t, id)
 		_, duplicate := ids[id]
 		require.False(t, duplicate, "New() generated a duplicate ID: %s", id)
@@ -377,7 +376,7 @@ func isValidCrockfordChar(ch rune) bool {
 func TestNew_ValidULIDFormat(t *testing.T) {
 	t.Parallel()
 
-	id := New()
+	id := NewULID()
 	// A ULID is exactly 26 characters of Crockford base32.
 	const ulidLen = 26
 	assert.Len(t, id, ulidLen, "ULID must be %d characters", ulidLen)

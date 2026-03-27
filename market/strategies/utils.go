@@ -12,7 +12,7 @@ func abs(x float64) float64 {
 	return x
 }
 
-func mkClose(scale int32, close float64) market.Candle {
-	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
+func mkClose(close float64) market.Candle {
+	toP := func(x float64) types.Price { return types.Price(x*float64(types.PriceScale) + 0.5) }
 	return market.Candle{Close: toP(close)}
 }

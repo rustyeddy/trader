@@ -9,32 +9,30 @@ import (
 )
 
 // helper to create a candle with close only
-func candle(close float64, scale int32) market.OHLC {
-	return market.OHLC{
-		C: types.Price(close * float64(scale)),
+func candle(close float64) market.Candle {
+	return market.Candle{
+		Close: types.Price(close * float64(types.PriceScale)),
 	}
 }
 
 func TestEMA_WarmupAndReady(t *testing.T) {
-	scale := int32(100) // simple scale for test
-	ema := NewEMA(3, scale)
+	ema := NewEMA(3, types.PriceScale)
 
 	require.False(t, ema.Ready())
 	require.Equal(t, 3, ema.Warmup())
 
-	ema.Update(candle(1.0, scale))
+	ema.Update(candle(1.0))
 	require.False(t, ema.Ready())
 
-	ema.Update(candle(2.0, scale))
+	ema.Update(candle(2.0))
 	require.False(t, ema.Ready())
 
-	ema.Update(candle(3.0, scale))
+	ema.Update(candle(3.0))
 	require.True(t, ema.Ready())
 }
 
 func TestEMA_KnownSequence(t *testing.T) {
-	scale := int32(100)
-	ema := NewEMA(3, scale)
+	ema := NewEMA(3, types.PriceScale)
 
 	// period = 3
 	// alpha = 2/(3+1) = 0.5
@@ -51,7 +49,7 @@ func TestEMA_KnownSequence(t *testing.T) {
 
 	var result float64
 	for _, v := range values {
-		ema.Update(candle(v, scale))
+		ema.Update(candle(v))
 		result = ema.Float64()
 	}
 
@@ -60,11 +58,10 @@ func TestEMA_KnownSequence(t *testing.T) {
 }
 
 func TestEMA_Reset(t *testing.T) {
-	scale := int32(100)
-	ema := NewEMA(3, scale)
+	ema := NewEMA(3, types.PriceScale)
 
-	ema.Update(candle(10, scale))
-	ema.Update(candle(11, scale))
+	ema.Update(candle(10))
+	ema.Update(candle(11))
 	require.False(t, ema.Ready())
 
 	ema.Reset()
@@ -72,6 +69,6 @@ func TestEMA_Reset(t *testing.T) {
 	require.False(t, ema.Ready())
 	require.Equal(t, 0.0, ema.Float64())
 
-	ema.Update(candle(20, scale))
+	ema.Update(candle(20))
 	require.Equal(t, 20.0, ema.Float64())
 }

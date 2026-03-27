@@ -94,10 +94,10 @@ func TestEngineRevalueEURUSDLong(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 
-	setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
-	openMarket(t, e, "EUR_USD", 100000, nil, nil)
+	setPrice(t, e, "EURUSD", 1.1000, 1.1002, t0)
+	openMarket(t, e, "EURUSD", 100000, nil, nil)
 
-	setPrice(t, e, "EUR_USD", 1.1010, 1.1012, t1)
+	setPrice(t, e, "EURUSD", 1.1010, 1.1012, t1)
 
 	acct, err := e.GetAccount(context.Background())
 	if err != nil {
@@ -118,10 +118,10 @@ func TestEngineRevalueUSDJPYLongWithConversion(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 
-	setPrice(t, e, "USD_JPY", 150.00, 150.02, t0)
-	openMarket(t, e, "USD_JPY", 100000, nil, nil)
+	setPrice(t, e, "USDJPY", 150.00, 150.02, t0)
+	openMarket(t, e, "USDJPY", 100000, nil, nil)
 
-	setPrice(t, e, "USD_JPY", 150.22, 150.24, t1)
+	setPrice(t, e, "USDJPY", 150.22, 150.24, t1)
 
 	acct, err := e.GetAccount(context.Background())
 	if err != nil {
@@ -139,11 +139,11 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 
 	t.Run("long stop loss uses bid", func(t *testing.T) {
 		e, _ := newEngine(t, 100000)
-		setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
+		setPrice(t, e, "EURUSD", 1.1000, 1.1002, t0)
 		sl := 1.0990
-		fill := openMarket(t, e, "EUR_USD", 100000, &sl, nil)
+		fill := openMarket(t, e, "EURUSD", 100000, &sl, nil)
 
-		setPrice(t, e, "EUR_USD", 1.0990, 1.0992, t1)
+		setPrice(t, e, "EURUSD", 1.0990, 1.0992, t1)
 
 		acct, err := e.GetAccount(context.Background())
 		if err != nil {
@@ -164,11 +164,11 @@ func TestStopLossUsesCorrectSide(t *testing.T) {
 
 	t.Run("short stop loss uses ask", func(t *testing.T) {
 		e, _ := newEngine(t, 100000)
-		setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
+		setPrice(t, e, "EURUSD", 1.1000, 1.1002, t0)
 		sl := 1.1012
-		fill := openMarket(t, e, "EUR_USD", -100000, &sl, nil)
+		fill := openMarket(t, e, "EURUSD", -100000, &sl, nil)
 
-		setPrice(t, e, "EUR_USD", 1.1010, 1.1012, t1)
+		setPrice(t, e, "EURUSD", 1.1010, 1.1012, t1)
 
 		acct, err := e.GetAccount(context.Background())
 		if err != nil {
@@ -194,14 +194,14 @@ func TestForcedLiquidationWorstTradeFirst(t *testing.T) {
 	t0 := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 
-	setPrice(t, e, "EUR_USD", 1.1000, 1.1002, t0)
-	setPrice(t, e, "USD_JPY", 150.00, 150.02, t0)
+	setPrice(t, e, "EURUSD", 1.1000, 1.1002, t0)
+	setPrice(t, e, "USDJPY", 150.00, 150.02, t0)
 
-	openMarket(t, e, "EUR_USD", 100000, nil, nil)
-	openMarket(t, e, "USD_JPY", 100000, nil, nil)
+	openMarket(t, e, "EURUSD", 100000, nil, nil)
+	openMarket(t, e, "USDJPY", 100000, nil, nil)
 
-	setPrice(t, e, "EUR_USD", 1.0500, 1.0502, t1)
-	setPrice(t, e, "USD_JPY", 149.98, 150.00, t1)
+	setPrice(t, e, "EURUSD", 1.0500, 1.0502, t1)
+	setPrice(t, e, "USDJPY", 149.98, 150.00, t1)
 
 	acct, err := e.GetAccount(context.Background())
 	if err != nil {
@@ -215,15 +215,15 @@ func TestForcedLiquidationWorstTradeFirst(t *testing.T) {
 			continue
 		}
 		switch tr.Instrument {
-		case "EUR_USD":
+		case "EURUSD":
 			openEUR = true
-		case "USD_JPY":
+		case "USDJPY":
 			openUSD = true
 		}
 	}
 
 	if openEUR {
-		t.Fatalf("expected worst trade (EUR_USD) to be closed first")
+		t.Fatalf("expected worst trade (EURUSD) to be closed first")
 	}
 
 	if acct.MarginUsed > 0 && acct.Equity < acct.MarginUsed {

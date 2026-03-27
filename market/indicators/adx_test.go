@@ -9,13 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mkCandle(scale int32, o, h, l, c float64) market.OHLC {
+func mkCandle(scale int32, o, h, l, c float64) market.Candle {
 	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
-	return market.OHLC{
-		O: toP(o),
-		H: toP(h),
-		L: toP(l),
-		C: toP(c),
+	return market.Candle{
+		Open:  toP(o),
+		High:  toP(h),
+		Low:   toP(l),
+		Close: toP(c),
 	}
 }
 
@@ -41,7 +41,7 @@ func feedUptrend(t *testing.T, adx *ADX, scale int32, nCandles int, start float6
 func TestADX_WarmupAndReady(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, scale)
+	adx := NewADX(n, types.PriceScale)
 
 	require.False(t, adx.Ready())
 	require.Equal(t, 2*n, adx.Warmup())
@@ -59,7 +59,7 @@ func TestADX_WarmupAndReady(t *testing.T) {
 func TestADX_FlatMarketGoesToZero(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, scale)
+	adx := NewADX(n, types.PriceScale)
 
 	// Plenty of candles so it becomes ready
 	feedFlat(t, adx, scale, 3*n, 1.2345)
@@ -74,7 +74,7 @@ func TestADX_FlatMarketGoesToZero(t *testing.T) {
 func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, scale)
+	adx := NewADX(n, types.PriceScale)
 
 	// Build a steady uptrend: close increases 1 pip each candle, with small range.
 	feedUptrend(t, adx, scale, 3*n, 1.0000, 0.0001, 0.00005)
@@ -90,7 +90,7 @@ func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 func TestADX_Reset(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, scale)
+	adx := NewADX(n, types.PriceScale)
 
 	feedUptrend(t, adx, scale, 3*n, 1.0000, 0.0001, 0.00005)
 	require.True(t, adx.Ready())

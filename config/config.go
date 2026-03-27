@@ -36,9 +36,9 @@ type StrategyConfig struct {
 
 // SimulationConfig contains simulation parameters
 type SimulationConfig struct {
-	InitialBid  float64   `json:"initial_bid" yaml:"initial_bid"`
-	InitialAsk  float64   `json:"initial_ask" yaml:"initial_ask"`
-	PriceSteps  []PriceStep `json:"price_steps,omitempty" yaml:"price_steps,omitempty"`
+	InitialBid float64     `json:"initial_bid" yaml:"initial_bid"`
+	InitialAsk float64     `json:"initial_ask" yaml:"initial_ask"`
+	PriceSteps []PriceStep `json:"price_steps,omitempty" yaml:"price_steps,omitempty"`
 }
 
 // PriceStep represents a price update in the simulation
@@ -66,9 +66,9 @@ type JournalConfig struct {
 
 // ReplayConfig contains replay-specific parameters
 type ReplayConfig struct {
-	CSVFile       string `json:"csv_file" yaml:"csv_file"`             // Path to CSV file with tick data
+	CSVFile       string `json:"csv_file" yaml:"csv_file"`               // Path to CSV file with tick data
 	TickThenEvent bool   `json:"tick_then_event" yaml:"tick_then_event"` // Process tick before event
-	CloseAtEnd    bool   `json:"close_at_end" yaml:"close_at_end"`     // Close all trades at end of replay
+	CloseAtEnd    bool   `json:"close_at_end" yaml:"close_at_end"`       // Close all trades at end of replay
 }
 
 // LoadFromFile loads configuration from a file (JSON or YAML based on extension)
@@ -172,7 +172,7 @@ func Default() *Config {
 		},
 		Strategy: StrategyConfig{
 			RiskPercent: 0.01,
-			Instrument:  "EUR_USD",
+			Instrument:  "EURUSD",
 			StopPips:    20,
 			TargetPips:  40,
 		},

@@ -14,9 +14,8 @@ func loadCandleSet(t *testing.T) *CandleSet {
 	if _, err := os.Stat(fname); err != nil {
 		t.Skip("candle test dataset missing")
 	}
-	set, err := NewCandleSet(fname)
-	if err != nil {
-		t.Fatalf("failed to load candle set: %v", err)
+	set := &CandleSet{
+		Filepath: fname,
 	}
 	return set
 }
@@ -24,7 +23,7 @@ func loadCandleSet(t *testing.T) *CandleSet {
 func TestIterator(t *testing.T) {
 	cs := loadCandleSet(t)
 
-	expected := OHLC{O: 1035030, H: 1035140, L: 1035030, C: 1035140}
+	expected := Candle{Open: 1035030, High: 1035140, Low: 1035030, Close: 1035140}
 	it := cs.Iterator()
 	it.Next()
 	assert.Equal(t, types.Timestamp(1735768800), it.StartTime())
