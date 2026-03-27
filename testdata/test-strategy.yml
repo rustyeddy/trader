@@ -1,0 +1,16 @@
+runs:
+  - name: eurusd_h1_template
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-06-30
+    strategy:
+      kind: template-strategy
+      params:
+        lookback: 5
+        threshold: 0.0015
+        units: 1000
+        stop_pips: 20
+        take_pips: 40
+        risk_pct: 0.5

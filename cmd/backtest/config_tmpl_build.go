@@ -1,0 +1,44 @@
+package backtest
+
+import (
+	"fmt"
+
+	bt "github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/types"
+)
+
+func BuildTemplateStrategyConfig(r bt.ResolvedRun) (strategies.TemplateStrategyConfig, error) {
+	lookback, ok, err := getRunIntParam(r.Strategy.Params, "lookback")
+	if err != nil {
+		return strategies.TemplateStrategyConfig{}, err
+	}
+	if !ok || lookback <= 0 {
+		return strategies.TemplateStrategyConfig{}, fmt.Errorf("missing or invalid param %q", "lookback")
+	}
+
+	threshold, ok, err := getRunFloatParam(r.Strategy.Params, "threshold")
+	if err != nil {
+		return strategies.TemplateStrategyConfig{}, err
+	}
+	if !ok {
+		return strategies.TemplateStrategyConfig{}, fmt.Errorf("missing param %q", "threshold")
+	}
+
+	scale := r.Scale
+	if scale <= 0 {
+		scale = types.PriceScale
+	}
+
+	return strategies.TemplateStrategyConfig{
+		StrategyConfig: strategies.StrategyConfig{
+			Balance: r.StartingBalance,
+			Stop:    r.StopPips,
+			Take:    r.TakePips,
+			RR:      r.RR,
+		},
+		Lookback:  lookback,
+		Threshold: threshold,
+		Scale:     scale,
+	}, nil
+}
