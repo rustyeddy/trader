@@ -82,11 +82,13 @@ func TestCandleEngineRun_BuyFirstBarStrategy(t *testing.T) {
 	err := engine.Run(feed, &BuyFirstBarStrategy{})
 	require.NoError(t, err)
 
-	require.True(t, engine.Pos.Open)
+	require.False(t, engine.Pos.Open)
 	require.Equal(t, Long, engine.Pos.Side)
 	require.Equal(t, types.Units(1000), engine.Pos.Units)
 	require.Equal(t, types.Price(100500), engine.Pos.EntryPrice)
-	require.Len(t, engine.Trades, 0)
+	require.Len(t, engine.Trades, 1)
+	require.Equal(t, types.Price(101000), engine.Trades[0].ExitPrice)
+
 }
 
 func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
