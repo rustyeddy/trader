@@ -91,43 +91,33 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 	x.core.slow.Update(c)
 	x.adx.Update(c)
 
+	fv := x.core.fast.Float64()
+	sv := x.core.slow.Float64()
 	close := float64(c.Close) / float64(x.core.scale)
+	dec := EMACrossADXDecision{
+		signal: Hold,
+		Fast:   fv,
+		Slow:   sv,
+		Close:  close,
+	}
 
 	// If EMAs aren't ready, we can't do cross logic.
 	if !x.core.fast.Ready() || !x.core.slow.Ready() {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "warming up EMAs",
-			Fast:   x.core.fast.Float64(),
-			Slow:   x.core.slow.Float64(),
-			Close:  close,
-		}
+		dec.reason = "warming up EMAs"
+		return dec
 	}
 
 	// Optionally require ADX to be ready before any signals.
 	if x.requireADXReady && !x.adx.Ready() {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "warming up ADX",
-			Fast:   x.core.fast.Float64(),
-			Slow:   x.core.slow.Float64(),
-			Close:  close,
-		}
+		dec.reason = "warming up ADX"
+		return dec
 	}
-
-	fv := x.core.fast.Float64()
-	sv := x.core.slow.Float64()
 	diff := fv - sv
 
 	// Optional noise filter on EMA spread
 	if x.core.minSpread > 0 && abs(diff) < x.core.minSpread {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "min-spread filter",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		dec.reason = "min-spread filter"
+		return dec
 	}
 
 	rel := 0
@@ -141,21 +131,11 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 	if x.core.prevRel == 0 {
 		if rel != 0 {
 			x.core.prevRel = rel
-			return EMACrossADXDecision{
-				signal: Hold,
-				reason: "baseline set",
-				Fast:   fv,
-				Slow:   sv,
-				Close:  close,
-			}
+			dec.reason = "baseline set"
+		} else {
+			dec.reason = "baseline pending"
 		}
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "baseline pending",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return dec
 	}
 
 	// Detect a fresh cross and mark it pending.
@@ -171,90 +151,51 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 
 	// No pending trend change to confirm.
 	if x.pendingRel == 0 {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "no cross",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		dec.reason = "no cross"
+		return dec
 	}
 
 	// Require ADX readiness if configured.
 	if x.requireADXReady && !x.adx.Ready() {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "waiting for ADX readiness",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		dec.reason = "waiting for ADX readiness"
+		return dec
 	}
 
 	// Require ADX strength once ready.
 	if x.adx.Ready() && x.adx.Float64() < x.adxThreshold {
-		return EMACrossADXDecision{
-			signal: Hold,
-			reason: "waiting for ADX threshold",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		dec.reason = "waiting for ADX threshold"
+		return dec
 	}
 
 	// Require DI confirmation if configured.
 	if x.requireDI && x.adx.Ready() {
 		if x.pendingRel == +1 && !(x.adx.PlusDI() > x.adx.MinusDI()) {
-			return EMACrossADXDecision{
-				signal: Hold,
-				reason: "waiting for DI confirmation (buy)",
-				Fast:   fv,
-				Slow:   sv,
-				Close:  close,
-			}
+			dec.reason = "waiting for DI confirmation (buy)"
+			return dec
 		}
 		if x.pendingRel == -1 && !(x.adx.MinusDI() > x.adx.PlusDI()) {
-			return EMACrossADXDecision{
-				signal: Hold,
-				reason: "waiting for DI confirmation (sell)",
-				Fast:   fv,
-				Slow:   sv,
-				Close:  close,
-			}
+			dec.reason = "waiting for DI confirmation (sell)"
+			return dec
 		}
 	}
 
 	// Confirmation passed: emit the pending signal once.
 	if x.pendingRel == +1 {
+		dec.reason = "EMA cross up + ADX confirmed"
+		dec.signal = Buy
 		x.pendingRel = 0
-		return EMACrossADXDecision{
-			signal: Buy,
-			reason: "EMA cross up + ADX confirmed",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return dec
 	}
 
 	if x.pendingRel == -1 {
+		dec.reason = "EMA cross down + ADX confirmed"
+		dec.signal = Sell
 		x.pendingRel = 0
-		return EMACrossADXDecision{
-			signal: Sell,
-			reason: "EMA cross down + ADX confirmed",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return dec
 	}
 
-	return EMACrossADXDecision{
-		signal: Hold,
-		reason: "no cross",
-		Fast:   fv,
-		Slow:   sv,
-		Close:  close,
-	}
-
+	dec.reason = "no cross"
+	return dec
 }
 
 type EMACrossADXDecision struct {
