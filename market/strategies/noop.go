@@ -3,16 +3,14 @@ package strategies
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
 )
 
 // NoopStrategy does nothing.
 type NoopStrategy struct{}
 
-func (NoopStrategy) OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error {
-	_ = ctx
-	_ = b
-	_ = tick
+func (NoopStrategy) Name() string   { return "NoOp" }
+func (NoopStrategy) Reason() string { return "No-op" }
+func (NoopStrategy) Update(ctx context.Context, c *market.Candle) Decision {
 	return nil
 }

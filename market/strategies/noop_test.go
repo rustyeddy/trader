@@ -4,15 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNoopStrategy_OnTick(t *testing.T) {
+func TestNoopStrategyUpdate(t *testing.T) {
 	strat := NoopStrategy{}
 	ctx := context.Background()
 
 	// NoopStrategy should do nothing and return no error
-	err := strat.OnTick(ctx, nil, market.Tick{})
+	err := strat.Update(ctx, nil)
 	assert.NoError(t, err)
 }
