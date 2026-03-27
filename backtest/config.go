@@ -329,16 +329,3 @@ func getFloat64Param(m map[string]any, key string) (float64, bool, error) {
 		return 0, true, fmt.Errorf("param %q must be numeric, got %T", key, v)
 	}
 }
-
-func getStringParam(m map[string]any, key string) (string, bool, error) {
-	v, ok := m[key]
-	if !ok {
-		return "", false, nil
-	}
-
-	s, ok := v.(string)
-	if !ok {
-		return "", true, fmt.Errorf("param %q must be string, got %T", key, v)
-	}
-	return strings.TrimSpace(s), true, nil
-}
