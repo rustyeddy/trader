@@ -1,13 +1,24 @@
-APP := trader
+APP     := trader
 BIN_DIR := bin
-BIN := $(BIN_DIR)/$(APP)
-CMD := cmd/main.go
+BIN     := $(BIN_DIR)/$(APP)
+CMD     := ./cmd
 
-.PHONY: build test cover cover-html clean
+GOPATH  ?= $(shell go env GOPATH)
+INSTALL_DIR := $(GOPATH)/bin
+
+.PHONY: all build vet tidy test cover cover-html test-blackbox run install clean
+
+all: vet build
 
 build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN) $(CMD)
+
+vet:
+	go vet ./...
+
+tidy:
+	go mod tidy
 
 test:
 	go test ./...
@@ -23,9 +34,11 @@ cover-html:
 test-blackbox:
 	go test ./... -tags=blackbox
 
-install: build
-	cp $(CMD) /home/rusty/bin/$(APP)
+run: build
+	$(BIN)
 
+install: build
+	cp $(BIN) $(INSTALL_DIR)/$(APP)
 
 clean:
 	@rm -rf $(BIN_DIR) coverage.out coverage.html
