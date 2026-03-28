@@ -4,11 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/data"
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -59,7 +59,7 @@ func main() {
 	}
 	dm.Init()
 	if err := dm.Sync(ctx, config.Download, config.Candles); err != nil {
-		log.Fatal(err)
+		tlog.Fatal("data sync failed", "err", err)
 	}
 	elapsed := time.Since(start)
 	fmt.Printf("Program duration: %s\n", elapsed)

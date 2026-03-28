@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
@@ -508,7 +508,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 		return err
 	}
 
-	log.Printf("writing path: %s", path)
+	tlog.Data.Debug("writing candle file", "path", path)
 	return bw.Flush()
 }
 

@@ -1,7 +1,7 @@
 package data
 
 import (
-	"log"
+	tlog "github.com/rustyeddy/trader/log"
 )
 
 type Plan struct {
@@ -16,11 +16,12 @@ type Plan struct {
 }
 
 func (p Plan) Log() {
-	log.Println("Plan: ")
-	log.Printf("\tDownloads: %d", len(p.Download))
-	log.Printf("\t Build M1: %d", len(p.BuildM1))
-	log.Printf("\t Build H1: %d", len(p.BuildH1))
-	log.Printf("\t Build D1: %d", len(p.BuildD1))
+	tlog.Info("plan summary",
+		"downloads", len(p.Download),
+		"build_m1", len(p.BuildM1),
+		"build_h1", len(p.BuildH1),
+		"build_d1", len(p.BuildD1),
+	)
 }
 
 type BuildTask struct {
