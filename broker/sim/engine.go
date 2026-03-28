@@ -264,7 +264,7 @@ func (e *Engine) Revalue() error {
 			mark = p.Ask
 		}
 
-		rate, err := e.acct.QuoteToRate(context.TODO(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.TODO(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
@@ -335,7 +335,7 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 
 func (e *Engine) closeTradeLocked(t *Trade, closePrice types.Price, closeTime types.Timestamp, reason string) error {
 
-	rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
+	rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ func (e *Engine) revalueLocked() error {
 			mark = p.Ask
 		}
 
-		rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
@@ -407,7 +407,7 @@ func (e *Engine) recomputeMarginLocked() error {
 			return err
 		}
 
-		rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
 		if err != nil {
 			return err
 		}
@@ -456,7 +456,7 @@ func (e *Engine) enforceMarginLocked() error {
 				mark = p.Ask
 			}
 
-			rate, err := e.acct.QuoteToRate(context.Background(), t.Instrument, e)
+			rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
 			if err != nil {
 				return err
 			}

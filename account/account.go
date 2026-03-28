@@ -18,7 +18,7 @@ type Account struct {
 	MarginLevel types.Money
 }
 
-func (act *Account) QuoteToRate(ctx context.Context, instrument string, prices market.TickSource) (types.Rate, error) {
+func (act *Account) QuoteToAccount(ctx context.Context, instrument string, prices market.TickSource) (types.Rate, error) {
 	meta, ok := market.Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)

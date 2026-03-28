@@ -47,15 +47,15 @@ func TestQuoteToRate_QuoteCurrencyIsAccountCurrency(t *testing.T) {
 	acct := usdAccount()
 	prices := &fakePrices{}
 
-	rate, err := acct.QuoteToRate(context.Background(), "EURUSD", prices)
+	rate, err := acct.QuoteToAccount(context.Background(), "EURUSD", prices)
 	require.NoError(t, err)
 	assert.Equal(t, types.Rate(types.RateScale), rate)
 }
 
-// TestQuoteToRate_BaseCurrencyIsAccountCurrency tests pairs like USDJPY for a
+// TestQuoteAccount_BaseCurrencyIsAccountCurrency tests pairs like USDJPY for a
 // USD-denominated account.  The base currency is USD == account currency, so
 // the conversion rate is 1/mid.
-func TestQuoteToRate_BaseCurrencyIsAccountCurrency(t *testing.T) {
+func TestQuoteAccount_BaseCurrencyIsAccountCurrency(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
@@ -71,39 +71,39 @@ func TestQuoteToRate_BaseCurrencyIsAccountCurrency(t *testing.T) {
 		},
 	}
 
-	rate, err := acct.QuoteToRate(context.Background(), "USDJPY", prices)
+	rate, err := acct.QuoteToAccount(context.Background(), "USDJPY", prices)
 	require.NoError(t, err)
 	// rate should be approximately 1/150 * RateScale
 	approxExpected := float64(types.RateScale) / 150.01 // mid = (150.00+150.02)/2 ≈ 150.01
 	assert.InDelta(t, approxExpected, float64(rate), 10)
 }
 
-// TestQuoteToRate_BaseCurrencyIsAccountCurrency_NoPrice tests the error path
+// TestQuoteAccount_BaseCurrencyIsAccountCurrency_NoPrice tests the error path
 // when the tick for a USD-base pair is not available.
-func TestQuoteToRate_BaseCurrencyIsAccountCurrency_NoPrice(t *testing.T) {
+func TestQuoteAccount_BaseCurrencyIsAccountCurrency_NoPrice(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
 	prices := &fakePrices{err: errors.New("no price")}
 
-	_, err := acct.QuoteToRate(context.Background(), "USDJPY", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "USDJPY", prices)
 	assert.Error(t, err)
 }
 
-// TestQuoteToRate_UnknownInstrument ensures an unknown symbol returns an error.
-func TestQuoteToRate_UnknownInstrument(t *testing.T) {
+// TestQuoteAccount_UnknownInstrument ensures an unknown symbol returns an error.
+func TestQuoteAccount_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
 	prices := &fakePrices{}
 
-	_, err := acct.QuoteToRate(context.Background(), "XXXYYY", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "XXXYYY", prices)
 	assert.Error(t, err)
 }
 
-// TestQuoteToRate_CrossCurrency tests a pair where neither base nor quote
+// TestQuoteAccount_CrossCurrency tests a pair where neither base nor quote
 // is the account currency.  For example, a JPY-account trading EURUSD.
-func TestQuoteToRate_CrossCurrency(t *testing.T) {
+func TestQuoteAccount_CrossCurrency(t *testing.T) {
 	t.Parallel()
 
 	// JPY account, EURUSD instrument:
@@ -115,6 +115,6 @@ func TestQuoteToRate_CrossCurrency(t *testing.T) {
 	}
 	prices := &fakePrices{}
 
-	_, err := acct.QuoteToRate(context.Background(), "EURUSD", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "EURUSD", prices)
 	assert.Error(t, err)
 }
