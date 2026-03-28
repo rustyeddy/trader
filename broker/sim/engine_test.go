@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
@@ -35,7 +36,7 @@ func (j *testJournal) Close() error {
 
 func newEngine(t *testing.T, balance float64) (*Engine, *testJournal) {
 	t.Helper()
-	acct := broker.Account{
+	acct := account.Account{
 		ID:       "acct-1",
 		Currency: "USD",
 		Balance:  types.MoneyFromFloat(balance),

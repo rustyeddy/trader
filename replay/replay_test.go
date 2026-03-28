@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/types"
@@ -72,7 +72,7 @@ func TestReplay_OPEN_SLTP_TakeProfit(t *testing.T) {
 	defer j.Close()
 
 	startBal := types.Money(100_000)
-	engine := sim.NewEngine(broker.Account{
+	engine := sim.NewEngine(account.Account{
 		ID:       "SIM-TEST",
 		Currency: "USD",
 		Balance:  startBal,

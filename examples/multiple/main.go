@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
@@ -14,20 +15,20 @@ import (
 
 type noopJournal struct{}
 
-func (noopJournal) RecordTrade(journal.TradeRecord) error   { return nil }
+func (noopJournal) RecordTrade(journal.TradeRecord) error     { return nil }
 func (noopJournal) RecordEquity(journal.EquitySnapshot) error { return nil }
-func (noopJournal) Close() error                            { return nil }
+func (noopJournal) Close() error                              { return nil }
 
 func tick(instr string, bid, ask float64) market.Tick {
 	return market.Tick{
 		Instrument: instr,
 		Timestamp:  types.FromTime(time.Now()),
-		BA: market.BA{Bid: types.PriceFromFloat(bid), Ask: types.PriceFromFloat(ask)},
+		BA:         market.BA{Bid: types.PriceFromFloat(bid), Ask: types.PriceFromFloat(ask)},
 	}
 }
 
 func main() {
-	engine := sim.NewEngine(broker.Account{
+	engine := sim.NewEngine(account.Account{
 		ID:       "EXAMPLE-MULTI",
 		Currency: "USD",
 		Balance:  types.MoneyFromFloat(20000),

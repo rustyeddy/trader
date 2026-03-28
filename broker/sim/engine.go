@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
@@ -15,7 +16,7 @@ import (
 
 type Engine struct {
 	mu      sync.Mutex
-	acct    broker.Account
+	acct    account.Account
 	ticks   *market.TickStore
 	trades  map[string]*Trade
 	nextID  int
@@ -27,7 +28,7 @@ var (
 	ErrTradeAlreadyClosed = errors.New("trade already closed")
 )
 
-func NewEngine(acct broker.Account, j journal.Journal) *Engine {
+func NewEngine(acct account.Account, j journal.Journal) *Engine {
 	return &Engine{
 		acct:    acct,
 		ticks:   market.NewTickStore(),
@@ -36,7 +37,7 @@ func NewEngine(acct broker.Account, j journal.Journal) *Engine {
 	}
 }
 
-func (e *Engine) GetAccount(ctx context.Context) (broker.Account, error) {
+func (e *Engine) GetAccount(ctx context.Context) (account.Account, error) {
 	return e.acct, nil
 }
 

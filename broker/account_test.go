@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
@@ -29,8 +29,8 @@ func (f *fakePrices) GetTick(_ context.Context, instrument string) (market.Tick,
 	return t, nil
 }
 
-func usdAccount() broker.Account {
-	return broker.Account{
+func usdAccount() account.Account {
+	return account.Account{
 		ID:       "test",
 		Currency: "USD",
 		Balance:  types.MoneyFromFloat(100_000),
@@ -108,7 +108,7 @@ func TestQuoteToRate_CrossCurrency(t *testing.T) {
 
 	// JPY account, EURUSD instrument:
 	//   BaseCurrency=EUR, QuoteCurrency=USD – neither is JPY.
-	acct := broker.Account{
+	acct := account.Account{
 		ID:       "jpy",
 		Currency: "JPY",
 		Balance:  types.MoneyFromFloat(1_000_000),

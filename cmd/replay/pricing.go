@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
@@ -77,7 +77,7 @@ func newPricingCmd(rc *config.RootConfig) *cobra.Command {
 			}
 			defer j.Close()
 
-			engine := sim.NewEngine(broker.Account{
+			engine := sim.NewEngine(account.Account{
 				ID:       accountID,
 				Currency: "USD",
 				Balance:  types.MoneyFromFloat(startingBalance),

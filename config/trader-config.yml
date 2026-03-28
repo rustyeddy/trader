@@ -1,0 +1,23 @@
+version: 1
+
+paths:
+  data_root: ~/src/trading
+  backtest_results_root: ~/Documents/trading-journal/backtests
+  config_root: ~/src/trader/testdata
+  journal_root: ~/Documents/trading-journal
+  sqlite_path: ~/Documents/trading-journal/backtests/backtests.db
+
+defaults:
+  starting_balance: 10000
+  account_ccy: USD
+  strict_data: true
+  output_format: text
+  report_timezone: UTC
+  account_risk: 0.5%
+
+
+backtest:
+  close_end_of_data: true
+  write_json: true
+  write_text: true
+  

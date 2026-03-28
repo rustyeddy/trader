@@ -3,12 +3,13 @@ package broker
 import (
 	"context"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
 type Broker interface {
-	GetAccount(ctx context.Context) (Account, error)
+	GetAccount(ctx context.Context) (account.Account, error)
 	GetTick(ctx context.Context, instrument string) (market.Tick, error)
 	CreateMarketOrder(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
 }
