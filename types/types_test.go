@@ -387,3 +387,498 @@ func TestNew_ValidULIDFormat(t *testing.T) {
 			"unexpected character %q in ULID %s", ch, id)
 	}
 }
+
+// ===== Scale conversions =====
+
+func TestScale6_Conversions(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, int32(100_000), PriceScale.Int32())
+	assert.Equal(t, int64(100_000), PriceScale.Int64())
+}
+
+func TestScale7_Conversions(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, int32(1_000_000), MoneyScale.Int32())
+	assert.Equal(t, int64(1_000_000), MoneyScale.Int64())
+}
+
+// ===== Money.String =====
+
+func TestMoney_String(t *testing.T) {
+	t.Parallel()
+
+	// Money.String formats the raw int64 value as a float (not divided by scale).
+	m := MoneyFromFloat(1.5) // = Money(1_500_000)
+	assert.Equal(t, "1500000.000000", m.String())
+	assert.Equal(t, "0.000000", Money(0).String())
+}
+
+// ===== FormatNumber =====
+
+func TestFormatNumber(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		price Price
+		scale int32
+		want  string
+	}{
+		{"typical_forex", PriceFromFloat(1.23456), int32(PriceScale), "1.23456"},
+		{"zero", Price(0), int32(PriceScale), "0.00000"},
+		{"whole", PriceFromFloat(2.0), int32(PriceScale), "2.00000"},
+		{"scale_1", Price(15), 10, "1.5"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, FormatNumber(tt.price, tt.scale))
+		})
+	}
+}
+
+// ===== ParsePrice =====
+
+func TestParsePrice_Valid(t *testing.T) {
+	t.Parallel()
+
+	p, err := ParsePrice("123456")
+	require.NoError(t, err)
+	assert.Equal(t, Price(123456), p)
+}
+
+func TestParsePrice_WithWhitespace(t *testing.T) {
+	t.Parallel()
+
+	p, err := ParsePrice("  100  ")
+	require.NoError(t, err)
+	assert.Equal(t, Price(100), p)
+}
+
+func TestParsePrice_Invalid(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParsePrice("notanumber")
+	assert.Error(t, err)
+}
+
+func TestParsePrice_Negative(t *testing.T) {
+	t.Parallel()
+
+	p, err := ParsePrice("-50000")
+	require.NoError(t, err)
+	assert.Equal(t, Price(-50000), p)
+}
+
+// ===== Price.String =====
+
+func TestPrice_String(t *testing.T) {
+	t.Parallel()
+
+	// Price.String formats the raw int32 value as a float (not divided by scale).
+	p := PriceFromFloat(1.5) // = Price(150_000)
+	assert.Equal(t, "150000.000000", p.String())
+	assert.Equal(t, "0.000000", Price(0).String())
+}
+
+// ===== Timeframe =====
+
+func TestTF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  Timeframe
+	}{
+		{"tf0", TF0},
+		{"TF0", TF0},
+		{"ticks", Ticks},
+		{"TICKS", Ticks},
+		{"m1", M1},
+		{"M1", M1},
+		{"h1", H1},
+		{"H1", H1},
+		{"d1", D1},
+		{"D1", D1},
+		{"unknown", TF0},
+		{"", TF0},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, TF(tt.input))
+		})
+	}
+}
+
+func TestNormalizeTF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"60", "m1"},
+		{"3600", "h1"},
+		{"86400", "d1"},
+		{"m1", "M1"},
+		{"h1", "H1"},
+		{" M1 ", "M1"},
+		{"other", "OTHER"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, NormalizeTF(tt.input))
+		})
+	}
+}
+
+func TestTimeframe_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		tf   Timeframe
+		want string
+	}{
+		{TF0, "tf0"},
+		{Ticks, "ticks"},
+		{M1, "m1"},
+		{H1, "h1"},
+		{D1, "d1"},
+		{Timeframe(9999), "UNKNOWN"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.tf.String())
+		})
+	}
+}
+
+// ===== Timestamp conversions =====
+
+func TestTimestamp_Milli(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timemilli(1_000_000), Timestamp(1000).Milli())
+	assert.Equal(t, Timemilli(0), Timestamp(0).Milli())
+}
+
+func TestTimemilli_Sec(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timestamp(5), Timemilli(5000).Sec())
+	assert.Equal(t, Timestamp(0), Timemilli(999).Sec())
+}
+
+func TestTimestamp_MS(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timemilli(5000), Timestamp(5).MS())
+	assert.Equal(t, Timemilli(0), Timestamp(0).MS())
+}
+
+func TestTimestamp_FloorToMinute(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timestamp(120), Timestamp(125).FloorToMinute())
+	assert.Equal(t, Timestamp(0), Timestamp(59).FloorToMinute())
+	assert.Equal(t, Timestamp(3600), Timestamp(3600).FloorToMinute())
+}
+
+func TestTimestamp_FloorToHour(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timestamp(3600), Timestamp(3700).FloorToHour())
+	assert.Equal(t, Timestamp(0), Timestamp(3599).FloorToHour())
+	assert.Equal(t, Timestamp(7200), Timestamp(7200).FloorToHour())
+}
+
+func TestTimemilli_FloorToMinute(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timemilli(120_000), Timemilli(125_000).FloorToMinute())
+	assert.Equal(t, Timemilli(0), Timemilli(59_999).FloorToMinute())
+}
+
+func TestTimemilli_FloorToHour(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timemilli(3_600_000), Timemilli(3_700_000).FloorToHour())
+	assert.Equal(t, Timemilli(0), Timemilli(3_599_999).FloorToHour())
+}
+
+func TestTimeMilliFromTime(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := TimeMilliFromTime(t0)
+	assert.Equal(t, Timemilli(t0.UnixMilli()), ms)
+}
+
+// ===== DaysInMonth =====
+
+func TestDaysInMonth(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		year   int
+		month0 int // 0-indexed
+		want   int
+	}{
+		{2023, 0, 31},  // January
+		{2023, 1, 28},  // February (non-leap)
+		{2024, 1, 29},  // February (leap)
+		{2023, 3, 30},  // April
+		{2023, 11, 31}, // December
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(fmt.Sprintf("%d-%02d", tt.year, tt.month0+1), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, DaysInMonth(tt.year, tt.month0))
+		})
+	}
+}
+
+// ===== TimeRange =====
+
+func TestNewTimeRange(t *testing.T) {
+	t.Parallel()
+
+	start, end := Timestamp(1000), Timestamp(2000)
+	tr := NewTimeRange(start, end)
+	assert.Equal(t, start, tr.Start)
+	assert.Equal(t, end, tr.End)
+}
+
+func TestTimeRange_Valid(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, NewTimeRange(Timestamp(1000), Timestamp(2000)).Valid())
+	assert.False(t, NewTimeRange(Timestamp(0), Timestamp(2000)).Valid(), "start=0 is invalid")
+	assert.False(t, NewTimeRange(Timestamp(2000), Timestamp(1000)).Valid(), "end<=start is invalid")
+	assert.False(t, NewTimeRange(Timestamp(1000), Timestamp(1000)).Valid(), "end==start is invalid")
+}
+
+func TestTimeRange_Contains(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTimeRange(Timestamp(100), Timestamp(200))
+	assert.True(t, tr.Contains(Timestamp(100)), "start is inclusive")
+	assert.True(t, tr.Contains(Timestamp(150)))
+	assert.False(t, tr.Contains(Timestamp(200)), "end is exclusive")
+	assert.False(t, tr.Contains(Timestamp(50)))
+	assert.False(t, tr.Contains(Timestamp(250)))
+}
+
+func TestTimeRange_Overlaps(t *testing.T) {
+	t.Parallel()
+
+	a := NewTimeRange(Timestamp(100), Timestamp(200))
+	assert.True(t, a.Overlaps(NewTimeRange(Timestamp(150), Timestamp(250))), "partial overlap")
+	assert.True(t, a.Overlaps(NewTimeRange(Timestamp(50), Timestamp(150))), "overlaps on left")
+	assert.False(t, a.Overlaps(NewTimeRange(Timestamp(200), Timestamp(300))), "adjacent does not overlap")
+	assert.False(t, a.Overlaps(NewTimeRange(Timestamp(50), Timestamp(100))), "adjacent on left")
+}
+
+func TestTimeRange_Covers(t *testing.T) {
+	t.Parallel()
+
+	outer := NewTimeRange(Timestamp(100), Timestamp(300))
+	inner := NewTimeRange(Timestamp(150), Timestamp(250))
+	partial := NewTimeRange(Timestamp(50), Timestamp(250))
+
+	assert.True(t, outer.Covers(inner), "outer covers inner")
+	assert.True(t, outer.Covers(outer), "range covers itself")
+	assert.False(t, outer.Covers(partial), "partial overlap is not covered")
+	assert.False(t, inner.Covers(outer), "inner cannot cover outer")
+}
+
+func TestTimeRange_String(t *testing.T) {
+	t.Parallel()
+
+	tr := NewTimeRange(Timestamp(0), Timestamp(3600))
+	s := tr.String()
+	assert.Contains(t, s, "1970-01-01T00:00:00Z")
+	assert.Contains(t, s, "1970-01-01T01:00:00Z")
+}
+
+// ===== MonthRange / YearRange =====
+
+func TestMonthRange(t *testing.T) {
+	t.Parallel()
+
+	tr := MonthRange(2023, 1) // January 2023
+	wantStart := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC)
+	assert.Equal(t, Timestamp(wantStart.Unix()), tr.Start)
+	assert.Equal(t, Timestamp(wantEnd.Unix()), tr.End)
+}
+
+func TestYearRange(t *testing.T) {
+	t.Parallel()
+
+	tr := YearRange(2023)
+	wantStart := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	assert.Equal(t, Timestamp(wantStart.Unix()), tr.Start)
+	assert.Equal(t, Timestamp(wantEnd.Unix()), tr.End)
+}
+
+func TestTimeRange_MonthsInRange(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single_month", func(t *testing.T) {
+		t.Parallel()
+		tr := MonthRange(2023, 1)
+		months := tr.MonthsInRange()
+		assert.Equal(t, []YearMonth{{Year: 2023, Month: 1}}, months)
+	})
+
+	t.Run("invalid_range", func(t *testing.T) {
+		t.Parallel()
+		invalid := NewTimeRange(Timestamp(0), Timestamp(0))
+		assert.Nil(t, invalid.MonthsInRange())
+	})
+
+	t.Run("multi_month", func(t *testing.T) {
+		t.Parallel()
+		tr := TimeRange{
+			Start: Timestamp(time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			End:   Timestamp(time.Date(2023, 3, 15, 0, 0, 0, 0, time.UTC).Unix()),
+		}
+		months := tr.MonthsInRange()
+		require.Len(t, months, 3)
+		assert.Equal(t, YearMonth{2023, 1}, months[0])
+		assert.Equal(t, YearMonth{2023, 2}, months[1])
+		assert.Equal(t, YearMonth{2023, 3}, months[2])
+	})
+
+	t.Run("cross_year", func(t *testing.T) {
+		t.Parallel()
+		tr := TimeRange{
+			Start: Timestamp(time.Date(2022, 11, 1, 0, 0, 0, 0, time.UTC).Unix()),
+			End:   Timestamp(time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC).Unix()),
+		}
+		months := tr.MonthsInRange()
+		require.Len(t, months, 3)
+		assert.Equal(t, YearMonth{2022, 11}, months[0])
+		assert.Equal(t, YearMonth{2022, 12}, months[1])
+		assert.Equal(t, YearMonth{2023, 1}, months[2])
+	})
+}
+
+// ===== IsForexMarketClosed / isMajorForexHolidayClosed =====
+
+func TestIsForexMarketClosed(t *testing.T) {
+	t.Parallel()
+
+	nyLoc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		t      time.Time
+		closed bool
+	}{
+		// Saturday - always closed
+		{
+			"saturday_noon",
+			time.Date(2023, 6, 3, 12, 0, 0, 0, nyLoc),
+			true,
+		},
+		// Sunday before 17:00 - closed
+		{
+			"sunday_before_17",
+			time.Date(2023, 6, 4, 12, 0, 0, 0, nyLoc),
+			true,
+		},
+		// Sunday at 17:00 - open
+		{
+			"sunday_at_17",
+			time.Date(2023, 6, 4, 17, 0, 0, 0, nyLoc),
+			false,
+		},
+		// Sunday after 17:00 - open
+		{
+			"sunday_after_17",
+			time.Date(2023, 6, 4, 20, 0, 0, 0, nyLoc),
+			false,
+		},
+		// Friday before 17:00 - open
+		{
+			"friday_before_17",
+			time.Date(2023, 6, 2, 12, 0, 0, 0, nyLoc),
+			false,
+		},
+		// Friday at 17:00 - closed
+		{
+			"friday_at_17",
+			time.Date(2023, 6, 2, 17, 0, 0, 0, nyLoc),
+			true,
+		},
+		// Normal Monday - open
+		{
+			"monday_normal",
+			time.Date(2023, 6, 5, 12, 0, 0, 0, nyLoc),
+			false,
+		},
+		// January 1 on a weekday - closed (Jan 1, 2024 is Monday)
+		{
+			"new_years_day_weekday",
+			time.Date(2024, 1, 1, 12, 0, 0, 0, nyLoc),
+			true,
+		},
+		// December 25 on a weekday - closed (Dec 25, 2023 is Monday)
+		{
+			"christmas_weekday",
+			time.Date(2023, 12, 25, 12, 0, 0, 0, nyLoc),
+			true,
+		},
+		// December 24 before 13:00 on weekday - open (Dec 24, 2024 is Tuesday)
+		{
+			"christmas_eve_before_13",
+			time.Date(2024, 12, 24, 12, 0, 0, 0, nyLoc),
+			false,
+		},
+		// December 24 at 13:00 on weekday - closed
+		{
+			"christmas_eve_at_13",
+			time.Date(2024, 12, 24, 13, 0, 0, 0, nyLoc),
+			true,
+		},
+		// December 31 before 13:00 on weekday - open (Dec 31, 2024 is Tuesday)
+		{
+			"new_years_eve_before_13",
+			time.Date(2024, 12, 31, 12, 0, 0, 0, nyLoc),
+			false,
+		},
+		// December 31 at 13:00 on weekday - closed
+		{
+			"new_years_eve_at_13",
+			time.Date(2024, 12, 31, 13, 0, 0, 0, nyLoc),
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.closed, IsForexMarketClosed(tt.t), "IsForexMarketClosed(%s)", tt.t)
+		})
+	}
+}
