@@ -85,8 +85,6 @@ func collectCandles(t *testing.T, it CandleIterator) ([]types.Timestamp, []marke
 }
 
 func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
-	t.Parallel()
-
 	s := useTempStore(t)
 	dm := &DataManager{}
 
@@ -178,8 +176,6 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 }
 
 func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
-	t.Parallel()
-
 	s := useTempStore(t)
 	dm := &DataManager{}
 
@@ -228,8 +224,6 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 }
 
 func TestDataManagerCandles_StrictTrueErrorsOnMissingMonth(t *testing.T) {
-	t.Parallel()
-
 	s := useTempStore(t)
 	dm := &DataManager{}
 
