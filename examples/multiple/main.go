@@ -35,11 +35,11 @@ func main() {
 		Equity:   types.MoneyFromFloat(20000),
 	}, &noopJournal{})
 
-	_ = engine.UpdatePrice(tick("EUR_USD", 1.1000, 1.1002))
-	_ = engine.UpdatePrice(tick("USD_JPY", 150.00, 150.02))
+	_ = engine.UpdatePrice(tick("EURUSD", 1.1000, 1.1002))
+	_ = engine.UpdatePrice(tick("USDJPY", 150.00, 150.02))
 
-	_, _ = engine.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{Instrument: "EUR_USD", Units: types.Units(1000)})
-	_, _ = engine.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{Instrument: "USD_JPY", Units: types.Units(2000)})
+	_, _ = engine.CreateMarketOrder(context.Background(), broker.OrderRequest{Instrument: "EURUSD", Units: types.Units(1000)})
+	_, _ = engine.CreateMarketOrder(context.Background(), broker.OrderRequest{Instrument: "USDJPY", Units: types.Units(2000)})
 
 	acct, _ := engine.GetAccount(context.Background())
 	fmt.Println("open positions across instruments", acct.Equity.Float64())

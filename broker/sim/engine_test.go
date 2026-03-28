@@ -73,7 +73,7 @@ func openMarket(t *testing.T, e *Engine, instr string, units float64, sl, tp *fl
 		v := types.PriceFromFloat(*tp)
 		tpp = &v
 	}
-	fill, err := e.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+	fill, err := e.CreateMarketOrder(context.Background(), broker.OrderRequest{
 		Instrument: instr,
 		Units:      types.Units(units),
 		StopLoss:   slp,

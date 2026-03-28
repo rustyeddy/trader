@@ -155,7 +155,7 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 		if err != nil {
 			return fmt.Errorf("OPEN: %w", err)
 		}
-		_, err = engine.CreateMarketOrder(ctx, broker.MarketOrderRequest{
+		_, err = engine.CreateMarketOrder(ctx, broker.OrderRequest{
 			Instrument: inst,
 			Units:      types.Units(units),
 		})
@@ -168,7 +168,7 @@ func handleEvent(ctx context.Context, engine *sim.Engine, event string, args []s
 			return fmt.Errorf("OPEN_SLTP: %w", err)
 		}
 
-		req := broker.MarketOrderRequest{
+		req := broker.OrderRequest{
 			Instrument: inst,
 			Units:      types.Units(units),
 		}

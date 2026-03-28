@@ -38,7 +38,7 @@ func main() {
 	}
 	_ = engine.UpdatePrice(tick)
 
-	_, _ = engine.CreateMarketOrder(context.Background(), broker.MarketOrderRequest{
+	_, _ = engine.CreateMarketOrder(context.Background(), broker.OrderRequest{
 		Instrument: "EUR_USD",
 		Units:      types.Units(1000),
 	})

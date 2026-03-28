@@ -57,7 +57,7 @@ func (e *Engine) GetTick(ctx context.Context, instr string) (market.Tick, error)
 	return e.ticks.Get(instr)
 }
 
-func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.MarketOrderRequest) (broker.OrderFill, error) {
+func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.OrderRequest) (broker.OrderFill, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -412,7 +412,7 @@ func (e *Engine) recomputeMarginLocked() error {
 			return err
 		}
 
-		u, err := broker.TradeMargin(t.Units, p.Mid(), t.Instrument, rate)
+		u, err := account.TradeMargin(t.Units, p.Mid(), t.Instrument, rate)
 		if err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-package broker_test
+package account_test
 
 import (
 	"context"

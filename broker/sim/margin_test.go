@@ -3,7 +3,7 @@ package sim
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
@@ -27,9 +27,9 @@ func TestTradeMargin_PositiveUnits(t *testing.T) {
 	price := types.PriceFromFloat(1.2345)
 	quoteToAccount := types.RateScale
 
-	got, err := broker.TradeMargin(units, price, instrument, types.Rate(quoteToAccount))
+	got, err := account.TradeMargin(units, price, instrument, types.Rate(quoteToAccount))
 	assert.NoError(t, err)
-	want, err := broker.TradeMargin(units, price, instrument, types.Rate(quoteToAccount))
+	want, err := account.TradeMargin(units, price, instrument, types.Rate(quoteToAccount))
 	assert.NoError(t, err)
 
 	assert.Equal(t, want, got)
@@ -44,9 +44,9 @@ func TestTradeMargin_NegativeUnits(t *testing.T) {
 	price := types.PriceFromFloat(2.0)
 	quoteToAccount := types.RateFromFloat(0.9)
 
-	got, err := broker.TradeMargin(units, price, instrument, quoteToAccount)
+	got, err := account.TradeMargin(units, price, instrument, quoteToAccount)
 	assert.NoError(t, err)
-	want, err := broker.TradeMargin(-units, price, instrument, quoteToAccount)
+	want, err := account.TradeMargin(-units, price, instrument, quoteToAccount)
 	assert.NoError(t, err)
 
 	assert.Equal(t, want, got)
@@ -57,7 +57,7 @@ func TestTradeMargin_ZeroUnits(t *testing.T) {
 
 	instrument := pickInstrument(t)
 
-	got, err := broker.TradeMargin(0, types.PriceFromFloat(1.5), instrument, types.RateScale)
+	got, err := account.TradeMargin(0, types.PriceFromFloat(1.5), instrument, types.RateScale)
 	assert.NoError(t, err)
 	assert.Equal(t, types.Money(0), got)
 }

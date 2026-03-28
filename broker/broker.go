@@ -4,18 +4,20 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
 type Broker interface {
-	GetAccount(ctx context.Context) (account.Account, error)
-	GetTick(ctx context.Context, instrument string) (market.Tick, error)
-	CreateMarketOrder(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
+	Account(ctx context.Context) (account.Account, error)
+	PlaceOrder(ctx context.Context, req OrderRequest) error
+	ClosePosition(id string) error
+
+	// GetTick(ctx context.Context, instrument string) (market.Tick, error)
+	// CreateMarketOrder1(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
 }
 
 // broker/models.go
-type MarketOrderRequest struct {
+type OrderRequest struct {
 	Instrument string
 	Units      types.Units
 	StopLoss   *types.Price
