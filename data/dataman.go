@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"slices"
 	"sort"
 	"time"
 
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
@@ -48,19 +48,19 @@ func (dm *DataManager) Init() {
 func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	var err error
 
-	log.Println("Building inventory")
+	tlog.Info("Building inventory")
 	dm.inventory, err = BuildInventory(ctx)
 	if err != nil {
 		return err
 	}
 
-	log.Println("Building wantlist")
+	tlog.Info("Building wantlist")
 	dm.wants, err = dm.BuildWantList(ctx)
 	if err != nil {
 		return err
 	}
 
-	log.Println("Planning")
+	tlog.Info("Planning")
 	dm.plan, err = dm.Plan(ctx)
 	if err != nil {
 		return err
@@ -68,33 +68,33 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	dm.plan.Log()
 
 	if download {
-		log.Println("Starting downloads")
+		tlog.Info("Starting downloads")
 		if err := dm.ExecuteDownloads(ctx); err != nil {
 			return err
 		}
 	}
 
 	if build {
-		log.Println("Re-building inventory")
+		tlog.Info("Re-building inventory")
 		dm.inventory, err = BuildInventory(ctx)
 		if err != nil {
 			return err
 		}
 
-		log.Println("Re-building wantlist")
+		tlog.Info("Re-building wantlist")
 		dm.wants, err = dm.BuildWantList(ctx)
 		if err != nil {
 			return err
 		}
 
-		log.Println("Re-planning wantlist")
+		tlog.Info("Re-planning wantlist")
 		dm.plan, err = dm.Plan(ctx)
 		if err != nil {
 			return err
 		}
 		dm.plan.Log()
 
-		log.Println("Making candles")
+		tlog.Info("Making candles")
 		if err := dm.candleMaker(ctx); err != nil {
 			return err
 		}

@@ -2,11 +2,11 @@ package backtest
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"text/template"
 	"time"
 
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -85,14 +85,14 @@ func (v *BacktestRun) WriteBacktestOrg() error {
 	// 1. Create a new template and parse the template string
 	t, err := template.New("backtest").Funcs(backtestOrgFuncs).Parse(BacktestOrgTemplate)
 	if err != nil {
-		log.Fatal(err)
+		tlog.Fatal("parse backtest template", "err", err)
 	}
 
 	// 2. Execute the template, writing the output to os.Stdout
 	buf := new(bytes.Buffer)
 	err = t.Execute(buf, v)
 	if err != nil {
-		log.Fatal(err)
+		tlog.Fatal("execute backtest template", "err", err)
 	}
 	err = os.WriteFile(v.OrgPath, buf.Bytes(), 0644)
 	return err
