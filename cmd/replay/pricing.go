@@ -10,7 +10,7 @@ import (
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/broker/sim"
-	"github.com/rustyeddy/trader/cmd/config"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/types"
 )

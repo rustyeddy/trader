@@ -1,7 +1,7 @@
 package replay
 
 import (
-	"github.com/rustyeddy/trader/cmd/config"
+	"github.com/rustyeddy/trader/config"
 	"github.com/spf13/cobra"
 )
 

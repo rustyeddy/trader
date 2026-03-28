@@ -10,8 +10,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type RootConfig struct {
+	ConfigPath string
+	GlobalPath string
+	DBPath     string
+	LogLevel   string
+	NoColor    bool
+
+	// Paths    PathsConfig
+	// Defaults DefaultsConfig
+	// Backtest BacktestConfig
+}
+
 // Config represents the complete simulation configuration
 type Config struct {
+	Root       RootConfig       `json:"root" yaml:"root"`
 	Account    AccountConfig    `json:"account" yaml:"account"`
 	Strategy   StrategyConfig   `json:"strategy" yaml:"strategy"`
 	Simulation SimulationConfig `json:"simulation" yaml:"simulation"`

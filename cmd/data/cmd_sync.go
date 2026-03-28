@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/cmd/config"
+	"github.com/rustyeddy/trader/config"
 	datapkg "github.com/rustyeddy/trader/data"
 )
 

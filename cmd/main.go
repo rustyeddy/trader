@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/rustyeddy/trader/cmd/backtest"
-	"github.com/rustyeddy/trader/cmd/config"
 	"github.com/rustyeddy/trader/cmd/data"
 	"github.com/rustyeddy/trader/cmd/replay"
+	"github.com/rustyeddy/trader/config"
 	"github.com/spf13/cobra"
 )
 
