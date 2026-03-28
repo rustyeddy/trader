@@ -129,3 +129,40 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 	events2 := feedSignals(s, closes)
 	require.Equal(t, events1, events2, "after reset, strategy should emit identical signals")
 }
+
+func TestEMACross_Name(t *testing.T) {
+s := NewEMACross(EMACrossConfig{
+FastPeriod: 3,
+SlowPeriod: 5,
+Scale:      types.PriceScale,
+})
+require.Equal(t, "EMA_CROSS(3,5)", s.Name())
+}
+
+func TestEMACrossDecision_Reason(t *testing.T) {
+s := NewEMACross(EMACrossConfig{
+FastPeriod: 3,
+SlowPeriod: 5,
+Scale:      types.PriceScale,
+})
+d := s.Update(mkClose(1.0))
+require.NotEmpty(t, d.Reason())
+}
+
+func TestNewEMACross_PanicOnInvalidConfig(t *testing.T) {
+require.Panics(t, func() {
+NewEMACross(EMACrossConfig{FastPeriod: 0, SlowPeriod: 5, Scale: types.PriceScale})
+}, "zero fast period should panic")
+
+require.Panics(t, func() {
+NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 0, Scale: types.PriceScale})
+}, "zero slow period should panic")
+
+require.Panics(t, func() {
+NewEMACross(EMACrossConfig{FastPeriod: 5, SlowPeriod: 3, Scale: types.PriceScale})
+}, "fast >= slow should panic")
+
+require.Panics(t, func() {
+NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
+}, "zero scale should panic")
+}

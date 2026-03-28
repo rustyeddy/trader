@@ -15,3 +15,13 @@ func TestNoopStrategyUpdate(t *testing.T) {
 	dec := strat.Update(ctx, nil)
 	assert.NotNil(t, dec)
 }
+
+func TestNoopStrategyName(t *testing.T) {
+	strat := NoopStrategy{}
+	assert.Equal(t, "NoOp", strat.Name())
+}
+
+func TestNoopStrategyReason(t *testing.T) {
+	strat := NoopStrategy{}
+	assert.Equal(t, "No-op", strat.Reason())
+}
