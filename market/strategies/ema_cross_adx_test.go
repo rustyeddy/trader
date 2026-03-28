@@ -208,3 +208,86 @@ func TestEMACrossADX_CloseOnlyCandles_NoPanic(t *testing.T) {
 	})
 	_ = events
 }
+
+func TestEMACrossADX_Name(t *testing.T) {
+s := NewEMACrossADX(EMACrossADXConfig{
+FastPeriod:   3,
+SlowPeriod:   5,
+ADXPeriod:    14,
+Scale:        types.PriceScale,
+ADXThreshold: 20.0,
+})
+require.Equal(t, "EMA_CROSS_ADX(3,5,ADX14@20.0)", s.Name())
+}
+
+func TestEMACrossADX_Ready(t *testing.T) {
+s := NewEMACrossADX(EMACrossADXConfig{
+FastPeriod:      3,
+SlowPeriod:      5,
+ADXPeriod:       14,
+Scale:           types.PriceScale,
+ADXThreshold:    20.0,
+RequireADXReady: true,
+})
+
+// Initially not ready
+require.False(t, s.Ready())
+
+// Feed enough candles to warm up EMAs but not ADX
+for i := 0; i < 5; i++ {
+s.Update(mkOHLC(1.0, 1.001, 0.999, 1.0))
+}
+// EMAs ready after SlowPeriod, but ADX needs more candles
+// Ready() depends on requireADXReady=true, so not ready yet if ADX not ready
+require.False(t, s.Ready())
+
+// Feed many more candles to warm up ADX (needs 14+14=28 candles typically)
+for i := 0; i < 40; i++ {
+s.Update(mkOHLC(1.0, 1.001, 0.999, 1.0))
+}
+require.True(t, s.Ready())
+
+// Test without requireADXReady: ready when EMAs are ready
+s2 := NewEMACrossADX(EMACrossADXConfig{
+FastPeriod:      3,
+SlowPeriod:      5,
+ADXPeriod:       14,
+Scale:           types.PriceScale,
+ADXThreshold:    20.0,
+RequireADXReady: false,
+})
+for i := 0; i < 5; i++ {
+s2.Update(mkOHLC(1.0, 1.001, 0.999, 1.0))
+}
+require.True(t, s2.Ready())
+}
+
+func TestEMACrossADXDecision_Reason(t *testing.T) {
+s := NewEMACrossADX(EMACrossADXConfig{
+FastPeriod:   3,
+SlowPeriod:   5,
+ADXPeriod:    14,
+Scale:        types.PriceScale,
+ADXThreshold: 20.0,
+})
+d := s.Update(mkOHLC(1.0, 1.001, 0.999, 1.0))
+require.NotEmpty(t, d.Reason())
+}
+
+func TestNewEMACrossADX_PanicOnInvalidConfig(t *testing.T) {
+require.Panics(t, func() {
+NewEMACrossADX(EMACrossADXConfig{FastPeriod: 0, SlowPeriod: 5, ADXPeriod: 14, Scale: types.PriceScale})
+}, "zero fast period should panic")
+
+require.Panics(t, func() {
+NewEMACrossADX(EMACrossADXConfig{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 0, Scale: types.PriceScale})
+}, "zero ADX period should panic")
+
+require.Panics(t, func() {
+NewEMACrossADX(EMACrossADXConfig{FastPeriod: 5, SlowPeriod: 3, ADXPeriod: 14, Scale: types.PriceScale})
+}, "fast >= slow should panic")
+
+require.Panics(t, func() {
+NewEMACrossADX(EMACrossADXConfig{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 14, Scale: 0})
+}, "zero scale should panic")
+}
