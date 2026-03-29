@@ -1,6 +1,7 @@
 package market
 
 import (
+	"math"
 	"strings"
 
 	"github.com/rustyeddy/trader/types"
@@ -159,4 +160,8 @@ func NormalizeInstrument(sym string) string {
 	sym = strings.ReplaceAll(sym, "_", "")
 	sym = strings.ReplaceAll(sym, "/", "")
 	return strings.ToUpper(sym)
+}
+
+func (inst *Instrument) PipSize() float64 {
+	return math.Pow10(inst.PipLocation)
 }

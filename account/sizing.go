@@ -10,36 +10,41 @@ import (
 
 type SizeRequest struct {
 	Instrument string
-	AccountCCY string
+	Entry      types.Price
+	Stop       types.Price
 
-	Equity  types.Money
-	RiskPct types.Rate
-
-	Entry types.Price
-	Stop  types.Price
+	// Conversion rate from quote currency to account currency.
+	// For EURUSD in a USD account, this is 1.0.
+	// For USDJPY in a USD account, this is 1 / USDJPY.
+	// For EURGBP in a USD account, this is GBPUSD (or 1 / USDGBP).
+	QuoteToAccount types.Rate
 }
 
 type SizeResult struct {
-	Units         types.Units
-	StopPips      float64
-	RiskAmount    types.Money
-	LossPerUnit   types.Money
-	EstimatedLoss types.Money
+	Units          types.Units
+	StopPips       float64
+	RiskAmount     types.Money
+	LossPerUnit    types.Money
+	EstimatedLoss  types.Money
+	QuoteToAccount types.Rate
+	RequiredMargin types.Money
 }
 
-func PipSize(pipLocation int) float64 {
-	return math.Pow10(pipLocation)
-}
-
-func SizePosition(req SizeRequest) (SizeResult, error) {
-	if req.RiskPct <= 0 {
-		return SizeResult{}, fmt.Errorf("risk_pct must be > 0")
+func (acct *Account) SizePosition(req SizeRequest) (SizeResult, error) {
+	if acct.RiskPct <= 0 {
+		return SizeResult{}, fmt.Errorf("account risk_pct must be > 0")
+	}
+	if acct.Equity <= 0 {
+		return SizeResult{}, fmt.Errorf("account equity must be > 0")
 	}
 	if req.Entry <= 0 || req.Stop <= 0 {
 		return SizeResult{}, fmt.Errorf("entry and stop must be > 0")
 	}
 	if req.Entry == req.Stop {
 		return SizeResult{}, fmt.Errorf("entry and stop must differ")
+	}
+	if req.QuoteToAccount <= 0 {
+		return SizeResult{}, fmt.Errorf("quote_to_account must be > 0")
 	}
 
 	meta, ok := market.Instruments[req.Instrument]
@@ -49,36 +54,27 @@ func SizePosition(req SizeRequest) (SizeResult, error) {
 
 	entryF := float64(req.Entry) / float64(types.PriceScale)
 	stopF := float64(req.Stop) / float64(types.PriceScale)
+	qta := req.QuoteToAccount.Float64()
 
-	quoteToAccount := 0.0
-	switch {
-	case meta.QuoteCurrency == req.AccountCCY:
-		quoteToAccount = 1.0
-	case meta.BaseCurrency == req.AccountCCY:
-		if entryF <= 0 {
-			return SizeResult{}, fmt.Errorf("entry must be > 0")
-		}
-		quoteToAccount = 1.0 / entryF
-	default:
-		return SizeResult{}, fmt.Errorf("cross-currency conversion not implemented for %s account %s", req.Instrument, req.AccountCCY)
-	}
-
-	pip := PipSize(meta.PipLocation)
+	pip := meta.PipSize()
 	stopPips := math.Abs(entryF-stopF) / pip
 	if stopPips <= 0 {
 		return SizeResult{}, fmt.Errorf("stop distance must be > 0")
 	}
 
-	riskAmountF := req.Equity.Float64() * req.RiskPct.Float64()
-	pipValuePerUnit := pip * quoteToAccount
+	riskAmountF := acct.Equity.Float64() * acct.RiskPct.Float64()
+	pipValuePerUnit := pip * qta
+	if pipValuePerUnit <= 0 {
+		return SizeResult{}, fmt.Errorf("pip value per unit must be > 0")
+	}
+
 	unitsF := riskAmountF / (stopPips * pipValuePerUnit)
 	units := types.Units(math.Floor(unitsF))
-
-	if units <= 0 {
+	if units <= meta.MinimumTradeSize {
 		return SizeResult{}, fmt.Errorf("computed units <= 0")
 	}
 
-	lossPerUnitF := math.Abs(entryF-stopF) * quoteToAccount
+	lossPerUnitF := math.Abs(entryF-stopF) * qta
 
 	return SizeResult{
 		Units:         units,
@@ -88,24 +84,3 @@ func SizePosition(req SizeRequest) (SizeResult, error) {
 		EstimatedLoss: types.MoneyFromFloat(float64(units) * lossPerUnitF),
 	}, nil
 }
-
-// func Calculate(req SizeRequest) SizeResult {
-// 	res := SizeResult{}
-// 	return res
-// }
-
-// func Calculate(in SizeRequest) SizeResult {
-// 	pip := pipSize(in.PipLocation)
-// 	stopPips := math.Abs(in.EntryPrice-in.StopPrice) / pip
-
-// 	riskAmt := in.Equity * in.RiskPct
-// 	pipValuePerUnit := pip * in.QuoteToAccount
-
-// 	units := riskAmt / (stopPips * pipValuePerUnit)
-
-// 	return SIzeResult{
-// 		Units:      math.Floor(units),
-// 		StopPips:   stopPips,
-// 		RiskAmount: riskAmt,
-// 	}
-// }

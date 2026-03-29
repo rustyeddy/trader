@@ -16,9 +16,23 @@ type Account struct {
 	MarginUsed  types.Money
 	FreeMargin  types.Money
 	MarginLevel types.Money
+	RiskPct     types.Rate
 }
 
-func (act *Account) QuoteToAccount(ctx context.Context, instrument string, prices market.TickSource) (types.Rate, error) {
+// QuoteToAccount returns the current conversion rate from an instrument's
+// quote currency into the account's base currency.
+//
+// It is used for position sizing and risk calculations when a price move
+// denominated in quote currency must be expressed in account currency.
+//
+// Examples for a USD account:
+//   - EURUSD -> 1.0
+//   - USDJPY -> 1 / USDJPY
+//   - EURGBP -> GBPUSD, or 1 / USDGBP if only the inverse exists
+//
+// The returned Rate is scaled by types.RateScale.
+func (act *Account) QuoteToAccount(ctx context.Context,
+	instrument string, prices market.TickSource) (types.Rate, error) {
 	meta, ok := market.Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)
