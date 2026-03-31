@@ -3,6 +3,8 @@ package risk
 import (
 	"fmt"
 	"time"
+
+	"github.com/rustyeddy/trader/account"
 )
 
 type Violation struct {
@@ -46,7 +48,7 @@ func Evaluate(
 	// Risk + RR
 	d.PlannedRiskUSD = PlannedRiskUSD(intent.Units, intent.Entry, intent.Stop, quoteToAccountRate)
 	d.PlannedRiskPct = RiskPct(d.PlannedRiskUSD, acct.Equity)
-	d.PlannedRR = RR(intent.Entry, intent.Stop, intent.TakeProfit)
+	d.PlannedRR = account.RR(intent.Entry, intent.Stop, intent.TakeProfit)
 
 	if d.PlannedRiskPct > p.MaxRiskPct {
 		d.add("RISK_TOO_HIGH",

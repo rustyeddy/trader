@@ -131,25 +131,27 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 }
 
 func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, error) {
+	cfg := strategies.EMACrossADXConfig{}
+
 	fast, ok, err := getRunIntParam(r.Strategy.Params, "fast")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok || fast <= 0 {
-		return strategies.EMACrossADXConfig{}, fmt.Errorf("missing or invalid param %q", "fast")
+		return cfg, fmt.Errorf("missing or invalid param %q", "fast")
 	}
 
 	slow, ok, err := getRunIntParam(r.Strategy.Params, "slow")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok || slow <= 0 {
-		return strategies.EMACrossADXConfig{}, fmt.Errorf("missing or invalid param %q", "slow")
+		return cfg, fmt.Errorf("missing or invalid param %q", "slow")
 	}
 
 	adxPeriod, ok, err := getRunIntParam(r.Strategy.Params, "adx_period")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok || adxPeriod <= 0 {
 		adxPeriod = 14
@@ -157,7 +159,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 
 	adxThreshold, ok, err := getRunFloatParam(r.Strategy.Params, "adx_threshold")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok || adxThreshold <= 0 {
 		adxThreshold = 20.0
@@ -165,7 +167,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 
 	minSpread, ok, err := getRunFloatParam(r.Strategy.Params, "min_spread")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok {
 		minSpread = 0
@@ -173,7 +175,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 
 	requireDI, ok, err := getRunBoolParam(r.Strategy.Params, "require_di")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok {
 		requireDI = false
@@ -181,7 +183,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 
 	requireADXReady, ok, err := getRunBoolParam(r.Strategy.Params, "require_adx_ready")
 	if err != nil {
-		return strategies.EMACrossADXConfig{}, err
+		return cfg, err
 	}
 	if !ok {
 		requireADXReady = true

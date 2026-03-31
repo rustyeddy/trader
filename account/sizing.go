@@ -70,8 +70,8 @@ func (acct *Account) SizePosition(req SizeRequest) (SizeResult, error) {
 
 	unitsF := riskAmountF / (stopPips * pipValuePerUnit)
 	units := types.Units(math.Floor(unitsF))
-	if units <= meta.MinimumTradeSize {
-		return SizeResult{}, fmt.Errorf("computed units <= 0")
+	if units < meta.MinimumTradeSize {
+		return SizeResult{}, fmt.Errorf("computed units < meta.MinimumTradeSize")
 	}
 
 	lossPerUnitF := math.Abs(entryF-stopF) * qta

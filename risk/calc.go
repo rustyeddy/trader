@@ -21,15 +21,6 @@ func PlannedRiskUSD(units, entry, stop, quoteToAccountRate float64) float64 {
 	return plQuote * quoteToAccountRate
 }
 
-func RR(entry, stop, takeProfit float64) float64 {
-	risk := abs(entry - stop)
-	reward := abs(takeProfit - entry)
-	if risk == 0 {
-		return 0
-	}
-	return reward / risk
-}
-
 func RiskPct(plannedRiskUSD, equity float64) float64 {
 	if equity <= 0 {
 		return math.Inf(1)

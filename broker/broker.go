@@ -11,9 +11,6 @@ type Broker interface {
 	Account(ctx context.Context) (account.Account, error)
 	PlaceOrder(ctx context.Context, req OrderRequest) error
 	ClosePosition(id string) error
-
-	// GetTick(ctx context.Context, instrument string) (market.Tick, error)
-	// CreateMarketOrder1(ctx context.Context, req MarketOrderRequest) (OrderFill, error)
 }
 
 // broker/models.go
@@ -22,6 +19,7 @@ type OrderRequest struct {
 	Units      types.Units
 	StopLoss   *types.Price
 	TakeProfit *types.Price
+	Reason     string
 }
 
 type OrderFill struct {

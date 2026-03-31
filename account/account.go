@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -65,4 +66,13 @@ func (act *Account) QuoteToAccount(ctx context.Context,
 
 	// Case 3: Cross currency (future-proofing)
 	return 0, fmt.Errorf("cross conversion not implemented for %s → %s", meta.QuoteCurrency, act.Currency)
+}
+
+func RR(entry, stop, takeProfit float64) float64 {
+	risk := math.Abs(entry - stop)
+	reward := math.Abs(takeProfit - entry)
+	if risk == 0 {
+		return 0
+	}
+	return reward / risk
 }
