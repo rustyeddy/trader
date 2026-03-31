@@ -3,6 +3,7 @@ package backtest
 import (
 	"fmt"
 
+	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
@@ -97,7 +98,7 @@ func NewCandleEngine(
 	}
 }
 
-func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
+func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error {
 	if feed == nil {
 		return fmt.Errorf("candle backtest: nil feed")
 	}
