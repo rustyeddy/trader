@@ -113,7 +113,6 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	cfg.Take = emaCrossADXOpts.takePips()
 
 	strat := strategies.NewEMACrossADX(cfg)
-
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,

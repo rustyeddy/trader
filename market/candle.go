@@ -752,6 +752,13 @@ func (cs *CandleSet) Iterator() *Iterator {
 	}
 }
 
+func (it *Iterator) NextCandle() (Candle, bool) {
+	if it.Next() {
+		return it.Candle(), true
+	}
+	return Candle{}, false
+}
+
 func (it *Iterator) Next() bool {
 	n := len(it.cs.Candles)
 

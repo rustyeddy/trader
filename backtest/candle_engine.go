@@ -105,12 +105,10 @@ func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
 		return fmt.Errorf("candle backtest: nil strategy")
 	}
 	defer feed.Close()
-
 	strat.Reset()
 
 	barIndex := 0
 	var prevTS types.Timestamp
-
 	var lastTS types.Timestamp
 	var lastC market.Candle
 	haveLast := false
@@ -131,7 +129,6 @@ func (e *CandleEngine) Run(feed CandleFeed, strat CandleStrategy) error {
 			}
 		}
 		prevTS = ts
-
 		ctx := &CandleContext{
 			Instrument: e.Instrument,
 			Timestamp:  ts,
