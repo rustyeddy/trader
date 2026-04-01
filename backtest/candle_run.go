@@ -2,7 +2,9 @@ package backtest
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/types"
 )
@@ -23,20 +25,22 @@ func RunCandles(
 	src CandleSource,
 	req CandleRunRequest,
 	strat CandleStrategy,
+	acct *account.Account,
 ) (*CandleEngine, error) {
+	if acct == nil {
+		return nil, fmt.Errorf("RunCandles: nil account")
+	}
+
 	it, err := src.Candles(ctx, req.DataRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	engine := NewCandleEngine(
-		req.DataRequest.Instrument,
-		req.DataRequest.Timeframe,
-		req.Scale,
-		req.StartingBalance,
-		req.AccountCCY,
-	)
-
+	engine := &CandleEngine{
+		Instrument: req.DataRequest.Instrument,
+		Timeframe:  req.DataRequest.Timeframe,
+		Account:    acct,
+	}
 	if err := engine.Run(it, strat); err != nil {
 		return nil, err
 	}

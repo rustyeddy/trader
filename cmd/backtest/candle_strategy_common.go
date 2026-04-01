@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/portfolio"
+	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -23,10 +25,10 @@ type candleCmdCommon struct {
 	From       string
 	To         string
 
-	StopPips32 int32
-	TakePips32 int32
-	Units32    int32
-	RiskPct64  float64
+	StopPips  int32
+	TakePips  int32
+	Units     int64
+	RiskPct64 float64
 }
 
 func newCandleCmdCommon() candleCmdCommon {
@@ -35,17 +37,17 @@ func newCandleCmdCommon() candleCmdCommon {
 		Timeframe:  "H1",
 		From:       "2025-01-01",
 		To:         "2025-12-31",
-		StopPips32: 20,
-		TakePips32: 40,
-		Units32:    1000,
+		StopPips:   20,
+		TakePips:   40,
+		Units:      1000,
 		RiskPct64:  0.5,
 	}
 }
 
 func (o *candleCmdCommon) addFlags(cmd *cobra.Command) {
-	cmd.Flags().Int32Var(&o.StopPips32, "stop", o.StopPips32, "Stop loss in pips")
-	cmd.Flags().Int32Var(&o.TakePips32, "take", o.TakePips32, "Take profit in pips")
-	cmd.Flags().Int32Var(&o.Units32, "units", o.Units32, "Position size in units")
+	cmd.Flags().Int32Var(&o.StopPips, "stop", o.StopPips, "Stop loss in pips")
+	cmd.Flags().Int32Var(&o.TakePips, "take", o.TakePips, "Take profit in pips")
+	cmd.Flags().Int64Var(&o.Units, "units", o.Units, "Position size in units")
 	cmd.Flags().Float64Var(&o.RiskPct64, "risk-pct", o.RiskPct64, "Risk per trade as a percent, e.g. 0.5")
 	cmd.Flags().StringVar(&o.Instrument, "instrument", o.Instrument, "Instrument, e.g. EURUSD")
 	cmd.Flags().StringVar(&o.Timeframe, "timeframe", o.Timeframe, "Timeframe: M1|H1|D1")
@@ -53,9 +55,9 @@ func (o *candleCmdCommon) addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&o.To, "to", o.To, "End date inclusive, YYYY-MM-DD")
 }
 
-func (o candleCmdCommon) stopPips() types.Price { return types.Price(o.StopPips32) }
-func (o candleCmdCommon) takePips() types.Price { return types.Price(o.TakePips32) }
-func (o candleCmdCommon) units() types.Units    { return types.Units(o.Units32) }
+func (o candleCmdCommon) stopPips() types.Price { return types.Price(o.StopPips) }
+func (o candleCmdCommon) takePips() types.Price { return types.Price(o.TakePips) }
+func (o candleCmdCommon) units() types.Units    { return types.Units(o.Units) }
 func (o candleCmdCommon) riskPct() types.Rate   { return types.RateFromFloat(o.RiskPct64 / 100.0) }
 
 type candleStrategyAdapter struct {
@@ -70,7 +72,7 @@ type candleStrategyAdapter struct {
 func (a *candleStrategyAdapter) Name() string { return a.S.Name() }
 func (a *candleStrategyAdapter) Reset()       { a.S.Reset() }
 
-func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *bt.OrderRequest {
+func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *portfolio.OpenRequest {
 	d := a.S.Update(c)
 	if d.Signal() == strategies.Hold {
 		return nil
@@ -80,14 +82,14 @@ func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *b
 	stopDist := a.StopPips * types.Price(a.PipScaled)
 	takeDist := a.TakePips * types.Price(a.PipScaled)
 
-	req := &bt.OrderRequest{
+	req := &portfolio.OpenRequest{
 		Units:  a.Units,
 		Reason: d.Reason(),
 	}
 
 	switch d.Signal() {
 	case strategies.Buy:
-		req.Side = bt.Long
+		req.Side = types.Long
 		if a.StopPips > 0 {
 			req.Stop = entry - stopDist
 		}
@@ -95,7 +97,7 @@ func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *b
 			req.Take = entry + takeDist
 		}
 	case strategies.Sell:
-		req.Side = bt.Short
+		req.Side = types.Short
 		if a.StopPips > 0 {
 			req.Stop = entry + stopDist
 		}
@@ -124,8 +126,9 @@ func runCandleStrategy(
 	ctx context.Context,
 	opts candleCmdCommon,
 	strat strategies.Strategy,
-	meta candleRunMeta) error {
-
+	meta candleRunMeta,
+	acct *account.Account,
+) error {
 	start, err := time.Parse("2006-01-02", opts.From)
 	if err != nil {
 		return fmt.Errorf("bad --from: %w", err)
@@ -165,9 +168,6 @@ func runCandleStrategy(
 			},
 			Strict: true,
 		},
-		StartingBalance: meta.Balance,
-		AccountCCY:      instMeta.QuoteCurrency,
-		Scale:           types.PriceScale,
 	}
 
 	dm := data.NewDataManager([]string{instrument}, start, end)
@@ -179,13 +179,15 @@ func runCandleStrategy(
 		PipScaled: bt.PipScaled(instMeta.PipLocation),
 	}
 
-	eng, err := bt.RunCandles(ctx, dm, req, adapter)
+	eng, err := bt.RunCandles(ctx, dm, req, adapter, acct)
 	if err != nil {
 		return err
 	}
 
 	wins, losses := 0, 0
-	for _, tr := range eng.Trades {
+	l := eng.Account.Trades.Len()
+	for i := 0; i < l; i++ {
+		tr := eng.Account.Trades.Get(i)
 		if tr.PNL > 0 {
 			wins++
 		} else if tr.PNL < 0 {
@@ -207,12 +209,12 @@ func runCandleStrategy(
 		RR:           meta.RR,
 		Start:        req.DataRequest.Range.Start,
 		End:          req.DataRequest.Range.End,
-		Trades:       len(eng.Trades),
+		Trades:       eng.Account.Trades.Len(),
 		Wins:         wins,
 		Losses:       losses,
 		StartBalance: meta.Balance,
-		EndBalance:   eng.Balance,
-		NetPL:        eng.Balance - meta.Balance,
+		EndBalance:   eng.Account.Balance,
+		NetPL:        eng.Account.Balance - meta.Balance,
 	}
 
 	if meta.Balance != 0 {

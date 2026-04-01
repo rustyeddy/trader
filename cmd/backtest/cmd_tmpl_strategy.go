@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +37,7 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 	}
 
 	strat := strategies.NewTemplateStrategy(cfg)
-
+	act := &account.Account{}
 	return runCandleStrategy(
 		context.Background(),
 		tmplStrategyOpts,
@@ -50,5 +51,6 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 			RR:       cfg.RR,
 			Strategy: strat.Name(),
 		},
+		act,
 	)
 }

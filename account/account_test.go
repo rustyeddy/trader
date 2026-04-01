@@ -45,9 +45,7 @@ func TestQuoteToRate_QuoteCurrencyIsAccountCurrency(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	prices := &fakePrices{}
-
-	rate, err := acct.QuoteToAccount(context.Background(), "EURUSD", prices)
+	rate, err := acct.QuoteToAccount(context.Background(), "EURUSD", 1013322)
 	require.NoError(t, err)
 	assert.Equal(t, types.Rate(types.RateScale), rate)
 }
@@ -59,22 +57,10 @@ func TestQuoteAccount_BaseCurrencyIsAccountCurrency(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	prices := &fakePrices{
-		ticks: map[string]market.Tick{
-			"USDJPY": {
-				Instrument: "USDJPY",
-				BA: market.BA{
-					Bid: types.PriceFromFloat(150.00),
-					Ask: types.PriceFromFloat(150.02),
-				},
-			},
-		},
-	}
 
-	rate, err := acct.QuoteToAccount(context.Background(), "USDJPY", prices)
+	rate, err := acct.QuoteToAccount(context.Background(), "USDJPY", types.PriceFromFloat(150.02))
 	require.NoError(t, err)
-	// rate should be approximately 1/150 * RateScale
-	approxExpected := float64(types.RateScale) / 150.01 // mid = (150.00+150.02)/2 ≈ 150.01
+	approxExpected := float64(types.RateScale) / 150.02 // mid = (150.00+150.02)/2 ≈ 150.01
 	assert.InDelta(t, approxExpected, float64(rate), 10)
 }
 
@@ -84,9 +70,7 @@ func TestQuoteAccount_BaseCurrencyIsAccountCurrency_NoPrice(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	prices := &fakePrices{err: errors.New("no price")}
-
-	_, err := acct.QuoteToAccount(context.Background(), "USDJPY", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "USDJPY", types.PriceFromFloat(150.02))
 	assert.Error(t, err)
 }
 
@@ -95,9 +79,7 @@ func TestQuoteAccount_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	prices := &fakePrices{}
-
-	_, err := acct.QuoteToAccount(context.Background(), "XXXYYY", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "XXXYYY", types.PriceFromFloat(150.02))
 	assert.Error(t, err)
 }
 
@@ -113,8 +95,6 @@ func TestQuoteAccount_CrossCurrency(t *testing.T) {
 		Currency: "JPY",
 		Balance:  types.MoneyFromFloat(1_000_000),
 	}
-	prices := &fakePrices{}
-
-	_, err := acct.QuoteToAccount(context.Background(), "EURUSD", prices)
+	_, err := acct.QuoteToAccount(context.Background(), "EURUSD", types.Price(1_000_000))
 	assert.Error(t, err)
 }

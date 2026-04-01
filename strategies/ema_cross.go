@@ -3,8 +3,8 @@ package strategies
 import (
 	"fmt"
 
+	"github.com/rustyeddy/trader/indicators"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/market/indicators"
 	"github.com/rustyeddy/trader/types"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	bt "github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/strategies"
 )
 
 type EMAParams struct {

@@ -1,10 +1,13 @@
 package backtest
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -18,23 +21,10 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c market.Candle) *OrderRequest
+	OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest
 }
 
 type Side int8
-
-const (
-	Long  Side = +1
-	Short Side = -1
-)
-
-type OrderRequest struct {
-	Side   Side
-	Units  types.Units // base units, e.g. 1000
-	Stop   types.Price // scaled price (0 = none)
-	Take   types.Price // scaled price (0 = none)
-	Reason string
-}
 
 type CandleContext struct {
 	CS         *market.CandleSet
@@ -44,61 +34,30 @@ type CandleContext struct {
 	Timestamp  types.Timestamp
 	GapBars    int // missing bars between this and previous valid bar
 
-	Pos     *Position
-	Balance *types.Money
-}
-
-type Position struct {
-	Open       bool
-	Side       Side
-	EntryPrice types.Price
-	Units      types.Units
-	Stop       types.Price
-	Take       types.Price
-	EntryIdx   int
-	EntryTime  types.Timestamp
-}
-
-type Trade struct {
-	EntryTime  types.Timestamp
-	ExitTime   types.Timestamp
-	Side       Side
-	EntryPrice types.Price
-	ExitPrice  types.Price
-	Units      types.Units
-	PNL        types.Money // account currency (best-effort)
-	Reason     string
+	Pos     *portfolio.Position
+	Account *account.Account
 }
 
 type CandleEngine struct {
 	Instrument string
 	types.Timeframe
-
-	AccountCCY string
-	Scale      types.Scale6
-
-	Balance types.Money
-	Pos     Position
-	Trades  []Trade
+	Pos     *portfolio.Position
+	Account *account.Account
 }
 
-func NewCandleEngine(
-	instrument string,
-	tf types.Timeframe,
-	scale types.Scale6,
-	startingBalance types.Money,
-	accountCCY string,
-) *CandleEngine {
+func NewCandleEngine(instrument string, tf types.Timeframe, account *account.Account) *CandleEngine {
 	return &CandleEngine{
 		Instrument: instrument,
 		Timeframe:  tf,
-		Scale:      scale,
-		AccountCCY: accountCCY,
-		Balance:    startingBalance,
+		Account:    account,
 	}
 }
 
 func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error {
+	if e.Account == nil {
+		return fmt.Errorf("candle backtest: nil account")
+	}
+
 	if feed == nil {
 		return fmt.Errorf("candle backtest: nil feed")
 	}
@@ -114,6 +73,7 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 	var lastC market.Candle
 	haveLast := false
 
+	count := 0
 	for feed.Next() {
 		ts := feed.Timestamp()
 		c := feed.Candle()
@@ -129,6 +89,7 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 				gapBars = int(delta/int64(e.Timeframe)) - 1
 			}
 		}
+
 		prevTS = ts
 		ctx := &CandleContext{
 			Instrument: e.Instrument,
@@ -136,90 +97,64 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 			Idx:        barIndex,
 			BarIndex:   barIndex,
 			GapBars:    gapBars,
-			Pos:        &e.Pos,
-			Balance:    &e.Balance,
+			Pos:        e.Pos,
+			Account:    e.Account,
 		}
 		barIndex++
-
-		if e.Pos.Open {
+		if e.Pos != nil {
 			if exitPx, reason, hit := checkExit(e.Pos, c); hit {
-				e.closePosition(ts, exitPx, reason)
+				fmt.Printf("close position: %d - %d\n", barIndex, count)
+				e.Account.ClosePosition(e.Pos, exitPx, ts, reason)
 			}
 		}
 
 		req := strat.OnBar(ctx, c)
-		if req == nil || e.Pos.Open || req.Units == 0 {
+		if req == nil || e.Pos != nil {
 			continue
 		}
 
-		e.openPosition(ctx.BarIndex, ts, c, req)
+		if req.Units == 0 {
+			if req.Stop == 0 {
+				return fmt.Errorf("risk sizing requires a stop price")
+			}
+
+			qta, err := e.Account.QuoteToAccount(context.TODO(), e.Instrument, c.Close)
+			if err != nil {
+				return err
+			}
+
+			r := account.SizeRequest{
+				Instrument:     e.Instrument,
+				Entry:          c.Close,
+				Stop:           req.Stop,
+				QuoteToAccount: qta,
+			}
+			res, err := e.Account.SizePosition(r)
+			if err != nil {
+				return err
+			}
+			req.Units = res.Units
+		}
+		count++
+		e.Account.OpenPosition(ts, c, req)
 	}
 
 	if err := feed.Err(); err != nil {
 		return err
 	}
 
-	if e.Pos.Open && haveLast {
-		e.closePosition(lastTS, lastC.Close, "end_of_data")
+	if e.Pos != nil && haveLast {
+		fmt.Printf("close position: %d - %d\n", barIndex, count)
+		e.Account.ClosePosition(e.Pos, lastC.Close, lastTS, "end_of_data")
 	}
 
 	return nil
 }
 
-func (e *CandleEngine) openPosition(idx int, t types.Timestamp, c market.Candle, req *OrderRequest) {
-	// Fill model: enter at bar close.
-	entry := c.Close
-
-	e.Pos = Position{
-		Open:       true,
-		Side:       req.Side,
-		EntryPrice: entry,
-		Units:      req.Units,
-		Stop:       req.Stop,
-		Take:       req.Take,
-		EntryIdx:   idx,
-		EntryTime:  t,
-	}
-}
-
-func (e *CandleEngine) closePosition(t types.Timestamp, exit types.Price, reason string) {
-	p := e.Pos
-	e.Pos.Open = false
-
-	// PnL in quote currency (best-effort): (exit-entry) * units (long) or opposite (short)
-	deltaScaled := int64(exit - p.EntryPrice) // scaled price units
-	pnlScaled := int64(p.Side) * deltaScaled * int64(p.Units)
-
-	// Convert scaled PnL to float quote currency
-	pnlQuote := float64(pnlScaled) / float64(e.Scale)
-
-	// If quote currency matches account, treat pnlQuote as account currency.
-	pnlAcct := pnlQuote
-	if meta, ok := market.Instruments[e.Instrument]; ok {
-		if e.AccountCCY != "" && meta.QuoteCurrency != "" && meta.QuoteCurrency != e.AccountCCY {
-			// TODO: add FX conversion using a price source. For now, leave as quote currency.
-			pnlAcct = pnlQuote
-		}
-	}
-
-	pnlMoney := types.MoneyFromFloat(pnlAcct)
-	e.Balance += pnlMoney
-	e.Trades = append(e.Trades, Trade{
-		EntryTime:  p.EntryTime,
-		ExitTime:   t,
-		Side:       p.Side,
-		EntryPrice: p.EntryPrice,
-		ExitPrice:  exit,
-		Units:      p.Units,
-		PNL:        pnlMoney,
-		Reason:     reason,
-	})
-}
-
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p Position, c market.Candle) (exitPx types.Price, reason string, hit bool) {
-	if !p.Open {
+func checkExit(p *portfolio.Position, c market.Candle) (exitPx types.Price, reason string, hit bool) {
+	if p == nil {
 		return 0, "", false
 	}
 
@@ -227,7 +162,7 @@ func checkExit(p Position, c market.Candle) (exitPx types.Price, reason string, 
 	hasTake := p.Take != 0
 
 	switch p.Side {
-	case Long:
+	case types.Long:
 		stopHit := hasStop && c.Low <= p.Stop
 		takeHit := hasTake && c.High >= p.Take
 		if stopHit && takeHit {
@@ -239,7 +174,7 @@ func checkExit(p Position, c market.Candle) (exitPx types.Price, reason string, 
 		if takeHit {
 			return p.Take, "TAKE", true
 		}
-	case Short:
+	case types.Short:
 		stopHit := hasStop && c.High >= p.Stop
 		takeHit := hasTake && c.Low <= p.Take
 		if stopHit && takeHit {

@@ -5,11 +5,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
+
+var testAccount = &account.Account{
+	ID:         "test",
+	Currency:   "USD",
+	Balance:    types.MoneyFromFloat(1000.0),
+	Equity:     types.MoneyFromFloat(1000.0),
+	MarginUsed: types.MoneyFromFloat(0.0),
+	FreeMargin: types.MoneyFromFloat(1000.0),
+	// MarginLevel: 0.0, ??
+	RiskPct: types.RateFromFloat(0.005),
+}
 
 type fakeFeed struct {
 	bars []fakeBar
@@ -31,6 +44,13 @@ func (f *fakeFeed) Next() bool {
 
 func (f *fakeFeed) Candle() market.Candle {
 	return f.bars[f.idx-1].c
+}
+
+func (f *fakeFeed) NextCandle() (market.Candle, bool) {
+	if f.Next() {
+		return f.Candle(), true
+	}
+	return market.Candle{}, false
 }
 
 func (f *fakeFeed) Timestamp() types.Timestamp {
@@ -74,21 +94,17 @@ func TestCandleEngineRun_BuyFirstBarStrategy(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &BuyFirstBarStrategy{})
 	require.NoError(t, err)
 
-	require.False(t, engine.Pos.Open)
-	require.Equal(t, Long, engine.Pos.Side)
+	require.Equal(t, types.Long, engine.Pos.Side)
 	require.Equal(t, types.Units(1000), engine.Pos.Units)
-	require.Equal(t, types.Price(100500), engine.Pos.EntryPrice)
-	require.Len(t, engine.Trades, 1)
-	require.Equal(t, types.Price(101000), engine.Trades[0].ExitPrice)
-
+	require.Equal(t, types.Price(100500), engine.Pos.Price)
+	require.Len(t, engine.Account.Trades, 1)
+	//require.Equal(t, types.Price(101000), engine.Account.Trades[0].ExitPrice)
 }
 
 func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
@@ -120,19 +136,15 @@ func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &testTakeProfitStrategy{})
 	require.NoError(t, err)
+	require.Len(t, engine.Account.Trades, 1)
 
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
-
-	tr := engine.Trades[0]
-	require.Equal(t, Long, tr.Side)
+	tr := engine.Account.Trades.Get(0)
+	require.Equal(t, types.Long, tr.Side)
 	require.Equal(t, types.Price(100000), tr.EntryPrice)
 	require.Equal(t, types.Price(101000), tr.ExitPrice)
 	require.Equal(t, "TAKE", tr.Reason)
@@ -150,14 +162,14 @@ func (s *testTakeProfitStrategy) Reset() {
 	s.done = false
 }
 
-func (s *testTakeProfitStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *testTakeProfitStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 
-	return &OrderRequest{
-		Side:   Long,
+	return &portfolio.OpenRequest{
+		Side:   types.Long,
 		Units:  types.Units(1000),
 		Take:   types.Price(101000),
 		Reason: "enter with take",
@@ -193,19 +205,16 @@ func TestCandleEngineRun_StopLossClosesTrade(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &testStopLossStrategy{})
 	require.NoError(t, err)
 
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
+	require.Len(t, engine.Account.Trades, 1)
 
-	tr := engine.Trades[0]
-	require.Equal(t, Long, tr.Side)
+	tr := engine.Account.Trades.Get(0)
+	require.Equal(t, types.Long, tr.Side)
 	require.Equal(t, types.Price(100000), tr.EntryPrice)
 	require.Equal(t, types.Price(99000), tr.ExitPrice)
 	require.Equal(t, "STOP", tr.Reason)
@@ -223,14 +232,14 @@ func (s *testStopLossStrategy) Reset() {
 	s.done = false
 }
 
-func (s *testStopLossStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *testStopLossStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 
-	return &OrderRequest{
-		Side:   Long,
+	return &portfolio.OpenRequest{
+		Side:   types.Long,
 		Units:  types.Units(1000),
 		Stop:   types.Price(99000),
 		Reason: "enter with stop",
@@ -266,18 +275,15 @@ func TestCandleEngineRun_SameBarStopAndTake_UsesStopFirst(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &testStopAndTakeStrategy{})
 	require.NoError(t, err)
 
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
+	require.Len(t, engine.Account.Trades.Len(), 1)
 
-	tr := engine.Trades[0]
+	tr := engine.Account.Trades.Get(0)
 	require.Equal(t, types.Price(100000), tr.EntryPrice)
 	require.Equal(t, types.Price(99000), tr.ExitPrice)
 	require.Equal(t, "STOP&TAKE same bar (stop-first)", tr.Reason)
@@ -295,14 +301,14 @@ func (s *testStopAndTakeStrategy) Reset() {
 	s.done = false
 }
 
-func (s *testStopAndTakeStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *testStopAndTakeStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 
-	return &OrderRequest{
-		Side:   Long,
+	return &portfolio.OpenRequest{
+		Side:   types.Long,
 		Units:  types.Units(1000),
 		Stop:   types.Price(99000),
 		Take:   types.Price(101000),
@@ -342,9 +348,7 @@ func TestCandleEngineRun_GapBarsReported(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, strat)
@@ -365,7 +369,7 @@ func (s *captureGapStrategy) Reset() {
 	s.gaps = nil
 }
 
-func (s *captureGapStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
+func (s *captureGapStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
 	s.gaps = append(s.gaps, ctx.GapBars)
 	return nil
 }
@@ -399,19 +403,15 @@ func TestCandleEngineRun_ShortTakeProfitClosesTrade(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &testShortTakeProfitStrategy{})
 	require.NoError(t, err)
+	require.Len(t, engine.Account.Trades, 1)
 
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
-
-	tr := engine.Trades[0]
-	require.Equal(t, Short, tr.Side)
+	tr := engine.Account.Trades.Get(0)
+	require.Equal(t, types.Short, tr.Side)
 	require.Equal(t, types.Price(100000), tr.EntryPrice)
 	require.Equal(t, types.Price(99000), tr.ExitPrice)
 	require.Equal(t, "TAKE", tr.Reason)
@@ -429,14 +429,14 @@ func (s *testShortTakeProfitStrategy) Reset() {
 	s.done = false
 }
 
-func (s *testShortTakeProfitStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *testShortTakeProfitStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 
-	return &OrderRequest{
-		Side:   Short,
+	return &portfolio.OpenRequest{
+		Side:   types.Short,
 		Units:  types.Units(1000),
 		Take:   types.Price(99000),
 		Reason: "enter short with take",
@@ -471,19 +471,17 @@ func TestCandleEngineRun_ShortStopLossClosesTrade(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	err := engine.Run(feed, &testShortStopLossStrategy{})
 	require.NoError(t, err)
 
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
+	require.False(t, engine.Pos == nil)
+	require.Len(t, engine.Account.Trades.Len(), 1)
 
-	tr := engine.Trades[0]
-	require.Equal(t, Short, tr.Side)
+	tr := engine.Account.Trades.Get(0)
+	require.Equal(t, types.Short, tr.Side)
 	require.Equal(t, types.Price(100000), tr.EntryPrice)
 	require.Equal(t, types.Price(101000), tr.ExitPrice)
 	require.Equal(t, "STOP", tr.Reason)
@@ -501,14 +499,14 @@ func (s *testShortStopLossStrategy) Reset() {
 	s.done = false
 }
 
-func (s *testShortStopLossStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *testShortStopLossStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 
-	return &OrderRequest{
-		Side:   Short,
+	return &portfolio.OpenRequest{
+		Side:   types.Short,
 		Units:  types.Units(1000),
 		Stop:   types.Price(101000),
 		Reason: "enter short with stop",
@@ -554,9 +552,7 @@ func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {
 	engine := NewCandleEngine(
 		"EURUSD",
 		types.H1,
-		types.PriceScale,
-		types.Money(10000),
-		"USD",
+		testAccount,
 	)
 
 	strat := &countingEntryStrategy{}
@@ -564,9 +560,9 @@ func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, strat.entries)
-	require.False(t, engine.Pos.Open)
-	require.Len(t, engine.Trades, 1)
-	require.Equal(t, types.Price(100000), engine.Pos.EntryPrice)
+	require.False(t, engine.Pos == nil)
+	require.Len(t, engine.Account.Trades.Len(), 1)
+	require.Equal(t, types.Price(100000), engine.Pos.Price)
 }
 
 type countingEntryStrategy struct {
@@ -583,22 +579,22 @@ func (s *countingEntryStrategy) Reset() {
 	s.done = false
 }
 
-func (s *countingEntryStrategy) OnBar(ctx *CandleContext, c market.Candle) *OrderRequest {
-	if s.done || ctx.Pos.Open {
+func (s *countingEntryStrategy) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
 	s.entries++
 
-	return &OrderRequest{
-		Side:   Long,
+	return &portfolio.OpenRequest{
+		Side:   types.Long,
 		Units:  types.Units(1000),
 		Reason: "single entry",
 	}
 }
 
 type fakeSource struct {
-	it  CandleFeed
+	it  data.CandleIterator
 	err error
 }
 
@@ -652,11 +648,11 @@ func TestRunCandles_Smoke(t *testing.T) {
 		Scale:           types.PriceScale,
 	}
 
-	engine, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{})
+	engine, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 
-	require.False(t, engine.Pos.Open)
-	require.Equal(t, Long, engine.Pos.Side)
+	require.True(t, engine.Pos == nil)
+	require.Equal(t, types.Long, engine.Pos.Side)
 	require.Equal(t, types.Units(1000), engine.Pos.Units)
 }

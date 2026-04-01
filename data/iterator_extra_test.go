@@ -29,10 +29,16 @@ func (it *errCandleIterator) Next() bool {
 	it.ts = types.Timestamp(it.count)
 	return true
 }
-func (it *errCandleIterator) Candle() market.Candle    { return it.cur }
+func (it *errCandleIterator) Candle() market.Candle      { return it.cur }
 func (it *errCandleIterator) Timestamp() types.Timestamp { return it.ts }
-func (it *errCandleIterator) Err() error               { return it.nextErr }
-func (it *errCandleIterator) Close() error             { return it.closeErr }
+func (it *errCandleIterator) Err() error                 { return it.nextErr }
+func (it *errCandleIterator) Close() error               { return it.closeErr }
+func (it *errCandleIterator) NextCandle() (market.Candle, bool) {
+	if it.Next() {
+		return it.Candle(), true
+	}
+	return market.Candle{}, false
+}
 
 // errAfterCandleIterator returns items first then an error.
 type errAfterCandleIterator struct {
@@ -50,7 +56,13 @@ func (it *errAfterCandleIterator) Next() bool {
 	}
 	return false
 }
-func (it *errAfterCandleIterator) Candle() market.Candle    { return it.items[it.idx-1] }
+func (it *errAfterCandleIterator) Candle() market.Candle { return it.items[it.idx-1] }
+func (it *errAfterCandleIterator) NextCandle() (market.Candle, bool) {
+	if it.Next() {
+		return it.Candle(), true
+	}
+	return market.Candle{}, false
+}
 func (it *errAfterCandleIterator) Timestamp() types.Timestamp { return it.tss[it.idx-1] }
 func (it *errAfterCandleIterator) Err() error {
 	if it.idx >= len(it.items) && !it.emitted {

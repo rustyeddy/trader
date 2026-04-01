@@ -29,7 +29,6 @@ go.work.sum
 
 # Build output
 bin/
-trader
 trader-bin
 /replay/replay
 /cmd/replay/replay

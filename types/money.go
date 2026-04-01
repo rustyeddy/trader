@@ -24,6 +24,13 @@ func (s Scale6) Int64() int64 { return int64(s) }
 func (s Scale7) Int32() int32 { return int32(s) }
 func (s Scale7) Int64() int64 { return int64(s) }
 
+type Side int
+
+const (
+	Short Side = -1
+	Long  Side = 1
+)
+
 func MoneyFromFloat(f float64) Money {
 	return Money(math.Round(f * float64(MoneyScale)))
 }

@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +54,7 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 	emaCrossCfg.Take = emaCrossOpts.takePips()
 
 	strat := strategies.NewEMACross(emaCrossCfg)
-
+	act := &account.Account{}
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
@@ -67,6 +68,7 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 			RR:       emaCrossCfg.RR,
 			Strategy: strat.Name(),
 		},
+		act,
 	)
 }
 
@@ -99,7 +101,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	applyCommonFlagOverrides(cmd, &emaCrossOpts)
 	applyEMACrossFlagOverrides(cmd, &cfg)
 
-	if emaCrossOpts.Units32 == 0 {
+	if emaCrossOpts.Units == 0 {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
@@ -109,7 +111,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	cfg.Take = emaCrossOpts.takePips()
 
 	strat := strategies.NewEMACross(cfg)
-
+	act := &account.Account{}
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
@@ -123,6 +125,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 			RR:       cfg.RR,
 			Strategy: strat.Name(),
 		},
+		act,
 	)
 }
 

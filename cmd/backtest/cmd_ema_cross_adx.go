@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/market/strategies"
+	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -57,7 +58,7 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 	emaCrossADXCfg.Take = emaCrossADXOpts.takePips()
 
 	strat := strategies.NewEMACrossADX(emaCrossADXCfg)
-
+	act := &account.Account{}
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -71,6 +72,7 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 			RR:       emaCrossADXCfg.RR,
 			Strategy: strat.Name(),
 		},
+		act,
 	)
 }
 
@@ -103,7 +105,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	applyCommonFlagOverrides(cmd, &emaCrossADXOpts)
 	applyEMACrossADXFlagOverrides(cmd, &cfg)
 
-	if emaCrossADXOpts.Units32 == 0 {
+	if emaCrossADXOpts.Units == 0 {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
@@ -113,6 +115,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	cfg.Take = emaCrossADXOpts.takePips()
 
 	strat := strategies.NewEMACrossADX(cfg)
+	act := &account.Account{}
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -126,6 +129,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 			RR:       cfg.RR,
 			Strategy: strat.Name(),
 		},
+		act,
 	)
 }
 
@@ -216,9 +220,9 @@ func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *bt.ResolvedRun) {
 	o.Timeframe = r.Timeframe
 	o.From = r.From
 	o.To = r.To
-	o.Units32 = int32(r.Units)
-	o.StopPips32 = int32(r.StopPips)
-	o.TakePips32 = int32(r.TakePips)
+	o.Units = r.Units.Int64()
+	o.StopPips = int32(r.StopPips)
+	o.TakePips = int32(r.TakePips)
 	o.RiskPct64 = r.RiskPct.Float64() * 100.0
 }
 

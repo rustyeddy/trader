@@ -256,15 +256,13 @@ func (e *Engine) Revalue() error {
 			return err
 		}
 
-		// meta := market.Instruments[t.Instrument]
-
 		// Use correct price side
 		mark := p.Bid
 		if t.Units < 0 {
 			mark = p.Ask
 		}
 
-		rate, err := e.acct.QuoteToAccount(context.TODO(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.TODO(), t.Instrument, mark)
 		if err != nil {
 			return err
 		}
@@ -335,7 +333,7 @@ func (e *Engine) UpdatePrice(p market.Tick) error {
 
 func (e *Engine) closeTradeLocked(t *Trade, closePrice types.Price, closeTime types.Timestamp, reason string) error {
 
-	rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
+	rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, closePrice)
 	if err != nil {
 		return err
 	}
@@ -382,7 +380,7 @@ func (e *Engine) revalueLocked() error {
 			mark = p.Ask
 		}
 
-		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, mark)
 		if err != nil {
 			return err
 		}
@@ -407,7 +405,7 @@ func (e *Engine) recomputeMarginLocked() error {
 			return err
 		}
 
-		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
+		rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, p.Mid())
 		if err != nil {
 			return err
 		}
@@ -456,13 +454,12 @@ func (e *Engine) enforceMarginLocked() error {
 				mark = p.Ask
 			}
 
-			rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, e)
+			rate, err := e.acct.QuoteToAccount(context.Background(), t.Instrument, mark)
 			if err != nil {
 				return err
 			}
 
 			pl := UnrealizedPL(*t, mark, rate)
-
 			if worst == nil || pl < worstPL {
 				worst = t
 				worstPL = pl
