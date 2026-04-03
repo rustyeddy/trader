@@ -6,19 +6,19 @@ import (
 )
 
 type OpenRequest struct {
-	*market.Instrument
-	types.Units
-	types.Side // Long or Sort
-	types.Price
-	Stop   types.Price
-	Take   types.Price
-	Reason string
-	Count  int
+	ID         string
+	Instrument *market.Instrument
+	Units      types.Units
+	Side       types.Side // Long or Sort
+	Price      types.Price
+	Stop       types.Price
+	Take       types.Price
+	Reason     string
 }
 
 type CloseRequest struct {
-	*market.Instrument
-	types.Units
-	types.Price
-	Count int
+	ID         string
+	Instrument *market.Instrument
+	Units      types.Units
+	Price      types.Price
 }

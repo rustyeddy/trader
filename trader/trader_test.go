@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,7 @@ func TestTrader(t *testing.T) {
 	trader := Trader{
 		AccountManager: am,
 		DataManager:    data.NewDataManager([]string{"EURUSD"}, start, end),
+		Broker:         &sim.Sim{},
 	}
 
 	am.CreateAccount("test", types.MoneyFromFloat(1000))

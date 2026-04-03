@@ -5,13 +5,14 @@ import (
 )
 
 type Trade struct {
+	ID         string
 	Instrument string
 	Side       types.Side
-	EntryPrice types.Price
-	ExitPrice  types.Price
 	Units      types.Units
 	PNL        types.Money // account currency (best-effort)
 	Reason     string
+	EntryPrice types.Price
+	ExitPrice  types.Price
 	EntryTime  types.Timestamp
 	ExitTime   types.Timestamp
 }

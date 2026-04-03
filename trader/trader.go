@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies"
@@ -15,6 +16,7 @@ type Trader struct {
 	*market.Instrument
 	*account.AccountManager
 	*data.DataManager
+	broker.Broker
 }
 
 type ConfigBackTest struct {
@@ -54,12 +56,21 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		return err
 	}
 
+	evtQ := t.Broker.Events()
 	for itr.Next() {
 		candle := itr.Candle()
 
-		// TODO This is a good time to check if any orders have been
-		// filled from the broker.  Or other account / positioning
-		// that needs to be made.
+		// TODO Check broker events to see if any broker activity has
+		// triggered, order fill, stop hit, etc.
+		select {
+		case ev, ok := <-evtQ:
+			// make sure the channel has not closed
+			if ok {
+				fmt.Printf("EVT: %+v\n", ev)
+			}
+
+		default:
+		}
 
 		plan := strategy.Update(ctx, &candle)
 		for _, cancel := range plan.Cancel {
@@ -91,7 +102,6 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			}
 			fmt.Printf("  open: %v\n", op)
 			// TODO
-			//   Get position size from Account
 			//   Submit OpenRequest to Broker
 			//   Wait for broker to fill the order
 			//   Create an open position from the filled order
