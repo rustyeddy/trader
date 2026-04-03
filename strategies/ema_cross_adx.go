@@ -86,37 +86,32 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c market.Candle) Decision {
+func (x *EMACrossADX) Update(c market.Candle) *Plan {
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)
 
 	fv := x.core.fast.Float64()
 	sv := x.core.slow.Float64()
-	close := float64(c.Close) / float64(x.core.scale)
-	dec := EMACrossADXDecision{
-		signal: Hold,
-		Fast:   fv,
-		Slow:   sv,
-		Close:  close,
-	}
+	// close := float64(c.Close) / float64(x.core.scale)
+	dec := &DefaultPlan
 
 	// If EMAs aren't ready, we can't do cross logic.
 	if !x.core.fast.Ready() || !x.core.slow.Ready() {
-		dec.reason = "warming up EMAs"
+		dec.Reason = "warming up EMAs"
 		return dec
 	}
 
 	// Optionally require ADX to be ready before any signals.
 	if x.requireADXReady && !x.adx.Ready() {
-		dec.reason = "warming up ADX"
+		dec.Reason = "warming up ADX"
 		return dec
 	}
 	diff := fv - sv
 
 	// Optional noise filter on EMA spread
 	if x.core.minSpread > 0 && abs(diff) < x.core.minSpread {
-		dec.reason = "min-spread filter"
+		dec.Reason = "min-spread filter"
 		return dec
 	}
 
@@ -131,9 +126,9 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 	if x.core.prevRel == 0 {
 		if rel != 0 {
 			x.core.prevRel = rel
-			dec.reason = "baseline set"
+			dec.Reason = "baseline set"
 		} else {
-			dec.reason = "baseline pending"
+			dec.Reason = "baseline pending"
 		}
 		return dec
 	}
@@ -151,66 +146,45 @@ func (x *EMACrossADX) Update(c market.Candle) Decision {
 
 	// No pending trend change to confirm.
 	if x.pendingRel == 0 {
-		dec.reason = "no cross"
+		dec.Reason = "no cross"
 		return dec
 	}
 
 	// Require ADX readiness if configured.
 	if x.requireADXReady && !x.adx.Ready() {
-		dec.reason = "waiting for ADX readiness"
+		dec.Reason = "waiting for ADX readiness"
 		return dec
 	}
 
 	// Require ADX strength once ready.
 	if x.adx.Ready() && x.adx.Float64() < x.adxThreshold {
-		dec.reason = "waiting for ADX threshold"
+		dec.Reason = "waiting for ADX threshold"
 		return dec
 	}
 
 	// Require DI confirmation if configured.
 	if x.requireDI && x.adx.Ready() {
 		if x.pendingRel == +1 && !(x.adx.PlusDI() > x.adx.MinusDI()) {
-			dec.reason = "waiting for DI confirmation (buy)"
+			dec.Reason = "waiting for DI confirmation (buy)"
 			return dec
 		}
 		if x.pendingRel == -1 && !(x.adx.MinusDI() > x.adx.PlusDI()) {
-			dec.reason = "waiting for DI confirmation (sell)"
+			dec.Reason = "waiting for DI confirmation (sell)"
 			return dec
 		}
 	}
 
 	// Confirmation passed: emit the pending signal once.
 	if x.pendingRel == +1 {
-		dec.reason = "EMA cross up + ADX confirmed"
-		dec.signal = Buy
-		x.pendingRel = 0
+		dec.Reason = "EMA cross up + ADX confirmed"
 		return dec
 	}
 
 	if x.pendingRel == -1 {
-		dec.reason = "EMA cross down + ADX confirmed"
-		dec.signal = Sell
-		x.pendingRel = 0
+		dec.Reason = "EMA cross down + ADX confirmed"
 		return dec
 	}
 
-	dec.reason = "no cross"
+	dec.Reason = "no cross"
 	return dec
-}
-
-type EMACrossADXDecision struct {
-	signal Signal
-	reason string
-
-	Fast  float64
-	Slow  float64
-	Close float64
-}
-
-func (x EMACrossADXDecision) Signal() Signal {
-	return x.signal
-}
-
-func (x EMACrossADXDecision) Reason() string {
-	return x.reason
 }

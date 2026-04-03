@@ -1,11 +1,7 @@
 package strategies
 
 import (
-	"context"
-
-	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/types"
 )
 
 // Strategy is the interface for candle-based strategies.
@@ -13,13 +9,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(c market.Candle) Decision
-}
-
-// TickStrategy is the minimal interface a tick-based backtest strategy must implement.
-// It is called once per tick.
-type TickStrategy interface {
-	OnTick(ctx context.Context, b broker.Broker, tick market.Tick) error
+	Update(c market.Candle) *Plan
 }
 
 type Float64 interface {
@@ -31,45 +21,5 @@ type Price interface {
 }
 
 type StrategyConfig struct {
-	Balance types.Money
-	Stop    types.Price // pips
-	Take    types.Price // pips
-	RR      types.Rate
-
-	File string // string to the file
-}
-
-type Signal int
-
-const (
-	Hold Signal = iota
-	Buy
-	Sell
-)
-
-func (s Signal) String() string {
-	switch s {
-	case Buy:
-		return "BUY"
-	case Sell:
-		return "SELL"
-	default:
-		return "HOLD"
-	}
-}
-
-type Decision interface {
-	Signal() Signal
-	Reason() string
-}
-
-type DefaultDecision struct {
-}
-
-func (d DefaultDecision) Signal() Signal {
-	return Hold
-}
-
-func (d DefaultDecision) Reason() string {
-	return "jbc"
+	*market.Instrument
 }

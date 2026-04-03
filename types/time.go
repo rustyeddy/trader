@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -226,4 +227,76 @@ func isMajorForexHolidayClosed(t time.Time) bool {
 	}
 
 	return false
+}
+
+// ********************************************************************
+// Timeframe
+// ********************************************************************
+type Timeframe int64
+
+const (
+	TF0   Timeframe = 0
+	Ticks Timeframe = 1
+	M1    Timeframe = 60
+	H1    Timeframe = 3600
+	D1    Timeframe = 86400
+)
+
+func TF(t string) Timeframe {
+	t = strings.ToLower(t)
+
+	switch t {
+	default:
+	case "tf0":
+		return TF0
+
+	case "ticks":
+		return Ticks
+
+	case "m1":
+		return M1
+
+	case "h1":
+		return H1
+
+	case "d1":
+		return D1
+	}
+	return TF0
+}
+
+func NormalizeTF(tf string) string {
+	tf = strings.TrimSpace(strings.ToUpper(tf))
+	// allow "60" etc if you ever pass seconds
+	switch tf {
+	case "60":
+		return "m1"
+	case "3600":
+		return "h1"
+	case "86400":
+		return "d1"
+	}
+	return tf
+}
+
+func (tf Timeframe) String() string {
+	switch tf {
+	case TF0:
+		return "tf0"
+
+	case Ticks:
+		return "ticks"
+
+	case M1:
+		return "m1"
+
+	case H1:
+		return "h1"
+
+	case D1:
+		return "d1"
+
+	default:
+		return "UNKNOWN"
+	}
 }

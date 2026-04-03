@@ -4,83 +4,83 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
-type SizeRequest struct {
-	Instrument string
-	Entry      types.Price
-	Stop       types.Price
-
-	// Conversion rate from quote currency to account currency.
-	// For EURUSD in a USD account, this is 1.0.
-	// For USDJPY in a USD account, this is 1 / USDJPY.
-	// For EURGBP in a USD account, this is GBPUSD (or 1 / USDGBP).
-	QuoteToAccount types.Rate
-}
-
-type SizeResult struct {
-	Units          types.Units
-	StopPips       float64
-	RiskAmount     types.Money
-	LossPerUnit    types.Money
-	EstimatedLoss  types.Money
-	QuoteToAccount types.Rate
-	RequiredMargin types.Money
-}
-
-func (acct *Account) SizePosition(req SizeRequest) (SizeResult, error) {
+func (acct *Account) SizePosition(req *portfolio.OpenRequest) error {
+	if acct == nil {
+		return fmt.Errorf("account is nil")
+	}
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
 	if acct.RiskPct <= 0 {
-		return SizeResult{}, fmt.Errorf("account risk_pct must be > 0")
+		return fmt.Errorf("account risk_pct must be > 0")
 	}
 	if acct.Equity <= 0 {
-		return SizeResult{}, fmt.Errorf("account equity must be > 0")
+		return fmt.Errorf("account equity must be > 0")
 	}
-	if req.Entry <= 0 || req.Stop <= 0 {
-		return SizeResult{}, fmt.Errorf("entry and stop must be > 0")
+	if req.Price <= 0 || req.Stop <= 0 {
+		return fmt.Errorf("entry and stop must be > 0")
 	}
-	if req.Entry == req.Stop {
-		return SizeResult{}, fmt.Errorf("entry and stop must differ")
+	if req.Price == req.Stop {
+		return fmt.Errorf("entry and stop must differ")
 	}
-	if req.QuoteToAccount <= 0 {
-		return SizeResult{}, fmt.Errorf("quote_to_account must be > 0")
-	}
-
-	meta, ok := market.Instruments[req.Instrument]
-	if !ok {
-		return SizeResult{}, fmt.Errorf("unknown instrument %q", req.Instrument)
+	if req.Instrument == nil {
+		return fmt.Errorf("req.Instrument is nil")
 	}
 
-	entryF := float64(req.Entry) / float64(types.PriceScale)
+	switch req.Side {
+	case types.Short:
+		if req.Stop <= req.Price {
+			return fmt.Errorf("short stop must be less than price")
+		}
+
+	case types.Long:
+		if req.Stop >= req.Price {
+			return fmt.Errorf("long stop must be greater than price")
+		}
+
+	default:
+		return fmt.Errorf("invalid side %v", req.Side)
+	}
+
+	qta, err := acct.QuoteToAccount(req.Instrument, req.Price)
+	if err != nil {
+		return err
+	}
+
+	entryF := float64(req.Price) / float64(types.PriceScale)
 	stopF := float64(req.Stop) / float64(types.PriceScale)
-	qta := req.QuoteToAccount.Float64()
 
-	pip := meta.PipSize()
-	stopPips := math.Abs(entryF-stopF) / pip
-	if stopPips <= 0 {
-		return SizeResult{}, fmt.Errorf("stop distance must be > 0")
+	// Risk budget in account currency, e.g. equity * 0.5%.
+	riskBudget := acct.Equity.Float64() * acct.RiskPct.Float64()
+	if riskBudget <= 0 {
+		return fmt.Errorf("risk budget must be > 0")
 	}
 
-	riskAmountF := acct.Equity.Float64() * acct.RiskPct.Float64()
-	pipValuePerUnit := pip * qta
-	if pipValuePerUnit <= 0 {
-		return SizeResult{}, fmt.Errorf("pip value per unit must be > 0")
+	// Loss per 1 unit in quote currency, then convert to account currency.
+	priceDist := math.Abs(entryF - stopF)
+	lossPerUnitAcct := priceDist * qta.Float64()
+	if lossPerUnitAcct <= 0 {
+		return fmt.Errorf("loss per unit must be > 0")
 	}
 
-	unitsF := riskAmountF / (stopPips * pipValuePerUnit)
+	unitsF := riskBudget / lossPerUnitAcct
 	units := types.Units(math.Floor(unitsF))
-	if units < meta.MinimumTradeSize {
-		return SizeResult{}, fmt.Errorf("computed units < meta.MinimumTradeSize")
+	if units < req.Instrument.MinimumTradeSize {
+		return fmt.Errorf("computed units < minimum trade size")
 	}
 
-	lossPerUnitF := math.Abs(entryF-stopF) * qta
+	req.Units = units
+	margin, err := acct.TradeMargin(units, req.Price, req.Instrument)
+	if err != nil {
+		return err
+	}
+	if acct.FreeMargin > 0 && margin > acct.FreeMargin {
+		return fmt.Errorf("required margin %v exceeds free margin %v", margin, acct.FreeMargin)
+	}
 
-	return SizeResult{
-		Units:         units,
-		StopPips:      stopPips,
-		RiskAmount:    types.MoneyFromFloat(riskAmountF),
-		LossPerUnit:   types.MoneyFromFloat(lossPerUnitF),
-		EstimatedLoss: types.MoneyFromFloat(float64(units) * lossPerUnitF),
-	}, nil
+	return nil
 }

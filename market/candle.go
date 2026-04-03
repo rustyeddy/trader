@@ -27,6 +27,12 @@ func (c *Candle) IsZero() bool {
 	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
 }
 
+func (c *Candle) String() string {
+	str := fmt.Sprintf("%d, %d, %d, %d: avg spread %d, max spread %d, ticks: %d",
+		c.Open, c.High, c.Low, c.Close, c.AvgSpread, c.MaxSpread, c.Ticks)
+	return str
+}
+
 // CandleSet contains a dense set of candles.
 type CandleSet struct {
 	Instrument string

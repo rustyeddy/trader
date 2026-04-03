@@ -39,16 +39,6 @@ var InstrumentList = []string{
 	"NZDUSD",
 }
 
-var InstrumentList_ = []string{
-	"EUR_USD",
-	"GBP_USD",
-	"USD_JPY",
-	"USD_CHF",
-	"AUD_USD",
-	"USD_CAD",
-	"NZD_USD",
-}
-
 var Instruments = map[string]*Instrument{
 	"EURUSD": {
 		Name:                "EURUSD",
@@ -132,13 +122,6 @@ var Symmap = map[string]string{
 	"AUD_USD": "AUDUSD",
 	"USD_CAD": "USDCAD",
 	"NZD_USD": "NZDUSD",
-	"EURUSD":  "EUR_USD",
-	"GBPUSD":  "GBP_USD",
-	"USDJPY":  "USD_JPY",
-	"USDCHF":  "USD_CHF",
-	"AUDUSD":  "AUD_USD",
-	"USDCAD":  "USD_CAD",
-	"NZDUSD":  "NZD_USD",
 }
 
 func GetInstrument(symbol string) *Instrument {
@@ -154,7 +137,29 @@ func GetInstrument(symbol string) *Instrument {
 	return nil
 }
 
-// Move to Market.
+func (inst *Instrument) PriceUnitsPerPip() types.Price {
+	units := int64(types.PriceScale)
+	for i := 0; i < -inst.PipLocation; i++ {
+		units /= 10
+	}
+	return types.Price(units)
+}
+
+func (inst *Instrument) PriceDeltaFromPips(pips types.Pips) types.Price {
+	perPip := inst.PriceUnitsPerPip()
+	return types.Price((int64(perPip) * int64(pips)) / int64(types.PipScale))
+}
+
+func (inst *Instrument) AddPips(px types.Price, pips types.Pips) types.Price {
+	delta := inst.PriceDeltaFromPips(pips)
+	return px + delta
+}
+
+func (inst *Instrument) SubPips(px types.Price, pips types.Pips) types.Price {
+	delta := inst.PriceDeltaFromPips(pips)
+	return px - delta
+}
+
 func NormalizeInstrument(sym string) string {
 	sym = strings.TrimSpace(sym)
 	sym = strings.ReplaceAll(sym, "_", "")

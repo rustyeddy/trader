@@ -1,7 +1,6 @@
 package account
 
 import (
-	"context"
 	"fmt"
 	"math"
 
@@ -12,6 +11,7 @@ import (
 
 type Account struct {
 	ID          string
+	Name        string
 	Currency    string
 	Balance     types.Money
 	Equity      types.Money
@@ -24,15 +24,15 @@ type Account struct {
 	Trades    portfolio.Trades
 }
 
-func NewAccount(deposit types.Money) *Account {
+func NewAccount(name string, deposit types.Money) *Account {
 	act := &Account{
 		ID:         types.NewULID(),
+		Name:       name,
 		Currency:   "USD",
 		Balance:    deposit,
 		Equity:     deposit,
 		MarginUsed: 0.0,
 		RiskPct:    types.RateFromFloat(0.05),
-		Positions:  portfolio.Positions(),
 	}
 	return act
 }
@@ -49,12 +49,7 @@ func NewAccount(deposit types.Money) *Account {
 //   - EURGBP -> GBPUSD, or 1 / USDGBP if only the inverse exists
 //
 // The returned Rate is scaled by types.RateScale.
-func (act *Account) QuoteToAccount(ctx context.Context, instrument string, price types.Price) (types.Rate, error) {
-	meta, ok := market.Instruments[instrument]
-	if !ok {
-		return 0, fmt.Errorf("unknown instrument %s", instrument)
-	}
-
+func (act *Account) QuoteToAccount(meta *market.Instrument, price types.Price) (types.Rate, error) {
 	// Case 1: quote currency == account currency (EUR_USD, GBP_USD, etc.)
 	if meta.QuoteCurrency == act.Currency {
 		return types.Rate(types.RateScale), nil // 1.000000
@@ -82,7 +77,7 @@ func (act *Account) RealizePNL(pos *portfolio.Position, exit types.Price) (types
 	if pos == nil {
 		return 0, fmt.Errorf("nil position")
 	}
-	if pos.Instrument == "" {
+	if pos.Instrument == nil {
 		return 0, fmt.Errorf("position instrument is empty")
 	}
 	if pos.Price <= 0 {
@@ -95,7 +90,7 @@ func (act *Account) RealizePNL(pos *portfolio.Position, exit types.Price) (types
 		return 0, fmt.Errorf("position units must be > 0")
 	}
 
-	qta, err := act.QuoteToAccount(context.Background(), pos.Instrument, exit)
+	qta, err := act.QuoteToAccount(pos.Instrument, exit)
 	if err != nil {
 		return 0, err
 	}
@@ -115,7 +110,7 @@ func (act *Account) ClosePosition(pos *portfolio.Position, exit types.Price, exi
 	if act == nil {
 		return 0, fmt.Errorf("nil account")
 	}
-	if pos.Instrument == "" {
+	if pos.Instrument == nil {
 		return 0, fmt.Errorf("position instrument is empty")
 	}
 	if exit <= 0 {
@@ -187,13 +182,9 @@ func (act *Account) closePosition(t types.Timestamp, exit types.Price, reason st
 	// })
 }
 
-func (act *Account) TradeMargin(units types.Units, price types.Price, instrument string) (types.Money, error) {
-	meta, ok := market.Instruments[instrument]
-	if !ok {
-		return 0, fmt.Errorf("unknown instrument %s", instrument)
-	}
+func (act *Account) TradeMargin(units types.Units, price types.Price, meta *market.Instrument) (types.Money, error) {
 	if meta.MarginRate <= 0 {
-		return 0, fmt.Errorf("invalid margin rate for %s: %d", instrument, meta.MarginRate)
+		return 0, fmt.Errorf("invalid margin rate for %s: %d", meta.Name, meta.MarginRate)
 	}
 
 	u := types.Abs64(int64(units))
@@ -215,7 +206,7 @@ func (act *Account) TradeMargin(units types.Units, price types.Price, instrument
 		return 0, err
 	}
 
-	qta, err := act.QuoteToAccount(context.TODO(), instrument, price)
+	qta, err := act.QuoteToAccount(meta, price)
 	if err != nil {
 		return 0, err
 	}

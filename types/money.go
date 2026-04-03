@@ -24,13 +24,6 @@ func (s Scale6) Int64() int64 { return int64(s) }
 func (s Scale7) Int32() int32 { return int32(s) }
 func (s Scale7) Int64() int64 { return int64(s) }
 
-type Side int
-
-const (
-	Short Side = -1
-	Long  Side = 1
-)
-
 func MoneyFromFloat(f float64) Money {
 	return Money(math.Round(f * float64(MoneyScale)))
 }
@@ -88,4 +81,18 @@ func (r Rate) Float64() float64 {
 
 func (r Rate) String() string {
 	return fmt.Sprintf("%0.6f", r.Float64())
+}
+
+// Pips is scaled such that 1 == .1 pip
+// and 20 == 2 pips
+type Pips int32
+
+const PipScale = 10 // tenths of a pip
+
+func PipsFromFloat(v float64) Pips {
+	return Pips(math.Round(v * PipScale))
+}
+
+func (p Pips) Float64() float64 {
+	return float64(p) / PipScale
 }

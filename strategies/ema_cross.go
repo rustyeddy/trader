@@ -77,22 +77,16 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c market.Candle) Decision {
+func (x *EMACross) Update(c market.Candle) *Plan {
 	// Update indicators first
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 
-	close := float64(c.Close) / float64(x.core.scale)
+	// close := float64(c.Close) / float64(x.core.scale)
 
 	// Not ready? no signal yet.
 	if !x.Ready() {
-		return EMACrossDecision{
-			signal: Hold,
-			reason: "warming up",
-			Fast:   x.core.fast.Float64(),
-			Slow:   x.core.slow.Float64(),
-			Close:  close,
-		}
+		return &DefaultPlan
 	}
 
 	fv := x.core.fast.Float64()
@@ -101,13 +95,7 @@ func (x *EMACross) Update(c market.Candle) Decision {
 
 	// Optional noise filter
 	if x.core.minSpread > 0 && abs(diff) < x.core.minSpread {
-		return EMACrossDecision{
-			signal: Hold,
-			reason: "min-spread filter",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return &DefaultPlan
 	}
 
 	rel := 0
@@ -120,63 +108,22 @@ func (x *EMACross) Update(c market.Candle) Decision {
 	// First time ready: establish baseline relationship, don't fire.
 	if x.core.prevRel == 0 {
 		x.core.prevRel = rel
-		return EMACrossDecision{
-			signal: Hold,
-			reason: "baseline set",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return &DefaultPlan
 	}
 
 	// Cross up: below -> above
 	if x.core.prevRel == -1 && rel == +1 {
 		x.core.prevRel = rel
-		return EMACrossDecision{
-			signal: Buy,
-			reason: "fast EMA crossed above slow EMA",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return &DefaultPlan
 	}
 
 	// Cross down: above -> below
 	if x.core.prevRel == +1 && rel == -1 {
 		x.core.prevRel = rel
-		return EMACrossDecision{
-			signal: Sell,
-			reason: "fast EMA crossed below slow EMA",
-			Fast:   fv,
-			Slow:   sv,
-			Close:  close,
-		}
+		return &DefaultPlan
 	}
 
 	// No cross; maintain state
 	x.core.prevRel = rel
-	return EMACrossDecision{
-		signal: Hold,
-		reason: "no cross",
-		Fast:   fv,
-		Slow:   sv,
-		Close:  close,
-	}
-}
-
-type EMACrossDecision struct {
-	signal Signal
-	reason string
-
-	Fast  float64
-	Slow  float64
-	Close float64
-}
-
-func (x EMACrossDecision) Signal() Signal {
-	return x.signal
-}
-
-func (x EMACrossDecision) Reason() string {
-	return x.reason
+	return &DefaultPlan
 }

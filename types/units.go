@@ -11,3 +11,10 @@ func (u Units) Int64() int64 {
 func (u Units) String() string {
 	return fmt.Sprintf("%d", u)
 }
+
+type Side int
+
+const (
+	Short Side = -1
+	Long  Side = 1
+)
