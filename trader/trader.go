@@ -2,9 +2,7 @@ package trader
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
@@ -20,16 +18,17 @@ type Trader struct {
 }
 
 type ConfigBackTest struct {
-	*market.Instrument
-	*account.Account
+	Instrument string
+	Account    string
+	types.TimeRange
 }
 
 func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 
 	// Select an Account
-	account := t.AccountManager.Get("test")
+	account := t.AccountManager.Get(cfg.Account)
 	if account == nil {
-		return errors.New("Account not found")
+		return fmt.Errorf("Account %s not found", cfg.Account)
 	}
 
 	// Select a Strategy and supply it with it's configuration
@@ -41,14 +40,11 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	}
 
 	// Select the Instrument, TimeRange and TimeFrame
-	timerange := types.TimeRange{
-		Start: types.FromTime(time.Date(2011, time.January, 1, 0, 0, 0, 0, time.UTC)),
-		End:   types.FromTime(time.Date(2012, time.December, 31, 23, 59, 0, 0, time.UTC)),
-		TF:    types.M1,
-	}
+	timerange := cfg.TimeRange
+	timerange.TF = types.M1
 	candlereq := data.CandleRequest{
 		Source:     "candles",
-		Instrument: "EURUSD",
+		Instrument: cfg.Instrument,
 		Timeframe:  types.M1,
 		Range:      timerange,
 	}
@@ -89,7 +85,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		for _, op := range plan.Opens {
 
 			// get sizing from Account
-			err := cfg.Account.SizePosition(op)
+			err := account.SizePosition(op)
 			if err != nil {
 				return err
 			}

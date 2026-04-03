@@ -7,7 +7,6 @@ import (
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -21,9 +20,11 @@ func TestTrader(t *testing.T) {
 		DataManager:    data.NewDataManager([]string{"EURUSD"}, start, end),
 	}
 
+	am.CreateAccount("test", types.MoneyFromFloat(1000))
 	cfg := ConfigBackTest{
-		Instrument: market.GetInstrument("EURUSD"),
-		Account:    am.CreateAccount("test", types.MoneyFromFloat(1000)),
+		Instrument: "EURUSD",
+		Account:    "test",
+		TimeRange:  types.NewTimeRange(types.FromTime(start), types.FromTime(end)),
 	}
 
 	ctx := context.TODO()

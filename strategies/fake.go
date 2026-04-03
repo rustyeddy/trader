@@ -44,8 +44,7 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 		Reason: "hold",
 	}
 
-	// fmt.Println(c.String())
-
+	inst := market.GetInstrument(f.Instrument)
 	if len(f.candles) < f.CandleCount {
 		if f.highest < c.High {
 			f.highest = c.High
@@ -62,10 +61,10 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 
 		if !f.openPosition {
 			op := &portfolio.OpenRequest{
-				Instrument: f.Instrument,
+				Instrument: inst,
 				Price:      c.Close,
 				Side:       types.Long,
-				Stop:       f.Instrument.SubPips(c.Close, types.Pips(10)),
+				Stop:       inst.SubPips(c.Close, types.Pips(10)),
 				Count:      len(f.candles),
 			}
 			plan.Opens = append(plan.Opens, op)
@@ -79,7 +78,7 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 		f.lowest = c.Low
 		if f.openPosition {
 			cl := &portfolio.CloseRequest{
-				Instrument: f.Instrument,
+				Instrument: inst,
 				Count:      len(f.candles),
 				Price:      c.Close,
 			}

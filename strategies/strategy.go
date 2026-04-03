@@ -21,5 +21,5 @@ type Price interface {
 }
 
 type StrategyConfig struct {
-	*market.Instrument
+	Instrument string
 }
