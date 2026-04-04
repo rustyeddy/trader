@@ -31,6 +31,45 @@ func MulDiv64(a, b, den int64) (int64, error) {
 	return int64(q), nil
 }
 
+// mulDivFloor64 computes floor((a*b)/den) with 128-bit intermediate precision.
+// Inputs must be non-negative and den > 0.
+func MulDivFloor64(a, b, den int64) (int64, error) {
+	if a < 0 || b < 0 || den <= 0 {
+		return 0, fmt.Errorf("mulDivFloor64: invalid args a=%d b=%d den=%d", a, b, den)
+	}
+
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi >= uint64(den) {
+		return 0, fmt.Errorf("mulDivFloor64: overflow result")
+	}
+	q, _ := bits.Div64(hi, lo, uint64(den))
+	if q > uint64(^uint64(0)>>1) {
+		return 0, fmt.Errorf("mulDivFloor64: overflow result")
+	}
+	return int64(q), nil
+}
+
+// mulDivCeil64 computes ceil((a*b)/den) with 128-bit intermediate precision.
+// Inputs must be non-negative and den > 0.
+func MulDivCeil64(a, b, den int64) (int64, error) {
+	if a < 0 || b < 0 || den <= 0 {
+		return 0, fmt.Errorf("mulDivCeil64: invalid args a=%d b=%d den=%d", a, b, den)
+	}
+
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi >= uint64(den) {
+		return 0, fmt.Errorf("mulDivCeil64: overflow result")
+	}
+	q, r := bits.Div64(hi, lo, uint64(den))
+	if r != 0 {
+		q++
+	}
+	if q > uint64(^uint64(0)>>1) {
+		return 0, fmt.Errorf("mulDivCeil64: overflow result")
+	}
+	return int64(q), nil
+}
+
 func Abs64(x int64) int64 {
 	if x < 0 {
 		return -x

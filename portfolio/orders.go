@@ -5,15 +5,20 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-type OpenRequest struct {
-	ID         string
+type CommonPortfolio struct {
 	Instrument *market.Instrument
-	Units      types.Units
 	Side       types.Side // Long or Sort
-	Price      types.Price
+	Units      types.Units
 	Stop       types.Price
 	Take       types.Price
 	Reason     string
+}
+
+type OpenRequest struct {
+	Common       CommonPortfolio
+	ID           string
+	Price        types.Price
+	ReqTimestamp types.Timestamp
 }
 
 type CloseRequest struct {

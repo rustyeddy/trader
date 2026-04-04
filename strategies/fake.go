@@ -61,11 +61,14 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 
 		if !f.openPosition {
 			op := &portfolio.OpenRequest{
-				ID:         types.NewULID(),
-				Instrument: inst,
-				Price:      c.Close,
-				Side:       types.Long,
-				Stop:       inst.SubPips(c.Close, types.Pips(10)),
+				ID: types.NewULID(),
+				Common: portfolio.CommonPortfolio{
+					Side:       types.Long,
+					Stop:       inst.SubPips(c.Close, types.PipsFromFloat(10)),
+					Instrument: inst,
+					Reason:     "higher high",
+				},
+				Price: c.Close,
 			}
 			plan.Opens = append(plan.Opens, op)
 			plan.Reason = "higher high"

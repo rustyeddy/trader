@@ -6,15 +6,14 @@ import (
 
 type Trade struct {
 	ID         string
-	Instrument string
-	Side       types.Side
-	Units      types.Units
-	PNL        types.Money // account currency (best-effort)
-	Reason     string
-	EntryPrice types.Price
+	Common     CommonPortfolio
+	OpenPrice  types.Price // EntryPrice - OpenPrice = slippage
+	FillPrice  types.Price
+	ClosePrice types.Price // ExitPrice - closePrice = slippage
 	ExitPrice  types.Price
 	EntryTime  types.Timestamp
 	ExitTime   types.Timestamp
+	PNL        types.Money // account currency (best-effort)
 }
 
 type Trades struct {
