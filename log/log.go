@@ -58,6 +58,11 @@ type Config struct {
 	// Memory enables in-memory capture of log entries, accessible via
 	// Entries() and ClearEntries().  Useful for testing and diagnostics.
 	Memory bool
+
+	// Chan enables channel-based delivery of log entries.  When true,
+	// every record that passes the level filter is sent (non-blocking) to
+	// the buffered channel returned by LogChan().
+	Chan bool
 }
 
 // -------------------------------------------------------------------------
@@ -151,8 +156,18 @@ func Setup(cfg Config) error {
 		h = slog.NewTextHandler(w, opts)
 	}
 
+	// Collect extra handlers (memory, channel) so we produce at most one
+	// multiHandler rather than nesting them.
+	extra := []slog.Handler{h}
 	if cfg.Memory {
-		h = &multiHandler{handlers: []slog.Handler{h, &stackHandler{}}}
+		extra = append(extra, &stackHandler{})
+	}
+	if cfg.Chan {
+		ch := newLogChan()
+		extra = append(extra, &chanHandler{ch: ch})
+	}
+	if len(extra) > 1 {
+		h = &multiHandler{handlers: extra}
 	}
 
 	defLog = slog.New(h)
