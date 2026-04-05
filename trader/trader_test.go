@@ -8,11 +8,15 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/data"
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTrader(t *testing.T) {
+	err := tlog.Setup(tlog.Config{Level: "debug", Format: "text"})
+	assert.NoError(t, err)
+
 	start := time.Date(2022, time.Month(time.January), 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2023, time.Month(time.January), 0, 0, 0, 0, 0, time.UTC)
 	am := account.NewAccountManager()
@@ -30,7 +34,7 @@ func TestTrader(t *testing.T) {
 	}
 
 	ctx := context.TODO()
-	err := trader.BackTest(ctx, cfg)
+	err = trader.BackTest(ctx, cfg)
 	assert.NoError(t, err)
 
 	act := am.Get("test")

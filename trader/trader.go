@@ -3,15 +3,17 @@ package trader
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/data"
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
+
+var l = tlog.Backtest
 
 type Trader struct {
 	*market.Instrument
@@ -29,12 +31,15 @@ type ConfigBackTest struct {
 }
 
 func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
+	l.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
 
 	// Select an Account
 	t.currentAccount = t.AccountManager.Get(cfg.Account)
 	if t.currentAccount == nil {
+		l.Error("account not found", "account", cfg.Account)
 		return fmt.Errorf("Account %s not found", cfg.Account)
 	}
+	l.Debug("account selected", "account", cfg.Account)
 
 	// Select a Strategy and supply it with it's configuration
 	strategy := strategies.Fake{
@@ -53,9 +58,11 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		Timeframe:  types.M1,
 		Range:      timerange,
 	}
+	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Timeframe)
 
 	// Start up the broker event handler
 	evtQ := t.Broker.Events()
+	l.Debug("broker event handler started")
 	go func() {
 		// TODO Check broker events to see if any broker activity has
 		// triggered, order fill, stop hit, etc.
@@ -64,13 +71,14 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			case evt, ok := <-evtQ:
 				// make sure the channel has not closed
 				if !ok {
+					l.Info("broker event channel closed")
 					// channel has been shutdown, we have no choice but to
 					// just return
 					return
 				}
 				err := t.processEvent(ctx, evt)
 				if err != nil {
-					log.Println("Log this error: ", err)
+					l.Error("failed to process broker event", "eventType", evt.Type, "error", err)
 				}
 			}
 		}
@@ -79,54 +87,64 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(context.TODO(), candlereq)
 	if err != nil {
+		l.Error("failed to get candle iterator", "error", err)
 		return err
 	}
+	l.Info("candle iterator ready", "instrument", cfg.Instrument)
+
+	processedCandles := 0
+	submittedOpens := 0
+	submittedCloses := 0
 
 	for itr.Next() {
 		candle := itr.Candle()
+		processedCandles++
 
 		err := t.currentAccount.ResolveWithMarks(map[string]types.Price{
 			cfg.Instrument: candle.Close,
 		})
 		if err != nil {
+			l.Error("failed to resolve account marks", "instrument", cfg.Instrument, "error", err)
 			return err
 		}
 
 		plan := strategy.Update(ctx, &candle)
 		for _, cancel := range plan.Cancel {
 			// TODO find the Order that needs to be canceled and cancel it.
-			fmt.Println("cancel: ", cancel)
+			l.Warn("cancel request not implemented", "cancel", cancel)
 		}
 
 		for _, cl := range plan.Closes {
-
-			fmt.Printf(" close: %v\n", cl)
+			l.Info("submit close", "request", cl)
 			//   Submit CloseRequest to broker
 			err = t.Broker.SubmitClose(ctx, cl)
 			if err != nil {
+				l.Error("failed to submit close", "error", err)
 				return err
 			}
+			submittedCloses++
 		}
 
 		for _, op := range plan.Opens {
 			op.ReqTimestamp = itr.Timestamp()
-
-			fmt.Printf("  open: %v\n", op)
+			l.Info("submit open", "request", op)
 
 			// get sizing from Account
 			err := t.currentAccount.SizePosition(op)
 			if err != nil {
+				l.Error("failed to size position", "error", err)
 				return err
 			}
 			err = t.Broker.SubmitOpen(ctx, op)
 			if err != nil {
+				l.Error("failed to submit open", "error", err)
 				return err
 			}
+			submittedOpens++
 		}
 	}
 
-	fmt.Println("End of data need to close any open requests")
-	fmt.Printf("Account positions %d - trades %d\n", t.currentAccount.Positions.Len(), t.currentAccount.Trades.Len())
+	l.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.currentAccount.Positions.Len(), "trades", t.currentAccount.Trades.Len())
 	// Finished
 	// If candles are used up
 	//   Close out any open position
