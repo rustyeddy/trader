@@ -15,6 +15,10 @@ type Positions struct {
 	positions map[string]*Position
 }
 
+func (p *Positions) Len() int {
+	return len(p.positions)
+}
+
 func (p *Positions) Add(pos *Position) {
 	if p.positions == nil {
 		p.positions = make(map[string]*Position)

@@ -32,4 +32,9 @@ func TestTrader(t *testing.T) {
 	ctx := context.TODO()
 	err := trader.BackTest(ctx, cfg)
 	assert.NoError(t, err)
+
+	act := am.Get("test")
+	act.Print()
+	assert.NotEqual(t, act.Trades.Len(), 0)
+
 }

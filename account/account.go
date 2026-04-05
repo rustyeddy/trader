@@ -38,6 +38,10 @@ func NewAccount(name string, deposit types.Money) *Account {
 	return act
 }
 
+func (act *Account) Print() {
+	fmt.Printf("Account: %+v\n", act)
+}
+
 // QuoteToAccount returns the current conversion rate from an instrument's
 // quote currency into the account's base currency.
 //
@@ -172,33 +176,33 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 	return nil
 }
 
-func (act *Account) RealizePNL(pos *portfolio.Position, exit types.Price) (types.Money, error) {
+func (act *Account) RealizePNL(trade *portfolio.Trade) (types.Money, error) {
 	if act == nil {
 		return 0, fmt.Errorf("nil account")
 	}
-	if pos == nil {
+	if trade == nil {
 		return 0, fmt.Errorf("nil position")
 	}
-	if pos.Common.Instrument == nil {
+	if trade.Common.Instrument == nil {
 		return 0, fmt.Errorf("position instrument is empty")
 	}
-	if pos.FillPrice <= 0 {
+	if trade.FillPrice <= 0 {
 		return 0, fmt.Errorf("position entry price must be > 0")
 	}
-	if exit <= 0 {
+	if trade.ExitPrice <= 0 {
 		return 0, fmt.Errorf("exit price must be > 0")
 	}
-	if pos.Common.Units <= 0 {
+	if trade.Common.Units <= 0 {
 		return 0, fmt.Errorf("position units must be > 0")
 	}
 
-	qta, err := act.QuoteToAccount(pos.Common.Instrument, exit)
+	qta, err := act.QuoteToAccount(trade.Common.Instrument, trade.ExitPrice)
 	if err != nil {
 		return 0, err
 	}
 
-	delta := float64(exit-pos.FillPrice) / float64(types.PriceScale)
-	pnlQuote := float64(pos.Common.Side) * delta * float64(pos.Common.Units)
+	delta := float64(trade.ExitPrice-trade.FillPrice) / float64(types.PriceScale)
+	pnlQuote := float64(trade.Common.Side) * delta * float64(trade.Common.Units)
 	pnlAcct := pnlQuote * qta.Float64()
 	pnlMoney := types.MoneyFromFloat(pnlAcct)
 
@@ -208,33 +212,25 @@ func (act *Account) RealizePNL(pos *portfolio.Position, exit types.Price) (types
 	return pnlMoney, nil
 }
 
-func (act *Account) ClosePosition(pos *portfolio.Position, exit types.Price, exitTime types.Timestamp, reason string) (types.Money, error) {
+func (act *Account) ClosePosition(pos *portfolio.Position, trade *portfolio.Trade) error {
 	if act == nil {
-		return 0, fmt.Errorf("nil account")
+		return fmt.Errorf("nil account")
 	}
 	if pos.Common.Instrument == nil {
-		return 0, fmt.Errorf("position instrument is empty")
+		return fmt.Errorf("position instrument is empty")
 	}
-	if exit <= 0 {
-		return 0, fmt.Errorf("exit price must be > 0")
+	if trade.ExitPrice <= 0 {
+		return fmt.Errorf("exit price must be > 0")
 	}
 
-	pnl, err := act.RealizePNL(pos, exit)
+	pnl, err := act.RealizePNL(trade)
 	if err != nil {
-		return 0, err
+		return err
 	}
-
-	act.Positions.Delete(pos.ID)
-	trade := portfolio.Trade{
-		EntryTime: pos.FillTime,
-		ExitTime:  exitTime,
-		FillPrice: pos.FillPrice,
-		ExitPrice: exit,
-		PNL:       pnl,
-	}
-	trade.Common = pos.Common
+	trade.PNL = pnl
 	act.Trades.Add(trade)
-	return pnl, nil
+	act.Positions.Delete(pos.ID)
+	return nil
 }
 
 func (act *Account) OpenPosition(t types.Timestamp, c market.Candle, req *portfolio.OpenRequest) {

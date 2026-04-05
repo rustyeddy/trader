@@ -18,6 +18,8 @@ type Trader struct {
 	*account.AccountManager
 	*data.DataManager
 	broker.Broker
+
+	currentAccount *account.Account
 }
 
 type ConfigBackTest struct {
@@ -29,8 +31,8 @@ type ConfigBackTest struct {
 func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 
 	// Select an Account
-	account := t.AccountManager.Get(cfg.Account)
-	if account == nil {
+	t.currentAccount = t.AccountManager.Get(cfg.Account)
+	if t.currentAccount == nil {
 		return fmt.Errorf("Account %s not found", cfg.Account)
 	}
 
@@ -83,7 +85,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	for itr.Next() {
 		candle := itr.Candle()
 
-		err := account.ResolveWithMarks(map[string]types.Price{
+		err := t.currentAccount.ResolveWithMarks(map[string]types.Price{
 			cfg.Instrument: candle.Close,
 		})
 		if err != nil {
@@ -92,30 +94,27 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 
 		plan := strategy.Update(ctx, &candle)
 		for _, cancel := range plan.Cancel {
+			// TODO find the Order that needs to be canceled and cancel it.
 			fmt.Println("cancel: ", cancel)
 		}
 
 		for _, cl := range plan.Closes {
 
-			// TODO
-			//   Submit CloseRequest to broker
-			//   Wait for closed Trade from broker
-			//   Record the trade
-			//   Close out Position
-			//   Remove Positon from Account
-			//   Add Closed trade to Account
-			//   Update Account Balance, Equity and Margin
-			//   Journal Trade
-			//   Continue to next Candle
-
 			fmt.Printf(" close: %v\n", cl)
+			//   Submit CloseRequest to broker
+			err = t.Broker.SubmitClose(ctx, cl)
+			if err != nil {
+				return err
+			}
 		}
 
 		for _, op := range plan.Opens {
 			op.ReqTimestamp = itr.Timestamp()
 
+			fmt.Printf("  open: %v\n", op)
+
 			// get sizing from Account
-			err := account.SizePosition(op)
+			err := t.currentAccount.SizePosition(op)
 			if err != nil {
 				return err
 			}
@@ -123,14 +122,11 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			if err != nil {
 				return err
 			}
-
-			// We are done, we will pickup the broker event
-			// when the order is finally filled.
-
 		}
 	}
 
 	fmt.Println("End of data need to close any open requests")
+	fmt.Printf("Account positions %d - trades %d\n", t.currentAccount.Positions.Len(), t.currentAccount.Trades.Len())
 	// Finished
 	// If candles are used up
 	//   Close out any open position
@@ -145,21 +141,35 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 
 	switch evt.Type {
 	case broker.EventOrderFilled:
-		fmt.Printf("ORDER Filled: %v\n", evt)
-
-		// TODO
-		//   Account Update Balace, Margin and Equity
-		//   Place Open Position in Account Portfolio
-		//   Continue to next candle
-
 		pos := evt.Position
 		if pos == nil {
 			err := fmt.Errorf("error order filled with no position")
 			return err
 		}
 
+		err := t.currentAccount.AddPosition(ctx, pos)
+		if err != nil {
+			panic(err)
+		}
+
+		// TODO Journal the new position
+
 	case broker.EventPositionClosed:
+		// We have the close event from the broker
+
 		fmt.Printf("ORDER Closed: %v\n", evt)
+		pos := evt.Position
+		trade := evt.Trade
+		panic(pos == nil) // should always have position
+		panic(trade == nil)
+
+		// Delete position from Account portfolio, and adds trade
+		err := t.currentAccount.ClosePosition(pos, trade)
+		if err != nil {
+			panic(err)
+		}
+
+		// TODO Journal the closed position, trade and account
 
 	default:
 		fmt.Printf("Either unknown or unsupported event: %v\n", evt.Type)

@@ -1,6 +1,8 @@
 package portfolio
 
 import (
+	"fmt"
+
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -17,10 +19,11 @@ type Trade struct {
 }
 
 type Trades struct {
-	trades []Trade
+	trades []*Trade
 }
 
-func (t *Trades) Add(trade Trade) {
+func (t *Trades) Add(trade *Trade) {
+	fmt.Println("Add trade ", trade.ID)
 	t.trades = append(t.trades, trade)
 }
 
@@ -32,5 +35,5 @@ func (t *Trades) Get(i int) *Trade {
 	if i >= t.Len() {
 		return nil
 	}
-	return &t.trades[i]
+	return t.trades[i]
 }
