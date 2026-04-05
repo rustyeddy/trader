@@ -882,3 +882,200 @@ func TestIsForexMarketClosed(t *testing.T) {
 		})
 	}
 }
+
+// ===== MulDivFloor64 =====
+
+func TestMulDivFloor64_BasicComputation(t *testing.T) {
+	t.Parallel()
+
+	// 10 * 20 / 4 = 50 exactly (no remainder, floor == result)
+	got, err := MulDivFloor64(10, 20, 4)
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), got)
+}
+
+func TestMulDivFloor64_FloorRounding(t *testing.T) {
+	t.Parallel()
+
+	// 10 * 3 / 4 = 7.5 → floor = 7
+	got, err := MulDivFloor64(10, 3, 4)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), got)
+}
+
+func TestMulDivFloor64_InvalidArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		a, b, d int64
+	}{
+		{"negative_a", -1, 10, 4},
+		{"negative_b", 10, -1, 4},
+		{"zero_den", 10, 20, 0},
+		{"negative_den", 10, 20, -1},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := MulDivFloor64(tt.a, tt.b, tt.d)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestMulDivFloor64_Overflow(t *testing.T) {
+	t.Parallel()
+
+	_, err := MulDivFloor64(math.MaxInt64, math.MaxInt64, 1)
+	assert.Error(t, err, "result exceeding MaxInt64 must return an overflow error")
+}
+
+// ===== MulDivCeil64 =====
+
+func TestMulDivCeil64_BasicComputation(t *testing.T) {
+	t.Parallel()
+
+	// 10 * 20 / 4 = 50 exactly
+	got, err := MulDivCeil64(10, 20, 4)
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), got)
+}
+
+func TestMulDivCeil64_CeilingRounding(t *testing.T) {
+	t.Parallel()
+
+	// 10 * 3 / 4 = 7.5 → ceil = 8
+	got, err := MulDivCeil64(10, 3, 4)
+	require.NoError(t, err)
+	assert.Equal(t, int64(8), got)
+}
+
+func TestMulDivCeil64_InvalidArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		a, b, d int64
+	}{
+		{"negative_a", -1, 10, 4},
+		{"negative_b", 10, -1, 4},
+		{"zero_den", 10, 20, 0},
+		{"negative_den", 10, 20, -1},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := MulDivCeil64(tt.a, tt.b, tt.d)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestMulDivCeil64_Overflow(t *testing.T) {
+	t.Parallel()
+
+	_, err := MulDivCeil64(math.MaxInt64, math.MaxInt64, 1)
+	assert.Error(t, err, "result exceeding MaxInt64 must return an overflow error")
+}
+
+// ===== Pips =====
+
+func TestPipsFromFloat_Scaling(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input float64
+		want  Pips
+	}{
+		{"zero", 0.0, 0},
+		{"one_pip", 1.0, Pips(PipScale)},
+		{"half_pip", 0.5, Pips(PipScale / 2)},
+		{"two_pips", 2.0, Pips(2 * PipScale)},
+		{"negative", -1.5, Pips(-15)},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, PipsFromFloat(tt.input))
+		})
+	}
+}
+
+func TestPips_Float64_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	cases := []float64{0.0, 1.0, 0.5, 2.0, -1.5, 10.0}
+	for _, v := range cases {
+		p := PipsFromFloat(v)
+		got := p.Float64()
+		assert.InDelta(t, v, got, 1e-9, "round-trip failed for %f", v)
+	}
+}
+
+// ===== Units.Int64 =====
+
+func TestUnits_Int64(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input Units
+		want  int64
+	}{
+		{0, 0},
+		{1, 1},
+		{-100, -100},
+		{1_000_000, 1_000_000},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input.String(), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.input.Int64())
+		})
+	}
+}
+
+// ===== Side =====
+
+func TestSide_Constants(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Side(-1), Short)
+	assert.Equal(t, Side(1), Long)
+	assert.NotEqual(t, Short, Long)
+}
+
+// ===== GapKind / Gap =====
+
+func TestGapKind_Constants(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, GapKind("minor"), GapMinor)
+	assert.Equal(t, GapKind("weekend"), GapWeekend)
+	assert.Equal(t, GapKind("suspicious"), GapSuspicious)
+}
+
+func TestGap_Fields(t *testing.T) {
+	t.Parallel()
+
+	g := Gap{
+		Start: Timestamp(1000),
+		End:   Timestamp(2000),
+		TF:    M1,
+		Kind:  GapWeekend,
+	}
+
+	assert.Equal(t, Timestamp(1000), g.Start)
+	assert.Equal(t, Timestamp(2000), g.End)
+	assert.Equal(t, M1, g.TF)
+	assert.Equal(t, GapWeekend, g.Kind)
+}
