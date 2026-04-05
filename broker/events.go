@@ -32,3 +32,24 @@ type Event struct {
 	Trade    *portfolio.Trade
 	Position *portfolio.Position
 }
+
+func (e EventType) String() string {
+	switch e {
+	case EventOrderAccepted:
+		return "OrderAccepted"
+	case EventOrderRejected:
+		return "OrderRejected"
+	case EventOrderFilled:
+		return "OrderFilled"
+	case EventOrderPartiallyFilled:
+		return "OrderPartiallyFilled"
+	case EventOrderCanceled:
+		return "OrderCanceled"
+	case EventPositionClosed:
+		return "PositionClosed"
+	case EventAccountUpdated:
+		return "AccountUpdated"
+	default:
+		return "UknownEventType"
+	}
+}
