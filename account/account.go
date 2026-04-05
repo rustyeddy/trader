@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/bits"
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/portfolio"
@@ -106,6 +107,140 @@ func (act *Account) Resolve() error {
 	return act.ResolveWithMarks(nil)
 }
 
+func mulChecked64(a, b int64) (int64, error) {
+	if a < 0 || b < 0 {
+		return 0, fmt.Errorf("mulChecked64: invalid args a=%d b=%d", a, b)
+	}
+
+	hi, lo := bits.Mul64(uint64(a), uint64(b))
+	if hi != 0 || lo > uint64(math.MaxInt64) {
+		return 0, fmt.Errorf("mulChecked64: overflow a=%d b=%d", a, b)
+	}
+
+	return int64(lo), nil
+}
+
+func roundHalfAwayFromZero(num, den int64) (int64, error) {
+	if num < 0 || den <= 0 {
+		return 0, fmt.Errorf("roundHalfAwayFromZero: invalid args num=%d den=%d", num, den)
+	}
+
+	q := num / den
+	r := num % den
+	if r >= (den+1)/2 {
+		if q == math.MaxInt64 {
+			return 0, fmt.Errorf("roundHalfAwayFromZero: overflow")
+		}
+		q++
+	}
+
+	return q, nil
+}
+
+func absInt64Checked(v int64) (int64, error) {
+	if v == math.MinInt64 {
+		return 0, fmt.Errorf("absInt64Checked: overflow")
+	}
+	if v < 0 {
+		return -v, nil
+	}
+	return v, nil
+}
+
+func signedMulDivRound(a, b, den int64) (int64, error) {
+	if b < 0 || den <= 0 {
+		return 0, fmt.Errorf("signedMulDivRound: invalid args a=%d b=%d den=%d", a, b, den)
+	}
+
+	absA, err := absInt64Checked(a)
+	if err != nil {
+		return 0, err
+	}
+
+	prod, err := mulChecked64(absA, b)
+	if err != nil {
+		return 0, err
+	}
+
+	q, err := roundHalfAwayFromZero(prod, den)
+	if err != nil {
+		return 0, err
+	}
+
+	if a < 0 {
+		return -q, nil
+	}
+
+	return q, nil
+}
+
+func positionUnrealizedPNL(pos *portfolio.Position, mark types.Price, qta types.Rate) (types.Money, error) {
+	if pos == nil {
+		return 0, fmt.Errorf("nil position")
+	}
+	if pos.Common.Units <= 0 {
+		return 0, fmt.Errorf("position %q has invalid units %d", pos.ID, pos.Common.Units)
+	}
+	if qta <= 0 {
+		return 0, fmt.Errorf("invalid quote-to-account rate %d", qta)
+	}
+
+	priceDelta := int64(mark) - int64(pos.FillPrice)
+	if priceDelta == 0 {
+		return 0, nil
+	}
+
+	absDelta, err := absInt64Checked(priceDelta)
+	if err != nil {
+		return 0, err
+	}
+	absUnits, err := absInt64Checked(int64(pos.Common.Units))
+	if err != nil {
+		return 0, err
+	}
+
+	deltaUnits, err := mulChecked64(absDelta, absUnits)
+	if err != nil {
+		return 0, err
+	}
+
+	// pnlMicro = round((abs(deltaPrice) * units * qta) / PriceScale)
+	whole := deltaUnits / int64(types.PriceScale)
+	frac := deltaUnits % int64(types.PriceScale)
+
+	base, err := mulChecked64(whole, int64(qta))
+	if err != nil {
+		return 0, err
+	}
+
+	fracNum, err := mulChecked64(frac, int64(qta))
+	if err != nil {
+		return 0, err
+	}
+	fracPart, err := roundHalfAwayFromZero(fracNum, int64(types.PriceScale))
+	if err != nil {
+		return 0, err
+	}
+
+	if base > math.MaxInt64-fracPart {
+		return 0, fmt.Errorf("position %q unrealized pnl overflow", pos.ID)
+	}
+	totalAbs := base + fracPart
+
+	sign := int64(pos.Common.Side)
+	if sign != int64(types.Long) && sign != int64(types.Short) {
+		return 0, fmt.Errorf("position %q has invalid side %d", pos.ID, pos.Common.Side)
+	}
+	if priceDelta < 0 {
+		sign = -sign
+	}
+	if sign < 0 {
+		totalAbs = -totalAbs
+	}
+
+	return types.Money(totalAbs), nil
+}
+
 func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
@@ -140,14 +275,11 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 			return err
 		}
 
-		entryF := float64(pos.FillPrice) / float64(types.PriceScale)
-		markF := float64(mark) / float64(types.PriceScale)
-		unitsF := float64(pos.Common.Units)
-
-		delta := markF - entryF
-		pnlQuote := float64(pos.Common.Side) * delta * unitsF
-		pnlAcct := pnlQuote * qta.Float64()
-		equity += types.MoneyFromFloat(pnlAcct)
+		pnl, err := positionUnrealizedPNL(pos, mark, qta)
+		if err != nil {
+			return err
+		}
+		equity += pnl
 
 		m, err := act.TradeMargin(pos.Common.Units, mark, pos.Common.Instrument)
 		if err != nil {
@@ -168,7 +300,11 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 	if act.MarginUsed > 0 {
 		// Stored as a scaled "money" for now because the field already exists.
 		// This is a ratio, not really money. Example: 5.0 means equity is 5x margin used.
-		act.MarginLevel = types.MoneyFromFloat(act.Equity.Float64() / act.MarginUsed.Float64())
+		v, err := signedMulDivRound(int64(act.Equity), int64(types.MoneyScale), int64(act.MarginUsed))
+		if err != nil {
+			return err
+		}
+		act.MarginLevel = types.Money(v)
 	} else {
 		act.MarginLevel = 0
 	}
@@ -201,10 +337,15 @@ func (act *Account) RealizePNL(trade *portfolio.Trade) (types.Money, error) {
 		return 0, err
 	}
 
-	delta := float64(trade.ExitPrice-trade.FillPrice) / float64(types.PriceScale)
-	pnlQuote := float64(trade.Common.Side) * delta * float64(trade.Common.Units)
-	pnlAcct := pnlQuote * qta.Float64()
-	pnlMoney := types.MoneyFromFloat(pnlAcct)
+	pos := &portfolio.Position{
+		ID:        trade.ID,
+		Common:    trade.Common,
+		FillPrice: trade.FillPrice,
+	}
+	pnlMoney, err := positionUnrealizedPNL(pos, trade.ExitPrice, qta)
+	if err != nil {
+		return 0, err
+	}
 
 	act.Balance += pnlMoney
 	act.Equity = act.Balance
