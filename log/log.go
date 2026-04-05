@@ -54,6 +54,10 @@ type Config struct {
 	// Syslog enables forwarding of log records to the system logger.
 	// Has no effect on Windows (syslog is not available there).
 	Syslog bool
+
+	// Memory enables in-memory capture of log entries, accessible via
+	// Entries() and ClearEntries().  Useful for testing and diagnostics.
+	Memory bool
 }
 
 // -------------------------------------------------------------------------
@@ -145,6 +149,10 @@ func Setup(cfg Config) error {
 		h = slog.NewJSONHandler(w, opts)
 	} else {
 		h = slog.NewTextHandler(w, opts)
+	}
+
+	if cfg.Memory {
+		h = &multiHandler{handlers: []slog.Handler{h, &stackHandler{}}}
 	}
 
 	defLog = slog.New(h)
