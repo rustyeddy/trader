@@ -65,6 +65,11 @@ func newLogChan() chan LogEntry {
 // chanHandler implements slog.Handler.  It sends each record to the
 // package-level logChan using a non-blocking select so that a slow consumer
 // never blocks the caller.
+//
+// groups tracks the active group chain so that sub-handlers created by
+// WithGroup carry the correct context.  Groups are not expanded into the
+// flat LogEntry.Attrs slice; callers who need group-prefixed keys should
+// inspect the slog.Record directly.
 type chanHandler struct {
 	ch     chan LogEntry
 	attrs  []slog.Attr
@@ -106,6 +111,6 @@ func (h *chanHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 func (h *chanHandler) WithGroup(name string) slog.Handler {
 	groups := make([]string, len(h.groups)+1)
 	copy(groups, h.groups)
-	groups[len(groups)-1] = name
+	groups[len(h.groups)] = name
 	return &chanHandler{ch: h.ch, attrs: h.attrs, groups: groups}
 }
