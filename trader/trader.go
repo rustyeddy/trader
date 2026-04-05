@@ -36,10 +36,9 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	// Select an Account
 	t.currentAccount = t.AccountManager.Get(cfg.Account)
 	if t.currentAccount == nil {
-		l.Error("account not found", "account", cfg.Account)
 		return fmt.Errorf("Account %s not found", cfg.Account)
 	}
-	l.Debug("account selected", "account", cfg.Account)
+	l.Info("account selected", "account", cfg.Account)
 
 	// Select a Strategy and supply it with it's configuration
 	strategy := strategies.Fake{
@@ -48,6 +47,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		},
 		CandleCount: 10,
 	}
+	l.Info("strategy selected", "strategy", strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
 	timerange := cfg.TimeRange
@@ -62,6 +62,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 
 	// Start up the broker event handler
 	evtQ := t.Broker.Events()
+
 	l.Debug("broker event handler started")
 	go func() {
 		// TODO Check broker events to see if any broker activity has
@@ -87,11 +88,8 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(context.TODO(), candlereq)
 	if err != nil {
-		l.Error("failed to get candle iterator", "error", err)
 		return err
 	}
-	l.Info("candle iterator ready", "instrument", cfg.Instrument)
-
 	processedCandles := 0
 	submittedOpens := 0
 	submittedCloses := 0
@@ -104,42 +102,41 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			cfg.Instrument: candle.Close,
 		})
 		if err != nil {
-			l.Error("failed to resolve account marks", "instrument", cfg.Instrument, "error", err)
 			return err
 		}
 
 		plan := strategy.Update(ctx, &candle)
+		l.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
+
 		for _, cancel := range plan.Cancel {
 			// TODO find the Order that needs to be canceled and cancel it.
-			l.Warn("cancel request not implemented", "cancel", cancel)
+			l.Warn("TODO - cancel request not implemented", "cancel", cancel)
 		}
-
 		for _, cl := range plan.Closes {
-			l.Info("submit close", "request", cl)
-			//   Submit CloseRequest to broker
+			l.Info("submit close request", "ID", cl.ID)
 			err = t.Broker.SubmitClose(ctx, cl)
 			if err != nil {
-				l.Error("failed to submit close", "error", err)
 				return err
 			}
 			submittedCloses++
 		}
 
 		for _, op := range plan.Opens {
-			op.ReqTimestamp = itr.Timestamp()
-			l.Info("submit open", "request", op)
+			l.Info("Broker event Open Position", "ID", op.ID)
 
-			// get sizing from Account
+			op.ReqTimestamp = itr.Timestamp()
 			err := t.currentAccount.SizePosition(op)
 			if err != nil {
-				l.Error("failed to size position", "error", err)
 				return err
 			}
+
+			l.Info("Open position size", "ID", op.ID, "size", op.Common.Units)
+			l.Info("Submitting open request to broker", "ID", op.ID)
 			err = t.Broker.SubmitOpen(ctx, op)
 			if err != nil {
-				l.Error("failed to submit open", "error", err)
 				return err
 			}
+
 			submittedOpens++
 		}
 	}
@@ -155,7 +152,17 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	return nil
 }
 
+func breakpoint() {}
+
 func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
+
+	l.Info("broker event recieved",
+		"type", evt.Type.String(),
+		"clientOrder", evt.ClientOrderID,
+		"brokerOrder", evt.BrokerOrderID,
+		"positionID", evt.PositionID,
+		"reason", evt.Reason,
+		"cause", evt.Cause.String())
 
 	switch evt.Type {
 	case broker.EventOrderFilled:
