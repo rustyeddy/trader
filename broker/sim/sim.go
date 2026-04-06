@@ -10,17 +10,10 @@ import (
 
 // Sim Broker
 type Sim struct {
-	evtQ   chan *broker.Event
-	opens  map[string]*portfolio.OpenRequest
-	closes map[string]*portfolio.CloseRequest
+	evtQ chan *broker.Event
 }
 
 func (s *Sim) SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error {
-	if s.opens == nil {
-		s.opens = make(map[string]*portfolio.OpenRequest)
-	}
-	s.opens[req.ID] = req
-
 	// we will fill immediately, could simulate
 	// Submit the order
 	pos := &portfolio.Position{
@@ -29,9 +22,11 @@ func (s *Sim) SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error 
 	pos.ID = types.NewULID()
 	pos.FillPrice = req.Price
 	pos.FillTime = req.ReqTimestamp
+	pos.State = portfolio.PositionOpenRequested
 
 	// This would be the time to emulate a delay between order and fill
 	// we will ignore this for now
+	pos.State = portfolio.PositionOpen
 
 	// send position back on event queue
 	evt := &broker.Event{
@@ -44,9 +39,8 @@ func (s *Sim) SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error 
 		PositionID: pos.ID,
 		Instrument: req.Common.Instrument.Name,
 		Reason:     req.Common.Reason,
-
-		Open:     req,
-		Position: pos,
+		Open:       req,
+		Position:   pos,
 	}
 
 	s.evtQ <- evt
@@ -55,18 +49,37 @@ func (s *Sim) SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error 
 }
 
 func (s *Sim) SubmitClose(ctx context.Context, req *portfolio.CloseRequest) error {
-	if s.closes == nil {
-		s.closes = make(map[string]*portfolio.CloseRequest)
+	if req.Position == nil {
+		panic("position is nil")
 	}
-	// place req.CloseRequest on an close queue
-	s.closes[req.ID] = req
 
-	// Submit the order
+	// place req.CloseRequest on an close queue Submit the order,
+	// this is where the emulator would be injecting delays and stuff
 
 	// When the order is filled, create a trade
+	pos := req.Position
+	trade := &portfolio.Trade{
+		ID:         types.NewULID(),
+		Common:     req.Common,
+		Price:      req.Price,
+		PositionID: pos.ID,
+		OpenPrice:  pos.OpenPrice,
+		FillPrice:  pos.FillPrice,
+		ExitPRice:  req.ExitPrice,
+	}
 
 	// send trade back on event queue
+	evt := &broker.Event{
+		BrokerOrderID: types.NewULID(),
+		ClientOrderID: req.ID,
+		Type:          broker.EventPositionClosed,
+		PositionID:    req.Position.ID,
+		Instrument:    req.Instrument.Name,
+		Reason:        "lowest low",
+		Cause:         broker.CloseManual,
+	}
 
+	s.evtQ <- evt
 	return nil
 }
 

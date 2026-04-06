@@ -96,8 +96,10 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 
 	for itr.Next() {
 		candle := itr.Candle()
+		l.Debug("candle", "candle", processedCandles, "candle", candle.String())
 		processedCandles++
 
+		// this should probaby be event driven not once a polling cycle
 		err := t.currentAccount.ResolveWithMarks(map[string]types.Price{
 			cfg.Instrument: candle.Close,
 		})
@@ -105,7 +107,8 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			return err
 		}
 
-		plan := strategy.Update(ctx, &candle)
+		// TODO We can just add positions to the context.
+		plan := strategy.Update(ctx, &candle, t.currentAccount.Positions)
 		l.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancel := range plan.Cancel {
@@ -114,11 +117,12 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		}
 		for _, cl := range plan.Closes {
 			l.Info("submit close request", "ID", cl.ID)
+
+			// TODO: sanitize the close request
 			err = t.Broker.SubmitClose(ctx, cl)
 			if err != nil {
 				return err
 			}
-			submittedCloses++
 		}
 
 		for _, op := range plan.Opens {
@@ -136,8 +140,6 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			if err != nil {
 				return err
 			}
-
-			submittedOpens++
 		}
 	}
 

@@ -28,6 +28,11 @@ func (c *Candle) IsZero() bool {
 }
 
 func (c *Candle) String() string {
+	str := fmt.Sprintf("%d, %d, %d, %d", c.Open, c.High, c.Low, c.Close)
+	return str
+}
+
+func (c *Candle) FullString() string {
 	str := fmt.Sprintf("%d, %d, %d, %d: avg spread %d, max spread %d, ticks: %d",
 		c.Open, c.High, c.Low, c.Close, c.AvgSpread, c.MaxSpread, c.Ticks)
 	return str

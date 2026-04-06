@@ -13,8 +13,6 @@ type Fake struct {
 	StrategyConfig
 	CandleCount int
 
-	openPosition bool
-
 	candles []*market.Candle
 	highest types.Price
 	lowest  types.Price
@@ -38,7 +36,7 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
+func (f *Fake) Update(ctx context.Context, c *market.Candle, positions portfolio.Positions) *Plan {
 	f.candles = append(f.candles, c)
 	plan := &Plan{
 		Reason: "hold",
@@ -56,10 +54,18 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 	}
 	plan.Reason = "hold"
 
+	var posid string
+	for _, pos := range positions.Positions() {
+		if pos.Common.Instrument.Name == inst.Name {
+			posid = pos.ID
+			break
+		}
+	}
+
 	if f.lowest > c.Low {
 		f.highest = c.High
 
-		if !f.openPosition {
+		if posid == "" {
 			op := &portfolio.OpenRequest{
 				ID: types.NewULID(),
 				Common: portfolio.CommonPortfolio{
@@ -72,22 +78,18 @@ func (f *Fake) Update(ctx context.Context, c *market.Candle) *Plan {
 			}
 			plan.Opens = append(plan.Opens, op)
 			plan.Reason = "higher high"
-			f.openPosition = true
 		}
 	}
 
 	if f.highest < c.High {
 		// Before closing we must make sure we have an open trade
 		f.lowest = c.Low
-		if f.openPosition {
+		if posid != "" {
 			cl := &portfolio.CloseRequest{
-				ID:         types.NewULID(),
-				Instrument: inst,
-				Price:      c.Close,
+				ID: types.NewULID(),
 			}
 			plan.Closes = append(plan.Closes, cl)
 			plan.Reason = "lower low"
-			f.openPosition = false
 		}
 	}
 

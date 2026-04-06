@@ -22,8 +22,9 @@ type OpenRequest struct {
 }
 
 type CloseRequest struct {
-	ID         string
-	Instrument *market.Instrument
-	Units      types.Units
-	Price      types.Price
+	Common     CommonPortfolio
+	ID         string // ID of this close request
+	PositionID string // ID of the Order that is to be closed
+
+	*Position
 }

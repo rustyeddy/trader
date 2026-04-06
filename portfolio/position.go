@@ -4,15 +4,30 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+type PositionState int
+
+const (
+	PositionNone = iota
+	PositionOpenRequested
+	PositionOpen
+	PositionCloseRequested
+	PositionClosed
+)
+
 type Position struct {
 	ID        string
 	Common    CommonPortfolio
 	FillPrice types.Price
 	FillTime  types.Timestamp
+	State     PositionState
 }
 
 type Positions struct {
 	positions map[string]*Position
+}
+
+func (p *Positions) Positions() map[string]*Position {
+	return p.positions
 }
 
 func (p *Positions) Len() int {

@@ -65,9 +65,9 @@ type Config struct {
 // -------------------------------------------------------------------------
 
 var (
-	mu      sync.RWMutex
-	level   = new(slog.LevelVar) // dynamic; adjusted by Setup
-	defLog  *slog.Logger
+	mu     sync.RWMutex
+	level  = new(slog.LevelVar) // dynamic; adjusted by Setup
+	defLog *slog.Logger
 
 	modulesMu sync.RWMutex
 	modules   = make(map[string]*slog.Logger)
@@ -77,6 +77,7 @@ var (
 	Data      *slog.Logger
 	Backtest  *slog.Logger
 	Indicator *slog.Logger
+	Strat     *slog.Logger
 	Replay    *slog.Logger
 )
 
@@ -97,6 +98,7 @@ func resetModules() {
 	Backtest = defLog.With("module", "backtest")
 	Indicator = defLog.With("module", "indicator")
 	Replay = defLog.With("module", "replay")
+	Strat = defLog.With("module", "strategies")
 
 	// Refresh any previously requested ad-hoc module loggers.
 	for name := range modules {

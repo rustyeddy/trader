@@ -1,8 +1,11 @@
 package strategies
 
 import (
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 )
+
+var l = log.Strat
 
 // Strategy is the interface for candle-based strategies.
 type Strategy interface {
