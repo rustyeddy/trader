@@ -1,16 +1,31 @@
 package portfolio
 
 import (
-	"fmt"
-
 	"github.com/rustyeddy/trader/types"
 )
 
-type Trade struct {
+type TradeStatus int
+
+const (
+	TradeStatusNone TradeStatus = iota
+	TradeStatusOpenRequest
+	TradeStatusOrder
+	TradeStatusOpen
+	TradeStatusCloseRequest
+	TradeStatusClosed
+)
+
+type TradeCommon struct {
 	ID         string
-	Common     CommonPortfolio
-	OpenPrice  types.Price // EntryPrice - OpenPrice = slippage
-	FillPrice  types.Price
+	Instrument string
+	types.Side // Long or Sort
+	types.Units
+	Stop types.Price
+	Take types.Price
+}
+
+type Trade struct {
+	*TradeCommon
 	ClosePrice types.Price // ExitPrice - closePrice = slippage
 	ExitPrice  types.Price
 	EntryTime  types.Timestamp
@@ -18,22 +33,8 @@ type Trade struct {
 	PNL        types.Money // account currency (best-effort)
 }
 
-type Trades struct {
-	trades []*Trade
-}
-
-func (t *Trades) Add(trade *Trade) {
-	fmt.Println("Add trade ", trade.ID)
-	t.trades = append(t.trades, trade)
-}
-
-func (t *Trades) Len() int {
-	return len(t.trades)
-}
-
-func (t *Trades) Get(i int) *Trade {
-	if i >= t.Len() {
-		return nil
-	}
-	return t.trades[i]
+func NewTrade(common *TradeCommon) *Trade {
+	t := &Trade{}
+	t.TradeCommon = common
+	return t
 }

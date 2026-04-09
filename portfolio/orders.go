@@ -1,30 +1,75 @@
 package portfolio
 
 import (
-	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/types"
+	"log"
 )
 
-type CommonPortfolio struct {
-	Instrument *market.Instrument
-	Side       types.Side // Long or Sort
-	Units      types.Units
-	Stop       types.Price
-	Take       types.Price
-	Reason     string
+type OrderType uint8
+
+const (
+	OrderNone OrderType = iota
+	OrderMarket
+	OrderLimit
+	OrderStop
+	OrderStopLimit
+	OrderTrailingStop
+)
+
+func (ot OrderType) String() string {
+	switch ot {
+	case OrderNone:
+		return "none"
+	case OrderMarket:
+		return "market"
+	case OrderLimit:
+		return "limit"
+	case OrderStop:
+		return "stop"
+	case OrderStopLimit:
+		return "stop-limit"
+	case OrderTrailingStop:
+		return "trailing-stop"
+	default:
+		log.Fatal("Uknown Order Type")
+		return "unknown"
+	}
+
 }
 
-type OpenRequest struct {
-	Common       CommonPortfolio
-	ID           string
-	Price        types.Price
-	ReqTimestamp types.Timestamp
+type OrderStatus uint8
+
+const (
+	OrderStatusNone OrderStatus = iota
+	OrderPending
+	OrderAccepted
+	OrderFilled
+	OrderRejected
+	OrderCanceled
+)
+
+func (os OrderStatus) String() string {
+	switch os {
+	case OrderStatusNone:
+		return "none"
+
+	case OrderPending:
+		return "pending"
+	case OrderAccepted:
+		return "accepted"
+	case OrderFilled:
+		return "filled"
+	case OrderRejected:
+		return "rejected"
+	case OrderCanceled:
+		return "cancled"
+	default:
+		log.Fatal("unknown order", os)
+	}
+	return ""
 }
 
-type CloseRequest struct {
-	Common     CommonPortfolio
-	ID         string // ID of this close request
-	PositionID string // ID of the Order that is to be closed
-
-	*Position
+type Order struct {
+	*TradeCommon
+	OrderType
+	OrderStatus
 }

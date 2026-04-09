@@ -3,12 +3,13 @@ package trader
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/data"
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
@@ -16,49 +17,24 @@ import (
 var l = tlog.Backtest
 
 type Trader struct {
-	*market.Instrument
-	*account.AccountManager
+	*account.Account
 	*data.DataManager
-	broker.Broker
-
-	currentAccount *account.Account
+	*portfolio.TradeBook
+	*broker.Broker
 }
 
 type ConfigBackTest struct {
 	Instrument string
-	Account    string
-	types.TimeRange
+	Strategy   string
+	TimeFrame  types.Timeframe
+	Start      time.Time
+	End        time.Time
+
+	Account string
 }
 
-func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
+func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	l.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
-
-	// Select an Account
-	t.currentAccount = t.AccountManager.Get(cfg.Account)
-	if t.currentAccount == nil {
-		return fmt.Errorf("Account %s not found", cfg.Account)
-	}
-	l.Info("account selected", "account", cfg.Account)
-
-	// Select a Strategy and supply it with it's configuration
-	strategy := strategies.Fake{
-		StrategyConfig: strategies.StrategyConfig{
-			Instrument: cfg.Instrument,
-		},
-		CandleCount: 10,
-	}
-	l.Info("strategy selected", "strategy", strategy.Name())
-
-	// Select the Instrument, TimeRange and TimeFrame
-	timerange := cfg.TimeRange
-	timerange.TF = types.M1
-	candlereq := data.CandleRequest{
-		Source:     "candles",
-		Instrument: cfg.Instrument,
-		Timeframe:  types.M1,
-		Range:      timerange,
-	}
-	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Timeframe)
 
 	// Start up the broker event handler
 	evtQ := t.Broker.Events()
@@ -85,6 +61,23 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		}
 	}()
 
+	// TODO have the strategy manager look it up and return
+	strategy := strategies.Fake{
+		StrategyConfig: strategies.StrategyConfig{
+			Instrument: cfg.Instrument,
+		},
+		CandleCount: 10,
+	}
+	l.Info("strategy selected", "strategy", strategy.Name())
+
+	// Select the Instrument, TimeRange and TimeFrame
+	candlereq := data.CandleRequest{
+		Source:     "candles",
+		Instrument: cfg.Instrument,
+		Range:      types.NewTimeRange(types.FromTime(cfg.Start), types.FromTime(cfg.End), types.M1),
+	}
+	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
+
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(context.TODO(), candlereq)
 	if err != nil {
@@ -95,12 +88,12 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 	submittedCloses := 0
 
 	for itr.Next() {
-		candle := itr.Candle()
-		l.Debug("candle", "candle", processedCandles, "candle", candle.String())
+		candle := itr.CandleTime()
+		l.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		processedCandles++
 
 		// this should probaby be event driven not once a polling cycle
-		err := t.currentAccount.ResolveWithMarks(map[string]types.Price{
+		err := t.Account.ResolveWithMarks(map[string]types.Price{
 			cfg.Instrument: candle.Close,
 		})
 		if err != nil {
@@ -108,7 +101,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 		}
 
 		// TODO We can just add positions to the context.
-		plan := strategy.Update(ctx, &candle, t.currentAccount.Positions)
+		plan := strategy.Update(ctx, &candle, &t.Account.Positions)
 		l.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancel := range plan.Cancel {
@@ -116,6 +109,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			l.Warn("TODO - cancel request not implemented", "cancel", cancel)
 		}
 		for _, cl := range plan.Closes {
+			fmt.Printf("CL: %+v\n", cl)
 			l.Info("submit close request", "ID", cl.ID)
 
 			// TODO: sanitize the close request
@@ -125,25 +119,28 @@ func (t *Trader) BackTest(ctx context.Context, cfg ConfigBackTest) error {
 			}
 		}
 
-		for _, op := range plan.Opens {
-			l.Info("Broker event Open Position", "ID", op.ID)
+		for _, openReq := range plan.Opens {
 
-			op.ReqTimestamp = itr.Timestamp()
-			err := t.currentAccount.SizePosition(op)
+			// th := portfolio.NewTradeHistory()
+
+			l.Info("Broker event Open Position", "ID", openReq.ID)
+
+			openReq.Timestamp = itr.Timestamp()
+			err := t.Account.SizePosition(openReq)
 			if err != nil {
 				return err
 			}
 
-			l.Info("Open position size", "ID", op.ID, "size", op.Common.Units)
-			l.Info("Submitting open request to broker", "ID", op.ID)
-			err = t.Broker.SubmitOpen(ctx, op)
+			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			l.Info("Submitting open request to broker", "ID", openReq.ID)
+			err = t.Broker.SubmitOpen(ctx, openReq)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	l.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.currentAccount.Positions.Len(), "trades", t.currentAccount.Trades.Len())
+	l.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
 	// Finished
 	// If candles are used up
 	//   Close out any open position
@@ -174,7 +171,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 			return err
 		}
 
-		err := t.currentAccount.AddPosition(ctx, pos)
+		err := t.Account.AddPosition(ctx, pos)
 		if err != nil {
 			panic(err)
 		}
@@ -191,7 +188,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 		panic(trade == nil)
 
 		// Delete position from Account portfolio, and adds trade
-		err := t.currentAccount.ClosePosition(pos, trade)
+		err := t.Account.ClosePosition(pos, trade)
 		if err != nil {
 			panic(err)
 		}

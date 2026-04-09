@@ -258,7 +258,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end))
+			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end), types.Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)

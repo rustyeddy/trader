@@ -15,8 +15,7 @@ const (
 )
 
 type Position struct {
-	ID        string
-	Common    CommonPortfolio
+	Common    *TradeCommon
 	FillPrice types.Price
 	FillTime  types.Timestamp
 	State     PositionState
@@ -38,7 +37,7 @@ func (p *Positions) Add(pos *Position) {
 	if p.positions == nil {
 		p.positions = make(map[string]*Position)
 	}
-	p.positions[pos.ID] = pos
+	p.positions[pos.Common.ID] = pos
 }
 
 func (p *Positions) Delete(ID string) {

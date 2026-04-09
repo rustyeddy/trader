@@ -12,7 +12,8 @@ func NewAccountManager() *AccountManager {
 	}
 }
 
-func (am *AccountManager) CreateAccount(name string, balance types.Money) *Account {
+func (am *AccountManager) CreateAccount(name string, b int64) *Account {
+	balance := types.Money(b * int64(types.MoneyScale))
 	act := NewAccount(name, balance)
 	am.accounts[name] = act
 	return act

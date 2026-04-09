@@ -13,7 +13,7 @@ type Fake struct {
 	StrategyConfig
 	CandleCount int
 
-	candles []*market.Candle
+	candles []*market.CandleTime
 	highest types.Price
 	lowest  types.Price
 }
@@ -36,61 +36,39 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *market.Candle, positions portfolio.Positions) *Plan {
+func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *portfolio.Positions) *Plan {
 	f.candles = append(f.candles, c)
 	plan := &Plan{
 		Reason: "hold",
 	}
 
-	inst := market.GetInstrument(f.Instrument)
 	if len(f.candles) < f.CandleCount {
-		if f.highest < c.High {
-			f.highest = c.High
-		}
-		if f.lowest == 0 || f.lowest > c.Low {
-			f.lowest = c.Low
-		}
 		return plan
 	}
-	plan.Reason = "hold"
 
-	var posid string
-	for _, pos := range positions.Positions() {
-		if pos.Common.Instrument.Name == inst.Name {
-			posid = pos.ID
-			break
-		}
-	}
-
-	if f.lowest > c.Low {
-		f.highest = c.High
-
-		if posid == "" {
-			op := &portfolio.OpenRequest{
-				ID: types.NewULID(),
-				Common: portfolio.CommonPortfolio{
-					Side:       types.Long,
-					Stop:       inst.SubPips(c.Close, types.PipsFromFloat(10)),
-					Instrument: inst,
-					Reason:     "higher high",
-				},
-				Price: c.Close,
-			}
-			plan.Opens = append(plan.Opens, op)
-			plan.Reason = "higher high"
-		}
-	}
-
+	openTrades := positions.Len()
 	if f.highest < c.High {
-		// Before closing we must make sure we have an open trade
-		f.lowest = c.Low
-		if posid != "" {
-			cl := &portfolio.CloseRequest{
-				ID: types.NewULID(),
-			}
-			plan.Closes = append(plan.Closes, cl)
-			plan.Reason = "lower low"
+		f.highest = c.High
+		if openTrades > 0 {
+			return plan
 		}
+		inst := market.GetInstrument(f.Instrument)
+		stop := inst.SubPips(c.Close, types.PipsFromFloat(10))
+		op := portfolio.NewOpenRequest(f.Instrument, c, types.Long, stop, types.Price(0), "higher highs")
+		plan.Opens = append(plan.Opens, op)
+	}
+
+	if f.lowest == 0 || f.lowest > c.Low {
+		f.lowest = c.Low
+		if openTrades == 0 {
+			return plan
+		}
+		cl := &portfolio.CloseRequest{
+			Request: portfolio.Request{
+				Reason: "lower low",
+			},
+		}
+		plan.Closes = append(plan.Closes, cl)
 	}
 
 	return plan

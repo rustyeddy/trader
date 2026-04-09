@@ -25,7 +25,7 @@ type Event struct {
 	PositionID    string
 	Instrument    string
 	Reason        string
-	Cause         CloseCause
+	Cause         portfolio.CloseCause
 
 	Open     *portfolio.OpenRequest
 	Close    *portfolio.CloseRequest
@@ -52,4 +52,8 @@ func (e EventType) String() string {
 	default:
 		return "UknownEventType"
 	}
+}
+
+type EventQ struct {
+	evtQ chan *Event
 }

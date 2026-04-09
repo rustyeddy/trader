@@ -87,10 +87,11 @@ type TimeRange struct {
 	TF    Timeframe // m1, h1, d1
 }
 
-func NewTimeRange(start Timestamp, end Timestamp) TimeRange {
+func NewTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	r := TimeRange{
 		Start: Timestamp(start),
 		End:   Timestamp(end),
+		TF:    tf,
 	}
 	return r
 }

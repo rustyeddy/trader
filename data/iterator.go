@@ -78,6 +78,7 @@ func (it *funcIterator[T]) Close() error {
 type CandleIterator interface {
 	Next() bool
 	Candle() market.Candle
+	CandleTime() market.CandleTime
 	NextCandle() (market.Candle, bool)
 	Timestamp() types.Timestamp
 	Err() error
@@ -139,6 +140,14 @@ func (it *candleSetIterator) Candle() market.Candle {
 	return it.cur
 }
 
+func (it *candleSetIterator) CandleTime() market.CandleTime {
+	ct := market.CandleTime{
+		Candle:    it.Candle(),
+		Timestamp: it.Timestamp(),
+	}
+	return ct
+}
+
 func (it *candleSetIterator) Timestamp() types.Timestamp {
 	return it.ts
 }
@@ -175,6 +184,14 @@ func (it *chainedCandleIterator) NextCandle() (market.Candle, bool) {
 		return it.Candle(), true
 	}
 	return market.Candle{}, false
+}
+
+func (it *chainedCandleIterator) CandleTime() market.CandleTime {
+	ct := market.CandleTime{
+		Candle:    it.Candle(),
+		Timestamp: it.Timestamp(),
+	}
+	return ct
 }
 
 func (it *chainedCandleIterator) Next() bool {

@@ -38,6 +38,15 @@ func (c *Candle) FullString() string {
 	return str
 }
 
+type CandleTime struct {
+	Candle
+	types.Timestamp
+}
+
+func String(c CandleTime) string {
+	return c.Candle.String()
+}
+
 // CandleSet contains a dense set of candles.
 type CandleSet struct {
 	Instrument string
