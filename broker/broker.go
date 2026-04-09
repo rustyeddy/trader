@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 
+	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
@@ -16,34 +17,41 @@ type BrokerInterface interface {
 type Broker struct {
 	ID   string
 	evtQ chan *Event
+	OpenOrders
 }
 
-func (b *Broker) SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error {
+func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) error {
 
 	// Create an order and submit the order
-	order := portfolio.Order{}
-	order.TradeCommon = req.TradeCommon
-	order.OrderType = portfolio.OrderMarket
-	order.OrderStatus = portfolio.OrderPending
+	o := &order.Order{}
+	o.TradeCommon = req.TradeCommon
+	o.OrderType = order.OrderMarket
+	o.OrderStatus = order.OrderPending
 
 	// place the order in the orderbook
+	b.OpenOrders.Add(o)
 
-	return nil
-}
+	// here is where the order get submitted to a real broker if
+	// we are using one.
 
-// portfolio.OrderRequest will change
-func (b *Broker) ReadOrderResponses(req *portfolio.OpenRequest) {
-
-	pos := &portfolio.Position{
-		Common: req.TradeCommon,
+	// Here we will just fake it and return a filled order.
+	fill, err := b.SubmitOrder(ctx, o)
+	if err != nil {
+		return err // probably need to correct here and now
 	}
-	// pos.FillPrice = req.Price
-	// pos.FillTime = req.Timestamp
-	// pos.State = portfolio.PositionOpenRequested
 
-	// // This would be the time to emulate a delay between order and fill
-	// // we will ignore this for now
-	// pos.State = portfolio.PositionOpen
+	pos, err := b.FillOrder(ctx, fill)
+	if err != nil {
+		return err
+	}
+
+	pos.FillPrice = req.Price
+	pos.FillTime = req.Timestamp
+	pos.State = portfolio.PositionOpenRequested
+
+	// This would be the time to emulate a delay between order and fill
+	// we will ignore this for now
+	pos.State = portfolio.PositionOpen
 
 	// send position back on event queue
 	evt := &Event{
@@ -61,6 +69,28 @@ func (b *Broker) ReadOrderResponses(req *portfolio.OpenRequest) {
 
 	b.evtQ <- evt
 
+	return nil
+}
+
+func (b *Broker) SubmitOrder(ctx context.Context, order *order.Order) (*portfolio.Fill, error) {
+	fill := &portfolio.Fill{}
+	return fill, nil
+}
+
+func (b *Broker) FillOrder(ctx context.Context, fill *portfolio.Fill) (*portfolio.Position, error) {
+	port := &portfolio.Position{}
+	return port, nil
+}
+
+// portfolio.OrderRequest will change
+func (b *Broker) ReadOrderResponses(req *portfolio.OpenRequest) {
+
+	o := &order.Order{
+		TradeCommon: req.TradeCommon,
+		OrderType:   order.OrderMarket,
+		OrderStatus: order.OrderPending,
+	}
+	b.OpenOrders.Add(o)
 	return
 }
 

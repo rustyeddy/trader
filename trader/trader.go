@@ -120,20 +120,14 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 		}
 
 		for _, openReq := range plan.Opens {
-
-			// th := portfolio.NewTradeHistory()
-
 			l.Info("Broker event Open Position", "ID", openReq.ID)
-
-			openReq.Timestamp = itr.Timestamp()
 			err := t.Account.SizePosition(openReq)
 			if err != nil {
 				return err
 			}
 
 			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
-			l.Info("Submitting open request to broker", "ID", openReq.ID)
-			err = t.Broker.SubmitOpen(ctx, openReq)
+			err = t.Broker.OpenRequest(ctx, openReq)
 			if err != nil {
 				return err
 			}
