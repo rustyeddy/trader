@@ -1,10 +1,10 @@
 package strategies
 
-import "github.com/rustyeddy/trader/portfolio"
+import "github.com/rustyeddy/trader/types"
 
 type Plan struct {
-	Opens  []*portfolio.OpenRequest
-	Closes []*portfolio.CloseRequest
+	Opens  []*types.OpenRequest
+	Closes []*types.CloseRequest
 	Cancel []string
 	Reason string
 }

@@ -1,10 +1,9 @@
-package market
+package types
 
 import (
 	"os"
 	"testing"
 
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,7 +25,7 @@ func TestIterator(t *testing.T) {
 	expected := Candle{Open: 1035030, High: 1035140, Low: 1035030, Close: 1035140}
 	it := cs.Iterator()
 	it.Next()
-	assert.Equal(t, types.Timestamp(1735768800), it.StartTime())
+	assert.Equal(t, Timestamp(1735768800), it.StartTime())
 
 	ca := it.Candle()
 	assert.Equal(t, expected, ca)

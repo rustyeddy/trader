@@ -5,10 +5,6 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-
-	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/portfolio"
-	"github.com/rustyeddy/trader/types"
 )
 
 type Account struct {
@@ -56,7 +52,7 @@ func (act *Account) Print() {
 //
 // The returned Rate is scaled by types.RateScale.
 func (act *Account) QuoteToAccount(inst string, price types.Price) (types.Rate, error) {
-	meta := market.GetInstrument(inst)
+	meta := types.GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("failed to find instrument %s", inst)
 	}
@@ -274,7 +270,7 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 			}
 		}
 
-		inst := market.GetInstrument(pos.Common.Instrument)
+		inst := types.GetInstrument(pos.Common.Instrument)
 		if inst == nil {
 			return fmt.Errorf("instrument is nil %s\n", inst)
 		}
@@ -375,7 +371,7 @@ func (act *Account) ClosePosition(pos *portfolio.Position, trade *portfolio.Trad
 	return nil
 }
 
-func (act *Account) OpenPosition(t types.Timestamp, c market.Candle, req *portfolio.OpenRequest) {
+func (act *Account) OpenPosition(t types.Timestamp, c types.Candle, req *portfolio.OpenRequest) {
 	// Fill model: enter at bar close.
 	entry := c.Close
 
@@ -416,7 +412,7 @@ func (act *Account) closePosition(t types.Timestamp, exit types.Price, reason st
 }
 
 func (act *Account) TradeMargin(units types.Units, price types.Price, inst string) (types.Money, error) {
-	meta := market.GetInstrument(inst)
+	meta := types.GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("no such instrument %s\n", inst)
 	}
@@ -514,7 +510,7 @@ func (acct *Account) lossPerUnit(req *portfolio.OpenRequest) (types.Money, error
 
 // marginPerUnit returns margin needed for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate required margin.
-func (acct *Account) marginPerUnit(inst *market.Instrument, price types.Price) (types.Money, error) {
+func (acct *Account) marginPerUnit(inst *types.Instrument, price types.Price) (types.Money, error) {
 	if inst == nil {
 		return 0, fmt.Errorf("instrument is nil")
 	}
@@ -593,7 +589,7 @@ func (acct *Account) unitsByMargin(req *portfolio.OpenRequest) (types.Units, err
 		return 0, fmt.Errorf("free margin must be > 0")
 	}
 
-	inst := market.GetInstrument(req.TradeCommon.Instrument)
+	inst := types.GetInstrument(req.TradeCommon.Instrument)
 	if inst == nil {
 		return 0, fmt.Errorf("unknown instrument %s", req.TradeCommon.Instrument)
 	}
@@ -656,7 +652,7 @@ func (acct *Account) SizePosition(req *portfolio.OpenRequest) error {
 		return err
 	}
 
-	inst := market.GetInstrument(req.TradeCommon.Instrument)
+	inst := types.GetInstrument(req.TradeCommon.Instrument)
 	if inst == nil {
 		return fmt.Errorf("unknown instrument %s\n", req.TradeCommon.Instrument)
 	}

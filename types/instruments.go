@@ -1,10 +1,8 @@
-package market
+package types
 
 import (
 	"math"
 	"strings"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type Symbol string
@@ -25,8 +23,8 @@ type Instrument struct {
 	QuoteCurrency       string
 	PipLocation         int
 	TradeUnitsPrecision int
-	MinimumTradeSize    types.Units
-	MarginRate          types.Rate
+	MinimumTradeSize    Units
+	MarginRate          Rate
 }
 
 var InstrumentList = []string{
@@ -47,7 +45,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000), // 2% (50:1)
+		MarginRate:          Rate(20_000), // 2% (50:1)
 	},
 	"GBPUSD": {
 		Name:                "GBPUSD",
@@ -56,7 +54,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20000),
+		MarginRate:          Rate(20000),
 	},
 	"USDJPY": {
 		Name:                "USDJPY",
@@ -65,7 +63,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -2,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          Rate(20_000),
 	},
 	"USDCHF": {
 		Name:                "USDCHF",
@@ -74,7 +72,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          Rate(20_000),
 	},
 	"AUDUSD": {
 		Name:                "AUDUSD",
@@ -83,7 +81,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          Rate(20_000),
 	},
 	"USDCAD": {
 		Name:                "USDCAD",
@@ -92,7 +90,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          Rate(20_000),
 	},
 	"NZDUSD": {
 		Name:                "NZDUSD",
@@ -101,7 +99,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -4,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(20_000),
+		MarginRate:          Rate(20_000),
 	},
 	"XAUUSD": {
 		Name:                "XAUUSD",
@@ -110,7 +108,7 @@ var Instruments = map[string]*Instrument{
 		PipLocation:         -2, // Gold pip = 0.01
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          types.Rate(50_000), // 5% (20:1 typical retail gold)
+		MarginRate:          Rate(50_000), // 5% (20:1 typical retail gold)
 	},
 }
 
@@ -137,25 +135,25 @@ func GetInstrument(symbol string) *Instrument {
 	return nil
 }
 
-func (inst *Instrument) PriceUnitsPerPip() types.Price {
-	units := int64(types.PriceScale)
+func (inst *Instrument) PriceUnitsPerPip() Price {
+	units := int64(PriceScale)
 	for i := 0; i < -inst.PipLocation; i++ {
 		units /= 10
 	}
-	return types.Price(units)
+	return Price(units)
 }
 
-func (inst *Instrument) PriceDeltaFromPips(pips types.Pips) types.Price {
+func (inst *Instrument) PriceDeltaFromPips(pips Pips) Price {
 	perPip := inst.PriceUnitsPerPip()
-	return types.Price((int64(perPip) * int64(pips)) / int64(types.PipScale))
+	return Price((int64(perPip) * int64(pips)) / int64(PipScale))
 }
 
-func (inst *Instrument) AddPips(px types.Price, pips types.Pips) types.Price {
+func (inst *Instrument) AddPips(px Price, pips Pips) Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px + delta
 }
 
-func (inst *Instrument) SubPips(px types.Price, pips types.Pips) types.Price {
+func (inst *Instrument) SubPips(px Price, pips Pips) Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px - delta
 }

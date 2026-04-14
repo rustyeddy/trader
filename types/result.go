@@ -1,4 +1,4 @@
-package portfolio
+package types
 
 type OpenResult struct {
 	*order.Order

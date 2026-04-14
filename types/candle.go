@@ -1,4 +1,4 @@
-package market
+package types
 
 import (
 	"bufio"
@@ -9,17 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type Candle struct {
-	Open      types.Price
-	High      types.Price
-	Low       types.Price
-	Close     types.Price
-	AvgSpread types.Price
-	MaxSpread types.Price
+	Open      Price
+	High      Price
+	Low       Price
+	Close     Price
+	AvgSpread Price
+	MaxSpread Price
 	Ticks     int32 // number of ticks per candle
 }
 
@@ -40,7 +38,7 @@ func (c *Candle) FullString() string {
 
 type CandleTime struct {
 	Candle
-	types.Timestamp
+	Timestamp
 }
 
 func String(c CandleTime) string {
@@ -50,9 +48,9 @@ func String(c CandleTime) string {
 // CandleSet contains a dense set of candles.
 type CandleSet struct {
 	Instrument string
-	Start      types.Timestamp // unix seconds for candle open
-	Timeframe  types.Timeframe
-	Scale      types.Scale6
+	Start      Timestamp // unix seconds for candle open
+	Timeframe  Timeframe
+	Scale      Scale6
 	Source     string
 	Candles    []Candle
 	Valid      []uint64
@@ -87,8 +85,8 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
-func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Timestamp,
-	scale types.Scale6, source string) (*CandleSet, error) {
+func NewMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
+	scale Scale6, source string) (*CandleSet, error) {
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
@@ -122,7 +120,7 @@ func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Times
 	}, nil
 }
 
-func (cs *CandleSet) AddCandle(ts types.Timestamp, c Candle) error {
+func (cs *CandleSet) AddCandle(ts Timestamp, c Candle) error {
 	if cs == nil {
 		return fmt.Errorf("nil CandleSet")
 	}
@@ -134,7 +132,7 @@ func (cs *CandleSet) AddCandle(ts types.Timestamp, c Candle) error {
 		return fmt.Errorf("timestamp %d before set start %d", ts, cs.Start)
 	}
 
-	tf := types.Timestamp(cs.Timeframe)
+	tf := Timestamp(cs.Timeframe)
 
 	off := ts - cs.Start
 	if off%tf != 0 {
@@ -181,7 +179,7 @@ func (cs *CandleSet) Merge(src *CandleSet) error {
 		if !src.IsValid(i) {
 			continue
 		}
-		ts := src.Start + types.Timestamp(i)*types.Timestamp(src.Timeframe)
+		ts := src.Start + Timestamp(i)*Timestamp(src.Timeframe)
 		if err := cs.AddCandle(ts, src.Candles[i]); err != nil {
 			return err
 		}
@@ -208,18 +206,18 @@ func (cs *CandleSet) CountValid() int {
 	return n
 }
 
-func FloorToMonthUTC(ts types.Timestamp) types.Timestamp {
+func FloorToMonthUTC(ts Timestamp) Timestamp {
 	t := time.Unix(int64(ts), 0).UTC()
 	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-	return types.Timestamp(first.Unix())
+	return Timestamp(first.Unix())
 }
 
 func (cs *CandleSet) Time(idx int) time.Time {
 	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
 }
 
-func (cs *CandleSet) Timestamp(idx int) types.Timestamp {
-	return types.Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
+func (cs *CandleSet) Timestamp(idx int) Timestamp {
+	return Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
 func (cs *CandleSet) Filename() string {
@@ -244,7 +242,7 @@ func isValid(valid []uint64, idx int) bool {
 	return valid[idx/64]&(1<<(idx%64)) != 0
 }
 
-func (cs *CandleSet) scanBounds() (minTs, maxTs types.Timestamp, err error) {
+func (cs *CandleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
 	f, err := os.Open(cs.Filepath)
 	if err != nil {
 		return 0, 0, err
@@ -306,9 +304,9 @@ func (cs *CandleSet) buildDenseFromFile() error {
 		return err
 	}
 
-	tf := types.Timestamp(cs.Timeframe)
-	start := types.Timestamp((minTs / tf) * tf)
-	end := types.Timestamp((maxTs / tf) * tf)
+	tf := Timestamp(cs.Timeframe)
+	start := Timestamp((minTs / tf) * tf)
+	end := Timestamp((maxTs / tf) * tf)
 
 	n := int((end-start)/tf) + 1
 
@@ -538,11 +536,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 		minValid = 60
 	}
 
-	tfIn := types.Timestamp(cs.Timeframe) // 60
-	tfOut := types.Timestamp(3600)
+	tfIn := Timestamp(cs.Timeframe) // 60
+	tfOut := Timestamp(3600)
 
 	start := (cs.Start / tfOut) * tfOut
-	end := cs.Start + types.Timestamp(len(cs.Candles)-1)*tfIn
+	end := cs.Start + Timestamp(len(cs.Candles)-1)*tfIn
 	nHours := int((end-start)/tfOut) + 1
 
 	h1 := &CandleSet{
@@ -556,11 +554,11 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	}
 
 	for h := 0; h < nHours; h++ {
-		hourStart := start + types.Timestamp(h)*tfOut
+		hourStart := start + Timestamp(h)*tfOut
 		firstIdx := int((hourStart - cs.Start) / tfIn)
 
 		validCount := 0
-		var o, hi, lo, cl types.Price
+		var o, hi, lo, cl Price
 		firstSet := false
 
 		for m := 0; m < 60; m++ {
@@ -655,7 +653,7 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
 // Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
-func (cs *CandleSet) Aggregate(outTF types.Timeframe) (*CandleSet, error) {
+func (cs *CandleSet) Aggregate(outTF Timeframe) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -750,7 +748,7 @@ func (cs *CandleSet) Aggregate(outTF types.Timeframe) (*CandleSet, error) {
 
 		outC.Ticks = int32(sumTicks)
 		if sumTicks > 0 {
-			outC.AvgSpread = types.Price((sumSpread + sumTicks/2) / sumTicks)
+			outC.AvgSpread = Price((sumSpread + sumTicks/2) / sumTicks)
 		}
 
 		out.Candles[oi] = outC
@@ -801,7 +799,7 @@ func (it *Iterator) Index() int {
 	return it.idx
 }
 
-func (it *Iterator) Timestamp() types.Timestamp {
+func (it *Iterator) Timestamp() Timestamp {
 	return it.cs.Timestamp(it.idx)
 }
 
@@ -809,6 +807,6 @@ func (it *Iterator) Time() time.Time {
 	return it.cs.Time(it.idx)
 }
 
-func (it *Iterator) StartTime() types.Timestamp {
+func (it *Iterator) StartTime() Timestamp {
 	return it.cs.Start
 }

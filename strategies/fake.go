@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -36,7 +35,7 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *portfolio.Positions) *Plan {
+func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *types.Positions) *Plan {
 	f.candles = append(f.candles, c)
 	plan := &Plan{
 		Reason: "hold",
@@ -54,7 +53,7 @@ func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *port
 		}
 		inst := market.GetInstrument(f.Instrument)
 		stop := inst.SubPips(c.Close, types.PipsFromFloat(10))
-		op := portfolio.NewOpenRequest(f.Instrument, c, types.Long, stop, types.Price(0), "higher highs")
+		op := types.NewOpenRequest(f.Instrument, c, types.Long, stop, types.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -63,8 +62,8 @@ func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *port
 		if openTrades == 0 {
 			return plan
 		}
-		cl := &portfolio.CloseRequest{
-			Request: portfolio.Request{
+		cl := &types.CloseRequest{
+			Request: types.Request{
 				Reason: "lower low",
 			},
 		}

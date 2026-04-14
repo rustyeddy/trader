@@ -1,4 +1,4 @@
-package portfolio
+package types
 
 type TradeBook struct {
 	Trades []*Trade

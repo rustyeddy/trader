@@ -1,8 +1,4 @@
-package portfolio
-
-import (
-	"github.com/rustyeddy/trader/types"
-)
+package types
 
 type PositionState int
 
@@ -16,8 +12,8 @@ const (
 
 type Position struct {
 	Common    *TradeCommon
-	FillPrice types.Price
-	FillTime  types.Timestamp
+	FillPrice Price
+	FillTime  Timestamp
 	State     PositionState
 }
 
@@ -56,17 +52,17 @@ func (p *Positions) Range(fn func(*Position) error) error {
 	return nil
 }
 
-func (p *Position) TriggerStopLoss(price types.Price) bool {
+func (p *Position) TriggerStopLoss(price Price) bool {
 
 	return false
 }
 
-func (p *Position) triggerTakeProfit(price types.Price) bool {
+func (p *Position) triggerTakeProfit(price Price) bool {
 
 	return false
 }
 
-func (p *Position) UnrealizedPL(currentPrice types.Price, quoteToAccount types.Price) types.Money {
-	plQuote := types.Money(p.Common.Units) * types.Money(currentPrice-p.FillPrice)
-	return types.Money(plQuote * types.Money(quoteToAccount))
+func (p *Position) UnrealizedPL(currentPrice Price, quoteToAccount Price) Money {
+	plQuote := Money(p.Common.Units) * Money(currentPrice-p.FillPrice)
+	return Money(plQuote * Money(quoteToAccount))
 }

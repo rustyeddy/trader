@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -25,12 +24,12 @@ type Event struct {
 	PositionID    string
 	Instrument    string
 	Reason        string
-	Cause         portfolio.CloseCause
+	Cause         types.CloseCause
 
-	Open     *portfolio.OpenRequest
-	Close    *portfolio.CloseRequest
-	Trade    *portfolio.Trade
-	Position *portfolio.Position
+	Open     *types.OpenRequest
+	Close    *types.CloseRequest
+	Trade    *types.Trade
+	Position *types.Position
 }
 
 func (e EventType) String() string {

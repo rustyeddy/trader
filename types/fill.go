@@ -1,8 +1,4 @@
-package portfolio
-
-import (
-	"github.com/rustyeddy/trader/types"
-)
+package types
 
 type FillStatus uint8
 
@@ -17,7 +13,7 @@ const (
 type Fill struct {
 	*TradeCommon
 	FillStatus
-	FillTime  types.Timestamp
-	FillPrice types.Price
-	FillUnits types.Units
+	FillTime  Timestamp
+	FillPrice Price
+	FillUnits Units
 }

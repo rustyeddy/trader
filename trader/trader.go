@@ -9,7 +9,6 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/data"
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
@@ -19,7 +18,7 @@ var l = tlog.Backtest
 type Trader struct {
 	*account.Account
 	*data.DataManager
-	*portfolio.TradeBook
+	*types.TradeBook
 	*broker.Broker
 }
 

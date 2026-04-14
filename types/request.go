@@ -1,8 +1,7 @@
-package portfolio
+package types
 
 import (
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/types"
 )
 
 type RequestType uint8
@@ -17,8 +16,8 @@ const (
 type Request struct {
 	*TradeCommon
 	RequestType
-	types.Price
-	types.Timestamp
+	Price
+	Timestamp
 	Reason string
 	Candle market.Candle
 }
@@ -35,9 +34,9 @@ type CloseRequest struct {
 func NewOpenRequest(
 	instr string,
 	c *market.CandleTime,
-	side types.Side,
-	stop types.Price,
-	take types.Price,
+	side Side,
+	stop Price,
+	take Price,
 	reason string) *OpenRequest {
 
 	th := NewTradeHistory(instr)

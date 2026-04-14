@@ -1,11 +1,9 @@
-package market
+package types
 
 import (
 	"context"
 	"errors"
 	"sync"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type TickSource interface {
@@ -13,23 +11,23 @@ type TickSource interface {
 }
 
 type BA struct {
-	Bid types.Price
-	Ask types.Price
+	Bid Price
+	Ask Price
 }
 
 type Tick struct {
 	Instrument string
-	Timestamp  types.Timestamp
+	Timestamp  Timestamp
 	BA
 }
 
-func (t Tick) Mid() types.Price {
+func (t Tick) Mid() Price {
 	sum := int64(t.Bid) + int64(t.Ask)
 	mid := (sum + 1) / 2 // round half up
-	return types.Price(mid)
+	return Price(mid)
 }
 
-func (t Tick) Spread() types.Price {
+func (t Tick) Spread() Price {
 	return t.Ask - t.Bid
 }
 

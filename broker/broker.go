@@ -3,13 +3,12 @@ package broker
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
 type BrokerInterface interface {
-	SubmitOpen(ctx context.Context, req *portfolio.OpenRequest) error
-	SubmitClose(ctx context.Context, req *portfolio.CloseRequest) error
+	SubmitOpen(ctx context.Context, req *types.OpenRequest) error
+	SubmitClose(ctx context.Context, req *types.CloseRequest) error
 	Events() <-chan *Event
 }
 
@@ -19,13 +18,13 @@ type Broker struct {
 	OpenOrders
 }
 
-func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) (*portfolio.OrderResult, error) {
+func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*types.OrderResult, error) {
 
 	// Create an order and submit the order
-	o := &portfolio.Order{}
+	o := &types.Order{}
 	o.TradeCommon = req.TradeCommon
-	o.OrderType = portfolio.OrderMarket
-	o.OrderStatus = portfolio.OrderPending
+	o.OrderType = types.OrderMarket
+	o.OrderStatus = types.OrderPending
 
 	// place the order in the orderbook
 	b.OpenOrders.Add(o)
@@ -41,11 +40,11 @@ func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) (*
 
 	pos.FillPrice = req.Price
 	pos.FillTime = req.Timestamp
-	pos.State = portfolio.PositionOpenRequested
+	pos.State = types.PositionOpenRequested
 
 	// This would be the time to emulate a delay between order and fill
 	// we will ignore this for now
-	pos.State = portfolio.PositionOpen
+	pos.State = types.PositionOpen
 
 	// send position back on event queue
 	evt := &Event{
@@ -66,36 +65,36 @@ func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) (*
 	return nil
 }
 
-func (b *Broker) SubmitOrder(ctx context.Context, ord *portfolio.Order) (*portfolio.Position, error) {
-	// fill := &portfolio.Fill{
+func (b *Broker) SubmitOrder(ctx context.Context, ord *types.Order) (*types.Position, error) {
+	// fill := &types.Fill{
 	// 	TradeCommon: ord.TradeCommon,
 	// }
-	pos := &portfolio.Position{
+	pos := &types.Position{
 		TradeCommon: ord.TradeCommon,
 	}
 	return pos, nil
 }
 
-// portfolio.OrderRequest will change
-func (b *Broker) ReadOrderResponses(req *portfolio.OpenRequest) {
+// types.OrderRequest will change
+func (b *Broker) ReadOrderResponses(req *types.OpenRequest) {
 
-	o := &portfolio.Order{
+	o := &types.Order{
 		TradeCommon: req.TradeCommon,
-		OrderType:   portfolio.OrderMarket,
-		OrderStatus: portfolio.OrderPending,
+		OrderType:   types.OrderMarket,
+		OrderStatus: types.OrderPending,
 	}
 	b.OpenOrders.Add(o)
 	return
 }
 
-func (b *Broker) SubmitClose(ctx context.Context, req *portfolio.CloseRequest) error {
+func (b *Broker) SubmitClose(ctx context.Context, req *types.CloseRequest) error {
 
 	// place req.CloseRequest on an close queue Submit the order,
 	// this is where the emulator would be injecting delays and stuff
 
 	// When the order is filled, create a trade
 	// pos := req.Position
-	trade := &portfolio.Trade{}
+	trade := &types.Trade{}
 
 	// send trade back on event queue
 	evt := &Event{
@@ -103,7 +102,7 @@ func (b *Broker) SubmitClose(ctx context.Context, req *portfolio.CloseRequest) e
 		Type:          EventPositionClosed,
 		ClientOrderID: req.ID,
 		Reason:        "lowest low",
-		Cause:         portfolio.CloseManual,
+		Cause:         types.CloseManual,
 		Trade:         trade,
 	}
 

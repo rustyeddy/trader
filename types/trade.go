@@ -1,8 +1,4 @@
-package portfolio
-
-import (
-	"github.com/rustyeddy/trader/types"
-)
+package types
 
 type TradeStatus int
 
@@ -18,19 +14,19 @@ const (
 type TradeCommon struct {
 	ID         string
 	Instrument string
-	types.Side // Long or Sort
-	types.Units
-	Stop types.Price
-	Take types.Price
+	Side       // Long or Sort
+	Units
+	Stop Price
+	Take Price
 }
 
 type Trade struct {
 	*TradeCommon
-	ClosePrice types.Price // ExitPrice - closePrice = slippage
-	ExitPrice  types.Price
-	EntryTime  types.Timestamp
-	ExitTime   types.Timestamp
-	PNL        types.Money // account currency (best-effort)
+	ClosePrice Price // ExitPrice - closePrice = slippage
+	ExitPrice  Price
+	EntryTime  Timestamp
+	ExitTime   Timestamp
+	PNL        Money // account currency (best-effort)
 }
 
 func NewTrade(common *TradeCommon) *Trade {
