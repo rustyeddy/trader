@@ -1,16 +1,16 @@
 package broker
 
-import "github.com/rustyeddy/trader/order"
+import "github.com/rustyeddy/trader/portfolio"
 
 type OpenOrders struct {
-	Orders map[string]*order.Order
+	Orders map[string]*portfolio.Order
 }
 
-func (o *OpenOrders) Add(od *order.Order) {
+func (o *OpenOrders) Add(od *portfolio.Order) {
 	o.Orders[od.ID] = od
 }
 
-func (o *OpenOrders) Get(id string) *order.Order {
+func (o *OpenOrders) Get(id string) *portfolio.Order {
 	od, _ := o.Orders[id]
 	return od
 }

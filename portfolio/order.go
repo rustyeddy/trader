@@ -1,9 +1,7 @@
-package order
+package portfolio
 
 import (
 	"log"
-
-	"github.com/rustyeddy/trader/portfolio"
 )
 
 type OrderType uint8
@@ -35,7 +33,6 @@ func (ot OrderType) String() string {
 		log.Fatal("Uknown Order Type")
 		return "unknown"
 	}
-
 }
 
 type OrderStatus uint8
@@ -71,7 +68,7 @@ func (os OrderStatus) String() string {
 }
 
 type Order struct {
-	*portfolio.TradeCommon
+	*TradeCommon
 	OrderType
 	OrderStatus
 }

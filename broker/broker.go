@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
@@ -20,13 +19,13 @@ type Broker struct {
 	OpenOrders
 }
 
-func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) error {
+func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) (*portfolio.OrderResult, error) {
 
 	// Create an order and submit the order
-	o := &order.Order{}
+	o := &portfolio.Order{}
 	o.TradeCommon = req.TradeCommon
-	o.OrderType = order.OrderMarket
-	o.OrderStatus = order.OrderPending
+	o.OrderType = portfolio.OrderMarket
+	o.OrderStatus = portfolio.OrderPending
 
 	// place the order in the orderbook
 	b.OpenOrders.Add(o)
@@ -35,14 +34,9 @@ func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) er
 	// we are using one.
 
 	// Here we will just fake it and return a filled order.
-	fill, err := b.SubmitOrder(ctx, o)
+	pos, err := b.SubmitOrder(ctx, o)
 	if err != nil {
 		return err // probably need to correct here and now
-	}
-
-	pos, err := b.FillOrder(ctx, fill)
-	if err != nil {
-		return err
 	}
 
 	pos.FillPrice = req.Price
@@ -72,23 +66,23 @@ func (b *Broker) OpenRequest(ctx context.Context, req *portfolio.OpenRequest) er
 	return nil
 }
 
-func (b *Broker) SubmitOrder(ctx context.Context, order *order.Order) (*portfolio.Fill, error) {
-	fill := &portfolio.Fill{}
-	return fill, nil
-}
-
-func (b *Broker) FillOrder(ctx context.Context, fill *portfolio.Fill) (*portfolio.Position, error) {
-	port := &portfolio.Position{}
-	return port, nil
+func (b *Broker) SubmitOrder(ctx context.Context, ord *portfolio.Order) (*portfolio.Position, error) {
+	// fill := &portfolio.Fill{
+	// 	TradeCommon: ord.TradeCommon,
+	// }
+	pos := &portfolio.Position{
+		TradeCommon: ord.TradeCommon,
+	}
+	return pos, nil
 }
 
 // portfolio.OrderRequest will change
 func (b *Broker) ReadOrderResponses(req *portfolio.OpenRequest) {
 
-	o := &order.Order{
+	o := &portfolio.Order{
 		TradeCommon: req.TradeCommon,
-		OrderType:   order.OrderMarket,
-		OrderStatus: order.OrderPending,
+		OrderType:   portfolio.OrderMarket,
+		OrderStatus: portfolio.OrderPending,
 	}
 	b.OpenOrders.Add(o)
 	return

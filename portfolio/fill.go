@@ -1,6 +1,8 @@
 package portfolio
 
-import "github.com/rustyeddy/trader/types"
+import (
+	"github.com/rustyeddy/trader/types"
+)
 
 type FillStatus uint8
 

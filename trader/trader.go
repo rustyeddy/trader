@@ -127,10 +127,15 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 			}
 
 			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
-			err = t.Broker.OpenRequest(ctx, openReq)
+			res, err = t.Broker.OpenRequest(ctx, openReq)
 			if err != nil {
 				return err
 			}
+
+			acct.AddPosition(res.Position)
+			th := t.TradeBook.Get(openReq.ID)
+			th.Orders = append(th.Orders, res.Order)
+			th.Fills = append(th.Fills, res.Fill)
 		}
 	}
 
