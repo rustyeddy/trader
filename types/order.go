@@ -1,9 +1,5 @@
 package types
 
-import (
-	"log"
-)
-
 type OrderType uint8
 
 const (
@@ -30,8 +26,7 @@ func (ot OrderType) String() string {
 	case OrderTrailingStop:
 		return "trailing-stop"
 	default:
-		log.Fatal("Uknown Order Type")
-		return "unknown"
+		return "<unknown>"
 	}
 }
 
@@ -60,11 +55,10 @@ func (os OrderStatus) String() string {
 	case OrderRejected:
 		return "rejected"
 	case OrderCanceled:
-		return "cancled"
+		return "canceled"
 	default:
-		log.Fatal("unknown order", os)
+		return "<unknown>"
 	}
-	return ""
 }
 
 type Order struct {
