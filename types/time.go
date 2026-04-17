@@ -192,6 +192,12 @@ var newYorkLoc = func() *time.Location {
 	return loc
 }()
 
+// IsFXMarketClosed is retained for backward compatibility.
+// It delegates to IsForexMarketClosed, which is the canonical market-close logic.
+func IsFXMarketClosed(t time.Time) bool {
+	return IsForexMarketClosed(t)
+}
+
 func IsForexMarketClosed(t time.Time) bool {
 	nt := t.In(newYorkLoc)
 	wd := nt.Weekday()

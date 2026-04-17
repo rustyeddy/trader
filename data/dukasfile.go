@@ -81,7 +81,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 
 	path := d.key.Path()
 	if !d.Time.IsZero() {
-		if types.IsFXMarketClosed(d.Time.UTC()) {
+		if types.IsForexMarketClosed(d.Time.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)

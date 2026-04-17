@@ -63,6 +63,25 @@ func (p *Position) triggerTakeProfit(price Price) bool {
 }
 
 func (p *Position) UnrealizedPL(currentPrice Price, quoteToAccount Price) Money {
-	plQuote := Money(p.Units) * Money(currentPrice-p.FillPrice)
-	return Money(plQuote * Money(quoteToAccount))
+	// price delta in quote currency per unit, scaled by PriceScale
+	delta := int64(currentPrice - p.FillPrice)
+
+	// If positions always store positive Units, apply direction here.
+	// Remove this block if short positions already use negative Units.
+	if p.Side == Short {
+		delta = -delta
+	}
+
+	// units * scaled price delta = quote-currency P/L, still scaled by PriceScale
+	plQuote := int64(p.Units) * delta
+
+	// Convert quote currency -> account currency.
+	// quoteToAccount is assumed to be a Price-scaled conversion rate.
+	// Result is still scaled by PriceScale.
+	plAccountPriceScaled := (plQuote * int64(quoteToAccount)) / int64(PriceScale)
+
+	// Convert Price-scaled account amount -> Money-scaled account amount.
+	plAccountMoneyScaled := (plAccountPriceScaled * int64(MoneyScale)) / int64(PriceScale)
+
+	return Money(plAccountMoneyScaled)
 }
