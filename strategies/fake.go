@@ -3,7 +3,6 @@ package strategies
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -12,7 +11,7 @@ type Fake struct {
 	StrategyConfig
 	CandleCount int
 
-	candles []*market.CandleTime
+	candles []*types.CandleTime
 	highest types.Price
 	lowest  types.Price
 }
@@ -35,7 +34,7 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *types.Positions) *Plan {
+func (f *Fake) Update(ctx context.Context, c *types.CandleTime, positions *types.Positions) *Plan {
 	f.candles = append(f.candles, c)
 	plan := &Plan{
 		Reason: "hold",
@@ -51,7 +50,7 @@ func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *type
 		if openTrades > 0 {
 			return plan
 		}
-		inst := market.GetInstrument(f.Instrument)
+		inst := types.GetInstrument(f.Instrument)
 		stop := inst.SubPips(c.Close, types.PipsFromFloat(10))
 		op := types.NewOpenRequest(f.Instrument, c, types.Long, stop, types.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
@@ -62,12 +61,44 @@ func (f *Fake) Update(ctx context.Context, c *market.CandleTime, positions *type
 		if openTrades == 0 {
 			return plan
 		}
-		cl := &types.CloseRequest{
-			Request: types.Request{
-				Reason: "lower low",
-			},
-		}
-		plan.Closes = append(plan.Closes, cl)
+
+		positions.Range(func(pos *types.Position) error {
+
+			// Are there positions that need to be closed?
+			if pos.Side == types.Long && c.Close <= pos.Stop {
+				cl := &types.CloseRequest{
+					Request: types.Request{
+						TradeCommon: pos.TradeCommon,
+						Reason:      "lower low",
+						Candle:      c.Candle,
+						RequestType: types.RequestClose,
+						Price:       c.Close,
+						Timestamp:   c.Timestamp,
+					},
+					CloseCause: types.CloseStopLoss,
+					Position:   pos,
+				}
+				plan.Closes = append(plan.Closes, cl)
+			}
+
+			// Is there an open signal to be become a request
+			if pos.Side == types.Short && c.Close >= pos.Stop {
+				cl := &types.CloseRequest{
+					Request: types.Request{
+						TradeCommon: pos.TradeCommon,
+						Reason:      "close stop",
+						Candle:      c.Candle,
+						RequestType: types.RequestClose,
+						Price:       c.Close,
+						Timestamp:   c.Timestamp,
+					},
+					CloseCause: types.CloseStopLoss,
+					Position:   pos,
+				}
+				plan.Closes = append(plan.Closes, cl)
+			}
+			return nil
+		})
 	}
 
 	return plan

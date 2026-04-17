@@ -10,7 +10,6 @@ import (
 	"time"
 
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -276,8 +275,8 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 	monthStart := time.Date(k.Year, time.Month(k.Month), 1, 0, 0, 0, 0, time.UTC)
 
-	monthSet, err := market.NewMonthlyCandleSet(
-		market.NormalizeInstrument(k.Instrument),
+	monthSet, err := types.NewMonthlyCandleSet(
+		types.NormalizeInstrument(k.Instrument),
 		types.M1,
 		types.FromTime(monthStart),
 		types.PriceScale,
@@ -325,7 +324,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	return nil
 }
 
-func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]) (_ *market.CandleSet, err error) {
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]) (_ *types.CandleSet, err error) {
 	defer func() {
 		if it != nil {
 			closeErr := it.Close()
@@ -350,19 +349,19 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]
 
 	const minutesPerHour = 60
 
-	cs := &market.CandleSet{
-		Instrument: market.NormalizeInstrument(key.Instrument),
+	cs := &types.CandleSet{
+		Instrument: types.NormalizeInstrument(key.Instrument),
 		Start:      types.FromTime(hourStartTime),
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
 		Source:     SourceCandles,
-		Candles:    make([]market.Candle, minutesPerHour),
+		Candles:    make([]types.Candle, minutesPerHour),
 		Valid:      make([]uint64, (minutesPerHour+63)/64),
 	}
 
 	var (
 		curIdx        = -1
-		cur           market.Candle
+		cur           types.Candle
 		spreadSum     int64
 		havePrevClose bool
 		prevClose     types.Price
@@ -386,7 +385,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]
 
 	fillFlat := func(idx int, px types.Price) {
 		// Dense placeholder candle. Intentionally NOT marked valid.
-		cs.Candles[idx] = market.Candle{
+		cs.Candles[idx] = types.Candle{
 			Open:  px,
 			High:  px,
 			Low:   px,
@@ -422,7 +421,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]
 
 		if curIdx == -1 {
 			curIdx = idx
-			cur = market.Candle{
+			cur = types.Candle{
 				Open:      mid,
 				High:      mid,
 				Low:       mid,
@@ -468,7 +467,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[Tick]
 		}
 
 		curIdx = idx
-		cur = market.Candle{
+		cur = types.Candle{
 			Open:      mid,
 			High:      mid,
 			Low:       mid,
@@ -608,7 +607,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 		return nil, err
 	}
 
-	inst := market.NormalizeInstrument(req.Instrument)
+	inst := types.NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
@@ -662,7 +661,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 	return NewChainedCandleIterator(iters...), nil
 }
 
-func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*market.CandleSet, error) {
+func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*types.CandleSet, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

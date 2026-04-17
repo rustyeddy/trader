@@ -1,12 +1,10 @@
-package market
+package types
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 // Simple closure window heuristic in UTC.
@@ -29,7 +27,7 @@ func IsFXMarketClosed(t time.Time) bool {
 	}
 }
 
-func parseToUnix(s string) (types.Timestamp, error) {
+func parseToUnix(s string) (Timestamp, error) {
 	// First try parsing rfc3339
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
@@ -43,7 +41,7 @@ func parseToUnix(s string) (types.Timestamp, error) {
 	if u%60 != 0 {
 		return 0, fmt.Errorf("timestamp not minute-aligned: %q -> %d", s, u)
 	}
-	return types.Timestamp(u), nil
+	return Timestamp(u), nil
 }
 
 func parseEST(s string) (time.Time, error) {
@@ -54,7 +52,7 @@ func parseEST(s string) (time.Time, error) {
 	return t.UTC(), nil // normalize immediately
 }
 
-func fastPrice(s string) (types.Price, error) {
+func fastPrice(s string) (Price, error) {
 	// "1.035030" → "1035030"
 	buf := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -66,7 +64,7 @@ func fastPrice(s string) (types.Price, error) {
 	if err != nil {
 		return 0, err
 	}
-	return types.Price(v), nil
+	return Price(v), nil
 }
 
 func bitIsSet(bits []uint64, i int) bool {
@@ -76,7 +74,7 @@ func bitSet(bits []uint64, i int) {
 	bits[i>>6] |= (uint64(1) << uint(i&63))
 }
 
-func SecondsToTFString(sec types.Timestamp) (string, error) {
+func SecondsToTFString(sec Timestamp) (string, error) {
 	if sec <= 0 {
 		return "", fmt.Errorf("invalid timeframe seconds: %d", sec)
 	}
@@ -106,7 +104,7 @@ func SecondsToTFString(sec types.Timestamp) (string, error) {
 	return "", fmt.Errorf("cannot map timeframe: %d seconds", sec)
 }
 
-func TFStringToSeconds(tf string) (types.Timestamp, error) {
+func TFStringToSeconds(tf string) (Timestamp, error) {
 	switch tf {
 	case "M1":
 		return 60, nil

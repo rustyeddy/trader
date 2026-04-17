@@ -18,7 +18,7 @@ type Broker struct {
 	OpenOrders
 }
 
-func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*types.OrderResult, error) {
+func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*types.OpenResult, error) {
 
 	// Create an order and submit the order
 	o := &types.Order{}
@@ -31,21 +31,23 @@ func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*type
 
 	// here is where the order get submitted to a real broker if
 	// we are using one.
+	res := &types.OpenResult{
+		Order: o,
+	}
 
 	// Here we will just fake it and return a filled order.
 	pos, err := b.SubmitOrder(ctx, o)
 	if err != nil {
-		return err // probably need to correct here and now
+		return res, err // probably need to correct here and now
 	}
-
+	// TODO: Need to create a fill fills
 	pos.FillPrice = req.Price
 	pos.FillTime = req.Timestamp
-	pos.State = types.PositionOpenRequested
 
 	// This would be the time to emulate a delay between order and fill
 	// we will ignore this for now
 	pos.State = types.PositionOpen
-
+	res.Position = pos
 	// send position back on event queue
 	evt := &Event{
 		Type:          EventOrderFilled,
@@ -54,7 +56,7 @@ func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*type
 		BrokerOrderID: types.NewULID(),
 
 		// Redundant?
-		PositionID: pos.Common.ID,
+		PositionID: pos.ID,
 		Instrument: req.Instrument,
 		Open:       req,
 		Position:   pos,
@@ -62,13 +64,10 @@ func (b *Broker) OpenRequest(ctx context.Context, req *types.OpenRequest) (*type
 
 	b.evtQ <- evt
 
-	return nil
+	return res, nil
 }
 
 func (b *Broker) SubmitOrder(ctx context.Context, ord *types.Order) (*types.Position, error) {
-	// fill := &types.Fill{
-	// 	TradeCommon: ord.TradeCommon,
-	// }
 	pos := &types.Position{
 		TradeCommon: ord.TradeCommon,
 	}
@@ -94,16 +93,21 @@ func (b *Broker) SubmitClose(ctx context.Context, req *types.CloseRequest) error
 
 	// When the order is filled, create a trade
 	// pos := req.Position
-	trade := &types.Trade{}
+	trade := &types.Trade{
+		TradeCommon: req.Request.TradeCommon,
+		FillPrice:   req.Price, // TODO add slippage
+		FillTime:    req.Timestamp,
+	}
 
 	// send trade back on event queue
 	evt := &Event{
 		BrokerOrderID: types.NewULID(),
 		Type:          EventPositionClosed,
-		ClientOrderID: req.ID,
+		ClientOrderID: req.Request.ID,
 		Reason:        "lowest low",
 		Cause:         types.CloseManual,
 		Trade:         trade,
+		Position:      req.Position,
 	}
 
 	b.evtQ <- evt

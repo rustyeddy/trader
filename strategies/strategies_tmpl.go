@@ -3,7 +3,6 @@ package strategies
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -55,7 +54,7 @@ func (s *TemplateStrategy) Ready() bool {
 	return s.ready
 }
 
-func (s *TemplateStrategy) Update(c market.Candle) *Plan {
+func (s *TemplateStrategy) Update(c types.Candle) *Plan {
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
 
 	s.bars++

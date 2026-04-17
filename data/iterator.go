@@ -1,7 +1,6 @@
 package data
 
 import (
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -77,27 +76,27 @@ func (it *funcIterator[T]) Close() error {
 
 type CandleIterator interface {
 	Next() bool
-	Candle() market.Candle
-	CandleTime() market.CandleTime
-	NextCandle() (market.Candle, bool)
+	Candle() types.Candle
+	CandleTime() types.CandleTime
+	NextCandle() (types.Candle, bool)
 	Timestamp() types.Timestamp
 	Err() error
 	Close() error
 }
 
 type candleSetIterator struct {
-	base     *market.Iterator
+	base     *types.Iterator
 	rng      types.TimeRange
 	useRange bool
 
-	cur    market.Candle
+	cur    types.Candle
 	ts     types.Timestamp
 	err    error
 	done   bool
 	closed bool
 }
 
-func NewCandleSetIterator(cs *market.CandleSet, rng types.TimeRange) CandleIterator {
+func NewCandleSetIterator(cs *types.CandleSet, rng types.TimeRange) CandleIterator {
 	return &candleSetIterator{
 		base:     cs.Iterator(),
 		rng:      rng,
@@ -105,16 +104,16 @@ func NewCandleSetIterator(cs *market.CandleSet, rng types.TimeRange) CandleItera
 	}
 }
 
-func (it *candleSetIterator) NextCandle() (market.Candle, bool) {
+func (it *candleSetIterator) NextCandle() (types.Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return market.Candle{}, false
+	return types.Candle{}, false
 }
 
 func (it *candleSetIterator) Next() bool {
 	if it.closed || it.done || it.err != nil {
-		it.cur = market.Candle{}
+		it.cur = types.Candle{}
 		it.ts = 0
 		return false
 	}
@@ -131,17 +130,17 @@ func (it *candleSetIterator) Next() bool {
 	}
 
 	it.done = true
-	it.cur = market.Candle{}
+	it.cur = types.Candle{}
 	it.ts = 0
 	return false
 }
 
-func (it *candleSetIterator) Candle() market.Candle {
+func (it *candleSetIterator) Candle() types.Candle {
 	return it.cur
 }
 
-func (it *candleSetIterator) CandleTime() market.CandleTime {
-	ct := market.CandleTime{
+func (it *candleSetIterator) CandleTime() types.CandleTime {
+	ct := types.CandleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}
@@ -167,7 +166,7 @@ func (it *candleSetIterator) Close() error {
 type chainedCandleIterator struct {
 	iters  []CandleIterator
 	idx    int
-	cur    market.Candle
+	cur    types.Candle
 	ts     types.Timestamp
 	err    error
 	closed bool
@@ -179,15 +178,15 @@ func NewChainedCandleIterator(iters ...CandleIterator) CandleIterator {
 	}
 }
 
-func (it *chainedCandleIterator) NextCandle() (market.Candle, bool) {
+func (it *chainedCandleIterator) NextCandle() (types.Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return market.Candle{}, false
+	return types.Candle{}, false
 }
 
-func (it *chainedCandleIterator) CandleTime() market.CandleTime {
-	ct := market.CandleTime{
+func (it *chainedCandleIterator) CandleTime() types.CandleTime {
+	ct := types.CandleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}
@@ -196,7 +195,7 @@ func (it *chainedCandleIterator) CandleTime() market.CandleTime {
 
 func (it *chainedCandleIterator) Next() bool {
 	if it.closed || it.err != nil {
-		it.cur = market.Candle{}
+		it.cur = types.Candle{}
 		it.ts = 0
 		return false
 	}
@@ -216,14 +215,14 @@ func (it *chainedCandleIterator) Next() bool {
 
 		if err := curIt.Err(); err != nil {
 			it.err = err
-			it.cur = market.Candle{}
+			it.cur = types.Candle{}
 			it.ts = 0
 			return false
 		}
 
 		if err := curIt.Close(); err != nil {
 			it.err = err
-			it.cur = market.Candle{}
+			it.cur = types.Candle{}
 			it.ts = 0
 			return false
 		}
@@ -231,12 +230,12 @@ func (it *chainedCandleIterator) Next() bool {
 		it.idx++
 	}
 
-	it.cur = market.Candle{}
+	it.cur = types.Candle{}
 	it.ts = 0
 	return false
 }
 
-func (it *chainedCandleIterator) Candle() market.Candle {
+func (it *chainedCandleIterator) Candle() types.Candle {
 	return it.cur
 }
 

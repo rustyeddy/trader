@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -22,7 +21,7 @@ type dukasfile struct {
 	weekend     bool
 	totalspread int64
 
-	m1 market.Candle
+	m1 types.Candle
 }
 
 func newDatafile(sym string, t time.Time) *dukasfile {
@@ -82,7 +81,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 
 	path := d.key.Path()
 	if !d.Time.IsZero() {
-		if market.IsFXMarketClosed(d.Time.UTC()) {
+		if types.IsFXMarketClosed(d.Time.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)

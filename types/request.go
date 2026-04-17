@@ -1,9 +1,5 @@
 package types
 
-import (
-	"github.com/rustyeddy/trader/market"
-)
-
 type RequestType uint8
 
 const (
@@ -19,7 +15,7 @@ type Request struct {
 	Price
 	Timestamp
 	Reason string
-	Candle market.Candle
+	Candle Candle
 }
 
 type OpenRequest struct {
@@ -28,12 +24,13 @@ type OpenRequest struct {
 
 type CloseRequest struct {
 	Request
+	*Position
 	CloseCause CloseCause
 }
 
 func NewOpenRequest(
 	instr string,
-	c *market.CandleTime,
+	c *CandleTime,
 	side Side,
 	stop Price,
 	take Price,
@@ -53,6 +50,7 @@ func NewOpenRequest(
 			Candle:      c.Candle,
 		},
 	}
+	th.OpenRequest = op
 	return op
 }
 

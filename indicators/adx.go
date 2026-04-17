@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -29,7 +28,7 @@ type ADX struct {
 
 	// candle tracking
 	seen    int
-	prev    market.Candle
+	prev    types.Candle
 	hasPrev bool
 	ready   bool
 	adx     float64
@@ -81,7 +80,7 @@ func (a *ADX) Reset() {
 }
 
 // Update consumes the next closed candle.
-func (a *ADX) Update(c market.Candle) {
+func (a *ADX) Update(c types.Candle) {
 	a.seen++
 
 	// Need a previous candle to form a "period"

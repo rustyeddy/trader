@@ -3,7 +3,6 @@ package data
 import (
 	"time"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -172,7 +171,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 
 		out = append(out, Key{
 			Source:     source,
-			Instrument: market.NormalizeInstrument(instrument),
+			Instrument: types.NormalizeInstrument(instrument),
 			Kind:       KindTick,
 			Year:       t.Year(),
 			Month:      int(t.Month()),

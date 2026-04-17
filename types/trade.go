@@ -22,11 +22,9 @@ type TradeCommon struct {
 
 type Trade struct {
 	*TradeCommon
-	ClosePrice Price // ExitPrice - closePrice = slippage
-	ExitPrice  Price
-	EntryTime  Timestamp
-	ExitTime   Timestamp
-	PNL        Money // account currency (best-effort)
+	FillPrice Price
+	FillTime  Timestamp
+	PNL       Money // account currency (best-effort)
 }
 
 func NewTrade(common *TradeCommon) *Trade {

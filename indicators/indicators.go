@@ -2,7 +2,6 @@
 package indicators
 
 import (
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -20,7 +19,7 @@ type Indicator interface {
 	Reset()
 
 	// Update consumes the next *closed* candle and updates internal state.
-	Update(c market.Candle)
+	Update(c types.Candle)
 
 	// Ready reports whether Value() is meaningful (warmup completed).
 	Ready() bool

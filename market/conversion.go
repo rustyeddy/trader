@@ -6,8 +6,8 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-func QuoteToAccountRate(instrument string, accountCurrency string, prices TickSource) (float64, error) {
-	meta, ok := Instruments[instrument]
+func QuoteToAccountRate(instrument string, accountCurrency string, prices types.TickSource) (float64, error) {
+	meta, ok := types.Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)
 	}

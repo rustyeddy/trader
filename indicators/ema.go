@@ -4,7 +4,6 @@ package indicators
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -52,7 +51,7 @@ func (e *EMA) Reset() {
 	e.ready = false
 }
 
-func (e *EMA) Update(c market.Candle) {
+func (e *EMA) Update(c types.Candle) {
 	// Convert scaled integer close into float price units.
 	x := float64(c.Close) / e.scale
 

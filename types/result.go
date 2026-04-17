@@ -1,6 +1,7 @@
 package types
 
 type OpenResult struct {
-	*order.Order
-	Fills []order.Fill
+	*Order
+	*Position
+	Fills []Fill
 }

@@ -2,7 +2,7 @@ package types
 
 type TradeHistory struct {
 	*TradeCommon
-	*portfolio.Request
+	*OpenRequest
 }
 
 func NewTradeHistory(inst string) *TradeHistory {

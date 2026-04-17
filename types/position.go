@@ -11,7 +11,7 @@ const (
 )
 
 type Position struct {
-	Common    *TradeCommon
+	*TradeCommon
 	FillPrice Price
 	FillTime  Timestamp
 	State     PositionState
@@ -33,7 +33,7 @@ func (p *Positions) Add(pos *Position) {
 	if p.positions == nil {
 		p.positions = make(map[string]*Position)
 	}
-	p.positions[pos.Common.ID] = pos
+	p.positions[pos.ID] = pos
 }
 
 func (p *Positions) Delete(ID string) {
@@ -63,6 +63,6 @@ func (p *Position) triggerTakeProfit(price Price) bool {
 }
 
 func (p *Position) UnrealizedPL(currentPrice Price, quoteToAccount Price) Money {
-	plQuote := Money(p.Common.Units) * Money(currentPrice-p.FillPrice)
+	plQuote := Money(p.Units) * Money(currentPrice-p.FillPrice)
 	return Money(plQuote * Money(quoteToAccount))
 }

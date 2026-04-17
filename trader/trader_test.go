@@ -9,7 +9,6 @@ import (
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/data"
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -39,7 +38,7 @@ func TestTrader(t *testing.T) {
 		Broker: &broker.Broker{
 			ID: types.NewULID(),
 			OpenOrders: broker.OpenOrders{
-				Orders: make(map[string]*order.Order),
+				Orders: make(map[string]*types.Order),
 			},
 		},
 	}

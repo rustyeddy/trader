@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/indicators"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -86,7 +85,7 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c market.Candle) *Plan {
+func (x *EMACrossADX) Update(c types.Candle) *Plan {
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)

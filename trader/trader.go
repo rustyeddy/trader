@@ -109,7 +109,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 		}
 		for _, cl := range plan.Closes {
 			fmt.Printf("CL: %+v\n", cl)
-			l.Info("submit close request", "ID", cl.ID)
+			l.Info("submit close request", "ID", cl.Request.ID)
 
 			// TODO: sanitize the close request
 			err = t.Broker.SubmitClose(ctx, cl)
@@ -126,15 +126,19 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 			}
 
 			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
-			res, err = t.Broker.OpenRequest(ctx, openReq)
+			res, err := t.Broker.OpenRequest(ctx, openReq)
 			if err != nil {
 				return err
 			}
 
-			acct.AddPosition(res.Position)
-			th := t.TradeBook.Get(openReq.ID)
-			th.Orders = append(th.Orders, res.Order)
-			th.Fills = append(th.Fills, res.Fill)
+			_ = res
+			/*
+				act := t.Account
+				act.AddPosition(ctx, res.Position)
+				th := t.TradeBook.Get(openReq.ID)
+				th.Orders = append(th.Orders, res.Order)
+			*/
+			// th.Fills = append(th.Fills, res.Fill)
 		}
 	}
 
@@ -171,19 +175,15 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 
 		err := t.Account.AddPosition(ctx, pos)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		// TODO Journal the new position
 
 	case broker.EventPositionClosed:
 		// We have the close event from the broker
-
-		fmt.Printf("ORDER Closed: %v\n", evt)
 		pos := evt.Position
 		trade := evt.Trade
-		panic(pos == nil) // should always have position
-		panic(trade == nil)
 
 		// Delete position from Account portfolio, and adds trade
 		err := t.Account.ClosePosition(pos, trade)

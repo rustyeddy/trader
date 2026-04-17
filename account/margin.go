@@ -3,12 +3,11 @@ package account
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
 func TradeMargin(units types.Units, price types.Price, instrument string, quoteToAccount types.Rate) (types.Money, error) {
-	meta, ok := market.Instruments[instrument]
+	meta, ok := types.Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)
 	}

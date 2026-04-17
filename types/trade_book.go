@@ -1,5 +1,10 @@
 package types
 
 type TradeBook struct {
-	Trades []*Trade
+	Trades map[string]*Trade
+}
+
+func (tb *TradeBook) Get(id string) *Trade {
+	trade, _ := tb.Trades[id]
+	return trade
 }

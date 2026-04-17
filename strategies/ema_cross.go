@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/indicators"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -77,7 +76,7 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c market.Candle) *Plan {
+func (x *EMACross) Update(c types.Candle) *Plan {
 	// Update indicators first
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)

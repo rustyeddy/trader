@@ -2,7 +2,7 @@ package strategies
 
 import (
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 var l = log.Strat
@@ -12,7 +12,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(c market.Candle) *Plan
+	Update(c types.Candle) *Plan
 }
 
 type Float64 interface {

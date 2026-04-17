@@ -15,7 +15,6 @@ import (
 	"time"
 
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
 )
@@ -47,7 +46,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 	if source == "" {
 		source = "unknown"
 	}
-	instrument := market.NormalizeInstrument(k.Instrument)
+	instrument := types.NormalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
 	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
@@ -77,7 +76,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<filename>.csv
 	n := len(parts)
 	k = Key{
-		Instrument: market.NormalizeInstrument(parts[n-4]),
+		Instrument: types.NormalizeInstrument(parts[n-4]),
 		Source:     normalizeSource(parts[n-5]),
 		Kind:       KindCandle,
 	}
@@ -102,7 +101,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 
-	fileInst := market.NormalizeInstrument(nameParts[0])
+	fileInst := types.NormalizeInstrument(nameParts[0])
 	fileYear, err := strconv.Atoi(nameParts[1])
 	if err != nil {
 		return k, false
@@ -134,7 +133,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
-	instrument := market.NormalizeInstrument(k.Instrument)
+	instrument := types.NormalizeInstrument(k.Instrument)
 
 	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
 	return filepath.Join(
@@ -169,7 +168,7 @@ func parseTickPath(path string) (Key, bool) {
 	inst := parts[n-5]
 
 	k = Key{
-		Instrument: market.NormalizeInstrument(inst),
+		Instrument: types.NormalizeInstrument(inst),
 		Source:     normalizeSource("dukascopy"),
 		Kind:       KindTick,
 		TF:         types.Ticks,
@@ -214,7 +213,7 @@ func parseTickPath(path string) (Key, bool) {
 
 func (s *Store) RelDir(key Key) string {
 	return filepath.Join(
-		market.NormalizeInstrument(key.Instrument),
+		types.NormalizeInstrument(key.Instrument),
 		strings.ToUpper(key.TF.String()),
 		fmt.Sprintf("%04d", key.Year),
 	)
@@ -288,7 +287,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 	})
 }
 
-func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
+func (store *Store) writeMetadata(cs *types.CandleSet, w io.Writer) error {
 	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -302,7 +301,7 @@ func (store *Store) writeMetadata(cs *market.CandleSet, w io.Writer) error {
 	return err
 }
 
-func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
+func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -331,14 +330,14 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 	spanSec := int64(endTime.Sub(monthStart).Seconds())
 	n := int(spanSec / step)
 
-	instName := market.NormalizeInstrument(key.Instrument)
-	cs = &market.CandleSet{
+	instName := types.NormalizeInstrument(key.Instrument)
+	cs = &types.CandleSet{
 		Instrument: instName,
 		Source:     "candles",
 		Start:      start,
 		Timeframe:  tf,
 		Scale:      types.PriceScale,
-		Candles:    make([]market.Candle, n),
+		Candles:    make([]types.Candle, n),
 		Valid:      make([]uint64, (n+63)/64),
 	}
 
@@ -409,7 +408,7 @@ func (store *Store) ReadCSV(key Key) (cs *market.CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		cs.Candles[idx] = market.Candle{
+		cs.Candles[idx] = types.Candle{
 			High:      highv,
 			Open:      openv,
 			Low:       lowv,
@@ -438,7 +437,7 @@ func looksLikeHeader(rec []string) bool {
 	return h == "timestamp" || h == "time"
 }
 
-func (s *Store) WriteCSV(cs *market.CandleSet) error {
+func (s *Store) WriteCSV(cs *types.CandleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
@@ -453,7 +452,7 @@ func (s *Store) WriteCSV(cs *market.CandleSet) error {
 
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: market.NormalizeInstrument(cs.Instrument),
+		Instrument: types.NormalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
 		TF:         types.Timeframe(cs.Timeframe),
