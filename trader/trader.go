@@ -3,6 +3,7 @@ package trader
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/account"
@@ -32,66 +33,117 @@ type ConfigBackTest struct {
 	Account string
 }
 
-func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
-	l.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
+type backtestStrategy interface {
+	Name() string
+	Update(context.Context, *types.CandleTime, *types.Positions) *strategies.Plan
+}
 
-	// Start up the broker event handler
-	evtQ := t.Broker.Events()
+type noopBacktestStrategy struct {
+	strategies.NoopStrategy
+}
 
-	l.Debug("broker event handler started")
+func (n noopBacktestStrategy) Update(ctx context.Context, c *types.CandleTime, _ *types.Positions) *strategies.Plan {
+	if c == nil {
+		return n.NoopStrategy.Update(ctx, nil)
+	}
+	candle := c.Candle
+	return n.NoopStrategy.Update(ctx, &candle)
+}
+
+func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
+	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy))
+	switch strategyName {
+	case "", "fake":
+		return &strategies.Fake{
+			StrategyConfig: strategies.StrategyConfig{
+				Instrument: cfg.Instrument,
+			},
+			CandleCount: 10,
+		}, nil
+	case "noop", "no-op":
+		return noopBacktestStrategy{NoopStrategy: strategies.NoopStrategy{}}, nil
+	default:
+		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
+	}
+}
+
+func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *broker.Event) (<-chan error, <-chan struct{}) {
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+
 	go func() {
-		// TODO Check broker events to see if any broker activity has
-		// triggered, order fill, stop hit, etc.
+		defer close(done)
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case evt, ok := <-evtQ:
-				// make sure the channel has not closed
 				if !ok {
 					l.Info("broker event channel closed")
-					// channel has been shutdown, we have no choice but to
-					// just return
 					return
 				}
-				err := t.processEvent(ctx, evt)
-				if err != nil {
-					l.Error("failed to process broker event", "eventType", evt.Type, "error", err)
+				if err := t.processEvent(ctx, evt); err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
 				}
 			}
 		}
 	}()
 
-	// TODO have the strategy manager look it up and return
-	strategy := strategies.Fake{
-		StrategyConfig: strategies.StrategyConfig{
-			Instrument: cfg.Instrument,
-		},
-		CandleCount: 10,
-	}
-	l.Info("strategy selected", "strategy", strategy.Name())
+	return errCh, done
+}
 
-	// Select the Instrument, TimeRange and TimeFrame
-	candlereq := data.CandleRequest{
-		Source:     "candles",
-		Instrument: cfg.Instrument,
-		Range:      types.NewTimeRange(types.FromTime(cfg.Start), types.FromTime(cfg.End), types.M1),
-	}
-	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
-
-	// Grab the candle iterator for this backtest
-	itr, err := t.DataManager.Candles(context.TODO(), candlereq)
-	if err != nil {
+func (t *Trader) brokerEventError(errCh <-chan error) error {
+	select {
+	case err := <-errCh:
 		return err
+	default:
+		return nil
 	}
+}
+
+func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr data.CandleIterator) (err error) {
+	if itr == nil {
+		return fmt.Errorf("nil candle iterator")
+	}
+
+	defer func() {
+		closeErr := itr.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	evtQ := t.Broker.Events()
+	l.Debug("broker event handler started")
+	errCh, done := t.startBrokerEventHandler(runCtx, evtQ)
+	defer func() {
+		cancel()
+		<-done
+	}()
+
 	processedCandles := 0
 	submittedOpens := 0
 	submittedCloses := 0
 
 	for itr.Next() {
+		if err := runCtx.Err(); err != nil {
+			return err
+		}
+		if err := t.brokerEventError(errCh); err != nil {
+			return err
+		}
+
 		candle := itr.CandleTime()
 		l.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		processedCandles++
 
-		// this should probaby be event driven not once a polling cycle
 		err := t.Account.ResolveWithMarks(map[string]types.Price{
 			cfg.Instrument: candle.Close,
 		})
@@ -99,23 +151,20 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 			return err
 		}
 
-		// TODO We can just add positions to the context.
-		plan := strategy.Update(ctx, &candle, &t.Account.Positions)
+		plan := strategy.Update(runCtx, &candle, &t.Account.Positions)
 		l.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
-		for _, cancel := range plan.Cancel {
-			// TODO find the Order that needs to be canceled and cancel it.
-			l.Warn("TODO - cancel request not implemented", "cancel", cancel)
+		for _, cancelReq := range plan.Cancel {
+			l.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
-			fmt.Printf("CL: %+v\n", cl)
 			l.Info("submit close request", "ID", cl.Request.ID)
 
-			// TODO: sanitize the close request
-			err = t.Broker.SubmitClose(ctx, cl)
+			err = t.Broker.SubmitClose(runCtx, cl)
 			if err != nil {
 				return err
 			}
+			submittedCloses++
 		}
 
 		for _, openReq := range plan.Opens {
@@ -126,23 +175,67 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 			}
 
 			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
-			res, err := t.Broker.OpenRequest(ctx, openReq)
+			_, err = t.Broker.OpenRequest(runCtx, openReq)
 			if err != nil {
 				return err
 			}
-
-			_ = res
-			/*
-				act := t.Account
-				act.AddPosition(ctx, res.Position)
-				th := t.TradeBook.Get(openReq.ID)
-				th.Orders = append(th.Orders, res.Order)
-			*/
-			// th.Fills = append(th.Fills, res.Fill)
+			submittedOpens++
 		}
 	}
 
+	if err := itr.Err(); err != nil {
+		return err
+	}
+	if err := runCtx.Err(); err != nil {
+		return err
+	}
+	if err := t.brokerEventError(errCh); err != nil {
+		return err
+	}
+
 	l.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
+
+	return nil
+}
+
+func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
+	l.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
+	if t == nil {
+		return fmt.Errorf("nil trader")
+	}
+	if cfg == nil {
+		return fmt.Errorf("nil backtest config")
+	}
+	if t.Account == nil {
+		return fmt.Errorf("nil account")
+	}
+	if t.Broker == nil {
+		return fmt.Errorf("nil broker")
+	}
+	if t.DataManager == nil {
+		return fmt.Errorf("nil data manager")
+	}
+
+	strategy, err := resolveBacktestStrategy(cfg)
+	if err != nil {
+		return err
+	}
+	l.Info("strategy selected", "strategy", strategy.Name())
+
+	// Select the Instrument, TimeRange and TimeFrame
+	candlereq := data.CandleRequest{
+		Source:     "candles",
+		Instrument: cfg.Instrument,
+		Range:      types.NewTimeRange(types.FromTime(cfg.Start), types.FromTime(cfg.End), cfg.TimeFrame),
+	}
+	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
+
+	// Grab the candle iterator for this backtest
+	itr, err := t.DataManager.Candles(ctx, candlereq)
+	if err != nil {
+		return err
+	}
+
 	// Finished
 	// If candles are used up
 	//   Close out any open position
@@ -150,12 +243,15 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	//   Update Account with PnL, Balance
 	//   Generate Backtest Report
 
-	return nil
+	return t.backTestWithIterator(ctx, cfg, strategy, itr)
 }
 
 func breakpoint() {}
 
 func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
+	if evt == nil {
+		return fmt.Errorf("nil broker event")
+	}
 
 	l.Info("broker event recieved",
 		"type", evt.Type.String(),
@@ -184,17 +280,23 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 		// We have the close event from the broker
 		pos := evt.Position
 		trade := evt.Trade
+		if pos == nil {
+			return fmt.Errorf("position closed event missing position")
+		}
+		if trade == nil {
+			return fmt.Errorf("position closed event missing trade")
+		}
 
 		// Delete position from Account portfolio, and adds trade
 		err := t.Account.ClosePosition(pos, trade)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		// TODO Journal the closed position, trade and account
 
 	default:
-		fmt.Printf("Either unknown or unsupported event: %v\n", evt.Type)
+		l.Warn("unsupported broker event", "eventType", evt.Type)
 
 	}
 	return nil
