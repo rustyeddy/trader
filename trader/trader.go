@@ -126,6 +126,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 	defer func() {
 		cancel()
 		<-done
+		if err == nil {
+			err = t.brokerEventError(errCh)
+		}
 	}()
 
 	processedCandles := 0

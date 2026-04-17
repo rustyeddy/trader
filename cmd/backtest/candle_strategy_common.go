@@ -10,8 +10,6 @@ import (
 	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/data"
-	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -72,43 +70,40 @@ type candleStrategyAdapter struct {
 func (a *candleStrategyAdapter) Name() string { return a.S.Name() }
 func (a *candleStrategyAdapter) Reset()       { a.S.Reset() }
 
-func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c market.Candle) *portfolio.OpenRequest {
+func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c types.Candle) *types.OpenRequest {
 	d := a.S.Update(c)
-	if d.Signal() == strategies.Hold {
+	if len(d.Opens) == 0 {
 		return nil
 	}
-
-	entry := c.Close
+	req := *d.Opens[0]
+	if req.Price == 0 {
+		req.Price = c.Close
+	}
+	if req.Timestamp == 0 {
+		req.Timestamp = ctx.Timestamp
+	}
+	if req.Units == 0 {
+		req.Units = a.Units
+	}
 	stopDist := a.StopPips * types.Price(a.PipScaled)
 	takeDist := a.TakePips * types.Price(a.PipScaled)
-
-	req := &portfolio.OpenRequest{
-		Units:  a.Units,
-		Reason: d.Reason(),
+	if req.Side == types.Long {
+		if req.Stop == 0 && a.StopPips > 0 {
+			req.Stop = c.Close - stopDist
+		}
+		if req.Take == 0 && a.TakePips > 0 {
+			req.Take = c.Close + takeDist
+		}
 	}
-
-	switch d.Signal() {
-	case strategies.Buy:
-		req.Side = types.Long
-		if a.StopPips > 0 {
-			req.Stop = entry - stopDist
+	if req.Side == types.Short {
+		if req.Stop == 0 && a.StopPips > 0 {
+			req.Stop = c.Close + stopDist
 		}
-		if a.TakePips > 0 {
-			req.Take = entry + takeDist
+		if req.Take == 0 && a.TakePips > 0 {
+			req.Take = c.Close - takeDist
 		}
-	case strategies.Sell:
-		req.Side = types.Short
-		if a.StopPips > 0 {
-			req.Stop = entry + stopDist
-		}
-		if a.TakePips > 0 {
-			req.Take = entry - takeDist
-		}
-	default:
-		return nil
 	}
-
-	return req
+	return &req
 }
 
 type candleRunMeta struct {
@@ -151,9 +146,9 @@ func runCandleStrategy(
 		return fmt.Errorf("unsupported timeframe %q", opts.Timeframe)
 	}
 
-	instrument := market.NormalizeInstrument(opts.Instrument)
-	instMeta, ok := market.Instruments[instrument]
-	if !ok {
+	instrument := types.NormalizeInstrument(opts.Instrument)
+	instMeta := types.GetInstrument(instrument)
+	if instMeta == nil {
 		return fmt.Errorf("unknown instrument %q", instrument)
 	}
 
@@ -185,9 +180,7 @@ func runCandleStrategy(
 	}
 
 	wins, losses := 0, 0
-	l := eng.Account.Trades.Len()
-	for i := 0; i < l; i++ {
-		tr := eng.Account.Trades.Get(i)
+	for _, tr := range eng.Account.Trades {
 		if tr.PNL > 0 {
 			wins++
 		} else if tr.PNL < 0 {
@@ -209,7 +202,7 @@ func runCandleStrategy(
 		RR:           meta.RR,
 		Start:        req.DataRequest.Range.Start,
 		End:          req.DataRequest.Range.End,
-		Trades:       eng.Account.Trades.Len(),
+		Trades:       len(eng.Account.Trades),
 		Wins:         wins,
 		Losses:       losses,
 		StartBalance: meta.Balance,

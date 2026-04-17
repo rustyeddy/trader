@@ -12,6 +12,11 @@ type BrokerInterface interface {
 	Events() <-chan *Event
 }
 
+type OrderRequest struct {
+	Instrument string
+	Units      types.Units
+}
+
 type Broker struct {
 	ID   string
 	evtQ chan *Event

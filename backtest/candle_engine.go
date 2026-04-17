@@ -1,13 +1,11 @@
 package backtest
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -21,7 +19,7 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest
+	OnBar(ctx *CandleContext, c market.Candle) *types.OpenRequest
 }
 
 type Side int8
@@ -34,14 +32,14 @@ type CandleContext struct {
 	Timestamp  types.Timestamp
 	GapBars    int // missing bars between this and previous valid bar
 
-	Pos     *portfolio.Position
+	Pos     *types.Position
 	Account *account.Account
 }
 
 type CandleEngine struct {
 	Instrument string
 	types.Timeframe
-	Pos     *portfolio.Position
+	Pos     *types.Position
 	Account *account.Account
 }
 
@@ -102,9 +100,17 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 		}
 		barIndex++
 		if e.Pos != nil {
-			if exitPx, reason, hit := checkExit(e.Pos, c); hit {
+			if exitPx, _, hit := checkExit(e.Pos, c); hit {
 				fmt.Printf("close position: %d - %d\n", barIndex, count)
-				e.Account.ClosePosition(e.Pos, exitPx, ts, reason)
+				trade := &types.Trade{
+					TradeCommon: e.Pos.TradeCommon,
+					FillPrice:   exitPx,
+					FillTime:    ts,
+				}
+				if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+					return err
+				}
+				e.Pos = nil
 			}
 		}
 
@@ -117,26 +123,13 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 			if req.Stop == 0 {
 				return fmt.Errorf("risk sizing requires a stop price")
 			}
-
-			qta, err := e.Account.QuoteToAccount(context.TODO(), e.Instrument, c.Close)
-			if err != nil {
+			if err := e.Account.SizePosition(req); err != nil {
 				return err
 			}
-
-			r := account.SizeRequest{
-				Instrument:     e.Instrument,
-				Entry:          c.Close,
-				Stop:           req.Stop,
-				QuoteToAccount: qta,
-			}
-			res, err := e.Account.SizePosition(r)
-			if err != nil {
-				return err
-			}
-			req.Units = res.Units
 		}
 		count++
 		e.Account.OpenPosition(ts, c, req)
+		e.Pos = e.Account.Positions.Positions()[req.ID]
 	}
 
 	if err := feed.Err(); err != nil {
@@ -145,7 +138,15 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 
 	if e.Pos != nil && haveLast {
 		fmt.Printf("close position: %d - %d\n", barIndex, count)
-		e.Account.ClosePosition(e.Pos, lastC.Close, lastTS, "end_of_data")
+		trade := &types.Trade{
+			TradeCommon: e.Pos.TradeCommon,
+			FillPrice:   lastC.Close,
+			FillTime:    lastTS,
+		}
+		if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+			return err
+		}
+		e.Pos = nil
 	}
 
 	return nil
@@ -153,7 +154,7 @@ func (e *CandleEngine) Run(feed data.CandleIterator, strat CandleStrategy) error
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p *portfolio.Position, c market.Candle) (exitPx types.Price, reason string, hit bool) {
+func checkExit(p *types.Position, c market.Candle) (exitPx types.Price, reason string, hit bool) {
 	if p == nil {
 		return 0, "", false
 	}

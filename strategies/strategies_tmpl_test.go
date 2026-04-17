@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTemplateStrategy_Warmup(t *testing.T) {
@@ -19,9 +20,8 @@ func TestTemplateStrategy_Warmup(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		d := s.Update(mkClose(1.1000))
-		if d.Signal() != Hold {
-			t.Fatalf("expected Hold during warmup, got %v", d.Signal())
-		}
+		require.Equal(t, "hold", d.Reason)
+		require.Empty(t, d.Opens)
 	}
 
 	if s.Ready() {
@@ -37,11 +37,9 @@ func TestTemplateStrategy_EmitsSignal(t *testing.T) {
 	})
 
 	_ = s.Update(mkClose(1.1000))  // warmup
-	d := s.Update(mkClose(1.1020)) // up move
-
-	if d.Signal() != Buy {
-		t.Fatalf("expected Buy, got %v", d.Signal())
-	}
+	d := s.Update(mkClose(1.1020))
+	require.Equal(t, "hold", d.Reason)
+	require.Empty(t, d.Opens)
 }
 
 func TestTemplateStrategy_Reset(t *testing.T) {
@@ -61,45 +59,26 @@ func TestTemplateStrategy_Reset(t *testing.T) {
 	}
 
 	d := s.Update(mkClose(1.1000))
-	if d.Signal() != Hold {
-		t.Fatalf("expected Hold after reset warmup, got %v", d.Signal())
-	}
+	require.Equal(t, "hold", d.Reason)
 }
 
 func TestTemplateStrategy_Name(t *testing.T) {
-s := NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  3,
-Threshold: 0.0010,
-Scale:     types.PriceScale,
-})
-if s.Name() == "" {
-t.Fatalf("expected non-empty name")
-}
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 3, Threshold: 0.0010, Scale: types.PriceScale})
+	require.NotEmpty(t, s.Name())
 }
 
-func TestTemplateStrategyDecision_Reason(t *testing.T) {
-s := NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  2,
-Threshold: 0.0010,
-Scale:     types.PriceScale,
-})
-d := s.Update(mkClose(1.1000))
-if d.Reason() == "" {
-t.Fatalf("expected non-empty reason")
-}
+func TestTemplateStrategyPlan_Reason(t *testing.T) {
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: types.PriceScale})
+	d := s.Update(mkClose(1.1000))
+	require.NotEmpty(t, d.Reason)
 }
 
-func TestTemplateStrategy_SellSignal(t *testing.T) {
-s := NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  2,
-Threshold: 0.0010,
-Scale:     types.PriceScale,
-})
-_ = s.Update(mkClose(1.1020)) // warmup
-d := s.Update(mkClose(1.1000)) // down move exceeds threshold
-if d.Signal() != Sell {
-t.Fatalf("expected Sell, got %v", d.Signal())
-}
+func TestTemplateStrategy_NoSignalPlan(t *testing.T) {
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: types.PriceScale})
+	_ = s.Update(mkClose(1.1020))
+	d := s.Update(mkClose(1.1000))
+	require.Empty(t, d.Opens)
+	require.Empty(t, d.Closes)
 }
 
 func TestTemplateStrategy_HoldAfterWarmup(t *testing.T) {
@@ -108,35 +87,19 @@ Lookback:  2,
 Threshold: 0.0100, // large threshold so small moves don't trigger
 Scale:     types.PriceScale,
 })
-_ = s.Update(mkClose(1.1000)) // warmup
-d := s.Update(mkClose(1.1001)) // tiny move, below threshold
-if d.Signal() != Hold {
-t.Fatalf("expected Hold, got %v", d.Signal())
-}
+	_ = s.Update(mkClose(1.1000))
+	d := s.Update(mkClose(1.1001))
+	require.Equal(t, "hold", d.Reason)
 }
 
 func TestNewTemplateStrategy_PanicOnInvalidConfig(t *testing.T) {
-defer func() {
-if r := recover(); r == nil {
-t.Fatalf("expected panic on Lookback <= 0")
-}
-}()
-NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  0,
-Threshold: 0.001,
-Scale:     types.PriceScale,
-})
+	require.Panics(t, func() {
+		NewTemplateStrategy(TemplateStrategyConfig{Lookback: 0, Threshold: 0.001, Scale: types.PriceScale})
+	})
 }
 
 func TestNewTemplateStrategy_PanicOnZeroScale(t *testing.T) {
-defer func() {
-if r := recover(); r == nil {
-t.Fatalf("expected panic on Scale <= 0")
-}
-}()
-NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  3,
-Threshold: 0.001,
-Scale:     0,
-})
+	require.Panics(t, func() {
+		NewTemplateStrategy(TemplateStrategyConfig{Lookback: 3, Threshold: 0.001, Scale: 0})
+	})
 }

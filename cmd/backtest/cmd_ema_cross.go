@@ -8,7 +8,6 @@ import (
 
 	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -24,13 +23,7 @@ var emaCrossOpts = newCandleCmdCommon()
 var emaCrossCfg = strategies.EMACrossConfig{}
 
 func init() {
-	scfg := strategies.StrategyConfig{
-		Balance: types.MoneyFromFloat(1000),
-		Stop:    20,
-		Take:    40,
-		RR:      types.RateFromFloat(2.0),
-	}
-	emaCrossCfg.StrategyConfig = scfg
+	emaCrossCfg.StrategyConfig = strategies.StrategyConfig{}
 
 	cmd := CMDBacktestEMACross
 	emaCrossOpts.addFlags(cmd)
@@ -50,11 +43,9 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 
 func runEMACrossFromFlags(cmd *cobra.Command) error {
 	emaCrossCfg.Scale = types.PriceScale
-	emaCrossCfg.Stop = emaCrossOpts.stopPips()
-	emaCrossCfg.Take = emaCrossOpts.takePips()
 
 	strat := strategies.NewEMACross(emaCrossCfg)
-	act := &account.Account{}
+	act := account.NewAccount("adhoc-ema-cross", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
@@ -64,8 +55,8 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 			RunName:  "adhoc-ema-cross",
 			Kind:     "ema-cross",
 			Created:  types.FromTime(time.Now().UTC()),
-			Balance:  emaCrossCfg.Balance,
-			RR:       emaCrossCfg.RR,
+			Balance:  act.Balance,
+			RR:       0,
 			Strategy: strat.Name(),
 		},
 		act,
@@ -105,13 +96,11 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
-	emaCrossOpts.Instrument = market.NormalizeInstrument(emaCrossOpts.Instrument)
+	emaCrossOpts.Instrument = types.NormalizeInstrument(emaCrossOpts.Instrument)
 	cfg.Scale = types.PriceScale
-	cfg.Stop = emaCrossOpts.stopPips()
-	cfg.Take = emaCrossOpts.takePips()
 
 	strat := strategies.NewEMACross(cfg)
-	act := &account.Account{}
+	act := account.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
@@ -121,8 +110,8 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
 			Created:  types.FromTime(time.Now().UTC()),
-			Balance:  cfg.Balance,
-			RR:       cfg.RR,
+			Balance:  rr.StartingBalance,
+			RR:       rr.RR,
 			Strategy: strat.Name(),
 		},
 		act,

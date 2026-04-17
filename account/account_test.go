@@ -1,33 +1,13 @@
 package account_test
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// fakePrices implements market.TickSource for testing.
-type fakePrices struct {
-	ticks map[string]market.Tick
-	err   error
-}
-
-func (f *fakePrices) GetTick(_ context.Context, instrument string) (market.Tick, error) {
-	if f.err != nil {
-		return market.Tick{}, f.err
-	}
-	t, ok := f.ticks[instrument]
-	if !ok {
-		return market.Tick{}, errors.New("no tick for " + instrument)
-	}
-	return t, nil
-}
 
 func usdAccount() account.Account {
 	return account.Account{
@@ -45,7 +25,7 @@ func TestQuoteToRate_QuoteCurrencyIsAccountCurrency(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	rate, err := acct.QuoteToAccount(context.Background(), "EURUSD", 1013322)
+	rate, err := acct.QuoteToAccount("EURUSD", 1013322)
 	require.NoError(t, err)
 	assert.Equal(t, types.Rate(types.RateScale), rate)
 }
@@ -58,19 +38,19 @@ func TestQuoteAccount_BaseCurrencyIsAccountCurrency(t *testing.T) {
 
 	acct := usdAccount()
 
-	rate, err := acct.QuoteToAccount(context.Background(), "USDJPY", types.PriceFromFloat(150.02))
+	rate, err := acct.QuoteToAccount("USDJPY", types.PriceFromFloat(150.02))
 	require.NoError(t, err)
-	approxExpected := float64(types.RateScale) / 150.02 // mid = (150.00+150.02)/2 ≈ 150.01
+	approxExpected := float64(types.RateScale) / 150.02
 	assert.InDelta(t, approxExpected, float64(rate), 10)
 }
 
-// TestQuoteAccount_BaseCurrencyIsAccountCurrency_NoPrice tests the error path
-// when the tick for a USD-base pair is not available.
-func TestQuoteAccount_BaseCurrencyIsAccountCurrency_NoPrice(t *testing.T) {
+// TestQuoteAccount_BaseCurrencyIsAccountCurrency_InvalidPrice tests the error path
+// when no valid price is available for a USD-base pair.
+func TestQuoteAccount_BaseCurrencyIsAccountCurrency_InvalidPrice(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	_, err := acct.QuoteToAccount(context.Background(), "USDJPY", types.PriceFromFloat(150.02))
+	_, err := acct.QuoteToAccount("USDJPY", 0)
 	assert.Error(t, err)
 }
 
@@ -79,7 +59,7 @@ func TestQuoteAccount_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := usdAccount()
-	_, err := acct.QuoteToAccount(context.Background(), "XXXYYY", types.PriceFromFloat(150.02))
+	_, err := acct.QuoteToAccount("XXXYYY", types.PriceFromFloat(150.02))
 	assert.Error(t, err)
 }
 
@@ -95,6 +75,6 @@ func TestQuoteAccount_CrossCurrency(t *testing.T) {
 		Currency: "JPY",
 		Balance:  types.MoneyFromFloat(1_000_000),
 	}
-	_, err := acct.QuoteToAccount(context.Background(), "EURUSD", types.Price(1_000_000))
+	_, err := acct.QuoteToAccount("EURUSD", types.Price(1_000_000))
 	assert.Error(t, err)
 }

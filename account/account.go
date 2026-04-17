@@ -274,7 +274,7 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 
 		inst := types.GetInstrument(pos.Instrument)
 		if inst == nil {
-			return fmt.Errorf("instrument is nil %s\n", inst)
+			return fmt.Errorf("instrument is nil %s", pos.Instrument)
 		}
 
 		qta, err := act.QuoteToAccount(pos.Instrument, mark)

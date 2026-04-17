@@ -39,7 +39,7 @@ func TestTradeMargin_NegativeUnitsSymmetric(t *testing.T) {
 func TestTradeMargin_ZeroUnits(t *testing.T) {
 	t.Parallel()
 
-	got, err := account.TradeMargin(0, types.PriceFromFloat(1.5), "EURUSD", types.RateScale)
+	got, err := account.TradeMargin(0, types.PriceFromFloat(1.5), "EURUSD", types.Rate(types.RateScale))
 	require.NoError(t, err)
 	assert.Equal(t, types.Money(0), got)
 }
@@ -54,13 +54,13 @@ func TestTradeMargin_InvalidRate(t *testing.T) {
 func TestTradeMargin_InvalidPrice(t *testing.T) {
 	t.Parallel()
 
-	_, err := account.TradeMargin(1000, 0, "EURUSD", types.RateScale)
+	_, err := account.TradeMargin(1000, 0, "EURUSD", types.Rate(types.RateScale))
 	assert.Error(t, err)
 }
 
 func TestTradeMargin_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
-	_, err := account.TradeMargin(1000, types.PriceFromFloat(1.1), "XXXYYY", types.RateScale)
+	_, err := account.TradeMargin(1000, types.PriceFromFloat(1.1), "XXXYYY", types.Rate(types.RateScale))
 	assert.Error(t, err)
 }

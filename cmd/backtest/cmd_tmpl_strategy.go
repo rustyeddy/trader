@@ -21,7 +21,7 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 		return err
 	}
 
-	runName, err := selectConfigRunByKind(bcfg, btRunName, "ema-cross")
+	runName, err := selectConfigRunByKind(bcfg, btRunName, "template")
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 	}
 
 	strat := strategies.NewTemplateStrategy(cfg)
-	act := &account.Account{}
+	act := account.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
 		tmplStrategyOpts,
@@ -47,8 +47,8 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
 			Created:  types.FromTime(time.Now().UTC()),
-			Balance:  cfg.Balance,
-			RR:       cfg.RR,
+			Balance:  rr.StartingBalance,
+			RR:       rr.RR,
 			Strategy: strat.Name(),
 		},
 		act,

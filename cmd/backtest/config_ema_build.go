@@ -19,15 +19,10 @@ func BuildEMACrossConfig(r bt.ResolvedRun) (strategies.EMACrossConfig, error) {
 	}
 
 	return strategies.EMACrossConfig{
-		StrategyConfig: strategies.StrategyConfig{
-			Balance: r.StartingBalance,
-			Stop:    r.StopPips,
-			Take:    r.TakePips,
-			RR:      r.RR,
-		},
-		FastPeriod: ema.Fast,
-		SlowPeriod: ema.Slow,
-		Scale:      r.Scale,
+		StrategyConfig: strategies.StrategyConfig{},
+		FastPeriod:     ema.Fast,
+		SlowPeriod:     ema.Slow,
+		Scale:          r.Scale,
 	}, nil
 }
 

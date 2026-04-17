@@ -8,7 +8,6 @@ import (
 
 	"github.com/rustyeddy/trader/account"
 	bt "github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -24,13 +23,7 @@ var emaCrossADXOpts = newCandleCmdCommon()
 var emaCrossADXCfg = strategies.EMACrossADXConfig{}
 
 func init() {
-	scfg := strategies.StrategyConfig{
-		Balance: types.MoneyFromFloat(1000),
-		Stop:    20,
-		Take:    40,
-		RR:      types.RateFromFloat(2.0),
-	}
-	emaCrossADXCfg.StrategyConfig = scfg
+	emaCrossADXCfg.StrategyConfig = strategies.StrategyConfig{}
 
 	cmd := CMDBacktestEMACrossADX
 	emaCrossADXOpts.addFlags(cmd)
@@ -54,11 +47,9 @@ func RunEMACrossADX(cmd *cobra.Command, args []string) error {
 
 func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 	emaCrossADXCfg.Scale = types.PriceScale
-	emaCrossADXCfg.Stop = emaCrossADXOpts.stopPips()
-	emaCrossADXCfg.Take = emaCrossADXOpts.takePips()
 
 	strat := strategies.NewEMACrossADX(emaCrossADXCfg)
-	act := &account.Account{}
+	act := account.NewAccount("adhoc-ema-cross-adx", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -68,8 +59,8 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 			RunName:  "adhoc-ema-cross-adx",
 			Kind:     "ema-cross-adx",
 			Created:  types.FromTime(time.Now().UTC()),
-			Balance:  emaCrossADXCfg.Balance,
-			RR:       emaCrossADXCfg.RR,
+			Balance:  act.Balance,
+			RR:       0,
 			Strategy: strat.Name(),
 		},
 		act,
@@ -109,13 +100,11 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
-	emaCrossADXOpts.Instrument = market.NormalizeInstrument(emaCrossADXOpts.Instrument)
+	emaCrossADXOpts.Instrument = types.NormalizeInstrument(emaCrossADXOpts.Instrument)
 	cfg.Scale = types.PriceScale
-	cfg.Stop = emaCrossADXOpts.stopPips()
-	cfg.Take = emaCrossADXOpts.takePips()
 
 	strat := strategies.NewEMACrossADX(cfg)
-	act := &account.Account{}
+	act := account.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -125,8 +114,8 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
 			Created:  types.FromTime(time.Now().UTC()),
-			Balance:  cfg.Balance,
-			RR:       cfg.RR,
+			Balance:  rr.StartingBalance,
+			RR:       rr.RR,
 			Strategy: strat.Name(),
 		},
 		act,
@@ -198,12 +187,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 	}
 
 	return strategies.EMACrossADXConfig{
-		StrategyConfig: strategies.StrategyConfig{
-			Balance: r.StartingBalance,
-			Stop:    r.StopPips,
-			Take:    r.TakePips,
-			RR:      r.RR,
-		},
+		StrategyConfig:  strategies.StrategyConfig{},
 		FastPeriod:      fast,
 		SlowPeriod:      slow,
 		ADXPeriod:       adxPeriod,
@@ -228,7 +212,7 @@ func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *bt.ResolvedRun) {
 
 func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
 	if cmd.Flags().Changed("instrument") {
-		o.Instrument = market.NormalizeInstrument(o.Instrument)
+		o.Instrument = types.NormalizeInstrument(o.Instrument)
 	}
 	if cmd.Flags().Changed("timeframe") {
 		o.Timeframe = strings.ToUpper(strings.TrimSpace(o.Timeframe))

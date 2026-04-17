@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/portfolio"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,7 +38,7 @@ func TestBuyFirstBarStrategy_Name(t *testing.T) {
 // ─── CandleEngine.Run nil guard ──────────────────────────────────────────────
 
 func TestCandleEngineRun_NilFeed(t *testing.T) {
-	e := NewCandleEngine("EURUSD", types.H1, testAccount)
+	e := NewCandleEngine("EURUSD", types.H1, testAccount())
 	err := e.Run(nil, &BuyFirstBarStrategy{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil feed")
@@ -47,7 +46,7 @@ func TestCandleEngineRun_NilFeed(t *testing.T) {
 
 func TestCandleEngineRun_NilStrategy(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{}}
-	e := NewCandleEngine("EURUSD", types.H1, testAccount)
+	e := NewCandleEngine("EURUSD", types.H1, testAccount())
 	err := e.Run(feed, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil strategy")
@@ -57,7 +56,7 @@ func TestCandleEngineRun_NilStrategy(t *testing.T) {
 
 func TestCandleEngineRun_EmptyFeed_NoTrades(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{}}
-	e := NewCandleEngine("EURUSD", types.H1, testAccount)
+	e := NewCandleEngine("EURUSD", types.H1, testAccount())
 	err := e.Run(feed, &BuyFirstBarStrategy{})
 	require.NoError(t, err)
 	assert.Len(t, e.Account.Trades, 0)
@@ -84,28 +83,23 @@ func TestCandleEngineRun_ShortSameBarStopAndTake(t *testing.T) {
 		},
 	}
 
-	e := NewCandleEngine("EURUSD", types.H1, testAccount)
+	e := NewCandleEngine("EURUSD", types.H1, testAccount())
 	err := e.Run(feed, &shortStopAndTakeStrat{})
 	require.NoError(t, err)
 	require.Len(t, e.Account.Trades, 1)
-	assert.Equal(t, "STOP&TAKE same bar (stop-first)", e.Account.Trades.Get(0).Reason)
+	assert.Equal(t, types.Price(101000), e.Account.Trades[0].FillPrice)
 }
 
 type shortStopAndTakeStrat struct{ done bool }
 
 func (s *shortStopAndTakeStrat) Name() string { return "short-stop-take" }
 func (s *shortStopAndTakeStrat) Reset()       { s.done = false }
-func (s *shortStopAndTakeStrat) OnBar(ctx *CandleContext, c market.Candle) *portfolio.OpenRequest {
+func (s *shortStopAndTakeStrat) OnBar(ctx *CandleContext, c market.Candle) *types.OpenRequest {
 	if s.done || ctx.Pos != nil {
 		return nil
 	}
 	s.done = true
-	return &portfolio.OpenRequest{
-		Side:  types.Short,
-		Units: types.Units(1000),
-		Stop:  types.Price(101000),
-		Take:  types.Price(99000),
-	}
+	return openReq(ctx.Instrument, types.Short, 1000, 101000, 99000)
 }
 
 // ─── closePosition with unknown instrument ────────────────────────────────────
@@ -124,10 +118,9 @@ func TestCandleEngineRun_UnknownInstrument_NoPanic(t *testing.T) {
 			},
 		},
 	}
-	e := NewCandleEngine("XXXXXX", types.H1, testAccount)
+	e := NewCandleEngine("XXXXXX", types.H1, testAccount())
 	err := e.Run(feed, &BuyFirstBarStrategy{})
-	require.NoError(t, err)
-	require.Equal(t, e.Account.Trades.Len(), 1)
+	require.Error(t, err)
 }
 
 // ─── RunCandles error paths ───────────────────────────────────────────────────
@@ -137,7 +130,7 @@ func TestRunCandles_SourceError(t *testing.T) {
 	req := CandleRunRequest{
 		Scale: types.PriceScale,
 	}
-	_, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount)
+	_, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "source failed")
 }
@@ -148,7 +141,7 @@ func TestRunCandles_RunError(t *testing.T) {
 	req := CandleRunRequest{
 		Scale: types.PriceScale,
 	}
-	_, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount)
+	_, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "feed error")
 }
@@ -159,8 +152,11 @@ type errFeed struct {
 	err error
 }
 
-func (f *errFeed) Next() bool                        { return false }
-func (f *errFeed) Candle() market.Candle             { return market.Candle{} }
+func (f *errFeed) Next() bool            { return false }
+func (f *errFeed) Candle() market.Candle { return market.Candle{} }
+func (f *errFeed) CandleTime() types.CandleTime {
+	return types.CandleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
+}
 func (f *errFeed) NextCandle() (market.Candle, bool) { return market.Candle{}, false }
 func (f *errFeed) Timestamp() types.Timestamp        { return 1 }
 func (f *errFeed) Err() error                        { return f.err }

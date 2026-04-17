@@ -29,7 +29,10 @@ func (it *errCandleIterator) Next() bool {
 	it.ts = types.Timestamp(it.count)
 	return true
 }
-func (it *errCandleIterator) Candle() market.Candle      { return it.cur }
+func (it *errCandleIterator) Candle() market.Candle { return it.cur }
+func (it *errCandleIterator) CandleTime() types.CandleTime {
+	return types.CandleTime{Candle: it.cur, Timestamp: it.ts}
+}
 func (it *errCandleIterator) Timestamp() types.Timestamp { return it.ts }
 func (it *errCandleIterator) Err() error                 { return it.nextErr }
 func (it *errCandleIterator) Close() error               { return it.closeErr }
@@ -57,6 +60,9 @@ func (it *errAfterCandleIterator) Next() bool {
 	return false
 }
 func (it *errAfterCandleIterator) Candle() market.Candle { return it.items[it.idx-1] }
+func (it *errAfterCandleIterator) CandleTime() types.CandleTime {
+	return types.CandleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
+}
 func (it *errAfterCandleIterator) NextCandle() (market.Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true

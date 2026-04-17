@@ -31,14 +31,9 @@ func BuildTemplateStrategyConfig(r bt.ResolvedRun) (strategies.TemplateStrategyC
 	}
 
 	return strategies.TemplateStrategyConfig{
-		StrategyConfig: strategies.StrategyConfig{
-			Balance: r.StartingBalance,
-			Stop:    r.StopPips,
-			Take:    r.TakePips,
-			RR:      r.RR,
-		},
-		Lookback:  lookback,
-		Threshold: threshold,
-		Scale:     scale,
+		StrategyConfig: strategies.StrategyConfig{},
+		Lookback:       lookback,
+		Threshold:      threshold,
+		Scale:          scale,
 	}, nil
 }
