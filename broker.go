@@ -2,7 +2,10 @@ package trader
 
 import (
 	"context"
+	"fmt"
 )
+
+const brokerEventQueueSize = 1024
 
 type BrokerInterface interface {
 	SubmitOpen(ctx context.Context, req *OpenRequest) error
@@ -65,9 +68,35 @@ func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*OpenResult
 		Position:   pos,
 	}
 
-	b.evtQ <- evt
+	if err := b.emitEvent(ctx, evt); err != nil {
+		return res, err
+	}
 
 	return res, nil
+}
+
+func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
+	if b.evtQ == nil {
+		b.evtQ = make(chan *Event, brokerEventQueueSize)
+	}
+
+	if ctx == nil {
+		select {
+		case b.evtQ <- evt:
+			return nil
+		default:
+			return fmt.Errorf("broker event queue is full")
+		}
+	}
+
+	select {
+	case b.evtQ <- evt:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return fmt.Errorf("broker event queue is full")
+	}
 }
 
 func (b *Broker) SubmitOrder(ctx context.Context, ord *Order) (*Position, error) {
@@ -111,13 +140,12 @@ func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
 		Position:      req.Position,
 	}
 
-	b.evtQ <- evt
-	return nil
+	return b.emitEvent(ctx, evt)
 }
 
 func (b *Broker) Events() <-chan *Event {
 	if b.evtQ == nil {
-		b.evtQ = make(chan *Event)
+		b.evtQ = make(chan *Event, brokerEventQueueSize)
 	}
 
 	return b.evtQ

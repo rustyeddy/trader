@@ -89,38 +89,41 @@ func newTestTrader() *Trader {
 }
 
 func TestTrader(t *testing.T) {
-	err := Setup(LogConfig{Level: "debug", File: "trader.log", Format: "text"})
-	assert.NoError(t, err)
+	trader := newTestTrader()
 
-	instrument := "EURUSD"
-
-	start := time.Date(2022, time.Month(time.January), 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2023, time.Month(time.January), 0, 0, 0, 0, 0, time.UTC)
-
-	cfg := &ConfigBackTest{
-		Instrument: instrument,
-		Strategy:   "fake",
-		Start:      start,
-		End:        end,
-		TimeFrame:  M1,
-		Account:    "test",
-	}
-
-	am := NewAccountManager()
-	trader := Trader{
-		Account:     am.CreateAccount("test", 1000),
-		DataManager: NewDataManager([]string{"EURUSD"}, start, end),
-		Broker: &Broker{
-			ID: NewULID(),
-			OpenOrders: OpenOrders{
-				Orders: make(map[string]*Order),
-			},
+	bars := []CandleTime{
+		{
+			Candle:    Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100500, Ticks: 10},
+			Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		},
+		{
+			Candle:    Candle{Open: 1100500, High: 1102000, Low: 1100000, Close: 1101500, Ticks: 11},
+			Timestamp: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		},
+		{
+			Candle:    Candle{Open: 1101500, High: 1103000, Low: 1101000, Close: 1102500, Ticks: 12},
+			Timestamp: FromTime(time.Date(2026, time.January, 1, 2, 0, 0, 0, time.UTC)),
 		},
 	}
 
-	ctx := context.TODO()
-	err = trader.BackTest(ctx, cfg)
+	idx := -1
+	iter := &testIterator{
+		nextFn: func() bool {
+			idx++
+			return idx < len(bars)
+		},
+		candleTimeFn: func() CandleTime {
+			if idx < 0 || idx >= len(bars) {
+				return CandleTime{}
+			}
+			return bars[idx]
+		},
+	}
+
+	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "noop", TimeFrame: M1}
+	err := trader.backTestWithIterator(context.Background(), cfg, testStrategy{name: "noop"}, iter)
 	assert.NoError(t, err)
+	assert.True(t, iter.closed)
 }
 
 func TestBackTestRejectsUnknownStrategy(t *testing.T) {

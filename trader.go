@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,7 +59,7 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 	}
 }
 
-func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event) (<-chan error, <-chan struct{}) {
+func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event, processed *int64) (<-chan error, <-chan struct{}) {
 	errCh := make(chan error, 1)
 	done := make(chan struct{})
 
@@ -79,6 +80,9 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event
 					default:
 					}
 					return
+				}
+				if processed != nil {
+					atomic.AddInt64(processed, 1)
 				}
 			}
 		}
@@ -113,8 +117,30 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 
 	evtQ := t.Broker.Events()
 	Backtest.Debug("broker event handler started")
-	errCh, done := t.startBrokerEventHandler(runCtx, evtQ)
+	var processedEvents int64
+	errCh, done := t.startBrokerEventHandler(runCtx, evtQ, &processedEvents)
 	defer func() {
+		// Give the broker event handler a short chance to drain queued events
+		// before cancellation, otherwise late errors can be dropped.
+		drainUntil := time.Now().Add(2 * time.Second)
+		for time.Now().Before(drainUntil) {
+			if err == nil {
+				if evtErr := t.brokerEventError(errCh); evtErr != nil {
+					err = evtErr
+					break
+				}
+			}
+
+			pending := 0
+			if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
+				pending = len(t.Broker.evtQ)
+			}
+			if pending == 0 {
+				break
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+
 		cancel()
 		<-done
 		if err == nil {
@@ -122,11 +148,72 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		}
 	}()
 
-	processedCandles := 0
-	submittedOpens := 0
-	submittedCloses := 0
+	var processedCandles int64
+	var submittedOpens int64
+	var submittedCloses int64
 
-	for itr.Next() {
+	var lastProgressNanos int64
+	atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
+
+	watchdogDone := make(chan struct{})
+	defer close(watchdogDone)
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-watchdogDone:
+				return
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				candles := atomic.LoadInt64(&processedCandles)
+				events := atomic.LoadInt64(&processedEvents)
+				opens := atomic.LoadInt64(&submittedOpens)
+				closes := atomic.LoadInt64(&submittedCloses)
+				lag := time.Since(time.Unix(0, atomic.LoadInt64(&lastProgressNanos)))
+
+				queueLen := 0
+				queueCap := 0
+				if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
+					queueLen = len(t.Broker.evtQ)
+					queueCap = cap(t.Broker.evtQ)
+				}
+
+				if lag > 30*time.Second {
+					Backtest.Warn("watchdog: backtest appears stalled",
+						"noProgressFor", lag.String(),
+						"candles", candles,
+						"events", events,
+						"opens", opens,
+						"closes", closes,
+						"evtQueueLen", queueLen,
+						"evtQueueCap", queueCap,
+					)
+					continue
+				}
+
+				Backtest.Debug("watchdog: progress",
+					"candles", candles,
+					"events", events,
+					"opens", opens,
+					"closes", closes,
+					"evtQueueLen", queueLen,
+					"evtQueueCap", queueCap,
+				)
+			}
+		}
+	}()
+
+	for {
+		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
+		if !itr.Next() {
+			break
+		}
+		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
+
 		if err := runCtx.Err(); err != nil {
 			return err
 		}
@@ -136,7 +223,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 
 		candle := itr.CandleTime()
 		Backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
-		processedCandles++
+		atomic.AddInt64(&processedCandles, 1)
 
 		err := t.Account.ResolveWithMarks(map[string]Price{
 			cfg.Instrument: candle.Close,
@@ -154,11 +241,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		for _, cl := range plan.Closes {
 			Backtest.Info("submit close request", "ID", cl.Request.ID)
 
+			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			err = t.Broker.SubmitClose(runCtx, cl)
 			if err != nil {
 				return err
 			}
-			submittedCloses++
+			atomic.AddInt64(&submittedCloses, 1)
 		}
 
 		for _, openReq := range plan.Opens {
@@ -169,11 +257,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 			}
 
 			Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.OpenRequest(runCtx, openReq)
 			if err != nil {
 				return err
 			}
-			submittedOpens++
+			atomic.AddInt64(&submittedOpens, 1)
 		}
 	}
 
@@ -187,7 +276,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		return err
 	}
 
-	Backtest.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
+	Backtest.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles), "events", atomic.LoadInt64(&processedEvents), "opens", atomic.LoadInt64(&submittedOpens), "closes", atomic.LoadInt64(&submittedCloses), "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
 
 	return nil
 }
