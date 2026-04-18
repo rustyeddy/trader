@@ -1,0 +1,37 @@
+==================================================
+ Backtest Result
+==================================================
+Run ID:        01KPH46S4GFQ45T18MRWVNRR0V
+Run Name:      eurusd_2023_fake
+Kind:          fake
+Created:       2026-04-18 13:23:38 -0700 PDT
+Strategy:      Fake
+Instrument:    EURUSD
+Timeframe:     H1
+Dataset:       EURUSD H1 2024-01-01..2024-12-31
+
+Period
+--------------------------------------------------
+Start:         2023-12-31 16:00:00 -0800 PST
+End:           2024-12-31 16:00:00 -0800 PST
+
+Strategy Configuration
+--------------------------------------------------
+Risk per Trade: 0.50%
+Stop Loss:     20.0 pips
+Risk/Reward:   2.00
+
+Trade Statistics
+--------------------------------------------------
+Trades:        1
+Wins:          1
+Losses:        0
+Win Rate:      100.00%
+
+Account Performance
+--------------------------------------------------
+Start Balance: 10000.00
+End Balance:   20806.30
+Net P/L:       10806.30
+Return:        108.06%
+
