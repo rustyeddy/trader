@@ -13,41 +13,48 @@ A professional-grade FX trading simulator and research platform written in Go.
 - OANDA API integration for historic candle data
 
 ## Supported Instruments
-- EUR_USD
-- USD_JPY
+- EURUSD
+- GBPUSD
+- USDJPY
+- USDCHF
+- AUDUSD
+- USDCAD
+- NZDUSD
+- XAUUSD
 
 ## Quick Start
 
 ```bash
-# Run a simple simulation
-go run ./cmd/simrun
+# Run a simple simulation example
+go run ./cmd/examples/simrun
 
 # Try the examples
-go run ./examples/basic_trade.go
-go run ./examples/risk_management.go
+go run ./cmd/examples/basic
+go run ./cmd/examples/multiple
 ```
 
-**New to the project?** See [GETTING_STARTED.md](docs/GETTING_STARTED.md) for a comprehensive guide.
+**New to the project?** See [getting-started.md](docs/getting-started.md) for a comprehensive guide.
 
 ## Documentation
 
-- **[Getting Started Guide](docs/GETTING_STARTED.md)** - Installation, first steps, and core concepts
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and component details
-- **[Examples](examples/)** - Sample trading strategies and use cases
+- **[Getting Started Guide](docs/getting-started.md)** - Installation, first steps, and core concepts
+- **[Architecture Overview](docs/architecture.md)** - System design and component details
+- **[Examples](cmd/examples/)** - Sample trading strategies and use cases
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
 
 ## Examples
 
-Explore practical examples in the `examples/` directory:
+Explore practical examples in the `cmd/examples/` directory:
 
-- **basic_trade.go** - Simple single trade with stop loss and take profit
-- **multiple_trades.go** - Managing multiple positions simultaneously  
-- **risk_management.go** - Demonstrates proper position sizing
-- **oanda/** - Download historic candles from OANDA account
+- **basic/** - Simple single trade flow
+- **multiple/** - Managing multiple positions simultaneously
+- **simrun/** - Minimal simulation run
+- **configs/** - Example backtest/replay YAML configurations
 
 ```bash
-go run ./examples/basic/main.go
-go run ./examples/oanda/main.go  # Requires OANDA_TOKEN env var
+go run ./cmd/examples/basic
+go run ./cmd/examples/multiple
+go run ./cmd/examples/simrun
 ```
 
 ## Building
@@ -58,6 +65,9 @@ make test
 
 # Build the CLI tools
 make build
+
+# Inspect available commands
+./bin/trader --help
 
 # Generate coverage report
 make cover
@@ -112,4 +122,3 @@ Every trade closed exactly once
 Every equity snapshot monotonic in time
 
 Journal writes never affect engine state
-
