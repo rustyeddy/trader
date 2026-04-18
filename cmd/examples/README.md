@@ -16,6 +16,7 @@ This directory contains example trading strategies demonstrating how to use the 
 - **[configs/replay.yaml](configs/replay.yaml)** - Replay historical tick data with events
 - **[configs/aggressive.yaml](configs/aggressive.yaml)** - Higher risk trading configuration
 - **[configs/conservative.yaml](configs/conservative.yaml)** - Lower risk trading configuration
+- **[configs/backtest_fake_eurusd_2023.yml](configs/backtest_fake_eurusd_2023.yml)** - Fake strategy backtest config for EURUSD (2023)
 
 ### Sample Data
 
@@ -37,6 +38,11 @@ Configuration-based simulations and replays use the trader CLI:
 
 # Replay historical data
 ./trader replay -config examples/configs/replay.yaml
+
+# Run fake-strategy backtest for EURUSD (2023)
+# (requires 2023 EURUSD candles to be present locally)
+./trader data sync --instruments EURUSD --from 2023-01 --to 2023-12
+./trader --config cmd/examples/configs/backtest_fake_eurusd_2023.yml backtest
 
 # Direct CSV replay
 ./trader replay -ticks examples/data/sample_ticks.csv -db results.db
