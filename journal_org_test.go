@@ -1,12 +1,12 @@
 package trader
 
 import (
-	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFormatTradeOrg(t *testing.T) {
@@ -32,7 +32,7 @@ func TestFormatTradeOrg(t *testing.T) {
 	// Check heading
 	assert.Contains(t, result, "** Trade: EUR_USD (trade-12)")
 
-	fmt.Printf("results: %s\n", result)
+	t.Logf("results: %s", result)
 
 	// Check properties drawer
 	assert.Contains(t, result, ":PROPERTIES:")
