@@ -4,14 +4,13 @@ package indicators
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
-func mkCandle(scale int32, o, h, l, c float64) market.Candle {
+func mkCandle(scale int32, o, h, l, c float64) types.Candle {
 	toP := func(x float64) types.Price { return types.Price(x*float64(scale) + 0.5) }
-	return market.Candle{
+	return types.Candle{
 		Open:  toP(o),
 		High:  toP(h),
 		Low:   toP(l),

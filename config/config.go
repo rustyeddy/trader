@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader"
 	"gopkg.in/yaml.v3"
 )
 
@@ -148,7 +148,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.instrument is required")
 	}
 	// Validate that the instrument exists in the market
-	if _, ok := market.Instruments[c.Strategy.Instrument]; !ok {
+	if _, ok := trader.Instruments[c.Strategy.Instrument]; !ok {
 		return fmt.Errorf("unknown instrument: %s", c.Strategy.Instrument)
 	}
 	if c.Strategy.StopPips <= 0 {

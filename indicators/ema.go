@@ -10,7 +10,7 @@ import (
 // EMA computes an Exponential Moving Average over candle closes.
 //
 // Pricing note:
-//   - market.Candle prices are scaled integers.
+//   - trader.Candle prices are scaled integers.
 //   - EMA outputs float64 in *price units* (e.g. 1.08765), so we need the CandleSet scale.
 //     Pass the same scale used to build your CandleSet (e.g. 1_000_000 for Dukascopy).
 type EMA struct {

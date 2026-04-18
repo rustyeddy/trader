@@ -3,14 +3,13 @@ package indicators
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
 // helper to create a candle with close only
-func candle(close float64) market.Candle {
-	return market.Candle{
+func candle(close float64) types.Candle {
+	return types.Candle{
 		Close: types.Price(close * float64(types.PriceScale)),
 	}
 }

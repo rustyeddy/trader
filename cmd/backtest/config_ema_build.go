@@ -3,7 +3,7 @@ package backtest
 import (
 	"fmt"
 
-	bt "github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies"
 )
 
@@ -12,7 +12,7 @@ type EMAParams struct {
 	Slow int
 }
 
-func BuildEMACrossConfig(r bt.ResolvedRun) (strategies.EMACrossConfig, error) {
+func BuildEMACrossConfig(r trader.ResolvedRun) (strategies.EMACrossConfig, error) {
 	ema, err := emaParamsFromRun(r)
 	if err != nil {
 		return strategies.EMACrossConfig{}, err
@@ -26,7 +26,7 @@ func BuildEMACrossConfig(r bt.ResolvedRun) (strategies.EMACrossConfig, error) {
 	}, nil
 }
 
-func emaParamsFromRun(r bt.ResolvedRun) (EMAParams, error) {
+func emaParamsFromRun(r trader.ResolvedRun) (EMAParams, error) {
 	fast, ok, err := getEMAIntParam(r.Strategy.Params, "fast")
 	if err != nil {
 		return EMAParams{}, err

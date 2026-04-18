@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/types"
 )
 
 type EventRow struct {
-	Tick  market.Tick
+	Tick  trader.Tick
 	Event string
 	P1    string
 	P2    string
@@ -131,39 +131,39 @@ func inRange(t, from, to types.Timestamp) bool {
 
 // parseTickRowCompat duplicates minimal parsing soreplay doesn't import backtest.
 // (Avoids internal package coupling.)
-func parseTickRowCompat(row []string) (market.Tick, bool, error) {
+func parseTickRowCompat(row []string) (trader.Tick, bool, error) {
 	// time,instrument,bid,ask
 	ts := strings.TrimSpace(row[0])
 	if ts == "" {
-		return market.Tick{}, false, nil
+		return trader.Tick{}, false, nil
 	}
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		t2, err2 := time.Parse(time.RFC3339Nano, ts)
 		if err2 != nil {
-			return market.Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
+			return trader.Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
 		}
 		t = t2
 	}
 
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
-		return market.Tick{}, false, nil
+		return trader.Tick{}, false, nil
 	}
 
 	bid, err := parseFloat(row[2])
 	if err != nil {
-		return market.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
+		return trader.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
 	}
 	ask, err := parseFloat(row[3])
 	if err != nil {
-		return market.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
+		return trader.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return market.Tick{
+	return trader.Tick{
 		Timestamp:  types.FromTime(t),
 		Instrument: inst,
-		BA: market.BA{
+		BA: trader.BA{
 			Bid: types.PriceFromFloat(bid),
 			Ask: types.PriceFromFloat(ask),
 		},

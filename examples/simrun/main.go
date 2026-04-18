@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -19,7 +18,7 @@ func (noopJournal) RecordEquity(journal.EquitySnapshot) error { return nil }
 func (noopJournal) Close() error                              { return nil }
 
 func main() {
-	engine := sim.NewEngine(account.Account{
+	engine := sim.NewEngine(trader.Account{
 		ID:       "EXAMPLE-SIMRUN",
 		Currency: "USD",
 		Balance:  types.MoneyFromFloat(5000),
@@ -27,10 +26,10 @@ func main() {
 	}, &noopJournal{})
 
 	for i := 0; i < 3; i++ {
-		_ = engine.UpdatePrice(market.Tick{
+		_ = engine.UpdatePrice(trader.Tick{
 			Instrument: "EUR_USD",
 			Timestamp:  types.FromTime(time.Now().Add(time.Duration(i) * time.Second)),
-			BA: market.BA{
+			BA: trader.BA{
 				Bid: types.PriceFromFloat(1.1000 + 0.0001*float64(i)),
 				Ask: types.PriceFromFloat(1.1002 + 0.0001*float64(i)),
 			},

@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/broker/sim"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -21,24 +19,24 @@ func (noopJournal) Close() error                              { return nil }
 
 func main() {
 	j := &noopJournal{}
-	engine := sim.NewEngine(account.Account{
+	engine := sim.NewEngine(trader.Account{
 		ID:       "EXAMPLE-BASIC",
 		Currency: "USD",
 		Balance:  types.MoneyFromFloat(10000),
 		Equity:   types.MoneyFromFloat(10000),
 	}, j)
 
-	tick := market.Tick{
+	tick := trader.Tick{
 		Instrument: "EUR_USD",
 		Timestamp:  types.FromTime(time.Now()),
-		BA: market.BA{
+		BA: trader.BA{
 			Bid: types.PriceFromFloat(1.1000),
 			Ask: types.PriceFromFloat(1.1002),
 		},
 	}
 	_ = engine.UpdatePrice(tick)
 
-	_, _ = engine.CreateMarketOrder(context.Background(), broker.OrderRequest{
+	_, _ = engine.CreateMarketOrder(context.Background(), trader.OrderRequest{
 		Instrument: "EUR_USD",
 		Units:      types.Units(1000),
 	})

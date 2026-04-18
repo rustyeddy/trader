@@ -3,12 +3,12 @@ package backtest
 import (
 	"fmt"
 
-	bt "github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
 
-func BuildTemplateStrategyConfig(r bt.ResolvedRun) (strategies.TemplateStrategyConfig, error) {
+func BuildTemplateStrategyConfig(r trader.ResolvedRun) (strategies.TemplateStrategyConfig, error) {
 	lookback, ok, err := getRunIntParam(r.Strategy.Params, "lookback")
 	if err != nil {
 		return strategies.TemplateStrategyConfig{}, err

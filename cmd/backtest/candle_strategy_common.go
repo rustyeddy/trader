@@ -7,9 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	bt "github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/data"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -70,7 +68,7 @@ type candleStrategyAdapter struct {
 func (a *candleStrategyAdapter) Name() string { return a.S.Name() }
 func (a *candleStrategyAdapter) Reset()       { a.S.Reset() }
 
-func (a *candleStrategyAdapter) OnBar(ctx *bt.CandleContext, c types.Candle) *types.OpenRequest {
+func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c types.Candle) *types.OpenRequest {
 	d := a.S.Update(c)
 	if len(d.Opens) == 0 {
 		return nil
@@ -122,7 +120,7 @@ func runCandleStrategy(
 	opts candleCmdCommon,
 	strat strategies.Strategy,
 	meta candleRunMeta,
-	acct *account.Account,
+	acct *trader.Account,
 ) error {
 	start, err := time.Parse("2006-01-02", opts.From)
 	if err != nil {
@@ -152,8 +150,8 @@ func runCandleStrategy(
 		return fmt.Errorf("unknown instrument %q", instrument)
 	}
 
-	req := bt.CandleRunRequest{
-		DataRequest: data.CandleRequest{
+	req := trader.CandleRunRequest{
+		DataRequest: trader.CandleRequest{
 			Source:     "candles",
 			Instrument: instrument,
 			Timeframe:  tf,
@@ -165,16 +163,16 @@ func runCandleStrategy(
 		},
 	}
 
-	dm := data.NewDataManager([]string{instrument}, start, end)
+	dm := trader.NewDataManager([]string{instrument}, start, end)
 	adapter := &candleStrategyAdapter{
 		S:         strat,
 		Units:     opts.units(),
 		StopPips:  opts.stopPips(),
 		TakePips:  opts.takePips(),
-		PipScaled: bt.PipScaled(instMeta.PipLocation),
+		PipScaled: trader.PipScaled(instMeta.PipLocation),
 	}
 
-	eng, err := bt.RunCandles(ctx, dm, req, adapter, acct)
+	eng, err := trader.RunCandles(ctx, dm, req, adapter, acct)
 	if err != nil {
 		return err
 	}
@@ -188,7 +186,7 @@ func runCandleStrategy(
 		}
 	}
 
-	run := bt.BacktestRun{
+	run := trader.BacktestRun{
 		RunID:        meta.RunID,
 		Name:         meta.RunName,
 		Kind:         meta.Kind,
@@ -217,11 +215,11 @@ func runCandleStrategy(
 		run.WinRate = types.RateFromFloat(float64(run.Wins) / float64(run.Trades))
 	}
 
-	bt.PrintBacktestRun(os.Stdout, run)
+	trader.PrintBacktestRun(os.Stdout, run)
 	return nil
 }
 
-func selectConfigRunByKind(cfg *bt.Config, requested, wantKind string) (string, error) {
+func selectConfigRunByKind(cfg *trader.Config, requested, wantKind string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	if requested != "" {
 		return requested, nil

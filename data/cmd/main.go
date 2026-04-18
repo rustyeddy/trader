@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/data"
+	"github.com/rustyeddy/trader"
 	tlog "github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/types"
 )
@@ -52,7 +52,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	dm := &data.DataManager{
+	dm := &trader.DataManager{
 		Start:       time.Date(2004, 01, 01, 0, 0, 0, 0, time.UTC),
 		End:         time.Now().AddDate(0, 0, -1), // start from yesterday (the last fullday)
 		Instruments: strings.Split(config.Symbols, ","),

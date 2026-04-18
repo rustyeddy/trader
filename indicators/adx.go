@@ -10,7 +10,7 @@ import (
 // ADX computes the Average Directional Index (Wilder) over candle OHLC.
 //
 // Pricing note:
-// - market.Candle prices are scaled integers.
+// - trader.Candle prices are scaled integers.
 // - ADX outputs float64 (0..100-ish) and uses float math internally.
 // - Pass the same scale used to build your CandleSet (e.g. 1_000_000 for Dukascopy).
 //

@@ -6,8 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	bt "github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -49,7 +48,7 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 	emaCrossADXCfg.Scale = types.PriceScale
 
 	strat := strategies.NewEMACrossADX(emaCrossADXCfg)
-	act := account.NewAccount("adhoc-ema-cross-adx", types.MoneyFromFloat(1000))
+	act := trader.NewAccount("adhoc-ema-cross-adx", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -69,7 +68,7 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 
 func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	path := strings.TrimSpace(rootCfg.ConfigPath)
-	bcfg, err := bt.LoadConfig(path)
+	bcfg, err := trader.LoadConfig(path)
 	if err != nil {
 		return err
 	}
@@ -104,7 +103,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	cfg.Scale = types.PriceScale
 
 	strat := strategies.NewEMACrossADX(cfg)
-	act := account.NewAccount(rr.Name, rr.StartingBalance)
+	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
@@ -122,7 +121,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	)
 }
 
-func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, error) {
+func buildEMACrossADXConfig(r trader.ResolvedRun) (strategies.EMACrossADXConfig, error) {
 	cfg := strategies.EMACrossADXConfig{}
 
 	fast, ok, err := getRunIntParam(r.Strategy.Params, "fast")
@@ -199,7 +198,7 @@ func buildEMACrossADXConfig(r bt.ResolvedRun) (strategies.EMACrossADXConfig, err
 	}, nil
 }
 
-func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *bt.ResolvedRun) {
+func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
 	o.Instrument = r.Instrument
 	o.Timeframe = r.Timeframe
 	o.From = r.From

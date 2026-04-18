@@ -6,8 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	bt "github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
@@ -45,7 +44,7 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 	emaCrossCfg.Scale = types.PriceScale
 
 	strat := strategies.NewEMACross(emaCrossCfg)
-	act := account.NewAccount("adhoc-ema-cross", types.MoneyFromFloat(1000))
+	act := trader.NewAccount("adhoc-ema-cross", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
@@ -65,7 +64,7 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 
 func runEMACrossFromConfig(cmd *cobra.Command) error {
 	path := strings.TrimSpace(rootCfg.ConfigPath)
-	bcfg, err := bt.LoadConfig(path)
+	bcfg, err := trader.LoadConfig(path)
 	if err != nil {
 		return err
 	}
@@ -100,7 +99,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	cfg.Scale = types.PriceScale
 
 	strat := strategies.NewEMACross(cfg)
-	act := account.NewAccount(rr.Name, rr.StartingBalance)
+	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,

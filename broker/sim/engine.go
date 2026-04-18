@@ -5,19 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/broker"
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/types"
 )
 
 type Engine struct {
-	account *account.Account
+	account *trader.Account
 	journal journal.Journal
 	prices  map[string]types.Tick
 }
 
-func NewEngine(acct account.Account, j journal.Journal) *Engine {
+func NewEngine(acct trader.Account, j journal.Journal) *Engine {
 	if acct.Positions.Positions() == nil {
 		acct.Positions = types.Positions{}
 	}
@@ -46,7 +45,7 @@ func (e *Engine) UpdatePrice(tick types.Tick) error {
 	return e.account.ResolveWithMarks(marks)
 }
 
-func (e *Engine) CreateMarketOrder(ctx context.Context, req broker.OrderRequest) (*types.Position, error) {
+func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*types.Position, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}
@@ -137,7 +136,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	return nil
 }
 
-func (e *Engine) GetAccount(context.Context) (*account.Account, error) {
+func (e *Engine) GetAccount(context.Context) (*trader.Account, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}

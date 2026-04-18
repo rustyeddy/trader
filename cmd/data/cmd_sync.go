@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/config"
-	datapkg "github.com/rustyeddy/trader/data"
 )
 
 func newDownloadTicksCmd(rc *config.RootConfig) *cobra.Command {
@@ -62,7 +62,7 @@ func newSyncLikeCmd(
 				return fmt.Errorf("--from must be before --to")
 			}
 
-			dm := datapkg.NewDataManager(instruments, start, end)
+			dm := traderpkg.NewDataManager(instruments, start, end)
 			dm.Init()
 
 			return dm.Sync(context.Background(), download, build)
