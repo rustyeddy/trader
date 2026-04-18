@@ -155,6 +155,7 @@ func TestStack_WithGroup_PropagatesToAttrs(t *testing.T) {
 		got[a.Key] = true
 	}
 
+	assert.True(t, got["module"])
 	assert.True(t, got["session.id"])
 	assert.True(t, got["session.state"])
 }

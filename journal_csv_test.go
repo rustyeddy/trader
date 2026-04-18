@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"path/filepath"
@@ -217,7 +218,7 @@ func TestCSVJournalCloseFileError(t *testing.T) {
 	assert.NoError(t, err)
 	defer ef.Close()
 
-	assert.NoError(t, tf.Close())
+	require.NoError(t, tf.Close())
 
 	j := &CSVJournal{
 		trades: csv.NewWriter(io.Discard),
