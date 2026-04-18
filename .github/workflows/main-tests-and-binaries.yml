@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
@@ -26,6 +29,9 @@ jobs:
           make test-blackbox
 
       - name: Build binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
         run: make build
 
       - name: Upload binary artifact
