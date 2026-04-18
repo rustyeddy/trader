@@ -567,6 +567,9 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 
 	q := make(chan Key, 1024)
 	wg := dm.downloader.startDownloader(ctx, dm, q)
+	defer wg.Wait()
+	defer close(q)
+
 	slices.Reverse(dm.plan.Download)
 	for _, key := range dm.plan.Download {
 
@@ -579,7 +582,6 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 		case q <- key:
 		}
 	}
-	wg.Wait()
 	return nil
 }
 
