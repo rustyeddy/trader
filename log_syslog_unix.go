@@ -14,7 +14,14 @@ import (
 // io.Writer (e.g. inside a slog.TextHandler / slog.JSONHandler), every write
 // is forwarded as syslog.LOG_INFO.
 type syslogWriter struct {
-	w *syslog.Writer
+	w syslogBackend
+}
+
+type syslogBackend interface {
+	Debug(string) error
+	Info(string) error
+	Warning(string) error
+	Err(string) error
 }
 
 // newSyslogWriter creates a syslogWriter connected to the local syslog

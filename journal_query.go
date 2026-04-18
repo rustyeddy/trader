@@ -94,34 +94,39 @@ func (j *SQLite) ListTradesClosedBetween(start, end Timestamp) ([]TradeRecord, e
 	return out, nil
 }
 
-func (j *SQLite) ListEquityBetween(start, end time.Time) ([]TradeRecord, error) {
+func (j *SQLite) ListEquityBetween(start, end time.Time) ([]EquitySnapshot, error) {
 
 	rows, err := j.db.Query(`
 		SELECT time, balance, equity, margin_used, free_margin, margin_level
 		FROM equity
 		WHERE time >= ? AND time < ?
-		ORDER BY time ASC;`, start, end)
+		ORDER BY time ASC;`, FromTime(start), FromTime(end))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []TradeRecord
+	var out []EquitySnapshot
 	for rows.Next() {
-		var rec TradeRecord
+		var rec EquitySnapshot
+		var ts time.Time
+		var bal, eq, mu, fm, ml float64
 		if err := rows.Scan(
-			&rec.TradeID,
-			&rec.Instrument,
-			&rec.Units,
-			&rec.EntryPrice,
-			&rec.ExitPrice,
-			&rec.OpenTime,
-			&rec.CloseTime,
-			&rec.RealizedPL,
-			&rec.Reason,
+			&ts,
+			&bal,
+			&eq,
+			&mu,
+			&fm,
+			&ml,
 		); err != nil {
 			return nil, err
 		}
+		rec.Timestamp = FromTime(ts)
+		rec.Balance = Money(bal)
+		rec.Equity = Money(eq)
+		rec.MarginUsed = Money(mu)
+		rec.FreeMargin = Money(fm)
+		rec.MarginLevel = Money(ml)
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {

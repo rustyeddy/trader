@@ -2,13 +2,23 @@ package trader
 
 import (
 	"encoding/csv"
+	"errors"
 	"github.com/stretchr/testify/assert"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write(_ []byte) (int, error) {
+	return 0, w.err
+}
 
 func TestCSVJournalHeaders(t *testing.T) {
 	t.Parallel()
@@ -145,4 +155,77 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 		marginLevel.String(),
 	}
 	assert.Equal(t, want, row)
+}
+
+func TestCSVJournalRecordTradeFlushError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("write failed")
+	j := &CSVJournal{
+		trades: csv.NewWriter(failingWriter{err: wantErr}),
+		equity: csv.NewWriter(io.Discard),
+	}
+
+	err := j.RecordTrade(TradeRecord{TradeID: "T1", Instrument: "EUR_USD"})
+	assert.ErrorIs(t, err, wantErr)
+}
+
+func TestCSVJournalRecordEquityFlushError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("write failed")
+	j := &CSVJournal{
+		trades: csv.NewWriter(io.Discard),
+		equity: csv.NewWriter(failingWriter{err: wantErr}),
+	}
+
+	err := j.RecordEquity(EquitySnapshot{Timestamp: FromTime(time.Now().UTC())})
+	assert.ErrorIs(t, err, wantErr)
+}
+
+func TestCSVJournalCloseFlushError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("flush failed")
+	tf, err := os.CreateTemp(t.TempDir(), "trades-*.csv")
+	assert.NoError(t, err)
+	defer tf.Close()
+	ef, err := os.CreateTemp(t.TempDir(), "equity-*.csv")
+	assert.NoError(t, err)
+	defer ef.Close()
+
+	trades := csv.NewWriter(failingWriter{err: wantErr})
+	assert.NoError(t, trades.Write([]string{"header"}))
+
+	j := &CSVJournal{
+		trades: trades,
+		equity: csv.NewWriter(io.Discard),
+		tf:     tf,
+		ef:     ef,
+	}
+
+	err = j.Close()
+	assert.ErrorIs(t, err, wantErr)
+}
+
+func TestCSVJournalCloseFileError(t *testing.T) {
+	t.Parallel()
+
+	tf, err := os.CreateTemp(t.TempDir(), "trades-*.csv")
+	assert.NoError(t, err)
+	ef, err := os.CreateTemp(t.TempDir(), "equity-*.csv")
+	assert.NoError(t, err)
+	defer ef.Close()
+
+	assert.NoError(t, tf.Close())
+
+	j := &CSVJournal{
+		trades: csv.NewWriter(io.Discard),
+		equity: csv.NewWriter(io.Discard),
+		tf:     tf,
+		ef:     ef,
+	}
+
+	err = j.Close()
+	assert.Error(t, err)
 }

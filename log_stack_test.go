@@ -139,3 +139,22 @@ func TestStack_Entries_EmptyBeforeAnyLog(t *testing.T) {
 	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
 	assert.Empty(t, tlog.Entries())
 }
+
+func TestStack_WithGroup_PropagatesToAttrs(t *testing.T) {
+	tlog.ClearEntries()
+	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
+
+	logger := tlog.Module("data").WithGroup("session").With("id", "A1")
+	logger.Info("grouped", "state", "open")
+
+	entries := tlog.Entries()
+	require.Len(t, entries, 1)
+
+	got := map[string]bool{}
+	for _, a := range entries[0].Attrs {
+		got[a.Key] = true
+	}
+
+	assert.True(t, got["session.id"])
+	assert.True(t, got["session.state"])
+}

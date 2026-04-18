@@ -15,6 +15,7 @@ package trader
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,6 +85,7 @@ func (h *stackHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 	e.Attrs = append(e.Attrs, h.attrs...)
 	r.Attrs(func(a slog.Attr) bool {
+		a = qualifyWithGroups(a, h.groups)
 		e.Attrs = append(e.Attrs, a)
 		return true
 	})
@@ -95,6 +97,14 @@ func (h *stackHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h *stackHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(h.groups) > 0 {
+		qualified := make([]slog.Attr, len(attrs))
+		for i, a := range attrs {
+			qualified[i] = qualifyWithGroups(a, h.groups)
+		}
+		attrs = qualified
+	}
+
 	combined := make([]slog.Attr, len(h.attrs)+len(attrs))
 	copy(combined, h.attrs)
 	copy(combined[len(h.attrs):], attrs)
@@ -106,6 +116,15 @@ func (h *stackHandler) WithGroup(name string) slog.Handler {
 	copy(groups, h.groups)
 	groups[len(groups)-1] = name
 	return &stackHandler{attrs: h.attrs, groups: groups}
+}
+
+func qualifyWithGroups(a slog.Attr, groups []string) slog.Attr {
+	if len(groups) == 0 || a.Key == "" {
+		return a
+	}
+
+	key := strings.Join(groups, ".") + "." + a.Key
+	return slog.Attr{Key: key, Value: a.Value}
 }
 
 // -------------------------------------------------------------------------
