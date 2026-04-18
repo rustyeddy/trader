@@ -406,3 +406,72 @@ func TestListTradesClosedBetweenMultipleInstruments(t *testing.T) {
 		assert.True(t, instrumentSet[instrument], "Expected instrument %s to be in results", instrument)
 	}
 }
+
+func TestListEquityBetweenBoundaryBehavior(t *testing.T) {
+	t.Parallel()
+
+	j, _ := newTestSQLite(t)
+	defer j.Close()
+
+	base := time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC)
+	recs := []EquitySnapshot{
+		{
+			Timestamp:   ts(base),
+			Balance:     m(1000),
+			Equity:      m(1000),
+			MarginUsed:  m(10),
+			FreeMargin:  m(990),
+			MarginLevel: m(100),
+		},
+		{
+			Timestamp:   ts(base.Add(1 * time.Hour)),
+			Balance:     m(1010),
+			Equity:      m(1008),
+			MarginUsed:  m(12),
+			FreeMargin:  m(996),
+			MarginLevel: m(84),
+		},
+		{
+			Timestamp:   ts(base.Add(2 * time.Hour)),
+			Balance:     m(1020),
+			Equity:      m(1015),
+			MarginUsed:  m(15),
+			FreeMargin:  m(1000),
+			MarginLevel: m(67),
+		},
+	}
+	for _, rec := range recs {
+		require.NoError(t, j.RecordEquity(rec))
+	}
+
+	results, err := j.ListEquityBetween(base.Add(1*time.Hour), base.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, results, 1, "start boundary should be inclusive and end boundary should be exclusive")
+	assert.Equal(t, recs[1], results[0])
+}
+
+func TestListEquityBetweenEmptyResults(t *testing.T) {
+	t.Parallel()
+
+	j, _ := newTestSQLite(t)
+	defer j.Close()
+
+	base := time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	results, err := j.ListEquityBetween(base, base.Add(1*time.Hour))
+	require.NoError(t, err)
+	assert.Empty(t, results)
+
+	require.NoError(t, j.RecordEquity(EquitySnapshot{
+		Timestamp:   ts(base.Add(3 * time.Hour)),
+		Balance:     m(1100),
+		Equity:      m(1090),
+		MarginUsed:  m(20),
+		FreeMargin:  m(1070),
+		MarginLevel: m(55),
+	}))
+
+	results, err = j.ListEquityBetween(base, base.Add(1*time.Hour))
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}

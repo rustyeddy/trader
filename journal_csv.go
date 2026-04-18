@@ -46,7 +46,7 @@ func NewCSV(tradesPath, equityPath string) (*CSVJournal, error) {
 }
 
 func (j *CSVJournal) RecordTrade(t TradeRecord) error {
-	j.trades.Write([]string{
+	err := j.trades.Write([]string{
 		t.TradeID,
 		t.Instrument,
 		t.Units.String(),
@@ -57,8 +57,11 @@ func (j *CSVJournal) RecordTrade(t TradeRecord) error {
 		t.RealizedPL.String(),
 		t.Reason,
 	})
+	if err != nil {
+		return err
+	}
 	j.trades.Flush()
-	return nil
+	return j.trades.Error()
 }
 
 func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
@@ -75,7 +78,7 @@ func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
 	}
 
 	j.equity.Flush()
-	return nil
+	return j.equity.Error()
 }
 
 func (j *CSVJournal) Close() error {
