@@ -1,6 +1,7 @@
 package backtest
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
