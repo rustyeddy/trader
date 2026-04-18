@@ -73,13 +73,9 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 		return err
 	}
 
-	if d.bytes == 0 {
-		return nil
-	}
-
 	path := d.key.Path()
-	if !d.Time.IsZero() {
-		if IsForexMarketClosed(d.Time.UTC()) {
+	if d.bytes == 0 {
+		if !d.Time.IsZero() && IsForexMarketClosed(d.Time.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)
@@ -96,6 +92,8 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer it.Close()
+
 	for it.Next() {
 		t := it.Item()
 
@@ -104,7 +102,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 				t.Timemilli, hourStart, hourEnd, path)
 		}
 	}
-	return nil
+	return it.Err()
 }
 
 func (d *dukasfile) baseHourUnixMS() (Timemilli, error) {
