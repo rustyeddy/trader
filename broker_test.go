@@ -1,7 +1,12 @@
 package trader
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPriceMid(t *testing.T) {
@@ -40,4 +45,140 @@ func TestPriceMid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
+	t.Parallel()
+
+	b := &Broker{
+		evtQ: make(chan *Event, 1),
+		OpenOrders: OpenOrders{
+			Orders: make(map[string]*Order),
+		},
+	}
+	b.evtQ <- &Event{Type: EventOrderAccepted}
+
+	req := &OpenRequest{
+		Request: Request{
+			TradeCommon: &TradeCommon{
+				ID:         NewULID(),
+				Instrument: "EURUSD",
+			},
+			RequestType: RequestMarketOpen,
+			Price:       Price(1100000),
+			Timestamp:   Timestamp(1),
+		},
+	}
+
+	done := make(chan struct{})
+	var (
+		res *OpenResult
+		err error
+	)
+	go func() {
+		defer close(done)
+		res, err = b.OpenRequest(context.Background(), req)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("OpenRequest blocked with full event queue")
+	}
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "queue is full")
+	require.NotNil(t, res)
+	require.NotNil(t, res.Order)
+	require.NotNil(t, res.Position)
+	assert.Equal(t, 1, len(b.evtQ))
+}
+
+func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *testing.T) {
+	t.Parallel()
+
+	b := &Broker{
+		evtQ: make(chan *Event, 1),
+		OpenOrders: OpenOrders{
+			Orders: make(map[string]*Order),
+		},
+	}
+	b.evtQ <- &Event{Type: EventOrderAccepted}
+
+	req := &OpenRequest{
+		Request: Request{
+			TradeCommon: &TradeCommon{
+				ID:         NewULID(),
+				Instrument: "EURUSD",
+			},
+			RequestType: RequestMarketOpen,
+			Price:       Price(1100000),
+			Timestamp:   Timestamp(2),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	var err error
+	go func() {
+		defer close(done)
+		_, err = b.OpenRequest(ctx, req)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("OpenRequest blocked with canceled context")
+	}
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, len(b.evtQ))
+}
+
+func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
+	t.Parallel()
+
+	b := &Broker{
+		OpenOrders: OpenOrders{
+			Orders: make(map[string]*Order),
+		},
+	}
+
+	req := &OpenRequest{
+		Request: Request{
+			TradeCommon: &TradeCommon{
+				ID:         NewULID(),
+				Instrument: "EURUSD",
+				Units:      Units(1000),
+				Side:       Long,
+			},
+			RequestType: RequestMarketOpen,
+			Price:       Price(1090000),
+			Timestamp:   Timestamp(10),
+		},
+	}
+	ord := &Order{
+		TradeCommon: req.TradeCommon,
+		OrderType:   OrderMarket,
+		OrderStatus: OrderPending,
+	}
+
+	pos, err := b.SubmitOrder(context.Background(), ord)
+	require.NoError(t, err)
+	require.NotNil(t, pos)
+	assert.Equal(t, req.ID, pos.ID)
+	assert.Equal(t, req.Instrument, pos.Instrument)
+	assert.Equal(t, req.Units, pos.Units)
+	assert.Equal(t, req.Side, pos.Side)
+	assert.Empty(t, b.OpenOrders.Orders, "SubmitOrder should not create open-order responses")
+
+	b.ReadOrderResponses(req)
+	require.Len(t, b.OpenOrders.Orders, 1)
+	stored := b.OpenOrders.Get(req.ID)
+	require.NotNil(t, stored)
+	assert.Equal(t, req.ID, stored.ID)
+	assert.Equal(t, OrderMarket, stored.OrderType)
+	assert.Equal(t, OrderPending, stored.OrderStatus)
 }
