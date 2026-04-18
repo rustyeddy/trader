@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/bits"
 )
 
 type Account struct {
@@ -96,73 +95,6 @@ func (act *Account) AddPosition(ctx context.Context, pos *Position) error {
 
 func (act *Account) Resolve() error {
 	return act.ResolveWithMarks(nil)
-}
-
-func mulChecked64(a, b int64) (int64, error) {
-	if a < 0 || b < 0 {
-		return 0, fmt.Errorf("mulChecked64: invalid args a=%d b=%d", a, b)
-	}
-
-	hi, lo := bits.Mul64(uint64(a), uint64(b))
-	if hi != 0 || lo > uint64(math.MaxInt64) {
-		return 0, fmt.Errorf("mulChecked64: overflow a=%d b=%d", a, b)
-	}
-
-	return int64(lo), nil
-}
-
-func roundHalfAwayFromZero(num, den int64) (int64, error) {
-	if num < 0 || den <= 0 {
-		return 0, fmt.Errorf("roundHalfAwayFromZero: invalid args num=%d den=%d", num, den)
-	}
-
-	q := num / den
-	r := num % den
-	if r >= (den+1)/2 {
-		if q == math.MaxInt64 {
-			return 0, fmt.Errorf("roundHalfAwayFromZero: overflow")
-		}
-		q++
-	}
-
-	return q, nil
-}
-
-func absInt64Checked(v int64) (int64, error) {
-	if v == math.MinInt64 {
-		return 0, fmt.Errorf("absInt64Checked: overflow")
-	}
-	if v < 0 {
-		return -v, nil
-	}
-	return v, nil
-}
-
-func signedMulDivRound(a, b, den int64) (int64, error) {
-	if b < 0 || den <= 0 {
-		return 0, fmt.Errorf("signedMulDivRound: invalid args a=%d b=%d den=%d", a, b, den)
-	}
-
-	absA, err := absInt64Checked(a)
-	if err != nil {
-		return 0, err
-	}
-
-	prod, err := mulChecked64(absA, b)
-	if err != nil {
-		return 0, err
-	}
-
-	q, err := roundHalfAwayFromZero(prod, den)
-	if err != nil {
-		return 0, err
-	}
-
-	if a < 0 {
-		return -q, nil
-	}
-
-	return q, nil
 }
 
 func positionUnrealizedPNL(pos *Position, mark Price, qta Rate) (Money, error) {

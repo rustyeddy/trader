@@ -82,12 +82,11 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 		require.NoError(t, err)
 
 		elapsed := time.Since(monthStart)
-		t.Logf("Month %2d: %4d candles in %v", monthIdx+1, candlesInMonth, elapsed)
+		assert.NotZero(t, elapsed)
 	}
 
 	totalElapsed := time.Since(startTime)
-	t.Logf("✓ Total: %d candles in %v", totalCandles, totalElapsed)
-
+	assert.NotZero(t, totalElapsed)
 	// Verify we processed expected amount
 	// Note: Not all hours have candles (weekends, forex market hours)
 	// ~520 candles/month * 12 months = ~6200 candles
@@ -115,8 +114,6 @@ func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 	// January has ~22 trading days
 	assert.Greater(t, candleCount, 15)
 	assert.Less(t, candleCount, 30)
-
-	t.Logf("Processed %d daily candles for January", candleCount)
 }
 
 // TestTraderTimeoutDetection verifies we can detect infinite loops with timeouts.
@@ -147,7 +144,6 @@ func TestTraderTimeoutDetection(t *testing.T) {
 	}
 
 	require.NoError(t, iter.Err())
-	t.Logf("✓ Completed within timeout: %d candles", candleCount)
 }
 
 // TestTraderWithHighVolatilitySynthetic tests with extreme volatility
@@ -193,8 +189,7 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 
 	// Calculate price range
 	priceRange := float64(maxPrice-minPrice) / float64(Price(1080000))
-	t.Logf("High volatility test: Range from %.4f to %.4f (%.2f%% swing)",
-		float64(minPrice)/1000000, float64(maxPrice)/1000000, priceRange*100)
+	assert.NotZero(t, priceRange)
 }
 
 // TestTraderWithDifferentSeeds verifies reproducibility
@@ -230,7 +225,6 @@ func TestTraderWithDifferentSeeds(t *testing.T) {
 	}
 
 	assert.Greater(t, differences, 0, "different seeds should produce different candles")
-	t.Logf("Seed 42 vs 43: %d candles differ out of %d", differences, len(cs1.Candles))
 }
 
 // ============================================================================
