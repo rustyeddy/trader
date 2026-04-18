@@ -1,0 +1,36 @@
+name: Main Tests and Binaries
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: |
+          make vet
+          make test
+          make test-blackbox
+
+      - name: Build binary
+        run: make build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trader-linux-amd64
+          path: bin/trader
+          if-no-files-found: error
