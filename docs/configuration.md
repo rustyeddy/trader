@@ -7,7 +7,7 @@ This project currently has two configuration entry points:
 
 ## 1) Global runtime settings (`RootConfig`)
 
-`RootConfig` is defined in `/home/runner/work/trader/trader/app_config.go` and is created in `/home/runner/work/trader/trader/cmd/main.go`.
+`RootConfig` is defined in `app_config.go` and is created in `cmd/main.go`.
 
 ### Default values
 
@@ -39,7 +39,7 @@ These values are wired as persistent CLI flags in `NewRootCmd()`:
 
 ## 2) Simulation file settings (`AppConfig`)
 
-`AppConfig` is defined in `/home/runner/work/trader/trader/app_config.go`.
+`AppConfig` is defined in `app_config.go`.
 
 ### Default values from `Default()`
 
@@ -68,8 +68,8 @@ These values are wired as persistent CLI flags in `NewRootCmd()`:
 
 ## Current package-level global
 
-There is also an internal package global in `/home/runner/work/trader/trader/trader_globals.go`:
+There is also an internal package global in `trader_globals.go`:
 
-- `store` defaults to base dir `"/home/rusty/src/trader/tmp"`
+- `store` currently defaults to base dir `"/home/rusty/src/trader/tmp"` (hard-coded in source)
 
 This variable is unexported. It is modified internally (for example, tests swap it to a temp store). External packages cannot set it directly.
