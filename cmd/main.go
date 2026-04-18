@@ -4,16 +4,15 @@ import (
 	"fmt"
 	"os"
 
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/data"
 	"github.com/rustyeddy/trader/cmd/replay"
-	"github.com/rustyeddy/trader/config"
-	tlog "github.com/rustyeddy/trader/log"
 	"github.com/spf13/cobra"
 )
 
 func NewRootCmd() *cobra.Command {
-	rc := &config.RootConfig{}
+	rc := &traderpkg.RootConfig{}
 
 	cmd := &cobra.Command{
 		Use:           "trader",
@@ -29,7 +28,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return tlog.Setup(tlog.Config{Level: rc.LogLevel})
+		return traderpkg.Setup(traderpkg.LogConfig{Level: rc.LogLevel})
 	}
 
 	// Subcommands

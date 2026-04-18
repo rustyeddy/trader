@@ -1,7 +1,5 @@
 package trader
 
-import "github.com/rustyeddy/trader/types"
-
 type EventType int
 
 const (
@@ -16,18 +14,18 @@ const (
 
 type Event struct {
 	Type          EventType
-	Time          types.Timestamp
+	Time          Timestamp
 	ClientOrderID string
 	BrokerOrderID string
 	PositionID    string
 	Instrument    string
 	Reason        string
-	Cause         types.CloseCause
+	Cause         CloseCause
 
-	Open     *types.OpenRequest
-	Close    *types.CloseRequest
-	Trade    *types.Trade
-	Position *types.Position
+	Open     *OpenRequest
+	Close    *CloseRequest
+	Trade    *Trade
+	Position *Position
 }
 
 func (e EventType) String() string {

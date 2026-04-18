@@ -1,8 +1,6 @@
 package trader
 
-import (
-	"github.com/rustyeddy/trader/types"
-)
+import ()
 
 type BuyFirstBarStrategy struct {
 	done bool
@@ -16,17 +14,17 @@ func (s *BuyFirstBarStrategy) Reset() {
 	s.done = false
 }
 
-func (s *BuyFirstBarStrategy) OnBar(ctx *CandleContext, c Candle) *types.OpenRequest {
+func (s *BuyFirstBarStrategy) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
 	if s.done || ctx.Pos != nil {
 		return nil
 	}
 
 	s.done = true
 
-	th := types.NewTradeHistory(ctx.Instrument)
-	th.Side = types.Long
-	th.Units = types.Units(1000)
-	return &types.OpenRequest{
-		Request: types.Request{TradeCommon: th.TradeCommon, Price: c.Close, Timestamp: ctx.Timestamp, Reason: "enter on first bar"},
+	th := NewTradeHistory(ctx.Instrument)
+	th.Side = Long
+	th.Units = Units(1000)
+	return &OpenRequest{
+		Request: Request{TradeCommon: th.TradeCommon, Price: c.Close, Timestamp: ctx.Timestamp, Reason: "enter on first bar"},
 	}
 }

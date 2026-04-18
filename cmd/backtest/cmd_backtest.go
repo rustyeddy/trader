@@ -1,13 +1,13 @@
 package backtest
 
 import (
-	"github.com/rustyeddy/trader/config"
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
 )
 
-var rootCfg *config.RootConfig
+var rootCfg *traderpkg.RootConfig
 
-func New(rc *config.RootConfig) *cobra.Command {
+func New(rc *traderpkg.RootConfig) *cobra.Command {
 	rootCfg = rc
 	return CMDBacktest
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -50,24 +49,24 @@ func (o *candleCmdCommon) addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&o.To, "to", o.To, "End date inclusive, YYYY-MM-DD")
 }
 
-func (o candleCmdCommon) stopPips() types.Price { return types.Price(o.StopPips) }
-func (o candleCmdCommon) takePips() types.Price { return types.Price(o.TakePips) }
-func (o candleCmdCommon) units() types.Units    { return types.Units(o.Units) }
-func (o candleCmdCommon) riskPct() types.Rate   { return types.RateFromFloat(o.RiskPct64 / 100.0) }
+func (o candleCmdCommon) stopPips() trader.Price { return trader.Price(o.StopPips) }
+func (o candleCmdCommon) takePips() trader.Price { return trader.Price(o.TakePips) }
+func (o candleCmdCommon) units() trader.Units    { return trader.Units(o.Units) }
+func (o candleCmdCommon) riskPct() trader.Rate   { return trader.RateFromFloat(o.RiskPct64 / 100.0) }
 
 type candleStrategyAdapter struct {
 	S trader.Strategy
 
-	Units     types.Units
-	StopPips  types.Price
-	TakePips  types.Price
-	PipScaled types.Price
+	Units     trader.Units
+	StopPips  trader.Price
+	TakePips  trader.Price
+	PipScaled trader.Price
 }
 
 func (a *candleStrategyAdapter) Name() string { return a.S.Name() }
 func (a *candleStrategyAdapter) Reset()       { a.S.Reset() }
 
-func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c types.Candle) *types.OpenRequest {
+func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c trader.Candle) *trader.OpenRequest {
 	d := a.S.Update(c)
 	if len(d.Opens) == 0 {
 		return nil
@@ -82,9 +81,9 @@ func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c types.Candle)
 	if req.Units == 0 {
 		req.Units = a.Units
 	}
-	stopDist := a.StopPips * types.Price(a.PipScaled)
-	takeDist := a.TakePips * types.Price(a.PipScaled)
-	if req.Side == types.Long {
+	stopDist := a.StopPips * trader.Price(a.PipScaled)
+	takeDist := a.TakePips * trader.Price(a.PipScaled)
+	if req.Side == trader.Long {
 		if req.Stop == 0 && a.StopPips > 0 {
 			req.Stop = c.Close - stopDist
 		}
@@ -92,7 +91,7 @@ func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c types.Candle)
 			req.Take = c.Close + takeDist
 		}
 	}
-	if req.Side == types.Short {
+	if req.Side == trader.Short {
 		if req.Stop == 0 && a.StopPips > 0 {
 			req.Stop = c.Close + stopDist
 		}
@@ -107,10 +106,10 @@ type candleRunMeta struct {
 	RunID   string
 	RunName string
 	Kind    string
-	Created types.Timestamp
+	Created trader.Timestamp
 
-	Balance  types.Money
-	RR       types.Rate
+	Balance  trader.Money
+	RR       trader.Rate
 	Strategy string
 }
 
@@ -131,20 +130,20 @@ func runCandleStrategy(
 	}
 	end := endDay.AddDate(0, 0, 1)
 
-	var tf types.Timeframe
+	var tf trader.Timeframe
 	switch strings.ToUpper(strings.TrimSpace(opts.Timeframe)) {
 	case "M1":
-		tf = types.M1
+		tf = trader.M1
 	case "H1":
-		tf = types.H1
+		tf = trader.H1
 	case "D1":
-		tf = types.D1
+		tf = trader.D1
 	default:
 		return fmt.Errorf("unsupported timeframe %q", opts.Timeframe)
 	}
 
-	instrument := types.NormalizeInstrument(opts.Instrument)
-	instMeta := types.GetInstrument(instrument)
+	instrument := trader.NormalizeInstrument(opts.Instrument)
+	instMeta := trader.GetInstrument(instrument)
 	if instMeta == nil {
 		return fmt.Errorf("unknown instrument %q", instrument)
 	}
@@ -154,9 +153,9 @@ func runCandleStrategy(
 			Source:     "candles",
 			Instrument: instrument,
 			Timeframe:  tf,
-			Range: types.TimeRange{
-				Start: types.FromTime(start),
-				End:   types.FromTime(end),
+			Range: trader.TimeRange{
+				Start: trader.FromTime(start),
+				End:   trader.FromTime(end),
 			},
 			Strict: true,
 		},
@@ -208,10 +207,10 @@ func runCandleStrategy(
 	}
 
 	if meta.Balance != 0 {
-		run.ReturnPct = types.RateFromFloat(run.NetPL.Float64() / meta.Balance.Float64())
+		run.ReturnPct = trader.RateFromFloat(run.NetPL.Float64() / meta.Balance.Float64())
 	}
 	if run.Trades > 0 {
-		run.WinRate = types.RateFromFloat(float64(run.Wins) / float64(run.Trades))
+		run.WinRate = trader.RateFromFloat(float64(run.Wins) / float64(run.Trades))
 	}
 
 	trader.PrintBacktestRun(os.Stdout, run)

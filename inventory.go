@@ -3,8 +3,6 @@ package trader
 import (
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type DataKind uint8
@@ -33,7 +31,7 @@ const (
 type Asset struct {
 	Key        Key
 	Path       string
-	Range      types.TimeRange
+	Range      TimeRange
 	Exists     bool
 	Complete   bool
 	Buildable  bool
@@ -121,17 +119,17 @@ func (inv *Inventory) MissingComplete(keys []Key) []Key {
 
 func (inv *Inventory) TicksComplete(k Key) (bool, []Key) {
 	var keys []Key
-	for day := 1; day <= types.DaysInMonth(k.Year, k.Month-1); day++ {
+	for day := 1; day <= DaysInMonth(k.Year, k.Month-1); day++ {
 		for hour := 0; hour < 24; hour++ {
 			t := time.Date(k.Year, time.Month(k.Month), day, hour, 0, 0, 0, time.UTC)
-			if types.IsForexMarketClosed(t) {
+			if IsForexMarketClosed(t) {
 				continue
 			}
 
 			key := k
 			key.Source = "dukascopy"
 			key.Kind = KindTick
-			key.TF = types.Ticks
+			key.TF = Ticks
 			key.Day = day
 			key.Hour = hour
 			asset, ok := inv.Get(key)

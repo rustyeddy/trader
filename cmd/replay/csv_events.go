@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 )
 
 type EventRow struct {
@@ -25,13 +24,13 @@ type EventRow struct {
 type CSVEventsFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from types.Timestamp
-	to   types.Timestamp
+	from trader.Timestamp
+	to   trader.Timestamp
 
 	sawFirst bool
 }
 
-func NewCSVEventsFeed(path string, from, to types.Timestamp) (*CSVEventsFeed, error) {
+func NewCSVEventsFeed(path string, from, to trader.Timestamp) (*CSVEventsFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -119,7 +118,7 @@ func (f *CSVEventsFeed) Next() (EventRow, bool, error) {
 	}
 }
 
-func inRange(t, from, to types.Timestamp) bool {
+func inRange(t, from, to trader.Timestamp) bool {
 	if !from.IsZero() && t < from {
 		return false
 	}
@@ -161,11 +160,11 @@ func parseTickRowCompat(row []string) (trader.Tick, bool, error) {
 	}
 
 	return trader.Tick{
-		Timestamp:  types.FromTime(t),
+		Timestamp:  trader.FromTime(t),
 		Instrument: inst,
 		BA: trader.BA{
-			Bid: types.PriceFromFloat(bid),
-			Ask: types.PriceFromFloat(ask),
+			Bid: trader.PriceFromFloat(bid),
+			Ask: trader.PriceFromFloat(ask),
 		},
 	}, true, nil
 }

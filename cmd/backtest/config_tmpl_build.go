@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 )
 
 func BuildTemplateStrategyConfig(r trader.ResolvedRun) (trader.TemplateStrategyConfig, error) {
@@ -26,7 +25,7 @@ func BuildTemplateStrategyConfig(r trader.ResolvedRun) (trader.TemplateStrategyC
 
 	scale := r.Scale
 	if scale <= 0 {
-		scale = types.PriceScale
+		scale = trader.PriceScale
 	}
 
 	return trader.TemplateStrategyConfig{

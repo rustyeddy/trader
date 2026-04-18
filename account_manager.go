@@ -1,7 +1,5 @@
 package trader
 
-import "github.com/rustyeddy/trader/types"
-
 type AccountManager struct {
 	accounts map[string]*Account
 }
@@ -13,7 +11,7 @@ func NewAccountManager() *AccountManager {
 }
 
 func (am *AccountManager) CreateAccount(name string, b int64) *Account {
-	balance := types.Money(b * int64(types.MoneyScale))
+	balance := Money(b * int64(MoneyScale))
 	act := NewAccount(name, balance)
 	am.accounts[name] = act
 	return act

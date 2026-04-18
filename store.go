@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
 )
 
@@ -46,7 +44,7 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 	if source == "" {
 		source = "unknown"
 	}
-	instrument := types.NormalizeInstrument(k.Instrument)
+	instrument := NormalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
 
 	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
@@ -76,7 +74,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	// Expect <basedir>/<source>/<instrument>/<year>/<month>/<filename>.csv
 	n := len(parts)
 	k = Key{
-		Instrument: types.NormalizeInstrument(parts[n-4]),
+		Instrument: NormalizeInstrument(parts[n-4]),
 		Source:     normalizeSource(parts[n-5]),
 		Kind:       KindCandle,
 	}
@@ -101,7 +99,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		return k, false
 	}
 
-	fileInst := types.NormalizeInstrument(nameParts[0])
+	fileInst := NormalizeInstrument(nameParts[0])
 	fileYear, err := strconv.Atoi(nameParts[1])
 	if err != nil {
 		return k, false
@@ -118,11 +116,11 @@ func parseCandlePath(path string) (k Key, ok bool) {
 
 	switch fileTF {
 	case "m1": // XXX normalize these!!
-		k.TF = types.M1
+		k.TF = M1
 	case "h1":
-		k.TF = types.H1
+		k.TF = H1
 	case "d1":
-		k.TF = types.D1
+		k.TF = D1
 	default:
 		return k, false
 	}
@@ -133,7 +131,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
-	instrument := types.NormalizeInstrument(k.Instrument)
+	instrument := NormalizeInstrument(k.Instrument)
 
 	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
 	return filepath.Join(
@@ -168,10 +166,10 @@ func parseTickPath(path string) (Key, bool) {
 	inst := parts[n-5]
 
 	k = Key{
-		Instrument: types.NormalizeInstrument(inst),
+		Instrument: NormalizeInstrument(inst),
 		Source:     normalizeSource("dukascopy"),
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 	}
 
 	year, err := strconv.Atoi(yearStr)
@@ -213,7 +211,7 @@ func parseTickPath(path string) (Key, bool) {
 
 func (s *Store) RelDir(key Key) string {
 	return filepath.Join(
-		types.NormalizeInstrument(key.Instrument),
+		NormalizeInstrument(key.Instrument),
 		strings.ToUpper(key.TF.String()),
 		fmt.Sprintf("%04d", key.Year),
 	)
@@ -241,7 +239,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 		}
 
 		var ok bool
-		var rng types.TimeRange
+		var rng TimeRange
 		var descriptor string
 		name := strings.ToLower(info.Name())
 		var key Key
@@ -257,7 +255,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end), types.Ticks)
+			rng = NewTimeRange(FromTime(start), FromTime(end), Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
@@ -265,7 +263,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = types.MonthRange(key.Year, key.Month)
+			rng = MonthRange(key.Year, key.Month)
 			descriptor = "Candles"
 
 		default:
@@ -287,8 +285,8 @@ func (s *Store) scanFiles(inv *Inventory) error {
 	})
 }
 
-func (store *Store) writeMetadata(cs *types.CandleSet, w io.Writer) error {
-	tfstr := types.Timeframe(cs.Timeframe).String()
+func (store *Store) writeMetadata(cs *CandleSet, w io.Writer) error {
+	tfstr := Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
 	_, err := fmt.Fprintf(w, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
@@ -301,7 +299,7 @@ func (store *Store) writeMetadata(cs *types.CandleSet, w io.Writer) error {
 	return err
 }
 
-func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
+func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -322,7 +320,7 @@ func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
 
 	// Build CandleSet structure from key parameters.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	start := types.FromTime(monthStart)
+	start := FromTime(monthStart)
 	tf := key.TF
 	step := int64(tf)
 
@@ -330,14 +328,14 @@ func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
 	spanSec := int64(endTime.Sub(monthStart).Seconds())
 	n := int(spanSec / step)
 
-	instName := types.NormalizeInstrument(key.Instrument)
-	cs = &types.CandleSet{
+	instName := NormalizeInstrument(key.Instrument)
+	cs = &CandleSet{
 		Instrument: instName,
 		Source:     "candles",
 		Start:      start,
 		Timeframe:  tf,
-		Scale:      types.PriceScale,
-		Candles:    make([]types.Candle, n),
+		Scale:      PriceScale,
+		Candles:    make([]Candle, n),
 		Valid:      make([]uint64, (n+63)/64),
 	}
 
@@ -373,27 +371,27 @@ func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := types.ParsePrice(fields[1])
+		highv, err := ParsePrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
-		openv, err := types.ParsePrice(fields[2])
+		openv, err := ParsePrice(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := types.ParsePrice(fields[3])
+		lowv, err := ParsePrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := types.ParsePrice(fields[4])
+		closev, err := ParsePrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := types.ParsePrice(fields[5])
+		avgSpread, err := ParsePrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := types.ParsePrice(fields[6])
+		maxSpread, err := ParsePrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
@@ -408,7 +406,7 @@ func (store *Store) ReadCSV(key Key) (cs *types.CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		cs.Candles[idx] = types.Candle{
+		cs.Candles[idx] = Candle{
 			High:      highv,
 			Open:      openv,
 			Low:       lowv,
@@ -437,7 +435,7 @@ func looksLikeHeader(rec []string) bool {
 	return h == "timestamp" || h == "time"
 }
 
-func (s *Store) WriteCSV(cs *types.CandleSet) error {
+func (s *Store) WriteCSV(cs *CandleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
@@ -452,10 +450,10 @@ func (s *Store) WriteCSV(cs *types.CandleSet) error {
 
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	key := Key{
-		Instrument: types.NormalizeInstrument(cs.Instrument),
+		Instrument: NormalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
-		TF:         types.Timeframe(cs.Timeframe),
+		TF:         Timeframe(cs.Timeframe),
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
@@ -507,7 +505,7 @@ func (s *Store) WriteCSV(cs *types.CandleSet) error {
 		return err
 	}
 
-	tlog.Data.Debug("writing candle file", "path", path)
+	Data.Debug("writing candle file", "path", path)
 	return bw.Flush()
 }
 
@@ -568,11 +566,11 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}
-	if key.TF != types.Ticks {
+	if key.TF != Ticks {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
-	if types.IsForexMarketClosed(key.Time()) {
+	if IsForexMarketClosed(key.Time()) {
 		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
 	}
 
@@ -593,7 +591,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
 	}
 
-	baseUnixMS := types.Timemilli(time.Date(
+	baseUnixMS := Timemilli(time.Date(
 		key.Year,
 		time.Month(key.Month),
 		key.Day,
@@ -611,7 +609,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 	return NewFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS types.Timemilli) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS Timemilli) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -639,9 +637,9 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS types.Timemilli) (RawT
 	}
 
 	t := RawTick{
-		Timemilli: baseUnixMS + types.Timemilli(msOffset),
-		Ask:       types.Price(askU * 10),
-		Bid:       types.Price(bidU * 10),
+		Timemilli: baseUnixMS + Timemilli(msOffset),
+		Ask:       Price(askU * 10),
+		Bid:       Price(bidU * 10),
 		AskVol:    askVol,
 		BidVol:    bidVol,
 	}

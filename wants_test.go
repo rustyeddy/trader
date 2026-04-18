@@ -2,17 +2,15 @@ package trader
 
 import (
 	"errors"
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestWantlistPutGetHasDelete(t *testing.T) {
 	t.Parallel()
 
 	wl := NewWantlist()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	w := Want{Key: k, WantReason: WantMissing}
 
 	require.False(t, wl.Has(k))

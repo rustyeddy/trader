@@ -2,8 +2,6 @@ package trader
 
 import (
 	"fmt"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type TemplateStrategyConfig struct {
@@ -12,7 +10,7 @@ type TemplateStrategyConfig struct {
 	// Strategy-specific parameters
 	Lookback  int
 	Threshold float64
-	Scale     types.Scale6
+	Scale     Scale6
 }
 
 type TemplateStrategy struct {
@@ -54,7 +52,7 @@ func (s *TemplateStrategy) Ready() bool {
 	return s.ready
 }
 
-func (s *TemplateStrategy) Update(c types.Candle) *StrategyPlan {
+func (s *TemplateStrategy) Update(c Candle) *StrategyPlan {
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
 
 	s.bars++

@@ -2,11 +2,9 @@ package trader
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -17,9 +15,9 @@ func TestCandleMaker_H1TaskFails(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	// Input M1 key doesn't exist in store → buildH1 will fail on ReadCSV
-	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 
 	dm := &DataManager{
 		plan: &Plan{
@@ -39,8 +37,8 @@ func TestCandleMaker_D1TaskFails(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 1}
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: D1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 
 	dm := &DataManager{
 		plan: &Plan{
@@ -64,7 +62,7 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := types.TimeMilliFromTime(hourStart)
+	baseMS := TimeMilliFromTime(hourStart)
 
 	// Tick at minute 0 and tick at minute 5 (gap of 4 minutes)
 	ticks := []RawTick{
@@ -84,7 +82,7 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 	k := Key{
 		Instrument: "EURUSD",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        5,
@@ -111,7 +109,7 @@ func TestExecuteDownloads_ContextCancelled(t *testing.T) {
 
 	k := Key{
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Year:       2026,

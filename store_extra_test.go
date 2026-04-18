@@ -2,13 +2,11 @@ package trader
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,7 +20,7 @@ func TestStoreDelete(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         types.M1,
+		TF:         M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -48,7 +46,7 @@ func TestStoreDelete(t *testing.T) {
 func TestOpenTickIterator_NotTickKind(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)
-	k := Key{Kind: KindCandle, TF: types.Ticks}
+	k := Key{Kind: KindCandle, TF: Ticks}
 	_, err := s.OpenTickIterator(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a tick key")
@@ -57,7 +55,7 @@ func TestOpenTickIterator_NotTickKind(t *testing.T) {
 func TestOpenTickIterator_BadTimeframe(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)
-	k := Key{Kind: KindTick, TF: types.M1}
+	k := Key{Kind: KindTick, TF: M1}
 	_, err := s.OpenTickIterator(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bad timeframe")
@@ -67,7 +65,7 @@ func TestOpenTickIterator_MarketClosed(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)
 	// Saturday - forex market is closed
-	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 3, Hour: 10} // 2026-01-03 is a Saturday
+	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 3, Hour: 10} // 2026-01-03 is a Saturday
 	_, err := s.OpenTickIterator(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "market is closed")
@@ -82,14 +80,14 @@ func TestBuildH1_FullPath(t *testing.T) {
 
 	// Write M1 candles
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, types.M1)
+	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, M1)
 	require.NoError(t, err)
 	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
-	km1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	kh1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	km1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	wl := NewWantlist()
 	wl.Put(Want{Key: kh1, WantReason: WantMissing})
 
@@ -102,14 +100,14 @@ func TestBuildD1_FullPath(t *testing.T) {
 	s := useTempStore(t)
 
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, types.H1)
+	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, H1)
 	require.NoError(t, err)
 	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
-	kh1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
-	kd1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
+	kd1 := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: D1, Year: 2026, Month: 1}
 	wl := NewWantlist()
 	wl.Put(Want{Key: kd1, WantReason: WantMissing})
 
@@ -126,11 +124,11 @@ func TestChainedCandleIterator_SubIteratorErr(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
 	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 
-	real := NewCandleSetIterator(cs, types.TimeRange{})
+	real := NewCandleSetIterator(cs, TimeRange{})
 	_ = s
 
 	// Wrap the real iterator in a chained one and read it
@@ -178,10 +176,10 @@ func TestLooksLikeHeader(t *testing.T) {
 // Helpers for tests in this file
 // ---------------------------------------------------------------------------
 
-func testCandle() types.Candle {
-	return types.Candle{
-		Open: types.Price(100), High: types.Price(105),
-		Low: types.Price(99), Close: types.Price(103), Ticks: 1,
+func testCandle() Candle {
+	return Candle{
+		Open: Price(100), High: Price(105),
+		Low: Price(99), Close: Price(103), Ticks: 1,
 	}
 }
 
@@ -189,13 +187,13 @@ func newMonthlyCandleSetFromStart(
 	s *Store,
 	instrument string,
 	start time.Time,
-	tf types.Timeframe,
-) (*types.CandleSet, error) {
-	return types.NewMonthlyCandleSet(
-		types.NormalizeInstrument(instrument),
+	tf Timeframe,
+) (*CandleSet, error) {
+	return NewMonthlyCandleSet(
+		NormalizeInstrument(instrument),
 		tf,
-		types.FromTime(start),
-		types.PriceScale,
+		FromTime(start),
+		PriceScale,
 		"test",
 	)
 }

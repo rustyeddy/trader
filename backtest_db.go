@@ -2,8 +2,6 @@ package trader
 
 import (
 	"context"
-
-	"github.com/rustyeddy/trader/journal"
 )
 
 func RecordBacktest(ctx context.Context, btr BacktestRun) error {
@@ -16,12 +14,12 @@ func GetBacktestRun(ctx context.Context, runID string) (btr BacktestRun, err err
 	return
 }
 
-func ListTradesByRunID(ctx context.Context, runID string) (tr []journal.TradeRecord, err error) {
+func ListTradesByRunID(ctx context.Context, runID string) (tr []TradeRecord, err error) {
 
 	return
 }
 
-func ListEquityByRunID(ctx context.Context, runID string) (eq []journal.EquitySnapshot, err error) {
+func ListEquityByRunID(ctx context.Context, runID string) (eq []EquitySnapshot, err error) {
 
 	return
 }

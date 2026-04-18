@@ -2,11 +2,9 @@ package trader
 
 import (
 	"bytes"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/assert"
 )
 
 // ─── PrintBacktestRun ─────────────────────────────────────────────────────────
@@ -16,26 +14,26 @@ func TestPrintBacktestRun_Basic(t *testing.T) {
 		RunID:        "run-001",
 		Name:         "test",
 		Kind:         "candle",
-		Created:      types.FromTime(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)),
+		Created:      FromTime(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)),
 		Strategy:     "buy-first",
 		Instrument:   "EURUSD",
 		Timeframe:    "H1",
 		Dataset:      "dukascopy",
-		Start:        types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-		End:          types.FromTime(time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)),
+		Start:        FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+		End:          FromTime(time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)),
 		Trades:       10,
 		Wins:         6,
 		Losses:       4,
-		StartBalance: types.MoneyFromFloat(10000.0),
-		EndBalance:   types.MoneyFromFloat(10500.0),
-		NetPL:        types.MoneyFromFloat(500.0),
-		ReturnPct:    types.RateFromFloat(0.05),
-		WinRate:      types.RateFromFloat(0.6),
-		ProfitFactor: types.RateFromFloat(1.5),
-		MaxDDPct:     types.RateFromFloat(0.03),
-		RiskPct:      types.RateFromFloat(0.005),
+		StartBalance: MoneyFromFloat(10000.0),
+		EndBalance:   MoneyFromFloat(10500.0),
+		NetPL:        MoneyFromFloat(500.0),
+		ReturnPct:    RateFromFloat(0.05),
+		WinRate:      RateFromFloat(0.6),
+		ProfitFactor: RateFromFloat(1.5),
+		MaxDDPct:     RateFromFloat(0.03),
+		RiskPct:      RateFromFloat(0.005),
 		StopPips:     20,
-		RR:           types.RateFromFloat(2.0),
+		RR:           RateFromFloat(2.0),
 	}
 
 	var buf bytes.Buffer

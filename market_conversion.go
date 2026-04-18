@@ -3,12 +3,10 @@ package trader
 import (
 	"context"
 	"fmt"
-
-	"github.com/rustyeddy/trader/types"
 )
 
-func QuoteToAccountRate(instrument string, accountCurrency string, prices types.TickSource) (float64, error) {
-	meta, ok := types.Instruments[instrument]
+func QuoteToAccountRate(instrument string, accountCurrency string, prices TickSource) (float64, error) {
+	meta, ok := Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)
 	}
@@ -22,7 +20,7 @@ func QuoteToAccountRate(instrument string, accountCurrency string, prices types.
 		if err != nil {
 			return 0, err
 		}
-		mid := float64(px.Mid()) / float64(types.PriceScale)
+		mid := float64(px.Mid()) / float64(PriceScale)
 		if mid <= 0 {
 			return 0, fmt.Errorf("invalid mid price for %s", instrument)
 		}

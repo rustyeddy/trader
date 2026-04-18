@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,7 +19,7 @@ func TestReadCSV_NonZeroDay(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1, Day: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1, Day: 1}
 	_, err := s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Day==0")
@@ -31,7 +29,7 @@ func TestReadCSV_NonZeroHour(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1, Hour: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1, Hour: 1}
 	_, err := s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Hour==0")
@@ -41,7 +39,7 @@ func TestReadCSV_BadTimestamp(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
@@ -59,7 +57,7 @@ func TestReadCSV_BadHighValue(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -78,7 +76,7 @@ func TestReadCSV_BadOpenValue(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -97,7 +95,7 @@ func TestReadCSV_BadLowValue(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -116,7 +114,7 @@ func TestReadCSV_BadCloseValue(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -135,7 +133,7 @@ func TestReadCSV_BadAvgSpread(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -154,7 +152,7 @@ func TestReadCSV_BadMaxSpread(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -173,7 +171,7 @@ func TestReadCSV_BadTicks(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -192,7 +190,7 @@ func TestReadCSV_BadFlags(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -212,7 +210,7 @@ func TestReadCSV_TimestampOutOfRange(t *testing.T) {
 	s := newTestStore(t)
 	// Timestamp for Feb 1 2026 - outside January range
 	ts := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	path := s.PathForAsset(k)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -244,7 +242,7 @@ func TestStoreSaveFile_CopyError(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -266,7 +264,7 @@ func TestStoreSaveFile_CopyError(t *testing.T) {
 func TestBuildHourM1_BadTimestamp(t *testing.T) {
 	t.Parallel()
 
-	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	tick := RawTick{Timemilli: 0, Ask: 100, Bid: 99} // Timemilli <= 0
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
@@ -290,7 +288,7 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := types.TimeMilliFromTime(hourStart)
+	baseMS := TimeMilliFromTime(hourStart)
 
 	ticks := []RawTick{
 		// First tick: minute 5
@@ -308,7 +306,7 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "out-of-order")
@@ -322,7 +320,7 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := types.TimeMilliFromTime(hourStart)
+	baseMS := TimeMilliFromTime(hourStart)
 
 	// Only minute 0 has a tick; minutes 1-59 should be filled flat
 	ticks := []RawTick{
@@ -338,7 +336,7 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
 	require.NotNil(t, cs)
@@ -385,8 +383,8 @@ func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
 	s := useTempStore(t)
 
 	// Write data for two months
-	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, nil)
-	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.February, nil)
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.January, nil)
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.February, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -395,10 +393,10 @@ func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  types.H1,
-		Range: types.TimeRange{
-			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   types.FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
+		Timeframe:  H1,
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
 		},
 	}
 	_, err := dm.Candles(ctx, req)
@@ -427,7 +425,7 @@ func TestInventoryString(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	a := Asset{
 		Key:        k,
 		Descriptor: "test descriptor",
@@ -447,7 +445,7 @@ func TestStoreExistsTwoPaths(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 
 	// Initially missing
 	exists, err := s.Exists(k)
@@ -487,7 +485,7 @@ func TestRequiredTickHoursForMonth_NoClosedHours(t *testing.T) {
 	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
 	for _, k := range keys {
 		ts := time.Date(k.Year, time.Month(k.Month), k.Day, k.Hour, 0, 0, 0, time.UTC)
-		require.False(t, types.IsForexMarketClosed(ts),
+		require.False(t, IsForexMarketClosed(ts),
 			"key %+v should not be forex-closed time", k)
 	}
 }
@@ -533,16 +531,16 @@ func TestWriteCSV_WithInvalidCandle(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := types.NewMonthlyCandleSet("EURUSD", types.H1, types.FromTime(start), types.PriceScale, "test")
+	cs, err := NewMonthlyCandleSet("EURUSD", H1, FromTime(start), PriceScale, "test")
 	require.NoError(t, err)
 
 	// Put a candle but do NOT call cs.SetValid → flags will be 0
-	cs.Candles[0] = types.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 
 	require.NoError(t, s.WriteCSV(cs))
 
 	// Read it back and verify the candle is NOT valid
-	key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 2}
+	key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 2}
 	back, err := s.ReadCSV(key)
 	require.NoError(t, err)
 	require.False(t, back.IsValid(0))

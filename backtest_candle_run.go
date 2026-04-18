@@ -3,8 +3,6 @@ package trader
 import (
 	"context"
 	"fmt"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type CandleSource interface {
@@ -13,9 +11,9 @@ type CandleSource interface {
 
 type CandleRunRequest struct {
 	DataRequest     CandleRequest
-	StartingBalance types.Money
+	StartingBalance Money
 	AccountCCY      string
-	Scale           types.Scale6
+	Scale           Scale6
 }
 
 func RunCandles(

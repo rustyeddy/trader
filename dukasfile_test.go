@@ -11,21 +11,21 @@ func TestBitIsSet(t *testing.T) {
 
 	bits := make([]uint64, 2)
 
-	require.False(t, bitIsSet(bits, 0))
-	require.False(t, bitIsSet(bits, 63))
-	require.False(t, bitIsSet(bits, 64))
+	require.False(t, dukasBitIsSet(bits, 0))
+	require.False(t, dukasBitIsSet(bits, 63))
+	require.False(t, dukasBitIsSet(bits, 64))
 
-	bitSet(bits, 0)
-	require.True(t, bitIsSet(bits, 0))
-	require.False(t, bitIsSet(bits, 1))
+	dukasBitSet(bits, 0)
+	require.True(t, dukasBitIsSet(bits, 0))
+	require.False(t, dukasBitIsSet(bits, 1))
 
-	bitSet(bits, 63)
-	require.True(t, bitIsSet(bits, 63))
+	dukasBitSet(bits, 63)
+	require.True(t, dukasBitIsSet(bits, 63))
 
-	bitSet(bits, 64)
-	require.True(t, bitIsSet(bits, 64))
+	dukasBitSet(bits, 64)
+	require.True(t, dukasBitIsSet(bits, 64))
 
 	// Idempotent
-	bitSet(bits, 0)
-	require.True(t, bitIsSet(bits, 0))
+	dukasBitSet(bits, 0)
+	require.True(t, dukasBitIsSet(bits, 0))
 }

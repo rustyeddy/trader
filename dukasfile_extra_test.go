@@ -2,11 +2,9 @@ package trader
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNewDatafile(t *testing.T) {
@@ -33,7 +31,7 @@ func TestDukasfileKey(t *testing.T) {
 	require.Equal(t, sym, k.Instrument)
 	require.Equal(t, "dukascopy", k.Source)
 	require.Equal(t, KindTick, k.Kind)
-	require.Equal(t, types.Ticks, k.TF)
+	require.Equal(t, Ticks, k.TF)
 	require.Equal(t, 2025, k.Year)
 	require.Equal(t, 1, k.Month)
 	require.Equal(t, 2, k.Day)

@@ -1,10 +1,8 @@
 package trader
 
 import (
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestDataKindString(t *testing.T) {
@@ -27,7 +25,7 @@ func TestInventoryPutGetHasDelete(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	a := Asset{Key: k, Exists: true, Complete: true}
 
 	require.False(t, inv.Has(k))

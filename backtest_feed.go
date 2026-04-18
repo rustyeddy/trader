@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 // CSVTicksFeed reads canonical tick CSV rows:
@@ -24,13 +22,13 @@ import (
 type CSVTicksFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from types.Timestamp
-	to   types.Timestamp
+	from Timestamp
+	to   Timestamp
 
 	sawFirst bool
 }
 
-func NewCSVTicksFeed(path string, from, to types.Timestamp) (*CSVTicksFeed, error) {
+func NewCSVTicksFeed(path string, from, to Timestamp) (*CSVTicksFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -104,7 +102,7 @@ func parseTickRow(row []string) (Tick, bool, error) {
 		t = t2
 	}
 
-	tstamp := types.Timestamp(t.Unix())
+	tstamp := Timestamp(t.Unix())
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
 		return Tick{}, false, nil
@@ -123,13 +121,13 @@ func parseTickRow(row []string) (Tick, bool, error) {
 		Timestamp:  tstamp,
 		Instrument: inst,
 		BA: BA{
-			Bid: types.PriceFromFloat(bid),
-			Ask: types.PriceFromFloat(ask),
+			Bid: PriceFromFloat(bid),
+			Ask: PriceFromFloat(ask),
 		},
 	}, true, nil
 }
 
-func inRange(t, from, to types.Timestamp) bool {
+func inRange(t, from, to Timestamp) bool {
 	if !from.IsZero() && t < from {
 		return false
 	}

@@ -5,34 +5,32 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type Account struct {
 	ID          string
 	Name        string
 	Currency    string
-	Balance     types.Money
-	Equity      types.Money
-	MarginUsed  types.Money
-	FreeMargin  types.Money
-	MarginLevel types.Money
-	RiskPct     types.Rate
+	Balance     Money
+	Equity      Money
+	MarginUsed  Money
+	FreeMargin  Money
+	MarginLevel Money
+	RiskPct     Rate
 
-	types.Positions
-	Trades []*types.Trade
+	Positions
+	Trades []*Trade
 }
 
-func NewAccount(name string, deposit types.Money) *Account {
+func NewAccount(name string, deposit Money) *Account {
 	act := &Account{
-		ID:         types.NewULID(),
+		ID:         NewULID(),
 		Name:       name,
 		Currency:   "USD",
 		Balance:    deposit,
 		Equity:     deposit,
 		MarginUsed: 0.0,
-		RiskPct:    types.RateFromFloat(0.005),
+		RiskPct:    RateFromFloat(0.005),
 	}
 	return act
 }
@@ -52,28 +50,28 @@ func (act *Account) Print() {
 //   - USDJPY -> 1 / USDJPY
 //   - EURGBP -> GBPUSD, or 1 / USDGBP if only the inverse exists
 //
-// The returned Rate is scaled by types.RateScale.
-func (act *Account) QuoteToAccount(inst string, price types.Price) (types.Rate, error) {
-	meta := types.GetInstrument(inst)
+// The returned Rate is scaled by RateScale.
+func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
+	meta := GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("failed to find instrument %s", inst)
 	}
 	if meta.QuoteCurrency == act.Currency {
-		return types.Rate(types.RateScale), nil
+		return Rate(RateScale), nil
 	}
 
 	if meta.BaseCurrency == act.Currency {
-		r, err := types.MulDiv64(int64(types.MoneyScale), int64(types.PriceScale), int64(price))
+		r, err := MulDiv64(int64(MoneyScale), int64(PriceScale), int64(price))
 		if err != nil {
 			return 0, err
 		}
-		return types.Rate(r), nil
+		return Rate(r), nil
 	}
 
 	return 0, fmt.Errorf("cross conversion not implemented for %s → %s", meta.QuoteCurrency, act.Currency)
 }
 
-func (act *Account) AddPosition(ctx context.Context, pos *types.Position) error {
+func (act *Account) AddPosition(ctx context.Context, pos *Position) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
 	}
@@ -91,7 +89,7 @@ func (act *Account) AddPosition(ctx context.Context, pos *types.Position) error 
 	}
 
 	act.Positions.Add(pos)
-	return act.ResolveWithMarks(map[string]types.Price{
+	return act.ResolveWithMarks(map[string]Price{
 		pos.Instrument: pos.FillPrice,
 	})
 }
@@ -167,7 +165,7 @@ func signedMulDivRound(a, b, den int64) (int64, error) {
 	return q, nil
 }
 
-func positionUnrealizedPNL(pos *types.Position, mark types.Price, qta types.Rate) (types.Money, error) {
+func positionUnrealizedPNL(pos *Position, mark Price, qta Rate) (Money, error) {
 	if pos == nil {
 		return 0, fmt.Errorf("nil position")
 	}
@@ -197,8 +195,8 @@ func positionUnrealizedPNL(pos *types.Position, mark types.Price, qta types.Rate
 		return 0, err
 	}
 
-	whole := deltaUnits / int64(types.PriceScale)
-	frac := deltaUnits % int64(types.PriceScale)
+	whole := deltaUnits / int64(PriceScale)
+	frac := deltaUnits % int64(PriceScale)
 
 	base, err := mulChecked64(whole, int64(qta))
 	if err != nil {
@@ -209,7 +207,7 @@ func positionUnrealizedPNL(pos *types.Position, mark types.Price, qta types.Rate
 	if err != nil {
 		return 0, err
 	}
-	fracPart, err := roundHalfAwayFromZero(fracNum, int64(types.PriceScale))
+	fracPart, err := roundHalfAwayFromZero(fracNum, int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
@@ -220,7 +218,7 @@ func positionUnrealizedPNL(pos *types.Position, mark types.Price, qta types.Rate
 	totalAbs := base + fracPart
 
 	sign := int64(pos.Side)
-	if sign != int64(types.Long) && sign != int64(types.Short) {
+	if sign != int64(Long) && sign != int64(Short) {
 		return 0, fmt.Errorf("position %q has invalid side %d", pos.ID, pos.Side)
 	}
 	if priceDelta < 0 {
@@ -230,18 +228,18 @@ func positionUnrealizedPNL(pos *types.Position, mark types.Price, qta types.Rate
 		totalAbs = -totalAbs
 	}
 
-	return types.Money(totalAbs), nil
+	return Money(totalAbs), nil
 }
 
-func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
+func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
 	}
 
 	equity := act.Balance
-	var marginUsed types.Money
+	var marginUsed Money
 
-	err := act.Positions.Range(func(pos *types.Position) error {
+	err := act.Positions.Range(func(pos *Position) error {
 		if pos.Instrument == "" {
 			return fmt.Errorf("position %q has nil instrument", pos.ID)
 		}
@@ -262,7 +260,7 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 			}
 		}
 
-		inst := types.GetInstrument(pos.Instrument)
+		inst := GetInstrument(pos.Instrument)
 		if inst == nil {
 			return fmt.Errorf("instrument is nil %s", pos.Instrument)
 		}
@@ -295,11 +293,11 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 	act.FreeMargin = act.Equity - act.MarginUsed
 
 	if act.MarginUsed > 0 {
-		v, err := signedMulDivRound(int64(act.Equity), int64(types.MoneyScale), int64(act.MarginUsed))
+		v, err := signedMulDivRound(int64(act.Equity), int64(MoneyScale), int64(act.MarginUsed))
 		if err != nil {
 			return err
 		}
-		act.MarginLevel = types.Money(v)
+		act.MarginLevel = Money(v)
 	} else {
 		act.MarginLevel = 0
 	}
@@ -307,7 +305,7 @@ func (act *Account) ResolveWithMarks(marks map[string]types.Price) error {
 	return nil
 }
 
-func (act *Account) RealizePNL(trade *types.Trade) (types.Money, error) {
+func (act *Account) RealizePNL(trade *Trade) (Money, error) {
 	if act == nil {
 		return 0, fmt.Errorf("nil account")
 	}
@@ -326,7 +324,7 @@ func (act *Account) RealizePNL(trade *types.Trade) (types.Money, error) {
 		return 0, err
 	}
 
-	pos := &types.Position{
+	pos := &Position{
 		TradeCommon: trade.TradeCommon,
 	}
 	pnlMoney, err := positionUnrealizedPNL(pos, trade.FillPrice, qta)
@@ -340,7 +338,7 @@ func (act *Account) RealizePNL(trade *types.Trade) (types.Money, error) {
 	return pnlMoney, nil
 }
 
-func (act *Account) ClosePosition(pos *types.Position, trade *types.Trade) error {
+func (act *Account) ClosePosition(pos *Position, trade *Trade) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
 	}
@@ -361,10 +359,10 @@ func (act *Account) ClosePosition(pos *types.Position, trade *types.Trade) error
 	return nil
 }
 
-func (act *Account) OpenPosition(t types.Timestamp, c types.Candle, req *types.OpenRequest) {
+func (act *Account) OpenPosition(t Timestamp, c Candle, req *OpenRequest) {
 	entry := c.Close
 
-	pos := &types.Position{
+	pos := &Position{
 		TradeCommon: req.TradeCommon,
 		FillPrice:   entry,
 		FillTime:    t,
@@ -372,11 +370,11 @@ func (act *Account) OpenPosition(t types.Timestamp, c types.Candle, req *types.O
 	act.Positions.Add(pos)
 }
 
-func (act *Account) closePosition(t types.Timestamp, exit types.Price, reason string) {
+func (act *Account) closePosition(t Timestamp, exit Price, reason string) {
 }
 
-func (act *Account) TradeMargin(units types.Units, price types.Price, inst string) (types.Money, error) {
-	meta := types.GetInstrument(inst)
+func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, error) {
+	meta := GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("no such instrument %s\n", inst)
 	}
@@ -385,17 +383,17 @@ func (act *Account) TradeMargin(units types.Units, price types.Price, inst strin
 		return 0, fmt.Errorf("invalid margin rate for %s: %d", meta.Name, meta.MarginRate)
 	}
 
-	u := types.Abs64(int64(units))
+	u := Abs64(int64(units))
 	p := int64(price)
 	if p <= 0 {
 		return 0, fmt.Errorf("invalid price: %d", p)
 	}
 
-	up, err := types.MulDiv64(u, p, int64(types.PriceScale))
+	up, err := MulDiv64(u, p, int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	notionalQuoteMicro, err := types.MulDiv64(up, int64(types.MoneyScale), 1)
+	notionalQuoteMicro, err := MulDiv64(up, int64(MoneyScale), 1)
 	if err != nil {
 		return 0, err
 	}
@@ -405,21 +403,21 @@ func (act *Account) TradeMargin(units types.Units, price types.Price, inst strin
 		return 0, err
 	}
 
-	notionalAcctMicro, err := types.MulDiv64(notionalQuoteMicro, int64(qta), int64(types.RateScale))
+	notionalAcctMicro, err := MulDiv64(notionalQuoteMicro, int64(qta), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	marginMicro, err := types.MulDiv64(notionalAcctMicro, int64(meta.MarginRate), int64(types.RateScale))
+	marginMicro, err := MulDiv64(notionalAcctMicro, int64(meta.MarginRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	return types.Money(marginMicro), nil
+	return Money(marginMicro), nil
 }
 
 // riskBudget returns the max allowed loss in account-money micro-units.
-func (acct *Account) riskBudget() (types.Money, error) {
+func (acct *Account) riskBudget() (Money, error) {
 	if acct.Equity <= 0 {
 		return 0, fmt.Errorf("account equity must be > 0")
 	}
@@ -427,20 +425,20 @@ func (acct *Account) riskBudget() (types.Money, error) {
 		return 0, fmt.Errorf("account risk_pct must be > 0")
 	}
 
-	v, err := types.MulDivFloor64(int64(acct.Equity), int64(acct.RiskPct), int64(types.RateScale))
+	v, err := MulDivFloor64(int64(acct.Equity), int64(acct.RiskPct), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 	if v <= 0 {
 		return 0, fmt.Errorf("risk budget must be > 0")
 	}
-	return types.Money(v), nil
+	return Money(v), nil
 }
 
 // lossPerUnit returns stop-loss exposure for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate loss and accidentally oversize.
-func (acct *Account) lossPerUnit(req *types.OpenRequest) (types.Money, error) {
-	priceDist := types.Abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
+func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
+	priceDist := Abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
 	if priceDist == 0 {
 		return 0, fmt.Errorf("entry and stop must differ")
 	}
@@ -450,11 +448,11 @@ func (acct *Account) lossPerUnit(req *types.OpenRequest) (types.Money, error) {
 		return 0, err
 	}
 
-	v, err := types.MulDivCeil64(priceDist, int64(types.MoneyScale), int64(types.PriceScale))
+	v, err := MulDivCeil64(priceDist, int64(MoneyScale), int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	v, err = types.MulDivCeil64(v, int64(qta), int64(types.RateScale))
+	v, err = MulDivCeil64(v, int64(qta), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -462,12 +460,12 @@ func (acct *Account) lossPerUnit(req *types.OpenRequest) (types.Money, error) {
 		return 0, fmt.Errorf("loss per unit must be > 0")
 	}
 
-	return types.Money(v), nil
+	return Money(v), nil
 }
 
 // marginPerUnit returns margin needed for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate required margin.
-func (acct *Account) marginPerUnit(inst *types.Instrument, price types.Price) (types.Money, error) {
+func (acct *Account) marginPerUnit(inst *Instrument, price Price) (Money, error) {
 	if inst == nil {
 		return 0, fmt.Errorf("instrument is nil")
 	}
@@ -483,17 +481,17 @@ func (acct *Account) marginPerUnit(inst *types.Instrument, price types.Price) (t
 		return 0, err
 	}
 
-	v, err := types.MulDivCeil64(int64(price), int64(types.MoneyScale), int64(types.PriceScale))
+	v, err := MulDivCeil64(int64(price), int64(MoneyScale), int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
 
-	v, err = types.MulDivCeil64(v, int64(qta), int64(types.RateScale))
+	v, err = MulDivCeil64(v, int64(qta), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	v, err = types.MulDivCeil64(v, int64(inst.MarginRate), int64(types.RateScale))
+	v, err = MulDivCeil64(v, int64(inst.MarginRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -501,10 +499,10 @@ func (acct *Account) marginPerUnit(inst *types.Instrument, price types.Price) (t
 		return 0, fmt.Errorf("margin per unit must be > 0")
 	}
 
-	return types.Money(v), nil
+	return Money(v), nil
 }
 
-func (acct *Account) availableMargin() types.Money {
+func (acct *Account) availableMargin() Money {
 	if acct.FreeMargin > 0 {
 		return acct.FreeMargin
 	}
@@ -517,7 +515,7 @@ func (acct *Account) availableMargin() types.Money {
 	return 0
 }
 
-func (acct *Account) unitsByRisk(req *types.OpenRequest) (types.Units, error) {
+func (acct *Account) unitsByRisk(req *OpenRequest) (Units, error) {
 	riskBudget, err := acct.riskBudget()
 	if err != nil {
 		return 0, err
@@ -528,20 +526,20 @@ func (acct *Account) unitsByRisk(req *types.OpenRequest) (types.Units, error) {
 		return 0, err
 	}
 
-	units := types.Units(int64(riskBudget) / int64(lossPerUnit))
+	units := Units(int64(riskBudget) / int64(lossPerUnit))
 	if units <= 0 {
 		return 0, fmt.Errorf("risk budget too small for stop distance")
 	}
 	return units, nil
 }
 
-func (acct *Account) unitsByMargin(req *types.OpenRequest) (types.Units, error) {
+func (acct *Account) unitsByMargin(req *OpenRequest) (Units, error) {
 	freeMargin := acct.availableMargin()
 	if freeMargin <= 0 {
 		return 0, fmt.Errorf("free margin must be > 0")
 	}
 
-	inst := types.GetInstrument(req.TradeCommon.Instrument)
+	inst := GetInstrument(req.TradeCommon.Instrument)
 	if inst == nil {
 		return 0, fmt.Errorf("unknown instrument %s", req.TradeCommon.Instrument)
 	}
@@ -550,21 +548,21 @@ func (acct *Account) unitsByMargin(req *types.OpenRequest) (types.Units, error) 
 		return 0, err
 	}
 
-	units := types.Units(int64(freeMargin) / int64(marginPerUnit))
+	units := Units(int64(freeMargin) / int64(marginPerUnit))
 	if units <= 0 {
 		return 0, fmt.Errorf("free margin too small for minimum position")
 	}
 	return units, nil
 }
 
-func minUnits(a, b types.Units) types.Units {
+func minUnits(a, b Units) Units {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func (acct *Account) SizePosition(req *types.OpenRequest) error {
+func (acct *Account) SizePosition(req *OpenRequest) error {
 	if acct == nil {
 		return fmt.Errorf("account is nil")
 	}
@@ -582,11 +580,11 @@ func (acct *Account) SizePosition(req *types.OpenRequest) error {
 	}
 
 	switch req.Side {
-	case types.Short:
+	case Short:
 		if req.TradeCommon.Stop <= req.Price {
 			return fmt.Errorf("short stop must be greater than price")
 		}
-	case types.Long:
+	case Long:
 		if req.Stop >= req.Price {
 			return fmt.Errorf("long stop must be less than price")
 		}
@@ -604,7 +602,7 @@ func (acct *Account) SizePosition(req *types.OpenRequest) error {
 		return err
 	}
 
-	inst := types.GetInstrument(req.TradeCommon.Instrument)
+	inst := GetInstrument(req.TradeCommon.Instrument)
 	if inst == nil {
 		return fmt.Errorf("unknown instrument %s\n", req.TradeCommon.Instrument)
 	}

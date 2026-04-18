@@ -3,13 +3,11 @@ package trader
 import (
 	"encoding/json"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -93,15 +91,15 @@ type ResolvedRun struct {
 	From            string
 	To              string
 	Strict          bool
-	StartingBalance types.Money
+	StartingBalance Money
 	AccountCCY      string
-	Scale           types.Scale6
+	Scale           Scale6
 
-	RiskPct  types.Rate
-	StopPips types.Price
-	TakePips types.Price
-	RR       types.Rate
-	Units    types.Units
+	RiskPct  Rate
+	StopPips Price
+	TakePips Price
+	RR       Rate
+	Units    Units
 
 	Strategy StrategyConfig
 }
@@ -147,9 +145,9 @@ func (c *Config) resolve(run RunConfig) (*ResolvedRun, error) {
 		return nil, fmt.Errorf("run %q missing strategy.kind", run.Name)
 	}
 
-	scale := types.Scale6(c.Defaults.Scale)
+	scale := Scale6(c.Defaults.Scale)
 	if scale <= 0 {
-		scale = types.PriceScale
+		scale = PriceScale
 	}
 
 	rr := &ResolvedRun{
@@ -160,14 +158,14 @@ func (c *Config) resolve(run RunConfig) (*ResolvedRun, error) {
 		From:            strings.TrimSpace(run.Data.From),
 		To:              strings.TrimSpace(run.Data.To),
 		Strict:          c.Defaults.Strict,
-		StartingBalance: types.MoneyFromFloat(c.Defaults.StartingBalance),
+		StartingBalance: MoneyFromFloat(c.Defaults.StartingBalance),
 		AccountCCY:      strings.TrimSpace(c.Defaults.AccountCCY),
 		Scale:           scale,
 		RiskPct:         percentToRate(c.Defaults.RiskPct),
-		StopPips:        types.Price(c.Defaults.StopPips),
-		TakePips:        types.Price(c.Defaults.TakePips),
-		RR:              types.RateFromFloat(c.Defaults.RR),
-		Units:           types.Units(c.Defaults.Units),
+		StopPips:        Price(c.Defaults.StopPips),
+		TakePips:        Price(c.Defaults.TakePips),
+		RR:              RateFromFloat(c.Defaults.RR),
+		Units:           Units(c.Defaults.Units),
 		Strategy:        run.Strategy,
 	}
 
@@ -192,8 +190,8 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-func percentToRate(pct float64) types.Rate {
-	return types.RateFromFloat(pct / 100.0)
+func percentToRate(pct float64) Rate {
+	return RateFromFloat(pct / 100.0)
 }
 
 func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
@@ -216,9 +214,9 @@ func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
 		Source:     r.Source,
 		Instrument: r.Instrument,
 		Timeframe:  tf,
-		Range: types.TimeRange{
-			Start: types.FromTime(start),
-			End:   types.FromTime(end),
+		Range: TimeRange{
+			Start: FromTime(start),
+			End:   FromTime(end),
 		},
 		Strict: r.Strict,
 	}, nil
@@ -236,14 +234,14 @@ func parseDateEndExclusive(s string) (time.Time, error) {
 	return t.AddDate(0, 0, 1), nil
 }
 
-func parseTimeframe(s string) (types.Timeframe, error) {
+func parseTimeframe(s string) (Timeframe, error) {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "M1":
-		return types.M1, nil
+		return M1, nil
 	case "H1":
-		return types.H1, nil
+		return H1, nil
 	case "D1":
-		return types.D1, nil
+		return D1, nil
 	default:
 		return 0, fmt.Errorf("unsupported timeframe %q", s)
 	}
@@ -257,19 +255,19 @@ func (r *ResolvedRun) ApplyCommonParamOverrides() error {
 	if v, ok, err := getInt32Param(r.Strategy.Params, "units"); err != nil {
 		return err
 	} else if ok {
-		r.Units = types.Units(v)
+		r.Units = Units(v)
 	}
 
 	if v, ok, err := getInt32Param(r.Strategy.Params, "stop_pips"); err != nil {
 		return err
 	} else if ok {
-		r.StopPips = types.Price(v)
+		r.StopPips = Price(v)
 	}
 
 	if v, ok, err := getInt32Param(r.Strategy.Params, "take_pips"); err != nil {
 		return err
 	} else if ok {
-		r.TakePips = types.Price(v)
+		r.TakePips = Price(v)
 	}
 
 	if v, ok, err := getFloat64Param(r.Strategy.Params, "risk_pct"); err != nil {
@@ -281,7 +279,7 @@ func (r *ResolvedRun) ApplyCommonParamOverrides() error {
 	if v, ok, err := getFloat64Param(r.Strategy.Params, "rr"); err != nil {
 		return err
 	} else if ok {
-		r.RR = types.RateFromFloat(v)
+		r.RR = RateFromFloat(v)
 	}
 
 	return nil

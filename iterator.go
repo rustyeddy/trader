@@ -1,9 +1,5 @@
 package trader
 
-import (
-	"github.com/rustyeddy/trader/types"
-)
-
 type Iterator[T any] interface {
 	Next() bool
 	Item() T
@@ -76,27 +72,27 @@ func (it *funcIterator[T]) Close() error {
 
 type CandleIterator interface {
 	Next() bool
-	Candle() types.Candle
-	CandleTime() types.CandleTime
-	NextCandle() (types.Candle, bool)
-	Timestamp() types.Timestamp
+	Candle() Candle
+	CandleTime() CandleTime
+	NextCandle() (Candle, bool)
+	Timestamp() Timestamp
 	Err() error
 	Close() error
 }
 
 type candleSetIterator struct {
-	base     *types.Iterator
-	rng      types.TimeRange
+	base     *CandleSetIterator
+	rng      TimeRange
 	useRange bool
 
-	cur    types.Candle
-	ts     types.Timestamp
+	cur    Candle
+	ts     Timestamp
 	err    error
 	done   bool
 	closed bool
 }
 
-func NewCandleSetIterator(cs *types.CandleSet, rng types.TimeRange) CandleIterator {
+func NewCandleSetIterator(cs *CandleSet, rng TimeRange) CandleIterator {
 	return &candleSetIterator{
 		base:     cs.Iterator(),
 		rng:      rng,
@@ -104,16 +100,16 @@ func NewCandleSetIterator(cs *types.CandleSet, rng types.TimeRange) CandleIterat
 	}
 }
 
-func (it *candleSetIterator) NextCandle() (types.Candle, bool) {
+func (it *candleSetIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return types.Candle{}, false
+	return Candle{}, false
 }
 
 func (it *candleSetIterator) Next() bool {
 	if it.closed || it.done || it.err != nil {
-		it.cur = types.Candle{}
+		it.cur = Candle{}
 		it.ts = 0
 		return false
 	}
@@ -130,24 +126,24 @@ func (it *candleSetIterator) Next() bool {
 	}
 
 	it.done = true
-	it.cur = types.Candle{}
+	it.cur = Candle{}
 	it.ts = 0
 	return false
 }
 
-func (it *candleSetIterator) Candle() types.Candle {
+func (it *candleSetIterator) Candle() Candle {
 	return it.cur
 }
 
-func (it *candleSetIterator) CandleTime() types.CandleTime {
-	ct := types.CandleTime{
+func (it *candleSetIterator) CandleTime() CandleTime {
+	ct := CandleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}
 	return ct
 }
 
-func (it *candleSetIterator) Timestamp() types.Timestamp {
+func (it *candleSetIterator) Timestamp() Timestamp {
 	return it.ts
 }
 
@@ -166,8 +162,8 @@ func (it *candleSetIterator) Close() error {
 type chainedCandleIterator struct {
 	iters  []CandleIterator
 	idx    int
-	cur    types.Candle
-	ts     types.Timestamp
+	cur    Candle
+	ts     Timestamp
 	err    error
 	closed bool
 }
@@ -178,15 +174,15 @@ func NewChainedCandleIterator(iters ...CandleIterator) CandleIterator {
 	}
 }
 
-func (it *chainedCandleIterator) NextCandle() (types.Candle, bool) {
+func (it *chainedCandleIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return types.Candle{}, false
+	return Candle{}, false
 }
 
-func (it *chainedCandleIterator) CandleTime() types.CandleTime {
-	ct := types.CandleTime{
+func (it *chainedCandleIterator) CandleTime() CandleTime {
+	ct := CandleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}
@@ -195,7 +191,7 @@ func (it *chainedCandleIterator) CandleTime() types.CandleTime {
 
 func (it *chainedCandleIterator) Next() bool {
 	if it.closed || it.err != nil {
-		it.cur = types.Candle{}
+		it.cur = Candle{}
 		it.ts = 0
 		return false
 	}
@@ -215,14 +211,14 @@ func (it *chainedCandleIterator) Next() bool {
 
 		if err := curIt.Err(); err != nil {
 			it.err = err
-			it.cur = types.Candle{}
+			it.cur = Candle{}
 			it.ts = 0
 			return false
 		}
 
 		if err := curIt.Close(); err != nil {
 			it.err = err
-			it.cur = types.Candle{}
+			it.cur = Candle{}
 			it.ts = 0
 			return false
 		}
@@ -230,16 +226,16 @@ func (it *chainedCandleIterator) Next() bool {
 		it.idx++
 	}
 
-	it.cur = types.Candle{}
+	it.cur = Candle{}
 	it.ts = 0
 	return false
 }
 
-func (it *chainedCandleIterator) Candle() types.Candle {
+func (it *chainedCandleIterator) Candle() Candle {
 	return it.cur
 }
 
-func (it *chainedCandleIterator) Timestamp() types.Timestamp {
+func (it *chainedCandleIterator) Timestamp() Timestamp {
 	return it.ts
 }
 
@@ -456,9 +452,9 @@ func (it *chainedCandleIterator) Close() error {
 // 	bidVolBits := binary.BigEndian.Uint32(rec[16:20])
 
 // 	t := Tick{
-// 		Timemilli: types.Timemilli(baseTimeMS + int64(msOffset)),
-// 		Bid:       types.Price(bidRaw),
-// 		Ask:       types.Price(askRaw),
+// 		Timemilli: Timemilli(baseTimeMS + int64(msOffset)),
+// 		Bid:       Price(bidRaw),
+// 		Ask:       Price(askRaw),
 // 		AskVol:    math.Float32frombits(askVolBits),
 // 		BidVol:    math.Float32frombits(bidVolBits),
 // 	}
@@ -470,7 +466,7 @@ func (it *chainedCandleIterator) Close() error {
 // 	if key.Kind != KindTick {
 // 		return nil, fmt.Errorf("OpenTickIterator: key is not KindTick: %+v", key)
 // 	}
-// 	if key.TF != types.Ticks {
+// 	if key.TF != Ticks {
 // 		return nil, fmt.Errorf("OpenTickIterator: key timeframe is not ticks: %+v", key)
 // 	}
 
@@ -500,7 +496,7 @@ func (it *chainedCandleIterator) Close() error {
 // 		file:     f,
 // 		reader:   bufio.NewReader(lr),
 // 		baseTime: base.UnixMilli(),
-// 		scale:    int32(types.PriceScale), // or your chosen price scale constant
+// 		scale:    int32(PriceScale), // or your chosen price scale constant
 // 	}
 
 // 	return it, nil

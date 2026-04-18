@@ -2,14 +2,11 @@ package trader
 
 import (
 	"fmt"
-
-	"github.com/rustyeddy/trader/indicators"
-	"github.com/rustyeddy/trader/types"
 )
 
 type EMACrossADX struct {
 	core emaCrossCore
-	adx  *indicators.ADX
+	adx  *ADX
 
 	// these are the config
 	adxThreshold    float64
@@ -24,7 +21,7 @@ type EMACrossADXConfig struct {
 	FastPeriod      int
 	SlowPeriod      int
 	ADXPeriod       int
-	Scale           types.Scale6
+	Scale           Scale6
 	MinSpread       float64
 	ADXThreshold    float64
 	RequireDI       bool
@@ -47,15 +44,15 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 
 	return &EMACrossADX{
 		core: emaCrossCore{
-			fast: indicators.NewEMA(cfg.FastPeriod, cfg.Scale),
-			slow: indicators.NewEMA(cfg.SlowPeriod, cfg.Scale),
+			fast: NewEMA(cfg.FastPeriod, cfg.Scale),
+			slow: NewEMA(cfg.SlowPeriod, cfg.Scale),
 
 			prevRel:   0,
 			minSpread: cfg.MinSpread,
 			scale:     cfg.Scale,
 			name:      fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
-		adx:             indicators.NewADX(cfg.ADXPeriod, cfg.Scale),
+		adx:             NewADX(cfg.ADXPeriod, cfg.Scale),
 		adxThreshold:    cfg.ADXThreshold,
 		requireDI:       cfg.RequireDI,
 		requireADXReady: cfg.RequireADXReady,
@@ -85,7 +82,7 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c types.Candle) *StrategyPlan {
+func (x *EMACrossADX) Update(c Candle) *StrategyPlan {
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)

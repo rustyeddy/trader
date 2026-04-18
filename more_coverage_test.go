@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/stretchr/testify/require"
 	"io"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -20,16 +18,16 @@ func TestKeyCompare_KindLessThan(t *testing.T) {
 	t.Parallel()
 
 	// KindTick < KindCandle, so tick.compare(candle) == -1
-	tickKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindTick, TF: types.H1, Year: 2026, Month: 1}
-	candleKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	tickKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindTick, TF: H1, Year: 2026, Month: 1}
+	candleKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	require.Equal(t, -1, tickKey.compare(candleKey))
 }
 
 func TestKeyCompare_HourGreaterThan(t *testing.T) {
 	t.Parallel()
 
-	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1, Day: 5, Hour: 13}
-	other := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1, Day: 5, Hour: 13}
+	other := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	require.Equal(t, 1, base.compare(other))
 }
 
@@ -77,7 +75,7 @@ func TestStoreSaveFile_CopyErrorInExtended(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        5,
@@ -99,7 +97,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := types.TimeMilliFromTime(hourStart)
+	baseMS := TimeMilliFromTime(hourStart)
 
 	// Tick at hour+2 (way outside the 1-hour window)
 	outsideMS := baseMS + 2*3600_000 + 100
@@ -116,7 +114,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	_ = err // result may vary depending on idx calculation; just verify no panic
 }
@@ -188,8 +186,8 @@ func TestWriteMetadata_Output(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := types.NewMonthlyCandleSet(
-		"EURUSD", types.H1, types.FromTime(start), types.PriceScale, "test",
+	cs, err := NewMonthlyCandleSet(
+		"EURUSD", H1, FromTime(start), PriceScale, "test",
 	)
 	require.NoError(t, err)
 
@@ -213,21 +211,21 @@ func TestWriteCSV_ValidFlag(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := types.NewMonthlyCandleSet(
-		"EURUSD", types.H1, types.FromTime(start), types.PriceScale, "test",
+	cs, err := NewMonthlyCandleSet(
+		"EURUSD", H1, FromTime(start), PriceScale, "test",
 	)
 	require.NoError(t, err)
 
-	cs.Candles[5] = types.Candle{Open: 200, High: 210, Low: 195, Close: 205, Ticks: 3}
+	cs.Candles[5] = Candle{Open: 200, High: 210, Low: 195, Close: 205, Ticks: 3}
 	cs.SetValid(5)
 
 	require.NoError(t, s.WriteCSV(cs))
 
-	key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 4}
+	key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 4}
 	back, err := s.ReadCSV(key)
 	require.NoError(t, err)
 	require.True(t, back.IsValid(5))
-	require.Equal(t, types.Price(210), back.Candles[5].High)
+	require.Equal(t, Price(210), back.Candles[5].High)
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +240,7 @@ func TestPathForAsset_EmptySourceDefaults(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "", // empty
 		Kind:       KindCandle,
-		TF:         types.H1,
+		TF:         H1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -262,10 +260,10 @@ func TestCandles_StrictMissingFileWrapsError(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  types.H1,
-		Range: types.TimeRange{
-			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+		Timeframe:  H1,
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 		},
 		Strict: true, // missing file should cause an error
 	}

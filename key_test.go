@@ -1,11 +1,9 @@
 package trader
 
 import (
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestKeyCompare(t *testing.T) {
@@ -15,7 +13,7 @@ func TestKeyCompare(t *testing.T) {
 		Source:     "candles",
 		Instrument: "EURUSD",
 		Kind:       KindCandle,
-		TF:         types.H1,
+		TF:         H1,
 		Year:       2026,
 		Month:      1,
 		Day:        0,
@@ -119,8 +117,8 @@ func TestKeyCompare(t *testing.T) {
 func TestKeyBeforeAfter(t *testing.T) {
 	t.Parallel()
 
-	a := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2025, Month: 1}
-	b := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	a := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2025, Month: 1}
+	b := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 
 	require.True(t, a.before(b))
 	require.False(t, a.after(b))
@@ -216,16 +214,16 @@ func TestKeyRange(t *testing.T) {
 		}
 		rng := k.Range()
 		start := time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC)
-		require.Equal(t, types.Timestamp(start.Unix()), rng.Start)
-		require.Equal(t, types.Timestamp(start.Add(time.Hour).Unix()), rng.End)
-		require.Equal(t, types.Ticks, rng.TF)
+		require.Equal(t, Timestamp(start.Unix()), rng.Start)
+		require.Equal(t, Timestamp(start.Add(time.Hour).Unix()), rng.End)
+		require.Equal(t, Ticks, rng.TF)
 	})
 
 	t.Run("monthly candle range spans one month", func(t *testing.T) {
 		t.Parallel()
 		k := Key{
 			Kind:  KindCandle,
-			TF:    types.H1,
+			TF:    H1,
 			Year:  2026,
 			Month: 3,
 			Day:   0,
@@ -234,16 +232,16 @@ func TestKeyRange(t *testing.T) {
 		rng := k.Range()
 		start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 		end := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-		require.Equal(t, types.Timestamp(start.Unix()), rng.Start)
-		require.Equal(t, types.Timestamp(end.Unix()), rng.End)
-		require.Equal(t, types.H1, rng.TF)
+		require.Equal(t, Timestamp(start.Unix()), rng.Start)
+		require.Equal(t, Timestamp(end.Unix()), rng.End)
+		require.Equal(t, H1, rng.TF)
 	})
 
 	t.Run("unsupported key returns empty range", func(t *testing.T) {
 		t.Parallel()
 		k := Key{Kind: KindCandle, Day: 1, Hour: 1}
 		rng := k.Range()
-		require.Equal(t, types.TimeRange{}, rng)
+		require.Equal(t, TimeRange{}, rng)
 	})
 }
 

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -41,10 +40,10 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 		tmplStrategyOpts,
 		strat,
 		candleRunMeta{
-			RunID:    types.NewULID(),
+			RunID:    trader.NewULID(),
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
-			Created:  types.FromTime(time.Now().UTC()),
+			Created:  trader.FromTime(time.Now().UTC()),
 			Balance:  rr.StartingBalance,
 			RR:       rr.RR,
 			Strategy: strat.Name(),

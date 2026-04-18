@@ -2,8 +2,6 @@ package trader
 
 import (
 	"testing"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 func TestPriceMid(t *testing.T) {
@@ -11,9 +9,9 @@ func TestPriceMid(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		bid      types.Price
-		ask      types.Price
-		expected types.Price
+		bid      Price
+		ask      Price
+		expected Price
 	}{
 		{"simple", 10, 30, 20},
 		{"same", 25, 25, 25},
@@ -28,8 +26,8 @@ func TestPriceMid(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := types.Tick{
-				BA: types.BA{Bid: tt.bid, Ask: tt.ask},
+			p := Tick{
+				BA: BA{Bid: tt.bid, Ask: tt.ask},
 			}
 			got := p.Mid()
 			v := got - tt.expected

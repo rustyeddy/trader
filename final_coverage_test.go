@@ -1,11 +1,9 @@
 package trader
 
 import (
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -15,19 +13,19 @@ import (
 func TestKeyCompareTF(t *testing.T) {
 	t.Parallel()
 
-	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 
 	t.Run("TF smaller returns -1", func(t *testing.T) {
 		t.Parallel()
 		other := base
-		other.TF = types.D1 // D1 > H1
+		other.TF = D1 // D1 > H1
 		require.Equal(t, -1, base.compare(other))
 	})
 
 	t.Run("TF larger returns 1", func(t *testing.T) {
 		t.Parallel()
 		other := base
-		other.TF = types.M1 // M1 < H1
+		other.TF = M1 // M1 < H1
 		require.Equal(t, 1, base.compare(other))
 	})
 }
@@ -89,7 +87,7 @@ func TestReadCSV_FileNotFound(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 3}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 3}
 	_, err := s.ReadCSV(k)
 	require.Error(t, err)
 }
@@ -103,11 +101,11 @@ func TestWriteCSV_EmptySource(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := types.NewMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		"EURUSD",
-		types.M1,
-		types.FromTime(start),
-		types.PriceScale,
+		M1,
+		FromTime(start),
+		PriceScale,
 		"", // empty source
 	)
 	require.NoError(t, err)
@@ -138,10 +136,10 @@ func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
 	_ = s
 
-	it := NewCandleSetIterator(cs, types.TimeRange{})
+	it := NewCandleSetIterator(cs, TimeRange{})
 	require.NoError(t, it.Close())
 	require.False(t, it.Next())
 	require.NoError(t, it.Close()) // idempotent
@@ -155,10 +153,10 @@ func TestCandleSetIterator_AfterDone(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
 	_ = s
 
-	it := NewCandleSetIterator(cs, types.TimeRange{})
+	it := NewCandleSetIterator(cs, TimeRange{})
 	// Drain all items
 	for it.Next() {
 	}
@@ -183,6 +181,6 @@ func TestKeyRange_TickHour0(t *testing.T) {
 	}
 	rng := k.Range()
 	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
-	require.Equal(t, types.Timestamp(start.Unix()), rng.Start)
-	require.Equal(t, types.Timestamp(start.Add(time.Hour).Unix()), rng.End)
+	require.Equal(t, Timestamp(start.Unix()), rng.Start)
+	require.Equal(t, Timestamp(start.Add(time.Hour).Unix()), rng.End)
 }

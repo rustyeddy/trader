@@ -1,12 +1,10 @@
 package trader
 
 import (
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,7 +22,7 @@ func TestParseCandlePath_Valid(t *testing.T) {
 	require.Equal(t, KindCandle, k.Kind)
 	require.Equal(t, 2026, k.Year)
 	require.Equal(t, 1, k.Month)
-	require.Equal(t, types.H1, k.TF)
+	require.Equal(t, H1, k.TF)
 }
 
 func TestParseCandlePath_M1(t *testing.T) {
@@ -35,7 +33,7 @@ func TestParseCandlePath_M1(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "GBPUSD", k.Instrument)
 	require.Equal(t, "candles", k.Source)
-	require.Equal(t, types.M1, k.TF)
+	require.Equal(t, M1, k.TF)
 	require.Equal(t, 2025, k.Year)
 	require.Equal(t, 6, k.Month)
 }
@@ -46,7 +44,7 @@ func TestParseCandlePath_D1(t *testing.T) {
 	path := "/basedir/src/USDJPY/2024/12/USDJPY-2024-12-d1.csv"
 	k, ok := parseCandlePath(path)
 	require.True(t, ok)
-	require.Equal(t, types.D1, k.TF)
+	require.Equal(t, D1, k.TF)
 }
 
 func TestParseCandlePath_TooFewParts(t *testing.T) {
@@ -167,7 +165,7 @@ func TestPathForAsset_TickKey(t *testing.T) {
 		Instrument: "EUR_USD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -203,7 +201,7 @@ func TestStoreRelDir(t *testing.T) {
 	s := newTestStore(t)
 	k := Key{
 		Instrument: "EUR_USD",
-		TF:         types.H1,
+		TF:         H1,
 		Year:       2026,
 	}
 	rel := s.RelDir(k)
@@ -222,7 +220,7 @@ func TestStoreExists_Missing(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         types.M1,
+		TF:         M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -239,7 +237,7 @@ func TestStoreExists_Present(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         types.M1,
+		TF:         M1,
 		Year:       2026,
 		Month:      1,
 	}

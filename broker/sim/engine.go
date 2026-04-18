@@ -6,50 +6,48 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/types"
 )
 
 type Engine struct {
 	account *trader.Account
-	journal journal.Journal
-	prices  map[string]types.Tick
+	journal trader.Journal
+	prices  map[string]trader.Tick
 }
 
-func NewEngine(acct trader.Account, j journal.Journal) *Engine {
+func NewEngine(acct trader.Account, j trader.Journal) *Engine {
 	if acct.Positions.Positions() == nil {
-		acct.Positions = types.Positions{}
+		acct.Positions = trader.Positions{}
 	}
 	return &Engine{
 		account: &acct,
 		journal: j,
-		prices:  make(map[string]types.Tick),
+		prices:  make(map[string]trader.Tick),
 	}
 }
 
-func (e *Engine) UpdatePrice(tick types.Tick) error {
+func (e *Engine) UpdatePrice(tick trader.Tick) error {
 	if e == nil || e.account == nil {
 		return fmt.Errorf("nil engine")
 	}
-	inst := types.NormalizeInstrument(tick.Instrument)
+	inst := trader.NormalizeInstrument(tick.Instrument)
 	if inst == "" {
 		return fmt.Errorf("blank instrument")
 	}
 	tick.Instrument = inst
 	e.prices[inst] = tick
 
-	marks := make(map[string]types.Price, len(e.prices))
+	marks := make(map[string]trader.Price, len(e.prices))
 	for instrument, px := range e.prices {
 		marks[instrument] = px.Mid()
 	}
 	return e.account.ResolveWithMarks(marks)
 }
 
-func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*types.Position, error) {
+func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Position, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}
-	inst := types.NormalizeInstrument(req.Instrument)
+	inst := trader.NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
@@ -58,24 +56,24 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest)
 		return nil, fmt.Errorf("no market price for %s", inst)
 	}
 
-	th := types.NewTradeHistory(inst)
+	th := trader.NewTradeHistory(inst)
 	units := req.Units
 	if units == 0 {
 		return nil, fmt.Errorf("units must be non-zero")
 	}
 	if units < 0 {
-		th.Side = types.Short
+		th.Side = trader.Short
 		units = -units
 	} else {
-		th.Side = types.Long
+		th.Side = trader.Long
 	}
 	th.Units = units
 
-	pos := &types.Position{
+	pos := &trader.Position{
 		TradeCommon: th.TradeCommon,
 		FillPrice:   px.Mid(),
-		FillTime:    types.FromTime(time.Now().UTC()),
-		State:       types.PositionOpen,
+		FillTime:    trader.FromTime(time.Now().UTC()),
+		State:       trader.PositionOpen,
 	}
 	if err := e.account.AddPosition(ctx, pos); err != nil {
 		return nil, err
@@ -88,8 +86,8 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		return fmt.Errorf("nil engine")
 	}
 
-	var positions []*types.Position
-	_ = e.account.Positions.Range(func(pos *types.Position) error {
+	var positions []*trader.Position
+	_ = e.account.Positions.Range(func(pos *trader.Position) error {
 		positions = append(positions, pos)
 		return nil
 	})
@@ -99,16 +97,16 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 		if !ok {
 			return fmt.Errorf("no market price for %s", pos.Instrument)
 		}
-		trade := &types.Trade{
+		trade := &trader.Trade{
 			TradeCommon: pos.TradeCommon,
 			FillPrice:   px.Mid(),
-			FillTime:    types.FromTime(time.Now().UTC()),
+			FillTime:    trader.FromTime(time.Now().UTC()),
 		}
 		if err := e.account.ClosePosition(pos, trade); err != nil {
 			return err
 		}
 		if e.journal != nil {
-			_ = e.journal.RecordTrade(journal.TradeRecord{
+			_ = e.journal.RecordTrade(trader.TradeRecord{
 				TradeID:    trade.ID,
 				Instrument: trade.Instrument,
 				Units:      trade.Units,
@@ -123,8 +121,8 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	if e.journal != nil {
-		_ = e.journal.RecordEquity(journal.EquitySnapshot{
-			Timestamp:   types.FromTime(time.Now().UTC()),
+		_ = e.journal.RecordEquity(trader.EquitySnapshot{
+			Timestamp:   trader.FromTime(time.Now().UTC()),
 			Balance:     e.account.Balance,
 			Equity:      e.account.Equity,
 			MarginUsed:  e.account.MarginUsed,

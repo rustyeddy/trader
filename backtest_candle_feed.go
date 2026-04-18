@@ -4,7 +4,7 @@ package trader
 // 	Next() bool
 // 	Candle() trader.Candle
 // 	NextCandle() (trader.Candle, bool)
-// 	Timestamp() types.Timestamp
+// 	Timestamp() Timestamp
 // 	Err() error
 // 	Close() error
 // }

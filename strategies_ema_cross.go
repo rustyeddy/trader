@@ -2,19 +2,16 @@ package trader
 
 import (
 	"fmt"
-
-	"github.com/rustyeddy/trader/indicators"
-	"github.com/rustyeddy/trader/types"
 )
 
 type emaCrossCore struct {
-	fast *indicators.EMA
-	slow *indicators.EMA
+	fast *EMA
+	slow *EMA
 
 	name      string
 	prevRel   int
 	minSpread float64
-	scale     types.Scale6
+	scale     Scale6
 }
 
 // EMACross generates signals when a fast EMA crosses a slow EMA.
@@ -29,7 +26,7 @@ type EMACrossConfig struct {
 
 	FastPeriod int
 	SlowPeriod int
-	Scale      types.Scale6
+	Scale      Scale6
 	MinSpread  float64
 }
 
@@ -46,8 +43,8 @@ func NewEMACross(cfg EMACrossConfig) *EMACross {
 		panic("EMACross requires Scale > 0")
 	}
 
-	f := indicators.NewEMA(cfg.FastPeriod, cfg.Scale) // Scale6 (PriceScale should be a default
-	s := indicators.NewEMA(cfg.SlowPeriod, cfg.Scale)
+	f := NewEMA(cfg.FastPeriod, cfg.Scale) // Scale6 (PriceScale should be a default
+	s := NewEMA(cfg.SlowPeriod, cfg.Scale)
 
 	return &EMACross{
 		core: emaCrossCore{
@@ -76,7 +73,7 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c types.Candle) *StrategyPlan {
+func (x *EMACross) Update(c Candle) *StrategyPlan {
 	// Update indicators first
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)

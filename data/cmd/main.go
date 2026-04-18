@@ -8,20 +8,18 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/types"
 )
 
 type Config struct {
-	Symbols         string `json:"symbols"`
-	Start           string `json:"start"`
-	End             string `json:"end"`
-	types.Timeframe `json:"timeframe"`
-	Basedir         string `json:"basedir"`
-	Dukasdir        string `json:"dukasdir"`
-	CandleRoot      string `json:"candleroot"`
-	Download        bool
-	Candles         bool
+	Symbols          string `json:"symbols"`
+	Start            string `json:"start"`
+	End              string `json:"end"`
+	trader.Timeframe `json:"timeframe"`
+	Basedir          string `json:"basedir"`
+	Dukasdir         string `json:"dukasdir"`
+	CandleRoot       string `json:"candleroot"`
+	Download         bool
+	Candles          bool
 }
 
 var (
@@ -29,7 +27,7 @@ var (
 		Symbols:    "EURUSD,USDJPY,GBPUSD",
 		Start:      "",
 		End:        "",
-		Timeframe:  types.D1,
+		Timeframe:  trader.D1,
 		Dukasdir:   "dukas/",
 		CandleRoot: "candles/",
 		Download:   false,
@@ -59,7 +57,7 @@ func main() {
 	}
 	dm.Init()
 	if err := dm.Sync(ctx, config.Download, config.Candles); err != nil {
-		tlog.Fatal("data sync failed", "err", err)
+		trader.Fatal("data sync failed", "err", err)
 	}
 	elapsed := time.Since(start)
 	fmt.Printf("Program duration: %s\n", elapsed)

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type dukasfile struct {
@@ -21,7 +19,7 @@ type dukasfile struct {
 	weekend     bool
 	totalspread int64
 
-	m1 types.Candle
+	m1 Candle
 }
 
 func newDatafile(sym string, t time.Time) *dukasfile {
@@ -41,7 +39,7 @@ func (d *dukasfile) Key() Key {
 			Instrument: d.symbol,
 			Source:     "dukascopy",
 			Kind:       KindTick,
-			TF:         types.Ticks,
+			TF:         Ticks,
 			Year:       d.Time.Year(),
 			Month:      int(d.Time.Month()),
 			Day:        d.Time.Day(),
@@ -81,7 +79,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 
 	path := d.key.Path()
 	if !d.Time.IsZero() {
-		if types.IsForexMarketClosed(d.Time.UTC()) {
+		if IsForexMarketClosed(d.Time.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)
@@ -109,7 +107,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 	return nil
 }
 
-func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
+func (d *dukasfile) baseHourUnixMS() (Timemilli, error) {
 	p := store.PathForAsset(d.Key())
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
@@ -121,7 +119,7 @@ func (d *dukasfile) baseHourUnixMS() (types.Timemilli, error) {
 	hh, _ := strconv.Atoi(m[4])
 
 	t := time.Date(year, time.Month(mon), day, hh, 0, 0, 0, time.UTC)
-	return types.Timemilli(t.UnixMilli()), nil
+	return Timemilli(t.UnixMilli()), nil
 }
 
 func (d *dukasfile) forEachTick1(ctx context.Context, fn func(RawTick) error) error {
@@ -149,9 +147,9 @@ func (d *dukasfile) forEachTick1(ctx context.Context, fn func(RawTick) error) er
 // TODO move these somewhere
 // If you can't access market's bitSet/bitIsSet because they are unexported,
 // include these tiny helpers in the data package (or export them from market).
-func bitIsSet(bits []uint64, idx int) bool {
+func dukasBitIsSet(bits []uint64, idx int) bool {
 	return (bits[idx>>6] & (1 << uint(idx&63))) != 0
 }
-func bitSet(bits []uint64, idx int) {
+func dukasBitSet(bits []uint64, idx int) {
 	bits[idx>>6] |= 1 << uint(idx&63)
 }

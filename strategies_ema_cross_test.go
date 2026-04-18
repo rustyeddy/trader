@@ -1,10 +1,8 @@
 package trader
 
 import (
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func feedPlans(s *EMACross, closes []float64) []*StrategyPlan {
@@ -20,7 +18,7 @@ func TestEMACross_WarmupNoSignals(t *testing.T) {
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      types.PriceScale,
+		Scale:      PriceScale,
 	})
 
 	plans := feedPlans(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
@@ -36,7 +34,7 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown_NoTradePlans(t *testing.T) {
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      types.PriceScale,
+		Scale:      PriceScale,
 		MinSpread:  0,
 	})
 
@@ -81,7 +79,7 @@ func TestEMACross_MinSpreadFiltersNoise(t *testing.T) {
 	s := NewEMACross(EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      types.PriceScale,
+		Scale:      PriceScale,
 		MinSpread:  0.0010, // big filter
 	})
 
@@ -106,7 +104,7 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 	cfg := EMACrossConfig{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      types.PriceScale,
+		Scale:      PriceScale,
 		MinSpread:  0,
 	}
 	s := NewEMACross(cfg)
@@ -130,25 +128,25 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 }
 
 func TestEMACross_Name(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: types.PriceScale})
+	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: PriceScale})
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
 func TestEMACrossPlan_Reason(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: types.PriceScale})
+	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: PriceScale})
 	d := s.Update(mkClose(1.0))
 	require.NotEmpty(t, d.Reason)
 }
 
 func TestNewEMACross_PanicOnInvalidConfig(t *testing.T) {
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 0, SlowPeriod: 5, Scale: types.PriceScale})
+		NewEMACross(EMACrossConfig{FastPeriod: 0, SlowPeriod: 5, Scale: PriceScale})
 	})
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 0, Scale: types.PriceScale})
+		NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 0, Scale: PriceScale})
 	})
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 5, SlowPeriod: 3, Scale: types.PriceScale})
+		NewEMACross(EMACrossConfig{FastPeriod: 5, SlowPeriod: 3, Scale: PriceScale})
 	})
 	require.Panics(t, func() {
 		NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: 0})

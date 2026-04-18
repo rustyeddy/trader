@@ -1,23 +1,11 @@
 package trader
 
-import (
-	"github.com/rustyeddy/trader/types"
-)
-
 // Strategy is the interface for candle-based strategies.
 type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(c types.Candle) *StrategyPlan
-}
-
-type Float64 interface {
-	Float64() float64
-}
-
-type Price interface {
-	Price() Price
+	Update(c Candle) *StrategyPlan
 }
 
 type StrategyBaseConfig struct {

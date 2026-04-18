@@ -9,23 +9,22 @@ import (
 	"github.com/spf13/cobra"
 
 	traderpkg "github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/config"
 )
 
-func newDownloadTicksCmd(rc *config.RootConfig) *cobra.Command {
+func newDownloadTicksCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return newSyncLikeCmd(rc, "download-ticks", "Download missing tick files", true, false)
 }
 
-func newBuildCandlesCmd(rc *config.RootConfig) *cobra.Command {
+func newBuildCandlesCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return newSyncLikeCmd(rc, "build-candles", "Build candles from existing data", false, true)
 }
 
-func newSyncCmd(rc *config.RootConfig) *cobra.Command {
+func newSyncCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return newSyncLikeCmd(rc, "sync", "Download ticks and build candles", true, true)
 }
 
 func newSyncLikeCmd(
-	rc *config.RootConfig,
+	rc *traderpkg.RootConfig,
 	use string,
 	short string,
 	download bool,

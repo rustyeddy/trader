@@ -1,11 +1,11 @@
 package replay
 
 import (
-	"github.com/rustyeddy/trader/config"
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
 )
 
-func New(rc *config.RootConfig) *cobra.Command {
+func New(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "replay",
 		Short: "Replay datasets through the sim engine",

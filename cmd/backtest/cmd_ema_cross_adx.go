@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -44,19 +43,19 @@ func RunEMACrossADX(cmd *cobra.Command, args []string) error {
 }
 
 func runEMACrossADXFromFlags(cmd *cobra.Command) error {
-	emaCrossADXCfg.Scale = types.PriceScale
+	emaCrossADXCfg.Scale = trader.PriceScale
 
 	strat := trader.NewEMACrossADX(emaCrossADXCfg)
-	act := trader.NewAccount("adhoc-ema-cross-adx", types.MoneyFromFloat(1000))
+	act := trader.NewAccount("adhoc-ema-cross-adx", trader.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossADXOpts,
 		strat,
 		candleRunMeta{
-			RunID:    types.NewULID(),
+			RunID:    trader.NewULID(),
 			RunName:  "adhoc-ema-cross-adx",
 			Kind:     "ema-cross-adx",
-			Created:  types.FromTime(time.Now().UTC()),
+			Created:  trader.FromTime(time.Now().UTC()),
 			Balance:  act.Balance,
 			RR:       0,
 			Strategy: strat.Name(),
@@ -98,8 +97,8 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
-	emaCrossADXOpts.Instrument = types.NormalizeInstrument(emaCrossADXOpts.Instrument)
-	cfg.Scale = types.PriceScale
+	emaCrossADXOpts.Instrument = trader.NormalizeInstrument(emaCrossADXOpts.Instrument)
+	cfg.Scale = trader.PriceScale
 
 	strat := trader.NewEMACrossADX(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
@@ -108,10 +107,10 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 		emaCrossADXOpts,
 		strat,
 		candleRunMeta{
-			RunID:    types.NewULID(),
+			RunID:    trader.NewULID(),
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
-			Created:  types.FromTime(time.Now().UTC()),
+			Created:  trader.FromTime(time.Now().UTC()),
 			Balance:  rr.StartingBalance,
 			RR:       rr.RR,
 			Strategy: strat.Name(),
@@ -181,7 +180,7 @@ func buildEMACrossADXConfig(r trader.ResolvedRun) (trader.EMACrossADXConfig, err
 
 	scale := r.Scale
 	if scale <= 0 {
-		scale = types.PriceScale
+		scale = trader.PriceScale
 	}
 
 	return trader.EMACrossADXConfig{
@@ -210,7 +209,7 @@ func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
 
 func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
 	if cmd.Flags().Changed("instrument") {
-		o.Instrument = types.NormalizeInstrument(o.Instrument)
+		o.Instrument = trader.NormalizeInstrument(o.Instrument)
 	}
 	if cmd.Flags().Changed("timeframe") {
 		o.Timeframe = strings.ToUpper(strings.TrimSpace(o.Timeframe))

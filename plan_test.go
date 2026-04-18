@@ -1,17 +1,15 @@
 package trader
 
 import (
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestWorkStateMarkClearDownload(t *testing.T) {
 	t.Parallel()
 
 	ws := NewWorkState()
-	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 3, Day: 1, Hour: 5}
+	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: Ticks, Year: 2026, Month: 3, Day: 1, Hour: 5}
 
 	require.False(t, ws.IsDownloadQueuedOrActive(k))
 
@@ -26,7 +24,7 @@ func TestWorkStateMarkClearBuild(t *testing.T) {
 	t.Parallel()
 
 	ws := NewWorkState()
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 
 	require.False(t, ws.IsBuildQueuedOrActive(k))
 

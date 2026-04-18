@@ -2,8 +2,6 @@ package trader
 
 import (
 	"fmt"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 // CandleStrategy is called once per *valid* candle (Iterator() skips invalid bars).
@@ -16,31 +14,31 @@ import (
 type CandleStrategy interface {
 	Name() string
 	Reset()
-	OnBar(ctx *CandleContext, c Candle) *types.OpenRequest
+	OnBar(ctx *CandleContext, c Candle) *OpenRequest
 }
 
-type Side int8
+type CandleSide int8
 
 type CandleContext struct {
 	CS         *CandleSet
 	BarIndex   int
 	Instrument string
 	Idx        int
-	Timestamp  types.Timestamp
+	Timestamp  Timestamp
 	GapBars    int // missing bars between this and previous valid bar
 
-	Pos     *types.Position
+	Pos     *Position
 	Account *Account
 }
 
 type CandleEngine struct {
 	Instrument string
-	types.Timeframe
-	Pos     *types.Position
+	Timeframe
+	Pos     *Position
 	Account *Account
 }
 
-func NewCandleEngine(instrument string, tf types.Timeframe, account *Account) *CandleEngine {
+func NewCandleEngine(instrument string, tf Timeframe, account *Account) *CandleEngine {
 	return &CandleEngine{
 		Instrument: instrument,
 		Timeframe:  tf,
@@ -63,8 +61,8 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 	strat.Reset()
 
 	barIndex := 0
-	var prevTS types.Timestamp
-	var lastTS types.Timestamp
+	var prevTS Timestamp
+	var lastTS Timestamp
 	var lastC Candle
 	haveLast := false
 
@@ -99,7 +97,7 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 		if e.Pos != nil {
 			if exitPx, _, hit := checkExit(e.Pos, c); hit {
 				fmt.Printf("close position: %d - %d\n", barIndex, count)
-				trade := &types.Trade{
+				trade := &Trade{
 					TradeCommon: e.Pos.TradeCommon,
 					FillPrice:   exitPx,
 					FillTime:    ts,
@@ -135,7 +133,7 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 
 	if e.Pos != nil && haveLast {
 		fmt.Printf("close position: %d - %d\n", barIndex, count)
-		trade := &types.Trade{
+		trade := &Trade{
 			TradeCommon: e.Pos.TradeCommon,
 			FillPrice:   lastC.Close,
 			FillTime:    lastTS,
@@ -151,7 +149,7 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p *types.Position, c Candle) (exitPx types.Price, reason string, hit bool) {
+func checkExit(p *Position, c Candle) (exitPx Price, reason string, hit bool) {
 	if p == nil {
 		return 0, "", false
 	}
@@ -160,7 +158,7 @@ func checkExit(p *types.Position, c Candle) (exitPx types.Price, reason string, 
 	hasTake := p.Take != 0
 
 	switch p.Side {
-	case types.Long:
+	case Long:
 		stopHit := hasStop && c.Low <= p.Stop
 		takeHit := hasTake && c.High >= p.Take
 		if stopHit && takeHit {
@@ -172,7 +170,7 @@ func checkExit(p *types.Position, c Candle) (exitPx types.Price, reason string, 
 		if takeHit {
 			return p.Take, "TAKE", true
 		}
-	case types.Short:
+	case Short:
 		stopHit := hasStop && c.High >= p.Stop
 		takeHit := hasTake && c.Low <= p.Take
 		if stopHit && takeHit {
@@ -190,10 +188,10 @@ func checkExit(p *types.Position, c Candle) (exitPx types.Price, reason string, 
 
 // PipScaled returns the pip size in *scaled* int32 units, based on the instrument pip location.
 // Example: EUR_USD pipLocation=-4, scale=1_000_000 => pipScaled=100.
-func PipScaled(pipLocation int) types.Price {
+func PipScaled(pipLocation int) Price {
 	pow := int64(1)
 	for i := 0; i < -pipLocation; i++ {
 		pow *= 10
 	}
-	return types.Price(types.PriceScale / types.Scale6(pow))
+	return Price(PriceScale / Scale6(pow))
 }

@@ -1,9 +1,5 @@
 package trader
 
-import (
-	tlog "github.com/rustyeddy/trader/log"
-)
-
 type Plan struct {
 	Download []Key
 	BuildM1  []BuildTask
@@ -16,7 +12,7 @@ type Plan struct {
 }
 
 func (p Plan) Log() {
-	tlog.Info("plan summary",
+	Info("plan summary",
 		"downloads", len(p.Download),
 		"build_m1", len(p.BuildM1),
 		"build_h1", len(p.BuildH1),
@@ -26,7 +22,7 @@ func (p Plan) Log() {
 
 type BuildTask struct {
 	Key
-	// Range  types.TimeRange
+	// Range  TimeRange
 	Inputs []Key
 	Kind   BuildKind
 }

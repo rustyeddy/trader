@@ -8,9 +8,6 @@ import (
 	"slices"
 	"sort"
 	"time"
-
-	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/types"
 )
 
 // DataManager is responsible for identifing data files that are
@@ -47,19 +44,19 @@ func (dm *DataManager) Init() {
 func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	var err error
 
-	tlog.Info("Building inventory")
+	Info("Building inventory")
 	dm.inventory, err = BuildInventory(ctx)
 	if err != nil {
 		return err
 	}
 
-	tlog.Info("Building wantlist")
+	Info("Building wantlist")
 	dm.wants, err = dm.BuildWantList(ctx)
 	if err != nil {
 		return err
 	}
 
-	tlog.Info("Planning")
+	Info("Planning")
 	dm.plan, err = dm.Plan(ctx)
 	if err != nil {
 		return err
@@ -67,33 +64,33 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	dm.plan.Log()
 
 	if download {
-		tlog.Info("Starting downloads")
+		Info("Starting downloads")
 		if err := dm.ExecuteDownloads(ctx); err != nil {
 			return err
 		}
 	}
 
 	if build {
-		tlog.Info("Re-building inventory")
+		Info("Re-building inventory")
 		dm.inventory, err = BuildInventory(ctx)
 		if err != nil {
 			return err
 		}
 
-		tlog.Info("Re-building wantlist")
+		Info("Re-building wantlist")
 		dm.wants, err = dm.BuildWantList(ctx)
 		if err != nil {
 			return err
 		}
 
-		tlog.Info("Re-planning wantlist")
+		Info("Re-planning wantlist")
 		dm.plan, err = dm.Plan(ctx)
 		if err != nil {
 			return err
 		}
 		dm.plan.Log()
 
-		tlog.Info("Making candles")
+		Info("Making candles")
 		if err := dm.candleMaker(ctx); err != nil {
 			return err
 		}
@@ -115,7 +112,7 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 	for _, sym := range dm.Instruments {
 		for year := dm.End.Year(); year >= dm.Start.Year(); year-- {
 			for month := 1; month <= 12; month++ {
-				for _, tf := range []types.Timeframe{types.M1, types.H1, types.D1} {
+				for _, tf := range []Timeframe{M1, H1, D1} {
 					key := Key{sym, "candles", KindCandle, tf, year, month, 0, 0}
 					if !dm.inventory.HasComplete(key) {
 						want := Want{
@@ -127,18 +124,18 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 				}
 
 				// now find all the ticks we are going to want
-				ndays := types.DaysInMonth(year, month-1)
+				ndays := DaysInMonth(year, month-1)
 				for day := 1; day <= ndays; day++ {
 					for hour := 0; hour < 24; hour++ {
 						t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-						if types.IsForexMarketClosed(t) {
+						if IsForexMarketClosed(t) {
 							continue
 						}
 						select {
 						case <-ctx.Done():
 						default:
 						}
-						key := Key{sym, "dukascopy", KindTick, types.Ticks, year, month, day, hour}
+						key := Key{sym, "dukascopy", KindTick, Ticks, year, month, day, hour}
 						if !dm.inventory.HasComplete(key) {
 							want := Want{
 								Key:        key,
@@ -174,7 +171,7 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 
 		case KindCandle:
 			switch k.TF {
-			case types.M1:
+			case M1:
 				// if it is M1 we need to determine if all the required ticks
 				// are already part of inventory. Otherwise this candle will
 				// have to continue to wait for all ticks to be ready
@@ -189,11 +186,11 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 					plan.BuildM1 = append(plan.BuildM1, bt)
 				}
 
-			case types.H1:
+			case H1:
 				// H1 is only  dependent on M1, if M1 is in inventory we can
 				// build H1 straight away
 				km1 := k
-				km1.TF = types.M1
+				km1.TF = M1
 				found := dm.inventory.HasComplete(km1)
 				if found {
 					bt := BuildTask{
@@ -204,11 +201,11 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 					plan.BuildH1 = append(plan.BuildH1, bt)
 				}
 
-			case types.D1:
+			case D1:
 				// D1 is only dependent on H1, if H1 is in inventory we can
 				// build D1 straight away
 				kh1 := k
-				kh1.TF = types.H1
+				kh1.TF = H1
 				found := dm.inventory.HasComplete(kh1)
 				if found {
 					bt := BuildTask{
@@ -259,7 +256,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	if k.Kind != KindCandle {
 		return fmt.Errorf("buildM1 requires candle key, got kind=%v", k.Kind)
 	}
-	if k.TF != types.M1 {
+	if k.TF != M1 {
 		return fmt.Errorf("buildM1 wrong timeframe: %v", k.TF)
 	}
 	if k.Day != 0 || k.Hour != 0 {
@@ -275,11 +272,11 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 	monthStart := time.Date(k.Year, time.Month(k.Month), 1, 0, 0, 0, 0, time.UTC)
 
-	monthSet, err := types.NewMonthlyCandleSet(
-		types.NormalizeInstrument(k.Instrument),
-		types.M1,
-		types.FromTime(monthStart),
-		types.PriceScale,
+	monthSet, err := NewMonthlyCandleSet(
+		NormalizeInstrument(k.Instrument),
+		M1,
+		FromTime(monthStart),
+		PriceScale,
 		SourceCandles,
 	)
 	if err != nil {
@@ -293,7 +290,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		default:
 		}
 
-		if tickKey.Kind != KindTick || tickKey.TF != types.Ticks {
+		if tickKey.Kind != KindTick || tickKey.TF != Ticks {
 			return fmt.Errorf("buildM1 input must be hourly tick key, got %+v", tickKey)
 		}
 
@@ -324,7 +321,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	return nil
 }
 
-func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTick]) (_ *types.CandleSet, err error) {
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTick]) (_ *CandleSet, err error) {
 	defer func() {
 		if it != nil {
 			closeErr := it.Close()
@@ -334,7 +331,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 	}()
 
-	if key.Kind != KindTick || key.TF != types.Ticks {
+	if key.Kind != KindTick || key.TF != Ticks {
 		return nil, fmt.Errorf("buildHourM1FromTickIterator requires tick key, got %+v", key)
 	}
 
@@ -345,26 +342,26 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		key.Hour,
 		0, 0, 0, time.UTC,
 	)
-	hourStartMS := types.TimeMilliFromTime(hourStartTime)
+	hourStartMS := TimeMilliFromTime(hourStartTime)
 
 	const minutesPerHour = 60
 
-	cs := &types.CandleSet{
-		Instrument: types.NormalizeInstrument(key.Instrument),
-		Start:      types.FromTime(hourStartTime),
-		Timeframe:  types.M1,
-		Scale:      types.PriceScale,
+	cs := &CandleSet{
+		Instrument: NormalizeInstrument(key.Instrument),
+		Start:      FromTime(hourStartTime),
+		Timeframe:  M1,
+		Scale:      PriceScale,
 		Source:     SourceCandles,
-		Candles:    make([]types.Candle, minutesPerHour),
+		Candles:    make([]Candle, minutesPerHour),
 		Valid:      make([]uint64, (minutesPerHour+63)/64),
 	}
 
 	var (
 		curIdx        = -1
-		cur           types.Candle
+		cur           Candle
 		spreadSum     int64
 		havePrevClose bool
-		prevClose     types.Price
+		prevClose     Price
 	)
 
 	finalize := func() error {
@@ -373,7 +370,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 
 		ticks := int64(cur.Ticks)
-		cur.AvgSpread = types.Price((spreadSum + ticks/2) / ticks)
+		cur.AvgSpread = Price((spreadSum + ticks/2) / ticks)
 
 		cs.Candles[curIdx] = cur
 		cs.SetValid(curIdx)
@@ -383,9 +380,9 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		return nil
 	}
 
-	fillFlat := func(idx int, px types.Price) {
+	fillFlat := func(idx int, px Price) {
 		// Dense placeholder candle. Intentionally NOT marked valid.
-		cs.Candles[idx] = types.Candle{
+		cs.Candles[idx] = Candle{
 			Open:  px,
 			High:  px,
 			Low:   px,
@@ -408,7 +405,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 
 		minuteOpen := ts.FloorToMinute()
-		idx := int((minuteOpen - hourStartMS) / types.MinuteInMS)
+		idx := int((minuteOpen - hourStartMS) / MinuteInMS)
 		if idx < 0 || idx >= minutesPerHour {
 			return nil, fmt.Errorf(
 				"tick outside hour window: minute=%d hourStart=%d idx=%d",
@@ -421,7 +418,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 
 		if curIdx == -1 {
 			curIdx = idx
-			cur = types.Candle{
+			cur = Candle{
 				Open:      mid,
 				High:      mid,
 				Low:       mid,
@@ -467,7 +464,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 
 		curIdx = idx
-		cur = types.Candle{
+		cur = Candle{
 			Open:      mid,
 			High:      mid,
 			Low:       mid,
@@ -502,7 +499,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 }
 
 func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err error) {
-	if k.TF != types.H1 {
+	if k.TF != H1 {
 		return fmt.Errorf("buildH1 wrong timeframe: %v", k.TF)
 	}
 	if len(inputs) != 1 {
@@ -510,7 +507,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 	}
 
 	km1 := inputs[0]
-	if km1.TF != types.M1 {
+	if km1.TF != M1 {
 		return fmt.Errorf("buildH1 expected M1 input, got %v", km1.TF)
 	}
 
@@ -519,7 +516,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 		return err
 	}
 
-	h1, err := cs.Aggregate(types.H1) // or cs.Aggregate(k.TF)
+	h1, err := cs.Aggregate(H1) // or cs.Aggregate(k.TF)
 	if err != nil {
 		return err
 	}
@@ -533,7 +530,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 }
 
 func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
-	if k.TF != types.D1 {
+	if k.TF != D1 {
 		return fmt.Errorf("buildD1 wrong timeframe: %v", k.TF)
 	}
 	if len(inputs) != 1 {
@@ -541,7 +538,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	}
 
 	kh1 := inputs[0]
-	if kh1.TF != types.H1 {
+	if kh1.TF != H1 {
 		return fmt.Errorf("buildD1 expected H1 input, got %v", kh1.TF)
 	}
 
@@ -550,7 +547,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		return err
 	}
 
-	d1, err := cs.Aggregate(types.D1) // or cs.Aggregate(k.TF)
+	d1, err := cs.Aggregate(D1) // or cs.Aggregate(k.TF)
 	if err != nil {
 		return err
 	}
@@ -589,12 +586,12 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 type CandleRequest struct {
 	Source     string
 	Instrument string
-	Timeframe  types.Timeframe
-	Range      types.TimeRange
+	Timeframe  Timeframe
+	Range      TimeRange
 	Strict     bool
 }
 
-func (cr CandleRequest) timeframe() types.Timeframe {
+func (cr CandleRequest) timeframe() Timeframe {
 	if cr.Range.TF != 0 {
 		return cr.Range.TF
 	}
@@ -615,14 +612,14 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 		return nil, err
 	}
 
-	inst := types.NormalizeInstrument(req.Instrument)
+	inst := NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
 
 	tf := req.timeframe()
 	switch tf {
-	case types.M1, types.H1, types.D1:
+	case M1, H1, D1:
 	default:
 		return nil, fmt.Errorf("unsupported candle timeframe: %v", tf)
 	}
@@ -637,7 +634,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 		source = SourceCandles
 	}
 
-	// months := types.MonthsInRange(req.Range)
+	// months := MonthsInRange(req.Range)
 	months := req.Range.MonthsInRange()
 	iters := make([]CandleIterator, 0, len(months))
 
@@ -671,7 +668,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 	return NewChainedCandleIterator(iters...), nil
 }
 
-func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*types.CandleSet, error) {
+func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*CandleSet, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

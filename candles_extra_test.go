@@ -2,11 +2,9 @@ package trader
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,10 +20,10 @@ func TestCandles_CancelledContext(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(ctx, CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  types.H1,
-		Range: types.TimeRange{
-			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+		Timeframe:  H1,
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 		},
 	})
 	require.Error(t, err)
@@ -37,10 +35,10 @@ func TestCandles_BlankInstrument(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "",
-		Timeframe:  types.H1,
-		Range: types.TimeRange{
-			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+		Timeframe:  H1,
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 		},
 	})
 	require.Error(t, err)
@@ -53,10 +51,10 @@ func TestCandles_UnsupportedTimeframe(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  types.Ticks, // unsupported
-		Range: types.TimeRange{
-			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+		Timeframe:  Ticks, // unsupported
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 		},
 	})
 	require.Error(t, err)
@@ -69,8 +67,8 @@ func TestCandles_InvalidRange(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  types.H1,
-		Range:      types.TimeRange{}, // zero range is invalid
+		Timeframe:  H1,
+		Range:      TimeRange{}, // zero range is invalid
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid candle range")
@@ -82,16 +80,16 @@ func TestCandles_DefaultSourceFallsBackToCandles(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 
-	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, nil)
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.January, nil)
 
 	dm := &DataManager{}
 	req := CandleRequest{
 		Source:     "", // empty source should fall back to SourceCandles
 		Instrument: "EURUSD",
-		Timeframe:  types.H1,
-		Range: types.TimeRange{
-			Start: types.FromTime(start),
-			End:   types.FromTime(end),
+		Timeframe:  H1,
+		Range: TimeRange{
+			Start: FromTime(start),
+			End:   FromTime(end),
 		},
 		Strict: false,
 	}
@@ -112,7 +110,7 @@ func TestLoadCandleSet_CancelledContext(t *testing.T) {
 	cancel()
 
 	dm := &DataManager{}
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	_, err := dm.loadCandleSet(ctx, k)
 	require.Error(t, err)
 }
@@ -125,9 +123,9 @@ func TestBuildM1_BadTickKey(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 	// input key is candle, not tick
-	badInput := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	badInput := Key{Instrument: "EURUSD", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 	err := buildM1(context.Background(), k, []Key{badInput}, NewWantlist())
 	require.Error(t, err)
 }

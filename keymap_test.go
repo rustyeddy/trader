@@ -2,17 +2,15 @@ package trader
 
 import (
 	"errors"
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestKeymapPutAndGet(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[int]()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
 
 	_, ok := km.Get(k)
 	require.False(t, ok)
@@ -36,7 +34,7 @@ func TestKeymapHas(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[string]()
-	k := Key{Instrument: "GBPUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 2}
+	k := Key{Instrument: "GBPUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 2}
 
 	require.False(t, km.Has(k))
 	km.Put(k, "hello")
@@ -54,7 +52,7 @@ func TestKeymapDelete(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[int]()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 3}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: H1, Year: 2026, Month: 3}
 	km.Put(k, 99)
 	require.True(t, km.Has(k))
 

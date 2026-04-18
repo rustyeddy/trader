@@ -3,15 +3,13 @@ package trader
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/stretchr/testify/require"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 func makeParentsAndFile(path string, content []byte) error {
@@ -56,13 +54,13 @@ func TestCandleRequestKey(t *testing.T) {
 	cr := CandleRequest{
 		Instrument: "EURUSD",
 		Source:     SourceCandles,
-		Timeframe:  types.H1,
+		Timeframe:  H1,
 	}
 	k := cr.Key()
 	require.Equal(t, "EURUSD", k.Instrument)
 	require.Equal(t, "candles", k.Source)
 	require.Equal(t, KindCandle, k.Kind)
-	require.Equal(t, types.H1, k.TF)
+	require.Equal(t, H1, k.TF)
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +80,7 @@ func makeBi5Record(msOffset, askU, bidU uint32, askVol, bidVol float32) []byte {
 func TestReadNextBI5Tick_Valid(t *testing.T) {
 	t.Parallel()
 
-	baseMS := types.Timemilli(1_000_000)
+	baseMS := Timemilli(1_000_000)
 	msOffset := uint32(500)
 	askU := uint32(12345)
 	bidU := uint32(12340)
@@ -95,9 +93,9 @@ func TestReadNextBI5Tick_Valid(t *testing.T) {
 	tick, ok, err := readNextBI5Tick(r, "test.bi5", baseMS)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, baseMS+types.Timemilli(msOffset), tick.Timemilli)
-	require.Equal(t, types.Price(askU*10), tick.Ask)
-	require.Equal(t, types.Price(bidU*10), tick.Bid)
+	require.Equal(t, baseMS+Timemilli(msOffset), tick.Timemilli)
+	require.Equal(t, Price(askU*10), tick.Ask)
+	require.Equal(t, Price(bidU*10), tick.Bid)
 	require.InDelta(t, float64(askVol), float64(tick.AskVol), 0.001)
 	require.InDelta(t, float64(bidVol), float64(tick.BidVol), 0.001)
 }
@@ -153,7 +151,7 @@ func TestStoreIsUsableTickFile_Missing(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -170,7 +168,7 @@ func TestStoreIsUsableTickFile_EmptyFile(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -191,7 +189,7 @@ func TestStoreIsUsableTickFile_NonEmptyFile(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -216,7 +214,7 @@ func TestStoreSaveFile(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
@@ -254,7 +252,7 @@ func TestStoreScanFiles_WithCSV(t *testing.T) {
 	s := newTestStore(t)
 
 	// Write a valid CSV file so scanFiles finds it
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
 	require.NoError(t, s.WriteCSV(cs))
 
 	inv := NewInventory()

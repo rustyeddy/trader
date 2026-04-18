@@ -1,8 +1,6 @@
 package trader
 
-import (
-	"github.com/rustyeddy/trader/types"
-)
+import ()
 
 func abs(x float64) float64 {
 	if x < 0 {
@@ -11,7 +9,7 @@ func abs(x float64) float64 {
 	return x
 }
 
-func mkClose(close float64) types.Candle {
-	toP := func(x float64) types.Price { return types.Price(x*float64(types.PriceScale) + 0.5) }
-	return types.Candle{Close: toP(close)}
+func mkClose(close float64) Candle {
+	toP := func(x float64) Price { return Price(x*float64(PriceScale) + 0.5) }
+	return Candle{Close: toP(close)}
 }

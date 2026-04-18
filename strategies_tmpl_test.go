@@ -1,17 +1,15 @@
 package trader
 
 import (
-	"testing"
-
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestTemplateStrategy_Warmup(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{
 		Lookback:  3,
 		Threshold: 0.0010,
-		Scale:     types.PriceScale,
+		Scale:     PriceScale,
 	})
 
 	if s.Ready() {
@@ -33,7 +31,7 @@ func TestTemplateStrategy_EmitsSignal(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{
 		Lookback:  2,
 		Threshold: 0.0010,
-		Scale:     types.PriceScale,
+		Scale:     PriceScale,
 	})
 
 	_ = s.Update(mkClose(1.1000)) // warmup
@@ -46,7 +44,7 @@ func TestTemplateStrategy_Reset(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{
 		Lookback:  2,
 		Threshold: 0.0010,
-		Scale:     types.PriceScale,
+		Scale:     PriceScale,
 	})
 
 	_ = s.Update(mkClose(1.1000))
@@ -63,18 +61,18 @@ func TestTemplateStrategy_Reset(t *testing.T) {
 }
 
 func TestTemplateStrategy_Name(t *testing.T) {
-	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 3, Threshold: 0.0010, Scale: types.PriceScale})
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 3, Threshold: 0.0010, Scale: PriceScale})
 	require.NotEmpty(t, s.Name())
 }
 
 func TestTemplateStrategyPlan_Reason(t *testing.T) {
-	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: types.PriceScale})
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: PriceScale})
 	d := s.Update(mkClose(1.1000))
 	require.NotEmpty(t, d.Reason)
 }
 
 func TestTemplateStrategy_NoSignalPlan(t *testing.T) {
-	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: types.PriceScale})
+	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: PriceScale})
 	_ = s.Update(mkClose(1.1020))
 	d := s.Update(mkClose(1.1000))
 	require.Empty(t, d.Opens)
@@ -85,7 +83,7 @@ func TestTemplateStrategy_HoldAfterWarmup(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{
 		Lookback:  2,
 		Threshold: 0.0100, // large threshold so small moves don't trigger
-		Scale:     types.PriceScale,
+		Scale:     PriceScale,
 	})
 	_ = s.Update(mkClose(1.1000))
 	d := s.Update(mkClose(1.1001))
@@ -94,7 +92,7 @@ func TestTemplateStrategy_HoldAfterWarmup(t *testing.T) {
 
 func TestNewTemplateStrategy_PanicOnInvalidConfig(t *testing.T) {
 	require.Panics(t, func() {
-		NewTemplateStrategy(TemplateStrategyConfig{Lookback: 0, Threshold: 0.001, Scale: types.PriceScale})
+		NewTemplateStrategy(TemplateStrategyConfig{Lookback: 0, Threshold: 0.001, Scale: PriceScale})
 	})
 }
 

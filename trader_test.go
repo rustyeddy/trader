@@ -6,15 +6,13 @@ import (
 	"testing"
 	"time"
 
-	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type testIterator struct {
 	nextFn       func() bool
-	candleTimeFn func() types.CandleTime
+	candleTimeFn func() CandleTime
 	err          error
 	closeErr     error
 	closed       bool
@@ -27,25 +25,25 @@ func (it *testIterator) Next() bool {
 	return it.nextFn()
 }
 
-func (it *testIterator) Candle() types.Candle {
+func (it *testIterator) Candle() Candle {
 	return it.CandleTime().Candle
 }
 
-func (it *testIterator) CandleTime() types.CandleTime {
+func (it *testIterator) CandleTime() CandleTime {
 	if it.candleTimeFn == nil {
-		return types.CandleTime{}
+		return CandleTime{}
 	}
 	return it.candleTimeFn()
 }
 
-func (it *testIterator) NextCandle() (types.Candle, bool) {
+func (it *testIterator) NextCandle() (Candle, bool) {
 	if !it.Next() {
-		return types.Candle{}, false
+		return Candle{}, false
 	}
 	return it.Candle(), true
 }
 
-func (it *testIterator) Timestamp() types.Timestamp {
+func (it *testIterator) Timestamp() Timestamp {
 	return it.CandleTime().Timestamp
 }
 
@@ -60,7 +58,7 @@ func (it *testIterator) Close() error {
 
 type testStrategy struct {
 	name     string
-	updateFn func(context.Context, *types.CandleTime, *types.Positions) *StrategyPlan
+	updateFn func(context.Context, *CandleTime, *Positions) *StrategyPlan
 }
 
 func (s testStrategy) Name() string {
@@ -70,7 +68,7 @@ func (s testStrategy) Name() string {
 	return s.name
 }
 
-func (s testStrategy) Update(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *StrategyPlan {
+func (s testStrategy) Update(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
 	if s.updateFn == nil {
 		return &DefaultStrategyPlan
 	}
@@ -82,16 +80,16 @@ func newTestTrader() *Trader {
 	return &Trader{
 		Account: am.CreateAccount("test", 1000),
 		Broker: &Broker{
-			ID: types.NewULID(),
+			ID: NewULID(),
 			OpenOrders: OpenOrders{
-				Orders: make(map[string]*types.Order),
+				Orders: make(map[string]*Order),
 			},
 		},
 	}
 }
 
 func TestTrader(t *testing.T) {
-	err := tlog.Setup(tlog.Config{Level: "debug", Format: "text"})
+	err := Setup(LogConfig{Level: "debug", Format: "text"})
 	assert.NoError(t, err)
 
 	instrument := "EURUSD"
@@ -104,7 +102,7 @@ func TestTrader(t *testing.T) {
 		Strategy:   "fake",
 		Start:      start,
 		End:        end,
-		TimeFrame:  types.M1,
+		TimeFrame:  M1,
 		Account:    "test",
 	}
 
@@ -113,9 +111,9 @@ func TestTrader(t *testing.T) {
 		Account:     am.CreateAccount("test", 1000),
 		DataManager: NewDataManager([]string{"EURUSD"}, start, end),
 		Broker: &Broker{
-			ID: types.NewULID(),
+			ID: NewULID(),
 			OpenOrders: OpenOrders{
-				Orders: make(map[string]*types.Order),
+				Orders: make(map[string]*Order),
 			},
 		},
 	}
@@ -132,7 +130,7 @@ func TestBackTestRejectsUnknownStrategy(t *testing.T) {
 	cfg := &ConfigBackTest{
 		Instrument: "EURUSD",
 		Strategy:   "does-not-exist",
-		TimeFrame:  types.M1,
+		TimeFrame:  M1,
 		Start:      time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		End:        time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
 		Account:    "test",
@@ -153,15 +151,15 @@ func TestBackTestWithIteratorReturnsContextCancellation(t *testing.T) {
 			cancel()
 			return true
 		},
-		candleTimeFn: func() types.CandleTime {
-			return types.CandleTime{
-				Candle:    types.Candle{Close: types.Price(1100000)},
-				Timestamp: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		candleTimeFn: func() CandleTime {
+			return CandleTime{
+				Candle:    Candle{Close: Price(1100000)},
+				Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 			}
 		},
 	}
 
-	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "noop", TimeFrame: types.M1}
+	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "noop", TimeFrame: M1}
 	err := trader.backTestWithIterator(ctx, cfg, testStrategy{name: "noop"}, iter)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.True(t, iter.closed)
@@ -175,7 +173,7 @@ func TestBackTestWithIteratorReturnsIteratorError(t *testing.T) {
 		err:    iterErr,
 	}
 
-	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "noop", TimeFrame: types.M1}
+	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "noop", TimeFrame: M1}
 	err := trader.backTestWithIterator(context.Background(), cfg, testStrategy{name: "noop"}, iter)
 	require.ErrorIs(t, err, iterErr)
 	assert.True(t, iter.closed)
@@ -187,22 +185,22 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 		nextFn: func() bool { return false },
 	}
 
-	position := &types.Position{
-		TradeCommon: types.NewTradeHistory("EURUSD").TradeCommon,
-		FillPrice:   types.Price(1100000),
-		State:       types.PositionOpen,
+	position := &Position{
+		TradeCommon: NewTradeHistory("EURUSD").TradeCommon,
+		FillPrice:   Price(1100000),
+		State:       PositionOpen,
 	}
 
 	strategy := testStrategy{
 		name: "bad-close",
-		updateFn: func(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *StrategyPlan {
+		updateFn: func(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
 			return &StrategyPlan{
-				Closes: []*types.CloseRequest{{
-					Request: types.Request{
+				Closes: []*CloseRequest{{
+					Request: Request{
 						TradeCommon: position.TradeCommon,
-						RequestType: types.RequestClose,
-						Price:       types.Price(1090000),
-						Timestamp:   types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+						RequestType: RequestClose,
+						Price:       Price(1090000),
+						Timestamp:   FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 					},
 				}},
 			}
@@ -216,14 +214,14 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 		iter.nextFn = func() bool { return false }
 		return true
 	}
-	iter.candleTimeFn = func() types.CandleTime {
-		return types.CandleTime{
-			Candle:    types.Candle{Close: types.Price(1100000)},
-			Timestamp: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+	iter.candleTimeFn = func() CandleTime {
+		return CandleTime{
+			Candle:    Candle{Close: Price(1100000)},
+			Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		}
 	}
 
-	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "fake", TimeFrame: types.M1}
+	cfg := &ConfigBackTest{Instrument: "EURUSD", Strategy: "fake", TimeFrame: M1}
 	err := trader.backTestWithIterator(context.Background(), cfg, strategy, iter)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing position")

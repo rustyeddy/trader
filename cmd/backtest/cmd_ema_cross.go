@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -40,19 +39,19 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 }
 
 func runEMACrossFromFlags(cmd *cobra.Command) error {
-	emaCrossCfg.Scale = types.PriceScale
+	emaCrossCfg.Scale = trader.PriceScale
 
 	strat := trader.NewEMACross(emaCrossCfg)
-	act := trader.NewAccount("adhoc-ema-cross", types.MoneyFromFloat(1000))
+	act := trader.NewAccount("adhoc-ema-cross", trader.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
 		emaCrossOpts,
 		strat,
 		candleRunMeta{
-			RunID:    types.NewULID(),
+			RunID:    trader.NewULID(),
 			RunName:  "adhoc-ema-cross",
 			Kind:     "ema-cross",
-			Created:  types.FromTime(time.Now().UTC()),
+			Created:  trader.FromTime(time.Now().UTC()),
 			Balance:  act.Balance,
 			RR:       0,
 			Strategy: strat.Name(),
@@ -94,8 +93,8 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
-	emaCrossOpts.Instrument = types.NormalizeInstrument(emaCrossOpts.Instrument)
-	cfg.Scale = types.PriceScale
+	emaCrossOpts.Instrument = trader.NormalizeInstrument(emaCrossOpts.Instrument)
+	cfg.Scale = trader.PriceScale
 
 	strat := trader.NewEMACross(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
@@ -104,10 +103,10 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 		emaCrossOpts,
 		strat,
 		candleRunMeta{
-			RunID:    types.NewULID(),
+			RunID:    trader.NewULID(),
 			RunName:  rr.Name,
 			Kind:     rr.Strategy.Kind,
-			Created:  types.FromTime(time.Now().UTC()),
+			Created:  trader.FromTime(time.Now().UTC()),
 			Balance:  rr.StartingBalance,
 			RR:       rr.RR,
 			Strategy: strat.Name(),

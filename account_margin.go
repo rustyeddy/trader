@@ -2,12 +2,10 @@ package trader
 
 import (
 	"fmt"
-
-	"github.com/rustyeddy/trader/types"
 )
 
-func TradeMargin(units types.Units, price types.Price, instrument string, quoteToAccount types.Rate) (types.Money, error) {
-	meta, ok := types.Instruments[instrument]
+func TradeMargin(units Units, price Price, instrument string, quoteToAccount Rate) (Money, error) {
+	meta, ok := Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)
 	}
@@ -18,32 +16,32 @@ func TradeMargin(units types.Units, price types.Price, instrument string, quoteT
 		return 0, fmt.Errorf("invalid margin rate for %s: %d", instrument, meta.MarginRate)
 	}
 
-	u := types.Abs64(int64(units))
+	u := Abs64(int64(units))
 	p := int64(price)
 	if p <= 0 {
 		return 0, fmt.Errorf("invalid price: %d", p)
 	}
 
-	ms := int64(types.MoneyScale)
+	ms := int64(MoneyScale)
 
-	up, err := types.MulDiv64(u, p, ms)
+	up, err := MulDiv64(u, p, ms)
 	if err != nil {
 		return 0, err
 	}
-	notionalQuoteMicro, err := types.MulDiv64(up, ms, 1)
-	if err != nil {
-		return 0, err
-	}
-
-	notionalAcctMicro, err := types.MulDiv64(notionalQuoteMicro, int64(quoteToAccount), ms)
+	notionalQuoteMicro, err := MulDiv64(up, ms, 1)
 	if err != nil {
 		return 0, err
 	}
 
-	marginMicro, err := types.MulDiv64(notionalAcctMicro, int64(meta.MarginRate), ms)
+	notionalAcctMicro, err := MulDiv64(notionalQuoteMicro, int64(quoteToAccount), ms)
 	if err != nil {
 		return 0, err
 	}
 
-	return types.Money(marginMicro), nil
+	marginMicro, err := MulDiv64(notionalAcctMicro, int64(meta.MarginRate), ms)
+	if err != nil {
+		return 0, err
+	}
+
+	return Money(marginMicro), nil
 }

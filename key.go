@@ -2,15 +2,13 @@ package trader
 
 import (
 	"time"
-
-	"github.com/rustyeddy/trader/types"
 )
 
 type Key struct {
 	Instrument string
 	Source     string
 	Kind       DataKind
-	TF         types.Timeframe
+	TF         Timeframe
 	Year       int
 	Month      int
 	Day        int
@@ -133,28 +131,28 @@ func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
-func (k Key) Range() types.TimeRange {
+func (k Key) Range() TimeRange {
 	start := k.Time().UTC()
 
 	switch {
 	case k.Kind == KindTick && k.Hour >= 0:
 		end := start.Add(time.Hour)
-		return types.TimeRange{
-			Start: types.Timestamp(start.Unix()),
-			End:   types.Timestamp(end.Unix()),
-			TF:    types.Ticks,
+		return TimeRange{
+			Start: Timestamp(start.Unix()),
+			End:   Timestamp(end.Unix()),
+			TF:    Ticks,
 		}
 
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		end := start.AddDate(0, 1, 0)
-		return types.TimeRange{
-			Start: types.Timestamp(start.Unix()),
-			End:   types.Timestamp(end.Unix()),
+		return TimeRange{
+			Start: Timestamp(start.Unix()),
+			End:   Timestamp(end.Unix()),
 			TF:    k.TF,
 		}
 
 	default:
-		return types.TimeRange{}
+		return TimeRange{}
 	}
 }
 
@@ -165,13 +163,13 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 	out := make([]Key, 0, 24*31)
 
 	for t := start; t.Before(end); t = t.Add(time.Hour) {
-		if types.IsForexMarketClosed(t) {
+		if IsForexMarketClosed(t) {
 			continue
 		}
 
 		out = append(out, Key{
 			Source:     source,
-			Instrument: types.NormalizeInstrument(instrument),
+			Instrument: NormalizeInstrument(instrument),
 			Kind:       KindTick,
 			Year:       t.Year(),
 			Month:      int(t.Month()),

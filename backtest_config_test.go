@@ -1,13 +1,11 @@
 package trader
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ─── LoadConfig ──────────────────────────────────────────────────────────────
@@ -346,7 +344,7 @@ func TestResolve_DefaultScaleFallback(t *testing.T) {
 	}
 	rr, err := cfg.ResolveAllRuns()
 	require.NoError(t, err)
-	assert.Equal(t, types.PriceScale, rr[0].Scale)
+	assert.Equal(t, PriceScale, rr[0].Scale)
 }
 
 func TestResolve_DataStrictOverride(t *testing.T) {
@@ -422,7 +420,7 @@ func TestCandleRequest_Valid(t *testing.T) {
 	cr, err := rr.CandleRequest()
 	require.NoError(t, err)
 	assert.Equal(t, "EURUSD", cr.Instrument)
-	assert.Equal(t, types.H1, cr.Timeframe)
+	assert.Equal(t, H1, cr.Timeframe)
 	assert.False(t, cr.Range.Start.IsZero())
 	assert.False(t, cr.Range.End.IsZero())
 }
@@ -467,15 +465,15 @@ func TestCandleRequest_InvalidTo(t *testing.T) {
 func TestParseTimeframe(t *testing.T) {
 	tests := []struct {
 		in   string
-		want types.Timeframe
+		want Timeframe
 		err  bool
 	}{
-		{"M1", types.M1, false},
-		{"m1", types.M1, false},
-		{"H1", types.H1, false},
-		{"h1", types.H1, false},
-		{"D1", types.D1, false},
-		{"d1", types.D1, false},
+		{"M1", M1, false},
+		{"m1", M1, false},
+		{"H1", H1, false},
+		{"h1", H1, false},
+		{"D1", D1, false},
+		{"d1", D1, false},
 		{"W1", 0, true},
 		{"", 0, true},
 	}
@@ -531,10 +529,10 @@ func TestFirstNonEmpty(t *testing.T) {
 
 func TestPercentToRate(t *testing.T) {
 	r := percentToRate(1.0)
-	assert.Equal(t, types.RateFromFloat(0.01), r)
+	assert.Equal(t, RateFromFloat(0.01), r)
 
 	r = percentToRate(0.5)
-	assert.Equal(t, types.RateFromFloat(0.005), r)
+	assert.Equal(t, RateFromFloat(0.005), r)
 }
 
 // ─── ApplyCommonParamOverrides ────────────────────────────────────────────────
@@ -551,7 +549,7 @@ func TestApplyCommonParamOverrides_Units(t *testing.T) {
 		Strategy: StrategyConfig{Params: map[string]any{"units": 5000}},
 	}
 	require.NoError(t, rr.ApplyCommonParamOverrides())
-	assert.Equal(t, types.Units(5000), rr.Units)
+	assert.Equal(t, Units(5000), rr.Units)
 }
 
 func TestApplyCommonParamOverrides_StopAndTakePips(t *testing.T) {
@@ -562,8 +560,8 @@ func TestApplyCommonParamOverrides_StopAndTakePips(t *testing.T) {
 		}},
 	}
 	require.NoError(t, rr.ApplyCommonParamOverrides())
-	assert.Equal(t, types.Price(20), rr.StopPips)
-	assert.Equal(t, types.Price(40), rr.TakePips)
+	assert.Equal(t, Price(20), rr.StopPips)
+	assert.Equal(t, Price(40), rr.TakePips)
 }
 
 func TestApplyCommonParamOverrides_RiskAndRR(t *testing.T) {
@@ -575,7 +573,7 @@ func TestApplyCommonParamOverrides_RiskAndRR(t *testing.T) {
 	}
 	require.NoError(t, rr.ApplyCommonParamOverrides())
 	assert.Equal(t, percentToRate(1.0), rr.RiskPct)
-	assert.Equal(t, types.RateFromFloat(2.0), rr.RR)
+	assert.Equal(t, RateFromFloat(2.0), rr.RR)
 }
 
 func TestApplyCommonParamOverrides_BadUnits(t *testing.T) {

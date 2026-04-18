@@ -2,16 +2,14 @@ package trader
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 func testAccount() *Account {
-	acct := NewAccount("test", types.MoneyFromFloat(1000.0))
-	acct.RiskPct = types.RateFromFloat(0.005)
+	acct := NewAccount("test", MoneyFromFloat(1000.0))
+	acct.RiskPct = RateFromFloat(0.005)
 	return acct
 }
 
@@ -22,7 +20,7 @@ type fakeFeed struct {
 }
 
 type fakeBar struct {
-	ts types.Timestamp
+	ts Timestamp
 	c  Candle
 }
 
@@ -35,8 +33,8 @@ func (f *fakeFeed) Next() bool {
 }
 
 func (f *fakeFeed) Candle() Candle { return f.bars[f.idx-1].c }
-func (f *fakeFeed) CandleTime() types.CandleTime {
-	return types.CandleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
+func (f *fakeFeed) CandleTime() CandleTime {
+	return CandleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
 }
 func (f *fakeFeed) NextCandle() (Candle, bool) {
 	if f.Next() {
@@ -44,27 +42,27 @@ func (f *fakeFeed) NextCandle() (Candle, bool) {
 	}
 	return Candle{}, false
 }
-func (f *fakeFeed) Timestamp() types.Timestamp { return f.bars[f.idx-1].ts }
-func (f *fakeFeed) Err() error                 { return f.err }
-func (f *fakeFeed) Close() error               { return nil }
+func (f *fakeFeed) Timestamp() Timestamp { return f.bars[f.idx-1].ts }
+func (f *fakeFeed) Err() error           { return f.err }
+func (f *fakeFeed) Close() error         { return nil }
 
-func openReq(instrument string, side types.Side, units types.Units, stop, take types.Price) *types.OpenRequest {
-	th := types.NewTradeHistory(instrument)
+func openReq(instrument string, side Side, units Units, stop, take Price) *OpenRequest {
+	th := NewTradeHistory(instrument)
 	th.Side = side
 	th.Units = units
 	th.Stop = stop
 	th.Take = take
-	return &types.OpenRequest{Request: types.Request{TradeCommon: th.TradeCommon}}
+	return &OpenRequest{Request: Request{TradeCommon: th.TradeCommon}}
 }
 
 type fixedStrategy struct {
 	name string
-	make func(*CandleContext, Candle) *types.OpenRequest
+	make func(*CandleContext, Candle) *OpenRequest
 }
 
 func (s *fixedStrategy) Name() string { return s.name }
 func (s *fixedStrategy) Reset()       {}
-func (s *fixedStrategy) OnBar(ctx *CandleContext, c Candle) *types.OpenRequest {
+func (s *fixedStrategy) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
 	if s.make == nil {
 		return nil
 	}
@@ -73,165 +71,165 @@ func (s *fixedStrategy) OnBar(ctx *CandleContext, c Candle) *types.OpenRequest {
 
 func TestCandleEngineRun_BuyFirstBarStrategy(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101000, Low: 99000, Close: 100500, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100500, High: 101500, Low: 100000, Close: 101000, Ticks: 12},
 	}}}
 
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, &BuyFirstBarStrategy{}))
 	require.Nil(t, engine.Pos)
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Price(101000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Price(101000), engine.Account.Trades[0].FillPrice)
 }
 
 func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100500, Low: 99500, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101500, Low: 99900, Close: 101000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "take", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		if ctx.Pos != nil {
 			return nil
 		}
-		return openReq(ctx.Instrument, types.Long, 1000, 0, 101000)
+		return openReq(ctx.Instrument, Long, 1000, 0, 101000)
 	}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Long, engine.Account.Trades[0].Side)
-	require.Equal(t, types.Price(101000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Long, engine.Account.Trades[0].Side)
+	require.Equal(t, Price(101000), engine.Account.Trades[0].FillPrice)
 }
 
 func TestCandleEngineRun_StopLossClosesTrade(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100500, Low: 99500, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 98900, Close: 99000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "stop", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "stop", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		if ctx.Pos != nil {
 			return nil
 		}
-		return openReq(ctx.Instrument, types.Long, 1000, 99000, 0)
+		return openReq(ctx.Instrument, Long, 1000, 99000, 0)
 	}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Price(99000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Price(99000), engine.Account.Trades[0].FillPrice)
 }
 
 func TestCandleEngineRun_SameBarStopAndTake_UsesStopFirst(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 99900, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101500, Low: 98900, Close: 100500, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "stop-take", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "stop-take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		if ctx.Pos != nil {
 			return nil
 		}
-		return openReq(ctx.Instrument, types.Long, 1000, 99000, 101000)
+		return openReq(ctx.Instrument, Long, 1000, 99000, 101000)
 	}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Price(99000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Price(99000), engine.Account.Trades[0].FillPrice)
 }
 
 func TestCandleEngineRun_GapBarsReported(t *testing.T) {
 	var gaps []int
-	strat := &fixedStrategy{name: "gap", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "gap", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		gaps = append(gaps, ctx.GapBars)
 		return nil
 	}}
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 99900, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 3, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 3, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100200, Low: 99800, Close: 100100, Ticks: 12},
 	}}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Equal(t, []int{0, 2}, gaps)
 }
 
 func TestCandleEngineRun_ShortTakeProfitClosesTrade(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100500, Low: 99500, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 98900, Close: 99000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "short-take", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "short-take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		if ctx.Pos != nil {
 			return nil
 		}
-		return openReq(ctx.Instrument, types.Short, 1000, 0, 99000)
+		return openReq(ctx.Instrument, Short, 1000, 0, 99000)
 	}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Short, engine.Account.Trades[0].Side)
-	require.Equal(t, types.Price(99000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Short, engine.Account.Trades[0].Side)
+	require.Equal(t, Price(99000), engine.Account.Trades[0].FillPrice)
 }
 
 func TestCandleEngineRun_ShortStopLossClosesTrade(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100500, Low: 99500, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101100, Low: 99900, Close: 101000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "short-stop", make: func(ctx *CandleContext, c Candle) *types.OpenRequest {
+	strat := &fixedStrategy{name: "short-stop", make: func(ctx *CandleContext, c Candle) *OpenRequest {
 		if ctx.Pos != nil {
 			return nil
 		}
-		return openReq(ctx.Instrument, types.Short, 1000, 101000, 0)
+		return openReq(ctx.Instrument, Short, 1000, 101000, 0)
 	}}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Len(t, engine.Account.Trades, 1)
-	require.Equal(t, types.Price(101000), engine.Account.Trades[0].FillPrice)
+	require.Equal(t, Price(101000), engine.Account.Trades[0].FillPrice)
 }
 
 type countingEntryStrategy struct{ entries int }
 
 func (s *countingEntryStrategy) Name() string { return "counting-entry" }
 func (s *countingEntryStrategy) Reset()       { s.entries = 0 }
-func (s *countingEntryStrategy) OnBar(ctx *CandleContext, c Candle) *types.OpenRequest {
+func (s *countingEntryStrategy) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
 	if s.entries > 0 || ctx.Pos != nil {
 		return nil
 	}
 	s.entries++
-	return openReq(ctx.Instrument, types.Long, 1000, 0, 0)
+	return openReq(ctx.Instrument, Long, 1000, 0, 0)
 }
 
 func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {
 	feed := &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 99900, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100200, Low: 99950, Close: 100100, Ticks: 11},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 2, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 2, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100100, High: 100300, Low: 100000, Close: 100200, Ticks: 12},
 	}}}
 	strat := &countingEntryStrategy{}
-	engine := NewCandleEngine("EURUSD", types.H1, testAccount())
+	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
 	require.Equal(t, 1, strat.entries)
 	require.Len(t, engine.Account.Trades, 1)
@@ -251,13 +249,13 @@ func (s *fakeSource) Candles(context.Context, CandleRequest) (CandleIterator, er
 
 func TestRunCandles_Smoke(t *testing.T) {
 	src := &fakeSource{it: &fakeFeed{bars: []fakeBar{{
-		ts: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 99900, Close: 100000, Ticks: 10},
 	}, {
-		ts: types.FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
+		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100200, Low: 99950, Close: 100100, Ticks: 11},
 	}}}}
-	req := CandleRunRequest{DataRequest: CandleRequest{Instrument: "EURUSD", Timeframe: types.H1, Range: types.TimeRange{Start: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)), End: types.FromTime(time.Date(2026, time.January, 1, 2, 0, 0, 0, time.UTC))}, Strict: true}, StartingBalance: types.Money(10000), AccountCCY: "USD", Scale: types.PriceScale}
+	req := CandleRunRequest{DataRequest: CandleRequest{Instrument: "EURUSD", Timeframe: H1, Range: TimeRange{Start: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)), End: FromTime(time.Date(2026, time.January, 1, 2, 0, 0, 0, time.UTC))}, Strict: true}, StartingBalance: Money(10000), AccountCCY: "USD", Scale: PriceScale}
 	engine, err := RunCandles(context.Background(), src, req, &BuyFirstBarStrategy{}, testAccount())
 	require.NoError(t, err)
 	require.NotNil(t, engine)

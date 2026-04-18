@@ -9,12 +9,9 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/broker/sim"
-	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/types"
 )
 
-func newPricingCmd(rc *config.RootConfig) *cobra.Command {
+func newPricingCmd(rc *trader.RootConfig) *cobra.Command {
 	var (
 		ticksPath string
 
@@ -70,7 +67,7 @@ func newPricingCmd(rc *config.RootConfig) *cobra.Command {
 
 			ctx := context.Background()
 
-			j, err := journal.NewSQLite(rc.DBPath)
+			j, err := trader.NewSQLite(rc.DBPath)
 			if err != nil {
 				return err
 			}
@@ -79,11 +76,11 @@ func newPricingCmd(rc *config.RootConfig) *cobra.Command {
 			engine := sim.NewEngine(trader.Account{
 				ID:       accountID,
 				Currency: "USD",
-				Balance:  types.MoneyFromFloat(startingBalance),
-				Equity:   types.MoneyFromFloat(startingBalance),
+				Balance:  trader.MoneyFromFloat(startingBalance),
+				Equity:   trader.MoneyFromFloat(startingBalance),
 			}, j)
 
-			feed, err := trader.NewCSVTicksFeed(ticksPath, types.FromTime(from), types.FromTime(to))
+			feed, err := trader.NewCSVTicksFeed(ticksPath, trader.FromTime(from), trader.FromTime(to))
 			if err != nil {
 				return err
 			}

@@ -2,11 +2,9 @@ package trader
 
 import (
 	"errors"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-
-	"github.com/rustyeddy/trader/types"
-	"github.com/stretchr/testify/require"
 )
 
 // errCandleIterator is a test-only CandleIterator that returns errors on demand.
@@ -15,8 +13,8 @@ type errCandleIterator struct {
 	closeErr error
 	count    int
 	maxItems int
-	cur      types.Candle
-	ts       types.Timestamp
+	cur      Candle
+	ts       Timestamp
 }
 
 func (it *errCandleIterator) Next() bool {
@@ -24,28 +22,28 @@ func (it *errCandleIterator) Next() bool {
 		return false
 	}
 	it.count++
-	it.cur = types.Candle{Open: 100, Close: 100, Ticks: 1}
-	it.ts = types.Timestamp(it.count)
+	it.cur = Candle{Open: 100, Close: 100, Ticks: 1}
+	it.ts = Timestamp(it.count)
 	return true
 }
-func (it *errCandleIterator) Candle() types.Candle { return it.cur }
-func (it *errCandleIterator) CandleTime() types.CandleTime {
-	return types.CandleTime{Candle: it.cur, Timestamp: it.ts}
+func (it *errCandleIterator) Candle() Candle { return it.cur }
+func (it *errCandleIterator) CandleTime() CandleTime {
+	return CandleTime{Candle: it.cur, Timestamp: it.ts}
 }
-func (it *errCandleIterator) Timestamp() types.Timestamp { return it.ts }
-func (it *errCandleIterator) Err() error                 { return it.nextErr }
-func (it *errCandleIterator) Close() error               { return it.closeErr }
-func (it *errCandleIterator) NextCandle() (types.Candle, bool) {
+func (it *errCandleIterator) Timestamp() Timestamp { return it.ts }
+func (it *errCandleIterator) Err() error           { return it.nextErr }
+func (it *errCandleIterator) Close() error         { return it.closeErr }
+func (it *errCandleIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return types.Candle{}, false
+	return Candle{}, false
 }
 
 // errAfterCandleIterator returns items first then an error.
 type errAfterCandleIterator struct {
-	items   []types.Candle
-	tss     []types.Timestamp
+	items   []Candle
+	tss     []Timestamp
 	idx     int
 	errOnce error
 	emitted bool
@@ -58,17 +56,17 @@ func (it *errAfterCandleIterator) Next() bool {
 	}
 	return false
 }
-func (it *errAfterCandleIterator) Candle() types.Candle { return it.items[it.idx-1] }
-func (it *errAfterCandleIterator) CandleTime() types.CandleTime {
-	return types.CandleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
+func (it *errAfterCandleIterator) Candle() Candle { return it.items[it.idx-1] }
+func (it *errAfterCandleIterator) CandleTime() CandleTime {
+	return CandleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
 }
-func (it *errAfterCandleIterator) NextCandle() (types.Candle, bool) {
+func (it *errAfterCandleIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
-	return types.Candle{}, false
+	return Candle{}, false
 }
-func (it *errAfterCandleIterator) Timestamp() types.Timestamp { return it.tss[it.idx-1] }
+func (it *errAfterCandleIterator) Timestamp() Timestamp { return it.tss[it.idx-1] }
 func (it *errAfterCandleIterator) Err() error {
 	if it.idx >= len(it.items) && !it.emitted {
 		it.emitted = true
@@ -87,8 +85,8 @@ func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 
 	sentinel := errors.New("sub error")
 	sub := &errAfterCandleIterator{
-		items:   []types.Candle{{Ticks: 1}},
-		tss:     []types.Timestamp{1},
+		items:   []Candle{{Ticks: 1}},
+		tss:     []Timestamp{1},
 		errOnce: sentinel,
 	}
 	chained := NewChainedCandleIterator(sub)
@@ -140,7 +138,7 @@ func TestOpenTickIterator_FileNotFound(t *testing.T) {
 	// 2026-01-05 (Monday) = forex market open
 	k := Key{
 		Kind:       KindTick,
-		TF:         types.Ticks,
+		TF:         Ticks,
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Year:       2026,
@@ -183,6 +181,6 @@ func TestDukasfileBaseHourUnixMS(t *testing.T) {
 
 	ms, err := df.baseHourUnixMS()
 	require.NoError(t, err)
-	want := types.TimeMilliFromTime(ts)
+	want := TimeMilliFromTime(ts)
 	require.Equal(t, want, ms)
 }

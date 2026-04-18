@@ -5,22 +5,19 @@ import (
 	"os"
 	"text/template"
 	"time"
-
-	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/types"
 )
 
 // Result is a lightweight summary of a backtest run.
 type Result struct {
-	Balance types.Money
-	Equity  types.Money
+	Balance Money
+	Equity  Money
 
 	Trades int
 	Wins   int
 	Losses int
 
-	Start types.Timestamp
-	End   types.Timestamp
+	Start Timestamp
+	End   Timestamp
 }
 
 // BacktestRunRow mirrors backtest_runs table.
@@ -28,7 +25,7 @@ type BacktestRun struct {
 	RunID     string
 	Name      string
 	Kind      string
-	Created   types.Timestamp
+	Created   Timestamp
 	Timeframe string
 	Dataset   string
 
@@ -38,13 +35,13 @@ type BacktestRun struct {
 	Config     []byte // strategy config
 
 	// Risk Management
-	RiskPct  types.Rate  // 0.005 (0.5%)
-	StopPips types.Price // e.g. 20
-	RR       types.Rate  // take-profit multiple of risk, e.g. 2.0
+	RiskPct  Rate  // 0.005 (0.5%)
+	StopPips Price // e.g. 20
+	RR       Rate  // take-profit multiple of risk, e.g. 2.0
 
 	// Account and price timeframe
-	Start types.Timestamp
-	End   types.Timestamp
+	Start Timestamp
+	End   Timestamp
 
 	// Results
 	Trades int
@@ -52,15 +49,15 @@ type BacktestRun struct {
 	Losses int
 
 	// account info
-	StartBalance types.Money
-	EndBalance   types.Money
+	StartBalance Money
+	EndBalance   Money
 
 	// Derived / computed in Go
-	NetPL        types.Money
-	ReturnPct    types.Rate
-	WinRate      types.Rate
-	ProfitFactor types.Rate
-	MaxDDPct     types.Rate
+	NetPL        Money
+	ReturnPct    Rate
+	WinRate      Rate
+	ProfitFactor Rate
+	MaxDDPct     Rate
 
 	GitCommit string
 	OrgPath   string
@@ -85,14 +82,14 @@ func (v *BacktestRun) WriteBacktestOrg() error {
 	// 1. Create a new template and parse the template string
 	t, err := template.New("backtest").Funcs(backtestOrgFuncs).Parse(BacktestOrgTemplate)
 	if err != nil {
-		tlog.Fatal("parse backtest template", "err", err)
+		Fatal("parse backtest template", "err", err)
 	}
 
 	// 2. Execute the template, writing the output to os.Stdout
 	buf := new(bytes.Buffer)
 	err = t.Execute(buf, v)
 	if err != nil {
-		tlog.Fatal("execute backtest template", "err", err)
+		Fatal("execute backtest template", "err", err)
 	}
 	err = os.WriteFile(v.OrgPath, buf.Bytes(), 0644)
 	return err
