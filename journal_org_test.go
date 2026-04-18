@@ -32,8 +32,6 @@ func TestFormatTradeOrg(t *testing.T) {
 	// Check heading
 	assert.Contains(t, result, "** Trade: EUR_USD (trade-12)")
 
-	t.Logf("results: %s", result)
-
 	// Check properties drawer
 	assert.Contains(t, result, ":PROPERTIES:")
 	assert.Contains(t, result, ":TRADE_ID: trade-12345678-abcd")
