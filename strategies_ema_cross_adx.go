@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ type EMACrossADX struct {
 }
 
 type EMACrossADXConfig struct {
-	StrategyConfig
+	StrategyBaseConfig
 
 	FastPeriod      int
 	SlowPeriod      int
@@ -85,7 +85,7 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c types.Candle) *Plan {
+func (x *EMACrossADX) Update(c types.Candle) *StrategyPlan {
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)
@@ -93,7 +93,7 @@ func (x *EMACrossADX) Update(c types.Candle) *Plan {
 	fv := x.core.fast.Float64()
 	sv := x.core.slow.Float64()
 	// close := float64(c.Close) / float64(x.core.scale)
-	dec := &DefaultPlan
+	dec := &DefaultStrategyPlan
 
 	// If EMAs aren't ready, we can't do cross logic.
 	if !x.core.fast.Ready() || !x.core.slow.Ready() {

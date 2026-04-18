@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 // NoopStrategy does nothing.
 type Fake struct {
-	StrategyConfig
+	StrategyBaseConfig
 	CandleCount int
 
 	candles []*types.CandleTime
@@ -34,9 +34,9 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *types.CandleTime, positions *types.Positions) *Plan {
+func (f *Fake) Update(ctx context.Context, c *types.CandleTime, positions *types.Positions) *StrategyPlan {
 	f.candles = append(f.candles, c)
-	plan := &Plan{
+	plan := &StrategyPlan{
 		Reason: "hold",
 	}
 

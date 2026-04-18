@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +60,7 @@ func (it *testIterator) Close() error {
 
 type testStrategy struct {
 	name     string
-	updateFn func(context.Context, *types.CandleTime, *types.Positions) *strategies.Plan
+	updateFn func(context.Context, *types.CandleTime, *types.Positions) *StrategyPlan
 }
 
 func (s testStrategy) Name() string {
@@ -71,9 +70,9 @@ func (s testStrategy) Name() string {
 	return s.name
 }
 
-func (s testStrategy) Update(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *strategies.Plan {
+func (s testStrategy) Update(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *StrategyPlan {
 	if s.updateFn == nil {
-		return &strategies.DefaultPlan
+		return &DefaultStrategyPlan
 	}
 	return s.updateFn(ctx, candle, positions)
 }
@@ -196,8 +195,8 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 
 	strategy := testStrategy{
 		name: "bad-close",
-		updateFn: func(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *strategies.Plan {
-			return &strategies.Plan{
+		updateFn: func(ctx context.Context, candle *types.CandleTime, positions *types.Positions) *StrategyPlan {
+			return &StrategyPlan{
 				Closes: []*types.CloseRequest{{
 					Request: types.Request{
 						TradeCommon: position.TradeCommon,

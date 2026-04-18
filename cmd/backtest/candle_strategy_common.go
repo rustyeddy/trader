@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -57,7 +56,7 @@ func (o candleCmdCommon) units() types.Units    { return types.Units(o.Units) }
 func (o candleCmdCommon) riskPct() types.Rate   { return types.RateFromFloat(o.RiskPct64 / 100.0) }
 
 type candleStrategyAdapter struct {
-	S strategies.Strategy
+	S trader.Strategy
 
 	Units     types.Units
 	StopPips  types.Price
@@ -118,7 +117,7 @@ type candleRunMeta struct {
 func runCandleStrategy(
 	ctx context.Context,
 	opts candleCmdCommon,
-	strat strategies.Strategy,
+	strat trader.Strategy,
 	meta candleRunMeta,
 	acct *trader.Account,
 ) error {

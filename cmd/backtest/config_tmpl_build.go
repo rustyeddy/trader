@@ -4,25 +4,24 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
 
-func BuildTemplateStrategyConfig(r trader.ResolvedRun) (strategies.TemplateStrategyConfig, error) {
+func BuildTemplateStrategyConfig(r trader.ResolvedRun) (trader.TemplateStrategyConfig, error) {
 	lookback, ok, err := getRunIntParam(r.Strategy.Params, "lookback")
 	if err != nil {
-		return strategies.TemplateStrategyConfig{}, err
+		return trader.TemplateStrategyConfig{}, err
 	}
 	if !ok || lookback <= 0 {
-		return strategies.TemplateStrategyConfig{}, fmt.Errorf("missing or invalid param %q", "lookback")
+		return trader.TemplateStrategyConfig{}, fmt.Errorf("missing or invalid param %q", "lookback")
 	}
 
 	threshold, ok, err := getRunFloatParam(r.Strategy.Params, "threshold")
 	if err != nil {
-		return strategies.TemplateStrategyConfig{}, err
+		return trader.TemplateStrategyConfig{}, err
 	}
 	if !ok {
-		return strategies.TemplateStrategyConfig{}, fmt.Errorf("missing param %q", "threshold")
+		return trader.TemplateStrategyConfig{}, fmt.Errorf("missing param %q", "threshold")
 	}
 
 	scale := r.Scale
@@ -30,10 +29,10 @@ func BuildTemplateStrategyConfig(r trader.ResolvedRun) (strategies.TemplateStrat
 		scale = types.PriceScale
 	}
 
-	return strategies.TemplateStrategyConfig{
-		StrategyConfig: strategies.StrategyConfig{},
-		Lookback:       lookback,
-		Threshold:      threshold,
-		Scale:          scale,
+	return trader.TemplateStrategyConfig{
+		StrategyBaseConfig: trader.StrategyBaseConfig{},
+		Lookback:           lookback,
+		Threshold:          threshold,
+		Scale:              scale,
 	}, nil
 }

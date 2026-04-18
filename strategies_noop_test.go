@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"context"

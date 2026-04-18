@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -19,10 +18,10 @@ var CMDBacktestEMACross = &cobra.Command{
 }
 
 var emaCrossOpts = newCandleCmdCommon()
-var emaCrossCfg = strategies.EMACrossConfig{}
+var emaCrossCfg = trader.EMACrossConfig{}
 
 func init() {
-	emaCrossCfg.StrategyConfig = strategies.StrategyConfig{}
+	emaCrossCfg.StrategyBaseConfig = trader.StrategyBaseConfig{}
 
 	cmd := CMDBacktestEMACross
 	emaCrossOpts.addFlags(cmd)
@@ -43,7 +42,7 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 func runEMACrossFromFlags(cmd *cobra.Command) error {
 	emaCrossCfg.Scale = types.PriceScale
 
-	strat := strategies.NewEMACross(emaCrossCfg)
+	strat := trader.NewEMACross(emaCrossCfg)
 	act := trader.NewAccount("adhoc-ema-cross", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
@@ -98,7 +97,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	emaCrossOpts.Instrument = types.NormalizeInstrument(emaCrossOpts.Instrument)
 	cfg.Scale = types.PriceScale
 
-	strat := strategies.NewEMACross(cfg)
+	strat := trader.NewEMACross(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
@@ -117,7 +116,7 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	)
 }
 
-func applyEMACrossFlagOverrides(cmd *cobra.Command, cfg *strategies.EMACrossConfig) {
+func applyEMACrossFlagOverrides(cmd *cobra.Command, cfg *trader.EMACrossConfig) {
 	if cmd.Flags().Changed("fast") {
 		cfg.FastPeriod = emaCrossCfg.FastPeriod
 	}

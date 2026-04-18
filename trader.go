@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tlog "github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -30,14 +29,14 @@ type ConfigBackTest struct {
 
 type backtestStrategy interface {
 	Name() string
-	Update(context.Context, *types.CandleTime, *types.Positions) *strategies.Plan
+	Update(context.Context, *types.CandleTime, *types.Positions) *StrategyPlan
 }
 
 type noopBacktestStrategy struct {
-	strategies.NoopStrategy
+	NoopStrategy
 }
 
-func (n noopBacktestStrategy) Update(ctx context.Context, c *types.CandleTime, _ *types.Positions) *strategies.Plan {
+func (n noopBacktestStrategy) Update(ctx context.Context, c *types.CandleTime, _ *types.Positions) *StrategyPlan {
 	if c == nil {
 		return n.NoopStrategy.Update(ctx, nil)
 	}
@@ -49,14 +48,14 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy))
 	switch strategyName {
 	case "", "fake":
-		return &strategies.Fake{
-			StrategyConfig: strategies.StrategyConfig{
+		return &Fake{
+			StrategyBaseConfig: StrategyBaseConfig{
 				Instrument: cfg.Instrument,
 			},
 			CandleCount: 10,
 		}, nil
 	case "noop", "no-op":
-		return noopBacktestStrategy{NoopStrategy: strategies.NoopStrategy{}}, nil
+		return noopBacktestStrategy{NoopStrategy: NoopStrategy{}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
 	}

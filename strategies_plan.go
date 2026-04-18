@@ -1,14 +1,14 @@
-package strategies
+package trader
 
 import "github.com/rustyeddy/trader/types"
 
-type Plan struct {
+type StrategyPlan struct {
 	Opens  []*types.OpenRequest
 	Closes []*types.CloseRequest
 	Cancel []string
 	Reason string
 }
 
-var DefaultPlan = Plan{
+var DefaultStrategyPlan = StrategyPlan{
 	Reason: "hold",
 }

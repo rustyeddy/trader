@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"context"
@@ -11,6 +11,6 @@ type NoopStrategy struct{}
 
 func (NoopStrategy) Name() string   { return "NoOp" }
 func (NoopStrategy) Reason() string { return "No-op" }
-func (NoopStrategy) Update(ctx context.Context, c *types.Candle) *Plan {
-	return &DefaultPlan
+func (NoopStrategy) Update(ctx context.Context, c *types.Candle) *StrategyPlan {
+	return &DefaultStrategyPlan
 }

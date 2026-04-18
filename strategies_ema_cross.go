@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ type EMACross struct {
 }
 
 type EMACrossConfig struct {
-	StrategyConfig
+	StrategyBaseConfig
 
 	FastPeriod int
 	SlowPeriod int
@@ -76,7 +76,7 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c types.Candle) *Plan {
+func (x *EMACross) Update(c types.Candle) *StrategyPlan {
 	// Update indicators first
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
@@ -85,7 +85,7 @@ func (x *EMACross) Update(c types.Candle) *Plan {
 
 	// Not ready? no signal yet.
 	if !x.Ready() {
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	fv := x.core.fast.Float64()
@@ -94,7 +94,7 @@ func (x *EMACross) Update(c types.Candle) *Plan {
 
 	// Optional noise filter
 	if x.core.minSpread > 0 && abs(diff) < x.core.minSpread {
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	rel := 0
@@ -107,22 +107,22 @@ func (x *EMACross) Update(c types.Candle) *Plan {
 	// First time ready: establish baseline relationship, don't fire.
 	if x.core.prevRel == 0 {
 		x.core.prevRel = rel
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	// Cross up: below -> above
 	if x.core.prevRel == -1 && rel == +1 {
 		x.core.prevRel = rel
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	// Cross down: above -> below
 	if x.core.prevRel == +1 && rel == -1 {
 		x.core.prevRel = rel
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	// No cross; maintain state
 	x.core.prevRel = rel
-	return &DefaultPlan
+	return &DefaultStrategyPlan
 }

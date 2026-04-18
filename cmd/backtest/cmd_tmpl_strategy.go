@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +34,7 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 		return err
 	}
 
-	strat := strategies.NewTemplateStrategy(cfg)
+	strat := trader.NewTemplateStrategy(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),

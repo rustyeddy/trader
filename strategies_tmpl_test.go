@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"testing"
@@ -36,7 +36,7 @@ func TestTemplateStrategy_EmitsSignal(t *testing.T) {
 		Scale:     types.PriceScale,
 	})
 
-	_ = s.Update(mkClose(1.1000))  // warmup
+	_ = s.Update(mkClose(1.1000)) // warmup
 	d := s.Update(mkClose(1.1020))
 	require.Equal(t, "hold", d.Reason)
 	require.Empty(t, d.Opens)
@@ -82,11 +82,11 @@ func TestTemplateStrategy_NoSignalPlan(t *testing.T) {
 }
 
 func TestTemplateStrategy_HoldAfterWarmup(t *testing.T) {
-s := NewTemplateStrategy(TemplateStrategyConfig{
-Lookback:  2,
-Threshold: 0.0100, // large threshold so small moves don't trigger
-Scale:     types.PriceScale,
-})
+	s := NewTemplateStrategy(TemplateStrategyConfig{
+		Lookback:  2,
+		Threshold: 0.0100, // large threshold so small moves don't trigger
+		Scale:     types.PriceScale,
+	})
 	_ = s.Update(mkClose(1.1000))
 	d := s.Update(mkClose(1.1001))
 	require.Equal(t, "hold", d.Reason)

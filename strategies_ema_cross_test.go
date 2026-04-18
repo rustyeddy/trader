@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"testing"
@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func feedPlans(s *EMACross, closes []float64) []*Plan {
-	out := make([]*Plan, 0, len(closes))
+func feedPlans(s *EMACross, closes []float64) []*StrategyPlan {
+	out := make([]*StrategyPlan, 0, len(closes))
 	for _, c := range closes {
 		d := s.Update(mkClose(c))
 		out = append(out, d)

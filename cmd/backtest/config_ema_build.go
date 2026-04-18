@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 )
 
 type EMAParams struct {
@@ -12,17 +11,17 @@ type EMAParams struct {
 	Slow int
 }
 
-func BuildEMACrossConfig(r trader.ResolvedRun) (strategies.EMACrossConfig, error) {
+func BuildEMACrossConfig(r trader.ResolvedRun) (trader.EMACrossConfig, error) {
 	ema, err := emaParamsFromRun(r)
 	if err != nil {
-		return strategies.EMACrossConfig{}, err
+		return trader.EMACrossConfig{}, err
 	}
 
-	return strategies.EMACrossConfig{
-		StrategyConfig: strategies.StrategyConfig{},
-		FastPeriod:     ema.Fast,
-		SlowPeriod:     ema.Slow,
-		Scale:          r.Scale,
+	return trader.EMACrossConfig{
+		StrategyBaseConfig: trader.StrategyBaseConfig{},
+		FastPeriod:         ema.Fast,
+		SlowPeriod:         ema.Slow,
+		Scale:              r.Scale,
 	}, nil
 }
 

@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"github.com/rustyeddy/trader/types"
@@ -9,7 +9,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(c types.Candle) *Plan
+	Update(c types.Candle) *StrategyPlan
 }
 
 type Float64 interface {
@@ -20,6 +20,6 @@ type Price interface {
 	Price() Price
 }
 
-type StrategyConfig struct {
+type StrategyBaseConfig struct {
 	Instrument string
 }

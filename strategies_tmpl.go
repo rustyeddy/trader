@@ -1,4 +1,4 @@
-package strategies
+package trader
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 )
 
 type TemplateStrategyConfig struct {
-	StrategyConfig
+	StrategyBaseConfig
 
 	// Strategy-specific parameters
 	Lookback  int
@@ -54,13 +54,13 @@ func (s *TemplateStrategy) Ready() bool {
 	return s.ready
 }
 
-func (s *TemplateStrategy) Update(c types.Candle) *Plan {
+func (s *TemplateStrategy) Update(c types.Candle) *StrategyPlan {
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
 
 	s.bars++
 	if s.bars < s.cfg.Lookback {
 		s.lastClose = closePx
-		return &DefaultPlan
+		return &DefaultStrategyPlan
 	}
 
 	s.ready = true
@@ -71,16 +71,16 @@ func (s *TemplateStrategy) Update(c types.Candle) *Plan {
 		change := closePx - s.lastClose
 		if change > s.cfg.Threshold {
 			s.lastClose = closePx
-			return &DefaultPlan
+			return &DefaultStrategyPlan
 		}
 
 		if change < -s.cfg.Threshold {
 			s.lastClose = closePx
-			return &DefaultPlan
+			return &DefaultStrategyPlan
 		}
 	}
 
 	s.lastClose = closePx
-	return &DefaultPlan
+	return &DefaultStrategyPlan
 
 }

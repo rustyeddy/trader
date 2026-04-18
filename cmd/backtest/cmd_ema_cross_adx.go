@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/strategies"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -19,10 +18,10 @@ var CMDBacktestEMACrossADX = &cobra.Command{
 }
 
 var emaCrossADXOpts = newCandleCmdCommon()
-var emaCrossADXCfg = strategies.EMACrossADXConfig{}
+var emaCrossADXCfg = trader.EMACrossADXConfig{}
 
 func init() {
-	emaCrossADXCfg.StrategyConfig = strategies.StrategyConfig{}
+	emaCrossADXCfg.StrategyBaseConfig = trader.StrategyBaseConfig{}
 
 	cmd := CMDBacktestEMACrossADX
 	emaCrossADXOpts.addFlags(cmd)
@@ -47,7 +46,7 @@ func RunEMACrossADX(cmd *cobra.Command, args []string) error {
 func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 	emaCrossADXCfg.Scale = types.PriceScale
 
-	strat := strategies.NewEMACrossADX(emaCrossADXCfg)
+	strat := trader.NewEMACrossADX(emaCrossADXCfg)
 	act := trader.NewAccount("adhoc-ema-cross-adx", types.MoneyFromFloat(1000))
 	return runCandleStrategy(
 		context.Background(),
@@ -102,7 +101,7 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	emaCrossADXOpts.Instrument = types.NormalizeInstrument(emaCrossADXOpts.Instrument)
 	cfg.Scale = types.PriceScale
 
-	strat := strategies.NewEMACrossADX(cfg)
+	strat := trader.NewEMACrossADX(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
@@ -121,8 +120,8 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 	)
 }
 
-func buildEMACrossADXConfig(r trader.ResolvedRun) (strategies.EMACrossADXConfig, error) {
-	cfg := strategies.EMACrossADXConfig{}
+func buildEMACrossADXConfig(r trader.ResolvedRun) (trader.EMACrossADXConfig, error) {
+	cfg := trader.EMACrossADXConfig{}
 
 	fast, ok, err := getRunIntParam(r.Strategy.Params, "fast")
 	if err != nil {
@@ -185,16 +184,16 @@ func buildEMACrossADXConfig(r trader.ResolvedRun) (strategies.EMACrossADXConfig,
 		scale = types.PriceScale
 	}
 
-	return strategies.EMACrossADXConfig{
-		StrategyConfig:  strategies.StrategyConfig{},
-		FastPeriod:      fast,
-		SlowPeriod:      slow,
-		ADXPeriod:       adxPeriod,
-		Scale:           scale,
-		MinSpread:       minSpread,
-		ADXThreshold:    adxThreshold,
-		RequireDI:       requireDI,
-		RequireADXReady: requireADXReady,
+	return trader.EMACrossADXConfig{
+		StrategyBaseConfig: trader.StrategyBaseConfig{},
+		FastPeriod:         fast,
+		SlowPeriod:         slow,
+		ADXPeriod:          adxPeriod,
+		Scale:              scale,
+		MinSpread:          minSpread,
+		ADXThreshold:       adxThreshold,
+		RequireDI:          requireDI,
+		RequireADXReady:    requireADXReady,
 	}, nil
 }
 
@@ -224,7 +223,7 @@ func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
 	}
 }
 
-func applyEMACrossADXFlagOverrides(cmd *cobra.Command, cfg *strategies.EMACrossADXConfig) {
+func applyEMACrossADXFlagOverrides(cmd *cobra.Command, cfg *trader.EMACrossADXConfig) {
 	if cmd.Flags().Changed("fast") {
 		cfg.FastPeriod = emaCrossADXCfg.FastPeriod
 	}
