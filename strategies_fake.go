@@ -63,28 +63,12 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, positions *Positions) 
 		positions.Range(func(pos *Position) error {
 
 			// Are there positions that need to be closed?
-			if pos.Side == Long && c.Close <= pos.Stop {
+			if (pos.Side == Long && c.Close <= pos.Stop) ||
+				(pos.Side == Short && c.Close >= pos.Stop) {
 				cl := &CloseRequest{
 					Request: Request{
 						TradeCommon: pos.TradeCommon,
-						Reason:      "lower low",
-						Candle:      c.Candle,
-						RequestType: RequestClose,
-						Price:       c.Close,
-						Timestamp:   c.Timestamp,
-					},
-					CloseCause: CloseStopLoss,
-					Position:   pos,
-				}
-				plan.Closes = append(plan.Closes, cl)
-			}
-
-			// Is there an open signal to be become a request
-			if pos.Side == Short && c.Close >= pos.Stop {
-				cl := &CloseRequest{
-					Request: Request{
-						TradeCommon: pos.TradeCommon,
-						Reason:      "close stop",
+						Reason:      "CloseStop",
 						Candle:      c.Candle,
 						RequestType: RequestClose,
 						Price:       c.Close,

@@ -55,6 +55,9 @@ type LogConfig struct {
 	// Has no effect on Windows (syslog is not available there).
 	Syslog bool
 
+	// Stdout enables log output to stdout
+	Stdout bool
+
 	// Memory enables in-memory capture of log entries, accessible via
 	// Entries() and ClearEntries().  Useful for testing and diagnostics.
 	Memory bool
@@ -122,7 +125,9 @@ func Setup(cfg LogConfig) error {
 
 	// --- build io.Writer ---
 	var writers []io.Writer
-	writers = append(writers, os.Stdout)
+	if cfg.Stdout {
+		writers = append(writers, os.Stdout)
+	}
 
 	if cfg.File != "" {
 		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

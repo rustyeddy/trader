@@ -89,7 +89,7 @@ func newTestTrader() *Trader {
 }
 
 func TestTrader(t *testing.T) {
-	err := Setup(LogConfig{Level: "debug", Format: "text"})
+	err := Setup(LogConfig{Level: "debug", File: "trader.log", Format: "text"})
 	assert.NoError(t, err)
 
 	instrument := "EURUSD"

@@ -49,3 +49,5 @@ main
 *.db
 cli
 tmp
+trader.log
+debug*
