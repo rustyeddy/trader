@@ -96,7 +96,6 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 		barIndex++
 		if e.Pos != nil {
 			if exitPx, _, hit := checkExit(e.Pos, c); hit {
-				fmt.Printf("close position: %d - %d\n", barIndex, count)
 				trade := &Trade{
 					TradeCommon: e.Pos.TradeCommon,
 					FillPrice:   exitPx,
@@ -132,7 +131,6 @@ func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
 	}
 
 	if e.Pos != nil && haveLast {
-		fmt.Printf("close position: %d - %d\n", barIndex, count)
 		trade := &Trade{
 			TradeCommon: e.Pos.TradeCommon,
 			FillPrice:   lastC.Close,
