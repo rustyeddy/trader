@@ -120,13 +120,28 @@ func runCandleStrategy(
 	meta candleRunMeta,
 	acct *trader.Account,
 ) error {
+	run, err := executeCandleStrategy(ctx, opts, strat, meta, acct)
+	if err != nil {
+		return err
+	}
+	trader.PrintBacktestRun(os.Stdout, run)
+	return nil
+}
+
+func executeCandleStrategy(
+	ctx context.Context,
+	opts candleCmdCommon,
+	strat trader.Strategy,
+	meta candleRunMeta,
+	acct *trader.Account,
+) (trader.BacktestRun, error) {
 	start, err := time.Parse("2006-01-02", opts.From)
 	if err != nil {
-		return fmt.Errorf("bad --from: %w", err)
+		return trader.BacktestRun{}, fmt.Errorf("bad --from: %w", err)
 	}
 	endDay, err := time.Parse("2006-01-02", opts.To)
 	if err != nil {
-		return fmt.Errorf("bad --to: %w", err)
+		return trader.BacktestRun{}, fmt.Errorf("bad --to: %w", err)
 	}
 	end := endDay.AddDate(0, 0, 1)
 
@@ -139,13 +154,13 @@ func runCandleStrategy(
 	case "D1":
 		tf = trader.D1
 	default:
-		return fmt.Errorf("unsupported timeframe %q", opts.Timeframe)
+		return trader.BacktestRun{}, fmt.Errorf("unsupported timeframe %q", opts.Timeframe)
 	}
 
 	instrument := trader.NormalizeInstrument(opts.Instrument)
 	instMeta := trader.GetInstrument(instrument)
 	if instMeta == nil {
-		return fmt.Errorf("unknown instrument %q", instrument)
+		return trader.BacktestRun{}, fmt.Errorf("unknown instrument %q", instrument)
 	}
 
 	req := trader.CandleRunRequest{
@@ -172,7 +187,7 @@ func runCandleStrategy(
 
 	eng, err := trader.RunCandles(ctx, dm, req, adapter, acct)
 	if err != nil {
-		return err
+		return trader.BacktestRun{}, err
 	}
 
 	wins, losses := 0, 0
@@ -213,8 +228,7 @@ func runCandleStrategy(
 		run.WinRate = trader.RateFromFloat(float64(run.Wins) / float64(run.Trades))
 	}
 
-	trader.PrintBacktestRun(os.Stdout, run)
-	return nil
+	return run, nil
 }
 
 func selectConfigRunByKind(cfg *trader.Config, requested, wantKind string) (string, error) {
