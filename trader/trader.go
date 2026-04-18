@@ -14,7 +14,6 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-var l = tlog.Backtest
 
 type Trader struct {
 	*account.Account
@@ -79,7 +78,7 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *broke
 				return
 			case evt, ok := <-evtQ:
 				if !ok {
-					l.Info("broker event channel closed")
+					tlog.Backtest.Info("broker event channel closed")
 					return
 				}
 				if err := t.processEvent(ctx, evt); err != nil {
@@ -121,7 +120,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 	defer cancel()
 
 	evtQ := t.Broker.Events()
-	l.Debug("broker event handler started")
+	tlog.Backtest.Debug("broker event handler started")
 	errCh, done := t.startBrokerEventHandler(runCtx, evtQ)
 	defer func() {
 		cancel()
@@ -144,7 +143,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		}
 
 		candle := itr.CandleTime()
-		l.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
+		tlog.Backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		processedCandles++
 
 		err := t.Account.ResolveWithMarks(map[string]types.Price{
@@ -155,13 +154,13 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		}
 
 		plan := strategy.Update(runCtx, &candle, &t.Account.Positions)
-		l.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
+		tlog.Backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancelReq := range plan.Cancel {
-			l.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
+			tlog.Backtest.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
-			l.Info("submit close request", "ID", cl.Request.ID)
+			tlog.Backtest.Info("submit close request", "ID", cl.Request.ID)
 
 			err = t.Broker.SubmitClose(runCtx, cl)
 			if err != nil {
@@ -171,13 +170,13 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		}
 
 		for _, openReq := range plan.Opens {
-			l.Info("Broker event Open Position", "ID", openReq.ID)
+			tlog.Backtest.Info("Broker event Open Position", "ID", openReq.ID)
 			err := t.Account.SizePosition(openReq)
 			if err != nil {
 				return err
 			}
 
-			l.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			tlog.Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			_, err = t.Broker.OpenRequest(runCtx, openReq)
 			if err != nil {
 				return err
@@ -196,13 +195,13 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		return err
 	}
 
-	l.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
+	tlog.Backtest.Info("backtest finished", "candles", processedCandles, "opens", submittedOpens, "closes", submittedCloses, "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
 
 	return nil
 }
 
 func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
-	l.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
+	tlog.Backtest.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
 	if t == nil {
 		return fmt.Errorf("nil trader")
 	}
@@ -223,7 +222,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	if err != nil {
 		return err
 	}
-	l.Info("strategy selected", "strategy", strategy.Name())
+	tlog.Backtest.Info("strategy selected", "strategy", strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := data.CandleRequest{
@@ -231,7 +230,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 		Instrument: cfg.Instrument,
 		Range:      types.NewTimeRange(types.FromTime(cfg.Start), types.FromTime(cfg.End), cfg.TimeFrame),
 	}
-	l.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
+	tlog.Backtest.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(ctx, candlereq)
@@ -256,7 +255,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 		return fmt.Errorf("nil broker event")
 	}
 
-	l.Info("broker event recieved",
+	tlog.Backtest.Info("broker event recieved",
 		"type", evt.Type.String(),
 		"clientOrder", evt.ClientOrderID,
 		"brokerOrder", evt.BrokerOrderID,
@@ -299,7 +298,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *broker.Event) error {
 		// TODO Journal the closed position, trade and account
 
 	default:
-		l.Warn("unsupported broker event", "eventType", evt.Type)
+		tlog.Backtest.Warn("unsupported broker event", "eventType", evt.Type)
 
 	}
 	return nil

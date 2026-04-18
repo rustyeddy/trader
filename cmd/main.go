@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/data"
 	"github.com/rustyeddy/trader/cmd/replay"
 	"github.com/rustyeddy/trader/config"
+	tlog "github.com/rustyeddy/trader/log"
 	"github.com/spf13/cobra"
 )
 
@@ -28,9 +29,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		// Intentionally minimal for now.
-		// Later: config load + logging setup.
-		return nil
+		return tlog.Setup(tlog.Config{Level: rc.LogLevel})
 	}
 
 	// Subcommands
