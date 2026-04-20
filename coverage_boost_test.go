@@ -71,7 +71,7 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 		{timemilli: baseMS + 5*60_000 + 500, Ask: 13020, Bid: 13010},
 	}
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}

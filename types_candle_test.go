@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func loadCandleSet(t *testing.T) *CandleSet {
+func loadCandleSet(t *testing.T) *candleSet {
 	t.Helper()
 	fname := "../testdata/DAT_ASCII_EURUSD_M1_2025.csv"
 	if _, err := os.Stat(fname); err != nil {
 		t.Skip("candle test dataset missing")
 	}
-	set := &CandleSet{
+	set := &candleSet{
 		Filepath: fname,
 	}
 	return set

@@ -106,7 +106,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 		{timemilli: outsideMS, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -187,7 +187,7 @@ func TestWriteMetadata_Output(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet(
+	cs, err := newMonthlyCandleSet(
 		"EURUSD", H1, FromTime(start), PriceScale, "test",
 	)
 	require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestWriteCSV_ValidFlag(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet(
+	cs, err := newMonthlyCandleSet(
 		"EURUSD", H1, FromTime(start), PriceScale, "test",
 	)
 	require.NoError(t, err)

@@ -119,8 +119,8 @@ func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, p
 }
 
 // GenerateSyntheticMonthlyCandles generates a full month of synthetic OHLC data.
-func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month time.Month) (*CandleSet, error) {
-	cs, err := NewMonthlyCandleSet(
+func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month time.Month) (*candleSet, error) {
+	cs, err := newMonthlyCandleSet(
 		cfg.Instrument,
 		cfg.Timeframe,
 		FromTime(time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)),
@@ -156,8 +156,8 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 }
 
 // GenerateSyntheticYearlyCandles generates a full year of monthly candle sets.
-func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyCandles(year int) ([]*CandleSet, error) {
-	var candleSets []*CandleSet
+func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyCandles(year int) ([]*candleSet, error) {
+	var candleSets []*candleSet
 	for m := 1; m <= 12; m++ {
 		cs, err := cfg.GenerateSyntheticMonthlyCandles(year, time.Month(m))
 		if err != nil {

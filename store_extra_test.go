@@ -124,15 +124,15 @@ func TestChainedCandleIterator_SubIteratorErr(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 
-	real := NewCandleSetIterator(cs, TimeRange{})
+	real := newCandleSetIterator(cs, TimeRange{})
 	_ = s
 
 	// Wrap the real iterator in a chained one and read it
-	chained := NewChainedCandleIterator(real)
+	chained := newChainedCandleIterator(real)
 	count := 0
 	for chained.Next() {
 		count++
@@ -188,8 +188,8 @@ func newMonthlyCandleSetFromStart(
 	instrument string,
 	start time.Time,
 	tf Timeframe,
-) (*CandleSet, error) {
-	return NewMonthlyCandleSet(
+) (*candleSet, error) {
+	return newMonthlyCandleSet(
 		NormalizeInstrument(instrument),
 		tf,
 		FromTime(start),

@@ -273,7 +273,7 @@ func TestSyntheticDataFeedsTraderIterator(t *testing.T) {
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := NewCandleSetIterator(cs, TimeRange{})
+	iter := newCandleSetIterator(cs, TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0

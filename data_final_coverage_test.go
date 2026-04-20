@@ -101,7 +101,7 @@ func TestWriteCSV_EmptySource(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet(
+	cs, err := newMonthlyCandleSet(
 		"EURUSD",
 		M1,
 		FromTime(start),
@@ -136,10 +136,10 @@ func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	_ = s
 
-	it := NewCandleSetIterator(cs, TimeRange{})
+	it := newCandleSetIterator(cs, TimeRange{})
 	require.NoError(t, it.Close())
 	require.False(t, it.Next())
 	require.NoError(t, it.Close()) // idempotent
@@ -153,10 +153,10 @@ func TestCandleSetIterator_AfterDone(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	_ = s
 
-	it := NewCandleSetIterator(cs, TimeRange{})
+	it := newCandleSetIterator(cs, TimeRange{})
 	// Drain all items
 	for it.Next() {
 	}

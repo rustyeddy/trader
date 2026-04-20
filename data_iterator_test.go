@@ -17,7 +17,7 @@ func TestFuncIterator_HappyPath(t *testing.T) {
 	items := []int{1, 2, 3}
 	idx := 0
 
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) {
 			if idx >= len(items) {
 				return 0, false, nil
@@ -42,7 +42,7 @@ func TestFuncIterator_ErrorFromNextFn(t *testing.T) {
 	t.Parallel()
 
 	sentinel := errors.New("next error")
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) {
 			return 0, false, sentinel
 		},
@@ -58,7 +58,7 @@ func TestFuncIterator_StopsAfterDone(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) {
 			calls++
 			return 0, false, nil
@@ -77,7 +77,7 @@ func TestFuncIterator_StopsAfterError(t *testing.T) {
 
 	calls := 0
 	sentinel := errors.New("test error")
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) {
 			calls++
 			return 0, false, sentinel
@@ -94,7 +94,7 @@ func TestFuncIterator_CloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	closeCalls := 0
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) { return 0, false, nil },
 		func() error {
 			closeCalls++
@@ -111,7 +111,7 @@ func TestFuncIterator_StopsAfterClose(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) {
 			calls++
 			return 1, true, nil
@@ -128,7 +128,7 @@ func TestFuncIterator_CloseError(t *testing.T) {
 	t.Parallel()
 
 	sentinel := errors.New("close failed")
-	it := NewFuncIterator(
+	it := newFuncIterator(
 		func() (int, bool, error) { return 0, false, nil },
 		func() error { return sentinel },
 	)

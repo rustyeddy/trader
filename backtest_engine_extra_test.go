@@ -152,8 +152,8 @@ type errFeed struct {
 
 func (f *errFeed) Next() bool     { return false }
 func (f *errFeed) Candle() Candle { return Candle{} }
-func (f *errFeed) CandleTime() CandleTime {
-	return CandleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
+func (f *errFeed) CandleTime() candleTime {
+	return candleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
 }
 func (f *errFeed) NextCandle() (Candle, bool) { return Candle{}, false }
 func (f *errFeed) Timestamp() Timestamp       { return 1 }

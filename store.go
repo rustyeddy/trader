@@ -285,7 +285,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 	})
 }
 
-func (store *Store) writeMetadata(cs *CandleSet, w io.Writer) error {
+func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
 	tfstr := Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -299,7 +299,7 @@ func (store *Store) writeMetadata(cs *CandleSet, w io.Writer) error {
 	return err
 }
 
-func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
+func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -329,7 +329,7 @@ func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
 	n := int(spanSec / step)
 
 	instName := NormalizeInstrument(key.Instrument)
-	cs = &CandleSet{
+	cs = &candleSet{
 		Instrument: instName,
 		Source:     "candles",
 		Start:      start,
@@ -435,7 +435,7 @@ func looksLikeHeader(rec []string) bool {
 	return h == "timestamp" || h == "time"
 }
 
-func (s *Store) WriteCSV(cs *CandleSet) error {
+func (s *Store) WriteCSV(cs *candleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
@@ -562,7 +562,7 @@ func (s *Store) IsUsableTickFile(k Key) bool {
 	return !info.IsDir() && info.Size() > 0
 }
 
-func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
+func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}
@@ -606,7 +606,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 	closeFn := func() error {
 		return f.Close()
 	}
-	return NewFuncIterator(nextFn, closeFn), nil
+	return newFuncIterator(nextFn, closeFn), nil
 }
 
 func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli) (RawTick, bool, error) {

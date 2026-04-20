@@ -9,7 +9,7 @@ type Fake struct {
 	StrategyBaseConfig
 	CandleCount int
 
-	candles []*CandleTime
+	candles []*candleTime
 	highest Price
 	lowest  Price
 }
@@ -32,7 +32,7 @@ func (f *Fake) Reason() string {
 	return "No-op"
 }
 
-func (f *Fake) Update(ctx context.Context, c *CandleTime, positions *Positions) *StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) *StrategyPlan {
 	f.candles = append(f.candles, c)
 	plan := &StrategyPlan{
 		Reason: "hold",

@@ -25,7 +25,7 @@ func demonstrateSyntheticDataUsage() {
 	// Process through trader
 	totalCandles := 0
 	for _, cs := range candleSets {
-		iter := NewCandleSetIterator(cs, TimeRange{})
+		iter := newCandleSetIterator(cs, TimeRange{})
 		for iter.Next() {
 			totalCandles++
 			_ = iter.Candle()
@@ -62,7 +62,7 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 
 	// Process all months
 	for monthIdx, cs := range candleSets {
-		iter := NewCandleSetIterator(cs, TimeRange{})
+		iter := newCandleSetIterator(cs, TimeRange{})
 		monthStart := time.Now()
 
 		candlesInMonth := 0
@@ -102,7 +102,7 @@ func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := NewCandleSetIterator(cs, TimeRange{})
+	iter := newCandleSetIterator(cs, TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -129,7 +129,7 @@ func TestTraderTimeoutDetection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	iter := NewCandleSetIterator(cs, TimeRange{})
+	iter := newCandleSetIterator(cs, TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -162,7 +162,7 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := NewCandleSetIterator(cs, TimeRange{})
+	iter := newCandleSetIterator(cs, TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -251,7 +251,7 @@ func BenchmarkSyntheticCandleIteration(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		iter := NewCandleSetIterator(cs, TimeRange{})
+		iter := newCandleSetIterator(cs, TimeRange{})
 		count := 0
 		for iter.Next() {
 			count++

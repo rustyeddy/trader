@@ -268,7 +268,7 @@ func TestBuildHourM1_BadTimestamp(t *testing.T) {
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	tick := RawTick{timemilli: 0, Ask: 100, Bid: 99} // Timemilli <= 0
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx > 0 {
 			return RawTick{}, false, nil
 		}
@@ -298,7 +298,7 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 		{timemilli: baseMS + 2*60_000 + 100, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -328,7 +328,7 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 		{timemilli: baseMS + 100, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -532,7 +532,7 @@ func TestWriteCSV_WithInvalidCandle(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet("EURUSD", H1, FromTime(start), PriceScale, "test")
+	cs, err := newMonthlyCandleSet("EURUSD", H1, FromTime(start), PriceScale, "test")
 	require.NoError(t, err)
 
 	// Put a candle but do NOT call cs.SetValid → flags will be 0

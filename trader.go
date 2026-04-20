@@ -27,14 +27,14 @@ type ConfigBackTest struct {
 
 type backtestStrategy interface {
 	Name() string
-	Update(context.Context, *CandleTime, *Positions) *StrategyPlan
+	Update(context.Context, *candleTime, *Positions) *StrategyPlan
 }
 
 type noopBacktestStrategy struct {
 	NoopStrategy
 }
 
-func (n noopBacktestStrategy) Update(ctx context.Context, c *CandleTime, _ *Positions) *StrategyPlan {
+func (n noopBacktestStrategy) Update(ctx context.Context, c *candleTime, _ *Positions) *StrategyPlan {
 	if c == nil {
 		return n.NoopStrategy.Update(ctx, nil)
 	}
@@ -100,7 +100,7 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr CandleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr candleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}

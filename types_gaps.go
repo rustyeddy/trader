@@ -1,11 +1,11 @@
 package trader
 
-type GapKind string
+type gapKind string
 
 const (
-	GapMinor      GapKind = "minor"
-	GapWeekend    GapKind = "weekend"
-	GapSuspicious GapKind = "suspicious"
+	GapMinor      gapKind = "minor"
+	GapWeekend    gapKind = "weekend"
+	GapSuspicious gapKind = "suspicious"
 )
 
 // type Gap struct {

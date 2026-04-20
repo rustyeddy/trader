@@ -7,7 +7,7 @@ import (
 )
 
 // HelperGenerateSyntheticCandles is a test helper to generate synthetic candles.
-func HelperGenerateSyntheticCandles(t *testing.T, instrument string, year int, month time.Month, timeframe Timeframe) *CandleSet {
+func HelperGenerateSyntheticCandles(t *testing.T, instrument string, year int, month time.Month, timeframe Timeframe) *candleSet {
 	t.Helper()
 	cfg := DefaultSyntheticConfig(instrument)
 	cfg.Timeframe = timeframe
@@ -21,7 +21,7 @@ func HelperGenerateSyntheticCandles(t *testing.T, instrument string, year int, m
 }
 
 // HelperGenerateSyntheticCandlesWithConfig generates synthetic candles with custom config.
-func HelperGenerateSyntheticCandlesWithConfig(t *testing.T, cfg SyntheticCandleConfig, year int, month time.Month) *CandleSet {
+func HelperGenerateSyntheticCandlesWithConfig(t *testing.T, cfg SyntheticCandleConfig, year int, month time.Month) *candleSet {
 	t.Helper()
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(year, month)
 	if err != nil {
@@ -31,8 +31,8 @@ func HelperGenerateSyntheticCandlesWithConfig(t *testing.T, cfg SyntheticCandleC
 }
 
 // MakeSyntheticCandleSetIterator creates an iterator from a synthetic CandleSet.
-func MakeSyntheticCandleSetIterator(cs *CandleSet) CandleIterator {
-	return NewCandleSetIterator(cs, TimeRange{})
+func MakeSyntheticCandleSetIterator(cs *candleSet) candleIterator {
+	return newCandleSetIterator(cs, TimeRange{})
 }
 
 // CreateTestDataFiles generates and writes synthetic CSV files to the testdata directory.
@@ -67,7 +67,7 @@ func GetOrCreateTestData(instrument string, year int, timeframe Timeframe) (stri
 }
 
 // LoadSyntheticCandles loads synthetic candles from testdata, creating them if needed.
-func LoadSyntheticCandles(instrument string, year int, month time.Month, timeframe Timeframe) (*CandleSet, error) {
+func LoadSyntheticCandles(instrument string, year int, month time.Month, timeframe Timeframe) (*candleSet, error) {
 	testdataDir := TestDataDir
 	store := &Store{basedir: testdataDir}
 

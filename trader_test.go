@@ -12,7 +12,7 @@ import (
 
 type testIterator struct {
 	nextFn       func() bool
-	candleTimeFn func() CandleTime
+	candleTimeFn func() candleTime
 	err          error
 	closeErr     error
 	closed       bool
@@ -29,9 +29,9 @@ func (it *testIterator) Candle() Candle {
 	return it.CandleTime().Candle
 }
 
-func (it *testIterator) CandleTime() CandleTime {
+func (it *testIterator) CandleTime() candleTime {
 	if it.candleTimeFn == nil {
-		return CandleTime{}
+		return candleTime{}
 	}
 	return it.candleTimeFn()
 }
@@ -58,7 +58,7 @@ func (it *testIterator) Close() error {
 
 type testStrategy struct {
 	name     string
-	updateFn func(context.Context, *CandleTime, *Positions) *StrategyPlan
+	updateFn func(context.Context, *candleTime, *Positions) *StrategyPlan
 }
 
 func (s testStrategy) Name() string {
@@ -68,7 +68,7 @@ func (s testStrategy) Name() string {
 	return s.name
 }
 
-func (s testStrategy) Update(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
+func (s testStrategy) Update(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
 	if s.updateFn == nil {
 		return &DefaultStrategyPlan
 	}
@@ -91,7 +91,7 @@ func newTestTrader() *Trader {
 func TestTrader(t *testing.T) {
 	trader := newTestTrader()
 
-	bars := []CandleTime{
+	bars := []candleTime{
 		{
 			Candle:    Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100500, Ticks: 10},
 			Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
@@ -112,9 +112,9 @@ func TestTrader(t *testing.T) {
 			idx++
 			return idx < len(bars)
 		},
-		candleTimeFn: func() CandleTime {
+		candleTimeFn: func() candleTime {
 			if idx < 0 || idx >= len(bars) {
-				return CandleTime{}
+				return candleTime{}
 			}
 			return bars[idx]
 		},
@@ -154,8 +154,8 @@ func TestBackTestWithIteratorReturnsContextCancellation(t *testing.T) {
 			cancel()
 			return true
 		},
-		candleTimeFn: func() CandleTime {
-			return CandleTime{
+		candleTimeFn: func() candleTime {
+			return candleTime{
 				Candle:    Candle{Close: Price(1100000)},
 				Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 			}
@@ -196,7 +196,7 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 
 	strategy := testStrategy{
 		name: "bad-close",
-		updateFn: func(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
+		updateFn: func(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
 			return &StrategyPlan{
 				Closes: []*CloseRequest{{
 					Request: Request{
@@ -217,8 +217,8 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 		iter.nextFn = func() bool { return false }
 		return true
 	}
-	iter.candleTimeFn = func() CandleTime {
-		return CandleTime{
+	iter.candleTimeFn = func() candleTime {
+		return candleTime{
 			Candle:    Candle{Close: Price(1100000)},
 			Timestamp: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 		}

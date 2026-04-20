@@ -713,7 +713,7 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 
 	// Set valid candles at index 0 and index 5 (hours 0 and 5)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -732,7 +732,7 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 		TF:    H1,
 	}
 
-	it := NewCandleSetIterator(cs, rng)
+	it := newCandleSetIterator(cs, rng)
 	count := 0
 	for it.Next() {
 		count++
@@ -747,11 +747,11 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	cs.Candles[2] = Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
 	cs.SetValid(2)
 
-	it := NewCandleSetIterator(cs, TimeRange{})
+	it := newCandleSetIterator(cs, TimeRange{})
 	require.True(t, it.Next())
 	require.Equal(t, int32(5), it.Candle().Ticks)
 	require.Greater(t, int64(it.Timestamp()), int64(0))
@@ -767,18 +767,18 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	makeCS := func(val int) *CandleSet {
-		cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	makeCS := func(val int) *candleSet {
+		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 		cs.Candles[0] = Candle{Open: Price(val), Ticks: 1}
 		cs.SetValid(0)
 		return cs
 	}
 
-	it1 := NewCandleSetIterator(makeCS(100), TimeRange{})
-	it2 := NewCandleSetIterator(makeCS(200), TimeRange{})
-	it3 := NewCandleSetIterator(makeCS(300), TimeRange{})
+	it1 := newCandleSetIterator(makeCS(100), TimeRange{})
+	it2 := newCandleSetIterator(makeCS(200), TimeRange{})
+	it3 := newCandleSetIterator(makeCS(300), TimeRange{})
 
-	chained := NewChainedCandleIterator(it1, it2, it3)
+	chained := newChainedCandleIterator(it1, it2, it3)
 	count := 0
 	for chained.Next() {
 		count++
@@ -792,7 +792,7 @@ func TestChainedCandleIterator_ErrThenNil(t *testing.T) {
 
 	sentinel := errors.New("sub error")
 	sub := &errCandleIterator{nextErr: sentinel}
-	chained := NewChainedCandleIterator(sub)
+	chained := newChainedCandleIterator(sub)
 
 	require.False(t, chained.Next())
 	require.ErrorIs(t, chained.Err(), sentinel)
@@ -804,7 +804,7 @@ func TestChainedCandleIterator_CloseAfterErr(t *testing.T) {
 
 	sentinel := errors.New("sub err")
 	sub := &errCandleIterator{nextErr: sentinel}
-	chained := NewChainedCandleIterator(sub)
+	chained := newChainedCandleIterator(sub)
 
 	chained.Next() // trigger error
 	err := chained.Close()
@@ -815,7 +815,7 @@ func TestChainedCandleIterator_CloseAfterErr(t *testing.T) {
 func TestChainedCandleIterator_AllNil(t *testing.T) {
 	t.Parallel()
 
-	chained := NewChainedCandleIterator(nil, nil, nil)
+	chained := newChainedCandleIterator(nil, nil, nil)
 	require.False(t, chained.Next())
 	require.NoError(t, chained.Err())
 	require.NoError(t, chained.Close())
@@ -842,7 +842,7 @@ func TestBuildHourM1_SingleTickEachMinute(t *testing.T) {
 	}
 
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -876,7 +876,7 @@ func TestBuildHourM1_MultipleTicksSameMinute(t *testing.T) {
 	}
 
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -969,7 +969,7 @@ func TestRequiredTickHoursForMonth_InstrumentNormalized(t *testing.T) {
 func TestFuncIterator_NilCloseFn(t *testing.T) {
 	t.Parallel()
 
-	it := NewFuncIterator(func() (int, bool, error) { return 0, false, nil }, nil)
+	it := newFuncIterator(func() (int, bool, error) { return 0, false, nil }, nil)
 	require.NoError(t, it.Close())
 	require.NoError(t, it.Close()) // idempotent even with nil closeFn
 }
@@ -977,7 +977,7 @@ func TestFuncIterator_NilCloseFn(t *testing.T) {
 func TestFuncIterator_ItemAfterClose(t *testing.T) {
 	t.Parallel()
 
-	it := NewFuncIterator(func() (int, bool, error) { return 42, true, nil }, nil)
+	it := newFuncIterator(func() (int, bool, error) { return 42, true, nil }, nil)
 	require.True(t, it.Next())
 	require.Equal(t, 42, it.Item())
 
@@ -990,7 +990,7 @@ func TestFuncIterator_ErrThenItem(t *testing.T) {
 	t.Parallel()
 
 	sentinel := errors.New("boom")
-	it := NewFuncIterator(func() (int, bool, error) { return 0, false, sentinel }, nil)
+	it := newFuncIterator(func() (int, bool, error) { return 0, false, sentinel }, nil)
 	require.False(t, it.Next())
 	require.Equal(t, 0, it.Item()) // zero value on error
 	require.ErrorIs(t, it.Err(), sentinel)
@@ -1115,7 +1115,7 @@ func TestWriteCSV_EmptyInstrument(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := &CandleSet{Instrument: ""}
+	cs := &candleSet{Instrument: ""}
 	err := s.WriteCSV(cs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "instrument")
@@ -1125,7 +1125,7 @@ func TestWriteCSV_ZeroTimeframe(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := &CandleSet{Instrument: "EURUSD", Timeframe: 0}
+	cs := &candleSet{Instrument: "EURUSD", Timeframe: 0}
 	err := s.WriteCSV(cs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeframe")

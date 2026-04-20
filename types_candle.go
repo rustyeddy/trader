@@ -36,17 +36,17 @@ func (c *Candle) FullString() string {
 	return str
 }
 
-type CandleTime struct {
+type candleTime struct {
 	Candle
 	Timestamp
 }
 
-func String(c CandleTime) string {
+func String(c candleTime) string {
 	return c.Candle.String()
 }
 
-// CandleSet contains a dense set of candles.
-type CandleSet struct {
+// candleSet contains a dense set of candles.
+type candleSet struct {
 	Instrument string
 	Start      Timestamp // unix seconds for candle open
 	Timeframe  Timeframe
@@ -56,7 +56,7 @@ type CandleSet struct {
 	Valid      []uint64
 
 	Filepath   string
-	Gaps       []Gap
+	Gaps       []gap
 	duplicates int
 	outOfRange int
 	badLines   int
@@ -64,13 +64,13 @@ type CandleSet struct {
 	prev int64
 }
 
-type Gap struct {
+type gap struct {
 	StartIdx int32  // first missing candle index
 	Len      int32  // number of missing intervals
 	Kind     string // weekend vs suspicious
 }
 
-type GapStats struct {
+type gapStats struct {
 	TotalMinutes   int
 	PresentMinutes int
 	MissingMinutes int
@@ -85,8 +85,8 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
-func NewMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
-	scale Scale6, source string) (*CandleSet, error) {
+func newMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
+	scale Scale6, source string) (*candleSet, error) {
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
@@ -109,7 +109,7 @@ func NewMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
 		return nil, fmt.Errorf("computed invalid candle count: %d", n)
 	}
 
-	return &CandleSet{
+	return &candleSet{
 		Instrument: inst,
 		Start:      monthStart,
 		Timeframe:  tf,
@@ -120,7 +120,7 @@ func NewMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
 	}, nil
 }
 
-func (cs *CandleSet) AddCandle(ts Timestamp, c Candle) error {
+func (cs *candleSet) AddCandle(ts Timestamp, c Candle) error {
 	if cs == nil {
 		return fmt.Errorf("nil CandleSet")
 	}
@@ -156,7 +156,7 @@ func (cs *CandleSet) AddCandle(ts Timestamp, c Candle) error {
 	return nil
 }
 
-func (cs *CandleSet) Merge(src *CandleSet) error {
+func (cs *candleSet) Merge(src *candleSet) error {
 	if cs == nil || src == nil {
 		return fmt.Errorf("nil CandleSet in merge")
 	}
@@ -188,15 +188,15 @@ func (cs *CandleSet) Merge(src *CandleSet) error {
 	return nil
 }
 
-func (cs *CandleSet) SetValid(idx int) {
+func (cs *candleSet) SetValid(idx int) {
 	cs.Valid[idx/64] |= uint64(1) << uint(idx%64)
 }
 
-func (cs *CandleSet) IsValid(idx int) bool {
+func (cs *candleSet) IsValid(idx int) bool {
 	return cs.Valid[idx/64]&(uint64(1)<<uint(idx%64)) != 0
 }
 
-func (cs *CandleSet) CountValid() int {
+func (cs *candleSet) CountValid() int {
 	n := 0
 	for i := range cs.Candles {
 		if cs.IsValid(i) {
@@ -206,21 +206,15 @@ func (cs *CandleSet) CountValid() int {
 	return n
 }
 
-func FloorToMonthUTC(ts Timestamp) Timestamp {
-	t := time.Unix(int64(ts), 0).UTC()
-	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-	return Timestamp(first.Unix())
-}
-
-func (cs *CandleSet) Time(idx int) time.Time {
+func (cs *candleSet) Time(idx int) time.Time {
 	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
 }
 
-func (cs *CandleSet) Timestamp(idx int) Timestamp {
+func (cs *candleSet) Timestamp(idx int) Timestamp {
 	return Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
-func (cs *CandleSet) Filename() string {
+func (cs *candleSet) Filename() string {
 	inst := strings.ToLower(cs.Instrument)
 
 	tfstr := cs.Timeframe.String()
@@ -242,7 +236,7 @@ func isValid(valid []uint64, idx int) bool {
 	return valid[idx/64]&(1<<(idx%64)) != 0
 }
 
-func (cs *CandleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
+func (cs *candleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
 	f, err := os.Open(cs.Filepath)
 	if err != nil {
 		return 0, 0, err
@@ -290,7 +284,7 @@ func (cs *CandleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
 // fills Candles and sets Valid bits when a candle exists in the file.
 // Missing minutes naturally remain invalid (Valid bit = 0).
 
-func (cs *CandleSet) buildDenseFromFile() error {
+func (cs *candleSet) buildDenseFromFile() error {
 	if cs.Timeframe == 0 {
 		cs.Timeframe = 60
 	}
@@ -431,7 +425,7 @@ func (cs *CandleSet) buildDenseFromFile() error {
 	return nil
 }
 
-func (cs *CandleSet) BuildGapReport() {
+func (cs *candleSet) BuildGapReport() {
 	cs.Gaps = cs.Gaps[:0]
 
 	n := len(cs.Candles)
@@ -454,7 +448,7 @@ func (cs *CandleSet) BuildGapReport() {
 		length := i - start
 
 		kind := cs.classifyGap(start, length)
-		cs.Gaps = append(cs.Gaps, Gap{
+		cs.Gaps = append(cs.Gaps, gap{
 			StartIdx: int32(start),
 			Len:      int32(length),
 			Kind:     kind,
@@ -462,7 +456,7 @@ func (cs *CandleSet) BuildGapReport() {
 	}
 }
 
-func (cs *CandleSet) classifyGap(startIdx, length int) string {
+func (cs *candleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe) // seconds per bar (60 for M1, 3600 for H1)
 
 	startUnix := int64(cs.Start) + int64(startIdx)*tf
@@ -488,8 +482,8 @@ func (cs *CandleSet) classifyGap(startIdx, length int) string {
 	return "minor"
 }
 
-func (cs *CandleSet) Stats() GapStats {
-	var s GapStats
+func (cs *candleSet) Stats() gapStats {
+	var s gapStats
 
 	if len(cs.Gaps) == 0 {
 		cs.BuildGapReport()
@@ -523,7 +517,7 @@ func (cs *CandleSet) Stats() GapStats {
 
 	return s
 }
-func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
+func (cs *candleSet) AggregateH1(minValid int) *candleSet {
 	if cs.Timeframe != 60 {
 		panic("AggregateH1 requires M1 source")
 	}
@@ -543,7 +537,7 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	end := cs.Start + Timestamp(len(cs.Candles)-1)*tfIn
 	nHours := int((end-start)/tfOut) + 1
 
-	h1 := &CandleSet{
+	h1 := &candleSet{
 		Instrument: cs.Instrument,
 		Start:      start,
 		Timeframe:  3600,
@@ -599,17 +593,17 @@ func (cs *CandleSet) AggregateH1(minValid int) *CandleSet {
 	return h1
 }
 
-func (cs *CandleSet) Float64(v int32) float64 {
+func (cs *candleSet) Float64(v int32) float64 {
 	return float64(v) / float64(cs.Scale)
 }
 
-func (cs *CandleSet) Int32(f float64) int32 {
+func (cs *candleSet) Int32(f float64) int32 {
 	// round to nearest scaled int
 	return int32(f*float64(cs.Scale) + 0.5)
 }
 
 // size of 1 pip in *price units* (float64), e.g. EURUSD: 0.0001, USDJPY: 0.01
-func (cs *CandleSet) PipSize() float64 {
+func (cs *candleSet) PipSize() float64 {
 	i, ok := Instruments[cs.Instrument]
 	if !ok {
 		return 0.0
@@ -618,21 +612,21 @@ func (cs *CandleSet) PipSize() float64 {
 }
 
 // number of encoded integer units per pip, e.g. if cs.Scale=1e6 and pip=1e-4 => 100 units/pip
-func (cs *CandleSet) UnitsPerPip() float64 {
+func (cs *candleSet) UnitsPerPip() float64 {
 	return float64(cs.Scale) * cs.PipSize()
 }
 
 // convert encoded delta (int32) to pips
-func (cs *CandleSet) DeltaToPips(delta int32) float64 {
+func (cs *candleSet) DeltaToPips(delta int32) float64 {
 	return float64(delta) / cs.UnitsPerPip()
 }
 
 // convert pips to encoded delta (int32)
-func (cs *CandleSet) PipsToDelta(pips float64) int32 {
+func (cs *candleSet) PipsToDelta(pips float64) int32 {
 	return int32(pips*cs.UnitsPerPip() + 0.5)
 }
 
-func (cs *CandleSet) PrintStats(f io.WriteCloser) {
+func (cs *candleSet) PrintStats(f io.WriteCloser) {
 	cs.BuildGapReport()
 	s := cs.Stats()
 
@@ -653,7 +647,7 @@ func (cs *CandleSet) PrintStats(f io.WriteCloser) {
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
 // Assumes Timeframe is in seconds (e.g., 60, 3600, 86400).
-func (cs *CandleSet) Aggregate(outTF Timeframe) (*CandleSet, error) {
+func (cs *candleSet) Aggregate(outTF Timeframe) (*candleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -667,7 +661,7 @@ func (cs *CandleSet) Aggregate(outTF Timeframe) (*CandleSet, error) {
 	ratio := int(outTF / cs.Timeframe)
 	outLen := (len(cs.Candles) + ratio - 1) / ratio
 
-	out := &CandleSet{
+	out := &candleSet{
 		Instrument: cs.Instrument,
 		Start:      cs.Start,
 		Timeframe:  outTF,
@@ -758,26 +752,26 @@ func (cs *CandleSet) Aggregate(outTF Timeframe) (*CandleSet, error) {
 	return out, nil
 }
 
-type CandleSetIterator struct {
-	cs  *CandleSet
+type candleSetIteratorV1 struct {
+	cs  *candleSet
 	idx int
 }
 
-func (cs *CandleSet) Iterator() *CandleSetIterator {
-	return &CandleSetIterator{
+func (cs *candleSet) Iterator() *candleSetIteratorV1 {
+	return &candleSetIteratorV1{
 		cs:  cs,
 		idx: -1,
 	}
 }
 
-func (it *CandleSetIterator) NextCandle() (Candle, bool) {
+func (it *candleSetIteratorV1) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
 	return Candle{}, false
 }
 
-func (it *CandleSetIterator) Next() bool {
+func (it *candleSetIteratorV1) Next() bool {
 	n := len(it.cs.Candles)
 
 	for {
@@ -791,22 +785,22 @@ func (it *CandleSetIterator) Next() bool {
 	}
 }
 
-func (it *CandleSetIterator) Candle() Candle {
+func (it *candleSetIteratorV1) Candle() Candle {
 	return it.cs.Candles[it.idx]
 }
 
-func (it *CandleSetIterator) Index() int {
+func (it *candleSetIteratorV1) Index() int {
 	return it.idx
 }
 
-func (it *CandleSetIterator) Timestamp() Timestamp {
+func (it *candleSetIteratorV1) Timestamp() Timestamp {
 	return it.cs.Timestamp(it.idx)
 }
 
-func (it *CandleSetIterator) Time() time.Time {
+func (it *candleSetIteratorV1) Time() time.Time {
 	return it.cs.Time(it.idx)
 }
 
-func (it *CandleSetIterator) StartTime() Timestamp {
+func (it *candleSetIteratorV1) StartTime() Timestamp {
 	return it.cs.Start
 }

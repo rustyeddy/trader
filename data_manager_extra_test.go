@@ -253,7 +253,7 @@ func TestStoreScanFiles_WithCSV(t *testing.T) {
 	s := newTestStore(t)
 
 	// Write a valid CSV file so scanFiles finds it
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	require.NoError(t, s.WriteCSV(cs))
 
 	inv := NewInventory()
