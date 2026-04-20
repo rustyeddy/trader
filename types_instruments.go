@@ -145,7 +145,7 @@ func (inst *Instrument) PriceUnitsPerPip() Price {
 
 func (inst *Instrument) PriceDeltaFromPips(pips Pips) Price {
 	perPip := inst.PriceUnitsPerPip()
-	return Price((int64(perPip) * int64(pips)) / int64(PipScale))
+	return Price((int64(perPip) * int64(pips)) / int64(pipScale))
 }
 
 func (inst *Instrument) AddPips(px Price, pips Pips) Price {

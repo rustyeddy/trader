@@ -49,7 +49,7 @@ func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) 
 			return plan
 		}
 		inst := GetInstrument(f.Instrument)
-		stop := inst.SubPips(c.Close, PipsFromFloat(10))
+		stop := inst.SubPips(c.Close, pipsFromFloat(10))
 		op := NewOpenRequest(f.Instrument, c, Long, stop, Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}

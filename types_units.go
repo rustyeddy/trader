@@ -26,12 +26,12 @@ const (
 // and 20 == 2 pips
 type Pips int32
 
-const PipScale = 10 // tenths of a pip
+const pipScale = 10 // tenths of a pip
 
-func PipsFromFloat(v float64) Pips {
-	return Pips(math.Round(v * PipScale))
+func pipsFromFloat(v float64) Pips {
+	return Pips(math.Round(v * pipScale))
 }
 
 func (p Pips) Float64() float64 {
-	return float64(p) / PipScale
+	return float64(p) / pipScale
 }

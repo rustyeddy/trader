@@ -3,10 +3,11 @@ package trader
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func useTempStore(t *testing.T) *Store {
