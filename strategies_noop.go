@@ -4,11 +4,11 @@ import (
 	"context"
 )
 
-// NoopStrategy does nothing.
-type NoopStrategy struct{}
+// noopStrategy does nothing.
+type noopStrategy struct{}
 
-func (NoopStrategy) Name() string   { return "NoOp" }
-func (NoopStrategy) Reason() string { return "No-op" }
-func (NoopStrategy) Update(ctx context.Context, c *Candle) *StrategyPlan {
+func (noopStrategy) Name() string   { return "NoOp" }
+func (noopStrategy) Reason() string { return "No-op" }
+func (noopStrategy) Update(ctx context.Context, c *Candle) *StrategyPlan {
 	return &DefaultStrategyPlan
 }

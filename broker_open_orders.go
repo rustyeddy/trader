@@ -1,14 +1,14 @@
 package trader
 
 type OpenOrders struct {
-	Orders map[string]*Order
+	Orders map[string]*order
 }
 
-func (o *OpenOrders) Add(od *Order) {
+func (o *OpenOrders) Add(od *order) {
 	o.Orders[od.ID] = od
 }
 
-func (o *OpenOrders) Get(id string) *Order {
+func (o *OpenOrders) Get(id string) *order {
 	od, _ := o.Orders[id]
 	return od
 }

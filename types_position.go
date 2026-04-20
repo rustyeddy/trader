@@ -1,6 +1,6 @@
 package trader
 
-type PositionState int
+type positionState int
 
 const (
 	PositionNone = iota
@@ -14,7 +14,7 @@ type Position struct {
 	*TradeCommon
 	FillPrice Price
 	FillTime  Timestamp
-	State     PositionState
+	State     positionState
 }
 
 type Positions struct {

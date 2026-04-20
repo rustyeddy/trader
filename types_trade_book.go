@@ -1,10 +1,10 @@
 package trader
 
-type TradeBook struct {
+type tradeBook struct {
 	Trades map[string]*Trade
 }
 
-func (tb *TradeBook) Get(id string) *Trade {
+func (tb *tradeBook) Get(id string) *Trade {
 	trade, _ := tb.Trades[id]
 	return trade
 }

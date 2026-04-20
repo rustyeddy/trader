@@ -3,9 +3,10 @@ package trader
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ func TestBuildInventory_Empty(t *testing.T) {
 
 func TestBuildInventory_WithCSV(t *testing.T) {
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	require.NoError(t, s.WriteCSV(cs))
 
 	inv, err := BuildInventory(context.Background())
@@ -130,7 +131,7 @@ func TestBuildD1_WrongInputTF(t *testing.T) {
 func TestBuildHourM1FromTickIterator_WrongKey(t *testing.T) {
 	t.Parallel()
 	k := Key{Kind: KindCandle, TF: M1}
-	it := NewFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
+	it := newFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.Error(t, err)
 }
@@ -138,7 +139,7 @@ func TestBuildHourM1FromTickIterator_WrongKey(t *testing.T) {
 func TestBuildHourM1FromTickIterator_Empty(t *testing.T) {
 	t.Parallel()
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 3, Hour: 10}
-	it := NewFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
+	it := newFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
 	require.Nil(t, cs)
@@ -149,16 +150,16 @@ func TestBuildHourM1FromTickIterator_WithTicks(t *testing.T) {
 
 	// Build some ticks for 2026-01-05 10:00:00 UTC
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Two ticks in minute 0 and minute 1
 	ticks := []RawTick{
-		{Timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
-		{Timemilli: baseMS + 2000, Ask: 13015, Bid: 13005},
-		{Timemilli: baseMS + 60_000 + 500, Ask: 13020, Bid: 13010},
+		{timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 2000, Ask: 13015, Bid: 13005},
+		{timemilli: baseMS + 60_000 + 500, Ask: 13020, Bid: 13010},
 	}
 	idx := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		if idx >= len(ticks) {
 			return RawTick{}, false, nil
 		}
@@ -192,12 +193,12 @@ func TestBuildHourM1FromTickIterator_ContextCancel(t *testing.T) {
 	cancel() // already cancelled
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	called := 0
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		called++
-		return RawTick{Timemilli: baseMS + 1000, Ask: 100, Bid: 99}, true, nil
+		return RawTick{timemilli: baseMS + 1000, Ask: 100, Bid: 99}, true, nil
 	}, nil)
 
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
@@ -212,7 +213,7 @@ func TestBuildHourM1FromTickIterator_IteratorError(t *testing.T) {
 
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	sentinel := errors.New("iter error")
-	it := NewFuncIterator(func() (RawTick, bool, error) {
+	it := newFuncIterator(func() (RawTick, bool, error) {
 		return RawTick{}, false, sentinel
 	}, nil)
 
@@ -375,12 +376,12 @@ func TestCloseCandleIterators_NoError(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
-	it1 := NewCandleSetIterator(cs, TimeRange{})
-	it2 := NewCandleSetIterator(cs, TimeRange{})
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
+	it1 := newCandleSetIterator(cs, TimeRange{})
+	it2 := newCandleSetIterator(cs, TimeRange{})
 
 	_ = s
-	err := closeCandleIterators([]CandleIterator{it1, it2})
+	err := closeCandleIterators([]candleIterator{it1, it2})
 	require.NoError(t, err)
 }
 
@@ -388,11 +389,11 @@ func TestCloseCandleIterators_WithNil(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
-	it1 := NewCandleSetIterator(cs, TimeRange{})
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
+	it1 := newCandleSetIterator(cs, TimeRange{})
 
 	_ = s
-	err := closeCandleIterators([]CandleIterator{nil, it1, nil})
+	err := closeCandleIterators([]candleIterator{nil, it1, nil})
 	require.NoError(t, err)
 }
 
@@ -404,12 +405,12 @@ func TestChainedCandleIterator_NilSub(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	cs.Candles[0] = Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 	cs.SetValid(0)
 
-	real := NewCandleSetIterator(cs, TimeRange{})
-	chained := NewChainedCandleIterator(nil, real, nil)
+	real := newCandleSetIterator(cs, TimeRange{})
+	chained := newChainedCandleIterator(nil, real, nil)
 
 	_ = s
 
@@ -425,7 +426,7 @@ func TestChainedCandleIterator_NilSub(t *testing.T) {
 func TestChainedCandleIterator_AlreadyClosed(t *testing.T) {
 	t.Parallel()
 
-	chained := NewChainedCandleIterator()
+	chained := newChainedCandleIterator()
 	require.NoError(t, chained.Close())
 	require.NoError(t, chained.Close()) // idempotent
 	require.False(t, chained.Next())

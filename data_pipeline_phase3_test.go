@@ -93,11 +93,11 @@ func TestExecuteDownloads_NonEmptyPlanCompletes(t *testing.T) {
 }
 
 func TestCandleSetIterator_NextCandleAndCandleTimeBoundaries(t *testing.T) {
-	cs := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
 	cs.Candles[0] = Candle{Open: 1, High: 2, Low: 1, Close: 2, Ticks: 1}
 	cs.SetValid(0)
 
-	it := NewCandleSetIterator(cs, TimeRange{})
+	it := newCandleSetIterator(cs, TimeRange{})
 	first, ok := it.NextCandle()
 	require.True(t, ok)
 	require.Equal(t, cs.Candles[0], first)
@@ -107,7 +107,7 @@ func TestCandleSetIterator_NextCandleAndCandleTimeBoundaries(t *testing.T) {
 	require.NotZero(t, ct.Timestamp)
 
 	require.False(t, it.Next())
-	require.Equal(t, CandleTime{}, it.CandleTime())
+	require.Equal(t, candleTime{}, it.CandleTime())
 
 	last, ok := it.NextCandle()
 	require.False(t, ok)
@@ -115,15 +115,15 @@ func TestCandleSetIterator_NextCandleAndCandleTimeBoundaries(t *testing.T) {
 }
 
 func TestChainedCandleIterator_TransitionsAcrossEmptyAndNil(t *testing.T) {
-	empty := newMonthlyCandleSet(t, "EURUSD", 2026, time.January, H1)
-	one := newMonthlyCandleSet(t, "EURUSD", 2026, time.February, H1)
+	empty := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
+	one := makeTestCandleSet(t, "EURUSD", 2026, time.February, H1)
 	one.Candles[0] = Candle{Open: 10, High: 10, Low: 10, Close: 10, Ticks: 1}
 	one.SetValid(0)
 
-	it := NewChainedCandleIterator(
-		NewCandleSetIterator(empty, TimeRange{}),
+	it := newChainedCandleIterator(
+		newCandleSetIterator(empty, TimeRange{}),
 		nil,
-		NewCandleSetIterator(one, TimeRange{}),
+		newCandleSetIterator(one, TimeRange{}),
 	)
 
 	c, ok := it.NextCandle()
@@ -132,7 +132,7 @@ func TestChainedCandleIterator_TransitionsAcrossEmptyAndNil(t *testing.T) {
 
 	require.False(t, it.Next())
 	require.NoError(t, it.Err())
-	require.Equal(t, CandleTime{}, it.CandleTime())
+	require.Equal(t, candleTime{}, it.CandleTime())
 }
 
 func TestDukasfileIsValid_EmptyFileOutsideClosedHours(t *testing.T) {

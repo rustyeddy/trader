@@ -124,11 +124,11 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 				}
 
 				// now find all the ticks we are going to want
-				ndays := DaysInMonth(year, month-1)
+				ndays := daysInMonth(year, month-1)
 				for day := 1; day <= ndays; day++ {
 					for hour := 0; hour < 24; hour++ {
 						t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-						if IsForexMarketClosed(t) {
+						if isForexMarketClosed(t) {
 							continue
 						}
 						select {
@@ -272,7 +272,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 	monthStart := time.Date(k.Year, time.Month(k.Month), 1, 0, 0, 0, 0, time.UTC)
 
-	monthSet, err := NewMonthlyCandleSet(
+	monthSet, err := newMonthlyCandleSet(
 		NormalizeInstrument(k.Instrument),
 		M1,
 		FromTime(monthStart),
@@ -321,7 +321,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	return nil
 }
 
-func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTick]) (_ *CandleSet, err error) {
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTick]) (_ *candleSet, err error) {
 	defer func() {
 		if it != nil {
 			closeErr := it.Close()
@@ -342,11 +342,11 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		key.Hour,
 		0, 0, 0, time.UTC,
 	)
-	hourStartMS := TimeMilliFromTime(hourStartTime)
+	hourStartMS := timeMilliFromTime(hourStartTime)
 
 	const minutesPerHour = 60
 
-	cs := &CandleSet{
+	cs := &candleSet{
 		Instrument: NormalizeInstrument(key.Instrument),
 		Start:      FromTime(hourStartTime),
 		Timeframe:  M1,
@@ -399,9 +399,9 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 
 		tick := it.Item()
-		ts := tick.Timemilli
+		ts := tick.timemilli
 		if ts <= 0 {
-			return nil, fmt.Errorf("bad tick timestamp: %d", tick.Timemilli)
+			return nil, fmt.Errorf("bad tick timestamp: %d", tick.timemilli)
 		}
 
 		minuteOpen := ts.FloorToMinute()
@@ -609,7 +609,7 @@ func (cr CandleRequest) Key() Key {
 	}
 }
 
-func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIterator, error) {
+func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (candleIterator, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -638,7 +638,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 
 	// months := MonthsInRange(req.Range)
 	months := req.Range.MonthsInRange()
-	iters := make([]CandleIterator, 0, len(months))
+	iters := make([]candleIterator, 0, len(months))
 
 	for _, ym := range months {
 		if err := ctx.Err(); err != nil {
@@ -664,20 +664,20 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 			return nil, fmt.Errorf("load candles %v: %w", key, err)
 		}
 
-		iters = append(iters, NewCandleSetIterator(cs, req.Range))
+		iters = append(iters, newCandleSetIterator(cs, req.Range))
 	}
 
-	return NewChainedCandleIterator(iters...), nil
+	return newChainedCandleIterator(iters...), nil
 }
 
-func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*CandleSet, error) {
+func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*candleSet, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return store.ReadCSV(key)
 }
 
-func closeCandleIterators(iters []CandleIterator) error {
+func closeCandleIterators(iters []candleIterator) error {
 	var firstErr error
 	for _, it := range iters {
 		if it == nil {

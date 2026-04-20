@@ -7,14 +7,14 @@ import (
 )
 
 type Timestamp int64
-type Timemilli int64
+type timemilli int64
 
 const (
-	SecondInMS  Timemilli = 1_000
+	SecondInMS  timemilli = 1_000
 	MinuteInSec Timestamp = 60
-	MinuteInMS  Timemilli = 60_000
+	MinuteInMS  timemilli = 60_000
 	HourInSec   Timestamp = 3_600
-	HourInMS    Timemilli = 3_600_000
+	HourInMS    timemilli = 3_600_000
 )
 
 func FromTime(t time.Time) Timestamp {
@@ -51,28 +51,28 @@ func (t Timestamp) String() string {
 		Format(time.RFC3339)
 }
 
-func (t Timestamp) Milli() Timemilli {
-	return Timemilli(t * 1000)
+func (t Timestamp) Milli() timemilli {
+	return timemilli(t * 1000)
 }
 
 // Conversions
-func (ms Timemilli) Sec() Timestamp { return Timestamp(int64(ms) / 1_000) }
-func (s Timestamp) MS() Timemilli   { return Timemilli(int64(s) * 1_000) }
+func (ms timemilli) Sec() Timestamp { return Timestamp(int64(ms) / 1_000) }
+func (s Timestamp) MS() timemilli   { return timemilli(int64(s) * 1_000) }
 
 // Flooring (bar opens)
 func (s Timestamp) FloorToMinute() Timestamp { return (s / 60) * 60 }
 func (s Timestamp) FloorToHour() Timestamp   { return (s / 3_600) * 3_600 }
 
-func (ms Timemilli) FloorToMinute() Timemilli { return (ms / 60_000) * 60_000 }
-func (ms Timemilli) FloorToHour() Timemilli   { return (ms / 3_600_000) * 3_600_000 }
+func (ms timemilli) FloorToMinute() timemilli { return (ms / 60_000) * 60_000 }
+func (ms timemilli) FloorToHour() timemilli   { return (ms / 3_600_000) * 3_600_000 }
 
-func TimeMilliFromTime(t time.Time) Timemilli {
-	return Timemilli(t.UnixMilli())
+func timeMilliFromTime(t time.Time) timemilli {
+	return timemilli(t.UnixMilli())
 }
 
 // daysInMonth returns the number of days in a given month.
 // month0 is 0-indexed: 0=Jan, 11=Dec.
-func DaysInMonth(year int, month0 int) int {
+func daysInMonth(year int, month0 int) int {
 	// Convert to Go's 1-indexed month
 	month := time.Month(month0 + 1)
 
@@ -87,7 +87,7 @@ type TimeRange struct {
 	TF    Timeframe // m1, h1, d1
 }
 
-func NewTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
+func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	r := TimeRange{
 		Start: Timestamp(start),
 		End:   Timestamp(end),
@@ -118,8 +118,8 @@ func (r TimeRange) String() string {
 		time.Unix(int64(r.End), 0).UTC().Format(time.RFC3339))
 }
 
-// MonthRange will return the first day and last day of month.
-func MonthRange(year int, month int) TimeRange {
+// monthRange will return the first day and last day of month.
+func monthRange(year int, month int) TimeRange {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(year, time.Month(month)+1, 1, 0, 0, 0, 0, time.UTC)
 	return TimeRange{
@@ -128,21 +128,12 @@ func MonthRange(year int, month int) TimeRange {
 	}
 }
 
-func YearRange(year int) TimeRange {
-	start := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(year+1, 1, 1, 0, 0, 0, 0, time.UTC)
-	return TimeRange{
-		Start: Timestamp(start.Unix()),
-		End:   Timestamp(end.Unix()),
-	}
-}
-
-type YearMonth struct {
+type yearMonth struct {
 	Year  int
 	Month int
 }
 
-func (r TimeRange) MonthsInRange() []YearMonth {
+func (r TimeRange) MonthsInRange() []yearMonth {
 	if !r.Valid() {
 		return nil
 	}
@@ -156,9 +147,9 @@ func (r TimeRange) MonthsInRange() []YearMonth {
 	lastInstant := endExclusive.Add(-time.Second)
 	last := time.Date(lastInstant.Year(), lastInstant.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	var out []YearMonth
+	var out []yearMonth
 	for !cur.After(last) {
-		out = append(out, YearMonth{
+		out = append(out, yearMonth{
 			Year:  cur.Year(),
 			Month: int(cur.Month()),
 		})
@@ -192,13 +183,13 @@ var newYorkLoc = func() *time.Location {
 	return loc
 }()
 
-// IsFXMarketClosed is retained for backward compatibility.
+// isFXMarketClosed is retained for backward compatibility.
 // It delegates to IsForexMarketClosed, which is the canonical market-close logic.
-func IsFXMarketClosed(t time.Time) bool {
-	return IsForexMarketClosed(t)
+func isFXMarketClosed(t time.Time) bool {
+	return isForexMarketClosed(t)
 }
 
-func IsForexMarketClosed(t time.Time) bool {
+func isForexMarketClosed(t time.Time) bool {
 	nt := t.In(newYorkLoc)
 	wd := nt.Weekday()
 	h := nt.Hour()
@@ -249,7 +240,7 @@ const (
 	D1    Timeframe = 86400
 )
 
-func TF(t string) Timeframe {
+func tfFromString(t string) Timeframe {
 	t = strings.ToLower(t)
 
 	switch t {
@@ -272,7 +263,7 @@ func TF(t string) Timeframe {
 	return TF0
 }
 
-func NormalizeTF(tf string) string {
+func normalizeTF(tf string) string {
 	tf = strings.TrimSpace(strings.ToUpper(tf))
 	// allow "60" etc if you ever pass seconds
 	switch tf {

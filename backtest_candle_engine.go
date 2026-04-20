@@ -20,7 +20,7 @@ type CandleStrategy interface {
 type CandleSide int8
 
 type CandleContext struct {
-	CS         *CandleSet
+	CS         *candleSet
 	BarIndex   int
 	Instrument string
 	Idx        int
@@ -46,7 +46,7 @@ func NewCandleEngine(instrument string, tf Timeframe, account *Account) *CandleE
 	}
 }
 
-func (e *CandleEngine) Run(feed CandleIterator, strat CandleStrategy) error {
+func (e *CandleEngine) Run(feed candleIterator, strat CandleStrategy) error {
 	if e.Account == nil {
 		return fmt.Errorf("candle backtest: nil account")
 	}

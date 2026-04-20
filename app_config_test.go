@@ -10,7 +10,7 @@ import (
 )
 
 func TestDefault(t *testing.T) {
-	cfg := Default()
+	cfg := defaultConfig()
 	assert.NotNil(t, cfg)
 	assert.Equal(t, "USD", cfg.Account.Currency)
 	assert.Equal(t, 100000.0, cfg.Account.Balance)
@@ -21,80 +21,80 @@ func TestDefault(t *testing.T) {
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  *AppConfig
+		config  *appConfig
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name:    "valid config",
-			config:  Default(),
+			config:  defaultConfig(),
 			wantErr: false,
 		},
 		{
 			name: "missing currency",
-			config: &AppConfig{
-				Account: AccountConfig{Balance: 100000},
+			config: &appConfig{
+				Account: accountConfig{Balance: 100000},
 			},
 			wantErr: true,
 			errMsg:  "account.currency is required",
 		},
 		{
 			name: "negative balance",
-			config: &AppConfig{
-				Account: AccountConfig{Currency: "USD", Balance: -1000},
+			config: &appConfig{
+				Account: accountConfig{Currency: "USD", Balance: -1000},
 			},
 			wantErr: true,
 			errMsg:  "account.balance must be positive",
 		},
 		{
 			name: "invalid risk percent",
-			config: &AppConfig{
-				Account:  AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy: AppStrategyConfig{RiskPercent: 1.5},
+			config: &appConfig{
+				Account:  accountConfig{Currency: "USD", Balance: 100000},
+				Strategy: appStrategyConfig{RiskPercent: 1.5},
 			},
 			wantErr: true,
 			errMsg:  "strategy.risk_percent must be between 0 and 1",
 		},
 		{
 			name: "unknown instrument",
-			config: &AppConfig{
-				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   AppStrategyConfig{RiskPercent: 0.01, Instrument: "INVALID", StopPips: 20, TargetPips: 40},
-				Simulation: SimulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
-				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "INVALID", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
 			wantErr: true,
 			errMsg:  "unknown instrument",
 		},
 		{
 			name: "negative stop pips",
-			config: &AppConfig{
-				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   AppStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: -10, TargetPips: 40},
-				Simulation: SimulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
-				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: -10, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
 			wantErr: true,
 			errMsg:  "strategy.stop_pips must be positive",
 		},
 		{
 			name: "zero target pips",
-			config: &AppConfig{
-				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   AppStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 0},
-				Simulation: SimulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
-				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 0},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
 			wantErr: true,
 			errMsg:  "strategy.target_pips must be positive",
 		},
 		{
 			name: "ask <= bid",
-			config: &AppConfig{
-				Account:    AccountConfig{Currency: "USD", Balance: 100000},
-				Strategy:   AppStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
-				Simulation: SimulationConfig{InitialBid: 1.0850, InitialAsk: 1.0849},
-				Journal:    JournalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0850, InitialAsk: 1.0849},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
 			},
 			wantErr: true,
 			errMsg:  "simulation initial_ask must be greater than initial_bid",
@@ -129,7 +129,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Default()
+			cfg := defaultConfig()
 			path := filepath.Join(tmpDir, "test"+tt.ext)
 
 			// Save
@@ -141,7 +141,7 @@ func TestSaveAndLoad(t *testing.T) {
 			require.NoError(t, err)
 
 			// Load
-			loaded, err := LoadFromFile(path)
+			loaded, err := loadFromFile(path)
 			require.NoError(t, err)
 
 			// Compare
@@ -154,7 +154,7 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestLoadInvalidFile(t *testing.T) {
-	_, err := LoadFromFile("/nonexistent/path.yaml")
+	_, err := loadFromFile("/nonexistent/path.yaml")
 	assert.Error(t, err)
 }
 
@@ -173,7 +173,7 @@ func TestPriceStepParseDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.delay, func(t *testing.T) {
-			ps := PriceStep{Delay: tt.delay}
+			ps := priceStep{Delay: tt.delay}
 			d, err := ps.ParseDuration()
 			if tt.wantErr {
 				assert.Error(t, err)

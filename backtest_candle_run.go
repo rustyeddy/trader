@@ -6,7 +6,7 @@ import (
 )
 
 type CandleSource interface {
-	Candles(ctx context.Context, req CandleRequest) (CandleIterator, error)
+	Candles(ctx context.Context, req CandleRequest) (candleIterator, error)
 }
 
 type CandleRunRequest struct {

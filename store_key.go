@@ -163,7 +163,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 	out := make([]Key, 0, 24*31)
 
 	for t := start; t.Before(end); t = t.Add(time.Hour) {
-		if IsForexMarketClosed(t) {
+		if isForexMarketClosed(t) {
 			continue
 		}
 

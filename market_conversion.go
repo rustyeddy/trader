@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func QuoteToAccountRate(instrument string, accountCurrency string, prices TickSource) (float64, error) {
+func QuoteToAccountRate(instrument string, accountCurrency string, prices tickSource) (float64, error) {
 	meta, ok := Instruments[instrument]
 	if !ok {
 		return 0, fmt.Errorf("unknown instrument %s", instrument)

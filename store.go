@@ -255,7 +255,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = NewTimeRange(FromTime(start), FromTime(end), Ticks)
+			rng = newTimeRange(FromTime(start), FromTime(end), Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
@@ -263,7 +263,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = MonthRange(key.Year, key.Month)
+			rng = monthRange(key.Year, key.Month)
 			descriptor = "Candles"
 
 		default:
@@ -285,7 +285,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 	})
 }
 
-func (store *Store) writeMetadata(cs *CandleSet, w io.Writer) error {
+func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
 	tfstr := Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -299,7 +299,7 @@ func (store *Store) writeMetadata(cs *CandleSet, w io.Writer) error {
 	return err
 }
 
-func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
+func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -329,7 +329,7 @@ func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
 	n := int(spanSec / step)
 
 	instName := NormalizeInstrument(key.Instrument)
-	cs = &CandleSet{
+	cs = &candleSet{
 		Instrument: instName,
 		Source:     "candles",
 		Start:      start,
@@ -371,27 +371,27 @@ func (store *Store) ReadCSV(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := ParsePrice(fields[1])
+		highv, err := parsePrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
-		openv, err := ParsePrice(fields[2])
+		openv, err := parsePrice(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := ParsePrice(fields[3])
+		lowv, err := parsePrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := ParsePrice(fields[4])
+		closev, err := parsePrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := ParsePrice(fields[5])
+		avgSpread, err := parsePrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := ParsePrice(fields[6])
+		maxSpread, err := parsePrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
@@ -435,7 +435,7 @@ func looksLikeHeader(rec []string) bool {
 	return h == "timestamp" || h == "time"
 }
 
-func (s *Store) WriteCSV(cs *CandleSet) error {
+func (s *Store) WriteCSV(cs *candleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
@@ -562,7 +562,7 @@ func (s *Store) IsUsableTickFile(k Key) bool {
 	return !info.IsDir() && info.Size() > 0
 }
 
-func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
+func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}
@@ -570,7 +570,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
-	if IsForexMarketClosed(key.Time()) {
+	if isForexMarketClosed(key.Time()) {
 		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
 	}
 
@@ -591,7 +591,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
 	}
 
-	baseUnixMS := Timemilli(time.Date(
+	baseUnixMS := timemilli(time.Date(
 		key.Year,
 		time.Month(key.Month),
 		key.Day,
@@ -606,10 +606,10 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 	closeFn := func() error {
 		return f.Close()
 	}
-	return NewFuncIterator(nextFn, closeFn), nil
+	return newFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS Timemilli) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -637,7 +637,7 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS Timemilli) (RawTick, b
 	}
 
 	t := RawTick{
-		Timemilli: baseUnixMS + Timemilli(msOffset),
+		timemilli: baseUnixMS + timemilli(msOffset),
 		Ask:       Price(askU * 10),
 		Bid:       Price(bidU * 10),
 		AskVol:    askVol,

@@ -21,76 +21,76 @@ type RootConfig struct {
 	// Backtest BacktestConfig
 }
 
-// AppConfig represents the complete simulation configuration.
-type AppConfig struct {
+// appConfig represents the complete simulation configuration.
+type appConfig struct {
 	Root       RootConfig        `json:"root" yaml:"root"`
-	Account    AccountConfig     `json:"account" yaml:"account"`
-	Strategy   AppStrategyConfig `json:"strategy" yaml:"strategy"`
-	Simulation SimulationConfig  `json:"simulation" yaml:"simulation"`
-	Journal    JournalConfig     `json:"journal" yaml:"journal"`
-	Replay     *ReplayConfig     `json:"replay,omitempty" yaml:"replay,omitempty"`
+	Account    accountConfig     `json:"account" yaml:"account"`
+	Strategy   appStrategyConfig `json:"strategy" yaml:"strategy"`
+	Simulation simulationConfig  `json:"simulation" yaml:"simulation"`
+	Journal    journalConfig     `json:"journal" yaml:"journal"`
+	Replay     *replayConfig     `json:"replay,omitempty" yaml:"replay,omitempty"`
 }
 
-// AccountConfig contains account initialization parameters
-type AccountConfig struct {
+// accountConfig contains account initialization parameters
+type accountConfig struct {
 	ID       string  `json:"id" yaml:"id"`
 	Currency string  `json:"currency" yaml:"currency"`
 	Balance  float64 `json:"balance" yaml:"balance"`
 }
 
-// AppStrategyConfig contains strategy parameters.
-type AppStrategyConfig struct {
+// appStrategyConfig contains strategy parameters.
+type appStrategyConfig struct {
 	RiskPercent float64 `json:"risk_percent" yaml:"risk_percent"`
 	Instrument  string  `json:"instrument" yaml:"instrument"`
 	StopPips    float64 `json:"stop_pips" yaml:"stop_pips"`
 	TargetPips  float64 `json:"target_pips" yaml:"target_pips"`
 }
 
-// SimulationConfig contains simulation parameters
-type SimulationConfig struct {
+// simulationConfig contains simulation parameters
+type simulationConfig struct {
 	InitialBid float64     `json:"initial_bid" yaml:"initial_bid"`
 	InitialAsk float64     `json:"initial_ask" yaml:"initial_ask"`
-	PriceSteps []PriceStep `json:"price_steps,omitempty" yaml:"price_steps,omitempty"`
+	PriceSteps []priceStep `json:"price_steps,omitempty" yaml:"price_steps,omitempty"`
 }
 
-// PriceStep represents a price update in the simulation
-type PriceStep struct {
+// priceStep represents a price update in the simulation
+type priceStep struct {
 	Bid   float64 `json:"bid" yaml:"bid"`
 	Ask   float64 `json:"ask" yaml:"ask"`
 	Delay string  `json:"delay" yaml:"delay"` // e.g., "1h", "30m", "1s"
 }
 
 // ParseDuration converts the delay string to time.Duration
-func (ps PriceStep) ParseDuration() (time.Duration, error) {
+func (ps priceStep) ParseDuration() (time.Duration, error) {
 	if ps.Delay == "" {
 		return 0, nil
 	}
 	return time.ParseDuration(ps.Delay)
 }
 
-// JournalConfig contains journaling parameters
-type JournalConfig struct {
+// journalConfig contains journaling parameters
+type journalConfig struct {
 	Type       string `json:"type" yaml:"type"` // "csv" or "sqlite"
 	TradesFile string `json:"trades_file,omitempty" yaml:"trades_file,omitempty"`
 	EquityFile string `json:"equity_file,omitempty" yaml:"equity_file,omitempty"`
 	DBPath     string `json:"db_path,omitempty" yaml:"db_path,omitempty"`
 }
 
-// ReplayConfig contains replay-specific parameters
-type ReplayConfig struct {
+// replayConfig contains replay-specific parameters
+type replayConfig struct {
 	CSVFile       string `json:"csv_file" yaml:"csv_file"`               // Path to CSV file with tick data
 	TickThenEvent bool   `json:"tick_then_event" yaml:"tick_then_event"` // Process tick before event
 	CloseAtEnd    bool   `json:"close_at_end" yaml:"close_at_end"`       // Close all trades at end of replay
 }
 
-// LoadFromFile loads configuration from a file (JSON or YAML based on extension)
-func LoadFromFile(path string) (*AppConfig, error) {
+// loadFromFile loads configuration from a file (JSON or YAML based on extension)
+func loadFromFile(path string) (*appConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	cfg := &AppConfig{}
+	cfg := &appConfig{}
 
 	// Try YAML first, fall back to JSON
 	err = yaml.Unmarshal(data, cfg)
@@ -110,7 +110,7 @@ func LoadFromFile(path string) (*AppConfig, error) {
 }
 
 // SaveToFile saves configuration to a file (JSON or YAML based on extension)
-func (c *AppConfig) SaveToFile(path string) error {
+func (c *appConfig) SaveToFile(path string) error {
 	var data []byte
 	var err error
 
@@ -133,7 +133,7 @@ func (c *AppConfig) SaveToFile(path string) error {
 }
 
 // Validate checks if the configuration is valid
-func (c *AppConfig) Validate() error {
+func (c *appConfig) Validate() error {
 	if c.Account.Currency == "" {
 		return fmt.Errorf("account.currency is required")
 	}
@@ -174,25 +174,25 @@ func (c *AppConfig) Validate() error {
 	return nil
 }
 
-// Default returns a configuration with sensible defaults
-func Default() *AppConfig {
-	return &AppConfig{
-		Account: AccountConfig{
+// defaultConfig returns a configuration with sensible defaults
+func defaultConfig() *appConfig {
+	return &appConfig{
+		Account: accountConfig{
 			ID:       "SIM-001",
 			Currency: "USD",
 			Balance:  100000,
 		},
-		Strategy: AppStrategyConfig{
+		Strategy: appStrategyConfig{
 			RiskPercent: 0.01,
 			Instrument:  "EURUSD",
 			StopPips:    20,
 			TargetPips:  40,
 		},
-		Simulation: SimulationConfig{
+		Simulation: simulationConfig{
 			InitialBid: 1.0849,
 			InitialAsk: 1.0851,
 		},
-		Journal: JournalConfig{
+		Journal: journalConfig{
 			Type:       "csv",
 			TradesFile: "./trades.csv",
 			EquityFile: "./equity.csv",

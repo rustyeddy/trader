@@ -3,14 +3,15 @@ package trader
 import (
 	"encoding/csv"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type failingWriter struct {
@@ -162,7 +163,7 @@ func TestCSVJournalRecordTradeFlushError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("write failed")
-	j := &CSVJournal{
+	j := &csvJournal{
 		trades: csv.NewWriter(failingWriter{err: wantErr}),
 		equity: csv.NewWriter(io.Discard),
 	}
@@ -175,7 +176,7 @@ func TestCSVJournalRecordEquityFlushError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("write failed")
-	j := &CSVJournal{
+	j := &csvJournal{
 		trades: csv.NewWriter(io.Discard),
 		equity: csv.NewWriter(failingWriter{err: wantErr}),
 	}
@@ -198,7 +199,7 @@ func TestCSVJournalCloseFlushError(t *testing.T) {
 	trades := csv.NewWriter(failingWriter{err: wantErr})
 	assert.NoError(t, trades.Write([]string{"header"}))
 
-	j := &CSVJournal{
+	j := &csvJournal{
 		trades: trades,
 		equity: csv.NewWriter(io.Discard),
 		tf:     tf,
@@ -220,7 +221,7 @@ func TestCSVJournalCloseFileError(t *testing.T) {
 
 	require.NoError(t, tf.Close())
 
-	j := &CSVJournal{
+	j := &csvJournal{
 		trades: csv.NewWriter(io.Discard),
 		equity: csv.NewWriter(io.Discard),
 		tf:     tf,

@@ -75,7 +75,7 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 
 	path := d.key.Path()
 	if d.bytes == 0 {
-		if !d.Time.IsZero() && IsForexMarketClosed(d.Time.UTC()) {
+		if !d.Time.IsZero() && isForexMarketClosed(d.Time.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)
@@ -97,15 +97,15 @@ func (d *dukasfile) IsValid(ctx context.Context) error {
 	for it.Next() {
 		t := it.Item()
 
-		if t.Timemilli < hourStart || t.Timemilli >= hourEnd {
+		if t.timemilli < hourStart || t.timemilli >= hourEnd {
 			return fmt.Errorf("first tick ts=%d outside hour [%d,%d) in %s",
-				t.Timemilli, hourStart, hourEnd, path)
+				t.timemilli, hourStart, hourEnd, path)
 		}
 	}
 	return it.Err()
 }
 
-func (d *dukasfile) baseHourUnixMS() (Timemilli, error) {
+func (d *dukasfile) baseHourUnixMS() (timemilli, error) {
 	p := store.PathForAsset(d.Key())
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
@@ -117,7 +117,7 @@ func (d *dukasfile) baseHourUnixMS() (Timemilli, error) {
 	hh, _ := strconv.Atoi(m[4])
 
 	t := time.Date(year, time.Month(mon), day, hh, 0, 0, 0, time.UTC)
-	return Timemilli(t.UnixMilli()), nil
+	return timemilli(t.UnixMilli()), nil
 }
 
 func (d *dukasfile) forEachTick1(ctx context.Context, fn func(RawTick) error) error {

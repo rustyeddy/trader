@@ -10,14 +10,14 @@ import (
 func TestOrderTypeString_UnknownIsSafe(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "<unknown>", OrderType(255).String())
+	assert.Equal(t, "<unknown>", orderType(255).String())
 }
 
 func TestOrderStatusString_Values(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "canceled", OrderCanceled.String())
-	assert.Equal(t, "<unknown>", OrderStatus(255).String())
+	assert.Equal(t, "<unknown>", orderStatus(255).String())
 }
 
 func TestPositionUnrealizedPL_LongAndShort(t *testing.T) {
@@ -59,7 +59,7 @@ func TestIsFXMarketClosed_BackCompatWrapper(t *testing.T) {
 
 	// Wrapper should match canonical function behavior.
 	tBerlin := time.Date(2024, 6, 8, 1, 0, 0, 0, berlin)
-	assert.Equal(t, IsForexMarketClosed(tBerlin), IsFXMarketClosed(tBerlin))
+	assert.Equal(t, isForexMarketClosed(tBerlin), isFXMarketClosed(tBerlin))
 }
 
 func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
@@ -70,7 +70,7 @@ func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
 		t.Fatalf("load location: %v", err)
 	}
 
-	assert.True(t, IsForexMarketClosed(time.Date(2024, 6, 7, 17, 0, 0, 0, ny)))
-	assert.False(t, IsForexMarketClosed(time.Date(2024, 6, 9, 17, 0, 0, 0, ny)))
-	assert.True(t, IsForexMarketClosed(time.Date(2024, 12, 24, 13, 0, 0, 0, ny)))
+	assert.True(t, isForexMarketClosed(time.Date(2024, 6, 7, 17, 0, 0, 0, ny)))
+	assert.False(t, isForexMarketClosed(time.Date(2024, 6, 9, 17, 0, 0, 0, ny)))
+	assert.True(t, isForexMarketClosed(time.Date(2024, 12, 24, 13, 0, 0, 0, ny)))
 }

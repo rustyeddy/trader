@@ -1,13 +1,13 @@
 package trader
 
-type Iterator[T any] interface {
+type iterator[T any] interface {
 	Next() bool
 	Item() T
 	Err() error
 	Close() error
 }
 
-type RawTickIterator = Iterator[RawTick]
+type rawTickIterator = iterator[RawTick]
 
 type funcIterator[T any] struct {
 	nextFn  func() (T, bool, error)
@@ -19,7 +19,7 @@ type funcIterator[T any] struct {
 	closed bool
 }
 
-func NewFuncIterator[T any](nextFn func() (T, bool, error), closeFn func() error) Iterator[T] {
+func newFuncIterator[T any](nextFn func() (T, bool, error), closeFn func() error) iterator[T] {
 	if closeFn == nil {
 		closeFn = func() error { return nil }
 	}
@@ -70,10 +70,10 @@ func (it *funcIterator[T]) Close() error {
 	return it.closeFn()
 }
 
-type CandleIterator interface {
+type candleIterator interface {
 	Next() bool
 	Candle() Candle
-	CandleTime() CandleTime
+	CandleTime() candleTime
 	NextCandle() (Candle, bool)
 	Timestamp() Timestamp
 	Err() error
@@ -81,7 +81,7 @@ type CandleIterator interface {
 }
 
 type candleSetIterator struct {
-	base     *CandleSetIterator
+	base     *candleSetIteratorV1
 	rng      TimeRange
 	useRange bool
 
@@ -92,7 +92,7 @@ type candleSetIterator struct {
 	closed bool
 }
 
-func NewCandleSetIterator(cs *CandleSet, rng TimeRange) CandleIterator {
+func newCandleSetIterator(cs *candleSet, rng TimeRange) candleIterator {
 	return &candleSetIterator{
 		base:     cs.Iterator(),
 		rng:      rng,
@@ -135,8 +135,8 @@ func (it *candleSetIterator) Candle() Candle {
 	return it.cur
 }
 
-func (it *candleSetIterator) CandleTime() CandleTime {
-	ct := CandleTime{
+func (it *candleSetIterator) CandleTime() candleTime {
+	ct := candleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}
@@ -160,7 +160,7 @@ func (it *candleSetIterator) Close() error {
 }
 
 type chainedCandleIterator struct {
-	iters  []CandleIterator
+	iters  []candleIterator
 	idx    int
 	cur    Candle
 	ts     Timestamp
@@ -168,7 +168,7 @@ type chainedCandleIterator struct {
 	closed bool
 }
 
-func NewChainedCandleIterator(iters ...CandleIterator) CandleIterator {
+func newChainedCandleIterator(iters ...candleIterator) candleIterator {
 	return &chainedCandleIterator{
 		iters: iters,
 	}
@@ -181,8 +181,8 @@ func (it *chainedCandleIterator) NextCandle() (Candle, bool) {
 	return Candle{}, false
 }
 
-func (it *chainedCandleIterator) CandleTime() CandleTime {
-	ct := CandleTime{
+func (it *chainedCandleIterator) CandleTime() candleTime {
+	ct := candleTime{
 		Candle:    it.Candle(),
 		Timestamp: it.Timestamp(),
 	}

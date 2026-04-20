@@ -2,11 +2,12 @@ package trader
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -14,7 +15,7 @@ func newTestStore(t *testing.T) *Store {
 	return &Store{basedir: t.TempDir()}
 }
 
-func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.Month, tf Timeframe) *CandleSet {
+func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf Timeframe) *candleSet {
 	t.Helper()
 
 	instName := NormalizeInstrument(instrument)
@@ -24,7 +25,7 @@ func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.M
 	}
 
 	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet(
+	cs, err := newMonthlyCandleSet(
 		inst.Name,
 		tf,
 		FromTime(start),
@@ -35,7 +36,7 @@ func newMonthlyCandleSet(t *testing.T, instrument string, year int, month time.M
 	return cs
 }
 
-func keyForSet(cs *CandleSet) Key {
+func keyForSet(cs *candleSet) Key {
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	return Key{
 		Instrument: cs.Instrument,
@@ -51,7 +52,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := newMonthlyCandleSet(t, "EUR_USD", 2026, time.January, H1)
+	cs := makeTestCandleSet(t, "EUR_USD", 2026, time.January, H1)
 
 	cs.Candles[0] = Candle{
 		High:      Price(101),
@@ -208,7 +209,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 
 	t.Run("nil instrument", func(t *testing.T) {
 		t.Parallel()
-		err := s.WriteCSV(&CandleSet{
+		err := s.WriteCSV(&candleSet{
 			Timeframe: M1,
 		})
 		require.Error(t, err)
@@ -217,7 +218,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 
 	t.Run("invalid timeframe", func(t *testing.T) {
 		t.Parallel()
-		err := s.WriteCSV(&CandleSet{
+		err := s.WriteCSV(&candleSet{
 			Instrument: "EURUSD",
 		})
 		require.Error(t, err)

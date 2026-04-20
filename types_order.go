@@ -1,9 +1,9 @@
 package trader
 
-type OrderType uint8
+type orderType uint8
 
 const (
-	OrderNone OrderType = iota
+	OrderNone orderType = iota
 	OrderMarket
 	OrderLimit
 	OrderStop
@@ -11,7 +11,7 @@ const (
 	OrderTrailingStop
 )
 
-func (ot OrderType) String() string {
+func (ot orderType) String() string {
 	switch ot {
 	case OrderNone:
 		return "none"
@@ -30,10 +30,10 @@ func (ot OrderType) String() string {
 	}
 }
 
-type OrderStatus uint8
+type orderStatus uint8
 
 const (
-	OrderStatusNone OrderStatus = iota
+	OrderStatusNone orderStatus = iota
 	OrderPending
 	OrderAccepted
 	OrderFilled
@@ -41,7 +41,7 @@ const (
 	OrderCanceled
 )
 
-func (os OrderStatus) String() string {
+func (os orderStatus) String() string {
 	switch os {
 	case OrderStatusNone:
 		return "none"
@@ -61,8 +61,8 @@ func (os OrderStatus) String() string {
 	}
 }
 
-type Order struct {
+type order struct {
 	*TradeCommon
-	OrderType
-	OrderStatus
+	orderType
+	orderStatus
 }

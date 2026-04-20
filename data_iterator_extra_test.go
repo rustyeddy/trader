@@ -2,9 +2,10 @@ package trader
 
 import (
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // errCandleIterator is a test-only CandleIterator that returns errors on demand.
@@ -27,8 +28,8 @@ func (it *errCandleIterator) Next() bool {
 	return true
 }
 func (it *errCandleIterator) Candle() Candle { return it.cur }
-func (it *errCandleIterator) CandleTime() CandleTime {
-	return CandleTime{Candle: it.cur, Timestamp: it.ts}
+func (it *errCandleIterator) CandleTime() candleTime {
+	return candleTime{Candle: it.cur, Timestamp: it.ts}
 }
 func (it *errCandleIterator) Timestamp() Timestamp { return it.ts }
 func (it *errCandleIterator) Err() error           { return it.nextErr }
@@ -57,8 +58,8 @@ func (it *errAfterCandleIterator) Next() bool {
 	return false
 }
 func (it *errAfterCandleIterator) Candle() Candle { return it.items[it.idx-1] }
-func (it *errAfterCandleIterator) CandleTime() CandleTime {
-	return CandleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
+func (it *errAfterCandleIterator) CandleTime() candleTime {
+	return candleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
 }
 func (it *errAfterCandleIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
@@ -89,7 +90,7 @@ func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 		tss:     []Timestamp{1},
 		errOnce: sentinel,
 	}
-	chained := NewChainedCandleIterator(sub)
+	chained := newChainedCandleIterator(sub)
 
 	// First item
 	require.True(t, chained.Next())
@@ -106,7 +107,7 @@ func TestChainedCandleIterator_SubCloseErr(t *testing.T) {
 		maxItems: 0,
 		closeErr: sentinel,
 	}
-	chained := NewChainedCandleIterator(sub)
+	chained := newChainedCandleIterator(sub)
 
 	// sub.Next() returns false → chained tries to close sub → error propagates
 	require.False(t, chained.Next())
@@ -122,7 +123,7 @@ func TestChainedCandleIterator_ClosePropagatesSubError(t *testing.T) {
 		closeErr: sentinel,
 	}
 	// The Close() on chainedCandleIterator should return first error from subs
-	closingChained := NewChainedCandleIterator(sub)
+	closingChained := newChainedCandleIterator(sub)
 	_ = closingChained.Next() // advance to trigger sub
 	err := closingChained.Close()
 	_ = err // May or may not propagate depending on state
@@ -163,7 +164,7 @@ func TestCloseCandleIterators_CloseError(t *testing.T) {
 	sentinel := errors.New("close error")
 	sub := &errCandleIterator{closeErr: sentinel}
 
-	err := closeCandleIterators([]CandleIterator{sub})
+	err := closeCandleIterators([]candleIterator{sub})
 	require.ErrorIs(t, err, sentinel)
 }
 
@@ -181,6 +182,6 @@ func TestDukasfileBaseHourUnixMS(t *testing.T) {
 
 	ms, err := df.baseHourUnixMS()
 	require.NoError(t, err)
-	want := TimeMilliFromTime(ts)
+	want := timeMilliFromTime(ts)
 	require.Equal(t, want, ms)
 }

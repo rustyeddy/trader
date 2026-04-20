@@ -53,7 +53,7 @@ func bitSet(bits []uint64, i int) {
 	bits[i>>6] |= (uint64(1) << uint(i&63))
 }
 
-func SecondsToTFString(sec Timestamp) (string, error) {
+func secondsToTFString(sec Timestamp) (string, error) {
 	if sec <= 0 {
 		return "", fmt.Errorf("invalid timeframe seconds: %d", sec)
 	}
@@ -83,7 +83,7 @@ func SecondsToTFString(sec Timestamp) (string, error) {
 	return "", fmt.Errorf("cannot map timeframe: %d seconds", sec)
 }
 
-func TFStringToSeconds(tf string) (Timestamp, error) {
+func tfStringToSeconds(tf string) (Timestamp, error) {
 	switch tf {
 	case "M1":
 		return 60, nil

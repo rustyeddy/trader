@@ -1,18 +1,18 @@
 package trader
 
-type FillStatus uint8
+type fillStatus uint8
 
 const (
-	FillNone FillStatus = iota
+	FillNone fillStatus = iota
 	FillComplete
 	FillPartial
 	FillCanceled
 	FillFailed
 )
 
-type Fill struct {
+type fill struct {
 	*TradeCommon
-	FillStatus
+	fillStatus
 	FillTime  Timestamp
 	FillPrice Price
 	FillUnits Units

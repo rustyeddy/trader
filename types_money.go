@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-type Dollars float64
+type dollars float64
 type Money int64
 type Price int32
 type Scale6 int32
@@ -39,7 +39,7 @@ func PriceFromFloat(f float64) Price {
 //	func PriceToFloat(price int32, scale int32) float64 {
 //		return float64(price) / math.Pow10(int(scale))
 //	}
-func FormatNumber(price Price, scale int32) string {
+func formatNumber(price Price, scale int32) string {
 	decimals := 0
 	for s := scale; s > 1; s /= 10 {
 		decimals++
@@ -49,7 +49,7 @@ func FormatNumber(price Price, scale int32) string {
 
 // parsePrice parses a CSV field as a raw Price (int32) value.
 // TODO MOVE TO Type
-func ParsePrice(s string) (Price, error) {
+func parsePrice(s string) (Price, error) {
 	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
 	if err != nil {
 		return 0, err
@@ -63,14 +63,14 @@ func (p Price) String() string {
 
 type Rate int64
 
-const RateScale = MoneyScale
+const rateScale = MoneyScale
 
 func RateFromFloat(f float64) Rate {
-	return Rate(math.Round(f * float64(RateScale)))
+	return Rate(math.Round(f * float64(rateScale)))
 }
 
 func (r Rate) Float64() float64 {
-	return float64(r) / float64(RateScale)
+	return float64(r) / float64(rateScale)
 }
 
 func (r Rate) String() string {

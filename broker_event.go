@@ -20,10 +20,10 @@ type Event struct {
 	PositionID    string
 	Instrument    string
 	Reason        string
-	Cause         CloseCause
+	Cause         closeCause
 
 	Open     *OpenRequest
-	Close    *CloseRequest
+	Close    *closeRequest
 	Trade    *Trade
 	Position *Position
 }

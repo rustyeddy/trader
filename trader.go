@@ -11,7 +11,7 @@ import (
 type Trader struct {
 	*Account
 	*DataManager
-	*TradeBook
+	*tradeBook
 	*Broker
 }
 
@@ -27,19 +27,19 @@ type ConfigBackTest struct {
 
 type backtestStrategy interface {
 	Name() string
-	Update(context.Context, *CandleTime, *Positions) *StrategyPlan
+	Update(context.Context, *candleTime, *Positions) *StrategyPlan
 }
 
 type noopBacktestStrategy struct {
-	NoopStrategy
+	noopStrategy
 }
 
-func (n noopBacktestStrategy) Update(ctx context.Context, c *CandleTime, _ *Positions) *StrategyPlan {
+func (n noopBacktestStrategy) Update(ctx context.Context, c *candleTime, _ *Positions) *StrategyPlan {
 	if c == nil {
-		return n.NoopStrategy.Update(ctx, nil)
+		return n.noopStrategy.Update(ctx, nil)
 	}
 	candle := c.Candle
-	return n.NoopStrategy.Update(ctx, &candle)
+	return n.noopStrategy.Update(ctx, &candle)
 }
 
 func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
@@ -53,7 +53,7 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 			CandleCount: 10,
 		}, nil
 	case "noop", "no-op":
-		return noopBacktestStrategy{NoopStrategy: NoopStrategy{}}, nil
+		return noopBacktestStrategy{noopStrategy: noopStrategy{}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
 	}
@@ -100,7 +100,7 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr CandleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr candleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -309,7 +309,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	candlereq := CandleRequest{
 		Source:     "candles",
 		Instrument: cfg.Instrument,
-		Range:      NewTimeRange(FromTime(cfg.Start), FromTime(cfg.End), cfg.TimeFrame),
+		Range:      newTimeRange(FromTime(cfg.Start), FromTime(cfg.End), cfg.TimeFrame),
 	}
 	Backtest.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 

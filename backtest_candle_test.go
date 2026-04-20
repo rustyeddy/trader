@@ -2,9 +2,10 @@ package trader
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func testAccount() *Account {
@@ -33,8 +34,8 @@ func (f *fakeFeed) Next() bool {
 }
 
 func (f *fakeFeed) Candle() Candle { return f.bars[f.idx-1].c }
-func (f *fakeFeed) CandleTime() CandleTime {
-	return CandleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
+func (f *fakeFeed) CandleTime() candleTime {
+	return candleTime{Candle: f.Candle(), Timestamp: f.Timestamp()}
 }
 func (f *fakeFeed) NextCandle() (Candle, bool) {
 	if f.Next() {
@@ -236,11 +237,11 @@ func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {
 }
 
 type fakeSource struct {
-	it  CandleIterator
+	it  candleIterator
 	err error
 }
 
-func (s *fakeSource) Candles(context.Context, CandleRequest) (CandleIterator, error) {
+func (s *fakeSource) Candles(context.Context, CandleRequest) (candleIterator, error) {
 	if s.err != nil {
 		return nil, s.err
 	}

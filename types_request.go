@@ -22,15 +22,15 @@ type OpenRequest struct {
 	Request
 }
 
-type CloseRequest struct {
+type closeRequest struct {
 	Request
 	*Position
-	CloseCause CloseCause
+	CloseCause closeCause
 }
 
-func NewOpenRequest(
+func newOpenRequest(
 	instr string,
-	c *CandleTime,
+	c *candleTime,
 	side Side,
 	stop Price,
 	take Price,
@@ -54,17 +54,17 @@ func NewOpenRequest(
 	return op
 }
 
-type CloseCause int
+type closeCause int
 
 const (
-	CloseUnknown CloseCause = iota
+	CloseUnknown closeCause = iota
 	CloseManual
 	CloseStopLoss
 	CloseTakeProfit
 	CloseBrokerLiquidation
 )
 
-func (c CloseCause) String() string {
+func (c closeCause) String() string {
 	switch c {
 	case CloseManual:
 		return "Manual"

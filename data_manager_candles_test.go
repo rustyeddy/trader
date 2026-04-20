@@ -3,10 +3,11 @@ package trader
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func useTempStore(t *testing.T) *Store {
@@ -39,7 +40,7 @@ func writeMonthlyCandles(
 
 	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
 
-	cs, err := NewMonthlyCandleSet(
+	cs, err := newMonthlyCandleSet(
 		instrument,
 		tf,
 		FromTime(start),
@@ -64,7 +65,7 @@ func writeMonthlyCandles(
 	}
 }
 
-func collectCandles(t *testing.T, it CandleIterator) ([]Timestamp, []Candle) {
+func collectCandles(t *testing.T, it candleIterator) ([]Timestamp, []Candle) {
 	t.Helper()
 
 	var outTS []Timestamp

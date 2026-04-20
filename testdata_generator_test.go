@@ -178,7 +178,7 @@ func TestGenerateSyntheticYearlyCandles_HasAllMonths(t *testing.T) {
 
 func TestTestHelperGenerateSyntheticCandles(t *testing.T) {
 	t.Parallel()
-	cs := TestHelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)
+	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)
 	require.NotNil(t, cs)
 	assert.Equal(t, "EURUSD", cs.Instrument)
 	assert.Equal(t, H1, cs.Timeframe)
@@ -196,7 +196,7 @@ func TestTestHelperGenerateSyntheticCandlesWithConfig(t *testing.T) {
 		TicksPerBar: 100,
 	}
 
-	cs := TestHelperGenerateSyntheticCandlesWithConfig(t, cfg, 2025, time.January)
+	cs := HelperGenerateSyntheticCandlesWithConfig(t, cfg, 2025, time.January)
 	require.NotNil(t, cs)
 	assert.Equal(t, "GBPUSD", cs.Instrument)
 	assert.Equal(t, M1, cs.Timeframe)
@@ -250,7 +250,7 @@ func TestLoadSyntheticCandles_CreatesIfMissing(t *testing.T) {
 func TestMakeSyntheticCandleSetIterator(t *testing.T) {
 	t.Parallel()
 
-	cs := TestHelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)
+	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)
 	iter := MakeSyntheticCandleSetIterator(cs)
 
 	require.NotNil(t, iter)
@@ -273,7 +273,7 @@ func TestSyntheticDataFeedsTraderIterator(t *testing.T) {
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := NewCandleSetIterator(cs, TimeRange{})
+	iter := newCandleSetIterator(cs, TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
