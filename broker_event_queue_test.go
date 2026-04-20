@@ -15,7 +15,7 @@ func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 
 	th := NewTradeHistory("EURUSD")
 	pos := &Position{TradeCommon: th.TradeCommon, State: PositionOpen}
-	req := &CloseRequest{
+	req := &closeRequest{
 		Request: Request{
 			TradeCommon: th.TradeCommon,
 			RequestType: RequestClose,

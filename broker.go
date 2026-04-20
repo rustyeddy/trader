@@ -9,7 +9,7 @@ const brokerEventQueueSize = 1024
 
 type BrokerInterface interface {
 	SubmitOpen(ctx context.Context, req *OpenRequest) error
-	SubmitClose(ctx context.Context, req *CloseRequest) error
+	SubmitClose(ctx context.Context, req *closeRequest) error
 	Events() <-chan *Event
 }
 
@@ -24,21 +24,21 @@ type Broker struct {
 	OpenOrders
 }
 
-func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*OpenResult, error) {
+func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*openResult, error) {
 
 	// Create an order and submit the order
-	o := &Order{}
+	o := &order{}
 	o.TradeCommon = req.TradeCommon
-	o.OrderType = OrderMarket
-	o.OrderStatus = OrderPending
+	o.orderType = OrderMarket
+	o.orderStatus = OrderPending
 
 	// place the order in the orderbook
 	b.OpenOrders.Add(o)
 
 	// here is where the order get submitted to a real broker if
 	// we are using one.
-	res := &OpenResult{
-		Order: o,
+	res := &openResult{
+		order: o,
 	}
 
 	// Here we will just fake it and return a filled order.
@@ -99,7 +99,7 @@ func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
 	}
 }
 
-func (b *Broker) SubmitOrder(ctx context.Context, ord *Order) (*Position, error) {
+func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Position, error) {
 	pos := &Position{
 		TradeCommon: ord.TradeCommon,
 	}
@@ -109,15 +109,15 @@ func (b *Broker) SubmitOrder(ctx context.Context, ord *Order) (*Position, error)
 // OrderRequest will change
 func (b *Broker) ReadOrderResponses(req *OpenRequest) {
 
-	o := &Order{
+	o := &order{
 		TradeCommon: req.TradeCommon,
-		OrderType:   OrderMarket,
-		OrderStatus: OrderPending,
+		orderType:   OrderMarket,
+		orderStatus: OrderPending,
 	}
 	b.OpenOrders.Add(o)
 }
 
-func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
+func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 
 	// place req.CloseRequest on an close queue Submit the order,
 	// this is where the emulator would be injecting delays and stuff

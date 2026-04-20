@@ -11,7 +11,7 @@ import (
 type Trader struct {
 	*Account
 	*DataManager
-	*TradeBook
+	*tradeBook
 	*Broker
 }
 
@@ -31,15 +31,15 @@ type backtestStrategy interface {
 }
 
 type noopBacktestStrategy struct {
-	NoopStrategy
+	noopStrategy
 }
 
 func (n noopBacktestStrategy) Update(ctx context.Context, c *candleTime, _ *Positions) *StrategyPlan {
 	if c == nil {
-		return n.NoopStrategy.Update(ctx, nil)
+		return n.noopStrategy.Update(ctx, nil)
 	}
 	candle := c.Candle
-	return n.NoopStrategy.Update(ctx, &candle)
+	return n.noopStrategy.Update(ctx, &candle)
 }
 
 func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
@@ -53,7 +53,7 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 			CandleCount: 10,
 		}, nil
 	case "noop", "no-op":
-		return noopBacktestStrategy{NoopStrategy: NoopStrategy{}}, nil
+		return noopBacktestStrategy{noopStrategy: noopStrategy{}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
 	}

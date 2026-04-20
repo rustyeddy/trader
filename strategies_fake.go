@@ -50,7 +50,7 @@ func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) 
 		}
 		inst := GetInstrument(f.Instrument)
 		stop := inst.SubPips(c.Close, pipsFromFloat(10))
-		op := NewOpenRequest(f.Instrument, c, Long, stop, Price(0), "higher highs")
+		op := newOpenRequest(f.Instrument, c, Long, stop, Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -65,7 +65,7 @@ func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) 
 			// Are there positions that need to be closed?
 			if (pos.Side == Long && c.Close <= pos.Stop) ||
 				(pos.Side == Short && c.Close >= pos.Stop) {
-				cl := &CloseRequest{
+				cl := &closeRequest{
 					Request: Request{
 						TradeCommon: pos.TradeCommon,
 						Reason:      "CloseStop",

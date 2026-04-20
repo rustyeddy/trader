@@ -10,14 +10,14 @@ import (
 func TestOrderTypeString_UnknownIsSafe(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "<unknown>", OrderType(255).String())
+	assert.Equal(t, "<unknown>", orderType(255).String())
 }
 
 func TestOrderStatusString_Values(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "canceled", OrderCanceled.String())
-	assert.Equal(t, "<unknown>", OrderStatus(255).String())
+	assert.Equal(t, "<unknown>", orderStatus(255).String())
 }
 
 func TestPositionUnrealizedPL_LongAndShort(t *testing.T) {

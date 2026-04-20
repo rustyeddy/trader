@@ -8,7 +8,7 @@ import (
 )
 
 func TestNoopStrategyUpdate(t *testing.T) {
-	strat := NoopStrategy{}
+	strat := noopStrategy{}
 	ctx := context.Background()
 
 	// NoopStrategy should do nothing and return no error
@@ -17,11 +17,11 @@ func TestNoopStrategyUpdate(t *testing.T) {
 }
 
 func TestNoopStrategyName(t *testing.T) {
-	strat := NoopStrategy{}
+	strat := noopStrategy{}
 	assert.Equal(t, "NoOp", strat.Name())
 }
 
 func TestNoopStrategyReason(t *testing.T) {
-	strat := NoopStrategy{}
+	strat := noopStrategy{}
 	assert.Equal(t, "No-op", strat.Reason())
 }

@@ -9,7 +9,7 @@ import (
 func TestPriceStore_SetGet(t *testing.T) {
 	t.Parallel()
 
-	ps := NewTickStore()
+	ps := newTickStore()
 	p := Tick{
 		Instrument: "EUR_USD",
 		BA: BA{
@@ -28,7 +28,7 @@ func TestPriceStore_SetGet(t *testing.T) {
 func TestPriceStore_GetMissing(t *testing.T) {
 	t.Parallel()
 
-	ps := NewTickStore()
+	ps := newTickStore()
 
 	got, err := ps.Get("NO_SUCH")
 	assert.Error(t, err)

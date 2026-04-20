@@ -82,7 +82,7 @@ func newTestTrader() *Trader {
 		Broker: &Broker{
 			ID: NewULID(),
 			OpenOrders: OpenOrders{
-				Orders: make(map[string]*Order),
+				Orders: make(map[string]*order),
 			},
 		},
 	}
@@ -198,7 +198,7 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 		name: "bad-close",
 		updateFn: func(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
 			return &StrategyPlan{
-				Closes: []*CloseRequest{{
+				Closes: []*closeRequest{{
 					Request: Request{
 						TradeCommon: position.TradeCommon,
 						RequestType: RequestClose,

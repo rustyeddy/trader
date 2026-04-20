@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type TickSource interface {
+type tickSource interface {
 	GetTick(ctx context.Context, instrument string) (Tick, error)
 }
 
@@ -31,22 +31,22 @@ func (t Tick) Spread() Price {
 	return t.Ask - t.Bid
 }
 
-type TickStore struct {
+type tickStore struct {
 	mu    sync.RWMutex
 	ticks map[string]Tick
 }
 
-func NewTickStore() *TickStore {
-	return &TickStore{ticks: make(map[string]Tick)}
+func newTickStore() *tickStore {
+	return &tickStore{ticks: make(map[string]Tick)}
 }
 
-func (ps *TickStore) Set(p Tick) {
+func (ps *tickStore) Set(p Tick) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.ticks[p.Instrument] = p
 }
 
-func (ps *TickStore) Get(instr string) (Tick, error) {
+func (ps *tickStore) Get(instr string) (Tick, error) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	p, ok := ps.ticks[instr]

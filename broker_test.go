@@ -53,7 +53,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	b := &Broker{
 		evtQ: make(chan *Event, 1),
 		OpenOrders: OpenOrders{
-			Orders: make(map[string]*Order),
+			Orders: make(map[string]*order),
 		},
 	}
 	b.evtQ <- &Event{Type: EventOrderAccepted}
@@ -72,7 +72,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 
 	done := make(chan struct{})
 	var (
-		res *OpenResult
+		res *openResult
 		err error
 	)
 	go func() {
@@ -89,7 +89,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "queue is full")
 	require.NotNil(t, res)
-	require.NotNil(t, res.Order)
+	require.NotNil(t, res.order)
 	require.NotNil(t, res.Position)
 	assert.Equal(t, 1, len(b.evtQ))
 }
@@ -100,7 +100,7 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	b := &Broker{
 		evtQ: make(chan *Event, 1),
 		OpenOrders: OpenOrders{
-			Orders: make(map[string]*Order),
+			Orders: make(map[string]*order),
 		},
 	}
 	b.evtQ <- &Event{Type: EventOrderAccepted}
@@ -142,7 +142,7 @@ func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
 
 	b := &Broker{
 		OpenOrders: OpenOrders{
-			Orders: make(map[string]*Order),
+			Orders: make(map[string]*order),
 		},
 	}
 
@@ -159,10 +159,10 @@ func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
 			Timestamp:   Timestamp(10),
 		},
 	}
-	ord := &Order{
+	ord := &order{
 		TradeCommon: req.TradeCommon,
-		OrderType:   OrderMarket,
-		OrderStatus: OrderPending,
+		orderType:   OrderMarket,
+		orderStatus: OrderPending,
 	}
 
 	pos, err := b.SubmitOrder(context.Background(), ord)
@@ -179,6 +179,6 @@ func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
 	stored := b.OpenOrders.Get(req.ID)
 	require.NotNil(t, stored)
 	assert.Equal(t, req.ID, stored.ID)
-	assert.Equal(t, OrderMarket, stored.OrderType)
-	assert.Equal(t, OrderPending, stored.OrderStatus)
+	assert.Equal(t, OrderMarket, stored.orderType)
+	assert.Equal(t, OrderPending, stored.orderStatus)
 }

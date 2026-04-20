@@ -1,9 +1,9 @@
 package trader
 
-type TradeStatus int
+type tradeStatus int
 
 const (
-	TradeStatusNone TradeStatus = iota
+	TradeStatusNone tradeStatus = iota
 	TradeStatusOpenRequest
 	TradeStatusOrder
 	TradeStatusOpen
@@ -27,7 +27,7 @@ type Trade struct {
 	PNL       Money // account currency (best-effort)
 }
 
-func NewTrade(common *TradeCommon) *Trade {
+func newTrade(common *TradeCommon) *Trade {
 	t := &Trade{}
 	t.TradeCommon = common
 	return t

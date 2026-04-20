@@ -5,16 +5,16 @@ import (
 	"strings"
 )
 
-type Symbol string
+type symbol string
 
 const (
-	EUR_USD Symbol = "EUR_USD"
-	GBP_USD Symbol = "GBP_USD"
-	USD_JPY Symbol = "USD_JPY"
-	USD_CHF Symbol = "USD_CHF"
-	AUD_USD Symbol = "AUD_USD"
-	USD_CAD Symbol = "USD_CAD"
-	NZD_USD Symbol = "NZD_USD"
+	EUR_USD symbol = "EUR_USD"
+	GBP_USD symbol = "GBP_USD"
+	USD_JPY symbol = "USD_JPY"
+	USD_CHF symbol = "USD_CHF"
+	AUD_USD symbol = "AUD_USD"
+	USD_CAD symbol = "USD_CAD"
+	NZD_USD symbol = "NZD_USD"
 )
 
 type Instrument struct {
@@ -27,7 +27,7 @@ type Instrument struct {
 	MarginRate          Rate
 }
 
-var InstrumentList = []string{
+var instrumentList = []string{
 	"EURUSD",
 	"GBPUSD",
 	"USDJPY",
@@ -112,7 +112,7 @@ var Instruments = map[string]*Instrument{
 	},
 }
 
-var Symmap = map[string]string{
+var symmap = map[string]string{
 	"EUR_USD": "EURUSD",
 	"GBP_USD": "GBPUSD",
 	"USD_JPY": "USDJPY",
@@ -126,7 +126,7 @@ func GetInstrument(symbol string) *Instrument {
 	if inst, ok := Instruments[symbol]; ok {
 		return inst
 	} else {
-		if symbol, ok = Symmap[symbol]; ok {
+		if symbol, ok = symmap[symbol]; ok {
 			if inst, ok = Instruments[symbol]; ok {
 				return inst
 			}

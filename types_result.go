@@ -1,7 +1,7 @@
 package trader
 
-type OpenResult struct {
-	*Order
+type openResult struct {
+	*order
 	*Position
-	Fills []Fill
+	Fills []fill
 }

@@ -7,13 +7,13 @@ import (
 	"strconv"
 )
 
-type CSVJournal struct {
+type csvJournal struct {
 	trades *csv.Writer
 	equity *csv.Writer
 	tf, ef *os.File
 }
 
-func NewCSV(tradesPath, equityPath string) (*CSVJournal, error) {
+func NewCSV(tradesPath, equityPath string) (*csvJournal, error) {
 	tf, err := os.Create(tradesPath)
 	if err != nil {
 		return nil, err
@@ -42,10 +42,10 @@ func NewCSV(tradesPath, equityPath string) (*CSVJournal, error) {
 		return nil, err
 	}
 
-	return &CSVJournal{tw, ew, tf, ef}, nil
+	return &csvJournal{tw, ew, tf, ef}, nil
 }
 
-func (j *CSVJournal) RecordTrade(t TradeRecord) error {
+func (j *csvJournal) RecordTrade(t TradeRecord) error {
 	err := j.trades.Write([]string{
 		t.TradeID,
 		t.Instrument,
@@ -64,7 +64,7 @@ func (j *CSVJournal) RecordTrade(t TradeRecord) error {
 	return j.trades.Error()
 }
 
-func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
+func (j *csvJournal) RecordEquity(e EquitySnapshot) error {
 	err := j.equity.Write([]string{
 		e.Timestamp.String(),
 		e.Balance.String(),
@@ -81,7 +81,7 @@ func (j *CSVJournal) RecordEquity(e EquitySnapshot) error {
 	return j.equity.Error()
 }
 
-func (j *CSVJournal) Close() error {
+func (j *csvJournal) Close() error {
 	j.trades.Flush()
 	if err := j.trades.Error(); err != nil {
 		return err
