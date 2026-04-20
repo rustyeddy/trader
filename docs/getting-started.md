@@ -33,7 +33,7 @@ make test
 The simplest way to get started is to run the included sample simulation:
 
 ```bash
-go run ./cmd/simrun
+go run ./examples/simrun
 ```
 
 This will:
@@ -77,11 +77,11 @@ make build
 
 The trader CLI provides several commands:
 
-#### Running Simulations
+#### Running Replays
 
 ```bash
-# Run a simulation from a config file
-./trader run -config examples/configs/basic.yaml
+# Replay from included sample tick data
+./bin/trader replay pricing --ticks ./examples/data/sample_ticks.csv
 ```
 
 #### Replaying Historical Data

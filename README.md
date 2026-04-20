@@ -26,11 +26,11 @@ A professional-grade FX trading simulator and research platform written in Go.
 
 ```bash
 # Run a simple simulation example
-go run ./cmd/examples/simrun
+go run ./examples/simrun
 
 # Try the examples
-go run ./cmd/examples/basic
-go run ./cmd/examples/multiple
+go run ./examples/basic
+go run ./examples/multiple
 ```
 
 **New to the project?** See [getting-started.md](docs/getting-started.md) for a comprehensive guide.
@@ -39,12 +39,12 @@ go run ./cmd/examples/multiple
 
 - **[Getting Started Guide](docs/getting-started.md)** - Installation, first steps, and core concepts
 - **[Architecture Overview](docs/architecture.md)** - System design and component details
-- **[Examples](cmd/examples/)** - Sample trading strategies and use cases
+- **[Examples](examples/)** - Sample trading strategies and use cases
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
 
 ## Examples
 
-Explore practical examples in the `cmd/examples/` directory:
+Explore practical examples in the `examples/` directory:
 
 - **basic/** - Simple single trade flow
 - **multiple/** - Managing multiple positions simultaneously
@@ -52,9 +52,9 @@ Explore practical examples in the `cmd/examples/` directory:
 - **configs/** - Example backtest/replay YAML configurations
 
 ```bash
-go run ./cmd/examples/basic
-go run ./cmd/examples/multiple
-go run ./cmd/examples/simrun
+go run ./examples/basic
+go run ./examples/multiple
+go run ./examples/simrun
 ```
 
 ## Building
