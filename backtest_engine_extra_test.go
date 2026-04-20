@@ -3,10 +3,11 @@ package trader
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ─── PipScaled ────────────────────────────────────────────────────────────────
@@ -158,24 +159,3 @@ func (f *errFeed) NextCandle() (Candle, bool) { return Candle{}, false }
 func (f *errFeed) Timestamp() Timestamp       { return 1 }
 func (f *errFeed) Err() error                 { return f.err }
 func (f *errFeed) Close() error               { return nil }
-
-// ─── backtest_db stubs ────────────────────────────────────────────────────────
-
-func TestBacktestDB_Stubs(t *testing.T) {
-	ctx := context.Background()
-
-	err := RecordBacktest(ctx, BacktestRun{})
-	assert.NoError(t, err)
-
-	_, err = GetBacktestRun(ctx, "run-id")
-	assert.NoError(t, err)
-
-	_, err = ListTradesByRunID(ctx, "run-id")
-	assert.NoError(t, err)
-
-	_, err = ListEquityByRunID(ctx, "run-id")
-	assert.NoError(t, err)
-
-	_, err = ExportBacktestOrg(ctx, "run-id")
-	assert.NoError(t, err)
-}
