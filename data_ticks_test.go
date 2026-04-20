@@ -1,8 +1,9 @@
 package trader
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRawTickMid(t *testing.T) {
@@ -42,13 +43,13 @@ func TestRawTickMinute(t *testing.T) {
 	// Timemilli = 90_500 ms = 1 minute 30.5 seconds
 	// FloorToMinute: (90500 / 60000) * 60000 = 60000
 	tick := RawTick{
-		Timemilli: Timemilli(90_500),
+		timemilli: timemilli(90_500),
 	}
-	require.Equal(t, Timemilli(60_000), tick.Minute())
+	require.Equal(t, timemilli(60_000), tick.Minute())
 
 	// Exactly on a minute boundary
 	tick2 := RawTick{
-		Timemilli: Timemilli(60_000),
+		timemilli: timemilli(60_000),
 	}
-	require.Equal(t, Timemilli(60_000), tick2.Minute())
+	require.Equal(t, timemilli(60_000), tick2.Minute())
 }

@@ -8,13 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // =============================================================================
@@ -164,15 +165,15 @@ func TestRawTick_LargeValues(t *testing.T) {
 func TestRawTick_MinuteAtHourBoundary(t *testing.T) {
 	t.Parallel()
 	// Exactly at the start of an hour
-	tick := RawTick{Timemilli: Timemilli(3_600_000)}
-	require.Equal(t, Timemilli(3_600_000), tick.Minute())
+	tick := RawTick{timemilli: timemilli(3_600_000)}
+	require.Equal(t, timemilli(3_600_000), tick.Minute())
 }
 
 func TestRawTick_MinuteJustBeforeNextHour(t *testing.T) {
 	t.Parallel()
 	// 59:59.999 into an hour
-	tick := RawTick{Timemilli: Timemilli(3_599_999)}
-	require.Equal(t, Timemilli(3_540_000), tick.Minute()) // 59 minutes
+	tick := RawTick{timemilli: timemilli(3_599_999)}
+	require.Equal(t, timemilli(3_540_000), tick.Minute()) // 59 minutes
 }
 
 // =============================================================================
@@ -449,10 +450,10 @@ func TestReadNextBI5Tick_MinOffset(t *testing.T) {
 	t.Parallel()
 
 	rec := makeBi5Record(0, 100, 99, 1.0, 0.5)
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", Timemilli(1_000_000))
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", timemilli(1_000_000))
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, Timemilli(1_000_000), tick.Timemilli)
+	require.Equal(t, timemilli(1_000_000), tick.timemilli)
 }
 
 func TestReadNextBI5Tick_MaxValidOffset(t *testing.T) {
@@ -463,7 +464,7 @@ func TestReadNextBI5Tick_MaxValidOffset(t *testing.T) {
 	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, Timemilli(3_599_999), tick.Timemilli)
+	require.Equal(t, timemilli(3_599_999), tick.timemilli)
 }
 
 func TestReadNextBI5Tick_ExactlyAtLimit(t *testing.T) {
@@ -828,13 +829,13 @@ func TestBuildHourM1_SingleTickEachMinute(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 2, 3, 8, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// One tick per minute for all 60 minutes
 	ticks := make([]RawTick, 60)
 	for m := 0; m < 60; m++ {
 		ticks[m] = RawTick{
-			Timemilli: baseMS + Timemilli(m)*60_000 + 1,
+			timemilli: baseMS + timemilli(m)*60_000 + 1,
 			Ask:       Price(13000 + m),
 			Bid:       Price(12999 + m),
 		}
@@ -864,14 +865,14 @@ func TestBuildHourM1_MultipleTicksSameMinute(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 2, 3, 8, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Three ticks in minute 0, tracking OHLC
 	ticks := []RawTick{
-		{Timemilli: baseMS + 100, Ask: 13010, Bid: 13000}, // open
-		{Timemilli: baseMS + 200, Ask: 13025, Bid: 13015}, // higher → high
-		{Timemilli: baseMS + 300, Ask: 13005, Bid: 12995}, // lower  → low
-		{Timemilli: baseMS + 400, Ask: 13012, Bid: 13002}, // close
+		{timemilli: baseMS + 100, Ask: 13010, Bid: 13000}, // open
+		{timemilli: baseMS + 200, Ask: 13025, Bid: 13015}, // higher → high
+		{timemilli: baseMS + 300, Ask: 13005, Bid: 12995}, // lower  → low
+		{timemilli: baseMS + 400, Ask: 13012, Bid: 13002}, // close
 	}
 
 	idx := 0

@@ -124,11 +124,11 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 				}
 
 				// now find all the ticks we are going to want
-				ndays := DaysInMonth(year, month-1)
+				ndays := daysInMonth(year, month-1)
 				for day := 1; day <= ndays; day++ {
 					for hour := 0; hour < 24; hour++ {
 						t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-						if IsForexMarketClosed(t) {
+						if isForexMarketClosed(t) {
 							continue
 						}
 						select {
@@ -342,7 +342,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		key.Hour,
 		0, 0, 0, time.UTC,
 	)
-	hourStartMS := TimeMilliFromTime(hourStartTime)
+	hourStartMS := timeMilliFromTime(hourStartTime)
 
 	const minutesPerHour = 60
 
@@ -399,9 +399,9 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it Iterator[RawTi
 		}
 
 		tick := it.Item()
-		ts := tick.Timemilli
+		ts := tick.timemilli
 		if ts <= 0 {
-			return nil, fmt.Errorf("bad tick timestamp: %d", tick.Timemilli)
+			return nil, fmt.Errorf("bad tick timestamp: %d", tick.timemilli)
 		}
 
 		minuteOpen := ts.FloorToMinute()

@@ -142,7 +142,7 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 		candleTime := startTime.Add(time.Duration(i) * step)
 
 		// Skip if market is closed (weekends and typical forex market hours)
-		if IsForexMarketClosed(candleTime) {
+		if isForexMarketClosed(candleTime) {
 			continue
 		}
 

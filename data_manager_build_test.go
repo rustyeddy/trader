@@ -3,9 +3,10 @@ package trader
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -149,13 +150,13 @@ func TestBuildHourM1FromTickIterator_WithTicks(t *testing.T) {
 
 	// Build some ticks for 2026-01-05 10:00:00 UTC
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Two ticks in minute 0 and minute 1
 	ticks := []RawTick{
-		{Timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
-		{Timemilli: baseMS + 2000, Ask: 13015, Bid: 13005},
-		{Timemilli: baseMS + 60_000 + 500, Ask: 13020, Bid: 13010},
+		{timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 2000, Ask: 13015, Bid: 13005},
+		{timemilli: baseMS + 60_000 + 500, Ask: 13020, Bid: 13010},
 	}
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
@@ -192,12 +193,12 @@ func TestBuildHourM1FromTickIterator_ContextCancel(t *testing.T) {
 	cancel() // already cancelled
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	called := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
 		called++
-		return RawTick{Timemilli: baseMS + 1000, Ask: 100, Bid: 99}, true, nil
+		return RawTick{timemilli: baseMS + 1000, Ask: 100, Bid: 99}, true, nil
 	}, nil)
 
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}

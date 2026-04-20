@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ func TestBuildHourM1_BadTimestamp(t *testing.T) {
 	t.Parallel()
 
 	k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
-	tick := RawTick{Timemilli: 0, Ask: 100, Bid: 99} // Timemilli <= 0
+	tick := RawTick{timemilli: 0, Ask: 100, Bid: 99} // Timemilli <= 0
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
 		if idx > 0 {
@@ -288,13 +289,13 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	ticks := []RawTick{
 		// First tick: minute 5
-		{Timemilli: baseMS + 5*60_000 + 100, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 5*60_000 + 100, Ask: 13010, Bid: 13000},
 		// Second tick: minute 2 (out of order)
-		{Timemilli: baseMS + 2*60_000 + 100, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 2*60_000 + 100, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
@@ -320,11 +321,11 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Only minute 0 has a tick; minutes 1-59 should be filled flat
 	ticks := []RawTick{
-		{Timemilli: baseMS + 100, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 100, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {
@@ -485,7 +486,7 @@ func TestRequiredTickHoursForMonth_NoClosedHours(t *testing.T) {
 	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
 	for _, k := range keys {
 		ts := time.Date(k.Year, time.Month(k.Month), k.Day, k.Hour, 0, 0, 0, time.UTC)
-		require.False(t, IsForexMarketClosed(ts),
+		require.False(t, isForexMarketClosed(ts),
 			"key %+v should not be forex-closed time", k)
 	}
 }

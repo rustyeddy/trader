@@ -2,9 +2,10 @@ package trader
 
 import (
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // errCandleIterator is a test-only CandleIterator that returns errors on demand.
@@ -181,6 +182,6 @@ func TestDukasfileBaseHourUnixMS(t *testing.T) {
 
 	ms, err := df.baseHourUnixMS()
 	require.NoError(t, err)
-	want := TimeMilliFromTime(ts)
+	want := timeMilliFromTime(ts)
 	require.Equal(t, want, ms)
 }

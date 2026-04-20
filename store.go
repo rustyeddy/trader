@@ -255,7 +255,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = NewTimeRange(FromTime(start), FromTime(end), Ticks)
+			rng = newTimeRange(FromTime(start), FromTime(end), Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
@@ -263,7 +263,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = MonthRange(key.Year, key.Month)
+			rng = monthRange(key.Year, key.Month)
 			descriptor = "Candles"
 
 		default:
@@ -570,7 +570,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
-	if IsForexMarketClosed(key.Time()) {
+	if isForexMarketClosed(key.Time()) {
 		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
 	}
 
@@ -591,7 +591,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
 	}
 
-	baseUnixMS := Timemilli(time.Date(
+	baseUnixMS := timemilli(time.Date(
 		key.Year,
 		time.Month(key.Month),
 		key.Day,
@@ -609,7 +609,7 @@ func (s *Store) OpenTickIterator(key Key) (Iterator[RawTick], error) {
 	return NewFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS Timemilli) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -637,7 +637,7 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS Timemilli) (RawTick, b
 	}
 
 	t := RawTick{
-		Timemilli: baseUnixMS + Timemilli(msOffset),
+		timemilli: baseUnixMS + timemilli(msOffset),
 		Ask:       Price(askU * 10),
 		Bid:       Price(bidU * 10),
 		AskVol:    askVol,

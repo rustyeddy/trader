@@ -8,7 +8,7 @@ import (
 
 // MulDiv64Ceil computes ceil((a*b)/den) using 128-bit intermediate precision.
 // Inputs must be non-negative. den must be > 0.
-func MulDiv64(a, b, den int64) (int64, error) {
+func mulDiv64(a, b, den int64) (int64, error) {
 	if a < 0 || b < 0 || den <= 0 {
 		return 0, fmt.Errorf("MulDiv64Ceil: invalid args a=%d b=%d den=%d", a, b, den)
 	}
@@ -33,7 +33,7 @@ func MulDiv64(a, b, den int64) (int64, error) {
 
 // mulDivFloor64 computes floor((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
-func MulDivFloor64(a, b, den int64) (int64, error) {
+func mulDivFloor64(a, b, den int64) (int64, error) {
 	if a < 0 || b < 0 || den <= 0 {
 		return 0, fmt.Errorf("mulDivFloor64: invalid args a=%d b=%d den=%d", a, b, den)
 	}
@@ -51,7 +51,7 @@ func MulDivFloor64(a, b, den int64) (int64, error) {
 
 // mulDivCeil64 computes ceil((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
-func MulDivCeil64(a, b, den int64) (int64, error) {
+func mulDivCeil64(a, b, den int64) (int64, error) {
 	if a < 0 || b < 0 || den <= 0 {
 		return 0, fmt.Errorf("mulDivCeil64: invalid args a=%d b=%d den=%d", a, b, den)
 	}
@@ -70,7 +70,7 @@ func MulDivCeil64(a, b, den int64) (int64, error) {
 	return int64(q), nil
 }
 
-func Abs64(x int64) int64 {
+func abs64(x int64) int64 {
 	if x < 0 {
 		return -x
 	}
@@ -146,13 +146,13 @@ func signedMulDivRound(a, b, den int64) (int64, error) {
 
 // Signed represents any signed integer or float type.
 // The `~` allows named types whose underlying type matches.
-type Signed interface {
+type signed interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
 		~float32 | ~float64
 }
 
-// Abs returns the absolute value of any signed numeric type.
-func Abs[T Signed](v T) T {
+// abs returns the absolute value of any signed numeric type.
+func abs[T signed](v T) T {
 	if v < 0 {
 		return -v
 	}

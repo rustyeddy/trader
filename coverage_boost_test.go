@@ -2,9 +2,10 @@ package trader
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -62,12 +63,12 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Tick at minute 0 and tick at minute 5 (gap of 4 minutes)
 	ticks := []RawTick{
-		{Timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
-		{Timemilli: baseMS + 5*60_000 + 500, Ask: 13020, Bid: 13010},
+		{timemilli: baseMS + 1000, Ask: 13010, Bid: 13000},
+		{timemilli: baseMS + 5*60_000 + 500, Ask: 13020, Bid: 13010},
 	}
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {

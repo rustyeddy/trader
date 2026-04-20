@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"io"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -97,12 +98,12 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := TimeMilliFromTime(hourStart)
+	baseMS := timeMilliFromTime(hourStart)
 
 	// Tick at hour+2 (way outside the 1-hour window)
 	outsideMS := baseMS + 2*3600_000 + 100
 	ticks := []RawTick{
-		{Timemilli: outsideMS, Ask: 13010, Bid: 13000},
+		{timemilli: outsideMS, Ask: 13010, Bid: 13000},
 	}
 	idx := 0
 	it := NewFuncIterator(func() (RawTick, bool, error) {

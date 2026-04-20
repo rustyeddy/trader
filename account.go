@@ -56,11 +56,11 @@ func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
 		return 0, fmt.Errorf("failed to find instrument %s", inst)
 	}
 	if meta.QuoteCurrency == act.Currency {
-		return Rate(RateScale), nil
+		return Rate(rateScale), nil
 	}
 
 	if meta.BaseCurrency == act.Currency {
-		r, err := MulDiv64(int64(MoneyScale), int64(PriceScale), int64(price))
+		r, err := mulDiv64(int64(MoneyScale), int64(PriceScale), int64(price))
 		if err != nil {
 			return 0, err
 		}
@@ -315,17 +315,17 @@ func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, e
 		return 0, fmt.Errorf("invalid margin rate for %s: %d", meta.Name, meta.MarginRate)
 	}
 
-	u := Abs64(int64(units))
+	u := abs64(int64(units))
 	p := int64(price)
 	if p <= 0 {
 		return 0, fmt.Errorf("invalid price: %d", p)
 	}
 
-	up, err := MulDiv64(u, p, int64(PriceScale))
+	up, err := mulDiv64(u, p, int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	notionalQuoteMicro, err := MulDiv64(up, int64(MoneyScale), 1)
+	notionalQuoteMicro, err := mulDiv64(up, int64(MoneyScale), 1)
 	if err != nil {
 		return 0, err
 	}
@@ -335,12 +335,12 @@ func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, e
 		return 0, err
 	}
 
-	notionalAcctMicro, err := MulDiv64(notionalQuoteMicro, int64(qta), int64(RateScale))
+	notionalAcctMicro, err := mulDiv64(notionalQuoteMicro, int64(qta), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	marginMicro, err := MulDiv64(notionalAcctMicro, int64(meta.MarginRate), int64(RateScale))
+	marginMicro, err := mulDiv64(notionalAcctMicro, int64(meta.MarginRate), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -357,7 +357,7 @@ func (acct *Account) riskBudget() (Money, error) {
 		return 0, fmt.Errorf("account risk_pct must be > 0")
 	}
 
-	v, err := MulDivFloor64(int64(acct.Equity), int64(acct.RiskPct), int64(RateScale))
+	v, err := mulDivFloor64(int64(acct.Equity), int64(acct.RiskPct), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -370,7 +370,7 @@ func (acct *Account) riskBudget() (Money, error) {
 // lossPerUnit returns stop-loss exposure for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate loss and accidentally oversize.
 func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
-	priceDist := Abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
+	priceDist := abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
 	if priceDist == 0 {
 		return 0, fmt.Errorf("entry and stop must differ")
 	}
@@ -380,11 +380,11 @@ func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
 		return 0, err
 	}
 
-	v, err := MulDivCeil64(priceDist, int64(MoneyScale), int64(PriceScale))
+	v, err := mulDivCeil64(priceDist, int64(MoneyScale), int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	v, err = MulDivCeil64(v, int64(qta), int64(RateScale))
+	v, err = mulDivCeil64(v, int64(qta), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -413,17 +413,17 @@ func (acct *Account) marginPerUnit(inst *Instrument, price Price) (Money, error)
 		return 0, err
 	}
 
-	v, err := MulDivCeil64(int64(price), int64(MoneyScale), int64(PriceScale))
+	v, err := mulDivCeil64(int64(price), int64(MoneyScale), int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
 
-	v, err = MulDivCeil64(v, int64(qta), int64(RateScale))
+	v, err = mulDivCeil64(v, int64(qta), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	v, err = MulDivCeil64(v, int64(inst.MarginRate), int64(RateScale))
+	v, err = mulDivCeil64(v, int64(inst.MarginRate), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}

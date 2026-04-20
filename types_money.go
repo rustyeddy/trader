@@ -63,14 +63,14 @@ func (p Price) String() string {
 
 type Rate int64
 
-const RateScale = MoneyScale
+const rateScale = MoneyScale
 
 func RateFromFloat(f float64) Rate {
-	return Rate(math.Round(f * float64(RateScale)))
+	return Rate(math.Round(f * float64(rateScale)))
 }
 
 func (r Rate) Float64() float64 {
-	return float64(r) / float64(RateScale)
+	return float64(r) / float64(rateScale)
 }
 
 func (r Rate) String() string {

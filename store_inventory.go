@@ -119,10 +119,10 @@ func (inv *Inventory) MissingComplete(keys []Key) []Key {
 
 func (inv *Inventory) TicksComplete(k Key) (bool, []Key) {
 	var keys []Key
-	for day := 1; day <= DaysInMonth(k.Year, k.Month-1); day++ {
+	for day := 1; day <= daysInMonth(k.Year, k.Month-1); day++ {
 		for hour := 0; hour < 24; hour++ {
 			t := time.Date(k.Year, time.Month(k.Month), day, hour, 0, 0, 0, time.UTC)
-			if IsForexMarketClosed(t) {
+			if isForexMarketClosed(t) {
 				continue
 			}
 

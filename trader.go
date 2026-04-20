@@ -309,7 +309,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	candlereq := CandleRequest{
 		Source:     "candles",
 		Instrument: cfg.Instrument,
-		Range:      NewTimeRange(FromTime(cfg.Start), FromTime(cfg.End), cfg.TimeFrame),
+		Range:      newTimeRange(FromTime(cfg.Start), FromTime(cfg.End), cfg.TimeFrame),
 	}
 	Backtest.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 

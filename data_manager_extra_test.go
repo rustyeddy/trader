@@ -3,13 +3,14 @@ package trader
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/stretchr/testify/require"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func makeParentsAndFile(path string, content []byte) error {
@@ -80,7 +81,7 @@ func makeBi5Record(msOffset, askU, bidU uint32, askVol, bidVol float32) []byte {
 func TestReadNextBI5Tick_Valid(t *testing.T) {
 	t.Parallel()
 
-	baseMS := Timemilli(1_000_000)
+	baseMS := timemilli(1_000_000)
 	msOffset := uint32(500)
 	askU := uint32(12345)
 	bidU := uint32(12340)
@@ -93,7 +94,7 @@ func TestReadNextBI5Tick_Valid(t *testing.T) {
 	tick, ok, err := readNextBI5Tick(r, "test.bi5", baseMS)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, baseMS+Timemilli(msOffset), tick.Timemilli)
+	require.Equal(t, baseMS+timemilli(msOffset), tick.timemilli)
 	require.Equal(t, Price(askU*10), tick.Ask)
 	require.Equal(t, Price(bidU*10), tick.Bid)
 	require.InDelta(t, float64(askVol), float64(tick.AskVol), 0.001)

@@ -1,9 +1,10 @@
 package trader
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func usdAccount() Account {
@@ -21,7 +22,7 @@ func TestQuoteToRate_QuoteCurrencyIsAccountCurrency(t *testing.T) {
 	acct := usdAccount()
 	rate, err := acct.QuoteToAccount("EURUSD", 1013322)
 	require.NoError(t, err)
-	assert.Equal(t, Rate(RateScale), rate)
+	assert.Equal(t, Rate(rateScale), rate)
 }
 
 func TestQuoteAccount_BaseCurrencyIsAccountCurrency(t *testing.T) {
@@ -31,7 +32,7 @@ func TestQuoteAccount_BaseCurrencyIsAccountCurrency(t *testing.T) {
 
 	rate, err := acct.QuoteToAccount("USDJPY", PriceFromFloat(150.02))
 	require.NoError(t, err)
-	approxExpected := float64(RateScale) / 150.02
+	approxExpected := float64(rateScale) / 150.02
 	assert.InDelta(t, approxExpected, float64(rate), 10)
 }
 
