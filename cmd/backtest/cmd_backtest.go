@@ -18,8 +18,6 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 }
 
 func init() {
-	CMDBacktest.AddCommand(CMDBacktestEMACross)
-	CMDBacktest.AddCommand(CMDBacktestEMACrossADX)
 	CMDBacktest.AddCommand(CMDBacktestRegress)
 	CMDBacktest.Flags().StringVar(&btReportsDir, "reports", defaultReportsDir, "Directory for generated backtest reports")
 }
