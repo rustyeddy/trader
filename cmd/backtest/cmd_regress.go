@@ -12,26 +12,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var regressConfigsDir string
+const defaultRegressionConfigPath = "./testdata/configs"
+
 var regressOutDir string
 
 var CMDBacktestRegress = &cobra.Command{
 	Use:   "regress",
-	Short: "Run committed regression backtests and write fresh JSON summaries",
+	Short: "Run config-based regression backtests and write fresh JSON summaries",
 	RunE:  runBacktestRegress,
 }
 
 func init() {
 	CMDBacktestRegress.Flags().StringVar(
-		&regressConfigsDir,
-		"configs",
-		"../testdata/configs",
-		"Regression config file or directory",
-	)
-	CMDBacktestRegress.Flags().StringVar(
 		&regressOutDir,
 		"out",
-		"../testdata/reports",
+		"",
 		"Output directory for generated regression summaries (default: temporary directory)",
 	)
 }
@@ -40,9 +35,9 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 	_ = cmd
 	_ = args
 
-	configPath := strings.TrimSpace(regressConfigsDir)
-	if configPath == "" {
-		configPath = "./testdata/configs"
+	configPath := defaultRegressionConfigPath
+	if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
+		configPath = strings.TrimSpace(rootCfg.ConfigPath)
 	}
 
 	configPaths, err := collectConfigPaths(configPath)

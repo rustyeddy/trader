@@ -1,8 +1,6 @@
 package backtest
 
 import (
-	"strings"
-
 	traderpkg "github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
 )
@@ -18,17 +16,22 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 }
 
 func init() {
+	// Patch 1:
+	// Keep only the regression/config-driven backtest entry point.
 	CMDBacktest.AddCommand(CMDBacktestRegress)
-	CMDBacktest.Flags().StringVar(&btReportsDir, "reports", defaultReportsDir, "Directory for generated backtest reports")
+
+	CMDBacktest.Flags().StringVar(
+		&btReportsDir,
+		"reports",
+		defaultReportsDir,
+		"Directory for generated backtest reports",
+	)
 }
 
 var CMDBacktest = &cobra.Command{
 	Use:   "backtest",
-	Short: "Run backtests on historical data",
+	Short: "Backtest commands",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
-			return runBacktestConfigBatch(cmd)
-		}
 		return cmd.Help()
 	},
 }
