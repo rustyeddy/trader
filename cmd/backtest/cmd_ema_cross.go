@@ -80,23 +80,21 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("run %q strategy.kind=%q, want %q", rr.Name, rr.Strategy.Kind, "ema-cross")
 	}
 
-	cfg, err := BuildEMACrossConfig(*rr)
-	if err != nil {
-		return err
-	}
-
 	applyCommonOptsFromResolvedRun(&emaCrossOpts, rr)
 	applyCommonFlagOverrides(cmd, &emaCrossOpts)
-	applyEMACrossFlagOverrides(cmd, &cfg)
+	applyEMACrossRunParamOverrides(cmd, rr)
 
 	if emaCrossOpts.Units == 0 {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
 	emaCrossOpts.Instrument = trader.NormalizeInstrument(emaCrossOpts.Instrument)
-	cfg.Scale = trader.PriceScale
+	rr.Instrument = emaCrossOpts.Instrument
 
-	strat := trader.NewEMACross(cfg)
+	strat, err := trader.NewStrategyFromResolvedRun(*rr)
+	if err != nil {
+		return err
+	}
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
@@ -115,14 +113,18 @@ func runEMACrossFromConfig(cmd *cobra.Command) error {
 	)
 }
 
-func applyEMACrossFlagOverrides(cmd *cobra.Command, cfg *trader.EMACrossConfig) {
+func applyEMACrossRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {
+	if rr.Strategy.Params == nil {
+		rr.Strategy.Params = make(map[string]any)
+	}
+
 	if cmd.Flags().Changed("fast") {
-		cfg.FastPeriod = emaCrossCfg.FastPeriod
+		rr.Strategy.Params["fast"] = emaCrossCfg.FastPeriod
 	}
 	if cmd.Flags().Changed("slow") {
-		cfg.SlowPeriod = emaCrossCfg.SlowPeriod
+		rr.Strategy.Params["slow"] = emaCrossCfg.SlowPeriod
 	}
 	if cmd.Flags().Changed("min-spread") {
-		cfg.MinSpread = emaCrossCfg.MinSpread
+		rr.Strategy.Params["min_spread"] = emaCrossCfg.MinSpread
 	}
 }

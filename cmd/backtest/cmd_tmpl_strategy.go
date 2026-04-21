@@ -28,12 +28,10 @@ func runTmplStrategyConfig(cmd *cobra.Command) error {
 		return err
 	}
 
-	cfg, err := BuildTemplateStrategyConfig(*rr)
+	strat, err := trader.NewStrategyFromResolvedRun(*rr)
 	if err != nil {
 		return err
 	}
-
-	strat := trader.NewTemplateStrategy(cfg)
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),

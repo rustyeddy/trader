@@ -84,23 +84,21 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("run %q strategy.kind=%q, want %q", rr.Name, rr.Strategy.Kind, "ema-cross-adx")
 	}
 
-	cfg, err := buildEMACrossADXConfig(*rr)
-	if err != nil {
-		return err
-	}
-
 	applyCommonOptsFromResolvedRun(&emaCrossADXOpts, rr)
 	applyCommonFlagOverrides(cmd, &emaCrossADXOpts)
-	applyEMACrossADXFlagOverrides(cmd, &cfg)
+	applyEMACrossADXRunParamOverrides(cmd, rr)
 
 	if emaCrossADXOpts.Units == 0 {
 		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
 	emaCrossADXOpts.Instrument = trader.NormalizeInstrument(emaCrossADXOpts.Instrument)
-	cfg.Scale = trader.PriceScale
+	rr.Instrument = emaCrossADXOpts.Instrument
 
-	strat := trader.NewEMACrossADX(cfg)
+	strat, err := trader.NewStrategyFromResolvedRun(*rr)
+	if err != nil {
+		return err
+	}
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(
 		context.Background(),
@@ -117,10 +115,6 @@ func runEMACrossADXFromConfig(cmd *cobra.Command) error {
 		},
 		act,
 	)
-}
-
-func buildEMACrossADXConfig(r trader.ResolvedRun) (trader.EMACrossADXConfig, error) {
-	return trader.BuildEMACrossADXConfigFromRun(r)
 }
 
 func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
@@ -149,26 +143,30 @@ func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
 	}
 }
 
-func applyEMACrossADXFlagOverrides(cmd *cobra.Command, cfg *trader.EMACrossADXConfig) {
+func applyEMACrossADXRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {
+	if rr.Strategy.Params == nil {
+		rr.Strategy.Params = make(map[string]any)
+	}
+
 	if cmd.Flags().Changed("fast") {
-		cfg.FastPeriod = emaCrossADXCfg.FastPeriod
+		rr.Strategy.Params["fast"] = emaCrossADXCfg.FastPeriod
 	}
 	if cmd.Flags().Changed("slow") {
-		cfg.SlowPeriod = emaCrossADXCfg.SlowPeriod
+		rr.Strategy.Params["slow"] = emaCrossADXCfg.SlowPeriod
 	}
 	if cmd.Flags().Changed("adx-period") {
-		cfg.ADXPeriod = emaCrossADXCfg.ADXPeriod
+		rr.Strategy.Params["adx_period"] = emaCrossADXCfg.ADXPeriod
 	}
 	if cmd.Flags().Changed("adx-threshold") {
-		cfg.ADXThreshold = emaCrossADXCfg.ADXThreshold
+		rr.Strategy.Params["adx_threshold"] = emaCrossADXCfg.ADXThreshold
 	}
 	if cmd.Flags().Changed("require-di") {
-		cfg.RequireDI = emaCrossADXCfg.RequireDI
+		rr.Strategy.Params["require_di"] = emaCrossADXCfg.RequireDI
 	}
 	if cmd.Flags().Changed("require-adx-ready") {
-		cfg.RequireADXReady = emaCrossADXCfg.RequireADXReady
+		rr.Strategy.Params["require_adx_ready"] = emaCrossADXCfg.RequireADXReady
 	}
 	if cmd.Flags().Changed("min-spread") {
-		cfg.MinSpread = emaCrossADXCfg.MinSpread
+		rr.Strategy.Params["min_spread"] = emaCrossADXCfg.MinSpread
 	}
 }
