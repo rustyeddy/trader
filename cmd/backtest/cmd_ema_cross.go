@@ -1,9 +1,7 @@
 package backtest
 
 import (
-	"context"
 	"strings"
-	"time"
 
 	"github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
@@ -38,24 +36,16 @@ func RunEMACross(cmd *cobra.Command, args []string) error {
 }
 
 func runEMACrossFromFlags(cmd *cobra.Command) error {
+	_ = cmd
 	emaCrossCfg.Scale = trader.PriceScale
-
-	strat := trader.NewEMACross(emaCrossCfg)
-	act := trader.NewAccount("adhoc-ema-cross", trader.MoneyFromFloat(1000))
-	return runCandleStrategy(
-		context.Background(),
+	return runAdhocStrategyCommand(
 		emaCrossOpts,
-		strat,
-		candleRunMeta{
-			RunID:    trader.NewULID(),
-			RunName:  "adhoc-ema-cross",
-			Kind:     "ema-cross",
-			Created:  trader.FromTime(time.Now().UTC()),
-			Balance:  act.Balance,
-			RR:       0,
-			Strategy: strat.Name(),
+		"adhoc-ema-cross",
+		"ema-cross",
+		trader.MoneyFromFloat(1000),
+		func() trader.Strategy {
+			return trader.NewEMACross(emaCrossCfg)
 		},
-		act,
 	)
 }
 

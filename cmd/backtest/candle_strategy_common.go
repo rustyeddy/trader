@@ -122,6 +122,7 @@ type candleRunMeta struct {
 }
 
 type strategyRunParamOverride func(cmd *cobra.Command, rr *trader.ResolvedRun)
+type adhocStrategyBuilder func() trader.Strategy
 
 func resolveConfiguredRunByKind(wantKind string) (*trader.ResolvedRun, error) {
 	configPath := strings.TrimSpace(rootCfg.ConfigPath)
@@ -191,6 +192,29 @@ func runConfiguredStrategyCommand(
 
 	act := trader.NewAccount(rr.Name, rr.StartingBalance)
 	return runCandleStrategy(context.Background(), *opts, strat, meta, act)
+}
+
+func runAdhocStrategyCommand(
+	opts candleCmdCommon,
+	runName string,
+	kind string,
+	startingBalance trader.Money,
+	build adhocStrategyBuilder,
+) error {
+	strat := build()
+	act := trader.NewAccount(runName, startingBalance)
+
+	meta := candleRunMeta{
+		RunID:    trader.NewULID(),
+		RunName:  runName,
+		Kind:     kind,
+		Created:  trader.FromTime(time.Now().UTC()),
+		Balance:  act.Balance,
+		RR:       0,
+		Strategy: strat.Name(),
+	}
+
+	return runCandleStrategy(context.Background(), opts, strat, meta, act)
 }
 
 func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
