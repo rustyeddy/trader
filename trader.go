@@ -13,6 +13,7 @@ type Trader struct {
 	*DataManager
 	*tradeBook
 	*Broker
+	*Store
 }
 
 type ConfigBackTest struct {
@@ -52,6 +53,15 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 			},
 			CandleCount: 10,
 		}, nil
+
+	case "fake-02":
+		return &Fake02{
+			Instrument: cfg.Instrument,
+			WaitBars:   8,
+			HoldBars:   6,
+			StopPips:   20,
+		}, nil
+
 	case "noop", "no-op":
 		return noopBacktestStrategy{noopStrategy: noopStrategy{}}, nil
 	default:

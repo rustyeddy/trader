@@ -1,0 +1,21 @@
+{
+  "name": "eurusd-h1-2024-template",
+  "kind": "template",
+  "strategy": "TEMPLATE_STRATEGY(lb=5,th=0.0015)",
+  "instrument": "EURUSD",
+  "timeframe": "H1",
+  "dataset": "EURUSD H1 2024-01-01..2024-12-31",
+  "start": "2024-01-01T00:00:00Z",
+  "end": "2025-01-01T00:00:00Z",
+  "trades": 0,
+  "wins": 0,
+  "losses": 0,
+  "start_balance": 10000,
+  "end_balance": 10000,
+  "net_pl": 0,
+  "return_pct": 0,
+  "win_rate": 0,
+  "risk_pct": 0.5,
+  "stop_pips": 20,
+  "rr": 0
+}

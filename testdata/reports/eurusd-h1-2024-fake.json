@@ -1,0 +1,21 @@
+{
+  "name": "eurusd-h1-2024-template",
+  "kind": "fake",
+  "strategy": "Fake",
+  "instrument": "EURUSD",
+  "timeframe": "H1",
+  "dataset": "EURUSD H1 2024-01-01..2024-12-31",
+  "start": "2024-01-01T00:00:00Z",
+  "end": "2025-01-01T00:00:00Z",
+  "trades": 1,
+  "wins": 1,
+  "losses": 0,
+  "start_balance": 10000,
+  "end_balance": 20348.6,
+  "net_pl": 10348.6,
+  "return_pct": 103.48599999999999,
+  "win_rate": 100,
+  "risk_pct": 0.5,
+  "stop_pips": 0,
+  "rr": 0
+}

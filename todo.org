@@ -28,7 +28,7 @@ Then improve planning accuracy, build correctness, and performance.
 
 * TODO Cleanup backlog
 
-** TODO Move datafile.download to downloader.go
+** DONE Move datafile.download to downloader.go
 ** TODO Choose and document the candle storage convention
 :PROPERTIES:
 :ID: trader-cleanup-storage-convention

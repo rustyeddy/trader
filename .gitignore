@@ -51,3 +51,4 @@ cli
 tmp
 trader.log
 debug*
+data

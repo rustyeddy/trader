@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/broker/sim"
+	"github.com/rustyeddy/trader/brokers/sim"
 )
 
 func newPricingCmd(rc *trader.RootConfig) *cobra.Command {

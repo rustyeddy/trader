@@ -229,3 +229,189 @@ func TestBackTestWithIteratorReturnsBrokerEventError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing position")
 }
+
+type testCycleStrategy struct {
+	instrument string
+	waitBars   int
+	holdBars   int
+	stopPips   float64
+	totalBars  int
+
+	bar        int
+	nextOpenAt int
+	openedAt   int
+	longNext   bool
+}
+
+func (s *testCycleStrategy) Name() string {
+	return "test-cycle"
+}
+
+func (s *testCycleStrategy) Update(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
+	_ = ctx
+
+	if candle == nil {
+		return &DefaultStrategyPlan
+	}
+
+	if s.waitBars <= 0 {
+		s.waitBars = 10
+	}
+	if s.holdBars <= 0 {
+		s.holdBars = 6
+	}
+	if s.stopPips <= 0 {
+		s.stopPips = 20
+	}
+	if s.bar == 0 && s.nextOpenAt == 0 {
+		s.nextOpenAt = 1
+		s.longNext = true
+	}
+
+	s.bar++
+
+	plan := &StrategyPlan{
+		Reason: "hold",
+	}
+
+	// If a position is open, close it after holdBars or on the very last bar.
+	if positions.Len() > 0 {
+		shouldClose := (s.bar - s.openedAt) >= s.holdBars
+		if s.totalBars > 0 && s.bar >= s.totalBars {
+			shouldClose = true
+		}
+
+		if shouldClose {
+			positions.Range(func(pos *Position) error {
+				cl := &closeRequest{
+					Request: Request{
+						TradeCommon: pos.TradeCommon,
+						Reason:      "CycleClose",
+						Candle:      candle.Candle,
+						RequestType: RequestClose,
+						Price:       candle.Close,
+						Timestamp:   candle.Timestamp,
+					},
+					// Keep the existing enum simple for now.
+					CloseCause: CloseStopLoss,
+					Position:   pos,
+				}
+				plan.Closes = append(plan.Closes, cl)
+				return nil
+			})
+
+			s.nextOpenAt = s.bar + s.waitBars
+			s.longNext = !s.longNext
+			return plan
+		}
+
+		return plan
+	}
+
+	// Flat: open on schedule.
+	if s.bar < s.nextOpenAt {
+		return plan
+	}
+
+	side := Long
+	if !s.longNext {
+		side = Short
+	}
+
+	inst := GetInstrument(s.instrument)
+	if inst == nil {
+		plan.Reason = "missing instrument"
+		return plan
+	}
+
+	var stop Price
+	if side == Long {
+		stop = inst.SubPips(candle.Close, pipsFromFloat(s.stopPips))
+	} else {
+		stop = inst.AddPips(candle.Close, pipsFromFloat(s.stopPips))
+	}
+
+	op := newOpenRequest(s.instrument, candle, side, stop, Price(0), "cycle-open")
+	plan.Opens = append(plan.Opens, op)
+	plan.Reason = "cycle-open"
+
+	s.openedAt = s.bar
+	return plan
+}
+
+func flattenValidCandles(sets []*candleSet) []candleTime {
+	var out []candleTime
+
+	for _, cs := range sets {
+		for i := range cs.Candles {
+			if !cs.IsValid(i) {
+				continue
+			}
+			out = append(out, candleTime{
+				Candle:    cs.Candles[i],
+				Timestamp: cs.Timestamp(i),
+			})
+		}
+	}
+
+	return out
+}
+
+func TestTraderFakeStrategyYearlyLifecycle(t *testing.T) {
+	trader := newTestTrader()
+
+	cfg := DefaultSyntheticConfig("EURUSD")
+	cfg.Timeframe = H1
+	cfg.Seed = 4242
+	cfg.Trend = 0.00002
+	cfg.Volatility = 0.0015
+	cfg.TicksPerBar = 20
+
+	sets, err := cfg.GenerateSyntheticYearlyCandles(2024)
+	require.NoError(t, err)
+
+	bars := flattenValidCandles(sets)
+	require.NotEmpty(t, bars)
+	require.Greater(t, len(bars), 1000)
+
+	idx := -1
+	iter := &testIterator{
+		nextFn: func() bool {
+			idx++
+			return idx < len(bars)
+		},
+		candleTimeFn: func() candleTime {
+			if idx < 0 || idx >= len(bars) {
+				return candleTime{}
+			}
+			return bars[idx]
+		},
+	}
+
+	strategy := &testCycleStrategy{
+		instrument: "EURUSD",
+		waitBars:   8,
+		holdBars:   6,
+		stopPips:   20,
+		totalBars:  len(bars),
+	}
+
+	cfgBacktest := &ConfigBackTest{
+		Instrument: "EURUSD",
+		Strategy:   "fake",
+		TimeFrame:  H1,
+	}
+
+	err = trader.backTestWithIterator(context.Background(), cfgBacktest, strategy, iter)
+	require.NoError(t, err)
+	assert.True(t, iter.closed)
+
+	// We want repeated opens/closes over a long run.
+	assert.Greater(t, len(trader.Account.Trades), 20)
+
+	// The cycle strategy should force-close by the end.
+	assert.Equal(t, 0, trader.Account.Positions.Len())
+
+	// Once all positions are closed, equity should equal balance.
+	assert.Equal(t, trader.Account.Balance, trader.Account.Equity)
+}

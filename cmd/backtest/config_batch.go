@@ -113,6 +113,12 @@ func executeConfiguredRun(ctx context.Context, rr trader.ResolvedRun) (trader.Ba
 		strat := newConfigFakeStrategy(rr.Instrument)
 		meta.Strategy = strat.Name()
 		return executeCandleStrategy(ctx, opts, strat, meta, acct)
+
+	case "fake-02":
+		strat := newConfigFakeStrategy(rr.Instrument)
+		meta.Strategy = strat.Name()
+		return executeCandleStrategy(ctx, opts, strat, meta, acct)
+
 	case "template":
 		cfg, err := BuildTemplateStrategyConfig(rr)
 		if err != nil {
