@@ -41,6 +41,8 @@ type candleTime struct {
 	Timestamp
 }
 
+type CandleTime = candleTime
+
 func String(c candleTime) string {
 	return c.Candle.String()
 }

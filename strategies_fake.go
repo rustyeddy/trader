@@ -60,7 +60,11 @@ func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) 
 			return plan
 		}
 
+		submittedClose := false
 		positions.Range(func(pos *Position) error {
+			if pos.State != PositionOpen {
+				return nil
+			}
 
 			// Are there positions that need to be closed?
 			if (pos.Side == Long && c.Close <= pos.Stop) ||
@@ -78,9 +82,13 @@ func (f *Fake) Update(ctx context.Context, c *candleTime, positions *Positions) 
 					Position:   pos,
 				}
 				plan.Closes = append(plan.Closes, cl)
+				submittedClose = true
 			}
 			return nil
 		})
+		if !submittedClose {
+			return plan
+		}
 	}
 
 	return plan

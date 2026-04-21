@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -82,7 +83,13 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(c Candle) *StrategyPlan {
+func (x *EMACrossADX) Update(ctx context.Context, ct *CandleTime, positions *Positions) *StrategyPlan {
+	_ = ctx
+	_ = positions
+	if ct == nil {
+		return &DefaultStrategyPlan
+	}
+	c := ct.Candle
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)

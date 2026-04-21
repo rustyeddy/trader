@@ -14,12 +14,15 @@ type Engine struct {
 	prices  map[string]trader.Tick
 }
 
-func NewEngine(acct trader.Account, j trader.Journal) *Engine {
+func NewEngine(acct *trader.Account, j trader.Journal) *Engine {
+	if acct == nil {
+		acct = &trader.Account{}
+	}
 	if acct.Positions.Positions() == nil {
 		acct.Positions = trader.Positions{}
 	}
 	return &Engine{
-		account: &acct,
+		account: acct,
 		journal: j,
 		prices:  make(map[string]trader.Tick),
 	}

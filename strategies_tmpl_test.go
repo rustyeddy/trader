@@ -1,9 +1,15 @@
 package trader
 
 import (
-	"github.com/stretchr/testify/require"
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func updateTemplateStrategy(s *TemplateStrategy, c Candle) *StrategyPlan {
+	return s.Update(context.Background(), &CandleTime{Candle: c}, nil)
+}
 
 func TestTemplateStrategy_Warmup(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{
@@ -17,7 +23,7 @@ func TestTemplateStrategy_Warmup(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		d := s.Update(mkClose(1.1000))
+		d := updateTemplateStrategy(s, mkClose(1.1000))
 		require.Equal(t, "hold", d.Reason)
 		require.Empty(t, d.Opens)
 	}
@@ -34,8 +40,8 @@ func TestTemplateStrategy_EmitsSignal(t *testing.T) {
 		Scale:     PriceScale,
 	})
 
-	_ = s.Update(mkClose(1.1000)) // warmup
-	d := s.Update(mkClose(1.1020))
+	_ = updateTemplateStrategy(s, mkClose(1.1000)) // warmup
+	d := updateTemplateStrategy(s, mkClose(1.1020))
 	require.Equal(t, "hold", d.Reason)
 	require.Empty(t, d.Opens)
 }
@@ -47,8 +53,8 @@ func TestTemplateStrategy_Reset(t *testing.T) {
 		Scale:     PriceScale,
 	})
 
-	_ = s.Update(mkClose(1.1000))
-	_ = s.Update(mkClose(1.1020))
+	_ = updateTemplateStrategy(s, mkClose(1.1000))
+	_ = updateTemplateStrategy(s, mkClose(1.1020))
 
 	s.Reset()
 
@@ -56,7 +62,7 @@ func TestTemplateStrategy_Reset(t *testing.T) {
 		t.Fatalf("expected not ready after reset")
 	}
 
-	d := s.Update(mkClose(1.1000))
+	d := updateTemplateStrategy(s, mkClose(1.1000))
 	require.Equal(t, "hold", d.Reason)
 }
 
@@ -67,14 +73,14 @@ func TestTemplateStrategy_Name(t *testing.T) {
 
 func TestTemplateStrategyPlan_Reason(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: PriceScale})
-	d := s.Update(mkClose(1.1000))
+	d := updateTemplateStrategy(s, mkClose(1.1000))
 	require.NotEmpty(t, d.Reason)
 }
 
 func TestTemplateStrategy_NoSignalPlan(t *testing.T) {
 	s := NewTemplateStrategy(TemplateStrategyConfig{Lookback: 2, Threshold: 0.0010, Scale: PriceScale})
-	_ = s.Update(mkClose(1.1020))
-	d := s.Update(mkClose(1.1000))
+	_ = updateTemplateStrategy(s, mkClose(1.1020))
+	d := updateTemplateStrategy(s, mkClose(1.1000))
 	require.Empty(t, d.Opens)
 	require.Empty(t, d.Closes)
 }
@@ -85,8 +91,8 @@ func TestTemplateStrategy_HoldAfterWarmup(t *testing.T) {
 		Threshold: 0.0100, // large threshold so small moves don't trigger
 		Scale:     PriceScale,
 	})
-	_ = s.Update(mkClose(1.1000))
-	d := s.Update(mkClose(1.1001))
+	_ = updateTemplateStrategy(s, mkClose(1.1000))
+	d := updateTemplateStrategy(s, mkClose(1.1001))
 	require.Equal(t, "hold", d.Reason)
 }
 

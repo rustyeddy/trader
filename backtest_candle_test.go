@@ -58,16 +58,21 @@ func openReq(instrument string, side Side, units Units, stop, take Price) *OpenR
 
 type fixedStrategy struct {
 	name string
-	make func(*CandleContext, Candle) *OpenRequest
+	make func(context.Context, *CandleTime, *Positions) *OpenRequest
 }
 
 func (s *fixedStrategy) Name() string { return s.name }
 func (s *fixedStrategy) Reset()       {}
-func (s *fixedStrategy) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
+func (s *fixedStrategy) Ready() bool  { return true }
+func (s *fixedStrategy) Update(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
 	if s.make == nil {
-		return nil
+		return &DefaultStrategyPlan
 	}
-	return s.make(ctx, c)
+	req := s.make(ctx, candle, positions)
+	if req == nil {
+		return &DefaultStrategyPlan
+	}
+	return &StrategyPlan{Reason: s.name, Opens: []*OpenRequest{req}}
 }
 
 func TestCandleEngineRun_BuyFirstBarStrategy(t *testing.T) {
@@ -94,11 +99,11 @@ func TestCandleEngineRun_TakeProfitClosesTrade(t *testing.T) {
 		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101500, Low: 99900, Close: 101000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		if ctx.Pos != nil {
+	strat := &fixedStrategy{name: "take", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		if positions != nil && positions.Len() > 0 {
 			return nil
 		}
-		return openReq(ctx.Instrument, Long, 1000, 0, 101000)
+		return openReq(StrategyInstrument(ctx), Long, 1000, 0, 101000)
 	}}
 	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
@@ -115,11 +120,11 @@ func TestCandleEngineRun_StopLossClosesTrade(t *testing.T) {
 		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 98900, Close: 99000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "stop", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		if ctx.Pos != nil {
+	strat := &fixedStrategy{name: "stop", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		if positions != nil && positions.Len() > 0 {
 			return nil
 		}
-		return openReq(ctx.Instrument, Long, 1000, 99000, 0)
+		return openReq(StrategyInstrument(ctx), Long, 1000, 99000, 0)
 	}}
 	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
@@ -135,11 +140,11 @@ func TestCandleEngineRun_SameBarStopAndTake_UsesStopFirst(t *testing.T) {
 		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101500, Low: 98900, Close: 100500, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "stop-take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		if ctx.Pos != nil {
+	strat := &fixedStrategy{name: "stop-take", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		if positions != nil && positions.Len() > 0 {
 			return nil
 		}
-		return openReq(ctx.Instrument, Long, 1000, 99000, 101000)
+		return openReq(StrategyInstrument(ctx), Long, 1000, 99000, 101000)
 	}}
 	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
@@ -149,8 +154,8 @@ func TestCandleEngineRun_SameBarStopAndTake_UsesStopFirst(t *testing.T) {
 
 func TestCandleEngineRun_GapBarsReported(t *testing.T) {
 	var gaps []int
-	strat := &fixedStrategy{name: "gap", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		gaps = append(gaps, ctx.GapBars)
+	strat := &fixedStrategy{name: "gap", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		gaps = append(gaps, StrategyGapBars(ctx))
 		return nil
 	}}
 	feed := &fakeFeed{bars: []fakeBar{{
@@ -173,11 +178,11 @@ func TestCandleEngineRun_ShortTakeProfitClosesTrade(t *testing.T) {
 		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 100100, Low: 98900, Close: 99000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "short-take", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		if ctx.Pos != nil {
+	strat := &fixedStrategy{name: "short-take", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		if positions != nil && positions.Len() > 0 {
 			return nil
 		}
-		return openReq(ctx.Instrument, Short, 1000, 0, 99000)
+		return openReq(StrategyInstrument(ctx), Short, 1000, 0, 99000)
 	}}
 	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
@@ -194,11 +199,11 @@ func TestCandleEngineRun_ShortStopLossClosesTrade(t *testing.T) {
 		ts: FromTime(time.Date(2026, time.January, 1, 1, 0, 0, 0, time.UTC)),
 		c:  Candle{Open: 100000, High: 101100, Low: 99900, Close: 101000, Ticks: 12},
 	}}}
-	strat := &fixedStrategy{name: "short-stop", make: func(ctx *CandleContext, c Candle) *OpenRequest {
-		if ctx.Pos != nil {
+	strat := &fixedStrategy{name: "short-stop", make: func(ctx context.Context, candle *CandleTime, positions *Positions) *OpenRequest {
+		if positions != nil && positions.Len() > 0 {
 			return nil
 		}
-		return openReq(ctx.Instrument, Short, 1000, 101000, 0)
+		return openReq(StrategyInstrument(ctx), Short, 1000, 101000, 0)
 	}}
 	engine := NewCandleEngine("EURUSD", H1, testAccount())
 	require.NoError(t, engine.Run(feed, strat))
@@ -210,12 +215,13 @@ type countingEntryStrategy struct{ entries int }
 
 func (s *countingEntryStrategy) Name() string { return "counting-entry" }
 func (s *countingEntryStrategy) Reset()       { s.entries = 0 }
-func (s *countingEntryStrategy) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
-	if s.entries > 0 || ctx.Pos != nil {
-		return nil
+func (s *countingEntryStrategy) Ready() bool  { return true }
+func (s *countingEntryStrategy) Update(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
+	if s.entries > 0 || (positions != nil && positions.Len() > 0) {
+		return &DefaultStrategyPlan
 	}
 	s.entries++
-	return openReq(ctx.Instrument, Long, 1000, 0, 0)
+	return &StrategyPlan{Reason: "counting-entry", Opens: []*OpenRequest{openReq(StrategyInstrument(ctx), Long, 1000, 0, 0)}}
 }
 
 func TestCandleEngineRun_StrategyEntersOnlyOnce(t *testing.T) {

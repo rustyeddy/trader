@@ -30,7 +30,7 @@ type closeRequest struct {
 
 func newOpenRequest(
 	instr string,
-	c *candleTime,
+	c *CandleTime,
 	side Side,
 	stop Price,
 	take Price,

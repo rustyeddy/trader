@@ -1,14 +1,16 @@
 package trader
 
 import (
-	"github.com/stretchr/testify/require"
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func feedPlans(s *EMACross, closes []float64) []*StrategyPlan {
 	out := make([]*StrategyPlan, 0, len(closes))
 	for _, c := range closes {
-		d := s.Update(mkClose(c))
+		d := s.Update(context.Background(), &CandleTime{Candle: mkClose(c)}, nil)
 		out = append(out, d)
 	}
 	return out
@@ -134,7 +136,7 @@ func TestEMACross_Name(t *testing.T) {
 
 func TestEMACrossPlan_Reason(t *testing.T) {
 	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: PriceScale})
-	d := s.Update(mkClose(1.0))
+	d := s.Update(context.Background(), &CandleTime{Candle: mkClose(1.0)}, nil)
 	require.NotEmpty(t, d.Reason)
 }
 

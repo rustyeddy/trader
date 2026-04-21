@@ -68,6 +68,10 @@ func (s testStrategy) Name() string {
 	return s.name
 }
 
+func (s testStrategy) Reset() {}
+
+func (s testStrategy) Ready() bool { return true }
+
 func (s testStrategy) Update(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
 	if s.updateFn == nil {
 		return &DefaultStrategyPlan
@@ -247,6 +251,15 @@ func (s *testCycleStrategy) Name() string {
 	return "test-cycle"
 }
 
+func (s *testCycleStrategy) Reset() {
+	s.bar = 0
+	s.nextOpenAt = 0
+	s.openedAt = 0
+	s.longNext = false
+}
+
+func (s *testCycleStrategy) Ready() bool { return true }
+
 func (s *testCycleStrategy) Update(ctx context.Context, candle *candleTime, positions *Positions) *StrategyPlan {
 	_ = ctx
 
@@ -282,7 +295,11 @@ func (s *testCycleStrategy) Update(ctx context.Context, candle *candleTime, posi
 		}
 
 		if shouldClose {
+			submittedClose := false
 			positions.Range(func(pos *Position) error {
+				if pos.State != PositionOpen {
+					return nil
+				}
 				cl := &closeRequest{
 					Request: Request{
 						TradeCommon: pos.TradeCommon,
@@ -297,8 +314,12 @@ func (s *testCycleStrategy) Update(ctx context.Context, candle *candleTime, posi
 					Position:   pos,
 				}
 				plan.Closes = append(plan.Closes, cl)
+				submittedClose = true
 				return nil
 			})
+			if !submittedClose {
+				return plan
+			}
 
 			s.nextOpenAt = s.bar + s.waitBars
 			s.longNext = !s.longNext
@@ -332,6 +353,7 @@ func (s *testCycleStrategy) Update(ctx context.Context, candle *candleTime, posi
 	}
 
 	op := newOpenRequest(s.instrument, candle, side, stop, Price(0), "cycle-open")
+	op.Units = Units(1000)
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "cycle-open"
 

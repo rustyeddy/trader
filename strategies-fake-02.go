@@ -29,7 +29,18 @@ func (f *Fake02) Name() string {
 	return "Fake02"
 }
 
-func (f *Fake02) Update(ctx context.Context, c *candleTime, positions *Positions) *StrategyPlan {
+func (f *Fake02) Reset() {
+	f.bar = 0
+	f.nextOpenAt = 0
+	f.openedAt = 0
+	f.longNext = false
+}
+
+func (f *Fake02) Ready() bool {
+	return true
+}
+
+func (f *Fake02) Update(ctx context.Context, c *CandleTime, positions *Positions) *StrategyPlan {
 	_ = ctx
 
 	plan := &StrategyPlan{
@@ -59,7 +70,11 @@ func (f *Fake02) Update(ctx context.Context, c *candleTime, positions *Positions
 	// If something is open, close it after HoldBars.
 	if positions != nil && positions.Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
+			submittedClose := false
 			positions.Range(func(pos *Position) error {
+				if pos.State != PositionOpen {
+					return nil
+				}
 				cl := &closeRequest{
 					Request: Request{
 						TradeCommon: pos.TradeCommon,
@@ -73,8 +88,12 @@ func (f *Fake02) Update(ctx context.Context, c *candleTime, positions *Positions
 					CloseCause: CloseManual,
 				}
 				plan.Closes = append(plan.Closes, cl)
+				submittedClose = true
 				return nil
 			})
+			if !submittedClose {
+				return plan
+			}
 
 			f.nextOpenAt = f.bar + f.WaitBars
 			f.longNext = !f.longNext

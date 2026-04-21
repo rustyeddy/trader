@@ -1,35 +1,9 @@
 package trader
 
 import (
+	"context"
 	"fmt"
 )
-
-// CandleStrategy is called once per *valid* candle (Iterator() skips invalid bars).
-// It may return an OrderRequest to open a position.
-//
-// This engine is intentionally simple:
-//   - one position at a time
-//   - market entries at close
-//   - stop/take evaluated on OHLC of each bar
-type CandleStrategy interface {
-	Name() string
-	Reset()
-	OnBar(ctx *CandleContext, c Candle) *OpenRequest
-}
-
-type CandleSide int8
-
-type CandleContext struct {
-	CS         *candleSet
-	BarIndex   int
-	Instrument string
-	Idx        int
-	Timestamp  Timestamp
-	GapBars    int // missing bars between this and previous valid bar
-
-	Pos     *Position
-	Account *Account
-}
 
 type CandleEngine struct {
 	Instrument string
@@ -46,7 +20,11 @@ func NewCandleEngine(instrument string, tf Timeframe, account *Account) *CandleE
 	}
 }
 
-func (e *CandleEngine) Run(feed candleIterator, strat CandleStrategy) error {
+func (e *CandleEngine) Run(feed candleIterator, strat Strategy) error {
+	return e.RunContext(context.Background(), feed, strat)
+}
+
+func (e *CandleEngine) RunContext(ctx context.Context, feed candleIterator, strat Strategy) error {
 	if e.Account == nil {
 		return fmt.Errorf("candle backtest: nil account")
 	}
@@ -84,14 +62,11 @@ func (e *CandleEngine) Run(feed candleIterator, strat CandleStrategy) error {
 		}
 
 		prevTS = ts
-		ctx := &CandleContext{
-			Instrument: e.Instrument,
-			Timestamp:  ts,
-			Idx:        barIndex,
-			BarIndex:   barIndex,
-			GapBars:    gapBars,
-			Pos:        e.Pos,
-			Account:    e.Account,
+		barCtx := withStrategyRuntime(ctx, e.Instrument, barIndex, gapBars, e.Account)
+		ct := &CandleTime{Candle: c, Timestamp: ts}
+		barPositions := Positions{positions: make(map[string]*Position, len(e.Account.Positions.Positions()))}
+		for id, pos := range e.Account.Positions.Positions() {
+			barPositions.positions[id] = pos
 		}
 		barIndex++
 		if e.Pos != nil {
@@ -108,8 +83,44 @@ func (e *CandleEngine) Run(feed candleIterator, strat CandleStrategy) error {
 			}
 		}
 
-		req := strat.OnBar(ctx, c)
-		if req == nil || e.Pos != nil {
+		plan := strat.Update(barCtx, ct, &barPositions)
+		if plan == nil {
+			continue
+		}
+
+		if e.Pos != nil {
+			for _, cl := range plan.Closes {
+				if cl == nil {
+					continue
+				}
+				if cl.Position != nil && cl.Position != e.Pos {
+					continue
+				}
+				trade := &Trade{
+					TradeCommon: e.Pos.TradeCommon,
+					FillPrice:   cl.Price,
+					FillTime:    cl.Timestamp,
+				}
+				if trade.FillPrice == 0 {
+					trade.FillPrice = c.Close
+				}
+				if trade.FillTime == 0 {
+					trade.FillTime = ts
+				}
+				if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+					return err
+				}
+				e.Pos = nil
+				break
+			}
+		}
+
+		if e.Pos != nil || len(plan.Opens) == 0 {
+			continue
+		}
+
+		req := plan.Opens[0]
+		if req == nil {
 			continue
 		}
 

@@ -1,5 +1,7 @@
 package trader
 
+import "sync"
+
 type positionState int
 
 const (
@@ -18,18 +20,32 @@ type Position struct {
 }
 
 type Positions struct {
+	mu        sync.RWMutex
 	positions map[string]*Position
 }
 
 func (p *Positions) Positions() map[string]*Position {
-	return p.positions
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.positions == nil {
+		return nil
+	}
+	out := make(map[string]*Position, len(p.positions))
+	for id, pos := range p.positions {
+		out[id] = pos
+	}
+	return out
 }
 
 func (p *Positions) Len() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return len(p.positions)
 }
 
 func (p *Positions) Add(pos *Position) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.positions == nil {
 		p.positions = make(map[string]*Position)
 	}
@@ -37,6 +53,8 @@ func (p *Positions) Add(pos *Position) {
 }
 
 func (p *Positions) Delete(ID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.positions == nil {
 		return
 	}
@@ -44,7 +62,13 @@ func (p *Positions) Delete(ID string) {
 }
 
 func (p *Positions) Range(fn func(*Position) error) error {
+	p.mu.RLock()
+	positions := make([]*Position, 0, len(p.positions))
 	for _, pos := range p.positions {
+		positions = append(positions, pos)
+	}
+	p.mu.RUnlock()
+	for _, pos := range positions {
 		if err := fn(pos); err != nil {
 			return err
 		}

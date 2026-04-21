@@ -54,7 +54,7 @@ func (o candleCmdCommon) takePips() trader.Price { return trader.Price(o.TakePip
 func (o candleCmdCommon) units() trader.Units    { return trader.Units(o.Units) }
 func (o candleCmdCommon) riskPct() trader.Rate   { return trader.RateFromFloat(o.RiskPct64 / 100.0) }
 
-type candleStrategyAdapter struct {
+type configuredStrategy struct {
 	S trader.Strategy
 
 	Units     trader.Units
@@ -63,43 +63,51 @@ type candleStrategyAdapter struct {
 	PipScaled trader.Price
 }
 
-func (a *candleStrategyAdapter) Name() string { return a.S.Name() }
-func (a *candleStrategyAdapter) Reset()       { a.S.Reset() }
+func (a *configuredStrategy) Name() string { return a.S.Name() }
+func (a *configuredStrategy) Reset()       { a.S.Reset() }
+func (a *configuredStrategy) Ready() bool  { return a.S.Ready() }
 
-func (a *candleStrategyAdapter) OnBar(ctx *trader.CandleContext, c trader.Candle) *trader.OpenRequest {
-	d := a.S.Update(c)
-	if len(d.Opens) == 0 {
-		return nil
+func (a *configuredStrategy) Update(ctx context.Context, candle *trader.CandleTime, positions *trader.Positions) *trader.StrategyPlan {
+	plan := a.S.Update(ctx, candle, positions)
+	if plan == nil || len(plan.Opens) == 0 || candle == nil {
+		return plan
 	}
-	req := *d.Opens[0]
+
+	copyPlan := *plan
+	copyPlan.Opens = append([]*trader.OpenRequest(nil), plan.Opens...)
+	req := *plan.Opens[0]
+
 	if req.Price == 0 {
-		req.Price = c.Close
+		req.Price = candle.Close
 	}
 	if req.Timestamp == 0 {
-		req.Timestamp = ctx.Timestamp
+		req.Timestamp = candle.Timestamp
 	}
 	if req.Units == 0 {
 		req.Units = a.Units
 	}
+
 	stopDist := a.StopPips * trader.Price(a.PipScaled)
 	takeDist := a.TakePips * trader.Price(a.PipScaled)
 	if req.Side == trader.Long {
 		if req.Stop == 0 && a.StopPips > 0 {
-			req.Stop = c.Close - stopDist
+			req.Stop = candle.Close - stopDist
 		}
 		if req.Take == 0 && a.TakePips > 0 {
-			req.Take = c.Close + takeDist
+			req.Take = candle.Close + takeDist
 		}
 	}
 	if req.Side == trader.Short {
 		if req.Stop == 0 && a.StopPips > 0 {
-			req.Stop = c.Close + stopDist
+			req.Stop = candle.Close + stopDist
 		}
 		if req.Take == 0 && a.TakePips > 0 {
-			req.Take = c.Close - takeDist
+			req.Take = candle.Close - takeDist
 		}
 	}
-	return &req
+
+	copyPlan.Opens[0] = &req
+	return &copyPlan
 }
 
 type candleRunMeta struct {
@@ -177,7 +185,7 @@ func executeCandleStrategy(
 	}
 
 	dm := trader.NewDataManager([]string{instrument}, start, end)
-	adapter := &candleStrategyAdapter{
+	adapter := &configuredStrategy{
 		S:         strat,
 		Units:     opts.units(),
 		StopPips:  opts.stopPips(),

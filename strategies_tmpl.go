@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -52,7 +53,13 @@ func (s *TemplateStrategy) Ready() bool {
 	return s.ready
 }
 
-func (s *TemplateStrategy) Update(c Candle) *StrategyPlan {
+func (s *TemplateStrategy) Update(ctx context.Context, ct *CandleTime, positions *Positions) *StrategyPlan {
+	_ = ctx
+	_ = positions
+	if ct == nil {
+		return &DefaultStrategyPlan
+	}
+	c := ct.Candle
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
 
 	s.bars++

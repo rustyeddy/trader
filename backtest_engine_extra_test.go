@@ -92,12 +92,13 @@ type shortStopAndTakeStrat struct{ done bool }
 
 func (s *shortStopAndTakeStrat) Name() string { return "short-stop-take" }
 func (s *shortStopAndTakeStrat) Reset()       { s.done = false }
-func (s *shortStopAndTakeStrat) OnBar(ctx *CandleContext, c Candle) *OpenRequest {
-	if s.done || ctx.Pos != nil {
-		return nil
+func (s *shortStopAndTakeStrat) Ready() bool  { return true }
+func (s *shortStopAndTakeStrat) Update(ctx context.Context, candle *CandleTime, positions *Positions) *StrategyPlan {
+	if s.done || (positions != nil && positions.Len() > 0) {
+		return &DefaultStrategyPlan
 	}
 	s.done = true
-	return openReq(ctx.Instrument, Short, 1000, 101000, 99000)
+	return &StrategyPlan{Reason: "short-stop-take", Opens: []*OpenRequest{openReq(StrategyInstrument(ctx), Short, 1000, 101000, 99000)}}
 }
 
 // ─── closePosition with unknown instrument ────────────────────────────────────

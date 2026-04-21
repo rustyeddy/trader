@@ -26,24 +26,7 @@ type ConfigBackTest struct {
 	Account string
 }
 
-type backtestStrategy interface {
-	Name() string
-	Update(context.Context, *candleTime, *Positions) *StrategyPlan
-}
-
-type noopBacktestStrategy struct {
-	noopStrategy
-}
-
-func (n noopBacktestStrategy) Update(ctx context.Context, c *candleTime, _ *Positions) *StrategyPlan {
-	if c == nil {
-		return n.noopStrategy.Update(ctx, nil)
-	}
-	candle := c.Candle
-	return n.noopStrategy.Update(ctx, &candle)
-}
-
-func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
+func resolveBacktestStrategy(cfg *ConfigBackTest) (Strategy, error) {
 	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy))
 	switch strategyName {
 	case "", "fake":
@@ -63,7 +46,7 @@ func resolveBacktestStrategy(cfg *ConfigBackTest) (backtestStrategy, error) {
 		}, nil
 
 	case "noop", "no-op":
-		return noopBacktestStrategy{noopStrategy: noopStrategy{}}, nil
+		return noopStrategy{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
 	}
@@ -110,10 +93,60 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy backtestStrategy, itr candleIterator) (err error) {
+func snapshotStrategyPositions(src *Positions) *Positions {
+	out := &Positions{}
+	if src == nil {
+		return out
+	}
+	_ = src.Range(func(pos *Position) error {
+		if pos != nil && (pos.State == PositionOpen || pos.State == PositionOpenRequested || pos.State == PositionCloseRequested) {
+			out.Add(pos)
+		}
+		return nil
+	})
+	return out
+}
+
+func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := t.brokerEventError(errCh); err != nil {
+			return err
+		}
+
+		queueLen := 0
+		if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
+			queueLen = len(t.Broker.evtQ)
+		}
+
+		pendingState := false
+		if t != nil && t.Account != nil {
+			_ = t.Account.Positions.Range(func(pos *Position) error {
+				if pos.State == PositionOpenRequested || pos.State == PositionCloseRequested {
+					pendingState = true
+				}
+				return nil
+			})
+		}
+
+		if queueLen == 0 && !pendingState {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+}
+
+func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy Strategy, itr candleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
+	if strategy == nil {
+		return fmt.Errorf("nil strategy")
+	}
+	strategy.Reset()
 
 	defer func() {
 		closeErr := itr.Close()
@@ -161,6 +194,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 	var processedCandles int64
 	var submittedOpens int64
 	var submittedCloses int64
+	var lastCandle candleTime
+	haveLastCandle := false
 
 	var lastProgressNanos int64
 	atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
@@ -232,6 +267,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		}
 
 		candle := itr.CandleTime()
+		lastCandle = candle
+		haveLastCandle = true
 		Backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		atomic.AddInt64(&processedCandles, 1)
 
@@ -242,7 +279,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 			return err
 		}
 
-		plan := strategy.Update(runCtx, &candle, &t.Account.Positions)
+		strategyCtx := withStrategyRuntime(runCtx, cfg.Instrument, int(processedCandles), 0, t.Account)
+		strategyPositions := snapshotStrategyPositions(&t.Account.Positions)
+		plan := strategy.Update(strategyCtx, &candle, strategyPositions)
+		if plan == nil {
+			plan = &DefaultStrategyPlan
+		}
 		Backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancelReq := range plan.Cancel {
@@ -256,20 +298,32 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 			if err != nil {
 				return err
 			}
+			if cl.Position != nil {
+				cl.Position.State = PositionCloseRequested
+			}
 			atomic.AddInt64(&submittedCloses, 1)
 		}
 
 		for _, openReq := range plan.Opens {
 			Backtest.Info("Broker event Open Position", "ID", openReq.ID)
-			err := t.Account.SizePosition(openReq)
-			if err != nil {
-				return err
+			if openReq.Units == 0 {
+				err := t.Account.SizePosition(openReq)
+				if err != nil {
+					return err
+				}
 			}
 
 			Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			t.Account.Positions.Add(&Position{
+				TradeCommon: openReq.TradeCommon,
+				FillPrice:   openReq.Price,
+				FillTime:    openReq.Timestamp,
+				State:       PositionOpenRequested,
+			})
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.OpenRequest(runCtx, openReq)
 			if err != nil {
+				t.Account.Positions.Delete(openReq.ID)
 				return err
 			}
 			atomic.AddInt64(&submittedOpens, 1)
@@ -278,6 +332,28 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 
 	if err := itr.Err(); err != nil {
 		return err
+	}
+	if err := t.waitForBrokerIdle(errCh, 2*time.Second); err != nil {
+		return err
+	}
+	if haveLastCandle {
+		var remaining []*Position
+		_ = t.Account.Positions.Range(func(pos *Position) error {
+			if pos != nil && pos.State == PositionOpen {
+				remaining = append(remaining, pos)
+			}
+			return nil
+		})
+		for _, pos := range remaining {
+			trade := &Trade{
+				TradeCommon: pos.TradeCommon,
+				FillPrice:   lastCandle.Close,
+				FillTime:    lastCandle.Timestamp,
+			}
+			if err := t.Account.ClosePosition(pos, trade); err != nil {
+				return err
+			}
+		}
 	}
 	if err := runCtx.Err(); err != nil {
 		return err

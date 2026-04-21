@@ -20,7 +20,7 @@ func RunCandles(
 	ctx context.Context,
 	src CandleSource,
 	req CandleRunRequest,
-	strat CandleStrategy,
+	strat Strategy,
 	acct *Account,
 ) (*CandleEngine, error) {
 	if acct == nil {
@@ -37,7 +37,7 @@ func RunCandles(
 		Timeframe:  req.DataRequest.Timeframe,
 		Account:    acct,
 	}
-	if err := engine.Run(it, strat); err != nil {
+	if err := engine.RunContext(ctx, it, strat); err != nil {
 		return nil, err
 	}
 

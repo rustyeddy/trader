@@ -1,6 +1,10 @@
 package backtest
 
-import "github.com/rustyeddy/trader"
+import (
+	"context"
+
+	"github.com/rustyeddy/trader"
+)
 
 type configFakeStrategy struct {
 	instrument string
@@ -19,8 +23,13 @@ func (s *configFakeStrategy) Reset() {
 
 func (s *configFakeStrategy) Ready() bool { return true }
 
-func (s *configFakeStrategy) Update(c trader.Candle) *trader.StrategyPlan {
+func (s *configFakeStrategy) Update(ctx context.Context, candle *trader.CandleTime, positions *trader.Positions) *trader.StrategyPlan {
+	_ = ctx
+	_ = positions
 	if s.opened {
+		return &trader.DefaultStrategyPlan
+	}
+	if candle == nil {
 		return &trader.DefaultStrategyPlan
 	}
 
@@ -35,7 +44,7 @@ func (s *configFakeStrategy) Update(c trader.Candle) *trader.StrategyPlan {
 				Request: trader.Request{
 					TradeCommon: th.TradeCommon,
 					RequestType: trader.RequestMarketOpen,
-					Candle:      c,
+					Candle:      candle.Candle,
 					Reason:      "fake-open",
 				},
 			},

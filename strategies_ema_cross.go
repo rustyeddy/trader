@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -73,7 +74,13 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(c Candle) *StrategyPlan {
+func (x *EMACross) Update(ctx context.Context, ct *CandleTime, positions *Positions) *StrategyPlan {
+	_ = ctx
+	_ = positions
+	if ct == nil {
+		return &DefaultStrategyPlan
+	}
+	c := ct.Candle
 	// Update indicators first
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
