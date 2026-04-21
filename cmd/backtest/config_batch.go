@@ -90,46 +90,13 @@ func executeConfiguredRun(ctx context.Context, rr trader.ResolvedRun) (trader.Ba
 	}
 
 	acct := trader.NewAccount(rr.Name, rr.StartingBalance)
-	kind := strings.ToLower(strings.TrimSpace(rr.Strategy.Kind))
-
-	switch kind {
-	case "ema-cross":
-		cfg, err := BuildEMACrossConfig(rr)
-		if err != nil {
-			return trader.BacktestRun{}, err
-		}
-		strat := trader.NewEMACross(cfg)
-		meta.Strategy = strat.Name()
-		return executeCandleStrategy(ctx, opts, strat, meta, acct)
-	case "ema-cross-adx":
-		cfg, err := buildEMACrossADXConfig(rr)
-		if err != nil {
-			return trader.BacktestRun{}, err
-		}
-		strat := trader.NewEMACrossADX(cfg)
-		meta.Strategy = strat.Name()
-		return executeCandleStrategy(ctx, opts, strat, meta, acct)
-	case "fake":
-		strat := newConfigFakeStrategy(rr.Instrument)
-		meta.Strategy = strat.Name()
-		return executeCandleStrategy(ctx, opts, strat, meta, acct)
-
-	case "fake-02":
-		strat := newConfigFakeStrategy(rr.Instrument)
-		meta.Strategy = strat.Name()
-		return executeCandleStrategy(ctx, opts, strat, meta, acct)
-
-	case "template":
-		cfg, err := BuildTemplateStrategyConfig(rr)
-		if err != nil {
-			return trader.BacktestRun{}, err
-		}
-		strat := trader.NewTemplateStrategy(cfg)
-		meta.Strategy = strat.Name()
-		return executeCandleStrategy(ctx, opts, strat, meta, acct)
-	default:
-		return trader.BacktestRun{}, fmt.Errorf("unsupported strategy.kind %q", rr.Strategy.Kind)
+	strat, err := trader.NewStrategyFromResolvedRun(rr)
+	if err != nil {
+		return trader.BacktestRun{}, err
 	}
+
+	meta.Strategy = strat.Name()
+	return executeCandleStrategy(ctx, opts, strat, meta, acct)
 }
 
 func collectConfigPaths(path string) ([]string, error) {
