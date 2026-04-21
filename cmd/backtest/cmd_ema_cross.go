@@ -2,7 +2,6 @@ package backtest
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -61,56 +60,7 @@ func runEMACrossFromFlags(cmd *cobra.Command) error {
 }
 
 func runEMACrossFromConfig(cmd *cobra.Command) error {
-	path := strings.TrimSpace(rootCfg.ConfigPath)
-	bcfg, err := trader.LoadConfig(path)
-	if err != nil {
-		return err
-	}
-
-	runName, err := selectConfigRunByKind(bcfg, btRunName, "ema-cross")
-	if err != nil {
-		return err
-	}
-
-	rr, err := bcfg.ResolveRun(runName)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(strings.TrimSpace(rr.Strategy.Kind), "ema-cross") {
-		return fmt.Errorf("run %q strategy.kind=%q, want %q", rr.Name, rr.Strategy.Kind, "ema-cross")
-	}
-
-	applyCommonOptsFromResolvedRun(&emaCrossOpts, rr)
-	applyCommonFlagOverrides(cmd, &emaCrossOpts)
-	applyEMACrossRunParamOverrides(cmd, rr)
-
-	if emaCrossOpts.Units == 0 {
-		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
-	}
-
-	emaCrossOpts.Instrument = trader.NormalizeInstrument(emaCrossOpts.Instrument)
-	rr.Instrument = emaCrossOpts.Instrument
-
-	strat, err := trader.NewStrategyFromResolvedRun(*rr)
-	if err != nil {
-		return err
-	}
-	act := trader.NewAccount(rr.Name, rr.StartingBalance)
-	return runCandleStrategy(
-		context.Background(),
-		emaCrossOpts,
-		strat,
-		candleRunMeta{
-			RunID:    trader.NewULID(),
-			RunName:  rr.Name,
-			Kind:     rr.Strategy.Kind,
-			Created:  trader.FromTime(time.Now().UTC()),
-			Balance:  rr.StartingBalance,
-			RR:       rr.RR,
-			Strategy: strat.Name(),
-		},
-		act,
-	)
+	return runConfiguredStrategyCommand(cmd, "ema-cross", &emaCrossOpts, applyEMACrossRunParamOverrides)
 }
 
 func applyEMACrossRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {

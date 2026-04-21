@@ -2,7 +2,6 @@ package backtest
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -65,82 +64,7 @@ func runEMACrossADXFromFlags(cmd *cobra.Command) error {
 }
 
 func runEMACrossADXFromConfig(cmd *cobra.Command) error {
-	path := strings.TrimSpace(rootCfg.ConfigPath)
-	bcfg, err := trader.LoadConfig(path)
-	if err != nil {
-		return err
-	}
-
-	runName, err := selectConfigRunByKind(bcfg, btRunName, "ema-cross-adx")
-	if err != nil {
-		return err
-	}
-
-	rr, err := bcfg.ResolveRun(runName)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(strings.TrimSpace(rr.Strategy.Kind), "ema-cross-adx") {
-		return fmt.Errorf("run %q strategy.kind=%q, want %q", rr.Name, rr.Strategy.Kind, "ema-cross-adx")
-	}
-
-	applyCommonOptsFromResolvedRun(&emaCrossADXOpts, rr)
-	applyCommonFlagOverrides(cmd, &emaCrossADXOpts)
-	applyEMACrossADXRunParamOverrides(cmd, rr)
-
-	if emaCrossADXOpts.Units == 0 {
-		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
-	}
-
-	emaCrossADXOpts.Instrument = trader.NormalizeInstrument(emaCrossADXOpts.Instrument)
-	rr.Instrument = emaCrossADXOpts.Instrument
-
-	strat, err := trader.NewStrategyFromResolvedRun(*rr)
-	if err != nil {
-		return err
-	}
-	act := trader.NewAccount(rr.Name, rr.StartingBalance)
-	return runCandleStrategy(
-		context.Background(),
-		emaCrossADXOpts,
-		strat,
-		candleRunMeta{
-			RunID:    trader.NewULID(),
-			RunName:  rr.Name,
-			Kind:     rr.Strategy.Kind,
-			Created:  trader.FromTime(time.Now().UTC()),
-			Balance:  rr.StartingBalance,
-			RR:       rr.RR,
-			Strategy: strat.Name(),
-		},
-		act,
-	)
-}
-
-func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
-	o.Instrument = r.Instrument
-	o.Timeframe = r.Timeframe
-	o.From = r.From
-	o.To = r.To
-	o.Units = r.Units.Int64()
-	o.StopPips = int32(r.StopPips)
-	o.TakePips = int32(r.TakePips)
-	o.RiskPct64 = r.RiskPct.Float64() * 100.0
-}
-
-func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
-	if cmd.Flags().Changed("instrument") {
-		o.Instrument = trader.NormalizeInstrument(o.Instrument)
-	}
-	if cmd.Flags().Changed("timeframe") {
-		o.Timeframe = strings.ToUpper(strings.TrimSpace(o.Timeframe))
-	}
-	if cmd.Flags().Changed("from") {
-		o.From = strings.TrimSpace(o.From)
-	}
-	if cmd.Flags().Changed("to") {
-		o.To = strings.TrimSpace(o.To)
-	}
+	return runConfiguredStrategyCommand(cmd, "ema-cross-adx", &emaCrossADXOpts, applyEMACrossADXRunParamOverrides)
 }
 
 func applyEMACrossADXRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {

@@ -121,6 +121,104 @@ type candleRunMeta struct {
 	Strategy string
 }
 
+type strategyRunParamOverride func(cmd *cobra.Command, rr *trader.ResolvedRun)
+
+func resolveConfiguredRunByKind(wantKind string) (*trader.ResolvedRun, error) {
+	configPath := strings.TrimSpace(rootCfg.ConfigPath)
+	if configPath == "" {
+		return nil, fmt.Errorf("missing --config path")
+	}
+
+	bcfg, err := trader.LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	runName, err := selectConfigRunByKind(bcfg, btRunName, wantKind)
+	if err != nil {
+		return nil, err
+	}
+
+	rr, err := bcfg.ResolveRun(runName)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(rr.Strategy.Kind), wantKind) {
+		return nil, fmt.Errorf("run %q strategy.kind=%q, want %q", rr.Name, rr.Strategy.Kind, wantKind)
+	}
+
+	return rr, nil
+}
+
+func runConfiguredStrategyCommand(
+	cmd *cobra.Command,
+	wantKind string,
+	opts *candleCmdCommon,
+	override strategyRunParamOverride,
+) error {
+	rr, err := resolveConfiguredRunByKind(wantKind)
+	if err != nil {
+		return err
+	}
+
+	applyCommonOptsFromResolvedRun(opts, rr)
+	applyCommonFlagOverrides(cmd, opts)
+	if override != nil {
+		override(cmd, rr)
+	}
+
+	if opts.Units == 0 {
+		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
+	}
+
+	opts.Instrument = trader.NormalizeInstrument(opts.Instrument)
+	rr.Instrument = opts.Instrument
+
+	strat, err := trader.NewStrategyFromResolvedRun(*rr)
+	if err != nil {
+		return err
+	}
+
+	meta := candleRunMeta{
+		RunID:    trader.NewULID(),
+		RunName:  rr.Name,
+		Kind:     rr.Strategy.Kind,
+		Created:  trader.FromTime(time.Now().UTC()),
+		Balance:  rr.StartingBalance,
+		RR:       rr.RR,
+		Strategy: strat.Name(),
+	}
+
+	act := trader.NewAccount(rr.Name, rr.StartingBalance)
+	return runCandleStrategy(context.Background(), *opts, strat, meta, act)
+}
+
+func applyCommonOptsFromResolvedRun(o *candleCmdCommon, r *trader.ResolvedRun) {
+	o.Instrument = r.Instrument
+	o.Timeframe = r.Timeframe
+	o.From = r.From
+	o.To = r.To
+	o.Units = r.Units.Int64()
+	o.StopPips = int32(r.StopPips)
+	o.TakePips = int32(r.TakePips)
+	o.RiskPct64 = r.RiskPct.Float64() * 100.0
+}
+
+func applyCommonFlagOverrides(cmd *cobra.Command, o *candleCmdCommon) {
+	if cmd.Flags().Changed("instrument") {
+		o.Instrument = trader.NormalizeInstrument(o.Instrument)
+	}
+	if cmd.Flags().Changed("timeframe") {
+		o.Timeframe = strings.ToUpper(strings.TrimSpace(o.Timeframe))
+	}
+	if cmd.Flags().Changed("from") {
+		o.From = strings.TrimSpace(o.From)
+	}
+	if cmd.Flags().Changed("to") {
+		o.To = strings.TrimSpace(o.To)
+	}
+}
+
 func runCandleStrategy(
 	ctx context.Context,
 	opts candleCmdCommon,
