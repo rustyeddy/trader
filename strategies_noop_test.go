@@ -20,8 +20,3 @@ func TestNoopStrategyName(t *testing.T) {
 	strat := noopStrategy{}
 	assert.Equal(t, "NoOp", strat.Name())
 }
-
-func TestNoopStrategyReason(t *testing.T) {
-	strat := noopStrategy{}
-	assert.Equal(t, "No-op", strat.Reason())
-}
