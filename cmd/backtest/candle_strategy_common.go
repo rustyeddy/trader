@@ -51,13 +51,26 @@ func (o *candleCmdCommon) addFlags(cmd *cobra.Command) {
 
 func (o candleCmdCommon) stopPips() trader.Price { return trader.Price(o.StopPips) }
 func (o candleCmdCommon) takePips() trader.Price { return trader.Price(o.TakePips) }
-func (o candleCmdCommon) units() trader.Units    { return trader.Units(o.Units) }
 func (o candleCmdCommon) riskPct() trader.Rate   { return trader.RateFromFloat(o.RiskPct64 / 100.0) }
+
+type requestSizer interface {
+	Size(req *trader.OpenRequest)
+}
+
+type riskSizer struct{}
+
+func (riskSizer) Size(req *trader.OpenRequest) {
+	if req == nil {
+		return
+	}
+	// Strategy-provided units are ignored; account risk sizing owns units.
+	req.Units = 0
+}
 
 type configuredStrategy struct {
 	S trader.Strategy
 
-	Units     trader.Units
+	Sizer     requestSizer
 	StopPips  trader.Price
 	TakePips  trader.Price
 	PipScaled trader.Price
@@ -83,9 +96,6 @@ func (a *configuredStrategy) Update(ctx context.Context, candle *trader.CandleTi
 	if req.Timestamp == 0 {
 		req.Timestamp = candle.Timestamp
 	}
-	if req.Units == 0 {
-		req.Units = a.Units
-	}
 
 	stopDist := a.StopPips * trader.Price(a.PipScaled)
 	takeDist := a.TakePips * trader.Price(a.PipScaled)
@@ -104,6 +114,9 @@ func (a *configuredStrategy) Update(ctx context.Context, candle *trader.CandleTi
 		if req.Take == 0 && a.TakePips > 0 {
 			req.Take = candle.Close - takeDist
 		}
+	}
+	if a.Sizer != nil {
+		a.Sizer.Size(&req)
 	}
 
 	copyPlan.Opens[0] = &req
@@ -166,10 +179,6 @@ func runConfiguredStrategyCommand(
 	applyCommonFlagOverrides(cmd, opts)
 	if override != nil {
 		override(cmd, rr)
-	}
-
-	if opts.Units == 0 {
-		return fmt.Errorf("units resolved to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented")
 	}
 
 	opts.Instrument = trader.NormalizeInstrument(opts.Instrument)
@@ -309,11 +318,12 @@ func executeCandleStrategy(
 	dm := trader.NewDataManager([]string{instrument}, start, end)
 	adapter := &configuredStrategy{
 		S:         strat,
-		Units:     opts.units(),
+		Sizer:     riskSizer{},
 		StopPips:  opts.stopPips(),
 		TakePips:  opts.takePips(),
 		PipScaled: trader.PipScaled(instMeta.PipLocation),
 	}
+	acct.RiskPct = opts.riskPct()
 
 	eng, err := trader.RunCandles(ctx, dm, req, adapter, acct)
 	if err != nil {

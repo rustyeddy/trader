@@ -74,9 +74,6 @@ func runBacktestConfigBatch(cmd *cobra.Command) error {
 func executeConfiguredRun(ctx context.Context, rr trader.ResolvedRun) (trader.BacktestRun, error) {
 	opts := newCandleCmdCommon()
 	applyCommonOptsFromResolvedRun(&opts, &rr)
-	if opts.Units == 0 {
-		return trader.BacktestRun{}, fmt.Errorf("run %q resolved units to 0; set defaults.units or strategy.params.units until risk-based sizing is implemented", rr.Name)
-	}
 
 	opts.Instrument = trader.NormalizeInstrument(opts.Instrument)
 
