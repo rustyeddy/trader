@@ -53,146 +53,69 @@ func (e *CandleEngine) RunContext(ctx context.Context, feed candleIterator, stra
 		lastC = c
 		haveLast = true
 
-		gapBars := 0
-		if prevTS != 0 {
-			delta := int64(ts - prevTS)
-			if delta > int64(e.Timeframe) {
-				gapBars = int(delta/int64(e.Timeframe)) - 1
-			}
-		}
-
+		gapBars := gapBarsSince(prevTS, ts, e.Timeframe)
 		prevTS = ts
+
 		barCtx := withStrategyRuntime(ctx, e.Instrument, barIndex, gapBars, e.Account)
 		ct := &CandleTime{Candle: c, Timestamp: ts}
-		barPositions := Positions{positions: make(map[string]*Position, len(e.Account.Positions.Positions()))}
-		for id, pos := range e.Account.Positions.Positions() {
-			barPositions.positions[id] = pos
-		}
+		barPositions := snapshotPositions(&e.Account.Positions)
 		barIndex++
+
 		if e.Pos != nil {
 			if exitPx, _, hit := checkExit(e.Pos, c); hit {
-				trade := &Trade{
-					TradeCommon: e.Pos.TradeCommon,
-					FillPrice:   exitPx,
-					FillTime:    ts,
-				}
-				if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+				if err := closePositionAtPrice(e.Account, e.Pos, exitPx, ts); err != nil {
 					return err
 				}
 				e.Pos = nil
 			}
 		}
 
-		plan := strat.Update(barCtx, ct, &barPositions)
+		plan := strat.Update(barCtx, ct, barPositions)
 		if plan == nil {
 			continue
 		}
 
 		if e.Pos != nil {
-			for _, cl := range plan.Closes {
-				if cl == nil {
-					continue
-				}
-				if cl.Position != nil && cl.Position != e.Pos {
-					continue
-				}
-				trade := &Trade{
-					TradeCommon: e.Pos.TradeCommon,
-					FillPrice:   cl.Price,
-					FillTime:    cl.Timestamp,
-				}
-				if trade.FillPrice == 0 {
-					trade.FillPrice = c.Close
-				}
-				if trade.FillTime == 0 {
-					trade.FillTime = ts
-				}
-				if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+			if cl := firstMatchingClose(plan, e.Pos); cl != nil {
+				if err := closePositionFromRequest(e.Account, e.Pos, cl, *ct); err != nil {
 					return err
 				}
 				e.Pos = nil
-				break
 			}
 		}
 
-		if e.Pos != nil || len(plan.Opens) == 0 {
+		if e.Pos != nil {
 			continue
 		}
 
-		req := plan.Opens[0]
+		req := firstOpenRequest(plan)
 		if req == nil {
 			continue
 		}
 
-		if req.Units == 0 {
-			if req.Stop == 0 {
-				return fmt.Errorf("risk sizing requires a stop price")
-			}
-			if err := e.Account.SizePosition(req); err != nil {
-				return err
-			}
+		if err := ensureSizedOpenRequest(e.Account, req); err != nil {
+			return err
 		}
+
 		count++
 		e.Account.OpenPosition(ts, c, req)
 		e.Pos = e.Account.Positions.Positions()[req.ID]
 	}
+
+	_ = count
 
 	if err := feed.Err(); err != nil {
 		return err
 	}
 
 	if e.Pos != nil && haveLast {
-		trade := &Trade{
-			TradeCommon: e.Pos.TradeCommon,
-			FillPrice:   lastC.Close,
-			FillTime:    lastTS,
-		}
-		if err := e.Account.ClosePosition(e.Pos, trade); err != nil {
+		if err := forceClosePositionAtEnd(e.Account, e.Pos, lastC, lastTS); err != nil {
 			return err
 		}
 		e.Pos = nil
 	}
 
 	return nil
-}
-
-// checkExit evaluates stop/take on OHLC.
-// If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p *Position, c Candle) (exitPx Price, reason string, hit bool) {
-	if p == nil {
-		return 0, "", false
-	}
-
-	hasStop := p.Stop != 0
-	hasTake := p.Take != 0
-
-	switch p.Side {
-	case Long:
-		stopHit := hasStop && c.Low <= p.Stop
-		takeHit := hasTake && c.High >= p.Take
-		if stopHit && takeHit {
-			return p.Stop, "STOP&TAKE same bar (stop-first)", true
-		}
-		if stopHit {
-			return p.Stop, "STOP", true
-		}
-		if takeHit {
-			return p.Take, "TAKE", true
-		}
-	case Short:
-		stopHit := hasStop && c.High >= p.Stop
-		takeHit := hasTake && c.Low <= p.Take
-		if stopHit && takeHit {
-			return p.Stop, "STOP&TAKE same bar (stop-first)", true
-		}
-		if stopHit {
-			return p.Stop, "STOP", true
-		}
-		if takeHit {
-			return p.Take, "TAKE", true
-		}
-	}
-	return 0, "", false
 }
 
 // PipScaled returns the pip size in *scaled* int32 units, based on the instrument pip location.

@@ -237,28 +237,31 @@ func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 	return nil
 }
 
-func (act *Account) RealizePNL(trade *Trade) (Money, error) {
+func (act *Account) RealizePNL(pos *Position, trade *Trade) (Money, error) {
 	if act == nil {
 		return 0, fmt.Errorf("nil account")
 	}
-	if trade == nil {
+	if pos == nil {
 		return 0, fmt.Errorf("nil position")
 	}
-	if trade.Instrument == "" {
+	if trade == nil {
+		return 0, fmt.Errorf("nil trade")
+	}
+	if pos.Instrument == "" {
 		return 0, fmt.Errorf("position instrument is empty")
 	}
-	if trade.TradeCommon.Units <= 0 {
+	if pos.Units <= 0 {
 		return 0, fmt.Errorf("position units must be > 0")
 	}
+	if trade.FillPrice <= 0 {
+		return 0, fmt.Errorf("trade fill price must be > 0")
+	}
 
-	qta, err := act.QuoteToAccount(trade.Instrument, trade.FillPrice)
+	qta, err := act.QuoteToAccount(pos.Instrument, trade.FillPrice)
 	if err != nil {
 		return 0, err
 	}
 
-	pos := &Position{
-		TradeCommon: trade.TradeCommon,
-	}
 	pnlMoney, err := positionUnrealizedPNL(pos, trade.FillPrice, qta)
 	if err != nil {
 		return 0, err
@@ -281,7 +284,7 @@ func (act *Account) ClosePosition(pos *Position, trade *Trade) error {
 		return fmt.Errorf("exit price must be > 0")
 	}
 
-	pnl, err := act.RealizePNL(trade)
+	pnl, err := act.RealizePNL(pos, trade)
 	if err != nil {
 		return err
 	}
@@ -549,7 +552,6 @@ func (acct *Account) SizePosition(req *OpenRequest) error {
 			unitsMargin,
 		)
 	}
-
 	req.Units = units
 	return nil
 }

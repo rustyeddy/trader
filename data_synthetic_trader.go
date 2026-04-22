@@ -152,7 +152,7 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	cfg := SyntheticCandleConfig{
 		Instrument:  "EURUSD",
 		Timeframe:   H1,
-		StartPrice:  Price(1080000),
+		StartPrice:  Price(108000),
 		Volatility:  0.05, // 5% volatility (extreme)
 		Trend:       0.0,  // No trend
 		Seed:        12345,
