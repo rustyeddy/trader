@@ -447,7 +447,6 @@ func (acct *Account) availableMargin() Money {
 	if fm > 0 {
 		return fm
 	}
-
 	return 0
 }
 

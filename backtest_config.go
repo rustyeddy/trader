@@ -52,42 +52,6 @@ type StrategyConfig struct {
 	Params map[string]any `json:"params" yaml:"params"`
 }
 
-// type ConfigBackTest struct {
-// 	Instrument string
-// 	Strategy   string
-// 	TimeFrame  Timeframe
-// 	Start      time.Time // remove for TimeFrame
-// 	End        time.Time // remove for TimeFrame
-
-// 	Account string
-// }
-
-func resolveBacktestStrategy(cfg RunConfig) (Strategy, error) {
-	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy.Kind))
-	switch strategyName {
-	case "", "fake":
-		return &Fake{
-			StrategyBaseConfig: StrategyBaseConfig{
-				Instrument: cfg.Data.Instrument,
-			},
-			CandleCount: 10,
-		}, nil
-
-	case "fake-02":
-		return &Fake02{
-			Instrument: cfg.Data.Instrument,
-			WaitBars:   8,
-			HoldBars:   6,
-			StopPips:   20,
-		}, nil
-
-	case "noop", "no-op":
-		return noopStrategy{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
-	}
-}
-
 func LoadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

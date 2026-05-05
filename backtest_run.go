@@ -48,7 +48,7 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 		return nil
 	}
 
-	strategy, err := resolveBacktestStrategy(cfg)
+	strategy, err := GetStrategy(cfg.Strategy.Kind)
 	if err != nil {
 		return nil
 	}

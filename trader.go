@@ -333,12 +333,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 	return nil
 }
 
-func (t *Trader) BacktestNew(ctx context.Context, req *BacktestRun) error {
-
-	return nil
-}
-
-func (t *Trader) BackTest(ctx context.Context, run *BacktestRun) error {
+func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 	if run == nil {
 		return fmt.Errorf("nil backtest run")
 	}
@@ -357,10 +352,6 @@ func (t *Trader) BackTest(ctx context.Context, run *BacktestRun) error {
 		return fmt.Errorf("nil data manager")
 	}
 
-	// strategy, err := resolveBacktestStrategy(*cfg)
-	// if err != nil {
-	// 	return err
-	// }
 	Backtest.Info("strategy selected", "strategy", run.Strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame

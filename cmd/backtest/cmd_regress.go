@@ -79,7 +79,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 
 		for _, run := range runs {
 			ctx := context.TODO()
-			err := t.BackTest(ctx, &run)
+			err := t.Backtest(ctx, &run)
 			if err != nil {
 				fmt.Printf("Backtest errored %+v\n", err) // turn into a log
 				continue

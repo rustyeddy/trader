@@ -45,6 +45,9 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *Str
 			return plan
 		}
 		inst := GetInstrument(f.Instrument)
+		if inst == nil {
+			return nil
+		}
 		stop := inst.SubPips(c.Close, pipsFromFloat(10))
 		op := newOpenRequest(f.Instrument, c, Long, stop, Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
