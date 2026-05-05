@@ -27,6 +27,9 @@ type Broker struct {
 func NewBroker(name string) *Broker {
 	return &Broker{
 		ID: name,
+		OpenOrders: OpenOrders{
+			Orders: make(map[string]*order),
+		},
 	}
 }
 
