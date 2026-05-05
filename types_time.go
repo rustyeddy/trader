@@ -21,6 +21,14 @@ func FromTime(t time.Time) Timestamp {
 	return Timestamp(t.Unix())
 }
 
+func FromString(s string) Timestamp {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return Timestamp(0)
+	}
+	return FromTime(t)
+}
+
 func (t Timestamp) Int64() int64 {
 	return int64(t)
 }
@@ -94,6 +102,41 @@ func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 		TF:    tf,
 	}
 	return r
+}
+
+func timeRangeFromStrings(fromStr, toStr, tf string) (TimeRange, error) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return TimeRange{}, err
+	}
+	return timeRangeLocation(fromStr, toStr, tf, loc)
+}
+
+func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRange, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	tf := tfFromString(tfstr)
+
+	from, err := time.ParseInLocation("2006-01-02", fromStr, loc)
+	if err != nil {
+		return TimeRange{}, fmt.Errorf("bad from date %q: %w", fromStr, err)
+	}
+
+	to, err := time.ParseInLocation("2006-01-02", toStr, loc)
+	if err != nil {
+		return TimeRange{}, fmt.Errorf("bad to date %q: %w", toStr, err)
+	}
+
+	if !from.Before(to) {
+		return TimeRange{}, fmt.Errorf("invalid date range: from %s must be before to %s", fromStr, toStr)
+	}
+
+	return TimeRange{
+		Start: Timestamp(from.Unix()), // inclusive
+		End:   Timestamp(to.Unix()),   // exclusive
+		TF:    tf,
+	}, nil
 }
 
 func (r TimeRange) Valid() bool {

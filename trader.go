@@ -3,7 +3,6 @@ package trader
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -11,45 +10,9 @@ import (
 type Trader struct {
 	*Account
 	*DataManager
-	*tradeBook
 	*Broker
 	*Store
-}
-
-type ConfigBackTest struct {
-	Instrument string
-	Strategy   string
-	TimeFrame  Timeframe
-	Start      time.Time
-	End        time.Time
-
-	Account string
-}
-
-func resolveBacktestStrategy(cfg *ConfigBackTest) (Strategy, error) {
-	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy))
-	switch strategyName {
-	case "", "fake":
-		return &Fake{
-			StrategyBaseConfig: StrategyBaseConfig{
-				Instrument: cfg.Instrument,
-			},
-			CandleCount: 10,
-		}, nil
-
-	case "fake-02":
-		return &Fake02{
-			Instrument: cfg.Instrument,
-			WaitBars:   8,
-			HoldBars:   6,
-			StopPips:   20,
-		}, nil
-
-	case "noop", "no-op":
-		return noopStrategy{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
-	}
+	*tradeBook
 }
 
 func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event, processed *int64) (<-chan error, <-chan struct{}) {
@@ -139,10 +102,12 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, strategy Strategy, itr candleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr candleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
+
+	strategy := run.Strategy
 	if strategy == nil {
 		return fmt.Errorf("nil strategy")
 	}
@@ -273,15 +238,16 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 		atomic.AddInt64(&processedCandles, 1)
 
 		err := t.Account.ResolveWithMarks(map[string]Price{
-			cfg.Instrument: candle.Close,
+			run.Instrument: candle.Close,
 		})
 		if err != nil {
 			return err
 		}
 
-		strategyCtx := withStrategyRuntime(runCtx, cfg.Instrument, int(processedCandles), 0, t.Account)
-		strategyPositions := snapshotStrategyPositions(&t.Account.Positions)
-		plan := strategy.Update(strategyCtx, &candle, strategyPositions)
+		strategyCtx := withStrategyRuntime(runCtx, run.Instrument, int(processedCandles), 0, t.Account)
+		positions := snapshotStrategyPositions(&t.Account.Positions)
+		run.Positions = positions
+		plan := strategy.Update(strategyCtx, &candle, run)
 		if plan == nil {
 			plan = &DefaultStrategyPlan
 		}
@@ -367,13 +333,19 @@ func (t *Trader) backTestWithIterator(ctx context.Context, cfg *ConfigBackTest, 
 	return nil
 }
 
-func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
-	Backtest.Info("backtest start", "instrument", cfg.Instrument, "account", cfg.Account)
+func (t *Trader) BacktestNew(ctx context.Context, req *BacktestRun) error {
+
+	return nil
+}
+
+func (t *Trader) BackTest(ctx context.Context, run *BacktestRun) error {
+	if run == nil {
+		return fmt.Errorf("nil backtest run")
+	}
+
+	Backtest.Info("backtest start", "instrument", run.Instrument)
 	if t == nil {
 		return fmt.Errorf("nil trader")
-	}
-	if cfg == nil {
-		return fmt.Errorf("nil backtest config")
 	}
 	if t.Account == nil {
 		return fmt.Errorf("nil account")
@@ -385,17 +357,17 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 		return fmt.Errorf("nil data manager")
 	}
 
-	strategy, err := resolveBacktestStrategy(cfg)
-	if err != nil {
-		return err
-	}
-	Backtest.Info("strategy selected", "strategy", strategy.Name())
+	// strategy, err := resolveBacktestStrategy(*cfg)
+	// if err != nil {
+	// 	return err
+	// }
+	Backtest.Info("strategy selected", "strategy", run.Strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
 		Source:     "candles",
-		Instrument: cfg.Instrument,
-		Range:      newTimeRange(FromTime(cfg.Start), FromTime(cfg.End), cfg.TimeFrame),
+		Instrument: run.Instrument,
+		Range:      run.TimeRange,
 	}
 	Backtest.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 
@@ -412,7 +384,7 @@ func (t *Trader) BackTest(ctx context.Context, cfg *ConfigBackTest) error {
 	//   Update Account with PnL, Balance
 	//   Generate Backtest Report
 
-	return t.backTestWithIterator(ctx, cfg, strategy, itr)
+	return t.backTestWithIterator(ctx, run, itr)
 }
 
 func (t *Trader) processEvent(ctx context.Context, evt *Event) error {

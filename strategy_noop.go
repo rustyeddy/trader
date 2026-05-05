@@ -10,9 +10,8 @@ type noopStrategy struct{}
 func (noopStrategy) Name() string { return "NoOp" }
 func (noopStrategy) Reset()       {}
 func (noopStrategy) Ready() bool  { return true }
-func (noopStrategy) Update(ctx context.Context, c *CandleTime, positions *Positions) *StrategyPlan {
+func (noopStrategy) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *StrategyPlan {
 	_ = ctx
 	_ = c
-	_ = positions
 	return &DefaultStrategyPlan
 }

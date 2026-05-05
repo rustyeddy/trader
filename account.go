@@ -306,6 +306,7 @@ func (act *Account) OpenPosition(t Timestamp, c Candle, req *OpenRequest) {
 }
 
 func (act *Account) closePosition(t Timestamp, exit Price, reason string) {
+	fmt.Println("TODO - closePosition")
 }
 
 func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, error) {

@@ -3,11 +3,12 @@ package trader
 import (
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -51,6 +52,42 @@ type StrategyConfig struct {
 	Params map[string]any `json:"params" yaml:"params"`
 }
 
+// type ConfigBackTest struct {
+// 	Instrument string
+// 	Strategy   string
+// 	TimeFrame  Timeframe
+// 	Start      time.Time // remove for TimeFrame
+// 	End        time.Time // remove for TimeFrame
+
+// 	Account string
+// }
+
+func resolveBacktestStrategy(cfg RunConfig) (Strategy, error) {
+	strategyName := strings.ToLower(strings.TrimSpace(cfg.Strategy.Kind))
+	switch strategyName {
+	case "", "fake":
+		return &Fake{
+			StrategyBaseConfig: StrategyBaseConfig{
+				Instrument: cfg.Data.Instrument,
+			},
+			CandleCount: 10,
+		}, nil
+
+	case "fake-02":
+		return &Fake02{
+			Instrument: cfg.Data.Instrument,
+			WaitBars:   8,
+			HoldBars:   6,
+			StopPips:   20,
+		}, nil
+
+	case "noop", "no-op":
+		return noopStrategy{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported strategy %q", cfg.Strategy)
+	}
+}
+
 func LoadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -83,25 +120,25 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-type ResolvedRun struct {
-	Name            string
-	Source          string
-	Instrument      string
-	Timeframe       string
-	From            string
-	To              string
-	Strict          bool
-	StartingBalance Money
-	AccountCCY      string
-	Scale           Scale6
+func (c *Config) runRequest(rcfg RunConfig) (*BacktestRun, error) {
+	rr, err := c.resolve(rcfg)
+	if err != nil {
+		return nil, err
+	}
 
-	RiskPct  Rate
-	StopPips Price
-	TakePips Price
-	RR       Rate
-	Units    Units
+	tr, err := timeRangeFromStrings(rr.To, rr.From, rr.Timeframe)
+	if err != nil {
+		return nil, err
+	}
 
-	Strategy StrategyConfig
+	btr := &BacktestRun{
+		BacktestRequest: &BacktestRequest{
+			Name:       "",
+			Instrument: rr.Instrument,
+			TimeRange:  tr,
+		},
+	}
+	return btr, nil
 }
 
 func (c *Config) ResolveRun(name string) (*ResolvedRun, error) {
@@ -111,18 +148,6 @@ func (c *Config) ResolveRun(name string) (*ResolvedRun, error) {
 		}
 	}
 	return nil, fmt.Errorf("run %q not found", name)
-}
-
-func (c *Config) ResolveAllRuns() ([]ResolvedRun, error) {
-	out := make([]ResolvedRun, 0, len(c.Runs))
-	for _, run := range c.Runs {
-		rr, err := c.resolve(run)
-		if err != nil {
-			return nil, fmt.Errorf("resolve run %q: %w", run.Name, err)
-		}
-		out = append(out, *rr)
-	}
-	return out, nil
 }
 
 func (c *Config) resolve(run RunConfig) (*ResolvedRun, error) {
@@ -194,34 +219,6 @@ func percentToRate(pct float64) Rate {
 	return RateFromFloat(pct / 100.0)
 }
 
-func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
-	tf, err := parseTimeframe(r.Timeframe)
-	if err != nil {
-		return CandleRequest{}, err
-	}
-
-	start, err := parseDateStart(r.From)
-	if err != nil {
-		return CandleRequest{}, fmt.Errorf("bad from %q: %w", r.From, err)
-	}
-
-	end, err := parseDateEndExclusive(r.To)
-	if err != nil {
-		return CandleRequest{}, fmt.Errorf("bad to %q: %w", r.To, err)
-	}
-
-	return CandleRequest{
-		Source:     r.Source,
-		Instrument: r.Instrument,
-		Timeframe:  tf,
-		Range: TimeRange{
-			Start: FromTime(start),
-			End:   FromTime(end),
-		},
-		Strict: r.Strict,
-	}, nil
-}
-
 func parseDateStart(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }
@@ -261,13 +258,13 @@ func (r *ResolvedRun) ApplyCommonParamOverrides() error {
 	if v, ok, err := getInt32Param(r.Strategy.Params, "stop_pips"); err != nil {
 		return err
 	} else if ok {
-		r.StopPips = Price(v)
+		r.StopPips = Price(v) // this should be removed
 	}
 
 	if v, ok, err := getInt32Param(r.Strategy.Params, "take_pips"); err != nil {
 		return err
 	} else if ok {
-		r.TakePips = Price(v)
+		r.TakePips = Price(v) // this should be removed
 	}
 
 	if v, ok, err := getFloat64Param(r.Strategy.Params, "risk_pct"); err != nil {

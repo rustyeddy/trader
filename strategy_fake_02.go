@@ -40,7 +40,7 @@ func (f *Fake02) Ready() bool {
 	return true
 }
 
-func (f *Fake02) Update(ctx context.Context, c *CandleTime, positions *Positions) *StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *StrategyPlan {
 	_ = ctx
 
 	plan := &StrategyPlan{
@@ -68,10 +68,10 @@ func (f *Fake02) Update(ctx context.Context, c *CandleTime, positions *Positions
 	f.bar++
 
 	// If something is open, close it after HoldBars.
-	if positions != nil && positions.Len() > 0 {
+	if run.Positions != nil && run.Positions.Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
 			submittedClose := false
-			positions.Range(func(pos *Position) error {
+			run.Positions.Range(func(pos *Position) error {
 				if pos.State != PositionOpen {
 					return nil
 				}

@@ -73,7 +73,7 @@ func newPricingCmd(rc *trader.RootConfig) *cobra.Command {
 			}
 			defer j.Close()
 
-			engine := sim.NewEngine(&trader.Account{
+			engine := sim.NewSimBroker(&trader.Account{
 				ID:       accountID,
 				Currency: "USD",
 				Balance:  trader.MoneyFromFloat(startingBalance),

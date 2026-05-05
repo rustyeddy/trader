@@ -1,12 +1,12 @@
+---
 version: 1
 
 defaults:
-  starting_balance: 10000
+  starting_balance: 2000
   account_ccy: USD
   scale: 100000
   strict: true
   risk_pct: 0.5
-  units: 1000
   source: candles
 
 runs:

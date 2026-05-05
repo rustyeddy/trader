@@ -10,32 +10,32 @@ import (
 func TestNewStrategyFromResolvedRun_KnownKinds(t *testing.T) {
 	tests := []struct {
 		name string
-		rr   ResolvedRun
+		rr   *ResolvedRun
 	}{
 		{
 			name: "fake",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Strategy:   StrategyConfig{Kind: "fake"},
 			},
 		},
 		{
 			name: "fake-02",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Strategy:   StrategyConfig{Kind: "fake-02"},
 			},
 		},
 		{
 			name: "noop",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Strategy:   StrategyConfig{Kind: "noop"},
 			},
 		},
 		{
 			name: "ema-cross",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Scale:      PriceScale,
 				Strategy: StrategyConfig{
@@ -49,7 +49,7 @@ func TestNewStrategyFromResolvedRun_KnownKinds(t *testing.T) {
 		},
 		{
 			name: "ema-cross-adx",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Scale:      PriceScale,
 				Strategy: StrategyConfig{
@@ -63,7 +63,7 @@ func TestNewStrategyFromResolvedRun_KnownKinds(t *testing.T) {
 		},
 		{
 			name: "template",
-			rr: ResolvedRun{
+			rr: &ResolvedRun{
 				Instrument: "EURUSD",
 				Scale:      PriceScale,
 				Strategy: StrategyConfig{
@@ -88,7 +88,7 @@ func TestNewStrategyFromResolvedRun_KnownKinds(t *testing.T) {
 }
 
 func TestNewStrategyFromResolvedRun_UnknownKind(t *testing.T) {
-	_, err := NewStrategyFromResolvedRun(ResolvedRun{
+	_, err := NewStrategyFromResolvedRun(&ResolvedRun{
 		Instrument: "EURUSD",
 		Strategy:   StrategyConfig{Kind: "does-not-exist"},
 	})

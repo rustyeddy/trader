@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultRegressionConfigPath = "./testdata/configs"
+const defaultRegressionConfigPath = "../testdata/configs"
 
 var regressOutDir string
 
@@ -59,6 +59,12 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	t := &trader.Trader{
+		Account:     trader.NewAccount("backtest", 2000),
+		DataManager: trader.GetDataManager(),
+	}
+	t.Broker = trader.NewBroker("sim")
+
 	count := 0
 	for _, cfgPath := range configPaths {
 		cfg, err := trader.LoadConfig(cfgPath)
@@ -66,35 +72,38 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("load config %q: %w", cfgPath, err)
 		}
 
-		runs, err := cfg.ResolveAllRuns()
+		runs, err := trader.GetBacktestRuns(cfg)
 		if err != nil {
 			return fmt.Errorf("resolve runs from %q: %w", cfgPath, err)
 		}
 
-		// Phase 1 regression is intentionally simple:
-		// one config file -> one run -> one summary json
-		if len(runs) != 1 {
-			return fmt.Errorf(
-				"regression config %q must resolve to exactly 1 run, got %d",
-				cfgPath,
-				len(runs),
-			)
+		for _, run := range runs {
+			ctx := context.TODO()
+			err := t.BackTest(ctx, &run)
+			if err != nil {
+				fmt.Printf("Backtest errored %+v\n", err) // turn into a log
+				continue
+			}
+
 		}
 
-		run, err := executeConfiguredRun(context.Background(), runs[0])
-		if err != nil {
-			return fmt.Errorf("execute run from %q: %w", cfgPath, err)
-		}
+		// fmt.Printf("RUNS: %+v\n", runs)
+		// vars, err := executeStrategy(context.Background(), candleCmdCommon{}, nil, candleRunMeta{}, nil)
+		// if err != nil {
+		// 	return fmt.Errorf("resolve runs from %q: %w", cfgPath, err)
+		// }
+		// fmt.Printf("VARS: %+v\n", vars)
+		// _ = vars
 
-		summary := trader.NewBacktestReportSummary(run)
-		reportPath := regressionReportPath(outDir, cfgPath)
+		// summary := trader.NewBacktestReportSummary(vars)
+		// reportPath := regressionReportPath(outDir, cfgPath)
 
-		if err := writeRegressionSummary(reportPath, summary); err != nil {
-			return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
-		}
+		// if err := writeRegressionSummary(reportPath, summary); err != nil {
+		// 	return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
+		// }
 
-		fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
-		count++
+		// fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
+		// count++
 	}
 
 	if count == 0 {

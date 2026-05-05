@@ -28,7 +28,7 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *CandleTime, positions *Positions) *StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *StrategyPlan {
 	f.candles = append(f.candles, c)
 	plan := &StrategyPlan{
 		Reason: "hold",
@@ -38,7 +38,7 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, positions *Positions) 
 		return plan
 	}
 
-	openTrades := positions.Len()
+	openTrades := run.Positions.Len()
 	if f.highest < c.High {
 		f.highest = c.High
 		if openTrades > 0 {
@@ -57,7 +57,7 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, positions *Positions) 
 		}
 
 		submittedClose := false
-		positions.Range(func(pos *Position) error {
+		run.Positions.Range(func(pos *Position) error {
 			if pos.State != PositionOpen {
 				return nil
 			}

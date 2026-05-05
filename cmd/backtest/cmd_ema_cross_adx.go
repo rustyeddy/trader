@@ -1,8 +1,6 @@
 package backtest
 
 import (
-	"strings"
-
 	"github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
 )
@@ -33,54 +31,51 @@ func init() {
 }
 
 func RunEMACrossADX(cmd *cobra.Command, args []string) error {
-	if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
-		return runEMACrossADXFromConfig(cmd)
-	}
-	return runEMACrossADXFromFlags(cmd)
+	return nil
 }
 
-func runEMACrossADXFromFlags(cmd *cobra.Command) error {
-	_ = cmd
-	emaCrossADXCfg.Scale = trader.PriceScale
-	return runAdhocStrategyCommand(
-		emaCrossADXOpts,
-		"adhoc-ema-cross-adx",
-		"ema-cross-adx",
-		trader.MoneyFromFloat(1000),
-		func() trader.Strategy {
-			return trader.NewEMACrossADX(emaCrossADXCfg)
-		},
-	)
-}
+// func runEMACrossADXFromFlags(cmd *cobra.Command) error {
+// 	_ = cmd
+// 	emaCrossADXCfg.Scale = trader.PriceScale
+// 	return runAdhocStrategyCommand(
+// 		emaCrossADXOpts,
+// 		"adhoc-ema-cross-adx",
+// 		"ema-cross-adx",
+// 		trader.MoneyFromFloat(1000),
+// 		func() trader.Strategy {
+// 			return trader.NewEMACrossADX(emaCrossADXCfg)
+// 		},
+// 	)
+// }
 
-func runEMACrossADXFromConfig(cmd *cobra.Command) error {
-	return runConfiguredStrategyCommand(cmd, "ema-cross-adx", &emaCrossADXOpts, applyEMACrossADXRunParamOverrides)
-}
+// func runEMACrossADXFromConfig(cmd *cobra.Command) error {
+// 	return runConfiguredStrategyCommand(cmd, "ema-cross-adx", &emaCrossADXOpts, applyEMACrossADXRunParamOverrides)
+// }
 
-func applyEMACrossADXRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {
-	if rr.Strategy.Params == nil {
-		rr.Strategy.Params = make(map[string]any)
-	}
+// func applyEMACrossADXRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {
+// 	if rr.Strategy.Params == nil {
+// 		rr.Strategy.Params = make(map[string]any)
+// 	}
 
-	if cmd.Flags().Changed("fast") {
-		rr.Strategy.Params["fast"] = emaCrossADXCfg.FastPeriod
-	}
-	if cmd.Flags().Changed("slow") {
-		rr.Strategy.Params["slow"] = emaCrossADXCfg.SlowPeriod
-	}
-	if cmd.Flags().Changed("adx-period") {
-		rr.Strategy.Params["adx_period"] = emaCrossADXCfg.ADXPeriod
-	}
-	if cmd.Flags().Changed("adx-threshold") {
-		rr.Strategy.Params["adx_threshold"] = emaCrossADXCfg.ADXThreshold
-	}
-	if cmd.Flags().Changed("require-di") {
-		rr.Strategy.Params["require_di"] = emaCrossADXCfg.RequireDI
-	}
-	if cmd.Flags().Changed("require-adx-ready") {
-		rr.Strategy.Params["require_adx_ready"] = emaCrossADXCfg.RequireADXReady
-	}
-	if cmd.Flags().Changed("min-spread") {
-		rr.Strategy.Params["min_spread"] = emaCrossADXCfg.MinSpread
-	}
-}
+// 	if cmd.Flags().Changed("fast") {
+// 		rr.Strategy.Params["fast"] = emaCrossADXCfg.FastPeriod
+// 	}
+// 	if cmd.Flags().Changed("slow") {
+// 		rr.Strategy.Params["slow"] = emaCrossADXCfg.SlowPeriod
+// 	}
+// 	if cmd.Flags().Changed("adx-period") {
+// 		rr.Strategy.Params["adx_period"] = emaCrossADXCfg.ADXPeriod
+// 	}
+// 	if cmd.Flags().Changed("adx-threshold") {
+// 		rr.Strategy.Params["adx_threshold"] = emaCrossADXCfg.ADXThreshold
+// 	}
+// 	if cmd.Flags().Changed("require-di") {
+// 		rr.Strategy.Params["require_di"] = emaCrossADXCfg.RequireDI
+// 	}
+// 	if cmd.Flags().Changed("require-adx-ready") {
+// 		rr.Strategy.Params["require_adx_ready"] = emaCrossADXCfg.RequireADXReady
+// 	}
+// 	if cmd.Flags().Changed("min-spread") {
+// 		rr.Strategy.Params["min_spread"] = emaCrossADXCfg.MinSpread
+// 	}
+// }

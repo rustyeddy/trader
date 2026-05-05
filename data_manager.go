@@ -25,6 +25,12 @@ type DataManager struct {
 	plan      *Plan
 }
 
+func GetDataManager() *DataManager {
+	end := time.Now()
+	start := time.Date(2014, time.January, 1, 1, 0, 0, 0, time.UTC)
+	return NewDataManager([]string{"EURUSD", "USDJPY", "USDGBP"}, start, end)
+}
+
 // NewDataManager constructs a DataManager for the given instruments and time range.
 func NewDataManager(instruments []string, start, end time.Time) *DataManager {
 	return &DataManager{

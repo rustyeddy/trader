@@ -73,7 +73,7 @@ func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
 			}
 			defer j.Close()
 
-			engine := sim.NewEngine(&trader.Account{
+			engine := sim.NewSimBroker(&trader.Account{
 				ID:       accountID,
 				Currency: "USD",
 				Balance:  trader.MoneyFromFloat(startingBalance),
@@ -129,7 +129,7 @@ func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
 
 // applyEvent should implement the same event semantics you already have in cmd/replay.
 // Send me your current event names + how p1-p4 are interpreted and I'll lock this down.
-func applyEvent(ctx context.Context, eng *sim.Engine, row EventRow) error {
+func applyEvent(ctx context.Context, eng *sim.Sim, row EventRow) error {
 	switch strings.ToUpper(strings.TrimSpace(row.Event)) {
 	case "OPEN":
 		return fmt.Errorf("OPEN not implemented yet: p1=%q p2=%q p3=%q p4=%q", row.P1, row.P2, row.P3, row.P4)

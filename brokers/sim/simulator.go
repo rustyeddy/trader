@@ -8,27 +8,27 @@ import (
 	"github.com/rustyeddy/trader"
 )
 
-type Engine struct {
+type Sim struct {
 	account *trader.Account
 	journal trader.Journal
 	prices  map[string]trader.Tick
 }
 
-func NewEngine(acct *trader.Account, j trader.Journal) *Engine {
+func NewSimBroker(acct *trader.Account, j trader.Journal) *Sim {
 	if acct == nil {
 		acct = &trader.Account{}
 	}
 	if acct.Positions.Positions() == nil {
 		acct.Positions = trader.Positions{}
 	}
-	return &Engine{
+	return &Sim{
 		account: acct,
 		journal: j,
 		prices:  make(map[string]trader.Tick),
 	}
 }
 
-func (e *Engine) UpdatePrice(tick trader.Tick) error {
+func (e *Sim) UpdatePrice(tick trader.Tick) error {
 	if e == nil || e.account == nil {
 		return fmt.Errorf("nil engine")
 	}
@@ -46,7 +46,7 @@ func (e *Engine) UpdatePrice(tick trader.Tick) error {
 	return e.account.ResolveWithMarks(marks)
 }
 
-func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Position, error) {
+func (e *Sim) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Position, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}
@@ -84,7 +84,7 @@ func (e *Engine) CreateMarketOrder(ctx context.Context, req trader.OrderRequest)
 	return pos, nil
 }
 
-func (e *Engine) CloseAll(ctx context.Context, reason string) error {
+func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 	if e == nil || e.account == nil {
 		return fmt.Errorf("nil engine")
 	}
@@ -137,7 +137,7 @@ func (e *Engine) CloseAll(ctx context.Context, reason string) error {
 	return nil
 }
 
-func (e *Engine) GetAccount(context.Context) (*trader.Account, error) {
+func (e *Sim) GetAccount(context.Context) (*trader.Account, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}

@@ -53,9 +53,7 @@ func (s *TemplateStrategy) Ready() bool {
 	return s.ready
 }
 
-func (s *TemplateStrategy) Update(ctx context.Context, ct *CandleTime, positions *Positions) *StrategyPlan {
-	_ = ctx
-	_ = positions
+func (s *TemplateStrategy) Update(ctx context.Context, ct *CandleTime, run *BacktestRun) *StrategyPlan {
 	if ct == nil {
 		return &DefaultStrategyPlan
 	}

@@ -1,8 +1,6 @@
 package backtest
 
 import (
-	"strings"
-
 	"github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
 )
@@ -29,42 +27,5 @@ func init() {
 }
 
 func RunEMACross(cmd *cobra.Command, args []string) error {
-	if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
-		return runEMACrossFromConfig(cmd)
-	}
-	return runEMACrossFromFlags(cmd)
-}
-
-func runEMACrossFromFlags(cmd *cobra.Command) error {
-	_ = cmd
-	emaCrossCfg.Scale = trader.PriceScale
-	return runAdhocStrategyCommand(
-		emaCrossOpts,
-		"adhoc-ema-cross",
-		"ema-cross",
-		trader.MoneyFromFloat(1000),
-		func() trader.Strategy {
-			return trader.NewEMACross(emaCrossCfg)
-		},
-	)
-}
-
-func runEMACrossFromConfig(cmd *cobra.Command) error {
-	return runConfiguredStrategyCommand(cmd, "ema-cross", &emaCrossOpts, applyEMACrossRunParamOverrides)
-}
-
-func applyEMACrossRunParamOverrides(cmd *cobra.Command, rr *trader.ResolvedRun) {
-	if rr.Strategy.Params == nil {
-		rr.Strategy.Params = make(map[string]any)
-	}
-
-	if cmd.Flags().Changed("fast") {
-		rr.Strategy.Params["fast"] = emaCrossCfg.FastPeriod
-	}
-	if cmd.Flags().Changed("slow") {
-		rr.Strategy.Params["slow"] = emaCrossCfg.SlowPeriod
-	}
-	if cmd.Flags().Changed("min-spread") {
-		rr.Strategy.Params["min_spread"] = emaCrossCfg.MinSpread
-	}
+	return nil
 }

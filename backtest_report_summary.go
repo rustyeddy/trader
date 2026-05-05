@@ -31,7 +31,7 @@ type BacktestReportSummary struct {
 	RR       float64 `json:"rr"`
 }
 
-func NewBacktestReportSummary(r BacktestRun) BacktestReportSummary {
+func NewBacktestReportSummary(r BacktestRunVars) BacktestReportSummary {
 	return BacktestReportSummary{
 		Name:         r.Name,
 		Kind:         r.Kind,

@@ -24,6 +24,12 @@ type Broker struct {
 	OpenOrders
 }
 
+func NewBroker(name string) *Broker {
+	return &Broker{
+		ID: name,
+	}
+}
+
 func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*openResult, error) {
 
 	// Create an order and submit the order
