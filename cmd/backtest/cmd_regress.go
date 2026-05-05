@@ -60,7 +60,6 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 	}
 
 	t := &trader.Trader{
-		Account:     trader.NewAccount("backtest", trader.MoneyFromFloat(2000)),
 		DataManager: trader.GetDataManager(),
 	}
 	t.Broker = trader.NewBroker("sim")
@@ -78,6 +77,8 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, run := range runs {
+			t.Account = trader.NewAccount("backtest", run.StartingBalance)
+
 			ctx := context.TODO()
 			err := t.Backtest(ctx, &run)
 			if err != nil {

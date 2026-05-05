@@ -33,9 +33,15 @@ func GetBacktestRuns(cfg *Config) ([]BacktestRun, error) {
 }
 
 type BacktestRequest struct {
-	Name       string
+	Name string
+
+	StartingBalance Money
+	RiskPct         Rate
+
+	DefaultStopPips Pips
+	DefaultTakePips Pips
+
 	Instrument string
-	Strict     bool
 	Strategy
 	TimeRange
 }
