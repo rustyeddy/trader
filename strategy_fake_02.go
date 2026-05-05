@@ -114,7 +114,7 @@ func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *S
 		side = Short
 	}
 
-	inst := GetInstrument(f.Instrument)
+	inst := GetInstrument(run.Instrument)
 	if inst == nil {
 		plan.Reason = "fake-02-missing-instrument"
 		return plan
@@ -127,7 +127,7 @@ func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *S
 		stop = inst.AddPips(c.Close, pipsFromFloat(f.StopPips))
 	}
 
-	op := newOpenRequest(f.Instrument, c, side, stop, Price(0), "fake-02-open")
+	op := newOpenRequest(run.Instrument, c, side, stop, Price(0), "fake-02-open")
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "fake-02-open"
 
