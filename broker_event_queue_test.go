@@ -10,7 +10,10 @@ import (
 func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 	t.Parallel()
 
-	b := &Broker{evtQ: make(chan *Event, 1)}
+	b := &Broker{
+		evtQ:    make(chan *Event, 1),
+		Account: NewAccount("account", MoneyFromFloat(2000.00)),
+	}
 	b.evtQ <- &Event{Type: EventOrderFilled}
 
 	th := NewTradeHistory("EURUSD")

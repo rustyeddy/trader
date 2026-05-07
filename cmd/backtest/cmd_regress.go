@@ -59,11 +59,6 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := &trader.Trader{
-		DataManager: trader.GetDataManager(),
-	}
-	t.Broker = trader.NewBroker("sim")
-
 	count := 0
 	for _, cfgPath := range configPaths {
 		cfg, err := trader.LoadConfig(cfgPath)
@@ -77,9 +72,13 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, run := range runs {
-			t.Account = trader.NewAccount("backtest", run.StartingBalance)
-
 			ctx := context.TODO()
+			t := &trader.Trader{
+				DataManager: trader.GetDataManager(),
+			}
+			t.Broker = trader.NewBroker("sim")
+			t.Broker.Account = trader.NewAccount("backtest", run.StartingBalance)
+
 			err := t.Backtest(ctx, &run)
 			if err != nil {
 				fmt.Printf("Backtest errored %+v\n", err) // turn into a log

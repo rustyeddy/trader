@@ -52,3 +52,5 @@ tmp
 trader.log
 debug*
 data
+cmd/cmd
+__debug*

@@ -3,12 +3,12 @@ package trader
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 )
 
 type Trader struct {
-	*Account
 	*DataManager
 	*Broker
 	*Store
@@ -394,10 +394,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		if pos == nil {
 			return fmt.Errorf("error order filled with no position")
 		}
-
-		if err := t.Account.AddPosition(ctx, pos); err != nil {
-			return err
-		}
+		log.Println("Trader position added to account")
 
 	case EventPositionClosed:
 		pos := evt.Position
@@ -408,10 +405,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		if trade == nil {
 			return fmt.Errorf("position closed event missing trade")
 		}
-
-		if err := t.Account.ClosePosition(pos, trade); err != nil {
-			return err
-		}
+		log.Println("Trader position added to account")
 
 	default:
 		Backtest.Warn("unsupported broker event", "eventType", evt.Type)

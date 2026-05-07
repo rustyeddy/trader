@@ -19,9 +19,11 @@ type OrderRequest struct {
 }
 
 type Broker struct {
-	ID   string
+	ID string
+	*Account
+	OpenOrders // should Account own OpenOrders?b
+
 	evtQ chan *Event
-	OpenOrders
 }
 
 func NewBroker(name string) *Broker {
@@ -138,6 +140,10 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		FillTime:    req.Timestamp,
 	}
 
+	if err := b.Account.ClosePosition(req.Position, trade); err != nil {
+		return err
+	}
+
 	// send trade back on event queue
 	evt := &Event{
 		BrokerOrderID: NewULID(),
@@ -146,7 +152,6 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		Reason:        "lowest low",
 		Cause:         CloseManual,
 		Trade:         trade,
-		Position:      req.Position,
 	}
 
 	return b.emitEvent(ctx, evt)
