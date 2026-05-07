@@ -17,7 +17,13 @@ func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 	b.evtQ <- &Event{Type: EventOrderFilled}
 
 	th := NewTradeHistory("EURUSD")
-	pos := &Position{TradeCommon: th.TradeCommon, State: PositionOpen}
+	th.TradeCommon.Units = Units(1000)
+	th.TradeCommon.Side = Long
+	pos := &Position{
+		TradeCommon: th.TradeCommon,
+		FillPrice:   Price(1095000),
+		State:       PositionOpen,
+	}
 	req := &closeRequest{
 		Request: Request{
 			TradeCommon: th.TradeCommon,

@@ -8,6 +8,7 @@ import (
 
 func TestBitIsSet(t *testing.T) {
 	t.Parallel()
+	requireDukascopyTests(t)
 
 	bits := make([]uint64, 2)
 

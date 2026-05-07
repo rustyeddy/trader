@@ -73,6 +73,16 @@ make build
 make cover
 ```
 
+### Dukascopy Tests
+
+Tests that exercise Dukascopy-specific download paths are skipped by default to keep CI and local runs deterministic.
+
+Enable them explicitly with:
+
+```bash
+TRADER_RUN_DUKASCOPY_TESTS=1 go test ./...
+```
+
 Core invariants (non-negotiable)
 
 These should always hold:

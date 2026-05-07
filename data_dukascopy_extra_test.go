@@ -2,13 +2,15 @@ package trader
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewDatafile(t *testing.T) {
 	t.Parallel()
+	requireDukascopyTests(t)
 
 	sym := "EURUSD"
 	ts := time.Date(2025, 1, 2, 13, 45, 30, 0, time.UTC)
@@ -22,6 +24,7 @@ func TestNewDatafile(t *testing.T) {
 
 func TestDukasfileKey(t *testing.T) {
 	t.Parallel()
+	requireDukascopyTests(t)
 
 	sym := "EURUSD"
 	ts := time.Date(2025, 1, 2, 13, 0, 0, 0, time.UTC)
@@ -44,6 +47,7 @@ func TestDukasfileKey(t *testing.T) {
 
 func TestDukasfileInstrument(t *testing.T) {
 	t.Parallel()
+	requireDukascopyTests(t)
 
 	df := newDatafile("GBPUSD", time.Now())
 	require.Equal(t, "GBPUSD", df.Instrument())
@@ -51,6 +55,7 @@ func TestDukasfileInstrument(t *testing.T) {
 
 func TestDukasfileURL(t *testing.T) {
 	t.Parallel()
+	requireDukascopyTests(t)
 
 	sym := "EURUSD"
 	ts := time.Date(2025, 1, 2, 13, 0, 0, 0, time.UTC)

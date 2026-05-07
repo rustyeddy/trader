@@ -105,6 +105,8 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExecuteDownloads_ContextCancelled(t *testing.T) {
+	requireDukascopyTests(t)
+
 	s := useTempStore(t)
 	_ = s
 
