@@ -25,7 +25,9 @@ func GetBacktestRuns(cfg *Config) ([]BacktestRun, error) {
 
 		// should scale these I guess?
 		req.StartingBalance = MoneyFromFloat(cfg.Defaults.StartingBalance)
-		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct)
+		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct / 100.0)
+		req.DefaultStopPips = pipsFromFloat(float64(cfg.Defaults.StopPips))
+		req.DefaultTakePips = pipsFromFloat(float64(cfg.Defaults.TakePips))
 
 		run.BacktestRequest = req
 		runs = append(runs, *run)

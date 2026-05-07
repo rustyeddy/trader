@@ -280,12 +280,6 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 			}
 
 			Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
-			t.Account.Positions.Add(&Position{
-				TradeCommon: openReq.TradeCommon,
-				FillPrice:   openReq.Price,     // XXX this needs to be filled out by the broker
-				FillTime:    openReq.Timestamp, // XXX by the broker
-				State:       PositionOpenRequested,
-			})
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.OpenRequest(runCtx, openReq)
 			if err != nil {
@@ -350,6 +344,9 @@ func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 	}
 	if t.DataManager == nil {
 		return fmt.Errorf("nil data manager")
+	}
+	if run.Strategy == nil {
+		return fmt.Errorf("nil strategy")
 	}
 
 	Backtest.Info("strategy selected", "strategy", run.Strategy.Name())

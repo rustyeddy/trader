@@ -102,9 +102,8 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		// if err := writeRegressionSummary(reportPath, summary); err != nil {
 		// 	return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
 		// }
-
 		// fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
-		// count++
+		count++
 	}
 
 	if count == 0 {
