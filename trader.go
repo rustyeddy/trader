@@ -282,8 +282,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 			Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			t.Account.Positions.Add(&Position{
 				TradeCommon: openReq.TradeCommon,
-				FillPrice:   openReq.Price,
-				FillTime:    openReq.Timestamp,
+				FillPrice:   openReq.Price,     // XXX this needs to be filled out by the broker
+				FillTime:    openReq.Timestamp, // XXX by the broker
 				State:       PositionOpenRequested,
 			})
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())

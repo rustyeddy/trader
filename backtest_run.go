@@ -23,6 +23,10 @@ func GetBacktestRuns(cfg *Config) ([]BacktestRun, error) {
 			return nil, fmt.Errorf("failed to create BacktestRequest from config")
 		}
 
+		// should scale these I guess?
+		req.StartingBalance = MoneyFromFloat(cfg.Defaults.StartingBalance)
+		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct)
+
 		run.BacktestRequest = req
 		runs = append(runs, *run)
 	}

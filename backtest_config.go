@@ -18,14 +18,14 @@ type Config struct {
 }
 
 type RunDefaults struct {
-	StartingBalance float64 `json:"starting_balance" yaml:"starting_balance"`
-	AccountCCY      string  `json:"account_ccy" yaml:"account_ccy"`
+	StartingBalance float64 `json:"starting-balance" yaml:"starting-balance"`
+	AccountCCY      string  `json:"account-ccy" yaml:"account-ccy"`
 	Scale           int64   `json:"scale" yaml:"scale"`
 	Strict          bool    `json:"strict" yaml:"strict"`
 
-	RiskPct  float64 `json:"risk_pct" yaml:"risk_pct"`
-	StopPips int32   `json:"stop_pips" yaml:"stop_pips"`
-	TakePips int32   `json:"take_pips" yaml:"take_pips"`
+	RiskPct  float64 `json:"risk-pct" yaml:"risk-pct"`
+	StopPips int32   `json:"stop-pips" yaml:"stop-pips"`
+	TakePips int32   `json:"take-pips" yaml:"take-pips"`
 	RR       float64 `json:"rr" yaml:"rr"`
 	Units    int32   `json:"units" yaml:"units"`
 

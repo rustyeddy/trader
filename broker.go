@@ -56,7 +56,7 @@ func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*openResult
 		return res, err
 	}
 	// TODO: Need to create a fill fills
-	pos.FillPrice = req.Price
+	pos.FillPrice = req.Price // add some spread & slippage
 	pos.FillTime = req.Timestamp
 
 	// This would be the time to emulate a delay between order and fill
