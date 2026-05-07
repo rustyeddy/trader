@@ -32,9 +32,6 @@ func init() {
 }
 
 func runBacktestRegress(cmd *cobra.Command, args []string) error {
-	_ = cmd
-	_ = args
-
 	configPath := defaultRegressionConfigPath
 	if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
 		configPath = strings.TrimSpace(rootCfg.ConfigPath)
@@ -85,24 +82,16 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
+			summary := trader.NewBacktestReportSummary(run.BacktestResult.BacktestRunVars)
+			reportPath := regressionReportPath(outDir, cfgPath)
+
+			if err := writeRegressionSummary(reportPath, summary); err != nil {
+				return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
+			}
+			fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
+			count++
 		}
 
-		// fmt.Printf("RUNS: %+v\n", runs)
-		// vars, err := executeStrategy(context.Background(), candleCmdCommon{}, nil, candleRunMeta{}, nil)
-		// if err != nil {
-		// 	return fmt.Errorf("resolve runs from %q: %w", cfgPath, err)
-		// }
-		// fmt.Printf("VARS: %+v\n", vars)
-		// _ = vars
-
-		// summary := trader.NewBacktestReportSummary(vars)
-		// reportPath := regressionReportPath(outDir, cfgPath)
-
-		// if err := writeRegressionSummary(reportPath, summary); err != nil {
-		// 	return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
-		// }
-		// fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
-		count++
 	}
 
 	if count == 0 {
