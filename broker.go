@@ -35,7 +35,7 @@ func NewBroker(name string) *Broker {
 	}
 }
 
-func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*openResult, error) {
+func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult, error) {
 
 	// Create an order and submit the order
 	o := &order{}
@@ -65,6 +65,16 @@ func (b *Broker) OpenRequest(ctx context.Context, req *OpenRequest) (*openResult
 	// we will ignore this for now
 	pos.State = PositionOpen
 	res.Position = pos
+
+	if b.Account == nil {
+		return res, fmt.Errorf("broker account is nil")
+	}
+	if err := b.Account.AddPosition(ctx, pos); err != nil {
+		return res, err
+	}
+
+	// b.Account.Positions.Add(pos)
+
 	// send position back on event queue
 	evt := &Event{
 		Type:          EventOrderFilled,

@@ -281,7 +281,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 
 			Backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-			_, err = t.Broker.OpenRequest(runCtx, openReq)
+			_, err = t.Broker.SubmitOpen(runCtx, openReq)
 			if err != nil {
 				t.Account.Positions.Delete(openReq.ID)
 				return err

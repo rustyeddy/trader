@@ -77,7 +77,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	)
 	go func() {
 		defer close(done)
-		res, err = b.OpenRequest(context.Background(), req)
+		res, err = b.SubmitOpen(context.Background(), req)
 	}()
 
 	select {
@@ -124,7 +124,7 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	var err error
 	go func() {
 		defer close(done)
-		_, err = b.OpenRequest(ctx, req)
+		_, err = b.SubmitOpen(ctx, req)
 	}()
 
 	select {
