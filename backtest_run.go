@@ -84,6 +84,13 @@ type BacktestResult struct {
 
 	Start Timestamp
 	End   Timestamp
+
+	// Derived / computed in Go
+	NetPL        Money
+	ReturnPct    Rate
+	WinRate      Rate
+	ProfitFactor Rate
+	MaxDDPct     Rate
 }
 
 // BacktestRunRow mirrors backtest_runs table.
@@ -133,55 +140,55 @@ type BacktestRunVars struct {
 	NextActions []string
 }
 
-type ResolvedRun struct {
-	Name       string
-	Source     string
-	Instrument string
-	Timeframe  string
-	From       string
-	To         string
-	Strict     bool
+// type ResolvedRun struct {
+// 	Name       string
+// 	Source     string
+// 	Instrument string
+// 	Timeframe  string
+// 	From       string
+// 	To         string
+// 	Strict     bool
 
-	// REMOVE: Accounting should not be part of
-	// the back test run
-	StartingBalance Money
-	AccountCCY      string
-	Scale           Scale6
-	RR              Rate
-	Units           Units
+// 	// REMOVE: Accounting should not be part of
+// 	// the back test run
+// 	StartingBalance Money
+// 	AccountCCY      string
+// 	Scale           Scale6
+// 	RR              Rate
+// 	Units           Units
 
-	// REMOVE: This is part of the strategy
-	RiskPct  Rate
-	StopPips Price
-	TakePips Price
+// 	// REMOVE: This is part of the strategy
+// 	RiskPct  Rate
+// 	StopPips Price
+// 	TakePips Price
 
-	Strategy StrategyConfig
-}
+// 	Strategy StrategyConfig
+// }
 
-func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
-	tf, err := parseTimeframe(r.Timeframe)
-	if err != nil {
-		return CandleRequest{}, err
-	}
+// func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
+// 	tf, err := parseTimeframe(r.Timeframe)
+// 	if err != nil {
+// 		return CandleRequest{}, err
+// 	}
 
-	start, err := parseDateStart(r.From)
-	if err != nil {
-		return CandleRequest{}, fmt.Errorf("bad from %q: %w", r.From, err)
-	}
+// 	start, err := parseDateStart(r.From)
+// 	if err != nil {
+// 		return CandleRequest{}, fmt.Errorf("bad from %q: %w", r.From, err)
+// 	}
 
-	end, err := parseDateEndExclusive(r.To)
-	if err != nil {
-		return CandleRequest{}, fmt.Errorf("bad to %q: %w", r.To, err)
-	}
+// 	end, err := parseDateEndExclusive(r.To)
+// 	if err != nil {
+// 		return CandleRequest{}, fmt.Errorf("bad to %q: %w", r.To, err)
+// 	}
 
-	return CandleRequest{
-		Source:     r.Source,
-		Instrument: r.Instrument,
-		Timeframe:  tf,
-		Range: TimeRange{
-			Start: FromTime(start),
-			End:   FromTime(end),
-		},
-		Strict: r.Strict,
-	}, nil
-}
+// 	return CandleRequest{
+// 		Source:     r.Source,
+// 		Instrument: r.Instrument,
+// 		Timeframe:  tf,
+// 		Range: TimeRange{
+// 			Start: FromTime(start),
+// 			End:   FromTime(end),
+// 		},
+// 		Strict: r.Strict,
+// 	}, nil
+// }
