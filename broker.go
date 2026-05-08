@@ -66,11 +66,10 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	pos.State = PositionOpen
 	res.Position = pos
 
-	if b.Account == nil {
-		return res, fmt.Errorf("broker account is nil")
-	}
-	if err := b.Account.AddPosition(ctx, pos); err != nil {
-		return res, err
+	if b.Account != nil {
+		if err := b.Account.AddPosition(ctx, pos); err != nil {
+			return res, err
+		}
 	}
 
 	// b.Account.Positions.Add(pos)
