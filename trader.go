@@ -354,7 +354,6 @@ func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 	if run.Strategy == nil {
 		return fmt.Errorf("nil strategy")
 	}
-
 	backtest.Info("strategy selected", "strategy", run.Strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
@@ -378,8 +377,15 @@ func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 	//   Update Account with PnL, Balance
 	//   Generate Backtest Report
 
-	run.BacktestResult = &BacktestResult{}
-	return t.backTestWithIterator(ctx, run, itr)
+	run.BacktestResult = nil
+	if err := t.backTestWithIterator(ctx, run, itr); err != nil {
+		return err
+	}
+	if run.BacktestResult == nil {
+		run.BuildBacktestResult(t.Account)
+	}
+
+	return nil
 }
 
 func (t *Trader) processEvent(ctx context.Context, evt *Event) error {

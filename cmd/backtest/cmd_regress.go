@@ -1,7 +1,6 @@
 package backtest
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -69,7 +68,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, run := range runs {
-			ctx := context.TODO()
+			ctx := cmd.Context()
 			t := &trader.Trader{
 				DataManager: trader.GetDataManager(),
 			}
@@ -82,12 +81,13 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			summary := trader.NewBacktestReportSummary(run.BacktestResult)
-			reportPath := regressionReportPath(outDir, cfgPath)
+			summary := run.Summary()
 
+			reportPath := filepath.Join(outDir, run.Name+".json")
 			if err := writeRegressionSummary(reportPath, summary); err != nil {
 				return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
 			}
+
 			fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
 			count++
 		}

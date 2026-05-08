@@ -23,7 +23,6 @@ func GetBacktestRuns(cfg *Config) ([]BacktestRun, error) {
 			return nil, fmt.Errorf("failed to create BacktestRequest from config")
 		}
 
-		// should scale these I guess?
 		req.StartingBalance = MoneyFromFloat(cfg.Defaults.StartingBalance)
 		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct / 100.0)
 		req.DefaultStopPips = pipsFromFloat(float64(cfg.Defaults.StopPips))
@@ -36,20 +35,6 @@ func GetBacktestRuns(cfg *Config) ([]BacktestRun, error) {
 		return nil, fmt.Errorf("regression config must resolve to exactly 1 run, got %d", len(runs))
 	}
 	return runs, nil
-}
-
-type BacktestRequest struct {
-	Name string
-
-	StartingBalance Money
-	RiskPct         Rate
-
-	DefaultStopPips Pips
-	DefaultTakePips Pips
-
-	Instrument string
-	Strategy
-	TimeRange
 }
 
 func newBacktestReq(cfg RunConfig) *BacktestRequest {
@@ -73,122 +58,78 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 	}
 }
 
-// Result is a lightweight summary of a backtest run.
-type BacktestResult struct {
-	Balance Money
-	Equity  Money
+type BacktestRequest struct {
+	Name string
 
-	Trades int
-	Wins   int
-	Losses int
+	StartingBalance Money
+	RiskPct         Rate
 
-	Start Timestamp
-	End   Timestamp
+	DefaultStopPips Pips
+	DefaultTakePips Pips
 
-	// Derived / computed in Go
-	NetPL        Money
-	ReturnPct    Rate
-	WinRate      Rate
-	ProfitFactor Rate
-	MaxDDPct     Rate
-}
-
-// BacktestRunRow mirrors backtest_runs table.
-type BacktestRunVars struct {
-	RunID     string
-	Name      string
-	Kind      string
-	Created   Timestamp
-	Timeframe string
-	Dataset   string
-
-	// Instrument traded in this backtest
 	Instrument string
-	Strategy   string
-	Config     []byte // strategy config
-
-	// Risk Management
-	RiskPct  Rate  // 0.005 (0.5%)
-	StopPips Price // e.g. 20
-	RR       Rate  // take-profit multiple of risk, e.g. 2.0
-
-	// Account and price timeframe
-	Start Timestamp
-	End   Timestamp
-
-	// Results
-	Trades int
-	Wins   int
-	Losses int
-
-	// account info
-	StartBalance Money
-	EndBalance   Money
-
-	// Derived / computed in Go
-	NetPL        Money
-	ReturnPct    Rate
-	WinRate      Rate
-	ProfitFactor Rate
-	MaxDDPct     Rate
-
-	GitCommit string
-	OrgPath   string
-	EquityPNG string
-
-	Notes       []string
-	NextActions []string
+	Strategy
+	TimeRange
 }
 
-// type ResolvedRun struct {
-// 	Name       string
-// 	Source     string
-// 	Instrument string
-// 	Timeframe  string
-// 	From       string
-// 	To         string
-// 	Strict     bool
+func (run *BacktestRun) BuildBacktestResult(acct *Account) *BacktestResult {
+	if run == nil || acct == nil {
+		return nil
+	}
 
-// 	// REMOVE: Accounting should not be part of
-// 	// the back test run
-// 	StartingBalance Money
-// 	AccountCCY      string
-// 	Scale           Scale6
-// 	RR              Rate
-// 	Units           Units
+	res := &BacktestResult{
+		Balance: acct.Balance,
+		Equity:  acct.Equity,
+		Trades:  len(acct.Trades),
+		Start:   run.TimeRange.Start,
+		End:     run.TimeRange.End,
+	}
 
-// 	// REMOVE: This is part of the strategy
-// 	RiskPct  Rate
-// 	StopPips Price
-// 	TakePips Price
+	for _, tr := range acct.Trades {
+		if tr == nil {
+			continue
+		}
+		if tr.PNL > 0 {
+			res.Wins++
+		} else if tr.PNL < 0 {
+			res.Losses++
+		}
+	}
 
-// 	Strategy StrategyConfig
-// }
+	res.NetPL = acct.Balance - run.StartingBalance
+	if run.StartingBalance != 0 {
+		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / run.StartingBalance.Float64())
+	}
+	if res.Trades > 0 {
+		res.WinRate = RateFromFloat(float64(res.Wins) / float64(res.Trades))
+	}
+	run.BacktestResult = res
+	return run.BacktestResult
 
-// func (r ResolvedRun) CandleRequest() (CandleRequest, error) {
-// 	tf, err := parseTimeframe(r.Timeframe)
-// 	if err != nil {
-// 		return CandleRequest{}, err
-// 	}
+}
 
-// 	start, err := parseDateStart(r.From)
-// 	if err != nil {
-// 		return CandleRequest{}, fmt.Errorf("bad from %q: %w", r.From, err)
-// 	}
+func (run *BacktestRun) Summary() BacktestReportSummary {
+	if run == nil || run.BacktestRequest == nil || run.BacktestResult == nil {
+		return BacktestReportSummary{}
+	}
 
-// 	end, err := parseDateEndExclusive(r.To)
-// 	if err != nil {
-// 		return CandleRequest{}, fmt.Errorf("bad to %q: %w", r.To, err)
-// 	}
+	return BacktestReportSummary{
+		Name:       run.Name,
+		Strategy:   run.Strategy.Name(),
+		Instrument: run.Instrument,
+		Timeframe:  run.TimeRange.TF.String(),
+		Start:      formatBacktestSummaryTime(run.TimeRange.Start),
+		End:        formatBacktestSummaryTime(run.TimeRange.End),
 
-// 	return CandleRequest{
-// 		Source:     r.Source,
-// 		Instrument: r.Instrument,
-// 		Timeframe:  tf,
-// 		Range: TimeRange{
-// 			Start: FromTime(start),
-// 			End:   FromTime(end),
-// 		},
-// 		Strict: r.Strict,
-// 	}, nil
-// }
+		Trades:       run.BacktestResult.Trades,
+		Wins:         run.BacktestResult.Wins,
+		Losses:       run.BacktestResult.Losses,
+		StartBalance: run.StartingBalance.Float64(),
+		EndBalance:   run.BacktestResult.Balance.Float64(),
+		NetPL:        run.BacktestResult.NetPL.Float64(),
+		ReturnPct:    run.BacktestResult.ReturnPct.Float64() * 100,
+		WinRate:      run.BacktestResult.WinRate.Float64() * 100,
+		RiskPct:      run.RiskPct.Float64() * 100,
+		StopPips:     int32(run.DefaultStopPips),
+	}
+}
