@@ -30,6 +30,15 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event
 					backtest.Info("broker event channel closed")
 					return
 				}
+
+				backtest.Debug("Broker event received",
+					"type", evt.Type,
+					"time", evt.Time,
+					"instrument", evt.Instrument,
+					"reason", evt.Reason,
+					"cause", evt.Cause,
+				)
+
 				if err := t.processEvent(ctx, evt); err != nil {
 					select {
 					case errCh <- err:
@@ -235,7 +244,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		candle := itr.CandleTime()
 		lastCandle = candle
 		haveLastCandle = true
-		backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
+		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		atomic.AddInt64(&processedCandles, 1)
 
 		err := t.Account.ResolveWithMarks(map[string]Price{
@@ -252,7 +261,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		if plan == nil {
 			plan = &DefaultStrategyPlan
 		}
-		backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
+		// backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancelReq := range plan.Cancel {
 			backtest.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
