@@ -15,3 +15,7 @@ type syslogWriter struct{}
 func (sw *syslogWriter) Write(p []byte) (int, error) {
 	return 0, fmt.Errorf("syslog is not supported on Windows")
 }
+
+func (sw *syslogWriter) Close() error {
+	return fmt.Errorf("syslog is not supported on Windows")
+}

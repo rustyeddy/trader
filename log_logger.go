@@ -23,6 +23,7 @@
 package trader
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -68,18 +69,22 @@ type LogConfig struct {
 // -------------------------------------------------------------------------
 
 var (
-	mu     sync.RWMutex
-	level  = new(slog.LevelVar) // dynamic; adjusted by Setup
-	defLog *slog.Logger
+	mu sync.Mutex
+
+	level        = new(slog.LevelVar) // dynamic; adjusted by Setup
+	handlerState *switchHandlerState
+	defLog       *slog.Logger
+	sinkClosers  []io.Closer
 
 	modulesMu sync.RWMutex
 	modules   = make(map[string]*slog.Logger)
 
 	// Pre-wired module loggers.  They are initialised to the default logger
-	// in init() and re-pointed whenever Setup is called.
+	// in init() and remain valid across Setup calls.
 	L            *slog.Logger
 	Data         *slog.Logger
-	backtest     *slog.Logger
+	Backtest     *slog.Logger
+	backtest     *slog.Logger // internal alias used by existing package code
 	IndicatorLog *slog.Logger
 	Strat        *slog.Logger
 	Replay       *slog.Logger
@@ -87,20 +92,25 @@ var (
 
 func init() {
 	level.Set(slog.LevelInfo)
-	defLog = slog.Default()
+
+	// Keep logger pointers stable for the lifetime of the process.
+	base := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: level})
+	handlerState = newSwitchHandlerState(base)
+	defLog = slog.New(&switchHandler{state: handlerState})
+	slog.SetDefault(defLog)
+
 	resetModules()
 }
 
-// resetModules rebuilds every pre-wired module logger from the current
-// defLog.  Must be called with mu held for writing (or before concurrent use
-// starts).
+// resetModules rebuilds every pre-wired module logger from defLog.
 func resetModules() {
 	modulesMu.Lock()
 	defer modulesMu.Unlock()
 
 	L = defLog.With("module", "trader")
 	Data = defLog.With("module", "data")
-	backtest = defLog.With("module", "backtest")
+	Backtest = defLog.With("module", "backtest")
+	backtest = Backtest
 	IndicatorLog = defLog.With("module", "indicator")
 	Replay = defLog.With("module", "replay")
 	Strat = defLog.With("module", "strategies")
@@ -116,8 +126,8 @@ func resetModules() {
 // -------------------------------------------------------------------------
 
 // Setup initialises (or re-initialises) the logging system according to cfg.
-// It is safe to call multiple times; subsequent calls replace the previous
-// handler and re-wire all module loggers.
+// It is safe to call multiple times; subsequent calls replace the active
+// handler and close previously opened sinks.
 func Setup(cfg LogConfig) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -125,8 +135,13 @@ func Setup(cfg LogConfig) error {
 	// --- log level ---
 	level.Set(parseLevel(cfg.Level))
 
-	// --- build io.Writer ---
+	if err := closeSinksLocked(); err != nil {
+		return err
+	}
+
+	// --- build io.Writer + closers ---
 	var writers []io.Writer
+	closers := make([]io.Closer, 0, 2)
 	if cfg.Stdout {
 		writers = append(writers, os.Stdout)
 	}
@@ -137,8 +152,7 @@ func Setup(cfg LogConfig) error {
 			return fmt.Errorf("log: open log file %q: %w", cfg.File, err)
 		}
 		writers = append(writers, f)
-		// f is intentionally not closed here; the file stays open for the
-		// lifetime of the process (subsequent Setup calls open a new handle).
+		closers = append(closers, f)
 	}
 
 	if cfg.Syslog {
@@ -147,6 +161,12 @@ func Setup(cfg LogConfig) error {
 			return fmt.Errorf("log: open syslog: %w", err)
 		}
 		writers = append(writers, sw)
+		if c, ok := any(sw).(io.Closer); ok {
+			closers = append(closers, c)
+		}
+	}
+	if len(writers) == 0 {
+		writers = append(writers, io.Discard)
 	}
 
 	w := io.MultiWriter(writers...)
@@ -164,10 +184,8 @@ func Setup(cfg LogConfig) error {
 		h = &multiHandler{handlers: []slog.Handler{h, &stackHandler{}}}
 	}
 
-	defLog = slog.New(h)
-	slog.SetDefault(defLog)
-
-	resetModules()
+	handlerState.Set(h)
+	sinkClosers = closers
 	return nil
 }
 
@@ -188,10 +206,7 @@ func Module(name string) *slog.Logger {
 
 	modulesMu.Lock()
 	defer modulesMu.Unlock()
-
-	mu.RLock()
 	l := defLog.With("module", name)
-	mu.RUnlock()
 
 	modules[name] = l
 	return l
@@ -222,6 +237,93 @@ func Fatal(msg string, args ...any) {
 // -------------------------------------------------------------------------
 // helpers
 // -------------------------------------------------------------------------
+
+func closeSinksLocked() error {
+	var firstErr error
+	for _, c := range sinkClosers {
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("log: close previous sink: %w", err)
+		}
+	}
+	sinkClosers = nil
+	return firstErr
+}
+
+type switchHandlerState struct {
+	mu sync.RWMutex
+	h  slog.Handler
+}
+
+func newSwitchHandlerState(h slog.Handler) *switchHandlerState {
+	return &switchHandlerState{h: h}
+}
+
+func (s *switchHandlerState) Set(h slog.Handler) {
+	s.mu.Lock()
+	s.h = h
+	s.mu.Unlock()
+}
+
+func (s *switchHandlerState) get() slog.Handler {
+	s.mu.RLock()
+	h := s.h
+	s.mu.RUnlock()
+	return h
+}
+
+type switchHandler struct {
+	state *switchHandlerState
+	ops   []handlerOp
+}
+
+func (h *switchHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.state.get().Enabled(ctx, l)
+}
+
+func (h *switchHandler) Handle(ctx context.Context, r slog.Record) error {
+	active := applyHandlerOps(h.state.get(), h.ops)
+	return active.Handle(ctx, r)
+}
+
+func (h *switchHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	ops := make([]handlerOp, len(h.ops), len(h.ops)+1)
+	copy(ops, h.ops)
+	attrsCopy := make([]slog.Attr, len(attrs))
+	copy(attrsCopy, attrs)
+	ops = append(ops, handlerOp{kind: handlerOpWithAttrs, attrs: attrsCopy})
+	return &switchHandler{state: h.state, ops: ops}
+}
+
+func (h *switchHandler) WithGroup(name string) slog.Handler {
+	ops := make([]handlerOp, len(h.ops), len(h.ops)+1)
+	copy(ops, h.ops)
+	ops = append(ops, handlerOp{kind: handlerOpWithGroup, group: name})
+	return &switchHandler{state: h.state, ops: ops}
+}
+
+const (
+	handlerOpWithAttrs = iota
+	handlerOpWithGroup
+)
+
+type handlerOp struct {
+	kind  int
+	attrs []slog.Attr
+	group string
+}
+
+func applyHandlerOps(base slog.Handler, ops []handlerOp) slog.Handler {
+	h := base
+	for _, op := range ops {
+		switch op.kind {
+		case handlerOpWithAttrs:
+			h = h.WithAttrs(op.attrs)
+		case handlerOpWithGroup:
+			h = h.WithGroup(op.group)
+		}
+	}
+	return h
+}
 
 func parseLevel(s string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(s)) {

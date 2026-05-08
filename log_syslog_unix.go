@@ -22,6 +22,7 @@ type syslogBackend interface {
 	Info(string) error
 	Warning(string) error
 	Err(string) error
+	Close() error
 }
 
 // newSyslogWriter creates a syslogWriter connected to the local syslog
@@ -54,6 +55,10 @@ func (sw *syslogWriter) Write(p []byte) (int, error) {
 	default:
 		return n, sw.w.Info(msg)
 	}
+}
+
+func (sw *syslogWriter) Close() error {
+	return sw.w.Close()
 }
 
 // levelToPriority maps the slog level field embedded in a formatted log

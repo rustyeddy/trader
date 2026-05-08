@@ -41,6 +41,10 @@ func (f *fakeSyslogBackend) Err(msg string) error {
 	return f.err
 }
 
+func (f *fakeSyslogBackend) Close() error {
+	return f.err
+}
+
 func TestLevelToPriorityTable(t *testing.T) {
 	t.Parallel()
 
