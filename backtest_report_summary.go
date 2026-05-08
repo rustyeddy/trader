@@ -31,28 +31,29 @@ type BacktestReportSummary struct {
 	RR       float64 `json:"rr"`
 }
 
-func NewBacktestReportSummary(r BacktestRunVars) BacktestReportSummary {
-	return BacktestReportSummary{
-		Name:         r.Name,
-		Kind:         r.Kind,
-		Strategy:     r.Strategy,
-		Instrument:   r.Instrument,
-		Timeframe:    r.Timeframe,
-		Dataset:      r.Dataset,
-		Start:        formatBacktestSummaryTime(r.Start),
-		End:          formatBacktestSummaryTime(r.End),
-		Trades:       r.Trades,
-		Wins:         r.Wins,
-		Losses:       r.Losses,
-		StartBalance: r.StartBalance.Float64(),
-		EndBalance:   r.EndBalance.Float64(),
-		NetPL:        r.NetPL.Float64(),
-		ReturnPct:    r.ReturnPct.Float64() * 100.0,
-		WinRate:      r.WinRate.Float64() * 100.0,
-		RiskPct:      r.RiskPct.Float64() * 100.0,
-		StopPips:     int32(r.StopPips),
-		RR:           r.RR.Float64(),
-	}
+func NewBacktestReportSummary(r *BacktestResult) BacktestReportSummary {
+	return BacktestReportSummary{}
+	// return BacktestReportSummary{
+	// 	Name:         r.Name,
+	// 	Kind:         r.Kind,
+	// 	Strategy:     r.Strategy,
+	// 	Instrument:   r.Instrument,
+	// 	Timeframe:    r.Timeframe,
+	// 	Dataset:      r.Dataset,
+	// 	Start:        formatBacktestSummaryTime(r.Start),
+	// 	End:          formatBacktestSummaryTime(r.End),
+	// 	Trades:       r.Trades,
+	// 	Wins:         r.Wins,
+	// 	Losses:       r.Losses,
+	// 	StartBalance: r.StartBalance.Float64(),
+	// 	EndBalance:   r.EndBalance.Float64(),
+	// 	NetPL:        r.NetPL.Float64(),
+	// 	ReturnPct:    r.ReturnPct.Float64() * 100.0,
+	// 	WinRate:      r.WinRate.Float64() * 100.0,
+	// 	RiskPct:      r.RiskPct.Float64() * 100.0,
+	// 	StopPips:     int32(r.StopPips),
+	// 	RR:           r.RR.Float64(),
+	// }
 }
 
 func formatBacktestSummaryTime(ts Timestamp) string {

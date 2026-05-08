@@ -322,7 +322,14 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		return err
 	}
 
-	Backtest.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles), "events", atomic.LoadInt64(&processedEvents), "opens", atomic.LoadInt64(&submittedOpens), "closes", atomic.LoadInt64(&submittedCloses), "positions", t.Account.Positions.Len(), "trades", len(t.Account.Trades))
+	Backtest.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
+		"events", atomic.LoadInt64(&processedEvents),
+		"opens", atomic.LoadInt64(&submittedOpens),
+		"closes", atomic.LoadInt64(&submittedCloses),
+		"positions", t.Account.Positions.Len(),
+		"trades", len(t.Account.Trades))
+
+	run.BacktestResult = &BacktestResult{}
 
 	return nil
 }

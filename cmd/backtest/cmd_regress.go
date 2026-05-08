@@ -82,7 +82,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			summary := trader.NewBacktestReportSummary(run.BacktestResult.BacktestRunVars)
+			summary := trader.NewBacktestReportSummary(run.BacktestResult)
 			reportPath := regressionReportPath(outDir, cfgPath)
 
 			if err := writeRegressionSummary(reportPath, summary); err != nil {

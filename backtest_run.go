@@ -73,12 +73,8 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 	}
 }
 
-type BacktestResult struct {
-	BacktestRunVars
-}
-
 // Result is a lightweight summary of a backtest run.
-type BackTestResult struct {
+type BacktestResult struct {
 	Balance Money
 	Equity  Money
 
