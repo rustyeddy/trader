@@ -14,6 +14,7 @@ import (
 const defaultRegressionConfigPath = "../testdata/configs"
 
 var regressOutDir string
+var l = trader.L
 
 var CMDBacktestRegress = &cobra.Command{
 	Use:   "regress",
@@ -28,6 +29,7 @@ func init() {
 		"",
 		"Output directory for generated regression summaries (default: temporary directory)",
 	)
+
 }
 
 func runBacktestRegress(cmd *cobra.Command, args []string) error {
@@ -88,7 +90,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Generated: %s\n", reportPath)
+			l.Info("Generated: %s\n", reportPath)
 			count++
 		}
 

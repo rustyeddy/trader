@@ -102,70 +102,6 @@ func (c *Config) runRequest(rcfg RunConfig) (*BacktestRun, error) {
 	return btr, nil
 }
 
-// func (c *Config) ResolveRun(name string) (*ResolvedRun, error) {
-// 	for _, run := range c.Runs {
-// 		if run.Name == name {
-// 			return c.resolve(run)
-// 		}
-// 	}
-// 	return nil, fmt.Errorf("run %q not found", name)
-// }
-
-// func (c *Config) resolve(run RunConfig) (*ResolvedRun, error) {
-// 	if strings.TrimSpace(run.Name) == "" {
-// 		return nil, fmt.Errorf("missing run name")
-// 	}
-// 	if strings.TrimSpace(run.Data.Instrument) == "" {
-// 		return nil, fmt.Errorf("run %q missing data.instrument", run.Name)
-// 	}
-// 	if strings.TrimSpace(run.Data.Timeframe) == "" {
-// 		return nil, fmt.Errorf("run %q missing data.timeframe", run.Name)
-// 	}
-// 	if strings.TrimSpace(run.Data.From) == "" {
-// 		return nil, fmt.Errorf("run %q missing data.from", run.Name)
-// 	}
-// 	if strings.TrimSpace(run.Data.To) == "" {
-// 		return nil, fmt.Errorf("run %q missing data.to", run.Name)
-// 	}
-// 	if strings.TrimSpace(run.Strategy.Kind) == "" {
-// 		return nil, fmt.Errorf("run %q missing strategy.kind", run.Name)
-// 	}
-
-// 	scale := Scale6(c.Defaults.Scale)
-// 	if scale <= 0 {
-// 		scale = PriceScale
-// 	}
-
-// 	rr := &ResolvedRun{
-// 		Name:            strings.TrimSpace(run.Name),
-// 		Source:          firstNonEmpty(run.Data.Source, c.Defaults.Source),
-// 		Instrument:      strings.ToUpper(strings.TrimSpace(run.Data.Instrument)),
-// 		Timeframe:       strings.ToUpper(strings.TrimSpace(run.Data.Timeframe)),
-// 		From:            strings.TrimSpace(run.Data.From),
-// 		To:              strings.TrimSpace(run.Data.To),
-// 		Strict:          c.Defaults.Strict,
-// 		StartingBalance: MoneyFromFloat(c.Defaults.StartingBalance),
-// 		AccountCCY:      strings.TrimSpace(c.Defaults.AccountCCY),
-// 		Scale:           scale,
-// 		RiskPct:         percentToRate(c.Defaults.RiskPct),
-// 		StopPips:        Price(c.Defaults.StopPips),
-// 		TakePips:        Price(c.Defaults.TakePips),
-// 		RR:              RateFromFloat(c.Defaults.RR),
-// 		Units:           Units(c.Defaults.Units),
-// 		Strategy:        run.Strategy,
-// 	}
-
-// 	if run.Data.Strict != nil {
-// 		rr.Strict = *run.Data.Strict
-// 	}
-
-// 	if err := rr.ApplyCommonParamOverrides(); err != nil {
-// 		return nil, fmt.Errorf("run %q params: %w", run.Name, err)
-// 	}
-
-// 	return rr, nil
-// }
-
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		v = strings.TrimSpace(v)
@@ -204,44 +140,6 @@ func parseTimeframe(s string) (Timeframe, error) {
 		return 0, fmt.Errorf("unsupported timeframe %q", s)
 	}
 }
-
-// func (r *ResolvedRun) ApplyCommonParamOverrides() error {
-// 	if len(r.Strategy.Params) == 0 {
-// 		return nil
-// 	}
-
-// 	if v, ok, err := getInt32Param(r.Strategy.Params, "units"); err != nil {
-// 		return err
-// 	} else if ok {
-// 		r.Units = Units(v)
-// 	}
-
-// 	if v, ok, err := getInt32Param(r.Strategy.Params, "stop_pips"); err != nil {
-// 		return err
-// 	} else if ok {
-// 		r.StopPips = Price(v) // this should be removed
-// 	}
-
-// 	if v, ok, err := getInt32Param(r.Strategy.Params, "take_pips"); err != nil {
-// 		return err
-// 	} else if ok {
-// 		r.TakePips = Price(v) // this should be removed
-// 	}
-
-// 	if v, ok, err := getFloat64Param(r.Strategy.Params, "risk_pct"); err != nil {
-// 		return err
-// 	} else if ok {
-// 		r.RiskPct = percentToRate(v)
-// 	}
-
-// 	if v, ok, err := getFloat64Param(r.Strategy.Params, "rr"); err != nil {
-// 		return err
-// 	} else if ok {
-// 		r.RR = RateFromFloat(v)
-// 	}
-
-// 	return nil
-// }
 
 func getInt32Param(m map[string]any, key string) (int32, bool, error) {
 	v, ok := m[key]

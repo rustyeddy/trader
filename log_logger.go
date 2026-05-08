@@ -77,6 +77,7 @@ var (
 
 	// Pre-wired module loggers.  They are initialised to the default logger
 	// in init() and re-pointed whenever Setup is called.
+	L            *slog.Logger
 	Data         *slog.Logger
 	backtest     *slog.Logger
 	IndicatorLog *slog.Logger
@@ -97,6 +98,7 @@ func resetModules() {
 	modulesMu.Lock()
 	defer modulesMu.Unlock()
 
+	L = defLog.With("module", "trader")
 	Data = defLog.With("module", "data")
 	backtest = defLog.With("module", "backtest")
 	IndicatorLog = defLog.With("module", "indicator")
