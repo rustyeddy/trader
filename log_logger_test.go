@@ -77,6 +77,25 @@ func TestSetup_FileOutput(t *testing.T) {
 	assert.Contains(t, string(data), "key=value")
 }
 
+func TestSetup_DefaultFileOutput(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(wd))
+	})
+
+	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "info"}))
+
+	tlog.Info("default file output", "kind", "test")
+
+	data, err := os.ReadFile(filepath.Join(dir, "trader.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "default file output")
+	assert.Contains(t, string(data), "kind=test")
+}
+
 func TestSetup_FileOutput_JSON(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "test.json.log")

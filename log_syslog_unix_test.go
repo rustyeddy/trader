@@ -49,9 +49,9 @@ func TestLevelToPriorityTable(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		msg   string
-		want  syslog.Priority
+		name string
+		msg  string
+		want syslog.Priority
 	}{
 		{name: "text debug", msg: "time=2026-01-01T00:00:00Z level=" + slog.LevelDebug.String() + " msg=test", want: syslog.LOG_DEBUG},
 		{name: "text warn", msg: "time=2026-01-01T00:00:00Z level=" + slog.LevelWarn.String() + " msg=test", want: syslog.LOG_WARNING},

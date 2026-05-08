@@ -48,8 +48,9 @@ type LogConfig struct {
 	// else (or empty) for human-readable text.
 	Format string
 
-	// File is an optional path to a log file.  When non-empty, log records
-	// are written to both stdout and this file.
+	// File is an optional path to a log file. When non-empty, log records
+	// are written to both stdout and this file. When empty and no other sink
+	// is configured, Setup falls back to a default log file.
 	File string
 
 	// Syslog enables forwarding of log records to the system logger.
@@ -89,6 +90,8 @@ var (
 	Strat        *slog.Logger
 	Replay       *slog.Logger
 )
+
+const defaultLogFile = "trader.log"
 
 func init() {
 	level.Set(slog.LevelInfo)
@@ -134,6 +137,10 @@ func Setup(cfg LogConfig) error {
 
 	// --- log level ---
 	level.Set(parseLevel(cfg.Level))
+
+	if cfg.File == "" && !cfg.Stdout && !cfg.Syslog {
+		cfg.File = defaultLogFile
+	}
 
 	if err := closeSinksLocked(); err != nil {
 		return err
