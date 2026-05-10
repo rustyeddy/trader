@@ -161,6 +161,7 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		Reason:        "lowest low",
 		Cause:         CloseManual,
 		Trade:         trade,
+		Position:      req.Position,
 	}
 
 	return b.emitEvent(ctx, evt)

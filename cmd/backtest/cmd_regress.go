@@ -66,9 +66,9 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 
 		runs, err := trader.GetBacktestRuns(cfg)
 		if err != nil {
-			return fmt.Errorf("resolve runs from %q: %w", cfgPath, err)
+			fmt.Printf("skipping config %q: %v\n", cfgPath, err)
+			continue
 		}
-
 		for _, run := range runs {
 			ctx := cmd.Context()
 			t := &trader.Trader{
