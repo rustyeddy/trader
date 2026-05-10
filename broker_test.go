@@ -182,3 +182,50 @@ func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
 	assert.Equal(t, OrderMarket, stored.orderType)
 	assert.Equal(t, OrderPending, stored.orderStatus)
 }
+
+func TestNewBroker(t *testing.T) {
+	t.Parallel()
+
+	b := NewBroker("test-broker")
+	require.NotNil(t, b)
+	assert.Equal(t, "test-broker", b.ID)
+	assert.Nil(t, b.Account)
+	assert.NotNil(t, b.OpenOrders.Orders)
+	assert.Equal(t, 0, len(b.OpenOrders.Orders))
+	assert.Nil(t, b.evtQ)
+}
+
+func TestBrokerEventsChannelCreation(t *testing.T) {
+	t.Parallel()
+
+	b := NewBroker("ch-test")
+	assert.Nil(t, b.evtQ)
+
+	ch := b.Events()
+	require.NotNil(t, ch)
+	assert.NotNil(t, b.evtQ)
+	assert.Len(t, b.evtQ, 0)
+
+	ch2 := b.Events()
+	assert.Equal(t, ch, ch2, "Events() should return the same channel on subsequent calls")
+}
+
+func TestBrokerEventsChannelReceiveEvent(t *testing.T) {
+	t.Parallel()
+
+	b := NewBroker("recv-test")
+	evtCh := b.Events()
+
+	evt := &Event{Type: EventOrderAccepted, Time: Timestamp(100)}
+	err := b.emitEvent(context.Background(), evt)
+	require.NoError(t, err)
+
+	select {
+	case received := <-evtCh:
+		require.NotNil(t, received)
+		assert.Equal(t, EventOrderAccepted, received.Type)
+		assert.Equal(t, Timestamp(100), received.Time)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("event not received on channel")
+	}
+}

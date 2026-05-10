@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakePriceSource struct {
@@ -107,4 +108,61 @@ func TestQuoteToAccountRate_CrossNotImplemented(t *testing.T) {
 	ps := &fakePriceSource{}
 	_, err := QuoteToAccountRate(instrument, "USD", ps)
 	assert.Error(t, err)
+}
+
+func TestAccountPrint(t *testing.T) {
+	t.Parallel()
+
+	acct := NewAccount("test", MoneyFromFloat(50_000))
+	acct.Balance = MoneyFromFloat(50_500)
+	acct.Equity = MoneyFromFloat(50_750)
+
+	require.NotPanics(t, func() {
+		acct.Print()
+	})
+}
+
+func TestAccountOpenPosition(t *testing.T) {
+	t.Parallel()
+
+	acct := NewAccount("test", MoneyFromFloat(10_000))
+
+	c := &CandleTime{
+		Candle: Candle{
+			Open:  PriceFromFloat(1.1000),
+			High:  PriceFromFloat(1.1010),
+			Low:   PriceFromFloat(1.0990),
+			Close: PriceFromFloat(1.1005),
+		},
+		Timestamp: Timestamp(1000),
+	}
+
+	tr := NewTradeHistory("EURUSD")
+	tr.Side = Long
+	tr.Units = 100_000
+	tr.Stop = PriceFromFloat(1.0950)
+
+	openReq := &OpenRequest{
+		Request: Request{
+			TradeCommon: tr.TradeCommon,
+			Price:       c.Close,
+			Timestamp:   c.Timestamp,
+		},
+	}
+
+	assert.Equal(t, 0, acct.Positions.Len(), "initial account should have no positions")
+
+	acct.OpenPosition(Timestamp(1000), c.Candle, openReq)
+
+	assert.Equal(t, 1, acct.Positions.Len(), "account should have 1 position after OpenPosition")
+
+	positions := acct.Positions.Positions()
+	require.Len(t, positions, 1)
+	pos := positions[openReq.ID]
+	require.NotNil(t, pos, "position should exist in account")
+	assert.Equal(t, openReq.ID, pos.ID)
+	assert.Equal(t, c.Close, pos.FillPrice)
+	assert.Equal(t, Timestamp(1000), pos.FillTime)
+	assert.Equal(t, Long, pos.Side)
+	assert.Equal(t, Units(100_000), pos.Units)
 }
