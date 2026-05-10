@@ -23,6 +23,14 @@ func GetStrategy(name string) (Strategy, error) {
 	case "noop", "no-op":
 		return noopStrategy{}, nil
 
+	case "template":
+		return NewTemplateStrategy(TemplateStrategyConfig{
+			StrategyBaseConfig: StrategyBaseConfig{},
+			Lookback:           5,
+			Threshold:          0.0015,
+			Scale:              PriceScale,
+		}), nil
+
 	// case "ema-cross":
 	// 	cfg, err := BuildEMACrossConfigFromRun(r)
 	// 	if err != nil {
