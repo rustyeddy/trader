@@ -7,7 +7,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(context.Context, *CandleTime, *BacktestRun) *StrategyPlan
+	Update(context.Context, *CandleTime, *Backtest) *StrategyPlan
 }
 
 type strategyRuntimeKey struct{}

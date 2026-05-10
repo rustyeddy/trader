@@ -83,7 +83,7 @@ func (x *EMACrossADX) Ready() bool {
 	return true
 }
 
-func (x *EMACrossADX) Update(ctx context.Context, ct *CandleTime, run *BacktestRun) *StrategyPlan {
+func (x *EMACrossADX) Update(ctx context.Context, ct *CandleTime, run *Backtest) *StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return &DefaultStrategyPlan

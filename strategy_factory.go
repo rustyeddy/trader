@@ -50,7 +50,7 @@ func GetStrategy(name string) (Strategy, error) {
 
 }
 
-func BuildEMACrossConfigFromRun(r *BacktestRun) (EMACrossConfig, error) {
+func BuildEMACrossConfigFromRun(r *Backtest) (EMACrossConfig, error) {
 	// fast, ok, err := runIntParam(r.Strategy.Params, "fast")
 	// if err != nil {
 	// 	return EMACrossConfig{}, err
@@ -80,7 +80,7 @@ func BuildEMACrossConfigFromRun(r *BacktestRun) (EMACrossConfig, error) {
 	return EMACrossConfig{}, nil
 }
 
-func BuildEMACrossADXConfigFromRun(r *BacktestRun) (EMACrossADXConfig, error) {
+func BuildEMACrossADXConfigFromRun(r *Backtest) (EMACrossADXConfig, error) {
 	cfg := EMACrossADXConfig{}
 
 	// fast, ok, err := runIntParam(r.Strategy.Params, "fast")
@@ -153,7 +153,7 @@ func BuildEMACrossADXConfigFromRun(r *BacktestRun) (EMACrossADXConfig, error) {
 	return cfg, nil
 }
 
-func BuildTemplateStrategyConfigFromRun(r *BacktestRun) (TemplateStrategyConfig, error) {
+func BuildTemplateStrategyConfigFromRun(r *Backtest) (TemplateStrategyConfig, error) {
 	// lookback, ok, err := runIntParam(r.Strategy.Params, "lookback")
 	// if err != nil {
 	// 	return TemplateStrategyConfig{}, err

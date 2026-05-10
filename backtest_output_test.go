@@ -1,9 +1,9 @@
 package trader
 
-// ─── PrintBacktestRun ─────────────────────────────────────────────────────────
+// ─── PrintBacktest ─────────────────────────────────────────────────────────
 
-// func TestPrintBacktestRun_Basic(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_Basic(t *testing.T) {
+// 	r := Backtest{
 // 		RunID:        "run-001",
 // 		Name:         "test",
 // 		Kind:         "candle",
@@ -30,7 +30,7 @@ package trader
 // 	}
 
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	out := buf.String()
 
 // 	assert.Contains(t, out, "run-001")
@@ -44,65 +44,65 @@ package trader
 // 	assert.Contains(t, out, "4")
 // }
 
-// func TestPrintBacktestRun_WithGitCommit(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_WithGitCommit(t *testing.T) {
+// 	r := Backtest{
 // 		RunID:     "run-002",
 // 		GitCommit: "abc1234",
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	assert.Contains(t, buf.String(), "abc1234")
 // }
 
-// func TestPrintBacktestRun_WithEquityPNG(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_WithEquityPNG(t *testing.T) {
+// 	r := Backtest{
 // 		RunID:     "run-003",
 // 		EquityPNG: "/tmp/equity.png",
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	assert.Contains(t, buf.String(), "/tmp/equity.png")
 // }
 
-// func TestPrintBacktestRun_WithOrgPath(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_WithOrgPath(t *testing.T) {
+// 	r := Backtest{
 // 		RunID:   "run-004",
 // 		OrgPath: "/tmp/result.org",
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	assert.Contains(t, buf.String(), "/tmp/result.org")
 // }
 
-// func TestPrintBacktestRun_WithNotes(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_WithNotes(t *testing.T) {
+// 	r := Backtest{
 // 		Notes: []string{"note one", "note two"},
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	out := buf.String()
 // 	assert.Contains(t, out, "note one")
 // 	assert.Contains(t, out, "note two")
 // }
 
-// func TestPrintBacktestRun_WithNextActions(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_WithNextActions(t *testing.T) {
+// 	r := Backtest{
 // 		NextActions: []string{"action one", "action two"},
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	out := buf.String()
 // 	assert.Contains(t, out, "action one")
 // 	assert.Contains(t, out, "action two")
 // }
 
-// func TestPrintBacktestRun_ZeroProfitFactorAndDD(t *testing.T) {
-// 	r := BacktestRun{
+// func TestPrintBacktest_ZeroProfitFactorAndDD(t *testing.T) {
+// 	r := Backtest{
 // 		ProfitFactor: 0,
 // 		MaxDDPct:     0,
 // 	}
 // 	var buf bytes.Buffer
-// 	PrintBacktestRun(&buf, r)
+// 	PrintBacktest(&buf, r)
 // 	// zero profit factor and max dd should not be printed
 // 	out := buf.String()
 // 	assert.NotContains(t, out, "Profit Factor")

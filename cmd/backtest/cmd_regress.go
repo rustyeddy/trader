@@ -64,7 +64,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("load config %q: %w", cfgPath, err)
 		}
 
-		runs, err := trader.GetBacktestRuns(cfg)
+		runs, err := trader.GetBacktests(cfg)
 		if err != nil {
 			fmt.Printf("skipping config %q: %v\n", cfgPath, err)
 			continue

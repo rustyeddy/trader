@@ -4,7 +4,7 @@ import (
 	"io"
 )
 
-func PrintBacktestRun(w io.Writer, r BacktestResult) {
+func PrintBacktest(w io.Writer, r BacktestResult) {
 	// fmt.Fprintln(w, "==================================================")
 	// fmt.Fprintln(w, " Backtest Result")
 	// fmt.Fprintln(w, "==================================================")

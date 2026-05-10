@@ -84,7 +84,7 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func (c *Config) runRequest(rcfg RunConfig) (*BacktestRun, error) {
+func (c *Config) runRequest(rcfg RunConfig) (*Backtest, error) {
 	fmt.Printf("rcfg: %+v\n", rcfg)
 
 	tr, err := timeRangeFromStrings(rcfg.Data.To, rcfg.Data.From, rcfg.Data.Timeframe)
@@ -92,7 +92,7 @@ func (c *Config) runRequest(rcfg RunConfig) (*BacktestRun, error) {
 		return nil, err
 	}
 
-	btr := &BacktestRun{
+	btr := &Backtest{
 		BacktestRequest: &BacktestRequest{
 			Name:       "",
 			Instrument: rcfg.Data.Instrument,

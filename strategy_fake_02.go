@@ -40,7 +40,7 @@ func (f *Fake02) Ready() bool {
 	return true
 }
 
-func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *Backtest) *StrategyPlan {
 	_ = ctx
 
 	plan := &StrategyPlan{
