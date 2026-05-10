@@ -28,7 +28,10 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return traderpkg.Setup(traderpkg.LogConfig{Level: rc.LogLevel})
+		return traderpkg.Setup(traderpkg.LogConfig{
+			Level:  rc.LogLevel,
+			Stdout: true,
+		})
 	}
 
 	// Subcommands

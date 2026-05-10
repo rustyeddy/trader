@@ -28,7 +28,7 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *CandleTime, run *BacktestRun) *StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *CandleTime, run *Backtest) *StrategyPlan {
 	f.candles = append(f.candles, c)
 	plan := &StrategyPlan{
 		Reason: "hold",

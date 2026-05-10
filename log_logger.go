@@ -84,8 +84,7 @@ var (
 	// in init() and remain valid across Setup calls.
 	L            *slog.Logger
 	Data         *slog.Logger
-	Backtest     *slog.Logger
-	backtest     *slog.Logger // internal alias used by existing package code
+	BacktestLog  *slog.Logger
 	IndicatorLog *slog.Logger
 	Strat        *slog.Logger
 	Replay       *slog.Logger
@@ -112,8 +111,7 @@ func resetModules() {
 
 	L = defLog.With("module", "trader")
 	Data = defLog.With("module", "data")
-	Backtest = defLog.With("module", "backtest")
-	backtest = Backtest
+	BacktestLog = defLog.With("module", "backtest")
 	IndicatorLog = defLog.With("module", "indicator")
 	Replay = defLog.With("module", "replay")
 	Strat = defLog.With("module", "strategies")

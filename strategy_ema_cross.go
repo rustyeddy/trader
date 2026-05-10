@@ -74,7 +74,7 @@ func (x *EMACross) Ready() bool {
 // Update consumes the next closed candle and returns a decision.
 // Strategy emits a signal only on the *cross event* (state transition),
 // not every candle while EMAs remain crossed.
-func (x *EMACross) Update(ctx context.Context, ct *CandleTime, run *BacktestRun) *StrategyPlan {
+func (x *EMACross) Update(ctx context.Context, ct *CandleTime, run *Backtest) *StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return &DefaultStrategyPlan

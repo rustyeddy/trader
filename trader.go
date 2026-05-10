@@ -27,11 +27,11 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event
 				return
 			case evt, ok := <-evtQ:
 				if !ok {
-					backtest.Info("broker event channel closed")
+					L.Info("broker event channel closed")
 					return
 				}
 
-				backtest.Debug("Broker event received",
+				L.Debug("Broker event received",
 					"type", evt.Type,
 					"time", evt.Time,
 					"instrument", evt.Instrument,
@@ -111,7 +111,7 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr candleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr candleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -133,7 +133,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 	defer cancel()
 
 	evtQ := t.Broker.Events()
-	backtest.Debug("broker event handler started")
+	L.Debug("broker event handler started")
 
 	var processedEvents int64
 	errCh, done := t.startBrokerEventHandler(runCtx, evtQ, &processedEvents)
@@ -156,6 +156,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 			if pending == 0 {
 				break
 			}
+			L.Debug("backtest drain events", "events", pending)
 			time.Sleep(1 * time.Millisecond)
 		}
 
@@ -203,7 +204,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 				}
 
 				if lag > 30*time.Second {
-					backtest.Warn("watchdog: backtest appears stalled",
+					L.Warn("watchdog: backtest appears stalled",
 						"noProgressFor", lag.String(),
 						"candles", candles,
 						"events", events,
@@ -215,7 +216,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 					continue
 				}
 
-				backtest.Debug("watchdog: progress",
+				L.Debug("watchdog: progress",
 					"candles", candles,
 					"events", events,
 					"opens", opens,
@@ -264,10 +265,10 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		// backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
 
 		for _, cancelReq := range plan.Cancel {
-			backtest.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
+			L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
-			backtest.Info("submit close request", "ID", cl.Request.ID)
+			L.Info("submit close request", "ID", cl.Request.ID)
 
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			err = t.Broker.SubmitClose(runCtx, cl)
@@ -281,7 +282,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		}
 
 		for _, openReq := range plan.Opens {
-			backtest.Info("Broker event Open Position", "ID", openReq.ID)
+			L.Info("Broker event Open Position", "ID", openReq.ID)
 			if openReq.Units == 0 {
 				err := t.Account.SizePosition(openReq)
 				if err != nil {
@@ -289,7 +290,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 				}
 			}
 
-			backtest.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.SubmitOpen(runCtx, openReq)
 			if err != nil {
@@ -332,7 +333,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 		return err
 	}
 
-	backtest.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
+	L.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
 		"events", atomic.LoadInt64(&processedEvents),
 		"opens", atomic.LoadInt64(&submittedOpens),
 		"closes", atomic.LoadInt64(&submittedCloses),
@@ -342,12 +343,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *BacktestRun, itr
 	return nil
 }
 
-func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
+func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	if run == nil {
 		return fmt.Errorf("nil backtest run")
 	}
 
-	backtest.Info("backtest start", "instrument", run.Instrument)
+	L.Info("backtest start", "instrument", run.Instrument)
 	if t == nil {
 		return fmt.Errorf("nil trader")
 	}
@@ -363,7 +364,7 @@ func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 	if run.Strategy == nil {
 		return fmt.Errorf("nil strategy")
 	}
-	backtest.Info("strategy selected", "strategy", run.Strategy.Name())
+	L.Info("strategy selected", "strategy", run.Strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
@@ -371,7 +372,7 @@ func (t *Trader) Backtest(ctx context.Context, run *BacktestRun) error {
 		Instrument: run.Instrument,
 		Range:      run.TimeRange,
 	}
-	backtest.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
+	L.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(ctx, candlereq)
@@ -402,7 +403,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		return fmt.Errorf("nil broker event")
 	}
 
-	backtest.Info("broker event recieved",
+	L.Info("broker event recieved",
 		"type", evt.Type.String(),
 		"clientOrder", evt.ClientOrderID,
 		"brokerOrder", evt.BrokerOrderID,
@@ -430,7 +431,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		log.Println("Trader position added to account")
 
 	default:
-		backtest.Warn("unsupported broker event", "eventType", evt.Type)
+		L.Warn("unsupported broker event", "eventType", evt.Type)
 	}
 
 	return nil
