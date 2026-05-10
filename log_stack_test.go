@@ -126,7 +126,7 @@ func TestStack_ModuleLogger_Captured(t *testing.T) {
 	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
 
 	tlog.Data.Info("data event")
-	tlog.Backtest.Warn("backtest warning")
+	tlog.BacktestLog.Warn("backtest warning")
 
 	entries := tlog.Entries()
 	require.Len(t, entries, 2)

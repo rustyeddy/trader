@@ -146,7 +146,7 @@ func TestModuleLoggers_Wired(t *testing.T) {
 
 	// Pre-wired module variables must be non-nil after Setup.
 	assert.NotNil(t, tlog.Data)
-	assert.NotNil(t, tlog.Backtest)
+	assert.NotNil(t, tlog.BacktestLog)
 	assert.NotNil(t, tlog.IndicatorLog)
 	assert.NotNil(t, tlog.Replay)
 }

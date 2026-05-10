@@ -34,3 +34,20 @@ func TestPriceStore_GetMissing(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, Tick{}, got)
 }
+
+func TestTickSpread_Phase1(t *testing.T) {
+	t.Parallel()
+
+	tk := Tick{BA: BA{Bid: 100, Ask: 106}}
+	assert.Equal(t, Price(6), tk.Spread())
+}
+
+func TestTickMid_RoundsHalfUp_Phase1(t *testing.T) {
+	t.Parallel()
+
+	even := Tick{BA: BA{Bid: 100, Ask: 104}}
+	assert.Equal(t, Price(102), even.Mid())
+
+	odd := Tick{BA: BA{Bid: 100, Ask: 103}}
+	assert.Equal(t, Price(102), odd.Mid())
+}

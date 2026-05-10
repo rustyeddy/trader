@@ -13,8 +13,6 @@ func isValidCrockfordChar(ch rune) bool {
 }
 
 func TestNewULIDFormat(t *testing.T) {
-	t.Parallel()
-
 	id := NewULID()
 	require.Len(t, id, 26)
 
@@ -24,8 +22,6 @@ func TestNewULIDFormat(t *testing.T) {
 }
 
 func TestNewULIDUniqueness(t *testing.T) {
-	t.Parallel()
-
 	const n = 1000
 	seen := make(map[string]struct{}, n)
 
@@ -39,8 +35,6 @@ func TestNewULIDUniqueness(t *testing.T) {
 }
 
 func TestNewULIDLexicographicNonDecreasing(t *testing.T) {
-	t.Parallel()
-
 	const n = 1000
 	prev := NewULID()
 	require.NotEmpty(t, prev)
@@ -51,4 +45,8 @@ func TestNewULIDLexicographicNonDecreasing(t *testing.T) {
 		assert.LessOrEqual(t, prev, cur, "ULIDs must be non-decreasing lexicographically")
 		prev = cur
 	}
+}
+
+func TestULIDEntropyReaderInitialized_Phase2(t *testing.T) {
+	assert.NotNil(t, mono)
 }
