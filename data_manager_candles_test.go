@@ -128,10 +128,10 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(jan31_23),
 			End:   FromTime(feb01_02), // exclusive
+			TF:    H1,
 		},
 		Strict: true,
 	}
@@ -192,10 +192,10 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 		Strict: false,
 	}
@@ -240,10 +240,10 @@ func TestDataManagerCandles_StrictTrueErrorsOnMissingMonth(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 		Strict: true,
 	}

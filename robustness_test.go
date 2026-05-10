@@ -1238,7 +1238,7 @@ func TestCandleRequestKey_AllTimeframes(t *testing.T) {
 		tf := tf
 		t.Run(tf.String(), func(t *testing.T) {
 			t.Parallel()
-			cr := CandleRequest{Instrument: "EURUSD", Source: SourceCandles, Timeframe: tf}
+			cr := CandleRequest{Instrument: "EURUSD", Source: SourceCandles}
 			k := cr.Key()
 			require.Equal(t, tf, k.TF)
 			require.Equal(t, KindCandle, k.Kind)

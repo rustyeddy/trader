@@ -261,10 +261,10 @@ func TestCandles_StrictMissingFileWrapsError(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 		Strict: true, // missing file should cause an error
 	}

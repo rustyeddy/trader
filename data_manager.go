@@ -594,18 +594,13 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 type CandleRequest struct {
 	Source     string
 	Instrument string
-	Timeframe  Timeframe
 	Range      TimeRange
 	Strict     bool
 }
 
 func (cr CandleRequest) timeframe() Timeframe {
-	if cr.Range.TF != 0 {
-		return cr.Range.TF
-	}
-	return cr.Timeframe
+	return cr.Range.TF
 }
-
 func (cr CandleRequest) Key() Key {
 	return Key{
 		Instrument: cr.Instrument,
@@ -625,14 +620,11 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (candleIt
 		return nil, fmt.Errorf("blank instrument")
 	}
 
-	tf := req.timeframe()
-	switch tf {
+	switch req.timeframe() {
 	case M1, H1, D1:
 	default:
-		return nil, fmt.Errorf("unsupported candle timeframe: %v", tf)
+		return nil, fmt.Errorf("unsupported candle timeframe: %v", req.timeframe())
 	}
-	req.Range.TF = tf
-
 	if !req.Range.Valid() {
 		return nil, fmt.Errorf("invalid candle range: %s", req.Range)
 	}

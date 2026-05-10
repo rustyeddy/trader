@@ -3,7 +3,6 @@ package trader
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync/atomic"
 	"time"
 )
@@ -315,13 +314,21 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			}
 			return nil
 		})
+
 		for _, pos := range remaining {
-			trade := &Trade{
-				TradeCommon: pos.TradeCommon,
-				FillPrice:   lastCandle.Close,
-				FillTime:    lastCandle.Timestamp,
+			cl := &closeRequest{
+				Request: Request{
+					TradeCommon: pos.TradeCommon,
+					Reason:      "end-of-backtest",
+					RequestType: RequestClose,
+					Price:       lastCandle.Close,
+					Timestamp:   lastCandle.Timestamp,
+				},
+				Position:   pos,
+				CloseCause: CloseManual,
 			}
-			if err := t.Account.ClosePosition(pos, trade); err != nil {
+
+			if err := t.Broker.SubmitClose(runCtx, cl); err != nil {
 				return err
 			}
 		}
@@ -348,7 +355,12 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		return fmt.Errorf("nil backtest run")
 	}
 
-	L.Info("backtest start", "instrument", run.Instrument)
+	L.Info("backtest start",
+		"instrument", run.Instrument,
+		"strategy", run.Strategy.Name(),
+		"balance", run.StartingBalance.Float64(),
+		"timerange", run.TimeRange.String(),
+	)
 	if t == nil {
 		return fmt.Errorf("nil trader")
 	}
@@ -364,7 +376,6 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	if run.Strategy == nil {
 		return fmt.Errorf("nil strategy")
 	}
-	L.Info("strategy selected", "strategy", run.Strategy.Name())
 
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
@@ -417,7 +428,6 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		if pos == nil {
 			return fmt.Errorf("error order filled with no position")
 		}
-		log.Println("Trader position added to account")
 
 	case EventPositionClosed:
 		pos := evt.Position
@@ -428,7 +438,6 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		if trade == nil {
 			return fmt.Errorf("position closed event missing trade")
 		}
-		log.Println("Trader position added to account")
 
 	default:
 		L.Warn("unsupported broker event", "eventType", evt.Type)

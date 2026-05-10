@@ -21,7 +21,7 @@ type OrderRequest struct {
 type Broker struct {
 	ID string
 	*Account
-	OpenOrders // should Account own OpenOrders?b
+	OpenOrders // should Account own OpenOrders?
 
 	evtQ chan *Event
 }
@@ -95,30 +95,6 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	return res, nil
 }
 
-func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
-	if b.evtQ == nil {
-		b.evtQ = make(chan *Event, brokerEventQueueSize)
-	}
-
-	if ctx == nil {
-		select {
-		case b.evtQ <- evt:
-			return nil
-		default:
-			return fmt.Errorf("broker event queue is full")
-		}
-	}
-
-	select {
-	case b.evtQ <- evt:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return fmt.Errorf("broker event queue is full")
-	}
-}
-
 func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Position, error) {
 	pos := &Position{
 		TradeCommon: ord.TradeCommon,
@@ -138,6 +114,18 @@ func (b *Broker) ReadOrderResponses(req *OpenRequest) {
 }
 
 func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
+	if b == nil {
+		return fmt.Errorf("nil broker")
+	}
+	if b.Account == nil {
+		return fmt.Errorf("broker account is nil")
+	}
+	if req == nil {
+		return fmt.Errorf("nil close request")
+	}
+	if req.Position == nil {
+		return fmt.Errorf("close request missing position")
+	}
 
 	// place req.CloseRequest on an close queue Submit the order,
 	// this is where the emulator would be injecting delays and stuff
@@ -173,4 +161,28 @@ func (b *Broker) Events() <-chan *Event {
 	}
 
 	return b.evtQ
+}
+
+func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
+	if b.evtQ == nil {
+		b.evtQ = make(chan *Event, brokerEventQueueSize)
+	}
+
+	if ctx == nil {
+		select {
+		case b.evtQ <- evt:
+			return nil
+		default:
+			return fmt.Errorf("broker event queue is full")
+		}
+	}
+
+	select {
+	case b.evtQ <- evt:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return fmt.Errorf("broker event queue is full")
+	}
 }

@@ -394,10 +394,10 @@ func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
 	req := CandleRequest{
 		Source:     SourceCandles,
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 	}
 	_, err := dm.Candles(ctx, req)

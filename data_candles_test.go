@@ -2,9 +2,10 @@ package trader
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -20,10 +21,10 @@ func TestCandles_CancelledContext(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(ctx, CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 	})
 	require.Error(t, err)
@@ -35,10 +36,10 @@ func TestCandles_BlankInstrument(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
 		},
 	})
 	require.Error(t, err)
@@ -51,10 +52,10 @@ func TestCandles_UnsupportedTimeframe(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  Ticks, // unsupported
 		Range: TimeRange{
 			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    Ticks, // unsupported
 		},
 	})
 	require.Error(t, err)
@@ -67,8 +68,9 @@ func TestCandles_InvalidRange(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Timeframe:  H1,
-		Range:      TimeRange{}, // zero range is invalid
+		Range: TimeRange{
+			TF: H1,
+		}, // zero range is invalid
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid candle range")
@@ -86,10 +88,10 @@ func TestCandles_DefaultSourceFallsBackToCandles(t *testing.T) {
 	req := CandleRequest{
 		Source:     "", // empty source should fall back to SourceCandles
 		Instrument: "EURUSD",
-		Timeframe:  H1,
 		Range: TimeRange{
 			Start: FromTime(start),
 			End:   FromTime(end),
+			TF:    H1,
 		},
 		Strict: false,
 	}
