@@ -66,13 +66,12 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	pos.State = PositionOpen
 	res.Position = pos
 
-	if b.Account != nil {
-		if err := b.Account.AddPosition(ctx, pos); err != nil {
-			return res, err
-		}
+	if b.Account == nil {
+		return nil, fmt.Errorf("broker account is nil")
 	}
-
-	// b.Account.Positions.Add(pos)
+	if err := b.Account.AddPosition(ctx, pos); err != nil {
+		return res, err
+	}
 
 	// send position back on event queue
 	evt := &Event{

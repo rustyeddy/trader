@@ -340,6 +340,10 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		return err
 	}
 
+	if err := t.waitForBrokerIdle(errCh, 2*time.Second); err != nil {
+		return err
+	}
+
 	L.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
 		"events", atomic.LoadInt64(&processedEvents),
 		"opens", atomic.LoadInt64(&submittedOpens),
@@ -351,7 +355,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 }
 
 func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
-	if run == nil {
+	if run == nil || run.Strategy == nil {
 		return fmt.Errorf("nil backtest run")
 	}
 
