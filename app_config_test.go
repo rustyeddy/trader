@@ -158,6 +158,47 @@ func TestLoadInvalidFile(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestLoadFromFile_ParseAndValidateFailures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parse failure", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bad.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("::not-valid::\n{{"), 0o644))
+
+		_, err := loadFromFile(path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parse config")
+	})
+
+	t.Run("validation failure", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, "invalid.yaml")
+		// Parses fine but fails Validate() because required fields are missing.
+		require.NoError(t, os.WriteFile(path, []byte("account:\n  currency: USD\n  balance: 1000\n"), 0o644))
+
+		_, err := loadFromFile(path)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid config")
+	})
+}
+
+func TestSaveToFile_YMLBranch(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultConfig()
+	path := filepath.Join(t.TempDir(), "test.yml")
+	require.NoError(t, cfg.SaveToFile(path))
+
+	loaded, err := loadFromFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Account.Currency, loaded.Account.Currency)
+}
+
 func TestPriceStepParseDuration(t *testing.T) {
 	tests := []struct {
 		delay    string
