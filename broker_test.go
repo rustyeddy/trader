@@ -51,6 +51,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	t.Parallel()
 
 	b := &Broker{
+		Account: NewAccount("test-account", MoneyFromFloat(10_000)),
 		evtQ: make(chan *Event, 1),
 		OpenOrders: OpenOrders{
 			Orders: make(map[string]*order),
@@ -63,6 +64,8 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 			TradeCommon: &TradeCommon{
 				ID:         NewULID(),
 				Instrument: "EURUSD",
+				Units:      Units(1000),
+				Side:       Long,
 			},
 			RequestType: RequestMarketOpen,
 			Price:       Price(1100000),
@@ -98,6 +101,7 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	t.Parallel()
 
 	b := &Broker{
+		Account: NewAccount("test-account", MoneyFromFloat(10_000)),
 		evtQ: make(chan *Event, 1),
 		OpenOrders: OpenOrders{
 			Orders: make(map[string]*order),
@@ -110,6 +114,8 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 			TradeCommon: &TradeCommon{
 				ID:         NewULID(),
 				Instrument: "EURUSD",
+				Units:      Units(1000),
+				Side:       Long,
 			},
 			RequestType: RequestMarketOpen,
 			Price:       Price(1100000),
