@@ -99,6 +99,21 @@ func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 	require.ErrorIs(t, chained.Err(), sentinel)
 }
 
+func TestChainedCandleIterator_NextCandleExhausted(t *testing.T) {
+	t.Parallel()
+
+	sub := &errCandleIterator{maxItems: 1}
+	chained := newChainedCandleIterator(sub)
+
+	c, ok := chained.NextCandle()
+	require.True(t, ok)
+	require.Equal(t, Candle{Open: 100, Close: 100, Ticks: 1}, c)
+
+	c, ok = chained.NextCandle()
+	require.False(t, ok)
+	require.Equal(t, Candle{}, c)
+}
+
 func TestChainedCandleIterator_SubCloseErr(t *testing.T) {
 	t.Parallel()
 
