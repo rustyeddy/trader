@@ -79,6 +79,8 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 		return nil
 	}
 
+	run.Trades = append(run.Trades[:0], acct.Trades...)
+
 	res := &BacktestResult{
 		Balance: acct.Balance,
 		Equity:  acct.Equity,

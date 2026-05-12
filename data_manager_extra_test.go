@@ -55,6 +55,9 @@ func TestCandleRequestKey(t *testing.T) {
 	cr := CandleRequest{
 		Instrument: "EURUSD",
 		Source:     SourceCandles,
+		Range: TimeRange{
+			TF: H1,
+		},
 	}
 	k := cr.Key()
 	require.Equal(t, "EURUSD", k.Instrument)
