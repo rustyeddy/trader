@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -261,6 +262,17 @@ func TestSaveToFile_WriteError(t *testing.T) {
 	err := cfg.SaveToFile(t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write config file")
+}
+
+func TestSaveToFile_MarshalError_JSONNaN(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultConfig()
+	cfg.Account.Balance = math.NaN()
+
+	err := cfg.SaveToFile(filepath.Join(t.TempDir(), "bad.json"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marshal config")
 }
 
 func TestPriceStepParseDuration(t *testing.T) {
