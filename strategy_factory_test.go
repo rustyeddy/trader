@@ -136,3 +136,42 @@ func TestRunBoolParam(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be bool")
 }
+
+func TestBuildEMACrossConfigFromRun_CurrentStubContract(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := BuildEMACrossConfigFromRun(nil)
+	require.NoError(t, err)
+	assert.Equal(t, EMACrossConfig{}, cfg)
+
+	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
+	cfg, err = BuildEMACrossConfigFromRun(run)
+	require.NoError(t, err)
+	assert.Equal(t, EMACrossConfig{}, cfg)
+}
+
+func TestBuildEMACrossADXConfigFromRun_CurrentStubContract(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := BuildEMACrossADXConfigFromRun(nil)
+	require.NoError(t, err)
+	assert.Equal(t, EMACrossADXConfig{}, cfg)
+
+	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
+	cfg, err = BuildEMACrossADXConfigFromRun(run)
+	require.NoError(t, err)
+	assert.Equal(t, EMACrossADXConfig{}, cfg)
+}
+
+func TestBuildTemplateStrategyConfigFromRun_CurrentStubContract(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := BuildTemplateStrategyConfigFromRun(nil)
+	require.NoError(t, err)
+	assert.Equal(t, TemplateStrategyConfig{}, cfg)
+
+	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
+	cfg, err = BuildTemplateStrategyConfigFromRun(run)
+	require.NoError(t, err)
+	assert.Equal(t, TemplateStrategyConfig{}, cfg)
+}
