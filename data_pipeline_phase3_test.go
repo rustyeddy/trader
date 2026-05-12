@@ -209,6 +209,29 @@ func TestDukasfileForEachTick1_CallbackError(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 }
 
+func TestDukasfileForEachTick1_ContextCanceled(t *testing.T) {
+	s := useTempStore(t)
+	df := newDatafile("EURUSD", time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC))
+	path := s.PathForAsset(df.Key())
+	writeLZMAFile(t, path, makeBi5Record(1_000, 100, 99, 1.0, 1.0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := df.forEachTick1(ctx, func(tick RawTick) error { return nil })
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestDukasfileIsValid_MissingFileCurrentBehavior(t *testing.T) {
+	useTempStore(t)
+	df := newDatafile("EURUSD", time.Date(2026, 1, 6, 10, 0, 0, 0, time.UTC))
+
+	// Current implementation returns the store.Exists error directly when file
+	// does not exist; since os.IsNotExist maps to (false, nil), this returns nil.
+	err := df.IsValid(context.Background())
+	require.NoError(t, err)
+}
+
 func TestDownloaderDownload_Non200(t *testing.T) {
 	useTempStore(t)
 
