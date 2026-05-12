@@ -36,6 +36,21 @@ func NewBroker(name string) *Broker {
 }
 
 func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult, error) {
+	if b == nil {
+		return nil, fmt.Errorf("nil broker")
+	}
+	if b.Account == nil {
+		return nil, fmt.Errorf("broker account is nil")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("nil open request")
+	}
+	if req.TradeCommon == nil {
+		return nil, fmt.Errorf("open request missing trade common")
+	}
+	if b.OpenOrders.Orders == nil {
+		b.OpenOrders.Orders = make(map[string]*order)
+	}
 
 	// Create an order and submit the order
 	o := &order{}
@@ -66,9 +81,6 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	pos.State = PositionOpen
 	res.Position = pos
 
-	if b.Account == nil {
-		return nil, fmt.Errorf("broker account is nil")
-	}
 	if err := b.Account.AddPosition(ctx, pos); err != nil {
 		return res, err
 	}
