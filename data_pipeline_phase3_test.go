@@ -65,6 +65,35 @@ func TestDataManagerSync_BuildInventoryError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestGetDataManager_Defaults(t *testing.T) {
+	t.Parallel()
+
+	dm := GetDataManager()
+	require.NotNil(t, dm)
+	require.Equal(t, time.Date(2014, time.January, 1, 1, 0, 0, 0, time.UTC), dm.Start)
+	require.False(t, dm.End.IsZero())
+	require.Equal(t, []string{"EURUSD", "USDJPY", "USDGBP"}, dm.Instruments)
+}
+
+func TestDataManagerSync_NoOpAndBuildOnTempStore(t *testing.T) {
+	t.Parallel()
+
+	useTempStore(t)
+	dm := NewDataManager([]string{"EURUSD"}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC))
+	dm.Init()
+
+	require.NoError(t, dm.Sync(context.Background(), false, false))
+	require.NotNil(t, dm.inventory)
+	require.NotNil(t, dm.wants)
+	require.NotNil(t, dm.plan)
+
+	require.NoError(t, dm.Sync(context.Background(), false, true))
+	require.NotNil(t, dm.inventory)
+	require.NotNil(t, dm.wants)
+	require.NotNil(t, dm.plan)
+	require.Greater(t, dm.wants.Len(), 0)
+}
+
 func TestExecuteDownloads_NonEmptyPlanCompletes(t *testing.T) {
 	useTempStore(t)
 
