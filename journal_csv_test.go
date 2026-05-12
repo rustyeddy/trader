@@ -231,3 +231,58 @@ func TestCSVJournalCloseFileError(t *testing.T) {
 	err = j.Close()
 	assert.Error(t, err)
 }
+
+func TestCSVJournalCloseEquityFileError(t *testing.T) {
+	t.Parallel()
+
+	tf, err := os.CreateTemp(t.TempDir(), "trades-*.csv")
+	assert.NoError(t, err)
+	defer tf.Close()
+
+	ef, err := os.CreateTemp(t.TempDir(), "equity-*.csv")
+	assert.NoError(t, err)
+	require.NoError(t, ef.Close())
+
+	j := &csvJournal{
+		trades: csv.NewWriter(io.Discard),
+		equity: csv.NewWriter(io.Discard),
+		tf:     tf,
+		ef:     ef,
+	}
+
+	err = j.Close()
+	assert.Error(t, err)
+}
+
+func TestNewCSV_CreateErrors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("trades create error", func(t *testing.T) {
+		t.Parallel()
+		base := t.TempDir()
+		tradesPath := filepath.Join(base, "missing-parent", "trades.csv")
+		equityPath := filepath.Join(base, "equity.csv")
+
+		j, err := NewCSV(tradesPath, equityPath)
+		assert.Nil(t, j)
+		assert.Error(t, err)
+	})
+
+	t.Run("equity create error", func(t *testing.T) {
+		t.Parallel()
+		base := t.TempDir()
+		tradesPath := filepath.Join(base, "trades.csv")
+		equityPath := filepath.Join(base, "missing-parent", "equity.csv")
+
+		j, err := NewCSV(tradesPath, equityPath)
+		assert.Nil(t, j)
+		assert.Error(t, err)
+	})
+}
+
+func TestFormatFloatHelperF(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "1.234568", f(1.23456789))
+	assert.Equal(t, "-2.500000", f(-2.5))
+}

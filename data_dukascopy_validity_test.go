@@ -36,7 +36,7 @@ func TestDukasfileIsValid_EmptyFile_MarketOpen(t *testing.T) {
 	t.Parallel()
 
 	s := useTempStore(t)
-	ts := time.Date(2026, 1, 6, 12, 0, 0, 0, time.UTC) // Tuesday
+	ts := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC) // Wednesday, not near holiday closure
 	df := newDatafile("EURUSD", ts)
 	path := s.PathForAsset(df.Key())
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
