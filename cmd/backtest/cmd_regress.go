@@ -109,11 +109,6 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func regressionReportPath(outDir, cfgPath string) string {
-	base := strings.TrimSuffix(filepath.Base(cfgPath), filepath.Ext(cfgPath))
-	return filepath.Join(outDir, base+".json")
-}
-
 func writeRegressionSummary(path string, summary trader.BacktestReportSummary) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
