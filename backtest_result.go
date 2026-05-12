@@ -8,6 +8,7 @@ type BacktestResult struct {
 	Trades int
 	Wins   int
 	Losses int
+	Flat   int
 
 	Start Timestamp
 	End   Timestamp
