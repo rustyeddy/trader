@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTimeframeParseNormalizeAndString(t *testing.T) {
@@ -61,4 +62,43 @@ func TestTimestampHelpers(t *testing.T) {
 	assert.Equal(t, Timestamp(0), ts.FloorToHour())
 	assert.Equal(t, timemilli(125000), ts.Milli())
 	assert.Equal(t, Timestamp(125), ts.MS().Sec())
+	assert.True(t, Timestamp(124).Before(Timestamp(125)))
+	assert.True(t, Timestamp(126).After(Timestamp(125)))
+	assert.Equal(t, Timestamp(135), Timestamp(125).Add(10*time.Second))
+}
+
+func TestFromStringAndTimeRangeLocation(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), FromString("2024-01-15"))
+	assert.Equal(t, Timestamp(0), FromString("not-a-date"))
+
+	loc := time.UTC
+	rng, err := timeRangeLocation("2024-01-01", "2024-01-10", "H1", loc)
+	require.NoError(t, err)
+	assert.True(t, rng.Valid())
+	assert.Equal(t, H1, rng.TF)
+
+	_, err = timeRangeLocation("2024-01-10", "2024-01-01", "H1", loc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid date range")
+
+	_, err = timeRangeLocation("bad", "2024-01-10", "H1", loc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bad from date")
+}
+
+func TestTimeRangeMonthsAndMonthRange(t *testing.T) {
+	t.Parallel()
+
+	r := TimeRange{Start: Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), End: Timestamp(time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC).Unix()), TF: D1}
+	months := r.MonthsInRange()
+	require.Equal(t, []yearMonth{{Year: 2024, Month: 1}, {Year: 2024, Month: 2}, {Year: 2024, Month: 3}}, months)
+
+	assert.Nil(t, TimeRange{}.MonthsInRange())
+
+	mr := monthRange(2024, 2)
+	assert.Equal(t, Timestamp(time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC).Unix()), mr.Start)
+	assert.Equal(t, Timestamp(time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC).Unix()), mr.End)
+	assert.False(t, TimeRange{}.Valid())
 }
