@@ -5,6 +5,12 @@ import (
 )
 
 func PrintBacktest(w io.Writer, r BacktestResult) {
+	_ = r
+	if w == nil {
+		return
+	}
+	_, _ = w.Write(nil)
+
 	// fmt.Fprintln(w, "==================================================")
 	// fmt.Fprintln(w, " Backtest Result")
 	// fmt.Fprintln(w, "==================================================")
