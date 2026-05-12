@@ -99,6 +99,61 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "simulation initial_ask must be greater than initial_bid",
 		},
+		{
+			name: "missing strategy instrument",
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			},
+			wantErr: true,
+			errMsg:  "strategy.instrument is required",
+		},
+		{
+			name: "non-positive initial prices",
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 0, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "trades.csv", EquityFile: "equity.csv"},
+			},
+			wantErr: true,
+			errMsg:  "simulation initial prices must be positive",
+		},
+		{
+			name: "invalid journal type",
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "bad"},
+			},
+			wantErr: true,
+			errMsg:  "journal.type must be 'csv' or 'sqlite'",
+		},
+		{
+			name: "csv journal missing files",
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "csv", TradesFile: "", EquityFile: ""},
+			},
+			wantErr: true,
+			errMsg:  "journal trades_file and equity_file required for CSV type",
+		},
+		{
+			name: "sqlite journal missing db path",
+			config: &appConfig{
+				Account:    accountConfig{Currency: "USD", Balance: 100000},
+				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
+				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
+				Journal:    journalConfig{Type: "sqlite", DBPath: ""},
+			},
+			wantErr: true,
+			errMsg:  "journal db_path required for SQLite type",
+		},
 	}
 
 	for _, tt := range tests {
@@ -197,6 +252,15 @@ func TestSaveToFile_YMLBranch(t *testing.T) {
 	loaded, err := loadFromFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, cfg.Account.Currency, loaded.Account.Currency)
+}
+
+func TestSaveToFile_WriteError(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultConfig()
+	err := cfg.SaveToFile(t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write config file")
 }
 
 func TestPriceStepParseDuration(t *testing.T) {
