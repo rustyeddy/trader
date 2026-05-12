@@ -96,10 +96,13 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 		if tr == nil {
 			continue
 		}
-		if tr.PNL > 0 {
+		switch {
+		case tr.PNL > 0:
 			res.Wins++
-		} else if tr.PNL < 0 {
+		case tr.PNL < 0:
 			res.Losses++
+		case tr.PNL == 0:
+			res.Flat++
 		}
 	}
 
