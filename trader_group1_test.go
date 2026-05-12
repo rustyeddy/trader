@@ -1,0 +1,262 @@
+package trader
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type countingStrategy struct {
+	plan   *StrategyPlan
+	resets int
+	calls  int
+}
+
+func (s *countingStrategy) Name() string { return "counting" }
+func (s *countingStrategy) Reset()       { s.resets++ }
+func (s *countingStrategy) Ready() bool  { return true }
+func (s *countingStrategy) Update(context.Context, *CandleTime, *Backtest) *StrategyPlan {
+	s.calls++
+	return s.plan
+}
+
+type fixedCandleIterator struct {
+	candles  []candleTime
+	idx      int
+	closeErr error
+	err      error
+}
+
+func (it *fixedCandleIterator) Next() bool {
+	if it.err != nil {
+		return false
+	}
+	if it.idx >= len(it.candles) {
+		return false
+	}
+	it.idx++
+	return true
+}
+
+func (it *fixedCandleIterator) Candle() Candle {
+	if it.idx == 0 || it.idx > len(it.candles) {
+		return Candle{}
+	}
+	return it.candles[it.idx-1].Candle
+}
+
+func (it *fixedCandleIterator) CandleTime() candleTime {
+	if it.idx == 0 || it.idx > len(it.candles) {
+		return candleTime{}
+	}
+	return it.candles[it.idx-1]
+}
+
+func (it *fixedCandleIterator) NextCandle() (Candle, bool) {
+	if !it.Next() {
+		return Candle{}, false
+	}
+	return it.Candle(), true
+}
+
+func (it *fixedCandleIterator) Timestamp() Timestamp {
+	if it.idx == 0 || it.idx > len(it.candles) {
+		return 0
+	}
+	return it.candles[it.idx-1].Timestamp
+}
+
+func (it *fixedCandleIterator) Err() error {
+	return it.err
+}
+
+func (it *fixedCandleIterator) Close() error {
+	return it.closeErr
+}
+
+func TestTraderProcessEventValidation(t *testing.T) {
+	t.Parallel()
+
+	tr := &Trader{}
+
+	require.ErrorContains(t, tr.processEvent(context.Background(), nil), "nil broker event")
+
+	require.ErrorContains(t,
+		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled}),
+		"no position")
+
+	require.ErrorContains(t,
+		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed}),
+		"missing position")
+
+	require.ErrorContains(t,
+		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}),
+		"missing trade")
+
+	require.NoError(t,
+		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}))
+
+	require.NoError(t,
+		tr.processEvent(context.Background(), &Event{
+			Type:     EventPositionClosed,
+			Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}},
+			Trade:    &Trade{TradeCommon: &TradeCommon{ID: NewULID()}},
+		}))
+
+	// Unsupported event types are intentionally non-fatal.
+	require.NoError(t, tr.processEvent(context.Background(), &Event{Type: EventType(255)}))
+}
+
+func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T) {
+	t.Parallel()
+
+	tr := &Trader{}
+	evtQ := make(chan *Event, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var processed int64
+	errCh, done := tr.startBrokerEventHandler(ctx, evtQ, &processed)
+
+	evtQ <- &Event{Type: EventOrderFilled, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt64(&processed) == 1
+	}, 200*time.Millisecond, 5*time.Millisecond)
+
+	evtQ <- &Event{Type: EventOrderFilled} // triggers processEvent error
+
+	select {
+	case err := <-errCh:
+		require.ErrorContains(t, err, "no position")
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("expected handler error")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("expected handler goroutine to stop")
+	}
+}
+
+func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
+	t.Parallel()
+
+	tr := &Trader{}
+	errCh := make(chan error, 1)
+	require.NoError(t, tr.brokerEventError(errCh))
+
+	errCh <- errors.New("boom")
+	require.EqualError(t, tr.brokerEventError(errCh), "boom")
+
+	b := NewBroker("idle")
+	b.Account = NewAccount("acct", MoneyFromFloat(10_000))
+	b.evtQ = make(chan *Event, 1)
+	idle := &Trader{Broker: b}
+	require.NoError(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
+
+	bad := make(chan error, 1)
+	bad <- errors.New("from broker")
+	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
+}
+
+func TestSnapshotStrategyPositions_FiltersByState(t *testing.T) {
+	t.Parallel()
+
+	src := &Positions{}
+	src.Add(&Position{TradeCommon: &TradeCommon{ID: "open"}, State: PositionOpen})
+	src.Add(&Position{TradeCommon: &TradeCommon{ID: "open-req"}, State: PositionOpenRequested})
+	src.Add(&Position{TradeCommon: &TradeCommon{ID: "close-req"}, State: PositionCloseRequested})
+	src.Add(&Position{TradeCommon: &TradeCommon{ID: "closed"}, State: PositionClosed})
+
+	got := snapshotStrategyPositions(src)
+	require.NotNil(t, got)
+	positions := got.Positions()
+	require.Len(t, positions, 3)
+	assert.Contains(t, positions, "open")
+	assert.Contains(t, positions, "open-req")
+	assert.Contains(t, positions, "close-req")
+	assert.NotContains(t, positions, "closed")
+}
+
+func TestBackTestWithIterator_BasicPaths(t *testing.T) {
+	t.Parallel()
+
+	acct := NewAccount("acct", MoneyFromFloat(10_000))
+	broker := NewBroker("broker")
+	broker.Account = acct
+
+	tr := &Trader{Broker: broker}
+	ctx := context.Background()
+
+	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
+	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, nil), "nil candle iterator")
+
+	itr := &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
+	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, itr), "nil strategy")
+
+	strat := &countingStrategy{}
+	run.Strategy = strat
+	run.BacktestRun = &BacktestRun{}
+
+	itr = &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
+	require.NoError(t, tr.backTestWithIterator(ctx, run, itr))
+	assert.Equal(t, 1, strat.resets)
+	assert.Equal(t, 1, strat.calls)
+}
+
+func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	strat := &countingStrategy{}
+	run := &Backtest{
+		BacktestRequest: &BacktestRequest{
+			Instrument:      "EURUSD",
+			Strategy:        strat,
+			TimeRange:       TimeRange{Start: Timestamp(1704067200), End: Timestamp(1704070800), TF: H1},
+			StartingBalance: MoneyFromFloat(10_000),
+		},
+		BacktestRun: &BacktestRun{},
+	}
+
+	var nilTrader *Trader
+	require.ErrorContains(t, nilTrader.Backtest(ctx, run), "nil trader")
+
+	noAcct := &Trader{Broker: NewBroker("no-account")}
+	require.ErrorContains(t, noAcct.Backtest(ctx, run), "nil account")
+
+	withAcctBroker := NewBroker("with-account")
+	withAcctBroker.Account = NewAccount("acct", MoneyFromFloat(10_000))
+	withAcct := &Trader{Broker: withAcctBroker}
+	require.ErrorContains(t, withAcct.Backtest(ctx, run), "nil data manager")
+
+	broker := NewBroker("broker")
+	broker.Account = withAcctBroker.Account
+
+	useTempStore(t)
+	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+	s := &Store{basedir: store.basedir}
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2024, time.January, map[time.Time]Candle{
+		ts: {
+			Open:      Price(1100000),
+			High:      Price(1102000),
+			Low:       Price(1099000),
+			Close:     Price(1101000),
+			AvgSpread: Price(10),
+			MaxSpread: Price(20),
+			Ticks:     42,
+		},
+	})
+
+	dm := NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
+	okTrader := &Trader{Broker: broker, DataManager: dm}
+	require.NoError(t, okTrader.Backtest(ctx, run))
+	require.NotNil(t, run.BacktestResult)
+	assert.Equal(t, 0, run.BacktestResult.Trades)
+}
