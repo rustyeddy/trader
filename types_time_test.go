@@ -61,6 +61,8 @@ func TestTimestampHelpers(t *testing.T) {
 	assert.Equal(t, Timestamp(120), ts.FloorToMinute())
 	assert.Equal(t, Timestamp(0), ts.FloorToHour())
 	assert.Equal(t, timemilli(125000), ts.Milli())
+	assert.Equal(t, timemilli(120000), ts.Milli().FloorToMinute())
+	assert.Equal(t, timemilli(0), ts.Milli().FloorToHour())
 	assert.Equal(t, Timestamp(125), ts.MS().Sec())
 	assert.True(t, Timestamp(124).Before(Timestamp(125)))
 	assert.True(t, Timestamp(126).After(Timestamp(125)))
