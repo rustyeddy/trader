@@ -110,3 +110,49 @@ func TestSyslogWriterWritePropagatesError(t *testing.T) {
 	assert.ErrorIs(t, err, wantErr)
 	assert.Equal(t, "err", backend.lastMethod)
 }
+
+func TestNewSyslogWriter_SuccessAndError(t *testing.T) {
+	t.Parallel()
+
+	orig := syslogNew
+	t.Cleanup(func() { syslogNew = orig })
+
+	t.Run("success", func(t *testing.T) {
+		backend := &fakeSyslogBackend{}
+		syslogNew = func(p syslog.Priority, tag string) (syslogBackend, error) {
+			assert.Equal(t, syslog.LOG_INFO|syslog.LOG_USER, p)
+			assert.Equal(t, "trader-test", tag)
+			return backend, nil
+		}
+
+		sw, err := newSyslogWriter("trader-test")
+		assert.NoError(t, err)
+		assert.NotNil(t, sw)
+		assert.Same(t, backend, sw.w)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		wantErr := errors.New("dial failed")
+		syslogNew = func(p syslog.Priority, tag string) (syslogBackend, error) {
+			return nil, wantErr
+		}
+
+		sw, err := newSyslogWriter("trader-test")
+		assert.Nil(t, sw)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, wantErr)
+		assert.Contains(t, err.Error(), "syslog.New")
+	})
+}
+
+func TestSyslogWriterClose(t *testing.T) {
+	t.Parallel()
+
+	backend := &fakeSyslogBackend{}
+	sw := &syslogWriter{w: backend}
+	assert.NoError(t, sw.Close())
+
+	wantErr := errors.New("close failed")
+	swErr := &syslogWriter{w: &fakeSyslogBackend{err: wantErr}}
+	assert.ErrorIs(t, swErr.Close(), wantErr)
+}

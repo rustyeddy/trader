@@ -25,10 +25,14 @@ type syslogBackend interface {
 	Close() error
 }
 
+var syslogNew = func(p syslog.Priority, tag string) (syslogBackend, error) {
+	return syslog.New(p, tag)
+}
+
 // newSyslogWriter creates a syslogWriter connected to the local syslog
 // daemon under the given program tag.
 func newSyslogWriter(tag string) (*syslogWriter, error) {
-	w, err := syslog.New(syslog.LOG_INFO|syslog.LOG_USER, tag)
+	w, err := syslogNew(syslog.LOG_INFO|syslog.LOG_USER, tag)
 	if err != nil {
 		return nil, fmt.Errorf("syslog.New: %w", err)
 	}
