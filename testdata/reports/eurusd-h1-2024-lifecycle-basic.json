@@ -1,0 +1,15 @@
+{
+  "name": "lifecycle-basic",
+  "strategy": "lifecycle-test",
+  "instrument": "EURUSD",
+  "timeframe": "H1",
+  "trades": 1,
+  "wins": 1,
+  "losses": 0,
+  "breakevens": 0,
+  "start_balance": 2000,
+  "end_balance": 2010,
+  "net_pl": 10,
+  "return_pct": 0.5
+}
+

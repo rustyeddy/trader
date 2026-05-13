@@ -23,6 +23,12 @@ func GetStrategy(name string) (Strategy, error) {
 	case "noop", "no-op":
 		return noopStrategy{}, nil
 
+	case "lifecycle-test":
+		return &LifecycleTestStrategy{
+			Units:    1000,
+			StopPips: 20,
+		}, nil
+
 	case "template":
 		return NewTemplateStrategy(TemplateStrategyConfig{
 			StrategyBaseConfig: StrategyBaseConfig{},

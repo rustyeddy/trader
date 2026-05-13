@@ -1,0 +1,20 @@
+version: 1
+
+defaults:
+  starting-balance: 2000
+  risk-pct: 0.5
+  source: canned
+
+runs:
+  - name: lifecycle-basic
+    data:
+      source: canned
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-01-02
+    strategy:
+      kind: lifecycle-test
+      params:
+        units: 1000
+        
