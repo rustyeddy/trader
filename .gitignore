@@ -42,6 +42,9 @@ main
 # Allow example data files
 !examples/data/*.csv
 
+# Claude Code session data
+.claude/
+
 # Editor/IDE
 # .idea/
 # .vscode/
