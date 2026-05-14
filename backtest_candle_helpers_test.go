@@ -28,6 +28,7 @@ func testOpenLot(t *testing.T, acct *Account, inst string, side Side, units Unit
 		EntryTime:      Timestamp(100),
 		OriginalUnits:  units,
 		RemainingUnits: units,
+		State:          LotOpen,
 	}
 	require.NoError(t, acct.AddLot(context.Background(), lot))
 	return lot
@@ -192,4 +193,63 @@ func TestCheckExit(t *testing.T) {
 	assert.False(t, hit)
 	assert.Equal(t, Price(0), px)
 	assert.Equal(t, "", reason)
+}
+
+func TestAutoCloseExits_StopAndTake(t *testing.T) {
+	t.Parallel()
+
+	acct := NewAccount("test", MoneyFromFloat(10_000))
+	b := NewBroker("test")
+	b.Account = acct
+
+	// Open a long lot with stop below and take above current price.
+	stopLot := testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.1000))
+	stopLot.Stop = PriceFromFloat(1.0950)
+	stopLot.Take = PriceFromFloat(1.1200)
+
+	// Open a second lot whose stop is not hit by this bar.
+	safeLot := testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.1000))
+	safeLot.Stop = PriceFromFloat(1.0800)
+	safeLot.Take = PriceFromFloat(1.1200)
+
+	// Bar whose low dips below stopLot's stop but not safeLot's stop.
+	candle := CandleTime{
+		Candle:    Candle{Open: PriceFromFloat(1.1000), High: PriceFromFloat(1.1050), Low: PriceFromFloat(1.0940), Close: PriceFromFloat(1.1010)},
+		Timestamp: Timestamp(1000),
+	}
+
+	n, err := autoCloseExits(context.Background(), b, candle)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "only the stop lot should have been auto-closed")
+
+	assert.Equal(t, 1, acct.Lots.Len(), "one lot should remain open")
+	assert.Equal(t, safeLot.ID, acct.Lots.Slice()[0].ID, "safe lot should still be open")
+	require.Len(t, acct.Trades, 1, "one closed trade recorded")
+	assert.Equal(t, CloseStopLoss, acct.Trades[0].CloseCause)
+	assert.Equal(t, stopLot.Stop, acct.Trades[0].ExitPrice, "exit price should be the stop level")
+}
+
+func TestAutoCloseExits_TakeProfit(t *testing.T) {
+	t.Parallel()
+
+	acct := NewAccount("test", MoneyFromFloat(10_000))
+	b := NewBroker("test")
+	b.Account = acct
+
+	lot := testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.1000))
+	lot.Stop = PriceFromFloat(1.0900)
+	lot.Take = PriceFromFloat(1.1100)
+
+	candle := CandleTime{
+		Candle:    Candle{Open: PriceFromFloat(1.1050), High: PriceFromFloat(1.1120), Low: PriceFromFloat(1.1040), Close: PriceFromFloat(1.1110)},
+		Timestamp: Timestamp(2000),
+	}
+
+	n, err := autoCloseExits(context.Background(), b, candle)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, 0, acct.Lots.Len())
+	require.Len(t, acct.Trades, 1)
+	assert.Equal(t, CloseTakeProfit, acct.Trades[0].CloseCause)
+	assert.Equal(t, lot.Take, acct.Trades[0].ExitPrice)
 }

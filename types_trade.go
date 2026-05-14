@@ -15,5 +15,6 @@ type Trade struct {
 	EntryTime  Timestamp
 	ExitPrice  Price
 	ExitTime   Timestamp
-	PNL        Money // account currency (best-effort)
+	PNL        Money       // account currency (best-effort)
+	CloseCause closeCause
 }

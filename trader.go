@@ -252,6 +252,14 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			return err
 		}
 
+		autoExits, err := autoCloseExits(runCtx, t.Broker, candle)
+		if err != nil {
+			return err
+		}
+		if autoExits > 0 {
+			atomic.AddInt64(&submittedCloses, int64(autoExits))
+		}
+
 		strategyCtx := withStrategyRuntime(runCtx, run.Instrument, int(processedCandles), 0, t.Account)
 		lots := snapshotLots(&t.Account.Lots)
 		run.Lots = lots

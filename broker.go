@@ -140,6 +140,7 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		EntryTime:   req.Lot.EntryTime,
 		ExitPrice:   req.Price,
 		ExitTime:    req.Timestamp,
+		CloseCause:  req.CloseCause,
 	}
 
 	if err := b.Account.CloseLot(req.Lot, trade); err != nil {
