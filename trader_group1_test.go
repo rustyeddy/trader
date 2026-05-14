@@ -95,17 +95,17 @@ func TestTraderProcessEventValidation(t *testing.T) {
 		"missing position")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}),
+		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}),
 		"missing trade")
 
 	require.NoError(t,
-		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}))
+		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}))
 
 	require.NoError(t,
 		tr.processEvent(context.Background(), &Event{
-			Type:     EventPositionClosed,
-			Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}},
-			Trade:    &Trade{TradeCommon: &TradeCommon{ID: NewULID()}},
+			Type:  EventPositionClosed,
+			Lot:   &Lot{TradeCommon: &TradeCommon{ID: NewULID()}},
+			Trade: &Trade{TradeCommon: &TradeCommon{ID: NewULID()}},
 		}))
 
 	// Unsupported event types are intentionally non-fatal.
@@ -123,7 +123,7 @@ func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T)
 	var processed int64
 	errCh, done := tr.startBrokerEventHandler(ctx, evtQ, &processed)
 
-	evtQ <- &Event{Type: EventOrderFilled, Position: &Position{TradeCommon: &TradeCommon{ID: NewULID()}}}
+	evtQ <- &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&processed) == 1
 	}, 200*time.Millisecond, 5*time.Millisecond)
@@ -165,23 +165,23 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 }
 
-func TestSnapshotStrategyPositions_FiltersByState(t *testing.T) {
+func TestSnapshotLots_FiltersByState(t *testing.T) {
 	t.Parallel()
 
-	src := &Positions{}
-	src.Add(&Position{TradeCommon: &TradeCommon{ID: "open"}, State: PositionOpen})
-	src.Add(&Position{TradeCommon: &TradeCommon{ID: "open-req"}, State: PositionOpenRequested})
-	src.Add(&Position{TradeCommon: &TradeCommon{ID: "close-req"}, State: PositionCloseRequested})
-	src.Add(&Position{TradeCommon: &TradeCommon{ID: "closed"}, State: PositionClosed})
+	src := &LotBook{}
+	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "open"}, State: LotOpen})
+	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "open-req"}, State: LotOpenRequested})
+	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "close-req"}, State: LotCloseRequested})
+	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "closed"}, State: LotClosed})
 
-	got := snapshotStrategyPositions(src)
+	got := snapshotLots(src)
 	require.NotNil(t, got)
-	positions := got.Positions()
-	require.Len(t, positions, 3)
-	assert.Contains(t, positions, "open")
-	assert.Contains(t, positions, "open-req")
-	assert.Contains(t, positions, "close-req")
-	assert.NotContains(t, positions, "closed")
+	lots := got.All()
+	require.Len(t, lots, 3)
+	assert.Contains(t, lots, "open")
+	assert.Contains(t, lots, "open-req")
+	assert.Contains(t, lots, "close-req")
+	assert.NotContains(t, lots, "closed")
 }
 
 func TestBackTestWithIterator_BasicPaths(t *testing.T) {
@@ -211,7 +211,6 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 }
 
 func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
-	t.Parallel()
 
 	ctx := context.Background()
 	strat := &countingStrategy{}

@@ -18,8 +18,8 @@ func NewSimBroker(acct *trader.Account, j trader.Journal) *Sim {
 	if acct == nil {
 		acct = &trader.Account{}
 	}
-	if acct.Positions.Positions() == nil {
-		acct.Positions = trader.Positions{}
+	if acct.Lots.All() == nil {
+		acct.Lots = trader.LotBook{}
 	}
 	return &Sim{
 		account: acct,
@@ -46,7 +46,7 @@ func (e *Sim) UpdatePrice(tick trader.Tick) error {
 	return e.account.ResolveWithMarks(marks)
 }
 
-func (e *Sim) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Position, error) {
+func (e *Sim) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Lot, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("nil engine")
 	}
@@ -72,16 +72,20 @@ func (e *Sim) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*
 	}
 	th.Units = units
 
-	pos := &trader.Position{
-		TradeCommon: th.TradeCommon,
-		FillPrice:   px.Mid(),
-		FillTime:    trader.FromTime(time.Now().UTC()),
-		State:       trader.PositionOpen,
+	entryPrice := px.Mid()
+	entryTime := trader.FromTime(time.Now().UTC())
+	lot := &trader.Lot{
+		TradeCommon:    th.TradeCommon,
+		EntryPrice:     entryPrice,
+		EntryTime:      entryTime,
+		OriginalUnits:  units,
+		RemainingUnits: units,
+		State:          trader.LotOpen,
 	}
-	if err := e.account.AddPosition(ctx, pos); err != nil {
+	if err := e.account.AddLot(ctx, lot); err != nil {
 		return nil, err
 	}
-	return pos, nil
+	return lot, nil
 }
 
 func (e *Sim) CloseAll(ctx context.Context, reason string) error {
@@ -89,23 +93,27 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		return fmt.Errorf("nil engine")
 	}
 
-	var positions []*trader.Position
-	_ = e.account.Positions.Range(func(pos *trader.Position) error {
-		positions = append(positions, pos)
+	var lots []*trader.Lot
+	_ = e.account.Lots.Range(func(lot *trader.Lot) error {
+		lots = append(lots, lot)
 		return nil
 	})
 
-	for _, pos := range positions {
-		px, ok := e.prices[pos.Instrument]
+	for _, lot := range lots {
+		px, ok := e.prices[lot.Instrument]
 		if !ok {
-			return fmt.Errorf("no market price for %s", pos.Instrument)
+			return fmt.Errorf("no market price for %s", lot.Instrument)
 		}
+		exitPrice := px.Mid()
+		exitTime := trader.FromTime(time.Now().UTC())
 		trade := &trader.Trade{
-			TradeCommon: pos.TradeCommon,
-			FillPrice:   px.Mid(),
-			FillTime:    trader.FromTime(time.Now().UTC()),
+			TradeCommon: lot.TradeCommon,
+			EntryPrice:  lot.EntryPrice,
+			EntryTime:   lot.EntryTime,
+			ExitPrice:   exitPrice,
+			ExitTime:    exitTime,
 		}
-		if err := e.account.ClosePosition(pos, trade); err != nil {
+		if err := e.account.CloseLot(lot, trade); err != nil {
 			return err
 		}
 		if e.journal != nil {
@@ -113,10 +121,10 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 				TradeID:    trade.ID,
 				Instrument: trade.Instrument,
 				Units:      trade.Units,
-				EntryPrice: pos.FillPrice,
-				ExitPrice:  trade.FillPrice,
-				OpenTime:   pos.FillTime,
-				CloseTime:  trade.FillTime,
+				EntryPrice: lot.EntryPrice,
+				ExitPrice:  trade.ExitPrice,
+				OpenTime:   lot.EntryTime,
+				CloseTime:  trade.ExitTime,
 				RealizedPL: trade.PNL,
 				Reason:     reason,
 			})

@@ -373,7 +373,6 @@ func TestPlanFromWantlist_D1ReadyWhenH1Complete(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCloseCandleIterators_NoError(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
@@ -386,7 +385,6 @@ func TestCloseCandleIterators_NoError(t *testing.T) {
 }
 
 func TestCloseCandleIterators_WithNil(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
@@ -402,7 +400,6 @@ func TestCloseCandleIterators_WithNil(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestChainedCandleIterator_NilSub(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)

@@ -68,23 +68,23 @@ func (f *Fake02) Update(ctx context.Context, c *CandleTime, run *Backtest) *Stra
 	f.bar++
 
 	// If something is open, close it after HoldBars.
-	if run.Positions != nil && run.Positions.Len() > 0 {
+	if run.Lots != nil && run.Lots.Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
 			submittedClose := false
-			run.Positions.Range(func(pos *Position) error {
-				if pos.State != PositionOpen {
+			run.Lots.Range(func(lot *Lot) error {
+				if lot.State != LotOpen {
 					return nil
 				}
 				cl := &closeRequest{
 					Request: Request{
-						TradeCommon: pos.TradeCommon,
+						TradeCommon: lot.TradeCommon,
 						Reason:      "fake-02-close",
 						Candle:      c.Candle,
 						RequestType: RequestClose,
 						Price:       c.Close,
 						Timestamp:   c.Timestamp,
 					},
-					Position:   pos,
+					Lot:        lot,
 					CloseCause: CloseManual,
 				}
 				plan.Closes = append(plan.Closes, cl)

@@ -68,35 +68,35 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	}
 
 	// Here we will just fake it and return a filled order.
-	pos, err := b.SubmitOrder(ctx, o)
+	lot, err := b.SubmitOrder(ctx, o)
 	if err != nil {
 		return res, err
 	}
 	// TODO: Need to create a fill fills
-	pos.FillPrice = req.Price // add some spread & slippage
-	pos.FillTime = req.Timestamp
+	lot.EntryPrice = req.Price // add some spread & slippage
+	lot.EntryTime = req.Timestamp
 
 	// This would be the time to emulate a delay between order and fill
 	// we will ignore this for now
-	pos.State = PositionOpen
-	res.Position = pos
+	lot.State = LotOpen
+	res.Lot = lot
 
-	if err := b.Account.AddPosition(ctx, pos); err != nil {
+	if err := b.Account.AddLot(ctx, lot); err != nil {
 		return res, err
 	}
 
-	// send position back on event queue
+	// send lot back on event queue
 	evt := &Event{
 		Type:          EventOrderFilled,
-		Time:          pos.FillTime,
+		Time:          lot.EntryTime,
 		ClientOrderID: req.ID,
 		BrokerOrderID: NewULID(),
 
 		// Redundant?
-		PositionID: pos.ID,
+		PositionID: lot.ID,
 		Instrument: req.Instrument,
 		Open:       req,
-		Position:   pos,
+		Lot:        lot,
 	}
 
 	if err := b.emitEvent(ctx, evt); err != nil {
@@ -106,11 +106,14 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*openResult,
 	return res, nil
 }
 
-func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Position, error) {
-	pos := &Position{
-		TradeCommon: ord.TradeCommon,
+func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Lot, error) {
+	units := ord.TradeCommon.Units
+	lot := &Lot{
+		TradeCommon:    ord.TradeCommon,
+		OriginalUnits:  units,
+		RemainingUnits: units,
 	}
-	return pos, nil
+	return lot, nil
 }
 
 func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
@@ -123,23 +126,23 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 	if req == nil {
 		return fmt.Errorf("nil close request")
 	}
-	if req.Position == nil {
+	if req.Lot == nil {
 		return fmt.Errorf("close request missing position")
 	}
 
-	// place req.CloseRequest on an close queue Submit the order,
-	// this is where the emulator would be injecting delays and stuff
+	// place req.closeRequest on a close queue; submit the order.
+	// This is where the emulator would inject delays and such.
 
 	// When the order is filled, create a trade
 	trade := &Trade{
 		TradeCommon: req.Request.TradeCommon,
-		OpenPrice:   req.Position.FillPrice,
-		OpenTime:    req.Position.FillTime,
-		FillPrice:   req.Price,
-		FillTime:    req.Timestamp,
+		EntryPrice:  req.Lot.EntryPrice,
+		EntryTime:   req.Lot.EntryTime,
+		ExitPrice:   req.Price,
+		ExitTime:    req.Timestamp,
 	}
 
-	if err := b.Account.ClosePosition(req.Position, trade); err != nil {
+	if err := b.Account.CloseLot(req.Lot, trade); err != nil {
 		return err
 	}
 
@@ -151,7 +154,7 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		Reason:        "lowest low",
 		Cause:         CloseManual,
 		Trade:         trade,
-		Position:      req.Position,
+		Lot:           req.Lot,
 	}
 
 	return b.emitEvent(ctx, evt)

@@ -19,10 +19,13 @@ func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 	th := NewTradeHistory("EURUSD")
 	th.TradeCommon.Units = Units(1000)
 	th.TradeCommon.Side = Long
-	pos := &Position{
-		TradeCommon: th.TradeCommon,
-		FillPrice:   Price(1095000),
-		State:       PositionOpen,
+	units := th.TradeCommon.Units
+	lot := &Lot{
+		TradeCommon:    th.TradeCommon,
+		EntryPrice:     Price(1095000),
+		OriginalUnits:  units,
+		RemainingUnits: units,
+		State:          LotOpen,
 	}
 	req := &closeRequest{
 		Request: Request{
@@ -31,7 +34,7 @@ func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 			Price:       Price(1100000),
 			Timestamp:   Timestamp(1),
 		},
-		Position: pos,
+		Lot: lot,
 	}
 
 	err := b.SubmitClose(context.Background(), req)

@@ -25,7 +25,7 @@ type Event struct {
 	Open     *OpenRequest
 	Close    *closeRequest
 	Trade    *Trade
-	Position *Position
+	Lot      *Lot
 }
 
 func (e EventType) String() string {

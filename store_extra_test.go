@@ -122,7 +122,6 @@ func TestBuildD1_FullPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestChainedCandleIterator_SubIteratorErr(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)

@@ -93,7 +93,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	require.Contains(t, err.Error(), "queue is full")
 	require.NotNil(t, res)
 	require.NotNil(t, res.order)
-	require.NotNil(t, res.Position)
+	require.NotNil(t, res.Lot)
 	assert.Equal(t, 1, len(b.evtQ))
 }
 

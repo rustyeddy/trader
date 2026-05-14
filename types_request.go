@@ -24,7 +24,7 @@ type OpenRequest struct {
 
 type closeRequest struct {
 	Request
-	*Position
+	*Lot
 	CloseCause closeCause
 }
 

@@ -38,7 +38,7 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, run *Backtest) *Strate
 		return plan
 	}
 
-	openTrades := run.Positions.Len()
+	openTrades := run.Lots.Len()
 	if f.highest < c.High {
 		f.highest = c.High
 		if openTrades > 0 {
@@ -60,17 +60,17 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, run *Backtest) *Strate
 		}
 
 		submittedClose := false
-		run.Positions.Range(func(pos *Position) error {
-			if pos.State != PositionOpen {
+		run.Lots.Range(func(lot *Lot) error {
+			if lot.State != LotOpen {
 				return nil
 			}
 
-			// Are there positions that need to be closed?
-			if (pos.Side == Long && c.Close <= pos.Stop) ||
-				(pos.Side == Short && c.Close >= pos.Stop) {
+			// Are there lots that need to be closed?
+			if (lot.Side == Long && c.Close <= lot.Stop) ||
+				(lot.Side == Short && c.Close >= lot.Stop) {
 				cl := &closeRequest{
 					Request: Request{
-						TradeCommon: pos.TradeCommon,
+						TradeCommon: lot.TradeCommon,
 						Reason:      "CloseStop",
 						Candle:      c.Candle,
 						RequestType: RequestClose,
@@ -78,7 +78,7 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, run *Backtest) *Strate
 						Timestamp:   c.Timestamp,
 					},
 					CloseCause: CloseStopLoss,
-					Position:   pos,
+					Lot:        lot,
 				}
 				plan.Closes = append(plan.Closes, cl)
 				submittedClose = true

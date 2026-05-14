@@ -1,111 +1,73 @@
 package trader
 
-import "sync"
-
-type positionState int
-
-const (
-	PositionNone = iota
-	PositionOpenRequested
-	PositionOpen
-	PositionCloseRequested
-	PositionClosed
-)
-
+// Position is the computed aggregate view of all open lots for one instrument.
 type Position struct {
-	*TradeCommon
-	FillPrice Price
-	FillTime  Timestamp
-	State     positionState
+	Instrument    string
+	NetUnits      Units
+	AvgEntryPrice Price
+	UnrealizedPL  Money
+	MarginUsed    Money
 }
 
-type Positions struct {
-	mu        sync.RWMutex
-	positions map[string]*Position
-}
-
-func (p *Positions) Positions() map[string]*Position {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.positions == nil {
+// InstrumentPositions derives per-instrument Position from all open lots.
+func InstrumentPositions(lb *LotBook) map[string]*Position {
+	if lb == nil {
 		return nil
 	}
-	out := make(map[string]*Position, len(p.positions))
-	for id, pos := range p.positions {
-		out[id] = pos
-	}
-	return out
-}
+	result := make(map[string]*Position)
+	_ = lb.Range(func(lot *Lot) error {
+		if lot == nil || lot.State != LotOpen || lot.RemainingUnits <= 0 {
+			return nil
+		}
+		pos, ok := result[lot.Instrument]
+		if !ok {
+			pos = &Position{Instrument: lot.Instrument}
+			result[lot.Instrument] = pos
+		}
+		// accumulate net units (positive=long, negative=short)
+		if lot.Side == Long {
+			pos.NetUnits += lot.RemainingUnits
+		} else {
+			pos.NetUnits -= lot.RemainingUnits
+		}
+		return nil
+	})
 
-func (p *Positions) Len() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return len(p.positions)
-}
-
-func (p *Positions) Add(pos *Position) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.positions == nil {
-		p.positions = make(map[string]*Position)
+	// compute AvgEntryPrice per instrument (simple average of open lots)
+	// We need a second pass to compute weighted average entry price
+	type lotAccum struct {
+		totalUnits Units
+		weightedPx int64
 	}
-	p.positions[pos.ID] = pos
-}
-
-func (p *Positions) Delete(ID string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.positions == nil {
-		return
-	}
-	delete(p.positions, ID)
-}
-
-func (p *Positions) Range(fn func(*Position) error) error {
-	p.mu.RLock()
-	positions := make([]*Position, 0, len(p.positions))
-	for _, pos := range p.positions {
-		positions = append(positions, pos)
-	}
-	p.mu.RUnlock()
-	for _, pos := range positions {
-		if err := fn(pos); err != nil {
-			return err
+	accums := make(map[string]*lotAccum)
+	_ = lb.Range(func(lot *Lot) error {
+		if lot == nil || lot.State != LotOpen || lot.RemainingUnits <= 0 {
+			return nil
+		}
+		a, ok := accums[lot.Instrument]
+		if !ok {
+			a = &lotAccum{}
+			accums[lot.Instrument] = a
+		}
+		u := int64(lot.RemainingUnits)
+		if u < 0 {
+			u = -u
+		}
+		a.totalUnits += lot.RemainingUnits
+		a.weightedPx += int64(lot.EntryPrice) * u
+		return nil
+	})
+	for inst, a := range accums {
+		if pos, ok := result[inst]; ok {
+			absUnits := int64(a.totalUnits)
+			if absUnits < 0 {
+				absUnits = -absUnits
+			}
+			if absUnits > 0 {
+				pos.AvgEntryPrice = Price(a.weightedPx / absUnits)
+			}
 		}
 	}
-	return nil
-}
 
-func (p *Position) TriggerStopLoss(price Price) bool {
-
-	return false
-}
-
-func (p *Position) triggerTakeProfit(price Price) bool {
-
-	return false
-}
-
-func (p *Position) UnrealizedPL(currentPrice Price, quoteToAccount Price) Money {
-	// price delta in quote currency per unit, scaled by PriceScale
-	delta := int64(currentPrice - p.FillPrice)
-
-	// If positions always store positive Units, apply direction here.
-	// Remove this block if short positions already use negative Units.
-	if p.Side == Short {
-		delta = -delta
-	}
-
-	// units * scaled price delta = quote-currency P/L, still scaled by PriceScale
-	plQuote := int64(p.Units) * delta
-
-	// Convert quote currency -> account currency.
-	// quoteToAccount is assumed to be a Price-scaled conversion rate.
-	// Result is still scaled by PriceScale.
-	plAccountPriceScaled := (plQuote * int64(quoteToAccount)) / int64(PriceScale)
-
-	// Convert Price-scaled account amount -> Money-scaled account amount.
-	plAccountMoneyScaled := (plAccountPriceScaled * int64(MoneyScale)) / int64(PriceScale)
-
-	return Money(plAccountMoneyScaled)
+	return result
 }

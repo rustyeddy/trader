@@ -15,20 +15,22 @@ func testSizedAccount() *Account {
 	return acct
 }
 
-func testOpenPosition(t *testing.T, acct *Account, inst string, side Side, units Units, fill Price) *Position {
+func testOpenLot(t *testing.T, acct *Account, inst string, side Side, units Units, fill Price) *Lot {
 	t.Helper()
-	pos := &Position{
+	lot := &Lot{
 		TradeCommon: &TradeCommon{
 			ID:         NewULID(),
 			Instrument: inst,
 			Side:       side,
 			Units:      units,
 		},
-		FillPrice: fill,
-		FillTime:  Timestamp(100),
+		EntryPrice:     fill,
+		EntryTime:      Timestamp(100),
+		OriginalUnits:  units,
+		RemainingUnits: units,
 	}
-	require.NoError(t, acct.AddPosition(context.Background(), pos))
-	return pos
+	require.NoError(t, acct.AddLot(context.Background(), lot))
+	return lot
 }
 
 func TestGapBarsSince(t *testing.T) {
@@ -40,18 +42,17 @@ func TestGapBarsSince(t *testing.T) {
 	assert.Equal(t, 2, gapBarsSince(100, 280, M1))
 }
 
-func TestSnapshotPositions(t *testing.T) {
+func TestSnapshotLots(t *testing.T) {
 	t.Parallel()
 
-	empty := snapshotPositions(nil)
-	require.NotNil(t, empty)
-	assert.Equal(t, 0, empty.Len())
+	// snapshotLots is in trader.go — test via indirect usage through BacktestRun.
+	// Directly we can test LotBook copying behavior.
+	src := &LotBook{}
+	lot := &Lot{TradeCommon: &TradeCommon{ID: "p1", Instrument: "EURUSD", Side: Long, Units: 10}, EntryPrice: PriceFromFloat(1.1), OriginalUnits: 10, RemainingUnits: 10, State: LotOpen}
+	src.Add(lot)
 
-	src := &Positions{}
-	pos := &Position{TradeCommon: &TradeCommon{ID: "p1", Instrument: "EURUSD", Side: Long, Units: 10}, FillPrice: PriceFromFloat(1.1)}
-	src.Add(pos)
-
-	cp := snapshotPositions(src)
+	// Use snapshotLots function from trader.go
+	cp := snapshotLots(src)
 	require.NotNil(t, cp)
 	assert.Equal(t, 1, cp.Len())
 
@@ -60,76 +61,76 @@ func TestSnapshotPositions(t *testing.T) {
 	assert.Equal(t, 1, cp.Len(), "snapshot should not change after source map mutation")
 }
 
-func TestClosePositionAtPrice_Validation(t *testing.T) {
+func TestCloseLotAtPrice_Validation(t *testing.T) {
 	t.Parallel()
 
 	acct := testSizedAccount()
-	err := closePositionAtPrice(nil, &Position{}, PriceFromFloat(1.2), Timestamp(10))
+	err := closeLotAtPrice(nil, &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}, PriceFromFloat(1.2), Timestamp(10))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil account")
 
-	err = closePositionAtPrice(acct, nil, PriceFromFloat(1.2), Timestamp(10))
+	err = closeLotAtPrice(acct, nil, PriceFromFloat(1.2), Timestamp(10))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil position")
 }
 
-func TestClosePositionAtPrice_AndForceClosePositionAtEnd(t *testing.T) {
+func TestCloseLotAtPrice_AndForceLotCloseAtEnd(t *testing.T) {
 	t.Parallel()
 
 	acct := testSizedAccount()
-	pos := testOpenPosition(t, acct, "EURUSD", Long, 100_000, PriceFromFloat(1.1000))
+	lot := testOpenLot(t, acct, "EURUSD", Long, 100_000, PriceFromFloat(1.1000))
 
-	err := closePositionAtPrice(acct, pos, PriceFromFloat(1.1010), Timestamp(200))
+	err := closeLotAtPrice(acct, lot, PriceFromFloat(1.1010), Timestamp(200))
 	require.NoError(t, err)
-	assert.Equal(t, 0, acct.Positions.Len())
+	assert.Equal(t, 0, acct.Lots.Len())
 	require.Len(t, acct.Trades, 1)
-	assert.Equal(t, Timestamp(200), acct.Trades[0].FillTime)
-	assert.Equal(t, PriceFromFloat(1.1010), acct.Trades[0].FillPrice)
+	assert.Equal(t, Timestamp(200), acct.Trades[0].ExitTime)
+	assert.Equal(t, PriceFromFloat(1.1010), acct.Trades[0].ExitPrice)
 
-	pos2 := testOpenPosition(t, acct, "EURUSD", Short, 50_000, PriceFromFloat(1.1050))
+	lot2 := testOpenLot(t, acct, "EURUSD", Short, 50_000, PriceFromFloat(1.1050))
 	last := Candle{Close: PriceFromFloat(1.1020)}
-	err = forceClosePositionAtEnd(acct, pos2, last, Timestamp(300))
+	err = forceLotCloseAtEnd(acct, lot2, last, Timestamp(300))
 	require.NoError(t, err)
 	require.Len(t, acct.Trades, 2)
-	assert.Equal(t, PriceFromFloat(1.1020), acct.Trades[1].FillPrice)
-	assert.Equal(t, Timestamp(300), acct.Trades[1].FillTime)
+	assert.Equal(t, PriceFromFloat(1.1020), acct.Trades[1].ExitPrice)
+	assert.Equal(t, Timestamp(300), acct.Trades[1].ExitTime)
 }
 
-func TestClosePositionFromRequest(t *testing.T) {
+func TestCloseLotFromRequest(t *testing.T) {
 	t.Parallel()
 
 	acct := testSizedAccount()
-	pos := testOpenPosition(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.2000))
+	lot := testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.2000))
 	fallback := CandleTime{Candle: Candle{Close: PriceFromFloat(1.1995)}, Timestamp: Timestamp(250)}
 
-	err := closePositionFromRequest(acct, pos, nil, fallback)
+	err := closeLotFromRequest(acct, lot, nil, fallback)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil close request")
 
-	pos = testOpenPosition(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.2000))
+	lot = testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.2000))
 	cl := &closeRequest{}
-	err = closePositionFromRequest(acct, pos, cl, fallback)
+	err = closeLotFromRequest(acct, lot, cl, fallback)
 	require.NoError(t, err)
 	require.NotEmpty(t, acct.Trades)
 	lastTrade := acct.Trades[len(acct.Trades)-1]
-	assert.Equal(t, fallback.Close, lastTrade.FillPrice)
-	assert.Equal(t, fallback.Timestamp, lastTrade.FillTime)
+	assert.Equal(t, fallback.Close, lastTrade.ExitPrice)
+	assert.Equal(t, fallback.Timestamp, lastTrade.ExitTime)
 }
 
 func TestFirstMatchingCloseAndFirstOpenRequest(t *testing.T) {
 	t.Parallel()
 
-	posA := &Position{TradeCommon: &TradeCommon{ID: "a"}}
-	posB := &Position{TradeCommon: &TradeCommon{ID: "b"}}
-	cl1 := &closeRequest{Position: posB}
-	cl2 := &closeRequest{Position: posA}
+	lotA := &Lot{TradeCommon: &TradeCommon{ID: "a"}}
+	lotB := &Lot{TradeCommon: &TradeCommon{ID: "b"}}
+	cl1 := &closeRequest{Lot: lotB}
+	cl2 := &closeRequest{Lot: lotA}
 	open := &OpenRequest{Request: Request{Reason: "open"}}
 
-	assert.Nil(t, firstMatchingClose(nil, posA))
+	assert.Nil(t, firstMatchingClose(nil, lotA))
 	assert.Nil(t, firstMatchingClose(&StrategyPlan{}, nil))
 
 	plan := &StrategyPlan{Closes: []*closeRequest{nil, cl1, cl2}, Opens: []*OpenRequest{open}}
-	assert.Same(t, cl2, firstMatchingClose(plan, posA))
+	assert.Same(t, cl2, firstMatchingClose(plan, lotA))
 	assert.Same(t, open, firstOpenRequest(plan))
 	assert.Nil(t, firstOpenRequest(nil))
 	assert.Nil(t, firstOpenRequest(&StrategyPlan{}))
@@ -165,7 +166,7 @@ func TestCheckExit(t *testing.T) {
 		return hit
 	}())
 
-	long := &Position{TradeCommon: &TradeCommon{Side: Long, Stop: PriceFromFloat(1.0900), Take: PriceFromFloat(1.1100)}}
+	long := &Lot{TradeCommon: &TradeCommon{Side: Long, Stop: PriceFromFloat(1.0900), Take: PriceFromFloat(1.1100)}}
 	px, reason, hit := checkExit(long, Candle{Low: PriceFromFloat(1.0890), High: PriceFromFloat(1.1110)})
 	assert.True(t, hit)
 	assert.Equal(t, long.Stop, px)
@@ -176,7 +177,7 @@ func TestCheckExit(t *testing.T) {
 	assert.Equal(t, long.Stop, px)
 	assert.Equal(t, "STOP", reason)
 
-	short := &Position{TradeCommon: &TradeCommon{Side: Short, Stop: PriceFromFloat(1.1100), Take: PriceFromFloat(1.0900)}}
+	short := &Lot{TradeCommon: &TradeCommon{Side: Short, Stop: PriceFromFloat(1.1100), Take: PriceFromFloat(1.0900)}}
 	px, reason, hit = checkExit(short, Candle{Low: PriceFromFloat(1.0890), High: PriceFromFloat(1.1110)})
 	assert.True(t, hit)
 	assert.Equal(t, short.Stop, px)

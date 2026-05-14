@@ -710,7 +710,6 @@ func TestParseTickPath_AllMonths(t *testing.T) {
 // =============================================================================
 
 func TestCandleSetIterator_WithRange(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
@@ -742,7 +741,6 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 }
 
 func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	_ = s
@@ -762,7 +760,6 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 // =============================================================================
 
 func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	_ = s

@@ -3,7 +3,7 @@ package trader
 type TradeCommon struct {
 	ID         string
 	Instrument string
-	Side       // Long or Sort
+	Side       // Long or Short
 	Units
 	Stop Price
 	Take Price
@@ -11,10 +11,9 @@ type TradeCommon struct {
 
 type Trade struct {
 	*TradeCommon
-	OpenPrice Price
-	OpenTime  Timestamp
-	FillPrice Price
-	FillTime  Timestamp
-	PNL       Money // account currency (best-effort)
+	EntryPrice Price
+	EntryTime  Timestamp
+	ExitPrice  Price
+	ExitTime   Timestamp
+	PNL        Money // account currency (best-effort)
 }
-

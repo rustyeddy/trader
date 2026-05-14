@@ -76,7 +76,6 @@ func TestGetDataManager_Defaults(t *testing.T) {
 }
 
 func TestDataManagerSync_NoOpAndBuildOnTempStore(t *testing.T) {
-	t.Parallel()
 
 	useTempStore(t)
 	dm := NewDataManager([]string{"EURUSD"}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC))

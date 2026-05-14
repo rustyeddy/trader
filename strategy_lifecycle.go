@@ -10,7 +10,7 @@ import "context"
 // Behavior:
 //
 //	bar 1: open long
-//	bar 3: close first open position
+//	bar 3: close first open lot
 //
 // Use a canned EURUSD dataset where:
 //
@@ -19,10 +19,10 @@ import "context"
 //
 // With Units = 1000, expected P/L is $10.00.
 type LifecycleTestStrategy struct {
-	bar        int
-	opened     bool
-	closed     bool
-	Units      Units
+	bar    int
+	opened bool
+	closed bool
+	Units  Units
 	StopPips   float64
 	TakeProfit Price
 }
@@ -77,32 +77,32 @@ func (s *LifecycleTestStrategy) Update(ctx context.Context, c *CandleTime, run *
 		return plan
 	}
 
-	// Bar 3: close the first open position.
+	// Bar 3: close the first open lot.
 	if s.bar == 3 && s.opened && !s.closed {
-		if run.Positions == nil || run.Positions.Len() == 0 {
+		if run.Lots == nil || run.Lots.Len() == 0 {
 			plan.Reason = "lifecycle-test-no-position-to-close"
 			return plan
 		}
 
 		submitted := false
-		_ = run.Positions.Range(func(pos *Position) error {
+		_ = run.Lots.Range(func(lot *Lot) error {
 			if submitted {
 				return nil
 			}
-			if pos == nil || pos.State != PositionOpen {
+			if lot == nil || lot.State != LotOpen {
 				return nil
 			}
 
 			cl := &closeRequest{
 				Request: Request{
-					TradeCommon: pos.TradeCommon,
+					TradeCommon: lot.TradeCommon,
 					RequestType: RequestClose,
 					Price:       c.Close,
 					Timestamp:   c.Timestamp,
 					Candle:      c.Candle,
 					Reason:      "lifecycle-test-close-long",
 				},
-				Position:   pos,
+				Lot:        lot,
 				CloseCause: CloseManual,
 			}
 

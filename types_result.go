@@ -2,6 +2,6 @@ package trader
 
 type openResult struct {
 	*order
-	*Position
+	*Lot
 	Fills []fill
 }

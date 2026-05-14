@@ -15,43 +15,25 @@ func gapBarsSince(prevTS, ts Timestamp, tf Timeframe) int {
 	return int(delta/int64(tf)) - 1
 }
 
-func snapshotPositions(src *Positions) *Positions {
-	if src == nil {
-		return &Positions{}
-	}
-
-	srcMap := src.Positions()
-	if len(srcMap) == 0 {
-		return &Positions{}
-	}
-
-	out := Positions{
-		positions: make(map[string]*Position, len(srcMap)),
-	}
-	for id, pos := range srcMap {
-		out.positions[id] = pos
-	}
-
-	return &out
-}
-
-func closePositionAtPrice(acct *Account, pos *Position, px Price, ts Timestamp) error {
+func closeLotAtPrice(acct *Account, lot *Lot, px Price, ts Timestamp) error {
 	if acct == nil {
 		return fmt.Errorf("nil account")
 	}
-	if pos == nil {
+	if lot == nil {
 		return fmt.Errorf("nil position")
 	}
 
 	trade := &Trade{
-		TradeCommon: pos.TradeCommon,
-		FillPrice:   px,
-		FillTime:    ts,
+		TradeCommon: lot.TradeCommon,
+		EntryPrice:  lot.EntryPrice,
+		EntryTime:   lot.EntryTime,
+		ExitPrice:   px,
+		ExitTime:    ts,
 	}
-	return acct.ClosePosition(pos, trade)
+	return acct.CloseLot(lot, trade)
 }
 
-func closePositionFromRequest(acct *Account, pos *Position, cl *closeRequest, fallback CandleTime) error {
+func closeLotFromRequest(acct *Account, lot *Lot, cl *closeRequest, fallback CandleTime) error {
 	if cl == nil {
 		return fmt.Errorf("nil close request")
 	}
@@ -66,10 +48,10 @@ func closePositionFromRequest(acct *Account, pos *Position, cl *closeRequest, fa
 		ts = fallback.Timestamp
 	}
 
-	return closePositionAtPrice(acct, pos, px, ts)
+	return closeLotAtPrice(acct, lot, px, ts)
 }
 
-func firstMatchingClose(plan *StrategyPlan, current *Position) *closeRequest {
+func firstMatchingClose(plan *StrategyPlan, current *Lot) *closeRequest {
 	if plan == nil || current == nil {
 		return nil
 	}
@@ -78,7 +60,7 @@ func firstMatchingClose(plan *StrategyPlan, current *Position) *closeRequest {
 		if cl == nil {
 			continue
 		}
-		if cl.Position != nil && cl.Position != current {
+		if cl.Lot != nil && cl.Lot != current {
 			continue
 		}
 		return cl
@@ -107,45 +89,45 @@ func ensureSizedOpenRequest(acct *Account, req *OpenRequest) error {
 	return acct.SizePosition(req)
 }
 
-func forceClosePositionAtEnd(acct *Account, pos *Position, lastC Candle, lastTS Timestamp) error {
-	return closePositionAtPrice(acct, pos, lastC.Close, lastTS)
+func forceLotCloseAtEnd(acct *Account, lot *Lot, lastC Candle, lastTS Timestamp) error {
+	return closeLotAtPrice(acct, lot, lastC.Close, lastTS)
 }
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(p *Position, c Candle) (exitPx Price, reason string, hit bool) {
-	if p == nil {
+func checkExit(lot *Lot, c Candle) (exitPx Price, reason string, hit bool) {
+	if lot == nil {
 		return 0, "", false
 	}
 
-	hasStop := p.Stop != 0
-	hasTake := p.Take != 0
+	hasStop := lot.Stop != 0
+	hasTake := lot.Take != 0
 
-	switch p.Side {
+	switch lot.Side {
 	case Long:
-		stopHit := hasStop && c.Low <= p.Stop
-		takeHit := hasTake && c.High >= p.Take
+		stopHit := hasStop && c.Low <= lot.Stop
+		takeHit := hasTake && c.High >= lot.Take
 		if stopHit && takeHit {
-			return p.Stop, "STOP&TAKE same bar (stop-first)", true
+			return lot.Stop, "STOP&TAKE same bar (stop-first)", true
 		}
 		if stopHit {
-			return p.Stop, "STOP", true
+			return lot.Stop, "STOP", true
 		}
 		if takeHit {
-			return p.Take, "TAKE", true
+			return lot.Take, "TAKE", true
 		}
 
 	case Short:
-		stopHit := hasStop && c.High >= p.Stop
-		takeHit := hasTake && c.Low <= p.Take
+		stopHit := hasStop && c.High >= lot.Stop
+		takeHit := hasTake && c.Low <= lot.Take
 		if stopHit && takeHit {
-			return p.Stop, "STOP&TAKE same bar (stop-first)", true
+			return lot.Stop, "STOP&TAKE same bar (stop-first)", true
 		}
 		if stopHit {
-			return p.Stop, "STOP", true
+			return lot.Stop, "STOP", true
 		}
 		if takeHit {
-			return p.Take, "TAKE", true
+			return lot.Take, "TAKE", true
 		}
 	}
 

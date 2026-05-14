@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func makeBrokerCloseFixture() (*Broker, *Position, *closeRequest) {
+func makeBrokerCloseFixture() (*Broker, *Lot, *closeRequest) {
 	acct := NewAccount("account", MoneyFromFloat(2_000))
 	broker := &Broker{
 		Account: acct,
@@ -21,13 +21,16 @@ func makeBrokerCloseFixture() (*Broker, *Position, *closeRequest) {
 	th := NewTradeHistory("EURUSD")
 	th.TradeCommon.Units = Units(1000)
 	th.TradeCommon.Side = Long
-	pos := &Position{
-		TradeCommon: th.TradeCommon,
-		FillPrice:   Price(1095000),
-		FillTime:    Timestamp(1),
-		State:       PositionOpen,
+	units := th.TradeCommon.Units
+	lot := &Lot{
+		TradeCommon:    th.TradeCommon,
+		EntryPrice:     Price(1095000),
+		EntryTime:      Timestamp(1),
+		OriginalUnits:  units,
+		RemainingUnits: units,
+		State:          LotOpen,
 	}
-	acct.Positions.Add(pos)
+	acct.Lots.Add(lot)
 
 	req := &closeRequest{
 		Request: Request{
@@ -36,11 +39,11 @@ func makeBrokerCloseFixture() (*Broker, *Position, *closeRequest) {
 			Price:       Price(1100000),
 			Timestamp:   Timestamp(2),
 		},
-		Position:   pos,
+		Lot:        lot,
 		CloseCause: CloseManual,
 	}
 
-	return broker, pos, req
+	return broker, lot, req
 }
 
 func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
@@ -69,17 +72,17 @@ func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 func TestBrokerSubmitCloseSuccessEmitsEvent(t *testing.T) {
 	t.Parallel()
 
-	broker, pos, req := makeBrokerCloseFixture()
+	broker, lot, req := makeBrokerCloseFixture()
 
 	err := broker.SubmitClose(context.Background(), req)
 	require.NoError(t, err)
 
 	require.Len(t, broker.Account.Trades, 1)
 	trade := broker.Account.Trades[0]
-	assert.Equal(t, req.Price, trade.FillPrice)
-	assert.Equal(t, req.Timestamp, trade.FillTime)
+	assert.Equal(t, req.Price, trade.ExitPrice)
+	assert.Equal(t, req.Timestamp, trade.ExitTime)
 	assert.Equal(t, MoneyFromFloat(50), trade.PNL)
-	assert.Equal(t, 0, broker.Account.Positions.Len())
+	assert.Equal(t, 0, broker.Account.Lots.Len())
 
 	select {
 	case evt := <-broker.evtQ:
@@ -88,7 +91,7 @@ func TestBrokerSubmitCloseSuccessEmitsEvent(t *testing.T) {
 		assert.Equal(t, req.Request.ID, evt.ClientOrderID)
 		assert.Equal(t, "lowest low", evt.Reason)
 		assert.Equal(t, CloseManual, evt.Cause)
-		assert.Same(t, pos, evt.Position)
+		assert.Same(t, lot, evt.Lot)
 		assert.Same(t, trade, evt.Trade)
 	default:
 		t.Fatal("expected close event to be queued")

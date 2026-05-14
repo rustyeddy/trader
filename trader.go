@@ -63,14 +63,14 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func snapshotStrategyPositions(src *Positions) *Positions {
-	out := &Positions{}
+func snapshotLots(src *LotBook) *LotBook {
+	out := &LotBook{}
 	if src == nil {
 		return out
 	}
-	_ = src.Range(func(pos *Position) error {
-		if pos != nil && (pos.State == PositionOpen || pos.State == PositionOpenRequested || pos.State == PositionCloseRequested) {
-			out.Add(pos)
+	_ = src.Range(func(lot *Lot) error {
+		if lot != nil && (lot.State == LotOpen || lot.State == LotOpenRequested || lot.State == LotCloseRequested) {
+			out.Add(lot)
 		}
 		return nil
 	})
@@ -91,8 +91,8 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 
 		pendingState := false
 		if t != nil && t.Account != nil {
-			_ = t.Account.Positions.Range(func(pos *Position) error {
-				if pos.State == PositionOpenRequested || pos.State == PositionCloseRequested {
+			_ = t.Account.Lots.Range(func(lot *Lot) error {
+				if lot.State == LotOpenRequested || lot.State == LotCloseRequested {
 					pendingState = true
 				}
 				return nil
@@ -253,8 +253,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		}
 
 		strategyCtx := withStrategyRuntime(runCtx, run.Instrument, int(processedCandles), 0, t.Account)
-		positions := snapshotStrategyPositions(&t.Account.Positions)
-		run.Positions = positions
+		lots := snapshotLots(&t.Account.Lots)
+		run.Lots = lots
 		plan := strategy.Update(strategyCtx, &candle, run)
 		if plan == nil {
 			plan = &DefaultStrategyPlan
@@ -272,8 +272,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			if err != nil {
 				return err
 			}
-			if cl.Position != nil {
-				cl.Position.State = PositionCloseRequested
+			if cl.Lot != nil {
+				cl.Lot.State = LotCloseRequested
 			}
 			atomic.AddInt64(&submittedCloses, 1)
 		}
@@ -291,7 +291,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.SubmitOpen(runCtx, openReq)
 			if err != nil {
-				t.Account.Positions.Delete(openReq.ID)
+				t.Account.Lots.Delete(openReq.ID)
 				return err
 			}
 			atomic.AddInt64(&submittedOpens, 1)
@@ -305,24 +305,24 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		return err
 	}
 	if haveLastCandle {
-		var remaining []*Position
-		_ = t.Account.Positions.Range(func(pos *Position) error {
-			if pos != nil && pos.State == PositionOpen {
-				remaining = append(remaining, pos)
+		var remaining []*Lot
+		_ = t.Account.Lots.Range(func(lot *Lot) error {
+			if lot != nil && lot.State == LotOpen {
+				remaining = append(remaining, lot)
 			}
 			return nil
 		})
 
-		for _, pos := range remaining {
+		for _, lot := range remaining {
 			cl := &closeRequest{
 				Request: Request{
-					TradeCommon: pos.TradeCommon,
+					TradeCommon: lot.TradeCommon,
 					Reason:      "end-of-backtest",
 					RequestType: RequestClose,
 					Price:       lastCandle.Close,
 					Timestamp:   lastCandle.Timestamp,
 				},
-				Position:   pos,
+				Lot:        lot,
 				CloseCause: CloseManual,
 			}
 
@@ -346,7 +346,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		"events", atomic.LoadInt64(&processedEvents),
 		"opens", atomic.LoadInt64(&submittedOpens),
 		"closes", atomic.LoadInt64(&submittedCloses),
-		"positions", t.Account.Positions.Len(),
+		"positions", t.Account.Lots.Len(),
 		"trades", len(t.Account.Trades))
 
 	return nil
@@ -420,15 +420,15 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 
 	switch evt.Type {
 	case EventOrderFilled:
-		pos := evt.Position
-		if pos == nil {
+		lot := evt.Lot
+		if lot == nil {
 			return fmt.Errorf("error order filled with no position")
 		}
 
 	case EventPositionClosed:
-		pos := evt.Position
+		lot := evt.Lot
 		trade := evt.Trade
-		if pos == nil {
+		if lot == nil {
 			return fmt.Errorf("position closed event missing position")
 		}
 		if trade == nil {

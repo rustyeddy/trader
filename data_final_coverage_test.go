@@ -134,7 +134,6 @@ func TestKeymapPut_NilMap(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
@@ -151,7 +150,6 @@ func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCandleSetIterator_AfterDone(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)

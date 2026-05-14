@@ -19,7 +19,6 @@ func TestDukasfileInstrument_Ungated(t *testing.T) {
 }
 
 func TestDukasfileIsValid_EmptyFile_MarketClosed(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	ts := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC) // Sunday
@@ -33,7 +32,6 @@ func TestDukasfileIsValid_EmptyFile_MarketClosed(t *testing.T) {
 }
 
 func TestDukasfileIsValid_EmptyFile_MarketOpen(t *testing.T) {
-	t.Parallel()
 
 	s := useTempStore(t)
 	ts := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC) // Wednesday, not near holiday closure

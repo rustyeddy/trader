@@ -1,7 +1,7 @@
 package trader
 
 type BacktestRun struct {
-	*Positions
+	Lots   *LotBook
 	Trades []*Trade
 }
 

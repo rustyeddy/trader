@@ -11,7 +11,7 @@ import (
 func fakeRun(instrument string) *Backtest {
 	return &Backtest{
 		BacktestRequest: &BacktestRequest{Instrument: instrument},
-		BacktestRun:     &BacktestRun{Positions: &Positions{}},
+		BacktestRun:     &BacktestRun{Lots: &LotBook{}},
 	}
 }
 
@@ -74,7 +74,7 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 	f := &Fake{StrategyBaseConfig: StrategyBaseConfig{Instrument: "EURUSD"}, CandleCount: 1, highest: PriceFromFloat(2.0)}
 	run := fakeRun("EURUSD")
 
-	pos := &Position{
+	lot := &Lot{
 		TradeCommon: &TradeCommon{
 			ID:         NewULID(),
 			Instrument: "EURUSD",
@@ -82,15 +82,17 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 			Units:      1000,
 			Stop:       PriceFromFloat(1.0950),
 		},
-		State: PositionOpen,
+		OriginalUnits:  1000,
+		RemainingUnits: 1000,
+		State:          LotOpen,
 	}
-	run.Positions.Add(pos)
+	run.Lots.Add(lot)
 
 	plan := f.Update(context.Background(), fakeCandle(10, 1.0940, 1.0900, 1.0890), run)
 	require.NotNil(t, plan)
 	require.Len(t, plan.Closes, 1)
 	assert.Equal(t, CloseStopLoss, plan.Closes[0].CloseCause)
-	assert.Equal(t, pos.ID, plan.Closes[0].Position.ID)
+	assert.Equal(t, lot.ID, plan.Closes[0].Lot.ID)
 }
 
 func TestFake02_NameResetReady(t *testing.T) {
@@ -118,8 +120,8 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	require.Len(t, openPlan.Opens, 1)
 	assert.Equal(t, "fake-02-open", openPlan.Reason)
 
-	openPos := &Position{TradeCommon: openPlan.Opens[0].TradeCommon, State: PositionOpen}
-	run.Positions.Add(openPos)
+	openLot := &Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: LotOpen}
+	run.Lots.Add(openLot)
 
 	holdPlan := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
 	require.NotNil(t, holdPlan)

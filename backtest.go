@@ -137,10 +137,10 @@ func (run *Backtest) Summary() BacktestReportSummary {
 			Instrument: tr.Instrument,
 			Side:       tr.Side.String(),
 			Units:      int64(tr.Units),
-			OpenPrice:  tr.OpenPrice.Float64(),
-			ClosePrice: tr.FillPrice.Float64(),
-			OpenTime:   formatBacktestSummaryTime(tr.OpenTime),
-			CloseTime:  formatBacktestSummaryTime(tr.FillTime),
+			OpenPrice:  tr.EntryPrice.Float64(),
+			ClosePrice: tr.ExitPrice.Float64(),
+			OpenTime:   formatBacktestSummaryTime(tr.EntryTime),
+			CloseTime:  formatBacktestSummaryTime(tr.ExitTime),
 			PNL:        tr.PNL.Float64(),
 		})
 	}
