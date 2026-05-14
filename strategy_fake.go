@@ -44,12 +44,12 @@ func (f *Fake) Update(ctx context.Context, c *CandleTime, run *Backtest) *Strate
 		if openTrades > 0 {
 			return plan
 		}
-		inst := GetInstrument(f.Instrument)
+		inst := GetInstrument(run.Instrument)
 		if inst == nil {
 			return nil
 		}
 		stop := inst.SubPips(c.Close, pipsFromFloat(10))
-		op := newOpenRequest(f.Instrument, c, Long, stop, Price(0), "higher highs")
+		op := newOpenRequest(run.Instrument, c, Long, stop, Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 

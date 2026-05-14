@@ -75,7 +75,11 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 				DataManager: trader.GetDataManager(),
 			}
 			t.Broker = trader.NewBroker("sim")
-			t.Broker.Account = trader.NewAccount("backtest", run.StartingBalance)
+			acct := trader.NewAccount("backtest", run.StartingBalance)
+			if run.RiskPct != 0 {
+				acct.RiskPct = run.RiskPct
+			}
+			t.Broker.Account = acct
 
 			err := t.Backtest(ctx, &run)
 			if err != nil {

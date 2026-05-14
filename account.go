@@ -293,7 +293,7 @@ func (act *Account) CloseLot(lot *Lot, trade *Trade) error {
 	trade.PNL = pnl
 	act.Trades = append(act.Trades, trade)
 	act.Lots.Delete(lot.ID)
-	return nil
+	return act.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
 }
 
 func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, error) {
