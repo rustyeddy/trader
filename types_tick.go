@@ -1,14 +1,9 @@
 package trader
 
 import (
-	"context"
 	"errors"
 	"sync"
 )
-
-type tickSource interface {
-	GetTick(ctx context.Context, instrument string) (Tick, error)
-}
 
 type BA struct {
 	Bid Price

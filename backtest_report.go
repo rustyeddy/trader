@@ -29,6 +29,20 @@ type BacktestReportSummary struct {
 
 	StopPips int32   `json:"stop_pips"`
 	RR       float64 `json:"rr"`
+
+	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
+}
+
+type BacktestReportTrade struct {
+	ID         string  `json:"id"`
+	Instrument string  `json:"instrument"`
+	Side       string  `json:"side"`
+	Units      int64   `json:"units"`
+	OpenPrice  float64 `json:"open_price"`
+	ClosePrice float64 `json:"close_price"`
+	OpenTime   string  `json:"open_time"`
+	CloseTime  string  `json:"close_time"`
+	PNL        float64 `json:"pnl"`
 }
 
 func NewBacktestReportSummary(r *BacktestResult) BacktestReportSummary {

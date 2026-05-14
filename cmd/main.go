@@ -24,6 +24,7 @@ func NewRootCmd() *cobra.Command {
 	// Global / persistent flags
 	cmd.PersistentFlags().StringVar(&rc.ConfigPath, "config", "", "Path to config file or directory (optional)")
 	cmd.PersistentFlags().StringVar(&rc.DBPath, "db", "./trader.db", "SQLite journal database")
+	cmd.PersistentFlags().StringVar(&rc.ReportPath, "report", "", "backtest report path")
 	cmd.PersistentFlags().StringVar(&rc.LogLevel, "log-level", "debug", "Log level: debug|info|warn|error")
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 

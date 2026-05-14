@@ -11,7 +11,6 @@ type Trader struct {
 	*DataManager
 	*Broker
 	*Store
-	*tradeBook
 }
 
 func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event, processed *int64) (<-chan error, <-chan struct{}) {
@@ -132,7 +131,6 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 	defer cancel()
 
 	evtQ := t.Broker.Events()
-	L.Debug("broker event handler started")
 
 	var processedEvents int64
 	errCh, done := t.startBrokerEventHandler(runCtx, evtQ, &processedEvents)
@@ -381,9 +379,10 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		return fmt.Errorf("nil strategy")
 	}
 
+	source := firstNonEmpty(run.Source, SourceCandles)
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
-		Source:     "candles",
+		Source:     source,
 		Instrument: run.Instrument,
 		Range:      run.TimeRange,
 	}
@@ -394,13 +393,6 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	if err != nil {
 		return err
 	}
-
-	// Finished
-	// If candles are used up
-	//   Close out any open position
-	//		Do everything in the Decision above
-	//   Update Account with PnL, Balance
-	//   Generate Backtest Report
 
 	run.BacktestResult = nil
 	if err := t.backTestWithIterator(ctx, run, itr); err != nil {

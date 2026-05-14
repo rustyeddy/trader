@@ -5,6 +5,13 @@ type BacktestRun struct {
 	Trades []*Trade
 }
 
+func (run *BacktestRun) GetTrades() []*Trade {
+	if run == nil {
+		return nil
+	}
+	return run.Trades
+}
+
 func (run *BacktestRun) BuildBacktestResult(acct *Account) {
 	if run == nil || acct == nil {
 		return

@@ -3,7 +3,6 @@ package trader
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -180,10 +179,6 @@ func TestAccountClosePositionAndPlaceholderClosePosition(t *testing.T) {
 	assert.Equal(t, MoneyFromFloat(10_100), acct.Balance)
 
 	var nilAcct *Account
-	assert.NotPanics(t, func() {
-		nilAcct.closePosition(Timestamp(time.Now().Unix()), PriceFromFloat(1.1000), "test")
-	})
-
 	var err error
 	assert.NotPanics(t, func() {
 		err = nilAcct.ClosePosition(pos, trade)

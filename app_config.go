@@ -13,8 +13,10 @@ type RootConfig struct {
 	ConfigPath string
 	GlobalPath string
 	DBPath     string
-	LogLevel   string
-	NoColor    bool
+	ReportPath string
+
+	LogLevel string
+	NoColor  bool
 
 	// Paths    PathsConfig
 	// Defaults DefaultsConfig

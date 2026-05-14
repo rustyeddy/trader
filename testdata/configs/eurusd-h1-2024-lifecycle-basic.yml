@@ -8,7 +8,7 @@ defaults:
 runs:
   - name: lifecycle-basic
     data:
-      source: canned
+      source: ../testdata/candles/EURUSD/H1/lifecycle-basic.csv
       instrument: EURUSD
       timeframe: H1
       from: 2024-01-01

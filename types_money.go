@@ -36,6 +36,10 @@ func PriceFromFloat(f float64) Price {
 	return Price(math.Round(f * float64(PriceScale)))
 }
 
+func (p Price) Float64() float64 {
+	return float64(p) / float64(PriceScale)
+}
+
 //	func PriceToFloat(price int32, scale int32) float64 {
 //		return float64(price) / math.Pow10(int(scale))
 //	}

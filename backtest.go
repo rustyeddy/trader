@@ -52,8 +52,10 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 		return nil
 	}
 
+	source := firstNonEmpty(cfg.Data.Source, "candles")
 	return &BacktestRequest{
 		Name:       cfg.Name,
+		Source:     source,
 		Instrument: cfg.Data.Instrument,
 		Strategy:   strategy,
 		TimeRange:  tr,
@@ -69,6 +71,7 @@ type BacktestRequest struct {
 	DefaultStopPips Pips
 	DefaultTakePips Pips
 
+	Source     string
 	Instrument string
 	Strategy
 	TimeRange
@@ -123,6 +126,25 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		return BacktestReportSummary{}
 	}
 
+	var trades []BacktestReportTrade
+	for _, tr := range run.BacktestRun.GetTrades() {
+		if tr == nil {
+			continue
+		}
+
+		trades = append(trades, BacktestReportTrade{
+			ID:         tr.ID,
+			Instrument: tr.Instrument,
+			Side:       tr.Side.String(),
+			Units:      int64(tr.Units),
+			OpenPrice:  tr.OpenPrice.Float64(),
+			ClosePrice: tr.FillPrice.Float64(),
+			OpenTime:   formatBacktestSummaryTime(tr.OpenTime),
+			CloseTime:  formatBacktestSummaryTime(tr.FillTime),
+			PNL:        tr.PNL.Float64(),
+		})
+	}
+
 	return BacktestReportSummary{
 		Name:       run.Name,
 		Strategy:   run.Strategy.Name(),
@@ -141,5 +163,7 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		WinRate:      run.BacktestResult.WinRate.Float64() * 100,
 		RiskPct:      run.RiskPct.Float64() * 100,
 		StopPips:     int32(run.DefaultStopPips),
+
+		TradeDetails: trades,
 	}
 }

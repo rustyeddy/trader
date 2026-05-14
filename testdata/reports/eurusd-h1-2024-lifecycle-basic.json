@@ -9,6 +9,7 @@
   "breakevens": 0,
   "start_balance": 2000,
   "end_balance": 2010,
+  "win_rate": 100,
   "net_pl": 10,
   "return_pct": 0.5
 }

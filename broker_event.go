@@ -48,7 +48,3 @@ func (e EventType) String() string {
 		return "UknownEventType"
 	}
 }
-
-type EventQ struct {
-	evtQ chan *Event
-}

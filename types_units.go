@@ -22,6 +22,13 @@ const (
 	Long  Side = 1
 )
 
+func (s Side) String() string {
+	if s == Short {
+		return "short"
+	}
+	return "long"
+}
+
 // Pips is scaled such that 1 == .1 pip
 // and 20 == 2 pips
 type Pips int32

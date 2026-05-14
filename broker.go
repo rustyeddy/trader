@@ -113,17 +113,6 @@ func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Position, error)
 	return pos, nil
 }
 
-// OrderRequest will change
-func (b *Broker) ReadOrderResponses(req *OpenRequest) {
-
-	o := &order{
-		TradeCommon: req.TradeCommon,
-		orderType:   OrderMarket,
-		orderStatus: OrderPending,
-	}
-	b.OpenOrders.Add(o)
-}
-
 func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 	if b == nil {
 		return fmt.Errorf("nil broker")
@@ -144,6 +133,8 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 	// When the order is filled, create a trade
 	trade := &Trade{
 		TradeCommon: req.Request.TradeCommon,
+		OpenPrice:   req.Position.FillPrice,
+		OpenTime:    req.Position.FillTime,
 		FillPrice:   req.Price,
 		FillTime:    req.Timestamp,
 	}

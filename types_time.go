@@ -104,12 +104,13 @@ func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	return r
 }
 
-func timeRangeFromStrings(fromStr, toStr, tf string) (TimeRange, error) {
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		return TimeRange{}, err
+func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
+	tf := tfFromString(tfstr)
+	if tf == TF0 {
+		return tr, fmt.Errorf("unsupported timeframe %q", tfstr)
 	}
-	return timeRangeLocation(fromStr, toStr, tf, loc)
+
+	return timeRangeLocation(fromStr, toStr, tfstr, time.UTC)
 }
 
 func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRange, error) {

@@ -143,52 +143,6 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	assert.Equal(t, 1, len(b.evtQ))
 }
 
-func TestBrokerSubmitOrderAndReadOrderResponsesContract(t *testing.T) {
-	t.Parallel()
-
-	b := &Broker{
-		OpenOrders: OpenOrders{
-			Orders: make(map[string]*order),
-		},
-	}
-
-	req := &OpenRequest{
-		Request: Request{
-			TradeCommon: &TradeCommon{
-				ID:         NewULID(),
-				Instrument: "EURUSD",
-				Units:      Units(1000),
-				Side:       Long,
-			},
-			RequestType: RequestMarketOpen,
-			Price:       Price(1090000),
-			Timestamp:   Timestamp(10),
-		},
-	}
-	ord := &order{
-		TradeCommon: req.TradeCommon,
-		orderType:   OrderMarket,
-		orderStatus: OrderPending,
-	}
-
-	pos, err := b.SubmitOrder(context.Background(), ord)
-	require.NoError(t, err)
-	require.NotNil(t, pos)
-	assert.Equal(t, req.ID, pos.ID)
-	assert.Equal(t, req.Instrument, pos.Instrument)
-	assert.Equal(t, req.Units, pos.Units)
-	assert.Equal(t, req.Side, pos.Side)
-	assert.Empty(t, b.OpenOrders.Orders, "SubmitOrder should not create open-order responses")
-
-	b.ReadOrderResponses(req)
-	require.Len(t, b.OpenOrders.Orders, 1)
-	stored := b.OpenOrders.Get(req.ID)
-	require.NotNil(t, stored)
-	assert.Equal(t, req.ID, stored.ID)
-	assert.Equal(t, OrderMarket, stored.orderType)
-	assert.Equal(t, OrderPending, stored.orderStatus)
-}
-
 func TestNewBroker(t *testing.T) {
 	t.Parallel()
 
