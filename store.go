@@ -599,8 +599,14 @@ func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		0, 0, 0, time.UTC,
 	).UnixMilli())
 
+	inst := GetInstrument(key.Instrument)
+	var priceMultiplier uint32 = 1
+	if inst != nil {
+		priceMultiplier = inst.DukascopyPriceMultiplier()
+	}
+
 	nextFn := func() (RawTick, bool, error) {
-		return readNextBI5Tick(zr, path, baseUnixMS)
+		return readNextBI5Tick(zr, path, baseUnixMS, priceMultiplier)
 	}
 
 	closeFn := func() error {
@@ -609,7 +615,7 @@ func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	return newFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli, priceMultiplier uint32) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -638,8 +644,8 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS timemilli) (RawTick, b
 
 	t := RawTick{
 		timemilli: baseUnixMS + timemilli(msOffset),
-		Ask:       Price(askU * 10),
-		Bid:       Price(bidU * 10),
+		Ask:       Price(askU * priceMultiplier),
+		Bid:       Price(bidU * priceMultiplier),
 		AskVol:    askVol,
 		BidVol:    bidVol,
 	}

@@ -93,12 +93,12 @@ func TestReadNextBI5Tick_Valid(t *testing.T) {
 	rec := makeBi5Record(msOffset, askU, bidU, askVol, bidVol)
 	r := bytes.NewReader(rec)
 
-	tick, ok, err := readNextBI5Tick(r, "test.bi5", baseMS)
+	tick, ok, err := readNextBI5Tick(r, "test.bi5", baseMS, 1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, baseMS+timemilli(msOffset), tick.timemilli)
-	require.Equal(t, Price(askU*10), tick.Ask)
-	require.Equal(t, Price(bidU*10), tick.Bid)
+	require.Equal(t, Price(askU), tick.Ask)
+	require.Equal(t, Price(bidU), tick.Bid)
 	require.InDelta(t, float64(askVol), float64(tick.AskVol), 0.001)
 	require.InDelta(t, float64(bidVol), float64(tick.BidVol), 0.001)
 }
@@ -107,7 +107,7 @@ func TestReadNextBI5Tick_EOF(t *testing.T) {
 	t.Parallel()
 
 	r := bytes.NewReader([]byte{})
-	_, ok, err := readNextBI5Tick(r, "test.bi5", 0)
+	_, ok, err := readNextBI5Tick(r, "test.bi5", 0, 1)
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -117,7 +117,7 @@ func TestReadNextBI5Tick_TruncatedRecord(t *testing.T) {
 
 	// Only 10 bytes, not a full 20-byte record
 	r := bytes.NewReader(make([]byte, 10))
-	_, ok, err := readNextBI5Tick(r, "test.bi5", 0)
+	_, ok, err := readNextBI5Tick(r, "test.bi5", 0, 1)
 	require.Error(t, err)
 	require.False(t, ok)
 }
@@ -129,7 +129,7 @@ func TestReadNextBI5Tick_BadMsOffset(t *testing.T) {
 	rec := makeBi5Record(3600*1000, 100, 99, 1.0, 1.0)
 	r := bytes.NewReader(rec)
 
-	_, ok, err := readNextBI5Tick(r, "test.bi5", 0)
+	_, ok, err := readNextBI5Tick(r, "test.bi5", 0, 1)
 	require.Error(t, err)
 	require.False(t, ok)
 	require.Contains(t, err.Error(), "bad msOffset")

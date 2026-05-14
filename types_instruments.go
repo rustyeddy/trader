@@ -168,3 +168,15 @@ func NormalizeInstrument(sym string) string {
 func (inst *Instrument) PipSize() float64 {
 	return math.Pow10(inst.PipLocation)
 }
+
+// DukascopyPriceMultiplier returns the factor needed to convert a raw
+// Dukascopy bi5 price integer into a Price value at the current PriceScale.
+//
+// Dukascopy stores prices with (−PipLocation + 1) decimal places:
+//   - 5-decimal pairs (EURUSD, PipLocation=−4): native scale 100,000  → multiplier = 1
+//   - 3-decimal pairs (USDJPY, PipLocation=−2): native scale   1,000  → multiplier = 100
+func (inst *Instrument) DukascopyPriceMultiplier() uint32 {
+	nativeDecimals := -inst.PipLocation + 1
+	nativeScale := int64(math.Pow10(nativeDecimals))
+	return uint32(int64(PriceScale) / nativeScale)
+}

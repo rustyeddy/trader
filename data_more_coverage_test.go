@@ -58,7 +58,7 @@ func TestReadNextBI5Tick_GeneralReadError(t *testing.T) {
 	// Write 10 bytes (partial record) then return a non-EOF error
 	partial := make([]byte, 10)
 	r := &errReadAfter{data: partial, err: sentinel}
-	_, ok, err := readNextBI5Tick(r, "test.bi5", 0)
+	_, ok, err := readNextBI5Tick(r, "test.bi5", 0, 1)
 	require.Error(t, err)
 	require.False(t, ok)
 	// Should be a wrapped error about truncated record

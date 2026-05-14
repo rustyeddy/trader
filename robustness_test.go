@@ -450,7 +450,7 @@ func TestReadNextBI5Tick_MinOffset(t *testing.T) {
 	t.Parallel()
 
 	rec := makeBi5Record(0, 100, 99, 1.0, 0.5)
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", timemilli(1_000_000))
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", timemilli(1_000_000), 1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, timemilli(1_000_000), tick.timemilli)
@@ -461,7 +461,7 @@ func TestReadNextBI5Tick_MaxValidOffset(t *testing.T) {
 
 	// 3599999 = max valid (just under 3600*1000)
 	rec := makeBi5Record(3_599_999, 200, 199, 2.0, 1.5)
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0)
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0, 1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, timemilli(3_599_999), tick.timemilli)
@@ -472,7 +472,7 @@ func TestReadNextBI5Tick_ExactlyAtLimit(t *testing.T) {
 
 	// 3600*1000 is invalid (>= limit)
 	rec := makeBi5Record(3_600_000, 100, 99, 1.0, 0.5)
-	_, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0)
+	_, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0, 1)
 	require.Error(t, err)
 	require.False(t, ok)
 }
@@ -483,7 +483,7 @@ func TestReadNextBI5Tick_GeneralReadError_Coverage(t *testing.T) {
 	// Build exactly 10 bytes (partial record, not EOF)
 	partial := make([]byte, 10)
 	r := &errReadAfter{data: partial, err: errors.New("disk fail")}
-	_, ok, err := readNextBI5Tick(r, "disk.bi5", 0)
+	_, ok, err := readNextBI5Tick(r, "disk.bi5", 0, 1)
 	// io.ReadFull will return io.ErrUnexpectedEOF for partial data, not the wrapped error
 	// because we only have 10 bytes of a 20-byte record.
 	require.Error(t, err)
@@ -494,7 +494,7 @@ func TestReadNextBI5Tick_ZeroVolumes(t *testing.T) {
 	t.Parallel()
 
 	rec := makeBi5Record(1000, 150, 149, 0, 0)
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0)
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0, 1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.InDelta(t, float64(0), float64(tick.AskVol), 0.0001)
@@ -507,7 +507,7 @@ func TestReadNextBI5Tick_NaNVolumes(t *testing.T) {
 	// Float32 NaN
 	nanBits := math.Float32bits(float32(math.NaN()))
 	rec := makeBi5Record(1000, 100, 99, math.Float32frombits(nanBits), math.Float32frombits(nanBits))
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0)
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0, 1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.True(t, math.IsNaN(float64(tick.AskVol)))
