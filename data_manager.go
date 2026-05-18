@@ -117,7 +117,23 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 	w := NewWantlist()
 	for _, sym := range dm.Instruments {
 		for year := dm.End.Year(); year >= dm.Start.Year(); year-- {
-			for month := 1; month <= 12; month++ {
+			startMonth := 1
+			endMonth := 12
+			if year == dm.Start.Year() {
+				startMonth = int(dm.Start.Month())
+			}
+			if year == dm.End.Year() {
+				// End is exclusive: include month M only if dm.End is after the 1st of M
+				endMonth = int(dm.End.Month())
+				monthStart := time.Date(year, dm.End.Month(), 1, 0, 0, 0, 0, time.UTC)
+				if !dm.End.After(monthStart) {
+					endMonth--
+				}
+				if endMonth < 1 {
+					continue
+				}
+			}
+			for month := startMonth; month <= endMonth; month++ {
 				for _, tf := range []Timeframe{M1, H1, D1} {
 					key := Key{sym, "candles", KindCandle, tf, year, month, 0, 0}
 					if !dm.inventory.HasComplete(key) {

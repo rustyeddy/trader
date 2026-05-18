@@ -1,1 +1,2 @@
 - [Dead code removal policy](feedback_dead_code_removal.md) — test-only symbols are dead; remove them with their tests
+- [Data audit feature](project_data_audit.md) — planned: audit H1 candles for zero-filled bars during market hours; cross-ref bi5 inventory to find missing/empty tick files
