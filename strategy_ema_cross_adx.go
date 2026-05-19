@@ -9,7 +9,6 @@ type EMACrossADX struct {
 	core emaCrossCore
 	adx  *ADX
 
-	// these are the config
 	adxThreshold    float64
 	requireDI       bool
 	requireADXReady bool
@@ -24,6 +23,9 @@ type EMACrossADXConfig struct {
 	ADXPeriod       int
 	Scale           Scale6
 	MinSpread       float64
+	StopPips        Pips    // used when ATRPeriod == 0
+	ATRPeriod       int     // 0 = disabled; use StopPips instead
+	ATRMultiplier   float64 // default 1.5 when ATRPeriod > 0
 	ADXThreshold    float64
 	RequireDI       bool
 	RequireADXReady bool
@@ -43,15 +45,28 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 		cfg.ADXThreshold = 20.0
 	}
 
+	mult := cfg.ATRMultiplier
+	if cfg.ATRPeriod > 0 && mult <= 0 {
+		mult = 1.5
+	}
+
+	var atr *ATR
+	if cfg.ATRPeriod > 0 {
+		atr = NewATR(cfg.ATRPeriod, cfg.Scale)
+	}
+
 	return &EMACrossADX{
 		core: emaCrossCore{
 			fast: NewEMA(cfg.FastPeriod, cfg.Scale),
 			slow: NewEMA(cfg.SlowPeriod, cfg.Scale),
+			atr:  atr,
 
-			prevRel:   0,
-			minSpread: cfg.MinSpread,
-			scale:     cfg.Scale,
-			name:      fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
+			prevRel:       0,
+			minSpread:     cfg.MinSpread,
+			scale:         cfg.Scale,
+			stopPips:      cfg.StopPips,
+			atrMultiplier: mult,
+			name:          fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
 		adx:             NewADX(cfg.ADXPeriod, cfg.Scale),
 		adxThreshold:    cfg.ADXThreshold,
@@ -68,6 +83,9 @@ func (x *EMACrossADX) Reset() {
 	x.core.fast.Reset()
 	x.core.slow.Reset()
 	x.adx.Reset()
+	if x.core.atr != nil {
+		x.core.atr.Reset()
+	}
 	x.core.prevRel = 0
 	x.pendingRel = 0
 }
@@ -92,6 +110,9 @@ func (x *EMACrossADX) Update(ctx context.Context, ct *CandleTime, run *Backtest)
 	x.core.fast.Update(c)
 	x.core.slow.Update(c)
 	x.adx.Update(c)
+	if x.core.atr != nil {
+		x.core.atr.Update(c)
+	}
 
 	fv := x.core.fast.Float64()
 	sv := x.core.slow.Float64()
@@ -176,15 +197,25 @@ func (x *EMACrossADX) Update(ctx context.Context, ct *CandleTime, run *Backtest)
 		}
 	}
 
-	// Confirmation passed: emit the pending signal once.
-	if x.pendingRel == +1 {
-		dec.Reason = "EMA cross up + ADX confirmed"
+	// Gate on ATR readiness when configured.
+	if x.core.atr != nil && !x.core.atr.Ready() {
+		dec.Reason = "warming up ATR"
 		return dec
 	}
 
+	// Confirmation passed: open position and clear the pending signal.
+	if x.pendingRel == +1 {
+		x.pendingRel = 0
+		plan := emaCrossEmitOpen(&x.core, ct, run, Long)
+		plan.Reason = "EMA cross up + ADX confirmed"
+		return plan
+	}
+
 	if x.pendingRel == -1 {
-		dec.Reason = "EMA cross down + ADX confirmed"
-		return dec
+		x.pendingRel = 0
+		plan := emaCrossEmitOpen(&x.core, ct, run, Short)
+		plan.Reason = "EMA cross down + ADX confirmed"
+		return plan
 	}
 
 	dec.Reason = "no cross"

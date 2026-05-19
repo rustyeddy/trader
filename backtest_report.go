@@ -1,6 +1,11 @@
 package trader
 
-import "time"
+import (
+	"fmt"
+	"io"
+	"strings"
+	"time"
+)
 
 // BacktestReportSummary is a normalized machine-readable summary used for
 // committed regression baselines and generated comparison artifacts.
@@ -68,6 +73,55 @@ func NewBacktestReportSummary(r *BacktestResult) BacktestReportSummary {
 	// 	StopPips:     int32(r.StopPips),
 	// 	RR:           r.RR.Float64(),
 	// }
+}
+
+// PrintSummary writes a human-readable backtest report to w.
+func PrintSummary(w io.Writer, s BacktestReportSummary) {
+	const width = 52
+	bar := strings.Repeat("─", width)
+
+	start := s.Start
+	if len(start) >= 10 {
+		start = start[:10]
+	}
+	end := s.End
+	if len(end) >= 10 {
+		end = end[:10]
+	}
+
+	sign := "+"
+	if s.NetPL < 0 {
+		sign = "-"
+	}
+	absNetPL := s.NetPL
+	if absNetPL < 0 {
+		absNetPL = -absNetPL
+	}
+	absRetPct := s.ReturnPct
+	if absRetPct < 0 {
+		absRetPct = -absRetPct
+	}
+
+	stopStr := "—"
+	if s.StopPips > 0 {
+		stopStr = fmt.Sprintf("%d pips", s.StopPips)
+	}
+	rrStr := "—"
+	if s.RR > 0 {
+		rrStr = fmt.Sprintf("%.1f", s.RR)
+	}
+
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "  %-48s\n", s.Strategy)
+	fmt.Fprintf(w, "  %s %s  %s → %s\n", s.Instrument, strings.ToUpper(s.Timeframe), start, end)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "  Trades : %d   Wins: %d (%.1f%%)   Losses: %d\n",
+		s.Trades, s.Wins, s.WinRate, s.Losses)
+	fmt.Fprintf(w, "  Balance: $%.2f → $%.2f   (%s$%.2f / %s%.2f%%)\n",
+		s.StartBalance, s.EndBalance, sign, absNetPL, sign, absRetPct)
+	fmt.Fprintf(w, "  Risk   : %.2f%%   Stop: %s   RR: %s\n",
+		s.RiskPct, stopStr, rrStr)
+	fmt.Fprintln(w, bar)
 }
 
 func formatBacktestSummaryTime(ts Timestamp) string {

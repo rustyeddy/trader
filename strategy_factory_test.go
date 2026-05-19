@@ -137,41 +137,47 @@ func TestRunBoolParam(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be bool")
 }
 
-func TestBuildEMACrossConfigFromRun_CurrentStubContract(t *testing.T) {
+func TestGetStrategy_EMACross(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := BuildEMACrossConfigFromRun(nil)
+	_, err := GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
+		"fast": 9,
+		"slow": 21,
+	}})
 	require.NoError(t, err)
-	assert.Equal(t, EMACrossConfig{}, cfg)
 
-	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
-	cfg, err = BuildEMACrossConfigFromRun(run)
-	require.NoError(t, err)
-	assert.Equal(t, EMACrossConfig{}, cfg)
+	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
+		"fast": 21,
+		"slow": 9,
+	}})
+	require.Error(t, err, "fast >= slow should error")
+
+	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
+		"slow": 21,
+	}})
+	require.Error(t, err, "missing fast should error")
 }
 
-func TestBuildEMACrossADXConfigFromRun_CurrentStubContract(t *testing.T) {
+func TestGetStrategy_EMACrossADX(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := BuildEMACrossADXConfigFromRun(nil)
+	s, err := GetStrategy(StrategyConfig{Kind: "ema-cross-adx", Params: map[string]any{
+		"fast":       9,
+		"slow":       21,
+		"adx_period": 14,
+	}})
 	require.NoError(t, err)
-	assert.Equal(t, EMACrossADXConfig{}, cfg)
+	assert.Contains(t, s.Name(), "EMA_CROSS_ADX")
 
-	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
-	cfg, err = BuildEMACrossADXConfigFromRun(run)
-	require.NoError(t, err)
-	assert.Equal(t, EMACrossADXConfig{}, cfg)
+	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross-adx", Params: map[string]any{
+		"fast": 9,
+	}})
+	require.Error(t, err, "missing slow should error")
 }
 
-func TestBuildTemplateStrategyConfigFromRun_CurrentStubContract(t *testing.T) {
+func TestGetStrategy_Unknown(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := BuildTemplateStrategyConfigFromRun(nil)
-	require.NoError(t, err)
-	assert.Equal(t, TemplateStrategyConfig{}, cfg)
-
-	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
-	cfg, err = BuildTemplateStrategyConfigFromRun(run)
-	require.NoError(t, err)
-	assert.Equal(t, TemplateStrategyConfig{}, cfg)
+	_, err := GetStrategy(StrategyConfig{Kind: "no-such-strategy"})
+	require.Error(t, err)
 }

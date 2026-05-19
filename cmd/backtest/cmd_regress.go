@@ -89,6 +89,8 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 
 			summary := run.Summary()
 
+			trader.PrintSummary(os.Stdout, summary)
+
 			reportPath := filepath.Join(outDir, run.Name+".json")
 			if err := writeRegressionSummary(reportPath, summary); err != nil {
 				return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)

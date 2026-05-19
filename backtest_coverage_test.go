@@ -151,7 +151,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	var nilRun *Backtest
 	assert.Equal(t, BacktestReportSummary{}, nilRun.Summary())
 
-	fake, err := GetStrategy("fake")
+	fake, err := GetStrategy(StrategyConfig{Kind: "fake"})
 	require.NoError(t, err)
 
 	run := &Backtest{
