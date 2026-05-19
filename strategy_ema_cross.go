@@ -73,6 +73,8 @@ func NewEMACross(cfg EMACrossConfig) *EMACross {
 
 func (x *EMACross) Name() string { return x.core.name }
 
+func (x *EMACross) StopDescription() string { return emaCrossStopDesc(&x.core) }
+
 func (x *EMACross) Reset() {
 	x.core.fast.Reset()
 	x.core.slow.Reset()
@@ -181,6 +183,17 @@ func emaCrossEmitOpen(core *emaCrossCore, ct *CandleTime, run *Backtest, side Si
 	stop := emaCrossStop(core, ct, inst, side)
 	plan.Opens = append(plan.Opens, newOpenRequest(inst, ct, side, stop, 0, "ema-cross"))
 	return plan
+}
+
+// emaCrossStopDesc returns a human-readable description of the stop method.
+func emaCrossStopDesc(core *emaCrossCore) string {
+	if core.atr != nil {
+		return fmt.Sprintf("ATR(%d)×%.1f", core.atr.n, core.atrMultiplier)
+	}
+	if core.stopPips > 0 {
+		return fmt.Sprintf("%.1f pips", core.stopPips.Float64())
+	}
+	return ""
 }
 
 // emaCrossStop computes the stop price: ATR-based if configured and ready, fixed pips otherwise.

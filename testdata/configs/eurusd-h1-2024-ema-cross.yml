@@ -1,0 +1,24 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  scale: 100000
+  risk-pct: 1.0
+  source: candles
+
+runs:
+  - name: eurusd-h1-2024-ema-cross
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-12-31
+    strategy:
+      kind: ema-cross
+      params:
+        fast: 9
+        slow: 21
+        atr_period: 14
+        atr_multiplier: 1.5
+        min_spread: 0.0003

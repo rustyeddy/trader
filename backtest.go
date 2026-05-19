@@ -52,12 +52,27 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 		return nil
 	}
 
+	scale := Scale6(PriceScale)
+	exit, err := GetExitStrategy(cfg.Exit, scale)
+	if err != nil {
+		fmt.Printf("failed to build exit strategy: %v\n", err)
+		return nil
+	}
+
+	regime, err := GetRegimeFilter(cfg.Regime, scale)
+	if err != nil {
+		fmt.Printf("failed to build regime filter: %v\n", err)
+		return nil
+	}
+
 	source := firstNonEmpty(cfg.Data.Source, "candles")
 	return &BacktestRequest{
 		Name:       cfg.Name,
 		Source:     source,
 		Instrument: cfg.Data.Instrument,
 		Strategy:   strategy,
+		Exit:       exit,
+		Regime:     regime,
 		TimeRange:  tr,
 	}
 }
@@ -74,6 +89,8 @@ type BacktestRequest struct {
 	Source     string
 	Instrument string
 	Strategy
+	Exit   ExitStrategy
+	Regime RegimeFilter
 	TimeRange
 }
 
@@ -145,6 +162,12 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		})
 	}
 
+	maxDD, avgWinner, avgLoser := computeTradeStats(trades)
+	rr := 0.0
+	if avgLoser != 0 {
+		rr = avgWinner / -avgLoser
+	}
+
 	return BacktestReportSummary{
 		Name:       run.Name,
 		Strategy:   run.Strategy.Name(),
@@ -162,8 +185,67 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		ReturnPct:    run.BacktestResult.ReturnPct.Float64() * 100,
 		WinRate:      run.BacktestResult.WinRate.Float64() * 100,
 		RiskPct:      run.RiskPct.Float64() * 100,
-		StopPips:     int32(run.DefaultStopPips),
+		Stop:         stopDescription(run),
+		Regime:       regimeDescription(run),
+		MaxDrawdown:  maxDD,
+		AvgWinner:    avgWinner,
+		AvgLoser:     avgLoser,
+		RR:           rr,
 
 		TradeDetails: trades,
 	}
+}
+
+// computeTradeStats derives max drawdown, avg winner, and avg loser from the trade list.
+// MaxDrawdown is the largest peak-to-trough drop in cumulative P/L (returned as negative).
+func computeTradeStats(trades []BacktestReportTrade) (maxDrawdown, avgWinner, avgLoser float64) {
+	var running, peak float64
+	var winSum, lossSum float64
+	var winN, lossN int
+
+	for _, tr := range trades {
+		running += tr.PNL
+		if running > peak {
+			peak = running
+		}
+		if drop := peak - running; drop > -maxDrawdown {
+			maxDrawdown = -drop
+		}
+		if tr.PNL > 0 {
+			winSum += tr.PNL
+			winN++
+		} else if tr.PNL < 0 {
+			lossSum += tr.PNL
+			lossN++
+		}
+	}
+
+	if winN > 0 {
+		avgWinner = winSum / float64(winN)
+	}
+	if lossN > 0 {
+		avgLoser = lossSum / float64(lossN)
+	}
+	return
+}
+
+// stopDescription builds the stop label for the summary, preferring the exit
+// strategy's name when one is configured, then falling back to the entry
+// strategy's StopDescription.
+func regimeDescription(run *Backtest) string {
+	if run.Regime != nil {
+		if name := run.Regime.Name(); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func stopDescription(run *Backtest) string {
+	if run.Exit != nil {
+		if name := run.Exit.Name(); name != "" {
+			return name
+		}
+	}
+	return run.Strategy.StopDescription()
 }

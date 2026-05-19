@@ -27,9 +27,8 @@ type LifecycleTestStrategy struct {
 	TakeProfit Price
 }
 
-func (s *LifecycleTestStrategy) Name() string {
-	return "lifecycle-test"
-}
+func (s *LifecycleTestStrategy) Name() string            { return "lifecycle-test" }
+func (s *LifecycleTestStrategy) StopDescription() string { return "" }
 
 func (s *LifecycleTestStrategy) Reset() {
 	s.bar = 0

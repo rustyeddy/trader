@@ -1,0 +1,67 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  scale: 100000
+  risk-pct: 1.0
+  source: candles
+
+runs:
+  - name: eurusd-h1-2019-2024-chandelier
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2019-01-01
+      to: 2024-12-31
+    strategy:
+      kind: ema-cross
+      params:
+        fast: 9
+        slow: 21
+        min_spread: 0.0003
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0
+
+  - name: eurusd-h1-2019-2024-adx20-chandelier
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2019-01-01
+      to: 2024-12-31
+    strategy:
+      kind: ema-cross-adx
+      params:
+        fast: 9
+        slow: 21
+        adx_period: 14
+        adx_threshold: 20.0
+        min_spread: 0.0003
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0
+
+  - name: eurusd-d1-2019-2024-adx20-chandelier
+    data:
+      instrument: EURUSD
+      timeframe: D1
+      from: 2019-01-01
+      to: 2024-12-31
+    strategy:
+      kind: ema-cross-adx
+      params:
+        fast: 9
+        slow: 21
+        adx_period: 14
+        adx_threshold: 20.0
+        min_spread: 0.0003
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 1.5

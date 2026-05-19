@@ -33,9 +33,11 @@ type RunDefaults struct {
 }
 
 type RunConfig struct {
-	Name     string         `json:"name" yaml:"name"`
-	Data     DataConfig     `json:"data" yaml:"data"`
+	Name     string         `json:"name"     yaml:"name"`
+	Data     DataConfig     `json:"data"     yaml:"data"`
 	Strategy StrategyConfig `json:"strategy" yaml:"strategy"`
+	Exit     ExitConfig     `json:"exit"     yaml:"exit"`
+	Regime   RegimeConfig   `json:"regime"   yaml:"regime"`
 }
 
 type DataConfig struct {

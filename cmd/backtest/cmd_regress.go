@@ -11,14 +11,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultRegressionConfigPath = "../testdata/configs"
+const defaultRegressionConfigPath = "testdata/configs"
+const defaultOutDir = "../trading/backtests"
 
 var regressOutDir string
 var l = trader.L
 
 var CMDBacktestRegress = &cobra.Command{
 	Use:   "regress",
-	Short: "Run config-based regression backtests and write fresh JSON summaries",
+	Short: "Run config-based regression backtests and write JSON + org reports",
 	RunE:  runBacktestRegress,
 }
 
@@ -27,9 +28,8 @@ func init() {
 		&regressOutDir,
 		"out",
 		"",
-		"Output directory for generated regression summaries (default: temporary directory)",
+		fmt.Sprintf("Output directory for reports (default: %s)", defaultOutDir),
 	)
-
 }
 
 func runBacktestRegress(cmd *cobra.Command, args []string) error {
@@ -44,17 +44,11 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 	}
 
 	outDir := strings.TrimSpace(regressOutDir)
-	createdTemp := false
 	if outDir == "" {
-		outDir, err = os.MkdirTemp("", "trader-regress-*")
-		if err != nil {
-			return fmt.Errorf("create temp output dir: %w", err)
-		}
-		createdTemp = true
-	} else {
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return fmt.Errorf("create output dir %q: %w", outDir, err)
-		}
+		outDir = defaultOutDir
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir %q: %w", outDir, err)
 	}
 
 	count := 0
@@ -69,6 +63,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 			fmt.Printf("skipping config %q: %v\n", cfgPath, err)
 			continue
 		}
+
 		for _, run := range runs {
 			ctx := cmd.Context()
 			t := &trader.Trader{
@@ -81,54 +76,89 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 			}
 			t.Broker.Account = acct
 
-			err := t.Backtest(ctx, &run)
-			if err != nil {
-				fmt.Printf("Backtest errored %+v\n", err) // turn into a log
+			if err := t.Backtest(ctx, &run); err != nil {
+				fmt.Printf("backtest error: %v\n", err)
 				continue
 			}
 
 			summary := run.Summary()
-
 			trader.PrintSummary(os.Stdout, summary)
 
-			reportPath := filepath.Join(outDir, run.Name+".json")
-			if err := writeRegressionSummary(reportPath, summary); err != nil {
-				return fmt.Errorf("write regression summary for %q: %w", cfgPath, err)
+			if err := writeJSON(filepath.Join(outDir, run.Name+".json"), summary); err != nil {
+				return fmt.Errorf("write json for %q: %w", run.Name, err)
+			}
+			if err := writeOrg(filepath.Join(outDir, run.Name+".org"), summary); err != nil {
+				return fmt.Errorf("write org for %q: %w", run.Name, err)
 			}
 
-			l.Info("generated regression summary", "path", reportPath)
+			l.Info("wrote reports", "name", run.Name, "dir", outDir)
 			count++
 		}
-
 	}
 
 	if count == 0 {
 		return fmt.Errorf("no regression configs found in %q", configPath)
 	}
 
-	if createdTemp {
-		fmt.Fprintf(os.Stdout, "\nTemporary output directory: %s\n", outDir)
-	} else {
-		fmt.Fprintf(os.Stdout, "\nOutput directory: %s\n", outDir)
+	// Rebuild index.org from all JSON files in the output directory.
+	if err := rebuildIndex(outDir); err != nil {
+		l.Warn("could not write index.org", "err", err)
 	}
 
+	fmt.Fprintf(os.Stdout, "\nOutput directory: %s\n", outDir)
 	return nil
 }
 
-func writeRegressionSummary(path string, summary trader.BacktestReportSummary) error {
+// writeJSON marshals the summary as indented JSON.
+func writeJSON(path string, s trader.BacktestReportSummary) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
+		return err
 	}
-
-	b, err := json.MarshalIndent(summary, "", "  ")
+	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal summary: %w", err)
+		return err
 	}
-	b = append(b, '\n')
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
 
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		return fmt.Errorf("write %q: %w", path, err)
+// writeOrg writes a full org-mode report for a single backtest run.
+func writeOrg(path string, s trader.BacktestReportSummary) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
-
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	trader.WriteOrgReport(f, s)
 	return nil
+}
+
+// rebuildIndex scans dir for all *.json files, loads their summaries,
+// and writes a fresh index.org comparison table.
+func rebuildIndex(dir string) error {
+	summaries, err := trader.LoadOrgIndexSummaries(dir)
+	if err != nil {
+		return err
+	}
+	if len(summaries) == 0 {
+		return nil
+	}
+
+	path := filepath.Join(dir, "index.org")
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	trader.WriteOrgIndex(f, summaries)
+	l.Info("wrote index", "path", path)
+	return nil
+}
+
+// writeRegressionSummary is kept for any callers outside this file.
+func writeRegressionSummary(path string, summary trader.BacktestReportSummary) error {
+	return writeJSON(path, summary)
 }

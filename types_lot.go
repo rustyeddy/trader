@@ -19,6 +19,9 @@ type Lot struct {
 	OriginalUnits  Units
 	RemainingUnits Units
 	State          lotState
+	// ExtremePrice tracks the highest-high (long) or lowest-low (short) seen
+	// since entry. Used by trailing/chandelier exit strategies.
+	ExtremePrice Price
 }
 
 type LotBook struct {

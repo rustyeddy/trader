@@ -57,7 +57,7 @@ func (c *Client) Get(ctx context.Context, path string, opts map[string]string) (
 
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return nil, fmt.Errorf("oanda pricing stream http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("oanda GET %s http %d: %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	return resp.Body, nil
 }

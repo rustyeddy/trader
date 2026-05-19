@@ -14,9 +14,8 @@ type Fake struct {
 	lowest  Price
 }
 
-func (f *Fake) Name() string {
-	return "Fake"
-}
+func (f *Fake) Name() string            { return "Fake" }
+func (f *Fake) StopDescription() string { return "" }
 
 func (f *Fake) Reset() {
 	clear(f.candles)

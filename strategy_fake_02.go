@@ -25,9 +25,8 @@ type Fake02 struct {
 	longNext   bool
 }
 
-func (f *Fake02) Name() string {
-	return "Fake02"
-}
+func (f *Fake02) Name() string            { return "Fake02" }
+func (f *Fake02) StopDescription() string { return "" }
 
 func (f *Fake02) Reset() {
 	f.bar = 0

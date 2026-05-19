@@ -7,6 +7,7 @@ import (
 	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/data"
+	"github.com/rustyeddy/trader/cmd/order"
 	"github.com/rustyeddy/trader/cmd/replay"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +40,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		backtest.New(rc),
 		data.New(rc),
+		order.New(),
 		replay.New(rc),
 	)
 

@@ -17,9 +17,10 @@ type countingStrategy struct {
 	calls  int
 }
 
-func (s *countingStrategy) Name() string { return "counting" }
-func (s *countingStrategy) Reset()       { s.resets++ }
-func (s *countingStrategy) Ready() bool  { return true }
+func (s *countingStrategy) Name() string            { return "counting" }
+func (s *countingStrategy) Reset()                  { s.resets++ }
+func (s *countingStrategy) Ready() bool             { return true }
+func (s *countingStrategy) StopDescription() string { return "" }
 func (s *countingStrategy) Update(context.Context, *CandleTime, *Backtest) *StrategyPlan {
 	s.calls++
 	return s.plan

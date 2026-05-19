@@ -41,7 +41,8 @@ func NewTemplateStrategy(cfg TemplateStrategyConfig) *TemplateStrategy {
 	}
 }
 
-func (s *TemplateStrategy) Name() string { return s.name }
+func (s *TemplateStrategy) Name() string            { return s.name }
+func (s *TemplateStrategy) StopDescription() string { return "" }
 
 func (s *TemplateStrategy) Reset() {
 	s.ready = false

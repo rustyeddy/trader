@@ -120,6 +120,16 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 	}
 	strategy.Reset()
 
+	exit := run.Exit
+	if exit == nil {
+		exit = NoopExit{}
+	}
+
+	regime := run.Regime
+	if regime == nil {
+		regime = NoopRegime{}
+	}
+
 	defer func() {
 		closeErr := itr.Close()
 		if err == nil && closeErr != nil {
@@ -252,6 +262,32 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			return err
 		}
 
+		// Tick regime filter and exit strategy indicators every bar.
+		regime.Tick(candle.Candle)
+		exit.Tick(candle.Candle)
+
+		// Update trailing/chandelier stops on all open lots.
+		if exit.Ready() {
+			_ = t.Account.Lots.Range(func(lot *Lot) error {
+				if lot == nil || lot.State != LotOpen {
+					return nil
+				}
+				// Advance extreme price watermark.
+				switch lot.Side {
+				case Long:
+					if lot.ExtremePrice == 0 || candle.High > lot.ExtremePrice {
+						lot.ExtremePrice = candle.High
+					}
+				case Short:
+					if lot.ExtremePrice == 0 || candle.Low < lot.ExtremePrice {
+						lot.ExtremePrice = candle.Low
+					}
+				}
+				lot.Stop = exit.UpdateStop(lot.Side, lot.Stop, lot.EntryPrice, lot.ExtremePrice, candle.Candle)
+				return nil
+			})
+		}
+
 		autoExits, err := autoCloseExits(runCtx, t.Broker, candle)
 		if err != nil {
 			return err
@@ -267,7 +303,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		if plan == nil {
 			plan = &DefaultStrategyPlan
 		}
-		// backtest.Debug("strategy.Update plan", "open", len(plan.Opens), "closes", len(plan.Closes), "cancel", len(plan.Cancel))
+
+		// Regime filter: suppress new entries in ranging/consolidating markets.
+		// Existing positions continue to be managed by the exit strategy.
+		if regime.Ready() && !regime.Trending() {
+			plan.Opens = nil
+		}
 
 		for _, cancelReq := range plan.Cancel {
 			L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
@@ -288,6 +329,14 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 
 		for _, openReq := range plan.Opens {
 			L.Info("Broker event Open Position", "ID", openReq.ID)
+
+			// Let the exit strategy override the initial stop when configured.
+			if exit.Ready() {
+				if s := exit.InitialStop(openReq.Side, openReq.Price, candle.Candle); s != 0 {
+					openReq.Stop = s
+				}
+			}
+
 			if openReq.Units == 0 {
 				err := t.Account.SizePosition(openReq)
 				if err != nil {

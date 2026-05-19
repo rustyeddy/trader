@@ -32,8 +32,12 @@ type BacktestReportSummary struct {
 	WinRate   float64 `json:"win_rate"`
 	RiskPct   float64 `json:"risk_pct"`
 
-	StopPips int32   `json:"stop_pips"`
-	RR       float64 `json:"rr"`
+	Stop        string  `json:"stop"`
+	Regime      string  `json:"regime"`
+	RR          float64 `json:"rr"`
+	MaxDrawdown float64 `json:"max_drawdown"` // largest peak-to-trough drop in dollars (negative)
+	AvgWinner   float64 `json:"avg_winner"`
+	AvgLoser    float64 `json:"avg_loser"` // negative
 
 	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
 }
@@ -102,9 +106,9 @@ func PrintSummary(w io.Writer, s BacktestReportSummary) {
 		absRetPct = -absRetPct
 	}
 
-	stopStr := "—"
-	if s.StopPips > 0 {
-		stopStr = fmt.Sprintf("%d pips", s.StopPips)
+	stopStr := s.Stop
+	if stopStr == "" {
+		stopStr = "—"
 	}
 	rrStr := "—"
 	if s.RR > 0 {
@@ -114,13 +118,24 @@ func PrintSummary(w io.Writer, s BacktestReportSummary) {
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "  %-48s\n", s.Strategy)
 	fmt.Fprintf(w, "  %s %s  %s → %s\n", s.Instrument, strings.ToUpper(s.Timeframe), start, end)
+	ddStr := "—"
+	if s.MaxDrawdown < 0 {
+		ddStr = fmt.Sprintf("-$%.2f", -s.MaxDrawdown)
+	}
+
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "  Trades : %d   Wins: %d (%.1f%%)   Losses: %d\n",
 		s.Trades, s.Wins, s.WinRate, s.Losses)
 	fmt.Fprintf(w, "  Balance: $%.2f → $%.2f   (%s$%.2f / %s%.2f%%)\n",
 		s.StartBalance, s.EndBalance, sign, absNetPL, sign, absRetPct)
-	fmt.Fprintf(w, "  Risk   : %.2f%%   Stop: %s   RR: %s\n",
-		s.RiskPct, stopStr, rrStr)
+	fmt.Fprintf(w, "  Drawdown: %s   Avg W: $%.2f   Avg L: $%.2f\n",
+		ddStr, s.AvgWinner, s.AvgLoser)
+	regimeStr := ""
+	if s.Regime != "" {
+		regimeStr = fmt.Sprintf("   Regime: %s", s.Regime)
+	}
+	fmt.Fprintf(w, "  Risk   : %.2f%%   Stop: %s   RR: %s%s\n",
+		s.RiskPct, stopStr, rrStr, regimeStr)
 	fmt.Fprintln(w, bar)
 }
 

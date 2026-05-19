@@ -75,9 +75,8 @@ func NewEMACrossADX(cfg EMACrossADXConfig) *EMACrossADX {
 	}
 }
 
-func (x *EMACrossADX) Name() string {
-	return x.core.name
-}
+func (x *EMACrossADX) Name() string            { return x.core.name }
+func (x *EMACrossADX) StopDescription() string { return emaCrossStopDesc(&x.core) }
 
 func (x *EMACrossADX) Reset() {
 	x.core.fast.Reset()

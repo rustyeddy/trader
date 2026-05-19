@@ -191,7 +191,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	assert.InDelta(t, 2.5, s.ReturnPct, 1e-9)
 	assert.InDelta(t, 60.0, s.WinRate, 1e-9)
 	assert.InDelta(t, 1.0, s.RiskPct, 1e-9)
-	assert.Equal(t, int32(pipsFromFloat(20)), s.StopPips)
+	assert.Equal(t, "", s.Stop) // Fake strategy returns no stop description
 }
 
 func TestConfigRunRequest_CurrentBehavior(t *testing.T) {

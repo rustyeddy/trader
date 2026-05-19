@@ -1,0 +1,59 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  scale: 100000
+  risk-pct: 1.0
+  source: candles
+
+runs:
+  - name: usdjpy-h1-2019-2022-adx20-ci45-insample
+    data:
+      instrument: USDJPY
+      timeframe: H1
+      from: 2019-01-01
+      to: 2022-12-31
+    strategy:
+      kind: ema-cross-adx
+      params:
+        fast: 9
+        slow: 21
+        adx_period: 14
+        adx_threshold: 20.0
+        min_spread: 0.03
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0
+    regime:
+      kind: choppiness
+      params:
+        period: 14
+        threshold: 45.0
+
+  - name: usdjpy-h1-2023-2024-adx20-ci45-outofsample
+    data:
+      instrument: USDJPY
+      timeframe: H1
+      from: 2023-01-01
+      to: 2024-12-31
+    strategy:
+      kind: ema-cross-adx
+      params:
+        fast: 9
+        slow: 21
+        adx_period: 14
+        adx_threshold: 20.0
+        min_spread: 0.03
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0
+    regime:
+      kind: choppiness
+      params:
+        period: 14
+        threshold: 45.0
