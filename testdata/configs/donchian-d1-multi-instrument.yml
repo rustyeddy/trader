@@ -1,0 +1,138 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  scale: 100000
+  risk-pct: 1.0
+  max-spread-pips: 5.0
+
+runs:
+  # ── Source comparison: EURUSD Dukascopy vs OANDA (same params) ──
+  - name: eurusd-d1-don20-ch10-DUKAS
+    data:
+      source: dukas
+      instrument: EURUSD
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 10.0
+
+  - name: eurusd-d1-don20-ch10-OANDA
+    data:
+      source: oanda
+      instrument: EURUSD
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 10.0
+
+  # ── Deeper chandelier sweep on EURUSD OANDA ──
+  - name: eurusd-d1-don20-ch15-OANDA
+    data:
+      source: oanda
+      instrument: EURUSD
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 15.0
+
+  - name: eurusd-d1-don20-ch20-OANDA
+    data:
+      source: oanda
+      instrument: EURUSD
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 20.0
+
+  # ── Cross-instrument rollout: OANDA D1 with the best params from EURUSD ──
+  - name: usdjpy-d1-don20-ch10-OANDA
+    data:
+      source: oanda
+      instrument: USDJPY
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 10.0
+
+  - name: gbpusd-d1-don20-ch10-OANDA
+    data:
+      source: oanda
+      instrument: GBPUSD
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 10.0
+
+  - name: usdchf-d1-don20-ch10-OANDA
+    data:
+      source: oanda
+      instrument: USDCHF
+      timeframe: D1
+      from: 2020-01-01
+      to: 2024-12-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 10.0

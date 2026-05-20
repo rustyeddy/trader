@@ -23,6 +23,7 @@ func newOandaDownloadCmd(rc *traderpkg.RootConfig) *cobra.Command {
 		toStr      string
 		token      string
 		env        string
+		rawDir     string
 	)
 
 	cmd := &cobra.Command{
@@ -132,6 +133,14 @@ func newOandaDownloadCmd(rc *traderpkg.RootConfig) *cobra.Command {
 				if err := store.WriteMonthlyCandles("oanda", instrTrader, tf, monthSlotStart, traderCandles); err != nil {
 					return fmt.Errorf("write %s: %w", monthSlotStart.Format("2006-01"), err)
 				}
+
+				// Raw preservation: keep bid+ask OHLC unmodified so we can later
+				// recompute spread, derive other timeframes, or build a
+				// fill-accurate execution model without re-hitting the API.
+				if err := writeRawOandaMonth(rawDir, instrTrader, tfStr, monthSlotStart, candles); err != nil {
+					return fmt.Errorf("write raw %s: %w", monthSlotStart.Format("2006-01"), err)
+				}
+
 				fmt.Printf("→ %d candles\n", countNonZero(traderCandles))
 
 				cursor = cursor.AddDate(0, 1, 0)
@@ -147,12 +156,66 @@ func newOandaDownloadCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&toStr, "to", "", "End date YYYY-MM-DD inclusive (required)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	cmd.Flags().StringVar(&rawDir, "raw-dir", "/data/raw", "Root directory for raw bid+ask candle preservation")
 	_ = cmd.MarkFlagRequired("instrument")
 	_ = cmd.MarkFlagRequired("timeframe")
 	_ = cmd.MarkFlagRequired("from")
 	_ = cmd.MarkFlagRequired("to")
 
 	return cmd
+}
+
+// writeRawOandaMonth preserves the bid+ask OHLC exactly as OANDA returned it,
+// before any spread/scale derivation. Lets us later recompute spread, derive
+// other timeframes, or build fill-accurate execution models without re-hitting
+// the API.
+//
+// Path: <rawDir>/oanda/<INSTR>/<YEAR>/<MM>/<INSTR>-<YEAR>-<MM>-<tf>.csv
+// Format: ISO timestamps, float prices (no scaling), one row per candle.
+func writeRawOandaMonth(rawDir, instrument, tfStr string, monthStart time.Time, candles []oanda.Candle) error {
+	dir := filepath.Join(rawDir, "oanda", instrument,
+		fmt.Sprintf("%04d", monthStart.Year()),
+		fmt.Sprintf("%02d", int(monthStart.Month())))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
+		instrument, monthStart.Year(), int(monthStart.Month()), strings.ToLower(tfStr))
+	path := filepath.Join(dir, filename)
+
+	monthEnd := monthStart.AddDate(0, 1, 0)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "# schema=raw-v1 source=oanda instrument=%s tf=%s year=%d month=%02d\n",
+		instrument, strings.ToLower(tfStr), monthStart.Year(), int(monthStart.Month())); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume,complete"); err != nil {
+		return err
+	}
+
+	written := 0
+	for _, oc := range candles {
+		if !oc.Time.Before(monthEnd) || oc.Time.Before(monthStart) {
+			continue
+		}
+		if _, err := fmt.Fprintf(f,
+			"%s,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%t\n",
+			oc.Time.UTC().Format(time.RFC3339),
+			oc.BidOpen, oc.BidHigh, oc.BidLow, oc.BidClose,
+			oc.AskOpen, oc.AskHigh, oc.AskLow, oc.AskClose,
+			oc.Volume, oc.Complete,
+		); err != nil {
+			return err
+		}
+		written++
+	}
+	return nil
 }
 
 func parseTraderTimeframe(s string) (traderpkg.Timeframe, error) {
