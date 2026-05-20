@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -34,6 +35,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(listOrdersCmd())
 	cmd.AddCommand(closeOrderCmd())
 	cmd.AddCommand(transactionsCmd())
+	cmd.AddCommand(transactionsStreamCmd())
 	return cmd
 }
 
@@ -462,6 +464,88 @@ func transactionsCmd() *cobra.Command {
 
 	cmd.Flags().Int64Var(&sinceID, "since", 0, "Return transactions with ID > this value (0 = from the start)")
 	cmd.Flags().IntVar(&limit, "limit", 25, "Max transactions to display (0 = all). Most-recent are shown.")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	return cmd
+}
+
+func transactionsStreamCmd() *cobra.Command {
+	var showHeartbeats bool
+	cmd := &cobra.Command{
+		Use:   "transactions-stream",
+		Short: "Subscribe to OANDA transaction stream (push). Ctrl-C to exit.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if token == "" {
+				token = readTokenFile()
+			}
+			if token == "" {
+				return fmt.Errorf("no OANDA token: set OANDA_TOKEN, use --token, or save to ~/.config/oanda/pat.txt")
+			}
+
+			baseURL, err := oanda.BaseURL(env)
+			if err != nil {
+				return err
+			}
+			client := &oanda.Client{BaseURL: baseURL, Token: token}
+
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer cancel()
+
+			if accountID == "" {
+				accounts, err := client.GetAccounts(ctx)
+				if err != nil {
+					return fmt.Errorf("discover accounts: %w", err)
+				}
+				if len(accounts) == 0 {
+					return fmt.Errorf("no accounts found for this token")
+				}
+				if len(accounts) > 1 {
+					fmt.Println("Multiple accounts found — specify one with --account-id:")
+					for _, a := range accounts {
+						fmt.Printf("  %s\n", a.ID)
+					}
+					return fmt.Errorf("ambiguous account")
+				}
+				accountID = accounts[0].ID
+			}
+
+			opts := oanda.StreamOptions{}
+			if showHeartbeats {
+				opts.OnHeartbeat = func(hb oanda.Heartbeat) {
+					fmt.Printf("  ♥  %s   lastTxID=%d\n", hb.Time.Format("15:04:05.000"), hb.LastTxID)
+				}
+			}
+
+			fmt.Printf("Subscribing to %s transaction stream (Ctrl-C to exit)...\n", accountID)
+			ch, err := client.StreamTransactions(ctx, accountID, opts)
+			if err != nil {
+				return fmt.Errorf("subscribe: %w", err)
+			}
+
+			for ev := range ch {
+				if ev.Err != nil {
+					fmt.Fprintf(os.Stderr, "stream error: %v\n", ev.Err)
+					continue
+				}
+				t := ev.Tx
+				priceStr := "—"
+				if t.Price != 0 {
+					priceStr = fmt.Sprintf("%.5f", t.Price)
+				}
+				plStr := ""
+				if t.PL != 0 {
+					plStr = fmt.Sprintf("  P/L=%+.2f", t.PL)
+				}
+				fmt.Printf("  ▸ %s  %-22s %-10s units=%-7d  price=%s%s\n",
+					t.ID, t.Type, t.Instrument, t.Units, priceStr, plStr)
+			}
+			fmt.Println("Stream closed.")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&showHeartbeats, "heartbeats", false, "Also print heartbeat messages")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
