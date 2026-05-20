@@ -38,8 +38,10 @@ type stopLossSpec struct {
 
 type orderResp struct {
 	OrderFillTransaction struct {
-		ID         string `json:"id"`
-		TradeID    string `json:"tradeOpened"`
+		ID          string `json:"id"`
+		TradeOpened struct {
+			TradeID string `json:"tradeID"`
+		} `json:"tradeOpened"`
 		Instrument string `json:"instrument"`
 		Units      string `json:"units"`
 		Price      string `json:"price"`
@@ -115,7 +117,7 @@ func (c *Client) SubmitMarketOrder(ctx context.Context, accountID, instrument st
 
 	return &OrderResult{
 		OrderID:    or.OrderFillTransaction.ID,
-		TradeID:    or.OrderFillTransaction.TradeID,
+		TradeID:    or.OrderFillTransaction.TradeOpened.TradeID,
 		Instrument: or.OrderFillTransaction.Instrument,
 		Units:      fillUnits,
 		Price:      fillPrice,

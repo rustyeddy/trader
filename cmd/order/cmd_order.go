@@ -29,6 +29,7 @@ func New() *cobra.Command {
 		Short: "Live order management (OANDA demo)",
 	}
 	cmd.AddCommand(newOrderCmd())
+	cmd.AddCommand(listOrdersCmd())
 	return cmd
 }
 
@@ -222,5 +223,78 @@ func runNewOrder(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Trade ID : %s\n", result.TradeID)
 	fmt.Printf("  Units    : %d\n", result.Units)
 	fmt.Printf("  Price    : %.5f\n", result.Price)
+	return nil
+}
+
+func listOrdersCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List open trades from OANDA",
+		RunE:  runListOrders,
+	}
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	return cmd
+}
+
+func runListOrders(cmd *cobra.Command, args []string) error {
+	if token == "" {
+		token = readTokenFile()
+	}
+	if token == "" {
+		return fmt.Errorf("no OANDA token found — set OANDA_TOKEN, use --token, or save to ~/.config/oanda/pat.txt")
+	}
+
+	baseURL, err := oanda.BaseURL(env)
+	if err != nil {
+		return err
+	}
+
+	client := &oanda.Client{BaseURL: baseURL, Token: token}
+	ctx := context.Background()
+
+	if accountID == "" {
+		accounts, err := client.GetAccounts(ctx)
+		if err != nil {
+			return fmt.Errorf("discover accounts: %w", err)
+		}
+		if len(accounts) == 0 {
+			return fmt.Errorf("no accounts found for this token")
+		}
+		if len(accounts) > 1 {
+			fmt.Println("Multiple accounts found — specify one with --account-id:")
+			for _, a := range accounts {
+				fmt.Printf("  %s\n", a.ID)
+			}
+			return fmt.Errorf("ambiguous account")
+		}
+		accountID = accounts[0].ID
+	}
+
+	trades, err := client.GetOpenTrades(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("get open trades: %w", err)
+	}
+
+	if len(trades) == 0 {
+		fmt.Println("No open trades.")
+		return nil
+	}
+
+	const width = 52
+	bar := strings.Repeat("─", width)
+	fmt.Println(bar)
+	fmt.Printf("  %-10s %-10s %8s %12s %10s %10s\n", "Trade ID", "Instrument", "Units", "Entry", "Stop", "Unreal P/L")
+	fmt.Println(bar)
+	for _, t := range trades {
+		stopStr := "—"
+		if t.StopLoss > 0 {
+			stopStr = fmt.Sprintf("%.5f", t.StopLoss)
+		}
+		fmt.Printf("  %-10s %-10s %8d %12.5f %10s %+10.2f\n",
+			t.ID, t.Instrument, t.Units, t.EntryPrice, stopStr, t.UnrealizedPL)
+	}
+	fmt.Println(bar)
 	return nil
 }
