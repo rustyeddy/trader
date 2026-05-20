@@ -33,6 +33,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(newOrderCmd())
 	cmd.AddCommand(listOrdersCmd())
 	cmd.AddCommand(closeOrderCmd())
+	cmd.AddCommand(transactionsCmd())
 	return cmd
 }
 
@@ -376,4 +377,93 @@ func runCloseOrder(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Units    : %d\n", result.Units)
 	fmt.Printf("  Price    : %.5f\n", result.Price)
 	return nil
+}
+
+func transactionsCmd() *cobra.Command {
+	var (
+		sinceID int64
+		limit   int
+	)
+	cmd := &cobra.Command{
+		Use:   "transactions",
+		Short: "List OANDA account transactions since a given ID",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if token == "" {
+				token = readTokenFile()
+			}
+			if token == "" {
+				return fmt.Errorf("no OANDA token: set OANDA_TOKEN, use --token, or save to ~/.config/oanda/pat.txt")
+			}
+
+			baseURL, err := oanda.BaseURL(env)
+			if err != nil {
+				return err
+			}
+			client := &oanda.Client{BaseURL: baseURL, Token: token}
+			ctx := context.Background()
+
+			if accountID == "" {
+				accounts, err := client.GetAccounts(ctx)
+				if err != nil {
+					return fmt.Errorf("discover accounts: %w", err)
+				}
+				if len(accounts) == 0 {
+					return fmt.Errorf("no accounts found for this token")
+				}
+				if len(accounts) > 1 {
+					fmt.Println("Multiple accounts found — specify one with --account-id:")
+					for _, a := range accounts {
+						fmt.Printf("  %s\n", a.ID)
+					}
+					return fmt.Errorf("ambiguous account")
+				}
+				accountID = accounts[0].ID
+			}
+
+			txns, lastID, err := client.GetTransactions(ctx, accountID, sinceID)
+			if err != nil {
+				return fmt.Errorf("get transactions: %w", err)
+			}
+
+			if len(txns) == 0 {
+				fmt.Printf("No transactions since ID %d. lastTransactionID=%d\n", sinceID, lastID)
+				return nil
+			}
+
+			start := 0
+			if limit > 0 && len(txns) > limit {
+				start = len(txns) - limit
+			}
+
+			bar := strings.Repeat("─", 88)
+			fmt.Println(bar)
+			fmt.Printf("  %-5s %-22s %-10s %-16s %10s %12s %12s\n",
+				"ID", "Type", "Instr", "Time", "Units", "Price", "P/L")
+			fmt.Println(bar)
+			for _, t := range txns[start:] {
+				timeStr := t.Time.Format("2006-01-02 15:04")
+				priceStr := "—"
+				if t.Price != 0 {
+					priceStr = fmt.Sprintf("%.5f", t.Price)
+				}
+				plStr := "—"
+				if t.PL != 0 {
+					plStr = fmt.Sprintf("%+.2f", t.PL)
+				}
+				fmt.Printf("  %-5s %-22s %-10s %-16s %10d %12s %12s\n",
+					t.ID, t.Type, t.Instrument, timeStr, t.Units, priceStr, plStr)
+			}
+			fmt.Println(bar)
+			fmt.Printf("Shown: %d of %d total since ID %d. lastTransactionID=%d\n",
+				len(txns)-start, len(txns), sinceID, lastID)
+			return nil
+		},
+	}
+
+	cmd.Flags().Int64Var(&sinceID, "since", 0, "Return transactions with ID > this value (0 = from the start)")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Max transactions to display (0 = all). Most-recent are shown.")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	return cmd
 }
