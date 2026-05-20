@@ -8,7 +8,7 @@ defaults:
   risk-pct: 0.5
   stop-pips: 20
   take-pips: 40
-  source: candles
+  source: oanda
 
 runs:
   - name: eurusd-h1-2024-template

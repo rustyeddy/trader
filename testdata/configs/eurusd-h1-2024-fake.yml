@@ -7,7 +7,7 @@ defaults:
   strict: true
   risk_pct: 0.5
   units: 1000
-  source: candles
+  source: oanda
 
 runs:
   - name: eurusd-h1-2024-template

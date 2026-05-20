@@ -11,7 +11,7 @@ runs:
   # ── Source comparison: EURUSD Dukascopy vs OANDA (same params) ──
   - name: eurusd-d1-don20-ch10-DUKAS
     data:
-      source: dukas
+      source: oanda
       instrument: EURUSD
       timeframe: D1
       from: 2020-01-01

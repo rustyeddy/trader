@@ -5,7 +5,7 @@ defaults:
   account-ccy: USD
   scale: 100000
   risk-pct: 1.0
-  source: candles
+  source: oanda
 
 runs:
   - name: eurusd-h1-2024-ema-cross-adx
