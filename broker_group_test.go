@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func makeBrokerCloseFixture() (*Broker, *Lot, *closeRequest) {
+func makeBrokerCloseFixture() (*Broker, *Lot, *CloseRequest) {
 	acct := NewAccount("account", MoneyFromFloat(2_000))
 	broker := &Broker{
 		Account: acct,
@@ -32,7 +32,7 @@ func makeBrokerCloseFixture() (*Broker, *Lot, *closeRequest) {
 	}
 	acct.Lots.Add(lot)
 
-	req := &closeRequest{
+	req := &CloseRequest{
 		Request: Request{
 			TradeCommon: th.TradeCommon,
 			RequestType: RequestClose,
@@ -50,12 +50,12 @@ func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 	t.Parallel()
 
 	var nilBroker *Broker
-	err := nilBroker.SubmitClose(context.Background(), &closeRequest{})
+	err := nilBroker.SubmitClose(context.Background(), &CloseRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broker")
 
 	broker := NewBroker("broker")
-	err = broker.SubmitClose(context.Background(), &closeRequest{})
+	err = broker.SubmitClose(context.Background(), &CloseRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "broker account is nil")
 
@@ -64,7 +64,7 @@ func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil close request")
 
-	err = broker.SubmitClose(context.Background(), &closeRequest{})
+	err = broker.SubmitClose(context.Background(), &CloseRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing position")
 }

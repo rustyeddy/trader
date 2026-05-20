@@ -13,6 +13,15 @@ import (
 
 	// Provider registration via init().
 	_ "github.com/rustyeddy/trader/data/dukascopy"
+
+	// Strategy registration via init().
+	_ "github.com/rustyeddy/trader/strategies/donchian"
+	_ "github.com/rustyeddy/trader/strategies/emacross"
+	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
+	_ "github.com/rustyeddy/trader/strategies/fake"
+	_ "github.com/rustyeddy/trader/strategies/lifecycle"
+	_ "github.com/rustyeddy/trader/strategies/noop"
+	_ "github.com/rustyeddy/trader/strategies/tmpl"
 )
 
 func NewRootCmd() *cobra.Command {

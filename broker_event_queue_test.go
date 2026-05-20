@@ -27,7 +27,7 @@ func TestBrokerSubmitCloseReturnsErrorWhenEventQueueIsFull(t *testing.T) {
 		RemainingUnits: units,
 		State:          LotOpen,
 	}
-	req := &closeRequest{
+	req := &CloseRequest{
 		Request: Request{
 			TradeCommon: th.TradeCommon,
 			RequestType: RequestClose,

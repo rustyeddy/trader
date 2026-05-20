@@ -403,7 +403,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		for _, lot := range remaining {
 			isBuy := lot.Side == Short
 			closePx := lastCandle.Close + fillAdjust(isBuy, lastCandle.AvgSpread, slippage)
-			cl := &closeRequest{
+			cl := &CloseRequest{
 				Request: Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "end-of-backtest",

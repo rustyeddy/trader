@@ -38,6 +38,7 @@ func NewATR(period int, scale Scale6) *ATR {
 }
 
 func (a *ATR) Name() string     { return a.name }
+func (a *ATR) Period() int      { return a.n }
 func (a *ATR) Warmup() int      { return a.n + 1 } // N periods = N+1 candles
 func (a *ATR) Ready() bool      { return a.ready }
 func (a *ATR) Float64() float64 { return a.atr }

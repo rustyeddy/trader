@@ -23,7 +23,7 @@ type Event struct {
 	Cause         closeCause
 
 	Open     *OpenRequest
-	Close    *closeRequest
+	Close    *CloseRequest
 	Trade    *Trade
 	Lot      *Lot
 }

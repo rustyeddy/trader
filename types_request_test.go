@@ -21,7 +21,7 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 		Timestamp: FromString("2024-01-15"),
 	}
 
-	op := newOpenRequest(
+	op := NewOpenRequest(
 		"EURUSD",
 		ct,
 		Long,

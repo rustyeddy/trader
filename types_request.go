@@ -22,13 +22,13 @@ type OpenRequest struct {
 	Request
 }
 
-type closeRequest struct {
+type CloseRequest struct {
 	Request
 	*Lot
 	CloseCause closeCause
 }
 
-func newOpenRequest(
+func NewOpenRequest(
 	instr string,
 	c *CandleTime,
 	side Side,

@@ -1,4 +1,4 @@
-package trader
+package emacross
 
 import (
 	"context"
@@ -6,22 +6,29 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/rustyeddy/trader"
 )
 
-func feedPlans(s *EMACross, closes []float64) []*StrategyPlan {
-	out := make([]*StrategyPlan, 0, len(closes))
+func mkClose(close float64) trader.Candle {
+	toP := func(x float64) trader.Price { return trader.Price(x*float64(trader.PriceScale) + 0.5) }
+	return trader.Candle{Close: toP(close)}
+}
+
+func feedPlans(s *Cross, closes []float64) []*trader.StrategyPlan {
+	out := make([]*trader.StrategyPlan, 0, len(closes))
 	for _, c := range closes {
-		d := s.Update(context.Background(), &CandleTime{Candle: mkClose(c)}, nil)
+		d := s.Update(context.Background(), &trader.CandleTime{Candle: mkClose(c)}, nil)
 		out = append(out, d)
 	}
 	return out
 }
 
-func TestEMACross_WarmupNoSignals(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{
+func TestCross_WarmupNoSignals(t *testing.T) {
+	s := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      PriceScale,
+		Scale:      trader.PriceScale,
 	})
 
 	plans := feedPlans(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
@@ -33,35 +40,31 @@ func TestEMACross_WarmupNoSignals(t *testing.T) {
 	}
 }
 
-func TestEMACross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{
+func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
+	s := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      PriceScale,
+		Scale:      trader.PriceScale,
 		MinSpread:  0,
 	})
 
 	closes := make([]float64, 0, 200)
 
-	// Phase 1: warm up with flat prices (no signals expected)
 	for i := 0; i < 40; i++ {
 		closes = append(closes, 1.0000)
 	}
 
-	// Phase 2: push fast < slow to establish baseline (no open on baseline)
 	p := 1.0000
 	for i := 0; i < 20; i++ {
 		p -= 0.0002
 		closes = append(closes, p)
 	}
 
-	// Phase 3: strong uptrend → cross UP after baseline → expect one long open
 	for i := 0; i < 30; i++ {
 		p += 0.0003
 		closes = append(closes, p)
 	}
 
-	// Phase 4: strong downtrend → cross DOWN → expect one short open
 	for i := 0; i < 30; i++ {
 		p -= 0.0003
 		closes = append(closes, p)
@@ -70,7 +73,7 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) 
 	plans := feedPlans(s, closes)
 	require.NotEmpty(t, plans)
 
-	var opens []*OpenRequest
+	var opens []*trader.OpenRequest
 	for _, plan := range plans {
 		require.NotNil(t, plan)
 		require.Empty(t, plan.Closes, "no lots in test so no closes expected")
@@ -78,16 +81,16 @@ func TestEMACross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) 
 	}
 
 	require.Len(t, opens, 2, "expect exactly one long open and one short open")
-	require.Equal(t, Long, opens[0].Side, "first open should be long (cross up)")
-	require.Equal(t, Short, opens[1].Side, "second open should be short (cross down)")
+	require.Equal(t, trader.Long, opens[0].Side, "first open should be long (cross up)")
+	require.Equal(t, trader.Short, opens[1].Side, "second open should be short (cross down)")
 }
 
-func TestEMACross_MinSpreadFiltersNoise(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{
+func TestCross_MinSpreadFiltersNoise(t *testing.T) {
+	s := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      PriceScale,
-		MinSpread:  0.0010, // big filter
+		Scale:      trader.PriceScale,
+		MinSpread:  0.0010,
 	})
 
 	closes := make([]float64, 0, 64)
@@ -107,14 +110,14 @@ func TestEMACross_MinSpreadFiltersNoise(t *testing.T) {
 	}
 }
 
-func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
-	cfg := EMACrossConfig{
+func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
+	cfg := Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      PriceScale,
+		Scale:      trader.PriceScale,
 		MinSpread:  0,
 	}
-	s := NewEMACross(cfg)
+	s := New(cfg)
 
 	closes := make([]float64, 0, 64)
 	for i := 0; i < 40; i++ {
@@ -125,7 +128,7 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 		1.0014, 1.0012, 1.0010, 1.0008, 1.0006, 1.0004, 1.0002, 1.0000,
 	)
 
-	planSignature := func(plans []*StrategyPlan) []string {
+	planSignature := func(plans []*trader.StrategyPlan) []string {
 		var sigs []string
 		for _, p := range plans {
 			sigs = append(sigs, fmt.Sprintf("%s opens=%d closes=%d", p.Reason, len(p.Opens), len(p.Closes)))
@@ -142,28 +145,28 @@ func TestEMACross_ResetReplaysSameSignalSequence(t *testing.T) {
 	require.Equal(t, planSignature(plans1), planSignature(plans2), "after reset, strategy should emit identical signal sequence")
 }
 
-func TestEMACross_Name(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: PriceScale})
+func TestCross_Name(t *testing.T) {
+	s := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
-func TestEMACrossPlan_Reason(t *testing.T) {
-	s := NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: PriceScale})
-	d := s.Update(context.Background(), &CandleTime{Candle: mkClose(1.0)}, nil)
+func TestCrossPlan_Reason(t *testing.T) {
+	s := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
+	d := s.Update(context.Background(), &trader.CandleTime{Candle: mkClose(1.0)}, nil)
 	require.NotEmpty(t, d.Reason)
 }
 
-func TestNewEMACross_PanicOnInvalidConfig(t *testing.T) {
+func TestNew_PanicOnInvalidConfig(t *testing.T) {
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 0, SlowPeriod: 5, Scale: PriceScale})
+		New(Config{FastPeriod: 0, SlowPeriod: 5, Scale: trader.PriceScale})
 	})
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 0, Scale: PriceScale})
+		New(Config{FastPeriod: 3, SlowPeriod: 0, Scale: trader.PriceScale})
 	})
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 5, SlowPeriod: 3, Scale: PriceScale})
+		New(Config{FastPeriod: 5, SlowPeriod: 3, Scale: trader.PriceScale})
 	})
 	require.Panics(t, func() {
-		NewEMACross(EMACrossConfig{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
+		New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
 	})
 }

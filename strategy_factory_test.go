@@ -137,43 +137,10 @@ func TestRunBoolParam(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be bool")
 }
 
-func TestGetStrategy_EMACross(t *testing.T) {
-	t.Parallel()
-
-	_, err := GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
-		"fast": 9,
-		"slow": 21,
-	}})
-	require.NoError(t, err)
-
-	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
-		"fast": 21,
-		"slow": 9,
-	}})
-	require.Error(t, err, "fast >= slow should error")
-
-	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross", Params: map[string]any{
-		"slow": 21,
-	}})
-	require.Error(t, err, "missing fast should error")
-}
-
-func TestGetStrategy_EMACrossADX(t *testing.T) {
-	t.Parallel()
-
-	s, err := GetStrategy(StrategyConfig{Kind: "ema-cross-adx", Params: map[string]any{
-		"fast":       9,
-		"slow":       21,
-		"adx_period": 14,
-	}})
-	require.NoError(t, err)
-	assert.Contains(t, s.Name(), "EMA_CROSS_ADX")
-
-	_, err = GetStrategy(StrategyConfig{Kind: "ema-cross-adx", Params: map[string]any{
-		"fast": 9,
-	}})
-	require.Error(t, err, "missing slow should error")
-}
+// ema-cross and ema-cross-adx factory tests moved to ./strategies/emacross
+// and ./strategies/emacrossadx respectively, along with the strategies
+// themselves. The registry lookup itself is exercised by every backtest
+// integration test.
 
 func TestGetStrategy_Unknown(t *testing.T) {
 	t.Parallel()

@@ -1,0 +1,97 @@
+// Package tmpl is a strategy template / starting point for new strategy
+// implementations. Returns DefaultStrategyPlan; copy and edit to build a
+// new strategy. Registers under "template".
+package tmpl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/rustyeddy/trader"
+)
+
+func init() {
+	trader.RegisterStrategy(build, "template")
+}
+
+type Config struct {
+	trader.StrategyBaseConfig
+
+	Lookback  int
+	Threshold float64
+	Scale     trader.Scale6
+}
+
+type Strategy struct {
+	cfg  Config
+	name string
+
+	ready bool
+	bars  int
+
+	lastClose float64
+}
+
+func New(cfg Config) *Strategy {
+	if cfg.Lookback <= 0 {
+		panic("tmpl: Lookback must be > 0")
+	}
+	if cfg.Scale <= 0 {
+		panic("tmpl: Scale must be > 0")
+	}
+
+	return &Strategy{
+		cfg:  cfg,
+		name: fmt.Sprintf("TEMPLATE_STRATEGY(lb=%d,th=%.4f)", cfg.Lookback, cfg.Threshold),
+	}
+}
+
+func (s *Strategy) Name() string            { return s.name }
+func (s *Strategy) StopDescription() string { return "" }
+
+func (s *Strategy) Reset() {
+	s.ready = false
+	s.bars = 0
+	s.lastClose = 0
+}
+
+func (s *Strategy) Ready() bool { return s.ready }
+
+func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+	if ct == nil {
+		return &trader.DefaultStrategyPlan
+	}
+	c := ct.Candle
+	closePx := float64(c.Close) / float64(s.cfg.Scale)
+
+	s.bars++
+	if s.bars < s.cfg.Lookback {
+		s.lastClose = closePx
+		return &trader.DefaultStrategyPlan
+	}
+
+	s.ready = true
+
+	if s.lastClose > 0 {
+		change := closePx - s.lastClose
+		if change > s.cfg.Threshold {
+			s.lastClose = closePx
+			return &trader.DefaultStrategyPlan
+		}
+		if change < -s.cfg.Threshold {
+			s.lastClose = closePx
+			return &trader.DefaultStrategyPlan
+		}
+	}
+
+	s.lastClose = closePx
+	return &trader.DefaultStrategyPlan
+}
+
+func build(params map[string]any) (trader.Strategy, error) {
+	return New(Config{
+		Lookback:  5,
+		Threshold: 0.0015,
+		Scale:     trader.PriceScale,
+	}), nil
+}

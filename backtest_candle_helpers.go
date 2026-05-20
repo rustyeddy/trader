@@ -52,7 +52,7 @@ func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage 
 		// Short closes by buying at ask; long closes by selling at bid.
 		isBuy := h.lot.Side == Short
 		adjPx := h.exitPx + fillAdjust(isBuy, candle.AvgSpread, slippage)
-		cl := &closeRequest{
+		cl := &CloseRequest{
 			Request: Request{
 				TradeCommon: h.lot.TradeCommon,
 				RequestType: RequestClose,
@@ -101,7 +101,7 @@ func closeLotAtPrice(acct *Account, lot *Lot, px Price, ts Timestamp) error {
 	return acct.CloseLot(lot, trade)
 }
 
-func closeLotFromRequest(acct *Account, lot *Lot, cl *closeRequest, fallback CandleTime) error {
+func closeLotFromRequest(acct *Account, lot *Lot, cl *CloseRequest, fallback CandleTime) error {
 	if cl == nil {
 		return fmt.Errorf("nil close request")
 	}
@@ -119,7 +119,7 @@ func closeLotFromRequest(acct *Account, lot *Lot, cl *closeRequest, fallback Can
 	return closeLotAtPrice(acct, lot, px, ts)
 }
 
-func firstMatchingClose(plan *StrategyPlan, current *Lot) *closeRequest {
+func firstMatchingClose(plan *StrategyPlan, current *Lot) *CloseRequest {
 	if plan == nil || current == nil {
 		return nil
 	}

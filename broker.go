@@ -9,7 +9,7 @@ const brokerEventQueueSize = 1024
 
 type BrokerInterface interface {
 	SubmitOpen(ctx context.Context, req *OpenRequest) error
-	SubmitClose(ctx context.Context, req *closeRequest) error
+	SubmitClose(ctx context.Context, req *CloseRequest) error
 	Events() <-chan *Event
 }
 
@@ -116,7 +116,7 @@ func (b *Broker) SubmitOrder(ctx context.Context, ord *order) (*Lot, error) {
 	return lot, nil
 }
 
-func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
+func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
 	if b == nil {
 		return fmt.Errorf("nil broker")
 	}
@@ -130,7 +130,7 @@ func (b *Broker) SubmitClose(ctx context.Context, req *closeRequest) error {
 		return fmt.Errorf("close request missing position")
 	}
 
-	// place req.closeRequest on a close queue; submit the order.
+	// place req.CloseRequest on a close queue; submit the order.
 	// This is where the emulator would inject delays and such.
 
 	// When the order is filled, create a trade

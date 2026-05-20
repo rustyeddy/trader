@@ -2,7 +2,7 @@ package trader
 
 type StrategyPlan struct {
 	Opens  []*OpenRequest
-	Closes []*closeRequest
+	Closes []*CloseRequest
 	Cancel []string
 	Reason string
 }

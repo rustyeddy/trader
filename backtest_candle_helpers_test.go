@@ -109,7 +109,7 @@ func TestCloseLotFromRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "nil close request")
 
 	lot = testOpenLot(t, acct, "EURUSD", Long, 10_000, PriceFromFloat(1.2000))
-	cl := &closeRequest{}
+	cl := &CloseRequest{}
 	err = closeLotFromRequest(acct, lot, cl, fallback)
 	require.NoError(t, err)
 	require.NotEmpty(t, acct.Trades)
@@ -123,14 +123,14 @@ func TestFirstMatchingCloseAndFirstOpenRequest(t *testing.T) {
 
 	lotA := &Lot{TradeCommon: &TradeCommon{ID: "a"}}
 	lotB := &Lot{TradeCommon: &TradeCommon{ID: "b"}}
-	cl1 := &closeRequest{Lot: lotB}
-	cl2 := &closeRequest{Lot: lotA}
+	cl1 := &CloseRequest{Lot: lotB}
+	cl2 := &CloseRequest{Lot: lotA}
 	open := &OpenRequest{Request: Request{Reason: "open"}}
 
 	assert.Nil(t, firstMatchingClose(nil, lotA))
 	assert.Nil(t, firstMatchingClose(&StrategyPlan{}, nil))
 
-	plan := &StrategyPlan{Closes: []*closeRequest{nil, cl1, cl2}, Opens: []*OpenRequest{open}}
+	plan := &StrategyPlan{Closes: []*CloseRequest{nil, cl1, cl2}, Opens: []*OpenRequest{open}}
 	assert.Same(t, cl2, firstMatchingClose(plan, lotA))
 	assert.Same(t, open, firstOpenRequest(plan))
 	assert.Nil(t, firstOpenRequest(nil))

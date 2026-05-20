@@ -39,6 +39,7 @@ func NewEMA(period int, scale Scale6) *EMA {
 }
 
 func (e *EMA) Name() string     { return e.name }
+func (e *EMA) Period() int      { return e.n }
 func (e *EMA) Warmup() int      { return e.n }
 func (e *EMA) Ready() bool      { return e.ready }
 func (e *EMA) Float64() float64 { return e.value }
