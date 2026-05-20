@@ -130,12 +130,18 @@ func parseCandlePath(path string) (k Key, ok bool) {
 	return k, true
 }
 
+// rawRoot returns the sibling "raw" directory next to basedir.
+// e.g. basedir=/data/candles → rawRoot=/data/raw
+func (s *Store) rawRoot() string {
+	return filepath.Join(filepath.Dir(s.basedir), "raw")
+}
+
 func (s *Store) pathForHourlyTick(k Key) string {
 	instrument := NormalizeInstrument(k.Instrument)
 
-	// <basedir>/dukascopy/iiijjj/yyyy/mm/dd/hhh_ticks.bi5
+	// <rawRoot>/dukascopy/<instr>/<yyyy>/<mm>/<dd>/<hh>h_ticks.bi5
 	return filepath.Join(
-		s.basedir,
+		s.rawRoot(),
 		"dukascopy",
 		instrument,
 		fmt.Sprintf("%04d", k.Year),
@@ -230,7 +236,21 @@ func (s Store) Exists(key Key) (bool, error) {
 }
 
 func (s *Store) scanFiles(inv *Inventory) error {
-	return filepath.Walk(s.basedir, func(path string, info os.FileInfo, err error) error {
+	// Candle CSVs live under basedir; raw .bi5 tick files live under the
+	// sibling raw dir. Walk both so the inventory has full coverage.
+	for _, root := range []string{s.basedir, s.rawRoot()} {
+		if _, err := os.Stat(root); os.IsNotExist(err) {
+			continue
+		}
+		if err := s.walkRoot(root, inv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) walkRoot(root string, inv *Inventory) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
