@@ -15,6 +15,7 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 		newDownloadTicksCmd(rc),
 		newBuildCandlesCmd(rc),
 		newSyncCmd(rc),
+		newOandaDownloadCmd(rc),
 	)
 
 	return cmd
