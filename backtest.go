@@ -20,6 +20,11 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 			BacktestRun: &BacktestRun{},
 		}
 
+		// Cascade defaults.source into per-run data.source when not overridden.
+		if runcfg.Data.Source == "" && cfg.Defaults.Source != "" {
+			runcfg.Data.Source = cfg.Defaults.Source
+		}
+
 		req := newBacktestReq(runcfg)
 		if req == nil {
 			return nil, fmt.Errorf("failed to create BacktestRequest from config")

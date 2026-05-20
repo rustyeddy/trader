@@ -155,6 +155,26 @@ func GetStrategy(scfg StrategyConfig) (Strategy, error) {
 			RequireADXReady: requireADXReady,
 		}), nil
 
+	case "donchian-breakout", "donchian":
+		period, _, err := getInt32Param(params, "period")
+		if err != nil {
+			return nil, err
+		}
+		if period <= 1 {
+			period = 20
+		}
+		closeStrength, ok, err := getFloat64Param(params, "close_strength")
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			closeStrength = 0.6
+		}
+		return NewDonchianBreakout(DonchianBreakoutConfig{
+			Period:        int(period),
+			CloseStrength: closeStrength,
+		}), nil
+
 	default:
 		return nil, fmt.Errorf("unsupported strategy.kind %q", name)
 	}
