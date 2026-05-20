@@ -467,14 +467,7 @@ func TestStoreExistsTwoPaths(t *testing.T) {
 // dukasfile URL month is 0-based (January = 00)
 // ---------------------------------------------------------------------------
 
-func TestDukasfileURLMonthOffset(t *testing.T) {
-	t.Parallel()
-
-	df := newDatafile("EURUSD", time.Date(2025, time.December, 15, 8, 0, 0, 0, time.UTC))
-	url := df.URL()
-	// December is month 12, Dukascopy uses 0-based so 11 = 0x0B
-	require.Contains(t, url, "/2025/11/15/08h_ticks.bi5")
-}
+// Dukascopy URL tests moved to ./data/dukascopy/
 
 // ---------------------------------------------------------------------------
 // RequiredTickHoursForMonth: result has no market-closed hours

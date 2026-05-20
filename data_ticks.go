@@ -24,4 +24,10 @@ func (t RawTick) Minute() timemilli {
 	return timemilli((t.timemilli / 60_000) * 60_000)
 }
 
+// TimeMS returns the tick timestamp in milliseconds since the Unix epoch.
+// Exported for use by sibling packages that need raw tick time.
+func (t RawTick) TimeMS() int64 {
+	return int64(t.timemilli)
+}
+
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)

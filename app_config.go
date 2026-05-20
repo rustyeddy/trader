@@ -14,6 +14,7 @@ type RootConfig struct {
 	GlobalPath string
 	DBPath     string
 	ReportPath string
+	DataDir    string
 
 	LogLevel string
 	NoColor  bool

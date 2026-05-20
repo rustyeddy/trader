@@ -233,6 +233,12 @@ func isFXMarketClosed(t time.Time) bool {
 	return isForexMarketClosed(t)
 }
 
+// IsForexMarketClosed is the exported form of isForexMarketClosed for
+// use by sibling packages (e.g. data/dukascopy).
+func IsForexMarketClosed(t time.Time) bool {
+	return isForexMarketClosed(t)
+}
+
 func isForexMarketClosed(t time.Time) bool {
 	nt := t.In(newYorkLoc)
 	wd := nt.Weekday()

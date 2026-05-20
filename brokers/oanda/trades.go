@@ -81,6 +81,91 @@ func (c *Client) GetOpenTrades(ctx context.Context, accountID string) ([]OpenTra
 	return out, nil
 }
 
+// CloseTradeResult holds the fill details from a trade close.
+type CloseTradeResult struct {
+	OrderID string
+	TradeID string
+	Units   int64
+	Price   float64
+}
+
+type closeTradeReq struct {
+	Units string `json:"units,omitempty"` // omit for full close
+}
+
+type closeTradeResp struct {
+	OrderFillTransaction struct {
+		ID          string `json:"id"`
+		TradesClosed []struct {
+			TradeID string `json:"tradeID"`
+			Units   string `json:"units"`
+		} `json:"tradesClosed"`
+		Price string `json:"price"`
+	} `json:"orderFillTransaction"`
+}
+
+// CloseTrade closes an open trade fully (units=0) or partially (units>0).
+func (c *Client) CloseTrade(ctx context.Context, accountID, tradeID string, units int64) (*CloseTradeResult, error) {
+	var body []byte
+	var err error
+	if units > 0 {
+		body, err = json.Marshal(closeTradeReq{Units: strconv.FormatInt(units, 10)})
+	} else {
+		body, err = json.Marshal(closeTradeReq{}) // full close
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = fmt.Sprintf("/v3/accounts/%s/trades/%s/close", accountID, tradeID)
+
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("oanda: close trade http %d: %s", resp.StatusCode, trimForErr(string(respData)))
+	}
+
+	var cr closeTradeResp
+	if err := json.Unmarshal(respData, &cr); err != nil {
+		return nil, fmt.Errorf("oanda: parse close trade response: %w", err)
+	}
+
+	result := &CloseTradeResult{
+		OrderID: cr.OrderFillTransaction.ID,
+		Price:   func() float64 { v, _ := strconv.ParseFloat(cr.OrderFillTransaction.Price, 64); return v }(),
+	}
+	if len(cr.OrderFillTransaction.TradesClosed) > 0 {
+		tc := cr.OrderFillTransaction.TradesClosed[0]
+		result.TradeID = tc.TradeID
+		result.Units, _ = strconv.ParseInt(tc.Units, 10, 64)
+	}
+	return result, nil
+}
+
 type updateTradeOrdersReq struct {
 	StopLoss   *tradeOrderSpec `json:"stopLoss,omitempty"`
 	TakeProfit *tradeOrderSpec `json:"takeProfit,omitempty"`

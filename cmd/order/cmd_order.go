@@ -21,6 +21,8 @@ var (
 	accountID  string
 	token      string
 	env        string
+	tradeID    string
+	closeUnits int64
 )
 
 func New() *cobra.Command {
@@ -30,6 +32,7 @@ func New() *cobra.Command {
 	}
 	cmd.AddCommand(newOrderCmd())
 	cmd.AddCommand(listOrdersCmd())
+	cmd.AddCommand(closeOrderCmd())
 	return cmd
 }
 
@@ -296,5 +299,81 @@ func runListOrders(cmd *cobra.Command, args []string) error {
 			t.ID, t.Instrument, t.Units, t.EntryPrice, stopStr, t.UnrealizedPL)
 	}
 	fmt.Println(bar)
+	return nil
+}
+
+func closeOrderCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "close",
+		Short: "Close an open trade (full or partial)",
+		RunE:  runCloseOrder,
+	}
+	cmd.Flags().StringVar(&tradeID, "trade-id", "", "Trade ID to close (required)")
+	cmd.Flags().Int64Var(&closeUnits, "units", 0, "Units to close (default 0 = full close)")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	_ = cmd.MarkFlagRequired("trade-id")
+	return cmd
+}
+
+func runCloseOrder(cmd *cobra.Command, args []string) error {
+	if token == "" {
+		token = readTokenFile()
+	}
+	if token == "" {
+		return fmt.Errorf("no OANDA token found — set OANDA_TOKEN, use --token, or save to ~/.config/oanda/pat.txt")
+	}
+
+	baseURL, err := oanda.BaseURL(env)
+	if err != nil {
+		return err
+	}
+
+	client := &oanda.Client{BaseURL: baseURL, Token: token}
+	ctx := context.Background()
+
+	if accountID == "" {
+		accounts, err := client.GetAccounts(ctx)
+		if err != nil {
+			return fmt.Errorf("discover accounts: %w", err)
+		}
+		if len(accounts) == 0 {
+			return fmt.Errorf("no accounts found for this token")
+		}
+		if len(accounts) > 1 {
+			fmt.Println("Multiple accounts found — specify one with --account-id:")
+			for _, a := range accounts {
+				fmt.Printf("  %s\n", a.ID)
+			}
+			return fmt.Errorf("ambiguous account")
+		}
+		accountID = accounts[0].ID
+	}
+
+	closeDesc := "full"
+	if closeUnits > 0 {
+		closeDesc = fmt.Sprintf("%d units", closeUnits)
+	}
+	fmt.Printf("Close trade %s (%s)? [y/N] ", tradeID, closeDesc)
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "y" && answer != "yes" {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	result, err := client.CloseTrade(ctx, accountID, tradeID, closeUnits)
+	if err != nil {
+		return fmt.Errorf("close trade: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("✓ Trade closed")
+	fmt.Printf("  Order ID : %s\n", result.OrderID)
+	fmt.Printf("  Trade ID : %s\n", result.TradeID)
+	fmt.Printf("  Units    : %d\n", result.Units)
+	fmt.Printf("  Price    : %.5f\n", result.Price)
 	return nil
 }

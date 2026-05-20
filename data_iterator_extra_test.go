@@ -3,7 +3,6 @@ package trader
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -187,16 +186,4 @@ func TestCloseCandleIterators_CloseError(t *testing.T) {
 // dukasfile.baseHourUnixMS via actual Key.Path()
 // ---------------------------------------------------------------------------
 
-func TestDukasfileBaseHourUnixMS(t *testing.T) {
-	s := useTempStore(t)
-	_ = s
-
-	sym := "EURUSD"
-	ts := time.Date(2025, 1, 2, 13, 0, 0, 0, time.UTC)
-	df := newDatafile(sym, ts)
-
-	ms, err := df.baseHourUnixMS()
-	require.NoError(t, err)
-	want := timeMilliFromTime(ts)
-	require.Equal(t, want, ms)
-}
+// baseHourUnixMS test moved to ./data/dukascopy/ (now an internal helper there)

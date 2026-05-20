@@ -1017,31 +1017,7 @@ func TestStoreExists_IsDirectory(t *testing.T) {
 // dukasfile – boundary dates
 // =============================================================================
 
-func TestDukasfileURLAllMonths(t *testing.T) {
-	t.Parallel()
-
-	// Dukascopy uses 0-based months in URLs: Jan=00, Dec=11
-	for m := 1; m <= 12; m++ {
-		m := m
-		t.Run(time.Month(m).String(), func(t *testing.T) {
-			t.Parallel()
-			df := newDatafile("EURUSD", time.Date(2025, time.Month(m), 1, 0, 0, 0, 0, time.UTC))
-			url := df.URL()
-			require.Contains(t, url, fmt.Sprintf("/%02d/", m-1))
-		})
-	}
-}
-
-func TestDukasfileTimeIsTruncatedToHour(t *testing.T) {
-	t.Parallel()
-
-	// Any sub-hour component should be dropped
-	ts := time.Date(2025, 6, 15, 14, 45, 30, 999, time.UTC)
-	df := newDatafile("EURUSD", ts)
-	require.Equal(t, 14, df.Time.Hour())
-	require.Equal(t, 0, df.Time.Minute())
-	require.Equal(t, 0, df.Time.Second())
-}
+// Dukascopy URL/time tests moved to ./data/dukascopy/
 
 // =============================================================================
 // bitIsSet / bitSet – boundary indices

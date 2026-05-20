@@ -287,19 +287,7 @@ func TestRequiredTickHoursForMonth_Count(t *testing.T) {
 	require.Less(t, len(keys), 31*24) // can't exceed 31 days × 24 hours
 }
 
-// ---------------------------------------------------------------------------
-// dukasfile.newDatafile: key is cached after first call
-// ---------------------------------------------------------------------------
-
-func TestDukasfileKeyIsCached(t *testing.T) {
-	t.Parallel()
-
-	df := newDatafile("EURUSD", time.Date(2025, 1, 2, 13, 0, 0, 0, time.UTC))
-	k1 := df.Key()
-	k2 := df.Key()
-	require.Equal(t, k1, k2)
-	require.Equal(t, k1.Instrument, df.key.Instrument)
-}
+// Dukascopy key-caching test moved to ./data/dukascopy/
 
 // ---------------------------------------------------------------------------
 // Inventory.MissingComplete: all present and complete returns empty slice

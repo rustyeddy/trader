@@ -54,6 +54,9 @@ cli
 tmp
 trader.log
 debug*
-data
 cmd/cmd
+
+# Ignore raw data under data/ packages; only Go source belongs here.
+data/dukascopy/*/
+data/oanda/*/
 __debug*

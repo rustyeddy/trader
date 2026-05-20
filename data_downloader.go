@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/rustyeddy/trader/data"
 )
 
 type downloader struct {
@@ -31,13 +33,20 @@ func NewDownloader() *downloader {
 }
 
 func (dl *downloader) download(ctx context.Context, key Key) (*saveResult, error) {
-	df := newDatafile(key.Instrument, key.Time())
+	provider, err := data.Get(key.Source)
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", key.Instrument, err)
+	}
 
 	// Correctness-first timeout
 	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	url := df.URL()
+	url := provider.SourceURL(data.SourceParams{
+		Instrument: key.Instrument,
+		Time:       key.Time(),
+		Timeframe:  "tick",
+	})
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
