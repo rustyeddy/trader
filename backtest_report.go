@@ -34,6 +34,12 @@ type BacktestReportSummary struct {
 
 	Stop        string  `json:"stop"`
 	Regime      string  `json:"regime"`
+	MaxSpread   string  `json:"max_spread,omitempty"`
+	Slippage    string  `json:"slippage,omitempty"`
+
+	// Execution cost stats
+	AvgSpreadPips  float64 `json:"avg_spread_pips"`
+	SpreadFiltered int     `json:"spread_filtered"`
 	RR          float64 `json:"rr"`
 	MaxDrawdown float64 `json:"max_drawdown"` // largest peak-to-trough drop in dollars (negative)
 	AvgWinner   float64 `json:"avg_winner"`
@@ -134,8 +140,23 @@ func PrintSummary(w io.Writer, s BacktestReportSummary) {
 	if s.Regime != "" {
 		regimeStr = fmt.Sprintf("   Regime: %s", s.Regime)
 	}
-	fmt.Fprintf(w, "  Risk   : %.2f%%   Stop: %s   RR: %s%s\n",
-		s.RiskPct, stopStr, rrStr, regimeStr)
+	maxSpreadStr := ""
+	if s.MaxSpread != "" {
+		maxSpreadStr = fmt.Sprintf("   MaxSpread: %s", s.MaxSpread)
+	}
+	fmt.Fprintf(w, "  Risk   : %.2f%%   Stop: %s   RR: %s%s%s\n",
+		s.RiskPct, stopStr, rrStr, regimeStr, maxSpreadStr)
+	if s.AvgSpreadPips > 0 || s.SpreadFiltered > 0 || s.Slippage != "" {
+		slipStr := ""
+		if s.Slippage != "" {
+			slipStr = fmt.Sprintf("   Slip: %s", s.Slippage)
+		}
+		filtStr := ""
+		if s.SpreadFiltered > 0 {
+			filtStr = fmt.Sprintf("   Filtered: %d", s.SpreadFiltered)
+		}
+		fmt.Fprintf(w, "  AvgSpread: %.2fp%s%s\n", s.AvgSpreadPips, slipStr, filtStr)
+	}
 	fmt.Fprintln(w, bar)
 }
 

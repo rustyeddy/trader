@@ -29,6 +29,8 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct / 100.0)
 		req.DefaultStopPips = pipsFromFloat(float64(cfg.Defaults.StopPips))
 		req.DefaultTakePips = pipsFromFloat(float64(cfg.Defaults.TakePips))
+		req.SlippagePips = pipsFromFloat(cfg.Defaults.SlippagePips)
+		req.MaxSpreadPips = pipsFromFloat(cfg.Defaults.MaxSpreadPips)
 
 		run.BacktestRequest = req
 		runs = append(runs, *run)
@@ -85,6 +87,8 @@ type BacktestRequest struct {
 
 	DefaultStopPips Pips
 	DefaultTakePips Pips
+	SlippagePips    Pips
+	MaxSpreadPips   Pips
 
 	Source     string
 	Instrument string
@@ -168,6 +172,8 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		rr = avgWinner / -avgLoser
 	}
 
+	avgSpreadPips, spreadFiltered := executionCostStats(run)
+
 	return BacktestReportSummary{
 		Name:       run.Name,
 		Strategy:   run.Strategy.Name(),
@@ -187,6 +193,10 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		RiskPct:      run.RiskPct.Float64() * 100,
 		Stop:         stopDescription(run),
 		Regime:       regimeDescription(run),
+		MaxSpread:    maxSpreadDescription(run),
+		Slippage:     slippageDescription(run),
+		AvgSpreadPips:  avgSpreadPips,
+		SpreadFiltered: spreadFiltered,
 		MaxDrawdown:  maxDD,
 		AvgWinner:    avgWinner,
 		AvgLoser:     avgLoser,
@@ -239,6 +249,37 @@ func regimeDescription(run *Backtest) string {
 		}
 	}
 	return ""
+}
+
+func slippageDescription(run *Backtest) string {
+	if run.SlippagePips == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.1fp", run.SlippagePips.Float64())
+}
+
+func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered int) {
+	if run.BacktestRun == nil {
+		return 0, 0
+	}
+	spreadFiltered = run.BacktestRun.SpreadFiltered
+	if run.BacktestRun.SpreadOpened == 0 {
+		return 0, spreadFiltered
+	}
+	inst := GetInstrument(run.Instrument)
+	if inst == nil {
+		return 0, spreadFiltered
+	}
+	unitsPerPip := float64(inst.PriceUnitsPerPip())
+	avgSpreadPips = float64(run.SpreadSum) / float64(run.SpreadOpened) / unitsPerPip
+	return avgSpreadPips, spreadFiltered
+}
+
+func maxSpreadDescription(run *Backtest) string {
+	if run.MaxSpreadPips == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.1fp", run.MaxSpreadPips.Float64())
 }
 
 func stopDescription(run *Backtest) string {

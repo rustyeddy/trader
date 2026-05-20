@@ -130,6 +130,17 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		regime = NoopRegime{}
 	}
 
+	// Convert slippage and max-spread pips to Price units using instrument metadata.
+	var slippage, maxSpread Price
+	if inst := GetInstrument(run.Instrument); inst != nil {
+		if run.SlippagePips != 0 {
+			slippage = inst.PriceDeltaFromPips(run.SlippagePips)
+		}
+		if run.MaxSpreadPips != 0 {
+			maxSpread = inst.PriceDeltaFromPips(run.MaxSpreadPips)
+		}
+	}
+
 	defer func() {
 		closeErr := itr.Close()
 		if err == nil && closeErr != nil {
@@ -288,7 +299,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			})
 		}
 
-		autoExits, err := autoCloseExits(runCtx, t.Broker, candle)
+		autoExits, err := autoCloseExits(runCtx, t.Broker, candle, slippage)
 		if err != nil {
 			return err
 		}
@@ -310,11 +321,24 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			plan.Opens = nil
 		}
 
+		// Max-spread filter: skip entries when the bid-ask spread is too wide
+		// (market opens, news events, low-liquidity periods).
+		if maxSpread > 0 && candle.AvgSpread > maxSpread && len(plan.Opens) > 0 {
+			run.SpreadFiltered++
+			plan.Opens = nil
+		}
+
 		for _, cancelReq := range plan.Cancel {
 			L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
 			L.Info("submit close request", "ID", cl.Request.ID)
+
+			// Short closes by buying at ask; long closes by selling at bid.
+			if cl.Lot != nil {
+				isBuy := cl.Lot.Side == Short
+				cl.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
+			}
 
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			err = t.Broker.SubmitClose(runCtx, cl)
@@ -329,6 +353,12 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 
 		for _, openReq := range plan.Opens {
 			L.Info("Broker event Open Position", "ID", openReq.ID)
+
+			// Long buys at ask; short sells at bid.
+			isBuy := openReq.Side == Long
+			openReq.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
+			run.SpreadOpened++
+			run.SpreadSum += candle.AvgSpread
 
 			// Let the exit strategy override the initial stop when configured.
 			if exit.Ready() {
@@ -371,12 +401,14 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		})
 
 		for _, lot := range remaining {
+			isBuy := lot.Side == Short
+			closePx := lastCandle.Close + fillAdjust(isBuy, lastCandle.AvgSpread, slippage)
 			cl := &closeRequest{
 				Request: Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "end-of-backtest",
 					RequestType: RequestClose,
-					Price:       lastCandle.Close,
+					Price:       closePx,
 					Timestamp:   lastCandle.Timestamp,
 				},
 				Lot:        lot,

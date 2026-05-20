@@ -23,11 +23,13 @@ type RunDefaults struct {
 	Scale           int64   `json:"scale" yaml:"scale"`
 	Strict          bool    `json:"strict" yaml:"strict"`
 
-	RiskPct  float64 `json:"risk-pct" yaml:"risk-pct"`
-	StopPips int32   `json:"stop-pips" yaml:"stop-pips"`
-	TakePips int32   `json:"take-pips" yaml:"take-pips"`
-	RR       float64 `json:"rr" yaml:"rr"`
-	Units    int32   `json:"units" yaml:"units"`
+	RiskPct      float64 `json:"risk-pct" yaml:"risk-pct"`
+	StopPips     int32   `json:"stop-pips" yaml:"stop-pips"`
+	TakePips     int32   `json:"take-pips" yaml:"take-pips"`
+	RR           float64 `json:"rr" yaml:"rr"`
+	Units        int32   `json:"units" yaml:"units"`
+	SlippagePips  float64 `json:"slippage-pips" yaml:"slippage-pips"`
+	MaxSpreadPips float64 `json:"max-spread-pips" yaml:"max-spread-pips"`
 
 	Source string `json:"source" yaml:"source"`
 }

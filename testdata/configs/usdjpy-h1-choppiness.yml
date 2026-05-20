@@ -6,6 +6,7 @@ defaults:
   scale: 100000
   risk-pct: 1.0
   source: candles
+  max-spread-pips: 1.5
 
 runs:
   - name: usdjpy-h1-2019-2024-adx20-chandelier-ci618

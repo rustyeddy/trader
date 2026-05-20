@@ -218,7 +218,7 @@ func TestAutoCloseExits_StopAndTake(t *testing.T) {
 		Timestamp: Timestamp(1000),
 	}
 
-	n, err := autoCloseExits(context.Background(), b, candle)
+	n, err := autoCloseExits(context.Background(), b, candle, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n, "only the stop lot should have been auto-closed")
 
@@ -245,7 +245,7 @@ func TestAutoCloseExits_TakeProfit(t *testing.T) {
 		Timestamp: Timestamp(2000),
 	}
 
-	n, err := autoCloseExits(context.Background(), b, candle)
+	n, err := autoCloseExits(context.Background(), b, candle, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	assert.Equal(t, 0, acct.Lots.Len())
