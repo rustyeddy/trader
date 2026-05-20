@@ -30,10 +30,24 @@ type Transaction struct {
 	OrderID        string  // the order this fill executed against
 	TradeID        string  // the trade opened by this fill (when applicable)
 
+	// TradesClosed is populated on ORDER_FILL transactions that close one
+	// or more existing trades. Empty for open fills.
+	TradesClosed []ClosedTrade
+
 	// Full transaction payload — use for transaction-type-specific fields
-	// the typed struct doesn't expose (closed trade details, financing
-	// breakdowns, margin call info, etc.).
+	// the typed struct doesn't expose (financing breakdowns, margin call
+	// info, etc.).
 	Raw json.RawMessage
+}
+
+// ClosedTrade is one entry inside an ORDER_FILL's tradesClosed array.
+// A single closing order can close multiple trades (e.g. closing a
+// position that's the aggregate of several legs).
+type ClosedTrade struct {
+	TradeID    string
+	Units      int64   // signed; the units that were closed (opposite of open direction)
+	Price      float64 // close price
+	RealizedPL float64 // realized P/L in account currency
 }
 
 type sinceIDResp struct {
@@ -107,6 +121,12 @@ func parseTransaction(raw json.RawMessage) (Transaction, error) {
 		TradeOpened    *struct {
 			TradeID string `json:"tradeID"`
 		} `json:"tradeOpened"`
+		TradesClosed []struct {
+			TradeID    string `json:"tradeID"`
+			Units      string `json:"units"`
+			Price      string `json:"price"`
+			RealizedPL string `json:"realizedPL"`
+		} `json:"tradesClosed"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return Transaction{}, err
@@ -142,6 +162,16 @@ func parseTransaction(raw json.RawMessage) (Transaction, error) {
 	}
 	if v.TradeOpened != nil {
 		t.TradeID = v.TradeOpened.TradeID
+	}
+	if len(v.TradesClosed) > 0 {
+		t.TradesClosed = make([]ClosedTrade, len(v.TradesClosed))
+		for i, tc := range v.TradesClosed {
+			closed := ClosedTrade{TradeID: tc.TradeID}
+			closed.Units, _ = strconv.ParseInt(tc.Units, 10, 64)
+			closed.Price, _ = strconv.ParseFloat(tc.Price, 64)
+			closed.RealizedPL, _ = strconv.ParseFloat(tc.RealizedPL, 64)
+			t.TradesClosed[i] = closed
+		}
 	}
 
 	return t, nil
