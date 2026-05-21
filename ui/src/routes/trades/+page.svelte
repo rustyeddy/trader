@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-  import { api, type OpenTrade } from '$lib/api';
+  import { api, type OpenTrade, type PlaceOrderProposal } from '$lib/api';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
   const qc = useQueryClient();
@@ -73,6 +73,49 @@
       id: selected.ID,
       units: parseInt(closeUnits) || 0,
     });
+  }
+
+  // ── Place order ────────────────────────────────────────────────────────────
+
+  let orderInstrument = 'EUR_USD';
+  let orderSide = 'long';
+  let orderStopPips = 20;
+  let orderRiskPct = 0.1;
+  let orderPreview: PlaceOrderProposal | null = null;
+  let orderMsg = '';
+
+  const previewMutation = createMutation({
+    mutationFn: () => api.placeTrade({
+      instrument: orderInstrument, side: orderSide,
+      stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: false,
+    }),
+    onSuccess: (data) => { orderPreview = data.Proposal; orderMsg = ''; },
+    onError: (e: Error) => { orderMsg = e.message; },
+  });
+
+  const placeMutation = createMutation({
+    mutationFn: () => api.placeTrade({
+      instrument: orderInstrument, side: orderSide,
+      stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: true,
+    }),
+    onSuccess: () => {
+      orderMsg = 'Order placed!';
+      orderPreview = null;
+      qc.invalidateQueries({ queryKey: ['trades'] });
+      setTimeout(() => { orderMsg = ''; }, 4000);
+    },
+    onError: (e: Error) => { orderMsg = e.message; orderPreview = null; },
+  });
+
+  function cancelPreview() { orderPreview = null; orderMsg = ''; }
+
+  function sideTabClass(tab: string) {
+    return orderSide === tab
+      ? 'bg-accent text-slate-900 font-semibold'
+      : 'text-slate-400 hover:text-slate-200';
+  }
+  function orderMsgClass() {
+    return orderMsg === 'Order placed!' ? 'text-profit' : 'text-loss';
   }
 
   // ── Formatting ─────────────────────────────────────────────────────────────
@@ -154,11 +197,12 @@
     {/if}
   </div>
 
-  <!-- Side panel -->
+  <!-- Right panel: trade detail when selected, new order form otherwise -->
+  <div class="w-72 shrink-0 space-y-4">
   {#if selected}
     {@const t = selected}
-    <div class="w-72 shrink-0 space-y-4">
-      <div class="flex items-center justify-between">
+    <div>
+      <div class="flex items-center justify-between mb-4">
         <h2 class="font-semibold text-slate-100">Trade {t.ID}</h2>
         <button on:click={deselect} class="text-slate-500 hover:text-slate-300 text-lg leading-none">✕</button>
       </div>
@@ -252,6 +296,119 @@
         {/if}
       </div>
     </div>
+
+  {:else}
+
+    <!-- New order form -->
+    <h2 class="font-semibold text-slate-100">New Order</h2>
+
+    <div class="card space-y-3">
+      <label class="block">
+        <span class="text-xs text-slate-400">Instrument</span>
+        <input
+          bind:value={orderInstrument}
+          type="text"
+          placeholder="EUR_USD"
+          class="mt-1 w-full bg-surface border border-surface-border rounded px-3 py-1.5
+                 text-sm font-mono uppercase focus:outline-none focus:border-accent"
+        />
+      </label>
+
+      <div>
+        <span class="text-xs text-slate-400">Side</span>
+        <div class="mt-1 flex rounded overflow-hidden border border-surface-border">
+          <button
+            on:click={() => { orderSide = 'long'; orderPreview = null; }}
+            class="flex-1 py-1.5 text-sm transition-colors {sideTabClass('long')}"
+          >Long</button>
+          <button
+            on:click={() => { orderSide = 'short'; orderPreview = null; }}
+            class="flex-1 py-1.5 text-sm transition-colors {sideTabClass('short')}"
+          >Short</button>
+        </div>
+      </div>
+
+      <label class="block">
+        <span class="text-xs text-slate-400">Stop (pips)</span>
+        <input
+          bind:value={orderStopPips}
+          type="number"
+          min="1"
+          step="1"
+          on:change={() => { orderPreview = null; }}
+          class="mt-1 w-full bg-surface border border-surface-border rounded px-3 py-1.5
+                 text-sm font-mono focus:outline-none focus:border-accent"
+        />
+      </label>
+
+      <label class="block">
+        <span class="text-xs text-slate-400">Risk %</span>
+        <input
+          bind:value={orderRiskPct}
+          type="number"
+          min="0.01"
+          step="0.01"
+          on:change={() => { orderPreview = null; }}
+          class="mt-1 w-full bg-surface border border-surface-border rounded px-3 py-1.5
+                 text-sm font-mono focus:outline-none focus:border-accent"
+        />
+      </label>
+
+      {#if !orderPreview}
+        <button
+          on:click={() => $previewMutation.mutate()}
+          disabled={$previewMutation.isLoading}
+          class="w-full py-1.5 rounded bg-surface-border hover:bg-slate-600 text-slate-200
+                 text-sm font-semibold disabled:opacity-50 transition-colors"
+        >
+          {$previewMutation.isLoading ? 'Loading…' : 'Preview Order'}
+        </button>
+      {:else}
+        <div class="border border-surface-border rounded p-3 space-y-1.5 text-sm">
+          <div class="flex justify-between">
+            <span class="text-slate-400">Units</span>
+            <span class="font-mono">{Math.abs(orderPreview.Units).toLocaleString()}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Entry</span>
+            <span class="font-mono">{orderPreview.EntryPrice.toFixed(5)}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Stop</span>
+            <span class="font-mono">{orderPreview.StopPrice.toFixed(5)}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Risk $</span>
+            <span class="font-mono">{fmtMoney(orderPreview.RiskAmount)}</span>
+          </div>
+          <div class="flex justify-between text-xs text-slate-500">
+            <span>Account NAV</span>
+            <span class="font-mono">{fmtMoney(orderPreview.AccountNAV)}</span>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button
+            on:click={cancelPreview}
+            class="flex-1 py-1.5 rounded bg-surface-border text-slate-300 text-sm
+                   hover:bg-slate-600 transition-colors"
+          >Cancel</button>
+          <button
+            on:click={() => $placeMutation.mutate()}
+            disabled={$placeMutation.isLoading}
+            class="flex-1 py-1.5 rounded bg-accent text-slate-900 text-sm font-semibold
+                   disabled:opacity-50 transition-colors"
+          >
+            {$placeMutation.isLoading ? 'Placing…' : 'Place Order'}
+          </button>
+        </div>
+      {/if}
+
+      {#if orderMsg}
+        <p class="text-xs {orderMsgClass()}">{orderMsg}</p>
+      {/if}
+    </div>
+
   {/if}
+  </div>
 
 </div>

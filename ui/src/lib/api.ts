@@ -33,6 +33,12 @@ export const api = {
   transactions: (sinceId = 0) =>
     request<TransactionsResult>('GET', `/api/v1/transactions?since_id=${sinceId}`),
 
+  placeTrade: (req: {
+    instrument: string; side: string;
+    risk_pct: number; stop_pips: number;
+    units?: number; confirm: boolean;
+  }) => request<PlaceOrderResult>('POST', '/api/v1/trades', req),
+
   runBacktest: (configPaths: string[]) =>
     request<BacktestResult>('POST', '/api/v1/backtests/run', { config_paths: configPaths }),
 
@@ -69,6 +75,29 @@ export interface OpenTrade {
   UnrealizedPL: number;
   StopLoss: number;      // 0 if none
   TakeProfit: number;    // 0 if none
+}
+
+export interface PlaceOrderProposal {
+  Instrument: string;
+  Side: string;
+  Units: number;
+  EntryPrice: number;
+  StopPrice: number;
+  RiskAmount: number;
+  AccountNAV: number;
+}
+
+export interface PlaceOrderFilled {
+  OrderID: string;
+  TradeID: string;
+  Instrument: string;
+  Units: number;
+  Price: number;
+}
+
+export interface PlaceOrderResult {
+  Proposal: PlaceOrderProposal;
+  Filled: PlaceOrderFilled | null;
 }
 
 export interface CloseTradeResult {
