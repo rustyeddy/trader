@@ -20,6 +20,11 @@ type PlaceMarketOrderRequest struct {
 	// Units may override risk-based sizing. When 0, units are computed
 	// from RiskPct + stop distance.
 	Units int64
+	// MaxUnits caps the absolute unit count after risk-based sizing. 0 = no cap.
+	MaxUnits int64
+	// MaxPositionUSD caps the notional value of the position in account currency.
+	// Units are reduced so that (|units| * entryPrice) ≤ MaxPositionUSD. 0 = no cap.
+	MaxPositionUSD float64
 	// Confirm must be true to actually submit the order. False returns the
 	// proposed order in PlaceMarketOrderResult.Proposal without sending.
 	Confirm bool
@@ -118,6 +123,21 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 			units = 1
 		}
 	}
+
+	// Apply caps before signing the units (caps work on absolute values).
+	if req.MaxUnits > 0 && units > req.MaxUnits {
+		units = req.MaxUnits
+	}
+	if req.MaxPositionUSD > 0 && entry > 0 {
+		maxByNotional := int64(math.Floor(req.MaxPositionUSD / entry))
+		if maxByNotional < 1 {
+			maxByNotional = 1
+		}
+		if units > maxByNotional {
+			units = maxByNotional
+		}
+	}
+
 	if side == "short" {
 		units = -units
 	}

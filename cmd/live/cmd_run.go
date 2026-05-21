@@ -17,12 +17,14 @@ import (
 
 // liveRunConfig is the YAML schema for `trader live run`.
 type liveRunConfig struct {
-	Instrument   string        `yaml:"instrument"`
-	Env          string        `yaml:"env"`          // "practice" or "live"
-	TickInterval string        `yaml:"tick_interval"` // e.g. "60s", "5m"
-	MaxPositions int           `yaml:"max_positions"`
-	RiskPct      float64       `yaml:"risk_pct"`
-	Strategy     strategyBlock `yaml:"strategy"`
+	Instrument     string        `yaml:"instrument"`
+	Env            string        `yaml:"env"`            // "practice" or "live"
+	TickInterval   string        `yaml:"tick_interval"`  // e.g. "60s", "5m"
+	MaxPositions   int           `yaml:"max_positions"`
+	RiskPct        float64       `yaml:"risk_pct"`
+	MaxUnits       int64         `yaml:"max_units"`       // hard cap on position size in units
+	MaxPositionUSD float64       `yaml:"max_position_usd"` // cap on notional value per trade
+	Strategy       strategyBlock `yaml:"strategy"`
 }
 
 type strategyBlock struct {
@@ -99,8 +101,15 @@ Example:
 			}
 
 			if dryRun {
-				fmt.Printf("Dry-run: strategy=%s instrument=%s interval=%s max_positions=%d risk_pct=%.2f%%\n",
+				fmt.Printf("Dry-run: strategy=%s instrument=%s interval=%s max_positions=%d risk_pct=%.2f%%",
 					strategy.Name(), cfg.Instrument, interval, cfg.MaxPositions, cfg.RiskPct)
+				if cfg.MaxUnits > 0 {
+					fmt.Printf(" max_units=%d", cfg.MaxUnits)
+				}
+				if cfg.MaxPositionUSD > 0 {
+					fmt.Printf(" max_position_usd=%.2f", cfg.MaxPositionUSD)
+				}
+				fmt.Println()
 				return nil
 			}
 
@@ -129,10 +138,12 @@ Example:
 			fmt.Println("Press Ctrl-C to stop.")
 
 			return svc.RunLiveStrategy(ctx, service.LiveRunConfig{
-				Instrument:   cfg.Instrument,
-				TickInterval: interval,
-				Strategy:     strategy,
-				RiskPct:      cfg.RiskPct,
+				Instrument:     cfg.Instrument,
+				TickInterval:   interval,
+				Strategy:       strategy,
+				RiskPct:        cfg.RiskPct,
+				MaxUnits:       cfg.MaxUnits,
+				MaxPositionUSD: cfg.MaxPositionUSD,
 			})
 		},
 	}

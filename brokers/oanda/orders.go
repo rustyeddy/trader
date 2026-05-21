@@ -42,6 +42,14 @@ type orderResp struct {
 		TradeOpened struct {
 			TradeID string `json:"tradeID"`
 		} `json:"tradeOpened"`
+		// OANDA netting: when the order nets against an existing position the
+		// trade ID appears in tradesClosed or tradeReduced, not tradeOpened.
+		TradesClosed []struct {
+			TradeID string `json:"tradeID"`
+		} `json:"tradesClosed"`
+		TradeReduced struct {
+			TradeID string `json:"tradeID"`
+		} `json:"tradeReduced"`
 		Instrument string `json:"instrument"`
 		Units      string `json:"units"`
 		Price      string `json:"price"`
@@ -115,9 +123,17 @@ func (c *Client) SubmitMarketOrder(ctx context.Context, accountID, instrument st
 	fillUnits, _ := strconv.ParseInt(or.OrderFillTransaction.Units, 10, 64)
 	fillPrice, _ := strconv.ParseFloat(or.OrderFillTransaction.Price, 64)
 
+	tradeID := or.OrderFillTransaction.TradeOpened.TradeID
+	if tradeID == "" && len(or.OrderFillTransaction.TradesClosed) > 0 {
+		tradeID = or.OrderFillTransaction.TradesClosed[0].TradeID
+	}
+	if tradeID == "" {
+		tradeID = or.OrderFillTransaction.TradeReduced.TradeID
+	}
+
 	return &OrderResult{
 		OrderID:    or.OrderFillTransaction.ID,
-		TradeID:    or.OrderFillTransaction.TradeOpened.TradeID,
+		TradeID:    tradeID,
 		Instrument: or.OrderFillTransaction.Instrument,
 		Units:      fillUnits,
 		Price:      fillPrice,

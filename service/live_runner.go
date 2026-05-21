@@ -26,6 +26,12 @@ type LiveRunConfig struct {
 	// RiskPct is the default risk per trade when the strategy's
 	// LiveOpenRequest carries zero. Defaults to 0.1.
 	RiskPct float64
+
+	// MaxUnits caps position size in units (absolute). 0 = no cap.
+	MaxUnits int64
+
+	// MaxPositionUSD caps position notional value in account currency. 0 = no cap.
+	MaxPositionUSD float64
 }
 
 // RunLiveStrategy runs a live strategy loop until ctx is cancelled.
@@ -176,11 +182,13 @@ func (s *Service) runOneTick(
 		riskPct = cfg.RiskPct
 	}
 	result, err := s.PlaceMarketOrder(ctx, PlaceMarketOrderRequest{
-		Instrument: cfg.Instrument,
-		Side:       plan.Open.Side,
-		RiskPct:    riskPct,
-		StopPips:   plan.Open.StopPips,
-		Confirm:    true,
+		Instrument:     cfg.Instrument,
+		Side:           plan.Open.Side,
+		RiskPct:        riskPct,
+		StopPips:       plan.Open.StopPips,
+		MaxUnits:       cfg.MaxUnits,
+		MaxPositionUSD: cfg.MaxPositionUSD,
+		Confirm:        true,
 	})
 	if err != nil {
 		return fmt.Errorf("place order: %w", err)

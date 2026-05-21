@@ -13,6 +13,8 @@ env: practice
 tick_interval: 60s      # poll prices every 60 seconds (1 candle-bar at M1)
 max_positions: 2        # never hold more than 2 open positions at once
 risk_pct: 0.1           # risk 0.1% of account NAV per trade
+max_units: 5000         # hard cap: never open more than 5 000 units per trade
+max_position_usd: 0     # 0 = no notional cap (use max_units instead)
 
 strategy:
   kind: pulse
