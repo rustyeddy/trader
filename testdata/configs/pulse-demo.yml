@@ -11,7 +11,7 @@
 instrument: EUR_USD
 env: practice
 tick_interval: 60s      # poll prices every 60 seconds (1 candle-bar at M1)
-max_positions: 2        # never hold more than 2 open positions at once
+max_positions: 1        # 1 position per instrument (netting account)
 risk_pct: 0.1           # risk 0.1% of account NAV per trade
 max_units: 5000         # hard cap: never open more than 5 000 units per trade
 max_position_usd: 0     # 0 = no notional cap (use max_units instead)
@@ -21,7 +21,7 @@ strategy:
   params:
     trade_every: 5       # open a new position every 5 ticks (~5 minutes)
     hold_bars: 15        # close each position after 15 ticks (~15 minutes)
-    max_positions: 2     # must match top-level max_positions
+    max_positions: 1     # must match top-level max_positions
     side: long           # long only (netting account — no hedging)
     stop_pips: 20        # 20-pip stop loss (≈$20 on a 10k-unit position)
     take_pips: 0         # no take-profit; rely on stop + hold_bars close

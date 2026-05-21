@@ -54,6 +54,15 @@ type orderResp struct {
 		Units      string `json:"units"`
 		Price      string `json:"price"`
 	} `json:"orderFillTransaction"`
+	// OANDA returns these instead of orderFillTransaction when a FOK order
+	// cannot be filled or is rejected before reaching the market.
+	OrderCancelTransaction struct {
+		Reason string `json:"reason"`
+	} `json:"orderCancelTransaction"`
+	OrderRejectTransaction struct {
+		Reason      string `json:"reason"`
+		RejectReason string `json:"rejectReason"`
+	} `json:"orderRejectTransaction"`
 	RelatedTransactionIDs []string `json:"relatedTransactionIDs"`
 }
 
@@ -118,6 +127,18 @@ func (c *Client) SubmitMarketOrder(ctx context.Context, accountID, instrument st
 	var or orderResp
 	if err := json.Unmarshal(respData, &or); err != nil {
 		return nil, fmt.Errorf("oanda: parse order response: %w", err)
+	}
+
+	// OANDA returns 201 even when a FOK order is cancelled or rejected;
+	// detect these by the absence of orderFillTransaction.id.
+	if or.OrderFillTransaction.ID == "" {
+		if r := or.OrderRejectTransaction.RejectReason; r != "" {
+			return nil, fmt.Errorf("oanda: order rejected: %s", r)
+		}
+		if r := or.OrderCancelTransaction.Reason; r != "" {
+			return nil, fmt.Errorf("oanda: order cancelled: %s", r)
+		}
+		return nil, fmt.Errorf("oanda: order not filled (no fill transaction in response)")
 	}
 
 	fillUnits, _ := strconv.ParseInt(or.OrderFillTransaction.Units, 10, 64)

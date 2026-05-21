@@ -136,3 +136,57 @@ func TestSubmitMarketOrder_ZeroUnitsRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "units must be non-zero")
 }
+
+// TestSubmitMarketOrder_FOKCancelled verifies that a 201 response containing
+// orderCancelTransaction (no fill) is surfaced as an error, not silent zeros.
+func TestSubmitMarketOrder_FOKCancelled(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"orderCancelTransaction": map[string]any{
+			"reason": "MARKET_ORDER_FOK_TRANSACTION_REJECTED",
+		},
+		"relatedTransactionIDs": []string{"99"},
+	})
+	srv := newOrderServer(t, body)
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}
+	_, err := c.SubmitMarketOrder(context.Background(), "ACC1", "EUR_USD", 10000, 1.08)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+	assert.Contains(t, err.Error(), "MARKET_ORDER_FOK_TRANSACTION_REJECTED")
+}
+
+// TestSubmitMarketOrder_OrderRejected verifies that orderRejectTransaction is
+// surfaced as an error with the reject reason.
+func TestSubmitMarketOrder_OrderRejected(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"orderRejectTransaction": map[string]any{
+			"reason":       "MARKET_ORDER_REJECT_TRANSACTION",
+			"rejectReason": "STOP_LOSS_ON_FILL_LOSS",
+		},
+		"relatedTransactionIDs": []string{"100"},
+	})
+	srv := newOrderServer(t, body)
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}
+	_, err := c.SubmitMarketOrder(context.Background(), "ACC1", "EUR_USD", 10000, 1.08)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected")
+	assert.Contains(t, err.Error(), "STOP_LOSS_ON_FILL_LOSS")
+}
+
+// TestSubmitMarketOrder_NoFillNoReason verifies the fallback error when the
+// response is a 201 with no fill, cancel, or reject transaction.
+func TestSubmitMarketOrder_NoFillNoReason(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"relatedTransactionIDs": []string{"101"},
+	})
+	srv := newOrderServer(t, body)
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}
+	_, err := c.SubmitMarketOrder(context.Background(), "ACC1", "EUR_USD", 10000, 1.08)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not filled")
+}
