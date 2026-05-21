@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rustyeddy/trader"
 	"github.com/spf13/cobra"
+
+	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/service"
 )
 
 const defaultRegressionConfigPath = "testdata/configs"
@@ -51,53 +53,26 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create output dir %q: %w", outDir, err)
 	}
 
-	count := 0
-	for _, cfgPath := range configPaths {
-		cfg, err := trader.LoadConfig(cfgPath)
-		if err != nil {
-			return fmt.Errorf("load config %q: %w", cfgPath, err)
-		}
-
-		runs, err := trader.GetBacktests(cfg)
-		if err != nil {
-			fmt.Printf("skipping config %q: %v\n", cfgPath, err)
-			continue
-		}
-
-		for _, run := range runs {
-			ctx := cmd.Context()
-			t := &trader.Trader{
-				DataManager: trader.GetDataManager(),
-			}
-			t.Broker = trader.NewBroker("sim")
-			acct := trader.NewAccount("backtest", run.StartingBalance)
-			if run.RiskPct != 0 {
-				acct.RiskPct = run.RiskPct
-			}
-			t.Broker.Account = acct
-
-			if err := t.Backtest(ctx, &run); err != nil {
-				fmt.Printf("backtest error: %v\n", err)
-				continue
-			}
-
-			summary := run.Summary()
-			trader.PrintSummary(os.Stdout, summary)
-
-			if err := writeJSON(filepath.Join(outDir, run.Name+".json"), summary); err != nil {
-				return fmt.Errorf("write json for %q: %w", run.Name, err)
-			}
-			if err := writeOrg(filepath.Join(outDir, run.Name+".org"), summary); err != nil {
-				return fmt.Errorf("write org for %q: %w", run.Name, err)
-			}
-
-			l.Info("wrote reports", "name", run.Name, "dir", outDir)
-			count++
-		}
+	// Backtest doesn't need OANDA, so construct a Service directly without
+	// going through service.New (which requires a token).
+	svc := &service.Service{Log: l}
+	summaries, err := svc.RunBacktestConfigs(cmd.Context(), configPaths)
+	if err != nil {
+		return err
+	}
+	if len(summaries) == 0 {
+		return fmt.Errorf("no regression configs found in %q", configPath)
 	}
 
-	if count == 0 {
-		return fmt.Errorf("no regression configs found in %q", configPath)
+	for _, summary := range summaries {
+		trader.PrintSummary(os.Stdout, summary)
+		if err := writeJSON(filepath.Join(outDir, summary.Name+".json"), summary); err != nil {
+			return fmt.Errorf("write json for %q: %w", summary.Name, err)
+		}
+		if err := writeOrg(filepath.Join(outDir, summary.Name+".org"), summary); err != nil {
+			return fmt.Errorf("write org for %q: %w", summary.Name, err)
+		}
+		l.Info("wrote reports", "name", summary.Name, "dir", outDir)
 	}
 
 	// Rebuild index.org from all JSON files in the output directory.
