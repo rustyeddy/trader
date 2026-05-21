@@ -23,7 +23,13 @@ func New(rc *trader.RootConfig) *cobra.Command {
 		Short: "Live trading subsystem",
 	}
 	cmd.AddCommand(newJournalCmd(rc))
+	cmd.AddCommand(newRunCmd(rc))
 	return cmd
+}
+
+// notifyContext returns a context that is cancelled on SIGINT / SIGTERM.
+func notifyContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 }
 
 func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
@@ -41,7 +47,7 @@ func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
 		Use:   "journal",
 		Short: "Subscribe to OANDA transactions and journal closed trades",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, cancel := notifyContext(cmd.Context())
 			defer cancel()
 
 			svc, err := service.New(service.Config{Env: env, Token: token, AccountID: accountID})
