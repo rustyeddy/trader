@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     // In dev, forward API calls to the running trader daemon.
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/health': 'http://localhost:8080',
+      '/api': 'http://localhost:9999',
+      '/health': 'http://localhost:9999',
     },
   },
 });

@@ -58,6 +58,11 @@ func (s *Server) Handler() http.Handler {
 	// Backtests (no OANDA required)
 	mux.HandleFunc("POST /api/v1/backtests/run", s.handleRunBacktest)
 
+	// SSE streams
+	mux.HandleFunc("GET /api/v1/stream/account", s.handleStreamAccount)
+	mux.HandleFunc("GET /api/v1/stream/events", s.handleStreamEvents)
+	mux.HandleFunc("GET /api/v1/stream/backtest/{id}", s.handleStreamBacktest)
+
 	// Health check — both paths for orchestrators and API clients.
 	health := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

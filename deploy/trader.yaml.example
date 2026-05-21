@@ -8,7 +8,7 @@ token: ""              # OANDA API token; falls back to OANDA_TOKEN env var
 account_id: ""         # auto-discovered if blank (errors if multiple accounts)
 
 rest:
-  addr: ":8080"        # TCP address for REST API
+  addr: ":9999"        # TCP address for REST API
 
 journal:
   kind: sqlite                              # sqlite | csv
