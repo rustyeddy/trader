@@ -1,0 +1,23 @@
+# trader daemon configuration
+# Copy to /etc/trader/trader.yaml and set token or OANDA_TOKEN env var.
+
+# OANDA credentials — leave token empty and set OANDA_TOKEN in the
+# environment (or systemd EnvironmentFile) instead of storing it here.
+env: practice          # practice | live
+token: ""              # OANDA API token; falls back to OANDA_TOKEN env var
+account_id: ""         # auto-discovered if blank (errors if multiple accounts)
+
+rest:
+  addr: ":8080"        # TCP address for REST API
+
+journal:
+  kind: sqlite                              # sqlite | csv
+  sqlite_path: /var/lib/trader/journal.db   # when kind=sqlite
+  csv_trades: /var/lib/trader/trades.csv    # when kind=csv
+  csv_equity: /var/lib/trader/equity.csv
+
+data:
+  dir: /data/candles   # root directory for candle data
+
+log:
+  level: info          # debug | info | warn | error

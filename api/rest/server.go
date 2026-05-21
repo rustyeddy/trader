@@ -48,10 +48,12 @@ func (s *Server) Handler() http.Handler {
 	// Backtests (no OANDA required)
 	mux.HandleFunc("POST /api/v1/backtests/run", s.handleRunBacktest)
 
-	// Health check
-	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+	// Health check — both paths for orchestrators and API clients.
+	health := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	}
+	mux.HandleFunc("GET /api/v1/health", health)
+	mux.HandleFunc("GET /health", health)
 
 	return corsMiddleware(mux)
 }
