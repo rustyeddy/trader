@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/service"
@@ -17,9 +19,10 @@ import (
 
 // Server wraps a Service and exposes its methods over HTTP.
 type Server struct {
-	svc  *service.Service
-	addr string
-	log  *slog.Logger
+	svc      *service.Service
+	addr     string
+	log      *slog.Logger
+	staticFS fs.FS // nil when no UI assets are embedded
 }
 
 // New creates a Server. svc may have a nil OANDA client for backtest-only
@@ -30,6 +33,13 @@ func New(svc *service.Service, addr string) *Server {
 		log = slog.Default()
 	}
 	return &Server{svc: svc, addr: addr, log: log}
+}
+
+// WithStatic sets the fs.FS from which the UI static assets are served.
+// Call before Serve. The FS should be rooted at the dist/ directory
+// (i.e. "index.html" should open directly, not "dist/index.html").
+func (s *Server) WithStatic(fsys fs.FS) {
+	s.staticFS = fsys
 }
 
 // Handler returns the http.Handler (mux) with all routes wired up.
@@ -55,7 +65,35 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/health", health)
 	mux.HandleFunc("GET /health", health)
 
+	// Static UI — registered last so /api/* routes take priority.
+	if s.staticFS != nil {
+		mux.Handle("/", s.spaHandler())
+	}
+
 	return corsMiddleware(mux)
+}
+
+// spaHandler serves static files from s.staticFS with an SPA fallback:
+// unknown paths get index.html so client-side routing works.
+func (s *Server) spaHandler() http.Handler {
+	fileServer := http.FileServerFS(s.staticFS)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		// Check if the file exists in the embedded FS.
+		f, err := s.staticFS.Open(path)
+		if err != nil {
+			// SPA fallback — let the client-side router handle it.
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			fileServer.ServeHTTP(w, r2)
+			return
+		}
+		f.Close()
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // Serve starts listening on s.addr and blocks until ctx is cancelled.

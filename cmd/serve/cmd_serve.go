@@ -23,6 +23,7 @@ import (
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/api/rest"
 	"github.com/rustyeddy/trader/service"
+	traderui "github.com/rustyeddy/trader/ui"
 )
 
 // DaemonConfig is the full config file schema for trader serve.
@@ -179,12 +180,20 @@ Example config file (see deploy/trader.yaml.example):
 			var wg sync.WaitGroup
 			errs := make(chan error, 2)
 
-			// REST API.
+			// REST API — with embedded UI assets.
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				log.Info("serve: REST API starting", "addr", cfg.REST.Addr)
 				srv := rest.New(svc, cfg.REST.Addr)
+				// Serve the SvelteKit UI from the embedded dist/ directory.
+				uiFS, fsErr := traderui.SubFS()
+				if fsErr == nil {
+					srv.WithStatic(uiFS)
+					log.Info("serve: UI assets embedded")
+				} else {
+					log.Warn("serve: UI assets not available", "err", fsErr)
+				}
 				if err := srv.Serve(ctx); err != nil {
 					errs <- fmt.Errorf("REST: %w", err)
 				}
