@@ -71,7 +71,7 @@ Boots:
   2. DataManager with warm candle cache
   3. OANDA broker connection
   4. Transaction stream → journal writer (reconnects on disconnect)
-  5. REST API server (:8080 by default)
+  5. REST API server (:9999 by default)
   6. Graceful shutdown on SIGTERM / SIGINT
 
 Configuration can be loaded from a YAML file (--config) with CLI flags
@@ -82,7 +82,7 @@ Example config file (see deploy/trader.yaml.example):
   token: ""          # or set OANDA_TOKEN
   account_id: ""     # auto-discovered if omitted
   rest:
-    addr: ":8080"
+    addr: ":9999"
   journal:
     kind: sqlite
     sqlite_path: /var/lib/trader/journal.db
@@ -108,7 +108,7 @@ Example config file (see deploy/trader.yaml.example):
 			if env != "" && env != "practice" {
 				cfg.Env = env
 			}
-			if addr != "" && addr != ":8080" {
+			if addr != "" && addr != ":9999" {
 				cfg.REST.Addr = addr
 			}
 			if logLevel != "" && logLevel != "info" {
@@ -124,7 +124,7 @@ Example config file (see deploy/trader.yaml.example):
 				cfg.Env = "practice"
 			}
 			if cfg.REST.Addr == "" {
-				cfg.REST.Addr = ":8080"
+				cfg.REST.Addr = ":9999"
 			}
 			if cfg.Journal.Kind == "" {
 				cfg.Journal.Kind = "sqlite"
@@ -230,7 +230,7 @@ Example config file (see deploy/trader.yaml.example):
 	}
 
 	cmd.Flags().StringVar(&cfgFile, "config", "", "Path to YAML config file")
-	cmd.Flags().StringVar(&addr, "addr", ":8080", "REST API listen address")
+	cmd.Flags().StringVar(&addr, "addr", ":9999", "REST API listen address")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")

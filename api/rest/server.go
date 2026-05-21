@@ -19,10 +19,11 @@ import (
 
 // Server wraps a Service and exposes its methods over HTTP.
 type Server struct {
-	svc      *service.Service
-	addr     string
-	log      *slog.Logger
-	staticFS fs.FS // nil when no UI assets are embedded
+	svc        *service.Service
+	addr       string
+	log        *slog.Logger
+	staticFS   fs.FS  // nil when no UI assets are embedded
+	reportsDir string // directory for backtest JSON reports
 }
 
 // New creates a Server. svc may have a nil OANDA client for backtest-only
@@ -55,8 +56,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/trades/{id}", s.handleCloseTrade)
 	mux.HandleFunc("GET /api/v1/transactions", s.handleGetTransactions)
 
-	// Backtests (no OANDA required)
+	// Backtests — run + browse saved reports
 	mux.HandleFunc("POST /api/v1/backtests/run", s.handleRunBacktest)
+	mux.HandleFunc("GET /api/v1/backtests", s.handleListBacktests)
+	mux.HandleFunc("GET /api/v1/backtests/{name}", s.handleGetBacktest)
+	mux.HandleFunc("GET /api/v1/backtests/{name}/org", s.handleGetBacktestOrg)
 
 	// SSE streams
 	mux.HandleFunc("GET /api/v1/stream/account", s.handleStreamAccount)

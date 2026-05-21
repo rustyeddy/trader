@@ -35,6 +35,17 @@ export const api = {
 
   runBacktest: (configPaths: string[]) =>
     request<BacktestResult>('POST', '/api/v1/backtests/run', { config_paths: configPaths }),
+
+  backtestList: (instrument = '', strategy = '') => {
+    const params = new URLSearchParams();
+    if (instrument) params.set('instrument', instrument);
+    if (strategy)   params.set('strategy', strategy);
+    const qs = params.toString();
+    return request<BacktestListResult>('GET', `/api/v1/backtests${qs ? '?' + qs : ''}`);
+  },
+
+  backtestGet: (name: string) =>
+    request<BacktestSummary>('GET', `/api/v1/backtests/${encodeURIComponent(name)}`),
 };
 
 // ── Types (mirror Go / OANDA JSON field names) ────────────────────────────
@@ -91,17 +102,49 @@ export interface TransactionsResult {
   last_transaction_id: number;
 }
 
+// BacktestSummary matches trader.BacktestReportSummary JSON tags (snake_case).
 export interface BacktestSummary {
-  Name: string;
-  Instrument: string;
-  Timeframe: string;
-  StartingBalance: number;
-  EndingBalance: number;
-  TotalTrades: number;
-  WinRate: number;
-  NetPnL: number;
-  MaxDrawdown: number;
-  SharpeRatio: number;
+  name: string;
+  kind: string;
+  strategy: string;
+  instrument: string;
+  timeframe: string;
+  dataset: string;
+  start: string;
+  end: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  start_balance: number;
+  end_balance: number;
+  net_pl: number;
+  return_pct: number;
+  win_rate: number;
+  risk_pct: number;
+  stop: string;
+  regime: string;
+  rr: number;
+  max_drawdown: number;
+  avg_winner: number;
+  avg_loser: number;
+  trade_details: BacktestReportTrade[] | null;
+}
+
+export interface BacktestReportTrade {
+  id: string;
+  instrument: string;
+  side: string;
+  units: number;
+  open_price: number;
+  close_price: number;
+  open_time: string;
+  close_time: string;
+  pnl: number;
+}
+
+export interface BacktestListResult {
+  count: number;
+  summaries: BacktestSummary[];
 }
 
 export interface BacktestResult {

@@ -2,7 +2,16 @@
 
 ## Overview
 
-**trader** is a Go FX (forex) backtesting and live-trading engine that targets the OANDA v20 REST API. It is structured in layers: the **CLI** (`trader <subcommand>`) is the entry point for every operation; the **service** package holds all business logic and is broker-agnostic; the **REST API** and **MCP server** expose the same service methods over HTTP and stdio respectively; and **SSE streams** push live account and market data to browser clients or other consumers. The daemon mode (`trader serve`) runs the REST API and a live OANDA transaction journal side-by-side, with exponential-backoff reconnect, under a single process.
+**trader** is a Go FX (forex) backtesting and live-trading engine that
+targets the OANDA v20 REST API. It is structured in layers: the
+**CLI** (`trader <subcommand>`) is the entry point for every
+operation; the **service** package holds all business logic and is
+broker-agnostic; the **REST API** and **MCP server** expose the same
+service methods over HTTP and stdio respectively; and **SSE streams**
+push live account and market data to browser clients or other
+consumers. The daemon mode (`trader serve`) runs the REST API and a
+live OANDA transaction journal side-by-side, with exponential-backoff
+reconnect, under a single process.
 
 ---
 
@@ -35,7 +44,10 @@ trader version
 
 ### `trader serve`
 
-Run trader as a long-running daemon. Boots structured logging, a warm candle cache, an OANDA broker connection, a live transaction-stream journal (with exponential-backoff reconnect), and the REST API server. Graceful shutdown on SIGTERM / SIGINT.
+Run trader as a long-running daemon. Boots structured logging, a warm
+candle cache, an OANDA broker connection, a live transaction-stream
+journal (with exponential-backoff reconnect), and the REST API
+server. Graceful shutdown on SIGTERM / SIGINT.
 
 ```
 trader serve [flags]
@@ -60,7 +72,9 @@ trader serve --token $OANDA_TOKEN --env live --addr :9999
 
 ### `trader api serve`
 
-Start only the REST API server (no live journal). Useful for backtest-only deployments. Without `--token`, OANDA endpoints return 503; backtest endpoints work unconditionally.
+Start only the REST API server (no live journal). Useful for
+backtest-only deployments. Without `--token`, OANDA endpoints return
+503; backtest endpoints work unconditionally.
 
 ```
 trader api serve [flags]
@@ -82,11 +96,14 @@ trader api serve --token $TOKEN --env practice
 
 ### `trader backtest`
 
-Parent command for backtest operations. Runs `help` when invoked alone.
+Parent command for backtest operations. Runs `help` when invoked
+alone.
 
 #### `trader backtest regress`
 
-Run all YAML configs in a directory (or a single file) and write JSON + org-mode reports to an output directory. Also rebuilds `index.org` comparing all runs.
+Run all YAML configs in a directory (or a single file) and write
+JSON + org-mode reports to an output directory. Also rebuilds
+`index.org` comparing all runs.
 
 ```
 trader backtest regress [flags]
@@ -97,7 +114,8 @@ trader backtest regress [flags]
 | `--out` | `../trading/backtests` | Output directory for reports |
 | `--reports` | `reports` | Alternate report directory flag |
 
-Config path defaults to `testdata/configs`; override with the global `--config` flag.
+Config path defaults to `testdata/configs`; override with the global
+`--config` flag.
 
 ```bash
 trader backtest regress
@@ -298,7 +316,9 @@ trader replay events --ticks scripted.csv --close-end
 
 ### `trader mcp serve`
 
-Start the MCP (Model Context Protocol) server on stdio. Claude Code and Claude Desktop connect to this to use trader as a set of typed tools.
+Start the MCP (Model Context Protocol) server on stdio. Claude Code
+and Claude Desktop connect to this to use trader as a set of typed
+tools.
 
 | Flag | Default | Description |
 |------|---------|-------------|
