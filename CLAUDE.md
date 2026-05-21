@@ -76,8 +76,15 @@ Backtests are driven by YAML files. See `testdata/configs/` for examples. A conf
 
 ## Testing Conventions
 
+**Every code change must ship with tests. No exceptions.**
+
+- New functions, handlers, and types require unit tests with maximum coverage
+- Modified functions must have their tests updated to cover the changed behaviour
+- Run `make test` and `make cover` before committing; address gaps in coverage
 - Use `testify` assertions (`require`, `assert`)
 - Historical candle fixtures live in `testdata/candles/`
 - Config fixtures live in `testdata/configs/`
 - Synthetic candle generators exist for deterministic unit tests
 - Tests are deterministic: same inputs always produce same outputs (no randomness)
+- REST handlers: use `httptest.NewRecorder` + `httptest.NewRequest`; no real server needed
+- Table-driven tests preferred for functions with multiple input/output cases
