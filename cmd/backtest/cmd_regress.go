@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,15 +65,17 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no regression configs found in %q", configPath)
 	}
 
+	ts := time.Now().Format("20060102-150405")
 	for _, summary := range summaries {
 		trader.PrintSummary(os.Stdout, summary)
-		if err := writeJSON(filepath.Join(outDir, summary.Name+".json"), summary); err != nil {
+		stem := summary.Name + "_" + ts
+		if err := writeJSON(filepath.Join(outDir, stem+".json"), summary); err != nil {
 			return fmt.Errorf("write json for %q: %w", summary.Name, err)
 		}
-		if err := writeOrg(filepath.Join(outDir, summary.Name+".org"), summary); err != nil {
+		if err := writeOrg(filepath.Join(outDir, stem+".org"), summary); err != nil {
 			return fmt.Errorf("write org for %q: %w", summary.Name, err)
 		}
-		l.Info("wrote reports", "name", summary.Name, "dir", outDir)
+		l.Info("wrote reports", "name", stem, "dir", outDir)
 	}
 
 	// Rebuild index.org from all JSON files in the output directory.

@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"time"
 
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -188,6 +192,24 @@ func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("run backtest: %v", err))
 		return
 	}
+
+	// Persist each result so it appears in the list view.
+	dir := s.effectiveReportsDir()
+	_ = os.MkdirAll(dir, 0o755)
+	ts := time.Now().Format("20060102-150405")
+	for i := range summaries {
+		stem := summaries[i].Name + "_" + ts
+		path := filepath.Join(dir, stem+".json")
+		if b, merr := json.MarshalIndent(summaries[i], "", "  "); merr == nil {
+			_ = os.WriteFile(path, append(b, '\n'), 0o644)
+		}
+		orgPath := filepath.Join(dir, stem+".org")
+		if f, ferr := os.Create(filepath.Clean(orgPath)); ferr == nil {
+			trader.WriteOrgReport(f, summaries[i])
+			f.Close()
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"count":     len(summaries),
 		"summaries": summaries,
