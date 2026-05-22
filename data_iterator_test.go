@@ -135,3 +135,26 @@ func TestFuncIterator_CloseError(t *testing.T) {
 
 	require.ErrorIs(t, it.Close(), sentinel)
 }
+
+// ---------------------------------------------------------------------------
+// candleSetIteratorV1.CandleSet
+// ---------------------------------------------------------------------------
+
+func TestCandleSetIteratorV1_CandleSet(t *testing.T) {
+	t.Parallel()
+	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, M1)
+	it := cs.Iterator()
+	require.Same(t, cs, it.CandleSet())
+}
+
+// ---------------------------------------------------------------------------
+// candleSetIterator.CandleSet
+// ---------------------------------------------------------------------------
+
+func TestCandleSetIterator_CandleSet(t *testing.T) {
+	t.Parallel()
+	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, M1)
+	it := newCandleSetIterator(cs, TimeRange{})
+	csi := it.(*candleSetIterator)
+	require.Same(t, cs, csi.CandleSet())
+}

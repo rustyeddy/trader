@@ -159,6 +159,10 @@ func (it *candleSetIterator) Close() error {
 	return nil
 }
 
+func (it *candleSetIterator) CandleSet() *candleSet {
+	return it.base.CandleSet()
+}
+
 type chainedCandleIterator struct {
 	iters  []candleIterator
 	idx    int

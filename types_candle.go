@@ -806,3 +806,7 @@ func (it *candleSetIteratorV1) Time() time.Time {
 func (it *candleSetIteratorV1) StartTime() Timestamp {
 	return it.cs.Start
 }
+
+func (it *candleSetIteratorV1) CandleSet() *candleSet {
+	return it.cs
+}
