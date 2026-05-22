@@ -1,5 +1,6 @@
 # ── Stage 1: build the UI ────────────────────────────────────────────────────
-FROM node:22-alpine AS ui
+# Always runs on the build machine (amd64 in CI), never emulated.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
 
 WORKDIR /ui
 COPY ui/package*.json ./
@@ -8,7 +9,13 @@ COPY ui/ ./
 RUN npm run build
 
 # ── Stage 2: build the Go binary ─────────────────────────────────────────────
-FROM golang:1.24 AS builder
+# Also runs on the build machine. Go cross-compiles natively via GOARCH/GOOS,
+# so no QEMU is needed for the default (CGO_ENABLED=0) build.
+FROM --platform=$BUILDPLATFORM golang:1.24 AS builder
+
+# Injected by docker buildx for each target platform.
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -18,23 +25,23 @@ COPY . .
 COPY --from=ui /ui/dist ./ui/dist
 
 ARG VERSION=dev
-# SQLITE=1 enables the sqlite build tag (CGo required; used for local/dev runs).
-# Default is 0: fully static binary, no CGo, suitable for Pi and cloud.
+# SQLITE=1 enables the sqlite build tag (requires CGo).
+# Cross-compiling CGo needs a cross-compiler toolchain; use QEMU instead for
+# that case. The default (SQLITE=0) cross-compiles cleanly with no QEMU.
 ARG SQLITE=0
 
 RUN if [ "$SQLITE" = "1" ]; then \
-      CGO_ENABLED=1 go build \
+      CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
         -tags sqlite \
         -ldflags="-s -w -X github.com/rustyeddy/trader.Version=${VERSION}" \
         -o /trader ./cmd/main.go; \
     else \
-      CGO_ENABLED=0 go build \
+      CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
         -ldflags="-s -w -X github.com/rustyeddy/trader.Version=${VERSION}" \
         -o /trader ./cmd/main.go; \
     fi
 
 # ── Stage 3a: default runtime — static, no libc, Pi/cloud/desktop ────────────
-# Pulled from the registry on a Pi; no build needed on-device.
 FROM gcr.io/distroless/static-debian12 AS runtime
 
 COPY --from=builder /trader /usr/local/bin/trader
@@ -43,7 +50,7 @@ ENTRYPOINT ["trader"]
 CMD ["--help"]
 
 # ── Stage 3b: SQLite runtime — needs libc for go-sqlite3 ─────────────────────
-# Build with: docker build --build-arg SQLITE=1 --target runtime-sqlite .
+# docker build --build-arg SQLITE=1 --target runtime-sqlite .
 FROM debian:bookworm-slim AS runtime-sqlite
 
 RUN apt-get update \
