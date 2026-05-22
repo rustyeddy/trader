@@ -133,6 +133,13 @@ Example:
 				return err
 			}
 
+			// Prevent two bots from trading the same account simultaneously.
+			_, release, err := acquireAccountLock(svc.AccountID)
+			if err != nil {
+				return err
+			}
+			defer release()
+
 			fmt.Printf("Starting live strategy: %s | %s | %s env | tick=%s\n",
 				strategy.Name(), cfg.Instrument, cfg.Env, interval)
 			fmt.Println("Press Ctrl-C to stop.")
