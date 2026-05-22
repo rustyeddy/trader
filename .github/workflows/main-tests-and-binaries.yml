@@ -28,15 +28,21 @@ jobs:
           make test
           make test-blackbox
 
-      - name: Build binary
-        env:
-          GOOS: linux
-          GOARCH: amd64
-        run: make build
+      - name: Build binaries
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o dist/trader-linux-amd64 ./cmd/main.go
+          GOOS=linux GOARCH=arm64 go build -o dist/trader-linux-arm64 ./cmd/main.go
 
-      - name: Upload binary artifact
+      - name: Upload amd64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: trader-linux-amd64
-          path: bin/trader
+          path: dist/trader-linux-amd64
+          if-no-files-found: error
+
+      - name: Upload arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trader-linux-arm64
+          path: dist/trader-linux-arm64
           if-no-files-found: error
