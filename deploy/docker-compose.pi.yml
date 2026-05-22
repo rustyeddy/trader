@@ -1,0 +1,38 @@
+# Raspberry Pi overlay — merge on top of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.pi.yml up -d live
+#
+# What this changes:
+#   - Caps memory so the live bot can't starve the OS on a 2 GB Pi
+#   - Wires the candle volume to an NFS mount when /data/candles is on a NAS
+#   - Pulls a pre-built arm64 image from the registry instead of building locally
+
+services:
+  data:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  backtest:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  live:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+volumes:
+  candles:
+    driver: local
+    driver_opts:
+      type: nfs
+      # Point NFS_SERVER at whatever box hosts /data/candles on your LAN.
+      o: addr=${NFS_SERVER:-nas.local},rw,soft,timeo=30
+      device: ":${NFS_CANDLE_PATH:-/data/candles}"

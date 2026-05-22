@@ -1,0 +1,102 @@
+# Trader — three-role compose stack
+#
+# Roles:
+#   data      — nightly Dukascopy candle sync (runs on a schedule via cron restart trick)
+#   backtest  — on-demand backtests (profile: backtest; exits when done)
+#   live      — 24/5 live trading strategy (always restarted)
+#
+# Quick start:
+#   cp deploy/env.example .env          # fill in OANDA_TOKEN and OANDA_ACCOUNT_ID
+#   docker compose up -d live           # start the live bot
+#   docker compose run --rm backtest    # run a backtest and exit
+#   docker compose up data              # run a one-shot candle sync
+
+services:
+
+  # ── data ──────────────────────────────────────────────────────────────────
+  # Downloads and builds Dukascopy candles into the shared candle volume.
+  # Run on demand, or schedule via "docker compose run --rm data" from cron.
+  data:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    build:
+      context: .
+      args:
+        VERSION: ${TRADER_VERSION:-dev}
+    command: >
+      data dukas
+      --instrument ${INSTRUMENT:-EUR_USD}
+      --data-dir /data/candles
+    volumes:
+      - candles:/data/candles
+    environment:
+      TZ: UTC
+    restart: "no"
+
+  # ── backtest ───────────────────────────────────────────────────────────────
+  # Runs a config-driven backtest and exits. Invoke with:
+  #   docker compose run --rm backtest
+  # Override the config by mounting a different file:
+  #   docker compose run --rm -v ./my.yml:/config/backtest.yml backtest
+  backtest:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    build:
+      context: .
+      args:
+        VERSION: ${TRADER_VERSION:-dev}
+    command: >
+      backtest regress
+      --config /config/backtest.yml
+      --data-dir /data/candles
+    volumes:
+      - candles:/data/candles
+      - ${BACKTEST_CONFIG_DIR:-./testdata/configs}:/config:ro
+      - backtest-reports:/var/lib/trader/reports
+    environment:
+      TZ: UTC
+    profiles: [backtest]
+    restart: "no"
+
+  # ── live ──────────────────────────────────────────────────────────────────
+  # Runs the live trading strategy against OANDA. Restarts automatically on
+  # crash or machine reboot. The flock guard in the binary prevents two live
+  # containers from racing on the same account.
+  live:
+    image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
+    build:
+      context: .
+      args:
+        VERSION: ${TRADER_VERSION:-dev}
+    command: >
+      live run
+      --instrument ${INSTRUMENT:-EUR_USD}
+      --strategy ${STRATEGY:-pulse}
+      --data-dir /data/candles
+      --db /var/lib/trader/live.db
+      --log-level info
+    volumes:
+      - candles:/data/candles
+      - trader-db:/var/lib/trader
+    environment:
+      OANDA_TOKEN: ${OANDA_TOKEN:?OANDA_TOKEN is required}
+      OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:?OANDA_ACCOUNT_ID is required}
+      OANDA_ENV: ${OANDA_ENV:-practice}
+      TZ: UTC
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  candles:
+    # On a single machine, a local named volume is fine.
+    # On a Pi cluster sharing an NFS mount, replace with:
+    #   driver: local
+    #   driver_opts:
+    #     type: nfs
+    #     o: addr=nas.local,rw
+    #     device: ":/data/candles"
+  trader-db:
+  backtest-reports:
