@@ -154,6 +154,15 @@ func (s *Service) runOneTick(
 		"bid", px.Bid, "ask", px.Ask,
 		"open_trades", len(liveTrades),
 	)
+	for _, t := range liveTrades {
+		log.Debug("live runner: open position",
+			"trade_id", t.ID,
+			"units", t.Units,
+			"entry", t.EntryPrice,
+			"ticks_open", t.TicksOpen,
+			"unrealized_pl", t.UnrealizedPL,
+		)
+	}
 
 	// 3. Strategy decision.
 	plan := cfg.Strategy.Tick(ctx, livePrice, liveTrades)
