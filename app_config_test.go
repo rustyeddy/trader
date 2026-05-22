@@ -131,7 +131,7 @@ func TestValidate(t *testing.T) {
 				Journal:    journalConfig{Type: "bad"},
 			},
 			wantErr: true,
-			errMsg:  "journal.type must be 'csv' or 'sqlite'",
+			errMsg:  "journal.type must be 'csv', 'sqlite', or 'postgres'",
 		},
 		{
 			name: "csv journal missing files",

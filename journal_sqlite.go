@@ -1,3 +1,5 @@
+//go:build sqlite
+
 package trader
 
 import (
@@ -10,7 +12,7 @@ type SQLite struct {
 	db *sql.DB
 }
 
-func NewSQLite(path string) (*SQLite, error) {
+func NewSQLite(path string) (Journal, error) {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, err

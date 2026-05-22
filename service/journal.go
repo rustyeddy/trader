@@ -9,15 +9,17 @@ import (
 
 // JournalConfig selects the journal backend and its destinations.
 type JournalConfig struct {
-	// Kind: "csv" or "sqlite"
+	// Kind: "csv", "sqlite", or "postgres"
 	Kind string
 
 	// CSV-only: paths to trades + equity CSV files.
 	CSVTrades string
 	CSVEquity string
 
-	// SQLite-only: path to the database file.
+	// SQLite: path to the database file.
+	// Postgres: DATABASE_URL connection string.
 	SQLitePath string
+	PostgresURL string
 }
 
 // OpenJournal opens the configured Journal. Caller is responsible for
@@ -36,8 +38,10 @@ func (s *Service) OpenJournal(cfg JournalConfig) (trader.Journal, error) {
 			return nil, fmt.Errorf("open sqlite journal: %w", err)
 		}
 		return j, nil
+	case "postgres":
+		return nil, fmt.Errorf("postgres journal not yet implemented")
 	default:
-		return nil, fmt.Errorf("journal kind must be 'csv' or 'sqlite', got %q", cfg.Kind)
+		return nil, fmt.Errorf("journal kind must be 'csv', 'sqlite', or 'postgres'; got %q", cfg.Kind)
 	}
 }
 

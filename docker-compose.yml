@@ -1,21 +1,47 @@
 # Trader — three-role compose stack
 #
 # Roles:
-#   data      — nightly Dukascopy candle sync (runs on a schedule via cron restart trick)
+#   data      — Dukascopy candle sync; run on demand or via cron
 #   backtest  — on-demand backtests (profile: backtest; exits when done)
-#   live      — 24/5 live trading strategy (always restarted)
+#   live      — 24/5 live strategy, always restarted
+#   postgres  — journal database for live trading on a server
+#
+# Journal backends:
+#   csv       — flat files on the candle NFS volume; works everywhere including Pi
+#   postgres  — DATABASE_URL pointing at the postgres service (or external DB)
+#   sqlite    — local dev only; requires image built with --build-arg SQLITE=1
 #
 # Quick start:
-#   cp deploy/env.example .env          # fill in OANDA_TOKEN and OANDA_ACCOUNT_ID
-#   docker compose up -d live           # start the live bot
-#   docker compose run --rm backtest    # run a backtest and exit
-#   docker compose up data              # run a one-shot candle sync
+#   cp deploy/env.example .env
+#   docker compose up -d postgres live
+#   docker compose run --rm backtest
+#   docker compose run --rm data
 
 services:
 
+  # ── postgres ───────────────────────────────────────────────────────────────
+  # Journal database. Not needed if you use csv journaling.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trader
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [postgres]
+
   # ── data ──────────────────────────────────────────────────────────────────
-  # Downloads and builds Dukascopy candles into the shared candle volume.
-  # Run on demand, or schedule via "docker compose run --rm data" from cron.
+  # Downloads Dukascopy candles into the shared candle volume.
+  # Intended for one-shot / cron use; not a long-running daemon.
   data:
     image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
     build:
@@ -33,9 +59,8 @@ services:
     restart: "no"
 
   # ── backtest ───────────────────────────────────────────────────────────────
-  # Runs a config-driven backtest and exits. Invoke with:
+  # Runs a config-driven backtest and exits.
   #   docker compose run --rm backtest
-  # Override the config by mounting a different file:
   #   docker compose run --rm -v ./my.yml:/config/backtest.yml backtest
   backtest:
     image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
@@ -57,9 +82,9 @@ services:
     restart: "no"
 
   # ── live ──────────────────────────────────────────────────────────────────
-  # Runs the live trading strategy against OANDA. Restarts automatically on
-  # crash or machine reboot. The flock guard in the binary prevents two live
-  # containers from racing on the same account.
+  # Live trading strategy. Restarts automatically on crash or reboot.
+  # Journal defaults to csv (NFS-friendly); set JOURNAL=postgres and
+  # DATABASE_URL to use the postgres service instead.
   live:
     image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
     build:
@@ -71,15 +96,16 @@ services:
       --instrument ${INSTRUMENT:-EUR_USD}
       --strategy ${STRATEGY:-pulse}
       --data-dir /data/candles
-      --db /var/lib/trader/live.db
+      --journal ${JOURNAL:-csv}
       --log-level info
     volumes:
       - candles:/data/candles
-      - trader-db:/var/lib/trader
+      - trader-csv:/var/lib/trader/csv
     environment:
       OANDA_TOKEN: ${OANDA_TOKEN:?OANDA_TOKEN is required}
       OANDA_ACCOUNT_ID: ${OANDA_ACCOUNT_ID:?OANDA_ACCOUNT_ID is required}
       OANDA_ENV: ${OANDA_ENV:-practice}
+      DATABASE_URL: ${DATABASE_URL:-}
       TZ: UTC
     restart: unless-stopped
     stop_grace_period: 30s
@@ -91,12 +117,8 @@ services:
 
 volumes:
   candles:
-    # On a single machine, a local named volume is fine.
-    # On a Pi cluster sharing an NFS mount, replace with:
-    #   driver: local
-    #   driver_opts:
-    #     type: nfs
-    #     o: addr=nas.local,rw
-    #     device: ":/data/candles"
-  trader-db:
+    # On a Pi cluster sharing NFS, replace with driver: local + driver_opts.
+    # See deploy/docker-compose.pi.yml for the NFS overlay.
+  postgres-data:
+  trader-csv:
   backtest-reports:

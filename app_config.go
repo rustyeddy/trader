@@ -165,14 +165,18 @@ func (c *appConfig) Validate() error {
 	if c.Simulation.InitialAsk <= c.Simulation.InitialBid {
 		return fmt.Errorf("simulation initial_ask must be greater than initial_bid")
 	}
-	if c.Journal.Type != "csv" && c.Journal.Type != "sqlite" {
-		return fmt.Errorf("journal.type must be 'csv' or 'sqlite'")
+	validJournalTypes := map[string]bool{"csv": true, "sqlite": true, "postgres": true}
+	if !validJournalTypes[c.Journal.Type] {
+		return fmt.Errorf("journal.type must be 'csv', 'sqlite', or 'postgres'")
 	}
 	if c.Journal.Type == "csv" && (c.Journal.TradesFile == "" || c.Journal.EquityFile == "") {
 		return fmt.Errorf("journal trades_file and equity_file required for CSV type")
 	}
 	if c.Journal.Type == "sqlite" && c.Journal.DBPath == "" {
 		return fmt.Errorf("journal db_path required for SQLite type")
+	}
+	if c.Journal.Type == "postgres" && c.Journal.DBPath == "" {
+		return fmt.Errorf("journal db_path (DATABASE_URL) required for postgres type")
 	}
 	return nil
 }

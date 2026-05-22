@@ -1,3 +1,5 @@
+//go:build sqlite
+
 // journal/schema.go
 package trader
 
