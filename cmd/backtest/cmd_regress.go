@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,29 +13,45 @@ import (
 	"github.com/rustyeddy/trader/service"
 )
 
-const defaultRegressionConfigPath = "testdata/configs"
-const defaultOutDir = "../trading/backtests"
+const defaultRegressConfigDir = "testdata/backtests/configs"
+const defaultBaselineDir = "testdata/backtests/reports"
 
-var regressOutDir string
-var l = trader.L
+var regressUpdate bool
+var regressBaselineDir string
 
+// CMDBacktestRegress runs backtest configs and compares the results against
+// committed JSON baselines. It exits non-zero when any metric differs.
+// Pass --update to replace the baselines with the current results instead.
 var CMDBacktestRegress = &cobra.Command{
 	Use:   "regress",
-	Short: "Run config-based regression backtests and write JSON + org reports",
+	Short: "Compare backtest results against committed baselines; exit 1 on regression",
 	RunE:  runBacktestRegress,
 }
 
 func init() {
+	CMDBacktestRegress.Flags().BoolVar(
+		&regressUpdate,
+		"update",
+		false,
+		"Write current results as new baselines instead of comparing",
+	)
 	CMDBacktestRegress.Flags().StringVar(
-		&regressOutDir,
-		"out",
-		"",
-		fmt.Sprintf("Output directory for reports (default: %s)", defaultOutDir),
+		&regressBaselineDir,
+		"baselines",
+		defaultBaselineDir,
+		"Directory containing committed baseline JSON reports",
 	)
 }
 
+// regressResult holds the pass/fail outcome and diff lines for one run.
+type regressResult struct {
+	name   string
+	passed bool
+	diffs  []string
+}
+
 func runBacktestRegress(cmd *cobra.Command, args []string) error {
-	configPath := defaultRegressionConfigPath
+	configPath := defaultRegressConfigDir
 	if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
 		configPath = strings.TrimSpace(rootCfg.ConfigPath)
 	}
@@ -46,16 +61,6 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	outDir := strings.TrimSpace(regressOutDir)
-	if outDir == "" {
-		outDir = defaultOutDir
-	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("create output dir %q: %w", outDir, err)
-	}
-
-	// Backtest doesn't need OANDA, so construct a Service directly without
-	// going through service.New (which requires a token).
 	svc := &service.Service{Log: l}
 	summaries, err := svc.RunBacktestConfigs(cmd.Context(), configPaths)
 	if err != nil {
@@ -65,78 +70,129 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no regression configs found in %q", configPath)
 	}
 
-	ts := time.Now().Format("20060102-150405")
-	for _, summary := range summaries {
-		trader.PrintSummary(os.Stdout, summary)
-		stem := summary.Name + "_" + ts
-		if err := writeJSON(filepath.Join(outDir, stem+".json"), summary); err != nil {
-			return fmt.Errorf("write json for %q: %w", summary.Name, err)
+	baselineDir := strings.TrimSpace(regressBaselineDir)
+
+	if regressUpdate {
+		return updateBaselines(baselineDir, summaries)
+	}
+	return compareBaselines(baselineDir, summaries)
+}
+
+// updateBaselines writes each summary as a baseline JSON file named
+// <name>.json in dir, creating dir if needed.
+func updateBaselines(dir string, summaries []trader.BacktestReportSummary) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create baseline dir %q: %w", dir, err)
+	}
+	for _, s := range summaries {
+		path := baselinePath(dir, s.Name)
+		if err := writeJSON(path, s); err != nil {
+			return fmt.Errorf("write baseline for %q: %w", s.Name, err)
 		}
-		if err := writeOrg(filepath.Join(outDir, stem+".org"), summary); err != nil {
-			return fmt.Errorf("write org for %q: %w", summary.Name, err)
+		fmt.Printf("  updated  %s\n", path)
+	}
+	return nil
+}
+
+// compareBaselines loads the baseline for each summary and diffs every
+// numeric metric. Prints a PASS/FAIL table to stdout and returns an error
+// if any run regresses.
+func compareBaselines(dir string, summaries []trader.BacktestReportSummary) error {
+	var results []regressResult
+	anyFailed := false
+
+	for _, got := range summaries {
+		path := baselinePath(dir, got.Name)
+		baseline, err := loadBaseline(path)
+		if err != nil {
+			results = append(results, regressResult{
+				name:   got.Name,
+				passed: false,
+				diffs:  []string{fmt.Sprintf("no baseline at %s — run with --update to create one", path)},
+			})
+			anyFailed = true
+			continue
 		}
-		l.Info("wrote reports", "name", stem, "dir", outDir)
+
+		diffs := diffSummaries(*baseline, got)
+		passed := len(diffs) == 0
+		if !passed {
+			anyFailed = true
+		}
+		results = append(results, regressResult{name: got.Name, passed: passed, diffs: diffs})
 	}
 
-	// Rebuild index.org from all JSON files in the output directory.
-	if err := rebuildIndex(outDir); err != nil {
-		l.Warn("could not write index.org", "err", err)
-	}
+	printRegressTable(results)
 
-	fmt.Fprintf(os.Stdout, "\nOutput directory: %s\n", outDir)
+	if anyFailed {
+		return fmt.Errorf("regression detected")
+	}
 	return nil
 }
 
-// writeJSON marshals the summary as indented JSON.
-func writeJSON(path string, s trader.BacktestReportSummary) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+// printRegressTable writes a PASS/FAIL summary and any diff lines to stdout.
+func printRegressTable(results []regressResult) {
+	for _, r := range results {
+		status := "PASS"
+		if !r.passed {
+			status = "FAIL"
+		}
+		fmt.Printf("  [%s] %s\n", status, r.name)
+		for _, d := range r.diffs {
+			fmt.Printf("         %s\n", d)
+		}
 	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
-// writeOrg writes a full org-mode report for a single backtest run.
-func writeOrg(path string, s trader.BacktestReportSummary) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	trader.WriteOrgReport(f, s)
-	return nil
+// baselinePath returns the expected path for the baseline file for a run.
+func baselinePath(dir, name string) string {
+	return filepath.Join(dir, name+".json")
 }
 
-// rebuildIndex scans dir for all *.json files, loads their summaries,
-// and writes a fresh index.org comparison table.
-func rebuildIndex(dir string) error {
-	summaries, err := trader.LoadOrgIndexSummaries(dir)
+// loadBaseline reads and JSON-decodes a baseline file.
+func loadBaseline(path string) (*trader.BacktestReportSummary, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(summaries) == 0 {
-		return nil
+	var s trader.BacktestReportSummary
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("parse baseline %q: %w", path, err)
 	}
-
-	path := filepath.Join(dir, "index.org")
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	trader.WriteOrgIndex(f, summaries)
-	l.Info("wrote index", "path", path)
-	return nil
+	return &s, nil
 }
 
-// writeRegressionSummary is kept for any callers outside this file.
-func writeRegressionSummary(path string, summary trader.BacktestReportSummary) error {
-	return writeJSON(path, summary)
+// diffSummaries returns a slice of human-readable difference strings between
+// baseline and got. All comparisons are exact: since all values are derived
+// from scaled-integer arithmetic, any change indicates a real regression.
+func diffSummaries(baseline, got trader.BacktestReportSummary) []string {
+	var diffs []string
+
+	diffInt := func(field string, b, g int) {
+		if b != g {
+			diffs = append(diffs, fmt.Sprintf("%s: baseline=%d got=%d", field, b, g))
+		}
+	}
+	diffFloat := func(field string, b, g float64) {
+		if b != g {
+			diffs = append(diffs, fmt.Sprintf("%s: baseline=%v got=%v", field, b, g))
+		}
+	}
+
+	diffInt("trades", baseline.Trades, got.Trades)
+	diffInt("wins", baseline.Wins, got.Wins)
+	diffInt("losses", baseline.Losses, got.Losses)
+	diffInt("spread_filtered", baseline.SpreadFiltered, got.SpreadFiltered)
+	diffFloat("start_balance", baseline.StartBalance, got.StartBalance)
+	diffFloat("end_balance", baseline.EndBalance, got.EndBalance)
+	diffFloat("net_pl", baseline.NetPL, got.NetPL)
+	diffFloat("return_pct", baseline.ReturnPct, got.ReturnPct)
+	diffFloat("win_rate", baseline.WinRate, got.WinRate)
+	diffFloat("max_drawdown", baseline.MaxDrawdown, got.MaxDrawdown)
+	diffFloat("avg_winner", baseline.AvgWinner, got.AvgWinner)
+	diffFloat("avg_loser", baseline.AvgLoser, got.AvgLoser)
+	diffFloat("rr", baseline.RR, got.RR)
+	diffFloat("avg_spread_pips", baseline.AvgSpreadPips, got.AvgSpreadPips)
+
+	return diffs
 }

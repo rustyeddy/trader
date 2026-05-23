@@ -7,6 +7,9 @@ import (
 	"sort"
 )
 
+// collectConfigPaths returns the config file(s) to run. If path points to a
+// single file it is returned as-is. If it is a directory, all *.yml, *.yaml,
+// and *.json files are returned in sorted order.
 func collectConfigPaths(path string) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -16,12 +19,17 @@ func collectConfigPaths(path string) ([]string, error) {
 		return []string{path}, nil
 	}
 
-	matches, err := filepath.Glob(filepath.Join(path, "*.yml"))
-	if err != nil {
-		return nil, fmt.Errorf("glob config path %q: %w", path, err)
+	var matches []string
+	for _, pattern := range []string{"*.yml", "*.yaml", "*.json"} {
+		m, err := filepath.Glob(filepath.Join(path, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("glob %q in %q: %w", pattern, path, err)
+		}
+		matches = append(matches, m...)
 	}
+
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("config directory %q contains no *.yml files", path)
+		return nil, fmt.Errorf("config directory %q contains no .yml/.yaml/.json files", path)
 	}
 
 	sort.Strings(matches)

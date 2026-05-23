@@ -6,9 +6,7 @@ import (
 )
 
 var rootCfg *traderpkg.RootConfig
-var btReportsDir string
-
-const defaultReportsDir = "reports"
+var l = traderpkg.L
 
 func New(rc *traderpkg.RootConfig) *cobra.Command {
 	rootCfg = rc
@@ -16,16 +14,8 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 }
 
 func init() {
-	// Patch 1:
-	// Keep only the regression/config-driven backtest entry point.
+	CMDBacktest.AddCommand(CMDBacktestRun)
 	CMDBacktest.AddCommand(CMDBacktestRegress)
-
-	CMDBacktest.Flags().StringVar(
-		&btReportsDir,
-		"reports",
-		defaultReportsDir,
-		"Directory for generated backtest reports",
-	)
 }
 
 var CMDBacktest = &cobra.Command{
