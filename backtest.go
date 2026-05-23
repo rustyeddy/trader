@@ -8,8 +8,6 @@ type Backtest struct {
 	*BacktestRequest
 	*BacktestRun
 	*BacktestResult
-
-	// Trades []Trade
 }
 
 func GetBacktests(cfg *Config) ([]Backtest, error) {
@@ -187,25 +185,25 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		Start:      formatBacktestSummaryTime(run.TimeRange.Start),
 		End:        formatBacktestSummaryTime(run.TimeRange.End),
 
-		Trades:       run.BacktestResult.Trades,
-		Wins:         run.BacktestResult.Wins,
-		Losses:       run.BacktestResult.Losses,
-		StartBalance: run.StartingBalance.Float64(),
-		EndBalance:   run.BacktestResult.Balance.Float64(),
-		NetPL:        run.BacktestResult.NetPL.Float64(),
-		ReturnPct:    run.BacktestResult.ReturnPct.Float64() * 100,
-		WinRate:      run.BacktestResult.WinRate.Float64() * 100,
-		RiskPct:      run.RiskPct.Float64() * 100,
-		Stop:         stopDescription(run),
-		Regime:       regimeDescription(run),
-		MaxSpread:    maxSpreadDescription(run),
-		Slippage:     slippageDescription(run),
+		Trades:         run.BacktestResult.Trades,
+		Wins:           run.BacktestResult.Wins,
+		Losses:         run.BacktestResult.Losses,
+		StartBalance:   run.StartingBalance.Float64(),
+		EndBalance:     run.BacktestResult.Balance.Float64(),
+		NetPL:          run.BacktestResult.NetPL.Float64(),
+		ReturnPct:      run.BacktestResult.ReturnPct.Float64() * 100,
+		WinRate:        run.BacktestResult.WinRate.Float64() * 100,
+		RiskPct:        run.RiskPct.Float64() * 100,
+		Stop:           stopDescription(run),
+		Regime:         regimeDescription(run),
+		MaxSpread:      maxSpreadDescription(run),
+		Slippage:       slippageDescription(run),
 		AvgSpreadPips:  avgSpreadPips,
 		SpreadFiltered: spreadFiltered,
-		MaxDrawdown:  maxDD,
-		AvgWinner:    avgWinner,
-		AvgLoser:     avgLoser,
-		RR:           rr,
+		MaxDrawdown:    maxDD,
+		AvgWinner:      avgWinner,
+		AvgLoser:       avgLoser,
+		RR:             rr,
 
 		TradeDetails: trades,
 	}

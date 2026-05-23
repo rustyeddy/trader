@@ -320,12 +320,12 @@ Start the MCP (Model Context Protocol) server on stdio. Claude Code
 and Claude Desktop connect to this to use trader as a set of typed
 tools.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--token` | `$OANDA_TOKEN` | OANDA API token (enables live endpoints) |
-| `--account-id` | `$OANDA_ACCOUNT_ID` | OANDA account ID |
-| `--env` | `practice` | `practice\|live` |
-| `--enable-write` | `false` | Enable `place_order`, `close_trade`, `update_stop` |
+| Flag             | Default             | Description                                        |
+|------------------|---------------------|----------------------------------------------------|
+| `--token`        | `$OANDA_TOKEN`      | OANDA API token (enables live endpoints)           |
+| `--account-id`   | `$OANDA_ACCOUNT_ID` | OANDA account ID                                   |
+| `--env`          | `practice`          | `practice\|live`                                   |
+| `--enable-write` | `false`             | Enable `place_order`, `close_trade`, `update_stop` |
 
 ```bash
 trader mcp serve
@@ -425,15 +425,17 @@ Requires OANDA token.
 
 Request body:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `instrument` | string | yes | OANDA format, e.g. `EUR_USD` |
-| `side` | string | yes | `long` or `short` |
-| `risk_pct` | number | | Percent of equity to risk (default `1.0`) |
-| `stop_pips` | number | | Stop distance in pips |
-| `stop_price` | number | | Explicit stop price (alternative to `stop_pips`) |
-| `units` | integer | | Explicit unit size (overrides risk sizing) |
-| `confirm` | boolean | | `true` to submit; `false` (default) to preview |
+| Field        | Type    | Required | Description                                      |
+|--------------|---------|----------|--------------------------------------------------|
+| `instrument` | string  | yes      | OANDA format, e.g. `EUR_USD`                     |
+| `side`       | string  | yes      | `long` or `short`                                |
+| `risk_pct`   | number  |          | Percent of equity to risk (default `1.0`)        |
+| `stop_pips`  | number  |          | Stop distance in pips                            |
+| `stop_price` | number  |          | Explicit stop price (alternative to `stop_pips`) |
+| `units`      | integer |          | Explicit unit size (overrides risk sizing)       |
+| `confirm`    | boolean |          | `true` to submit; `false` (default) to preview   |
+|--------------|---------|----------|--------------------------------------------------|
+
 
 ```bash
 # Preview
@@ -521,11 +523,11 @@ Run one or more YAML backtest configs on the server. No OANDA token required.
 
 Request body:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `config_paths` | array of strings | yes | Server-side file paths or glob patterns |
-| `start_date` | string | | ISO-8601 date override for all runs |
-| `end_date` | string | | ISO-8601 date override for all runs |
+| Field          | Type             | Required | Description                             |
+|----------------|------------------|----------|-----------------------------------------|
+| `config_paths` | array of strings | yes      | Server-side file paths or glob patterns |
+| `start_date`   | string           |          | ISO-8601 date override for all runs     |
+| `end_date`     | string           |          | ISO-8601 date override for all runs     |
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/backtests/run \
@@ -565,7 +567,9 @@ data: <JSON payload>
 
 ### `GET /api/v1/stream/account`
 
-Polls the OANDA account summary every 5 seconds and pushes each snapshot as an `account` event. An initial snapshot is sent immediately on connect.
+Polls the OANDA account summary every 5 seconds and pushes each
+snapshot as an `account` event. An initial snapshot is sent
+immediately on connect.
 
 Requires OANDA token.
 
@@ -595,7 +599,10 @@ es.addEventListener('account', e => {
 
 ### `GET /api/v1/stream/events`
 
-Proxies the OANDA live transaction stream. Each trade fill, order cancel, or account event is forwarded as a `transaction` event. OANDA heartbeats are forwarded as `heartbeat` events to prevent proxy timeouts.
+Proxies the OANDA live transaction stream. Each trade fill, order
+cancel, or account event is forwarded as a `transaction` event. OANDA
+heartbeats are forwarded as `heartbeat` events to prevent proxy
+timeouts.
 
 Requires OANDA token.
 
@@ -641,10 +648,10 @@ curl http://localhost:9999/api/v1/stream/backtest/my-run
 
 Two MCP resources are also exposed (read-only):
 
-| URI | Description |
-|-----|-------------|
+| URI                  | Description                                                           |
+|----------------------|-----------------------------------------------------------------------|
 | `backtest://results` | Lists or reads `.org` report files from the backtest output directory |
-| `config://configs` | Lists or reads YAML config files from `testdata/configs/` |
+| `config://configs`   | Lists or reads YAML config files from `testdata/configs/`             |
 
 ---
 
@@ -692,9 +699,9 @@ Return OANDA account transactions with ID greater than `since_id`.
 
 Run one or more YAML backtest configs and return result summaries. Glob patterns are expanded server-side. No OANDA token required.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config_paths` | array of strings | yes | File paths or glob patterns on the server |
+| Parameter      | Type             | Required | Description                               |
+|----------------|------------------|----------|-------------------------------------------|
+| `config_paths` | array of strings | yes      | File paths or glob patterns on the server |
 
 ```json
 {
@@ -715,13 +722,13 @@ These tools are only registered when the server is started with `trader mcp serv
 
 Size and submit a risk-based market order. Set `confirm: false` (the default) to preview without submitting.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `instrument` | string | yes | OANDA instrument, e.g. `EUR_USD` |
-| `side` | string | yes | `long` or `short` |
-| `stop_pips` | number | yes | Stop distance in pips |
-| `risk_pct` | number | | Percent of NAV to risk (default `1.0`) |
-| `confirm` | boolean | | `true` to submit; `false` (default) to preview |
+| Parameter    | Type    | Required | Description                                    |
+|--------------|---------|----------|------------------------------------------------|
+| `instrument` | string  | yes      | OANDA instrument, e.g. `EUR_USD`               |
+| `side`       | string  | yes      | `long` or `short`                              |
+| `stop_pips`  | number  | yes      | Stop distance in pips                          |
+| `risk_pct`   | number  |          | Percent of NAV to risk (default `1.0`)         |
+| `confirm`    | boolean |          | `true` to submit; `false` (default) to preview |
 
 ```json
 {
@@ -742,10 +749,10 @@ Size and submit a risk-based market order. Set `confirm: false` (the default) to
 
 Close an open trade fully or partially.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `trade_id` | string | yes | OANDA trade ID |
-| `units` | integer | | Units to close (0 = full close) |
+| Parameter  | Type    | Required | Description                     |
+|------------|---------|----------|---------------------------------|
+| `trade_id` | string  | yes      | OANDA trade ID                  |
+| `units`    | integer |          | Units to close (0 = full close) |
 
 ```json
 {"name": "close_trade", "arguments": {"trade_id": "1234", "units": 0}}
@@ -757,11 +764,11 @@ Close an open trade fully or partially.
 
 Move the stop-loss and/or take-profit on an open trade. Pass `0` to leave a level unchanged; pass a negative value to cancel it.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `trade_id` | string | yes | OANDA trade ID |
-| `stop_price` | number | | New stop-loss price (0 = unchanged, <0 = cancel) |
-| `take_price` | number | | New take-profit price (0 = unchanged, <0 = cancel) |
+| Parameter    | Type   | Required | Description                                        |
+|--------------|--------|----------|----------------------------------------------------|
+| `trade_id`   | string | yes      | OANDA trade ID                                     |
+| `stop_price` | number |          | New stop-loss price (0 = unchanged, <0 = cancel)   |
+| `take_price` | number |          | New take-profit price (0 = unchanged, <0 = cancel) |
 
 ```json
 {
@@ -804,11 +811,14 @@ log:
   level: info          # debug | info | warn | error
 ```
 
-CLI flags override every config file field. Token resolution order: `--token` flag → `OANDA_TOKEN` env var → `~/.config/oanda/pat.txt`.
+CLI flags override every config file field. Token resolution order:
+`--token` flag → `OANDA_TOKEN` env var → `~/.config/oanda/pat.txt`.
 
 ### Backtest YAML config
 
-Backtest runs are described by YAML files. The `--config` global flag (or the first positional argument for `backtest regress`) points to a single file or a directory of `*.yml` files.
+Backtest runs are described by YAML files. The `--config` global flag
+(or the first positional argument for `backtest regress`) points to a
+single file or a directory of `*.yml` files.
 
 ```yaml
 version: 1
@@ -851,8 +861,8 @@ Available built-in strategy names: `ema-cross`, `ema-cross-adx`, `donchian`, `no
 
 ### Environment variables
 
-| Variable | Description |
-|----------|-------------|
-| `OANDA_TOKEN` | OANDA personal access token |
-| `OANDA_ACCOUNT_ID` | OANDA account ID (skip auto-discovery) |
+| Variable                     | Description                                                   |
+|------------------------------|---------------------------------------------------------------|
+| `OANDA_TOKEN`                | OANDA personal access token                                   |
+| `OANDA_ACCOUNT_ID`           | OANDA account ID (skip auto-discovery)                        |
 | `TRADER_RUN_DUKASCOPY_TESTS` | Set to `1` to enable network-hitting Dukascopy download tests |
