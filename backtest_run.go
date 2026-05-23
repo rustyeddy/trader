@@ -1,5 +1,8 @@
 package trader
 
+// BacktestRun holds mutable state accumulated during a single backtest
+// execution: the live lot book, the list of closed trades, and execution-cost
+// counters updated by the run loop.
 type BacktestRun struct {
 	Lots   *LotBook
 	Trades []*Trade
@@ -10,6 +13,7 @@ type BacktestRun struct {
 	SpreadSum      Price // sum of candle.AvgSpread at each accepted open
 }
 
+// GetTrades returns the run's closed trade list, or nil if run is nil.
 func (run *BacktestRun) GetTrades() []*Trade {
 	if run == nil {
 		return nil
@@ -17,6 +21,8 @@ func (run *BacktestRun) GetTrades() []*Trade {
 	return run.Trades
 }
 
+// BuildBacktestResult copies the account's closed trades into the run.
+// Full result computation (win/loss counts, P/L) is done by Backtest.BuildBacktestResult.
 func (run *BacktestRun) BuildBacktestResult(acct *Account) {
 	if run == nil || acct == nil {
 		return

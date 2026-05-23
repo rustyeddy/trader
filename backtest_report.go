@@ -48,6 +48,8 @@ type BacktestReportSummary struct {
 	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
 }
 
+// BacktestReportTrade is a JSON-serialisable record of a single closed trade
+// used inside BacktestReportSummary.TradeDetails.
 type BacktestReportTrade struct {
 	ID         string  `json:"id"`
 	Instrument string  `json:"instrument"`
@@ -60,6 +62,9 @@ type BacktestReportTrade struct {
 	PNL        float64 `json:"pnl"`
 }
 
+// NewBacktestReportSummary constructs a BacktestReportSummary from a result.
+// NOTE: currently returns a zero-value summary; full mapping is pending a
+// BacktestResult restructure.
 func NewBacktestReportSummary(r *BacktestResult) BacktestReportSummary {
 	return BacktestReportSummary{}
 	// return BacktestReportSummary{
@@ -160,6 +165,7 @@ func PrintSummary(w io.Writer, s BacktestReportSummary) {
 	fmt.Fprintln(w, bar)
 }
 
+// formatBacktestSummaryTime formats a Timestamp as RFC3339 UTC, or "" for zero.
 func formatBacktestSummaryTime(ts Timestamp) string {
 	if ts == 0 {
 		return ""

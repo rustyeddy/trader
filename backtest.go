@@ -2,6 +2,9 @@ package trader
 
 import "fmt"
 
+// Backtest is the top-level unit of work for a single backtesting run.
+// It composes a request (what to run), a mutable run-state (open lots,
+// execution cost counters), and an immutable result (produced at the end).
 type Backtest struct {
 	ID string
 
@@ -10,6 +13,10 @@ type Backtest struct {
 	*BacktestResult
 }
 
+// GetBacktests converts a loaded Config into a slice of ready-to-run Backtest
+// values. Defaults from cfg.Defaults (balance, risk, stop/take pips, slippage,
+// max spread) are merged into each run. Returns an error if the config
+// resolves to zero runs or any run is misconfigured.
 func GetBacktests(cfg *Config) ([]Backtest, error) {
 	runs := make([]Backtest, 0, len(cfg.Runs))
 	for _, runcfg := range cfg.Runs {
@@ -44,6 +51,9 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 	return runs, nil
 }
 
+// newBacktestReq builds a BacktestRequest from a single RunConfig, resolving
+// the time range, strategy, exit strategy, and regime filter. Returns nil and
+// logs to stdout on any construction error (callers must nil-check).
 func newBacktestReq(cfg RunConfig) *BacktestRequest {
 
 	tr, err := timeRangeFromStrings(cfg.Data.From, cfg.Data.To, cfg.Data.Timeframe)
@@ -82,25 +92,31 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 	}
 }
 
+// BacktestRequest holds all the static inputs needed to execute one backtest
+// run. It is populated from Config/RunConfig before the run loop starts and
+// is not modified during execution.
 type BacktestRequest struct {
 	Name string
 
 	StartingBalance Money
-	RiskPct         Rate
+	RiskPct         Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
 
-	DefaultStopPips Pips
-	DefaultTakePips Pips
-	SlippagePips    Pips
-	MaxSpreadPips   Pips
+	DefaultStopPips Pips // fallback stop distance when the strategy doesn't supply one
+	DefaultTakePips Pips // fallback take-profit distance
+	SlippagePips    Pips // extra adverse fill adjustment applied on every open/close
+	MaxSpreadPips   Pips // opens are skipped when the candle spread exceeds this
 
-	Source     string
-	Instrument string
+	Source     string // data source identifier (e.g. "candles", "dukascopy")
+	Instrument string // FX pair (e.g. "EUR_USD")
 	Strategy
 	Exit   ExitStrategy
 	Regime RegimeFilter
 	TimeRange
 }
 
+// BuildBacktestResult snapshots the account state into a BacktestResult and
+// stores it on the run. It computes wins/losses/flat counts, NetPL, ReturnPct,
+// and WinRate from the account's closed trades. Returns nil if run or acct is nil.
 func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	if run == nil || acct == nil {
 		return nil
@@ -145,6 +161,9 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 
 }
 
+// Summary builds a fully-populated BacktestReportSummary from the run's
+// request and result fields. It is safe to call after BuildBacktestResult.
+// Returns a zero-value summary if any required field is nil.
 func (run *Backtest) Summary() BacktestReportSummary {
 	if run == nil || run.BacktestRequest == nil || run.BacktestResult == nil || run.Strategy == nil {
 		return BacktestReportSummary{}
@@ -242,9 +261,8 @@ func computeTradeStats(trades []BacktestReportTrade) (maxDrawdown, avgWinner, av
 	return
 }
 
-// stopDescription builds the stop label for the summary, preferring the exit
-// strategy's name when one is configured, then falling back to the entry
-// strategy's StopDescription.
+// regimeDescription returns the regime filter's name for display in the
+// summary, or an empty string when no filter is configured.
 func regimeDescription(run *Backtest) string {
 	if run.Regime != nil {
 		if name := run.Regime.Name(); name != "" {
@@ -254,6 +272,8 @@ func regimeDescription(run *Backtest) string {
 	return ""
 }
 
+// slippageDescription returns a formatted slippage label (e.g. "1.5p") or
+// an empty string when slippage is zero.
 func slippageDescription(run *Backtest) string {
 	if run.SlippagePips == 0 {
 		return ""
@@ -261,6 +281,8 @@ func slippageDescription(run *Backtest) string {
 	return fmt.Sprintf("%.1fp", run.SlippagePips.Float64())
 }
 
+// executionCostStats returns the average spread (in pips) across accepted
+// opens and the number of opens that were suppressed by the max-spread filter.
 func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered int) {
 	if run.BacktestRun == nil {
 		return 0, 0
@@ -278,6 +300,8 @@ func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered in
 	return avgSpreadPips, spreadFiltered
 }
 
+// maxSpreadDescription returns a formatted max-spread label (e.g. "2.0p") or
+// an empty string when no spread filter is configured.
 func maxSpreadDescription(run *Backtest) string {
 	if run.MaxSpreadPips == 0 {
 		return ""
@@ -285,6 +309,9 @@ func maxSpreadDescription(run *Backtest) string {
 	return fmt.Sprintf("%.1fp", run.MaxSpreadPips.Float64())
 }
 
+// stopDescription returns the stop label for the summary, preferring the exit
+// strategy's name when one is configured, then falling back to the entry
+// strategy's StopDescription.
 func stopDescription(run *Backtest) string {
 	if run.Exit != nil {
 		if name := run.Exit.Name(); name != "" {

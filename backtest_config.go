@@ -11,12 +11,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config is the top-level structure parsed from a YAML or JSON config file.
+// It carries a set of defaults that are merged into each RunConfig before
+// the run is executed.
 type Config struct {
 	Version  int         `json:"version" yaml:"version"`
 	Defaults RunDefaults `json:"defaults" yaml:"defaults"`
 	Runs     []RunConfig `json:"runs" yaml:"runs"`
 }
 
+// RunDefaults holds account-level and execution-cost settings that apply to
+// every run in the config unless overridden at the run level.
 type RunDefaults struct {
 	StartingBalance float64 `json:"starting-balance" yaml:"starting-balance"`
 	AccountCCY      string  `json:"account-ccy" yaml:"account-ccy"`
@@ -34,6 +39,8 @@ type RunDefaults struct {
 	Source string `json:"source" yaml:"source"`
 }
 
+// RunConfig describes a single backtest run: what data to load, which
+// strategy to use, and optional exit and regime-filter overrides.
 type RunConfig struct {
 	Name     string         `json:"name"     yaml:"name"`
 	Data     DataConfig     `json:"data"     yaml:"data"`
@@ -42,6 +49,8 @@ type RunConfig struct {
 	Regime   RegimeConfig   `json:"regime"   yaml:"regime"`
 }
 
+// DataConfig specifies the data source, instrument, timeframe, and date range
+// for a run.
 type DataConfig struct {
 	Source     string `json:"source" yaml:"source"`
 	Instrument string `json:"instrument" yaml:"instrument"`
@@ -51,11 +60,16 @@ type DataConfig struct {
 	Strict     *bool  `json:"strict" yaml:"strict"`
 }
 
+// StrategyConfig names the strategy and carries arbitrary key/value parameters
+// that are passed to the strategy constructor at build time.
 type StrategyConfig struct {
 	Kind   string         `json:"kind" yaml:"kind"`
 	Params map[string]any `json:"params" yaml:"params"`
 }
 
+// LoadConfig reads and parses a YAML or JSON config file from path.
+// The file extension determines the parser (.yaml/.yml → YAML; .json → JSON).
+// Returns an error if the file is missing, unparseable, or contains no runs.
 func LoadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -88,6 +102,9 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// runRequest constructs a minimal Backtest from a single RunConfig.
+// Note: this is a lower-level builder used internally; prefer GetBacktests
+// for full default-merging and validation.
 func (c *Config) runRequest(rcfg RunConfig) (*Backtest, error) {
 	fmt.Printf("rcfg: %+v\n", rcfg)
 
@@ -106,6 +123,8 @@ func (c *Config) runRequest(rcfg RunConfig) (*Backtest, error) {
 	return btr, nil
 }
 
+// firstNonEmpty returns the first non-blank string from vals, or "" if all
+// are blank or empty.
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		v = strings.TrimSpace(v)
@@ -116,14 +135,20 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// percentToRate converts a percentage (e.g. 0.5 meaning 0.5 %) to a
+// RateScale-scaled Rate value.
 func percentToRate(pct float64) Rate {
 	return RateFromFloat(pct / 100.0)
 }
 
+// parseDateStart parses a "YYYY-MM-DD" string as the inclusive start of a
+// date range (midnight UTC on that day).
 func parseDateStart(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }
 
+// parseDateEndExclusive parses a "YYYY-MM-DD" string and returns midnight
+// of the following day, making the range end exclusive (i.e. [start, end)).
 func parseDateEndExclusive(s string) (time.Time, error) {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
@@ -132,6 +157,8 @@ func parseDateEndExclusive(s string) (time.Time, error) {
 	return t.AddDate(0, 0, 1), nil
 }
 
+// parseTimeframe converts a case-insensitive timeframe string ("M1", "H1",
+// "D1") to its Timeframe constant. Returns an error for unknown strings.
 func parseTimeframe(s string) (Timeframe, error) {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "M1":
@@ -145,6 +172,9 @@ func parseTimeframe(s string) (Timeframe, error) {
 	}
 }
 
+// getInt32Param extracts an int32 from a strategy params map, accepting any
+// numeric type that YAML/JSON decoding might produce. Returns (0, false, nil)
+// when the key is absent, or an error if the value is a non-numeric type.
 func getInt32Param(m map[string]any, key string) (int32, bool, error) {
 	v, ok := m[key]
 	if !ok {
@@ -165,6 +195,9 @@ func getInt32Param(m map[string]any, key string) (int32, bool, error) {
 	}
 }
 
+// getFloat64Param extracts a float64 from a strategy params map, widening
+// any integer type as needed. Returns (0, false, nil) when the key is absent,
+// or an error if the value is a non-numeric type.
 func getFloat64Param(m map[string]any, key string) (float64, bool, error) {
 	v, ok := m[key]
 	if !ok {

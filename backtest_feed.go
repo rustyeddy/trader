@@ -28,6 +28,9 @@ type CSVTicksFeed struct {
 	sawFirst bool
 }
 
+// NewCSVTicksFeed opens the CSV file at path and returns a feed that yields
+// only ticks whose timestamp falls within [from, to). Pass zero Timestamps
+// to disable filtering.
 func NewCSVTicksFeed(path string, from, to Timestamp) (*CSVTicksFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -40,6 +43,7 @@ func NewCSVTicksFeed(path string, from, to Timestamp) (*CSVTicksFeed, error) {
 	return &CSVTicksFeed{f: f, r: r, from: from, to: to}, nil
 }
 
+// Close releases the underlying file handle.
 func (f *CSVTicksFeed) Close() error {
 	if f.f != nil {
 		return f.f.Close()
@@ -47,6 +51,8 @@ func (f *CSVTicksFeed) Close() error {
 	return nil
 }
 
+// Next advances the feed and returns the next in-range Tick.
+// Returns (Tick{}, false, nil) at EOF and (Tick{}, false, err) on parse errors.
 func (f *CSVTicksFeed) Next() (Tick, bool, error) {
 	for {
 		row, err := f.r.Read()
@@ -82,6 +88,8 @@ func (f *CSVTicksFeed) Next() (Tick, bool, error) {
 	}
 }
 
+// parseTickRow parses one CSV row into a Tick. Returns (Tick{}, false, nil)
+// for rows that are too short or have blank fields (silently skipped).
 func parseTickRow(row []string) (Tick, bool, error) {
 	// Need at least: time,instrument,bid,ask
 	if len(row) < 4 {
@@ -127,6 +135,8 @@ func parseTickRow(row []string) (Tick, bool, error) {
 	}, true, nil
 }
 
+// inRange reports whether t falls within [from, to). A zero from or to
+// disables the corresponding bound.
 func inRange(t, from, to Timestamp) bool {
 	if !from.IsZero() && t < from {
 		return false

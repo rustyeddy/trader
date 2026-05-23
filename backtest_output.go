@@ -4,6 +4,9 @@ import (
 	"io"
 )
 
+// PrintBacktest writes a formatted backtest result to w.
+// NOTE: this function is currently a stub; the print logic is commented out
+// pending a BacktestResult restructure.
 func PrintBacktest(w io.Writer, r BacktestResult) {
 	_ = r
 	if w == nil {
