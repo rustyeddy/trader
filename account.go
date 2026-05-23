@@ -6,22 +6,29 @@ import (
 	"math"
 )
 
+// Account holds the financial state for a single trading account.
+// All monetary values are scaled integers (Money = int64 × MoneyScale).
+// Invariants that must hold after every operation:
+//   - Equity = Balance + UnrealizedPL
+//   - FreeMargin = Equity − MarginUsed
 type Account struct {
 	ID          string
 	Name        string
-	Currency    string
-	Balance     Money
-	Equity      Money
-	MarginUsed  Money
-	FreeMargin  Money
-	MarginLevel Money
-	RiskPct     Rate
+	Currency    string // account denomination (e.g. "USD")
+	Balance     Money  // realised cash; updated on every close
+	Equity      Money  // Balance + sum of unrealised P/L across open lots
+	MarginUsed  Money  // sum of margin reserved by open lots
+	FreeMargin  Money  // Equity − MarginUsed
+	MarginLevel Money  // Equity / MarginUsed × MoneyScale (0 when flat)
+	RiskPct     Rate   // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
 
 	Lots    LotBook
 	Matcher CloseMatcher
-	Trades  []*Trade
+	Trades  []*Trade // closed trades, appended by CloseLot
 }
 
+// NewAccount creates an Account with the given name and opening deposit.
+// Currency defaults to "USD"; RiskPct defaults to 0.5 %; Matcher to FIFO.
 func NewAccount(name string, deposit Money) *Account {
 	act := &Account{
 		ID:         NewULID(),
@@ -36,6 +43,7 @@ func NewAccount(name string, deposit Money) *Account {
 	return act
 }
 
+// Print writes a debug dump of the account to stdout.
 func (act *Account) Print() {
 	fmt.Printf("Account: %+v\n", act)
 }
@@ -72,6 +80,8 @@ func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
 	return 0, fmt.Errorf("cross conversion not implemented for %s → %s", meta.QuoteCurrency, act.Currency)
 }
 
+// AddLot registers a newly opened lot with the account and immediately
+// revalues all open positions at the lot's entry price.
 func (act *Account) AddLot(ctx context.Context, lot *Lot) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
@@ -95,10 +105,16 @@ func (act *Account) AddLot(ctx context.Context, lot *Lot) error {
 	})
 }
 
+// Resolve recomputes Equity, MarginUsed, FreeMargin, and MarginLevel
+// using each lot's last known entry price as its mark.
 func (act *Account) Resolve() error {
 	return act.ResolveWithMarks(nil)
 }
 
+// lotUnrealizedPNL computes the open profit/loss for a single lot at the
+// given mark price. qta is the quote-to-account rate (RateScale-scaled).
+// The sign follows the lot's side: long gains when mark > entry; short gains
+// when mark < entry.
 func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 	if lot == nil {
 		return 0, fmt.Errorf("nil position")
@@ -165,6 +181,10 @@ func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 	return Money(totalAbs), nil
 }
 
+// ResolveWithMarks recomputes all account-level derived fields (Equity,
+// MarginUsed, FreeMargin, MarginLevel) using the provided mark prices.
+// If a lot's instrument has no entry in marks, the lot's EntryPrice is used.
+// Pass nil to revalue everything at entry (same as Resolve).
 func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
@@ -239,6 +259,10 @@ func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 	return nil
 }
 
+// RealizePNL closes out a lot's unrealised P/L into the account Balance.
+// It updates Balance and resets Equity to the new Balance (caller must call
+// ResolveWithMarks to account for any remaining open lots afterwards).
+// Returns the realised P/L amount.
 func (act *Account) RealizePNL(lot *Lot, trade *Trade) (Money, error) {
 	if act == nil {
 		return 0, fmt.Errorf("nil account")
@@ -275,6 +299,9 @@ func (act *Account) RealizePNL(lot *Lot, trade *Trade) (Money, error) {
 	return pnlMoney, nil
 }
 
+// CloseLot realizes P/L for the lot, appends the trade to the account's
+// Trades history, removes the lot from the LotBook, and revalues remaining
+// open lots at the exit price.
 func (act *Account) CloseLot(lot *Lot, trade *Trade) error {
 	if act == nil {
 		return fmt.Errorf("nil account")
@@ -296,6 +323,10 @@ func (act *Account) CloseLot(lot *Lot, trade *Trade) error {
 	return act.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
 }
 
+// TradeMargin returns the margin required to hold a position of the given
+// size at the given price for the named instrument, expressed in account
+// currency (Money-scaled). It uses the instrument's MarginRate and the
+// account's QuoteToAccount conversion.
 func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, error) {
 	meta := GetInstrument(inst)
 	if meta == nil {
@@ -425,6 +456,9 @@ func (acct *Account) marginPerUnit(inst *Instrument, price Price) (Money, error)
 	return Money(v), nil
 }
 
+// availableMargin returns the usable margin for new positions.
+// It prefers the cached FreeMargin but falls back to computing Equity − MarginUsed
+// in case the field is stale.
 func (acct *Account) availableMargin() Money {
 	if acct.FreeMargin > 0 {
 		return acct.FreeMargin
@@ -437,6 +471,8 @@ func (acct *Account) availableMargin() Money {
 	return 0
 }
 
+// unitsByRisk returns how many units can be opened without exceeding the
+// account's per-trade risk budget (RiskPct × Equity).
 func (acct *Account) unitsByRisk(req *OpenRequest) (Units, error) {
 	riskBudget, err := acct.riskBudget()
 	if err != nil {
@@ -455,6 +491,8 @@ func (acct *Account) unitsByRisk(req *OpenRequest) (Units, error) {
 	return units, nil
 }
 
+// unitsByMargin returns how many units can be opened given the account's
+// current free margin.
 func (acct *Account) unitsByMargin(req *OpenRequest) (Units, error) {
 	freeMargin := acct.availableMargin()
 	if freeMargin <= 0 {
@@ -477,6 +515,7 @@ func (acct *Account) unitsByMargin(req *OpenRequest) (Units, error) {
 	return units, nil
 }
 
+// minUnits returns the smaller of two Units values.
 func minUnits(a, b Units) Units {
 	if a < b {
 		return a
@@ -484,6 +523,12 @@ func minUnits(a, b Units) Units {
 	return b
 }
 
+// SizePosition computes and sets req.Units as the lesser of:
+//   - the units allowed by the risk budget (unitsByRisk)
+//   - the units allowed by available margin (unitsByMargin)
+//
+// Returns an error if the computed size is below the instrument's minimum
+// trade size or if any input is invalid.
 func (acct *Account) SizePosition(req *OpenRequest) error {
 	if acct == nil {
 		return fmt.Errorf("account is nil")
@@ -543,6 +588,8 @@ func (acct *Account) SizePosition(req *OpenRequest) error {
 	return nil
 }
 
+// RR returns the reward-to-risk ratio for a trade setup as a plain float.
+// A ratio of 2.0 means the potential reward is twice the risk.
 func RR(entry, stop, takeProfit float64) float64 {
 	risk := math.Abs(entry - stop)
 	reward := math.Abs(takeProfit - entry)

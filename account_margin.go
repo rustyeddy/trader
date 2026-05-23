@@ -4,6 +4,13 @@ import (
 	"fmt"
 )
 
+// TradeMargin is a package-level helper that computes the margin required to
+// hold a position of the given size at the given price for the named
+// instrument. Unlike Account.TradeMargin, the caller supplies the
+// quote-to-account rate directly, making this function usable without an
+// Account instance (e.g. in unit tests or external calculators).
+//
+// Result is in account currency, Money-scaled (micro-units).
 func TradeMargin(units Units, price Price, instrument string, quoteToAccount Rate) (Money, error) {
 	meta, ok := Instruments[instrument]
 	if !ok {
