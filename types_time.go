@@ -104,6 +104,12 @@ func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	return r
 }
 
+// ParseTimeRange parses a TimeRange from "YYYY-MM-DD" from/to strings and a
+// timeframe string ("M1", "H1", "D1"). Exported for use by sibling packages.
+func ParseTimeRange(from, to, tf string) (TimeRange, error) {
+	return timeRangeFromStrings(from, to, tf)
+}
+
 func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
 	tf := tfFromString(tfstr)
 	if tf == TF0 {

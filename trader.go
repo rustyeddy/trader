@@ -468,7 +468,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		return fmt.Errorf("nil strategy")
 	}
 
-	source := firstNonEmpty(run.Source, SourceCandles)
+	source := firstNonEmpty(run.Source, SourceOanda)
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
 		Source:     source,

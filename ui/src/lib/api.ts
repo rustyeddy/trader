@@ -52,6 +52,9 @@ export const api = {
 
   backtestGet: (name: string) =>
     request<BacktestSummary>('GET', `/api/v1/backtests/${encodeURIComponent(name)}`),
+
+  backtestCandles: (name: string) =>
+    request<CandleResponse>('GET', `/api/v1/backtests/${encodeURIComponent(name)}/candles`),
 };
 
 // ── Types (mirror Go / OANDA JSON field names) ────────────────────────────
@@ -169,6 +172,22 @@ export interface BacktestReportTrade {
   open_time: string;
   close_time: string;
   pnl: number;
+  stop_price?: number;
+  take_profit_price?: number;
+}
+
+export interface CandleBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface CandleResponse {
+  instrument: string;
+  timeframe: string;
+  bars: CandleBar[];
 }
 
 export interface BacktestListResult {

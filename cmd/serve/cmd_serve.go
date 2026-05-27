@@ -52,13 +52,14 @@ type DaemonConfig struct {
 // New returns the "serve" cobra command.
 func New(rc *trader.RootConfig) *cobra.Command {
 	var (
-		cfgFile   string
-		addr      string
-		token     string
-		accountID string
-		env       string
-		logLevel  string
-		journalDB string
+		cfgFile    string
+		addr       string
+		token      string
+		accountID  string
+		env        string
+		logLevel   string
+		journalDB  string
+		reportsDir string
 	)
 
 	cmd := &cobra.Command{
@@ -186,6 +187,10 @@ Example config file (see deploy/trader.yaml.example):
 				defer wg.Done()
 				log.Info("serve: REST API starting", "addr", cfg.REST.Addr)
 				srv := rest.New(svc, cfg.REST.Addr)
+				if reportsDir != "" {
+					srv.WithReportsDir(reportsDir)
+					log.Info("serve: reports dir", "path", reportsDir)
+				}
 				// Serve the SvelteKit UI from the embedded dist/ directory.
 				uiFS, fsErr := traderui.SubFS()
 				if fsErr == nil {
@@ -236,6 +241,7 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level: debug|info|warn|error")
 	cmd.Flags().StringVar(&journalDB, "journal-db", "", "SQLite journal path (default ./trader.db)")
+	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
 
 	return cmd
 }

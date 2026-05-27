@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/backtests", s.handleListBacktests)
 	mux.HandleFunc("GET /api/v1/backtests/{name}", s.handleGetBacktest)
 	mux.HandleFunc("GET /api/v1/backtests/{name}/org", s.handleGetBacktestOrg)
+	mux.HandleFunc("GET /api/v1/backtests/{name}/candles", s.handleGetBacktestCandles)
 
 	// SSE streams
 	mux.HandleFunc("GET /api/v1/stream/account", s.handleStreamAccount)

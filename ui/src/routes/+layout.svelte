@@ -13,7 +13,7 @@
 </script>
 
 <QueryClientProvider client={queryClient}>
-  <div class="flex min-h-screen">
+  <div class="flex h-screen">
     <!-- Sidebar -->
     <nav class="w-48 bg-surface-raised border-r border-surface-border flex flex-col shrink-0">
       <div class="px-4 py-5 border-b border-surface-border">

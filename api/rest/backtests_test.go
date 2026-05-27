@@ -202,15 +202,17 @@ func TestLoadSummary_BackfillsNameFromFilename(t *testing.T) {
 	assert.Equal(t, "inferred-name", s.Name)
 }
 
-func TestLoadSummary_PreservesExplicitName(t *testing.T) {
+func TestLoadSummary_AlwaysUsesFilenameAsName(t *testing.T) {
+	// The filename stem is the canonical name even when the JSON has a different
+	// "name" field (e.g. missing the hash suffix).
 	dir := t.TempDir()
-	path := filepath.Join(dir, "file.json")
-	b, _ := json.Marshal(trader.BacktestReportSummary{Name: "explicit"})
+	path := filepath.Join(dir, "run-abc123.json")
+	b, _ := json.Marshal(trader.BacktestReportSummary{Name: "run"})
 	require.NoError(t, os.WriteFile(path, b, 0o644))
 
 	s, err := loadSummary(path)
 	require.NoError(t, err)
-	assert.Equal(t, "explicit", s.Name)
+	assert.Equal(t, "run-abc123", s.Name)
 }
 
 func TestLoadSummary_InvalidJSON(t *testing.T) {
@@ -225,4 +227,64 @@ func TestLoadSummary_InvalidJSON(t *testing.T) {
 func TestLoadSummary_MissingFile(t *testing.T) {
 	_, err := loadSummary("/nonexistent/path/file.json")
 	assert.Error(t, err)
+}
+
+// ── handleGetBacktestCandles ──────────────────────────────────────────────────
+
+func TestHandleGetBacktestCandles_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t, nil)
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/no-such-run/candles")
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestHandleGetBacktestCandles_InvalidTimeRange(t *testing.T) {
+	s := trader.BacktestReportSummary{
+		Name: "bad-range",
+		Config: trader.RunConfig{
+			Data: trader.DataConfig{
+				Instrument: "EURUSD",
+				Timeframe:  "H1",
+				From:       "2024-06-01",
+				To:         "2024-01-01", // to before from — invalid
+			},
+		},
+	}
+	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/bad-range/candles")
+	assert.Equal(t, http.StatusUnprocessableEntity, rr.Code)
+}
+
+func TestHandleGetBacktestCandles_EmptyWhenNoCandleFiles(t *testing.T) {
+	// Report has a valid config but no candle files exist on disk.
+	// strict=false means DataManager skips missing files → empty bars array.
+	s := trader.BacktestReportSummary{
+		Name: "no-candles",
+		Config: trader.RunConfig{
+			Data: trader.DataConfig{
+				Instrument: "EURUSD",
+				Timeframe:  "H1",
+				From:       "2024-01-01",
+				To:         "2024-02-01",
+			},
+		},
+	}
+	// Point the server at an empty reports dir; swap the store to a temp dir
+	// that has no candle files so DataManager returns an empty iterator.
+	restore := trader.SwapStore(trader.NewStoreAt(t.TempDir()))
+	t.Cleanup(restore)
+
+	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/no-candles/candles")
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Instrument string      `json:"instrument"`
+		Timeframe  string      `json:"timeframe"`
+		Bars       []candleBar `json:"bars"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "EURUSD", body.Instrument)
+	assert.Equal(t, "H1", body.Timeframe)
+	assert.NotNil(t, body.Bars, "bars must be [] not null")
+	assert.Empty(t, body.Bars)
 }

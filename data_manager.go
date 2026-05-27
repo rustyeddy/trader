@@ -647,7 +647,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (candleIt
 
 	source := normalizeSource(req.Source)
 	if source == "" {
-		source = SourceCandles
+		source = SourceOanda
 	}
 
 	// months := MonthsInRange(req.Range)

@@ -152,13 +152,21 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 }
 
 // emitOpen closes any opposite open lots, then opens a new position.
+// If a position in the same direction is already open, no new entry is emitted
+// (prevents piling up 5 entries across 6 consecutive breakout bars).
 // No internal stop is set — the ExitStrategy supplies one via InitialStop.
 func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *trader.StrategyPlan {
 	plan := &trader.StrategyPlan{}
 
+	alreadyOpen := false
 	if run != nil && run.Lots != nil {
 		_ = run.Lots.Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen || lot.Side == side {
+			if lot.State != trader.LotOpen {
+				return nil
+			}
+			if lot.Side == side {
+				// Already in this direction — skip new entry.
+				alreadyOpen = true
 				return nil
 			}
 			plan.Closes = append(plan.Closes, &trader.CloseRequest{
@@ -177,8 +185,12 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 		})
 	}
 
+	if alreadyOpen {
+		return plan
+	}
+
 	inst := ""
-	if run != nil {
+	if run != nil && run.BacktestRequest != nil {
 		inst = run.Instrument
 	}
 	plan.Opens = append(plan.Opens, trader.NewOpenRequest(inst, ct, side, 0, 0, "donchian-breakout"))

@@ -58,15 +58,17 @@ type BacktestReportSummary struct {
 // BacktestReportTrade is a JSON-serialisable record of a single closed trade
 // used inside BacktestReportSummary.TradeDetails.
 type BacktestReportTrade struct {
-	ID         string  `json:"id"`
-	Instrument string  `json:"instrument"`
-	Side       string  `json:"side"`
-	Units      int64   `json:"units"`
-	OpenPrice  float64 `json:"open_price"`
-	ClosePrice float64 `json:"close_price"`
-	OpenTime   string  `json:"open_time"`
-	CloseTime  string  `json:"close_time"`
-	PNL        float64 `json:"pnl"`
+	ID             string  `json:"id"`
+	Instrument     string  `json:"instrument"`
+	Side           string  `json:"side"`
+	Units          int64   `json:"units"`
+	OpenPrice      float64 `json:"open_price"`
+	ClosePrice     float64 `json:"close_price"`
+	OpenTime       string  `json:"open_time"`
+	CloseTime      string  `json:"close_time"`
+	PNL            float64 `json:"pnl"`
+	StopPrice      float64 `json:"stop_price,omitempty"`
+	TakeProfitPrice float64 `json:"take_profit_price,omitempty"`
 }
 
 // NewBacktestReportSummary constructs a BacktestReportSummary from a result.

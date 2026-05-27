@@ -75,3 +75,49 @@ func TestBreakout_NoBreakNoEntry(t *testing.T) {
 	assert.Empty(t, plan.Opens)
 	assert.Equal(t, "no breakout", plan.Reason)
 }
+
+// makeOpenLot returns a minimal Backtest with one open lot on the given side,
+// used to simulate an already-open position when calling emitOpen.
+func makeOpenLot(side trader.Side) *trader.Backtest {
+	lot := &trader.Lot{
+		TradeCommon: &trader.TradeCommon{ID: "test-lot", Side: side},
+		State:       trader.LotOpen,
+	}
+	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
+	run.Lots = &trader.LotBook{}
+	run.Lots.Add(lot)
+	return run
+}
+
+func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
+	t.Parallel()
+	s := New(Config{Period: 5, CloseStrength: 0.6})
+	for i := 0; i < 5; i++ {
+		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
+		s.Update(context.Background(), ct, nil)
+	}
+
+	// Simulate a long already open; a second breakout bar should not add another.
+	run := makeOpenLot(trader.Long)
+	break2 := &trader.CandleTime{Candle: trader.Candle{Open: 110, High: 125, Low: 109, Close: 124}}
+	plan := s.Update(context.Background(), break2, run)
+	assert.Empty(t, plan.Opens, "should not stack a second long on top of existing long")
+	assert.Empty(t, plan.Closes, "should not close the existing long either")
+}
+
+func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
+	t.Parallel()
+	s := New(Config{Period: 5, CloseStrength: 0.6})
+	for i := 0; i < 5; i++ {
+		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
+		s.Update(context.Background(), ct, nil)
+	}
+
+	// Long open, then a short breakout: should close the long and open a short.
+	run := makeOpenLot(trader.Long)
+	rev := &trader.CandleTime{Candle: trader.Candle{Open: 90, High: 91, Low: 78, Close: 79}}
+	plan := s.Update(context.Background(), rev, run)
+	require.Len(t, plan.Closes, 1, "should close existing long on reversal")
+	require.Len(t, plan.Opens, 1, "should open new short on reversal")
+	assert.Equal(t, trader.Short, plan.Opens[0].Side)
+}
