@@ -9,6 +9,8 @@ import (
 
 // BacktestReportSummary is a normalized machine-readable summary used for
 // committed regression baselines and generated comparison artifacts.
+// The Config and ConfigHash fields make every report self-describing: you can
+// open any JSON file and see exactly what params produced it.
 type BacktestReportSummary struct {
 	Name       string `json:"name"`
 	Kind       string `json:"kind"`
@@ -32,20 +34,25 @@ type BacktestReportSummary struct {
 	WinRate   float64 `json:"win_rate"`
 	RiskPct   float64 `json:"risk_pct"`
 
-	Stop        string  `json:"stop"`
-	Regime      string  `json:"regime"`
-	MaxSpread   string  `json:"max_spread,omitempty"`
-	Slippage    string  `json:"slippage,omitempty"`
+	Stop      string `json:"stop"`
+	Regime    string `json:"regime"`
+	MaxSpread string `json:"max_spread,omitempty"`
+	Slippage  string `json:"slippage,omitempty"`
 
 	// Execution cost stats
 	AvgSpreadPips  float64 `json:"avg_spread_pips"`
 	SpreadFiltered int     `json:"spread_filtered"`
-	RR          float64 `json:"rr"`
-	MaxDrawdown float64 `json:"max_drawdown"` // largest peak-to-trough drop in dollars (negative)
-	AvgWinner   float64 `json:"avg_winner"`
-	AvgLoser    float64 `json:"avg_loser"` // negative
+	RR             float64 `json:"rr"`
+	MaxDrawdown    float64 `json:"max_drawdown"` // largest peak-to-trough drop in dollars (negative)
+	AvgWinner      float64 `json:"avg_winner"`
+	AvgLoser       float64 `json:"avg_loser"` // negative
 
 	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
+
+	// Provenance — always populated; links this report back to its origin.
+	ConfigHash  string    `json:"config_hash"`            // 8-char SHA256 prefix of the run config params
+	GeneratedAt string    `json:"generated_at"`           // RFC3339 UTC timestamp of when the run completed
+	Config      RunConfig `json:"config"`                 // full config snapshot that produced this result
 }
 
 // BacktestReportTrade is a JSON-serialisable record of a single closed trade

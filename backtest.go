@@ -1,12 +1,20 @@
 package trader
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // Backtest is the top-level unit of work for a single backtesting run.
 // It composes a request (what to run), a mutable run-state (open lots,
 // execution cost counters), and an immutable result (produced at the end).
+// RunConfig is the original config snapshot; it is carried through to the
+// summary so every report is self-describing.
 type Backtest struct {
-	ID string
+	ID        string
+	RunConfig RunConfig // original config snapshot before transformation
 
 	*BacktestRequest
 	*BacktestRun
@@ -22,6 +30,7 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 	for _, runcfg := range cfg.Runs {
 		run := &Backtest{
 			ID:          NewULID(),
+			RunConfig:   runcfg,
 			BacktestRun: &BacktestRun{},
 		}
 
@@ -41,6 +50,7 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 		req.DefaultTakePips = pipsFromFloat(float64(cfg.Defaults.TakePips))
 		req.SlippagePips = pipsFromFloat(cfg.Defaults.SlippagePips)
 		req.MaxSpreadPips = pipsFromFloat(cfg.Defaults.MaxSpreadPips)
+		req.ConfigHash = hashRunConfig(runcfg)
 
 		run.BacktestRequest = req
 		runs = append(runs, *run)
@@ -49,6 +59,27 @@ func GetBacktests(cfg *Config) ([]Backtest, error) {
 		return nil, fmt.Errorf("regression config must resolve to exactly 1 run, got %d", len(runs))
 	}
 	return runs, nil
+}
+
+// hashRunConfig returns the first 8 hex characters of the SHA256 of the
+// run's data/strategy/exit/regime params. The Name field is excluded because
+// it is a label, not a parameter that affects results. This hash is used as
+// a stable filename suffix: same params → same hash → same file on disk.
+func hashRunConfig(cfg RunConfig) string {
+	type hashable struct {
+		Data     DataConfig     `json:"data"`
+		Strategy StrategyConfig `json:"strategy"`
+		Exit     ExitConfig     `json:"exit"`
+		Regime   RegimeConfig   `json:"regime"`
+	}
+	b, _ := json.Marshal(hashable{
+		Data:     cfg.Data,
+		Strategy: cfg.Strategy,
+		Exit:     cfg.Exit,
+		Regime:   cfg.Regime,
+	})
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:4]) // 8 hex chars
 }
 
 // newBacktestReq builds a BacktestRequest from a single RunConfig, resolving
@@ -96,7 +127,8 @@ func newBacktestReq(cfg RunConfig) *BacktestRequest {
 // run. It is populated from Config/RunConfig before the run loop starts and
 // is not modified during execution.
 type BacktestRequest struct {
-	Name string
+	Name       string
+	ConfigHash string // 8-char SHA256 prefix of the RunConfig params (set by GetBacktests)
 
 	StartingBalance Money
 	RiskPct         Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
@@ -225,6 +257,10 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		RR:             rr,
 
 		TradeDetails: trades,
+
+		ConfigHash:  run.ConfigHash,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Config:      run.RunConfig,
 	}
 }
 

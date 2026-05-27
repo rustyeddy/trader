@@ -1,0 +1,24 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  risk-pct: 1.0
+  source: oanda
+
+runs:
+  - name: eurusd-h1-emacross-adx
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-03-31
+    strategy:
+      kind: ema-cross-adx
+      params:
+        fast: 9
+        slow: 21
+        adx_period: 14
+        adx_threshold: 25.0
+        atr_period: 14
+        atr_multiplier: 1.5

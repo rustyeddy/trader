@@ -1,0 +1,40 @@
+{
+  "name": "eurusd-h1-lifecycle",
+  "kind": "",
+  "strategy": "lifecycle-test",
+  "instrument": "EURUSD",
+  "timeframe": "h1",
+  "dataset": "",
+  "start": "2024-01-01T00:00:00Z",
+  "end": "2024-03-31T00:00:00Z",
+  "trades": 1,
+  "wins": 0,
+  "losses": 1,
+  "start_balance": 10000,
+  "end_balance": 9999.02,
+  "net_pl": -0.98,
+  "return_pct": -0.0098,
+  "win_rate": 0,
+  "risk_pct": 1,
+  "stop": "",
+  "regime": "",
+  "avg_spread_pips": 3.5,
+  "spread_filtered": 0,
+  "rr": 0,
+  "max_drawdown": -0.98,
+  "avg_winner": 0,
+  "avg_loser": -0.98,
+  "trade_details": [
+    {
+      "id": "01KSASZFW916CHQ3KB7F4TQ35D",
+      "instrument": "EURUSD",
+      "side": "long",
+      "units": 1000,
+      "open_price": 1.10473,
+      "close_price": 1.10375,
+      "open_time": "2024-01-01T22:00:00Z",
+      "close_time": "2024-01-02T00:00:00Z",
+      "pnl": -0.98
+    }
+  ]
+}

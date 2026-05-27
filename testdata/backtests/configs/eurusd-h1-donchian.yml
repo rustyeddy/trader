@@ -1,0 +1,26 @@
+version: 1
+
+defaults:
+  starting-balance: 10000
+  account-ccy: USD
+  risk-pct: 1.0
+  source: oanda
+  max-spread-pips: 1.5
+
+runs:
+  - name: eurusd-h1-donchian
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-03-31
+    strategy:
+      kind: donchian-breakout
+      params:
+        period: 20
+        close_strength: 0.6
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0

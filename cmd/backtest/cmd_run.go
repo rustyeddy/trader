@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,31 +13,55 @@ import (
 	"github.com/rustyeddy/trader/service"
 )
 
-const defaultRunConfigDir = "testdata/backtests/configs"
-const defaultRunOutDir = "reports"
+// backtestBaseDir returns the root directory for production backtest configs
+// and results. It honours the TRADER_BACKTEST_DIR environment variable; if
+// unset it falls back to /trading/backtests.
+//
+// Layout under this directory:
+//
+//	configs/   — YAML backtest configs
+//	results/   — hash-named JSON + org reports
+func backtestBaseDir() string {
+	if d := strings.TrimSpace(os.Getenv("TRADER_BACKTEST_DIR")); d != "" {
+		return d
+	}
+	return "/trading/backtests"
+}
 
 var runOutDir string
 
-// CMDBacktestRun runs one or more backtest configs and writes timestamped
-// JSON and org-mode reports to an output directory.
+// CMDBacktestRun runs one or more backtest configs and writes reports named
+// <run-name>-<config-hash>.json to the output directory. Re-running the same
+// config overwrites the same file; changing any param produces a new file.
 var CMDBacktestRun = &cobra.Command{
 	Use:   "run [config-path]",
 	Short: "Run backtest configs and write JSON + org reports",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runBacktestRun,
+	Long: `Run backtest configs and write reports to the results directory.
+
+Report filenames are derived from a hash of the run parameters, so
+re-running the same config overwrites the same file rather than
+creating a new timestamped copy. Changing any parameter produces a
+distinct file alongside the previous one.
+
+Config and result directories default to $TRADER_BACKTEST_DIR/{configs,results}
+(falling back to /trading/backtests/{configs,results} when the env var is unset).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runBacktestRun,
 }
 
 func init() {
 	CMDBacktestRun.Flags().StringVar(
 		&runOutDir,
 		"out",
-		defaultRunOutDir,
-		"Output directory for generated reports",
+		"",
+		fmt.Sprintf("Output directory for reports (default: $TRADER_BACKTEST_DIR/results or %s/results)", backtestBaseDir()),
 	)
 }
 
 func runBacktestRun(cmd *cobra.Command, args []string) error {
-	configPath := defaultRunConfigDir
+	base := backtestBaseDir()
+
+	configPath := filepath.Join(base, "configs")
 	if len(args) > 0 {
 		configPath = args[0]
 	} else if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
@@ -51,6 +74,9 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 	}
 
 	outDir := strings.TrimSpace(runOutDir)
+	if outDir == "" {
+		outDir = filepath.Join(base, "results")
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir %q: %w", outDir, err)
 	}
@@ -64,10 +90,9 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no backtest configs found in %q", configPath)
 	}
 
-	ts := time.Now().Format("20060102-150405")
 	for _, summary := range summaries {
 		trader.PrintSummary(os.Stdout, summary)
-		stem := summary.Name + "_" + ts
+		stem := summary.Name + "-" + summary.ConfigHash
 		if err := writeJSON(filepath.Join(outDir, stem+".json"), summary); err != nil {
 			return fmt.Errorf("write json for %q: %w", summary.Name, err)
 		}
