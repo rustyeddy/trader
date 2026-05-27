@@ -131,7 +131,7 @@ func parseCandlePath(path string) (k Key, ok bool) {
 }
 
 // rawRoot returns the sibling "raw" directory next to basedir.
-// e.g. basedir=/srv/trading/data → rawRoot=/srv/trading/raw
+// e.g. basedir=/srv/trading/data/candles → rawRoot=/srv/trading/data/raw
 func (s *Store) rawRoot() string {
 	return filepath.Join(filepath.Dir(s.basedir), "raw")
 }
