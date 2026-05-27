@@ -2,7 +2,7 @@ package trader
 
 var (
 	store = &Store{
-		basedir: "/data/candles",
+		basedir: "/srv/trading/data",
 	}
 )
 
