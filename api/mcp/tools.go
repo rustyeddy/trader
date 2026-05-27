@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rustyeddy/trader/service"
 )
@@ -49,6 +50,17 @@ func (s *Server) tools() []toolDef {
 
 	if s.writeEnable {
 		all = append(all,
+			toolDef{
+				Name:        "download_candles",
+				Description: "Download OANDA candles for an instrument/timeframe/date-range and write them to the local candle store.",
+				InputSchema: schema(map[string]any{
+					"instrument": prop("string", "OANDA-format instrument, e.g. EUR_USD or USD_JPY"),
+					"timeframe":  prop("string", "Candle granularity: M1, H1, or D1"),
+					"from":       prop("string", "Start date inclusive, format YYYY-MM-DD"),
+					"to":         prop("string", "End date inclusive, format YYYY-MM-DD"),
+					"raw_dir":    prop("string", "Optional root dir for raw bid+ask preservation (default /srv/trading/raw; empty string skips raw write)"),
+				}, []string{"instrument", "timeframe", "from", "to"}),
+			},
 			toolDef{
 				Name:        "place_order",
 				Description: "Size and submit a risk-based market order. Set confirm=false to preview without submitting.",
@@ -116,6 +128,11 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return s.toolGetTransactions(ctx, p.Arguments)
 	case "run_backtest":
 		return s.toolRunBacktest(ctx, p.Arguments)
+	case "download_candles":
+		if !s.writeEnable {
+			return errContent("download_candles requires --enable-write"), nil
+		}
+		return s.toolDownloadCandles(ctx, p.Arguments)
 	case "place_order":
 		if !s.writeEnable {
 			return errContent("place_order requires --enable-write"), nil
@@ -263,6 +280,52 @@ func (s *Server) toolUpdateStop(ctx context.Context, raw json.RawMessage) (any, 
 		return errContent(fmt.Sprintf("update_stop: %v", err)), nil
 	}
 	return textContent(fmt.Sprintf("stop updated for trade %s", args.TradeID)), nil
+}
+
+func (s *Server) toolDownloadCandles(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instrument string `json:"instrument"`
+		Timeframe  string `json:"timeframe"`
+		From       string `json:"from"`
+		To         string `json:"to"`
+		RawDir     string `json:"raw_dir"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: "invalid download_candles args"}
+	}
+	if args.Instrument == "" || args.Timeframe == "" || args.From == "" || args.To == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, timeframe, from, and to are required"}
+	}
+	from, err := time.Parse("2006-01-02", args.From)
+	if err != nil {
+		return errContent(fmt.Sprintf("bad from date %q: %v", args.From, err)), nil
+	}
+	to, err := time.Parse("2006-01-02", args.To)
+	if err != nil {
+		return errContent(fmt.Sprintf("bad to date %q: %v", args.To, err)), nil
+	}
+	rawDir := args.RawDir
+	if rawDir == "" {
+		rawDir = "/srv/trading/raw"
+	}
+
+	var progress []string
+	result, err := s.svc.DownloadOandaCandles(ctx, service.DownloadOandaCandlesRequest{
+		Instrument: args.Instrument,
+		Timeframe:  args.Timeframe,
+		From:       from,
+		To:         to,
+		RawDir:     rawDir,
+		OnProgress: func(line string) { progress = append(progress, line) },
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("download_candles: %v", err)), nil
+	}
+	return jsonContent(map[string]any{
+		"months_processed": result.MonthsProcessed,
+		"candles_written":  result.CandlesWritten,
+		"progress":         progress,
+	}), nil
 }
 
 // ── schema helpers ────────────────────────────────────────────────────────

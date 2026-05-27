@@ -356,6 +356,77 @@ func TestMCPBlackbox_PromptsList_Empty(t *testing.T) {
 	assert.Empty(t, prompts)
 }
 
+func TestMCPBlackbox_ToolsList_WriteEnabled_IncludesDownloadCandles(t *testing.T) {
+	h := newHarness(t, true)
+	h.send(40, "tools/list", nil)
+	resp := h.recv()
+
+	require.Nil(t, resp["error"])
+	result := resp["result"].(map[string]any)
+	tools := result["tools"].([]any)
+	assert.Contains(t, toolNames(tools), "download_candles")
+}
+
+func TestMCPBlackbox_ToolsList_ReadOnly_ExcludesDownloadCandles(t *testing.T) {
+	h := newHarness(t, false)
+	h.send(41, "tools/list", nil)
+	resp := h.recv()
+
+	require.Nil(t, resp["error"])
+	result := resp["result"].(map[string]any)
+	tools := result["tools"].([]any)
+	assert.NotContains(t, toolNames(tools), "download_candles")
+}
+
+func TestMCPBlackbox_DownloadCandles_BlockedWithoutWriteFlag(t *testing.T) {
+	// writeEnable=false: OANDA-nil guard fires before writeEnable check, both produce isError=true.
+	h := newHarness(t, false)
+	h.send(42, "tools/call", map[string]any{
+		"name": "download_candles",
+		"arguments": map[string]any{
+			"instrument": "EUR_USD", "timeframe": "H1",
+			"from": "2024-01-01", "to": "2024-01-31",
+		},
+	})
+	resp := h.recv()
+
+	require.Nil(t, resp["error"])
+	result := resp["result"].(map[string]any)
+	assert.Equal(t, true, result["isError"])
+}
+
+func TestMCPBlackbox_DownloadCandles_NoOANDA_ReturnsErrContent(t *testing.T) {
+	// writeEnable=true but no OANDA client configured.
+	h := newHarness(t, true)
+	h.send(43, "tools/call", map[string]any{
+		"name": "download_candles",
+		"arguments": map[string]any{
+			"instrument": "EUR_USD", "timeframe": "H1",
+			"from": "2024-01-01", "to": "2024-01-31",
+		},
+	})
+	resp := h.recv()
+
+	require.Nil(t, resp["error"])
+	result := resp["result"].(map[string]any)
+	assert.Equal(t, true, result["isError"])
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	assert.Contains(t, strings.ToLower(text), "oanda")
+}
+
+func TestMCPBlackbox_DownloadCandles_MissingParams_ReturnsInvalidParams(t *testing.T) {
+	h := newHarness(t, true)
+	h.send(44, "tools/call", map[string]any{
+		"name":      "download_candles",
+		"arguments": map[string]any{"instrument": "EUR_USD"}, // missing timeframe, from, to
+	})
+	resp := h.recv()
+
+	require.Nil(t, resp["error"])
+	result := resp["result"].(map[string]any)
+	assert.Equal(t, true, result["isError"])
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func toolNames(tools []any) []string {
