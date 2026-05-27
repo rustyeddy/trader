@@ -14,18 +14,18 @@ import (
 )
 
 // backtestBaseDir returns the root directory for production backtest configs
-// and results. It honours the TRADER_BACKTEST_DIR environment variable; if
-// unset it falls back to /trading/backtests.
+// and reports. It honours the TRADER_BACKTEST_DIR environment variable; if
+// unset it falls back to /srv/trading/backtests.
 //
 // Layout under this directory:
 //
 //	configs/   — YAML backtest configs
-//	results/   — hash-named JSON + org reports
+//	reports/   — hash-named JSON + org reports
 func backtestBaseDir() string {
 	if d := strings.TrimSpace(os.Getenv("TRADER_BACKTEST_DIR")); d != "" {
 		return d
 	}
-	return "/trading/backtests"
+	return "/srv/trading/backtests"
 }
 
 var runOutDir string
@@ -36,15 +36,15 @@ var runOutDir string
 var CMDBacktestRun = &cobra.Command{
 	Use:   "run [config-path]",
 	Short: "Run backtest configs and write JSON + org reports",
-	Long: `Run backtest configs and write reports to the results directory.
+	Long: `Run backtest configs and write reports to the reports directory.
 
 Report filenames are derived from a hash of the run parameters, so
 re-running the same config overwrites the same file rather than
 creating a new timestamped copy. Changing any parameter produces a
 distinct file alongside the previous one.
 
-Config and result directories default to $TRADER_BACKTEST_DIR/{configs,results}
-(falling back to /trading/backtests/{configs,results} when the env var is unset).`,
+Config and result directories default to $TRADER_BACKTEST_DIR/{configs,reports}
+(falling back to /srv/trading/backtests/{configs,reports} when the env var is unset).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runBacktestRun,
 }
@@ -54,7 +54,7 @@ func init() {
 		&runOutDir,
 		"out",
 		"",
-		fmt.Sprintf("Output directory for reports (default: $TRADER_BACKTEST_DIR/results or %s/results)", backtestBaseDir()),
+		fmt.Sprintf("Output directory for reports (default: $TRADER_BACKTEST_DIR/reports or %s/reports)", backtestBaseDir()),
 	)
 }
 
@@ -75,7 +75,7 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 
 	outDir := strings.TrimSpace(runOutDir)
 	if outDir == "" {
-		outDir = filepath.Join(base, "results")
+		outDir = filepath.Join(base, "reports")
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir %q: %w", outDir, err)
