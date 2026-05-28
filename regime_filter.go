@@ -10,8 +10,10 @@ type RegimeFilter interface {
 	// Ready reports whether the filter has enough history to classify.
 	Ready() bool
 
-	// Tick updates internal indicators. Called every bar.
-	Tick(c Candle)
+	// Tick updates internal indicators with the current bar. The full
+	// CandleTime is provided so implementations can use the timestamp
+	// (e.g. to aggregate sub-daily bars into daily bars).
+	Tick(ct CandleTime)
 
 	// Trending returns true when the market is in a trending regime and
 	// new entries should be allowed. Returns true while not yet ready so
@@ -22,7 +24,7 @@ type RegimeFilter interface {
 // NoopRegime is a pass-through filter that always allows trading.
 type NoopRegime struct{}
 
-func (NoopRegime) Name() string    { return "" }
-func (NoopRegime) Ready() bool     { return true }
-func (NoopRegime) Tick(_ Candle)   {}
-func (NoopRegime) Trending() bool  { return true }
+func (NoopRegime) Name() string       { return "" }
+func (NoopRegime) Ready() bool        { return true }
+func (NoopRegime) Tick(_ CandleTime)  {}
+func (NoopRegime) Trending() bool     { return true }

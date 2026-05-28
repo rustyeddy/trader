@@ -20,6 +20,11 @@ import (
 
 	// Strategy registration via init().
 	_ "github.com/rustyeddy/trader/strategies/donchian"
+	_ "github.com/rustyeddy/trader/strategies/donchianv2"
+	_ "github.com/rustyeddy/trader/strategies/donchianv3"
+	_ "github.com/rustyeddy/trader/strategies/donchianv4"
+	_ "github.com/rustyeddy/trader/strategies/donchianv5"
+	_ "github.com/rustyeddy/trader/strategies/donchianv6"
 	_ "github.com/rustyeddy/trader/strategies/emacross"
 	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
 	_ "github.com/rustyeddy/trader/strategies/fake"

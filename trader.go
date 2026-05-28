@@ -274,7 +274,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		}
 
 		// Tick regime filter and exit strategy indicators every bar.
-		regime.Tick(candle.Candle)
+		regime.Tick(candle)
 		exit.Tick(candle.Candle)
 
 		// Update trailing/chandelier stops on all open lots.

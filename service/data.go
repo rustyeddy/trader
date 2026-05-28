@@ -56,7 +56,7 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 	if err != nil {
 		return nil, err
 	}
-	tfStr := strings.ToUpper(strings.TrimSpace(req.Timeframe))
+	tfStr := toOandaGranularity(req.Timeframe)
 
 	store := trader.GetStore()
 	instrTrader := strings.ReplaceAll(req.Instrument, "_", "")
@@ -162,6 +162,17 @@ func parseTraderTimeframe(s string) (trader.Timeframe, error) {
 		return trader.D1, nil
 	default:
 		return 0, fmt.Errorf("unsupported timeframe %q (use M1, H1, D1)", s)
+	}
+}
+
+// toOandaGranularity converts a trader timeframe string to the OANDA API
+// granularity value. OANDA uses "D" not "D1".
+func toOandaGranularity(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "D1", "D":
+		return "D"
+	default:
+		return strings.ToUpper(strings.TrimSpace(s))
 	}
 }
 

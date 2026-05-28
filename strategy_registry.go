@@ -65,6 +65,19 @@ func GetBoolParam(m map[string]any, key string) (bool, bool, error) {
 	return runBoolParam(m, key)
 }
 
+// GetStringParam extracts a string param, or returns ok=false if missing.
+func GetStringParam(m map[string]any, key string) (string, bool, error) {
+	v, ok := m[key]
+	if !ok {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", true, fmt.Errorf("param %q must be a string, got %T", key, v)
+	}
+	return s, true, nil
+}
+
 // PipsFromFloat converts a pip count expressed as float64 to the Pips type.
 func PipsFromFloat(v float64) Pips {
 	return pipsFromFloat(v)

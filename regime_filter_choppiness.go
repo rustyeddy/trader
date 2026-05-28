@@ -23,7 +23,7 @@ func (f *ChoppinessFilter) Name() string {
 }
 
 func (f *ChoppinessFilter) Ready() bool   { return f.ci.Ready() }
-func (f *ChoppinessFilter) Tick(c Candle) { f.ci.Update(c) }
+func (f *ChoppinessFilter) Tick(ct CandleTime) { f.ci.Update(ct.Candle) }
 
 func (f *ChoppinessFilter) Trending() bool {
 	if !f.ci.Ready() {
