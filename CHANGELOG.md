@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.1] - 2026-05-28
+
+### Added
+
+- **Donchian v2–v6 strategy variants** — progressive filter stack: v2 adds
+  close-strength and confirm-bars; v3 adds D1 choppiness gate; v4 adds ADX
+  gate; v5 adds news-day filter; v6 adds weekly ATR volatility gate.
+- **Regime filters** — `session` (UTC hour window), `adx-d1` (H1→daily
+  aggregation + ADX gate), and `composite` (AND combinator for chaining
+  filters). Registered via `GetRegimeFilter` factory.
+- **`gen-newsdays` tool** — generates news-day CSV calendars from a
+  Dukascopy-format news event file for use with the v5 news filter.
+
+### Fixed
+
+- Default `--raw-dir` corrected: `/srv/trading/data/raw` (was `/srv/trading/raw`).
+  Applies to both the `trader data oanda` CLI flag and the MCP `download_candles`
+  tool handler. Existing raw data migrated to the canonical path.
+
 ## [v0.2.0] - 2026-05-27
 
 ### Added
