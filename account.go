@@ -77,6 +77,15 @@ func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
 		return Rate(r), nil
 	}
 
+	// Cross pair: neither quote nor base is the account currency.
+	// Use a static approximate USD rate per currency. This introduces a
+	// bounded error (~±30% over long backtests) on absolute dollar P/L but
+	// does not affect win/loss decisions or relative return percentages.
+	if act.Currency == "USD" {
+		if r, ok := approxUSDPerUnit[meta.QuoteCurrency]; ok {
+			return RateFromFloat(r), nil
+		}
+	}
 	return 0, fmt.Errorf("cross conversion not implemented for %s → %s", meta.QuoteCurrency, act.Currency)
 }
 

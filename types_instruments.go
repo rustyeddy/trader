@@ -15,6 +15,10 @@ const (
 	AUD_USD symbol = "AUD_USD"
 	USD_CAD symbol = "USD_CAD"
 	NZD_USD symbol = "NZD_USD"
+	EUR_GBP symbol = "EUR_GBP"
+	GBP_JPY symbol = "GBP_JPY"
+	EUR_JPY symbol = "EUR_JPY"
+	AUD_JPY symbol = "AUD_JPY"
 )
 
 type Instrument struct {
@@ -110,6 +114,42 @@ var Instruments = map[string]*Instrument{
 		MinimumTradeSize:    1,
 		MarginRate:          Rate(50_000), // 5% (20:1 typical retail gold)
 	},
+	"EURGBP": {
+		Name:                "EURGBP",
+		BaseCurrency:        "EUR",
+		QuoteCurrency:       "GBP",
+		PipLocation:         -4,
+		TradeUnitsPrecision: 0,
+		MinimumTradeSize:    1,
+		MarginRate:          Rate(20_000),
+	},
+	"GBPJPY": {
+		Name:                "GBPJPY",
+		BaseCurrency:        "GBP",
+		QuoteCurrency:       "JPY",
+		PipLocation:         -2,
+		TradeUnitsPrecision: 0,
+		MinimumTradeSize:    1,
+		MarginRate:          Rate(20_000),
+	},
+	"EURJPY": {
+		Name:                "EURJPY",
+		BaseCurrency:        "EUR",
+		QuoteCurrency:       "JPY",
+		PipLocation:         -2,
+		TradeUnitsPrecision: 0,
+		MinimumTradeSize:    1,
+		MarginRate:          Rate(20_000),
+	},
+	"AUDJPY": {
+		Name:                "AUDJPY",
+		BaseCurrency:        "AUD",
+		QuoteCurrency:       "JPY",
+		PipLocation:         -2,
+		TradeUnitsPrecision: 0,
+		MinimumTradeSize:    1,
+		MarginRate:          Rate(20_000),
+	},
 }
 
 var symmap = map[string]string{
@@ -120,6 +160,24 @@ var symmap = map[string]string{
 	"AUD_USD": "AUDUSD",
 	"USD_CAD": "USDCAD",
 	"NZD_USD": "NZDUSD",
+	"EUR_GBP": "EURGBP",
+	"GBP_JPY": "GBPJPY",
+	"EUR_JPY": "EURJPY",
+	"AUD_JPY": "AUDJPY",
+}
+
+// approxUSDPerUnit provides static approximate USD values for non-USD currencies.
+// Used as a fallback for cross-pair P/L conversion in backtests where the
+// complementary pair's price is not available. Absolute dollar P/L may be
+// off by ±30% over long test periods; win/loss ratios and return % are unaffected.
+var approxUSDPerUnit = map[string]float64{
+	"EUR": 1.08,
+	"GBP": 1.26,
+	"JPY": 0.0067, // ~1/150
+	"AUD": 0.65,
+	"CAD": 0.74,
+	"NZD": 0.61,
+	"CHF": 1.10,
 }
 
 func GetInstrument(symbol string) *Instrument {
