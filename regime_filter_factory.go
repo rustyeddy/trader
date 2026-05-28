@@ -52,6 +52,15 @@ func (c *CompositeRegimeFilter) Trending() bool {
 	return true
 }
 
+func (c *CompositeRegimeFilter) AllowSide(side Side) bool {
+	for _, f := range c.filters {
+		if !f.AllowSide(side) {
+			return false
+		}
+	}
+	return true
+}
+
 func joinStrings(ss []string, sep string) string {
 	result := ""
 	for i, s := range ss {
@@ -137,6 +146,40 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 			threshold = 20.0
 		}
 		return NewD1ADXFilter(int(period), threshold, scale), nil
+
+	case "weekly-ema":
+		period, _, err := getInt32Param(cfg.Params, "period")
+		if err != nil {
+			return nil, err
+		}
+		if period <= 0 {
+			period = 20
+		}
+		return NewWeeklyEMAFilter(int(period), scale), nil
+
+	case "atr-percentile":
+		atrPeriod, _, err := getInt32Param(cfg.Params, "atr_period")
+		if err != nil {
+			return nil, err
+		}
+		if atrPeriod <= 0 {
+			atrPeriod = 20
+		}
+		windowSize, _, err := getInt32Param(cfg.Params, "window_size")
+		if err != nil {
+			return nil, err
+		}
+		if windowSize <= 0 {
+			windowSize = 200
+		}
+		threshold, _, err := getFloat64Param(cfg.Params, "threshold")
+		if err != nil {
+			return nil, err
+		}
+		if threshold <= 0 {
+			threshold = 20.0
+		}
+		return NewATRPercentileFilter(int(atrPeriod), int(windowSize), threshold, scale), nil
 
 	case "composite":
 		if len(cfg.Filters) == 0 {

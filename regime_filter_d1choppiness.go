@@ -85,5 +85,7 @@ func (f *D1ChoppinessFilter) Trending() bool {
 	return f.ci.Value() < f.threshold
 }
 
+func (f *D1ChoppinessFilter) AllowSide(_ Side) bool { return true }
+
 // Value exposes the raw CI value for debugging.
 func (f *D1ChoppinessFilter) Value() float64 { return f.ci.Value() }

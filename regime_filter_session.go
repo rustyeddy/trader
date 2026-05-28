@@ -38,3 +38,5 @@ func (f *SessionFilter) Trending() bool {
 	}
 	return f.hour >= f.start && f.hour < f.end
 }
+
+func (f *SessionFilter) AllowSide(_ Side) bool { return true }

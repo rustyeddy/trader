@@ -113,6 +113,28 @@ func TestCompositeRegimeFilter_TrendingRequiresAll(t *testing.T) {
 	assert.False(t, comp.Trending(), "outside session = not trending regardless of ADX")
 }
 
+func TestCompositeRegimeFilter_AllowSideRequiresAll(t *testing.T) {
+	t.Parallel()
+	// weekly-ema blocks Short when rising; all others allow both sides.
+	// Use a minimal weekly-ema (period=3) as the directional sub-filter.
+	wf := NewWeeklyEMAFilter(3, PriceScale)
+	comp := NewCompositeRegimeFilter([]RegimeFilter{wf})
+
+	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	weeks := mondays(base, 10)
+
+	// Feed rising closes so close ends up above EMA.
+	for i, m := range weeks {
+		wf.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+	}
+	lastWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
+	wf.Tick(weeklyEMACT(lastWeek, Price(120000)))
+
+	require.True(t, comp.Ready())
+	assert.True(t, comp.AllowSide(Long), "composite must pass Long when sub-filter allows it")
+	assert.False(t, comp.AllowSide(Short), "composite must block Short when any sub-filter blocks it")
+}
+
 func TestCompositeRegimeFilter_ReadyRequiresAll(t *testing.T) {
 	t.Parallel()
 

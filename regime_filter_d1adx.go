@@ -85,5 +85,7 @@ func (f *D1ADXFilter) Trending() bool {
 	return f.adx.Float64() >= f.threshold
 }
 
+func (f *D1ADXFilter) AllowSide(_ Side) bool { return true }
+
 // ADXValue exposes the raw ADX value for debugging.
 func (f *D1ADXFilter) ADXValue() float64 { return f.adx.Float64() }

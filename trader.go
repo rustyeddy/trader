@@ -317,8 +317,18 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 
 		// Regime filter: suppress new entries in ranging/consolidating markets.
 		// Existing positions continue to be managed by the exit strategy.
-		if regime.Ready() && !regime.Trending() {
-			plan.Opens = nil
+		if regime.Ready() {
+			if !regime.Trending() {
+				plan.Opens = nil
+			} else if len(plan.Opens) > 0 {
+				filtered := plan.Opens[:0]
+				for _, o := range plan.Opens {
+					if regime.AllowSide(o.Side) {
+						filtered = append(filtered, o)
+					}
+				}
+				plan.Opens = filtered
+			}
 		}
 
 		// Max-spread filter: skip entries when the bid-ask spread is too wide

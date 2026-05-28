@@ -91,3 +91,10 @@ func TestSessionFilter_Name(t *testing.T) {
 	f := NewSessionFilter(7, 17)
 	assert.Equal(t, "Session(07:00-17:00UTC)", f.Name())
 }
+
+func TestSessionFilter_AllowSideAlwaysTrue(t *testing.T) {
+	t.Parallel()
+	f := NewSessionFilter(7, 17)
+	assert.True(t, f.AllowSide(Long))
+	assert.True(t, f.AllowSide(Short))
+}
