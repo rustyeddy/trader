@@ -19,6 +19,7 @@ import (
 	_ "github.com/rustyeddy/trader/data/dukascopy"
 
 	// Strategy registration via init().
+	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
 	_ "github.com/rustyeddy/trader/strategies/donchian"
 	_ "github.com/rustyeddy/trader/strategies/donchianv2"
 	_ "github.com/rustyeddy/trader/strategies/donchianv3"
