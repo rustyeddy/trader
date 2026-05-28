@@ -58,7 +58,7 @@ func (s *Server) tools() []toolDef {
 					"timeframe":  prop("string", "Candle granularity: M1, H1, or D1"),
 					"from":       prop("string", "Start date inclusive, format YYYY-MM-DD"),
 					"to":         prop("string", "End date inclusive, format YYYY-MM-DD"),
-					"raw_dir":    prop("string", "Optional root dir for raw bid+ask preservation (default /srv/trading/raw; empty string skips raw write)"),
+					"raw_dir":    prop("string", "Optional root dir for raw bid+ask preservation (default /srv/trading/data/raw; empty string skips raw write)"),
 				}, []string{"instrument", "timeframe", "from", "to"}),
 			},
 			toolDef{
@@ -306,7 +306,7 @@ func (s *Server) toolDownloadCandles(ctx context.Context, raw json.RawMessage) (
 	}
 	rawDir := args.RawDir
 	if rawDir == "" {
-		rawDir = "/srv/trading/raw"
+		rawDir = "/srv/trading/data/raw"
 	}
 
 	var progress []string

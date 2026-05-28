@@ -73,7 +73,7 @@ func newOandaDownloadCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&toStr, "to", "", "End date YYYY-MM-DD inclusive (required)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().StringVar(&rawDir, "raw-dir", "/srv/trading/raw", "Root directory for raw bid+ask candle preservation")
+	cmd.Flags().StringVar(&rawDir, "raw-dir", "/srv/trading/data/raw", "Root directory for raw bid+ask candle preservation")
 	_ = cmd.MarkFlagRequired("instrument")
 	_ = cmd.MarkFlagRequired("timeframe")
 	_ = cmd.MarkFlagRequired("from")
