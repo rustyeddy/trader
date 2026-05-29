@@ -166,11 +166,10 @@ var symmap = map[string]string{
 	"AUD_JPY": "AUDJPY",
 }
 
-// approxUSDPerUnit provides static approximate USD values for non-USD currencies.
-// Used as a fallback for cross-pair P/L conversion in backtests where the
-// complementary pair's price is not available. Absolute dollar P/L may be
-// off by ±30% over long test periods; win/loss ratios and return % are unaffected.
-var approxUSDPerUnit = map[string]float64{
+// ApproxUSDPerUnit provides static approximate USD values for non-USD currencies.
+// Used for cross-pair P/L conversion and position sizing when a live complementary
+// rate is not available. Accuracy ±30% over long periods; correct in order of magnitude.
+var ApproxUSDPerUnit = map[string]float64{
 	"EUR": 1.08,
 	"GBP": 1.26,
 	"JPY": 0.0067, // ~1/150

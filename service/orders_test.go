@@ -220,3 +220,81 @@ func TestPlaceMarketOrder_NoStop(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "StopPrice or StopPips")
 }
+
+// ── quoteToUSDRate ──────────────────────────────────────────────────────────
+
+func TestQuoteToUSDRate_USDQuoted(t *testing.T) {
+	t.Parallel()
+	// EUR_USD, GBP_USD — quote is USD, rate must be 1.0
+	assert.Equal(t, 1.0, quoteToUSDRate("EUR_USD"))
+	assert.Equal(t, 1.0, quoteToUSDRate("GBP_USD"))
+}
+
+func TestQuoteToUSDRate_JPYQuoted(t *testing.T) {
+	t.Parallel()
+	// USD_JPY, AUD_JPY, EUR_JPY — quote is JPY ≈ 0.0067
+	for _, inst := range []string{"USD_JPY", "AUD_JPY", "EUR_JPY"} {
+		r := quoteToUSDRate(inst)
+		assert.Greater(t, r, 0.0, "%s: rate must be > 0", inst)
+		assert.Less(t, r, 0.1, "%s: JPY rate must be < 0.1", inst)
+	}
+}
+
+func TestQuoteToUSDRate_GBPQuoted(t *testing.T) {
+	t.Parallel()
+	// EUR_GBP — quote is GBP ≈ 1.26
+	r := quoteToUSDRate("EUR_GBP")
+	assert.Greater(t, r, 1.0, "GBP rate must be > 1")
+	assert.Less(t, r, 2.0, "GBP rate must be < 2")
+}
+
+// TestPlaceMarketOrder_JPYSizing verifies that a USD_JPY order with a 600-pip
+// stop on a $2,000 account at 1% risk produces ~500 units (not ~3).
+func TestPlaceMarketOrder_JPYSizing(t *testing.T) {
+	// Build a test server that returns USD_JPY pricing.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/summary"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"account": map[string]any{
+					"id": "ACC1", "balance": "2000.00",
+					"NAV": "2000.00", "marginUsed": "0.00", "marginAvailable": "2000.00",
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/pricing"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"prices": []any{map[string]any{
+					"instrument": "USD_JPY",
+					"bids":       []any{map[string]any{"price": "150.000"}},
+					"asks":       []any{map[string]any{"price": "150.010"}},
+					"status":     "tradeable",
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		AccountID: "ACC1",
+		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()},
+	}
+
+	// 1% of $2,000 = $20 risk; 600-pip stop on USDJPY at 150
+	// Expected: ~500 units ($20 / (6 JPY × 0.0067 USD/JPY))
+	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+		Instrument: "USD_JPY",
+		Side:       "long",
+		RiskPct:    1.0,
+		StopPips:   600,
+		Confirm:    false,
+	})
+	require.NoError(t, err)
+	units := result.Proposal.Units
+	// Should be in the hundreds, not single digits.
+	assert.Greater(t, units, int64(100), "JPY sizing should produce >100 units, got %d", units)
+	assert.Less(t, units, int64(2000), "JPY sizing should produce <2000 units, got %d", units)
+	t.Logf("USD_JPY 600-pip stop, $2000 account, 1%% risk → %d units", units)
+}
