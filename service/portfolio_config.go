@@ -34,6 +34,11 @@ type portfolioInstrumentYAML struct {
 		Params map[string]any `yaml:"params"`
 	} `yaml:"strategy"`
 
+	Exit struct {
+		Kind   string         `yaml:"kind"`
+		Params map[string]any `yaml:"params"`
+	} `yaml:"exit"`
+
 	Regime struct {
 		Kind    string         `yaml:"kind"`
 		Params  map[string]any `yaml:"params"`
@@ -94,14 +99,25 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			riskPct = cfg.RiskPct
 		}
 
+		exitCfg := trader.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
+		exit, err := trader.GetExitStrategy(exitCfg, trader.PriceScale)
+		if err != nil {
+			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
+		}
+
+		// Wrap the service so the adapter can update trailing stops on OANDA.
+		svc := &Service{OANDA: oandaClient, AccountID: accountID, Log: log}
+
 		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
 			Strategy:    strategy,
+			Exit:        exit,
 			Regime:      regime,
 			Instrument:  y.Instrument,
 			Granularity: granularity,
 			WarmupBars:  warmup,
 			OANDA:       oandaClient,
 			AccountID:   accountID,
+			Service:     svc,
 			Log:         log,
 		})
 
