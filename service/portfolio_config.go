@@ -1,0 +1,125 @@
+package service
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/brokers/oanda"
+)
+
+// PortfolioConfig is the YAML schema for `trader live portfolio`.
+type PortfolioConfig struct {
+	Env                string  `yaml:"env"`                  // "practice" or "live"
+	RiskPct            float64 `yaml:"risk_pct"`             // default risk per trade (%)
+	DrawdownCircuitPct float64 `yaml:"drawdown_circuit_pct"` // halt opens when equity drops this % from peak
+	Instruments        []portfolioInstrumentYAML `yaml:"instruments"`
+}
+
+type portfolioInstrumentYAML struct {
+	Instrument   string  `yaml:"instrument"`    // OANDA format, e.g. "USD_CHF"
+	Timeframe    string  `yaml:"timeframe"`     // "H1" or "D1"
+	TickInterval string  `yaml:"tick_interval"` // optional poll override, e.g. "5m"
+	RiskPct      float64 `yaml:"risk_pct"`      // overrides top-level default
+	MaxUnits     int64   `yaml:"max_units"`
+	WarmupBars   int     `yaml:"warmup_bars"`
+
+	Strategy struct {
+		Kind   string         `yaml:"kind"`
+		Params map[string]any `yaml:"params"`
+	} `yaml:"strategy"`
+
+	Regime struct {
+		Kind    string         `yaml:"kind"`
+		Params  map[string]any `yaml:"params"`
+		Filters []struct {
+			Kind   string         `yaml:"kind"`
+			Params map[string]any `yaml:"params"`
+		} `yaml:"filters"`
+	} `yaml:"regime"`
+}
+
+// LoadPortfolioConfig reads and parses a portfolio YAML file.
+func LoadPortfolioConfig(path string) (*PortfolioConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read portfolio config %q: %w", path, err)
+	}
+	cfg := &PortfolioConfig{
+		Env:                "practice",
+		RiskPct:            1.0,
+		DrawdownCircuitPct: 10.0,
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse portfolio config %q: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// BuildPortfolioRunConfig wires up the full PortfolioRunConfig from a parsed
+// PortfolioConfig, building CandleStrategyAdapters for every instrument.
+func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, accountID string, log *slog.Logger) (*PortfolioRunConfig, error) {
+	rc := &PortfolioRunConfig{
+		DrawdownCircuitPct: cfg.DrawdownCircuitPct,
+		Log:                log,
+	}
+
+	for _, y := range cfg.Instruments {
+		strategy, err := trader.GetStrategy(trader.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params})
+		if err != nil {
+			return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
+		}
+
+		regimeCfg := trader.RegimeConfig{Kind: y.Regime.Kind, Params: y.Regime.Params}
+		for _, f := range y.Regime.Filters {
+			regimeCfg.Filters = append(regimeCfg.Filters, trader.RegimeConfig{Kind: f.Kind, Params: f.Params})
+		}
+		regime, err := trader.GetRegimeFilter(regimeCfg, trader.PriceScale)
+		if err != nil {
+			return nil, fmt.Errorf("instrument %s regime: %w", y.Instrument, err)
+		}
+
+		granularity := toOandaGranularity(y.Timeframe)
+		warmup := y.WarmupBars
+		if warmup <= 0 {
+			warmup = 100
+		}
+		riskPct := y.RiskPct
+		if riskPct <= 0 {
+			riskPct = cfg.RiskPct
+		}
+
+		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
+			Strategy:    strategy,
+			Regime:      regime,
+			Instrument:  y.Instrument,
+			Granularity: granularity,
+			WarmupBars:  warmup,
+			OANDA:       oandaClient,
+			AccountID:   accountID,
+			Log:         log,
+		})
+
+		var tick time.Duration
+		if y.TickInterval != "" {
+			tick, err = time.ParseDuration(y.TickInterval)
+			if err != nil {
+				return nil, fmt.Errorf("instrument %s tick_interval: %w", y.Instrument, err)
+			}
+		}
+
+		rc.Instruments = append(rc.Instruments, InstrumentRunConfig{
+			Instrument:   y.Instrument,
+			Granularity:  granularity,
+			TickInterval: tick,
+			Strategy:     adapter,
+			RiskPct:      riskPct,
+			MaxUnits:     y.MaxUnits,
+		})
+	}
+	return rc, nil
+}

@@ -24,6 +24,7 @@ func New(rc *trader.RootConfig) *cobra.Command {
 	}
 	cmd.AddCommand(newJournalCmd(rc))
 	cmd.AddCommand(newRunCmd(rc))
+	cmd.AddCommand(newPortfolioCmd(rc))
 	return cmd
 }
 
