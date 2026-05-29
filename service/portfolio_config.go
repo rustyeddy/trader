@@ -15,6 +15,7 @@ import (
 // PortfolioConfig is the YAML schema for `trader live portfolio`.
 type PortfolioConfig struct {
 	Env                string  `yaml:"env"`                  // "practice" or "live"
+	AccountID          string  `yaml:"account_id"`           // OANDA account ID (overrides --account-id flag and env var)
 	RiskPct            float64 `yaml:"risk_pct"`             // default risk per trade (%)
 	DrawdownCircuitPct float64 `yaml:"drawdown_circuit_pct"` // halt opens when equity drops this % from peak
 	Instruments        []portfolioInstrumentYAML `yaml:"instruments"`

@@ -57,10 +57,16 @@ Example:
 				return nil
 			}
 
+			// Config file account_id takes precedence over flag / env var.
+			resolvedAccount := accountID
+			if cfg.AccountID != "" {
+				resolvedAccount = cfg.AccountID
+			}
+
 			svc, err := service.New(service.Config{
 				Env:       cfg.Env,
 				Token:     token,
-				AccountID: accountID,
+				AccountID: resolvedAccount,
 			})
 			if err != nil {
 				return err
