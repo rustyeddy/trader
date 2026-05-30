@@ -55,6 +55,9 @@ export const api = {
 
   backtestCandles: (name: string) =>
     request<CandleResponse>('GET', `/api/v1/backtests/${encodeURIComponent(name)}/candles`),
+
+  replay: (req: ReplayRequest) =>
+    request<ReplayResult>('POST', '/api/v1/replay', req),
 };
 
 // ── Types (mirror Go / OANDA JSON field names) ────────────────────────────
@@ -198,4 +201,40 @@ export interface BacktestListResult {
 export interface BacktestResult {
   count: number;
   summaries: BacktestSummary[];
+}
+
+// ── Replay ────────────────────────────────────────────────────────────────────
+
+export type SignalKind = 'open' | 'close' | 'blocked' | 'no_stop' | 'stop_update';
+
+export interface ReplaySignal {
+  time: number;       // unix seconds (bar open time)
+  kind: SignalKind;
+  side?: string;      // "long" | "short"
+  price?: number;     // entry (open) or exit (close) price
+  stop_price?: number;
+  stop_pips?: number;
+  reason?: string;
+}
+
+export interface ReplayResult {
+  instrument: string;
+  timeframe: string;
+  strategy: string;
+  from: string;
+  to: string;
+  warmup_bars: number;
+  bars: CandleBar[];
+  signals: ReplaySignal[];
+}
+
+export interface ReplayRequest {
+  instrument: string;
+  timeframe: string;
+  from: string;
+  to: string;
+  warmup_bars?: number;
+  strategy: { kind: string; params?: Record<string, unknown> };
+  exit?:     { kind: string; params?: Record<string, unknown> };
+  regime?:   { kind: string; params?: Record<string, unknown> };
 }

@@ -9,6 +9,7 @@
     { href: '/trades',     label: 'Trades' },
     { href: '/backtests',  label: 'Backtests' },
     { href: '/charts',     label: 'Charts' },
+    { href: '/replay',     label: 'Replay' },
   ];
 </script>
 
