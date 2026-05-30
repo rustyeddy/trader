@@ -18,16 +18,22 @@ type PortfolioConfig struct {
 	AccountID          string  `yaml:"account_id"`           // OANDA account ID (overrides --account-id flag and env var)
 	RiskPct            float64 `yaml:"risk_pct"`             // default risk per trade (%)
 	DrawdownCircuitPct float64 `yaml:"drawdown_circuit_pct"` // halt opens when equity drops this % from peak
+	// LocalWarmupBars is the default number of bars to load from the local
+	// candle store for indicator priming. Per-instrument values override this.
+	// 500 covers ~3 weeks of H1 data; 5000 covers ~7 months. 0 disables.
+	LocalWarmupBars    int     `yaml:"local_warmup_bars"`
 	Instruments        []portfolioInstrumentYAML `yaml:"instruments"`
 }
 
 type portfolioInstrumentYAML struct {
-	Instrument   string  `yaml:"instrument"`    // OANDA format, e.g. "USD_CHF"
-	Timeframe    string  `yaml:"timeframe"`     // "H1" or "D1"
-	TickInterval string  `yaml:"tick_interval"` // optional poll override, e.g. "5m"
-	RiskPct      float64 `yaml:"risk_pct"`      // overrides top-level default
-	MaxUnits     int64   `yaml:"max_units"`
-	WarmupBars   int     `yaml:"warmup_bars"`
+	Instrument      string  `yaml:"instrument"`       // OANDA format, e.g. "USD_CHF"
+	Timeframe       string  `yaml:"timeframe"`        // "H1" or "D1"
+	TickInterval    string  `yaml:"tick_interval"`    // optional poll override, e.g. "5m"
+	RiskPct         float64 `yaml:"risk_pct"`         // overrides top-level default
+	MaxUnits        int64   `yaml:"max_units"`
+	WarmupBars      int     `yaml:"warmup_bars"`
+	// LocalWarmupBars overrides the portfolio-level default for this instrument.
+	LocalWarmupBars int     `yaml:"local_warmup_bars"`
 
 	Strategy struct {
 		Kind   string         `yaml:"kind"`
@@ -94,6 +100,10 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		if warmup <= 0 {
 			warmup = 100
 		}
+		localWarmup := y.LocalWarmupBars
+		if localWarmup <= 0 {
+			localWarmup = cfg.LocalWarmupBars
+		}
 		riskPct := y.RiskPct
 		if riskPct <= 0 {
 			riskPct = cfg.RiskPct
@@ -109,16 +119,17 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		svc := &Service{OANDA: oandaClient, AccountID: accountID, Log: log}
 
 		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
-			Strategy:    strategy,
-			Exit:        exit,
-			Regime:      regime,
-			Instrument:  y.Instrument,
-			Granularity: granularity,
-			WarmupBars:  warmup,
-			OANDA:       oandaClient,
-			AccountID:   accountID,
-			Service:     svc,
-			Log:         log,
+			Strategy:        strategy,
+			Exit:            exit,
+			Regime:          regime,
+			Instrument:      y.Instrument,
+			Granularity:     granularity,
+			WarmupBars:      warmup,
+			LocalWarmupBars: localWarmup,
+			OANDA:           oandaClient,
+			AccountID:       accountID,
+			Service:         svc,
+			Log:             log,
 		})
 
 		var tick time.Duration

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader"
@@ -22,14 +23,15 @@ import (
 // OANDA and replays them silently so all indicators are primed before the first
 // live signal is emitted.
 type CandleStrategyAdapter struct {
-	strategy    trader.Strategy
-	exit        trader.ExitStrategy
-	regime      trader.RegimeFilter
-	instrument  string // OANDA format, e.g. "EUR_USD"
-	instNorm    string // internal format, e.g. "EURUSD"
-	granularity string // OANDA granularity, e.g. "H1", "D"
-	warmupBars  int
-	scale       trader.Scale6
+	strategy        trader.Strategy
+	exit            trader.ExitStrategy
+	regime          trader.RegimeFilter
+	instrument      string // OANDA format, e.g. "EUR_USD"
+	instNorm        string // internal format, e.g. "EURUSD"
+	granularity     string // OANDA granularity, e.g. "H1", "D"
+	warmupBars      int
+	localWarmupBars int
+	scale           trader.Scale6
 
 	oanda     *oanda.Client
 	accountID string
@@ -48,11 +50,16 @@ type CandleAdapterConfig struct {
 	Regime      trader.RegimeFilter // nil means NoopRegime
 	Instrument  string              // OANDA format
 	Granularity string              // "H1" or "D"
-	WarmupBars  int                 // bars to fetch for indicator warmup (default 100)
-	OANDA       *oanda.Client
-	AccountID   string
-	Service     *Service // required for UpdateTradeStop; nil disables trailing stops
-	Log         *slog.Logger
+	WarmupBars  int                 // bars to fetch from OANDA for indicator warmup (default 100)
+	// LocalWarmupBars, when > 0, reads this many bars from the local candle
+	// store (set via trader.SetDataDir / --data-dir) before the OANDA warmup
+	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
+	// indicators are fully primed. Falls back gracefully if local data is absent.
+	LocalWarmupBars int
+	OANDA           *oanda.Client
+	AccountID       string
+	Service         *Service // required for UpdateTradeStop; nil disables trailing stops
+	Log             *slog.Logger
 }
 
 // NewCandleStrategyAdapter constructs a ready-to-use adapter.
@@ -74,18 +81,19 @@ func NewCandleStrategyAdapter(cfg CandleAdapterConfig) *CandleStrategyAdapter {
 		log = slog.Default()
 	}
 	return &CandleStrategyAdapter{
-		strategy:    cfg.Strategy,
-		exit:        exit,
-		regime:      regime,
-		instrument:  cfg.Instrument,
-		instNorm:    trader.NormalizeInstrument(cfg.Instrument),
-		granularity: cfg.Granularity,
-		warmupBars:  warmup,
-		scale:       trader.PriceScale,
-		oanda:       cfg.OANDA,
-		accountID:   cfg.AccountID,
-		svc:         cfg.Service,
-		log:         log,
+		strategy:        cfg.Strategy,
+		exit:            exit,
+		regime:          regime,
+		instrument:      cfg.Instrument,
+		instNorm:        trader.NormalizeInstrument(cfg.Instrument),
+		granularity:     cfg.Granularity,
+		warmupBars:      warmup,
+		localWarmupBars: cfg.LocalWarmupBars,
+		scale:           trader.PriceScale,
+		oanda:           cfg.OANDA,
+		accountID:       cfg.AccountID,
+		svc:             cfg.Service,
+		log:             log,
 	}
 }
 
@@ -155,11 +163,73 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price trader.LivePrice
 	return a.convertPlan(plan, ct, price)
 }
 
-// warmup fetches historical bars and replays them through the strategy and
-// regime filter without emitting signals.
+// warmup primes all indicators before the first live signal is emitted.
+// When localWarmupBars > 0 it first replays bars from the local candle store
+// (which may span years), then tops up with a short OANDA fetch to cover any
+// gap between the newest local bar and now.
 func (a *CandleStrategyAdapter) warmup(ctx context.Context) error {
+	if a.localWarmupBars > 0 {
+		if err := a.warmupFromLocalData(ctx); err != nil {
+			a.log.Warn("candle adapter: local warmup failed, continuing with OANDA-only warmup",
+				"err", err, "instrument", a.instrument)
+		}
+	}
+	return a.warmupFromOANDA(ctx)
+}
+
+// warmupFromLocalData reads up to localWarmupBars bars from the local candle
+// store and replays them through the strategy, regime filter, and exit strategy.
+// Missing months are silently skipped so the adapter starts up even when data
+// is incomplete.
+func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	to := time.Now().UTC()
-	// Fetch enough bars to cover indicator warmup periods plus some buffer.
+	from := barsBefore(to, a.granularity, a.localWarmupBars)
+	tf := oandaGranToTF(a.granularity)
+
+	dm := trader.NewDataManager([]string{a.instNorm}, from, to)
+	iter, err := dm.Candles(ctx, trader.CandleRequest{
+		Source:     trader.SourceOanda,
+		Instrument: a.instNorm,
+		Range:      trader.TimeRange{Start: trader.FromTime(from), End: trader.FromTime(to), TF: tf},
+	})
+	if err != nil {
+		return fmt.Errorf("load local candles: %w", err)
+	}
+	defer func() { _ = iter.Close() }()
+
+	count := 0
+	for iter.Next() {
+		ct := trader.CandleTime{
+			Candle:    iter.Candle(),
+			Timestamp: iter.Timestamp(),
+		}
+		a.regime.Tick(ct)
+		a.exit.Tick(ct.Candle)
+		bt := a.makeBacktest()
+		_ = a.strategy.Update(ctx, &ct, bt)
+		if barTime := iter.Timestamp().Time(); barTime.After(a.lastBarTime) {
+			a.lastBarTime = barTime
+		}
+		count++
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("iterate local candles: %w", err)
+	}
+
+	a.log.Info("candle adapter: local warmup complete",
+		"instrument", a.instrument,
+		"bars", count,
+		"from", from.Format("2006-01-02"),
+		"last_bar", a.lastBarTime.Format("2006-01-02"),
+		"exit_ready", a.exit.Ready(),
+	)
+	return nil
+}
+
+// warmupFromOANDA fetches recent bars from OANDA to cover any gap between the
+// newest local bar and now, and to ensure all indicators see the latest prices.
+func (a *CandleStrategyAdapter) warmupFromOANDA(ctx context.Context) error {
+	to := time.Now().UTC()
 	from := barsBefore(to, a.granularity, a.warmupBars+10)
 
 	candles, err := a.oanda.FetchCandles(ctx, oanda.FetchCandlesOptions{
@@ -172,7 +242,7 @@ func (a *CandleStrategyAdapter) warmup(ctx context.Context) error {
 		return fmt.Errorf("fetch warmup candles: %w", err)
 	}
 
-	a.log.Info("candle adapter: warming up",
+	a.log.Info("candle adapter: OANDA warmup",
 		"instrument", a.instrument,
 		"bars", len(candles),
 		"strategy", a.strategy.Name(),
@@ -184,7 +254,7 @@ func (a *CandleStrategyAdapter) warmup(ctx context.Context) error {
 		}
 		ct := oandaCandleToCandleTime(c, a.instNorm)
 		a.regime.Tick(ct)
-		// Call Update but discard the plan — warmup only.
+		a.exit.Tick(ct.Candle)
 		bt := a.makeBacktest()
 		_ = a.strategy.Update(ctx, &ct, bt)
 		a.lastBarTime = c.Time
@@ -249,27 +319,40 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 	// Convert first open request, if any.
 	if len(plan.Opens) > 0 {
 		req := plan.Opens[0]
-		inst := trader.GetInstrument(a.instNorm)
-		stopPips := 0.0
-		if inst != nil && req.Stop != 0 {
-			entryPrice := ct.Close
-			dist := entryPrice - req.Stop
-			if dist < 0 {
-				dist = -dist
-			}
-			perPip := inst.PriceUnitsPerPip()
-			if perPip > 0 {
-				stopPips = math.Round(float64(dist)/float64(perPip)*10) / 10
-			}
+
+		// Mirror the backtest loop (trader.go): if the strategy did not set a
+		// stop, ask the exit strategy for the initial stop price.
+		if req.Stop == 0 && a.exit.Ready() {
+			req.Stop = a.exit.InitialStop(req.Side, ct.Close, ct.Candle)
 		}
 
-		side := "long"
-		if req.Side == trader.Short {
-			side = "short"
-		}
-		live.Open = &trader.LiveOpenRequest{
-			Side:     side,
-			StopPips: stopPips,
+		if req.Stop == 0 {
+			a.log.Error("candle adapter: strategy returned open with no stop — exit strategy also provided none; skipping open",
+				"instrument", a.instNorm, "side", req.Side, "reason", plan.Reason)
+		} else {
+			inst := trader.GetInstrument(a.instNorm)
+			if inst == nil {
+				a.log.Error("candle adapter: unknown instrument — skipping open", "instrument", a.instNorm)
+			} else {
+				entryPrice := ct.Close
+				dist := entryPrice - req.Stop
+				if dist < 0 {
+					dist = -dist
+				}
+				stopPips := 0.0
+				if perPip := inst.PriceUnitsPerPip(); perPip > 0 {
+					stopPips = math.Round(float64(dist)/float64(perPip)*10) / 10
+				}
+
+				side := "long"
+				if req.Side == trader.Short {
+					side = "short"
+				}
+				live.Open = &trader.LiveOpenRequest{
+					Side:     side,
+					StopPips: stopPips,
+				}
+			}
 		}
 	}
 
@@ -300,6 +383,19 @@ func oandaCandleToCandleTime(c oanda.Candle, _ string) trader.CandleTime {
 	return trader.CandleTime{
 		Candle:    candle,
 		Timestamp: trader.FromTime(c.Time),
+	}
+}
+
+// oandaGranToTF converts an OANDA granularity string ("H1", "D", "M1") to the
+// internal trader.Timeframe constant used by the candle store.
+func oandaGranToTF(granularity string) trader.Timeframe {
+	switch strings.ToUpper(strings.TrimSpace(granularity)) {
+	case "D", "D1":
+		return trader.D1
+	case "M1":
+		return trader.M1
+	default:
+		return trader.H1
 	}
 }
 
