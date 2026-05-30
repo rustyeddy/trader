@@ -55,6 +55,39 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// Load global config files, then apply fields that the user did not
+		// explicitly set via CLI flags (flags always win).
+		gcfg, err := traderpkg.LoadGlobalConfig(rc.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("global config: %w", err)
+		}
+		flags := cmd.Flags()
+		if !flags.Changed("log-level") && gcfg.Log.Level != "" {
+			rc.LogLevel = gcfg.Log.Level
+		}
+		if !flags.Changed("log-format") && gcfg.Log.Format != "" {
+			rc.LogFormat = gcfg.Log.Format
+		}
+		if !flags.Changed("log-file") && gcfg.Log.File != "" {
+			rc.LogFile = gcfg.Log.File
+		}
+		if !flags.Changed("data-dir") && gcfg.Data.Dir != "" {
+			rc.DataDir = gcfg.Data.Dir
+		}
+		if !flags.Changed("db") && gcfg.DB != "" {
+			rc.DBPath = gcfg.DB
+		}
+		// OANDA creds have no root-level CLI flags; always take from global config.
+		if gcfg.OANDA.Token != "" {
+			rc.OANDAToken = gcfg.OANDA.Token
+		}
+		if gcfg.OANDA.AccountID != "" {
+			rc.OANDAAccountID = gcfg.OANDA.AccountID
+		}
+		if gcfg.OANDA.Env != "" {
+			rc.OANDAEnv = gcfg.OANDA.Env
+		}
+
 		traderpkg.SetDataDir(rc.DataDir)
 		return traderpkg.Setup(traderpkg.LogConfig{
 			Level:  rc.LogLevel,

@@ -21,6 +21,12 @@ type RootConfig struct {
 	LogFormat string
 	NoColor   bool
 
+	// OANDA credentials populated from global config; individual commands
+	// may override via their own --token / --account-id / --env flags.
+	OANDAToken     string
+	OANDAAccountID string
+	OANDAEnv       string
+
 	// Paths    PathsConfig
 	// Defaults DefaultsConfig
 	// Backtest BacktestConfig
