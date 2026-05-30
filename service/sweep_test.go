@@ -37,19 +37,32 @@ import (
 	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
 )
 
-// sweepStrategies are the canonical names of real (non-scaffolding) strategies.
+// sweepStrategy pairs a strategy kind with any params it requires to run.
 // Aliases (donchian-breakout-*, bollinger-fade) are omitted to avoid
 // re-testing the same constructor twice.
-var sweepStrategies = []string{
-	"donchian",
-	"donchian-v2",
-	"donchian-v3",
-	"donchian-v4",
-	"donchian-v5",
-	"donchian-v6",
-	"ema-cross",
-	"ema-cross-adx",
-	"bb-fade",
+type sweepStrategy struct {
+	kind   string
+	params map[string]any
+}
+
+var sweepStrategies = []sweepStrategy{
+	{kind: "donchian"},
+	{kind: "donchian-v2"},
+	{kind: "donchian-v3"},
+	{kind: "donchian-v4"},
+	{kind: "donchian-v5"},
+	{kind: "donchian-v6"},
+	{kind: "ema-cross", params: map[string]any{
+		"fast": 9,
+		"slow": 21,
+	}},
+	{kind: "ema-cross-adx", params: map[string]any{
+		"fast":          9,
+		"slow":          21,
+		"adx_period":    14,
+		"adx_threshold": 20.0,
+	}},
+	{kind: "bb-fade"},
 }
 
 // sweepMatrix defines what to run each strategy against.
@@ -97,7 +110,7 @@ func TestStrategySweep(t *testing.T) {
 			for _, inst := range sweepInstruments {
 				// Capture loop vars for parallel subtests.
 				strategy, tf, inst := strategy, tf, inst
-				name := fmt.Sprintf("%s/%s/%s", strategy, tf.timeframe, inst)
+				name := fmt.Sprintf("%s/%s/%s", strategy.kind, tf.timeframe, inst)
 
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
@@ -113,7 +126,7 @@ func TestStrategySweep(t *testing.T) {
 								From:       tf.from,
 								To:         tf.to,
 							},
-							Strategy: trader.StrategyConfig{Kind: strategy},
+							Strategy: trader.StrategyConfig{Kind: strategy.kind, Params: strategy.params},
 							// Chandelier exit ensures strategies that delegate
 							// stop calculation (donchian-v3+) produce valid stops.
 							Exit: trader.ExitConfig{
