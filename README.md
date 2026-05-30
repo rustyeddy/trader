@@ -342,6 +342,41 @@ Response includes `bars[]` (OHLC) and `signals[]`. Signal kinds:
 | `blocked` | Regime filter suppressed an open signal |
 | `no_stop` | Open skipped — strategy produced no stop and exit strategy not ready |
 
+Save the response and slice it with `jq` to analyse signals offline:
+
+```bash
+# Save replay output to file
+curl -s -X POST http://localhost:9999/api/v1/replay \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "instrument": "EURUSD", "timeframe": "H1",
+    "from": "2026-01-01", "to": "2026-05-29",
+    "warmup_bars": 200,
+    "strategy": {"kind": "donchian-v6"},
+    "exit":     {"kind": "chandelier", "params": {"atr_period": 14, "multiplier": 3.0}},
+    "regime":   {"kind": "weekly-ema"}
+  }' > replay.json
+
+# Signal summary
+jq '.signals | group_by(.kind) | map({(.[0].kind): length}) | add' replay.json
+
+# All entries with human-readable time and stop distance
+jq '[.signals[] | select(.kind == "open")] |
+    map({time: (.time | todate), side, price, stop_price, stop_pips, reason})' replay.json
+
+# All exits
+jq '[.signals[] | select(.kind == "close")] |
+    map({time: (.time | todate), side, price, reason})' replay.json
+
+# Blocked signals (regime filter)
+jq '[.signals[] | select(.kind == "blocked")] |
+    map({time: (.time | todate), side, reason})' replay.json
+
+# Chronological timeline — skip stop_update noise
+jq '[.signals[] | select(.kind != "stop_update")] |
+    map({time: (.time | todate), kind, side, price, stop_pips, reason})' replay.json
+```
+
 ### Web UI
 
 Open `http://localhost:9999/replay`. Controls: instrument, timeframe, date range, strategy, exit strategy (ATR period + multiplier), regime filter, warmup bars. Click **Run Replay** to render:
@@ -351,6 +386,8 @@ Open `http://localhost:9999/replay`. Controls: instrument, timeframe, date range
 - **Yellow ■** regime-blocked signals
 - **Orange ■** no-stop-dropped signals
 - **Dashed orange line** — chandelier stop trail from entry to exit
+
+The signal summary bar below the controls shows counts for each kind. The chart re-renders immediately when you change parameters and click Run again — useful for tuning the ATR multiplier or switching regime filters interactively.
 
 ---
 
