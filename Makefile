@@ -6,7 +6,7 @@ CMD     := ./cmd
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin
 
-.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke install clean
+.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke sweep install clean
 
 all: vet build
 
@@ -53,6 +53,9 @@ live-portfolio: build
 
 smoke: build
 	@scripts/smoke.sh
+
+sweep:
+	go test -tags sweep -timeout 15m -v -count=1 ./service/... -run TestStrategySweep
 
 install: build
 	cp $(BIN) $(INSTALL_DIR)/$(APP)
