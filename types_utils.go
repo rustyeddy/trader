@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// parseToUnix performs parseToUnix.
+// parseToUnix parses a timestamp string and returns a minute-aligned UTC Unix timestamp.
 func parseToUnix(s string) (Timestamp, error) {
 	// First try parsing rfc3339
 	t, err := time.Parse(time.RFC3339, s)
@@ -24,7 +24,7 @@ func parseToUnix(s string) (Timestamp, error) {
 	return Timestamp(u), nil
 }
 
-// parseEST performs parseEST.
+// parseEST parses a timestamp string in EST and normalizes it to UTC.
 func parseEST(s string) (time.Time, error) {
 	t, err := time.ParseInLocation(layout, s, estNoDST)
 	if err != nil {
@@ -33,7 +33,7 @@ func parseEST(s string) (time.Time, error) {
 	return t.UTC(), nil // normalize immediately
 }
 
-// fastPrice performs fastPrice.
+// fastPrice parses a decimal price string into the internal fixed-point Price value.
 func fastPrice(s string) (Price, error) {
 	// "1.035030" → "1035030"
 	buf := make([]byte, 0, len(s))
@@ -49,17 +49,17 @@ func fastPrice(s string) (Price, error) {
 	return Price(v), nil
 }
 
-// bitIsSet performs bitIsSet.
+// bitIsSet reports whether bit i is set in the bitset.
 func bitIsSet(bits []uint64, i int) bool {
 	return (bits[i>>6] & (uint64(1) << uint(i&63))) != 0
 }
 
-// bitSet performs bitSet.
+// bitSet sets bit i in the bitset.
 func bitSet(bits []uint64, i int) {
 	bits[i>>6] |= (uint64(1) << uint(i&63))
 }
 
-// secondsToTFString performs secondsToTFString.
+// secondsToTFString converts timeframe seconds into its OANDA-style timeframe string.
 func secondsToTFString(sec Timestamp) (string, error) {
 	if sec <= 0 {
 		return "", fmt.Errorf("invalid timeframe seconds: %d", sec)
@@ -90,7 +90,7 @@ func secondsToTFString(sec Timestamp) (string, error) {
 	return "", fmt.Errorf("cannot map timeframe: %d seconds", sec)
 }
 
-// tfStringToSeconds performs tfStringToSeconds.
+// tfStringToSeconds converts an OANDA-style timeframe string to seconds.
 func tfStringToSeconds(tf string) (Timestamp, error) {
 	switch tf {
 	case "M1":
