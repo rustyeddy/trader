@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestOrderTypeString_AllValuesAndUnknown_Phase1 verifies expected behavior for this component.
 func TestOrderTypeString_AllValuesAndUnknown_Phase1(t *testing.T) {
 	t.Parallel()
 
@@ -27,6 +28,7 @@ func TestOrderTypeString_AllValuesAndUnknown_Phase1(t *testing.T) {
 	}
 }
 
+// TestOrderStatusString_AllValuesAndUnknown_Phase1 verifies expected behavior for this component.
 func TestOrderStatusString_AllValuesAndUnknown_Phase1(t *testing.T) {
 	t.Parallel()
 

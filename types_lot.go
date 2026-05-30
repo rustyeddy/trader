@@ -2,6 +2,7 @@ package trader
 
 import "sync"
 
+// lotState represents a trader domain type.
 type lotState int
 
 const (
@@ -12,6 +13,7 @@ const (
 	LotClosed
 )
 
+// Lot represents a trader domain type.
 type Lot struct {
 	*TradeCommon
 	EntryPrice     Price
@@ -24,11 +26,13 @@ type Lot struct {
 	ExtremePrice Price
 }
 
+// LotBook represents a trader domain type.
 type LotBook struct {
 	mu   sync.RWMutex
 	lots map[string]*Lot
 }
 
+// All is an internal helper for trader type processing.
 func (lb *LotBook) All() map[string]*Lot {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
@@ -42,12 +46,14 @@ func (lb *LotBook) All() map[string]*Lot {
 	return out
 }
 
+// Len is an internal helper for trader type processing.
 func (lb *LotBook) Len() int {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 	return len(lb.lots)
 }
 
+// Add is an internal helper for trader type processing.
 func (lb *LotBook) Add(lot *Lot) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -57,6 +63,7 @@ func (lb *LotBook) Add(lot *Lot) {
 	lb.lots[lot.ID] = lot
 }
 
+// Delete is an internal helper for trader type processing.
 func (lb *LotBook) Delete(id string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -66,6 +73,7 @@ func (lb *LotBook) Delete(id string) {
 	delete(lb.lots, id)
 }
 
+// Range is an internal helper for trader type processing.
 func (lb *LotBook) Range(fn func(*Lot) error) error {
 	lb.mu.RLock()
 	lots := make([]*Lot, 0, len(lb.lots))
@@ -81,6 +89,7 @@ func (lb *LotBook) Range(fn func(*Lot) error) error {
 	return nil
 }
 
+// Slice is an internal helper for trader type processing.
 func (lb *LotBook) Slice() []*Lot {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()

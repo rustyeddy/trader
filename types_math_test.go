@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMulDiv64 verifies expected behavior for this component.
 func TestMulDiv64(t *testing.T) {
 	t.Parallel()
 
@@ -19,6 +20,7 @@ func TestMulDiv64(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestMulDivFloor64 verifies expected behavior for this component.
 func TestMulDivFloor64(t *testing.T) {
 	t.Parallel()
 
@@ -30,6 +32,7 @@ func TestMulDivFloor64(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestMulDivCeil64 verifies expected behavior for this component.
 func TestMulDivCeil64(t *testing.T) {
 	t.Parallel()
 
@@ -41,6 +44,7 @@ func TestMulDivCeil64(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestAbs64AndAbsGeneric verifies expected behavior for this component.
 func TestAbs64AndAbsGeneric(t *testing.T) {
 	t.Parallel()
 
@@ -50,6 +54,7 @@ func TestAbs64AndAbsGeneric(t *testing.T) {
 	assert.Equal(t, float64(2.5), abs(-2.5))
 }
 
+// TestMulChecked64AndRoundHelpers_Phase2 verifies expected behavior for this component.
 func TestMulChecked64AndRoundHelpers_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -78,6 +83,7 @@ func TestMulChecked64AndRoundHelpers_Phase2(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestAbsInt64CheckedAndSignedMulDivRound_Phase2 verifies expected behavior for this component.
 func TestAbsInt64CheckedAndSignedMulDivRound_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +115,7 @@ func TestAbsInt64CheckedAndSignedMulDivRound_Phase2(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestMulDivVariants_OverflowBranches_Phase2 verifies expected behavior for this component.
 func TestMulDivVariants_OverflowBranches_Phase2(t *testing.T) {
 	t.Parallel()
 

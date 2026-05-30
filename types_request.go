@@ -1,5 +1,6 @@
 package trader
 
+// RequestType represents a trader domain type.
 type RequestType uint8
 
 const (
@@ -9,6 +10,7 @@ const (
 	RequestClose
 )
 
+// Request represents a trader domain type.
 type Request struct {
 	*TradeCommon
 	RequestType
@@ -18,16 +20,19 @@ type Request struct {
 	Candle Candle
 }
 
+// OpenRequest represents a trader domain type.
 type OpenRequest struct {
 	Request
 }
 
+// CloseRequest represents a trader domain type.
 type CloseRequest struct {
 	Request
 	*Lot
 	CloseCause closeCause
 }
 
+// NewOpenRequest is an internal helper for trader type processing.
 func NewOpenRequest(
 	instr string,
 	c *CandleTime,
@@ -54,6 +59,7 @@ func NewOpenRequest(
 	return op
 }
 
+// closeCause represents a trader domain type.
 type closeCause int
 
 const (
@@ -64,6 +70,7 @@ const (
 	CloseBrokerLiquidation
 )
 
+// String is an internal helper for trader type processing.
 func (c closeCause) String() string {
 	switch c {
 	case CloseManual:

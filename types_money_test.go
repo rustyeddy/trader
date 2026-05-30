@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMoneyFromFloatAndFloat64 verifies expected behavior for this component.
 func TestMoneyFromFloatAndFloat64(t *testing.T) {
 	t.Parallel()
 
@@ -18,6 +19,7 @@ func TestMoneyFromFloatAndFloat64(t *testing.T) {
 	}
 }
 
+// TestMoneyStringRawScaledValue verifies expected behavior for this component.
 func TestMoneyStringRawScaledValue(t *testing.T) {
 	t.Parallel()
 
@@ -25,6 +27,7 @@ func TestMoneyStringRawScaledValue(t *testing.T) {
 	assert.Equal(t, "1500000.000000", m.String())
 }
 
+// TestPriceFromFloatScaling verifies expected behavior for this component.
 func TestPriceFromFloatScaling(t *testing.T) {
 	t.Parallel()
 
@@ -32,6 +35,7 @@ func TestPriceFromFloatScaling(t *testing.T) {
 	assert.Equal(t, Price(-150000), PriceFromFloat(-1.5))
 }
 
+// TestFormatNumber verifies expected behavior for this component.
 func TestFormatNumber(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +43,7 @@ func TestFormatNumber(t *testing.T) {
 	assert.Equal(t, "1.5", formatNumber(15, 10))
 }
 
+// TestParsePrice verifies expected behavior for this component.
 func TestParsePrice(t *testing.T) {
 	t.Parallel()
 
@@ -50,6 +55,7 @@ func TestParsePrice(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestRateFromFloatFloat64AndString verifies expected behavior for this component.
 func TestRateFromFloatFloat64AndString(t *testing.T) {
 	t.Parallel()
 
@@ -58,6 +64,7 @@ func TestRateFromFloatFloat64AndString(t *testing.T) {
 	assert.Equal(t, "0.123456", r.String())
 }
 
+// TestScaleConsts verifies expected behavior for this component.
 func TestScaleConsts(t *testing.T) {
 	t.Parallel()
 
@@ -65,6 +72,7 @@ func TestScaleConsts(t *testing.T) {
 	assert.Equal(t, Scale7(1000000), MoneyScale)
 }
 
+// TestPriceOverflowBoundaryBehavior verifies expected behavior for this component.
 func TestPriceOverflowBoundaryBehavior(t *testing.T) {
 	t.Parallel()
 

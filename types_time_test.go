@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestTimeframeParseNormalizeAndString verifies expected behavior for this component.
 func TestTimeframeParseNormalizeAndString(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +24,7 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 	assert.Equal(t, "UNKNOWN", Timeframe(999).String())
 }
 
+// TestTimeRangeBasics verifies expected behavior for this component.
 func TestTimeRangeBasics(t *testing.T) {
 	t.Parallel()
 
@@ -34,6 +36,7 @@ func TestTimeRangeBasics(t *testing.T) {
 	assert.True(t, r.Covers(newTimeRange(120, 180, M1)))
 }
 
+// TestIsFXMarketClosedWrapperMatchesCanonical verifies expected behavior for this component.
 func TestIsFXMarketClosedWrapperMatchesCanonical(t *testing.T) {
 	t.Parallel()
 
@@ -54,6 +57,7 @@ func TestIsFXMarketClosedWrapperMatchesCanonical(t *testing.T) {
 	}
 }
 
+// TestTimestampHelpers verifies expected behavior for this component.
 func TestTimestampHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -69,6 +73,7 @@ func TestTimestampHelpers(t *testing.T) {
 	assert.Equal(t, Timestamp(135), Timestamp(125).Add(10*time.Second))
 }
 
+// TestFromStringAndTimeRangeLocation verifies expected behavior for this component.
 func TestFromStringAndTimeRangeLocation(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +95,7 @@ func TestFromStringAndTimeRangeLocation(t *testing.T) {
 	assert.Contains(t, err.Error(), "bad from date")
 }
 
+// TestTimeRangeMonthsAndMonthRange verifies expected behavior for this component.
 func TestTimeRangeMonthsAndMonthRange(t *testing.T) {
 	t.Parallel()
 

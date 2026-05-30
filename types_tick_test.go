@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestPriceStore_SetGet verifies expected behavior for this component.
 func TestPriceStore_SetGet(t *testing.T) {
 	t.Parallel()
 
@@ -25,6 +26,7 @@ func TestPriceStore_SetGet(t *testing.T) {
 	assert.Equal(t, p, got)
 }
 
+// TestPriceStore_GetMissing verifies expected behavior for this component.
 func TestPriceStore_GetMissing(t *testing.T) {
 	t.Parallel()
 
@@ -35,6 +37,7 @@ func TestPriceStore_GetMissing(t *testing.T) {
 	assert.Equal(t, Tick{}, got)
 }
 
+// TestTickSpread_Phase1 verifies expected behavior for this component.
 func TestTickSpread_Phase1(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +45,7 @@ func TestTickSpread_Phase1(t *testing.T) {
 	assert.Equal(t, Price(6), tk.Spread())
 }
 
+// TestTickMid_RoundsHalfUp_Phase1 verifies expected behavior for this component.
 func TestTickMid_RoundsHalfUp_Phase1(t *testing.T) {
 	t.Parallel()
 

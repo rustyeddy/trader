@@ -1,5 +1,6 @@
 package trader
 
+// orderType represents a trader domain type.
 type orderType uint8
 
 const (
@@ -11,6 +12,7 @@ const (
 	OrderTrailingStop
 )
 
+// String is an internal helper for trader type processing.
 func (ot orderType) String() string {
 	switch ot {
 	case OrderNone:
@@ -30,6 +32,7 @@ func (ot orderType) String() string {
 	}
 }
 
+// orderStatus represents a trader domain type.
 type orderStatus uint8
 
 const (
@@ -41,6 +44,7 @@ const (
 	OrderCanceled
 )
 
+// String is an internal helper for trader type processing.
 func (os orderStatus) String() string {
 	switch os {
 	case OrderStatusNone:
@@ -61,6 +65,7 @@ func (os orderStatus) String() string {
 	}
 }
 
+// order represents a trader domain type.
 type order struct {
 	*TradeCommon
 	orderType

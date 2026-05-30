@@ -7,10 +7,19 @@ import (
 	"strings"
 )
 
+// dollars represents a trader domain type.
 type dollars float64
+
+// Money represents a trader domain type.
 type Money int64
+
+// Price represents a trader domain type.
 type Price int32
+
+// Scale6 represents a trader domain type.
 type Scale6 int32
+
+// Scale7 represents a trader domain type.
 type Scale7 int64
 
 const (
@@ -18,24 +27,29 @@ const (
 	MoneyScale Scale7 = 1_000_000
 )
 
+// MoneyFromFloat is an internal helper for trader type processing.
 func MoneyFromFloat(f float64) Money {
 	return Money(math.Round(f * float64(MoneyScale)))
 }
 
+// String is an internal helper for trader type processing.
 func (m Money) String() string {
 	return fmt.Sprintf("%f", float64(m))
 }
 
+// Float64 is an internal helper for trader type processing.
 func (m Money) Float64() float64 {
 	return float64(m) / float64(MoneyScale)
 }
 
 // Price represents scaled int price ticks
 
+// PriceFromFloat is an internal helper for trader type processing.
 func PriceFromFloat(f float64) Price {
 	return Price(math.Round(f * float64(PriceScale)))
 }
 
+// Float64 is an internal helper for trader type processing.
 func (p Price) Float64() float64 {
 	return float64(p) / float64(PriceScale)
 }
@@ -61,22 +75,27 @@ func parsePrice(s string) (Price, error) {
 	return Price(v), nil
 }
 
+// String is an internal helper for trader type processing.
 func (p Price) String() string {
 	return fmt.Sprintf("%f", float64(p))
 }
 
+// Rate represents a trader domain type.
 type Rate int64
 
 const rateScale = MoneyScale
 
+// RateFromFloat is an internal helper for trader type processing.
 func RateFromFloat(f float64) Rate {
 	return Rate(math.Round(f * float64(rateScale)))
 }
 
+// Float64 is an internal helper for trader type processing.
 func (r Rate) Float64() float64 {
 	return float64(r) / float64(rateScale)
 }
 
+// String is an internal helper for trader type processing.
 func (r Rate) String() string {
 	return fmt.Sprintf("%0.6f", r.Float64())
 }

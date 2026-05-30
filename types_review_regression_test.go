@@ -8,12 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestOrderTypeString_UnknownIsSafe verifies expected behavior for this component.
 func TestOrderTypeString_UnknownIsSafe(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "<unknown>", orderType(255).String())
 }
 
+// TestOrderStatusString_Values verifies expected behavior for this component.
 func TestOrderStatusString_Values(t *testing.T) {
 	t.Parallel()
 
@@ -21,6 +23,7 @@ func TestOrderStatusString_Values(t *testing.T) {
 	assert.Equal(t, "<unknown>", orderStatus(255).String())
 }
 
+// TestLotUnrealizedPL_LongAndShort verifies expected behavior for this component.
 func TestLotUnrealizedPL_LongAndShort(t *testing.T) {
 	t.Parallel()
 
@@ -51,6 +54,7 @@ func TestLotUnrealizedPL_LongAndShort(t *testing.T) {
 	assert.Equal(t, Money(MoneyScale), shortPL2)
 }
 
+// TestLotUnrealizedPL_QuoteToAccountConversion verifies expected behavior for this component.
 func TestLotUnrealizedPL_QuoteToAccountConversion(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +70,7 @@ func TestLotUnrealizedPL_QuoteToAccountConversion(t *testing.T) {
 	assert.Equal(t, Money(1_500_000), pl)
 }
 
+// TestIsFXMarketClosed_BackCompatWrapper verifies expected behavior for this component.
 func TestIsFXMarketClosed_BackCompatWrapper(t *testing.T) {
 	t.Parallel()
 
@@ -79,6 +84,7 @@ func TestIsFXMarketClosed_BackCompatWrapper(t *testing.T) {
 	assert.Equal(t, isForexMarketClosed(tBerlin), isFXMarketClosed(tBerlin))
 }
 
+// TestIsForexMarketClosed_NewYorkBoundaries verifies expected behavior for this component.
 func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
 	t.Parallel()
 

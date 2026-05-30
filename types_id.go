@@ -16,6 +16,7 @@ var (
 	mono   io.Reader
 )
 
+// init is an internal helper for trader type processing.
 func init() {
 	// Seed a PRNG from crypto/rand so ULID entropy is unpredictable.
 	// We use ulid.Monotonic so IDs generated within the same millisecond remain

@@ -70,6 +70,7 @@ func mulDivCeil64(a, b, den int64) (int64, error) {
 	return int64(q), nil
 }
 
+// abs64 is an internal helper for trader type processing.
 func abs64(x int64) int64 {
 	if x < 0 {
 		return -x
@@ -77,6 +78,7 @@ func abs64(x int64) int64 {
 	return x
 }
 
+// mulChecked64 is an internal helper for trader type processing.
 func mulChecked64(a, b int64) (int64, error) {
 	if a < 0 || b < 0 {
 		return 0, fmt.Errorf("mulChecked64: invalid args a=%d b=%d", a, b)
@@ -90,6 +92,7 @@ func mulChecked64(a, b int64) (int64, error) {
 	return int64(lo), nil
 }
 
+// roundHalfAwayFromZero is an internal helper for trader type processing.
 func roundHalfAwayFromZero(num, den int64) (int64, error) {
 	if num < 0 || den <= 0 {
 		return 0, fmt.Errorf("roundHalfAwayFromZero: invalid args num=%d den=%d", num, den)
@@ -107,6 +110,7 @@ func roundHalfAwayFromZero(num, den int64) (int64, error) {
 	return q, nil
 }
 
+// absInt64Checked is an internal helper for trader type processing.
 func absInt64Checked(v int64) (int64, error) {
 	if v == math.MinInt64 {
 		return 0, fmt.Errorf("absInt64Checked: overflow")
@@ -117,6 +121,7 @@ func absInt64Checked(v int64) (int64, error) {
 	return v, nil
 }
 
+// signedMulDivRound is an internal helper for trader type processing.
 func signedMulDivRound(a, b, den int64) (int64, error) {
 	if b < 0 || den <= 0 {
 		return 0, fmt.Errorf("signedMulDivRound: invalid args a=%d b=%d den=%d", a, b, den)

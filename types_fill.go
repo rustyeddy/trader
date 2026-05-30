@@ -1,5 +1,6 @@
 package trader
 
+// fillStatus represents a trader domain type.
 type fillStatus uint8
 
 const (
@@ -10,6 +11,7 @@ const (
 	FillFailed
 )
 
+// fill represents a trader domain type.
 type fill struct {
 	*TradeCommon
 	fillStatus

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestLotBookAddDeleteLen_Phase2 verifies expected behavior for this component.
 func TestLotBookAddDeleteLen_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -27,6 +28,7 @@ func TestLotBookAddDeleteLen_Phase2(t *testing.T) {
 	assert.Equal(t, 1, lb.Len())
 }
 
+// TestLotBookAll_ReturnsCopyNotAlias_Phase2 verifies expected behavior for this component.
 func TestLotBookAll_ReturnsCopyNotAlias_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +44,7 @@ func TestLotBookAll_ReturnsCopyNotAlias_Phase2(t *testing.T) {
 	assert.NotNil(t, lb.All()["p1"])
 }
 
+// TestLotBookRange_VisitsAllAndStopsOnError_Phase2 verifies expected behavior for this component.
 func TestLotBookRange_VisitsAllAndStopsOnError_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -68,6 +71,7 @@ func TestLotBookRange_VisitsAllAndStopsOnError_Phase2(t *testing.T) {
 	assert.ErrorIs(t, err, stopErr)
 }
 
+// TestLotBookAllNilMap_Phase2 verifies expected behavior for this component.
 func TestLotBookAllNilMap_Phase2(t *testing.T) {
 	t.Parallel()
 

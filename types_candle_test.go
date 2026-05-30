@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// loadCandleSet is an internal helper for trader type processing.
 func loadCandleSet(t *testing.T) *candleSet {
 	t.Helper()
 	fname := "./testdata/DAT_ASCII_EURUSD_M1_2025.csv"
@@ -19,6 +20,7 @@ func loadCandleSet(t *testing.T) *candleSet {
 	return set
 }
 
+// TestIterator verifies expected behavior for this component.
 func TestIterator(t *testing.T) {
 	cs := loadCandleSet(t)
 
@@ -38,6 +40,7 @@ func TestIterator(t *testing.T) {
 	assert.Equal(t, i, 372023)
 }
 
+// TestReadCandleSetFile verifies expected behavior for this component.
 func TestReadCandleSetFile(t *testing.T) {
 	cs := loadCandleSet(t)
 	s := cs.Stats()
@@ -49,6 +52,7 @@ func TestReadCandleSetFile(t *testing.T) {
 	assert.Equal(t, 15, s.SuspiciousGaps)
 }
 
+// TestAggregateH1 verifies expected behavior for this component.
 func TestAggregateH1(t *testing.T) {
 	cs := loadCandleSet(t)
 	h1 := cs.AggregateH1(50)
