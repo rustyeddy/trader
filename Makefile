@@ -6,7 +6,7 @@ CMD     := ./cmd
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin
 
-.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run install clean
+.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio install clean
 
 all: vet build
 
@@ -43,6 +43,13 @@ test-blackbox:
 
 run: build
 	$(BIN)
+
+live-portfolio: build
+	$(BIN) live portfolio \
+		--config /srv/trading/live/configs/demo-portfolio.yml \
+		--log-level info \
+		--log-format json \
+		--log-file /srv/trading/live/logs/portfolio.log
 
 install: build
 	cp $(BIN) $(INSTALL_DIR)/$(APP)

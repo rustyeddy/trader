@@ -3,11 +3,11 @@ package live
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	trader "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -17,6 +17,9 @@ func newPortfolioCmd(_ any) *cobra.Command {
 		accountID  string
 		token      string
 		dryRun     bool
+		logFile    string
+		logFormat  string
+		logLevel   string
 	)
 
 	cmd := &cobra.Command{
@@ -33,6 +36,15 @@ Example:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := notifyContext(cmd.Context())
 			defer cancel()
+
+			if err := trader.Setup(trader.LogConfig{
+				Level:  logLevel,
+				Format: logFormat,
+				File:   logFile,
+				Stdout: true,
+			}); err != nil {
+				return err
+			}
 
 			if configFile == "" {
 				return fmt.Errorf("--config is required")
@@ -88,7 +100,7 @@ Example:
 			}
 			defer release()
 
-			log := slog.Default()
+			log := trader.L
 			portfolioCfg, err := service.BuildPortfolioRunConfig(cfg, svc.OANDA, svc.AccountID, log)
 			if err != nil {
 				return fmt.Errorf("build portfolio config: %w", err)
@@ -109,6 +121,9 @@ Example:
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print resolved config and exit without trading")
+	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level: debug|info|warn|error")
+	cmd.Flags().StringVar(&logFormat, "log-format", "text", "Log format: text|json")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "Path to log file (written in addition to stdout)")
 
 	return cmd
 }

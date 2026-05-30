@@ -28,6 +28,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -152,6 +153,11 @@ func Setup(cfg LogConfig) error {
 	}
 
 	if cfg.File != "" {
+		if dir := filepath.Dir(cfg.File); dir != "" {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("log: create log directory %q: %w", dir, err)
+			}
+		}
 		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("log: open log file %q: %w", cfg.File, err)
