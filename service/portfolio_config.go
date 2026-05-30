@@ -21,19 +21,19 @@ type PortfolioConfig struct {
 	// LocalWarmupBars is the default number of bars to load from the local
 	// candle store for indicator priming. Per-instrument values override this.
 	// 500 covers ~3 weeks of H1 data; 5000 covers ~7 months. 0 disables.
-	LocalWarmupBars    int     `yaml:"local_warmup_bars"`
-	Instruments        []portfolioInstrumentYAML `yaml:"instruments"`
+	LocalWarmupBars int                       `yaml:"local_warmup_bars"`
+	Instruments     []portfolioInstrumentYAML `yaml:"instruments"`
 }
 
 type portfolioInstrumentYAML struct {
-	Instrument      string  `yaml:"instrument"`       // OANDA format, e.g. "USD_CHF"
-	Timeframe       string  `yaml:"timeframe"`        // "H1" or "D1"
-	TickInterval    string  `yaml:"tick_interval"`    // optional poll override, e.g. "5m"
-	RiskPct         float64 `yaml:"risk_pct"`         // overrides top-level default
-	MaxUnits        int64   `yaml:"max_units"`
-	WarmupBars      int     `yaml:"warmup_bars"`
+	Instrument   string  `yaml:"instrument"`    // OANDA format, e.g. "USD_CHF"
+	Timeframe    string  `yaml:"timeframe"`     // "H1" or "D1"
+	TickInterval string  `yaml:"tick_interval"` // optional poll override, e.g. "5m"
+	RiskPct      float64 `yaml:"risk_pct"`      // overrides top-level default
+	MaxUnits     int64   `yaml:"max_units"`
+	WarmupBars   int     `yaml:"warmup_bars"`
 	// LocalWarmupBars overrides the portfolio-level default for this instrument.
-	LocalWarmupBars int     `yaml:"local_warmup_bars"`
+	LocalWarmupBars int `yaml:"local_warmup_bars"`
 
 	Strategy struct {
 		Kind   string         `yaml:"kind"`
@@ -117,7 +117,6 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 
 		// Wrap the service so the adapter can update trailing stops on OANDA.
 		svc := &Service{OANDA: oandaClient, AccountID: accountID, Log: log}
-
 		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
 			Strategy:        strategy,
 			Exit:            exit,
