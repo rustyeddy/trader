@@ -72,11 +72,12 @@ type ReplayRequest struct {
 // ── replayPosition tracks open simulated positions during replay ──────────────
 
 type replayPosition struct {
-	side        trader.Side
-	entryPrice  trader.Price
-	currentStop trader.Price
+	id           string
+	side         trader.Side
+	entryPrice   trader.Price
+	currentStop  trader.Price
 	extremePrice trader.Price
-	openTime    trader.Timestamp
+	openTime     trader.Timestamp
 }
 
 // ── RunReplay ────────────────────────────────────────────────────────────────
@@ -214,10 +215,22 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 		// Process closes.
 		for _, cl := range plan.Closes {
-			_ = cl
+			// Determine side from the closed lot if available, else from our tracker.
 			side := trader.Long
-			if len(positions) > 0 {
+			if cl.Lot != nil {
+				side = cl.Lot.Side
+				bt.BacktestRun.Lots.Delete(cl.Lot.ID)
+				// Also remove from our position tracker.
+				for i, pos := range positions {
+					if pos.id == cl.Lot.ID {
+						positions = append(positions[:i], positions[i+1:]...)
+						break
+					}
+				}
+			} else if len(positions) > 0 {
 				side = positions[0].side
+				bt.BacktestRun.Lots.Delete(positions[0].id)
+				positions = positions[1:]
 			}
 			signals = append(signals, Signal{
 				Time:   int64(ts),
@@ -226,8 +239,6 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 				Price:  candle.Close.Float64(),
 				Reason: plan.Reason,
 			})
-			// Remove closed positions (simplified: close all on any close signal).
-			positions = positions[:0]
 		}
 
 		// Process opens.
@@ -273,6 +284,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			}
 
 			stopPips := pipsFromDist(op.Side, candle.Close, stop, inst_)
+			posID := trader.NewULID()
 			signals = append(signals, Signal{
 				Time:      int64(ts),
 				Kind:      SignalOpen,
@@ -283,7 +295,21 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 				Reason:    plan.Reason,
 			})
 
+			// Add to the synthetic LotBook so the strategy can see open positions.
+			tc := &trader.TradeCommon{ID: posID}
+			tc.Side = op.Side
+			tc.Stop = stop
+			tc.Instrument = inst
+			bt.BacktestRun.Lots.Add(&trader.Lot{
+				TradeCommon:    tc,
+				EntryPrice:     candle.Close,
+				OriginalUnits:  1,
+				RemainingUnits: 1,
+				State:          trader.LotOpen,
+			})
+
 			positions = append(positions, &replayPosition{
+				id:           posID,
 				side:         op.Side,
 				entryPrice:   candle.Close,
 				currentStop:  stop,

@@ -10,14 +10,14 @@
   ];
 
   const STRATEGIES = [
-    { value: 'donchianv6', label: 'Donchian v6' },
-    { value: 'donchianv5', label: 'Donchian v5' },
-    { value: 'donchianv4', label: 'Donchian v4' },
-    { value: 'donchianv3', label: 'Donchian v3' },
-    { value: 'donchianv2', label: 'Donchian v2' },
-    { value: 'donchian',   label: 'Donchian v1' },
-    { value: 'emacross',   label: 'EMA Cross' },
-    { value: 'bollingerfade', label: 'Bollinger Fade' },
+    { value: 'donchian-v6',  label: 'Donchian v6' },
+    { value: 'donchian-v5',  label: 'Donchian v5' },
+    { value: 'donchian-v4',  label: 'Donchian v4' },
+    { value: 'donchian-v3',  label: 'Donchian v3' },
+    { value: 'donchian-v2',  label: 'Donchian v2' },
+    { value: 'donchian',     label: 'Donchian v1' },
+    { value: 'ema-cross',    label: 'EMA Cross' },
+    { value: 'bb-fade',      label: 'Bollinger Fade' },
   ];
 
   const EXIT_STRATEGIES = [
@@ -26,11 +26,11 @@
   ];
 
   const REGIME_FILTERS = [
-    { value: '',            label: 'None' },
-    { value: 'weeklyema',   label: 'Weekly EMA' },
-    { value: 'atrpercentile', label: 'ATR Percentile' },
-    { value: 'd1adx',       label: 'D1 ADX' },
-    { value: 'composite',   label: 'Composite' },
+    { value: '',              label: 'None' },
+    { value: 'weekly-ema',    label: 'Weekly EMA' },
+    { value: 'atr-percentile', label: 'ATR Percentile' },
+    { value: 'adx-d1',        label: 'D1 ADX' },
+    { value: 'composite',     label: 'Composite' },
   ];
 
   // Default to last 6 months
@@ -41,7 +41,7 @@
   let timeframe    = 'H1';
   let from         = sixBack;
   let to           = today;
-  let strategyKind = 'donchianv6';
+  let strategyKind = 'donchian-v6';
   let exitKind     = 'chandelier';
   let exitPeriod   = 14;
   let exitMult     = 3.0;
