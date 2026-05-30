@@ -388,6 +388,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 				live.Open = &trader.LiveOpenRequest{
 					Side:     side,
 					StopPips: stopPips,
+					Reason:   plan.Reason,
 				}
 			}
 		}

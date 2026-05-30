@@ -63,4 +63,5 @@ type LiveOpenRequest struct {
 	StopPips float64 // stop-loss distance in pips
 	TakePips float64 // take-profit distance in pips (0 = none)
 	RiskPct  float64 // percent of account NAV to risk
+	Reason   string  // strategy signal reason, e.g. "donchian-v6-breakout-down"
 }

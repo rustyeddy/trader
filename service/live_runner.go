@@ -179,7 +179,10 @@ func (s *Service) runOneTick(
 			continue
 		}
 		delete(tickCounts, id)
-		log.Info("live runner: closed trade", "trade_id", id)
+		log.Info("live runner: closed trade",
+			"trade_id", id,
+			"reason", plan.Reason,
+		)
 	}
 
 	// 5. Execute open.
@@ -190,6 +193,15 @@ func (s *Service) runOneTick(
 	if riskPct <= 0 {
 		riskPct = cfg.RiskPct
 	}
+
+	log.Info("live runner: submitting order",
+		"instrument", cfg.Instrument,
+		"side", plan.Open.Side,
+		"stop_pips", plan.Open.StopPips,
+		"risk_pct", riskPct,
+		"reason", plan.Open.Reason,
+	)
+
 	result, err := s.PlaceMarketOrder(ctx, PlaceMarketOrderRequest{
 		Instrument:     cfg.Instrument,
 		Side:           plan.Open.Side,
@@ -205,9 +217,11 @@ func (s *Service) runOneTick(
 	if result.Filled != nil {
 		log.Info("live runner: opened trade",
 			"trade_id", result.Filled.TradeID,
+			"instrument", cfg.Instrument,
 			"side", plan.Open.Side,
 			"units", result.Filled.Units,
 			"price", result.Filled.Price,
+			"reason", plan.Open.Reason,
 		)
 	}
 	return nil
