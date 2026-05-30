@@ -348,7 +348,7 @@ func tfFromString(t string) Timeframe {
 	case "h1":
 		return H1
 
-	case "d1":
+	case "d", "d1":
 		return D1
 	}
 	return TF0

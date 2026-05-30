@@ -14,6 +14,9 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 
 	assert.Equal(t, M1, tfFromString("m1"))
 	assert.Equal(t, H1, tfFromString("H1"))
+	assert.Equal(t, D1, tfFromString("D1"))
+	assert.Equal(t, D1, tfFromString("D"))  // OANDA uses "D" not "D1"
+	assert.Equal(t, D1, tfFromString("d"))
 	assert.Equal(t, TF0, tfFromString("unknown"))
 
 	assert.Equal(t, "m1", normalizeTF("60"))
@@ -22,6 +25,19 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 
 	assert.Equal(t, "m1", M1.String())
 	assert.Equal(t, "UNKNOWN", Timeframe(999).String())
+}
+
+// TestParseTimeRange_OANDADailyAlias ensures "D" (OANDA's daily granularity)
+// is accepted by ParseTimeRange, fixing the replay 422 on daily timeframes.
+func TestParseTimeRange_OANDADailyAlias(t *testing.T) {
+	t.Parallel()
+	tr, err := ParseTimeRange("2024-01-01", "2024-03-01", "D")
+	require.NoError(t, err)
+	assert.Equal(t, D1, tr.TF)
+
+	tr2, err := ParseTimeRange("2024-01-01", "2024-03-01", "D1")
+	require.NoError(t, err)
+	assert.Equal(t, D1, tr2.TF)
 }
 
 // TestTimeRangeBasics verifies expected behavior for this component.
