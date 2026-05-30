@@ -13,7 +13,7 @@ make build          # → bin/trader
 make install        # install to $GOPATH/bin
 ```
 
-Requires Go 1.22+. No C dependencies.
+Requires Go 1.22+. No C dependencies (default build). SQLite journal requires `make build-sqlite`.
 
 ---
 
@@ -37,16 +37,19 @@ export OANDA_TOKEN=your-practice-api-token
 # Dry-run: print resolved config and exit
 trader live run --config testdata/configs/pulse-demo.yml --dry-run
 
-# Run the pulse strategy against a practice account
+# Single instrument against a practice account
 trader live run --config testdata/configs/pulse-demo.yml
+
+# Multi-instrument portfolio
+trader live portfolio --config /path/to/portfolio.yml --dry-run
+trader live portfolio --config /path/to/portfolio.yml
 ```
 
-### Web UI + REST API
+### Daemon (REST API + UI)
 
 ```bash
-trader serve                         # REST on :9999, live journal, embedded UI
-trader serve --addr :8080            # custom port
-trader serve --log-level debug
+trader serve --config deploy/trader.yaml.example   # REST on :9999, embedded UI, live journal
+trader serve --addr :8080 --log-level debug
 ```
 
 Open `http://localhost:9999` for the dashboard.
@@ -60,12 +63,13 @@ Open `http://localhost:9999` for the dashboard.
 | `trader backtest` | Run backtests against historical candles |
 | `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
-| `trader data oanda` | Download candles from OANDA into the candle store |
+| `trader data oanda` | Download candles directly from OANDA into the candle store |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
 | `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
 | `trader live journal` | Subscribe to OANDA transaction stream and journal closed trades |
-| `trader order` | Place/close orders on a live OANDA account |
-| `trader serve` | Long-running daemon: REST API + live journal + embedded UI |
+| `trader order` | Place, close, and list orders on a live OANDA account |
+| `trader serve` | Full daemon: REST API + live journal + embedded UI (port :9999) |
+| `trader api serve` | Minimal REST API only, no journal (port :8080) |
 | `trader replay` | Replay a dataset through the sim engine |
 | `trader mcp` | Expose trader as typed Claude tools over stdio (MCP protocol) |
 
@@ -82,19 +86,19 @@ Backtests are driven by YAML config files. See `testdata/configs/` for a full li
 defaults:
   capital: 10000
   risk_pct: 1.0
-  data_dir: /data/candles
+  data_dir: /srv/trading/data/candles
 
 runs:
   - instrument: EUR_USD
     start_date: 2024-01-01
     end_date:   2024-12-31
     strategy:
-      name: emacross
+      name: ema-cross
       fast: 9
       slow: 21
 ```
 
-Results are printed to stdout and optionally written to `reports/` as JSON.
+Results are printed to stdout and optionally written to `reports/` as JSON + org-mode files.
 
 ---
 
@@ -104,18 +108,21 @@ Live trading uses OANDA's REST API. A practice account is free at [oanda.com](ht
 
 **Authentication** — set one of:
 ```bash
-export OANDA_TOKEN=<your-token>        # env var
+export OANDA_TOKEN=<your-token>        # env var (preferred)
 echo <token> > ~/.config/oanda/pat.txt # file fallback
 ```
 
-**Config** (`testdata/configs/pulse-demo.yml`):
+### Single Instrument
+
+Config (`testdata/configs/pulse-demo.yml`):
 ```yaml
 instrument: EUR_USD
-env: practice
-tick_interval: 60s
+env: practice           # practice | live
+tick_interval: 60s      # how often to poll prices
 max_positions: 1
-risk_pct: 0.1
-max_units: 5000         # hard cap on position size
+risk_pct: 0.1           # % of account NAV to risk per trade
+max_units: 5000         # hard unit cap
+max_position_usd: 0     # hard notional cap in account currency (0 = none)
 
 strategy:
   kind: pulse
@@ -127,57 +134,64 @@ strategy:
     risk_pct: 0.1
 ```
 
-The runner polls prices every `tick_interval`, calls the strategy, executes closes then opens, and logs every action. `--log-level debug` adds per-trade tick counts and unrealized P/L each bar.
+```bash
+trader live run --config testdata/configs/pulse-demo.yml
+trader live run --config testdata/configs/pulse-demo.yml --env live --instrument GBP_USD
+```
 
 ### Multi-Instrument Portfolio
 
 Run multiple strategies concurrently with a shared drawdown circuit breaker:
-
-```bash
-trader live portfolio --config /path/to/demo-portfolio.yml --dry-run
-trader live portfolio --config /path/to/demo-portfolio.yml
-```
-
-Portfolio YAML:
 
 ```yaml
 env: practice
 account_id: 101-001-XXXXXXX-001   # auto-discovered if omitted
 risk_pct: 1.0                     # default risk per trade (%)
 drawdown_circuit_pct: 10.0        # halt new opens if equity drops this % from peak
-local_warmup_bars: 5000           # bars to load from local candle store for indicator priming
+local_warmup_bars: 5000           # bars to load from local store for indicator priming
 
 instruments:
   - instrument: EUR_USD
     timeframe: H1
+    tick_interval: 60s            # poll interval (optional, inherits global default)
+    risk_pct: 0.5                 # overrides top-level default
+    max_units: 10000
+
     strategy:
-      kind: donchianv6
+      kind: donchian-v6
+
     exit:
       kind: chandelier
-      params: {period: 14, multiplier: 3.0}
+      params:
+        atr_period: 14
+        multiplier: 3.0
+
     regime:
-      kind: weeklyema
-    risk_pct: 0.5
-    max_units: 10000
+      kind: weekly-ema
 
   - instrument: GBP_USD
     timeframe: H1
     local_warmup_bars: 2000       # per-instrument override
     strategy:
-      kind: emacross
+      kind: ema-cross
     exit:
       kind: chandelier
-      params: {period: 14, multiplier: 3.0}
+      params: {atr_period: 14, multiplier: 3.0}
+```
+
+```bash
+trader live portfolio --config portfolio.yml --dry-run
+trader live portfolio --config portfolio.yml
 ```
 
 ### Indicator Warmup
 
-Before emitting live signals the adapter primes all indicators (strategy, regime filter, exit/chandelier stop) using two phases:
+Before emitting live signals the adapter primes all indicators (strategy, regime filter, chandelier stop) using two phases:
 
-1. **Local phase** — reads `local_warmup_bars` bars from the on-disk OANDA candle store. 500 bars covers ~3 weeks of H1 data; 5000 covers ~7 months and is sufficient for ATR-percentile and weekly-EMA regime filters.
+1. **Local phase** — reads `local_warmup_bars` bars from the on-disk OANDA candle store. 500 bars covers ~3 weeks of H1 data; 5000 covers ~7 months — sufficient for ATR-percentile and weekly-EMA regime filters.
 2. **OANDA phase** — fetches the most recent ~100 bars from OANDA to bridge any gap between the newest local bar and now.
 
-Set `local_warmup_bars: 0` to skip local warmup and use OANDA-only (the original behaviour).
+Set `local_warmup_bars: 0` to skip local warmup and use OANDA-only.
 
 ### Signal Logging
 
@@ -197,16 +211,48 @@ Use `--log-level info` (the default) to see all signal events; `--log-level warn
 
 ## Strategies
 
-| Strategy | Description |
+Strategies are referenced by their registered kind string in config files.
+
+| Kind | Description | Live? |
+|---|---|---|
+| `pulse` | Mechanical open/close on fixed tick schedule — useful for pipeline testing | live only |
+| `ema-cross` | EMA crossover (fast/slow periods configurable) | backtest + live |
+| `ema-cross-adx` | EMA crossover filtered by ADX trend strength | backtest + live |
+| `donchian` | Donchian channel breakout (v1) | backtest + live |
+| `donchian-v2` | Donchian v2 with improved exit logic | backtest + live |
+| `donchian-v3` | Donchian v3 | backtest + live |
+| `donchian-v4` | Donchian v4 | backtest + live |
+| `donchian-v5` | Donchian v5 | backtest + live |
+| `donchian-v6` | Donchian v6 — most recent, recommended | backtest + live |
+| `bb-fade` | Bollinger Band fade (mean-reversion) | backtest + live |
+| `noop` | Does nothing — baseline / benchmark | backtest + live |
+| `fake` | Scripted actions for deterministic testing | backtest only |
+| `lifecycle-test` | Exercises the full open → modify-stop → close lifecycle | backtest only |
+| `template` | Starter template for new strategy development | backtest only |
+
+### Exit Strategies
+
+Exit strategies control the trailing stop. Configured via the `exit:` block in portfolio YAML or used implicitly by the backtest engine.
+
+| Kind | Description |
 |---|---|
-| `pulse` | Mechanical open/close on fixed tick schedule — useful for pipeline testing |
-| `emacross` | EMA crossover (fast/slow) |
-| `emacrossadx` | EMA crossover filtered by ADX trend strength |
-| `donchian` | Donchian channel breakout |
-| `noop` | Does nothing — baseline / benchmark |
-| `fake` | Scripted actions for deterministic testing |
-| `lifecycle` | Exercises the full open → modify-stop → close lifecycle |
-| `tmpl` | Strategy template for new strategy development |
+| `chandelier` | ATR-based chandelier trailing stop. Params: `atr_period` (default 14), `multiplier` (default 3.0) |
+| `""` / `noop` | No trailing stop — strategy sets its own fixed stop |
+
+### Regime Filters
+
+Regime filters suppress entries when the market is not in a favourable state.
+
+| Kind | Description |
+|---|---|
+| `""` / `noop` | No filtering — all signals pass through |
+| `weekly-ema` | Allow longs only above weekly EMA, shorts only below |
+| `atr-percentile` | Block entries when ATR is below a percentile threshold (range-bound markets) |
+| `adx-d1` | Block entries when daily ADX is below threshold (no trend) |
+| `choppiness` | Block entries when choppiness index signals sideways price action |
+| `choppiness-d1` | Same as above using daily bars |
+| `session` | Allow entries only during specified trading sessions |
+| `composite` | Combine multiple filters (all must pass); use `filters:` list in config |
 
 ---
 
@@ -221,15 +267,123 @@ trader data sync --instruments EUR_USD,GBP_USD --from 2022-01 --to 2024-12
 
 **OANDA** (candles, requires token):
 ```bash
-trader data oanda --instrument EUR_USD --granularity H1 --from 2024-01-01
+# All flags are required
+trader data oanda \
+  --instrument EUR_USD \
+  --timeframe  H1 \
+  --from       2024-01-01 \
+  --to         2024-12-31 \
+  --env        practice
 ```
 
-Candle data is stored under `$DATA_DIR` (default `/data/candles`) in a hierarchy:
+Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) in a hierarchy:
 ```
-/data/candles/<source>/<INSTRUMENT>/<YYYY>/<MM>/
+/srv/trading/data/candles/<source>/<INSTRUMENT>/<YYYY>/<MM>/
 ```
 
 `testdata/candles/` contains small fixtures used by unit tests — do not use for real backtests.
+
+---
+
+## REST API
+
+`trader serve` (port :9999) exposes the following endpoints. All return JSON.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/health` | Health check |
+| `GET` | `/api/v1/account` | OANDA account summary |
+| `GET` | `/api/v1/trades` | Open trades |
+| `POST` | `/api/v1/trades` | Place a risk-sized market order |
+| `PATCH` | `/api/v1/trades/{id}/stop` | Update stop / take-profit on an open trade |
+| `DELETE` | `/api/v1/trades/{id}` | Close a trade (full or partial) |
+| `GET` | `/api/v1/transactions` | OANDA transaction history |
+| `POST` | `/api/v1/backtests/run` | Run one or more backtest configs |
+| `GET` | `/api/v1/backtests` | List saved backtest reports |
+| `GET` | `/api/v1/backtests/{name}` | Get a single backtest report |
+| `GET` | `/api/v1/backtests/{name}/candles` | OHLC bars for a saved report |
+| `POST` | `/api/v1/replay` | Run a strategy replay; returns bars + signal log |
+| `GET` | `/api/v1/stream/account` | SSE: account equity stream |
+| `GET` | `/api/v1/stream/events` | SSE: broker event stream |
+| `GET` | `/api/v1/stream/backtest/{id}` | SSE: live backtest progress |
+
+OANDA endpoints return `503` when the server starts without a token (backtest-only mode).
+
+---
+
+## Strategy Replay
+
+The replay API runs any strategy against stored local candles and returns every bar plus a full signal log — without placing any orders. Use it to debug signal generation, visualise where entries and stops were placed, and tune parameters interactively.
+
+### REST API
+
+```bash
+curl -s -X POST http://localhost:9999/api/v1/replay \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "instrument":   "EURUSD",
+    "timeframe":    "H1",
+    "from":         "2026-01-01",
+    "to":           "2026-05-29",
+    "warmup_bars":  200,
+    "strategy":     {"kind": "donchian-v6"},
+    "exit":         {"kind": "chandelier", "params": {"atr_period": 14, "multiplier": 3.0}},
+    "regime":       {"kind": "weekly-ema"}
+  }'
+```
+
+Response includes `bars[]` (OHLC) and `signals[]`. Signal kinds:
+
+| Kind | Meaning |
+|---|---|
+| `open` | Strategy signalled an entry; includes `stop_price` and `stop_pips` |
+| `close` | Strategy signalled an exit |
+| `stop_update` | Chandelier trailing stop ratcheted to a new level |
+| `blocked` | Regime filter suppressed an open signal |
+| `no_stop` | Open skipped — strategy produced no stop and exit strategy not ready |
+
+### Web UI
+
+Open `http://localhost:9999/replay`. Controls: instrument, timeframe, date range, strategy, exit strategy (ATR period + multiplier), regime filter, warmup bars. Click **Run Replay** to render:
+
+- **Green ▲ / Red ▼** entry markers with stop-pips label
+- **Gray ●** exit markers
+- **Yellow ■** regime-blocked signals
+- **Orange ■** no-stop-dropped signals
+- **Dashed orange line** — chandelier stop trail from entry to exit
+
+---
+
+## Deployment
+
+### Docker
+
+```bash
+cp deploy/env.example .env
+# edit .env: OANDA_TOKEN, OANDA_ACCOUNT_ID, INSTRUMENT, STRATEGY
+
+# Start the live bot + Postgres journal
+docker compose up -d live postgres
+
+# Run a one-off backtest
+docker compose run --rm backtest
+
+# Download candles
+docker compose run --rm data
+
+# Raspberry Pi (adds memory caps + NFS candle volume)
+docker compose -f docker-compose.yml -f deploy/docker-compose.pi.yml up -d live
+```
+
+### Systemd
+
+A ready-to-use unit file is at `deploy/trader.service`. It runs `trader serve` with the config at `/etc/trader/trader.yaml`. Copy the example config:
+
+```bash
+sudo cp deploy/trader.yaml.example /etc/trader/trader.yaml
+sudo cp deploy/trader.service /etc/systemd/system/
+sudo systemctl enable --now trader
+```
 
 ---
 
@@ -242,6 +396,8 @@ Config (YAML)
   → DataManager  (loads / caches OHLC candles)
   → Backtest     (iterates candles bar by bar)
   → Strategy     (returns StrategyPlan each bar)
+  → ExitStrategy (computes / updates trailing stop)
+  → RegimeFilter (suppresses entries in ranging markets)
   → Broker       (fills orders, emits Events)
   → Account      (updates equity, margin, P/L)
   → Journal      (records closed trades — CSV or SQLite)
@@ -287,83 +443,17 @@ Every code change must ship with tests — see `CLAUDE.md` for conventions.
 
 ```
 cmd/            CLI entry points (Cobra)
-api/rest/       REST handlers
+api/rest/       REST handlers and routing
 api/mcp/        Claude MCP tool server
-brokers/oanda/  OANDA REST client
-service/        Business logic (orders, live runner, journal)
+brokers/oanda/  OANDA REST + streaming client
+service/        Business logic (orders, live runner, replay, journal)
 strategies/     Strategy implementations
 data/           Candle loading, Dukascopy parser
-ui/             Embedded SvelteKit frontend
+ui/             Embedded SvelteKit frontend (build → ui/dist/)
+deploy/         Dockerfile, docker-compose, systemd unit, example configs
 testdata/       Config fixtures and candle fixtures
 ROADMAP.md      Planned features and known gaps
 ```
-
----
-
-## Strategy Replay
-
-The replay API runs any strategy against stored local candles and returns every bar plus a full signal log — without placing any orders. Use it to debug signal generation, visualise where entries and stops were placed, and tune parameters.
-
-### REST API
-
-```bash
-curl -s -X POST http://localhost:9999/api/v1/replay \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "instrument":   "EURUSD",
-    "timeframe":    "H1",
-    "from":         "2026-01-01",
-    "to":           "2026-05-29",
-    "warmup_bars":  200,
-    "strategy":     {"kind": "donchianv6"},
-    "exit":         {"kind": "chandelier", "params": {"period": 14, "multiplier": 3.0}},
-    "regime":       {"kind": "weeklyema"}
-  }'
-```
-
-Response shape:
-
-```json
-{
-  "instrument": "EURUSD",
-  "timeframe":  "H1",
-  "strategy":   "donchian-v6",
-  "bars":    [ { "time": 1234567890, "open": 1.1, "high": 1.11, "low": 1.09, "close": 1.105 } ],
-  "signals": [
-    { "time": 1234567890, "kind": "open",        "side": "long", "price": 1.105, "stop_price": 1.095, "stop_pips": 10.0, "reason": "breakout" },
-    { "time": 1234571490, "kind": "stop_update", "side": "long", "stop_price": 1.098 },
-    { "time": 1234575090, "kind": "close",        "side": "long", "price": 1.098, "reason": "stop hit" },
-    { "time": 1234578690, "kind": "blocked",      "side": "long", "reason": "regime: not trending" }
-  ]
-}
-```
-
-Signal kinds:
-
-| Kind | Meaning |
-|---|---|
-| `open` | Strategy signalled an entry; includes `stop_price` and `stop_pips` |
-| `close` | Strategy signalled an exit |
-| `stop_update` | Chandelier trailing stop ratcheted to a new level |
-| `blocked` | Regime filter suppressed an open signal |
-| `no_stop` | Open skipped — strategy produced no stop and exit strategy not ready |
-
-### Web UI
-
-Open `http://localhost:9999/replay` for the visual replay interface. Controls:
-
-- **Instrument / Timeframe / From / To** — the data window
-- **Strategy** — which strategy to run (donchianv6, emacross, bollingerfade, …)
-- **Exit** — chandelier ATR trailing stop (ATR period + multiplier)
-- **Regime** — optional trend filter (Weekly EMA, ATR Percentile, D1 ADX, …)
-- **Warmup bars** — indicator priming bars before recording signals
-
-The chart renders:
-- **Green ▲ / Red ▼** entry markers with stop-pips label
-- **Gray ●** exit markers
-- **Yellow ■** regime-blocked signals
-- **Orange ■** no-stop-dropped signals
-- **Dashed orange line** — chandelier stop trail tracking from entry to exit
 
 ---
 
