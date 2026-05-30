@@ -7,11 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// isValidCrockfordChar performs isValidCrockfordChar.
 func isValidCrockfordChar(ch rune) bool {
 	return (ch >= '0' && ch <= '9') ||
 		(ch >= 'A' && ch <= 'Z' && ch != 'I' && ch != 'L' && ch != 'O' && ch != 'U')
 }
 
+// TestNewULIDFormat performs TestNewULIDFormat.
 func TestNewULIDFormat(t *testing.T) {
 	id := NewULID()
 	require.Len(t, id, 26)
@@ -21,6 +23,7 @@ func TestNewULIDFormat(t *testing.T) {
 	}
 }
 
+// TestNewULIDUniqueness performs TestNewULIDUniqueness.
 func TestNewULIDUniqueness(t *testing.T) {
 	const n = 1000
 	seen := make(map[string]struct{}, n)
@@ -34,6 +37,7 @@ func TestNewULIDUniqueness(t *testing.T) {
 	}
 }
 
+// TestNewULIDLexicographicNonDecreasing performs TestNewULIDLexicographicNonDecreasing.
 func TestNewULIDLexicographicNonDecreasing(t *testing.T) {
 	const n = 1000
 	prev := NewULID()
@@ -47,6 +51,7 @@ func TestNewULIDLexicographicNonDecreasing(t *testing.T) {
 	}
 }
 
+// TestULIDEntropyReaderInitialized_Phase2 performs TestULIDEntropyReaderInitialized_Phase2.
 func TestULIDEntropyReaderInitialized_Phase2(t *testing.T) {
 	assert.NotNil(t, mono)
 }

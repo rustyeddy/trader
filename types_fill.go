@@ -1,5 +1,6 @@
 package trader
 
+// fillStatus defines the fillStatus type.
 type fillStatus uint8
 
 const (
@@ -10,6 +11,7 @@ const (
 	FillFailed
 )
 
+// fill defines the fill type.
 type fill struct {
 	*TradeCommon
 	fillStatus

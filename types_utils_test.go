@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestParseToUnix performs TestParseToUnix.
 func TestParseToUnix(t *testing.T) {
 	t.Parallel()
 
@@ -28,6 +29,7 @@ func TestParseToUnix(t *testing.T) {
 	assert.Contains(t, err.Error(), "Error parsing date")
 }
 
+// TestParseEST performs TestParseEST.
 func TestParseEST(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +41,7 @@ func TestParseEST(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestFastPrice performs TestFastPrice.
 func TestFastPrice(t *testing.T) {
 	t.Parallel()
 
@@ -54,6 +57,7 @@ func TestFastPrice(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestBitHelpers performs TestBitHelpers.
 func TestBitHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +70,7 @@ func TestBitHelpers(t *testing.T) {
 	assert.True(t, bitIsSet(bits, 64))
 }
 
+// TestSecondsToTFStringAndBack performs TestSecondsToTFStringAndBack.
 func TestSecondsToTFStringAndBack(t *testing.T) {
 	t.Parallel()
 

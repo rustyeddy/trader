@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// symbol defines the symbol type.
 type symbol string
 
 const (
@@ -21,6 +22,7 @@ const (
 	AUD_JPY symbol = "AUD_JPY"
 )
 
+// Instrument defines the Instrument type.
 type Instrument struct {
 	Name                string
 	BaseCurrency        string
@@ -179,6 +181,7 @@ var ApproxUSDPerUnit = map[string]float64{
 	"CHF": 1.10,
 }
 
+// GetInstrument performs GetInstrument.
 func GetInstrument(symbol string) *Instrument {
 	if inst, ok := Instruments[symbol]; ok {
 		return inst
@@ -192,6 +195,7 @@ func GetInstrument(symbol string) *Instrument {
 	return nil
 }
 
+// PriceUnitsPerPip performs PriceUnitsPerPip.
 func (inst *Instrument) PriceUnitsPerPip() Price {
 	units := int64(PriceScale)
 	for i := 0; i < -inst.PipLocation; i++ {
@@ -200,21 +204,25 @@ func (inst *Instrument) PriceUnitsPerPip() Price {
 	return Price(units)
 }
 
+// PriceDeltaFromPips performs PriceDeltaFromPips.
 func (inst *Instrument) PriceDeltaFromPips(pips Pips) Price {
 	perPip := inst.PriceUnitsPerPip()
 	return Price((int64(perPip) * int64(pips)) / int64(pipScale))
 }
 
+// AddPips performs AddPips.
 func (inst *Instrument) AddPips(px Price, pips Pips) Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px + delta
 }
 
+// SubPips performs SubPips.
 func (inst *Instrument) SubPips(px Price, pips Pips) Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px - delta
 }
 
+// NormalizeInstrument performs NormalizeInstrument.
 func NormalizeInstrument(sym string) string {
 	sym = strings.TrimSpace(sym)
 	sym = strings.ReplaceAll(sym, "_", "")
@@ -222,6 +230,7 @@ func NormalizeInstrument(sym string) string {
 	return strings.ToUpper(sym)
 }
 
+// PipSize performs PipSize.
 func (inst *Instrument) PipSize() float64 {
 	return math.Pow10(inst.PipLocation)
 }

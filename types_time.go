@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
+// Timestamp defines the Timestamp type.
 type Timestamp int64
+
+// timemilli defines the timemilli type.
 type timemilli int64
 
 const (
@@ -17,10 +20,12 @@ const (
 	HourInMS    timemilli = 3_600_000
 )
 
+// FromTime performs FromTime.
 func FromTime(t time.Time) Timestamp {
 	return Timestamp(t.Unix())
 }
 
+// FromString performs FromString.
 func FromString(s string) Timestamp {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
@@ -29,51 +34,67 @@ func FromString(s string) Timestamp {
 	return FromTime(t)
 }
 
+// Int64 performs Int64.
 func (t Timestamp) Int64() int64 {
 	return int64(t)
 }
 
+// Time performs Time.
 func (t Timestamp) Time() time.Time {
 	return time.Unix(t.Int64(), 0)
 }
 
+// IsZero performs IsZero.
 func (t Timestamp) IsZero() bool {
 	return t == 0
 }
 
+// Before performs Before.
 func (t Timestamp) Before(ts Timestamp) bool {
 	return t < ts
 }
 
+// After performs After.
 func (t Timestamp) After(ts Timestamp) bool {
 	return t > ts
 }
 
+// Add performs Add.
 func (t Timestamp) Add(d time.Duration) Timestamp {
 	return t + Timestamp(d/time.Second)
 }
 
+// String performs String.
 func (t Timestamp) String() string {
 	return time.Unix(t.Int64(), 0).
 		UTC().
 		Format(time.RFC3339)
 }
 
+// Milli performs Milli.
 func (t Timestamp) Milli() timemilli {
 	return timemilli(t * 1000)
 }
 
 // Conversions
 func (ms timemilli) Sec() Timestamp { return Timestamp(int64(ms) / 1_000) }
-func (s Timestamp) MS() timemilli   { return timemilli(int64(s) * 1_000) }
+
+// MS performs MS.
+func (s Timestamp) MS() timemilli { return timemilli(int64(s) * 1_000) }
 
 // Flooring (bar opens)
 func (s Timestamp) FloorToMinute() Timestamp { return (s / 60) * 60 }
-func (s Timestamp) FloorToHour() Timestamp   { return (s / 3_600) * 3_600 }
 
+// FloorToHour performs FloorToHour.
+func (s Timestamp) FloorToHour() Timestamp { return (s / 3_600) * 3_600 }
+
+// FloorToMinute performs FloorToMinute.
 func (ms timemilli) FloorToMinute() timemilli { return (ms / 60_000) * 60_000 }
-func (ms timemilli) FloorToHour() timemilli   { return (ms / 3_600_000) * 3_600_000 }
 
+// FloorToHour performs FloorToHour.
+func (ms timemilli) FloorToHour() timemilli { return (ms / 3_600_000) * 3_600_000 }
+
+// timeMilliFromTime performs timeMilliFromTime.
 func timeMilliFromTime(t time.Time) timemilli {
 	return timemilli(t.UnixMilli())
 }
@@ -89,12 +110,14 @@ func daysInMonth(year int, month0 int) int {
 	return t.Day()
 }
 
+// TimeRange defines the TimeRange type.
 type TimeRange struct {
 	Start Timestamp // inclusive
 	End   Timestamp // exclusive
 	TF    Timeframe // m1, h1, d1
 }
 
+// newTimeRange performs newTimeRange.
 func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	r := TimeRange{
 		Start: Timestamp(start),
@@ -110,6 +133,7 @@ func ParseTimeRange(from, to, tf string) (TimeRange, error) {
 	return timeRangeFromStrings(from, to, tf)
 }
 
+// timeRangeFromStrings performs timeRangeFromStrings.
 func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
 	tf := tfFromString(tfstr)
 	if tf == TF0 {
@@ -119,6 +143,7 @@ func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error
 	return timeRangeLocation(fromStr, toStr, tfstr, time.UTC)
 }
 
+// timeRangeLocation performs timeRangeLocation.
 func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRange, error) {
 	if loc == nil {
 		loc = time.UTC
@@ -146,22 +171,27 @@ func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRa
 	}, nil
 }
 
+// Valid performs Valid.
 func (r TimeRange) Valid() bool {
 	return r.Start > 0 && r.End > r.Start
 }
 
+// Contains performs Contains.
 func (r TimeRange) Contains(ts Timestamp) bool {
 	return ts >= r.Start && ts < r.End
 }
 
+// Overlaps performs Overlaps.
 func (r TimeRange) Overlaps(other TimeRange) bool {
 	return r.Start < other.End && other.Start < r.End
 }
 
+// Covers performs Covers.
 func (r TimeRange) Covers(other TimeRange) bool {
 	return r.Start <= other.Start && r.End >= other.End
 }
 
+// String performs String.
 func (r TimeRange) String() string {
 	return fmt.Sprintf("[%s, %s)",
 		time.Unix(int64(r.Start), 0).UTC().Format(time.RFC3339),
@@ -178,11 +208,13 @@ func monthRange(year int, month int) TimeRange {
 	}
 }
 
+// yearMonth defines the yearMonth type.
 type yearMonth struct {
 	Year  int
 	Month int
 }
 
+// MonthsInRange performs MonthsInRange.
 func (r TimeRange) MonthsInRange() []yearMonth {
 	if !r.Valid() {
 		return nil
@@ -245,6 +277,7 @@ func IsForexMarketClosed(t time.Time) bool {
 	return isForexMarketClosed(t)
 }
 
+// isForexMarketClosed performs isForexMarketClosed.
 func isForexMarketClosed(t time.Time) bool {
 	nt := t.In(newYorkLoc)
 	wd := nt.Weekday()
@@ -262,6 +295,7 @@ func isForexMarketClosed(t time.Time) bool {
 	}
 }
 
+// isMajorForexHolidayClosed performs isMajorForexHolidayClosed.
 func isMajorForexHolidayClosed(t time.Time) bool {
 	month := t.Month()
 	day := t.Day()
@@ -296,6 +330,7 @@ const (
 	D1    Timeframe = 86400
 )
 
+// tfFromString performs tfFromString.
 func tfFromString(t string) Timeframe {
 	t = strings.ToLower(t)
 
@@ -319,6 +354,7 @@ func tfFromString(t string) Timeframe {
 	return TF0
 }
 
+// normalizeTF performs normalizeTF.
 func normalizeTF(tf string) string {
 	tf = strings.TrimSpace(strings.ToUpper(tf))
 	// allow "60" etc if you ever pass seconds
@@ -333,6 +369,7 @@ func normalizeTF(tf string) string {
 	return tf
 }
 
+// String performs String.
 func (tf Timeframe) String() string {
 	switch tf {
 	case TF0:

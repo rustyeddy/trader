@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestUnitsInt64AndString_Phase1 performs TestUnitsInt64AndString_Phase1.
 func TestUnitsInt64AndString_Phase1(t *testing.T) {
 	t.Parallel()
 
@@ -14,6 +15,7 @@ func TestUnitsInt64AndString_Phase1(t *testing.T) {
 	assert.Equal(t, "12345", u.String())
 }
 
+// TestPipsFromFloat_RoundingCases_Phase1 performs TestPipsFromFloat_RoundingCases_Phase1.
 func TestPipsFromFloat_RoundingCases_Phase1(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +25,7 @@ func TestPipsFromFloat_RoundingCases_Phase1(t *testing.T) {
 	assert.Equal(t, Pips(-13), pipsFromFloat(-1.25))
 }
 
+// TestPipsFloat64_Phase1 performs TestPipsFloat64_Phase1.
 func TestPipsFloat64_Phase1(t *testing.T) {
 	t.Parallel()
 

@@ -1,5 +1,6 @@
 package trader
 
+// orderType defines the orderType type.
 type orderType uint8
 
 const (
@@ -11,6 +12,7 @@ const (
 	OrderTrailingStop
 )
 
+// String performs String.
 func (ot orderType) String() string {
 	switch ot {
 	case OrderNone:
@@ -30,6 +32,7 @@ func (ot orderType) String() string {
 	}
 }
 
+// orderStatus defines the orderStatus type.
 type orderStatus uint8
 
 const (
@@ -41,6 +44,7 @@ const (
 	OrderCanceled
 )
 
+// String performs String.
 func (os orderStatus) String() string {
 	switch os {
 	case OrderStatusNone:
@@ -61,6 +65,7 @@ func (os orderStatus) String() string {
 	}
 }
 
+// order defines the order type.
 type order struct {
 	*TradeCommon
 	orderType

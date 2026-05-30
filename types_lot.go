@@ -2,6 +2,7 @@ package trader
 
 import "sync"
 
+// lotState defines the lotState type.
 type lotState int
 
 const (
@@ -12,6 +13,7 @@ const (
 	LotClosed
 )
 
+// Lot defines the Lot type.
 type Lot struct {
 	*TradeCommon
 	EntryPrice     Price
@@ -24,11 +26,13 @@ type Lot struct {
 	ExtremePrice Price
 }
 
+// LotBook defines the LotBook type.
 type LotBook struct {
 	mu   sync.RWMutex
 	lots map[string]*Lot
 }
 
+// All performs All.
 func (lb *LotBook) All() map[string]*Lot {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
@@ -42,12 +46,14 @@ func (lb *LotBook) All() map[string]*Lot {
 	return out
 }
 
+// Len performs Len.
 func (lb *LotBook) Len() int {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 	return len(lb.lots)
 }
 
+// Add performs Add.
 func (lb *LotBook) Add(lot *Lot) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -57,6 +63,7 @@ func (lb *LotBook) Add(lot *Lot) {
 	lb.lots[lot.ID] = lot
 }
 
+// Delete performs Delete.
 func (lb *LotBook) Delete(id string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -66,6 +73,7 @@ func (lb *LotBook) Delete(id string) {
 	delete(lb.lots, id)
 }
 
+// Range performs Range.
 func (lb *LotBook) Range(fn func(*Lot) error) error {
 	lb.mu.RLock()
 	lots := make([]*Lot, 0, len(lb.lots))
@@ -81,6 +89,7 @@ func (lb *LotBook) Range(fn func(*Lot) error) error {
 	return nil
 }
 
+// Slice performs Slice.
 func (lb *LotBook) Slice() []*Lot {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()

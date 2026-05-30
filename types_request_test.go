@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1 performs TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1.
 func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +47,7 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 	assert.NotEmpty(t, op.ID)
 }
 
+// TestCloseCauseString_AllValues_Phase1 performs TestCloseCauseString_AllValues_Phase1.
 func TestCloseCauseString_AllValues_Phase1(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// parseToUnix performs parseToUnix.
 func parseToUnix(s string) (Timestamp, error) {
 	// First try parsing rfc3339
 	t, err := time.Parse(time.RFC3339, s)
@@ -23,6 +24,7 @@ func parseToUnix(s string) (Timestamp, error) {
 	return Timestamp(u), nil
 }
 
+// parseEST performs parseEST.
 func parseEST(s string) (time.Time, error) {
 	t, err := time.ParseInLocation(layout, s, estNoDST)
 	if err != nil {
@@ -31,6 +33,7 @@ func parseEST(s string) (time.Time, error) {
 	return t.UTC(), nil // normalize immediately
 }
 
+// fastPrice performs fastPrice.
 func fastPrice(s string) (Price, error) {
 	// "1.035030" → "1035030"
 	buf := make([]byte, 0, len(s))
@@ -46,13 +49,17 @@ func fastPrice(s string) (Price, error) {
 	return Price(v), nil
 }
 
+// bitIsSet performs bitIsSet.
 func bitIsSet(bits []uint64, i int) bool {
 	return (bits[i>>6] & (uint64(1) << uint(i&63))) != 0
 }
+
+// bitSet performs bitSet.
 func bitSet(bits []uint64, i int) {
 	bits[i>>6] |= (uint64(1) << uint(i&63))
 }
 
+// secondsToTFString performs secondsToTFString.
 func secondsToTFString(sec Timestamp) (string, error) {
 	if sec <= 0 {
 		return "", fmt.Errorf("invalid timeframe seconds: %d", sec)
@@ -83,6 +90,7 @@ func secondsToTFString(sec Timestamp) (string, error) {
 	return "", fmt.Errorf("cannot map timeframe: %d seconds", sec)
 }
 
+// tfStringToSeconds performs tfStringToSeconds.
 func tfStringToSeconds(tf string) (Timestamp, error) {
 	switch tf {
 	case "M1":

@@ -16,6 +16,7 @@ var (
 	mono   io.Reader
 )
 
+// init performs init.
 func init() {
 	// Seed a PRNG from crypto/rand so ULID entropy is unpredictable.
 	// We use ulid.Monotonic so IDs generated within the same millisecond remain

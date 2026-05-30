@@ -1,5 +1,6 @@
 package trader
 
+// RequestType defines the RequestType type.
 type RequestType uint8
 
 const (
@@ -9,6 +10,7 @@ const (
 	RequestClose
 )
 
+// Request defines the Request type.
 type Request struct {
 	*TradeCommon
 	RequestType
@@ -18,16 +20,19 @@ type Request struct {
 	Candle Candle
 }
 
+// OpenRequest defines the OpenRequest type.
 type OpenRequest struct {
 	Request
 }
 
+// CloseRequest defines the CloseRequest type.
 type CloseRequest struct {
 	Request
 	*Lot
 	CloseCause closeCause
 }
 
+// NewOpenRequest performs NewOpenRequest.
 func NewOpenRequest(
 	instr string,
 	c *CandleTime,
@@ -54,6 +59,7 @@ func NewOpenRequest(
 	return op
 }
 
+// closeCause defines the closeCause type.
 type closeCause int
 
 const (
@@ -64,6 +70,7 @@ const (
 	CloseBrokerLiquidation
 )
 
+// String performs String.
 func (c closeCause) String() string {
 	switch c {
 	case CloseManual:

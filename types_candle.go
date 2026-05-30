@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// Candle defines the Candle type.
 type Candle struct {
 	Open      Price
 	High      Price
@@ -21,28 +22,34 @@ type Candle struct {
 	Ticks     int32 // number of ticks per candle
 }
 
+// IsZero performs IsZero.
 func (c *Candle) IsZero() bool {
 	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
 }
 
+// String performs String.
 func (c *Candle) String() string {
 	str := fmt.Sprintf("%d, %d, %d, %d", c.Open, c.High, c.Low, c.Close)
 	return str
 }
 
+// FullString performs FullString.
 func (c *Candle) FullString() string {
 	str := fmt.Sprintf("%d, %d, %d, %d: avg spread %d, max spread %d, ticks: %d",
 		c.Open, c.High, c.Low, c.Close, c.AvgSpread, c.MaxSpread, c.Ticks)
 	return str
 }
 
+// candleTime defines the candleTime type.
 type candleTime struct {
 	Candle
 	Timestamp
 }
 
+// CandleTime defines the CandleTime type.
 type CandleTime = candleTime
 
+// String performs String.
 func String(c candleTime) string {
 	return c.Candle.String()
 }
@@ -66,12 +73,14 @@ type candleSet struct {
 	prev int64
 }
 
+// gap defines the gap type.
 type gap struct {
 	StartIdx int32  // first missing candle index
 	Len      int32  // number of missing intervals
 	Kind     string // weekend vs suspicious
 }
 
+// gapStats defines the gapStats type.
 type gapStats struct {
 	TotalMinutes   int
 	PresentMinutes int
@@ -87,6 +96,7 @@ var estNoDST = time.FixedZone("EST", -5*60*60)
 
 const layout = "20060102 150405"
 
+// newMonthlyCandleSet performs newMonthlyCandleSet.
 func newMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
 	scale Scale6, source string) (*candleSet, error) {
 	if inst == "" {
@@ -122,6 +132,7 @@ func newMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp,
 	}, nil
 }
 
+// AddCandle performs AddCandle.
 func (cs *candleSet) AddCandle(ts Timestamp, c Candle) error {
 	if cs == nil {
 		return fmt.Errorf("nil CandleSet")
@@ -158,6 +169,7 @@ func (cs *candleSet) AddCandle(ts Timestamp, c Candle) error {
 	return nil
 }
 
+// Merge performs Merge.
 func (cs *candleSet) Merge(src *candleSet) error {
 	if cs == nil || src == nil {
 		return fmt.Errorf("nil CandleSet in merge")
@@ -190,14 +202,17 @@ func (cs *candleSet) Merge(src *candleSet) error {
 	return nil
 }
 
+// SetValid performs SetValid.
 func (cs *candleSet) SetValid(idx int) {
 	cs.Valid[idx/64] |= uint64(1) << uint(idx%64)
 }
 
+// IsValid performs IsValid.
 func (cs *candleSet) IsValid(idx int) bool {
 	return cs.Valid[idx/64]&(uint64(1)<<uint(idx%64)) != 0
 }
 
+// CountValid performs CountValid.
 func (cs *candleSet) CountValid() int {
 	n := 0
 	for i := range cs.Candles {
@@ -208,14 +223,17 @@ func (cs *candleSet) CountValid() int {
 	return n
 }
 
+// Time performs Time.
 func (cs *candleSet) Time(idx int) time.Time {
 	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
 }
 
+// Timestamp performs Timestamp.
 func (cs *candleSet) Timestamp(idx int) Timestamp {
 	return Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
+// Filename performs Filename.
 func (cs *candleSet) Filename() string {
 	inst := strings.ToLower(cs.Instrument)
 
@@ -230,14 +248,17 @@ func (cs *candleSet) Filename() string {
 	return fmt.Sprintf("%s-%s-%d", inst, tfstr, year)
 }
 
+// setValid performs setValid.
 func setValid(valid []uint64, idx int) {
 	valid[idx/64] |= 1 << (idx % 64)
 }
 
+// isValid performs isValid.
 func isValid(valid []uint64, idx int) bool {
 	return valid[idx/64]&(1<<(idx%64)) != 0
 }
 
+// scanBounds performs scanBounds.
 func (cs *candleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
 	f, err := os.Open(cs.Filepath)
 	if err != nil {
@@ -286,6 +307,7 @@ func (cs *candleSet) scanBounds() (minTs, maxTs Timestamp, err error) {
 // fills Candles and sets Valid bits when a candle exists in the file.
 // Missing minutes naturally remain invalid (Valid bit = 0).
 
+// buildDenseFromFile performs buildDenseFromFile.
 func (cs *candleSet) buildDenseFromFile() error {
 	if cs.Timeframe == 0 {
 		cs.Timeframe = 60
@@ -427,6 +449,7 @@ func (cs *candleSet) buildDenseFromFile() error {
 	return nil
 }
 
+// BuildGapReport performs BuildGapReport.
 func (cs *candleSet) BuildGapReport() {
 	cs.Gaps = cs.Gaps[:0]
 
@@ -458,6 +481,7 @@ func (cs *candleSet) BuildGapReport() {
 	}
 }
 
+// classifyGap performs classifyGap.
 func (cs *candleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe) // seconds per bar (60 for M1, 3600 for H1)
 
@@ -484,6 +508,7 @@ func (cs *candleSet) classifyGap(startIdx, length int) string {
 	return "minor"
 }
 
+// Stats performs Stats.
 func (cs *candleSet) Stats() gapStats {
 	var s gapStats
 
@@ -519,6 +544,8 @@ func (cs *candleSet) Stats() gapStats {
 
 	return s
 }
+
+// AggregateH1 performs AggregateH1.
 func (cs *candleSet) AggregateH1(minValid int) *candleSet {
 	if cs.Timeframe != 60 {
 		panic("AggregateH1 requires M1 source")
@@ -595,10 +622,12 @@ func (cs *candleSet) AggregateH1(minValid int) *candleSet {
 	return h1
 }
 
+// Float64 performs Float64.
 func (cs *candleSet) Float64(v int32) float64 {
 	return float64(v) / float64(cs.Scale)
 }
 
+// Int32 performs Int32.
 func (cs *candleSet) Int32(f float64) int32 {
 	// round to nearest scaled int
 	return int32(f*float64(cs.Scale) + 0.5)
@@ -628,6 +657,7 @@ func (cs *candleSet) PipsToDelta(pips float64) int32 {
 	return int32(pips*cs.UnitsPerPip() + 0.5)
 }
 
+// PrintStats performs PrintStats.
 func (cs *candleSet) PrintStats(f io.WriteCloser) {
 	cs.BuildGapReport()
 	s := cs.Stats()
@@ -754,11 +784,13 @@ func (cs *candleSet) Aggregate(outTF Timeframe) (*candleSet, error) {
 	return out, nil
 }
 
+// candleSetIteratorV1 defines the candleSetIteratorV1 type.
 type candleSetIteratorV1 struct {
 	cs  *candleSet
 	idx int
 }
 
+// Iterator performs Iterator.
 func (cs *candleSet) Iterator() *candleSetIteratorV1 {
 	return &candleSetIteratorV1{
 		cs:  cs,
@@ -766,6 +798,7 @@ func (cs *candleSet) Iterator() *candleSetIteratorV1 {
 	}
 }
 
+// NextCandle performs NextCandle.
 func (it *candleSetIteratorV1) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
@@ -773,6 +806,7 @@ func (it *candleSetIteratorV1) NextCandle() (Candle, bool) {
 	return Candle{}, false
 }
 
+// Next performs Next.
 func (it *candleSetIteratorV1) Next() bool {
 	n := len(it.cs.Candles)
 
@@ -787,26 +821,32 @@ func (it *candleSetIteratorV1) Next() bool {
 	}
 }
 
+// Candle performs Candle.
 func (it *candleSetIteratorV1) Candle() Candle {
 	return it.cs.Candles[it.idx]
 }
 
+// Index performs Index.
 func (it *candleSetIteratorV1) Index() int {
 	return it.idx
 }
 
+// Timestamp performs Timestamp.
 func (it *candleSetIteratorV1) Timestamp() Timestamp {
 	return it.cs.Timestamp(it.idx)
 }
 
+// Time performs Time.
 func (it *candleSetIteratorV1) Time() time.Time {
 	return it.cs.Time(it.idx)
 }
 
+// StartTime performs StartTime.
 func (it *candleSetIteratorV1) StartTime() Timestamp {
 	return it.cs.Start
 }
 
+// CandleSet performs CandleSet.
 func (it *candleSetIteratorV1) CandleSet() *candleSet {
 	return it.cs
 }
