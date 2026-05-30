@@ -78,10 +78,27 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	ticker := time.NewTicker(cfg.TickInterval)
 	defer ticker.Stop()
 
-	// Run the first tick immediately so there's no initial delay.
-	if err := s.runOneTick(ctx, cfg, tickCounts, log); err != nil {
-		log.Warn("live runner: tick error", "err", err)
+	marketWasClosed := false
+
+	tick := func() {
+		if trader.IsForexMarketClosed(time.Now()) {
+			if !marketWasClosed {
+				log.Info("live runner: market closed, pausing", "instrument", cfg.Instrument)
+				marketWasClosed = true
+			}
+			return
+		}
+		if marketWasClosed {
+			log.Info("live runner: market open, resuming", "instrument", cfg.Instrument)
+			marketWasClosed = false
+		}
+		if err := s.runOneTick(ctx, cfg, tickCounts, log); err != nil {
+			log.Warn("live runner: tick error", "err", err)
+		}
 	}
+
+	// Run the first tick immediately so there's no initial delay.
+	tick()
 
 	for {
 		select {
@@ -89,9 +106,7 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 			log.Info("live runner: stopped", "strategy", cfg.Strategy.Name())
 			return nil
 		case <-ticker.C:
-			if err := s.runOneTick(ctx, cfg, tickCounts, log); err != nil {
-				log.Warn("live runner: tick error", "err", err)
-			}
+			tick()
 		}
 	}
 }

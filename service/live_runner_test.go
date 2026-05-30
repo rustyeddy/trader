@@ -121,6 +121,42 @@ func TestLivePrice_Mid(t *testing.T) {
 	require.InDelta(t, 1.0851, p.Mid(), 0.000001)
 }
 
+// ── market-hours gate ─────────────────────────────────────────────────────────
+
+// TestMarketClosedGate verifies that the gate logic used in the tick closure
+// skips runOneTick when IsForexMarketClosed returns true. We replicate the
+// closure logic here so the guard is tested independently of wall-clock time.
+func TestMarketClosedGate(t *testing.T) {
+	strategy := &stubStrategy{name: "stub", plan: &trader.LivePlan{}}
+
+	var tickCalls int
+	runOneTick := func() { tickCalls++ }
+
+	gate := func(now time.Time, marketWasClosed *bool) {
+		if trader.IsForexMarketClosed(now) {
+			*marketWasClosed = true
+			return
+		}
+		*marketWasClosed = false
+		runOneTick()
+	}
+
+	_ = strategy // kept to show intent
+
+	// Saturday — always closed.
+	saturday := time.Date(2024, 1, 6, 12, 0, 0, 0, time.UTC)
+	closed := false
+	gate(saturday, &closed)
+	assert.True(t, closed)
+	assert.Equal(t, 0, tickCalls)
+
+	// Monday — market open.
+	monday := time.Date(2024, 1, 8, 12, 0, 0, 0, time.UTC)
+	gate(monday, &closed)
+	assert.False(t, closed)
+	assert.Equal(t, 1, tickCalls)
+}
+
 // ── stubStrategy records ticks correctly ──────────────────────────────────────
 
 func TestStubStrategy_RecordsTicks(t *testing.T) {
