@@ -16,8 +16,10 @@ type RootConfig struct {
 	ReportPath string
 	DataDir    string
 
-	LogLevel string
-	NoColor  bool
+	LogLevel  string
+	LogFile   string
+	LogFormat string
+	NoColor   bool
 
 	// Paths    PathsConfig
 	// Defaults DefaultsConfig

@@ -59,9 +59,6 @@ func New(rc *trader.RootConfig) *cobra.Command {
 		token      string
 		accountID  string
 		env        string
-		logLevel   string
-		logFile    string
-		logFormat  string
 		journalDB  string
 		reportsDir string
 	)
@@ -116,14 +113,14 @@ Example config file (see deploy/trader.yaml.example):
 			if addr != "" && addr != ":9999" {
 				cfg.REST.Addr = addr
 			}
-			if logLevel != "" && logLevel != "info" {
-				cfg.Log.Level = logLevel
+			if cmd.Flags().Changed("log-level") {
+				cfg.Log.Level = rc.LogLevel
 			}
-			if logFile != "" {
-				cfg.Log.File = logFile
+			if cmd.Flags().Changed("log-file") {
+				cfg.Log.File = rc.LogFile
 			}
-			if logFormat != "" {
-				cfg.Log.Format = logFormat
+			if cmd.Flags().Changed("log-format") {
+				cfg.Log.Format = rc.LogFormat
 			}
 			if journalDB != "" {
 				cfg.Journal.Kind = "sqlite"
@@ -251,9 +248,6 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level: debug|info|warn|error")
-	cmd.Flags().StringVar(&logFile, "log-file", "", "Path to log file (written in addition to stdout)")
-	cmd.Flags().StringVar(&logFormat, "log-format", "text", "Log format: text|json")
 	cmd.Flags().StringVar(&journalDB, "journal-db", "", "SQLite journal path (default ./trader.db)")
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
 
