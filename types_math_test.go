@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMulDiv64 performs TestMulDiv64.
+// TestMulDiv64 verifies expected behavior for this component.
 func TestMulDiv64(t *testing.T) {
 	t.Parallel()
 
@@ -20,7 +20,7 @@ func TestMulDiv64(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestMulDivFloor64 performs TestMulDivFloor64.
+// TestMulDivFloor64 verifies expected behavior for this component.
 func TestMulDivFloor64(t *testing.T) {
 	t.Parallel()
 
@@ -32,7 +32,7 @@ func TestMulDivFloor64(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestMulDivCeil64 performs TestMulDivCeil64.
+// TestMulDivCeil64 verifies expected behavior for this component.
 func TestMulDivCeil64(t *testing.T) {
 	t.Parallel()
 
@@ -44,7 +44,7 @@ func TestMulDivCeil64(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestAbs64AndAbsGeneric performs TestAbs64AndAbsGeneric.
+// TestAbs64AndAbsGeneric verifies expected behavior for this component.
 func TestAbs64AndAbsGeneric(t *testing.T) {
 	t.Parallel()
 
@@ -54,7 +54,7 @@ func TestAbs64AndAbsGeneric(t *testing.T) {
 	assert.Equal(t, float64(2.5), abs(-2.5))
 }
 
-// TestMulChecked64AndRoundHelpers_Phase2 performs TestMulChecked64AndRoundHelpers_Phase2.
+// TestMulChecked64AndRoundHelpers_Phase2 verifies expected behavior for this component.
 func TestMulChecked64AndRoundHelpers_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -83,7 +83,7 @@ func TestMulChecked64AndRoundHelpers_Phase2(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestAbsInt64CheckedAndSignedMulDivRound_Phase2 performs TestAbsInt64CheckedAndSignedMulDivRound_Phase2.
+// TestAbsInt64CheckedAndSignedMulDivRound_Phase2 verifies expected behavior for this component.
 func TestAbsInt64CheckedAndSignedMulDivRound_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -115,7 +115,7 @@ func TestAbsInt64CheckedAndSignedMulDivRound_Phase2(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestMulDivVariants_OverflowBranches_Phase2 performs TestMulDivVariants_OverflowBranches_Phase2.
+// TestMulDivVariants_OverflowBranches_Phase2 verifies expected behavior for this component.
 func TestMulDivVariants_OverflowBranches_Phase2(t *testing.T) {
 	t.Parallel()
 

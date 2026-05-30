@@ -5,50 +5,50 @@ import (
 	"sync"
 )
 
-// BA defines the BA type.
+// BA represents a trader domain type.
 type BA struct {
 	Bid Price
 	Ask Price
 }
 
-// Tick defines the Tick type.
+// Tick represents a trader domain type.
 type Tick struct {
 	Instrument string
 	Timestamp  Timestamp
 	BA
 }
 
-// Mid performs Mid.
+// Mid is an internal helper for trader type processing.
 func (t Tick) Mid() Price {
 	sum := int64(t.Bid) + int64(t.Ask)
 	mid := (sum + 1) / 2 // round half up
 	return Price(mid)
 }
 
-// Spread performs Spread.
+// Spread is an internal helper for trader type processing.
 func (t Tick) Spread() Price {
 	return t.Ask - t.Bid
 }
 
-// tickStore defines the tickStore type.
+// tickStore represents a trader domain type.
 type tickStore struct {
 	mu    sync.RWMutex
 	ticks map[string]Tick
 }
 
-// newTickStore performs newTickStore.
+// newTickStore is an internal helper for trader type processing.
 func newTickStore() *tickStore {
 	return &tickStore{ticks: make(map[string]Tick)}
 }
 
-// Set performs Set.
+// Set is an internal helper for trader type processing.
 func (ps *tickStore) Set(p Tick) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.ticks[p.Instrument] = p
 }
 
-// Get performs Get.
+// Get is an internal helper for trader type processing.
 func (ps *tickStore) Get(instr string) (Tick, error) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()

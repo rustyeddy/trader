@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTimeframeParseNormalizeAndString performs TestTimeframeParseNormalizeAndString.
+// TestTimeframeParseNormalizeAndString verifies expected behavior for this component.
 func TestTimeframeParseNormalizeAndString(t *testing.T) {
 	t.Parallel()
 
@@ -24,7 +24,7 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 	assert.Equal(t, "UNKNOWN", Timeframe(999).String())
 }
 
-// TestTimeRangeBasics performs TestTimeRangeBasics.
+// TestTimeRangeBasics verifies expected behavior for this component.
 func TestTimeRangeBasics(t *testing.T) {
 	t.Parallel()
 
@@ -36,7 +36,7 @@ func TestTimeRangeBasics(t *testing.T) {
 	assert.True(t, r.Covers(newTimeRange(120, 180, M1)))
 }
 
-// TestIsFXMarketClosedWrapperMatchesCanonical performs TestIsFXMarketClosedWrapperMatchesCanonical.
+// TestIsFXMarketClosedWrapperMatchesCanonical verifies expected behavior for this component.
 func TestIsFXMarketClosedWrapperMatchesCanonical(t *testing.T) {
 	t.Parallel()
 
@@ -57,7 +57,7 @@ func TestIsFXMarketClosedWrapperMatchesCanonical(t *testing.T) {
 	}
 }
 
-// TestTimestampHelpers performs TestTimestampHelpers.
+// TestTimestampHelpers verifies expected behavior for this component.
 func TestTimestampHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -73,7 +73,7 @@ func TestTimestampHelpers(t *testing.T) {
 	assert.Equal(t, Timestamp(135), Timestamp(125).Add(10*time.Second))
 }
 
-// TestFromStringAndTimeRangeLocation performs TestFromStringAndTimeRangeLocation.
+// TestFromStringAndTimeRangeLocation verifies expected behavior for this component.
 func TestFromStringAndTimeRangeLocation(t *testing.T) {
 	t.Parallel()
 
@@ -95,7 +95,7 @@ func TestFromStringAndTimeRangeLocation(t *testing.T) {
 	assert.Contains(t, err.Error(), "bad from date")
 }
 
-// TestTimeRangeMonthsAndMonthRange performs TestTimeRangeMonthsAndMonthRange.
+// TestTimeRangeMonthsAndMonthRange verifies expected behavior for this component.
 func TestTimeRangeMonthsAndMonthRange(t *testing.T) {
 	t.Parallel()
 

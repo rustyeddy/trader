@@ -1,6 +1,6 @@
 package trader
 
-// TradeCommon defines the TradeCommon type.
+// TradeCommon represents a trader domain type.
 type TradeCommon struct {
 	ID         string
 	Instrument string
@@ -10,7 +10,7 @@ type TradeCommon struct {
 	Take Price
 }
 
-// Trade defines the Trade type.
+// Trade represents a trader domain type.
 type Trade struct {
 	*TradeCommon
 	EntryPrice Price

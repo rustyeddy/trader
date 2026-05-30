@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewMonthlyCandleSet_Guards performs TestNewMonthlyCandleSet_Guards.
+// TestNewMonthlyCandleSet_Guards verifies expected behavior for this component.
 func TestNewMonthlyCandleSet_Guards(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +33,7 @@ func TestNewMonthlyCandleSet_Guards(t *testing.T) {
 	assert.Contains(t, err.Error(), "start of month")
 }
 
-// TestCandleSetAddCandle_Branches performs TestCandleSetAddCandle_Branches.
+// TestCandleSetAddCandle_Branches verifies expected behavior for this component.
 func TestCandleSetAddCandle_Branches(t *testing.T) {
 	t.Parallel()
 

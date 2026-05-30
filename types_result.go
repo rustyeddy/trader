@@ -1,6 +1,6 @@
 package trader
 
-// openResult defines the openResult type.
+// openResult represents a trader domain type.
 type openResult struct {
 	*order
 	*Lot

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetInstrument_DirectAndMappedSymbols_Phase2 performs TestGetInstrument_DirectAndMappedSymbols_Phase2.
+// TestGetInstrument_DirectAndMappedSymbols_Phase2 verifies expected behavior for this component.
 func TestGetInstrument_DirectAndMappedSymbols_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -20,14 +20,14 @@ func TestGetInstrument_DirectAndMappedSymbols_Phase2(t *testing.T) {
 	assert.Equal(t, "EURUSD", mapped.Name)
 }
 
-// TestGetInstrument_UnknownReturnsNil_Phase2 performs TestGetInstrument_UnknownReturnsNil_Phase2.
+// TestGetInstrument_UnknownReturnsNil_Phase2 verifies expected behavior for this component.
 func TestGetInstrument_UnknownReturnsNil_Phase2(t *testing.T) {
 	t.Parallel()
 
 	assert.Nil(t, GetInstrument("NOPE"))
 }
 
-// TestNormalizeInstrument_Phase2 performs TestNormalizeInstrument_Phase2.
+// TestNormalizeInstrument_Phase2 verifies expected behavior for this component.
 func TestNormalizeInstrument_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -35,7 +35,7 @@ func TestNormalizeInstrument_Phase2(t *testing.T) {
 	assert.Equal(t, "USDJPY", NormalizeInstrument("usd_jpy"))
 }
 
-// TestInstrumentPriceAndPipMath_Phase2 performs TestInstrumentPriceAndPipMath_Phase2.
+// TestInstrumentPriceAndPipMath_Phase2 verifies expected behavior for this component.
 func TestInstrumentPriceAndPipMath_Phase2(t *testing.T) {
 	t.Parallel()
 
@@ -49,7 +49,7 @@ func TestInstrumentPriceAndPipMath_Phase2(t *testing.T) {
 	assert.Equal(t, px-Price(25), eurusd.SubPips(px, Pips(25)))
 }
 
-// TestInstrumentPipSize_Phase2 performs TestInstrumentPipSize_Phase2.
+// TestInstrumentPipSize_Phase2 verifies expected behavior for this component.
 func TestInstrumentPipSize_Phase2(t *testing.T) {
 	t.Parallel()
 

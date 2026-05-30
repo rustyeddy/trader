@@ -11,15 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bufferWriteCloser defines the bufferWriteCloser type.
+// bufferWriteCloser represents a trader domain type.
 type bufferWriteCloser struct {
 	bytes.Buffer
 }
 
-// Close performs Close.
+// Close is an internal helper for trader type processing.
 func (b *bufferWriteCloser) Close() error { return nil }
 
-// writeCandleSourceFile performs writeCandleSourceFile.
+// writeCandleSourceFile is an internal helper for trader type processing.
 func writeCandleSourceFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -27,7 +27,7 @@ func writeCandleSourceFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// TestCandleFormattingHelpers performs TestCandleFormattingHelpers.
+// TestCandleFormattingHelpers verifies expected behavior for this component.
 func TestCandleFormattingHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +39,7 @@ func TestCandleFormattingHelpers(t *testing.T) {
 	assert.Equal(t, c.String(), String(ct))
 }
 
-// TestCandleSetFilenameTimeAndBitHelpers performs TestCandleSetFilenameTimeAndBitHelpers.
+// TestCandleSetFilenameTimeAndBitHelpers verifies expected behavior for this component.
 func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -59,7 +59,7 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 	assert.False(t, isValid(valid, 6))
 }
 
-// TestCandleSetScanBoundsAndBuildDenseFromFile performs TestCandleSetScanBoundsAndBuildDenseFromFile.
+// TestCandleSetScanBoundsAndBuildDenseFromFile verifies expected behavior for this component.
 func TestCandleSetScanBoundsAndBuildDenseFromFile(t *testing.T) {
 	t.Parallel()
 
@@ -93,7 +93,7 @@ func TestCandleSetScanBoundsAndBuildDenseFromFile(t *testing.T) {
 	assert.Equal(t, Price(1102500), cs.Candles[2].Close)
 }
 
-// TestCandleSetScanBoundsNoValidRows performs TestCandleSetScanBoundsNoValidRows.
+// TestCandleSetScanBoundsNoValidRows verifies expected behavior for this component.
 func TestCandleSetScanBoundsNoValidRows(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +108,7 @@ func TestCandleSetScanBoundsNoValidRows(t *testing.T) {
 	assert.Contains(t, err.Error(), "no valid timestamps found")
 }
 
-// TestCandleSetPrintStatsAndConversions performs TestCandleSetPrintStatsAndConversions.
+// TestCandleSetPrintStatsAndConversions verifies expected behavior for this component.
 func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 	t.Parallel()
 
@@ -140,7 +140,7 @@ func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 	assert.Contains(t, out, "Longest Gap")
 }
 
-// TestCandleSetIteratorAccessors performs TestCandleSetIteratorAccessors.
+// TestCandleSetIteratorAccessors verifies expected behavior for this component.
 func TestCandleSetIteratorAccessors(t *testing.T) {
 	t.Parallel()
 

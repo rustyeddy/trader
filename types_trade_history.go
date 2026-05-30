@@ -1,12 +1,12 @@
 package trader
 
-// TradeHistory defines the TradeHistory type.
+// TradeHistory represents a trader domain type.
 type TradeHistory struct {
 	*TradeCommon
 	*OpenRequest
 }
 
-// NewTradeHistory performs NewTradeHistory.
+// NewTradeHistory is an internal helper for trader type processing.
 func NewTradeHistory(inst string) *TradeHistory {
 	return &TradeHistory{
 		TradeCommon: &TradeCommon{

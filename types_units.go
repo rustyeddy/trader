@@ -5,20 +5,20 @@ import (
 	"math"
 )
 
-// Units defines the Units type.
+// Units represents a trader domain type.
 type Units int64
 
-// Int64 performs Int64.
+// Int64 is an internal helper for trader type processing.
 func (u Units) Int64() int64 {
 	return int64(u)
 }
 
-// String performs String.
+// String is an internal helper for trader type processing.
 func (u Units) String() string {
 	return fmt.Sprintf("%d", u)
 }
 
-// Side defines the Side type.
+// Side represents a trader domain type.
 type Side int
 
 const (
@@ -26,7 +26,7 @@ const (
 	Long  Side = 1
 )
 
-// String performs String.
+// String is an internal helper for trader type processing.
 func (s Side) String() string {
 	if s == Short {
 		return "short"
@@ -40,12 +40,12 @@ type Pips int32
 
 const pipScale = 10 // tenths of a pip
 
-// pipsFromFloat performs pipsFromFloat.
+// pipsFromFloat is an internal helper for trader type processing.
 func pipsFromFloat(v float64) Pips {
 	return Pips(math.Round(v * pipScale))
 }
 
-// Float64 performs Float64.
+// Float64 is an internal helper for trader type processing.
 func (p Pips) Float64() float64 {
 	return float64(p) / pipScale
 }

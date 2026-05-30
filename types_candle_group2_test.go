@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCandleSetMerge_SuccessAndValidationErrors performs TestCandleSetMerge_SuccessAndValidationErrors.
+// TestCandleSetMerge_SuccessAndValidationErrors verifies expected behavior for this component.
 func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +39,7 @@ func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 	require.ErrorContains(t, dst.Merge(differentInst), "instrument mismatch")
 }
 
-// TestCandleSetBuildGapReportAndStats performs TestCandleSetBuildGapReportAndStats.
+// TestCandleSetBuildGapReportAndStats verifies expected behavior for this component.
 func TestCandleSetBuildGapReportAndStats(t *testing.T) {
 	t.Parallel()
 
@@ -80,7 +80,7 @@ func TestCandleSetBuildGapReportAndStats(t *testing.T) {
 	assert.Equal(t, "weekend", s.LongestGapKind)
 }
 
-// TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart performs TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart.
+// TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart verifies expected behavior for this component.
 func TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart(t *testing.T) {
 	t.Parallel()
 
@@ -91,7 +91,7 @@ func TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart(t *testing.T) {
 	assert.Equal(t, "suspicious", kind)
 }
 
-// TestCandleSetAggregateH1_ThresholdAndOHLC performs TestCandleSetAggregateH1_ThresholdAndOHLC.
+// TestCandleSetAggregateH1_ThresholdAndOHLC verifies expected behavior for this component.
 func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 	t.Parallel()
 
@@ -132,7 +132,7 @@ func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 	assert.True(t, withClamp.IsValid(1))
 }
 
-// TestCandleSetAggregateH1_PanicsForNonM1 performs TestCandleSetAggregateH1_PanicsForNonM1.
+// TestCandleSetAggregateH1_PanicsForNonM1 verifies expected behavior for this component.
 func TestCandleSetAggregateH1_PanicsForNonM1(t *testing.T) {
 	t.Parallel()
 
