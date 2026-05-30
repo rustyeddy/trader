@@ -195,17 +195,59 @@ Set `local_warmup_bars: 0` to skip local warmup and use OANDA-only.
 
 ### Signal Logging
 
-Every strategy decision in the live path is emitted as a structured `slog` record:
+All three event types — strategy signals, broker fills, and OANDA-initiated closes — flow through the same structured `slog` stream. With `--log-level info` (the default) every trading event is captured in one place.
 
-| Event | Log level | Key fields |
+| Source | Message | Key fields |
 |---|---|---|
-| Strategy signals open | `INFO` | `instrument`, `side`, `stop`, `reason` |
-| Regime filter blocks open | `INFO` | `instrument`, reason (`not trending` / `side not allowed`) |
-| Open queued for OANDA | `INFO` | `instrument`, `side`, `entry_price`, `stop_price`, `stop_pips` |
-| Strategy signals close | `INFO` | `instrument`, `count`, `reason` |
-| No stop available — skipped | `ERROR` | `instrument`, `side`, `reason` |
+| Strategy | `live: strategy signal open` | `instrument`, `side`, `stop`, `reason` |
+| Strategy | `live: open blocked by regime filter` | `instrument`, `side`, reason (`not trending` / `side not allowed`) |
+| Strategy | `live: open order queued` | `instrument`, `side`, `entry_price`, `stop_price`, `stop_pips` |
+| Strategy | `live: strategy signal close` | `instrument`, `count`, `reason` |
+| Strategy | `candle adapter: strategy returned open with no stop` | `instrument`, `side`, `reason` |
+| Broker fill | `live runner: opened trade` | `trade_id`, `side`, `units`, `price` (OANDA confirmed fill) |
+| Broker fill | `live runner: closed trade` | `trade_id` (strategy-triggered close) |
+| Stop-out / TP | `live-journal trade recorded` | `trade_id`, `instrument`, `entry`, `exit`, `pl`, `reason` |
 
-Use `--log-level info` (the default) to see all signal events; `--log-level warn` to suppress them.
+The `reason` field on `live-journal trade recorded` contains the OANDA close reason:
+- `STOP_LOSS_ORDER` — stop-loss hit
+- `TAKE_PROFIT_ORDER` — take-profit hit
+- `CLIENT_REQUEST` — closed manually via the API
+
+**Configuration** — add to `trader.yaml` or pass as flags:
+
+```yaml
+log:
+  level: info     # debug | info | warn | error
+  format: json    # json enables structured filtering with jq
+  file: /var/log/trader/trader.log   # written in addition to stdout
+```
+
+```bash
+# Flags override the config file
+trader serve --log-level info --log-format json --log-file /var/log/trader/trader.log
+```
+
+**Filter the live log with jq** (requires `--log-format json`):
+
+```bash
+# Tail all trading events — skip tick-level noise
+tail -f /var/log/trader/trader.log | jq -c 'select(.msg | test("signal|queued|opened trade|closed trade|journal trade"))'
+
+# Entries only — with stop price and pips
+tail -f /var/log/trader/trader.log | jq -c 'select(.msg == "live: open order queued") | {time, instrument, side, entry_price, stop_price, stop_pips}'
+
+# Fills only
+tail -f /var/log/trader/trader.log | jq -c 'select(.msg == "live runner: opened trade") | {time, trade_id, side, units, price}'
+
+# Stop-outs and closes with P/L
+tail -f /var/log/trader/trader.log | jq -c 'select(.msg == "live-journal trade recorded") | {time, trade_id, instrument, entry, exit, pl, reason}'
+
+# Everything in one clean stream
+tail -f /var/log/trader/trader.log | \
+  jq -c 'select(.msg | test("queued|opened trade|closed trade|journal trade")) |
+         {time, msg: (.msg | split(":")[1] | ltrimstr(" ")), instrument, side,
+          entry_price, stop_price, stop_pips, trade_id, price, pl, reason}'
+```
 
 ---
 

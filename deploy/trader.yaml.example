@@ -21,3 +21,6 @@ data:
 
 log:
   level: info          # debug | info | warn | error
+  format: text         # text | json  (json enables jq filtering)
+  file: ""             # optional log file path; written in addition to stdout
+                       # e.g. /var/log/trader/trader.log
