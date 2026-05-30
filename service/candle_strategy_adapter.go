@@ -145,15 +145,43 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price trader.LivePrice
 		return nil
 	}
 
+	if len(plan.Opens) > 0 {
+		a.log.Info("live: strategy signal open",
+			"instrument", a.instNorm,
+			"side", plan.Opens[0].Side,
+			"stop", plan.Opens[0].Stop,
+			"reason", plan.Reason,
+			"bar_time", bar.Time,
+		)
+	}
+	if len(plan.Closes) > 0 {
+		a.log.Info("live: strategy signal close",
+			"instrument", a.instNorm,
+			"count", len(plan.Closes),
+			"reason", plan.Reason,
+			"bar_time", bar.Time,
+		)
+	}
+
 	// Apply regime filter to opens (mirrors the backtest loop in trader.go).
 	if a.regime.Ready() && len(plan.Opens) > 0 {
 		if !a.regime.Trending() {
+			a.log.Info("live: open blocked by regime filter — not trending",
+				"instrument", a.instNorm,
+				"bar_time", bar.Time,
+			)
 			plan.Opens = nil
 		} else {
 			filtered := plan.Opens[:0]
 			for _, o := range plan.Opens {
 				if a.regime.AllowSide(o.Side) {
 					filtered = append(filtered, o)
+				} else {
+					a.log.Info("live: open blocked by regime filter — side not allowed",
+						"instrument", a.instNorm,
+						"side", o.Side,
+						"bar_time", bar.Time,
+					)
 				}
 			}
 			plan.Opens = filtered
@@ -348,6 +376,15 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 				if req.Side == trader.Short {
 					side = "short"
 				}
+				scale := float64(a.scale)
+				a.log.Info("live: open order queued",
+					"instrument", a.instNorm,
+					"side", side,
+					"entry_price", float64(entryPrice)/scale,
+					"stop_price", float64(req.Stop)/scale,
+					"stop_pips", stopPips,
+					"reason", plan.Reason,
+				)
 				live.Open = &trader.LiveOpenRequest{
 					Side:     side,
 					StopPips: stopPips,

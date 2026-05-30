@@ -63,6 +63,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/backtests/{name}/org", s.handleGetBacktestOrg)
 	mux.HandleFunc("GET /api/v1/backtests/{name}/candles", s.handleGetBacktestCandles)
 
+	// Strategy replay — runs a strategy against stored candles, returns bars + signals
+	mux.HandleFunc("POST /api/v1/replay", s.handleReplay)
+
 	// SSE streams
 	mux.HandleFunc("GET /api/v1/stream/account", s.handleStreamAccount)
 	mux.HandleFunc("GET /api/v1/stream/events", s.handleStreamEvents)
