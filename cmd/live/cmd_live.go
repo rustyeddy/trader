@@ -51,7 +51,27 @@ func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
 			ctx, cancel := notifyContext(cmd.Context())
 			defer cancel()
 
-			svc, err := service.New(service.Config{Env: env, Token: token, AccountID: accountID})
+			// Token: explicit flag > global config > env var.
+			tok := token
+			if !cmd.Flags().Changed("token") {
+				if rc.OANDAToken != "" {
+					tok = rc.OANDAToken
+				} else {
+					tok = os.Getenv("OANDA_TOKEN")
+				}
+			}
+
+			// Account: explicit flag > global config > env var.
+			resolvedAccount := accountID
+			if !cmd.Flags().Changed("account-id") {
+				if rc.OANDAAccountID != "" {
+					resolvedAccount = rc.OANDAAccountID
+				} else {
+					resolvedAccount = os.Getenv("OANDA_ACCOUNT_ID")
+				}
+			}
+
+			svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount})
 			if err != nil {
 				return err
 			}

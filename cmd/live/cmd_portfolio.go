@@ -11,7 +11,7 @@ import (
 	"github.com/rustyeddy/trader/service"
 )
 
-func newPortfolioCmd(_ any) *cobra.Command {
+func newPortfolioCmd(rc *trader.RootConfig) *cobra.Command {
 	var (
 		configFile string
 		accountID  string
@@ -57,15 +57,34 @@ Example:
 				return nil
 			}
 
-			// Config file account_id takes precedence over flag / env var.
-			resolvedAccount := accountID
-			if cfg.AccountID != "" {
+			// Token: explicit flag > global config > env var.
+			tok := token
+			if !cmd.Flags().Changed("token") {
+				if rc.OANDAToken != "" {
+					tok = rc.OANDAToken
+				} else {
+					tok = os.Getenv("OANDA_TOKEN")
+				}
+			}
+
+			// Account: explicit flag > YAML config > global config > env var.
+			resolvedAccount := ""
+			if cmd.Flags().Changed("account-id") {
+				resolvedAccount = accountID
+			}
+			if resolvedAccount == "" {
 				resolvedAccount = cfg.AccountID
+			}
+			if resolvedAccount == "" {
+				resolvedAccount = rc.OANDAAccountID
+			}
+			if resolvedAccount == "" {
+				resolvedAccount = os.Getenv("OANDA_ACCOUNT_ID")
 			}
 
 			svc, err := service.New(service.Config{
 				Env:       cfg.Env,
-				Token:     token,
+				Token:     tok,
 				AccountID: resolvedAccount,
 			})
 			if err != nil {

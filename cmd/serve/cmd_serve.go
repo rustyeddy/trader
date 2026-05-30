@@ -101,10 +101,10 @@ Example config file (see deploy/trader.yaml.example):
 			}
 
 			// CLI flags override config file.
-			if token != "" {
+			if cmd.Flags().Changed("token") {
 				cfg.Token = token
 			}
-			if accountID != "" {
+			if cmd.Flags().Changed("account-id") {
 				cfg.AccountID = accountID
 			}
 			if env != "" && env != "practice" {
@@ -147,13 +147,24 @@ Example config file (see deploy/trader.yaml.example):
 				trader.SetDataDir(cfg.Data.Dir)
 			}
 
-			// Resolve token.
+			// Resolve token: YAML/flag > global config > env var > token file.
 			tok := cfg.Token
+			if tok == "" {
+				tok = rc.OANDAToken
+			}
 			if tok == "" {
 				tok = os.Getenv("OANDA_TOKEN")
 			}
 			if tok == "" {
 				tok = readTokenFile()
+			}
+
+			// Resolve account: YAML/flag > global config > env var.
+			if cfg.AccountID == "" {
+				cfg.AccountID = rc.OANDAAccountID
+			}
+			if cfg.AccountID == "" {
+				cfg.AccountID = os.Getenv("OANDA_ACCOUNT_ID")
 			}
 
 			if err := trader.Setup(trader.LogConfig{
