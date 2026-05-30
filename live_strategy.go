@@ -32,10 +32,11 @@ func (p LivePrice) Mid() float64 { return (p.Bid + p.Ask) / 2 }
 type LiveTrade struct {
 	ID           string
 	Instrument   string
-	Units        int64   // positive = long, negative = short
+	Units        int64     // positive = long, negative = short
 	EntryPrice   float64
 	UnrealizedPL float64
-	TicksOpen    int // incremented by the runner each poll tick
+	OpenTime     time.Time // when OANDA opened the trade
+	TicksOpen    int       // estimated ticks elapsed, seeded from OpenTime on restart
 }
 
 // Side returns "long" or "short".

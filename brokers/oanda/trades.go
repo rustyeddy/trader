@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // OpenTrade represents one open position returned by GET /v3/accounts/{id}/openTrades.
@@ -18,8 +19,9 @@ type OpenTrade struct {
 	EntryPrice   float64
 	Units        int64   // positive = long, negative = short
 	UnrealizedPL float64
-	StopLoss     float64 // 0 if none
-	TakeProfit   float64 // 0 if none
+	StopLoss     float64   // 0 if none
+	TakeProfit   float64   // 0 if none
+	OpenTime     time.Time // when the trade was opened on OANDA
 }
 
 type openTradesResp struct {
@@ -29,6 +31,7 @@ type openTradesResp struct {
 		Price        string `json:"price"`
 		CurrentUnits string `json:"currentUnits"`
 		UnrealizedPL string `json:"unrealizedPL"`
+		OpenTime     string `json:"openTime"` // RFC3339Nano, e.g. "2024-01-15T10:30:00.000000Z"
 		StopLossOrder *struct {
 			Price string `json:"price"`
 		} `json:"stopLossOrder"`
@@ -69,6 +72,11 @@ func (c *Client) GetOpenTrades(ctx context.Context, accountID string) ([]OpenTra
 			EntryPrice:   parse(t.Price),
 			Units:        int64(parse(t.CurrentUnits)),
 			UnrealizedPL: parse(t.UnrealizedPL),
+		}
+		if t.OpenTime != "" {
+			if ts, err := time.Parse(time.RFC3339Nano, t.OpenTime); err == nil {
+				ot.OpenTime = ts
+			}
 		}
 		if t.StopLossOrder != nil {
 			ot.StopLoss = parse(t.StopLossOrder.Price)

@@ -72,8 +72,8 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	)
 
 	// tickCounts tracks how many ticks each open trade has been held.
-	// This is maintained by the runner so the strategy doesn't need to.
-	tickCounts := map[string]int{}
+	// Seeded from OANDA open-time on startup so a restart doesn't reset ages.
+	tickCounts := s.seedTickCounts(ctx, cfg, log)
 
 	ticker := time.NewTicker(cfg.TickInterval)
 	defer ticker.Stop()
@@ -153,6 +153,7 @@ func (s *Service) runOneTick(
 			Units:        t.Units,
 			EntryPrice:   t.EntryPrice,
 			UnrealizedPL: t.UnrealizedPL,
+			OpenTime:     t.OpenTime,
 			TicksOpen:    tickCounts[t.ID],
 		})
 	}
@@ -240,6 +241,51 @@ func (s *Service) runOneTick(
 		)
 	}
 	return nil
+}
+
+// seedTickCounts fetches the current open trades from OANDA at startup and
+// returns a tickCounts map pre-populated with estimated ages. This ensures
+// that a bot restart does not reset trade ages back to 1.
+//
+// The estimate is: elapsed = now − openTime, ticks = elapsed ÷ tickInterval.
+// We seed with (ticks - 1) so that the first increment in runOneTick brings
+// the count to the correct estimated value.
+func (s *Service) seedTickCounts(ctx context.Context, cfg LiveRunConfig, log *slog.Logger) map[string]int {
+	counts := map[string]int{}
+	trades, err := s.OANDA.GetOpenTrades(ctx, s.AccountID)
+	if err != nil {
+		log.Warn("live runner: could not seed tick counts from open trades", "err", err)
+		return counts
+	}
+	inst := normalizeInstrument(cfg.Instrument)
+	now := time.Now()
+	for _, t := range trades {
+		if normalizeInstrument(t.Instrument) != inst {
+			continue
+		}
+		if t.OpenTime.IsZero() {
+			continue
+		}
+		estimated := estimateTicksOpen(t.OpenTime, now, cfg.TickInterval)
+		if estimated > 0 {
+			counts[t.ID] = estimated - 1 // runOneTick will add 1 on first tick
+		}
+		log.Info("live runner: seeded tick count for existing trade",
+			"trade_id", t.ID,
+			"open_time", t.OpenTime,
+			"estimated_ticks", estimated,
+		)
+	}
+	return counts
+}
+
+// estimateTicksOpen returns how many tick intervals have elapsed between
+// openTime and now. Returns 0 when openTime is zero or in the future.
+func estimateTicksOpen(openTime, now time.Time, interval time.Duration) int {
+	if openTime.IsZero() || !now.After(openTime) {
+		return 0
+	}
+	return int(now.Sub(openTime) / interval)
 }
 
 // normalizeInstrument converts "EUR/USD" → "EUR_USD" and uppercases.

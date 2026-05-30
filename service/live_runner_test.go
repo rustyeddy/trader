@@ -2,10 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -119,6 +124,93 @@ func TestLiveTrade_Side(t *testing.T) {
 func TestLivePrice_Mid(t *testing.T) {
 	p := trader.LivePrice{Bid: 1.0850, Ask: 1.0852}
 	require.InDelta(t, 1.0851, p.Mid(), 0.000001)
+}
+
+// ── estimateTicksOpen ─────────────────────────────────────────────────────────
+
+func TestEstimateTicksOpen(t *testing.T) {
+	interval := 5 * time.Minute
+	base := time.Date(2024, 1, 10, 12, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		label    string
+		openTime time.Time
+		now      time.Time
+		want     int
+	}{
+		{"zero openTime", time.Time{}, base, 0},
+		{"openTime in future", base.Add(time.Minute), base, 0},
+		{"exactly one interval", base, base.Add(5 * time.Minute), 1},
+		{"two intervals", base, base.Add(10 * time.Minute), 2},
+		{"partial interval rounds down", base, base.Add(7 * time.Minute), 1},
+		{"overnight ~12h", base, base.Add(12 * time.Hour), 144},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			assert.Equal(t, tc.want, estimateTicksOpen(tc.openTime, tc.now, interval))
+		})
+	}
+}
+
+// ── seedTickCounts ────────────────────────────────────────────────────────────
+
+// newSeedService builds a Service backed by a fake OANDA HTTP server that
+// returns the given open-trades JSON body.
+func newSeedService(t *testing.T, body string) (*Service, func()) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	svc := &Service{
+		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "test"},
+		AccountID: "acc-1",
+	}
+	return svc, srv.Close
+}
+
+// TestSeedTickCounts_SeedValue verifies that seed = estimated-1 so the first
+// runOneTick increment lands on the correct estimated age.
+func TestSeedTickCounts_SeedValue(t *testing.T) {
+	// Trade opened 3 hours ago; tick interval is 1 hour → estimated = 3, seed = 2.
+	openTime := time.Now().UTC().Add(-3 * time.Hour)
+	body := fmt.Sprintf(`{"trades":[{"id":"trade-1","instrument":"EUR_USD","price":"1.08","currentUnits":"1000","unrealizedPL":"0","openTime":%q}]}`, openTime.Format(time.RFC3339Nano))
+
+	svc, cleanup := newSeedService(t, body)
+	defer cleanup()
+
+	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
+	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+
+	require.Contains(t, counts, "trade-1")
+	assert.Equal(t, 2, counts["trade-1"]) // 3 estimated - 1 = 2
+}
+
+// TestSeedTickCounts_WrongInstrumentIgnored ensures trades for other
+// instruments are not seeded into this runner's tick counter.
+func TestSeedTickCounts_WrongInstrumentIgnored(t *testing.T) {
+	openTime := time.Now().UTC().Add(-2 * time.Hour)
+	body := fmt.Sprintf(`{"trades":[{"id":"trade-9","instrument":"USD_JPY","price":"150","currentUnits":"1000","unrealizedPL":"0","openTime":%q}]}`, openTime.Format(time.RFC3339Nano))
+
+	svc, cleanup := newSeedService(t, body)
+	defer cleanup()
+
+	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
+	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+	assert.Empty(t, counts)
+}
+
+// TestSeedTickCounts_ZeroOpenTimeSkipped ensures trades with no openTime
+// (missing from OANDA response) are skipped rather than seeded with garbage.
+func TestSeedTickCounts_ZeroOpenTimeSkipped(t *testing.T) {
+	body := `{"trades":[{"id":"trade-2","instrument":"EUR_USD","price":"1.08","currentUnits":"1000","unrealizedPL":"0"}]}`
+
+	svc, cleanup := newSeedService(t, body)
+	defer cleanup()
+
+	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
+	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+	assert.Empty(t, counts)
 }
 
 // ── market-hours gate ─────────────────────────────────────────────────────────
