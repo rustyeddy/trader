@@ -28,4 +28,6 @@ runs:
       params:
         fast_period: 3
         slow_period: 8
+        atr_period: 14
+        stop_multiplier: 1.0
         warmup_bars: 20
