@@ -6,7 +6,7 @@ CMD     := ./cmd
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin
 
-.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke sweep install clean
+.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep install clean
 
 all: vet build
 
@@ -53,6 +53,23 @@ live-portfolio: build
 
 smoke: build
 	@scripts/smoke.sh
+
+# Live OANDA integration smoke test — requires OANDA_TOKEN and an active market session.
+# Runs the pulse strategy against a $2,000 practice account to exercise broker plumbing.
+# Phase 2: uncomment GBP_USD block in testdata/configs/smoke-test.yml first.
+smoke-live-dry: build
+	$(BIN) live portfolio \
+		--config testdata/configs/smoke-test.yml \
+		--log-level info \
+		--dry-run
+
+smoke-live: build
+	@mkdir -p logs
+	$(BIN) live portfolio \
+		--config testdata/configs/smoke-test.yml \
+		--log-level info \
+		--log-format json \
+		--log-file logs/smoke-live.log
 
 sweep:
 	go test -tags sweep -timeout 15m -v -count=1 ./service/... -run TestStrategySweep
