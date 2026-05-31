@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "trader": {
+      "type": "stdio",
+      "command": "trader",
+      "args": [
+        "mcp",
+        "serve"
+      ],
+      "env": {}
+    }
+  }
+}

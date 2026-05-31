@@ -13,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/strategies/pulse"
+	"github.com/rustyeddy/trader/strategies/scalper"
 )
 
 // liveRunConfig is the YAML schema for `trader live run`.
@@ -28,8 +29,9 @@ type liveRunConfig struct {
 }
 
 type strategyBlock struct {
-	Kind   string         `yaml:"kind"`
-	Params map[string]any `yaml:"params"`
+	Kind        string         `yaml:"kind"`
+	Granularity string         `yaml:"granularity"` // candle bar size for candle-based strategies, e.g. "M1", "H1"
+	Params      map[string]any `yaml:"params"`
 }
 
 func newRunCmd(rc *trader.RootConfig) *cobra.Command {
@@ -94,15 +96,13 @@ Example:
 				return fmt.Errorf("invalid tick_interval %q: %w", cfg.TickInterval, err)
 			}
 
-			// Build strategy.
-			strategy, err := buildStrategy(cfg)
-			if err != nil {
-				return fmt.Errorf("build strategy: %w", err)
-			}
-
 			if dryRun {
-				fmt.Printf("Dry-run: strategy=%s instrument=%s interval=%s max_positions=%d risk_pct=%.2f%%",
-					strategy.Name(), cfg.Instrument, interval, cfg.MaxPositions, cfg.RiskPct)
+				kind := cfg.Strategy.Kind
+				if kind == "" {
+					kind = "pulse"
+				}
+				fmt.Printf("Dry-run: kind=%s instrument=%s interval=%s max_positions=%d risk_pct=%.2f%%",
+					kind, cfg.Instrument, interval, cfg.MaxPositions, cfg.RiskPct)
 				if cfg.MaxUnits > 0 {
 					fmt.Printf(" max_units=%d", cfg.MaxUnits)
 				}
@@ -160,6 +160,12 @@ Example:
 			}
 			defer release()
 
+			// Build strategy — candle-based strategies need the OANDA client.
+			strategy, err := buildStrategy(cfg, svc)
+			if err != nil {
+				return fmt.Errorf("build strategy: %w", err)
+			}
+
 			fmt.Printf("Starting live strategy: %s | %s | %s env | tick=%s\n",
 				strategy.Name(), cfg.Instrument, cfg.Env, interval)
 			fmt.Println("Press Ctrl-C to stop.")
@@ -187,7 +193,8 @@ Example:
 }
 
 // buildStrategy constructs a LiveStrategy from the config's strategy block.
-func buildStrategy(cfg liveRunConfig) (trader.LiveStrategy, error) {
+// svc is required for candle-based strategies (they need the OANDA client).
+func buildStrategy(cfg liveRunConfig, svc *service.Service) (trader.LiveStrategy, error) {
 	kind := strings.ToLower(strings.TrimSpace(cfg.Strategy.Kind))
 	if kind == "" {
 		kind = "pulse"
@@ -224,8 +231,32 @@ func buildStrategy(cfg liveRunConfig) (trader.LiveStrategy, error) {
 			pcfg.RiskPct = toFloat(v, pcfg.RiskPct)
 		}
 		return pulse.New(pcfg)
+
+	case "scalper":
+		p := cfg.Strategy.Params
+		fastPeriod := toInt(p["fast_period"], 3)
+		slowPeriod := toInt(p["slow_period"], 8)
+		warmupBars := toInt(p["warmup_bars"], 20)
+		granularity := cfg.Strategy.Granularity
+		if granularity == "" {
+			granularity = "M1"
+		}
+		s, err := scalper.New(scalper.Config{FastPeriod: fastPeriod, SlowPeriod: slowPeriod})
+		if err != nil {
+			return nil, err
+		}
+		return service.NewCandleStrategyAdapter(service.CandleAdapterConfig{
+			Strategy:    s,
+			Instrument:  cfg.Instrument,
+			Granularity: granularity,
+			WarmupBars:  warmupBars,
+			OANDA:       svc.OANDA,
+			AccountID:   svc.AccountID,
+			Service:     svc,
+		}), nil
+
 	default:
-		return nil, fmt.Errorf("unknown strategy kind %q (supported: pulse)", kind)
+		return nil, fmt.Errorf("unknown strategy kind %q (supported: pulse, scalper)", kind)
 	}
 }
 

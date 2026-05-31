@@ -29,6 +29,8 @@ go.work.sum
 
 # Build output
 bin/
+gen-newsdays
+logs/
 trader-bin
 /replay/replay
 /cmd/replay/replay

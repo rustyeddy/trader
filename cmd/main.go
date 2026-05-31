@@ -31,6 +31,7 @@ import (
 	_ "github.com/rustyeddy/trader/strategies/fake"
 	_ "github.com/rustyeddy/trader/strategies/lifecycle"
 	_ "github.com/rustyeddy/trader/strategies/noop"
+	_ "github.com/rustyeddy/trader/strategies/scalper"
 	_ "github.com/rustyeddy/trader/strategies/tmpl"
 )
 
