@@ -42,6 +42,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(closeOrderCmd())
 	cmd.AddCommand(transactionsCmd())
 	cmd.AddCommand(transactionsStreamCmd())
+	cmd.AddCommand(pricesCmd())
 	return cmd
 }
 
