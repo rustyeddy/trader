@@ -64,6 +64,7 @@ Open `http://localhost:9999` for the dashboard.
 | `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
 | `trader data oanda` | Download candles directly from OANDA into the candle store |
+| `trader data stats` | Print statistics for a historical candle dataset |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
 | `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
 | `trader live journal` | Subscribe to OANDA transaction stream and journal closed trades |
@@ -324,6 +325,64 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 ```
 
 `testdata/candles/` contains small fixtures used by unit tests — do not use for real backtests.
+
+### Dataset Statistics
+
+`trader data stats` walks a candle dataset and reports four groups of metrics:
+
+| Group | What it measures |
+|---|---|
+| **Swing** | High-low range per bar: count, mean, min, p25/p50/p75/p90, max (in pips) |
+| **Spread** | Average spread per bar: mean, p90, max (in pips; bars with zero spread are skipped) |
+| **Trend vs Consolidation** | Body/range ratio — `\|Close−Open\| / (High−Low)`. >0.6 = trending, <0.3 = consolidating |
+| **Session** | Average range and bar count by UTC hour — shows which sessions are most active |
+
+```bash
+trader data stats \
+  --instrument EURUSD \
+  --timeframe  H1 \
+  --from       2020-01-01 \
+  --to         2024-12-31
+```
+
+Example output:
+```
+EURUSD H1   2020-01-01 → 2024-12-31
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Swing (High-Low Range)
+  count                      21890
+  mean                       14.3 pips
+  min                         0.1 pips
+  p25                         8.1 pips
+  p50                        12.4 pips
+  p75                        18.9 pips
+  p90                        26.7 pips
+  max                       112.0 pips
+
+Spread
+  count (with spread)        21890
+  mean                        0.18 pips
+  p90                         0.30 pips
+  max                         2.10 pips
+
+Trend vs Consolidation
+  count                      21890
+  mean body/range             0.421
+  trending  (>0.6)           35.2%  (7705)
+  mixed  (0.3–0.6)           34.8%  (7618)
+  consolidating  (<0.3)      30.0%  (6567)
+
+Session (by UTC hour)
+  00:00 UTC                  count=1094    avg range=8.3 pips
+  01:00 UTC                  count=1089    avg range=7.9 pips
+  ...
+  08:00 UTC                  count=1096    avg range=15.2 pips
+  09:00 UTC                  count=1098    avg range=18.4 pips
+  ...
+```
+
+`--timeframe` defaults to `H1`. All three timeframes (`M1`, `H1`, `D1`) are supported. `--from` and `--to` are both inclusive.
 
 ---
 
