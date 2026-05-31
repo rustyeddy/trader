@@ -18,6 +18,7 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 		newOandaDownloadCmd(rc),
 		newStatsCmd(rc),
 		newPipValueCmd(rc),
+		newPositionCmd(rc),
 	)
 
 	return cmd
