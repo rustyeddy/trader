@@ -1,0 +1,23 @@
+# scalper-demo.yml — high-frequency demo account broker integration test
+#
+# Runs the "scalper" strategy on M1 EURUSD candles against a practice account.
+# Designed to generate many trades per day to exercise the full broker pipeline.
+#
+# Usage:
+#   trader live run --config testdata/configs/scalper-demo.yml
+#   trader live run --config testdata/configs/scalper-demo.yml --dry-run
+
+instrument: EUR_USD
+env: practice
+tick_interval: 30s       # poll every 30s; CandleStrategyAdapter fires only on new completed M1 bars
+max_positions: 1         # netting account — one position at a time
+risk_pct: 0.1            # 0.1% of account NAV per trade
+max_units: 1000          # hard cap: tiny size for broker testing
+
+strategy:
+  kind: scalper
+  granularity: M1        # feed completed M1 bars to Update()
+  params:
+    fast_period: 3       # EMA periods (placeholder — Update() is currently a no-op)
+    slow_period: 8
+    warmup_bars: 20      # bars to replay from OANDA before first live signal

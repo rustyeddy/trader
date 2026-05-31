@@ -1,0 +1,70 @@
+# smoke-test.yml — multi-instrument broker integration smoke test
+#
+# Purpose: exercise the full OANDA plumbing at high frequency.
+#   - Opens and closes many positions per session
+#   - Triggers stop-losses to verify fill/journal accuracy
+#   - Validates multi-instrument concurrency
+#   - $2,000 practice account; micro-lot sizing keeps cost negligible
+#
+# Usage:
+#   trader live portfolio --config testdata/configs/smoke-test.yml --dry-run
+#   trader live portfolio --config testdata/configs/smoke-test.yml
+#
+# Phase 1 (current): single instrument, single strategy
+# Phase 2:           add second instrument block (see commented section below)
+
+env: practice
+risk_pct: 0.1                  # 0.1% of $2,000 = ~$2 per trade
+drawdown_circuit_pct: 20.0     # halt if equity drops 20% from peak ($400)
+local_warmup_bars: 10          # minimal warmup — pulse doesn't need history
+
+instruments:
+
+  # ── Phase 1: EURUSD pulse ──────────────────────────────────────────────────
+  - instrument: EUR_USD
+    timeframe: M1
+    tick_interval: 30s           # poll every 30s; new M1 bar fires Update()
+    risk_pct: 0.1
+    max_units: 1000              # micro lot — minimal exposure
+
+    strategy:
+      kind: pulse
+      params:
+        trade_every: 3           # open every 3 ticks (~90s)
+        hold_bars:   8           # close after 8 ticks (~4 min)
+        side:        long        # netting account — one direction
+        stop_pips:   15          # tight stop to exercise stop-loss path
+        take_pips:   0           # no TP; rely on hold_bars close
+        risk_pct:    0.1
+
+    regime:
+      kind: session
+      params:
+        start: 13                # London/NY overlap: 13:00–17:00 UTC
+        end:   17                # most liquid window; dense tick coverage
+
+
+  # ── Phase 2: add second instrument here ────────────────────────────────────
+  # Uncomment and adjust to begin multi-instrument testing.
+  #
+  # - instrument: GBP_USD
+  #   timeframe: M1
+  #   tick_interval: 30s
+  #   risk_pct: 0.1
+  #   max_units: 1000
+  #
+  #   strategy:
+  #     kind: pulse
+  #     params:
+  #       trade_every: 4         # slightly offset from EURUSD to stagger opens
+  #       hold_bars:   8
+  #       side:        long
+  #       stop_pips:   15
+  #       take_pips:   0
+  #       risk_pct:    0.1
+  #
+  #   regime:
+  #     kind: session
+  #     params:
+  #       start: 13
+  #       end:   17
