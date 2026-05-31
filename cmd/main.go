@@ -52,7 +52,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&rc.DataDir, "data-dir", "/srv/trading/data/candles", "Root directory for candle data")
 	cmd.PersistentFlags().StringVar(&rc.LogLevel, "log-level", "debug", "Log level: debug|info|warn|error")
 	cmd.PersistentFlags().StringVar(&rc.LogFormat, "log-format", "text", "Log format: text|json")
-	cmd.PersistentFlags().StringVar(&rc.LogFile, "log-file", "", "Path to log file (written in addition to stdout)")
+	cmd.PersistentFlags().StringVar(&rc.LogFile, "log-file", "./trader.log", "Path to log file (written in addition to stdout)")
 	cmd.PersistentFlags().BoolVar(&rc.NoColor, "no-color", false, "Disable colored output")
 
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
