@@ -49,15 +49,25 @@ func TestFmtDollar(t *testing.T) {
 
 func TestPrintPositionTable_NoPanic(t *testing.T) {
 	eurusd := trader.GetInstrument("EURUSD")
-	assert.NotPanics(t, func() { printPositionTable(eurusd, 1.0845) })
+	assert.NotPanics(t, func() { printPositionTable(eurusd, 1.0845, 0) })
+}
+
+func TestPrintPositionTable_WithPips_NoPanic(t *testing.T) {
+	eurusd := trader.GetInstrument("EURUSD")
+	assert.NotPanics(t, func() { printPositionTable(eurusd, 1.0845, 20) })
 }
 
 func TestPrintSinglePosition_NoPanic(t *testing.T) {
 	usdjpy := trader.GetInstrument("USDJPY")
-	assert.NotPanics(t, func() { printSinglePosition(usdjpy, 150.0, 25_000) })
+	assert.NotPanics(t, func() { printSinglePosition(usdjpy, 150.0, 25_000, 0) })
+}
+
+func TestPrintSinglePosition_WithPips_NoPanic(t *testing.T) {
+	usdjpy := trader.GetInstrument("USDJPY")
+	assert.NotPanics(t, func() { printSinglePosition(usdjpy, 150.0, 25_000, 15) })
 }
 
 func TestPrintUnitsForNotional_NoPanic(t *testing.T) {
 	gbpusd := trader.GetInstrument("GBPUSD")
-	assert.NotPanics(t, func() { printUnitsForNotional(gbpusd, 1.2720, 5_000.0) })
+	assert.NotPanics(t, func() { printUnitsForNotional(gbpusd, 1.2720, 5_000.0, 0) })
 }

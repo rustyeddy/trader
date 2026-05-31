@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"strconv"
@@ -12,12 +13,15 @@ import (
 )
 
 // defaultRates are approximate mid-market rates for USD-base pairs used when
-// the user does not supply --rates.  Override with e.g. --rates USDJPY=152.50
+// live prices are unavailable.
 var defaultRates = map[string]float64{
 	"USDJPY": 150.00,
 	"USDCHF": 0.90,
 	"USDCAD": 1.36,
 }
+
+// usdBasePairs are the majors whose pip value depends on the current rate.
+var usdBasePairs = []string{"USDJPY", "USDCHF", "USDCAD"}
 
 var pipMultipliers = []float64{1, 10, 100, 1000}
 
@@ -25,6 +29,7 @@ func newPipValueCmd(_ *trader.RootConfig) *cobra.Command {
 	var (
 		units    int64
 		ratesCSV string
+		auth     = defaultOandaAuth()
 	)
 
 	cmd := &cobra.Command{
@@ -34,29 +39,43 @@ func newPipValueCmd(_ *trader.RootConfig) *cobra.Command {
 at the given position size (default: 100,000 units = 1 standard lot).
 
 For USD-base pairs (USDJPY, USDCHF, USDCAD) the pip value depends on the
-current exchange rate.  Approximate defaults are used unless you supply
---rates with live values.`,
+current exchange rate.  Rates are resolved in this order:
+  1. --rates flag (explicit overrides)
+  2. Live OANDA prices (when OANDA_TOKEN is set or --token is supplied)
+  3. Built-in approximate defaults`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rates := buildRates(ratesCSV)
-			printPipValues(units, rates)
+			ctx := context.Background()
+			rates, live := resolveRates(ctx, ratesCSV, auth)
+			printPipValues(units, rates, live)
 			return nil
 		},
 	}
 
 	cmd.Flags().Int64Var(&units, "units", 100_000, "Position size in units (100000 = 1 standard lot)")
-	cmd.Flags().StringVar(&ratesCSV, "rates", "", "Current rates for USD-base pairs, e.g. USDJPY=152.50,USDCHF=0.88,USDCAD=1.38")
+	cmd.Flags().StringVar(&ratesCSV, "rates", "", "Explicit rates for USD-base pairs, e.g. USDJPY=152.50,USDCHF=0.88")
+	cmd.Flags().StringVar(&auth.token, "token", auth.token, "OANDA API token (for live rate lookup)")
+	cmd.Flags().StringVar(&auth.env, "env", "practice", "OANDA environment: practice|live")
+	cmd.Flags().StringVar(&auth.accountID, "account-id", auth.accountID, "OANDA account ID (auto-discovered if omitted)")
 
 	return cmd
 }
 
-// buildRates merges defaultRates with any user-supplied overrides.
-func buildRates(csv string) map[string]float64 {
-	rates := make(map[string]float64, len(defaultRates))
+// resolveRates returns the rates map and whether live prices were used.
+// Priority: explicit --rates > live OANDA > built-in defaults.
+func resolveRates(ctx context.Context, ratesCSV string, auth oandaAuth) (rates map[string]float64, live bool) {
+	rates = make(map[string]float64, len(defaultRates))
 	maps.Copy(rates, defaultRates)
-	if csv == "" {
-		return rates
+
+	// Try live prices if a token is available and no explicit rates given.
+	if ratesCSV == "" && auth.token != "" {
+		if prices, err := fetchMidPrices(ctx, auth, usdBasePairs); err == nil && len(prices) > 0 {
+			maps.Copy(rates, prices)
+			live = true
+		}
 	}
-	for pair := range strings.SplitSeq(csv, ",") {
+
+	// Explicit --rates always win.
+	for pair := range strings.SplitSeq(ratesCSV, ",") {
 		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(kv) != 2 {
 			continue
@@ -65,13 +84,24 @@ func buildRates(csv string) map[string]float64 {
 		v, err := strconv.ParseFloat(strings.TrimSpace(kv[1]), 64)
 		if err == nil && v > 0 {
 			rates[inst] = v
+			live = false // explicit overrides trump "live" label
 		}
 	}
+	return rates, live
+}
+
+// buildRates is retained for tests: merges defaultRates with CSV overrides only.
+func buildRates(csv string) map[string]float64 {
+	rates, _ := resolveRates(context.Background(), csv, oandaAuth{})
 	return rates
 }
 
-func printPipValues(units int64, rates map[string]float64) {
-	// header
+func printPipValues(units int64, rates map[string]float64, live bool) {
+	rateLabel := "approximate"
+	if live {
+		rateLabel = "live"
+	}
+
 	fmt.Printf("\nPip values — %s units", fmtUnits(units))
 	fmt.Printf("  (USD per N pips)\n\n")
 	fmt.Printf("%-10s  %10s  %10s  %10s  %12s\n",
@@ -79,20 +109,19 @@ func printPipValues(units int64, rates map[string]float64) {
 	fmt.Printf("%-10s  %10s  %10s  %10s  %12s\n",
 		"──────────", "──────────", "──────────", "──────────", "────────────")
 
-	var approxPairs []string
-
+	var notedPairs []string
 	for _, name := range trader.Majors {
 		inst := trader.GetInstrument(name)
 		if inst == nil {
 			continue
 		}
 		rate := rates[name]
-		approx := inst.QuoteCurrency != "USD"
-		if approx {
-			approxPairs = append(approxPairs, fmt.Sprintf("%s=%.4g", name, rate))
+		needsRate := inst.QuoteCurrency != "USD"
+		if needsRate {
+			notedPairs = append(notedPairs, fmt.Sprintf("%s=%.5g", name, rate))
 		}
 		marker := " "
-		if approx {
+		if needsRate {
 			marker = "†"
 		}
 
@@ -104,9 +133,11 @@ func printPipValues(units int64, rates map[string]float64) {
 		fmt.Println()
 	}
 
-	if len(approxPairs) > 0 {
-		fmt.Printf("\n† approximate rate(s): %s\n", strings.Join(approxPairs, ", "))
-		fmt.Println("  Override with --rates USDJPY=152.50,USDCHF=0.88,USDCAD=1.38")
+	if len(notedPairs) > 0 {
+		fmt.Printf("\n† %s rate(s): %s\n", rateLabel, strings.Join(notedPairs, ", "))
+		if !live {
+			fmt.Println("  Set OANDA_TOKEN for live rates, or override with --rates USDJPY=152.50,...")
+		}
 	}
 	fmt.Println()
 }
