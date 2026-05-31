@@ -65,6 +65,7 @@ Open `http://localhost:9999` for the dashboard.
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
 | `trader data oanda` | Download candles directly from OANDA into the candle store |
 | `trader data stats` | Print statistics for a historical candle dataset |
+| `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
 | `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
 | `trader live journal` | Subscribe to OANDA transaction stream and journal closed trades |
@@ -383,6 +384,38 @@ Session (by UTC hour)
 ```
 
 `--timeframe` defaults to `H1`. All three timeframes (`M1`, `H1`, `D1`) are supported. `--from` and `--to` are both inclusive.
+
+### Pip Values
+
+`trader data pip-value` prints the USD value of 1, 10, 100, and 1000 pips for every major pair at a given position size:
+
+```bash
+# Default: 100,000 units (1 standard lot), approximate rates for USD-base pairs
+trader data pip-value
+
+# Mini lot with live rates
+trader data pip-value --units 10000 --rates USDJPY=152.50,USDCHF=0.88,USDCAD=1.38
+```
+
+Example output:
+```
+Pip values — 100,000 (standard lot) units  (USD per N pips)
+
+Instrument       1 pip     10 pips    100 pips     1000 pips
+──────────  ──────────  ──────────  ──────────  ────────────
+EURUSD          $10.00    $100.00     $1,000    $10,000
+GBPUSD          $10.00    $100.00     $1,000    $10,000
+USDJPY    †    $6.6667     $66.67    $666.67     $6,667
+USDCHF    †     $11.11    $111.11     $1,111    $11,111
+AUDUSD          $10.00    $100.00     $1,000    $10,000
+USDCAD    †    $7.3529     $73.53    $735.29     $7,353
+NZDUSD          $10.00    $100.00     $1,000    $10,000
+
+† approximate rate(s): USDJPY=150, USDCHF=0.9, USDCAD=1.36
+  Override with --rates USDJPY=152.50,USDCHF=0.88,USDCAD=1.38
+```
+
+USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. USD-base pairs (USDJPY, USDCHF, USDCAD) are marked `†` and use approximate defaults until you supply `--rates`.
 
 ---
 
