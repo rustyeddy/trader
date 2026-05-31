@@ -94,7 +94,7 @@ func NewRootCmd() *cobra.Command {
 			Level:  rc.LogLevel,
 			Format: rc.LogFormat,
 			File:   rc.LogFile,
-			Stdout: true,
+			Stdout: rc.LogFile == "",
 		})
 	}
 
