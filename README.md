@@ -68,6 +68,7 @@ Open `http://localhost:9999` for the dashboard.
 | `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
 | `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
+| `trader order prices` | Fetch live bid/ask prices from OANDA for the major pairs |
 | `trader live journal` | Subscribe to OANDA transaction stream and journal closed trades |
 | `trader order` | Place, close, and list orders on a live OANDA account |
 | `trader serve` | Full daemon: REST API + live journal + embedded UI (port :9999) |
@@ -614,6 +615,28 @@ TRADER_RUN_DUKASCOPY_TESTS=1 go test ./...
 
 Every code change must ship with tests — see `CLAUDE.md` for conventions.
 
+### Live Integration Smoke Test
+
+`make smoke-live` runs the pulse strategy against an OANDA practice account to exercise the full broker plumbing at high frequency. Requires an active market session (London/NY overlap: 13:00–17:00 UTC recommended) and `OANDA_TOKEN` set in the environment.
+
+```bash
+export OANDA_TOKEN=your-practice-token
+
+make smoke-live-dry   # parse and resolve config only — no orders placed
+make smoke-live       # full run; logs to logs/smoke-live.log
+
+# Tail trading events while running
+tail -f logs/smoke-live.log | jq -c 'select(.msg | test("signal|opened trade|closed trade|journal trade"))'
+```
+
+Config: `testdata/configs/smoke-test.yml` — EUR_USD M1 pulse, trades every ~90s, 15-pip stops, session-gated to 13:00–17:00 UTC. Uncomment the `GBP_USD` block to test multi-instrument concurrency (phase 2).
+
+| Target | Needs OANDA? | What it does |
+|---|---|---|
+| `make smoke` | No | Offline CI: build, backtest, replay API |
+| `make smoke-live-dry` | Token only | Resolve config, print plan, exit |
+| `make smoke-live` | Token + open session | Full pulse run, JSON log |
+
 ---
 
 ## Project Layout
@@ -629,6 +652,7 @@ data/           Candle loading, Dukascopy parser
 ui/             Embedded SvelteKit frontend (build → ui/dist/)
 deploy/         Dockerfile, docker-compose, systemd unit, example configs
 testdata/       Config fixtures and candle fixtures
+lots-of.go	    Trader core source code
 ROADMAP.md      Planned features and known gaps
 ```
 
