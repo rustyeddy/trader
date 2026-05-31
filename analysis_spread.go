@@ -36,10 +36,15 @@ func (a *SpreadAnalyzer) Stats() []Stat {
 		sum += v
 	}
 	mean := sum / float64(len(sorted))
+	p90 := percentile(sorted, 90)
+	max := sorted[len(sorted)-1]
+	pip := func(name string, v float64) Stat {
+		return Stat{Name: name, Value: fmt.Sprintf("%.2f pips", v), Pips: v}
+	}
 	return []Stat{
 		{Name: "count (with spread)", Value: fmt.Sprintf("%d", len(sorted))},
-		{Name: "mean", Value: fmt.Sprintf("%.2f pips", mean)},
-		{Name: "p90", Value: fmt.Sprintf("%.2f pips", percentile(sorted, 90))},
-		{Name: "max", Value: fmt.Sprintf("%.2f pips", sorted[len(sorted)-1])},
+		pip("mean", mean),
+		pip("p90", p90),
+		pip("max", max),
 	}
 }

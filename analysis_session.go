@@ -46,6 +46,7 @@ func (a *SessionAnalyzer) Stats() []Stat {
 		stats = append(stats, Stat{
 			Name:  fmt.Sprintf("%02d:00 UTC", h),
 			Value: fmt.Sprintf("count=%-6d  avg range=%.1f pips", b.count, avg),
+			Pips:  avg,
 		})
 	}
 	return stats

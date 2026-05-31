@@ -6,9 +6,12 @@ import (
 )
 
 // Stat is a single labeled measurement returned by an Analyzer.
+// Pips is the raw pip count when Value is a pip measurement; zero otherwise.
+// Callers can use Pips to convert to a currency amount without re-parsing Value.
 type Stat struct {
 	Name  string
 	Value string
+	Pips  float64
 }
 
 // Analyzer accumulates statistics over a candle sequence.

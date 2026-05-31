@@ -238,6 +238,49 @@ func TestRunAnalysis_ContextCancelled(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// ---- Pips field -------------------------------------------------------------
+
+func TestSwingAnalyzer_PipsFieldSet(t *testing.T) {
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(0, 20, 0, 10, 0, 0)) // range=20 price units = 2 pips
+	for _, s := range a.Stats() {
+		if s.Name == "count" {
+			assert.Equal(t, 0.0, s.Pips)
+		} else {
+			assert.Equal(t, 2.0, s.Pips, "stat %q should have Pips=2.0", s.Name)
+		}
+	}
+}
+
+func TestSpreadAnalyzer_PipsFieldSet(t *testing.T) {
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(0, 20, 0, 10, 10, 0)) // spread=10 price units = 1 pip
+	for _, s := range a.Stats() {
+		if s.Name == "count (with spread)" {
+			assert.Equal(t, 0.0, s.Pips)
+		} else {
+			assert.Equal(t, 1.0, s.Pips, "stat %q should have Pips=1.0", s.Name)
+		}
+	}
+}
+
+func TestSessionAnalyzer_PipsFieldSet(t *testing.T) {
+	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
+	h8 := time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC).Unix()
+	a.Update(makeCT(0, 20, 0, 10, 0, h8)) // range=20 price units = 2 pips
+	stats := a.Stats()
+	require.Len(t, stats, 1)
+	assert.Equal(t, 2.0, stats[0].Pips)
+}
+
+func TestTrendAnalyzer_PipsAlwaysZero(t *testing.T) {
+	a := NewTrendAnalyzer()
+	a.Update(makeCT(0, 10, 0, 10, 0, 0))
+	for _, s := range a.Stats() {
+		assert.Equal(t, 0.0, s.Pips, "TrendAnalyzer stat %q should never set Pips", s.Name)
+	}
+}
+
 // ---- helper -----------------------------------------------------------------
 
 // statMap converts []Stat to a map for easy assertions.

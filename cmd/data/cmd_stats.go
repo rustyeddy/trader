@@ -19,6 +19,7 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 		fromStr    string
 		toStr      string
 		source     string
+		units      int64
 	)
 
 	cmd := &cobra.Command{
@@ -30,7 +31,8 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
   - Trend:   body/range ratio (trending vs consolidating bars)
   - Session: average range and candle count by UTC hour
 
---from and --to are inclusive dates in YYYY-MM-DD format.`,
+--from and --to are inclusive dates in YYYY-MM-DD format.
+--units adds a USD column showing the dollar value of each pip measurement.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inst := trader.NormalizeInstrument(instrument)
 			if inst == "" {
@@ -88,7 +90,10 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 				return fmt.Errorf("analysis: %w", err)
 			}
 
-			printAnalysis(os.Stdout, inst, timeframe, from, to, analyzers)
+			// For USD-base pairs (USDJPY etc.) use the same approximate rates as
+			// pip-value so the dollar column is always populated.
+			rate := defaultRates[inst]
+			printAnalysis(os.Stdout, instMeta, inst, timeframe, from, to, analyzers, units, rate)
 			return nil
 		},
 	}
@@ -98,6 +103,7 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&fromStr, "from", "", "Start date inclusive (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&toStr, "to", "", "End date inclusive (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&source, "source", "", "Data source override (default: oanda)")
+	cmd.Flags().Int64Var(&units, "units", 0, "Show USD value per N units alongside pips (e.g. 100000 for a standard lot); 0 disables")
 
 	_ = cmd.MarkFlagRequired("instrument")
 	_ = cmd.MarkFlagRequired("from")
@@ -106,20 +112,41 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func printAnalysis(w io.Writer, inst, tf string, from, to time.Time, analyzers []trader.Analyzer) {
+func printAnalysis(w io.Writer, instMeta *trader.Instrument, inst, tf string, from, to time.Time, analyzers []trader.Analyzer, units int64, rate float64) {
 	header := fmt.Sprintf("%s %s   %s → %s",
 		inst, tf,
 		from.Format("2006-01-02"),
 		to.Format("2006-01-02"),
 	)
+	if units > 0 {
+		header += fmt.Sprintf("   (USD at %s)", lotLabel(units))
+	}
 	bar := "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	fmt.Fprintln(w, header)
 	fmt.Fprintln(w, bar)
 	for _, a := range analyzers {
 		fmt.Fprintf(w, "\n%s\n", a.Name())
 		for _, s := range a.Stats() {
-			fmt.Fprintf(w, "  %-26s %s\n", s.Name, s.Value)
+			line := fmt.Sprintf("  %-26s %s", s.Name, s.Value)
+			if units > 0 && s.Pips > 0 {
+				usd := instMeta.PipValueUSD(rate, units, s.Pips)
+				line += fmt.Sprintf("  ($%.2f)", usd)
+			}
+			fmt.Fprintln(w, line)
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+func lotLabel(units int64) string {
+	switch units {
+	case 100_000:
+		return "standard lot"
+	case 10_000:
+		return "mini lot"
+	case 1_000:
+		return "micro lot"
+	default:
+		return fmt.Sprintf("%d units", units)
+	}
 }

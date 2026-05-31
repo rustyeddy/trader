@@ -36,14 +36,21 @@ func (a *SwingAnalyzer) Stats() []Stat {
 		sum += v
 	}
 	mean := sum / float64(len(sorted))
+	p25 := percentile(sorted, 25)
+	p50 := percentile(sorted, 50)
+	p75 := percentile(sorted, 75)
+	p90 := percentile(sorted, 90)
+	pip := func(name string, v float64) Stat {
+		return Stat{Name: name, Value: fmt.Sprintf("%.1f pips", v), Pips: v}
+	}
 	return []Stat{
 		{Name: "count", Value: fmt.Sprintf("%d", len(sorted))},
-		{Name: "mean", Value: fmt.Sprintf("%.1f pips", mean)},
-		{Name: "min", Value: fmt.Sprintf("%.1f pips", sorted[0])},
-		{Name: "p25", Value: fmt.Sprintf("%.1f pips", percentile(sorted, 25))},
-		{Name: "p50", Value: fmt.Sprintf("%.1f pips", percentile(sorted, 50))},
-		{Name: "p75", Value: fmt.Sprintf("%.1f pips", percentile(sorted, 75))},
-		{Name: "p90", Value: fmt.Sprintf("%.1f pips", percentile(sorted, 90))},
-		{Name: "max", Value: fmt.Sprintf("%.1f pips", sorted[len(sorted)-1])},
+		pip("mean", mean),
+		pip("min", sorted[0]),
+		pip("p25", p25),
+		pip("p50", p50),
+		pip("p75", p75),
+		pip("p90", p90),
+		pip("max", sorted[len(sorted)-1]),
 	}
 }
