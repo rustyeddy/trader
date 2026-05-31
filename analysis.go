@@ -44,6 +44,20 @@ func RunAnalysis(ctx context.Context, itr CandleIterator, analyzers []Analyzer) 
 	return itr.Err()
 }
 
+// unitsPerPip returns the number of Price units that equal one pip for inst.
+func unitsPerPip(inst *Instrument) float64 {
+	return float64(PriceScale) * inst.PipSize()
+}
+
+// pricesToPips converts a slice of Price deltas to pip values.
+func pricesToPips(prices []Price, uPip float64) []float64 {
+	out := make([]float64, len(prices))
+	for i, p := range prices {
+		out[i] = float64(p) / uPip
+	}
+	return out
+}
+
 // sortedCopy returns a sorted copy of vals.
 func sortedCopy(vals []float64) []float64 {
 	cp := make([]float64, len(vals))

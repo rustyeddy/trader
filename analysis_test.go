@@ -63,7 +63,7 @@ func TestPercentile_Interpolation(t *testing.T) {
 // ---- SwingAnalyzer ----------------------------------------------------------
 
 func TestSwingAnalyzer_Empty(t *testing.T) {
-	a := NewSwingAnalyzer(10)
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	stats := a.Stats()
 	require.Len(t, stats, 1)
 	assert.Equal(t, "count", stats[0].Name)
@@ -71,7 +71,7 @@ func TestSwingAnalyzer_Empty(t *testing.T) {
 }
 
 func TestSwingAnalyzer_ZeroRangeSkipped(t *testing.T) {
-	a := NewSwingAnalyzer(10)
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 100, 100, 100, 0, 0)) // High==Low, skip
 	assert.Len(t, a.Stats(), 1)
 	assert.Equal(t, "0", a.Stats()[0].Value)
@@ -79,7 +79,7 @@ func TestSwingAnalyzer_ZeroRangeSkipped(t *testing.T) {
 
 func TestSwingAnalyzer_SingleCandle(t *testing.T) {
 	// High−Low = 20 price units; unitsPerPip=10 → 2 pips
-	a := NewSwingAnalyzer(10)
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 120, 100, 110, 0, 0))
 	stats := statMap(a.Stats())
 	assert.Equal(t, "1", stats["count"])
@@ -90,7 +90,7 @@ func TestSwingAnalyzer_SingleCandle(t *testing.T) {
 }
 
 func TestSwingAnalyzer_MultipleCandles(t *testing.T) {
-	a := NewSwingAnalyzer(10)
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	// ranges in price units: 10, 20, 30 → pips: 1, 2, 3
 	a.Update(makeCT(0, 10, 0, 5, 0, 0))
 	a.Update(makeCT(0, 20, 0, 10, 0, 0))
@@ -106,21 +106,21 @@ func TestSwingAnalyzer_MultipleCandles(t *testing.T) {
 // ---- SpreadAnalyzer ---------------------------------------------------------
 
 func TestSpreadAnalyzer_Empty(t *testing.T) {
-	a := NewSpreadAnalyzer(10)
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	stats := a.Stats()
 	require.Len(t, stats, 1)
 	assert.Equal(t, "0", stats[0].Value)
 }
 
 func TestSpreadAnalyzer_ZeroSpreadSkipped(t *testing.T) {
-	a := NewSpreadAnalyzer(10)
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 110, 90, 105, 0, 0))
 	assert.Equal(t, "0", a.Stats()[0].Value)
 }
 
 func TestSpreadAnalyzer_Values(t *testing.T) {
 	// spreads: 5 and 15 price units at 10 units/pip → 0.5 and 1.5 pips
-	a := NewSpreadAnalyzer(10)
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 110, 90, 105, 5, 0))
 	a.Update(makeCT(100, 110, 90, 105, 15, 0))
 	stats := statMap(a.Stats())
@@ -182,18 +182,18 @@ func TestTrendAnalyzer_Mixed(t *testing.T) {
 // ---- SessionAnalyzer --------------------------------------------------------
 
 func TestSessionAnalyzer_Empty(t *testing.T) {
-	a := NewSessionAnalyzer(10)
+	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
 	assert.Empty(t, a.Stats())
 }
 
 func TestSessionAnalyzer_ZeroRangeSkipped(t *testing.T) {
-	a := NewSessionAnalyzer(10)
+	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 100, 100, 100, 0, 0))
 	assert.Empty(t, a.Stats())
 }
 
 func TestSessionAnalyzer_BucketsByHour(t *testing.T) {
-	a := NewSessionAnalyzer(10)
+	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
 	// UTC 08:00 on 2024-01-01
 	h8 := time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC).Unix()
 	// UTC 14:00 on 2024-01-01
@@ -215,7 +215,7 @@ func TestSessionAnalyzer_BucketsByHour(t *testing.T) {
 // ---- RunAnalysis ------------------------------------------------------------
 
 func TestRunAnalysis_WalksAllCandles(t *testing.T) {
-	swing := NewSwingAnalyzer(10)
+	swing := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	candles := []CandleTime{
 		*makeCT(0, 10, 0, 5, 0, 0),
 		*makeCT(0, 20, 0, 10, 0, 3600),
@@ -232,7 +232,7 @@ func TestRunAnalysis_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled immediately
 
-	swing := NewSwingAnalyzer(10)
+	swing := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	itr := newSliceIter(*makeCT(0, 10, 0, 5, 0, 0))
 	err := RunAnalysis(ctx, itr, []Analyzer{swing})
 	assert.ErrorIs(t, err, context.Canceled)

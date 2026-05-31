@@ -7,21 +7,19 @@ import (
 
 type hourBucket struct {
 	count      int
-	totalRange float64
+	totalRange int64 // sum of Price deltas
 }
 
 // SessionAnalyzer breaks down candle activity and average range by UTC hour.
-// Useful for identifying which trading sessions (London, NY, Tokyo) are most
-// active and volatile for a given instrument.
+// Ranges are stored as Price (scaled int) and converted to pips only at output.
 type SessionAnalyzer struct {
-	unitsPerPip float64
-	hours       [24]hourBucket
+	inst  *Instrument
+	hours [24]hourBucket
 }
 
-// NewSessionAnalyzer creates a SessionAnalyzer. unitsPerPip is the number of
-// Price units that equal one pip for the instrument.
-func NewSessionAnalyzer(unitsPerPip float64) *SessionAnalyzer {
-	return &SessionAnalyzer{unitsPerPip: unitsPerPip}
+// NewSessionAnalyzer creates a SessionAnalyzer for the given instrument.
+func NewSessionAnalyzer(inst *Instrument) *SessionAnalyzer {
+	return &SessionAnalyzer{inst: inst}
 }
 
 func (a *SessionAnalyzer) Name() string { return "Session (by UTC hour)" }
@@ -33,17 +31,18 @@ func (a *SessionAnalyzer) Update(ct *CandleTime) {
 	}
 	h := time.Unix(int64(ct.Timestamp), 0).UTC().Hour()
 	a.hours[h].count++
-	a.hours[h].totalRange += float64(rng) / a.unitsPerPip
+	a.hours[h].totalRange += int64(rng)
 }
 
 func (a *SessionAnalyzer) Stats() []Stat {
+	uPip := unitsPerPip(a.inst)
 	stats := make([]Stat, 0, 24)
 	for h := range 24 {
 		b := a.hours[h]
 		if b.count == 0 {
 			continue
 		}
-		avg := b.totalRange / float64(b.count)
+		avg := float64(b.totalRange) / float64(b.count) / uPip
 		stats = append(stats, Stat{
 			Name:  fmt.Sprintf("%02d:00 UTC", h),
 			Value: fmt.Sprintf("count=%-6d  avg range=%.1f pips", b.count, avg),

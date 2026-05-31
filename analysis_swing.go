@@ -2,16 +2,16 @@ package trader
 
 import "fmt"
 
-// SwingAnalyzer measures the high-low range (in pips) of each candle.
+// SwingAnalyzer measures the high-low range of each candle.
+// Ranges are stored as Price (scaled int) and converted to pips only at output.
 type SwingAnalyzer struct {
-	unitsPerPip float64
-	ranges      []float64
+	inst   *Instrument
+	ranges []Price
 }
 
-// NewSwingAnalyzer creates a SwingAnalyzer.  unitsPerPip is the number of
-// Price units that equal one pip for the instrument (e.g. 10 for EURUSD).
-func NewSwingAnalyzer(unitsPerPip float64) *SwingAnalyzer {
-	return &SwingAnalyzer{unitsPerPip: unitsPerPip}
+// NewSwingAnalyzer creates a SwingAnalyzer for the given instrument.
+func NewSwingAnalyzer(inst *Instrument) *SwingAnalyzer {
+	return &SwingAnalyzer{inst: inst}
 }
 
 func (a *SwingAnalyzer) Name() string { return "Swing (High-Low Range)" }
@@ -21,14 +21,16 @@ func (a *SwingAnalyzer) Update(ct *CandleTime) {
 	if delta <= 0 {
 		return
 	}
-	a.ranges = append(a.ranges, float64(delta)/a.unitsPerPip)
+	a.ranges = append(a.ranges, delta)
 }
 
 func (a *SwingAnalyzer) Stats() []Stat {
 	if len(a.ranges) == 0 {
 		return []Stat{{Name: "count", Value: "0"}}
 	}
-	sorted := sortedCopy(a.ranges)
+	uPip := unitsPerPip(a.inst)
+	pips := pricesToPips(a.ranges, uPip)
+	sorted := sortedCopy(pips)
 	var sum float64
 	for _, v := range sorted {
 		sum += v

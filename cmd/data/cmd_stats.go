@@ -64,13 +64,11 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 				return fmt.Errorf("bad range: %w", err)
 			}
 
-			unitsPerPip := float64(trader.PriceScale) * instMeta.PipSize()
-
 			analyzers := []trader.Analyzer{
-				trader.NewSwingAnalyzer(unitsPerPip),
-				trader.NewSpreadAnalyzer(unitsPerPip),
+				trader.NewSwingAnalyzer(instMeta),
+				trader.NewSpreadAnalyzer(instMeta),
 				trader.NewTrendAnalyzer(),
-				trader.NewSessionAnalyzer(unitsPerPip),
+				trader.NewSessionAnalyzer(instMeta),
 			}
 
 			dm := trader.NewDataManager([]string{inst}, from, toExcl)
