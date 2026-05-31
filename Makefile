@@ -6,7 +6,7 @@ CMD     := ./cmd
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin
 
-.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep install clean
+.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean
 
 all: vet build
 
@@ -70,6 +70,12 @@ smoke-live: build
 		--log-level info \
 		--log-format json \
 		--log-file logs/smoke-live.log
+
+# Incremental scalper development — edit strategies/scalper/scalper.go then re-run.
+# Uses 1 month of M1 data for a fast feedback loop (~seconds per run).
+# Widen the date range in testdata/configs/scalper-backtest.yml once logic is stable.
+backtest-scalper: build
+	$(BIN) backtest run testdata/configs/scalper-backtest.yml
 
 sweep:
 	go test -tags sweep -timeout 15m -v -count=1 ./service/... -run TestStrategySweep
