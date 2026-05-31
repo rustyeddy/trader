@@ -43,6 +43,9 @@ var instrumentList = []string{
 	"NZDUSD",
 }
 
+// Majors is the ordered list of seven major FX pairs tracked by this engine.
+var Majors = instrumentList
+
 var Instruments = map[string]*Instrument{
 	"EURUSD": {
 		Name:                "EURUSD",
@@ -233,6 +236,23 @@ func NormalizeInstrument(sym string) string {
 // PipSize is an internal helper for trader type processing.
 func (inst *Instrument) PipSize() float64 {
 	return math.Pow10(inst.PipLocation)
+}
+
+// PipValueUSD returns the USD value of pips pips for a position of units units.
+//
+// For USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) the result is exact
+// and rate is ignored.  For USD-base pairs (USDJPY, USDCHF, USDCAD) the pip
+// value is denominated in the quote currency, so rate (the current pair price)
+// is required to convert back to USD.  Returns 0 if rate ≤ 0.
+func (inst *Instrument) PipValueUSD(rate float64, units int64, pips float64) float64 {
+	pip := inst.PipSize()
+	if inst.QuoteCurrency == "USD" {
+		return pip * float64(units) * pips
+	}
+	if rate <= 0 {
+		return 0
+	}
+	return pip * float64(units) * pips / rate
 }
 
 // DukascopyPriceMultiplier returns the factor needed to convert a raw
