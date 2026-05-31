@@ -339,33 +339,39 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 | **Session** | Average range and bar count by UTC hour — shows which sessions are most active |
 
 ```bash
+# Pips only
 trader data stats \
   --instrument EURUSD \
   --timeframe  H1 \
   --from       2020-01-01 \
   --to         2024-12-31
+
+# Pips + USD value for a standard lot (100,000 units)
+trader data stats --instrument EURUSD --from 2020-01-01 --to 2024-12-31 --units 100000
 ```
 
-Example output:
+`--units` adds a USD column showing what each pip measurement is worth at the given position size. Position sizes: `1000` = micro lot, `10000` = mini lot, `100000` = standard lot. For USD-base pairs (USDJPY, USDCHF, USDCAD) approximate rates are used automatically.
+
+Example output with `--units 100000`:
 ```
-EURUSD H1   2020-01-01 → 2024-12-31
+EURUSD H1   2020-01-01 → 2024-12-31   (USD at standard lot)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Swing (High-Low Range)
   count                      21890
-  mean                       14.3 pips
-  min                         0.1 pips
-  p25                         8.1 pips
-  p50                        12.4 pips
-  p75                        18.9 pips
-  p90                        26.7 pips
-  max                       112.0 pips
+  mean                       14.3 pips  ($143.00)
+  min                         0.1 pips  ($1.00)
+  p25                         8.1 pips  ($81.00)
+  p50                        12.4 pips  ($124.00)
+  p75                        18.9 pips  ($189.00)
+  p90                        26.7 pips  ($267.00)
+  max                       112.0 pips  ($1120.00)
 
 Spread
   count (with spread)        21890
-  mean                        0.18 pips
-  p90                         0.30 pips
-  max                         2.10 pips
+  mean                        0.18 pips  ($1.80)
+  p90                         0.30 pips  ($3.00)
+  max                         2.10 pips  ($21.00)
 
 Trend vs Consolidation
   count                      21890
@@ -375,11 +381,11 @@ Trend vs Consolidation
   consolidating  (<0.3)      30.0%  (6567)
 
 Session (by UTC hour)
-  00:00 UTC                  count=1094    avg range=8.3 pips
-  01:00 UTC                  count=1089    avg range=7.9 pips
+  00:00 UTC                  count=1094    avg range=8.3 pips  ($83.00)
+  01:00 UTC                  count=1089    avg range=7.9 pips  ($79.00)
   ...
-  08:00 UTC                  count=1096    avg range=15.2 pips
-  09:00 UTC                  count=1098    avg range=18.4 pips
+  08:00 UTC                  count=1096    avg range=15.2 pips  ($152.00)
+  09:00 UTC                  count=1098    avg range=18.4 pips  ($184.00)
   ...
 ```
 
