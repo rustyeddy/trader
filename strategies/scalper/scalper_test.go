@@ -38,11 +38,17 @@ func TestNew_FastEqualSlow(t *testing.T) {
 
 func TestName(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
-	assert.Equal(t, "SCALPER(ema3/8)", s.Name())
+	assert.Equal(t, "SCALPER(ema3/8,atr14)", s.Name())
 }
 
-func TestReady_AlwaysTrue(t *testing.T) {
+func TestReady_AfterIndicatorsWarmUp(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
+	for i := 0; i < 14; i++ {
+		s.Update(context.Background(), scalperCT(1.1000, 1.1010, 1.0990, 1.1000), nil)
+	}
+	assert.False(t, s.Ready())
+
+	s.Update(context.Background(), scalperCT(1.1000, 1.1010, 1.0990, 1.1000), nil)
 	assert.True(t, s.Ready())
 }
 
@@ -51,9 +57,9 @@ func TestReset_IsNoop(t *testing.T) {
 	require.NotPanics(t, s.Reset)
 }
 
-func TestStopDescription_Empty(t *testing.T) {
+func TestStopDescription(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
-	assert.Equal(t, "", s.StopDescription())
+	assert.Equal(t, "ATR(14)×1.0", s.StopDescription())
 }
 
 func TestUpdate_NilCandleTime(t *testing.T) {
@@ -73,4 +79,44 @@ func TestUpdate_ReturnsDefaultPlan(t *testing.T) {
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Opens)
 	assert.Empty(t, plan.Closes)
+}
+
+func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
+	s, err := New(Config{FastPeriod: 2, SlowPeriod: 3, ATRPeriod: 2, StopMultiplier: 1.0})
+	require.NoError(t, err)
+
+	run := &trader.Backtest{
+		BacktestRequest: &trader.BacktestRequest{Instrument: "EURUSD"},
+		BacktestRun:     &trader.BacktestRun{},
+	}
+
+	for _, ct := range []*trader.CandleTime{
+		scalperCT(1.0000, 1.0010, 0.9990, 1.0000),
+		scalperCT(1.0100, 1.0110, 1.0090, 1.0100),
+		scalperCT(1.0200, 1.0210, 1.0190, 1.0200),
+		scalperCT(1.0100, 1.0110, 0.9990, 1.0000),
+	} {
+		plan := s.Update(context.Background(), ct, run)
+		require.Empty(t, plan.Opens)
+	}
+
+	recovery := scalperCT(1.0000, 1.0310, 0.9990, 1.0300)
+	plan := s.Update(context.Background(), recovery, run)
+	require.Len(t, plan.Opens, 1)
+	assert.Equal(t, "buy-the-dip", plan.Reason)
+	assert.Equal(t, "buy-the-dip", plan.Opens[0].Reason)
+	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, "EURUSD", plan.Opens[0].Instrument)
+	assert.Less(t, plan.Opens[0].Stop, recovery.Close)
+}
+
+func scalperCT(open, high, low, close float64) *trader.CandleTime {
+	return &trader.CandleTime{
+		Candle: trader.Candle{
+			Open:  trader.PriceFromFloat(open),
+			High:  trader.PriceFromFloat(high),
+			Low:   trader.PriceFromFloat(low),
+			Close: trader.PriceFromFloat(close),
+		},
+	}
 }

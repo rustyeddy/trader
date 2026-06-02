@@ -21,8 +21,8 @@ runs:
     data:
       instrument: USDJPY
       timeframe: M1
-      from: 2024-01-01
-      to: 2024-01-31
+      from: 2024-02-01
+      to: 2024-02-29
     strategy:
       kind: scalper
       params:
