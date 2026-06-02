@@ -110,6 +110,9 @@ func newOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new",
 		Short: "Size and submit a market order with confirmation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runNewOrder(cmd, args, rc)
+		},
 	}
 	cmd.Flags().StringVar(&instrument, "instrument", "", "Instrument in OANDA format, e.g. USD_JPY (required)")
 	cmd.Flags().StringVar(&side, "side", "", "Trade direction: long or short (required)")
@@ -118,9 +121,6 @@ func newOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	addCommonFlags(cmd)
 	_ = cmd.MarkFlagRequired("instrument")
 	_ = cmd.MarkFlagRequired("side")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runNewOrder(cmd, args, rc)
-	}
 	return cmd
 }
 
@@ -199,11 +199,11 @@ func listOrdersCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List open trades from OANDA",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runListOrders(cmd, args, rc)
+		},
 	}
 	addCommonFlags(cmd)
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runListOrders(cmd, args, rc)
-	}
 	return cmd
 }
 
@@ -243,14 +243,14 @@ func closeOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "close",
 		Short: "Close an open trade (full or partial)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloseOrder(cmd, args, rc)
+		},
 	}
 	cmd.Flags().StringVar(&tradeID, "trade-id", "", "Trade ID to close (required)")
 	cmd.Flags().Int64Var(&closeUnits, "units", 0, "Units to close (default 0 = full close)")
 	addCommonFlags(cmd)
 	_ = cmd.MarkFlagRequired("trade-id")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runCloseOrder(cmd, args, rc)
-	}
 	return cmd
 }
 

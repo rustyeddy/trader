@@ -39,16 +39,7 @@ lots is printed.  Supply one of those flags for a specific calculation:
 Notional = units × price  (USD-quoted pairs: EURUSD, GBPUSD, AUDUSD, NZDUSD)
          = units           (USD-base pairs:   USDJPY, USDCHF, USDCAD)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Apply global config overrides when flags weren't explicitly set.
-			if !cmd.Flags().Changed("account-id") && rc != nil && rc.OANDAAccountID != "" {
-				auth.accountID = rc.OANDAAccountID
-			}
-			if !cmd.Flags().Changed("token") && rc != nil && rc.OANDAToken != "" {
-				auth.token = rc.OANDAToken
-			}
-			if !cmd.Flags().Changed("env") && rc != nil && rc.OANDAEnv != "" {
-				auth.env = rc.OANDAEnv
-			}
+			applyGlobalOANDA(cmd, &auth, rc)
 			inst := trader.NormalizeInstrument(instrument)
 			instMeta := trader.GetInstrument(inst)
 			if instMeta == nil {
