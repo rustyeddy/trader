@@ -1,0 +1,20 @@
+# trader user configuration — copy to ~/.config/trader/trader.yml
+#
+# This file is merged with /etc/trader/*.yml and any explicit --config path.
+# CLI flags always take precedence over config file values.
+#
+# OANDA credentials
+oanda:
+  account_id: "101-001-38241940-001"  # default OANDA account
+  env: practice                        # practice | live
+  token: ""                            # leave empty; use OANDA_TOKEN env var
+
+# Log settings
+log:
+  level: info    # debug | info | warn | error
+  format: text   # text | json
+  file: ""       # optional log file path (also written to stdout)
+
+# Data directory
+data:
+  dir: /srv/trading/data/candles

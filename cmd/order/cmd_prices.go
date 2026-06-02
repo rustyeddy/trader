@@ -12,7 +12,7 @@ import (
 	trader "github.com/rustyeddy/trader"
 )
 
-func pricesCmd() *cobra.Command {
+func pricesCmd(rc *trader.RootConfig) *cobra.Command {
 	var (
 		instrumentsCSV string
 		units          int64
@@ -27,7 +27,7 @@ bid, ask, mid, spread in pips, and USD pip value per lot.
 Defaults to all seven major pairs. Supply --instruments to restrict the list.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			svc, err := buildService(ctx)
+			svc, err := buildService(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}

@@ -106,7 +106,7 @@ func NewRootCmd() *cobra.Command {
 		serve.New(rc),
 		data.New(rc),
 		live.New(rc),
-		order.New(),
+		order.New(rc),
 		replay.New(rc),
 	)
 
