@@ -101,10 +101,7 @@ func pipDecimals(inst *trader.Instrument) int {
 }
 
 func fmtPipVal(v float64) string {
-	if v >= 10 {
-		return fmt.Sprintf("$%.2f", v)
-	}
-	return fmt.Sprintf("$%.4f", v)
+	return fmt.Sprintf("$%.2f", v)
 }
 
 func splitInstrumentCSV(s string) []string {

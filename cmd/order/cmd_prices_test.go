@@ -28,7 +28,7 @@ func TestPipDecimals(t *testing.T) {
 
 func TestFmtPipVal(t *testing.T) {
 	assert.Equal(t, "$10.00", fmtPipVal(10.0))
-	assert.Equal(t, "$6.6667", fmtPipVal(6.6667))
+	assert.Equal(t, "$6.67", fmtPipVal(6.6667))
 	assert.Equal(t, "$100.00", fmtPipVal(100.0))
 }
 
