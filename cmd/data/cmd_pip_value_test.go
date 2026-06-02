@@ -42,7 +42,7 @@ func TestCommaInt(t *testing.T) {
 func TestFmtUSD(t *testing.T) {
 	assert.Equal(t, "$10,000", fmtUSD(10000))
 	assert.Equal(t, "$100.00", fmtUSD(100))
-	assert.Equal(t, "$6.6667", fmtUSD(6.6667))
+	assert.Equal(t, "$6.67", fmtUSD(6.6667))
 }
 
 func TestFmtUnits(t *testing.T) {

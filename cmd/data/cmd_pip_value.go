@@ -146,10 +146,7 @@ func fmtUSD(v float64) string {
 	if v >= 1000 {
 		return "$" + commaInt(int64(v+0.5))
 	}
-	if v >= 10 {
-		return fmt.Sprintf("$%.2f", v)
-	}
-	return fmt.Sprintf("$%.4f", v)
+	return fmt.Sprintf("$%.2f", v)
 }
 
 // commaInt formats n with thousands separators (e.g. 10000 → "10,000").
