@@ -99,9 +99,9 @@ func buildService(ctx context.Context, cmd *cobra.Command, rc *traderpkg.RootCon
 
 // addCommonFlags adds the OANDA auth/account flags every order subcommand needs.
 func addCommonFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (overrides global config and OANDA_ACCOUNT_ID env var)")
-	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
-	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (takes precedence over global config and OANDA_ACCOUNT_ID env var)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (takes precedence over global config)")
 }
 
 // ── order new ─────────────────────────────────────────────────────────────
