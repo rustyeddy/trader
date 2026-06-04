@@ -1,0 +1,126 @@
+package service
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+
+func TestNewBotID_Unique(t *testing.T) {
+	ids := map[string]struct{}{}
+	for i := 0; i < 100; i++ {
+		id := newBotID()
+		assert.NotContains(t, ids, id, "duplicate bot ID")
+		ids[id] = struct{}{}
+		assert.Contains(t, id, "bot-")
+	}
+}
+
+func TestParseBotDuration_Empty(t *testing.T) {
+	d, err := parseBotDuration("", 60*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, 60*time.Second, d)
+}
+
+func TestParseBotDuration_Valid(t *testing.T) {
+	d, err := parseBotDuration("30s", time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, d)
+}
+
+func TestParseBotDuration_Invalid(t *testing.T) {
+	_, err := parseBotDuration("notaduration", time.Minute)
+	require.Error(t, err)
+}
+
+func TestStartBot_MissingInstrument(t *testing.T) {
+	svc := testService()
+	_, err := svc.StartBot(context.Background(), BotConfig{
+		Strategy: StrategyConfig{Kind: "pulse", Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "instrument")
+}
+
+func TestStartBot_UnknownStrategy(t *testing.T) {
+	svc := testService()
+	_, err := svc.StartBot(context.Background(), BotConfig{
+		Instrument: "EUR_USD",
+		Strategy:   StrategyConfig{Kind: "bogus"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown strategy kind")
+}
+
+func TestStartBot_InvalidDuration(t *testing.T) {
+	svc := testService()
+	_, err := svc.StartBot(context.Background(), BotConfig{
+		Instrument:   "EUR_USD",
+		TickInterval: "notvalid",
+		Strategy:     StrategyConfig{Kind: "pulse", Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tick_interval")
+}
+
+func TestStopBot_NotFound(t *testing.T) {
+	svc := testService()
+	err := svc.StopBot("nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestGetBot_NotFound(t *testing.T) {
+	svc := testService()
+	_, err := svc.GetBot("nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestListBots_Empty(t *testing.T) {
+	svc := testService()
+	assert.Empty(t, svc.ListBots())
+}
+
+func TestStartBot_RegistersAndStop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := testService()
+
+	// Use pulse with a very long tick interval so the goroutine just waits.
+	status, err := svc.StartBot(ctx, BotConfig{
+		Instrument:   "EUR_USD",
+		TickInterval: "24h",
+		Strategy: StrategyConfig{
+			Kind:   "pulse",
+			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "running", status.Status)
+	assert.Equal(t, "EUR_USD", status.Instrument)
+	assert.NotEmpty(t, status.ID)
+
+	// Listed.
+	bots := svc.ListBots()
+	require.Len(t, bots, 1)
+	assert.Equal(t, status.ID, bots[0].ID)
+
+	// Get by ID.
+	got, err := svc.GetBot(status.ID)
+	require.NoError(t, err)
+	assert.Equal(t, status.ID, got.ID)
+
+	// Stop it.
+	require.NoError(t, svc.StopBot(status.ID))
+
+	// Status should now be "stopped".
+	final, err := svc.GetBot(status.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "stopped", final.Status)
+}

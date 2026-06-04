@@ -66,6 +66,12 @@ func (s *Server) Handler() http.Handler {
 	// Strategy replay — runs a strategy against stored candles, returns bars + signals
 	mux.HandleFunc("POST /api/v1/replay", s.handleReplay)
 
+	// Bot manager — start/stop/list live strategy bots
+	mux.HandleFunc("POST /api/v1/bots", s.handleStartBot)
+	mux.HandleFunc("GET /api/v1/bots", s.handleListBots)
+	mux.HandleFunc("GET /api/v1/bots/{id}", s.handleGetBot)
+	mux.HandleFunc("DELETE /api/v1/bots/{id}", s.handleStopBot)
+
 	// SSE streams
 	mux.HandleFunc("GET /api/v1/stream/account", s.handleStreamAccount)
 	mux.HandleFunc("GET /api/v1/stream/events", s.handleStreamEvents)

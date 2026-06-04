@@ -1,0 +1,24 @@
+# stress-demo.yml — OANDA broker integration stress test.
+#
+# Fires a position every `trade_every` completed M1 bars with no warmup,
+# so it exercises the full live pipeline immediately after startup.
+#
+# Usage:
+#   trader live run --config testdata/configs/stress-demo.yml
+#   trader live run --config testdata/configs/stress-demo.yml --dry-run
+
+instrument: EUR_USD
+env: practice
+tick_interval: 30s      # poll every 30s; adapter fires only on new completed M1 bars
+max_positions: 1        # netting account — one position at a time
+risk_pct: 0.1           # 0.1% of account NAV per trade
+max_units: 1000         # hard cap: tiny size for broker testing
+
+strategy:
+  kind: stress
+  granularity: M1
+  params:
+    trade_every: 1      # open on every new completed bar
+    stop_pct: 0.2       # 0.2% of close price (converted to 20 bps internally)
+    side: long          # long / short / alternate
+    warmup_bars: 0      # no warmup needed

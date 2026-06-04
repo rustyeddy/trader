@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
@@ -29,6 +30,9 @@ type Service struct {
 
 	// AccountID resolved at construction or via ResolveAccount.
 	AccountID string
+
+	botsMu sync.RWMutex
+	bots   map[string]*botEntry
 }
 
 // Config bundles the inputs needed to construct a Service.
@@ -75,6 +79,7 @@ func New(cfg Config) (*Service, error) {
 		OANDA:     &oanda.Client{BaseURL: baseURL, Token: token},
 		Log:       log,
 		AccountID: cfg.AccountID,
+		bots:      make(map[string]*botEntry),
 	}, nil
 }
 

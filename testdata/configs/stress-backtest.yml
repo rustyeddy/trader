@@ -1,0 +1,36 @@
+version: 1
+
+# stress-backtest.yml — unconditional mechanical strategy for API plumbing tests.
+#
+# Opens a position every `trade_every` candles with no indicator warmup, so it
+# fires immediately at the start of any date range on any instrument.
+#
+# Usage:
+#   trader backtest run testdata/configs/stress-backtest.yml
+
+defaults:
+  starting-balance: 2000
+  account-ccy: USD
+  scale: 100000
+  risk-pct: 0.1
+  source: oanda
+
+runs:
+  - name: stress-eurusd-h1
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: 2024-01-01
+      to: 2024-03-31
+    strategy:
+      kind: stress
+      params:
+        trade_every: 5     # open every 5 bars
+        stop_pct: 0.2      # 0.2% of close price (converted to 20 bps internally)
+        side: long         # long / short / alternate
+
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 2.0

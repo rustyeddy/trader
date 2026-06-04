@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
-	"github.com/rustyeddy/trader/strategies/pulse"
-	"github.com/rustyeddy/trader/strategies/scalper"
 )
 
 // liveRunConfig is the YAML schema for `trader live run`.
@@ -192,90 +189,27 @@ Example:
 	return cmd
 }
 
-// buildStrategy constructs a LiveStrategy from the config's strategy block.
-// svc is required for candle-based strategies (they need the OANDA client).
+// buildStrategy delegates to the service layer so the same factory is used
+// by both the CLI and the REST API bot manager.
 func buildStrategy(cfg liveRunConfig, svc *service.Service) (trader.LiveStrategy, error) {
-	kind := strings.ToLower(strings.TrimSpace(cfg.Strategy.Kind))
-	if kind == "" {
-		kind = "pulse"
+	// Top-level liveRunConfig fields seed params when not already set explicitly.
+	p := cfg.Strategy.Params
+	if p == nil {
+		p = map[string]any{}
 	}
-	switch kind {
-	case "pulse":
-		pcfg := pulse.DefaultConfig()
-		pcfg.MaxPositions = cfg.MaxPositions
-		pcfg.RiskPct = cfg.RiskPct
-
-		// Overlay params from config file.
-		p := cfg.Strategy.Params
-		if v, ok := p["trade_every"]; ok {
-			pcfg.TradeEvery = toInt(v, pcfg.TradeEvery)
+	if cfg.MaxPositions > 0 {
+		if _, set := p["max_positions"]; !set {
+			p["max_positions"] = cfg.MaxPositions
 		}
-		if v, ok := p["hold_bars"]; ok {
-			pcfg.HoldBars = toInt(v, pcfg.HoldBars)
-		}
-		if v, ok := p["max_positions"]; ok {
-			pcfg.MaxPositions = toInt(v, pcfg.MaxPositions)
-		}
-		if v, ok := p["side"]; ok {
-			if s, ok := v.(string); ok {
-				pcfg.Side = s
-			}
-		}
-		if v, ok := p["stop_pips"]; ok {
-			pcfg.StopPips = toFloat(v, pcfg.StopPips)
-		}
-		if v, ok := p["take_pips"]; ok {
-			pcfg.TakePips = toFloat(v, pcfg.TakePips)
-		}
-		if v, ok := p["risk_pct"]; ok {
-			pcfg.RiskPct = toFloat(v, pcfg.RiskPct)
-		}
-		return pulse.New(pcfg)
-
-	case "scalper":
-		p := cfg.Strategy.Params
-		fastPeriod := toInt(p["fast_period"], 3)
-		slowPeriod := toInt(p["slow_period"], 8)
-		warmupBars := toInt(p["warmup_bars"], 20)
-		granularity := cfg.Strategy.Granularity
-		if granularity == "" {
-			granularity = "M1"
-		}
-		s, err := scalper.New(scalper.Config{FastPeriod: fastPeriod, SlowPeriod: slowPeriod})
-		if err != nil {
-			return nil, err
-		}
-		return service.NewCandleStrategyAdapter(service.CandleAdapterConfig{
-			Strategy:    s,
-			Instrument:  cfg.Instrument,
-			Granularity: granularity,
-			WarmupBars:  warmupBars,
-			OANDA:       svc.OANDA,
-			AccountID:   svc.AccountID,
-			Service:     svc,
-		}), nil
-
-	default:
-		return nil, fmt.Errorf("unknown strategy kind %q (supported: pulse, scalper)", kind)
 	}
-}
-
-func toInt(v any, def int) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case float64:
-		return int(x)
+	if cfg.RiskPct > 0 {
+		if _, set := p["risk_pct"]; !set {
+			p["risk_pct"] = cfg.RiskPct
+		}
 	}
-	return def
-}
-
-func toFloat(v any, def float64) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int:
-		return float64(x)
-	}
-	return def
+	return svc.BuildLiveStrategy(service.StrategyConfig{
+		Kind:        cfg.Strategy.Kind,
+		Granularity: cfg.Strategy.Granularity,
+		Params:      p,
+	}, cfg.Instrument)
 }
