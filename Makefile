@@ -6,6 +6,9 @@ CMD     := ./cmd
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
+
 .PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean
 
 all: vet build
@@ -13,7 +16,7 @@ all: vet build
 # Build Go binary only (uses whatever is already in ui/dist/).
 build:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN) $(CMD)
+	go build $(LDFLAGS) -o $(BIN) $(CMD)
 
 # Build the SvelteKit UI, then rebuild the Go binary with fresh assets.
 ui:
