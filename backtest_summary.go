@@ -102,15 +102,8 @@ func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered in
 		return 0, 0
 	}
 	spreadFiltered = run.State.SpreadFiltered
-	if run.State.SpreadOpened == 0 {
-		return 0, spreadFiltered
-	}
 	inst := GetInstrument(run.Request.Instrument)
-	if inst == nil {
-		return 0, spreadFiltered
-	}
-	unitsPerPip := float64(inst.PriceUnitsPerPip())
-	avgSpreadPips = float64(run.State.SpreadSum) / float64(run.State.SpreadOpened) / unitsPerPip
+	avgSpreadPips = AvgSpreadPips(run.State.SpreadSum, run.State.SpreadOpened, inst)
 	return avgSpreadPips, spreadFiltered
 }
 

@@ -49,3 +49,15 @@ func pipsFromFloat(v float64) Pips {
 func (p Pips) Float64() float64 {
 	return float64(p) / pipScale
 }
+
+// AvgSpreadPips converts an accumulated Price spread into average pips.
+func AvgSpreadPips(spreadSum Price, spreadOpened int, inst *Instrument) float64 {
+	if spreadOpened <= 0 || inst == nil {
+		return 0
+	}
+	unitsPerPip := inst.PriceUnitsPerPip()
+	if unitsPerPip <= 0 {
+		return 0
+	}
+	return float64(spreadSum) / float64(spreadOpened) / float64(unitsPerPip)
+}

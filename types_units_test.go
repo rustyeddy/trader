@@ -32,3 +32,12 @@ func TestPipsFloat64_Phase1(t *testing.T) {
 	assert.InDelta(t, 1.3, Pips(13).Float64(), 1e-9)
 	assert.InDelta(t, -1.2, Pips(-12).Float64(), 1e-9)
 }
+
+func TestAvgSpreadPips(t *testing.T) {
+	t.Parallel()
+
+	inst := GetInstrument("EURUSD")
+	assert.InDelta(t, 1.5, AvgSpreadPips(Price(30), 2, inst), 1e-9)
+	assert.Zero(t, AvgSpreadPips(Price(30), 0, inst))
+	assert.Zero(t, AvgSpreadPips(Price(30), 2, nil))
+}
