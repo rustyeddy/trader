@@ -2,6 +2,12 @@ package trader
 
 import "context"
 
+// CandleSource provides candle iterators for backtest and replay execution.
+// DataManager satisfies this interface.
+type CandleSource interface {
+	Candles(context.Context, CandleRequest) (candleIterator, error)
+}
+
 // fillAdjust returns the price adjustment for spread and slippage.
 // Dukascopy OHLC prices are bid-side. When we are buying (long open, short
 // close) we pay the ask: +spread+slippage. When selling we only lose slippage.

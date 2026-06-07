@@ -14,30 +14,26 @@ func (run *Backtest) Summary() BacktestReportSummary {
 	}
 
 	var trades []BacktestReportTrade
-	for _, tr := range run.State.GetTrades() {
-		if tr == nil {
-			continue
+	if run.State != nil {
+		for _, tr := range run.State.GetTrades() {
+			if tr == nil {
+				continue
+			}
+
+			trades = append(trades, BacktestReportTrade{
+				ID:              tr.ID,
+				Instrument:      tr.Instrument,
+				Side:            tr.Side.String(),
+				Units:           int64(tr.Units),
+				OpenPrice:       tr.EntryPrice.Float64(),
+				ClosePrice:      tr.ExitPrice.Float64(),
+				OpenTime:        formatBacktestSummaryTime(tr.EntryTime),
+				CloseTime:       formatBacktestSummaryTime(tr.ExitTime),
+				PNL:             tr.PNL.Float64(),
+				StopPrice:       tr.Stop.Float64(),
+				TakeProfitPrice: tr.Take.Float64(),
+			})
 		}
-
-		trades = append(trades, BacktestReportTrade{
-			ID:              tr.ID,
-			Instrument:      tr.Instrument,
-			Side:            tr.Side.String(),
-			Units:           int64(tr.Units),
-			OpenPrice:       tr.EntryPrice.Float64(),
-			ClosePrice:      tr.ExitPrice.Float64(),
-			OpenTime:        formatBacktestSummaryTime(tr.EntryTime),
-			CloseTime:       formatBacktestSummaryTime(tr.ExitTime),
-			PNL:             tr.PNL.Float64(),
-			StopPrice:       tr.Stop.Float64(),
-			TakeProfitPrice: tr.Take.Float64(),
-		})
-	}
-
-	maxDD, avgWinner, avgLoser := computeTradeStats(trades)
-	rr := 0.0
-	if avgLoser != 0 {
-		rr = avgWinner / -avgLoser
 	}
 
 	avgSpreadPips, spreadFiltered := executionCostStats(run)
@@ -48,13 +44,13 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		Instrument: run.Request.Instrument,
 		Timeframe:  run.Request.TimeRange.TF.String(),
 		Dataset:    run.RunConfig.Data.Source,
-		Start:      formatBacktestSummaryTime(run.Request.TimeRange.Start),
-		End:        formatBacktestSummaryTime(run.Request.TimeRange.End),
+		Start:      formatBacktestSummaryTime(run.Result.Start),
+		End:        formatBacktestSummaryTime(run.Result.End),
 
 		Trades:         run.Result.Trades,
 		Wins:           run.Result.Wins,
 		Losses:         run.Result.Losses,
-		StartBalance:   run.Request.StartingBalance.Float64(),
+		StartBalance:   run.Result.StartBalance.Float64(),
 		EndBalance:     run.Result.Balance.Float64(),
 		NetPL:          run.Result.NetPL.Float64(),
 		ReturnPct:      run.Result.ReturnPct.Float64() * 100,
@@ -66,10 +62,10 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		Slippage:       slippageDescription(run),
 		AvgSpreadPips:  avgSpreadPips,
 		SpreadFiltered: spreadFiltered,
-		MaxDrawdown:    maxDD,
-		AvgWinner:      avgWinner,
-		AvgLoser:       avgLoser,
-		RR:             rr,
+		MaxDrawdown:    run.Result.MaxDrawdown.Float64(),
+		AvgWinner:      run.Result.AvgWinner.Float64(),
+		AvgLoser:       run.Result.AvgLoser.Float64(),
+		RR:             run.Result.RR.Float64(),
 
 		TradeDetails: trades,
 
@@ -77,39 +73,6 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Config:      run.RunConfig,
 	}
-}
-
-// computeTradeStats derives max drawdown, avg winner, and avg loser from the trade list.
-// MaxDrawdown is the largest peak-to-trough drop in cumulative P/L (returned as negative).
-func computeTradeStats(trades []BacktestReportTrade) (maxDrawdown, avgWinner, avgLoser float64) {
-	var running, peak float64
-	var winSum, lossSum float64
-	var winN, lossN int
-
-	for _, tr := range trades {
-		running += tr.PNL
-		if running > peak {
-			peak = running
-		}
-		if drop := peak - running; drop > -maxDrawdown {
-			maxDrawdown = -drop
-		}
-		if tr.PNL > 0 {
-			winSum += tr.PNL
-			winN++
-		} else if tr.PNL < 0 {
-			lossSum += tr.PNL
-			lossN++
-		}
-	}
-
-	if winN > 0 {
-		avgWinner = winSum / float64(winN)
-	}
-	if lossN > 0 {
-		avgLoser = lossSum / float64(lossN)
-	}
-	return
 }
 
 // regimeDescription returns the regime filter's name for display in the

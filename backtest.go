@@ -143,8 +143,9 @@ func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, default
 }
 
 // BuildBacktestResult snapshots the account state into a BacktestResult and
-// stores it on the run's explicit Result field. It computes wins/losses/flat
-// counts, NetPL, ReturnPct, and WinRate from the account's closed trades.
+// stores it on the run's explicit Result field. It computes trade counts,
+// returns, gross P/L, averages, risk/reward, and closed-trade drawdown from
+// the account's closed trades.
 // Returns nil if run or acct is nil.
 func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	if run == nil || acct == nil {
@@ -160,34 +161,60 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	run.State.Trades = append(run.State.Trades[:0], acct.Trades...)
 
 	res := &BacktestResult{
-		Balance: acct.Balance,
-		Equity:  acct.Equity,
-		Trades:  len(acct.Trades),
-		Start:   run.Request.TimeRange.Start,
-		End:     run.Request.TimeRange.End,
+		Start:        run.Request.TimeRange.Start,
+		End:          run.Request.TimeRange.End,
+		StartBalance: run.Request.StartingBalance,
+		Balance:      acct.Balance,
+		Equity:       acct.Equity,
 	}
 
+	var running, peak Money
 	for _, tr := range acct.Trades {
 		if tr == nil {
 			continue
 		}
+		res.Trades++
+		running += tr.PNL
+		if running > peak {
+			peak = running
+		}
+		if drop := peak - running; drop > -res.MaxDrawdown {
+			res.MaxDrawdown = -drop
+		}
+
 		switch {
 		case tr.PNL > 0:
 			res.Wins++
+			res.GrossProfit += tr.PNL
 		case tr.PNL < 0:
 			res.Losses++
-		case tr.PNL == 0:
+			res.GrossLoss += tr.PNL
+		default:
 			res.Flat++
 		}
 	}
 
-	res.NetPL = acct.Balance - run.Request.StartingBalance
-	if run.Request.StartingBalance != 0 {
-		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / run.Request.StartingBalance.Float64())
+	res.NetPL = acct.Balance - res.StartBalance
+	if res.StartBalance != 0 {
+		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / res.StartBalance.Float64())
+		res.MaxDrawdownPct = RateFromFloat(res.MaxDrawdown.Float64() / res.StartBalance.Float64())
 	}
 	if res.Trades > 0 {
 		res.WinRate = RateFromFloat(float64(res.Wins) / float64(res.Trades))
 	}
+	if res.Wins > 0 {
+		res.AvgWinner = Money(int64(res.GrossProfit) / int64(res.Wins))
+	}
+	if res.Losses > 0 {
+		res.AvgLoser = Money(int64(res.GrossLoss) / int64(res.Losses))
+	}
+	if res.GrossLoss < 0 {
+		res.ProfitFactor = RateFromFloat(res.GrossProfit.Float64() / -res.GrossLoss.Float64())
+	}
+	if res.AvgLoser < 0 {
+		res.RR = RateFromFloat(res.AvgWinner.Float64() / -res.AvgLoser.Float64())
+	}
+
 	run.Result = res
 	return run.Result
 }

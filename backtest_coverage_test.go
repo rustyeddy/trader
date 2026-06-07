@@ -196,13 +196,23 @@ func TestBuildBacktestResult(t *testing.T) {
 	require.NotNil(t, res)
 	assert.Equal(t, acct.Balance, res.Balance)
 	assert.Equal(t, acct.Equity, res.Equity)
-	assert.Equal(t, 4, res.Trades)
+	assert.Equal(t, 3, res.Trades)
 	assert.Equal(t, 1, res.Wins)
 	assert.Equal(t, 1, res.Losses)
+	assert.Equal(t, 1, res.Flat)
+	assert.Equal(t, run.Request.StartingBalance, res.StartBalance)
+	assert.Equal(t, MoneyFromFloat(100), res.GrossProfit)
+	assert.Equal(t, MoneyFromFloat(-25), res.GrossLoss)
+	assert.Equal(t, MoneyFromFloat(100), res.AvgWinner)
+	assert.Equal(t, MoneyFromFloat(-25), res.AvgLoser)
+	assert.Equal(t, RateFromFloat(4.0), res.ProfitFactor)
+	assert.Equal(t, RateFromFloat(4.0), res.RR)
+	assert.Equal(t, MoneyFromFloat(-25), res.MaxDrawdown)
+	assert.Equal(t, RateFromFloat(-25.0/10_000.0), res.MaxDrawdownPct)
 	assert.Equal(t, Timestamp(100), res.Start)
 	assert.Equal(t, Timestamp(200), res.End)
 	assert.Equal(t, acct.Balance-run.Request.StartingBalance, res.NetPL)
-	assert.Equal(t, RateFromFloat(1.0/4.0), res.WinRate)
+	assert.Equal(t, RateFromFloat(1.0/3.0), res.WinRate)
 	assert.Equal(t, RateFromFloat(res.NetPL.Float64()/run.Request.StartingBalance.Float64()), res.ReturnPct)
 	assert.Same(t, res, run.Result)
 }
@@ -231,13 +241,20 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 		},
 		State: &BacktestRun{},
 		Result: &BacktestResult{
-			Trades:    10,
-			Wins:      6,
-			Losses:    4,
-			Balance:   MoneyFromFloat(10_250),
-			NetPL:     MoneyFromFloat(250),
-			ReturnPct: RateFromFloat(0.025),
-			WinRate:   RateFromFloat(0.6),
+			Start:        Timestamp(1),
+			End:          Timestamp(3601),
+			StartBalance: MoneyFromFloat(10_000),
+			Trades:       10,
+			Wins:         6,
+			Losses:       4,
+			Balance:      MoneyFromFloat(10_250),
+			NetPL:        MoneyFromFloat(250),
+			ReturnPct:    RateFromFloat(0.025),
+			WinRate:      RateFromFloat(0.6),
+			AvgWinner:    MoneyFromFloat(150),
+			AvgLoser:     MoneyFromFloat(-75),
+			RR:           RateFromFloat(2.0),
+			MaxDrawdown:  MoneyFromFloat(-80),
 		},
 	}
 
@@ -256,6 +273,10 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	assert.InDelta(t, 250.0, s.NetPL, 1e-9)
 	assert.InDelta(t, 2.5, s.ReturnPct, 1e-9)
 	assert.InDelta(t, 60.0, s.WinRate, 1e-9)
+	assert.InDelta(t, -80.0, s.MaxDrawdown, 1e-9)
+	assert.InDelta(t, 150.0, s.AvgWinner, 1e-9)
+	assert.InDelta(t, -75.0, s.AvgLoser, 1e-9)
+	assert.InDelta(t, 2.0, s.RR, 1e-9)
 	assert.InDelta(t, 1.0, s.RiskPct, 1e-9)
 	assert.Equal(t, "", s.Stop) // Fake strategy returns no stop description
 }
