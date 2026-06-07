@@ -15,7 +15,7 @@ type Key struct {
 	Hour       int
 }
 
-func (k Key) Path() string {
+func (k Key) Path() (string, error) {
 	return store.PathForAsset(k)
 }
 

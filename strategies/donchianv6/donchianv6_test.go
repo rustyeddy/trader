@@ -53,7 +53,7 @@ func candleAt(c trader.Candle, ts int64) *trader.CandleTime {
 
 func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -61,6 +61,8 @@ func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   true,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// 2024-01-01 = Monday = unix day 19723
@@ -80,7 +82,7 @@ func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
 
 func TestV6_MondayBlock_AllowsEntryOnTuesday(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -88,6 +90,8 @@ func TestV6_MondayBlock_AllowsEntryOnTuesday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   true,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// 2024-01-02 = Tuesday = unix day 19724
@@ -115,7 +119,7 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 	require.Equal(t, int64(1), friday%7, "sanity: 19727 is Friday")
 	require.Equal(t, int64(4), monday%7, "sanity: 19730 is Monday")
 
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -123,6 +127,8 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   true,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Bar 1 on Friday: streak starts.
@@ -147,7 +153,7 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 
 func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -155,6 +161,8 @@ func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   false,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	monday := int64(19723)
@@ -168,7 +176,7 @@ func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
 
 func TestV6_FridayBlock_BlocksEntryOnFriday(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -176,6 +184,8 @@ func TestV6_FridayBlock_BlocksEntryOnFriday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockFriday:   true,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// 2024-01-05 = Friday = unix day 19727
@@ -193,7 +203,7 @@ func TestV6_NewsDayBlock_StillWorksInV6(t *testing.T) {
 	// 2024-01-11 = Thursday = day 19733 (CPI day)
 	cpiDay := int64(19733)
 	require.Equal(t, int64(0), cpiDay%7, "sanity: 19733 is Thursday")
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -202,6 +212,7 @@ func TestV6_NewsDayBlock_StillWorksInV6(t *testing.T) {
 		BlockMonday:   true,
 		BlockedDays:   map[int64]bool{cpiDay: true},
 	})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	ct := candleAt(longBreak(110).Candle, cpiDay*86400)
@@ -211,7 +222,7 @@ func TestV6_NewsDayBlock_StillWorksInV6(t *testing.T) {
 
 func TestV6_Reset_ClearsState(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -219,6 +230,8 @@ func TestV6_Reset_ClearsState(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   true,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 	s.pendingSide = trader.Long
 	s.pendingCount = 2
@@ -234,7 +247,9 @@ func TestV6_Reset_ClearsState(t *testing.T) {
 
 func TestV6_ShortEntry(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	s.Update(context.Background(), shortBreak(90), nil)
@@ -245,7 +260,9 @@ func TestV6_ShortEntry(t *testing.T) {
 
 func TestV6_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Opens)

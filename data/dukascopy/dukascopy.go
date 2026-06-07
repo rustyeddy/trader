@@ -79,7 +79,10 @@ func (f *File) IsValid(ctx context.Context) error {
 		return err
 	}
 
-	path := f.key.Path()
+	path, err := f.key.Path()
+	if err != nil {
+		return err
+	}
 	if f.bytes == 0 {
 		if !f.t.IsZero() && trader.IsForexMarketClosed(f.t.UTC()) {
 			return nil
@@ -114,7 +117,10 @@ func (f *File) IsValid(ctx context.Context) error {
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
 func (f *File) baseHourUnixMS() (int64, error) {
-	p := trader.GetStore().PathForAsset(f.Key())
+	p, err := trader.GetStore().PathForAsset(f.Key())
+	if err != nil {
+		return 0, err
+	}
 	m := rePath.FindStringSubmatch(p)
 	if m == nil {
 		return 0, fmt.Errorf("cannot parse datetime from path: %s", p)

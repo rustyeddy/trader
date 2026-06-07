@@ -25,11 +25,13 @@ func feedPlans(s *Cross, closes []float64) []*trader.StrategyPlan {
 }
 
 func TestCross_WarmupNoSignals(t *testing.T) {
-	s := New(Config{
+	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
 		Scale:      trader.PriceScale,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 
 	plans := feedPlans(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
 	require.Len(t, plans, 4)
@@ -41,12 +43,14 @@ func TestCross_WarmupNoSignals(t *testing.T) {
 }
 
 func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
-	s := New(Config{
+	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
 		Scale:      trader.PriceScale,
 		MinSpread:  0,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 
 	closes := make([]float64, 0, 200)
 
@@ -86,12 +90,14 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
 }
 
 func TestCross_MinSpreadFiltersNoise(t *testing.T) {
-	s := New(Config{
+	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
 		Scale:      trader.PriceScale,
 		MinSpread:  0.0010,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 
 	closes := make([]float64, 0, 64)
 	for i := 0; i < 40; i++ {
@@ -117,7 +123,8 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 		Scale:      trader.PriceScale,
 		MinSpread:  0,
 	}
-	s := New(cfg)
+	s, err := New(cfg)
+	require.NoError(t, err)
 
 	closes := make([]float64, 0, 64)
 	for i := 0; i < 40; i++ {
@@ -146,27 +153,27 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 }
 
 func TestCross_Name(t *testing.T) {
-	s := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
+	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
 func TestCrossPlan_Reason(t *testing.T) {
-	s := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
+	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	d := s.Update(context.Background(), &trader.CandleTime{Candle: mkClose(1.0)}, nil)
 	require.NotEmpty(t, d.Reason)
 }
 
-func TestNew_PanicOnInvalidConfig(t *testing.T) {
-	require.Panics(t, func() {
-		New(Config{FastPeriod: 0, SlowPeriod: 5, Scale: trader.PriceScale})
-	})
-	require.Panics(t, func() {
-		New(Config{FastPeriod: 3, SlowPeriod: 0, Scale: trader.PriceScale})
-	})
-	require.Panics(t, func() {
-		New(Config{FastPeriod: 5, SlowPeriod: 3, Scale: trader.PriceScale})
-	})
-	require.Panics(t, func() {
-		New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
-	})
+func TestNew_ErrorOnInvalidConfig(t *testing.T) {
+	_, err := New(Config{FastPeriod: 0, SlowPeriod: 5, Scale: trader.PriceScale})
+	require.Error(t, err)
+	_, err = New(Config{FastPeriod: 3, SlowPeriod: 0, Scale: trader.PriceScale})
+	require.Error(t, err)
+	_, err = New(Config{FastPeriod: 5, SlowPeriod: 3, Scale: trader.PriceScale})
+	require.Error(t, err)
+	_, err = New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
+	require.Error(t, err)
 }

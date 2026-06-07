@@ -32,18 +32,18 @@ type Strategy struct {
 	lastClose float64
 }
 
-func New(cfg Config) *Strategy {
+func New(cfg Config) (*Strategy, error) {
 	if cfg.Lookback <= 0 {
-		panic("tmpl: Lookback must be > 0")
+		return nil, fmt.Errorf("tmpl: Lookback must be > 0")
 	}
 	if cfg.Scale <= 0 {
-		panic("tmpl: Scale must be > 0")
+		return nil, fmt.Errorf("tmpl: Scale must be > 0")
 	}
 
 	return &Strategy{
 		cfg:  cfg,
 		name: fmt.Sprintf("TEMPLATE_STRATEGY(lb=%d,th=%.4f)", cfg.Lookback, cfg.Threshold),
-	}
+	}, nil
 }
 
 func (s *Strategy) Name() string            { return s.name }
@@ -93,5 +93,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		Lookback:  5,
 		Threshold: 0.0015,
 		Scale:     trader.PriceScale,
-	}), nil
+	})
 }

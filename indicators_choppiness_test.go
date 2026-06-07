@@ -8,13 +8,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestChoppinessIndex_PanicOnBadArgs(t *testing.T) {
-	assert.Panics(t, func() { NewChoppinessIndex(1, 100000) })
-	assert.Panics(t, func() { NewChoppinessIndex(14, 0) })
+func TestChoppinessIndex_ErrorOnBadArgs(t *testing.T) {
+	_, err := NewChoppinessIndex(1, 100000)
+	assert.Error(t, err)
+	_, err = NewChoppinessIndex(14, 0)
+	assert.Error(t, err)
 }
 
 func TestChoppinessIndex_NotReadyBeforeWarmup(t *testing.T) {
-	ci := NewChoppinessIndex(5, 100000)
+	ci, err := NewChoppinessIndex(5, 100000)
+	require.NoError(t, err)
 	c := Candle{Open: 110000, High: 111000, Low: 109000, Close: 110500}
 	for i := 0; i < 4; i++ {
 		ci.Update(c)
@@ -26,7 +29,8 @@ func TestChoppinessIndex_NotReadyBeforeWarmup(t *testing.T) {
 
 func TestChoppinessIndex_PerfectChop(t *testing.T) {
 	// Identical candles: sum(TR) = N × range; HH−LL = range → CI = 100.
-	ci := NewChoppinessIndex(5, 100000)
+	ci, err := NewChoppinessIndex(5, 100000)
+	require.NoError(t, err)
 	c := Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
 	for i := 0; i < 5; i++ {
 		ci.Update(c)
@@ -38,7 +42,8 @@ func TestChoppinessIndex_PerfectChop(t *testing.T) {
 func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 	// Non-overlapping bars [0,1], [1,2], ... [4,5] (in price units × scale).
 	// sum(TR) = 5; HH−LL = 5 → CI = 100×log10(1)/log10(5) = 0.
-	ci := NewChoppinessIndex(5, 100000)
+	ci, err := NewChoppinessIndex(5, 100000)
+	require.NoError(t, err)
 	scale := 100000.0
 	for i := 0; i < 5; i++ {
 		lo := Price(float64(i) * scale)
@@ -50,7 +55,8 @@ func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 }
 
 func TestChoppinessIndex_Reset(t *testing.T) {
-	ci := NewChoppinessIndex(5, 100000)
+	ci, err := NewChoppinessIndex(5, 100000)
+	require.NoError(t, err)
 	c := Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
 	for i := 0; i < 5; i++ {
 		ci.Update(c)
@@ -63,7 +69,8 @@ func TestChoppinessIndex_Reset(t *testing.T) {
 
 func TestChoppinessIndex_ValueInRange(t *testing.T) {
 	// Realistic trending sequence: CI should be between 0 and 100.
-	ci := NewChoppinessIndex(14, 100000)
+	ci, err := NewChoppinessIndex(14, 100000)
+	require.NoError(t, err)
 	prices := []float64{
 		1.0800, 1.0820, 1.0810, 1.0830, 1.0815,
 		1.0850, 1.0840, 1.0860, 1.0855, 1.0870,

@@ -51,7 +51,7 @@ func TestV5_NewsDayBlock_BlocksEntry(t *testing.T) {
 	t.Parallel()
 	// 2024-01-05 (NFP) = unix day 19727
 	newsDay := int64(19727)
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -59,6 +59,7 @@ func TestV5_NewsDayBlock_BlocksEntry(t *testing.T) {
 		ADXThreshold:  25,
 		BlockedDays:   map[int64]bool{newsDay: true},
 	})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	ts := newsDay * 86400
@@ -80,7 +81,7 @@ func TestV5_NewsDayBlock_StreakPreservedAcrossBlock(t *testing.T) {
 	t.Parallel()
 	// 19724 = 2024-01-02, 19725 = 2024-01-03 (blocked), 19726 = 2024-01-04
 	blockedDay := int64(19725)
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -88,6 +89,7 @@ func TestV5_NewsDayBlock_StreakPreservedAcrossBlock(t *testing.T) {
 		ADXThreshold:  25,
 		BlockedDays:   map[int64]bool{blockedDay: true},
 	})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Bar 1 on day 19724: streak starts (pendingCount=1).
@@ -113,7 +115,7 @@ func TestV5_NewsDayBlock_StreakPreservedAcrossBlock(t *testing.T) {
 func TestV5_NoBlockOnNonNewsDays(t *testing.T) {
 	t.Parallel()
 	// Only day 19727 is blocked; day 19728 should be tradeable.
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -121,6 +123,7 @@ func TestV5_NoBlockOnNonNewsDays(t *testing.T) {
 		ADXThreshold:  25,
 		BlockedDays:   map[int64]bool{19727: true},
 	})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	ts := int64(19728) * 86400
@@ -134,7 +137,7 @@ func TestV5_NoBlockOnNonNewsDays(t *testing.T) {
 
 func TestV5_EmptyBlockedDays_NoBlocking(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -142,6 +145,8 @@ func TestV5_EmptyBlockedDays_NoBlocking(t *testing.T) {
 		ADXThreshold:  25,
 		// BlockedDays nil → no blocking
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	ct1 := &trader.CandleTime{Candle: longBreak(110).Candle}
@@ -191,13 +196,15 @@ func TestV5_LoadNewsDays_InvalidDate(t *testing.T) {
 
 func TestV5_Reset_ClearsState(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        5,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
 		ADXPeriod:     14,
 		ADXThreshold:  25,
 	})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 	s.pendingSide = trader.Long
 	s.pendingCount = 2
@@ -213,7 +220,9 @@ func TestV5_Reset_ClearsState(t *testing.T) {
 
 func TestV5_ShortEntry(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	s.Update(context.Background(), shortBreak(90), nil)
@@ -224,7 +233,9 @@ func TestV5_ShortEntry(t *testing.T) {
 
 func TestV5_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
+	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Opens)
@@ -232,7 +243,7 @@ func TestV5_NilCandleTime_ReturnsSafely(t *testing.T) {
 
 func TestV5_Name_IncludesNewsDayCount(t *testing.T) {
 	t.Parallel()
-	s := New(Config{
+	s, err := New(Config{
 		Period:        20,
 		CloseStrength: 0.6,
 		ConfirmBars:   2,
@@ -240,5 +251,6 @@ func TestV5_Name_IncludesNewsDayCount(t *testing.T) {
 		ADXThreshold:  25,
 		BlockedDays:   map[int64]bool{19727: true, 19755: true},
 	})
+	require.NoError(t, err)
 	assert.Equal(t, "DONCHIAN-V5(20,cs=0.60,cb=2,adx=14/25.0,nd=2)", s.Name())
 }

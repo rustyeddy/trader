@@ -105,7 +105,7 @@ func (act *Account) AddLot(ctx context.Context, lot *Lot) error {
 		return fmt.Errorf("position price must be > 0")
 	}
 	if lot.ID == "" {
-		panic("pos.common.id is nil")
+		return fmt.Errorf("pos.common.id is nil")
 	}
 
 	act.Lots.Add(lot)

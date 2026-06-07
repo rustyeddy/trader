@@ -31,7 +31,8 @@ func mondays(base time.Time, n int) []time.Time {
 
 func TestWeeklyEMAFilter_NotReadyBeforeWarmup(t *testing.T) {
 	t.Parallel()
-	f := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	// AllowSide returns true during warmup.
 	assert.True(t, f.AllowSide(Long))
@@ -40,7 +41,8 @@ func TestWeeklyEMAFilter_NotReadyBeforeWarmup(t *testing.T) {
 
 func TestWeeklyEMAFilter_TrendingAlwaysTrue(t *testing.T) {
 	t.Parallel()
-	f := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	// Feed several weeks of data.
 	for i, m := range mondays(base, 10) {
@@ -52,7 +54,8 @@ func TestWeeklyEMAFilter_TrendingAlwaysTrue(t *testing.T) {
 func TestWeeklyEMAFilter_AllowsLongAboveEMA(t *testing.T) {
 	t.Parallel()
 	// EMA(3) on weekly closes: feed rising prices so last close is above EMA.
-	f := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	weeks := mondays(base, 10)
 
@@ -72,7 +75,8 @@ func TestWeeklyEMAFilter_AllowsLongAboveEMA(t *testing.T) {
 func TestWeeklyEMAFilter_AllowsShortBelowEMA(t *testing.T) {
 	t.Parallel()
 	// EMA(3): feed falling prices so last close is below EMA.
-	f := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	weeks := mondays(base, 10)
 
@@ -93,7 +97,8 @@ func TestWeeklyEMAFilter_AggregatesWithinWeek(t *testing.T) {
 	t.Parallel()
 	// Multiple H1 bars within the same ISO week should update only the
 	// running weekly high/low/close, not advance the EMA.
-	f := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
 	monday := time.Date(2024, 1, 8, 9, 0, 0, 0, time.UTC) // a Monday
 	tuesday := monday.Add(24 * time.Hour)
 	friday := monday.Add(4 * 24 * time.Hour)
@@ -129,6 +134,7 @@ func TestWeeklyEMAFilter_FactoryDefaults(t *testing.T) {
 
 func TestWeeklyEMAFilter_Name(t *testing.T) {
 	t.Parallel()
-	f := NewWeeklyEMAFilter(20, PriceScale)
+	f, err := NewWeeklyEMAFilter(20, PriceScale)
+	require.NoError(t, err)
 	assert.Equal(t, "WeeklyEMA(20)", f.Name())
 }

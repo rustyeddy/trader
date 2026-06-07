@@ -44,7 +44,7 @@ type Config struct {
 	ATRMult     float64
 }
 
-func New(cfg Config) *Fade {
+func New(cfg Config) (*Fade, error) {
 	period := cfg.Period
 	if period < 2 {
 		period = 20
@@ -61,13 +61,21 @@ func New(cfg Config) *Fade {
 	if atrMult <= 0 {
 		atrMult = 1.5
 	}
+	bb, err := trader.NewBollingerBands(period, mult, trader.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("bb-fade: Bollinger Bands: %w", err)
+	}
+	atr, err := trader.NewATR(atrPeriod, trader.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("bb-fade: ATR: %w", err)
+	}
 	return &Fade{
-		bb:      trader.NewBollingerBands(period, mult, trader.PriceScale),
-		atr:     trader.NewATR(atrPeriod, trader.PriceScale),
+		bb:      bb,
+		atr:     atr,
 		atrMult: atrMult,
 		scale:   float64(trader.PriceScale),
 		name:    fmt.Sprintf("BB-FADE(%d,%.1f,atr=%d×%.1f)", period, mult, atrPeriod, atrMult),
-	}
+	}, nil
 }
 
 func (f *Fade) Name() string            { return f.name }
@@ -188,5 +196,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		Multiplier: mult,
 		ATRPeriod:  int(atrPeriod),
 		ATRMult:    atrMult,
-	}), nil
+	})
 }

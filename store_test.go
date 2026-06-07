@@ -79,7 +79,8 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	require.NoError(t, s.WriteCSV(cs))
 
 	// Verify that WriteCSV created a CSV file at the expected location
-	filename := s.PathForAsset(keyForSet(cs))
+	filename, err := s.PathForAsset(keyForSet(cs))
+	require.NoError(t, err)
 	info, err := os.Stat(filename)
 	require.NoError(t, err, "expected CSV file to be written at %q", filename)
 	require.False(t, info.IsDir(), "expected %q to be a file, not a directory", filename)
@@ -99,7 +100,8 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 		Month:      1,
 	}
 
-	path := s.PathForAsset(key)
+	path, err := s.PathForAsset(key)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -165,14 +167,15 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		s := newTestStore(t)
 		key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 
-		path := s.PathForAsset(key)
+		path, err := s.PathForAsset(key)
+		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
 			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
 				"1767225600,1,2\n",
 		), 0o644))
 
-		_, err := s.ReadCSV(key)
+		_, err = s.ReadCSV(key)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "expected 9 fields")
 	})
@@ -182,14 +185,15 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		s := newTestStore(t)
 		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
 
-		path := s.PathForAsset(key)
+		path, err := s.PathForAsset(key)
+		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
 			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
 				"1767225601,10,9,8,9,1,2,3,0x0001\n",
 		), 0o644))
 
-		_, err := s.ReadCSV(key)
+		_, err = s.ReadCSV(key)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not aligned")
 	})

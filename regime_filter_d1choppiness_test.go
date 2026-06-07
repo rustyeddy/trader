@@ -26,7 +26,8 @@ func feedDay(f *D1ChoppinessFilter, date time.Time, o, h, l, c Price) {
 func TestD1ChoppinessFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(14, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(14, 61.8, scale)
+	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	assert.True(t, f.Trending(), "should allow trading while warming up")
 }
@@ -34,7 +35,8 @@ func TestD1ChoppinessFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 func TestD1ChoppinessFilter_ReadyAfterPeriodDays(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(5, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(5, 61.8, scale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for d := 0; d < 5; d++ {
@@ -48,7 +50,8 @@ func TestD1ChoppinessFilter_ReadyAfterPeriodDays(t *testing.T) {
 func TestD1ChoppinessFilter_DayRolloverAggregation(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(3, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -72,7 +75,8 @@ func TestD1ChoppinessFilter_DayRolloverAggregation(t *testing.T) {
 func TestD1ChoppinessFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(5, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(5, 61.8, scale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
 	f.Tick(h1CT(base, 10000, 10500, 9800, 10200))
@@ -89,7 +93,8 @@ func TestD1ChoppinessFilter_TrendingBlocksWhenChoppy(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
 	// Use period=3 so we can warm up quickly.
-	f := NewD1ChoppinessFilter(3, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -109,7 +114,8 @@ func TestD1ChoppinessFilter_TrendingBlocksWhenChoppy(t *testing.T) {
 func TestD1ChoppinessFilter_TrendingAllowsWhenTrending(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(3, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -132,7 +138,8 @@ func TestD1ChoppinessFilter_TrendingAllowsWhenTrending(t *testing.T) {
 func TestD1ChoppinessFilter_WarmupAlwaysTrending(t *testing.T) {
 	t.Parallel()
 	scale := Scale6(100_000)
-	f := NewD1ChoppinessFilter(14, 61.8, scale)
+	f, err := NewD1ChoppinessFilter(14, 61.8, scale)
+	require.NoError(t, err)
 
 	// Even with choppy data, Trending() must return true until Ready.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)

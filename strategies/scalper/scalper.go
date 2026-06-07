@@ -60,12 +60,24 @@ func New(cfg Config) (*Strategy, error) {
 	if cfg.StopMultiplier <= 0 {
 		cfg.StopMultiplier = 1.0
 	}
+	fastEMA, err := trader.NewEMA(cfg.FastPeriod, trader.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("scalper: fast EMA: %w", err)
+	}
+	slowEMA, err := trader.NewEMA(cfg.SlowPeriod, trader.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("scalper: slow EMA: %w", err)
+	}
+	atr, err := trader.NewATR(cfg.ATRPeriod, trader.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("scalper: ATR: %w", err)
+	}
 	return &Strategy{
 		cfg:     cfg,
 		name:    fmt.Sprintf("SCALPER(ema%d/%d,atr%d)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ATRPeriod),
-		fastEMA: trader.NewEMA(cfg.FastPeriod, trader.PriceScale),
-		slowEMA: trader.NewEMA(cfg.SlowPeriod, trader.PriceScale),
-		atr:     trader.NewATR(cfg.ATRPeriod, trader.PriceScale),
+		fastEMA: fastEMA,
+		slowEMA: slowEMA,
+		atr:     atr,
 	}, nil
 }
 
