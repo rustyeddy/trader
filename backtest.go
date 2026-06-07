@@ -50,7 +50,7 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 
 	compiled := make([]CompiledBacktest, 0, len(cfg.Runs))
 	for _, rawRun := range cfg.Runs {
-		runCfg := applyRunDefaults(cfg.Defaults, rawRun)
+		runCfg := applyRunSourceDefault(cfg.Defaults, rawRun)
 		req, err := compileBacktestRequest(runCfg, cfg.Defaults)
 		if err != nil {
 			return nil, err
@@ -67,51 +67,89 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 	return compiled, nil
 }
 
-// GetBacktests adapts compiled definitions into executable Backtest values.
-func GetBacktests(cfg *Config) ([]Backtest, error) {
-	compiled, err := CompileBacktests(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	runs := make([]Backtest, 0, len(compiled))
-	for _, def := range compiled {
-		runs = append(runs, def.NewRun())
-	}
-	return runs, nil
-}
-
-// hashRunConfig returns the first 8 hex characters of the SHA256 of the
-// run's data/strategy/exit/regime params. The Name field is excluded because
-// it is a label, not a parameter that affects results. This hash is used as
-// a stable filename suffix: same params → same hash → same file on disk.
-func hashRunConfig(cfg RunConfig) string {
+// hashBacktestConfig returns the first 8 hex characters of the SHA256 of the
+// resolved run config plus the defaults that currently affect execution.
+// The Name field is excluded because it is a label, not a parameter that
+// affects results. This hash is used as a stable filename suffix for report
+// artifacts: same execution inputs → same hash → same file on disk.
+func hashBacktestConfig(cfg RunConfig, defaults RunDefaults) string {
 	type hashable struct {
 		Data     DataConfig     `json:"data"`
 		Strategy StrategyConfig `json:"strategy"`
 		Exit     ExitConfig     `json:"exit"`
 		Regime   RegimeConfig   `json:"regime"`
+		Defaults struct {
+			StartingBalance float64 `json:"starting_balance"`
+			RiskPct         float64 `json:"risk_pct"`
+			StopPips        int32   `json:"stop_pips"`
+			TakePips        int32   `json:"take_pips"`
+			SlippagePips    float64 `json:"slippage_pips"`
+			MaxSpreadPips   float64 `json:"max_spread_pips"`
+		} `json:"defaults"`
 	}
-	b, _ := json.Marshal(hashable{
+
+	h := hashable{
 		Data:     cfg.Data,
 		Strategy: cfg.Strategy,
 		Exit:     cfg.Exit,
 		Regime:   cfg.Regime,
-	})
+	}
+	h.Defaults.StartingBalance = defaults.StartingBalance
+	h.Defaults.RiskPct = defaults.RiskPct
+	h.Defaults.StopPips = defaults.StopPips
+	h.Defaults.TakePips = defaults.TakePips
+	h.Defaults.SlippagePips = defaults.SlippagePips
+	h.Defaults.MaxSpreadPips = defaults.MaxSpreadPips
+
+	b, _ := json.Marshal(h)
 	sum := sha256.Sum256(b)
 	return fmt.Sprintf("%x", sum[:4]) // 8 hex chars
 }
 
-func applyRunDefaults(defaults RunDefaults, cfg RunConfig) RunConfig {
+func applyRunSourceDefault(defaults RunDefaults, cfg RunConfig) RunConfig {
 	if cfg.Data.Source == "" && defaults.Source != "" {
 		cfg.Data.Source = defaults.Source
 	}
 	return cfg
 }
 
+// BacktestRequest holds all the static inputs needed to execute one backtest
+// run. It is populated from Config/RunConfig before the run loop starts and
+// is not modified during execution.
+type BacktestRequest struct {
+	Name       string
+	ConfigHash string // 8-char SHA256 prefix of execution-affecting config inputs
+
+	StartingBalance Money
+	RiskPct         Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
+
+	DefaultStopPips Pips // fallback stop distance when the strategy doesn't supply one
+	DefaultTakePips Pips // fallback take-profit distance
+	SlippagePips    Pips // extra adverse fill adjustment applied on every open/close
+	MaxSpreadPips   Pips // opens are skipped when the candle spread exceeds this
+
+	Source     string // data source identifier (e.g. "candles", "dukascopy")
+	Instrument string // FX pair (e.g. "EUR_USD")
+	Strategy
+	Exit   ExitStrategy
+	Regime RegimeFilter
+	TimeRange
+}
+
 // compileBacktestRequest builds a validated BacktestRequest from one resolved
 // RunConfig and the shared defaults that affect execution semantics.
 func compileBacktestRequest(cfg RunConfig, defaults RunDefaults) (*BacktestRequest, error) {
+	req, err := compileBacktestComponents(cfg)
+	if err != nil {
+		return nil, err
+	}
+	applyBacktestExecutionDefaults(req, cfg, defaults)
+	return req, nil
+}
+
+// compileBacktestComponents resolves the time range and builds the strategy,
+// exit strategy, and regime filter for one backtest run.
+func compileBacktestComponents(cfg RunConfig) (*BacktestRequest, error) {
 	tr, err := timeRangeFromStrings(cfg.Data.From, cfg.Data.To, cfg.Data.Timeframe)
 	if err != nil {
 		return nil, fmt.Errorf("build backtest time range for %q: %w", cfg.Name, err)
@@ -135,44 +173,29 @@ func compileBacktestRequest(cfg RunConfig, defaults RunDefaults) (*BacktestReque
 
 	source := firstNonEmpty(cfg.Data.Source, "candles")
 	return &BacktestRequest{
-		Name:            cfg.Name,
-		ConfigHash:      hashRunConfig(cfg),
-		StartingBalance: MoneyFromFloat(defaults.StartingBalance),
-		RiskPct:         RateFromFloat(defaults.RiskPct / 100.0),
-		DefaultStopPips: pipsFromFloat(float64(defaults.StopPips)),
-		DefaultTakePips: pipsFromFloat(float64(defaults.TakePips)),
-		SlippagePips:    pipsFromFloat(defaults.SlippagePips),
-		MaxSpreadPips:   pipsFromFloat(defaults.MaxSpreadPips),
-		Source:          source,
-		Instrument:      cfg.Data.Instrument,
-		Strategy:        strategy,
-		Exit:            exit,
-		Regime:          regime,
-		TimeRange:       tr,
+		Name:       cfg.Name,
+		Source:     source,
+		Instrument: cfg.Data.Instrument,
+		Strategy:   strategy,
+		Exit:       exit,
+		Regime:     regime,
+		TimeRange:  tr,
 	}, nil
 }
 
-// BacktestRequest holds all the static inputs needed to execute one backtest
-// run. It is populated from Config/RunConfig before the run loop starts and
-// is not modified during execution.
-type BacktestRequest struct {
-	Name       string
-	ConfigHash string // 8-char SHA256 prefix of the RunConfig params (set by GetBacktests)
-
-	StartingBalance Money
-	RiskPct         Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
-
-	DefaultStopPips Pips // fallback stop distance when the strategy doesn't supply one
-	DefaultTakePips Pips // fallback take-profit distance
-	SlippagePips    Pips // extra adverse fill adjustment applied on every open/close
-	MaxSpreadPips   Pips // opens are skipped when the candle spread exceeds this
-
-	Source     string // data source identifier (e.g. "candles", "dukascopy")
-	Instrument string // FX pair (e.g. "EUR_USD")
-	Strategy
-	Exit   ExitStrategy
-	Regime RegimeFilter
-	TimeRange
+// applyBacktestExecutionDefaults injects the defaults that currently affect
+// backtest execution semantics onto an already-compiled request.
+func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, defaults RunDefaults) {
+	if req == nil {
+		return
+	}
+	req.ConfigHash = hashBacktestConfig(cfg, defaults)
+	req.StartingBalance = MoneyFromFloat(defaults.StartingBalance)
+	req.RiskPct = RateFromFloat(defaults.RiskPct / 100.0)
+	req.DefaultStopPips = pipsFromFloat(float64(defaults.StopPips))
+	req.DefaultTakePips = pipsFromFloat(float64(defaults.TakePips))
+	req.SlippagePips = pipsFromFloat(defaults.SlippagePips)
+	req.MaxSpreadPips = pipsFromFloat(defaults.MaxSpreadPips)
 }
 
 // BuildBacktestResult snapshots the account state into a BacktestResult and

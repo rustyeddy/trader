@@ -21,7 +21,8 @@ func TestCompileBacktestRequest_Success(t *testing.T) {
 		Strategy: StrategyConfig{Kind: "fake"},
 	}
 
-	req, err := compileBacktestRequest(rc, RunDefaults{StartingBalance: 10_000, RiskPct: 1.5})
+	defaults := RunDefaults{StartingBalance: 10_000, RiskPct: 1.5}
+	req, err := compileBacktestRequest(rc, defaults)
 	require.NoError(t, err)
 	require.NotNil(t, req)
 	assert.Equal(t, "run-1", req.Name)
@@ -29,6 +30,7 @@ func TestCompileBacktestRequest_Success(t *testing.T) {
 	assert.Equal(t, H1, req.TimeRange.TF)
 	assert.Equal(t, MoneyFromFloat(10_000), req.StartingBalance)
 	assert.Equal(t, RateFromFloat(0.015), req.RiskPct)
+	assert.Equal(t, hashBacktestConfig(rc, defaults), req.ConfigHash)
 	require.NotNil(t, req.Strategy)
 	assert.Equal(t, "Fake", req.Strategy.Name())
 }
@@ -51,6 +53,61 @@ func TestCompileBacktestRequest_InvalidInputs(t *testing.T) {
 	_, err = compileBacktestRequest(badStrategy, RunDefaults{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build backtest strategy")
+}
+
+func TestCompileBacktestComponents_Success(t *testing.T) {
+	t.Parallel()
+
+	rc := RunConfig{
+		Name: "run-1",
+		Data: DataConfig{
+			Instrument: "EURUSD",
+			Timeframe:  "H1",
+			From:       "2026-01-01",
+			To:         "2026-01-10",
+		},
+		Strategy: StrategyConfig{Kind: "fake"},
+	}
+
+	req, err := compileBacktestComponents(rc)
+	require.NoError(t, err)
+	require.NotNil(t, req)
+	assert.Equal(t, "run-1", req.Name)
+	assert.Equal(t, "EURUSD", req.Instrument)
+	assert.Equal(t, "candles", req.Source)
+	assert.Equal(t, H1, req.TimeRange.TF)
+	require.NotNil(t, req.Strategy)
+	assert.Equal(t, "Fake", req.Strategy.Name())
+	assert.Zero(t, req.StartingBalance)
+	assert.Empty(t, req.ConfigHash)
+}
+
+func TestApplyBacktestExecutionDefaults(t *testing.T) {
+	t.Parallel()
+
+	rc := RunConfig{
+		Name:     "run-1",
+		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-01", To: "2026-01-10"},
+		Strategy: StrategyConfig{Kind: "fake"},
+	}
+	req := &BacktestRequest{Name: rc.Name, Instrument: rc.Data.Instrument}
+	defaults := RunDefaults{
+		StartingBalance: 10_000,
+		RiskPct:         1.5,
+		StopPips:        20,
+		TakePips:        40,
+		SlippagePips:    0.5,
+		MaxSpreadPips:   2.0,
+	}
+
+	applyBacktestExecutionDefaults(req, rc, defaults)
+	assert.Equal(t, hashBacktestConfig(rc, defaults), req.ConfigHash)
+	assert.Equal(t, MoneyFromFloat(10_000), req.StartingBalance)
+	assert.Equal(t, RateFromFloat(0.015), req.RiskPct)
+	assert.Equal(t, pipsFromFloat(20), req.DefaultStopPips)
+	assert.Equal(t, pipsFromFloat(40), req.DefaultTakePips)
+	assert.Equal(t, pipsFromFloat(0.5), req.SlippagePips)
+	assert.Equal(t, pipsFromFloat(2.0), req.MaxSpreadPips)
 }
 
 func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
