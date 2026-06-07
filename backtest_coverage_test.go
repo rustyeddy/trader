@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewBacktestReq_Success(t *testing.T) {
+func TestCompileBacktestRequest_Success(t *testing.T) {
 	t.Parallel()
 
 	rc := RunConfig{
@@ -21,32 +21,39 @@ func TestNewBacktestReq_Success(t *testing.T) {
 		Strategy: StrategyConfig{Kind: "fake"},
 	}
 
-	req := newBacktestReq(rc)
+	req, err := compileBacktestRequest(rc, RunDefaults{StartingBalance: 10_000, RiskPct: 1.5})
+	require.NoError(t, err)
 	require.NotNil(t, req)
 	assert.Equal(t, "run-1", req.Name)
 	assert.Equal(t, "EURUSD", req.Instrument)
 	assert.Equal(t, H1, req.TimeRange.TF)
+	assert.Equal(t, MoneyFromFloat(10_000), req.StartingBalance)
+	assert.Equal(t, RateFromFloat(0.015), req.RiskPct)
 	require.NotNil(t, req.Strategy)
 	assert.Equal(t, "Fake", req.Strategy.Name())
 }
 
-func TestNewBacktestReq_InvalidInputs(t *testing.T) {
+func TestCompileBacktestRequest_InvalidInputs(t *testing.T) {
 	t.Parallel()
 
 	badDates := RunConfig{
 		Data:     DataConfig{From: "bad-date", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
 		Strategy: StrategyConfig{Kind: "fake"},
 	}
-	assert.Nil(t, newBacktestReq(badDates))
+	_, err := compileBacktestRequest(badDates, RunDefaults{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build backtest time range")
 
 	badStrategy := RunConfig{
 		Data:     DataConfig{From: "2026-01-01", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
 		Strategy: StrategyConfig{Kind: "not-supported"},
 	}
-	assert.Nil(t, newBacktestReq(badStrategy))
+	_, err = compileBacktestRequest(badStrategy, RunDefaults{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build backtest strategy")
 }
 
-func TestGetBacktests_SuccessAndDefaultsApplied(t *testing.T) {
+func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
@@ -55,6 +62,7 @@ func TestGetBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 			RiskPct:         1.5,
 			StopPips:        20,
 			TakePips:        40,
+			Source:          "oanda",
 		},
 		Runs: []RunConfig{
 			{
@@ -70,27 +78,27 @@ func TestGetBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 		},
 	}
 
-	runs, err := GetBacktests(cfg)
+	runs, err := CompileBacktests(cfg)
 	require.NoError(t, err)
 	require.Len(t, runs, 2)
 
 	for _, run := range runs {
-		require.NotNil(t, run.BacktestRequest)
-		require.NotNil(t, run.BacktestRun)
-		assert.Equal(t, MoneyFromFloat(12_500), run.StartingBalance)
-		assert.Equal(t, RateFromFloat(0.015), run.RiskPct)
-		assert.Equal(t, pipsFromFloat(20), run.DefaultStopPips)
-		assert.Equal(t, pipsFromFloat(40), run.DefaultTakePips)
+		assert.Equal(t, MoneyFromFloat(12_500), run.Request.StartingBalance)
+		assert.Equal(t, RateFromFloat(0.015), run.Request.RiskPct)
+		assert.Equal(t, pipsFromFloat(20), run.Request.DefaultStopPips)
+		assert.Equal(t, pipsFromFloat(40), run.Request.DefaultTakePips)
 		assert.NotEmpty(t, run.ID)
 	}
+
+	assert.Equal(t, "oanda", runs[0].RunConfig.Data.Source)
 }
 
-func TestGetBacktests_ErrorCases(t *testing.T) {
+func TestCompileBacktests_ErrorCases(t *testing.T) {
 	t.Parallel()
 
-	_, err := GetBacktests(&Config{})
+	_, err := CompileBacktests(&Config{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "resolve to exactly 1 run")
+	assert.Contains(t, err.Error(), "at least 1 run")
 
 	cfg := &Config{
 		Runs: []RunConfig{{
@@ -98,9 +106,9 @@ func TestGetBacktests_ErrorCases(t *testing.T) {
 			Strategy: StrategyConfig{Kind: "unknown"},
 		}},
 	}
-	_, err = GetBacktests(cfg)
+	_, err = CompileBacktests(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create BacktestRequest")
+	assert.Contains(t, err.Error(), "build backtest strategy")
 }
 
 func TestBuildBacktestResult(t *testing.T) {
@@ -138,7 +146,7 @@ func TestBuildBacktestResult(t *testing.T) {
 	assert.Equal(t, acct.Balance-run.StartingBalance, res.NetPL)
 	assert.Equal(t, RateFromFloat(1.0/4.0), res.WinRate)
 	assert.Equal(t, RateFromFloat(res.NetPL.Float64()/run.StartingBalance.Float64()), res.ReturnPct)
-	assert.Same(t, res, run.BacktestResult)
+	assert.Same(t, res, run.Result)
 }
 
 func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
@@ -163,7 +171,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 			RiskPct:         RateFromFloat(0.01),
 			DefaultStopPips: pipsFromFloat(20),
 		},
-		BacktestResult: &BacktestResult{
+		Result: &BacktestResult{
 			Trades:    10,
 			Wins:      6,
 			Losses:    4,

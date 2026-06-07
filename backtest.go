@@ -7,56 +7,76 @@ import (
 	"time"
 )
 
-// Backtest is the top-level unit of work for a single backtesting run.
-// It composes a request (what to run), a mutable run-state (open lots,
-// execution cost counters), and an immutable result (produced at the end).
-// RunConfig is the original config snapshot; it is carried through to the
-// summary so every report is self-describing.
+// Backtest is the executable form of one backtest run.
+// It keeps the immutable request and mutable run-state together so strategies
+// can inspect open lots during execution, while the final result is stored in
+// the explicit Result field rather than anonymously merged into the run.
 type Backtest struct {
 	ID        string
-	RunConfig RunConfig // original config snapshot before transformation
+	RunConfig RunConfig // resolved config snapshot used for execution
 
 	*BacktestRequest
 	*BacktestRun
-	*BacktestResult
+	Result *BacktestResult
 }
 
-// GetBacktests converts a loaded Config into a slice of ready-to-run Backtest
-// values. Defaults from cfg.Defaults (balance, risk, stop/take pips, slippage,
-// max spread) are merged into each run. Returns an error if the config
-// resolves to zero runs or any run is misconfigured.
-func GetBacktests(cfg *Config) ([]Backtest, error) {
-	runs := make([]Backtest, 0, len(cfg.Runs))
-	for _, runcfg := range cfg.Runs {
-		run := &Backtest{
-			ID:          NewULID(),
-			RunConfig:   runcfg,
-			BacktestRun: &BacktestRun{},
-		}
+// CompiledBacktest is the construction-phase output for one backtest run.
+// It is immutable and contains the resolved config snapshot plus the validated
+// request used to instantiate an executable Backtest later.
+type CompiledBacktest struct {
+	ID        string
+	RunConfig RunConfig
+	Request   BacktestRequest
+}
 
-		// Cascade defaults.source into per-run data.source when not overridden.
-		if runcfg.Data.Source == "" && cfg.Defaults.Source != "" {
-			runcfg.Data.Source = cfg.Defaults.Source
-		}
-
-		req := newBacktestReq(runcfg)
-		if req == nil {
-			return nil, fmt.Errorf("failed to create BacktestRequest from config")
-		}
-
-		req.StartingBalance = MoneyFromFloat(cfg.Defaults.StartingBalance)
-		req.RiskPct = RateFromFloat(cfg.Defaults.RiskPct / 100.0)
-		req.DefaultStopPips = pipsFromFloat(float64(cfg.Defaults.StopPips))
-		req.DefaultTakePips = pipsFromFloat(float64(cfg.Defaults.TakePips))
-		req.SlippagePips = pipsFromFloat(cfg.Defaults.SlippagePips)
-		req.MaxSpreadPips = pipsFromFloat(cfg.Defaults.MaxSpreadPips)
-		req.ConfigHash = hashRunConfig(runcfg)
-
-		run.BacktestRequest = req
-		runs = append(runs, *run)
+// NewRun instantiates a fresh executable Backtest from a compiled definition.
+func (c CompiledBacktest) NewRun() Backtest {
+	req := c.Request
+	return Backtest{
+		ID:              c.ID,
+		RunConfig:       c.RunConfig,
+		BacktestRequest: &req,
+		BacktestRun:     &BacktestRun{},
 	}
-	if len(runs) < 1 {
-		return nil, fmt.Errorf("regression config must resolve to exactly 1 run, got %d", len(runs))
+}
+
+// CompileBacktests converts a loaded Config into validated, immutable
+// backtest definitions. Defaults are applied during construction so execution
+// only deals with already-compiled requests.
+func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("nil config")
+	}
+
+	compiled := make([]CompiledBacktest, 0, len(cfg.Runs))
+	for _, rawRun := range cfg.Runs {
+		runCfg := applyRunDefaults(cfg.Defaults, rawRun)
+		req, err := compileBacktestRequest(runCfg, cfg.Defaults)
+		if err != nil {
+			return nil, err
+		}
+		compiled = append(compiled, CompiledBacktest{
+			ID:        NewULID(),
+			RunConfig: runCfg,
+			Request:   *req,
+		})
+	}
+	if len(compiled) == 0 {
+		return nil, fmt.Errorf("backtest config must resolve to at least 1 run, got %d", len(compiled))
+	}
+	return compiled, nil
+}
+
+// GetBacktests adapts compiled definitions into executable Backtest values.
+func GetBacktests(cfg *Config) ([]Backtest, error) {
+	compiled, err := CompileBacktests(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	runs := make([]Backtest, 0, len(compiled))
+	for _, def := range compiled {
+		runs = append(runs, def.NewRun())
 	}
 	return runs, nil
 }
@@ -82,45 +102,54 @@ func hashRunConfig(cfg RunConfig) string {
 	return fmt.Sprintf("%x", sum[:4]) // 8 hex chars
 }
 
-// newBacktestReq builds a BacktestRequest from a single RunConfig, resolving
-// the time range, strategy, exit strategy, and regime filter. Returns nil and
-// logs to stdout on any construction error (callers must nil-check).
-func newBacktestReq(cfg RunConfig) *BacktestRequest {
+func applyRunDefaults(defaults RunDefaults, cfg RunConfig) RunConfig {
+	if cfg.Data.Source == "" && defaults.Source != "" {
+		cfg.Data.Source = defaults.Source
+	}
+	return cfg
+}
 
+// compileBacktestRequest builds a validated BacktestRequest from one resolved
+// RunConfig and the shared defaults that affect execution semantics.
+func compileBacktestRequest(cfg RunConfig, defaults RunDefaults) (*BacktestRequest, error) {
 	tr, err := timeRangeFromStrings(cfg.Data.From, cfg.Data.To, cfg.Data.Timeframe)
 	if err != nil {
-		fmt.Printf("Failed to create Backtest Request")
-		return nil
+		return nil, fmt.Errorf("build backtest time range for %q: %w", cfg.Name, err)
 	}
 
 	strategy, err := GetStrategy(cfg.Strategy)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("build backtest strategy for %q: %w", cfg.Name, err)
 	}
 
 	scale := Scale6(PriceScale)
 	exit, err := GetExitStrategy(cfg.Exit, scale)
 	if err != nil {
-		fmt.Printf("failed to build exit strategy: %v\n", err)
-		return nil
+		return nil, fmt.Errorf("build exit strategy for %q: %w", cfg.Name, err)
 	}
 
 	regime, err := GetRegimeFilter(cfg.Regime, scale)
 	if err != nil {
-		fmt.Printf("failed to build regime filter: %v\n", err)
-		return nil
+		return nil, fmt.Errorf("build regime filter for %q: %w", cfg.Name, err)
 	}
 
 	source := firstNonEmpty(cfg.Data.Source, "candles")
 	return &BacktestRequest{
-		Name:       cfg.Name,
-		Source:     source,
-		Instrument: cfg.Data.Instrument,
-		Strategy:   strategy,
-		Exit:       exit,
-		Regime:     regime,
-		TimeRange:  tr,
-	}
+		Name:            cfg.Name,
+		ConfigHash:      hashRunConfig(cfg),
+		StartingBalance: MoneyFromFloat(defaults.StartingBalance),
+		RiskPct:         RateFromFloat(defaults.RiskPct / 100.0),
+		DefaultStopPips: pipsFromFloat(float64(defaults.StopPips)),
+		DefaultTakePips: pipsFromFloat(float64(defaults.TakePips)),
+		SlippagePips:    pipsFromFloat(defaults.SlippagePips),
+		MaxSpreadPips:   pipsFromFloat(defaults.MaxSpreadPips),
+		Source:          source,
+		Instrument:      cfg.Data.Instrument,
+		Strategy:        strategy,
+		Exit:            exit,
+		Regime:          regime,
+		TimeRange:       tr,
+	}, nil
 }
 
 // BacktestRequest holds all the static inputs needed to execute one backtest
@@ -147,8 +176,9 @@ type BacktestRequest struct {
 }
 
 // BuildBacktestResult snapshots the account state into a BacktestResult and
-// stores it on the run. It computes wins/losses/flat counts, NetPL, ReturnPct,
-// and WinRate from the account's closed trades. Returns nil if run or acct is nil.
+// stores it on the run's explicit Result field. It computes wins/losses/flat
+// counts, NetPL, ReturnPct, and WinRate from the account's closed trades.
+// Returns nil if run or acct is nil.
 func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	if run == nil || acct == nil {
 		return nil
@@ -188,8 +218,8 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	if res.Trades > 0 {
 		res.WinRate = RateFromFloat(float64(res.Wins) / float64(res.Trades))
 	}
-	run.BacktestResult = res
-	return run.BacktestResult
+	run.Result = res
+	return run.Result
 
 }
 
@@ -197,7 +227,7 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 // request and result fields. It is safe to call after BuildBacktestResult.
 // Returns a zero-value summary if any required field is nil.
 func (run *Backtest) Summary() BacktestReportSummary {
-	if run == nil || run.BacktestRequest == nil || run.BacktestResult == nil || run.Strategy == nil {
+	if run == nil || run.BacktestRequest == nil || run.Result == nil || run.Strategy == nil {
 		return BacktestReportSummary{}
 	}
 
@@ -238,14 +268,14 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		Start:      formatBacktestSummaryTime(run.TimeRange.Start),
 		End:        formatBacktestSummaryTime(run.TimeRange.End),
 
-		Trades:         run.BacktestResult.Trades,
-		Wins:           run.BacktestResult.Wins,
-		Losses:         run.BacktestResult.Losses,
+		Trades:         run.Result.Trades,
+		Wins:           run.Result.Wins,
+		Losses:         run.Result.Losses,
 		StartBalance:   run.StartingBalance.Float64(),
-		EndBalance:     run.BacktestResult.Balance.Float64(),
-		NetPL:          run.BacktestResult.NetPL.Float64(),
-		ReturnPct:      run.BacktestResult.ReturnPct.Float64() * 100,
-		WinRate:        run.BacktestResult.WinRate.Float64() * 100,
+		EndBalance:     run.Result.Balance.Float64(),
+		NetPL:          run.Result.NetPL.Float64(),
+		ReturnPct:      run.Result.ReturnPct.Float64() * 100,
+		WinRate:        run.Result.WinRate.Float64() * 100,
 		RiskPct:        run.RiskPct.Float64() * 100,
 		Stop:           stopDescription(run),
 		Regime:         regimeDescription(run),

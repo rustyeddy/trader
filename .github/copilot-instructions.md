@@ -40,9 +40,10 @@ Svelte/TypeScript checker.
   journal, and bot logic here; presentation layers should stay thin.
 
 - Backtest flow is: YAML config (`Config` / `RunConfig`) ->
-  `GetBacktests()` merges defaults and resolves strategy/exit/regime
-  -> `service.RunBacktest()` builds a fresh `Trader` + `Broker` +
-  `Account` -> `Trader.Backtest()` iterates candle data and drains
+  `CompileBacktests()` resolves defaults and compiles requests
+  -> `service.RunBacktest()` delegates to a backtest executor
+  -> the default `TraderBacktestExecutor` builds a fresh `Trader` +
+  `Broker` + `Account` -> `Trader.Backtest()` iterates candle data and drains
   broker events -> summaries/reports are written by `cmd/backtest` or
   exposed through REST.
 

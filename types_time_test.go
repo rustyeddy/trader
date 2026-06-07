@@ -12,12 +12,28 @@ import (
 func TestTimeframeParseNormalizeAndString(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, M1, tfFromString("m1"))
-	assert.Equal(t, H1, tfFromString("H1"))
-	assert.Equal(t, D1, tfFromString("D1"))
-	assert.Equal(t, D1, tfFromString("D"))  // OANDA uses "D" not "D1"
-	assert.Equal(t, D1, tfFromString("d"))
-	assert.Equal(t, TF0, tfFromString("unknown"))
+	tf, err := ParseTimeframe("m1")
+	require.NoError(t, err)
+	assert.Equal(t, M1, tf)
+
+	tf, err = ParseTimeframe("H1")
+	require.NoError(t, err)
+	assert.Equal(t, H1, tf)
+
+	tf, err = ParseTimeframe("D1")
+	require.NoError(t, err)
+	assert.Equal(t, D1, tf)
+
+	tf, err = ParseTimeframe("D")
+	require.NoError(t, err)
+	assert.Equal(t, D1, tf) // OANDA uses "D" not "D1"
+
+	tf, err = ParseTimeframe("d")
+	require.NoError(t, err)
+	assert.Equal(t, D1, tf)
+
+	_, err = ParseTimeframe("unknown")
+	require.Error(t, err)
 
 	assert.Equal(t, "m1", normalizeTF("60"))
 	assert.Equal(t, "h1", normalizeTF("3600"))
@@ -25,6 +41,37 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 
 	assert.Equal(t, "m1", M1.String())
 	assert.Equal(t, "UNKNOWN", Timeframe(999).String())
+}
+
+func TestParseTimeframe(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want Timeframe
+		err  bool
+	}{
+		{"M1", M1, false},
+		{"m1", M1, false},
+		{"H1", H1, false},
+		{"h1", H1, false},
+		{"D1", D1, false},
+		{"D", D1, false},
+		{"d1", D1, false},
+		{"ticks", Ticks, false},
+		{"W1", TF0, true},
+		{"", TF0, true},
+	}
+
+	for _, tc := range tests {
+		got, err := ParseTimeframe(tc.in)
+		if tc.err {
+			assert.Error(t, err, "input=%q", tc.in)
+			continue
+		}
+		require.NoError(t, err, "input=%q", tc.in)
+		assert.Equal(t, tc.want, got, "input=%q", tc.in)
+	}
 }
 
 // TestParseTimeRange_OANDADailyAlias ensures "D" (OANDA's daily granularity)

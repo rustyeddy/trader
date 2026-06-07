@@ -135,11 +135,6 @@ func ParseTimeRange(from, to, tf string) (TimeRange, error) {
 
 // timeRangeFromStrings is an internal helper for trader type processing.
 func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
-	tf := tfFromString(tfstr)
-	if tf == TF0 {
-		return tr, fmt.Errorf("unsupported timeframe %q", tfstr)
-	}
-
 	return timeRangeLocation(fromStr, toStr, tfstr, time.UTC)
 }
 
@@ -148,7 +143,10 @@ func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRa
 	if loc == nil {
 		loc = time.UTC
 	}
-	tf := tfFromString(tfstr)
+	tf, err := ParseTimeframe(tfstr)
+	if err != nil {
+		return TimeRange{}, err
+	}
 
 	from, err := time.ParseInLocation("2006-01-02", fromStr, loc)
 	if err != nil {
@@ -240,23 +238,6 @@ func (r TimeRange) MonthsInRange() []yearMonth {
 	return out
 }
 
-// func (r Range) Count() int
-// func (r Range) Duration() int64
-// func (r Range) Align() Range
-// func (r Range) CandleStart(ts Timestamp) Timestamp
-// func (r Range) IndexOf(ts Timestamp) (int, error)
-// func (r Range) TimestampAt(i int) Timestamp
-
-// func Floor(ts Timestamp, tf Timeframe) Timestamp
-// func Ceil(ts Timestamp, tf Timeframe) Timestamp
-// func AlignStart(ts Timestamp, tf Timeframe) Timestamp
-// func Next(ts Timestamp, tf Timeframe) Timestamp
-// func Prev(ts Timestamp, tf Timeframe) Timestamp
-
-// func YearRange(year int, tf Timeframe) Range
-// func MonthRange(year int, month time.Month, tf Timeframe) Range
-// func DayRange(year int, month time.Month, day int, tf Timeframe) Range
-
 var newYorkLoc = func() *time.Location {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
@@ -330,28 +311,21 @@ const (
 	D1    Timeframe = 86400
 )
 
-// tfFromString is an internal helper for trader type processing.
-func tfFromString(t string) Timeframe {
-	t = strings.ToLower(t)
-
-	switch t {
-	default:
-	case "tf0":
-		return TF0
-
+// ParseTimeframe parses a timeframe string into its canonical Timeframe value.
+// It accepts common aliases and returns an error for unknown values.
+func ParseTimeframe(s string) (Timeframe, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "ticks":
-		return Ticks
-
+		return Ticks, nil
 	case "m1":
-		return M1
-
+		return M1, nil
 	case "h1":
-		return H1
-
+		return H1, nil
 	case "d", "d1":
-		return D1
+		return D1, nil
+	default:
+		return TF0, fmt.Errorf("unsupported timeframe %q", s)
 	}
-	return TF0
 }
 
 // normalizeTF is an internal helper for trader type processing.

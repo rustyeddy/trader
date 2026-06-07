@@ -74,6 +74,23 @@ func TestGetBacktests_SetsConfigHash(t *testing.T) {
 	assert.Equal(t, hash, runs2[0].ConfigHash)
 }
 
+func TestCompileBacktests_StoresResolvedRunConfig(t *testing.T) {
+	cfg := &Config{
+		Defaults: RunDefaults{Source: "oanda"},
+		Runs: []RunConfig{{
+			Name:     "test-run",
+			Data:     DataConfig{Instrument: "GBPUSD", Timeframe: "D1", From: "2023-01-01", To: "2023-12-31"},
+			Strategy: StrategyConfig{Kind: "fake"},
+		}},
+	}
+
+	runs, err := CompileBacktests(cfg)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "oanda", runs[0].RunConfig.Data.Source)
+	assert.Equal(t, runs[0].Request.ConfigHash, hashRunConfig(runs[0].RunConfig))
+}
+
 func TestGetBacktests_StoresRunConfig(t *testing.T) {
 	rc := RunConfig{
 		Name:     "test-run",

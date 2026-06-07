@@ -257,6 +257,6 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	dm := NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &Trader{Broker: broker, DataManager: dm}
 	require.NoError(t, okTrader.Backtest(ctx, run))
-	require.NotNil(t, run.BacktestResult)
-	assert.Equal(t, 0, run.BacktestResult.Trades)
+	require.NotNil(t, run.Result)
+	assert.Equal(t, 0, run.Result.Trades)
 }

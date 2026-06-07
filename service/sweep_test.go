@@ -73,7 +73,7 @@ var sweepMatrix = []struct {
 	to        string
 }{
 	{"H1", "2024-01-01", "2024-12-31"},
-	{"D",  "2022-01-01", "2024-12-31"},
+	{"D", "2022-01-01", "2024-12-31"},
 }
 
 // sweepInstruments are all instruments that have local candle data.
@@ -132,14 +132,14 @@ func TestStrategySweep(t *testing.T) {
 							Exit: trader.ExitConfig{
 								Kind: "chandelier",
 								Params: map[string]any{
-									"atr_period":  14,
-									"multiplier":  3.0,
+									"atr_period": 14,
+									"multiplier": 3.0,
 								},
 							},
 						}},
 					}
 
-					runs, err := trader.GetBacktests(cfg)
+					runs, err := trader.CompileBacktests(cfg)
 					if err != nil {
 						// Strategy or config not compatible — skip, not fail.
 						mu.Lock()
@@ -150,7 +150,7 @@ func TestStrategySweep(t *testing.T) {
 					}
 
 					run := runs[0]
-					_, runErr := svc.RunBacktest(context.Background(), &run)
+					_, runErr := svc.RunBacktest(context.Background(), run)
 					if runErr != nil {
 						atomic.AddInt64(&failed, 1)
 						mu.Lock()

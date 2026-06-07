@@ -153,16 +153,11 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 
 // parseTraderTimeframe maps an OANDA timeframe string to a trader.Timeframe.
 func parseTraderTimeframe(s string) (trader.Timeframe, error) {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "M1":
-		return trader.M1, nil
-	case "H1":
-		return trader.H1, nil
-	case "D1", "D":
-		return trader.D1, nil
-	default:
+	tf, err := trader.ParseTimeframe(s)
+	if err != nil {
 		return 0, fmt.Errorf("unsupported timeframe %q (use M1, H1, D1)", s)
 	}
+	return tf, nil
 }
 
 // toOandaGranularity converts a trader timeframe string to the OANDA API

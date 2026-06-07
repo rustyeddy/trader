@@ -206,7 +206,7 @@ func validConfig() *Config {
 	}
 }
 
-func TestParseTimeframe(t *testing.T) {
+func TestParseTimeframe_FromBacktestConfigCoverage(t *testing.T) {
 	tests := []struct {
 		in   string
 		want Timeframe
@@ -222,7 +222,7 @@ func TestParseTimeframe(t *testing.T) {
 		{"", 0, true},
 	}
 	for _, tc := range tests {
-		got, err := parseTimeframe(tc.in)
+		got, err := ParseTimeframe(tc.in)
 		if tc.err {
 			assert.Error(t, err, "input=%q", tc.in)
 		} else {

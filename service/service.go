@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
@@ -30,6 +31,9 @@ type Service struct {
 
 	// AccountID resolved at construction or via ResolveAccount.
 	AccountID string
+
+	// Backtests optionally overrides how compiled backtests are executed.
+	Backtests trader.BacktestExecutor
 
 	botsMu sync.RWMutex
 	bots   map[string]*botEntry

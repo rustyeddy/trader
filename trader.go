@@ -8,7 +8,7 @@ import (
 )
 
 type Trader struct {
-	*DataManager
+	DataManager CandleSource
 	*Broker
 	*Store
 }
@@ -493,11 +493,11 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		return err
 	}
 
-	run.BacktestResult = nil
+	run.Result = nil
 	if err := t.backTestWithIterator(ctx, run, itr); err != nil {
 		return err
 	}
-	if run.BacktestResult == nil {
+	if run.Result == nil {
 		run.BuildBacktestResult(t.Account)
 	}
 

@@ -51,7 +51,7 @@ CLI entry is `cmd/main.go` (Cobra). Subcommands: `backtest`, `data`, `replay`.
 - `Instrument` — FX pair metadata (base/quote currencies, margin rate, pip location)
 
 **Engine types:**
-- `Backtest` — wraps `BacktestRequest` + `BacktestRun` + `BacktestResult`
+- `Backtest` — executable run holding `BacktestRequest`, mutable `BacktestRun` state, and an explicit final `Result`
 - `Trader` — coordinates DataManager + Broker + Account + Journal
 - `Broker` — executes `OpenRequest`/`closeRequest`, emits events on a channel
 - `Strategy` interface — `Update(ctx, candle, backtest) → StrategyPlan`
