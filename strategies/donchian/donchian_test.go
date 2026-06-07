@@ -88,9 +88,9 @@ func makeOpenLot(side trader.Side) *trader.Backtest {
 		TradeCommon: &trader.TradeCommon{ID: "test-lot", Side: side},
 		State:       trader.LotOpen,
 	}
-	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
-	run.Lots = &trader.LotBook{}
-	run.Lots.Add(lot)
+	run := &trader.Backtest{State: &trader.BacktestRun{}}
+	run.State.Lots = &trader.LotBook{}
+	run.State.Lots.Add(lot)
 	return run
 }
 

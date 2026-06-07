@@ -195,15 +195,15 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	tr := &Trader{Broker: broker}
 	ctx := context.Background()
 
-	run := &Backtest{BacktestRequest: &BacktestRequest{Instrument: "EURUSD"}}
+	run := &Backtest{Request: &BacktestRequest{Instrument: "EURUSD"}}
 	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, nil), "nil candle iterator")
 
 	itr := &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
 	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, itr), "nil strategy")
 
 	strat := &countingStrategy{}
-	run.Strategy = strat
-	run.BacktestRun = &BacktestRun{}
+	run.Request.Strategy = strat
+	run.State = &BacktestRun{}
 
 	itr = &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
 	require.NoError(t, tr.backTestWithIterator(ctx, run, itr))
@@ -216,13 +216,13 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	ctx := context.Background()
 	strat := &countingStrategy{}
 	run := &Backtest{
-		BacktestRequest: &BacktestRequest{
+		Request: &BacktestRequest{
 			Instrument:      "EURUSD",
 			Strategy:        strat,
 			TimeRange:       TimeRange{Start: Timestamp(1704067200), End: Timestamp(1704070800), TF: H1},
 			StartingBalance: MoneyFromFloat(10_000),
 		},
-		BacktestRun: &BacktestRun{},
+		State: &BacktestRun{},
 	}
 
 	var nilTrader *Trader

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 )
 
 // BacktestReportSummary is a normalized machine-readable summary used for
@@ -144,12 +143,4 @@ func PrintSummary(w io.Writer, s BacktestReportSummary) {
 		fmt.Fprintf(w, "  AvgSpread: %.2fp%s%s\n", s.AvgSpreadPips, slipStr, filtStr)
 	}
 	fmt.Fprintln(w, bar)
-}
-
-// formatBacktestSummaryTime formats a Timestamp as RFC3339 UTC, or "" for zero.
-func formatBacktestSummaryTime(ts Timestamp) string {
-	if ts == 0 {
-		return ""
-	}
-	return ts.Time().UTC().Format(time.RFC3339)
 }

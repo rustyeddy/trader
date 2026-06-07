@@ -176,8 +176,8 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run *trader.B
 func EmitOpen(c *Core, ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *trader.StrategyPlan {
 	plan := &trader.StrategyPlan{}
 
-	if run != nil && run.Lots != nil {
-		_ = run.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil && run.State != nil && run.State.Lots != nil {
+		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen || lot.Side == side {
 				return nil
 			}
@@ -198,8 +198,8 @@ func EmitOpen(c *Core, ct *trader.CandleTime, run *trader.Backtest, side trader.
 	}
 
 	inst := ""
-	if run != nil {
-		inst = run.Instrument
+	if run != nil && run.Request != nil {
+		inst = run.Request.Instrument
 	}
 
 	stop := Stop(c, ct, inst, side)

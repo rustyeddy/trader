@@ -43,8 +43,8 @@ func shortBreak(below trader.Price) *trader.CandleTime {
 }
 
 func newRun() *trader.Backtest {
-	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
-	run.Lots = &trader.LotBook{}
+	run := &trader.Backtest{State: &trader.BacktestRun{}}
+	run.State.Lots = &trader.LotBook{}
 	return run
 }
 
@@ -86,7 +86,7 @@ func TestV4_EntryWhenADXNotReady_Bypassed(t *testing.T) {
 
 	require.False(t, s.adx.Ready(), "ADX must still be warming up at this point")
 
-	s.Update(context.Background(), longBreak(110), nil) // bar 1
+	s.Update(context.Background(), longBreak(110), nil)         // bar 1
 	plan := s.Update(context.Background(), longBreak(110), nil) // bar 2 — confirms
 	require.Len(t, plan.Opens, 1, "ADX warmup bypass must allow entry")
 	assert.Equal(t, trader.Long, plan.Opens[0].Side)
@@ -168,7 +168,7 @@ func TestV4_StreakPreservedOnADXBlock(t *testing.T) {
 	require.True(t, s.adx.Ready())
 
 	// Confirm a long streak — should be blocked by ADX threshold.
-	s.Update(context.Background(), longBreak(110), nil) // bar 1
+	s.Update(context.Background(), longBreak(110), nil)         // bar 1
 	plan := s.Update(context.Background(), longBreak(110), nil) // bar 2 — confirmed but blocked
 	assert.Empty(t, plan.Opens, "impossible threshold must block entry")
 	assert.Contains(t, plan.Reason, "adx-filtered")
@@ -245,7 +245,7 @@ func TestV4_ReverseClosesOppositeAndOpens(t *testing.T) {
 		State:       trader.LotOpen,
 	}
 	run := newRun()
-	run.Lots.Add(lot)
+	run.State.Lots.Add(lot)
 
 	s.Update(context.Background(), shortBreak(90), nil)
 	plan := s.Update(context.Background(), shortBreak(90), run)

@@ -44,8 +44,8 @@ func shortBreak(below trader.Price) *trader.CandleTime {
 }
 
 func newRun() *trader.Backtest {
-	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
-	run.Lots = &trader.LotBook{}
+	run := &trader.Backtest{State: &trader.BacktestRun{}}
+	run.State.Lots = &trader.LotBook{}
 	return run
 }
 
@@ -99,7 +99,7 @@ func TestV3_BlockAfterStopOut(t *testing.T) {
 	require.NoError(t, err)
 	warm(t, s, 5)
 
-	day := int64(19723)   // 2024-01-01 UTC (unix day number)
+	day := int64(19723) // 2024-01-01 UTC (unix day number)
 	ts := day * 86400
 
 	// Trigger a confirmed long entry.
@@ -114,11 +114,11 @@ func TestV3_BlockAfterStopOut(t *testing.T) {
 	require.NotEmpty(t, openID, "strategy must record the new lot ID")
 
 	// Simulate broker fill then stop-out: add then delete from LotBook.
-	run.Lots.Add(&trader.Lot{
+	run.State.Lots.Add(&trader.Lot{
 		TradeCommon: &trader.TradeCommon{ID: openID, Side: trader.Long},
 		State:       trader.LotOpen,
 	})
-	run.Lots.Delete(openID)
+	run.State.Lots.Delete(openID)
 
 	// Next bar same day: strategy detects stop-out, blocks.
 	ct3 := candleAt(longBreak(130).Candle, ts+7200)
@@ -258,7 +258,7 @@ func TestV3_ReverseClosesOppositeAndOpens(t *testing.T) {
 		State:       trader.LotOpen,
 	}
 	run := newRun()
-	run.Lots.Add(lot)
+	run.State.Lots.Add(lot)
 
 	s.Update(context.Background(), shortBreak(90), nil)
 	plan := s.Update(context.Background(), shortBreak(90), run)

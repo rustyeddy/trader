@@ -114,30 +114,30 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		return fmt.Errorf("nil candle iterator")
 	}
 
-	strategy := run.Strategy
+	strategy := run.Request.Strategy
 	if strategy == nil {
 		return fmt.Errorf("nil strategy")
 	}
 	strategy.Reset()
 
-	exit := run.Exit
+	exit := run.Request.Exit
 	if exit == nil {
 		exit = NoopExit{}
 	}
 
-	regime := run.Regime
+	regime := run.Request.Regime
 	if regime == nil {
 		regime = NoopRegime{}
 	}
 
 	// Convert slippage and max-spread pips to Price units using instrument metadata.
 	var slippage, maxSpread Price
-	if inst := GetInstrument(run.Instrument); inst != nil {
-		if run.SlippagePips != 0 {
-			slippage = inst.PriceDeltaFromPips(run.SlippagePips)
+	if inst := GetInstrument(run.Request.Instrument); inst != nil {
+		if run.Request.SlippagePips != 0 {
+			slippage = inst.PriceDeltaFromPips(run.Request.SlippagePips)
 		}
-		if run.MaxSpreadPips != 0 {
-			maxSpread = inst.PriceDeltaFromPips(run.MaxSpreadPips)
+		if run.Request.MaxSpreadPips != 0 {
+			maxSpread = inst.PriceDeltaFromPips(run.Request.MaxSpreadPips)
 		}
 	}
 
@@ -267,7 +267,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		atomic.AddInt64(&processedCandles, 1)
 
 		err := t.Account.ResolveWithMarks(map[string]Price{
-			run.Instrument: candle.Close,
+			run.Request.Instrument: candle.Close,
 		})
 		if err != nil {
 			return err
@@ -307,9 +307,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			atomic.AddInt64(&submittedCloses, int64(autoExits))
 		}
 
-		strategyCtx := withStrategyRuntime(runCtx, run.Instrument, int(processedCandles), 0, t.Account)
+		strategyCtx := withStrategyRuntime(runCtx, run.Request.Instrument, int(processedCandles), 0, t.Account)
 		lots := snapshotLots(&t.Account.Lots)
-		run.Lots = lots
+		run.State.Lots = lots
 		plan := strategy.Update(strategyCtx, &candle, run)
 		if plan == nil {
 			plan = &DefaultStrategyPlan
@@ -334,7 +334,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 		// Max-spread filter: skip entries when the bid-ask spread is too wide
 		// (market opens, news events, low-liquidity periods).
 		if maxSpread > 0 && candle.AvgSpread > maxSpread && len(plan.Opens) > 0 {
-			run.SpreadFiltered++
+			run.State.SpreadFiltered++
 			plan.Opens = nil
 		}
 
@@ -367,8 +367,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			// Long buys at ask; short sells at bid.
 			isBuy := openReq.Side == Long
 			openReq.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
-			run.SpreadOpened++
-			run.SpreadSum += candle.AvgSpread
+			run.State.SpreadOpened++
+			run.State.SpreadSum += candle.AvgSpread
 
 			// Let the exit strategy override the initial stop when configured.
 			if exit.Ready() {
@@ -452,15 +452,15 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 }
 
 func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
-	if run == nil || run.Strategy == nil {
+	if run == nil || run.Request == nil || run.Request.Strategy == nil {
 		return fmt.Errorf("nil backtest run")
 	}
 
 	L.Info("backtest start",
-		"instrument", run.Instrument,
-		"strategy", run.Strategy.Name(),
-		"balance", run.StartingBalance.Float64(),
-		"timerange", run.TimeRange.String(),
+		"instrument", run.Request.Instrument,
+		"strategy", run.Request.Strategy.Name(),
+		"balance", run.Request.StartingBalance.Float64(),
+		"timerange", run.Request.TimeRange.String(),
 	)
 	if t == nil {
 		return fmt.Errorf("nil trader")
@@ -474,16 +474,12 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	if t.DataManager == nil {
 		return fmt.Errorf("nil data manager")
 	}
-	if run.Strategy == nil {
-		return fmt.Errorf("nil strategy")
-	}
-
-	source := firstNonEmpty(run.Source, SourceOanda)
+	source := firstNonEmpty(run.Request.Source, SourceOanda)
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := CandleRequest{
 		Source:     source,
-		Instrument: run.Instrument,
-		Range:      run.TimeRange,
+		Instrument: run.Request.Instrument,
+		Range:      run.Request.TimeRange,
 	}
 	L.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 

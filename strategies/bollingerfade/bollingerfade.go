@@ -38,10 +38,10 @@ type Fade struct {
 type Config struct {
 	trader.StrategyBaseConfig
 
-	Period      int
-	Multiplier  float64
-	ATRPeriod   int
-	ATRMult     float64
+	Period     int
+	Multiplier float64
+	ATRPeriod  int
+	ATRMult    float64
 }
 
 func New(cfg Config) (*Fade, error) {
@@ -108,8 +108,8 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Ba
 
 	// Check open lots: close any that have reverted to the middle band.
 	hasOpen := false
-	if run != nil && run.Lots != nil {
-		_ = run.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil && run.State != nil && run.State.Lots != nil {
+		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -168,8 +168,8 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Ba
 }
 
 func instrumentFrom(run *trader.Backtest) string {
-	if run != nil && run.BacktestRequest != nil {
-		return run.Instrument
+	if run != nil && run.Request != nil {
+		return run.Request.Instrument
 	}
 	return ""
 }

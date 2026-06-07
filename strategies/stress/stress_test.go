@@ -86,8 +86,8 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 
 	run := &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{Instrument: "EURUSD"},
-		BacktestRun:     &trader.BacktestRun{},
+		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
+		State:   &trader.BacktestRun{},
 	}
 
 	// First call opens a position.
@@ -97,7 +97,7 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	// Simulate position open by adding a lot.
 	lb := &trader.LotBook{}
 	lb.Add(&trader.Lot{TradeCommon: &trader.TradeCommon{ID: "test-lot-1"}})
-	run.Lots = lb
+	run.State.Lots = lb
 
 	// Subsequent calls skip because a position is open.
 	plan = s.Update(context.Background(), ct(1.1000), run)
@@ -140,8 +140,8 @@ func TestUpdate_SideAlternate(t *testing.T) {
 func TestUpdate_InstrumentFromRun(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 	run := &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{Instrument: "USDJPY"},
-		BacktestRun:     &trader.BacktestRun{},
+		Request: &trader.BacktestRequest{Instrument: "USDJPY"},
+		State:   &trader.BacktestRun{},
 	}
 	plan := s.Update(context.Background(), ct(150.00), run)
 	require.Len(t, plan.Opens, 1)

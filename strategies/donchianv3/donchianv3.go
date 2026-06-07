@@ -39,9 +39,9 @@ type Breakout struct {
 	pendingLevel trader.Price
 
 	// Same-day re-entry block state.
-	openLotID    string // ID of the lot we most recently opened
-	manualClose  bool   // true if WE closed openLotID (don't block on manual close)
-	blockedDay   int64  // UTC day (unix_sec/86400) when we were last stopped out
+	openLotID   string // ID of the lot we most recently opened
+	manualClose bool   // true if WE closed openLotID (don't block on manual close)
+	blockedDay  int64  // UTC day (unix_sec/86400) when we were last stopped out
 
 	name string
 }
@@ -135,11 +135,11 @@ func closeStrengthOK(c trader.Candle, side trader.Side, threshold float64) bool 
 
 // lotIsOpen returns true if the given lot ID is present and open in the book.
 func lotIsOpen(run *trader.Backtest, id string) bool {
-	if run == nil || run.Lots == nil || id == "" {
+	if run == nil || run.State == nil || run.State.Lots == nil || id == "" {
 		return false
 	}
 	found := false
-	_ = run.Lots.Range(func(lot *trader.Lot) error {
+	_ = run.State.Lots.Range(func(lot *trader.Lot) error {
 		if lot.ID == id && lot.State == trader.LotOpen {
 			found = true
 		}
@@ -268,8 +268,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side, d *
 	plan := &trader.StrategyPlan{}
 
 	alreadyOpen := false
-	if run != nil && run.Lots != nil {
-		_ = run.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil && run.State != nil && run.State.Lots != nil {
+		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -298,8 +298,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side, d *
 	}
 
 	inst := ""
-	if run != nil && run.BacktestRequest != nil {
-		inst = run.Instrument
+	if run != nil && run.Request != nil {
+		inst = run.Request.Instrument
 	}
 	open := trader.NewOpenRequest(inst, ct, side, 0, 0, "donchian-v3-breakout")
 	plan.Opens = append(plan.Opens, open)

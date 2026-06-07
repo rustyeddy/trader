@@ -159,8 +159,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 	plan := &trader.StrategyPlan{}
 
 	alreadyOpen := false
-	if run != nil && run.Lots != nil {
-		_ = run.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil && run.State != nil && run.State.Lots != nil {
+		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -190,8 +190,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 	}
 
 	inst := ""
-	if run != nil && run.BacktestRequest != nil {
-		inst = run.Instrument
+	if run != nil && run.Request != nil {
+		inst = run.Request.Instrument
 	}
 	plan.Opens = append(plan.Opens, trader.NewOpenRequest(inst, ct, side, 0, 0, "donchian-breakout"))
 	return plan

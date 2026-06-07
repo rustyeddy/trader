@@ -12,8 +12,8 @@ import (
 
 func fakeRun(instrument string) *trader.Backtest {
 	return &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{Instrument: instrument},
-		BacktestRun:     &trader.BacktestRun{Lots: &trader.LotBook{}},
+		Request: &trader.BacktestRequest{Instrument: instrument},
+		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
 	}
 }
 
@@ -88,7 +88,7 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 		RemainingUnits: 1000,
 		State:          trader.LotOpen,
 	}
-	run.Lots.Add(lot)
+	run.State.Lots.Add(lot)
 
 	plan := f.Update(context.Background(), fakeCandle(10, 1.0940, 1.0900, 1.0890), run)
 	require.NotNil(t, plan)
@@ -123,7 +123,7 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	assert.Equal(t, "fake-02-open", openPlan.Reason)
 
 	openLot := &trader.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: trader.LotOpen}
-	run.Lots.Add(openLot)
+	run.State.Lots.Add(openLot)
 
 	holdPlan := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
 	require.NotNil(t, holdPlan)

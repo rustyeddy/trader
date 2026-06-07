@@ -320,10 +320,10 @@ func (a *CandleStrategyAdapter) latestCompleteBar(ctx context.Context) (*oanda.C
 func (a *CandleStrategyAdapter) makeBacktest() *trader.Backtest {
 	lb := a.lots.toLotBook()
 	return &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{
+		Request: &trader.BacktestRequest{
 			Instrument: a.instNorm,
 		},
-		BacktestRun: &trader.BacktestRun{
+		State: &trader.BacktestRun{
 			Lots: lb,
 		},
 	}

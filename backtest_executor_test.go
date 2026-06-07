@@ -11,7 +11,7 @@ import (
 func TestTraderBacktestExecutor_Guards(t *testing.T) {
 	t.Parallel()
 
-	run := &Backtest{BacktestRequest: &BacktestRequest{}}
+	run := &Backtest{Request: &BacktestRequest{}}
 
 	var nilExec *TraderBacktestExecutor
 	require.ErrorContains(t, nilExec.Execute(context.Background(), run), "nil backtest executor")

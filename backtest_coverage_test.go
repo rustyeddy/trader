@@ -175,7 +175,7 @@ func TestBuildBacktestResult(t *testing.T) {
 	assert.Nil(t, nilRun.BuildBacktestResult(&Account{}))
 
 	run := &Backtest{
-		BacktestRequest: &BacktestRequest{StartingBalance: MoneyFromFloat(10_000)},
+		Request: &BacktestRequest{StartingBalance: MoneyFromFloat(10_000)},
 	}
 	assert.Nil(t, run.BuildBacktestResult(nil))
 
@@ -190,7 +190,7 @@ func TestBuildBacktestResult(t *testing.T) {
 		},
 	}
 
-	run.TimeRange = TimeRange{Start: Timestamp(100), End: Timestamp(200)}
+	run.Request.TimeRange = TimeRange{Start: Timestamp(100), End: Timestamp(200)}
 	res := run.BuildBacktestResult(acct)
 	require.NotNil(t, res)
 	assert.Equal(t, acct.Balance, res.Balance)
@@ -200,9 +200,9 @@ func TestBuildBacktestResult(t *testing.T) {
 	assert.Equal(t, 1, res.Losses)
 	assert.Equal(t, Timestamp(100), res.Start)
 	assert.Equal(t, Timestamp(200), res.End)
-	assert.Equal(t, acct.Balance-run.StartingBalance, res.NetPL)
+	assert.Equal(t, acct.Balance-run.Request.StartingBalance, res.NetPL)
 	assert.Equal(t, RateFromFloat(1.0/4.0), res.WinRate)
-	assert.Equal(t, RateFromFloat(res.NetPL.Float64()/run.StartingBalance.Float64()), res.ReturnPct)
+	assert.Equal(t, RateFromFloat(res.NetPL.Float64()/run.Request.StartingBalance.Float64()), res.ReturnPct)
 	assert.Same(t, res, run.Result)
 }
 
@@ -219,7 +219,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	require.NoError(t, err)
 
 	run := &Backtest{
-		BacktestRequest: &BacktestRequest{
+		Request: &BacktestRequest{
 			Name:            "summary-run",
 			Instrument:      "EURUSD",
 			Strategy:        fake,
@@ -228,6 +228,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 			RiskPct:         RateFromFloat(0.01),
 			DefaultStopPips: pipsFromFloat(20),
 		},
+		State: &BacktestRun{},
 		Result: &BacktestResult{
 			Trades:    10,
 			Wins:      6,

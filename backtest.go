@@ -1,10 +1,7 @@
 package trader
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // Backtest is the executable form of one backtest run.
@@ -15,9 +12,9 @@ type Backtest struct {
 	ID        string
 	RunConfig RunConfig // resolved config snapshot used for execution
 
-	*BacktestRequest
-	*BacktestRun
-	Result *BacktestResult
+	Request *BacktestRequest
+	State   *BacktestRun
+	Result  *BacktestResult
 }
 
 // CompiledBacktest is the construction-phase output for one backtest run.
@@ -33,10 +30,10 @@ type CompiledBacktest struct {
 func (c CompiledBacktest) NewRun() Backtest {
 	req := c.Request
 	return Backtest{
-		ID:              c.ID,
-		RunConfig:       c.RunConfig,
-		BacktestRequest: &req,
-		BacktestRun:     &BacktestRun{},
+		ID:        c.ID,
+		RunConfig: c.RunConfig,
+		Request:   &req,
+		State:     &BacktestRun{},
 	}
 }
 
@@ -65,45 +62,6 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 		return nil, fmt.Errorf("backtest config must resolve to at least 1 run, got %d", len(compiled))
 	}
 	return compiled, nil
-}
-
-// hashBacktestConfig returns the first 8 hex characters of the SHA256 of the
-// resolved run config plus the defaults that currently affect execution.
-// The Name field is excluded because it is a label, not a parameter that
-// affects results. This hash is used as a stable filename suffix for report
-// artifacts: same execution inputs → same hash → same file on disk.
-func hashBacktestConfig(cfg RunConfig, defaults RunDefaults) string {
-	type hashable struct {
-		Data     DataConfig     `json:"data"`
-		Strategy StrategyConfig `json:"strategy"`
-		Exit     ExitConfig     `json:"exit"`
-		Regime   RegimeConfig   `json:"regime"`
-		Defaults struct {
-			StartingBalance float64 `json:"starting_balance"`
-			RiskPct         float64 `json:"risk_pct"`
-			StopPips        int32   `json:"stop_pips"`
-			TakePips        int32   `json:"take_pips"`
-			SlippagePips    float64 `json:"slippage_pips"`
-			MaxSpreadPips   float64 `json:"max_spread_pips"`
-		} `json:"defaults"`
-	}
-
-	h := hashable{
-		Data:     cfg.Data,
-		Strategy: cfg.Strategy,
-		Exit:     cfg.Exit,
-		Regime:   cfg.Regime,
-	}
-	h.Defaults.StartingBalance = defaults.StartingBalance
-	h.Defaults.RiskPct = defaults.RiskPct
-	h.Defaults.StopPips = defaults.StopPips
-	h.Defaults.TakePips = defaults.TakePips
-	h.Defaults.SlippagePips = defaults.SlippagePips
-	h.Defaults.MaxSpreadPips = defaults.MaxSpreadPips
-
-	b, _ := json.Marshal(h)
-	sum := sha256.Sum256(b)
-	return fmt.Sprintf("%x", sum[:4]) // 8 hex chars
 }
 
 func applyRunSourceDefault(defaults RunDefaults, cfg RunConfig) RunConfig {
@@ -206,18 +164,21 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	if run == nil || acct == nil {
 		return nil
 	}
-	if run.BacktestRun == nil {
-		run.BacktestRun = &BacktestRun{}
+	if run.Request == nil {
+		return nil
+	}
+	if run.State == nil {
+		run.State = &BacktestRun{}
 	}
 
-	run.BacktestRun.Trades = append(run.BacktestRun.Trades[:0], acct.Trades...)
+	run.State.Trades = append(run.State.Trades[:0], acct.Trades...)
 
 	res := &BacktestResult{
 		Balance: acct.Balance,
 		Equity:  acct.Equity,
 		Trades:  len(acct.Trades),
-		Start:   run.TimeRange.Start,
-		End:     run.TimeRange.End,
+		Start:   run.Request.TimeRange.Start,
+		End:     run.Request.TimeRange.End,
 	}
 
 	for _, tr := range acct.Trades {
@@ -234,9 +195,9 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 		}
 	}
 
-	res.NetPL = acct.Balance - run.StartingBalance
-	if run.StartingBalance != 0 {
-		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / run.StartingBalance.Float64())
+	res.NetPL = acct.Balance - run.Request.StartingBalance
+	if run.Request.StartingBalance != 0 {
+		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / run.Request.StartingBalance.Float64())
 	}
 	if res.Trades > 0 {
 		res.WinRate = RateFromFloat(float64(res.Wins) / float64(res.Trades))
@@ -244,170 +205,4 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	run.Result = res
 	return run.Result
 
-}
-
-// Summary builds a fully-populated BacktestReportSummary from the run's
-// request and result fields. It is safe to call after BuildBacktestResult.
-// Returns a zero-value summary if any required field is nil.
-func (run *Backtest) Summary() BacktestReportSummary {
-	if run == nil || run.BacktestRequest == nil || run.Result == nil || run.Strategy == nil {
-		return BacktestReportSummary{}
-	}
-
-	var trades []BacktestReportTrade
-	for _, tr := range run.BacktestRun.GetTrades() {
-		if tr == nil {
-			continue
-		}
-
-		trades = append(trades, BacktestReportTrade{
-			ID:              tr.ID,
-			Instrument:      tr.Instrument,
-			Side:            tr.Side.String(),
-			Units:           int64(tr.Units),
-			OpenPrice:       tr.EntryPrice.Float64(),
-			ClosePrice:      tr.ExitPrice.Float64(),
-			OpenTime:        formatBacktestSummaryTime(tr.EntryTime),
-			CloseTime:       formatBacktestSummaryTime(tr.ExitTime),
-			PNL:             tr.PNL.Float64(),
-			StopPrice:       tr.Stop.Float64(),
-			TakeProfitPrice: tr.Take.Float64(),
-		})
-	}
-
-	maxDD, avgWinner, avgLoser := computeTradeStats(trades)
-	rr := 0.0
-	if avgLoser != 0 {
-		rr = avgWinner / -avgLoser
-	}
-
-	avgSpreadPips, spreadFiltered := executionCostStats(run)
-
-	return BacktestReportSummary{
-		Name:       run.Name,
-		Strategy:   run.Strategy.Name(),
-		Instrument: run.Instrument,
-		Timeframe:  run.TimeRange.TF.String(),
-		Start:      formatBacktestSummaryTime(run.TimeRange.Start),
-		End:        formatBacktestSummaryTime(run.TimeRange.End),
-
-		Trades:         run.Result.Trades,
-		Wins:           run.Result.Wins,
-		Losses:         run.Result.Losses,
-		StartBalance:   run.StartingBalance.Float64(),
-		EndBalance:     run.Result.Balance.Float64(),
-		NetPL:          run.Result.NetPL.Float64(),
-		ReturnPct:      run.Result.ReturnPct.Float64() * 100,
-		WinRate:        run.Result.WinRate.Float64() * 100,
-		RiskPct:        run.RiskPct.Float64() * 100,
-		Stop:           stopDescription(run),
-		Regime:         regimeDescription(run),
-		MaxSpread:      maxSpreadDescription(run),
-		Slippage:       slippageDescription(run),
-		AvgSpreadPips:  avgSpreadPips,
-		SpreadFiltered: spreadFiltered,
-		MaxDrawdown:    maxDD,
-		AvgWinner:      avgWinner,
-		AvgLoser:       avgLoser,
-		RR:             rr,
-
-		TradeDetails: trades,
-
-		ConfigHash:  run.ConfigHash,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Config:      run.RunConfig,
-	}
-}
-
-// computeTradeStats derives max drawdown, avg winner, and avg loser from the trade list.
-// MaxDrawdown is the largest peak-to-trough drop in cumulative P/L (returned as negative).
-func computeTradeStats(trades []BacktestReportTrade) (maxDrawdown, avgWinner, avgLoser float64) {
-	var running, peak float64
-	var winSum, lossSum float64
-	var winN, lossN int
-
-	for _, tr := range trades {
-		running += tr.PNL
-		if running > peak {
-			peak = running
-		}
-		if drop := peak - running; drop > -maxDrawdown {
-			maxDrawdown = -drop
-		}
-		if tr.PNL > 0 {
-			winSum += tr.PNL
-			winN++
-		} else if tr.PNL < 0 {
-			lossSum += tr.PNL
-			lossN++
-		}
-	}
-
-	if winN > 0 {
-		avgWinner = winSum / float64(winN)
-	}
-	if lossN > 0 {
-		avgLoser = lossSum / float64(lossN)
-	}
-	return
-}
-
-// regimeDescription returns the regime filter's name for display in the
-// summary, or an empty string when no filter is configured.
-func regimeDescription(run *Backtest) string {
-	if run.Regime != nil {
-		if name := run.Regime.Name(); name != "" {
-			return name
-		}
-	}
-	return ""
-}
-
-// slippageDescription returns a formatted slippage label (e.g. "1.5p") or
-// an empty string when slippage is zero.
-func slippageDescription(run *Backtest) string {
-	if run.SlippagePips == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%.1fp", run.SlippagePips.Float64())
-}
-
-// executionCostStats returns the average spread (in pips) across accepted
-// opens and the number of opens that were suppressed by the max-spread filter.
-func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered int) {
-	if run.BacktestRun == nil {
-		return 0, 0
-	}
-	spreadFiltered = run.BacktestRun.SpreadFiltered
-	if run.BacktestRun.SpreadOpened == 0 {
-		return 0, spreadFiltered
-	}
-	inst := GetInstrument(run.Instrument)
-	if inst == nil {
-		return 0, spreadFiltered
-	}
-	unitsPerPip := float64(inst.PriceUnitsPerPip())
-	avgSpreadPips = float64(run.SpreadSum) / float64(run.SpreadOpened) / unitsPerPip
-	return avgSpreadPips, spreadFiltered
-}
-
-// maxSpreadDescription returns a formatted max-spread label (e.g. "2.0p") or
-// an empty string when no spread filter is configured.
-func maxSpreadDescription(run *Backtest) string {
-	if run.MaxSpreadPips == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%.1fp", run.MaxSpreadPips.Float64())
-}
-
-// stopDescription returns the stop label for the summary, preferring the exit
-// strategy's name when one is configured, then falling back to the entry
-// strategy's StopDescription.
-func stopDescription(run *Backtest) string {
-	if run.Exit != nil {
-		if name := run.Exit.Name(); name != "" {
-			return name
-		}
-	}
-	return run.Strategy.StopDescription()
 }

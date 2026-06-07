@@ -39,7 +39,7 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	if e == nil {
 		return fmt.Errorf("nil backtest executor")
 	}
-	if run == nil || run.BacktestRequest == nil {
+	if run == nil || run.Request == nil {
 		return fmt.Errorf("nil backtest run")
 	}
 	if e.DataManager == nil {
@@ -57,12 +57,12 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	if t.Broker == nil {
 		return fmt.Errorf("nil broker")
 	}
-	acct := e.AccountFactory("backtest", run.StartingBalance)
+	acct := e.AccountFactory("backtest", run.Request.StartingBalance)
 	if acct == nil {
 		return fmt.Errorf("nil account")
 	}
-	if run.RiskPct != 0 {
-		acct.RiskPct = run.RiskPct
+	if run.Request.RiskPct != 0 {
+		acct.RiskPct = run.Request.RiskPct
 	}
 	t.Broker.Account = acct
 

@@ -77,7 +77,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	}
 
 	// Netting account: one position at a time.
-	if run != nil && run.Lots != nil && run.Lots.Len() > 0 {
+	if run != nil && run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
 		return &trader.StrategyPlan{Reason: "in position"}
 	}
 
@@ -91,8 +91,8 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	stop := s.calcStop(ct, side)
 
 	instr := ""
-	if run != nil {
-		instr = run.Instrument
+	if run != nil && run.Request != nil {
+		instr = run.Request.Instrument
 	}
 
 	reason := fmt.Sprintf("stress-%s", side)

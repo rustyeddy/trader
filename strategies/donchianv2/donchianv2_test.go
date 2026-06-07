@@ -182,9 +182,9 @@ func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 		TradeCommon: &trader.TradeCommon{ID: "test-lot", Side: trader.Long},
 		State:       trader.LotOpen,
 	}
-	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
-	run.Lots = &trader.LotBook{}
-	run.Lots.Add(lot)
+	run := &trader.Backtest{State: &trader.BacktestRun{}}
+	run.State.Lots = &trader.LotBook{}
+	run.State.Lots.Add(lot)
 
 	s.Update(context.Background(), longBreak(110), nil)         // bar 1
 	plan := s.Update(context.Background(), longBreak(110), run) // bar 2 — confirm
@@ -202,12 +202,12 @@ func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 		TradeCommon: &trader.TradeCommon{ID: "test-lot", Side: trader.Long},
 		State:       trader.LotOpen,
 	}
-	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{}}
-	run.Lots = &trader.LotBook{}
-	run.Lots.Add(lot)
+	run := &trader.Backtest{State: &trader.BacktestRun{}}
+	run.State.Lots = &trader.LotBook{}
+	run.State.Lots.Add(lot)
 
 	// Two consecutive short bars with a long position open → close long, open short.
-	s.Update(context.Background(), shortBreak(90), nil) // bar 1, no entry
+	s.Update(context.Background(), shortBreak(90), nil)         // bar 1, no entry
 	plan := s.Update(context.Background(), shortBreak(90), run) // bar 2, entry
 	require.Len(t, plan.Closes, 1, "should close existing long on confirmed reversal")
 	require.Len(t, plan.Opens, 1, "should open new short")
@@ -235,7 +235,7 @@ func TestBreakout_ThreeConfirmBars(t *testing.T) {
 	warm(t, s, 5) // channel hi=110
 
 	// All three bars close above pendingLevel=110.
-	s.Update(context.Background(), longBreak(110), nil) // bar 1
+	s.Update(context.Background(), longBreak(110), nil)         // bar 1
 	plan := s.Update(context.Background(), longBreak(110), nil) // bar 2
 	assert.Empty(t, plan.Opens, "need 3 bars, only 2 confirmed")
 	plan = s.Update(context.Background(), longBreak(110), nil) // bar 3

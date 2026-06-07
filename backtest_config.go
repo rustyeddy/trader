@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,6 +100,45 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// hashBacktestConfig returns the first 8 hex characters of the SHA256 of the
+// resolved run config plus the defaults that currently affect execution.
+// The Name field is excluded because it is a label, not a parameter that
+// affects results. This hash is used as a stable filename suffix for report
+// artifacts: same execution inputs -> same hash -> same file on disk.
+func hashBacktestConfig(cfg RunConfig, defaults RunDefaults) string {
+	type hashable struct {
+		Data     DataConfig     `json:"data"`
+		Strategy StrategyConfig `json:"strategy"`
+		Exit     ExitConfig     `json:"exit"`
+		Regime   RegimeConfig   `json:"regime"`
+		Defaults struct {
+			StartingBalance float64 `json:"starting_balance"`
+			RiskPct         float64 `json:"risk_pct"`
+			StopPips        int32   `json:"stop_pips"`
+			TakePips        int32   `json:"take_pips"`
+			SlippagePips    float64 `json:"slippage_pips"`
+			MaxSpreadPips   float64 `json:"max_spread_pips"`
+		} `json:"defaults"`
+	}
+
+	h := hashable{
+		Data:     cfg.Data,
+		Strategy: cfg.Strategy,
+		Exit:     cfg.Exit,
+		Regime:   cfg.Regime,
+	}
+	h.Defaults.StartingBalance = defaults.StartingBalance
+	h.Defaults.RiskPct = defaults.RiskPct
+	h.Defaults.StopPips = defaults.StopPips
+	h.Defaults.TakePips = defaults.TakePips
+	h.Defaults.SlippagePips = defaults.SlippagePips
+	h.Defaults.MaxSpreadPips = defaults.MaxSpreadPips
+
+	b, _ := json.Marshal(h)
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:4]) // 8 hex chars
 }
 
 // firstNonEmpty returns the first non-blank string from vals, or "" if all

@@ -17,11 +17,11 @@ import (
 // service does not retain execution state between runs.
 func (s *Service) RunBacktest(ctx context.Context, compiled trader.CompiledBacktest) (trader.BacktestReportSummary, error) {
 	run := compiled.NewRun()
-	if run.BacktestRequest == nil {
+	if run.Request == nil {
 		return trader.BacktestReportSummary{}, fmt.Errorf("nil backtest request")
 	}
 	if err := s.backtestExecutor().Execute(ctx, &run); err != nil {
-		return trader.BacktestReportSummary{}, fmt.Errorf("backtest %q: %w", run.Name, err)
+		return trader.BacktestReportSummary{}, fmt.Errorf("backtest %q: %w", run.Request.Name, err)
 	}
 	return run.Summary(), nil
 }

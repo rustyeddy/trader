@@ -16,21 +16,21 @@ type SignalKind string
 
 const (
 	SignalOpen       SignalKind = "open"        // strategy signalled an entry
-	SignalClose      SignalKind = "close"        // strategy signalled an exit
-	SignalBlocked    SignalKind = "blocked"      // regime filter suppressed an open
-	SignalNoStop     SignalKind = "no_stop"      // open dropped: no stop available
-	SignalStopUpdate SignalKind = "stop_update"  // trailing stop ratcheted
+	SignalClose      SignalKind = "close"       // strategy signalled an exit
+	SignalBlocked    SignalKind = "blocked"     // regime filter suppressed an open
+	SignalNoStop     SignalKind = "no_stop"     // open dropped: no stop available
+	SignalStopUpdate SignalKind = "stop_update" // trailing stop ratcheted
 )
 
 // Signal records a single strategy decision or indicator event.
 type Signal struct {
-	Time      int64      `json:"time"`                 // bar open time, unix seconds
+	Time      int64      `json:"time"` // bar open time, unix seconds
 	Kind      SignalKind `json:"kind"`
-	Side      string     `json:"side,omitempty"`        // "long" or "short"
-	Price     float64    `json:"price,omitempty"`       // entry price (open) or exit price (close)
-	StopPrice float64    `json:"stop_price,omitempty"`  // stop at time of signal
-	StopPips  float64    `json:"stop_pips,omitempty"`   // stop distance in pips
-	Reason    string     `json:"reason,omitempty"`      // strategy reason string
+	Side      string     `json:"side,omitempty"`       // "long" or "short"
+	Price     float64    `json:"price,omitempty"`      // entry price (open) or exit price (close)
+	StopPrice float64    `json:"stop_price,omitempty"` // stop at time of signal
+	StopPips  float64    `json:"stop_pips,omitempty"`  // stop distance in pips
+	Reason    string     `json:"reason,omitempty"`     // strategy reason string
 }
 
 // ReplayCandleBar is the lightweight-charts JSON shape: unix-second time + OHLC.
@@ -59,14 +59,14 @@ type ReplayResult struct {
 
 // ReplayRequest drives a single-instrument strategy replay against stored candles.
 type ReplayRequest struct {
-	Instrument  string                `json:"instrument"`   // internal format, e.g. "EURUSD"
-	Timeframe   string                `json:"timeframe"`    // "H1" or "D"
-	From        string                `json:"from"`         // "YYYY-MM-DD"
-	To          string                `json:"to"`           // "YYYY-MM-DD"
-	WarmupBars  int                   `json:"warmup_bars"`  // bars to prime before recording; default 100
-	Strategy    trader.StrategyConfig `json:"strategy"`
-	Exit        trader.ExitConfig     `json:"exit"`
-	Regime      trader.RegimeConfig   `json:"regime"`
+	Instrument string                `json:"instrument"`  // internal format, e.g. "EURUSD"
+	Timeframe  string                `json:"timeframe"`   // "H1" or "D"
+	From       string                `json:"from"`        // "YYYY-MM-DD"
+	To         string                `json:"to"`          // "YYYY-MM-DD"
+	WarmupBars int                   `json:"warmup_bars"` // bars to prime before recording; default 100
+	Strategy   trader.StrategyConfig `json:"strategy"`
+	Exit       trader.ExitConfig     `json:"exit"`
+	Regime     trader.RegimeConfig   `json:"regime"`
 }
 
 // ── replayPosition tracks open simulated positions during replay ──────────────
@@ -149,8 +149,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	)
 
 	bt := &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{Instrument: inst},
-		BacktestRun:     &trader.BacktestRun{Lots: &trader.LotBook{}},
+		Request: &trader.BacktestRequest{Instrument: inst},
+		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
 	}
 
 	for iter.Next() {
@@ -219,7 +219,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			side := trader.Long
 			if cl.Lot != nil {
 				side = cl.Lot.Side
-				bt.BacktestRun.Lots.Delete(cl.Lot.ID)
+				bt.State.Lots.Delete(cl.Lot.ID)
 				// Also remove from our position tracker.
 				for i, pos := range positions {
 					if pos.id == cl.Lot.ID {
@@ -229,7 +229,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 				}
 			} else if len(positions) > 0 {
 				side = positions[0].side
-				bt.BacktestRun.Lots.Delete(positions[0].id)
+				bt.State.Lots.Delete(positions[0].id)
 				positions = positions[1:]
 			}
 			signals = append(signals, Signal{
@@ -300,7 +300,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			tc.Side = op.Side
 			tc.Stop = stop
 			tc.Instrument = inst
-			bt.BacktestRun.Lots.Add(&trader.Lot{
+			bt.State.Lots.Add(&trader.Lot{
 				TradeCommon:    tc,
 				EntryPrice:     candle.Close,
 				OriginalUnits:  1,

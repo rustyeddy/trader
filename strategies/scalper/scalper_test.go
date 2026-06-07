@@ -86,8 +86,8 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 	require.NoError(t, err)
 
 	run := &trader.Backtest{
-		BacktestRequest: &trader.BacktestRequest{Instrument: "EURUSD"},
-		BacktestRun:     &trader.BacktestRun{},
+		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
+		State:   &trader.BacktestRun{},
 	}
 
 	for _, ct := range []*trader.CandleTime{
