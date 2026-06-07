@@ -140,7 +140,6 @@ export interface TransactionsResult {
 // BacktestSummary matches trader.BacktestReportSummary JSON tags (snake_case).
 export interface BacktestSummary {
   name: string;
-  kind: string;
   strategy: string;
   instrument: string;
   timeframe: string;

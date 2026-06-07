@@ -47,6 +47,7 @@ func (run *Backtest) Summary() BacktestReportSummary {
 		Strategy:   run.Request.Strategy.Name(),
 		Instrument: run.Request.Instrument,
 		Timeframe:  run.Request.TimeRange.TF.String(),
+		Dataset:    run.RunConfig.Data.Source,
 		Start:      formatBacktestSummaryTime(run.Request.TimeRange.Start),
 		End:        formatBacktestSummaryTime(run.Request.TimeRange.End),
 

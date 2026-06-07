@@ -12,7 +12,6 @@ import (
 // open any JSON file and see exactly what params produced it.
 type BacktestReportSummary struct {
 	Name       string `json:"name"`
-	Kind       string `json:"kind"`
 	Strategy   string `json:"strategy"`
 	Instrument string `json:"instrument"`
 	Timeframe  string `json:"timeframe"`
@@ -48,7 +47,8 @@ type BacktestReportSummary struct {
 
 	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
 
-	// Provenance — always populated; links this report back to its origin.
+	// Provenance links generated reports back to their origin. Older fixtures
+	// and manually constructed summaries may leave these fields empty.
 	ConfigHash  string    `json:"config_hash"`  // 8-char SHA256 prefix of the run config params
 	GeneratedAt string    `json:"generated_at"` // RFC3339 UTC timestamp of when the run completed
 	Config      RunConfig `json:"config"`       // full config snapshot that produced this result
