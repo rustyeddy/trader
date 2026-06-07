@@ -101,6 +101,17 @@ on EUR_USD + GBP_USD without running two separate processes.
 Grid/random search over strategy params against historical data; emit a ranked
 result table. Builds on the existing backtest infrastructure.
 
+### Stop Strategy Modes
+Add configurable stop-sizing modes so risk can adapt to streaks and edge quality.
+
+- **Martingale** — increase risk/size after a loss so one win can recover prior
+  losses. Reset to base risk after a profitable trade.
+- **Anti-martingale** — increase risk/size after wins and reduce after losses
+  (pyramiding into momentum, de-risking during drawdowns).
+- **Kelly method** — size risk as a fraction derived from estimated win rate and
+  payoff ratio (`f* = p - (1-p)/b`), typically using fractional Kelly in
+  production to reduce volatility.
+
 ---
 
 ## Backtesting
