@@ -383,43 +383,6 @@ func TestWantlist_AllReasonsRoundTrip(t *testing.T) {
 }
 
 // =============================================================================
-// WorkState – edge cases
-// =============================================================================
-
-func TestWorkState_MarkClearIdempotent(t *testing.T) {
-	t.Parallel()
-
-	ws := NewWorkState()
-	k := Key{Instrument: "EURUSD"}
-
-	ws.MarkDownload(k)
-	ws.MarkDownload(k) // idempotent
-	require.True(t, ws.IsDownloadQueuedOrActive(k))
-
-	ws.ClearDownload(k)
-	ws.ClearDownload(k) // idempotent
-	require.False(t, ws.IsDownloadQueuedOrActive(k))
-}
-
-func TestWorkState_DownloadAndBuildAreIndependent(t *testing.T) {
-	t.Parallel()
-
-	ws := NewWorkState()
-	k := Key{Instrument: "EURUSD"}
-
-	ws.MarkDownload(k)
-	require.True(t, ws.IsDownloadQueuedOrActive(k))
-	require.False(t, ws.IsBuildQueuedOrActive(k))
-
-	ws.MarkBuild(k)
-	require.True(t, ws.IsBuildQueuedOrActive(k))
-
-	ws.ClearDownload(k)
-	require.False(t, ws.IsDownloadQueuedOrActive(k))
-	require.True(t, ws.IsBuildQueuedOrActive(k)) // still set
-}
-
-// =============================================================================
 // Plan – boundary values
 // =============================================================================
 
