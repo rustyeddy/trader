@@ -324,13 +324,19 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		it, err := store.OpenTickIterator(tickKey)
 		if err != nil {
-			tickPath, _ := store.PathForAsset(tickKey)
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
 			return fmt.Errorf("open tick iterator %s: %w", tickPath, err)
 		}
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-			tickPath, _ := store.PathForAsset(tickKey)
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
 			return fmt.Errorf("build hour M1 %s: %w", tickPath, err)
 		}
 		if hourSet == nil {
@@ -338,8 +344,14 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
-			tickPath, _ := store.PathForAsset(tickKey)
-			kPath, _ := store.PathForAsset(k)
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+kPath, err2 := store.PathForAsset(k)
+			if err2 != nil {
+				kPath = "<path unavailable>"
+			}
 			return fmt.Errorf("merge hour %s into month %s: %w",
 				tickPath, kPath, err)
 		}

@@ -58,7 +58,6 @@ func TestV3_NotReadyDuringWarmup(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	for i := 0; i < 4; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 105}}
 		plan := s.Update(context.Background(), ct, nil)
@@ -70,7 +69,6 @@ func TestV3_NotReadyDuringWarmup(t *testing.T) {
 func TestV3_EntryOnTwoConfirmBars(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: false})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -85,7 +83,6 @@ func TestV3_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1, SameDayBlock: false})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	plan := s.Update(context.Background(), longBreak(110), nil)
@@ -99,7 +96,6 @@ func TestV3_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 func TestV3_BlockAfterStopOut(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -138,7 +134,6 @@ func TestV3_NoBlockAfterManualClose(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	day := int64(19723)
@@ -163,7 +158,6 @@ func TestV3_NoBlockAfterManualClose(t *testing.T) {
 func TestV3_BlockLiftsNextDay(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -191,7 +185,6 @@ func TestV3_SameDayBlockDisabled(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: false})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	day := int64(19723)
@@ -210,7 +203,6 @@ func TestV3_SameDayBlockDisabled(t *testing.T) {
 func TestV3_Reset_ClearsAllState(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -237,7 +229,6 @@ func TestV3_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Opens)
@@ -246,7 +237,6 @@ func TestV3_NilCandleTime_ReturnsSafely(t *testing.T) {
 func TestV3_ShortEntryOnTwoConfirmBars(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: false})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -260,7 +250,6 @@ func TestV3_ShortEntryOnTwoConfirmBars(t *testing.T) {
 func TestV3_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: false})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -281,7 +270,6 @@ func TestV3_ReverseClosesOppositeAndOpens(t *testing.T) {
 func TestV3_BlockDoesNotPreventNilRunUpdate(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, SameDayBlock: true})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 

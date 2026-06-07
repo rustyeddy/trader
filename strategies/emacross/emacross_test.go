@@ -31,7 +31,6 @@ func TestCross_WarmupNoSignals(t *testing.T) {
 		Scale:      trader.PriceScale,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 
 	plans := feedPlans(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
 	require.Len(t, plans, 4)
@@ -49,7 +48,6 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
 		Scale:      trader.PriceScale,
 		MinSpread:  0,
 	})
-	require.NoError(t, err)
 	require.NoError(t, err)
 
 	closes := make([]float64, 0, 200)
@@ -96,7 +94,6 @@ func TestCross_MinSpreadFiltersNoise(t *testing.T) {
 		Scale:      trader.PriceScale,
 		MinSpread:  0.0010,
 	})
-	require.NoError(t, err)
 	require.NoError(t, err)
 
 	closes := make([]float64, 0, 64)
@@ -155,13 +152,11 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 func TestCross_Name(t *testing.T) {
 	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
 func TestCrossPlan_Reason(t *testing.T) {
 	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: trader.PriceScale})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	d := s.Update(context.Background(), &trader.CandleTime{Candle: mkClose(1.0)}, nil)
 	require.NotEmpty(t, d.Reason)

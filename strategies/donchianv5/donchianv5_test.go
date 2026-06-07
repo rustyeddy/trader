@@ -146,7 +146,6 @@ func TestV5_EmptyBlockedDays_NoBlocking(t *testing.T) {
 		// BlockedDays nil → no blocking
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	ct1 := &trader.CandleTime{Candle: longBreak(110).Candle}
@@ -204,7 +203,6 @@ func TestV5_Reset_ClearsState(t *testing.T) {
 		ADXThreshold:  25,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 	s.pendingSide = trader.Long
 	s.pendingCount = 2
@@ -222,7 +220,6 @@ func TestV5_ShortEntry(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	s.Update(context.Background(), shortBreak(90), nil)
@@ -234,7 +231,6 @@ func TestV5_ShortEntry(t *testing.T) {
 func TestV5_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)

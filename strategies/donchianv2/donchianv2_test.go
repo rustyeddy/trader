@@ -51,7 +51,6 @@ func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	for i := 0; i < 4; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 105}}
 		plan := s.Update(context.Background(), ct, nil)
@@ -63,7 +62,6 @@ func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 func TestBreakout_NoEntryOnFirstBreakBar(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110, lo=90
 
@@ -77,7 +75,6 @@ func TestBreakout_NoEntryOnFirstBreakBar(t *testing.T) {
 func TestBreakout_EntryOnSecondConsecutiveBreakBar(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 
@@ -94,7 +91,6 @@ func TestBreakout_EntryOnSecondConsecutiveBreakBar(t *testing.T) {
 func TestBreakout_StreakResetByInsideBar(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 
@@ -119,7 +115,6 @@ func TestBreakout_StreakResetByWeakFirstBar(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Closes above channel but weak (close near bottom of bar range).
@@ -136,7 +131,6 @@ func TestBreakout_ShortEntryOnTwoConsecutiveBreaks(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5) // channel lo=90
 
 	// Bar 1: pendingLevel=90.
@@ -152,7 +146,6 @@ func TestBreakout_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// With confirm_bars=1 the first strong breakout bar should enter immediately.
@@ -164,7 +157,6 @@ func TestBreakout_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 func TestBreakout_DirectionFlipResetsStreak(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110, lo=90
 
@@ -183,7 +175,6 @@ func TestBreakout_DirectionFlipResetsStreak(t *testing.T) {
 func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -204,7 +195,6 @@ func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -228,7 +218,6 @@ func TestBreakout_Reset(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 	s.Update(context.Background(), longBreak(110), nil) // start streak
 
@@ -242,7 +231,6 @@ func TestBreakout_Reset(t *testing.T) {
 func TestBreakout_ThreeConfirmBars(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 3})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 

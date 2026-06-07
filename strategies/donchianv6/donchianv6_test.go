@@ -62,7 +62,6 @@ func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
 		BlockMonday:   true,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// 2024-01-01 = Monday = unix day 19723
@@ -90,7 +89,6 @@ func TestV6_MondayBlock_AllowsEntryOnTuesday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockMonday:   true,
 	})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -128,7 +126,6 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 		BlockMonday:   true,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Bar 1 on Friday: streak starts.
@@ -162,7 +159,6 @@ func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
 		BlockMonday:   false,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	monday := int64(19723)
@@ -184,7 +180,6 @@ func TestV6_FridayBlock_BlocksEntryOnFriday(t *testing.T) {
 		ADXThreshold:  25,
 		BlockFriday:   true,
 	})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	warm(t, s, 5)
 
@@ -231,7 +226,6 @@ func TestV6_Reset_ClearsState(t *testing.T) {
 		BlockMonday:   true,
 	})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 	s.pendingSide = trader.Long
 	s.pendingCount = 2
@@ -249,7 +243,6 @@ func TestV6_ShortEntry(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
 	require.NoError(t, err)
-	require.NoError(t, err)
 	warm(t, s, 5)
 
 	s.Update(context.Background(), shortBreak(90), nil)
@@ -261,7 +254,6 @@ func TestV6_ShortEntry(t *testing.T) {
 func TestV6_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
-	require.NoError(t, err)
 	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)
