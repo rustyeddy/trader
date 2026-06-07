@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/service"
 )
@@ -32,27 +33,53 @@ var (
 	closeUnits int64
 )
 
-func New() *cobra.Command {
+func New(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "order",
 		Short: "Live order management (OANDA demo)",
 	}
-	cmd.AddCommand(newOrderCmd())
-	cmd.AddCommand(listOrdersCmd())
-	cmd.AddCommand(closeOrderCmd())
-	cmd.AddCommand(transactionsCmd())
-	cmd.AddCommand(transactionsStreamCmd())
-	cmd.AddCommand(pricesCmd())
+	cmd.AddCommand(newOrderCmd(rc))
+	cmd.AddCommand(listOrdersCmd(rc))
+	cmd.AddCommand(closeOrderCmd(rc))
+	cmd.AddCommand(transactionsCmd(rc))
+	cmd.AddCommand(transactionsStreamCmd(rc))
+	cmd.AddCommand(pricesCmd(rc))
 	return cmd
 }
 
-// buildService wires a Service from current flag values + env fallbacks.
-// Used by every subcommand in this package.
-func buildService(ctx context.Context) (*service.Service, error) {
+// buildService wires a Service from current flag values + global config + env
+// fallbacks. cmd is used to detect which flags were explicitly set by the user.
+func buildService(ctx context.Context, cmd *cobra.Command, rc *traderpkg.RootConfig) (*service.Service, error) {
+	// Token: explicit flag > global config > env var.
+	tok := token
+	if !cmd.Flags().Changed("token") {
+		if rc != nil && rc.OANDAToken != "" {
+			tok = rc.OANDAToken
+		} else {
+			tok = os.Getenv("OANDA_TOKEN")
+		}
+	}
+
+	// Account: explicit flag > global config > env var.
+	resolvedAccount := accountID
+	if !cmd.Flags().Changed("account-id") {
+		if rc != nil && rc.OANDAAccountID != "" {
+			resolvedAccount = rc.OANDAAccountID
+		} else {
+			resolvedAccount = os.Getenv("OANDA_ACCOUNT_ID")
+		}
+	}
+
+	// Env: explicit flag > global config > default "practice".
+	resolvedEnv := env
+	if !cmd.Flags().Changed("env") && rc != nil && rc.OANDAEnv != "" {
+		resolvedEnv = rc.OANDAEnv
+	}
+
 	svc, err := service.New(service.Config{
-		Env:       env,
-		Token:     token,
-		AccountID: accountID,
+		Env:       resolvedEnv,
+		Token:     tok,
+		AccountID: resolvedAccount,
 	})
 	if err != nil {
 		return nil, err
@@ -72,18 +99,20 @@ func buildService(ctx context.Context) (*service.Service, error) {
 
 // addCommonFlags adds the OANDA auth/account flags every order subcommand needs.
 func addCommonFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
-	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
-	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (takes precedence over global config and OANDA_ACCOUNT_ID env var)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (takes precedence over global config)")
 }
 
 // ── order new ─────────────────────────────────────────────────────────────
 
-func newOrderCmd() *cobra.Command {
+func newOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new",
 		Short: "Size and submit a market order with confirmation",
-		RunE:  runNewOrder,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runNewOrder(cmd, args, rc)
+		},
 	}
 	cmd.Flags().StringVar(&instrument, "instrument", "", "Instrument in OANDA format, e.g. USD_JPY (required)")
 	cmd.Flags().StringVar(&side, "side", "", "Trade direction: long or short (required)")
@@ -95,9 +124,9 @@ func newOrderCmd() *cobra.Command {
 	return cmd
 }
 
-func runNewOrder(cmd *cobra.Command, args []string) error {
+func runNewOrder(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx)
+	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
@@ -166,19 +195,21 @@ func printProposal(env string, p service.OrderProposal, riskPct float64) {
 
 // ── order list ────────────────────────────────────────────────────────────
 
-func listOrdersCmd() *cobra.Command {
+func listOrdersCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List open trades from OANDA",
-		RunE:  runListOrders,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runListOrders(cmd, args, rc)
+		},
 	}
 	addCommonFlags(cmd)
 	return cmd
 }
 
-func runListOrders(cmd *cobra.Command, args []string) error {
+func runListOrders(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx)
+	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
@@ -208,11 +239,13 @@ func runListOrders(cmd *cobra.Command, args []string) error {
 
 // ── order close ───────────────────────────────────────────────────────────
 
-func closeOrderCmd() *cobra.Command {
+func closeOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "close",
 		Short: "Close an open trade (full or partial)",
-		RunE:  runCloseOrder,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloseOrder(cmd, args, rc)
+		},
 	}
 	cmd.Flags().StringVar(&tradeID, "trade-id", "", "Trade ID to close (required)")
 	cmd.Flags().Int64Var(&closeUnits, "units", 0, "Units to close (default 0 = full close)")
@@ -221,9 +254,9 @@ func closeOrderCmd() *cobra.Command {
 	return cmd
 }
 
-func runCloseOrder(cmd *cobra.Command, args []string) error {
+func runCloseOrder(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx)
+	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
@@ -257,7 +290,7 @@ func runCloseOrder(cmd *cobra.Command, args []string) error {
 
 // ── order transactions ────────────────────────────────────────────────────
 
-func transactionsCmd() *cobra.Command {
+func transactionsCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	var (
 		sinceID int64
 		limit   int
@@ -267,7 +300,7 @@ func transactionsCmd() *cobra.Command {
 		Short: "List OANDA account transactions since a given ID",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			svc, err := buildService(ctx)
+			svc, err := buildService(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}
@@ -319,7 +352,7 @@ func transactionsCmd() *cobra.Command {
 
 // ── order transactions-stream ─────────────────────────────────────────────
 
-func transactionsStreamCmd() *cobra.Command {
+func transactionsStreamCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	var showHeartbeats bool
 	cmd := &cobra.Command{
 		Use:   "transactions-stream",
@@ -328,7 +361,7 @@ func transactionsStreamCmd() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			svc, err := buildService(ctx)
+			svc, err := buildService(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}

@@ -11,7 +11,7 @@ import (
 	trader "github.com/rustyeddy/trader"
 )
 
-func newPositionCmd(_ *trader.RootConfig) *cobra.Command {
+func newPositionCmd(rc *trader.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		price      float64
@@ -39,6 +39,7 @@ lots is printed.  Supply one of those flags for a specific calculation:
 Notional = units × price  (USD-quoted pairs: EURUSD, GBPUSD, AUDUSD, NZDUSD)
          = units           (USD-base pairs:   USDJPY, USDCHF, USDCAD)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			applyGlobalOANDA(cmd, &auth, rc)
 			inst := trader.NormalizeInstrument(instrument)
 			instMeta := trader.GetInstrument(inst)
 			if instMeta == nil {
