@@ -50,53 +50,25 @@ type BacktestReportSummary struct {
 	TradeDetails []BacktestReportTrade `json:"trade_details,omitempty"`
 
 	// Provenance — always populated; links this report back to its origin.
-	ConfigHash  string    `json:"config_hash"`            // 8-char SHA256 prefix of the run config params
-	GeneratedAt string    `json:"generated_at"`           // RFC3339 UTC timestamp of when the run completed
-	Config      RunConfig `json:"config"`                 // full config snapshot that produced this result
+	ConfigHash  string    `json:"config_hash"`  // 8-char SHA256 prefix of the run config params
+	GeneratedAt string    `json:"generated_at"` // RFC3339 UTC timestamp of when the run completed
+	Config      RunConfig `json:"config"`       // full config snapshot that produced this result
 }
 
 // BacktestReportTrade is a JSON-serialisable record of a single closed trade
 // used inside BacktestReportSummary.TradeDetails.
 type BacktestReportTrade struct {
-	ID             string  `json:"id"`
-	Instrument     string  `json:"instrument"`
-	Side           string  `json:"side"`
-	Units          int64   `json:"units"`
-	OpenPrice      float64 `json:"open_price"`
-	ClosePrice     float64 `json:"close_price"`
-	OpenTime       string  `json:"open_time"`
-	CloseTime      string  `json:"close_time"`
-	PNL            float64 `json:"pnl"`
-	StopPrice      float64 `json:"stop_price,omitempty"`
+	ID              string  `json:"id"`
+	Instrument      string  `json:"instrument"`
+	Side            string  `json:"side"`
+	Units           int64   `json:"units"`
+	OpenPrice       float64 `json:"open_price"`
+	ClosePrice      float64 `json:"close_price"`
+	OpenTime        string  `json:"open_time"`
+	CloseTime       string  `json:"close_time"`
+	PNL             float64 `json:"pnl"`
+	StopPrice       float64 `json:"stop_price,omitempty"`
 	TakeProfitPrice float64 `json:"take_profit_price,omitempty"`
-}
-
-// NewBacktestReportSummary constructs a BacktestReportSummary from a result.
-// NOTE: currently returns a zero-value summary; full mapping is pending a
-// BacktestResult restructure.
-func NewBacktestReportSummary(r *BacktestResult) BacktestReportSummary {
-	return BacktestReportSummary{}
-	// return BacktestReportSummary{
-	// 	Name:         r.Name,
-	// 	Kind:         r.Kind,
-	// 	Strategy:     r.Strategy,
-	// 	Instrument:   r.Instrument,
-	// 	Timeframe:    r.Timeframe,
-	// 	Dataset:      r.Dataset,
-	// 	Start:        formatBacktestSummaryTime(r.Start),
-	// 	End:          formatBacktestSummaryTime(r.End),
-	// 	Trades:       r.Trades,
-	// 	Wins:         r.Wins,
-	// 	Losses:       r.Losses,
-	// 	StartBalance: r.StartBalance.Float64(),
-	// 	EndBalance:   r.EndBalance.Float64(),
-	// 	NetPL:        r.NetPL.Float64(),
-	// 	ReturnPct:    r.ReturnPct.Float64() * 100.0,
-	// 	WinRate:      r.WinRate.Float64() * 100.0,
-	// 	RiskPct:      r.RiskPct.Float64() * 100.0,
-	// 	StopPips:     int32(r.StopPips),
-	// 	RR:           r.RR.Float64(),
-	// }
 }
 
 // PrintSummary writes a human-readable backtest report to w.

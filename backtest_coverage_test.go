@@ -1,7 +1,6 @@
 package trader
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -192,37 +191,4 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	assert.InDelta(t, 60.0, s.WinRate, 1e-9)
 	assert.InDelta(t, 1.0, s.RiskPct, 1e-9)
 	assert.Equal(t, "", s.Stop) // Fake strategy returns no stop description
-}
-
-func TestConfigRunRequest_CurrentBehavior(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{}
-
-	_, err := cfg.runRequest(RunConfig{
-		Data: DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-01", To: "2026-01-10"},
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid date range")
-
-	r, err := cfg.runRequest(RunConfig{
-		Data: DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-10", To: "2026-01-01"},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, r)
-	require.NotNil(t, r.BacktestRequest)
-	assert.Equal(t, "EURUSD", r.Instrument)
-	assert.True(t, r.TimeRange.Valid())
-	assert.Equal(t, H1, r.TimeRange.TF)
-}
-
-func TestPrintBacktestAndNewBacktestReportSummary(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	PrintBacktest(&buf, BacktestResult{})
-	assert.Equal(t, "", buf.String())
-
-	s := NewBacktestReportSummary(&BacktestResult{Trades: 3})
-	assert.Equal(t, BacktestReportSummary{}, s)
 }

@@ -232,32 +232,6 @@ func TestParseTimeframe(t *testing.T) {
 	}
 }
 
-// ─── parseDateStart / parseDateEndExclusive ───────────────────────────────────
-
-func TestParseDateStart_Valid(t *testing.T) {
-	tm, err := parseDateStart("2026-03-15")
-	require.NoError(t, err)
-	assert.Equal(t, 2026, tm.Year())
-	assert.Equal(t, 15, tm.Day())
-}
-
-func TestParseDateStart_Invalid(t *testing.T) {
-	_, err := parseDateStart("15/03/2026")
-	require.Error(t, err)
-}
-
-func TestParseDateEndExclusive_Valid(t *testing.T) {
-	tm, err := parseDateEndExclusive("2026-03-15")
-	require.NoError(t, err)
-	// end-exclusive adds one day
-	assert.Equal(t, 16, tm.Day())
-}
-
-func TestParseDateEndExclusive_Invalid(t *testing.T) {
-	_, err := parseDateEndExclusive("bad-date")
-	require.Error(t, err)
-}
-
 // ─── firstNonEmpty ────────────────────────────────────────────────────────────
 
 func TestFirstNonEmpty(t *testing.T) {
@@ -267,16 +241,6 @@ func TestFirstNonEmpty(t *testing.T) {
 	assert.Equal(t, "c", firstNonEmpty("", "", "c"))
 	assert.Equal(t, "", firstNonEmpty("", ""))
 	assert.Equal(t, "", firstNonEmpty())
-}
-
-// ─── percentToRate ────────────────────────────────────────────────────────────
-
-func TestPercentToRate(t *testing.T) {
-	r := percentToRate(1.0)
-	assert.Equal(t, RateFromFloat(0.01), r)
-
-	r = percentToRate(0.5)
-	assert.Equal(t, RateFromFloat(0.005), r)
 }
 
 // ─── ApplyCommonParamOverrides ────────────────────────────────────────────────

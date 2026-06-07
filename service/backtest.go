@@ -219,7 +219,7 @@ func WriteBacktestSummaryOrg(path string, s trader.BacktestReportSummary) error 
 // RebuildBacktestIndex scans dir for persisted report JSON files and rewrites
 // index.org as a comparison table.
 func RebuildBacktestIndex(dir string) error {
-	summaries, err := trader.LoadOrgIndexSummaries(dir)
+	summaries, err := ListBacktestSummaries(dir)
 	if err != nil {
 		return err
 	}
@@ -247,6 +247,9 @@ func ListBacktestSummaries(dir string) ([]trader.BacktestReportSummary, error) {
 
 	var summaries []trader.BacktestReportSummary
 	for _, path := range matches {
+		if filepath.Base(path) == "index.json" {
+			continue
+		}
 		s, err := ReadBacktestSummaryFile(path)
 		if err != nil {
 			continue

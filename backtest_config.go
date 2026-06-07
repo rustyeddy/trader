@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,11 +27,11 @@ type RunDefaults struct {
 	Scale           int64   `json:"scale" yaml:"scale"`
 	Strict          bool    `json:"strict" yaml:"strict"`
 
-	RiskPct      float64 `json:"risk-pct" yaml:"risk-pct"`
-	StopPips     int32   `json:"stop-pips" yaml:"stop-pips"`
-	TakePips     int32   `json:"take-pips" yaml:"take-pips"`
-	RR           float64 `json:"rr" yaml:"rr"`
-	Units        int32   `json:"units" yaml:"units"`
+	RiskPct       float64 `json:"risk-pct" yaml:"risk-pct"`
+	StopPips      int32   `json:"stop-pips" yaml:"stop-pips"`
+	TakePips      int32   `json:"take-pips" yaml:"take-pips"`
+	RR            float64 `json:"rr" yaml:"rr"`
+	Units         int32   `json:"units" yaml:"units"`
 	SlippagePips  float64 `json:"slippage-pips" yaml:"slippage-pips"`
 	MaxSpreadPips float64 `json:"max-spread-pips" yaml:"max-spread-pips"`
 
@@ -102,27 +101,6 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// runRequest constructs a minimal Backtest from a single RunConfig.
-// Note: this is a lower-level builder used internally; prefer GetBacktests
-// for full default-merging and validation.
-func (c *Config) runRequest(rcfg RunConfig) (*Backtest, error) {
-	fmt.Printf("rcfg: %+v\n", rcfg)
-
-	tr, err := timeRangeFromStrings(rcfg.Data.To, rcfg.Data.From, rcfg.Data.Timeframe)
-	if err != nil {
-		return nil, err
-	}
-
-	btr := &Backtest{
-		BacktestRequest: &BacktestRequest{
-			Name:       "",
-			Instrument: rcfg.Data.Instrument,
-			TimeRange:  tr,
-		},
-	}
-	return btr, nil
-}
-
 // firstNonEmpty returns the first non-blank string from vals, or "" if all
 // are blank or empty.
 func firstNonEmpty(vals ...string) string {
@@ -133,28 +111,6 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-// percentToRate converts a percentage (e.g. 0.5 meaning 0.5 %) to a
-// RateScale-scaled Rate value.
-func percentToRate(pct float64) Rate {
-	return RateFromFloat(pct / 100.0)
-}
-
-// parseDateStart parses a "YYYY-MM-DD" string as the inclusive start of a
-// date range (midnight UTC on that day).
-func parseDateStart(s string) (time.Time, error) {
-	return time.Parse("2006-01-02", s)
-}
-
-// parseDateEndExclusive parses a "YYYY-MM-DD" string and returns midnight
-// of the following day, making the range end exclusive (i.e. [start, end)).
-func parseDateEndExclusive(s string) (time.Time, error) {
-	t, err := time.Parse("2006-01-02", s)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return t.AddDate(0, 0, 1), nil
 }
 
 // parseTimeframe converts a case-insensitive timeframe string ("M1", "H1",

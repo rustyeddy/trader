@@ -1,13 +1,9 @@
 package trader
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -83,32 +79,6 @@ func WriteOrgIndex(w io.Writer, summaries []BacktestReportSummary) {
 	tbl.write(w, "  ")
 }
 
-// LoadOrgIndexSummaries scans dir for *.json files and returns all summaries found.
-func LoadOrgIndexSummaries(dir string) ([]BacktestReportSummary, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var out []BacktestReportSummary
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || e.Name() == "index.json" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var s BacktestReportSummary
-		if err := json.Unmarshal(data, &s); err != nil {
-			continue
-		}
-		out = append(out, s)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
 // ── internal helpers ──────────────────────────────────────────────────────────
 
 func writeProperties(w io.Writer, s BacktestReportSummary) {
@@ -181,11 +151,11 @@ func writeSummaryTable(w io.Writer, s BacktestReportSummary) {
 }
 
 type monthStats struct {
-	month   string
-	trades  int
-	wins    int
-	losses  int
-	netPL   float64
+	month  string
+	trades int
+	wins   int
+	losses int
+	netPL  float64
 }
 
 func writeMonthlyTable(w io.Writer, s BacktestReportSummary) {

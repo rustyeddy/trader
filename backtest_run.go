@@ -20,15 +20,3 @@ func (run *BacktestRun) GetTrades() []*Trade {
 	}
 	return run.Trades
 }
-
-// BuildBacktestResult copies the account's closed trades into the run.
-// Full result computation (win/loss counts, P/L) is done by Backtest.BuildBacktestResult.
-func (run *BacktestRun) BuildBacktestResult(acct *Account) {
-	if run == nil || acct == nil {
-		return
-	}
-
-	run.Trades = append(run.Trades[:0], acct.Trades...)
-
-	// build summary result from acct.Trades/account values
-}
