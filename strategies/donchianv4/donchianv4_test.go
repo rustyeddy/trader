@@ -66,7 +66,8 @@ func warmADX(s *Breakout, count int) {
 
 func TestV4_NotReadyDuringWarmup(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	for i := 0; i < 4; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 105}}
 		plan := s.Update(context.Background(), ct, nil)
@@ -79,7 +80,8 @@ func TestV4_EntryWhenADXNotReady_Bypassed(t *testing.T) {
 	t.Parallel()
 	// ADX period=14 needs 28 bars; with period=5 Donchian, ADX won't be ready
 	// until after many bars — so the gate is bypassed and v2 logic applies.
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	require.False(t, s.adx.Ready(), "ADX must still be warming up at this point")
@@ -93,7 +95,8 @@ func TestV4_EntryWhenADXNotReady_Bypassed(t *testing.T) {
 
 func TestV4_EntryBlockedWhenADXBelowThreshold(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 50})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 50})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Force ADX ready with a moderate (non-extreme) value by seeding with
@@ -124,7 +127,8 @@ func TestV4_EntryBlockedWhenADXBelowThreshold(t *testing.T) {
 
 func TestV4_EntryBlockedWhenDIDirectionDisagrees(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 1})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 1})
+	require.NoError(t, err)
 	// ADXThreshold=1 so ADX strength always passes.
 	warm(t, s, 5)
 
@@ -156,7 +160,8 @@ func TestV4_StreakPreservedOnADXBlock(t *testing.T) {
 	// With threshold=1, ADX strength gate always passes; only DI direction matters.
 	// We inject a bearish DI state, block a long entry, then inject bullish DI
 	// and verify the streak is still active (entry fires without restarting).
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 200})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 200})
+	require.NoError(t, err)
 	// ADXThreshold=200 (impossible to reach) — every confirmed streak is blocked.
 	warm(t, s, 5)
 	warmADX(s, 30)
@@ -174,7 +179,8 @@ func TestV4_StreakPreservedOnADXBlock(t *testing.T) {
 
 func TestV4_ShortEntry(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// ADX not ready → gate bypassed → v2 logic.
@@ -189,7 +195,8 @@ func TestV4_ShortEntry(t *testing.T) {
 
 func TestV4_ConfirmBarsOne(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 	require.False(t, s.adx.Ready()) // gate bypassed
 
@@ -199,7 +206,8 @@ func TestV4_ConfirmBarsOne(t *testing.T) {
 
 func TestV4_Reset_ClearsAllState(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 	s.pendingSide = trader.Long
 	s.pendingCount = 2
@@ -218,7 +226,8 @@ func TestV4_Reset_ClearsAllState(t *testing.T) {
 
 func TestV4_NilCandleTime_ReturnsSafely(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	plan := s.Update(context.Background(), nil, nil)
 	require.NotNil(t, plan)
 	assert.Empty(t, plan.Opens)
@@ -226,7 +235,8 @@ func TestV4_NilCandleTime_ReturnsSafely(t *testing.T) {
 
 func TestV4_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 	require.False(t, s.adx.Ready()) // gate bypassed for this test
 
@@ -246,7 +256,8 @@ func TestV4_ReverseClosesOppositeAndOpens(t *testing.T) {
 
 func TestV4_WeakFirstBar_StreakReset(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	weak := &trader.CandleTime{
@@ -260,6 +271,7 @@ func TestV4_WeakFirstBar_StreakReset(t *testing.T) {
 
 func TestV4_Name(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 20, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	s, err := New(Config{Period: 20, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
+	require.NoError(t, err)
 	assert.Equal(t, "DONCHIAN-V4(20,cs=0.60,cb=2,adx=14/25.0)", s.Name())
 }

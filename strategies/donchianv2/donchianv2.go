@@ -51,12 +51,12 @@ type Config struct {
 	ConfirmBars   int     // consecutive closes beyond channel required (default 2)
 }
 
-func New(cfg Config) *Breakout {
+func New(cfg Config) (*Breakout, error) {
 	if cfg.Period <= 1 {
-		panic("donchianv2: period must be > 1")
+		return nil, fmt.Errorf("donchianv2: period must be > 1")
 	}
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
-		panic("donchianv2: close_strength must be in [0.5, 1.0]")
+		return nil, fmt.Errorf("donchianv2: close_strength must be in [0.5, 1.0]")
 	}
 	cb := cfg.ConfirmBars
 	if cb < 1 {
@@ -70,7 +70,7 @@ func New(cfg Config) *Breakout {
 		lows:          make([]trader.Price, cfg.Period),
 		name: fmt.Sprintf("DONCHIAN-V2(%d,cs=%.2f,cb=%d)",
 			cfg.Period, cfg.CloseStrength, cb),
-	}
+	}, nil
 }
 
 func (d *Breakout) Name() string            { return d.name }
@@ -288,5 +288,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		Period:        int(period),
 		CloseStrength: closeStrength,
 		ConfirmBars:   int(confirmBars),
-	}), nil
+	})
 }

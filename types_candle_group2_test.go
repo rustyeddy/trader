@@ -121,23 +121,24 @@ func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 		bitSet(cs.Valid, i)
 	}
 
-	h1 := cs.AggregateH1(50)
+	h1, err := cs.AggregateH1(50)
+	require.NoError(t, err)
 	require.Len(t, h1.Candles, 2)
 	assert.True(t, h1.IsValid(0))
 	assert.False(t, h1.IsValid(1))
 	assert.Equal(t, Candle{Open: 1000, High: 1159, Low: 841, Close: 1109}, h1.Candles[0])
 
-	withClamp := cs.AggregateH1(0) // minValid should clamp to 1
+	withClamp, err := cs.AggregateH1(0) // minValid should clamp to 1
+	require.NoError(t, err)
 	assert.True(t, withClamp.IsValid(0))
 	assert.True(t, withClamp.IsValid(1))
 }
 
-// TestCandleSetAggregateH1_PanicsForNonM1 verifies expected behavior for this component.
-func TestCandleSetAggregateH1_PanicsForNonM1(t *testing.T) {
+// TestCandleSetAggregateH1_ErrorForNonM1 verifies that AggregateH1 returns an error for non-M1 input.
+func TestCandleSetAggregateH1_ErrorForNonM1(t *testing.T) {
 	t.Parallel()
 
 	cs := &candleSet{Timeframe: H1}
-	assert.Panics(t, func() {
-		_ = cs.AggregateH1(10)
-	})
+	_, err := cs.AggregateH1(10)
+	assert.Error(t, err)
 }

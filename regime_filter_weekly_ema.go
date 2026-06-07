@@ -31,12 +31,16 @@ type WeeklyEMAFilter struct {
 	hasWeek bool
 }
 
-func NewWeeklyEMAFilter(period int, scale Scale6) *WeeklyEMAFilter {
+func NewWeeklyEMAFilter(period int, scale Scale6) (*WeeklyEMAFilter, error) {
+	ema, err := NewEMA(period, scale)
+	if err != nil {
+		return nil, err
+	}
 	return &WeeklyEMAFilter{
-		ema:    NewEMA(period, scale),
+		ema:    ema,
 		period: period,
 		scale:  float64(scale),
-	}
+	}, nil
 }
 
 func (f *WeeklyEMAFilter) Name() string {

@@ -22,14 +22,18 @@ type ATRPercentileFilter struct {
 	count  int       // readings accumulated so far (capped at windowSize)
 }
 
-func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale Scale6) *ATRPercentileFilter {
+func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale Scale6) (*ATRPercentileFilter, error) {
+	atr, err := NewATR(atrPeriod, scale)
+	if err != nil {
+		return nil, err
+	}
 	return &ATRPercentileFilter{
-		atr:        NewATR(atrPeriod, scale),
+		atr:        atr,
 		atrPeriod:  atrPeriod,
 		windowSize: windowSize,
 		threshold:  threshold,
 		window:     make([]float64, windowSize),
-	}
+	}, nil
 }
 
 func (f *ATRPercentileFilter) Name() string {

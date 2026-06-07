@@ -16,7 +16,8 @@ func atrPCT(open, high, low, close Price) CandleTime {
 
 func TestATRPercentileFilter_NotReadyBeforeWarmup(t *testing.T) {
 	t.Parallel()
-	f := NewATRPercentileFilter(3, 10, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(3, 10, 20.0, PriceScale)
+	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	// During warmup, Trending and AllowSide must not gate entries.
 	assert.True(t, f.Trending())
@@ -27,7 +28,8 @@ func TestATRPercentileFilter_NotReadyBeforeWarmup(t *testing.T) {
 func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 	t.Parallel()
 	// ATR(3) needs 4 candles (3 periods = 4 candles). windowSize=5 needs 1 ATR value.
-	f := NewATRPercentileFilter(3, 5, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(3, 5, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	candles := []CandleTime{
 		atrPCT(100000, 101000, 99000, 100500),
@@ -43,7 +45,8 @@ func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 
 func TestATRPercentileFilter_AllowSideAlwaysTrue(t *testing.T) {
 	t.Parallel()
-	f := NewATRPercentileFilter(3, 10, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(3, 10, 20.0, PriceScale)
+	require.NoError(t, err)
 	// Feed enough bars to warm up.
 	for i := 0; i < 20; i++ {
 		p := Price(100000 + i*1000)
@@ -58,7 +61,8 @@ func TestATRPercentileFilter_TrendingTrueWhenHighVolatility(t *testing.T) {
 	t.Parallel()
 	// Feed a long sequence of normal-range bars, then a burst of wide bars.
 	// After the burst the current ATR should rank above the 20th percentile.
-	f := NewATRPercentileFilter(5, 50, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(5, 50, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	// 50 narrow bars to fill the window
 	for i := 0; i < 50; i++ {
@@ -78,7 +82,8 @@ func TestATRPercentileFilter_TrendingFalseWhenLowVolatility(t *testing.T) {
 	t.Parallel()
 	// Fill window with wide bars, then switch to very narrow bars.
 	// ATR will drop and rank below the 20th percentile.
-	f := NewATRPercentileFilter(5, 50, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(5, 50, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	// 50 wide bars
 	for i := 0; i < 50; i++ {
@@ -125,6 +130,7 @@ func TestATRPercentileFilter_FactoryDefaults(t *testing.T) {
 
 func TestATRPercentileFilter_Name(t *testing.T) {
 	t.Parallel()
-	f := NewATRPercentileFilter(20, 200, 20.0, PriceScale)
+	f, err := NewATRPercentileFilter(20, 200, 20.0, PriceScale)
+	require.NoError(t, err)
 	assert.Equal(t, "ATRPercentile(20,200,20)", f.Name())
 }

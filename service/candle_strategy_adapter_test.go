@@ -190,7 +190,8 @@ func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
 	t.Parallel()
 
 	// Build a chandelier exit and warm it up so InitialStop returns non-zero.
-	exit := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	exit, err := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	require.NoError(t, err)
 	warmCandles := []trader.Candle{
 		{Open: 110000, High: 111000, Low: 109000, Close: 110500},
 		{Open: 110500, High: 112000, Low: 110000, Close: 111000},
@@ -275,7 +276,8 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	t.Parallel()
 
 	// Build a chandelier exit that needs 3 bars to be ready.
-	exit := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	exit, err := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	require.NoError(t, err)
 	require.False(t, exit.Ready())
 
 	// Write 5 synthetic H1 candles into a temp store. Place them at the end of
@@ -302,8 +304,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	candles := make([]trader.Candle, startSlot+len(real))
 	copy(candles[startSlot:], real)
 
-	err := s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1, monthStart, candles)
-	require.NoError(t, err)
+	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1, monthStart, candles))
 
 	// Swap the global store to point at our temp dir and restore after.
 	restore := trader.SwapStore(s)

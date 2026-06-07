@@ -94,7 +94,7 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 		if threshold <= 0 {
 			threshold = 61.8
 		}
-		return NewChoppinessFilter(int(period), threshold, scale), nil
+		return NewChoppinessFilter(int(period), threshold, scale)
 
 	case "choppiness-d1":
 		period, _, err := getInt32Param(cfg.Params, "period")
@@ -111,7 +111,7 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 		if threshold <= 0 {
 			threshold = 61.8
 		}
-		return NewD1ChoppinessFilter(int(period), threshold, scale), nil
+		return NewD1ChoppinessFilter(int(period), threshold, scale)
 
 	case "session":
 		start, _, err := getInt32Param(cfg.Params, "session_start")
@@ -145,7 +145,7 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 		if threshold <= 0 {
 			threshold = 20.0
 		}
-		return NewD1ADXFilter(int(period), threshold, scale), nil
+		return NewD1ADXFilter(int(period), threshold, scale)
 
 	case "weekly-ema":
 		period, _, err := getInt32Param(cfg.Params, "period")
@@ -155,7 +155,7 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 		if period <= 0 {
 			period = 20
 		}
-		return NewWeeklyEMAFilter(int(period), scale), nil
+		return NewWeeklyEMAFilter(int(period), scale)
 
 	case "atr-percentile":
 		atrPeriod, _, err := getInt32Param(cfg.Params, "atr_period")
@@ -179,7 +179,7 @@ func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
 		if threshold <= 0 {
 			threshold = 20.0
 		}
-		return NewATRPercentileFilter(int(atrPeriod), int(windowSize), threshold, scale), nil
+		return NewATRPercentileFilter(int(atrPeriod), int(windowSize), threshold, scale)
 
 	case "composite":
 		if len(cfg.Filters) == 0 {

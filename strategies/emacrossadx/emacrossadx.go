@@ -41,15 +41,15 @@ type Config struct {
 	RequireADXReady bool
 }
 
-func New(cfg Config) *Strategy {
+func New(cfg Config) (*Strategy, error) {
 	if cfg.FastPeriod <= 0 || cfg.SlowPeriod <= 0 || cfg.ADXPeriod <= 0 {
-		panic("emacrossadx: periods must be > 0")
+		return nil, fmt.Errorf("emacrossadx: periods must be > 0")
 	}
 	if cfg.FastPeriod >= cfg.SlowPeriod {
-		panic("emacrossadx: FastPeriod must be < SlowPeriod")
+		return nil, fmt.Errorf("emacrossadx: FastPeriod must be < SlowPeriod")
 	}
 	if cfg.Scale <= 0 {
-		panic("emacrossadx: Scale must be > 0")
+		return nil, fmt.Errorf("emacrossadx: Scale must be > 0")
 	}
 	if cfg.ADXThreshold <= 0 {
 		cfg.ADXThreshold = 20.0
@@ -62,13 +62,30 @@ func New(cfg Config) *Strategy {
 
 	var atr *trader.ATR
 	if cfg.ATRPeriod > 0 {
-		atr = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		var err error
+		atr, err = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	fast, err := trader.NewEMA(cfg.FastPeriod, cfg.Scale)
+	if err != nil {
+		return nil, err
+	}
+	slow, err := trader.NewEMA(cfg.SlowPeriod, cfg.Scale)
+	if err != nil {
+		return nil, err
+	}
+	adx, err := trader.NewADX(cfg.ADXPeriod, cfg.Scale)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Strategy{
 		core: emacross.Core{
-			Fast:          trader.NewEMA(cfg.FastPeriod, cfg.Scale),
-			Slow:          trader.NewEMA(cfg.SlowPeriod, cfg.Scale),
+			Fast:          fast,
+			Slow:          slow,
 			ATR:           atr,
 			MinSpread:     cfg.MinSpread,
 			Scale:         cfg.Scale,
@@ -76,11 +93,11 @@ func New(cfg Config) *Strategy {
 			ATRMultiplier: mult,
 			Name:          fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
-		adx:             trader.NewADX(cfg.ADXPeriod, cfg.Scale),
+		adx:             adx,
 		adxThreshold:    cfg.ADXThreshold,
 		requireDI:       cfg.RequireDI,
 		requireADXReady: cfg.RequireADXReady,
-	}
+	}, nil
 }
 
 func (x *Strategy) Name() string            { return x.core.Name }
@@ -286,5 +303,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		ADXThreshold:    adxThreshold,
 		RequireDI:       requireDI,
 		RequireADXReady: requireADXReady,
-	}), nil
+	})
 }

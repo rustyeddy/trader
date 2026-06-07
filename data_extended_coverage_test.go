@@ -41,14 +41,15 @@ func TestReadCSV_BadTimestamp(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"NOT_A_NUMBER,100,99,98,99,1,2,3,0x0001\n",
 	), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse timestamp")
 }
@@ -59,7 +60,8 @@ func TestReadCSV_BadHighValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -67,7 +69,7 @@ func TestReadCSV_BadHighValue(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse high")
 }
@@ -78,7 +80,8 @@ func TestReadCSV_BadOpenValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -86,7 +89,7 @@ func TestReadCSV_BadOpenValue(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse open")
 }
@@ -97,7 +100,8 @@ func TestReadCSV_BadLowValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -105,7 +109,7 @@ func TestReadCSV_BadLowValue(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse low")
 }
@@ -116,7 +120,8 @@ func TestReadCSV_BadCloseValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -124,7 +129,7 @@ func TestReadCSV_BadCloseValue(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse close")
 }
@@ -135,7 +140,8 @@ func TestReadCSV_BadAvgSpread(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -143,7 +149,7 @@ func TestReadCSV_BadAvgSpread(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse avgspread")
 }
@@ -154,7 +160,8 @@ func TestReadCSV_BadMaxSpread(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -162,7 +169,7 @@ func TestReadCSV_BadMaxSpread(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse maxspread")
 }
@@ -173,7 +180,8 @@ func TestReadCSV_BadTicks(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -181,7 +189,7 @@ func TestReadCSV_BadTicks(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse ticks")
 }
@@ -192,7 +200,8 @@ func TestReadCSV_BadFlags(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -200,7 +209,7 @@ func TestReadCSV_BadFlags(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse flags")
 }
@@ -212,7 +221,8 @@ func TestReadCSV_TimestampOutOfRange(t *testing.T) {
 	// Timestamp for Feb 1 2026 - outside January range
 	ts := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: M1, Year: 2026, Month: 1}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
@@ -220,7 +230,7 @@ func TestReadCSV_TimestampOutOfRange(t *testing.T) {
 		ts.Unix(),
 	)), 0o644))
 
-	_, err := s.ReadCSV(k)
+	_, err = s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "out of range")
 }
@@ -454,7 +464,8 @@ func TestStoreExistsTwoPaths(t *testing.T) {
 	require.False(t, exists)
 
 	// Create file
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
 

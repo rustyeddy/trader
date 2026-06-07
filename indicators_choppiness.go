@@ -33,19 +33,19 @@ type ciBar struct {
 	low  float64
 }
 
-func NewChoppinessIndex(period int, scale Scale6) *ChoppinessIndex {
+func NewChoppinessIndex(period int, scale Scale6) (*ChoppinessIndex, error) {
 	if period < 2 {
-		panic("ChoppinessIndex period must be >= 2")
+		return nil, fmt.Errorf("ChoppinessIndex period must be >= 2")
 	}
 	if scale <= 0 {
-		panic("ChoppinessIndex scale must be > 0")
+		return nil, fmt.Errorf("ChoppinessIndex scale must be > 0")
 	}
 	return &ChoppinessIndex{
 		n:     period,
 		scale: float64(scale),
 		name:  fmt.Sprintf("CI(%d)", period),
 		buf:   make([]ciBar, period),
-	}
+	}, nil
 }
 
 func (c *ChoppinessIndex) Name() string   { return c.name }

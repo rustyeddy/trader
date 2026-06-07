@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // loadCandleSet is an internal helper for trader type processing.
@@ -55,7 +56,8 @@ func TestReadCandleSetFile(t *testing.T) {
 // TestAggregateH1 verifies expected behavior for this component.
 func TestAggregateH1(t *testing.T) {
 	cs := loadCandleSet(t)
-	h1 := cs.AggregateH1(50)
+	h1, err := cs.AggregateH1(50)
+	require.NoError(t, err)
 	h1.BuildGapReport()
 	s := h1.Stats()
 

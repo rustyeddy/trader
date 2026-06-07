@@ -11,11 +11,15 @@ type ChoppinessFilter struct {
 	threshold float64
 }
 
-func NewChoppinessFilter(period int, threshold float64, scale Scale6) *ChoppinessFilter {
-	return &ChoppinessFilter{
-		ci:        NewChoppinessIndex(period, scale),
-		threshold: threshold,
+func NewChoppinessFilter(period int, threshold float64, scale Scale6) (*ChoppinessFilter, error) {
+	ci, err := NewChoppinessIndex(period, scale)
+	if err != nil {
+		return nil, err
 	}
+	return &ChoppinessFilter{
+		ci:        ci,
+		threshold: threshold,
+	}, nil
 }
 
 func (f *ChoppinessFilter) Name() string {

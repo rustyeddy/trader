@@ -15,7 +15,8 @@ func bbCandle(close Price) Candle {
 
 func TestBollingerBands_NotReadyUntilNBars(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	assert.False(t, b.Ready())
 	b.Update(bbCandle(100000))
 	assert.False(t, b.Ready())
@@ -27,7 +28,8 @@ func TestBollingerBands_NotReadyUntilNBars(t *testing.T) {
 
 func TestBollingerBands_MiddleIsCorrectSMA(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	// Feed 1.00, 1.02, 1.04 → mean = 1.02  (PriceScale=100_000)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
@@ -38,7 +40,8 @@ func TestBollingerBands_MiddleIsCorrectSMA(t *testing.T) {
 
 func TestBollingerBands_BandsSymmetric(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
@@ -49,7 +52,8 @@ func TestBollingerBands_BandsSymmetric(t *testing.T) {
 func TestBollingerBands_StdDevCorrect(t *testing.T) {
 	t.Parallel()
 	// values: 1.0, 1.02, 1.04 → mean=1.02, pop variance=((−0.02)²+0²+(0.02)²)/3
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
@@ -60,7 +64,8 @@ func TestBollingerBands_StdDevCorrect(t *testing.T) {
 
 func TestBollingerBands_FlatLineZeroWidth(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(5, 2.0, PriceScale)
+	b, err := NewBollingerBands(5, 2.0, PriceScale)
+	require.NoError(t, err)
 	for range 5 {
 		b.Update(bbCandle(100_000))
 	}
@@ -72,7 +77,8 @@ func TestBollingerBands_FlatLineZeroWidth(t *testing.T) {
 
 func TestBollingerBands_PriceAccessors(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
@@ -84,7 +90,8 @@ func TestBollingerBands_PriceAccessors(t *testing.T) {
 
 func TestBollingerBands_PercentB(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
@@ -96,7 +103,8 @@ func TestBollingerBands_PercentB(t *testing.T) {
 
 func TestBollingerBands_PercentBFlatLine(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	for range 3 {
 		b.Update(bbCandle(100_000))
 	}
@@ -107,7 +115,8 @@ func TestBollingerBands_PercentBFlatLine(t *testing.T) {
 
 func TestBollingerBands_BandWidth(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	b.Update(bbCandle(100_000))
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
@@ -118,7 +127,8 @@ func TestBollingerBands_BandWidth(t *testing.T) {
 
 func TestBollingerBands_Reset(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	for range 3 {
 		b.Update(bbCandle(100_000))
 	}
@@ -133,7 +143,8 @@ func TestBollingerBands_Reset(t *testing.T) {
 func TestBollingerBands_RollingWindowEvictsOldValues(t *testing.T) {
 	t.Parallel()
 	// Feed 5 bars at 1.0 then 1 bar at 1.1; period=3 so window is [1.0, 1.0, 1.1].
-	b := NewBollingerBands(3, 2.0, PriceScale)
+	b, err := NewBollingerBands(3, 2.0, PriceScale)
+	require.NoError(t, err)
 	for range 5 {
 		b.Update(bbCandle(100_000))
 	}
@@ -145,6 +156,7 @@ func TestBollingerBands_RollingWindowEvictsOldValues(t *testing.T) {
 
 func TestBollingerBands_Name(t *testing.T) {
 	t.Parallel()
-	b := NewBollingerBands(20, 2.0, PriceScale)
+	b, err := NewBollingerBands(20, 2.0, PriceScale)
+	require.NoError(t, err)
 	assert.Equal(t, "BB(20,2.0)", b.Name())
 }

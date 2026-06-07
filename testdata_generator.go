@@ -189,7 +189,11 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyAndWrite(store *Store, y
 			Year:       start.Year(),
 			Month:      int(start.Month()),
 		}
-		paths = append(paths, store.PathForAsset(key))
+		p, err := store.PathForAsset(key)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
 	}
 	return paths, nil
 }

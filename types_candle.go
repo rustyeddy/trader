@@ -546,9 +546,9 @@ func (cs *candleSet) Stats() gapStats {
 }
 
 // AggregateH1 is an internal helper for trader type processing.
-func (cs *candleSet) AggregateH1(minValid int) *candleSet {
+func (cs *candleSet) AggregateH1(minValid int) (*candleSet, error) {
 	if cs.Timeframe != 60 {
-		panic("AggregateH1 requires M1 source")
+		return nil, fmt.Errorf("AggregateH1 requires M1 source, got timeframe %d", cs.Timeframe)
 	}
 
 	// Defensive: never allow 0 (would mark empty hours valid)
@@ -619,7 +619,7 @@ func (cs *candleSet) AggregateH1(minValid int) *candleSet {
 		}
 	}
 
-	return h1
+	return h1, nil
 }
 
 // Float64 is an internal helper for trader type processing.

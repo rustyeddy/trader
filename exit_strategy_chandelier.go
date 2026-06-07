@@ -13,11 +13,15 @@ type ChandelierExit struct {
 	multiplier float64
 }
 
-func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) *ChandelierExit {
-	return &ChandelierExit{
-		atr:        NewATR(atrPeriod, scale),
-		multiplier: multiplier,
+func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*ChandelierExit, error) {
+	atr, err := NewATR(atrPeriod, scale)
+	if err != nil {
+		return nil, err
 	}
+	return &ChandelierExit{
+		atr:        atr,
+		multiplier: multiplier,
+	}, nil
 }
 
 func (c *ChandelierExit) Name() string {

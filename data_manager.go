@@ -179,6 +179,7 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 
 	// walk through the want list.  For all ticks on the want list enque on download list
 	// For all candles on want list determine if the provider is complete and ready
+	var walkErr error
 	dm.wants.items.Range(func(k Key, w Want) bool {
 		select {
 		case <-ctx.Done():
@@ -239,16 +240,21 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 				}
 
 			default:
-				panic("bad timeframe ")
+				walkErr = fmt.Errorf("bad timeframe %v for candle key %+v", k.TF, k)
+				return false
 
 			}
 
 		default:
-			panic("unknown k.Kind " + string(k.Kind))
+			walkErr = fmt.Errorf("unknown k.Kind %q for key %+v", string(k.Kind), k)
+			return false
 		}
 		return true
 	})
 
+	if walkErr != nil {
+		return plan, walkErr
+	}
 	return plan, err
 }
 
@@ -318,25 +324,42 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		it, err := store.OpenTickIterator(tickKey)
 		if err != nil {
-			return fmt.Errorf("open tick iterator %s: %w", store.PathForAsset(tickKey), err)
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+			return fmt.Errorf("open tick iterator %s: %w", tickPath, err)
 		}
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-			return fmt.Errorf("build hour M1 %s: %w", store.PathForAsset(tickKey), err)
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+			return fmt.Errorf("build hour M1 %s: %w", tickPath, err)
 		}
 		if hourSet == nil {
 			continue
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
+tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+kPath, err2 := store.PathForAsset(k)
+			if err2 != nil {
+				kPath = "<path unavailable>"
+			}
 			return fmt.Errorf("merge hour %s into month %s: %w",
-				store.PathForAsset(tickKey), store.PathForAsset(k), err)
+				tickPath, kPath, err)
 		}
 	}
 
 	if err := store.WriteCSV(monthSet); err != nil {
-		return fmt.Errorf("write monthly M1 %s: %w", store.PathForAsset(k), err)
+		kPath, _ := store.PathForAsset(k)
+		return fmt.Errorf("write monthly M1 %s: %w", kPath, err)
 	}
 
 	wants.Delete(k)

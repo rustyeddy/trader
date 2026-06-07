@@ -171,13 +171,14 @@ func TestPathForAsset_TickKey(t *testing.T) {
 		Day:        2,
 		Hour:       13,
 	}
-	p := s.PathForAsset(k)
+	p, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.Contains(t, p, "EURUSD")
 	require.Contains(t, p, "2025")
 	require.Contains(t, p, "13h_ticks.bi5")
 }
 
-func TestPathForAsset_PanicOnUnsupported(t *testing.T) {
+func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -188,7 +189,8 @@ func TestPathForAsset_PanicOnUnsupported(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	require.Panics(t, func() { s.PathForAsset(k) })
+	_, err := s.PathForAsset(k)
+	require.Error(t, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +243,8 @@ func TestStoreExists_Present(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("data"), 0o644))
 
