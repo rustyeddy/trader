@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +47,7 @@ func TestHandleListBacktests_Empty(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	assert.Equal(t, float64(0), body["count"])
-	assert.Nil(t, body["summaries"])
+	assert.Equal(t, []any{}, body["summaries"])
 }
 
 func TestHandleListBacktests_ReturnsSummaries(t *testing.T) {
@@ -197,7 +198,7 @@ func TestLoadSummary_BackfillsNameFromFilename(t *testing.T) {
 	path := filepath.Join(dir, "inferred-name.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"strategy":"ema"}`), 0o644))
 
-	s, err := loadSummary(path)
+	s, err := service.ReadBacktestSummaryFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "inferred-name", s.Name)
 }
@@ -210,7 +211,7 @@ func TestLoadSummary_AlwaysUsesFilenameAsName(t *testing.T) {
 	b, _ := json.Marshal(trader.BacktestReportSummary{Name: "run"})
 	require.NoError(t, os.WriteFile(path, b, 0o644))
 
-	s, err := loadSummary(path)
+	s, err := service.ReadBacktestSummaryFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "run-abc123", s.Name)
 }
@@ -220,12 +221,12 @@ func TestLoadSummary_InvalidJSON(t *testing.T) {
 	path := filepath.Join(dir, "bad.json")
 	require.NoError(t, os.WriteFile(path, []byte(`not json`), 0o644))
 
-	_, err := loadSummary(path)
+	_, err := service.ReadBacktestSummaryFile(path)
 	assert.Error(t, err)
 }
 
 func TestLoadSummary_MissingFile(t *testing.T) {
-	_, err := loadSummary("/nonexistent/path/file.json")
+	_, err := service.ReadBacktestSummaryFile("/nonexistent/path/file.json")
 	assert.Error(t, err)
 }
 

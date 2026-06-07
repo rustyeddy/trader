@@ -4,12 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
-	"time"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -169,11 +165,6 @@ func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
 type runBacktestRequest struct {
 	// ConfigPaths is a list of YAML backtest config file paths on the server.
 	ConfigPaths []string `json:"config_paths"`
-
-	// StartDate/EndDate override the date range for all runs in the configs.
-	// ISO-8601 date strings, optional.
-	StartDate string `json:"start_date,omitempty"`
-	EndDate   string `json:"end_date,omitempty"`
 }
 
 func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
@@ -187,27 +178,10 @@ func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summaries, err := s.svc.RunBacktestConfigs(r.Context(), req.ConfigPaths)
+	summaries, err := s.svc.RunBacktestPathSpecsAndWriteReports(r.Context(), req.ConfigPaths, s.effectiveReportsDir())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("run backtest: %v", err))
 		return
-	}
-
-	// Persist each result so it appears in the list view.
-	dir := s.effectiveReportsDir()
-	_ = os.MkdirAll(dir, 0o755)
-	ts := time.Now().Format("20060102-150405")
-	for i := range summaries {
-		stem := summaries[i].Name + "_" + ts
-		path := filepath.Join(dir, stem+".json")
-		if b, merr := json.MarshalIndent(summaries[i], "", "  "); merr == nil {
-			_ = os.WriteFile(path, append(b, '\n'), 0o644)
-		}
-		orgPath := filepath.Join(dir, stem+".org")
-		if f, ferr := os.Create(filepath.Clean(orgPath)); ferr == nil {
-			trader.WriteOrgReport(f, summaries[i])
-			f.Close()
-		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

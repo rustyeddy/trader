@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rustyeddy/trader/service"
 )
 
 // handleResourcesList returns available MCP resources.
@@ -48,14 +50,13 @@ func (s *Server) handleResourcesRead(ctx context.Context, raw json.RawMessage) (
 }
 
 func (s *Server) readBacktestResource(uri string) (any, *rpcError) {
-	const outDir = "../trading/backtests"
+	outDir := s.effectiveReportsDir()
 
 	// backtest://results → list all .org files
 	if uri == "backtest://results" {
-		matches, _ := filepath.Glob(filepath.Join(outDir, "*.org"))
-		var names []string
-		for _, m := range matches {
-			names = append(names, filepath.Base(m))
+		names, err := service.ListBacktestOrgReports(outDir)
+		if err != nil {
+			return errContent(fmt.Sprintf("list backtest reports: %v", err)), nil
 		}
 		text := strings.Join(names, "\n")
 		if text == "" {
@@ -66,13 +67,9 @@ func (s *Server) readBacktestResource(uri string) (any, *rpcError) {
 
 	// backtest://results/<name> → read the specific .org file
 	name := strings.TrimPrefix(uri, "backtest://results/")
-	path := filepath.Join(outDir, name)
-	if !strings.HasSuffix(path, ".org") {
-		path += ".org"
-	}
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, filename, err := service.ReadBacktestOrgReport(outDir, name)
 	if err != nil {
-		return errContent(fmt.Sprintf("read %s: %v", path, err)), nil
+		return errContent(fmt.Sprintf("read %s: %v", filename, err)), nil
 	}
 	return resourceContent(uri, "text/plain", string(data)), nil
 }

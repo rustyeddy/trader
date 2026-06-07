@@ -56,13 +56,8 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		configPath = strings.TrimSpace(rootCfg.ConfigPath)
 	}
 
-	configPaths, err := collectConfigPaths(configPath)
-	if err != nil {
-		return err
-	}
-
 	svc := &service.Service{Log: l}
-	summaries, err := svc.RunBacktestConfigs(cmd.Context(), configPaths)
+	summaries, err := svc.RunBacktestPathSpecs(cmd.Context(), []string{configPath})
 	if err != nil {
 		return err
 	}
@@ -86,7 +81,7 @@ func updateBaselines(dir string, summaries []trader.BacktestReportSummary) error
 	}
 	for _, s := range summaries {
 		path := baselinePath(dir, s.Name)
-		if err := writeJSON(path, s); err != nil {
+		if err := service.WriteBacktestSummaryJSON(path, s); err != nil {
 			return fmt.Errorf("write baseline for %q: %w", s.Name, err)
 		}
 		fmt.Printf("  updated  %s\n", path)

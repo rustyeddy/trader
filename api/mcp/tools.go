@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,7 +42,7 @@ func (s *Server) tools() []toolDef {
 			Name:        "run_backtest",
 			Description: "Run one or more backtest configs and return the result summaries.",
 			InputSchema: schema(map[string]any{
-				"config_paths": prop("array", "List of YAML backtest config file paths on the server"),
+				"config_paths": prop("array", "List of backtest config path specs on the server (files, directories, or glob patterns)"),
 			}, []string{"config_paths"}),
 		},
 	}
@@ -196,18 +195,7 @@ func (s *Server) toolRunBacktest(ctx context.Context, raw json.RawMessage) (any,
 		return nil, &rpcError{Code: errInvalidParams, Message: "config_paths (array of strings) is required"}
 	}
 
-	// Resolve glob patterns and relative paths safely.
-	var resolved []string
-	for _, pattern := range args.ConfigPaths {
-		matches, err := filepath.Glob(pattern)
-		if err != nil || len(matches) == 0 {
-			resolved = append(resolved, pattern) // pass through; loader will error
-		} else {
-			resolved = append(resolved, matches...)
-		}
-	}
-
-	summaries, err := s.svc.RunBacktestConfigs(ctx, resolved)
+	summaries, err := s.svc.RunBacktestPathSpecsAndWriteReports(ctx, args.ConfigPaths, s.effectiveReportsDir())
 	if err != nil {
 		return errContent(fmt.Sprintf("run_backtest: %v", err)), nil
 	}

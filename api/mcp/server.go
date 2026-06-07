@@ -24,10 +24,13 @@ type Server struct {
 	svc         *service.Service
 	log         *slog.Logger
 	writeEnable bool // gates place_order, close_trade, update_stop
+	reportsDir  string
 
 	mu  sync.Mutex
 	out io.Writer
 }
+
+const defaultReportsDir = "/srv/trading/backtests/reports"
 
 // New creates a Server.
 func New(svc *service.Service, writeEnable bool) *Server {
@@ -39,7 +42,23 @@ func New(svc *service.Service, writeEnable bool) *Server {
 		svc:         svc,
 		log:         log,
 		writeEnable: writeEnable,
+		reportsDir:  defaultReportsDir,
 	}
+}
+
+// WithReportsDir overrides the directory used for persisted backtest reports
+// and MCP backtest resources.
+func (s *Server) WithReportsDir(dir string) {
+	if dir != "" {
+		s.reportsDir = dir
+	}
+}
+
+func (s *Server) effectiveReportsDir() string {
+	if s.reportsDir != "" {
+		return s.reportsDir
+	}
+	return defaultReportsDir
 }
 
 // ServeStdio runs the MCP server over os.Stdin / os.Stdout until ctx is

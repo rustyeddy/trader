@@ -326,9 +326,11 @@ tools.
 | `--account-id`   | `$OANDA_ACCOUNT_ID` | OANDA account ID                                   |
 | `--env`          | `practice`          | `practice\|live`                                   |
 | `--enable-write` | `false`             | Enable `place_order`, `close_trade`, `update_stop` |
+| `--reports-dir`  | `/srv/trading/backtests/reports` | Where `run_backtest` writes reports and `backtest://results` reads them |
 
 ```bash
 trader mcp serve
+trader mcp serve --reports-dir /tmp/trader-reports
 trader mcp serve --token $OANDA_TOKEN --enable-write
 ```
 
@@ -525,9 +527,7 @@ Request body:
 
 | Field          | Type             | Required | Description                             |
 |----------------|------------------|----------|-----------------------------------------|
-| `config_paths` | array of strings | yes      | Server-side file paths or glob patterns |
-| `start_date`   | string           |          | ISO-8601 date override for all runs     |
-| `end_date`     | string           |          | ISO-8601 date override for all runs     |
+| `config_paths` | array of strings | yes      | Server-side backtest config path specs: files, directories, or glob patterns |
 
 ```bash
 curl -X POST http://localhost:9999/api/v1/backtests/run \
@@ -697,11 +697,11 @@ Return OANDA account transactions with ID greater than `since_id`.
 
 #### `run_backtest`
 
-Run one or more YAML backtest configs and return result summaries. Glob patterns are expanded server-side. No OANDA token required.
+Run one or more backtest configs and return result summaries. File paths, directories, and glob patterns are expanded server-side. No OANDA token required.
 
 | Parameter      | Type             | Required | Description                               |
 |----------------|------------------|----------|-------------------------------------------|
-| `config_paths` | array of strings | yes      | File paths or glob patterns on the server |
+| `config_paths` | array of strings | yes      | Backtest config path specs on the server: files, directories, or glob patterns |
 
 ```json
 {
@@ -710,6 +710,40 @@ Run one or more YAML backtest configs and return result summaries. Glob patterns
     "config_paths": ["testdata/configs/eurusd-h1-ci45.yml"]
   }
 }
+```
+
+Example session flow:
+
+1. Start the MCP server:
+
+```bash
+trader mcp serve --reports-dir /tmp/trader-reports
+```
+
+2. Call the tool:
+
+```json
+{
+  "name": "run_backtest",
+  "arguments": {
+    "config_paths": ["testdata/backtests/configs/*.yml"]
+  }
+}
+```
+
+3. The server runs the backtests, returns JSON summaries, and writes the same hash-named artifacts used by the CLI and REST API:
+
+```text
+/tmp/trader-reports/<run-name>-<config-hash>.json
+/tmp/trader-reports/<run-name>-<config-hash>.org
+/tmp/trader-reports/index.org
+```
+
+4. Read the generated reports through MCP resources:
+
+```json
+{"uri": "backtest://results"}
+{"uri": "backtest://results/eurusd-h1-emacross-deadbeef.org"}
 ```
 
 ---

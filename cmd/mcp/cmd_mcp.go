@@ -28,6 +28,7 @@ func newServeCmd(rc *trader.RootConfig) *cobra.Command {
 		accountID   string
 		env         string
 		writeEnable bool
+		reportsDir  string
 	)
 
 	cmd := &cobra.Command{
@@ -83,6 +84,9 @@ Resources:
 			}
 
 			srv := mcpserver.New(svc, writeEnable)
+			if reportsDir != "" {
+				srv.WithReportsDir(reportsDir)
+			}
 			return srv.ServeStdio(ctx)
 		},
 	}
@@ -91,6 +95,7 @@ Resources:
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
 	cmd.Flags().BoolVar(&writeEnable, "enable-write", false, "Enable write tools: place_order, close_trade, update_stop")
+	cmd.Flags().StringVar(&reportsDir, "reports-dir", "/srv/trading/backtests/reports", "Backtest reports directory for run_backtest output and backtest://results")
 
 	return cmd
 }
