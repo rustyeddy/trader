@@ -178,7 +178,8 @@ func TestStoreIsUsableTickFile_EmptyFile(t *testing.T) {
 		Hour:       13,
 	}
 
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, makeParentsAndFile(path, nil))
 
 	require.False(t, s.IsUsableTickFile(k))
@@ -199,7 +200,8 @@ func TestStoreIsUsableTickFile_NonEmptyFile(t *testing.T) {
 		Hour:       13,
 	}
 
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, makeParentsAndFile(path, []byte("data")))
 
 	require.True(t, s.IsUsableTickFile(k))

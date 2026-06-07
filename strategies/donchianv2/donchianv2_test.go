@@ -49,7 +49,8 @@ func shortBreak(below trader.Price) *trader.CandleTime {
 
 func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	for i := 0; i < 4; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 105}}
 		plan := s.Update(context.Background(), ct, nil)
@@ -60,7 +61,8 @@ func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 
 func TestBreakout_NoEntryOnFirstBreakBar(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110, lo=90
 
 	// Bar 1 closes above 110 — streak starts, no entry yet.
@@ -72,7 +74,8 @@ func TestBreakout_NoEntryOnFirstBreakBar(t *testing.T) {
 
 func TestBreakout_EntryOnSecondConsecutiveBreakBar(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 
 	// Bar 1: streak starts, pendingLevel=110.
@@ -87,7 +90,8 @@ func TestBreakout_EntryOnSecondConsecutiveBreakBar(t *testing.T) {
 
 func TestBreakout_StreakResetByInsideBar(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 
 	// Bar 1: pendingLevel=110, streak starts.
@@ -109,7 +113,8 @@ func TestBreakout_StreakResetByInsideBar(t *testing.T) {
 
 func TestBreakout_StreakResetByWeakFirstBar(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// Closes above channel but weak (close near bottom of bar range).
@@ -124,7 +129,8 @@ func TestBreakout_StreakResetByWeakFirstBar(t *testing.T) {
 
 func TestBreakout_ShortEntryOnTwoConsecutiveBreaks(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel lo=90
 
 	// Bar 1: pendingLevel=90.
@@ -138,7 +144,8 @@ func TestBreakout_ShortEntryOnTwoConsecutiveBreaks(t *testing.T) {
 
 func TestBreakout_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 1})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	// With confirm_bars=1 the first strong breakout bar should enter immediately.
@@ -149,7 +156,8 @@ func TestBreakout_ConfirmBarsOne_BehavesLikeV1(t *testing.T) {
 
 func TestBreakout_DirectionFlipResetsStreak(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110, lo=90
 
 	// Long streak starts.
@@ -166,7 +174,8 @@ func TestBreakout_DirectionFlipResetsStreak(t *testing.T) {
 
 func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	lot := &trader.Lot{
@@ -185,7 +194,8 @@ func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 
 func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5)
 
 	lot := &trader.Lot{
@@ -206,7 +216,8 @@ func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 
 func TestBreakout_Reset(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2})
+	require.NoError(t, err)
 	warm(t, s, 5)
 	s.Update(context.Background(), longBreak(110), nil) // start streak
 
@@ -219,7 +230,8 @@ func TestBreakout_Reset(t *testing.T) {
 
 func TestBreakout_ThreeConfirmBars(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 3})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 3})
+	require.NoError(t, err)
 	warm(t, s, 5) // channel hi=110
 
 	// All three bars close above pendingLevel=110.

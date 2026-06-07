@@ -38,7 +38,8 @@ func feedUptrend(t *testing.T, adx *ADX, scale int32, nCandles int, start float6
 func TestADX_WarmupAndReady(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, PriceScale)
+	adx, err := NewADX(n, PriceScale)
+	require.NoError(t, err)
 
 	require.False(t, adx.Ready())
 	require.Equal(t, 2*n, adx.Warmup())
@@ -56,7 +57,8 @@ func TestADX_WarmupAndReady(t *testing.T) {
 func TestADX_FlatMarketGoesToZero(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, PriceScale)
+	adx, err := NewADX(n, PriceScale)
+	require.NoError(t, err)
 
 	// Plenty of candles so it becomes ready
 	feedFlat(t, adx, scale, 3*n, 1.2345)
@@ -71,7 +73,8 @@ func TestADX_FlatMarketGoesToZero(t *testing.T) {
 func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, PriceScale)
+	adx, err := NewADX(n, PriceScale)
+	require.NoError(t, err)
 
 	// Build a steady uptrend: close increases 1 pip each candle, with small range.
 	feedUptrend(t, adx, scale, 3*n, 1.0000, 0.0001, 0.00005)
@@ -87,7 +90,8 @@ func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 func TestADX_Reset(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx := NewADX(n, PriceScale)
+	adx, err := NewADX(n, PriceScale)
+	require.NoError(t, err)
 
 	feedUptrend(t, adx, scale, 3*n, 1.0000, 0.0001, 0.00005)
 	require.True(t, adx.Ready())

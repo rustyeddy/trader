@@ -23,18 +23,18 @@ type ATR struct {
 	sumTR   float64 // accumulates first N true ranges to seed Wilder smoothing
 }
 
-func NewATR(period int, scale Scale6) *ATR {
+func NewATR(period int, scale Scale6) (*ATR, error) {
 	if period <= 0 {
-		panic("ATR period must be > 0")
+		return nil, fmt.Errorf("ATR period must be > 0")
 	}
 	if scale <= 0 {
-		panic("ATR scale must be > 0")
+		return nil, fmt.Errorf("ATR scale must be > 0")
 	}
 	return &ATR{
 		n:     period,
 		scale: float64(scale),
 		name:  fmt.Sprintf("ATR(%d)", period),
-	}
+	}, nil
 }
 
 func (a *ATR) Name() string     { return a.name }

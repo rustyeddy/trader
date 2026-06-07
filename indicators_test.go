@@ -9,13 +9,15 @@ import (
 func TestIndicatorEMAName(t *testing.T) {
 	t.Parallel()
 
-	ema := NewEMA(14, PriceScale)
+	ema, err := NewEMA(14, PriceScale)
+	assert.NoError(t, err)
 	assert.Equal(t, "EMA(14)", ema.Name())
 }
 
 func TestIndicatorADXName(t *testing.T) {
 	t.Parallel()
 
-	adx := NewADX(14, PriceScale)
+	adx, err := NewADX(14, PriceScale)
+	assert.NoError(t, err)
 	assert.Equal(t, "ADX(14)", adx.Name())
 }

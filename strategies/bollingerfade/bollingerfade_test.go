@@ -43,7 +43,8 @@ func makeLot(side trader.Side) *trader.LotBook {
 // TestFade_NoOpensBeforeReady verifies warmup suppression.
 func TestFade_NoOpensBeforeReady(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 5, Multiplier: 2.0, ATRPeriod: 3, ATRMult: 1.5})
+	f, err := New(Config{Period: 5, Multiplier: 2.0, ATRPeriod: 3, ATRMult: 1.5})
+	require.NoError(t, err)
 	for range 4 {
 		plan := f.Update(context.Background(), flat(1.0), nil)
 		assert.Empty(t, plan.Opens, "no opens during warmup")
@@ -53,7 +54,8 @@ func TestFade_NoOpensBeforeReady(t *testing.T) {
 // TestFade_LongEntryBelowLowerBand verifies a long signal when close < lower band.
 func TestFade_LongEntryBelowLowerBand(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	// Push price sharply down to force close below lower band.
@@ -70,7 +72,8 @@ func TestFade_LongEntryBelowLowerBand(t *testing.T) {
 // TestFade_ShortEntryAboveUpperBand verifies a short signal when close > upper band.
 func TestFade_ShortEntryAboveUpperBand(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	plan := f.Update(context.Background(), flat(1.05), nil)
@@ -84,7 +87,8 @@ func TestFade_ShortEntryAboveUpperBand(t *testing.T) {
 // TestFade_NoEntryWithinBands verifies no signal when price is inside the bands.
 func TestFade_NoEntryWithinBands(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	// Price stays at 1.0 — within bands (bands are near-zero width after flat warmup).
@@ -95,7 +99,8 @@ func TestFade_NoEntryWithinBands(t *testing.T) {
 // TestFade_NoNewEntryWhenAlreadyOpen verifies the single-position guard.
 func TestFade_NoNewEntryWhenAlreadyOpen(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{Lots: makeLot(trader.Long)}}
@@ -107,7 +112,8 @@ func TestFade_NoNewEntryWhenAlreadyOpen(t *testing.T) {
 // TestFade_CloseLongAtMiddle verifies the mean-reversion exit for a long lot.
 func TestFade_CloseLongAtMiddle(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	// Simulate an open long position. Middle band ≈ 1.0 after flat warmup.
@@ -122,7 +128,8 @@ func TestFade_CloseLongAtMiddle(t *testing.T) {
 // TestFade_CloseShortAtMiddle verifies the mean-reversion exit for a short lot.
 func TestFade_CloseShortAtMiddle(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{Lots: makeLot(trader.Short)}}
@@ -136,7 +143,8 @@ func TestFade_CloseShortAtMiddle(t *testing.T) {
 // TestFade_LongNotClosedBelowMiddle verifies no premature close of a long.
 func TestFade_LongNotClosedBelowMiddle(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 
 	run := &trader.Backtest{BacktestRun: &trader.BacktestRun{Lots: makeLot(trader.Long)}}
@@ -149,14 +157,16 @@ func TestFade_LongNotClosedBelowMiddle(t *testing.T) {
 // TestFade_Name checks the strategy name format.
 func TestFade_Name(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	f, err := New(Config{Period: 20, Multiplier: 2.0, ATRPeriod: 14, ATRMult: 1.5})
+	require.NoError(t, err)
 	assert.Equal(t, "BB-FADE(20,2.0,atr=14×1.5)", f.Name())
 }
 
 // TestFade_Reset verifies the strategy can be reset and re-warmed.
 func TestFade_Reset(t *testing.T) {
 	t.Parallel()
-	f := New(Config{Period: 5, Multiplier: 2.0, ATRPeriod: 3, ATRMult: 1.5})
+	f, err := New(Config{Period: 5, Multiplier: 2.0, ATRPeriod: 3, ATRMult: 1.5})
+	require.NoError(t, err)
 	warmup(t, f)
 	require.True(t, f.Ready())
 	f.Reset()

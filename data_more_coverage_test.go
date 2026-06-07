@@ -245,7 +245,8 @@ func TestPathForAsset_EmptySourceDefaults(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.Contains(t, path, "unknown")
 }
 

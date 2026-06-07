@@ -106,9 +106,9 @@ func TestAccountAddPositionValidation(t *testing.T) {
 
 	emptyID := newTestPosition("EURUSD", Long, 100_000, 1.1000)
 	emptyID.ID = ""
-	assert.Panics(t, func() {
-		_ = acct.AddLot(context.Background(), emptyID)
-	})
+	err = acct.AddLot(context.Background(), emptyID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "id")
 }
 
 func TestAccountRealizePNLAndClosePosition(t *testing.T) {

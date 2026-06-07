@@ -26,16 +26,16 @@ type Store struct {
 	basedir string // e.g. "data/candles"
 }
 
-func (s *Store) PathForAsset(k Key) string {
+func (s *Store) PathForAsset(k Key) (string, error) {
 	switch {
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
-		return s.pathForMonthlyCandle(k)
+		return s.pathForMonthlyCandle(k), nil
 
 	case k.Kind == KindTick && k.Day > 0 && k.Hour >= 0:
-		return s.pathForHourlyTick(k)
+		return s.pathForHourlyTick(k), nil
 
 	default:
-		panic(fmt.Sprintf("unsupported asset key for path: %+v", k))
+		return "", fmt.Errorf("unsupported asset key for path: %+v", k)
 	}
 }
 
@@ -224,8 +224,11 @@ func (s *Store) RelDir(key Key) string {
 }
 
 func (s Store) Exists(key Key) (bool, error) {
-	p := s.PathForAsset(key)
-	_, err := os.Stat(p)
+	p, err := s.PathForAsset(key)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(p)
 	if err == nil {
 		return true, nil
 	}
@@ -330,7 +333,10 @@ func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
 	}
 
-	path := store.PathForAsset(key)
+	path, err := store.PathForAsset(key)
+	if err != nil {
+		return nil, err
+	}
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -477,7 +483,10 @@ func (s *Store) WriteCSV(cs *candleSet) error {
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
-	path := s.PathForAsset(key)
+	path, err := s.PathForAsset(key)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -530,7 +539,10 @@ func (s *Store) WriteCSV(cs *candleSet) error {
 }
 
 func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
-	dst := key.Path()
+	dst, err := key.Path()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
@@ -566,7 +578,11 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 }
 
 func (s Store) Delete(k Key) error {
-	return os.Remove(k.Path())
+	p, err := k.Path()
+	if err != nil {
+		return err
+	}
+	return os.Remove(p)
 }
 
 func (s Store) baseScanDir() string {
@@ -574,7 +590,10 @@ func (s Store) baseScanDir() string {
 }
 
 func (s *Store) IsUsableTickFile(k Key) bool {
-	p := s.PathForAsset(k)
+	p, err := s.PathForAsset(k)
+	if err != nil {
+		return false
+	}
 	info, err := os.Stat(p)
 	if err != nil {
 		return false
@@ -599,7 +618,10 @@ func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		// return nil, fmt.Errorf("tick file not usable: %+v", key)
 	}
 
-	path := s.PathForAsset(key)
+	path, err := s.PathForAsset(key)
+	if err != nil {
+		return nil, err
+	}
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)

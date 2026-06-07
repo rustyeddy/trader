@@ -13,7 +13,8 @@ func candle(close float64) Candle {
 }
 
 func TestEMA_WarmupAndReady(t *testing.T) {
-	ema := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, PriceScale)
+	require.NoError(t, err)
 
 	require.False(t, ema.Ready())
 	require.Equal(t, 3, ema.Warmup())
@@ -29,7 +30,8 @@ func TestEMA_WarmupAndReady(t *testing.T) {
 }
 
 func TestEMA_KnownSequence(t *testing.T) {
-	ema := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, PriceScale)
+	require.NoError(t, err)
 
 	// period = 3
 	// alpha = 2/(3+1) = 0.5
@@ -55,7 +57,8 @@ func TestEMA_KnownSequence(t *testing.T) {
 }
 
 func TestEMA_Reset(t *testing.T) {
-	ema := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, PriceScale)
+	require.NoError(t, err)
 
 	ema.Update(candle(10))
 	ema.Update(candle(11))

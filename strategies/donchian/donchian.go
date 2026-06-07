@@ -43,12 +43,12 @@ type Config struct {
 	CloseStrength float64 // 0.5 = no filter; 0.6 = close in upper/lower 40% of bar
 }
 
-func New(cfg Config) *Breakout {
+func New(cfg Config) (*Breakout, error) {
 	if cfg.Period <= 1 {
-		panic("donchian: period must be > 1")
+		return nil, fmt.Errorf("donchian: period must be > 1")
 	}
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
-		panic("donchian: close_strength must be in [0.5, 1.0]")
+		return nil, fmt.Errorf("donchian: close_strength must be in [0.5, 1.0]")
 	}
 	return &Breakout{
 		period:        cfg.Period,
@@ -56,7 +56,7 @@ func New(cfg Config) *Breakout {
 		highs:         make([]trader.Price, cfg.Period),
 		lows:          make([]trader.Price, cfg.Period),
 		name:          fmt.Sprintf("DONCHIAN(%d,cs=%.2f)", cfg.Period, cfg.CloseStrength),
-	}
+	}, nil
 }
 
 func (d *Breakout) Name() string            { return d.name }
@@ -217,5 +217,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 	return New(Config{
 		Period:        int(period),
 		CloseStrength: closeStrength,
-	}), nil
+	})
 }

@@ -12,7 +12,8 @@ import (
 
 func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 4; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 105}}
 		plan := s.Update(context.Background(), ct, nil)
@@ -23,7 +24,8 @@ func TestBreakout_NotReadyDuringWarmup(t *testing.T) {
 
 func TestBreakout_LongOnUpperBreak(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
@@ -39,7 +41,8 @@ func TestBreakout_LongOnUpperBreak(t *testing.T) {
 
 func TestBreakout_ShortOnLowerBreak(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		s.Update(context.Background(), ct, nil)
@@ -52,7 +55,8 @@ func TestBreakout_ShortOnLowerBreak(t *testing.T) {
 
 func TestBreakout_WeakCloseRejected(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		s.Update(context.Background(), ct, nil)
@@ -65,7 +69,8 @@ func TestBreakout_WeakCloseRejected(t *testing.T) {
 
 func TestBreakout_NoBreakNoEntry(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		s.Update(context.Background(), ct, nil)
@@ -91,7 +96,8 @@ func makeOpenLot(side trader.Side) *trader.Backtest {
 
 func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		s.Update(context.Background(), ct, nil)
@@ -107,7 +113,8 @@ func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 
 func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
-	s := New(Config{Period: 5, CloseStrength: 0.6})
+	s, err := New(Config{Period: 5, CloseStrength: 0.6})
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		s.Update(context.Background(), ct, nil)

@@ -50,18 +50,18 @@ type ADX struct {
 	dxCount int
 }
 
-func NewADX(period int, scale Scale6) *ADX {
+func NewADX(period int, scale Scale6) (*ADX, error) {
 	if period <= 0 {
-		panic("ADX period must be > 0")
+		return nil, fmt.Errorf("ADX period must be > 0")
 	}
 	if scale <= 0 {
-		panic("ADX scale must be > 0")
+		return nil, fmt.Errorf("ADX scale must be > 0")
 	}
 	return &ADX{
 		n:     period,
 		scale: float64(scale),
 		name:  fmt.Sprintf("ADX(%d)", period),
-	}
+	}, nil
 }
 
 func (a *ADX) Name() string     { return a.name }

@@ -117,7 +117,8 @@ func TestCompositeRegimeFilter_AllowSideRequiresAll(t *testing.T) {
 	t.Parallel()
 	// weekly-ema blocks Short when rising; all others allow both sides.
 	// Use a minimal weekly-ema (period=3) as the directional sub-filter.
-	wf := NewWeeklyEMAFilter(3, PriceScale)
+	wf, err := NewWeeklyEMAFilter(3, PriceScale)
+		require.NoError(t, err)
 	comp := NewCompositeRegimeFilter([]RegimeFilter{wf})
 
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)

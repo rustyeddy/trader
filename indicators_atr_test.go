@@ -7,13 +7,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestATR_PanicGuards(t *testing.T) {
-	require.Panics(t, func() { NewATR(0, PriceScale) })
-	require.Panics(t, func() { NewATR(3, 0) })
+func TestATR_ErrorGuards(t *testing.T) {
+	_, err := NewATR(0, PriceScale)
+	require.Error(t, err)
+	_, err = NewATR(3, 0)
+	require.Error(t, err)
 }
 
 func TestATR_WarmupAndReady(t *testing.T) {
-	a := NewATR(3, PriceScale)
+	a, err := NewATR(3, PriceScale)
+	require.NoError(t, err)
 	assert.Equal(t, "ATR(3)", a.Name())
 	assert.Equal(t, 4, a.Warmup()) // period+1
 	assert.False(t, a.Ready())
@@ -30,7 +33,8 @@ func TestATR_WarmupAndReady(t *testing.T) {
 }
 
 func TestATR_Reset(t *testing.T) {
-	a := NewATR(3, PriceScale)
+	a, err := NewATR(3, PriceScale)
+	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		a.Update(mkCandle(int32(PriceScale), 1.0, 1.01, 0.99, 1.0))
 	}
@@ -42,7 +46,8 @@ func TestATR_Reset(t *testing.T) {
 }
 
 func TestATR_ValueIncreases_WithVolatility(t *testing.T) {
-	a := NewATR(5, PriceScale)
+	a, err := NewATR(5, PriceScale)
+	require.NoError(t, err)
 
 	// seed with low-volatility candles
 	for i := 0; i < 10; i++ {

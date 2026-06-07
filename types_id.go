@@ -40,8 +40,9 @@ func NewULID() string {
 
 	id, err := ulid.New(ulid.Timestamp(time.Now().UTC()), mono)
 	if err != nil {
-		// Errors are extremely unlikely unless time goes backwards or entropy fails.
-		panic(err)
+		// Extremely unlikely (entropy overflow within same millisecond).
+		// Fall back to a non-monotonic but still unique and valid ULID.
+		id = ulid.Make()
 	}
 	return id.String()
 }

@@ -17,7 +17,8 @@ func feedDayADX(f *D1ADXFilter, date time.Time, o, h, l, c Price) {
 
 func TestD1ADXFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 	t.Parallel()
-	f := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	assert.True(t, f.Trending(), "warmup must allow trading")
 }
@@ -26,7 +27,8 @@ func TestD1ADXFilter_ReadyAfterWarmupDays(t *testing.T) {
 	t.Parallel()
 	// ADX needs 2×period days to become ready.
 	period := 3
-	f := NewD1ADXFilter(period, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Feed 2*period days + 1 trigger day.
@@ -39,7 +41,8 @@ func TestD1ADXFilter_ReadyAfterWarmupDays(t *testing.T) {
 
 func TestD1ADXFilter_DayRolloverAggregation(t *testing.T) {
 	t.Parallel()
-	f := NewD1ADXFilter(3, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(3, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -61,7 +64,8 @@ func TestD1ADXFilter_DayRolloverAggregation(t *testing.T) {
 
 func TestD1ADXFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	t.Parallel()
-	f := NewD1ADXFilter(5, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(5, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
 	f.Tick(h1CT(base, 10000, 10500, 9800, 10200))
@@ -77,7 +81,8 @@ func TestD1ADXFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 func TestD1ADXFilter_TrendingAllowsWhenTrending(t *testing.T) {
 	t.Parallel()
 	period := 3
-	f := NewD1ADXFilter(period, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Feed strongly trending bars: each day price advances significantly.
@@ -94,7 +99,8 @@ func TestD1ADXFilter_BlocksWhenFlat(t *testing.T) {
 	t.Parallel()
 	period := 3
 	// Use a high threshold (80) — even a moderately trending market won't pass.
-	f := NewD1ADXFilter(period, 80.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 80.0, PriceScale)
+	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for d := 0; d <= 2*period; d++ {
@@ -113,7 +119,8 @@ func TestD1ADXFilter_BlocksWhenFlat(t *testing.T) {
 
 func TestD1ADXFilter_WarmupAlwaysTrending(t *testing.T) {
 	t.Parallel()
-	f := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	require.NoError(t, err)
 
 	// Only feed 5 days — well under 2*14 warmup.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -126,6 +133,7 @@ func TestD1ADXFilter_WarmupAlwaysTrending(t *testing.T) {
 
 func TestD1ADXFilter_Name(t *testing.T) {
 	t.Parallel()
-	f := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	require.NoError(t, err)
 	assert.Equal(t, "D1-ADX(14,20.0)", f.Name())
 }

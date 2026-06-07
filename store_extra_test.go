@@ -25,7 +25,8 @@ func TestStoreDelete(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	path := s.PathForAsset(k)
+	path, err := s.PathForAsset(k)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("data"), 0o644))
 

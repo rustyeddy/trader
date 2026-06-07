@@ -54,7 +54,10 @@ func GetOrCreateTestData(instrument string, year int, timeframe Timeframe) (stri
 		Year:       year,
 		Month:      1,
 	}
-	expectedPath := store.PathForAsset(key)
+	expectedPath, err := store.PathForAsset(key)
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(expectedPath); err == nil {
 		return testdataDir, nil
 	}
