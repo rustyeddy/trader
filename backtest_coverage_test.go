@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCompileBacktestRequest_Success(t *testing.T) {
+func TestCompileBacktestComponents_WithExecutionDefaults_Success(t *testing.T) {
 	t.Parallel()
 
 	rc := RunConfig{
@@ -22,9 +22,10 @@ func TestCompileBacktestRequest_Success(t *testing.T) {
 	}
 
 	defaults := RunDefaults{StartingBalance: 10_000, RiskPct: 1.5}
-	req, err := compileBacktestRequest(rc, defaults)
+	req, err := compileBacktestComponents(rc)
 	require.NoError(t, err)
 	require.NotNil(t, req)
+	applyBacktestExecutionDefaults(req, rc, defaults)
 	assert.Equal(t, "run-1", req.Name)
 	assert.Equal(t, "EURUSD", req.Instrument)
 	assert.Equal(t, H1, req.TimeRange.TF)
@@ -35,14 +36,14 @@ func TestCompileBacktestRequest_Success(t *testing.T) {
 	assert.Equal(t, "Fake", req.Strategy.Name())
 }
 
-func TestCompileBacktestRequest_InvalidInputs(t *testing.T) {
+func TestCompileBacktestComponents_InvalidInputs(t *testing.T) {
 	t.Parallel()
 
 	badDates := RunConfig{
 		Data:     DataConfig{From: "bad-date", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
 		Strategy: StrategyConfig{Kind: "fake"},
 	}
-	_, err := compileBacktestRequest(badDates, RunDefaults{})
+	_, err := compileBacktestComponents(badDates)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build backtest time range")
 
@@ -50,7 +51,7 @@ func TestCompileBacktestRequest_InvalidInputs(t *testing.T) {
 		Data:     DataConfig{From: "2026-01-01", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
 		Strategy: StrategyConfig{Kind: "not-supported"},
 	}
-	_, err = compileBacktestRequest(badStrategy, RunDefaults{})
+	_, err = compileBacktestComponents(badStrategy)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build backtest strategy")
 }

@@ -47,11 +47,15 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 
 	compiled := make([]CompiledBacktest, 0, len(cfg.Runs))
 	for _, rawRun := range cfg.Runs {
-		runCfg := applyRunSourceDefault(cfg.Defaults, rawRun)
-		req, err := compileBacktestRequest(runCfg, cfg.Defaults)
+		runCfg := rawRun
+		if runCfg.Data.Source == "" && cfg.Defaults.Source != "" {
+			runCfg.Data.Source = cfg.Defaults.Source
+		}
+		req, err := compileBacktestComponents(runCfg)
 		if err != nil {
 			return nil, err
 		}
+		applyBacktestExecutionDefaults(req, runCfg, cfg.Defaults)
 		compiled = append(compiled, CompiledBacktest{
 			ID:        NewULID(),
 			RunConfig: runCfg,
@@ -62,13 +66,6 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 		return nil, fmt.Errorf("backtest config must resolve to at least 1 run, got %d", len(compiled))
 	}
 	return compiled, nil
-}
-
-func applyRunSourceDefault(defaults RunDefaults, cfg RunConfig) RunConfig {
-	if cfg.Data.Source == "" && defaults.Source != "" {
-		cfg.Data.Source = defaults.Source
-	}
-	return cfg
 }
 
 // BacktestRequest holds all the static inputs needed to execute one backtest
@@ -88,21 +85,10 @@ type BacktestRequest struct {
 
 	Source     string // data source identifier (e.g. "candles", "dukascopy")
 	Instrument string // FX pair (e.g. "EUR_USD")
-	Strategy
-	Exit   ExitStrategy
-	Regime RegimeFilter
-	TimeRange
-}
-
-// compileBacktestRequest builds a validated BacktestRequest from one resolved
-// RunConfig and the shared defaults that affect execution semantics.
-func compileBacktestRequest(cfg RunConfig, defaults RunDefaults) (*BacktestRequest, error) {
-	req, err := compileBacktestComponents(cfg)
-	if err != nil {
-		return nil, err
-	}
-	applyBacktestExecutionDefaults(req, cfg, defaults)
-	return req, nil
+	Strategy   Strategy
+	Exit       ExitStrategy
+	Regime     RegimeFilter
+	TimeRange  TimeRange
 }
 
 // compileBacktestComponents resolves the time range and builds the strategy,
@@ -204,5 +190,4 @@ func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
 	}
 	run.Result = res
 	return run.Result
-
 }
