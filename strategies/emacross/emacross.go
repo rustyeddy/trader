@@ -47,15 +47,15 @@ type Config struct {
 	ATRMultiplier float64
 }
 
-func New(cfg Config) *Cross {
+func New(cfg Config) (*Cross, error) {
 	if cfg.FastPeriod <= 0 || cfg.SlowPeriod <= 0 {
-		panic("emacross periods must be > 0")
+		return nil, fmt.Errorf("emacross periods must be > 0")
 	}
 	if cfg.FastPeriod >= cfg.SlowPeriod {
-		panic("emacross requires FastPeriod < SlowPeriod")
+		return nil, fmt.Errorf("emacross requires FastPeriod < SlowPeriod")
 	}
 	if cfg.Scale <= 0 {
-		panic("emacross requires Scale > 0")
+		return nil, fmt.Errorf("emacross requires Scale > 0")
 	}
 
 	mult := cfg.ATRMultiplier
@@ -65,13 +65,26 @@ func New(cfg Config) *Cross {
 
 	var atr *trader.ATR
 	if cfg.ATRPeriod > 0 {
-		atr = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		var err error
+		atr, err = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	fast, err := trader.NewEMA(cfg.FastPeriod, cfg.Scale)
+	if err != nil {
+		return nil, err
+	}
+	slow, err := trader.NewEMA(cfg.SlowPeriod, cfg.Scale)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Cross{
 		core: Core{
-			Fast:          trader.NewEMA(cfg.FastPeriod, cfg.Scale),
-			Slow:          trader.NewEMA(cfg.SlowPeriod, cfg.Scale),
+			Fast:          fast,
+			Slow:          slow,
 			ATR:           atr,
 			MinSpread:     cfg.MinSpread,
 			Scale:         cfg.Scale,
@@ -79,7 +92,7 @@ func New(cfg Config) *Cross {
 			ATRMultiplier: mult,
 			Name:          fmt.Sprintf("EMA_CROSS(%d,%d)", cfg.FastPeriod, cfg.SlowPeriod),
 		},
-	}
+	}, nil
 }
 
 func (x *Cross) Name() string            { return x.core.Name }
@@ -269,5 +282,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		MinSpread:     minSpread,
 		ATRPeriod:     int(atrPeriod),
 		ATRMultiplier: atrMult,
-	}), nil
+	})
 }

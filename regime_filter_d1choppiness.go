@@ -26,11 +26,15 @@ type D1ChoppinessFilter struct {
 	hasDay   bool
 }
 
-func NewD1ChoppinessFilter(period int, threshold float64, scale Scale6) *D1ChoppinessFilter {
-	return &D1ChoppinessFilter{
-		ci:        NewChoppinessIndex(period, scale),
-		threshold: threshold,
+func NewD1ChoppinessFilter(period int, threshold float64, scale Scale6) (*D1ChoppinessFilter, error) {
+	ci, err := NewChoppinessIndex(period, scale)
+	if err != nil {
+		return nil, err
 	}
+	return &D1ChoppinessFilter{
+		ci:        ci,
+		threshold: threshold,
+	}, nil
 }
 
 func (f *D1ChoppinessFilter) Name() string {

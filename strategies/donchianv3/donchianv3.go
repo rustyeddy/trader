@@ -56,12 +56,12 @@ type Config struct {
 	SameDayBlock  bool // block re-entry after a stop-out for the rest of the day
 }
 
-func New(cfg Config) *Breakout {
+func New(cfg Config) (*Breakout, error) {
 	if cfg.Period <= 1 {
-		panic("donchianv3: period must be > 1")
+		return nil, fmt.Errorf("donchianv3: period must be > 1")
 	}
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
-		panic("donchianv3: close_strength must be in [0.5, 1.0]")
+		return nil, fmt.Errorf("donchianv3: close_strength must be in [0.5, 1.0]")
 	}
 	cb := cfg.ConfirmBars
 	if cb < 1 {
@@ -76,7 +76,7 @@ func New(cfg Config) *Breakout {
 		lows:          make([]trader.Price, cfg.Period),
 		name: fmt.Sprintf("DONCHIAN-V3(%d,cs=%.2f,cb=%d,sdb=%v)",
 			cfg.Period, cfg.CloseStrength, cb, cfg.SameDayBlock),
-	}
+	}, nil
 }
 
 func (d *Breakout) Name() string            { return d.name }
@@ -347,5 +347,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		CloseStrength: closeStrength,
 		ConfirmBars:   int(confirmBars),
 		SameDayBlock:  sameDayBlock,
-	}), nil
+	})
 }

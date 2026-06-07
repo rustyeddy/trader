@@ -23,19 +23,19 @@ type EMA struct {
 	name string
 }
 
-func NewEMA(period int, scale Scale6) *EMA {
+func NewEMA(period int, scale Scale6) (*EMA, error) {
 	if period <= 0 {
-		panic("EMA period must be > 0")
+		return nil, fmt.Errorf("EMA period must be > 0")
 	}
 	if scale <= 0 {
-		panic("EMA scale must be > 0")
+		return nil, fmt.Errorf("EMA scale must be > 0")
 	}
 	return &EMA{
 		n:     period,
 		alpha: 2.0 / float64(period+1),
 		scale: float64(scale),
 		name:  fmt.Sprintf("EMA(%d)", period),
-	}
+	}, nil
 }
 
 func (e *EMA) Name() string     { return e.name }

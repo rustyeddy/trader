@@ -25,12 +25,16 @@ type D1ADXFilter struct {
 	hasDay   bool
 }
 
-func NewD1ADXFilter(period int, threshold float64, scale Scale6) *D1ADXFilter {
+func NewD1ADXFilter(period int, threshold float64, scale Scale6) (*D1ADXFilter, error) {
+	adx, err := NewADX(period, scale)
+	if err != nil {
+		return nil, err
+	}
 	return &D1ADXFilter{
-		adx:       NewADX(period, scale),
+		adx:       adx,
 		period:    period,
 		threshold: threshold,
-	}
+	}, nil
 }
 
 func (f *D1ADXFilter) Name() string {

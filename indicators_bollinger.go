@@ -23,22 +23,22 @@ type BollingerBands struct {
 	stdDev float64
 }
 
-func NewBollingerBands(period int, multiplier float64, scale Scale6) *BollingerBands {
+func NewBollingerBands(period int, multiplier float64, scale Scale6) (*BollingerBands, error) {
 	if period < 2 {
-		panic("BollingerBands: period must be >= 2")
+		return nil, fmt.Errorf("BollingerBands: period must be >= 2")
 	}
 	if multiplier <= 0 {
-		panic("BollingerBands: multiplier must be > 0")
+		return nil, fmt.Errorf("BollingerBands: multiplier must be > 0")
 	}
 	if scale <= 0 {
-		panic("BollingerBands: scale must be > 0")
+		return nil, fmt.Errorf("BollingerBands: scale must be > 0")
 	}
 	return &BollingerBands{
 		n:      period,
 		k:      multiplier,
 		scale:  float64(scale),
 		closes: make([]float64, period),
-	}
+	}, nil
 }
 
 func (b *BollingerBands) Name() string { return fmt.Sprintf("BB(%d,%.1f)", b.n, b.k) }

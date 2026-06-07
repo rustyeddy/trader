@@ -59,12 +59,12 @@ type Config struct {
 	ADXThreshold  float64
 }
 
-func New(cfg Config) *Breakout {
+func New(cfg Config) (*Breakout, error) {
 	if cfg.Period <= 1 {
-		panic("donchianv4: period must be > 1")
+		return nil, fmt.Errorf("donchianv4: period must be > 1")
 	}
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
-		panic("donchianv4: close_strength must be in [0.5, 1.0]")
+		return nil, fmt.Errorf("donchianv4: close_strength must be in [0.5, 1.0]")
 	}
 	cb := cfg.ConfirmBars
 	if cb < 1 {
@@ -78,6 +78,10 @@ func New(cfg Config) *Breakout {
 	if at <= 0 {
 		at = 25.0
 	}
+	adx, err := trader.NewADX(ap, trader.PriceScale)
+	if err != nil {
+		return nil, err
+	}
 	return &Breakout{
 		period:        cfg.Period,
 		closeStrength: cfg.CloseStrength,
@@ -85,10 +89,10 @@ func New(cfg Config) *Breakout {
 		adxThreshold:  at,
 		highs:         make([]trader.Price, cfg.Period),
 		lows:          make([]trader.Price, cfg.Period),
-		adx:           trader.NewADX(ap, trader.PriceScale),
+		adx:           adx,
 		name: fmt.Sprintf("DONCHIAN-V4(%d,cs=%.2f,cb=%d,adx=%d/%.1f)",
 			cfg.Period, cfg.CloseStrength, cb, ap, at),
-	}
+	}, nil
 }
 
 func (d *Breakout) Name() string            { return d.name }
@@ -346,5 +350,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		ConfirmBars:   int(confirmBars),
 		ADXPeriod:     int(adxPeriod),
 		ADXThreshold:  adxThreshold,
-	}), nil
+	})
 }

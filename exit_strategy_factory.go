@@ -30,7 +30,7 @@ func GetExitStrategy(cfg ExitConfig, scale Scale6) (ExitStrategy, error) {
 		if mult <= 0 {
 			mult = 2.0
 		}
-		return NewChandelierExit(int(period), mult, scale), nil
+		return NewChandelierExit(int(period), mult, scale)
 
 	default:
 		return nil, fmt.Errorf("unknown exit strategy %q", cfg.Kind)

@@ -74,12 +74,12 @@ type Config struct {
 	BlockFriday   bool
 }
 
-func New(cfg Config) *Breakout {
+func New(cfg Config) (*Breakout, error) {
 	if cfg.Period <= 1 {
-		panic("donchianv6: period must be > 1")
+		return nil, fmt.Errorf("donchianv6: period must be > 1")
 	}
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
-		panic("donchianv6: close_strength must be in [0.5, 1.0]")
+		return nil, fmt.Errorf("donchianv6: close_strength must be in [0.5, 1.0]")
 	}
 	cb := cfg.ConfirmBars
 	if cb < 1 {
@@ -97,6 +97,10 @@ func New(cfg Config) *Breakout {
 	if bd == nil {
 		bd = map[int64]bool{}
 	}
+	adx, err := trader.NewADX(ap, trader.PriceScale)
+	if err != nil {
+		return nil, err
+	}
 	return &Breakout{
 		period:        cfg.Period,
 		closeStrength: cfg.CloseStrength,
@@ -106,12 +110,12 @@ func New(cfg Config) *Breakout {
 		blockFriday:   cfg.BlockFriday,
 		highs:         make([]trader.Price, cfg.Period),
 		lows:          make([]trader.Price, cfg.Period),
-		adx:           trader.NewADX(ap, trader.PriceScale),
+		adx:           adx,
 		blockedDays:   bd,
 		name: fmt.Sprintf("DONCHIAN-V6(%d,cs=%.2f,cb=%d,adx=%d/%.1f,nd=%d,mon=%v,fri=%v)",
 			cfg.Period, cfg.CloseStrength, cb, ap, at, len(bd),
 			cfg.BlockMonday, cfg.BlockFriday),
-	}
+	}, nil
 }
 
 func (d *Breakout) Name() string            { return d.name }
@@ -410,5 +414,5 @@ func build(params map[string]any) (trader.Strategy, error) {
 		BlockedDays:   blockedDays,
 		BlockMonday:   blockMonday,
 		BlockFriday:   blockFriday,
-	}), nil
+	})
 }
