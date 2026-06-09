@@ -16,6 +16,9 @@ type Money int64
 // Price represents a trader domain type.
 type Price int32
 
+// PriceSum represents an accumulated sum of Price values.
+type PriceSum int64
+
 // Scale6 represents a trader domain type.
 type Scale6 int32
 

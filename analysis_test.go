@@ -390,6 +390,13 @@ func TestRunAnalysis_ReturnsIteratorError(t *testing.T) {
 	assert.ErrorIs(t, err, sentinel)
 }
 
+func TestRunAnalysis_NilIterator(t *testing.T) {
+	err := RunAnalysis(context.Background(), nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil candle iterator")
+}
+
 // ---- Pips field -------------------------------------------------------------
 
 func TestSwingAnalyzer_PipsFieldSet(t *testing.T) {

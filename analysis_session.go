@@ -1,13 +1,10 @@
 package trader
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
 type hourBucket struct {
 	count      int
-	totalRange int64 // sum of Price deltas
+	totalRange PriceSum
 }
 
 // SessionAnalyzer breaks down candle activity and average range by UTC hour.
@@ -29,9 +26,9 @@ func (a *SessionAnalyzer) Update(ct *CandleTime) {
 		return
 	}
 	rng := ct.High - ct.Low
-	h := time.Unix(int64(ct.Timestamp), 0).UTC().Hour()
+	h := ct.Timestamp.Time().UTC().Hour()
 	a.hours[h].count++
-	a.hours[h].totalRange += int64(rng)
+	a.hours[h].totalRange += PriceSum(rng)
 }
 
 func (a *SessionAnalyzer) Stats() []Stat {
