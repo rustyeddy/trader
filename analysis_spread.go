@@ -15,7 +15,7 @@ func NewSpreadAnalyzer(inst *Instrument) *SpreadAnalyzer {
 	return &SpreadAnalyzer{inst: inst}
 }
 
-func (a *SpreadAnalyzer) Name() string { return "Average Spread" }
+func (a *SpreadAnalyzer) Name() string { return "Avg Spread Distribution" }
 
 func (a *SpreadAnalyzer) Update(ct *CandleTime) {
 	if !ct.Candle.Validate() {
@@ -32,17 +32,18 @@ func (a *SpreadAnalyzer) Stats() []Stat {
 		return missingInstrumentStats()
 	}
 	if a.spreads.Len() == 0 {
-		return []Stat{{Name: "count (with avg spread)", Value: "0"}}
+		return []Stat{{Name: "count", Value: "0"}}
 	}
 	uPip := float64(a.inst.PriceUnitsPerPip())
 	sorted := a.spreads.sortedPrices()
-	pip := func(name string, v float64) Stat {
-		return Stat{Name: name, Value: fmt.Sprintf("%.2f pips", v), Pips: v}
-	}
 	return []Stat{
-		{Name: "count (with avg spread)", Value: fmt.Sprintf("%d", a.spreads.Len())},
-		pip("mean", a.spreads.MeanPips(uPip)),
-		pip("p90", a.spreads.percentilePips(90, uPip, sorted)),
-		pip("max", a.spreads.MaxPips(uPip)),
+		{Name: "count", Value: fmt.Sprintf("%d", a.spreads.Len())},
+		pipStat("mean", a.spreads.MeanPips(uPip), 2),
+		pipStat("p0", a.spreads.percentilePips(0, uPip, sorted), 2),
+		pipStat("p25", a.spreads.percentilePips(25, uPip, sorted), 2),
+		pipStat("p50", a.spreads.percentilePips(50, uPip, sorted), 2),
+		pipStat("p75", a.spreads.percentilePips(75, uPip, sorted), 2),
+		pipStat("tail (p90)", a.spreads.percentilePips(90, uPip, sorted), 2),
+		pipStat("max", a.spreads.MaxPips(uPip), 2),
 	}
 }

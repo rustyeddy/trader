@@ -91,6 +91,7 @@ func TestSwingAnalyzer_Empty(t *testing.T) {
 	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	stats := a.Stats()
 	require.Len(t, stats, 1)
+	assert.Equal(t, "Swing Range Distribution", a.Name())
 	assert.Equal(t, "count", stats[0].Name)
 	assert.Equal(t, "0", stats[0].Value)
 }
@@ -121,6 +122,7 @@ func TestSwingAnalyzer_SingleCandle(t *testing.T) {
 	stats := statMap(a.Stats())
 	assert.Equal(t, "1", stats["count"])
 	assert.Equal(t, "2.0 pips", stats["mean"])
+	assert.Equal(t, "2.0 pips", stats["p0"])
 	assert.Equal(t, "2.0 pips", stats["min"])
 	assert.Equal(t, "2.0 pips", stats["max"])
 	assert.Equal(t, "2.0 pips", stats["p50"])
@@ -135,6 +137,7 @@ func TestSwingAnalyzer_MultipleCandles(t *testing.T) {
 	stats := statMap(a.Stats())
 	assert.Equal(t, "3", stats["count"])
 	assert.Equal(t, "2.0 pips", stats["mean"])
+	assert.Equal(t, "1.0 pips", stats["p0"])
 	assert.Equal(t, "1.0 pips", stats["min"])
 	assert.Equal(t, "3.0 pips", stats["max"])
 	assert.Equal(t, "2.0 pips", stats["p50"])
@@ -165,7 +168,7 @@ func TestSpreadAnalyzer_Empty(t *testing.T) {
 	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	stats := a.Stats()
 	require.Len(t, stats, 1)
-	assert.Equal(t, "Average Spread", a.Name())
+	assert.Equal(t, "Avg Spread Distribution", a.Name())
 	assert.Equal(t, "0", stats[0].Value)
 }
 
@@ -193,8 +196,13 @@ func TestSpreadAnalyzer_Values(t *testing.T) {
 	a.Update(makeCT(100, 110, 90, 105, 5, 0))
 	a.Update(makeCT(100, 110, 90, 105, 15, 0))
 	stats := statMap(a.Stats())
-	assert.Equal(t, "2", stats["count (with avg spread)"])
+	assert.Equal(t, "2", stats["count"])
 	assert.Equal(t, "1.00 pips", stats["mean"])
+	assert.Equal(t, "0.50 pips", stats["p0"])
+	assert.Equal(t, "0.75 pips", stats["p25"])
+	assert.Equal(t, "1.00 pips", stats["p50"])
+	assert.Equal(t, "1.25 pips", stats["p75"])
+	assert.Equal(t, "1.40 pips", stats["tail (p90)"])
 	assert.Equal(t, "1.50 pips", stats["max"])
 }
 
@@ -205,7 +213,7 @@ func TestSpreadAnalyzer_AggregatesDuplicateSpreads(t *testing.T) {
 	a.Update(makeCT(100, 110, 90, 105, 10, 0))
 
 	stats := statMap(a.Stats())
-	assert.Equal(t, "3", stats["count (with avg spread)"])
+	assert.Equal(t, "3", stats["count"])
 	assert.Equal(t, "1.00 pips", stats["mean"])
 	assert.Len(t, a.spreads.counts, 1)
 }
@@ -223,6 +231,7 @@ func TestTrendAnalyzer_Empty(t *testing.T) {
 	a := NewTrendAnalyzer()
 	stats := a.Stats()
 	require.Len(t, stats, 1)
+	assert.Equal(t, "Trend Distribution", a.Name())
 	assert.Equal(t, "0", stats[0].Value)
 }
 
@@ -245,8 +254,8 @@ func TestTrendAnalyzer_AllTrending(t *testing.T) {
 	stats := statMap(a.Stats())
 	assert.Equal(t, "1", stats["count"])
 	assert.Equal(t, "1.000", stats["mean body/range"])
-	assert.Contains(t, stats["trending  (>0.6)"], "100.0%")
-	assert.Contains(t, stats["consolidating  (<0.3)"], "0.0%")
+	assert.Contains(t, stats["trending (>0.6)"], "100.0%")
+	assert.Contains(t, stats["consolidating (<0.3)"], "0.0%")
 }
 
 func TestTrendAnalyzer_AllConsolidating(t *testing.T) {
@@ -254,8 +263,8 @@ func TestTrendAnalyzer_AllConsolidating(t *testing.T) {
 	a := NewTrendAnalyzer()
 	a.Update(makeCT(5, 10, 0, 5, 0, 0)) // Open==Close, ratio=0
 	stats := statMap(a.Stats())
-	assert.Contains(t, stats["consolidating  (<0.3)"], "100.0%")
-	assert.Contains(t, stats["trending  (>0.6)"], "0.0%")
+	assert.Contains(t, stats["consolidating (<0.3)"], "100.0%")
+	assert.Contains(t, stats["trending (>0.6)"], "0.0%")
 }
 
 func TestTrendAnalyzer_Mixed(t *testing.T) {
@@ -268,9 +277,9 @@ func TestTrendAnalyzer_Mixed(t *testing.T) {
 	a.Update(makeCT(0, 10, 0, 5, 0, 0))
 	stats := statMap(a.Stats())
 	assert.Equal(t, "3", stats["count"])
-	assert.Contains(t, stats["trending  (>0.6)"], "33.3%")
-	assert.Contains(t, stats["consolidating  (<0.3)"], "33.3%")
-	assert.Contains(t, stats["mixed  (0.3–0.6)"], "33.3%")
+	assert.Contains(t, stats["trending (>0.6)"], "33.3%")
+	assert.Contains(t, stats["consolidating (<0.3)"], "33.3%")
+	assert.Contains(t, stats["mixed (0.3–0.6)"], "33.3%")
 }
 
 func TestTrendAnalyzer_ThresholdBoundaries(t *testing.T) {
@@ -280,9 +289,9 @@ func TestTrendAnalyzer_ThresholdBoundaries(t *testing.T) {
 	a.Update(makeCT(0, 10, 0, 3, 0, 0))     // exactly 0.3 → mixed
 	a.Update(makeCT(0, 1000, 0, 299, 0, 0)) // just below 0.3 → consolidating
 	stats := statMap(a.Stats())
-	assert.Contains(t, stats["trending  (>0.6)"], "25.0%")
-	assert.Contains(t, stats["mixed  (0.3–0.6)"], "50.0%")
-	assert.Contains(t, stats["consolidating  (<0.3)"], "25.0%")
+	assert.Contains(t, stats["trending (>0.6)"], "25.0%")
+	assert.Contains(t, stats["mixed (0.3–0.6)"], "50.0%")
+	assert.Contains(t, stats["consolidating (<0.3)"], "25.0%")
 }
 
 func TestTrendAnalyzer_MeanUsesHigherPrecision(t *testing.T) {
@@ -415,7 +424,7 @@ func TestSpreadAnalyzer_PipsFieldSet(t *testing.T) {
 	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(0, 20, 0, 10, 10, 0)) // spread=10 price units = 1 pip
 	for _, s := range a.Stats() {
-		if s.Name == "count (with avg spread)" {
+		if s.Name == "count" {
 			assert.Equal(t, 0.0, s.Pips)
 		} else {
 			assert.Equal(t, 1.0, s.Pips, "stat %q should have Pips=1.0", s.Name)

@@ -14,7 +14,7 @@ func NewSwingAnalyzer(inst *Instrument) *SwingAnalyzer {
 	return &SwingAnalyzer{inst: inst}
 }
 
-func (a *SwingAnalyzer) Name() string { return "Swing (High-Low Range)" }
+func (a *SwingAnalyzer) Name() string { return "Swing Range Distribution" }
 
 func (a *SwingAnalyzer) Update(ct *CandleTime) {
 	if !ct.Candle.Validate() {
@@ -33,17 +33,15 @@ func (a *SwingAnalyzer) Stats() []Stat {
 	}
 	uPip := float64(a.inst.PriceUnitsPerPip())
 	sorted := a.ranges.sortedPrices()
-	pip := func(name string, v float64) Stat {
-		return Stat{Name: name, Value: fmt.Sprintf("%.1f pips", v), Pips: v}
-	}
 	return []Stat{
 		{Name: "count", Value: fmt.Sprintf("%d", a.ranges.Len())},
-		pip("mean", a.ranges.MeanPips(uPip)),
-		pip("min", a.ranges.MinPips(uPip)),
-		pip("p25", a.ranges.percentilePips(25, uPip, sorted)),
-		pip("p50", a.ranges.percentilePips(50, uPip, sorted)),
-		pip("p75", a.ranges.percentilePips(75, uPip, sorted)),
-		pip("p90", a.ranges.percentilePips(90, uPip, sorted)),
-		pip("max", a.ranges.MaxPips(uPip)),
+		pipStat("mean", a.ranges.MeanPips(uPip), 1),
+		pipStat("p0", a.ranges.percentilePips(0, uPip, sorted), 1),
+		pipStat("min", a.ranges.MinPips(uPip), 1),
+		pipStat("p25", a.ranges.percentilePips(25, uPip, sorted), 1),
+		pipStat("p50", a.ranges.percentilePips(50, uPip, sorted), 1),
+		pipStat("p75", a.ranges.percentilePips(75, uPip, sorted), 1),
+		pipStat("p90", a.ranges.percentilePips(90, uPip, sorted), 1),
+		pipStat("max", a.ranges.MaxPips(uPip), 1),
 	}
 }

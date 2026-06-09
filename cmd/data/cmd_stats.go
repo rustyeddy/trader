@@ -26,9 +26,9 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 		Use:   "stats",
 		Short: "Print statistics for a historical candle dataset",
 		Long: `Walk a candle dataset and report:
-  - Swing:   high-low range distribution in pips
-  - Average Spread: AvgSpread distribution in pips
-  - Trend:   body/range ratio (trending vs consolidating bars)
+  - Swing Range Distribution: high-low range distribution in pips
+  - Avg Spread Distribution: AvgSpread distribution in pips
+  - Trend Distribution: body/range ratio (trending vs consolidating bars)
   - Session: average range and candle count by UTC hour
 
 --from and --to are inclusive dates in YYYY-MM-DD format.

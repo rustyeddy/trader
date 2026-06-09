@@ -2,12 +2,17 @@ package trader
 
 import "fmt"
 
-const trendRatioScale = 1_000_000
+const (
+	trendRatioScale                 int64 = 1_000_000
+	trendThresholdNumerator         int64 = 6
+	consolidationThresholdNumerator int64 = 3
+	trendThresholdDenominator       int64 = 10
+)
 
 // TrendAnalyzer measures the body/range ratio as a proxy for trending vs
 // consolidating bars.  ratio = |Close−Open| / (High−Low).
 //
-// Thresholds: >600 → trending; <300 → consolidating.
+// Thresholds: >0.6 → trending; <0.3 → consolidating.
 type TrendAnalyzer struct {
 	total         int
 	trending      int
@@ -20,24 +25,24 @@ func NewTrendAnalyzer() *TrendAnalyzer {
 	return &TrendAnalyzer{}
 }
 
-func (a *TrendAnalyzer) Name() string { return "Trend vs Consolidation" }
+func (a *TrendAnalyzer) Name() string { return "Trend Distribution" }
 
 func (a *TrendAnalyzer) Update(ct *CandleTime) {
 	if !ct.Candle.Validate() {
 		return
 	}
-	rng := int64(ct.High - ct.Low)
-	body := int64(ct.Close - ct.Open)
+	rng := int64(ct.High) - int64(ct.Low)
+	body := int64(ct.Close) - int64(ct.Open)
 	if body < 0 {
 		body = -body
 	}
-	ratioScaled := body * trendRatioScale / rng
+	ratioScaled := (body*trendRatioScale + rng/2) / rng
 	a.total++
 	a.ratioSum += ratioScaled
 	switch {
-	case body*10 > rng*6:
+	case body*trendThresholdDenominator > rng*trendThresholdNumerator:
 		a.trending++
-	case body*10 < rng*3:
+	case body*trendThresholdDenominator < rng*consolidationThresholdNumerator:
 		a.consolidating++
 	}
 }
@@ -47,15 +52,15 @@ func (a *TrendAnalyzer) Stats() []Stat {
 		return []Stat{{Name: "count", Value: "0"}}
 	}
 	mixed := a.total - a.trending - a.consolidating
-	meanRatio := float64(a.ratioSum) / float64(a.total) / trendRatioScale
+	meanRatio := float64(a.ratioSum) / float64(a.total) / float64(trendRatioScale)
 	pct := func(n int) string {
 		return fmt.Sprintf("%.1f%%  (%d)", 100*float64(n)/float64(a.total), n)
 	}
 	return []Stat{
 		{Name: "count", Value: fmt.Sprintf("%d", a.total)},
 		{Name: "mean body/range", Value: fmt.Sprintf("%.3f", meanRatio)},
-		{Name: "trending  (>0.6)", Value: pct(a.trending)},
-		{Name: "mixed  (0.3–0.6)", Value: pct(mixed)},
-		{Name: "consolidating  (<0.3)", Value: pct(a.consolidating)},
+		{Name: "trending (>0.6)", Value: pct(a.trending)},
+		{Name: "mixed (0.3–0.6)", Value: pct(mixed)},
+		{Name: "consolidating (<0.3)", Value: pct(a.consolidating)},
 	}
 }
