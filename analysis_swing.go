@@ -17,7 +17,7 @@ func NewSwingAnalyzer(inst *Instrument) *SwingAnalyzer {
 func (a *SwingAnalyzer) Name() string { return "Swing (High-Low Range)" }
 
 func (a *SwingAnalyzer) Update(ct *CandleTime) {
-	if !validOHLC(ct.Candle) {
+	if !ct.Candle.Validate() {
 		return
 	}
 	delta := ct.High - ct.Low

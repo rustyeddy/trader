@@ -57,12 +57,6 @@ func RunAnalysis(ctx context.Context, itr CandleIterator, analyzers []Analyzer) 
 	return itr.Err()
 }
 
-func validOHLC(c Candle) bool {
-	return c.High > c.Low &&
-		c.Open >= c.Low && c.Open <= c.High &&
-		c.Close >= c.Low && c.Close <= c.High
-}
-
 func missingInstrumentStats() []Stat {
 	return []Stat{{Name: "error", Value: "missing instrument"}}
 }

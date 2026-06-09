@@ -23,7 +23,7 @@ func NewTrendAnalyzer() *TrendAnalyzer {
 func (a *TrendAnalyzer) Name() string { return "Trend vs Consolidation" }
 
 func (a *TrendAnalyzer) Update(ct *CandleTime) {
-	if !validOHLC(ct.Candle) {
+	if !ct.Candle.Validate() {
 		return
 	}
 	rng := int64(ct.High - ct.Low)

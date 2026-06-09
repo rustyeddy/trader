@@ -25,7 +25,7 @@ func NewSessionAnalyzer(inst *Instrument) *SessionAnalyzer {
 func (a *SessionAnalyzer) Name() string { return "Session (by UTC hour)" }
 
 func (a *SessionAnalyzer) Update(ct *CandleTime) {
-	if !validOHLC(ct.Candle) {
+	if !ct.Candle.Validate() {
 		return
 	}
 	rng := ct.High - ct.Low

@@ -18,7 +18,7 @@ func NewSpreadAnalyzer(inst *Instrument) *SpreadAnalyzer {
 func (a *SpreadAnalyzer) Name() string { return "Average Spread" }
 
 func (a *SpreadAnalyzer) Update(ct *CandleTime) {
-	if !validOHLC(ct.Candle) {
+	if !ct.Candle.Validate() {
 		return
 	}
 	if ct.AvgSpread <= 0 {

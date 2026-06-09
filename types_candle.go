@@ -27,6 +27,13 @@ func (c *Candle) IsZero() bool {
 	return c.Open == 0 && c.High == 0 && c.Low == 0 && c.Close == 0 && c.Ticks == 0
 }
 
+// Validate reports whether the candle has a valid OHLC shape.
+func (c Candle) Validate() bool {
+	return c.High > c.Low &&
+		c.Open >= c.Low && c.Open <= c.High &&
+		c.Close >= c.Low && c.Close <= c.High
+}
+
 // String is an internal helper for trader type processing.
 func (c *Candle) String() string {
 	str := fmt.Sprintf("%d, %d, %d, %d", c.Open, c.High, c.Low, c.Close)
