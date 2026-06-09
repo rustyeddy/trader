@@ -41,7 +41,7 @@ cover-html:
 	go test ./... -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
 
-test-blackbox:
+blackbox:
 	go test ./... -tags=blackbox
 
 run: build
