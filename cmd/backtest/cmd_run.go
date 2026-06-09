@@ -27,7 +27,10 @@ func backtestBaseDir() string {
 	return "/srv/trading/backtests"
 }
 
-var runOutDir string
+var (
+	runConfigPath string
+	runOutDir     string
+)
 
 // CMDBacktestRun runs one or more backtest configs and writes reports named
 // <run-name>-<config-hash>.json to the output directory. Re-running the same
@@ -50,6 +53,12 @@ Config and result directories default to $TRADER_BACKTEST_DIR/{configs,reports}
 
 func init() {
 	CMDBacktestRun.Flags().StringVar(
+		&runConfigPath,
+		"config",
+		"",
+		fmt.Sprintf("Backtest config file, directory, or glob (default: $TRADER_BACKTEST_DIR/configs or %s/configs)", backtestBaseDir()),
+	)
+	CMDBacktestRun.Flags().StringVar(
 		&runOutDir,
 		"out",
 		"",
@@ -60,12 +69,7 @@ func init() {
 func runBacktestRun(cmd *cobra.Command, args []string) error {
 	base := backtestBaseDir()
 
-	configPath := filepath.Join(base, "configs")
-	if len(args) > 0 {
-		configPath = args[0]
-	} else if rootCfg != nil && strings.TrimSpace(rootCfg.ConfigPath) != "" {
-		configPath = strings.TrimSpace(rootCfg.ConfigPath)
-	}
+	configPath := backtestRunConfigPath(base, args, runConfigPath, rootCfg)
 
 	outDir := strings.TrimSpace(runOutDir)
 	if outDir == "" {
@@ -85,4 +89,19 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "\nOutput directory: %s\n", outDir)
 	return nil
+}
+
+func backtestRunConfigPath(base string, args []string, localConfig string, root *trader.RootConfig) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	if path := strings.TrimSpace(localConfig); path != "" {
+		return path
+	}
+	if root != nil {
+		if path := strings.TrimSpace(root.ConfigPath); path != "" {
+			return path
+		}
+	}
+	return filepath.Join(base, "configs")
 }

@@ -7,12 +7,12 @@ import (
 	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/cmd/api"
 	"github.com/rustyeddy/trader/cmd/backtest"
-	cmdmcp "github.com/rustyeddy/trader/cmd/mcp"
-	"github.com/rustyeddy/trader/cmd/serve"
 	"github.com/rustyeddy/trader/cmd/data"
 	"github.com/rustyeddy/trader/cmd/live"
+	cmdmcp "github.com/rustyeddy/trader/cmd/mcp"
 	"github.com/rustyeddy/trader/cmd/order"
 	"github.com/rustyeddy/trader/cmd/replay"
+	"github.com/rustyeddy/trader/cmd/serve"
 	"github.com/spf13/cobra"
 
 	// Provider registration via init().
@@ -59,7 +59,11 @@ func NewRootCmd() *cobra.Command {
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// Load global config files, then apply fields that the user did not
 		// explicitly set via CLI flags (flags always win).
-		gcfg, err := traderpkg.LoadGlobalConfig(rc.ConfigPath)
+		globalConfigPath := rc.ConfigPath
+		if cmd.CommandPath() == "trader backtest run" && cmd.LocalFlags().Changed("config") {
+			globalConfigPath = ""
+		}
+		gcfg, err := traderpkg.LoadGlobalConfig(globalConfigPath)
 		if err != nil {
 			return fmt.Errorf("global config: %w", err)
 		}
