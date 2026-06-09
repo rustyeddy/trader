@@ -3,7 +3,6 @@ package trader
 import (
 	"fmt"
 	"io"
-	"math"
 	"strings"
 	"time"
 )
@@ -206,7 +205,7 @@ func writeTradeTable(w io.Writer, trades []BacktestReportTrade) {
 	for i, tr := range trades {
 		tbl.addRow(
 			fmt.Sprintf("%d", i+1),
-			strings.Title(tr.Side),
+			titleASCII(tr.Side),
 			shortDateTime(tr.OpenTime),
 			shortDateTime(tr.CloseTime),
 			fmt.Sprintf("%.5f", tr.OpenPrice),
@@ -292,6 +291,13 @@ func (t *orgTable) write(w io.Writer, indent string) {
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 
+func titleASCII(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func shortDate(s string) string {
 	if len(s) >= 10 {
 		return s[:10]
@@ -313,6 +319,3 @@ func shortDateTime(s string) string {
 	}
 	return t.UTC().Format("2006-01-02 15:04")
 }
-
-// ensure math is imported (used for RR zero-guard elsewhere)
-var _ = math.Abs

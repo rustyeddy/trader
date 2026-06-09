@@ -6,7 +6,7 @@ import "fmt"
 // Ranges are stored as Price (scaled int) and converted to pips only at output.
 type SwingAnalyzer struct {
 	inst   *Instrument
-	ranges []Price
+	ranges priceDistribution
 }
 
 // NewSwingAnalyzer creates a SwingAnalyzer for the given instrument.
@@ -17,40 +17,32 @@ func NewSwingAnalyzer(inst *Instrument) *SwingAnalyzer {
 func (a *SwingAnalyzer) Name() string { return "Swing (High-Low Range)" }
 
 func (a *SwingAnalyzer) Update(ct *CandleTime) {
-	delta := ct.High - ct.Low
-	if delta <= 0 {
+	if !validOHLC(ct.Candle) {
 		return
 	}
-	a.ranges = append(a.ranges, delta)
+	delta := ct.High - ct.Low
+	a.ranges.Add(delta)
 }
 
 func (a *SwingAnalyzer) Stats() []Stat {
-	if len(a.ranges) == 0 {
+	if a.inst == nil {
+		return missingInstrumentStats()
+	}
+	if a.ranges.Len() == 0 {
 		return []Stat{{Name: "count", Value: "0"}}
 	}
 	uPip := unitsPerPip(a.inst)
-	pips := pricesToPips(a.ranges, uPip)
-	sorted := sortedCopy(pips)
-	var sum float64
-	for _, v := range sorted {
-		sum += v
-	}
-	mean := sum / float64(len(sorted))
-	p25 := percentile(sorted, 25)
-	p50 := percentile(sorted, 50)
-	p75 := percentile(sorted, 75)
-	p90 := percentile(sorted, 90)
 	pip := func(name string, v float64) Stat {
 		return Stat{Name: name, Value: fmt.Sprintf("%.1f pips", v), Pips: v}
 	}
 	return []Stat{
-		{Name: "count", Value: fmt.Sprintf("%d", len(sorted))},
-		pip("mean", mean),
-		pip("min", sorted[0]),
-		pip("p25", p25),
-		pip("p50", p50),
-		pip("p75", p75),
-		pip("p90", p90),
-		pip("max", sorted[len(sorted)-1]),
+		{Name: "count", Value: fmt.Sprintf("%d", a.ranges.Len())},
+		pip("mean", a.ranges.MeanPips(uPip)),
+		pip("min", a.ranges.MinPips(uPip)),
+		pip("p25", a.ranges.PercentilePips(25, uPip)),
+		pip("p50", a.ranges.PercentilePips(50, uPip)),
+		pip("p75", a.ranges.PercentilePips(75, uPip)),
+		pip("p90", a.ranges.PercentilePips(90, uPip)),
+		pip("max", a.ranges.MaxPips(uPip)),
 	}
 }

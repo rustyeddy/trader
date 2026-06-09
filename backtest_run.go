@@ -1,7 +1,7 @@
 package trader
 
 // BacktestRun holds mutable state accumulated during a single backtest
-// execution: the live lot book, the list of closed trades, and execution-cost
+// execution: the current lot book, the list of closed trades, and execution-cost
 // counters updated by the run loop.
 type BacktestRun struct {
 	Lots   *LotBook

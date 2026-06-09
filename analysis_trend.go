@@ -2,16 +2,17 @@ package trader
 
 import "fmt"
 
+const trendRatioScale = 1_000_000
+
 // TrendAnalyzer measures the body/range ratio as a proxy for trending vs
 // consolidating bars.  ratio = |Close−Open| / (High−Low).
 //
-// Integer fixed-point: ratio is stored as ratio×1000 (0–1000).
 // Thresholds: >600 → trending; <300 → consolidating.
 type TrendAnalyzer struct {
 	total         int
 	trending      int
 	consolidating int
-	ratioSum      int64 // sum of ratio×1000 values
+	ratioSum      int64 // sum of ratio values scaled by trendRatioScale
 }
 
 // NewTrendAnalyzer creates a TrendAnalyzer.
@@ -22,21 +23,21 @@ func NewTrendAnalyzer() *TrendAnalyzer {
 func (a *TrendAnalyzer) Name() string { return "Trend vs Consolidation" }
 
 func (a *TrendAnalyzer) Update(ct *CandleTime) {
-	rng := int64(ct.High - ct.Low)
-	if rng <= 0 {
+	if !validOHLC(ct.Candle) {
 		return
 	}
+	rng := int64(ct.High - ct.Low)
 	body := int64(ct.Close - ct.Open)
 	if body < 0 {
 		body = -body
 	}
-	ratio1000 := body * 1000 / rng
+	ratioScaled := body * trendRatioScale / rng
 	a.total++
-	a.ratioSum += ratio1000
+	a.ratioSum += ratioScaled
 	switch {
-	case ratio1000 > 600:
+	case body*10 > rng*6:
 		a.trending++
-	case ratio1000 < 300:
+	case body*10 < rng*3:
 		a.consolidating++
 	}
 }
@@ -46,7 +47,7 @@ func (a *TrendAnalyzer) Stats() []Stat {
 		return []Stat{{Name: "count", Value: "0"}}
 	}
 	mixed := a.total - a.trending - a.consolidating
-	meanRatio := float64(a.ratioSum) / float64(int64(a.total)*1000)
+	meanRatio := float64(a.ratioSum) / float64(a.total) / trendRatioScale
 	pct := func(n int) string {
 		return fmt.Sprintf("%.1f%%  (%d)", 100*float64(n)/float64(a.total), n)
 	}

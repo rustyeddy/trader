@@ -2,6 +2,7 @@ package trader
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -24,8 +25,10 @@ func makeCT(open, high, low, close int32, avgSpread int32, unixSec int64) *Candl
 
 // sliceIter is a minimal CandleIterator backed by a []CandleTime.
 type sliceIter struct {
-	candles []CandleTime
-	idx     int
+	candles  []CandleTime
+	idx      int
+	err      error
+	closeErr error
 }
 
 func newSliceIter(candles ...CandleTime) CandleIterator {
@@ -37,8 +40,8 @@ func (it *sliceIter) Next() bool {
 	return it.idx < len(it.candles)
 }
 func (it *sliceIter) CandleTime() CandleTime { return it.candles[it.idx] }
-func (it *sliceIter) Err() error             { return nil }
-func (it *sliceIter) Close() error           { return nil }
+func (it *sliceIter) Err() error             { return it.err }
+func (it *sliceIter) Close() error           { return it.closeErr }
 
 // ---- percentile -------------------------------------------------------------
 
@@ -60,6 +63,24 @@ func TestPercentile_Interpolation(t *testing.T) {
 	assert.InDelta(t, 2.5, percentile([]float64{0, 10}, 25), 1e-9)
 }
 
+func TestPercentile_ClampsBelowZero(t *testing.T) {
+	assert.Equal(t, 1.0, percentile([]float64{1, 2, 3}, -10))
+}
+
+func TestPercentile_ClampsAboveHundred(t *testing.T) {
+	assert.Equal(t, 3.0, percentile([]float64{1, 2, 3}, 110))
+}
+
+func TestPriceDistribution_PercentileClampsOutOfRange(t *testing.T) {
+	var d priceDistribution
+	d.Add(Price(10))
+	d.Add(Price(20))
+	d.Add(Price(30))
+
+	assert.Equal(t, 1.0, d.PercentilePips(-10, 10))
+	assert.Equal(t, 3.0, d.PercentilePips(110, 10))
+}
+
 // ---- SwingAnalyzer ----------------------------------------------------------
 
 func TestSwingAnalyzer_Empty(t *testing.T) {
@@ -70,10 +91,22 @@ func TestSwingAnalyzer_Empty(t *testing.T) {
 	assert.Equal(t, "0", stats[0].Value)
 }
 
+func TestSwingAnalyzer_NilInstrument(t *testing.T) {
+	a := NewSwingAnalyzer(nil)
+	a.Update(makeCT(0, 20, 0, 10, 0, 0))
+	assertMissingInstrument(t, a.Stats())
+}
+
 func TestSwingAnalyzer_ZeroRangeSkipped(t *testing.T) {
 	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 100, 100, 100, 0, 0)) // High==Low, skip
 	assert.Len(t, a.Stats(), 1)
+	assert.Equal(t, "0", a.Stats()[0].Value)
+}
+
+func TestSwingAnalyzer_InvalidOHLCSkipped(t *testing.T) {
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(130, 120, 100, 110, 0, 0))
 	assert.Equal(t, "0", a.Stats()[0].Value)
 }
 
@@ -103,18 +136,50 @@ func TestSwingAnalyzer_MultipleCandles(t *testing.T) {
 	assert.Equal(t, "2.0 pips", stats["p50"])
 }
 
+func TestSwingAnalyzer_AggregatesDuplicateRanges(t *testing.T) {
+	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(0, 20, 0, 10, 0, 0))
+	a.Update(makeCT(0, 20, 0, 10, 0, 0))
+	a.Update(makeCT(0, 20, 0, 10, 0, 0))
+
+	stats := statMap(a.Stats())
+	assert.Equal(t, "3", stats["count"])
+	assert.Equal(t, "2.0 pips", stats["mean"])
+	assert.Len(t, a.ranges.counts, 1)
+}
+
+func TestSwingAnalyzer_JPYPipConversion(t *testing.T) {
+	a := NewSwingAnalyzer(GetInstrument("USDJPY"))
+	a.Update(makeCT(0, 2000, 0, 1000, 0, 0))
+	stats := statMap(a.Stats())
+	assert.Equal(t, "2.0 pips", stats["mean"])
+}
+
 // ---- SpreadAnalyzer ---------------------------------------------------------
 
 func TestSpreadAnalyzer_Empty(t *testing.T) {
 	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	stats := a.Stats()
 	require.Len(t, stats, 1)
+	assert.Equal(t, "Average Spread", a.Name())
 	assert.Equal(t, "0", stats[0].Value)
+}
+
+func TestSpreadAnalyzer_NilInstrument(t *testing.T) {
+	a := NewSpreadAnalyzer(nil)
+	a.Update(makeCT(100, 110, 90, 105, 10, 0))
+	assertMissingInstrument(t, a.Stats())
 }
 
 func TestSpreadAnalyzer_ZeroSpreadSkipped(t *testing.T) {
 	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 110, 90, 105, 0, 0))
+	assert.Equal(t, "0", a.Stats()[0].Value)
+}
+
+func TestSpreadAnalyzer_InvalidOHLCSkipped(t *testing.T) {
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(100, 110, 90, 120, 10, 0))
 	assert.Equal(t, "0", a.Stats()[0].Value)
 }
 
@@ -124,9 +189,28 @@ func TestSpreadAnalyzer_Values(t *testing.T) {
 	a.Update(makeCT(100, 110, 90, 105, 5, 0))
 	a.Update(makeCT(100, 110, 90, 105, 15, 0))
 	stats := statMap(a.Stats())
-	assert.Equal(t, "2", stats["count (with spread)"])
+	assert.Equal(t, "2", stats["count (with avg spread)"])
 	assert.Equal(t, "1.00 pips", stats["mean"])
 	assert.Equal(t, "1.50 pips", stats["max"])
+}
+
+func TestSpreadAnalyzer_AggregatesDuplicateSpreads(t *testing.T) {
+	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(100, 110, 90, 105, 10, 0))
+	a.Update(makeCT(100, 110, 90, 105, 10, 0))
+	a.Update(makeCT(100, 110, 90, 105, 10, 0))
+
+	stats := statMap(a.Stats())
+	assert.Equal(t, "3", stats["count (with avg spread)"])
+	assert.Equal(t, "1.00 pips", stats["mean"])
+	assert.Len(t, a.spreads.counts, 1)
+}
+
+func TestSpreadAnalyzer_JPYPipConversion(t *testing.T) {
+	a := NewSpreadAnalyzer(GetInstrument("USDJPY"))
+	a.Update(makeCT(1000, 2000, 1000, 1500, 1000, 0))
+	stats := statMap(a.Stats())
+	assert.Equal(t, "1.00 pips", stats["mean"])
 }
 
 // ---- TrendAnalyzer ----------------------------------------------------------
@@ -141,6 +225,12 @@ func TestTrendAnalyzer_Empty(t *testing.T) {
 func TestTrendAnalyzer_ZeroRangeSkipped(t *testing.T) {
 	a := NewTrendAnalyzer()
 	a.Update(makeCT(100, 100, 100, 100, 0, 0))
+	assert.Equal(t, 0, a.total)
+}
+
+func TestTrendAnalyzer_InvalidOHLCSkipped(t *testing.T) {
+	a := NewTrendAnalyzer()
+	a.Update(makeCT(100, 110, 90, 120, 0, 0))
 	assert.Equal(t, 0, a.total)
 }
 
@@ -179,6 +269,25 @@ func TestTrendAnalyzer_Mixed(t *testing.T) {
 	assert.Contains(t, stats["mixed  (0.3–0.6)"], "33.3%")
 }
 
+func TestTrendAnalyzer_ThresholdBoundaries(t *testing.T) {
+	a := NewTrendAnalyzer()
+	a.Update(makeCT(0, 10, 0, 6, 0, 0))     // exactly 0.6 → mixed
+	a.Update(makeCT(0, 1000, 0, 601, 0, 0)) // just above 0.6 → trending
+	a.Update(makeCT(0, 10, 0, 3, 0, 0))     // exactly 0.3 → mixed
+	a.Update(makeCT(0, 1000, 0, 299, 0, 0)) // just below 0.3 → consolidating
+	stats := statMap(a.Stats())
+	assert.Contains(t, stats["trending  (>0.6)"], "25.0%")
+	assert.Contains(t, stats["mixed  (0.3–0.6)"], "50.0%")
+	assert.Contains(t, stats["consolidating  (<0.3)"], "25.0%")
+}
+
+func TestTrendAnalyzer_MeanUsesHigherPrecision(t *testing.T) {
+	a := NewTrendAnalyzer()
+	a.Update(makeCT(0, 3, 0, 2, 0, 0))
+	stats := statMap(a.Stats())
+	assert.Equal(t, "0.667", stats["mean body/range"])
+}
+
 // ---- SessionAnalyzer --------------------------------------------------------
 
 func TestSessionAnalyzer_Empty(t *testing.T) {
@@ -186,9 +295,21 @@ func TestSessionAnalyzer_Empty(t *testing.T) {
 	assert.Empty(t, a.Stats())
 }
 
+func TestSessionAnalyzer_NilInstrument(t *testing.T) {
+	a := NewSessionAnalyzer(nil)
+	a.Update(makeCT(0, 20, 0, 10, 0, 0))
+	assertMissingInstrument(t, a.Stats())
+}
+
 func TestSessionAnalyzer_ZeroRangeSkipped(t *testing.T) {
 	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 100, 100, 100, 0, 0))
+	assert.Empty(t, a.Stats())
+}
+
+func TestSessionAnalyzer_InvalidOHLCSkipped(t *testing.T) {
+	a := NewSessionAnalyzer(GetInstrument("EURUSD"))
+	a.Update(makeCT(80, 110, 90, 100, 0, 0))
 	assert.Empty(t, a.Stats())
 }
 
@@ -212,6 +333,14 @@ func TestSessionAnalyzer_BucketsByHour(t *testing.T) {
 	assert.Contains(t, stats["14:00 UTC"], "2.0 pips")
 }
 
+func TestSessionAnalyzer_JPYPipConversion(t *testing.T) {
+	a := NewSessionAnalyzer(GetInstrument("USDJPY"))
+	h8 := time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC).Unix()
+	a.Update(makeCT(0, 2000, 0, 1000, 0, h8))
+	stats := statMap(a.Stats())
+	assert.Contains(t, stats["08:00 UTC"], "2.0 pips")
+}
+
 // ---- RunAnalysis ------------------------------------------------------------
 
 func TestRunAnalysis_WalksAllCandles(t *testing.T) {
@@ -233,9 +362,28 @@ func TestRunAnalysis_ContextCancelled(t *testing.T) {
 	cancel() // cancelled immediately
 
 	swing := NewSwingAnalyzer(GetInstrument("EURUSD"))
-	itr := newSliceIter(*makeCT(0, 10, 0, 5, 0, 0))
+	itr := &sliceIter{candles: []CandleTime{*makeCT(0, 10, 0, 5, 0, 0)}, idx: -1}
 	err := RunAnalysis(ctx, itr, []Analyzer{swing})
 	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, -1, itr.idx)
+}
+
+func TestRunAnalysis_ReturnsCloseError(t *testing.T) {
+	sentinel := errors.New("close failed")
+	itr := &sliceIter{idx: -1, closeErr: sentinel}
+
+	err := RunAnalysis(context.Background(), itr, nil)
+
+	assert.ErrorIs(t, err, sentinel)
+}
+
+func TestRunAnalysis_ReturnsIteratorError(t *testing.T) {
+	sentinel := errors.New("iterator failed")
+	itr := &sliceIter{idx: -1, err: sentinel}
+
+	err := RunAnalysis(context.Background(), itr, nil)
+
+	assert.ErrorIs(t, err, sentinel)
 }
 
 // ---- Pips field -------------------------------------------------------------
@@ -256,7 +404,7 @@ func TestSpreadAnalyzer_PipsFieldSet(t *testing.T) {
 	a := NewSpreadAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(0, 20, 0, 10, 10, 0)) // spread=10 price units = 1 pip
 	for _, s := range a.Stats() {
-		if s.Name == "count (with spread)" {
+		if s.Name == "count (with avg spread)" {
 			assert.Equal(t, 0.0, s.Pips)
 		} else {
 			assert.Equal(t, 1.0, s.Pips, "stat %q should have Pips=1.0", s.Name)
@@ -290,4 +438,11 @@ func statMap(stats []Stat) map[string]string {
 		m[s.Name] = s.Value
 	}
 	return m
+}
+
+func assertMissingInstrument(t *testing.T, stats []Stat) {
+	t.Helper()
+	require.Len(t, stats, 1)
+	assert.Equal(t, "error", stats[0].Name)
+	assert.Equal(t, "missing instrument", stats[0].Value)
 }

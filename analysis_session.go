@@ -25,16 +25,19 @@ func NewSessionAnalyzer(inst *Instrument) *SessionAnalyzer {
 func (a *SessionAnalyzer) Name() string { return "Session (by UTC hour)" }
 
 func (a *SessionAnalyzer) Update(ct *CandleTime) {
-	rng := ct.High - ct.Low
-	if rng <= 0 {
+	if !validOHLC(ct.Candle) {
 		return
 	}
+	rng := ct.High - ct.Low
 	h := time.Unix(int64(ct.Timestamp), 0).UTC().Hour()
 	a.hours[h].count++
 	a.hours[h].totalRange += int64(rng)
 }
 
 func (a *SessionAnalyzer) Stats() []Stat {
+	if a.inst == nil {
+		return missingInstrumentStats()
+	}
 	uPip := unitsPerPip(a.inst)
 	stats := make([]Stat, 0, 24)
 	for h := range 24 {
