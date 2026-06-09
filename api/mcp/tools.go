@@ -45,6 +45,17 @@ func (s *Server) tools() []toolDef {
 				"config_paths": prop("array", "List of backtest config path specs on the server (files, directories, or glob patterns)"),
 			}, []string{"config_paths"}),
 		},
+		{
+			Name:        "get_candles_csv",
+			Description: "Return local candles for an instrument/timeframe/date-range in canonical CSV format.",
+			InputSchema: schema(map[string]any{
+				"instrument": prop("string", "Instrument, e.g. EURUSD or USD_JPY"),
+				"timeframe":  prop("string", "Candle timeframe: M1, H1, or D1"),
+				"from":       prop("string", "Start date inclusive, format YYYY-MM-DD"),
+				"to":         prop("string", "Optional end date inclusive, format YYYY-MM-DD; defaults to now/latest available"),
+				"source":     prop("string", "Optional local candle source override, default oanda"),
+			}, []string{"instrument", "timeframe", "from"}),
+		},
 	}
 
 	if s.writeEnable {
@@ -111,8 +122,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 
 	if s.svc.OANDA == nil {
 		switch p.Name {
-		case "run_backtest":
-			// allowed without OANDA
+		case "run_backtest", "get_candles_csv":
+			// allowed without OANDA because they use local data only
 		default:
 			return errContent("OANDA not configured — start server with --token to enable live endpoints"), nil
 		}
@@ -127,6 +138,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return s.toolGetTransactions(ctx, p.Arguments)
 	case "run_backtest":
 		return s.toolRunBacktest(ctx, p.Arguments)
+	case "get_candles_csv":
+		return s.toolGetCandlesCSV(ctx, p.Arguments)
 	case "download_candles":
 		if !s.writeEnable {
 			return errContent("download_candles requires --enable-write"), nil
@@ -203,6 +216,48 @@ func (s *Server) toolRunBacktest(ctx context.Context, raw json.RawMessage) (any,
 		"count":     len(summaries),
 		"summaries": summaries,
 	}), nil
+}
+
+func (s *Server) toolGetCandlesCSV(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instrument string `json:"instrument"`
+		Timeframe  string `json:"timeframe"`
+		From       string `json:"from"`
+		To         string `json:"to"`
+		Source     string `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: "invalid get_candles_csv args"}
+	}
+	if args.Instrument == "" || args.Timeframe == "" || args.From == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, timeframe, and from are required"}
+	}
+
+	result, err := s.svc.CandlesCSV(ctx, service.CandlesCSVRequest{
+		Instrument: args.Instrument,
+		Timeframe:  args.Timeframe,
+		From:       args.From,
+		To:         args.To,
+		Source:     args.Source,
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("get_candles_csv: %v", err)), nil
+	}
+	return map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": result.CSV,
+		}},
+		"metadata": map[string]any{
+			"instrument": result.Instrument,
+			"timeframe":  result.Timeframe,
+			"from":       result.From,
+			"to":         result.To,
+			"source":     result.Source,
+			"count":      result.Count,
+			"mime_type":  "text/csv",
+		},
+	}, nil
 }
 
 func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
