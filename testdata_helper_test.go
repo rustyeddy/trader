@@ -31,7 +31,7 @@ func HelperGenerateSyntheticCandlesWithConfig(t *testing.T, cfg SyntheticCandleC
 }
 
 // MakeSyntheticCandleSetIterator creates an iterator from a synthetic CandleSet.
-func MakeSyntheticCandleSetIterator(cs *candleSet) candleIterator {
+func MakeSyntheticCandleSetIterator(cs *candleSet) CandleIterator {
 	return newCandleSetIterator(cs, TimeRange{})
 }
 

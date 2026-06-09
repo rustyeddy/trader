@@ -21,16 +21,6 @@ type Analyzer interface {
 	Stats() []Stat
 }
 
-// CandleIterator is the read-only traversal interface exposed to callers
-// outside this package (e.g. cmd/data).  The unexported candleIterator is a
-// superset of this interface, so all existing implementations satisfy it.
-type CandleIterator interface {
-	Next() bool
-	CandleTime() CandleTime
-	Err() error
-	Close() error
-}
-
 // RunAnalysis walks itr, feeding every candle to each Analyzer.
 // It closes itr before returning.
 func RunAnalysis(ctx context.Context, itr CandleIterator, analyzers []Analyzer) (err error) {
@@ -43,13 +33,13 @@ func RunAnalysis(ctx context.Context, itr CandleIterator, analyzers []Analyzer) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !itr.Next() {
+		ct, ok := itr.Next()
+		if !ok {
 			break
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ct := itr.CandleTime()
 		for _, a := range analyzers {
 			a.Update(&ct)
 		}
@@ -112,6 +102,10 @@ func (d *priceDistribution) MaxPips(uPip float64) float64 {
 }
 
 func (d *priceDistribution) PercentilePips(p float64, uPip float64) float64 {
+	return d.percentilePips(p, uPip, d.sortedPrices())
+}
+
+func (d *priceDistribution) percentilePips(p float64, uPip float64, sorted []Price) float64 {
 	n := d.count
 	if n == 0 {
 		return 0
@@ -127,14 +121,14 @@ func (d *priceDistribution) PercentilePips(p float64, uPip float64) float64 {
 		return d.MaxPips(uPip)
 	}
 	frac := idx - float64(lo)
-	loVal := float64(d.valueAt(lo)) / uPip
-	hiVal := float64(d.valueAt(hi)) / uPip
+	loVal := float64(d.valueAt(lo, sorted)) / uPip
+	hiVal := float64(d.valueAt(hi, sorted)) / uPip
 	return loVal*(1-frac) + hiVal*frac
 }
 
-func (d *priceDistribution) valueAt(idx int) Price {
+func (d *priceDistribution) valueAt(idx int, sorted []Price) Price {
 	seen := 0
-	for _, v := range d.sortedPrices() {
+	for _, v := range sorted {
 		seen += d.counts[v]
 		if idx < seen {
 			return v
@@ -152,28 +146,6 @@ func (d *priceDistribution) sortedPrices() []Price {
 	return vals
 }
 
-// unitsPerPip returns the number of Price units that equal one pip for inst.
-func unitsPerPip(inst *Instrument) float64 {
-	return float64(PriceScale) * inst.PipSize()
-}
-
-// pricesToPips converts a slice of Price deltas to pip values.
-func pricesToPips(prices []Price, uPip float64) []float64 {
-	out := make([]float64, len(prices))
-	for i, p := range prices {
-		out[i] = float64(p) / uPip
-	}
-	return out
-}
-
-// sortedCopy returns a sorted copy of vals.
-func sortedCopy(vals []float64) []float64 {
-	cp := make([]float64, len(vals))
-	copy(cp, vals)
-	sort.Float64s(cp)
-	return cp
-}
-
 func clampPercentile(p float64) float64 {
 	switch {
 	case p < 0:
@@ -183,25 +155,4 @@ func clampPercentile(p float64) float64 {
 	default:
 		return p
 	}
-}
-
-// percentile returns the p-th percentile of a pre-sorted slice using linear
-// interpolation. Values outside the 0-100 percentile range are clamped.
-func percentile(sorted []float64, p float64) float64 {
-	n := len(sorted)
-	if n == 0 {
-		return 0
-	}
-	if n == 1 {
-		return sorted[0]
-	}
-	p = clampPercentile(p)
-	idx := p / 100.0 * float64(n-1)
-	lo := int(idx)
-	hi := lo + 1
-	if hi >= n {
-		return sorted[n-1]
-	}
-	frac := idx - float64(lo)
-	return sorted[lo]*(1-frac) + sorted[hi]*frac
 }

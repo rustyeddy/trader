@@ -35,40 +35,44 @@ func newSliceIter(candles ...CandleTime) CandleIterator {
 	return &sliceIter{candles: candles, idx: -1}
 }
 
-func (it *sliceIter) Next() bool {
+func (it *sliceIter) Next() (CandleTime, bool) {
 	it.idx++
-	return it.idx < len(it.candles)
+	if it.idx >= len(it.candles) {
+		return CandleTime{}, false
+	}
+	return it.candles[it.idx], true
 }
-func (it *sliceIter) CandleTime() CandleTime { return it.candles[it.idx] }
-func (it *sliceIter) Err() error             { return it.err }
-func (it *sliceIter) Close() error           { return it.closeErr }
+func (it *sliceIter) Err() error   { return it.err }
+func (it *sliceIter) Close() error { return it.closeErr }
 
-// ---- percentile -------------------------------------------------------------
+// ---- priceDistribution ------------------------------------------------------
 
-func TestPercentile_Empty(t *testing.T) {
-	assert.Equal(t, 0.0, percentile(nil, 50))
+func TestPriceDistribution_PercentileEmpty(t *testing.T) {
+	var d priceDistribution
+	assert.Equal(t, 0.0, d.PercentilePips(50, 10))
 }
 
-func TestPercentile_Single(t *testing.T) {
-	assert.Equal(t, 7.0, percentile([]float64{7}, 50))
+func TestPriceDistribution_PercentileSingle(t *testing.T) {
+	var d priceDistribution
+	d.Add(Price(70))
+	assert.Equal(t, 7.0, d.PercentilePips(50, 10))
 }
 
-func TestPercentile_OddLength(t *testing.T) {
+func TestPriceDistribution_PercentileOddLength(t *testing.T) {
 	// [1,2,3,4,5] p50 → index 2.0 → 3
-	assert.InDelta(t, 3.0, percentile([]float64{1, 2, 3, 4, 5}, 50), 1e-9)
+	var d priceDistribution
+	for _, p := range []Price{10, 20, 30, 40, 50} {
+		d.Add(p)
+	}
+	assert.InDelta(t, 3.0, d.PercentilePips(50, 10), 1e-9)
 }
 
-func TestPercentile_Interpolation(t *testing.T) {
+func TestPriceDistribution_PercentileInterpolation(t *testing.T) {
 	// [0,10] p25 → index 0.25 → 0*(0.75) + 10*(0.25) = 2.5
-	assert.InDelta(t, 2.5, percentile([]float64{0, 10}, 25), 1e-9)
-}
-
-func TestPercentile_ClampsBelowZero(t *testing.T) {
-	assert.Equal(t, 1.0, percentile([]float64{1, 2, 3}, -10))
-}
-
-func TestPercentile_ClampsAboveHundred(t *testing.T) {
-	assert.Equal(t, 3.0, percentile([]float64{1, 2, 3}, 110))
+	var d priceDistribution
+	d.Add(Price(0))
+	d.Add(Price(100))
+	assert.InDelta(t, 2.5, d.PercentilePips(25, 10), 1e-9)
 }
 
 func TestPriceDistribution_PercentileClampsOutOfRange(t *testing.T) {
@@ -111,7 +115,7 @@ func TestSwingAnalyzer_InvalidOHLCSkipped(t *testing.T) {
 }
 
 func TestSwingAnalyzer_SingleCandle(t *testing.T) {
-	// High−Low = 20 price units; unitsPerPip=10 → 2 pips
+	// High−Low = 20 price units; PriceUnitsPerPip=10 → 2 pips
 	a := NewSwingAnalyzer(GetInstrument("EURUSD"))
 	a.Update(makeCT(100, 120, 100, 110, 0, 0))
 	stats := statMap(a.Stats())

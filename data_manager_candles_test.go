@@ -65,15 +65,15 @@ func writeMonthlyCandles(
 	}
 }
 
-func collectCandles(t *testing.T, it candleIterator) ([]Timestamp, []Candle) {
+func collectCandles(t *testing.T, it CandleIterator) ([]Timestamp, []Candle) {
 	t.Helper()
 
 	var outTS []Timestamp
 	var outCandles []Candle
 
-	for it.Next() {
-		outTS = append(outTS, it.Timestamp())
-		outCandles = append(outCandles, it.Candle())
+	for ct, ok := it.Next(); ok; ct, ok = it.Next() {
+		outTS = append(outTS, ct.Timestamp)
+		outCandles = append(outCandles, ct.Candle)
 	}
 
 	require.NoError(t, it.Err())

@@ -109,7 +109,7 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr candleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr CandleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -248,7 +248,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 
 	for {
 		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-		if !itr.Next() {
+		candle, ok := itr.Next()
+		if !ok {
 			break
 		}
 		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
@@ -260,7 +261,6 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ca
 			return err
 		}
 
-		candle := itr.CandleTime()
 		lastCandle = candle
 		haveLastCandle = true
 		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())

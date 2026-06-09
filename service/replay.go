@@ -153,14 +153,13 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
 	}
 
-	for iter.Next() {
+	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		candle := iter.Candle()
-		ts := iter.Timestamp()
-		ct := trader.CandleTime{Candle: candle, Timestamp: ts}
+		candle := ct.Candle
+		ts := ct.Timestamp
 
 		// Tick indicators.
 		regime.Tick(ct)

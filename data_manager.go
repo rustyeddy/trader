@@ -324,7 +324,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		it, err := store.OpenTickIterator(tickKey)
 		if err != nil {
-tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := store.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -333,7 +333,7 @@ tickPath, err2 := store.PathForAsset(tickKey)
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := store.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -344,11 +344,11 @@ tickPath, err2 := store.PathForAsset(tickKey)
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
-tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := store.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
-kPath, err2 := store.PathForAsset(k)
+			kPath, err2 := store.PathForAsset(k)
 			if err2 != nil {
 				kPath = "<path unavailable>"
 			}
@@ -649,7 +649,7 @@ func (cr CandleRequest) Key() Key {
 	}
 }
 
-func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (candleIterator, error) {
+func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIterator, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -675,7 +675,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (candleIt
 
 	// months := MonthsInRange(req.Range)
 	months := req.Range.MonthsInRange()
-	iters := make([]candleIterator, 0, len(months))
+	iters := make([]CandleIterator, 0, len(months))
 
 	for _, ym := range months {
 		if err := ctx.Err(); err != nil {
@@ -714,7 +714,7 @@ func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*candleSet, 
 	return store.ReadCSV(key)
 }
 
-func closeCandleIterators(iters []candleIterator) error {
+func closeCandleIterators(iters []CandleIterator) error {
 	var firstErr error
 	for _, it := range iters {
 		if it == nil {

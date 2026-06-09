@@ -34,14 +34,15 @@ func (a *SpreadAnalyzer) Stats() []Stat {
 	if a.spreads.Len() == 0 {
 		return []Stat{{Name: "count (with avg spread)", Value: "0"}}
 	}
-	uPip := unitsPerPip(a.inst)
+	uPip := float64(a.inst.PriceUnitsPerPip())
+	sorted := a.spreads.sortedPrices()
 	pip := func(name string, v float64) Stat {
 		return Stat{Name: name, Value: fmt.Sprintf("%.2f pips", v), Pips: v}
 	}
 	return []Stat{
 		{Name: "count (with avg spread)", Value: fmt.Sprintf("%d", a.spreads.Len())},
 		pip("mean", a.spreads.MeanPips(uPip)),
-		pip("p90", a.spreads.PercentilePips(90, uPip)),
+		pip("p90", a.spreads.percentilePips(90, uPip, sorted)),
 		pip("max", a.spreads.MaxPips(uPip)),
 	}
 }

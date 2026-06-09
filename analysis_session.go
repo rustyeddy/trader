@@ -38,7 +38,7 @@ func (a *SessionAnalyzer) Stats() []Stat {
 	if a.inst == nil {
 		return missingInstrumentStats()
 	}
-	uPip := unitsPerPip(a.inst)
+	uPip := float64(a.inst.PriceUnitsPerPip())
 	stats := make([]Stat, 0, 24)
 	for h := range 24 {
 		b := a.hours[h]

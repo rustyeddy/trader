@@ -17,28 +17,17 @@ type errCandleIterator struct {
 	ts       Timestamp
 }
 
-func (it *errCandleIterator) Next() bool {
+func (it *errCandleIterator) Next() (CandleTime, bool) {
 	if it.nextErr != nil || it.count >= it.maxItems {
-		return false
+		return CandleTime{}, false
 	}
 	it.count++
 	it.cur = Candle{Open: 100, Close: 100, Ticks: 1}
 	it.ts = Timestamp(it.count)
-	return true
+	return CandleTime{Candle: it.cur, Timestamp: it.ts}, true
 }
-func (it *errCandleIterator) Candle() Candle { return it.cur }
-func (it *errCandleIterator) CandleTime() candleTime {
-	return candleTime{Candle: it.cur, Timestamp: it.ts}
-}
-func (it *errCandleIterator) Timestamp() Timestamp { return it.ts }
-func (it *errCandleIterator) Err() error           { return it.nextErr }
-func (it *errCandleIterator) Close() error         { return it.closeErr }
-func (it *errCandleIterator) NextCandle() (Candle, bool) {
-	if it.Next() {
-		return it.Candle(), true
-	}
-	return Candle{}, false
-}
+func (it *errCandleIterator) Err() error   { return it.nextErr }
+func (it *errCandleIterator) Close() error { return it.closeErr }
 
 // errAfterCandleIterator returns items first then an error.
 type errAfterCandleIterator struct {
@@ -49,24 +38,14 @@ type errAfterCandleIterator struct {
 	emitted bool
 }
 
-func (it *errAfterCandleIterator) Next() bool {
+func (it *errAfterCandleIterator) Next() (CandleTime, bool) {
 	if it.idx < len(it.items) {
+		ct := CandleTime{Candle: it.items[it.idx], Timestamp: it.tss[it.idx]}
 		it.idx++
-		return true
+		return ct, true
 	}
-	return false
+	return CandleTime{}, false
 }
-func (it *errAfterCandleIterator) Candle() Candle { return it.items[it.idx-1] }
-func (it *errAfterCandleIterator) CandleTime() candleTime {
-	return candleTime{Candle: it.Candle(), Timestamp: it.Timestamp()}
-}
-func (it *errAfterCandleIterator) NextCandle() (Candle, bool) {
-	if it.Next() {
-		return it.Candle(), true
-	}
-	return Candle{}, false
-}
-func (it *errAfterCandleIterator) Timestamp() Timestamp { return it.tss[it.idx-1] }
 func (it *errAfterCandleIterator) Err() error {
 	if it.idx >= len(it.items) && !it.emitted {
 		it.emitted = true
@@ -92,25 +71,27 @@ func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 	chained := newChainedCandleIterator(sub)
 
 	// First item
-	require.True(t, chained.Next())
+	_, ok := chained.Next()
+	require.True(t, ok)
 	// After items exhausted, sub.Err() returns sentinel → chained propagates it
-	require.False(t, chained.Next())
+	_, ok = chained.Next()
+	require.False(t, ok)
 	require.ErrorIs(t, chained.Err(), sentinel)
 }
 
-func TestChainedCandleIterator_NextCandleExhausted(t *testing.T) {
+func TestChainedCandleIterator_NextExhausted(t *testing.T) {
 	t.Parallel()
 
 	sub := &errCandleIterator{maxItems: 1}
 	chained := newChainedCandleIterator(sub)
 
-	c, ok := chained.NextCandle()
+	ct, ok := chained.Next()
 	require.True(t, ok)
-	require.Equal(t, Candle{Open: 100, Close: 100, Ticks: 1}, c)
+	require.Equal(t, Candle{Open: 100, Close: 100, Ticks: 1}, ct.Candle)
 
-	c, ok = chained.NextCandle()
+	ct, ok = chained.Next()
 	require.False(t, ok)
-	require.Equal(t, Candle{}, c)
+	require.Equal(t, CandleTime{}, ct)
 }
 
 func TestChainedCandleIterator_SubCloseErr(t *testing.T) {
@@ -124,7 +105,8 @@ func TestChainedCandleIterator_SubCloseErr(t *testing.T) {
 	chained := newChainedCandleIterator(sub)
 
 	// sub.Next() returns false → chained tries to close sub → error propagates
-	require.False(t, chained.Next())
+	_, ok := chained.Next()
+	require.False(t, ok)
 	require.ErrorIs(t, chained.Err(), sentinel)
 }
 
@@ -138,7 +120,7 @@ func TestChainedCandleIterator_ClosePropagatesSubError(t *testing.T) {
 	}
 	// The Close() on chainedCandleIterator should return first error from subs
 	closingChained := newChainedCandleIterator(sub)
-	_ = closingChained.Next() // advance to trigger sub
+	_, _ = closingChained.Next() // advance to trigger sub
 	err := closingChained.Close()
 	_ = err // May or may not propagate depending on state
 }
@@ -178,7 +160,7 @@ func TestCloseCandleIterators_CloseError(t *testing.T) {
 	sentinel := errors.New("close error")
 	sub := &errCandleIterator{closeErr: sentinel}
 
-	err := closeCandleIterators([]candleIterator{sub})
+	err := closeCandleIterators([]CandleIterator{sub})
 	require.ErrorIs(t, err, sentinel)
 }
 

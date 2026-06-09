@@ -26,9 +26,8 @@ func demonstrateSyntheticDataUsage() {
 	totalCandles := 0
 	for _, cs := range candleSets {
 		iter := newCandleSetIterator(cs, TimeRange{})
-		for iter.Next() {
+		for _, ok := iter.Next(); ok; _, ok = iter.Next() {
 			totalCandles++
-			_ = iter.Candle()
 		}
 		iter.Close()
 	}
@@ -66,10 +65,10 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 		monthStart := time.Now()
 
 		candlesInMonth := 0
-		for iter.Next() {
+		for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 			totalCandles++
 			candlesInMonth++
-			c := iter.Candle()
+			c := ct.Candle
 
 			// Verify candle sanity
 			if c.High < c.Low || c.Open > c.High || c.Open < c.Low {
@@ -106,9 +105,8 @@ func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 	defer iter.Close()
 
 	candleCount := 0
-	for iter.Next() {
+	for _, ok := iter.Next(); ok; _, ok = iter.Next() {
 		candleCount++
-		_ = iter.Candle()
 	}
 
 	// January has ~22 trading days
@@ -133,7 +131,7 @@ func TestTraderTimeoutDetection(t *testing.T) {
 	defer iter.Close()
 
 	candleCount := 0
-	for iter.Next() {
+	for _, ok := iter.Next(); ok; _, ok = iter.Next() {
 		select {
 		case <-ctx.Done():
 			t.Fatalf("Timeout while processing candles: infinite loop likely at candle %d",
@@ -169,9 +167,9 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	maxPrice := Price(0)
 	minPrice := Price(999999999) // Fixed overflow
 
-	for iter.Next() {
+	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		candleCount++
-		c := iter.Candle()
+		c := ct.Candle
 
 		if c.High > maxPrice {
 			maxPrice = c.High
@@ -253,7 +251,7 @@ func BenchmarkSyntheticCandleIteration(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		iter := newCandleSetIterator(cs, TimeRange{})
 		count := 0
-		for iter.Next() {
+		for _, ok := iter.Next(); ok; _, ok = iter.Next() {
 			count++
 		}
 		iter.Close()

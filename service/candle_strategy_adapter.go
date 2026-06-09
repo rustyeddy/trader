@@ -226,16 +226,12 @@ func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	defer func() { _ = iter.Close() }()
 
 	count := 0
-	for iter.Next() {
-		ct := trader.CandleTime{
-			Candle:    iter.Candle(),
-			Timestamp: iter.Timestamp(),
-		}
+	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		a.regime.Tick(ct)
 		a.exit.Tick(ct.Candle)
 		bt := a.makeBacktest()
 		_ = a.strategy.Update(ctx, &ct, bt)
-		if barTime := iter.Timestamp().Time(); barTime.After(a.lastBarTime) {
+		if barTime := ct.Timestamp.Time(); barTime.After(a.lastBarTime) {
 			a.lastBarTime = barTime
 		}
 		count++

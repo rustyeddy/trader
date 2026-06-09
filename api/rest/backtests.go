@@ -158,10 +158,10 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 	defer func() { _ = iter.Close() }()
 
 	bars := make([]candleBar, 0)
-	for iter.Next() {
-		c := iter.Candle()
+	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
+		c := ct.Candle
 		bars = append(bars, candleBar{
-			Time:  int64(iter.Timestamp()),
+			Time:  int64(ct.Timestamp),
 			Open:  c.Open.Float64(),
 			High:  c.High.Float64(),
 			Low:   c.Low.Float64(),

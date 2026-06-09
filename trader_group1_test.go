@@ -33,43 +33,16 @@ type fixedCandleIterator struct {
 	err      error
 }
 
-func (it *fixedCandleIterator) Next() bool {
+func (it *fixedCandleIterator) Next() (CandleTime, bool) {
 	if it.err != nil {
-		return false
+		return CandleTime{}, false
 	}
 	if it.idx >= len(it.candles) {
-		return false
+		return CandleTime{}, false
 	}
+	ct := it.candles[it.idx]
 	it.idx++
-	return true
-}
-
-func (it *fixedCandleIterator) Candle() Candle {
-	if it.idx == 0 || it.idx > len(it.candles) {
-		return Candle{}
-	}
-	return it.candles[it.idx-1].Candle
-}
-
-func (it *fixedCandleIterator) CandleTime() candleTime {
-	if it.idx == 0 || it.idx > len(it.candles) {
-		return candleTime{}
-	}
-	return it.candles[it.idx-1]
-}
-
-func (it *fixedCandleIterator) NextCandle() (Candle, bool) {
-	if !it.Next() {
-		return Candle{}, false
-	}
-	return it.Candle(), true
-}
-
-func (it *fixedCandleIterator) Timestamp() Timestamp {
-	if it.idx == 0 || it.idx > len(it.candles) {
-		return 0
-	}
-	return it.candles[it.idx-1].Timestamp
+	return ct, true
 }
 
 func (it *fixedCandleIterator) Err() error {

@@ -254,9 +254,10 @@ func TestMakeSyntheticCandleSetIterator(t *testing.T) {
 	iter := MakeSyntheticCandleSetIterator(cs)
 
 	require.NotNil(t, iter)
-	assert.True(t, iter.Next(), "should have at least one candle")
+	ct, ok := iter.Next()
+	assert.True(t, ok, "should have at least one candle")
 
-	candle := iter.Candle()
+	candle := ct.Candle
 	assert.Greater(t, candle.High, Price(0))
 }
 
@@ -277,10 +278,9 @@ func TestSyntheticDataFeedsTraderIterator(t *testing.T) {
 	defer iter.Close()
 
 	candleCount := 0
-	for iter.Next() {
+	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		candleCount++
-		candle := iter.Candle()
-		ct := iter.CandleTime()
+		candle := ct.Candle
 
 		// Verify candle structure
 		assert.Greater(t, candle.High, Price(0))

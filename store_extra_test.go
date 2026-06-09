@@ -135,7 +135,7 @@ func TestChainedCandleIterator_SubIteratorErr(t *testing.T) {
 	// Wrap the real iterator in a chained one and read it
 	chained := newChainedCandleIterator(real)
 	count := 0
-	for chained.Next() {
+	for _, ok := chained.Next(); ok; _, ok = chained.Next() {
 		count++
 	}
 	require.NoError(t, chained.Err())

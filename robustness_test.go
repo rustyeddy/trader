@@ -702,7 +702,7 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 
 	it := newCandleSetIterator(cs, rng)
 	count := 0
-	for it.Next() {
+	for _, ok := it.Next(); ok; _, ok = it.Next() {
 		count++
 	}
 	require.NoError(t, it.Err())
@@ -719,9 +719,10 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 	cs.SetValid(2)
 
 	it := newCandleSetIterator(cs, TimeRange{})
-	require.True(t, it.Next())
-	require.Equal(t, int32(5), it.Candle().Ticks)
-	require.Greater(t, int64(it.Timestamp()), int64(0))
+	ct, ok := it.Next()
+	require.True(t, ok)
+	require.Equal(t, int32(5), ct.Candle.Ticks)
+	require.Greater(t, int64(ct.Timestamp), int64(0))
 }
 
 // =============================================================================
@@ -746,7 +747,7 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 
 	chained := newChainedCandleIterator(it1, it2, it3)
 	count := 0
-	for chained.Next() {
+	for _, ok := chained.Next(); ok; _, ok = chained.Next() {
 		count++
 	}
 	require.NoError(t, chained.Err())
@@ -760,9 +761,11 @@ func TestChainedCandleIterator_ErrThenNil(t *testing.T) {
 	sub := &errCandleIterator{nextErr: sentinel}
 	chained := newChainedCandleIterator(sub)
 
-	require.False(t, chained.Next())
+	_, ok := chained.Next()
+	require.False(t, ok)
 	require.ErrorIs(t, chained.Err(), sentinel)
-	require.False(t, chained.Next()) // still false after error
+	_, ok = chained.Next()
+	require.False(t, ok) // still false after error
 }
 
 func TestChainedCandleIterator_CloseAfterErr(t *testing.T) {
@@ -772,7 +775,7 @@ func TestChainedCandleIterator_CloseAfterErr(t *testing.T) {
 	sub := &errCandleIterator{nextErr: sentinel}
 	chained := newChainedCandleIterator(sub)
 
-	chained.Next() // trigger error
+	_, _ = chained.Next() // trigger error
 	err := chained.Close()
 	// Close may return an error if the sub-iterator close also fails; either way no panic
 	_ = err
@@ -782,7 +785,8 @@ func TestChainedCandleIterator_AllNil(t *testing.T) {
 	t.Parallel()
 
 	chained := newChainedCandleIterator(nil, nil, nil)
-	require.False(t, chained.Next())
+	_, ok := chained.Next()
+	require.False(t, ok)
 	require.NoError(t, chained.Err())
 	require.NoError(t, chained.Close())
 }

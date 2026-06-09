@@ -380,7 +380,7 @@ func TestCloseCandleIterators_NoError(t *testing.T) {
 	it2 := newCandleSetIterator(cs, TimeRange{})
 
 	_ = s
-	err := closeCandleIterators([]candleIterator{it1, it2})
+	err := closeCandleIterators([]CandleIterator{it1, it2})
 	require.NoError(t, err)
 }
 
@@ -391,7 +391,7 @@ func TestCloseCandleIterators_WithNil(t *testing.T) {
 	it1 := newCandleSetIterator(cs, TimeRange{})
 
 	_ = s
-	err := closeCandleIterators([]candleIterator{nil, it1, nil})
+	err := closeCandleIterators([]CandleIterator{nil, it1, nil})
 	require.NoError(t, err)
 }
 
@@ -412,7 +412,7 @@ func TestChainedCandleIterator_NilSub(t *testing.T) {
 	_ = s
 
 	count := 0
-	for chained.Next() {
+	for _, ok := chained.Next(); ok; _, ok = chained.Next() {
 		count++
 	}
 	require.NoError(t, chained.Err())
@@ -426,7 +426,8 @@ func TestChainedCandleIterator_AlreadyClosed(t *testing.T) {
 	chained := newChainedCandleIterator()
 	require.NoError(t, chained.Close())
 	require.NoError(t, chained.Close()) // idempotent
-	require.False(t, chained.Next())
+	_, ok := chained.Next()
+	require.False(t, ok)
 }
 
 // ---------------------------------------------------------------------------

@@ -141,7 +141,8 @@ func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 
 	it := newCandleSetIterator(cs, TimeRange{})
 	require.NoError(t, it.Close())
-	require.False(t, it.Next())
+	_, ok := it.Next()
+	require.False(t, ok)
 	require.NoError(t, it.Close()) // idempotent
 }
 
@@ -157,10 +158,11 @@ func TestCandleSetIterator_AfterDone(t *testing.T) {
 
 	it := newCandleSetIterator(cs, TimeRange{})
 	// Drain all items
-	for it.Next() {
+	for _, ok := it.Next(); ok; _, ok = it.Next() {
 	}
 	// Calling Next again after done should return false
-	require.False(t, it.Next())
+	_, ok := it.Next()
+	require.False(t, ok)
 	require.NoError(t, it.Err())
 }
 

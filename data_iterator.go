@@ -70,12 +70,9 @@ func (it *funcIterator[T]) Close() error {
 	return it.closeFn()
 }
 
-type candleIterator interface {
-	Next() bool
-	Candle() Candle
-	CandleTime() candleTime
-	NextCandle() (Candle, bool)
-	Timestamp() Timestamp
+// CandleIterator traverses a sequence of timestamped candles.
+type CandleIterator interface {
+	Next() (CandleTime, bool)
 	Err() error
 	Close() error
 }
@@ -92,7 +89,7 @@ type candleSetIterator struct {
 	closed bool
 }
 
-func newCandleSetIterator(cs *candleSet, rng TimeRange) candleIterator {
+func newCandleSetIterator(cs *candleSet, rng TimeRange) CandleIterator {
 	return &candleSetIterator{
 		base:     cs.Iterator(),
 		rng:      rng,
@@ -100,18 +97,11 @@ func newCandleSetIterator(cs *candleSet, rng TimeRange) candleIterator {
 	}
 }
 
-func (it *candleSetIterator) NextCandle() (Candle, bool) {
-	if it.Next() {
-		return it.Candle(), true
-	}
-	return Candle{}, false
-}
-
-func (it *candleSetIterator) Next() bool {
+func (it *candleSetIterator) Next() (CandleTime, bool) {
 	if it.closed || it.done || it.err != nil {
 		it.cur = Candle{}
 		it.ts = 0
-		return false
+		return CandleTime{}, false
 	}
 
 	for it.base.Next() {
@@ -122,29 +112,13 @@ func (it *candleSetIterator) Next() bool {
 
 		it.cur = it.base.Candle()
 		it.ts = ts
-		return true
+		return CandleTime{Candle: it.cur, Timestamp: it.ts}, true
 	}
 
 	it.done = true
 	it.cur = Candle{}
 	it.ts = 0
-	return false
-}
-
-func (it *candleSetIterator) Candle() Candle {
-	return it.cur
-}
-
-func (it *candleSetIterator) CandleTime() candleTime {
-	ct := candleTime{
-		Candle:    it.Candle(),
-		Timestamp: it.Timestamp(),
-	}
-	return ct
-}
-
-func (it *candleSetIterator) Timestamp() Timestamp {
-	return it.ts
+	return CandleTime{}, false
 }
 
 func (it *candleSetIterator) Err() error {
@@ -164,7 +138,7 @@ func (it *candleSetIterator) CandleSet() *candleSet {
 }
 
 type chainedCandleIterator struct {
-	iters  []candleIterator
+	iters  []CandleIterator
 	idx    int
 	cur    Candle
 	ts     Timestamp
@@ -172,32 +146,17 @@ type chainedCandleIterator struct {
 	closed bool
 }
 
-func newChainedCandleIterator(iters ...candleIterator) candleIterator {
+func newChainedCandleIterator(iters ...CandleIterator) CandleIterator {
 	return &chainedCandleIterator{
 		iters: iters,
 	}
 }
 
-func (it *chainedCandleIterator) NextCandle() (Candle, bool) {
-	if it.Next() {
-		return it.Candle(), true
-	}
-	return Candle{}, false
-}
-
-func (it *chainedCandleIterator) CandleTime() candleTime {
-	ct := candleTime{
-		Candle:    it.Candle(),
-		Timestamp: it.Timestamp(),
-	}
-	return ct
-}
-
-func (it *chainedCandleIterator) Next() bool {
+func (it *chainedCandleIterator) Next() (CandleTime, bool) {
 	if it.closed || it.err != nil {
 		it.cur = Candle{}
 		it.ts = 0
-		return false
+		return CandleTime{}, false
 	}
 
 	for it.idx < len(it.iters) {
@@ -207,24 +166,24 @@ func (it *chainedCandleIterator) Next() bool {
 			continue
 		}
 
-		if curIt.Next() {
-			it.cur = curIt.Candle()
-			it.ts = curIt.Timestamp()
-			return true
+		if ct, ok := curIt.Next(); ok {
+			it.cur = ct.Candle
+			it.ts = ct.Timestamp
+			return ct, true
 		}
 
 		if err := curIt.Err(); err != nil {
 			it.err = err
 			it.cur = Candle{}
 			it.ts = 0
-			return false
+			return CandleTime{}, false
 		}
 
 		if err := curIt.Close(); err != nil {
 			it.err = err
 			it.cur = Candle{}
 			it.ts = 0
-			return false
+			return CandleTime{}, false
 		}
 
 		it.idx++
@@ -232,15 +191,7 @@ func (it *chainedCandleIterator) Next() bool {
 
 	it.cur = Candle{}
 	it.ts = 0
-	return false
-}
-
-func (it *chainedCandleIterator) Candle() Candle {
-	return it.cur
-}
-
-func (it *chainedCandleIterator) Timestamp() Timestamp {
-	return it.ts
+	return CandleTime{}, false
 }
 
 func (it *chainedCandleIterator) Err() error {
