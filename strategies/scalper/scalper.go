@@ -118,19 +118,19 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		return &trader.StrategyPlan{Reason: "in position"}
 	}
 
-	closeF := c.Close.Float64()
-	openF := c.Open.Float64()
-	fastVal := s.fastEMA.Float64()
-	slowVal := s.slowEMA.Float64()
+	closePrice := trader.PriceSum(c.Close)
+	openPrice := trader.PriceSum(c.Open)
+	fastVal := s.fastEMA.PriceSum()
+	slowVal := s.slowEMA.PriceSum()
 
 	// Track dip: price closed below the fast EMA.
-	if closeF < fastVal {
+	if closePrice < fastVal {
 		s.dipSeen = true
 		return &trader.StrategyPlan{Reason: "in dip"}
 	}
 
 	// Entry: dip recovery — bullish close back above fast EMA, in uptrend.
-	if s.dipSeen && closeF > fastVal && closeF > openF && closeF > slowVal {
+	if s.dipSeen && closePrice > fastVal && closePrice > openPrice && closePrice > slowVal {
 		s.dipSeen = false
 		stop := s.calcStop(ct)
 		instr := ""

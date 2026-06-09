@@ -111,6 +111,24 @@ func TestBreakout_NoSecondEntryInSameDirection(t *testing.T) {
 	assert.Empty(t, plan.Closes, "should not close the existing long either")
 }
 
+func TestBreakout_AllowsSecondEntryWhenStackingEnabled(t *testing.T) {
+	t.Parallel()
+	s, err := New(Config{Period: 5, CloseStrength: 0.6, AllowStacking: true})
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
+		s.Update(context.Background(), ct, nil)
+	}
+
+	run := makeOpenLot(trader.Long)
+	break2 := &trader.CandleTime{Candle: trader.Candle{Open: 110, High: 125, Low: 109, Close: 124}}
+	plan := s.Update(context.Background(), break2, run)
+	require.Len(t, plan.Opens, 1, "stacking should allow another same-direction entry")
+	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Empty(t, plan.Closes)
+	assert.Equal(t, "DONCHIAN(5,cs=0.60,stack)", s.Name())
+}
+
 func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{Period: 5, CloseStrength: 0.6})
@@ -127,4 +145,18 @@ func TestBreakout_ReverseClosesOppositeAndOpens(t *testing.T) {
 	require.Len(t, plan.Closes, 1, "should close existing long on reversal")
 	require.Len(t, plan.Opens, 1, "should open new short on reversal")
 	assert.Equal(t, trader.Short, plan.Opens[0].Side)
+}
+
+func TestBuildSinglePositionParam(t *testing.T) {
+	t.Parallel()
+	defaultStrategy, err := build(map[string]any{"period": 5, "close_strength": 0.6})
+	require.NoError(t, err)
+	defaultBreakout := defaultStrategy.(*Breakout)
+	assert.False(t, defaultBreakout.allowStacking)
+
+	stackingStrategy, err := build(map[string]any{"period": 5, "close_strength": 0.6, "single_position": false})
+	require.NoError(t, err)
+	stackingBreakout := stackingStrategy.(*Breakout)
+	assert.True(t, stackingBreakout.allowStacking)
+	assert.Equal(t, "DONCHIAN(5,cs=0.60,stack)", stackingBreakout.Name())
 }

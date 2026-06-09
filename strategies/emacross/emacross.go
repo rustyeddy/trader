@@ -24,7 +24,7 @@ type Core struct {
 
 	Name          string
 	PrevRel       int
-	MinSpread     float64
+	MinSpread     trader.Price
 	Scale         trader.Scale6
 	StopPips      trader.Pips
 	ATRMultiplier float64
@@ -86,7 +86,7 @@ func New(cfg Config) (*Cross, error) {
 			Fast:          fast,
 			Slow:          slow,
 			ATR:           atr,
-			MinSpread:     cfg.MinSpread,
+			MinSpread:     priceFromFloat(cfg.MinSpread, cfg.Scale),
 			Scale:         cfg.Scale,
 			StopPips:      cfg.StopPips,
 			ATRMultiplier: mult,
@@ -127,11 +127,9 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run *trader.B
 		return &trader.StrategyPlan{Reason: "warming up"}
 	}
 
-	fv := x.core.Fast.Float64()
-	sv := x.core.Slow.Float64()
-	diff := fv - sv
+	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && math.Abs(diff) < x.core.MinSpread {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < trader.PriceSum(x.core.MinSpread) {
 		return &trader.StrategyPlan{Reason: "min-spread filter"}
 	}
 
@@ -169,6 +167,13 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run *trader.B
 
 	x.core.PrevRel = rel
 	return &trader.StrategyPlan{Reason: "no cross"}
+}
+
+func absPriceSum(v trader.PriceSum) trader.PriceSum {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // EmitOpen closes any opposite open lots, then opens a new position in the
@@ -238,6 +243,10 @@ func Stop(c *Core, ct *trader.CandleTime, inst string, side trader.Side) trader.
 	}
 
 	return 0
+}
+
+func priceFromFloat(v float64, scale trader.Scale6) trader.Price {
+	return trader.Price(math.Round(v * float64(scale)))
 }
 
 func build(params map[string]any) (trader.Strategy, error) {

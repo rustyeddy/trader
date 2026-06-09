@@ -26,6 +26,7 @@ func init() {
 type Breakout struct {
 	period        int
 	closeStrength float64
+	allowStacking bool
 
 	// Circular buffer of completed-bar highs and lows.
 	highs []trader.Price
@@ -41,6 +42,7 @@ type Config struct {
 
 	Period        int     // N-bar lookback (e.g. 20)
 	CloseStrength float64 // 0.5 = no filter; 0.6 = close in upper/lower 40% of bar
+	AllowStacking bool    // true allows repeated same-direction entries
 }
 
 func New(cfg Config) (*Breakout, error) {
@@ -50,12 +52,17 @@ func New(cfg Config) (*Breakout, error) {
 	if cfg.CloseStrength < 0.5 || cfg.CloseStrength > 1.0 {
 		return nil, fmt.Errorf("donchian: close_strength must be in [0.5, 1.0]")
 	}
+	name := fmt.Sprintf("DONCHIAN(%d,cs=%.2f)", cfg.Period, cfg.CloseStrength)
+	if cfg.AllowStacking {
+		name = fmt.Sprintf("DONCHIAN(%d,cs=%.2f,stack)", cfg.Period, cfg.CloseStrength)
+	}
 	return &Breakout{
 		period:        cfg.Period,
 		closeStrength: cfg.CloseStrength,
+		allowStacking: cfg.AllowStacking,
 		highs:         make([]trader.Price, cfg.Period),
 		lows:          make([]trader.Price, cfg.Period),
-		name:          fmt.Sprintf("DONCHIAN(%d,cs=%.2f)", cfg.Period, cfg.CloseStrength),
+		name:          name,
 	}, nil
 }
 
@@ -141,7 +148,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		return &trader.StrategyPlan{Reason: "weak close"}
 	}
 
-	plan := emitOpen(ct, run, side)
+	plan := emitOpen(ct, run, side, d.allowStacking)
 	d.pushBar(ct.Candle)
 	if side == trader.Long {
 		plan.Reason = "donchian-breakout-up"
@@ -152,10 +159,10 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 }
 
 // emitOpen closes any opposite open lots, then opens a new position.
-// If a position in the same direction is already open, no new entry is emitted
-// (prevents piling up 5 entries across 6 consecutive breakout bars).
+// If stacking is disabled and a position in the same direction is already open,
+// no new entry is emitted.
 // No internal stop is set — the ExitStrategy supplies one via InitialStop.
-func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *trader.StrategyPlan {
+func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side, allowStacking bool) *trader.StrategyPlan {
 	plan := &trader.StrategyPlan{}
 
 	alreadyOpen := false
@@ -165,8 +172,10 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 				return nil
 			}
 			if lot.Side == side {
-				// Already in this direction — skip new entry.
-				alreadyOpen = true
+				if !allowStacking {
+					// Already in this direction — skip new entry.
+					alreadyOpen = true
+				}
 				return nil
 			}
 			plan.Closes = append(plan.Closes, &trader.CloseRequest{
@@ -197,8 +206,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 	return plan
 }
 
-// build is the registry constructor. Reads "period" and "close_strength" from
-// params and returns a configured Breakout.
+// build is the registry constructor. Reads "period", "close_strength", and
+// "single_position" from params and returns a configured Breakout.
 func build(params map[string]any) (trader.Strategy, error) {
 	period, _, err := trader.GetInt32Param(params, "period")
 	if err != nil {
@@ -214,8 +223,16 @@ func build(params map[string]any) (trader.Strategy, error) {
 	if !ok {
 		closeStrength = 0.6
 	}
+	singlePosition, ok, err := trader.GetBoolParam(params, "single_position")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		singlePosition = true
+	}
 	return New(Config{
 		Period:        int(period),
 		CloseStrength: closeStrength,
+		AllowStacking: !singlePosition,
 	})
 }

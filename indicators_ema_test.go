@@ -53,6 +53,8 @@ func TestEMA_KnownSequence(t *testing.T) {
 	}
 
 	require.True(t, ema.Ready())
+	require.Equal(t, PriceSum(1212500), ema.PriceSum())
+	require.Equal(t, Price(1212500), ema.Price())
 	require.InDelta(t, 12.125, result, 1e-9)
 }
 
@@ -68,7 +70,9 @@ func TestEMA_Reset(t *testing.T) {
 
 	require.False(t, ema.Ready())
 	require.Equal(t, 0.0, ema.Float64())
+	require.Equal(t, PriceSum(0), ema.PriceSum())
 
 	ema.Update(candle(20))
+	require.Equal(t, PriceSum(2000000), ema.PriceSum())
 	require.Equal(t, 20.0, ema.Float64())
 }

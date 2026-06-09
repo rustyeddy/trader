@@ -19,7 +19,6 @@ import (
 type WeeklyEMAFilter struct {
 	ema    *EMA
 	period int
-	scale  float64
 
 	// Weekly bar accumulation.
 	isoYear int
@@ -39,7 +38,6 @@ func NewWeeklyEMAFilter(period int, scale Scale6) (*WeeklyEMAFilter, error) {
 	return &WeeklyEMAFilter{
 		ema:    ema,
 		period: period,
-		scale:  float64(scale),
 	}, nil
 }
 
@@ -97,8 +95,8 @@ func (f *WeeklyEMAFilter) AllowSide(side Side) bool {
 	if !f.ema.Ready() {
 		return true
 	}
-	closePrice := float64(f.wClose) / f.scale
-	emaVal := f.ema.Float64()
+	closePrice := PriceSum(f.wClose)
+	emaVal := f.ema.PriceSum()
 	switch side {
 	case Long:
 		return closePrice > emaVal

@@ -87,7 +87,7 @@ func New(cfg Config) (*Strategy, error) {
 			Fast:          fast,
 			Slow:          slow,
 			ATR:           atr,
-			MinSpread:     cfg.MinSpread,
+			MinSpread:     trader.Price(math.Round(cfg.MinSpread * float64(cfg.Scale))),
 			Scale:         cfg.Scale,
 			StopPips:      cfg.StopPips,
 			ATRMultiplier: mult,
@@ -137,8 +137,6 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		x.core.ATR.Update(c)
 	}
 
-	fv := x.core.Fast.Float64()
-	sv := x.core.Slow.Float64()
 	dec := &trader.DefaultStrategyPlan
 
 	if !x.core.Fast.Ready() || !x.core.Slow.Ready() {
@@ -150,9 +148,9 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		dec.Reason = "warming up ADX"
 		return dec
 	}
-	diff := fv - sv
+	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && math.Abs(diff) < x.core.MinSpread {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < trader.PriceSum(x.core.MinSpread) {
 		dec.Reason = "min-spread filter"
 		return dec
 	}
@@ -230,6 +228,13 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 
 	dec.Reason = "no cross"
 	return dec
+}
+
+func absPriceSum(v trader.PriceSum) trader.PriceSum {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func build(params map[string]any) (trader.Strategy, error) {

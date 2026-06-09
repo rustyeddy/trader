@@ -1,23 +1,19 @@
 // pkg/indicators/ema.go
 package trader
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // EMA computes an Exponential Moving Average over candle closes.
 //
 // Pricing note:
 //   - trader.Candle prices are scaled integers.
-//   - EMA outputs float64 in *price units* (e.g. 1.08765), so we need the CandleSet scale.
-//     Pass the same scale used to build your CandleSet (e.g. 1_000_000 for Dukascopy).
+//   - EMA stores scaled price units internally; Float64 is only for display.
 type EMA struct {
 	n     int
-	alpha float64
-	scale float64
+	scale Scale6
 
 	seen  int
-	value float64
+	value PriceSum
 	ready bool
 
 	name string
@@ -32,17 +28,18 @@ func NewEMA(period int, scale Scale6) (*EMA, error) {
 	}
 	return &EMA{
 		n:     period,
-		alpha: 2.0 / float64(period+1),
-		scale: float64(scale),
+		scale: scale,
 		name:  fmt.Sprintf("EMA(%d)", period),
 	}, nil
 }
 
-func (e *EMA) Name() string     { return e.name }
-func (e *EMA) Period() int      { return e.n }
-func (e *EMA) Warmup() int      { return e.n }
-func (e *EMA) Ready() bool      { return e.ready }
-func (e *EMA) Float64() float64 { return e.value }
+func (e *EMA) Name() string       { return e.name }
+func (e *EMA) Period() int        { return e.n }
+func (e *EMA) Warmup() int        { return e.n }
+func (e *EMA) Ready() bool        { return e.ready }
+func (e *EMA) PriceSum() PriceSum { return e.value }
+func (e *EMA) Price() Price       { return Price(e.value) }
+func (e *EMA) Float64() float64   { return float64(e.value) / float64(e.scale) }
 
 func (e *EMA) Reset() {
 	e.seen = 0
@@ -51,15 +48,13 @@ func (e *EMA) Reset() {
 }
 
 func (e *EMA) Update(c Candle) {
-	// Convert scaled integer close into float price units.
-	x := float64(c.Close) / e.scale
-
 	e.seen++
 	if e.seen == 1 {
 		// Seed with the first close (simple, deterministic).
-		e.value = x
+		e.value = PriceSum(c.Close)
 	} else {
-		e.value = e.alpha*x + (1.0-e.alpha)*e.value
+		denom := PriceSum(e.n + 1)
+		e.value = (PriceSum(c.Close)*2 + e.value*PriceSum(e.n-1) + denom/2) / denom
 	}
 
 	if e.seen >= e.n {
