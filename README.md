@@ -64,6 +64,7 @@ Open `http://localhost:9999` for the dashboard.
 | `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
 | `trader data oanda` | Download candles directly from OANDA into the candle store |
+| `trader data candles` | Print local candles in canonical CSV format |
 | `trader data stats` | Print statistics for a historical candle dataset |
 | `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
@@ -328,6 +329,28 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 
 `testdata/candles/` contains small fixtures used by unit tests — do not use for real backtests.
 
+### Candle CSV Export
+
+Raw local candle reads go through `Service.CandlesCSV`, which streams candles from the canonical store and returns the same scaled integer CSV format used on disk. The service is shared by CLI, REST, and MCP so callers get consistent output:
+
+```csv
+# schema=v1 source=oanda instrument=EURUSD tf=h1 scale=100000
+Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags
+1704067200,110100,110000,109900,110050,10,15,60,0x0001
+```
+
+CLI:
+
+```bash
+trader data candles \
+  --instrument EUR_USD \
+  --timeframe  H1 \
+  --from       2024-01-01 \
+  --to         2024-01-31
+```
+
+`--to` is optional and defaults to now/latest available. Dates are inclusive at the caller boundary. Prices and spreads are emitted as fixed-point scaled integers, not floats.
+
 ### Dataset Statistics
 
 `trader data stats` walks a candle dataset and reports four groups of metrics:
@@ -428,11 +451,12 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 
 ## REST API
 
-`trader serve` (port :9999) exposes the following endpoints. All return JSON.
+`trader serve` (port :9999) exposes the following endpoints. Most return JSON; the raw candle export returns `text/csv`.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/health` | Health check |
+| `GET` | `/api/v1/candles/{instrument}` | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`) |
 | `GET` | `/api/v1/account` | OANDA account summary |
 | `GET` | `/api/v1/trades` | Open trades |
 | `POST` | `/api/v1/trades` | Place a risk-sized market order |
@@ -449,6 +473,32 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 | `GET` | `/api/v1/stream/backtest/{id}` | SSE: live backtest progress |
 
 OANDA endpoints return `503` when the server starts without a token (backtest-only mode).
+
+Example candle CSV request:
+
+```bash
+curl -s 'http://localhost:9999/api/v1/candles/EUR_USD?from=2024-01-01&to=2024-01-31&timeframe=H1'
+```
+
+---
+
+## MCP Tools
+
+`trader mcp serve` exposes typed tools over stdio. The `get_candles_csv` tool calls `Service.CandlesCSV` and returns local stored candles as `text/csv`; it does not require an OANDA token because it reads the local candle store. Live account and trade tools require `--token`, and write tools also require `--enable-write`.
+
+Local config example:
+
+```json
+{
+  "mcpServers": {
+    "trader": {
+      "type": "stdio",
+      "command": "trader",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
 
 ---
 
@@ -613,7 +663,7 @@ go test -run TestName ./...
 TRADER_RUN_DUKASCOPY_TESTS=1 go test ./...
 ```
 
-Every code change must ship with tests — see `CLAUDE.md` for conventions.
+Every code change must ship with tests — see `docs/CLAUDE.md` for conventions.
 
 ### Live Integration Smoke Test
 
@@ -646,18 +696,18 @@ cmd/            CLI entry points (Cobra)
 api/rest/       REST handlers and routing
 api/mcp/        Claude MCP tool server
 brokers/oanda/  OANDA REST + streaming client
-service/        Business logic (orders, live runner, replay, journal)
+service/        Business logic (orders, candle CSV export, live runner, replay, journal)
 strategies/     Strategy implementations
 data/           Candle loading, Dukascopy parser
 ui/             Embedded SvelteKit frontend (build → ui/dist/)
 deploy/         Dockerfile, docker-compose, systemd unit, example configs
 testdata/       Config fixtures and candle fixtures
 lots-of.go	    Trader core source code
-ROADMAP.md      Planned features and known gaps
+docs/           Project notes, roadmap, service docs, and plans
 ```
 
 ---
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features including walk-forward testing, external/plugin strategies, and more.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features including walk-forward testing, external/plugin strategies, and more.
