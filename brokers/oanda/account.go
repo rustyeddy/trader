@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 )
 
 // AccountSummary holds the key financial fields from OANDA's account summary.
@@ -49,19 +48,35 @@ func (c *Client) GetAccountSummary(ctx context.Context, accountID string) (*Acco
 		return nil, fmt.Errorf("oanda: parse account summary: %w", err)
 	}
 
-	parse := func(s string) float64 {
-		v, _ := strconv.ParseFloat(s, 64)
-		return v
+	a := resp.Account
+	balance, err := parseOptionalFloatField("account balance", a.Balance)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
+	nav, err := parseOptionalFloatField("account NAV", a.NAV)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
+	unrealizedPL, err := parseOptionalFloatField("account unrealizedPL", a.UnrealizedPL)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
+	marginUsed, err := parseOptionalFloatField("account marginUsed", a.MarginUsed)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
+	marginAvail, err := parseOptionalFloatField("account marginAvailable", a.MarginAvail)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
 	}
 
-	a := resp.Account
 	return &AccountSummary{
 		ID:           a.ID,
 		Currency:     a.Currency,
-		Balance:      parse(a.Balance),
-		NAV:          parse(a.NAV),
-		UnrealizedPL: parse(a.UnrealizedPL),
-		MarginUsed:   parse(a.MarginUsed),
-		MarginAvail:  parse(a.MarginAvail),
+		Balance:      balance,
+		NAV:          nav,
+		UnrealizedPL: unrealizedPL,
+		MarginUsed:   marginUsed,
+		MarginAvail:  marginAvail,
 	}, nil
 }

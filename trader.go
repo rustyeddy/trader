@@ -30,11 +30,8 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event
 				}
 
 				L.Debug("Broker event received",
-					"type", evt.Type,
-					"time", evt.Time,
-					"instrument", evt.Instrument,
-					"reason", evt.Reason,
-					"cause", evt.Cause,
+					"type", evt.Type.String(),
+					"positionID", eventPositionID(evt),
 				)
 
 				if err := t.processEvent(ctx, evt); err != nil {
@@ -507,11 +504,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 
 	L.Info("broker event recieved",
 		"type", evt.Type.String(),
-		"clientOrder", evt.ClientOrderID,
-		"brokerOrder", evt.BrokerOrderID,
-		"positionID", evt.PositionID,
-		"reason", evt.Reason,
-		"cause", evt.Cause.String())
+		"positionID", eventPositionID(evt))
 
 	switch evt.Type {
 	case EventOrderFilled:
@@ -535,4 +528,11 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 	}
 
 	return nil
+}
+
+func eventPositionID(evt *Event) string {
+	if evt == nil || evt.Lot == nil {
+		return ""
+	}
+	return evt.Lot.ID
 }

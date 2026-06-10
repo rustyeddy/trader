@@ -44,7 +44,7 @@ func TestNewTraderBacktestExecutor_DefaultFactories(t *testing.T) {
 
 	broker := exec.BrokerFactory()
 	require.NotNil(t, broker)
-	assert.Equal(t, "sim", broker.ID)
+	assert.Equal(t, "sim", broker.Name)
 
 	acct := exec.AccountFactory("backtest", MoneyFromFloat(10_000))
 	require.NotNil(t, acct)

@@ -14,10 +14,10 @@ import (
 // callers can dig into transaction-type-specific fields without us modeling
 // every variant.
 type Transaction struct {
-	ID        string    // OANDA transaction ID (numeric, monotonically increasing)
-	BatchID   string    // groups related transactions from a single API request
+	ID        string // OANDA transaction ID (numeric, monotonically increasing)
+	BatchID   string // groups related transactions from a single API request
 	AccountID string
-	Type      string    // e.g. "ORDER_FILL", "MARKET_ORDER", "STOP_LOSS_FILLED"
+	Type      string // e.g. "ORDER_FILL", "MARKET_ORDER", "STOP_LOSS_FILLED"
 	Time      time.Time
 	Reason    string
 
@@ -97,7 +97,10 @@ func (c *Client) GetTransactions(ctx context.Context, accountID string, sinceID 
 		out = append(out, t)
 	}
 
-	lastID, _ := strconv.ParseInt(resp.LastTransactionID, 10, 64)
+	lastID, err := parseIntField("lastTransactionID", resp.LastTransactionID)
+	if err != nil {
+		return out, 0, fmt.Errorf("oanda: %w", err)
+	}
 	return out, lastID, nil
 }
 
@@ -133,32 +136,47 @@ func parseTransaction(raw json.RawMessage) (Transaction, error) {
 	}
 
 	t := Transaction{
-		ID:        v.ID,
-		BatchID:   v.BatchID,
-		AccountID: v.AccountID,
-		Type:      v.Type,
-		Reason:    v.Reason,
+		ID:         v.ID,
+		BatchID:    v.BatchID,
+		AccountID:  v.AccountID,
+		Type:       v.Type,
+		Reason:     v.Reason,
 		Instrument: v.Instrument,
-		OrderID:   v.OrderID,
-		Raw:       raw,
+		OrderID:    v.OrderID,
+		Raw:        raw,
 	}
+	var err error
 
 	if v.Time != "" {
-		if ts, err := time.Parse(time.RFC3339Nano, v.Time); err == nil {
-			t.Time = ts
+		ts, err := parseTimeField("transaction time", v.Time)
+		if err != nil {
+			return Transaction{}, err
 		}
+		t.Time = ts
 	}
 	if v.Units != "" {
-		t.Units, _ = strconv.ParseInt(v.Units, 10, 64)
+		t.Units, err = parseIntField("transaction units", v.Units)
+		if err != nil {
+			return Transaction{}, err
+		}
 	}
 	if v.Price != "" {
-		t.Price, _ = strconv.ParseFloat(v.Price, 64)
+		t.Price, err = parseFloatField("transaction price", v.Price)
+		if err != nil {
+			return Transaction{}, err
+		}
 	}
 	if v.PL != "" {
-		t.PL, _ = strconv.ParseFloat(v.PL, 64)
+		t.PL, err = parseFloatField("transaction pl", v.PL)
+		if err != nil {
+			return Transaction{}, err
+		}
 	}
 	if v.AccountBalance != "" {
-		t.AccountBalance, _ = strconv.ParseFloat(v.AccountBalance, 64)
+		t.AccountBalance, err = parseFloatField("transaction accountBalance", v.AccountBalance)
+		if err != nil {
+			return Transaction{}, err
+		}
 	}
 	if v.TradeOpened != nil {
 		t.TradeID = v.TradeOpened.TradeID
@@ -167,9 +185,18 @@ func parseTransaction(raw json.RawMessage) (Transaction, error) {
 		t.TradesClosed = make([]ClosedTrade, len(v.TradesClosed))
 		for i, tc := range v.TradesClosed {
 			closed := ClosedTrade{TradeID: tc.TradeID}
-			closed.Units, _ = strconv.ParseInt(tc.Units, 10, 64)
-			closed.Price, _ = strconv.ParseFloat(tc.Price, 64)
-			closed.RealizedPL, _ = strconv.ParseFloat(tc.RealizedPL, 64)
+			closed.Units, err = parseIntField("closed trade units", tc.Units)
+			if err != nil {
+				return Transaction{}, err
+			}
+			closed.Price, err = parseFloatField("closed trade price", tc.Price)
+			if err != nil {
+				return Transaction{}, err
+			}
+			closed.RealizedPL, err = parseFloatField("closed trade realizedPL", tc.RealizedPL)
+			if err != nil {
+				return Transaction{}, err
+			}
 			t.TradesClosed[i] = closed
 		}
 	}

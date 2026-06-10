@@ -16,7 +16,7 @@ type Sim struct {
 
 func NewSimBroker(acct *trader.Account, j trader.Journal) *Sim {
 	if acct == nil {
-		acct = &trader.Account{}
+		acct = trader.NewAccount("sim", 0)
 	}
 	if acct.Lots.All() == nil {
 		acct.Lots = trader.LotBook{}
@@ -30,7 +30,7 @@ func NewSimBroker(acct *trader.Account, j trader.Journal) *Sim {
 
 func (e *Sim) UpdatePrice(tick trader.Tick) error {
 	if e == nil || e.account == nil {
-		return fmt.Errorf("nil engine")
+		return fmt.Errorf("sim broker account is nil")
 	}
 	inst := trader.NormalizeInstrument(tick.Instrument)
 	if inst == "" {
@@ -46,51 +46,9 @@ func (e *Sim) UpdatePrice(tick trader.Tick) error {
 	return e.account.ResolveWithMarks(marks)
 }
 
-func (e *Sim) CreateMarketOrder(ctx context.Context, req trader.OrderRequest) (*trader.Lot, error) {
-	if e == nil || e.account == nil {
-		return nil, fmt.Errorf("nil engine")
-	}
-	inst := trader.NormalizeInstrument(req.Instrument)
-	if inst == "" {
-		return nil, fmt.Errorf("blank instrument")
-	}
-	px, ok := e.prices[inst]
-	if !ok {
-		return nil, fmt.Errorf("no market price for %s", inst)
-	}
-
-	th := trader.NewTradeHistory(inst)
-	units := req.Units
-	if units == 0 {
-		return nil, fmt.Errorf("units must be non-zero")
-	}
-	if units < 0 {
-		th.Side = trader.Short
-		units = -units
-	} else {
-		th.Side = trader.Long
-	}
-	th.Units = units
-
-	entryPrice := px.Mid()
-	entryTime := trader.FromTime(time.Now().UTC())
-	lot := &trader.Lot{
-		TradeCommon:    th.TradeCommon,
-		EntryPrice:     entryPrice,
-		EntryTime:      entryTime,
-		OriginalUnits:  units,
-		RemainingUnits: units,
-		State:          trader.LotOpen,
-	}
-	if err := e.account.AddLot(ctx, lot); err != nil {
-		return nil, err
-	}
-	return lot, nil
-}
-
 func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 	if e == nil || e.account == nil {
-		return fmt.Errorf("nil engine")
+		return fmt.Errorf("sim broker account is nil")
 	}
 
 	var lots []*trader.Lot
@@ -147,7 +105,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 
 func (e *Sim) GetAccount(context.Context) (*trader.Account, error) {
 	if e == nil || e.account == nil {
-		return nil, fmt.Errorf("nil engine")
+		return nil, fmt.Errorf("sim broker account is nil")
 	}
 	return e.account, nil
 }

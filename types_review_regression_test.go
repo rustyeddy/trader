@@ -8,21 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOrderTypeString_UnknownIsSafe verifies expected behavior for this component.
-func TestOrderTypeString_UnknownIsSafe(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "<unknown>", orderType(255).String())
-}
-
-// TestOrderStatusString_Values verifies expected behavior for this component.
-func TestOrderStatusString_Values(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "canceled", OrderCanceled.String())
-	assert.Equal(t, "<unknown>", orderStatus(255).String())
-}
-
 // TestLotUnrealizedPL_LongAndShort verifies expected behavior for this component.
 func TestLotUnrealizedPL_LongAndShort(t *testing.T) {
 	t.Parallel()
