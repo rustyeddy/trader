@@ -235,9 +235,7 @@ func TestStoreIsUsableTickFile_NonEmptyFile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStoreSaveFile(t *testing.T) {
-	// SaveFile uses key.Path() which reads from the global store,
-	// so we must swap the global store to a temp dir.
-	s := useTempStore(t)
+	s := newTestStore(t)
 	k := Key{
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
@@ -259,6 +257,35 @@ func TestStoreSaveFile(t *testing.T) {
 	exists, err := s.Exists(k)
 	require.NoError(t, err)
 	require.True(t, exists)
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (t *trackingReadCloser) Close() error {
+	t.closed = true
+	return nil
+}
+
+func TestStoreSaveFile_ClosesReader(t *testing.T) {
+	s := newTestStore(t)
+	k := Key{
+		Instrument: "EURUSD",
+		Source:     SourceDukascopy,
+		Kind:       KindTick,
+		TF:         Ticks,
+		Year:       2025,
+		Month:      1,
+		Day:        2,
+		Hour:       13,
+	}
+
+	rc := &trackingReadCloser{Reader: bytes.NewReader([]byte("fake bi5 data"))}
+	_, err := s.SaveFile(k, rc)
+	require.NoError(t, err)
+	require.True(t, rc.closed)
 }
 
 // ---------------------------------------------------------------------------

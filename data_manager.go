@@ -168,7 +168,11 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 					}
 				}
 
-				for _, key := range RequiredTickHoursForMonth(SourceDukascopy, sym, year, month) {
+				keys, err := RequiredTickHoursForMonth(SourceDukascopy, sym, year, month)
+				if err != nil {
+					return nil, err
+				}
+				for _, key := range keys {
 					if err := ctx.Err(); err != nil {
 						return nil, err
 					}
@@ -207,7 +211,11 @@ func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
 				// are already part of inventory. Otherwise this candle will
 				// have to continue to wait for all ticks to be ready
 				// for the month involved, are all (or enough) tick files present
-				ready, keys := dm.inventory.TicksComplete(k)
+				ready, keys, _, err := dm.inventory.TicksComplete(k)
+				if err != nil {
+					walkErr = err
+					return false
+				}
 				if ready {
 					bt := BuildTask{
 						Key:    k,

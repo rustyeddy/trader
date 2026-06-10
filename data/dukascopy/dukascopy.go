@@ -74,12 +74,12 @@ func (f *File) URL() string {
 // a legitimately empty market-closed file or a non-corrupt .bi5.
 func (f *File) IsValid(ctx context.Context) error {
 	store := trader.GetStore()
-	ok, err := store.Exists(f.key)
+	ok, err := store.Exists(f.Key())
 	if err != nil || !ok {
 		return err
 	}
 
-	path, err := f.key.Path()
+	path, err := store.PathForAsset(f.Key())
 	if err != nil {
 		return err
 	}

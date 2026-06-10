@@ -145,6 +145,14 @@ func TestParseTickPath_InvalidDay(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestParseTickPath_ImpossibleCalendarDay(t *testing.T) {
+	t.Parallel()
+
+	path := "/data/dukascopy/EURUSD/2025/04/31/13h_ticks.bi5"
+	_, ok := parseTickPath(path)
+	require.False(t, ok)
+}
+
 func TestParseTickPath_InvalidHour(t *testing.T) {
 	t.Parallel()
 
@@ -176,6 +184,26 @@ func TestPathForAsset_TickKey(t *testing.T) {
 	require.Contains(t, p, "EURUSD")
 	require.Contains(t, p, "2025")
 	require.Contains(t, p, "13h_ticks.bi5")
+}
+
+func TestPathForAsset_TickKeyUsesSourceDirectory(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	k := Key{
+		Instrument: "EURUSD",
+		Source:     "other",
+		Kind:       KindTick,
+		TF:         Ticks,
+		Year:       2025,
+		Month:      1,
+		Day:        2,
+		Hour:       13,
+	}
+
+	p, err := s.PathForAsset(k)
+	require.NoError(t, err)
+	require.Contains(t, p, filepath.Join("raw", "other", "EURUSD"))
 }
 
 func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {

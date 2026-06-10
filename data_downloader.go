@@ -98,6 +98,7 @@ func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 		return Asset{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
+	rng, _ := key.Range()
 	return Asset{
 		Key:       key,
 		Path:      path,
@@ -105,7 +106,7 @@ func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 		Exists:    true,
 		Complete:  info.Size() > 0,
 		UpdatedAt: info.ModTime(),
-		Range:     key.Range(),
+		Range:     rng,
 		Flags:     FlagUsable,
 	}, nil
 }
@@ -115,10 +116,11 @@ func downloadFailureAsset(key Key, err error) Asset {
 	if pathErr != nil {
 		path = ""
 	}
+	rng, _ := key.Range()
 	return Asset{
 		Key:    key,
 		Path:   path,
-		Range:  key.Range(),
+		Range:  rng,
 		Reason: err.Error(),
 		Flags:  FlagDownloadFailed,
 	}

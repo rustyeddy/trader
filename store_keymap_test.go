@@ -72,28 +72,30 @@ func TestKeymapKeys(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[int]()
-	k1 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 1}
-	k2 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 1}
+	k1 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 1}
+	k2 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 1}
 
 	km.Put(k1, 1)
 	km.Put(k2, 2)
 
 	keys := km.Keys()
 	require.Len(t, keys, 2)
+	require.Equal(t, []Key{k2, k1}, keys)
 }
 
 func TestKeymapList(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[int]()
-	k1 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 1}
-	k2 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 2}
+	k1 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 1}
+	k2 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 2}
 
 	km.Put(k1, 10)
 	km.Put(k2, 20)
 
 	list := km.List()
 	require.Len(t, list, 2)
+	require.Equal(t, []int{20, 10}, list)
 }
 
 func TestKeymapLen(t *testing.T) {
@@ -144,23 +146,43 @@ func TestKeymapRange(t *testing.T) {
 	t.Parallel()
 
 	km := NewKeymap[int]()
+	k1 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 1}
+	k2 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 2}
+	km.Put(k1, 1)
+	km.Put(k2, 2)
+
+	seen := make([]Key, 0, 2)
+	km.Range(func(k Key, v int) bool {
+		seen = append(seen, k)
+		return true
+	})
+	require.Equal(t, []Key{k2, k1}, seen)
+
+	// Early stop
+	seen = seen[:0]
+	km.Range(func(k Key, v int) bool {
+		seen = append(seen, k)
+		return false
+	})
+	require.Equal(t, []Key{k2}, seen)
+}
+
+func TestKeymapRange_AllowsMutationInsideCallback(t *testing.T) {
+	t.Parallel()
+
+	km := NewKeymap[int]()
 	k1 := Key{Instrument: "EURUSD", Kind: KindCandle, Year: 2026, Month: 1}
 	k2 := Key{Instrument: "GBPUSD", Kind: KindCandle, Year: 2026, Month: 2}
 	km.Put(k1, 1)
 	km.Put(k2, 2)
 
-	count := 0
+	seen := 0
 	km.Range(func(k Key, v int) bool {
-		count++
+		seen++
+		km.Delete(k)
 		return true
 	})
-	require.Equal(t, 2, count)
 
-	// Early stop
-	count = 0
-	km.Range(func(k Key, v int) bool {
-		count++
-		return false
-	})
-	require.Equal(t, 1, count)
+	require.Equal(t, 2, seen)
+	require.Equal(t, 0, km.Len())
 }

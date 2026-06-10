@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -13,10 +14,6 @@ type Key struct {
 	Month      int
 	Day        int
 	Hour       int
-}
-
-func (k Key) Path() (string, error) {
-	return store.PathForAsset(k)
 }
 
 // compare returns:
@@ -93,6 +90,7 @@ func (ak Key) after(k Key) bool {
 
 // Time returns the UTC time represented by the key.
 // Missing fields are normalized to the earliest valid value.
+// Use Validate() first when invalid keys should be rejected instead of coerced.
 //
 // Examples:
 //
@@ -123,6 +121,25 @@ func (ak Key) Time() time.Time {
 	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
 }
 
+func (k Key) Validate() error {
+	switch {
+	case k.IsHourlyTick():
+		if k.TF != Ticks {
+			return fmt.Errorf("tick key must use Ticks timeframe, got %v", k.TF)
+		}
+		return validateKeyDate(k.Year, k.Month, k.Day, k.Hour)
+
+	case k.IsMonthlyCandle():
+		if k.TF <= 0 || k.TF == Ticks {
+			return fmt.Errorf("monthly candle key must use a candle timeframe, got %v", k.TF)
+		}
+		return validateKeyMonth(k.Year, k.Month)
+
+	default:
+		return fmt.Errorf("unsupported key shape: %+v", k)
+	}
+}
+
 func (k Key) IsMonthlyCandle() bool {
 	return k.Kind == KindCandle && k.Day == 0 && k.Hour == 0
 }
@@ -131,7 +148,10 @@ func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
-func (k Key) Range() TimeRange {
+func (k Key) Range() (TimeRange, error) {
+	if err := k.Validate(); err != nil {
+		return TimeRange{}, err
+	}
 	start := k.Time().UTC()
 
 	switch {
@@ -141,7 +161,7 @@ func (k Key) Range() TimeRange {
 			Start: Timestamp(start.Unix()),
 			End:   Timestamp(end.Unix()),
 			TF:    Ticks,
-		}
+		}, nil
 
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		end := start.AddDate(0, 1, 0)
@@ -149,14 +169,17 @@ func (k Key) Range() TimeRange {
 			Start: Timestamp(start.Unix()),
 			End:   Timestamp(end.Unix()),
 			TF:    k.TF,
-		}
+		}, nil
 
 	default:
-		return TimeRange{}
+		return TimeRange{}, fmt.Errorf("unsupported key range: %+v", k)
 	}
 }
 
-func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key {
+func RequiredTickHoursForMonth(source, instrument string, year, month int) ([]Key, error) {
+	if err := validateKeyMonth(year, month); err != nil {
+		return nil, err
+	}
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 
@@ -171,6 +194,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 			Source:     source,
 			Instrument: NormalizeInstrument(instrument),
 			Kind:       KindTick,
+			TF:         Ticks,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
 			Day:        t.Day(),
@@ -178,5 +202,33 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) []Key
 		})
 	}
 
-	return out
+	return out, nil
+}
+
+func validateKeyMonth(year, month int) error {
+	if year <= 0 {
+		return fmt.Errorf("key year must be > 0, got %d", year)
+	}
+	if month < 1 || month > 12 {
+		return fmt.Errorf("key month must be between 1 and 12, got %d", month)
+	}
+	return nil
+}
+
+func validateKeyDate(year, month, day, hour int) error {
+	if err := validateKeyMonth(year, month); err != nil {
+		return err
+	}
+	if day < 1 || day > 31 {
+		return fmt.Errorf("key day must be between 1 and 31, got %d", day)
+	}
+	if hour < 0 || hour > 23 {
+		return fmt.Errorf("key hour must be between 0 and 23, got %d", hour)
+	}
+
+	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+	if t.Year() != year || int(t.Month()) != month || t.Day() != day || t.Hour() != hour {
+		return fmt.Errorf("key date is not a valid calendar time: %04d-%02d-%02d %02d:00Z", year, month, day, hour)
+	}
+	return nil
 }

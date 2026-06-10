@@ -498,7 +498,9 @@ func TestDownloader_StartDownloaderStoresSuccess(t *testing.T) {
 	require.True(t, asset.Exists)
 	require.True(t, asset.Complete)
 	require.NotEmpty(t, asset.Path)
-	require.Equal(t, key.Range(), asset.Range)
+	rng, err := key.Range()
+	require.NoError(t, err)
+	require.Equal(t, rng, asset.Range)
 	require.True(t, s.IsUsableTickFile(key))
 }
 
@@ -805,15 +807,17 @@ func TestInventoryTicksComplete_AllComplete(t *testing.T) {
 
 	// Add all required tick hours. TicksComplete constructs keys with TF=Ticks,
 	// so we must also set TF=Ticks when populating the inventory.
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	require.NoError(t, err)
 	for _, k := range keys {
-		k.TF = Ticks
 		inv.Put(Asset{Key: k, Exists: true, Complete: true, Size: 100})
 	}
 
-	complete, gotKeys := inv.TicksComplete(base)
+	complete, gotKeys, missing, err := inv.TicksComplete(base)
+	require.NoError(t, err)
 	require.True(t, complete)
 	require.NotEmpty(t, gotKeys)
+	require.Empty(t, missing)
 }
 
 func TestInventoryTicksComplete_Missing(t *testing.T) {
@@ -829,9 +833,11 @@ func TestInventoryTicksComplete_Missing(t *testing.T) {
 		Month:      1,
 	}
 
-	complete, gotKeys := inv.TicksComplete(base)
+	complete, gotKeys, missing, err := inv.TicksComplete(base)
+	require.NoError(t, err)
 	require.False(t, complete)
-	require.Nil(t, gotKeys)
+	require.NotEmpty(t, gotKeys)
+	require.NotEmpty(t, missing)
 }
 
 // ---------------------------------------------------------------------------
@@ -1035,12 +1041,14 @@ func TestKeyRange_TickHour0(t *testing.T) {
 
 	k := Key{
 		Kind:  KindTick,
+		TF:    Ticks,
 		Year:  2026,
 		Month: 1,
 		Day:   5,
 		Hour:  0,
 	}
-	rng := k.Range()
+	rng, err := k.Range()
+	require.NoError(t, err)
 	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
 	require.Equal(t, Timestamp(start.Unix()), rng.Start)
 	require.Equal(t, Timestamp(start.Add(time.Hour).Unix()), rng.End)
@@ -1096,7 +1104,8 @@ func TestKeymapRange_Empty(t *testing.T) {
 func TestRequiredTickHoursForMonth_Count(t *testing.T) {
 	t.Parallel()
 
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	require.NoError(t, err)
 	require.Greater(t, len(keys), 100)
 	require.Less(t, len(keys), 31*24)
 }
@@ -1104,7 +1113,8 @@ func TestRequiredTickHoursForMonth_Count(t *testing.T) {
 func TestRequiredTickHoursForMonth_NoClosedHours(t *testing.T) {
 	t.Parallel()
 
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 1)
+	require.NoError(t, err)
 	for _, k := range keys {
 		ts := time.Date(k.Year, time.Month(k.Month), k.Day, k.Hour, 0, 0, 0, time.UTC)
 		require.False(t, isForexMarketClosed(ts), "key %+v should not be forex-closed time", k)

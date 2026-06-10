@@ -15,8 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestStoreDelete(t *testing.T) {
-	// Uses global store for key.Path(), so must swap.
-	s := useTempStore(t)
+	s := newTestStore(t)
 	k := Key{
 		Instrument: "EURUSD",
 		Source:     "test",
@@ -71,6 +70,26 @@ func TestOpenTickIterator_MarketClosed(t *testing.T) {
 	_, err := s.OpenTickIterator(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "market is closed")
+}
+
+func TestOpenTickIterator_UnusableFile(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	k := Key{
+		Instrument: "EURUSD",
+		Source:     SourceDukascopy,
+		Kind:       KindTick,
+		TF:         Ticks,
+		Year:       2026,
+		Month:      1,
+		Day:        5,
+		Hour:       10,
+	}
+
+	_, err := s.OpenTickIterator(k)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tick file not usable")
 }
 
 // ---------------------------------------------------------------------------
