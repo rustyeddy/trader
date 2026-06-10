@@ -13,7 +13,7 @@ make build          # → bin/trader
 make install        # install to $GOPATH/bin
 ```
 
-Requires Go 1.22+. No C dependencies (default build). SQLite journal requires `make build-sqlite`.
+Requires Go 1.22+.
 
 ---
 
@@ -79,6 +79,8 @@ Open `http://localhost:9999` for the dashboard.
 | `trader mcp` | Expose trader as typed Claude tools over stdio (MCP protocol) |
 
 All commands accept `--help`.
+
+Live journaling defaults to newline-delimited JSON files (`*.jsonl`) for trades and equity snapshots so the records stay easy to inspect now and easy to import into a database later.
 
 ---
 
@@ -627,7 +629,7 @@ The signal summary bar below the controls shows counts for each kind. The chart 
 cp deploy/env.example .env
 # edit .env: OANDA_TOKEN, OANDA_ACCOUNT_ID, INSTRUMENT, STRATEGY
 
-# Start the live bot + Postgres journal
+# Start the live bot + Postgres services
 docker compose up -d live postgres
 
 # Run a one-off backtest
@@ -665,7 +667,7 @@ Config (YAML)
   → RegimeFilter (suppresses entries in ranging markets)
   → Broker       (fills orders, emits Events)
   → Account      (updates equity, margin, P/L)
-  → Journal      (records closed trades — CSV or SQLite)
+  → Journal      (records closed trades — CSV or JSON)
 ```
 
 **Numeric types** — all prices and money are fixed-point integers, never floats:

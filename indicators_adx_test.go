@@ -1,4 +1,3 @@
-// pkg/indicators/adx_test.go
 package trader
 
 import (

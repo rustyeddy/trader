@@ -9,16 +9,13 @@ import (
 
 // JournalConfig selects the journal backend and its destinations.
 type JournalConfig struct {
-	// Kind: "csv", "sqlite", or "postgres"
+	// Kind: "csv", "json", or "postgres"
 	Kind string
 
-	// CSV-only: paths to trades + equity CSV files.
-	CSVTrades string
-	CSVEquity string
+	// File-backed journals use one file for trades and one for equity snapshots.
+	TradesPath string
+	EquityPath string
 
-	// SQLite: path to the database file.
-	// Postgres: DATABASE_URL connection string.
-	SQLitePath string
 	PostgresURL string
 }
 
@@ -27,21 +24,21 @@ type JournalConfig struct {
 func (s *Service) OpenJournal(cfg JournalConfig) (trader.Journal, error) {
 	switch cfg.Kind {
 	case "csv":
-		j, err := trader.NewCSV(cfg.CSVTrades, cfg.CSVEquity)
+		j, err := trader.NewCSV(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
 			return nil, fmt.Errorf("open csv journal: %w", err)
 		}
 		return j, nil
-	case "sqlite":
-		j, err := trader.NewSQLite(cfg.SQLitePath)
+	case "json":
+		j, err := trader.NewJSON(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
-			return nil, fmt.Errorf("open sqlite journal: %w", err)
+			return nil, fmt.Errorf("open json journal: %w", err)
 		}
 		return j, nil
 	case "postgres":
 		return nil, fmt.Errorf("postgres journal not yet implemented")
 	default:
-		return nil, fmt.Errorf("journal kind must be 'csv', 'sqlite', or 'postgres'; got %q", cfg.Kind)
+		return nil, fmt.Errorf("journal kind must be 'csv', 'json', or 'postgres'; got %q", cfg.Kind)
 	}
 }
 

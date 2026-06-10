@@ -131,10 +131,10 @@ func TestValidate(t *testing.T) {
 				Journal:    journalConfig{Type: "bad"},
 			},
 			wantErr: true,
-			errMsg:  "journal.type must be 'csv', 'sqlite', or 'postgres'",
+			errMsg:  "journal.type must be 'csv', 'json', or 'postgres'",
 		},
 		{
-			name: "csv journal missing files",
+			name: "file journal missing files",
 			config: &appConfig{
 				Account:    accountConfig{Currency: "USD", Balance: 100000},
 				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
@@ -142,18 +142,18 @@ func TestValidate(t *testing.T) {
 				Journal:    journalConfig{Type: "csv", TradesFile: "", EquityFile: ""},
 			},
 			wantErr: true,
-			errMsg:  "journal trades_file and equity_file required for CSV type",
+			errMsg:  "journal trades_file and equity_file required for CSV/JSON types",
 		},
 		{
-			name: "sqlite journal missing db path",
+			name: "json journal missing files",
 			config: &appConfig{
 				Account:    accountConfig{Currency: "USD", Balance: 100000},
 				Strategy:   appStrategyConfig{RiskPercent: 0.01, Instrument: "EURUSD", StopPips: 20, TargetPips: 40},
 				Simulation: simulationConfig{InitialBid: 1.0849, InitialAsk: 1.0851},
-				Journal:    journalConfig{Type: "sqlite", DBPath: ""},
+				Journal:    journalConfig{Type: "json", TradesFile: "", EquityFile: ""},
 			},
 			wantErr: true,
-			errMsg:  "journal db_path required for SQLite type",
+			errMsg:  "journal trades_file and equity_file required for CSV/JSON types",
 		},
 	}
 

@@ -1,7 +1,8 @@
-// journal/journal.go
 package trader
 
-// This could go into trade or market
+// TradeRecord is the canonical persisted representation of a completed trade.
+// It is shared by live journaling, replay/sim journaling, and export formats
+// such as CSV, JSONL, and Org output.
 type TradeRecord struct {
 	TradeID    string
 	Instrument string
@@ -14,7 +15,8 @@ type TradeRecord struct {
 	Reason     string
 }
 
-// This could go into broker
+// EquitySnapshot captures account state at a point in time for journal backends
+// that persist balance/equity history alongside completed trades.
 type EquitySnapshot struct {
 	Timestamp   Timestamp
 	Balance     Money
@@ -24,6 +26,8 @@ type EquitySnapshot struct {
 	MarginLevel Money
 }
 
+// Journal is the storage contract used by live trading and replay code to
+// persist completed trades and optional equity snapshots.
 type Journal interface {
 	RecordTrade(TradeRecord) error
 	RecordEquity(EquitySnapshot) error

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
-	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
@@ -26,18 +26,16 @@ type LiveJournal struct {
 	journal   Journal
 	log       *slog.Logger
 
-	mu          sync.Mutex
+	mu           sync.Mutex
 	pendingOpens map[string]*pendingOpen // by OANDA tradeID
 	lastSeenTxID int64
 }
 
 type pendingOpen struct {
-	TradeID    string
 	Instrument string
-	Units      int64 // signed; positive long, negative short
-	EntryPrice float64
-	OpenTime   time.Time
-	Reason     string
+	Units      Units
+	EntryPrice Price
+	OpenTime   Timestamp
 }
 
 // NewLiveJournal creates a journal worker. Call Run to start the subscription.
@@ -74,11 +72,7 @@ func (lj *LiveJournal) Backfill(ctx context.Context, sinceID int64) error {
 		for _, tx := range txns {
 			lj.handleTransaction(tx)
 		}
-		lj.mu.Lock()
-		if lastID > lj.lastSeenTxID {
-			lj.lastSeenTxID = lastID
-		}
-		lj.mu.Unlock()
+		lj.noteLastSeenTxID(lastID)
 		// OANDA caps responses at 1000; if we got fewer we're done.
 		if len(txns) < 1000 {
 			return nil
@@ -93,11 +87,7 @@ func (lj *LiveJournal) Backfill(ctx context.Context, sinceID int64) error {
 func (lj *LiveJournal) Run(ctx context.Context) error {
 	ch, err := lj.client.StreamTransactions(ctx, lj.accountID, oanda.StreamOptions{
 		OnHeartbeat: func(hb oanda.Heartbeat) {
-			lj.mu.Lock()
-			if hb.LastTxID > lj.lastSeenTxID {
-				lj.lastSeenTxID = hb.LastTxID
-			}
-			lj.mu.Unlock()
+			lj.noteLastSeenTxID(hb.LastTxID)
 		},
 	})
 	if err != nil {
@@ -105,32 +95,29 @@ func (lj *LiveJournal) Run(ctx context.Context) error {
 	}
 
 	for ev := range ch {
-		if ev.Err != nil {
-			lj.log.Warn("live-journal stream event error", "err", ev.Err)
-			continue
+		if err := lj.handleStreamEvent(ev); err != nil {
+			return err
 		}
-		lj.handleTransaction(ev.Tx)
 	}
 	return ctx.Err()
+}
+
+func (lj *LiveJournal) handleStreamEvent(ev oanda.TxEvent) error {
+	if ev.Err != nil {
+		lj.log.Warn("live-journal stream event error", "err", ev.Err)
+		return ev.Err
+	}
+	lj.handleTransaction(ev.Tx)
+	return nil
 }
 
 // handleTransaction routes a transaction to the open/close handler.
 // Currently only ORDER_FILL is processed; other types advance the txID
 // cursor but don't write to the journal.
 func (lj *LiveJournal) handleTransaction(tx oanda.Transaction) {
-	lj.mu.Lock()
-	if id := parseTxID(tx.ID); id > lj.lastSeenTxID {
-		lj.lastSeenTxID = id
-	}
-	lj.mu.Unlock()
+	lj.noteLastSeenTxID(parseTxID(tx.ID))
 
 	if tx.Type != "ORDER_FILL" {
-		return
-	}
-
-	// Open fill: tradeOpened field present, tradesClosed empty.
-	if tx.TradeID != "" && len(tx.TradesClosed) == 0 {
-		lj.recordOpen(tx)
 		return
 	}
 
@@ -138,16 +125,19 @@ func (lj *LiveJournal) handleTransaction(tx oanda.Transaction) {
 	for _, closed := range tx.TradesClosed {
 		lj.recordClose(tx, closed)
 	}
+
+	// Some ORDER_FILL events can both close existing trades and open a new one.
+	if tx.TradeID != "" {
+		lj.recordOpen(tx)
+	}
 }
 
 func (lj *LiveJournal) recordOpen(tx oanda.Transaction) {
 	po := &pendingOpen{
-		TradeID:    tx.TradeID,
 		Instrument: tx.Instrument,
-		Units:      tx.Units,
-		EntryPrice: tx.Price,
-		OpenTime:   tx.Time,
-		Reason:     tx.Reason,
+		Units:      Units(tx.Units),
+		EntryPrice: PriceFromFloat(tx.Price),
+		OpenTime:   FromTime(tx.Time),
 	}
 	lj.mu.Lock()
 	lj.pendingOpens[tx.TradeID] = po
@@ -163,9 +153,6 @@ func (lj *LiveJournal) recordOpen(tx oanda.Transaction) {
 func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrade) {
 	lj.mu.Lock()
 	po, ok := lj.pendingOpens[closed.TradeID]
-	if ok {
-		delete(lj.pendingOpens, closed.TradeID)
-	}
 	lj.mu.Unlock()
 
 	if !ok {
@@ -177,19 +164,18 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 			"realized_pl", closed.RealizedPL,
 		)
 		po = &pendingOpen{
-			TradeID:    closed.TradeID,
 			Instrument: tx.Instrument,
-			Units:      -closed.Units, // close units have opposite sign
+			Units:      Units(-closed.Units), // close units have opposite sign
 		}
 	}
 
 	record := TradeRecord{
 		TradeID:    closed.TradeID,
 		Instrument: po.Instrument,
-		Units:      Units(po.Units),
-		EntryPrice: PriceFromFloat(po.EntryPrice),
+		Units:      po.Units,
+		EntryPrice: po.EntryPrice,
 		ExitPrice:  PriceFromFloat(closed.Price),
-		OpenTime:   FromTime(po.OpenTime),
+		OpenTime:   po.OpenTime,
 		CloseTime:  FromTime(tx.Time),
 		RealizedPL: MoneyFromFloat(closed.RealizedPL),
 		Reason:     tx.Reason,
@@ -201,18 +187,33 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 		)
 		return
 	}
+	if ok {
+		lj.mu.Lock()
+		delete(lj.pendingOpens, closed.TradeID)
+		lj.mu.Unlock()
+	}
 	lj.log.Info("live-journal trade recorded",
 		"trade_id", closed.TradeID,
 		"instrument", po.Instrument,
-		"entry", po.EntryPrice,
+		"entry", po.EntryPrice.Float64(),
 		"exit", closed.Price,
 		"pl", closed.RealizedPL,
 		"reason", tx.Reason,
 	)
 }
 
+func (lj *LiveJournal) noteLastSeenTxID(id int64) {
+	lj.mu.Lock()
+	if id > lj.lastSeenTxID {
+		lj.lastSeenTxID = id
+	}
+	lj.mu.Unlock()
+}
+
 func parseTxID(s string) int64 {
-	var id int64
-	_, _ = fmt.Sscanf(s, "%d", &id)
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
 	return id
 }

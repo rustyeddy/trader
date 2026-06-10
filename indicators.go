@@ -1,4 +1,3 @@
-// Package indicators provides technical analysis indicators for trading
 package trader
 
 // CandleIndicator computes a single streaming value from candles.
@@ -6,6 +5,9 @@ package trader
 type CandleIndicator interface {
 	// Name returns a stable identifier like "EMA(20)" or "RSI(14)".
 	Name() string
+
+	// Period returns the configured lookback length.
+	Period() int
 
 	// Warmup returns how many updates are needed before Ready() can be true.
 	// (Some indicators may become ready earlier; that's fine.)
@@ -17,22 +19,16 @@ type CandleIndicator interface {
 	// Update consumes the next *closed* candle and updates internal state.
 	Update(c Candle)
 
-	// Ready reports whether Value() is meaningful (warmup completed).
+	// Ready reports whether the indicator output is meaningful.
 	Ready() bool
 }
 
-type IndicatorFloat64 interface {
-	// Value returns the current indicator value. If !Ready(), it should return 0
+type Float64Indicator interface {
+	// Float64 returns the current indicator value. If !Ready(), it should return 0
 	// (or the last computed value) — callers should always check Ready().
 	Float64() float64
 }
 
-type IndicatorFloat64s interface {
-	// Value returns the current indicator value. If !Ready(), it should return 0
-	// (or the last computed value) — callers should always check Ready().
-	Float64() []float64
-}
-
-type IndicatorPrice interface {
+type PriceIndicator interface {
 	Price() Price
 }

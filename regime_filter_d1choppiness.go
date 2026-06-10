@@ -86,10 +86,10 @@ func (f *D1ChoppinessFilter) Trending() bool {
 	if !f.ci.Ready() {
 		return true // don't gate during warmup
 	}
-	return f.ci.Value() < f.threshold
+	return f.ci.Float64() < f.threshold
 }
 
 func (f *D1ChoppinessFilter) AllowSide(_ Side) bool { return true }
 
 // Value exposes the raw CI value for debugging.
-func (f *D1ChoppinessFilter) Value() float64 { return f.ci.Value() }
+func (f *D1ChoppinessFilter) Value() float64 { return f.ci.Float64() }

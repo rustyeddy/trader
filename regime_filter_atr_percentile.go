@@ -17,9 +17,9 @@ type ATRPercentileFilter struct {
 	windowSize int
 	threshold  float64
 
-	window []float64 // ring buffer of recent ATR readings
-	pos    int       // next write index
-	count  int       // readings accumulated so far (capped at windowSize)
+	window []Price // ring buffer of recent ATR readings
+	pos    int     // next write index
+	count  int     // readings accumulated so far (capped at windowSize)
 }
 
 func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale Scale6) (*ATRPercentileFilter, error) {
@@ -32,7 +32,7 @@ func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale 
 		atrPeriod:  atrPeriod,
 		windowSize: windowSize,
 		threshold:  threshold,
-		window:     make([]float64, windowSize),
+		window:     make([]Price, windowSize),
 	}, nil
 }
 
@@ -47,7 +47,7 @@ func (f *ATRPercentileFilter) Tick(ct CandleTime) {
 	if !f.atr.Ready() {
 		return
 	}
-	v := f.atr.Float64()
+	v := f.atr.Price()
 	f.window[f.pos] = v
 	f.pos = (f.pos + 1) % f.windowSize
 	if f.count < f.windowSize {
@@ -71,7 +71,7 @@ func (f *ATRPercentileFilter) percentile() float64 {
 	if f.count == 0 {
 		return 100.0
 	}
-	current := f.atr.Float64()
+	current := f.atr.Price()
 	below := 0
 	for i := 0; i < f.count; i++ {
 		if f.window[i] < current {

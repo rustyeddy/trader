@@ -35,6 +35,7 @@ func TestBollingerBands_MiddleIsCorrectSMA(t *testing.T) {
 	b.Update(bbCandle(102_000))
 	b.Update(bbCandle(104_000))
 	require.True(t, b.Ready())
+	assert.Equal(t, Price(102_000), b.MiddlePrice())
 	assert.InDelta(t, 1.02, b.Middle(), 1e-6)
 }
 
@@ -59,7 +60,8 @@ func TestBollingerBands_StdDevCorrect(t *testing.T) {
 	b.Update(bbCandle(104_000))
 	require.True(t, b.Ready())
 	expected := math.Sqrt((0.02*0.02 + 0 + 0.02*0.02) / 3)
-	assert.InDelta(t, expected, b.StdDev(), 1e-9)
+	assert.Equal(t, Price(1_633), b.StdDevPrice())
+	assert.InDelta(t, expected, b.StdDev(), 1.0/float64(PriceScale))
 }
 
 func TestBollingerBands_FlatLineZeroWidth(t *testing.T) {
@@ -122,7 +124,7 @@ func TestBollingerBands_BandWidth(t *testing.T) {
 	b.Update(bbCandle(104_000))
 	require.True(t, b.Ready())
 	expected := (b.Upper() - b.Lower()) / b.Middle()
-	assert.InDelta(t, expected, b.BandWidth(), 1e-12)
+	assert.InDelta(t, expected, b.BandWidth(), 1.0/float64(PriceScale))
 }
 
 func TestBollingerBands_Reset(t *testing.T) {
@@ -151,7 +153,8 @@ func TestBollingerBands_RollingWindowEvictsOldValues(t *testing.T) {
 	b.Update(bbCandle(110_000))
 	require.True(t, b.Ready())
 	// mean = (1.0 + 1.0 + 1.1) / 3
-	assert.InDelta(t, (1.0+1.0+1.1)/3.0, b.Middle(), 1e-6)
+	assert.Equal(t, Price(103_333), b.MiddlePrice())
+	assert.InDelta(t, (1.0+1.0+1.1)/3.0, b.Middle(), 1.0/float64(PriceScale))
 }
 
 func TestBollingerBands_Name(t *testing.T) {

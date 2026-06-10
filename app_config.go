@@ -81,7 +81,7 @@ func (ps priceStep) ParseDuration() (time.Duration, error) {
 
 // journalConfig contains journaling parameters
 type journalConfig struct {
-	Type       string `json:"type" yaml:"type"` // "csv" or "sqlite"
+	Type       string `json:"type" yaml:"type"` // "csv" or "json"
 	TradesFile string `json:"trades_file,omitempty" yaml:"trades_file,omitempty"`
 	EquityFile string `json:"equity_file,omitempty" yaml:"equity_file,omitempty"`
 	DBPath     string `json:"db_path,omitempty" yaml:"db_path,omitempty"`
@@ -173,15 +173,12 @@ func (c *appConfig) Validate() error {
 	if c.Simulation.InitialAsk <= c.Simulation.InitialBid {
 		return fmt.Errorf("simulation initial_ask must be greater than initial_bid")
 	}
-	validJournalTypes := map[string]bool{"csv": true, "sqlite": true, "postgres": true}
+	validJournalTypes := map[string]bool{"csv": true, "json": true, "postgres": true}
 	if !validJournalTypes[c.Journal.Type] {
-		return fmt.Errorf("journal.type must be 'csv', 'sqlite', or 'postgres'")
+		return fmt.Errorf("journal.type must be 'csv', 'json', or 'postgres'")
 	}
-	if c.Journal.Type == "csv" && (c.Journal.TradesFile == "" || c.Journal.EquityFile == "") {
-		return fmt.Errorf("journal trades_file and equity_file required for CSV type")
-	}
-	if c.Journal.Type == "sqlite" && c.Journal.DBPath == "" {
-		return fmt.Errorf("journal db_path required for SQLite type")
+	if (c.Journal.Type == "csv" || c.Journal.Type == "json") && (c.Journal.TradesFile == "" || c.Journal.EquityFile == "") {
+		return fmt.Errorf("journal trades_file and equity_file required for CSV/JSON types")
 	}
 	if c.Journal.Type == "postgres" && c.Journal.DBPath == "" {
 		return fmt.Errorf("journal db_path (DATABASE_URL) required for postgres type")

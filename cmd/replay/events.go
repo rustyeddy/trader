@@ -67,7 +67,8 @@ func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
 
 			ctx := context.Background()
 
-			j, err := trader.NewSQLite(rc.DBPath)
+			tradesPath, equityPath := trader.JournalRecordPaths(rc.DBPath)
+			j, err := trader.NewJSON(tradesPath, equityPath)
 			if err != nil {
 				return err
 			}

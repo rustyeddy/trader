@@ -1,52 +1,76 @@
-// journal/csv.go
 package trader
 
 import (
 	"encoding/csv"
+	"errors"
 	"os"
-	"strconv"
 )
 
+var tradeCSVHeader = []string{
+	"trade_id", "instrument", "units", "entry_price", "exit_price", "open_time", "close_time", "realized_pl", "reason",
+}
+
+var equityCSVHeader = []string{
+	"time", "balance", "equity", "margin_used", "free_margin", "margin_level",
+}
+
 type csvJournal struct {
-	trades *csv.Writer
-	equity *csv.Writer
-	tf, ef *os.File
+	tradeWriter  *csv.Writer
+	equityWriter *csv.Writer
+	tradesFile   *os.File
+	equityFile   *os.File
 }
 
 func NewCSV(tradesPath, equityPath string) (*csvJournal, error) {
-	tf, err := os.Create(tradesPath)
-	if err != nil {
-		return nil, err
-	}
-	ef, err := os.Create(equityPath)
+	tradesFile, tradeWriter, err := openCSVJournalFile(tradesPath, tradeCSVHeader)
 	if err != nil {
 		return nil, err
 	}
 
-	tw := csv.NewWriter(tf)
-	ew := csv.NewWriter(ef)
-
-	if err := tw.Write([]string{"trade_id", "instrument", "units", "entry_price", "exit_price", "open_time", "close_time", "realized_pl", "reason"}); err != nil {
-		return nil, err
-	}
-	if err := ew.Write([]string{"time", "balance", "equity", "margin_used", "free_margin", "margin_level"}); err != nil {
+	equityFile, equityWriter, err := openCSVJournalFile(equityPath, equityCSVHeader)
+	if err != nil {
+		_ = tradesFile.Close()
 		return nil, err
 	}
 
-	tw.Flush()
-	if err := tw.Error(); err != nil {
-		return nil, err
-	}
-	ew.Flush()
-	if err := ew.Error(); err != nil {
-		return nil, err
+	return &csvJournal{
+		tradeWriter:  tradeWriter,
+		equityWriter: equityWriter,
+		tradesFile:   tradesFile,
+		equityFile:   equityFile,
+	}, nil
+}
+
+func openCSVJournalFile(path string, header []string) (*os.File, *csv.Writer, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return &csvJournal{tw, ew, tf, ef}, nil
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+
+	writer := csv.NewWriter(file)
+	if info.Size() == 0 {
+		if err := writer.Write(header); err != nil {
+			_ = file.Close()
+			return nil, nil, err
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			_ = file.Close()
+			return nil, nil, err
+		}
+	}
+
+	return file, writer, nil
 }
 
 func (j *csvJournal) RecordTrade(t TradeRecord) error {
-	err := j.trades.Write([]string{
+	err := j.tradeWriter.Write([]string{
 		t.TradeID,
 		t.Instrument,
 		t.Units.String(),
@@ -60,12 +84,12 @@ func (j *csvJournal) RecordTrade(t TradeRecord) error {
 	if err != nil {
 		return err
 	}
-	j.trades.Flush()
-	return j.trades.Error()
+	j.tradeWriter.Flush()
+	return j.tradeWriter.Error()
 }
 
 func (j *csvJournal) RecordEquity(e EquitySnapshot) error {
-	err := j.equity.Write([]string{
+	err := j.equityWriter.Write([]string{
 		e.Timestamp.String(),
 		e.Balance.String(),
 		e.Equity.String(),
@@ -77,29 +101,20 @@ func (j *csvJournal) RecordEquity(e EquitySnapshot) error {
 		return err
 	}
 
-	j.equity.Flush()
-	return j.equity.Error()
+	j.equityWriter.Flush()
+	return j.equityWriter.Error()
 }
 
 func (j *csvJournal) Close() error {
-	j.trades.Flush()
-	if err := j.trades.Error(); err != nil {
-		return err
-	}
-	j.equity.Flush()
-	if err := j.equity.Error(); err != nil {
-		return err
-	}
+	var errs []error
 
-	if err := j.tf.Close(); err != nil {
-		return err
-	}
-	if err := j.ef.Close(); err != nil {
-		return err
-	}
-	return nil
-}
+	j.tradeWriter.Flush()
+	errs = append(errs, j.tradeWriter.Error())
 
-func f(x float64) string {
-	return strconv.FormatFloat(x, 'f', 6, 64)
+	j.equityWriter.Flush()
+	errs = append(errs, j.equityWriter.Error())
+
+	errs = append(errs, j.tradesFile.Close(), j.equityFile.Close())
+
+	return errors.Join(errs...)
 }

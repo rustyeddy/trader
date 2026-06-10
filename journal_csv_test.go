@@ -46,11 +46,8 @@ func TestCSVJournalHeaders(t *testing.T) {
 	equityHeader, err := equityReader.Read()
 	assert.NoError(t, err)
 
-	wantTrades := []string{"trade_id", "instrument", "units", "entry_price", "exit_price", "open_time", "close_time", "realized_pl", "reason"}
-	assert.Equal(t, wantTrades, tradesHeader)
-
-	wantEquity := []string{"time", "balance", "equity", "margin_used", "free_margin", "margin_level"}
-	assert.Equal(t, wantEquity, equityHeader)
+	assert.Equal(t, tradeCSVHeader, tradesHeader)
+	assert.Equal(t, equityCSVHeader, equityHeader)
 }
 
 func TestCSVJournalRecordTrade(t *testing.T) {
@@ -164,8 +161,8 @@ func TestCSVJournalRecordTradeFlushError(t *testing.T) {
 
 	wantErr := errors.New("write failed")
 	j := &csvJournal{
-		trades: csv.NewWriter(failingWriter{err: wantErr}),
-		equity: csv.NewWriter(io.Discard),
+		tradeWriter:  csv.NewWriter(failingWriter{err: wantErr}),
+		equityWriter: csv.NewWriter(io.Discard),
 	}
 
 	err := j.RecordTrade(TradeRecord{TradeID: "T1", Instrument: "EUR_USD"})
@@ -177,8 +174,8 @@ func TestCSVJournalRecordEquityFlushError(t *testing.T) {
 
 	wantErr := errors.New("write failed")
 	j := &csvJournal{
-		trades: csv.NewWriter(io.Discard),
-		equity: csv.NewWriter(failingWriter{err: wantErr}),
+		tradeWriter:  csv.NewWriter(io.Discard),
+		equityWriter: csv.NewWriter(failingWriter{err: wantErr}),
 	}
 
 	err := j.RecordEquity(EquitySnapshot{Timestamp: FromTime(time.Now().UTC())})
@@ -200,10 +197,10 @@ func TestCSVJournalCloseFlushError(t *testing.T) {
 	assert.NoError(t, trades.Write([]string{"header"}))
 
 	j := &csvJournal{
-		trades: trades,
-		equity: csv.NewWriter(io.Discard),
-		tf:     tf,
-		ef:     ef,
+		tradeWriter:  trades,
+		equityWriter: csv.NewWriter(io.Discard),
+		tradesFile:   tf,
+		equityFile:   ef,
 	}
 
 	err = j.Close()
@@ -222,10 +219,10 @@ func TestCSVJournalCloseFileError(t *testing.T) {
 	require.NoError(t, tf.Close())
 
 	j := &csvJournal{
-		trades: csv.NewWriter(io.Discard),
-		equity: csv.NewWriter(io.Discard),
-		tf:     tf,
-		ef:     ef,
+		tradeWriter:  csv.NewWriter(io.Discard),
+		equityWriter: csv.NewWriter(io.Discard),
+		tradesFile:   tf,
+		equityFile:   ef,
 	}
 
 	err = j.Close()
@@ -244,10 +241,10 @@ func TestCSVJournalCloseEquityFileError(t *testing.T) {
 	require.NoError(t, ef.Close())
 
 	j := &csvJournal{
-		trades: csv.NewWriter(io.Discard),
-		equity: csv.NewWriter(io.Discard),
-		tf:     tf,
-		ef:     ef,
+		tradeWriter:  csv.NewWriter(io.Discard),
+		equityWriter: csv.NewWriter(io.Discard),
+		tradesFile:   tf,
+		equityFile:   ef,
 	}
 
 	err = j.Close()
@@ -280,9 +277,76 @@ func TestNewCSV_CreateErrors(t *testing.T) {
 	})
 }
 
-func TestFormatFloatHelperF(t *testing.T) {
+func TestCSVJournalReopenAppendsWithoutDuplicatingHeaders(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "1.234568", f(1.23456789))
-	assert.Equal(t, "-2.500000", f(-2.5))
+	dir := t.TempDir()
+	tradesPath := filepath.Join(dir, "trades.csv")
+	equityPath := filepath.Join(dir, "equity.csv")
+
+	j1, err := NewCSV(tradesPath, equityPath)
+	require.NoError(t, err)
+	require.NoError(t, j1.RecordTrade(TradeRecord{
+		TradeID:    "T1",
+		Instrument: "EUR_USD",
+		Units:      1000,
+		EntryPrice: PriceFromFloat(1.1),
+		ExitPrice:  PriceFromFloat(1.2),
+		OpenTime:   FromTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)),
+		CloseTime:  FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
+		RealizedPL: MoneyFromFloat(10),
+		Reason:     "first",
+	}))
+	require.NoError(t, j1.RecordEquity(EquitySnapshot{
+		Timestamp:   FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
+		Balance:     MoneyFromFloat(1000),
+		Equity:      MoneyFromFloat(1001),
+		MarginUsed:  MoneyFromFloat(10),
+		FreeMargin:  MoneyFromFloat(991),
+		MarginLevel: MoneyFromFloat(100),
+	}))
+	require.NoError(t, j1.Close())
+
+	j2, err := NewCSV(tradesPath, equityPath)
+	require.NoError(t, err)
+	require.NoError(t, j2.RecordTrade(TradeRecord{
+		TradeID:    "T2",
+		Instrument: "GBP_USD",
+		Units:      2000,
+		EntryPrice: PriceFromFloat(1.3),
+		ExitPrice:  PriceFromFloat(1.4),
+		OpenTime:   FromTime(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)),
+		CloseTime:  FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
+		RealizedPL: MoneyFromFloat(20),
+		Reason:     "second",
+	}))
+	require.NoError(t, j2.RecordEquity(EquitySnapshot{
+		Timestamp:   FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
+		Balance:     MoneyFromFloat(1002),
+		Equity:      MoneyFromFloat(1003),
+		MarginUsed:  MoneyFromFloat(12),
+		FreeMargin:  MoneyFromFloat(991),
+		MarginLevel: MoneyFromFloat(83.5),
+	}))
+	require.NoError(t, j2.Close())
+
+	tradesFile, err := os.Open(tradesPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tradesFile.Close() })
+
+	tradesRows, err := csv.NewReader(tradesFile).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, tradesRows, 3)
+	assert.Equal(t, tradeCSVHeader, tradesRows[0])
+	assert.Equal(t, "T1", tradesRows[1][0])
+	assert.Equal(t, "T2", tradesRows[2][0])
+
+	equityFile, err := os.Open(equityPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = equityFile.Close() })
+
+	equityRows, err := csv.NewReader(equityFile).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, equityRows, 3)
+	assert.Equal(t, equityCSVHeader, equityRows[0])
 }

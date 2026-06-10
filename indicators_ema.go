@@ -1,4 +1,3 @@
-// pkg/indicators/ema.go
 package trader
 
 import "fmt"
@@ -61,3 +60,5 @@ func (e *EMA) Update(c Candle) {
 		e.ready = true
 	}
 }
+
+var _ PriceIndicator = (*EMA)(nil)

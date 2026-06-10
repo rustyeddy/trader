@@ -36,7 +36,7 @@ func TestChoppinessIndex_PerfectChop(t *testing.T) {
 		ci.Update(c)
 	}
 	require.True(t, ci.Ready())
-	assert.InDelta(t, 100.0, ci.Value(), 0.001)
+	assert.InDelta(t, 100.0, ci.Float64(), 0.001)
 }
 
 func TestChoppinessIndex_PerfectTrend(t *testing.T) {
@@ -51,7 +51,7 @@ func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 		ci.Update(Candle{Open: lo, High: hi, Low: lo, Close: hi})
 	}
 	require.True(t, ci.Ready())
-	assert.Less(t, ci.Value(), 5.0, "expected CI near 0 for perfect trend, got %.2f", ci.Value())
+	assert.Less(t, ci.Float64(), 5.0, "expected CI near 0 for perfect trend, got %.2f", ci.Float64())
 }
 
 func TestChoppinessIndex_Reset(t *testing.T) {
@@ -64,7 +64,7 @@ func TestChoppinessIndex_Reset(t *testing.T) {
 	require.True(t, ci.Ready())
 	ci.Reset()
 	assert.False(t, ci.Ready())
-	assert.Equal(t, 0.0, ci.Value())
+	assert.Equal(t, 0.0, ci.Float64())
 }
 
 func TestChoppinessIndex_ValueInRange(t *testing.T) {
@@ -88,6 +88,6 @@ func TestChoppinessIndex_ValueInRange(t *testing.T) {
 		})
 	}
 	require.True(t, ci.Ready())
-	assert.Greater(t, ci.Value(), 0.0)
-	assert.Less(t, ci.Value(), 100.0)
+	assert.Greater(t, ci.Float64(), 0.0)
+	assert.Less(t, ci.Float64(), 100.0)
 }
