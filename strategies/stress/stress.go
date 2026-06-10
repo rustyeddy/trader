@@ -18,7 +18,6 @@ func init() {
 
 // Config holds stress strategy parameters.
 type Config struct {
-	trader.StrategyBaseConfig
 
 	// TradeEvery opens a position every N candles (1 = every bar).
 	TradeEvery int

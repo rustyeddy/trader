@@ -46,7 +46,7 @@ func TestFake_NameResetReady(t *testing.T) {
 func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{StrategyBaseConfig: trader.StrategyBaseConfig{Instrument: "EURUSD"}, CandleCount: 2}
+	f := &Fake{CandleCount: 2}
 	run := fakeRun("EURUSD")
 
 	plan1 := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
@@ -63,7 +63,7 @@ func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
 func TestFake_Update_MissingInstrumentReturnsNil(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{StrategyBaseConfig: trader.StrategyBaseConfig{Instrument: "NOPE"}, CandleCount: 1}
+	f := &Fake{CandleCount: 1}
 	run := fakeRun("NOPE")
 
 	plan := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
@@ -73,7 +73,7 @@ func TestFake_Update_MissingInstrumentReturnsNil(t *testing.T) {
 func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{StrategyBaseConfig: trader.StrategyBaseConfig{Instrument: "EURUSD"}, CandleCount: 1, highest: trader.PriceFromFloat(2.0)}
+	f := &Fake{CandleCount: 1, highest: trader.PriceFromFloat(2.0)}
 	run := fakeRun("EURUSD")
 
 	lot := &trader.Lot{
@@ -114,7 +114,7 @@ func TestFake02_NameResetReady(t *testing.T) {
 func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake02{Instrument: "EURUSD", WaitBars: 1, HoldBars: 2, StopPips: 10}
+	f := &Fake02{WaitBars: 1, HoldBars: 2, StopPips: 10}
 	run := fakeRun("EURUSD")
 
 	openPlan := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)

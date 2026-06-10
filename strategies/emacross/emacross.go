@@ -36,7 +36,6 @@ type Cross struct {
 }
 
 type Config struct {
-	trader.StrategyBaseConfig
 
 	FastPeriod    int
 	SlowPeriod    int

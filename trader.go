@@ -304,10 +304,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 			atomic.AddInt64(&submittedCloses, int64(autoExits))
 		}
 
-		strategyCtx := withStrategyRuntime(runCtx, run.Request.Instrument, int(processedCandles), 0, t.Account)
 		lots := snapshotLots(&t.Account.Lots)
 		run.State.Lots = lots
-		plan := strategy.Update(strategyCtx, &candle, run)
+		plan := strategy.Update(runCtx, &candle, run)
 		if plan == nil {
 			plan = &DefaultStrategyPlan
 		}

@@ -38,7 +38,6 @@ type Breakout struct {
 }
 
 type Config struct {
-	trader.StrategyBaseConfig
 
 	Period        int     // N-bar lookback (e.g. 20)
 	CloseStrength float64 // 0.5 = no filter; 0.6 = close in upper/lower 40% of bar

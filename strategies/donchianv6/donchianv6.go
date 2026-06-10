@@ -62,7 +62,6 @@ type Breakout struct {
 
 // Config holds constructor parameters.
 type Config struct {
-	trader.StrategyBaseConfig
 
 	Period        int
 	CloseStrength float64

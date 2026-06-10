@@ -15,7 +15,6 @@ func init() {
 
 // Fake opens long on higher highs, closes on stop loss on lower lows.
 type Fake struct {
-	trader.StrategyBaseConfig
 	CandleCount int
 
 	candles []*trader.CandleTime
@@ -100,10 +99,9 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Bac
 
 // Fake02 is a deterministic lifecycle/accounting test strategy.
 type Fake02 struct {
-	Instrument string
-	WaitBars   int
-	HoldBars   int
-	StopPips   float64
+	WaitBars int
+	HoldBars int
+	StopPips float64
 
 	bar        int
 	nextOpenAt int
