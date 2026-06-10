@@ -1,9 +1,6 @@
 package trader
 
-import (
-	"fmt"
-	"math"
-)
+import "fmt"
 
 // ChandelierExit trails the stop from the highest-high (long) or lowest-low
 // (short) seen since entry, offset by N×ATR. The stop only ever moves in the
@@ -12,8 +9,8 @@ import (
 // Per-position extreme tracking lives on Lot.ExtremePrice so multiple
 // concurrent lots each maintain their own watermark.
 type ChandelierExit struct {
-	atr              *ATR
-	multiplierScaled int64 // multiplier × indicatorValueScale; all arithmetic is integer
+	atr        *ATR
+	multiplier Units // fixed-point; use UnitsFromFloat at construction, Float64() at output boundaries
 }
 
 func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*ChandelierExit, error) {
@@ -22,15 +19,14 @@ func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*Chande
 		return nil, err
 	}
 	return &ChandelierExit{
-		atr:              atr,
-		multiplierScaled: int64(math.Round(multiplier * float64(indicatorValueScale))),
+		atr:        atr,
+		multiplier: UnitsFromFloat(multiplier),
 	}, nil
 }
 
 func (c *ChandelierExit) Name() string {
 	// Convert back to float64 only for display.
-	mult := float64(c.multiplierScaled) / float64(indicatorValueScale)
-	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.n, mult)
+	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.n, c.multiplier.Float64())
 }
 
 func (c *ChandelierExit) Ready() bool { return c.atr.Ready() }
@@ -40,7 +36,7 @@ func (c *ChandelierExit) Tick(candle Candle) { c.atr.Update(candle) }
 // atrOffset returns the ATR-based stop offset in scaled Price units.
 // All arithmetic is integer; no float64 round-trip.
 func (c *ChandelierExit) atrOffset() Price {
-	return Price(roundDivPositive(int64(c.atr.PriceSum())*c.multiplierScaled, indicatorValueScale))
+	return Price(roundDivPositive(int64(c.atr.PriceSum())*int64(c.multiplier), UnitsScale))
 }
 
 func (c *ChandelierExit) InitialStop(side Side, entry Price, candle Candle) Price {

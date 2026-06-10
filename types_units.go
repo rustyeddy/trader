@@ -8,6 +8,21 @@ import (
 // Units represents a trader domain type.
 type Units int64
 
+// UnitsScale is the fixed-point scale for Units values that represent
+// fractional multipliers (e.g. 2.5 → Units(2_500_000)).
+const UnitsScale int64 = 1_000_000
+
+// UnitsFromFloat converts a float64 multiplier to a fixed-point Units value.
+func UnitsFromFloat(f float64) Units {
+	return Units(math.Round(f * float64(UnitsScale)))
+}
+
+// Float64 converts a fixed-point Units multiplier back to float64.
+// Use only at output boundaries (display, broker API).
+func (u Units) Float64() float64 {
+	return float64(u) / float64(UnitsScale)
+}
+
 // Int64 is an internal helper for trader type processing.
 func (u Units) Int64() int64 {
 	return int64(u)
