@@ -137,12 +137,16 @@ func (s *Store) rawRoot() string {
 }
 
 func (s *Store) pathForHourlyTick(k Key) string {
+	source := normalizeSource(k.Source)
+	if source == "" {
+		source = SourceDukascopy
+	}
 	instrument := NormalizeInstrument(k.Instrument)
 
-	// <rawRoot>/dukascopy/<instr>/<yyyy>/<mm>/<dd>/<hh>h_ticks.bi5
+	// <rawRoot>/<source>/<instr>/<yyyy>/<mm>/<dd>/<hh>h_ticks.bi5
 	return filepath.Join(
 		s.rawRoot(),
-		"dukascopy",
+		source,
 		instrument,
 		fmt.Sprintf("%04d", k.Year),
 		fmt.Sprintf("%02d", k.Month),
@@ -157,10 +161,10 @@ func parseTickPath(path string) (Key, bool) {
 	clean := filepath.ToSlash(path)
 
 	// Example expected tail:
-	//   n-5   -4  -3 -2    -1
-	// EURUSD/2025/01/02/13h_ticks.bi5
+	//   n-6      -5   -4  -3 -2    -1
+	// dukascopy/EURUSD/2025/01/02/13h_ticks.bi5
 	parts := strings.Split(clean, "/")
-	if len(parts) < 5 {
+	if len(parts) < 6 {
 		return k, false
 	}
 
@@ -170,10 +174,11 @@ func parseTickPath(path string) (Key, bool) {
 	monthStr := parts[n-3]
 	yearStr := parts[n-4]
 	inst := parts[n-5]
+	source := parts[n-6]
 
 	k = Key{
 		Instrument: NormalizeInstrument(inst),
-		Source:     normalizeSource("dukascopy"),
+		Source:     normalizeSource(source),
 		Kind:       KindTick,
 		TF:         Ticks,
 	}
@@ -210,6 +215,10 @@ func parseTickPath(path string) (Key, bool) {
 	k.Hour = hour
 
 	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 {
+		return k, false
+	}
+	if parsed := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC); parsed.Year() != year ||
+		int(parsed.Month()) != month || parsed.Day() != day || parsed.Hour() != hour {
 		return k, false
 	}
 	return k, true
@@ -286,8 +295,9 @@ func (s *Store) walkRoot(root string, inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = monthRange(key.Year, key.Month)
-			descriptor = "Candles"
+			asset := s.inspectCandleAsset(key, path, info)
+			inv.Put(asset)
+			return nil
 
 		default:
 			return nil
@@ -306,6 +316,75 @@ func (s *Store) walkRoot(root string, inv *Inventory) error {
 		inv.Put(asset)
 		return nil
 	})
+}
+
+func (s *Store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset {
+	asset := Asset{
+		Key:        key,
+		Path:       path,
+		Range:      monthRange(key.Year, key.Month),
+		Exists:     true,
+		Complete:   info.Size() > 0,
+		Size:       info.Size(),
+		UpdatedAt:  info.ModTime(),
+		Descriptor: "Candles",
+	}
+	if info.Size() <= 0 {
+		asset.Reason = "empty candle file"
+		return asset
+	}
+
+	cs, err := s.ReadCSV(key)
+	if err != nil {
+		asset.Complete = false
+		asset.Reason = fmt.Sprintf("read candle file: %v", err)
+		return asset
+	}
+
+	missingExpected, expected := candleSetMissingExpectedSlots(cs)
+	asset.Complete = missingExpected == 0
+	asset.Buildable = expected > 0
+	asset.MissingInputs = missingExpected
+	if missingExpected > 0 {
+		asset.Reason = fmt.Sprintf("%d expected candles missing", missingExpected)
+	}
+	return asset
+}
+
+func candleSetMissingExpectedSlots(cs *candleSet) (missing int, expected int) {
+	if cs == nil || cs.Timeframe <= 0 {
+		return 0, 0
+	}
+
+	step := time.Duration(cs.Timeframe) * time.Second
+	start := time.Unix(int64(cs.Start), 0).UTC()
+	for i := range cs.Candles {
+		slotStart := start.Add(time.Duration(i) * step)
+		slotEnd := slotStart.Add(step)
+		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
+			continue
+		}
+		expected++
+		if !cs.IsValid(i) {
+			missing++
+		}
+	}
+	return missing, expected
+}
+
+func timeRangeMayHaveForexData(start, end time.Time) bool {
+	start = start.UTC()
+	end = end.UTC()
+	if !start.Before(end) {
+		return false
+	}
+
+	for probe := start; probe.Before(end); probe = probe.Add(time.Hour) {
+		if !isForexMarketClosed(probe) {
+			return true
+		}
+	}
+	return false
 }
 
 func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
@@ -357,7 +436,7 @@ func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 	instName := NormalizeInstrument(key.Instrument)
 	cs = &candleSet{
 		Instrument: instName,
-		Source:     "candles",
+		Source:     readCSVSource(key.Source),
 		Start:      start,
 		Timeframe:  tf,
 		Scale:      PriceScale,
@@ -461,6 +540,14 @@ func looksLikeHeader(rec []string) bool {
 	return h == "timestamp" || h == "time"
 }
 
+func readCSVSource(source string) string {
+	source = normalizeSource(source)
+	if source == "" {
+		return SourceCandles
+	}
+	return source
+}
+
 func (s *Store) WriteCSV(cs *candleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
@@ -539,7 +626,12 @@ func (s *Store) WriteCSV(cs *candleSet) error {
 }
 
 func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
-	dst, err := key.Path()
+	if r == nil {
+		return "", errors.New("nil reader")
+	}
+	defer r.Close()
+
+	dst, err := s.PathForAsset(key)
 	if err != nil {
 		return "", err
 	}
@@ -578,11 +670,15 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 }
 
 func (s Store) Delete(k Key) error {
-	p, err := k.Path()
+	p, err := s.PathForAsset(k)
 	if err != nil {
 		return err
 	}
-	return os.Remove(p)
+	err = os.Remove(p)
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func (s Store) baseScanDir() string {
@@ -613,9 +709,8 @@ func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: market is closed: %+v", key)
 	}
 
-	if ok := store.IsUsableTickFile(key); !ok {
-		store.Delete(key)
-		// return nil, fmt.Errorf("tick file not usable: %+v", key)
+	if ok := s.IsUsableTickFile(key); !ok {
+		return nil, fmt.Errorf("OpenTickIterator: tick file not usable: %+v", key)
 	}
 
 	path, err := s.PathForAsset(key)

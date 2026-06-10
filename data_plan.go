@@ -10,30 +10,56 @@ type Plan struct {
 	BuildD1  []BuildTask
 }
 
+func (p *Plan) downloadCount() int {
+	if p == nil {
+		return 0
+	}
+	return len(p.Download)
+}
+
+func (p *Plan) buildCount(tf Timeframe) int {
+	return len(p.BuildTasks(tf))
+}
+
+func (p *Plan) TotalBuilds() int {
+	return p.buildCount(M1) + p.buildCount(H1) + p.buildCount(D1)
+}
+
+func (p *Plan) Empty() bool {
+	return p.downloadCount() == 0 && p.TotalBuilds() == 0
+}
+
+func (p *Plan) BuildTasks(tf Timeframe) []BuildTask {
+	if p == nil {
+		return nil
+	}
+	switch tf {
+	case M1:
+		return p.BuildM1
+	case H1:
+		return p.BuildH1
+	case D1:
+		return p.BuildD1
+	default:
+		return nil
+	}
+}
+
 // Log emits a structured summary of the plan (download and build counts) at
 // info level.
-func (p Plan) Log() {
+func (p *Plan) Log() {
 	Info("plan summary",
-		"downloads", len(p.Download),
-		"build_m1", len(p.BuildM1),
-		"build_h1", len(p.BuildH1),
-		"build_d1", len(p.BuildD1),
+		"downloads", p.downloadCount(),
+		"build_m1", p.buildCount(M1),
+		"build_h1", p.buildCount(H1),
+		"build_d1", p.buildCount(D1),
+		"build_total", p.TotalBuilds(),
 	)
 }
 
 // BuildTask represents a single candle-aggregation job: build the candles
-// identified by Key from the listed input Keys using the specified Kind.
+// identified by Key from the listed input Keys.
 type BuildTask struct {
 	Key
 	Inputs []Key
-	Kind   BuildKind
 }
-
-// BuildKind identifies the aggregation step to perform.
-type BuildKind string
-
-const (
-	BuildM1 BuildKind = "m1_from_ticks" // aggregate tick data into M1 candles
-	BuildH1 BuildKind = "h1_from_m1"    // aggregate M1 candles into H1 candles
-	BuildD1 BuildKind = "d1_from_h1"    // aggregate H1 candles into D1 candles
-)

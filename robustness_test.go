@@ -112,28 +112,32 @@ func TestKeyRange_AllBranches(t *testing.T) {
 
 	t.Run("tick hour 0 spans one hour", func(t *testing.T) {
 		t.Parallel()
-		k := Key{Kind: KindTick, Year: 2026, Month: 3, Day: 16, Hour: 0}
-		rng := k.Range()
+		k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 3, Day: 16, Hour: 0}
+		rng, err := k.Range()
+		require.NoError(t, err)
 		require.Equal(t, Ticks, rng.TF)
 		require.Equal(t, rng.End-rng.Start, Timestamp(3600))
 	})
 	t.Run("tick hour 23 spans exactly one hour", func(t *testing.T) {
 		t.Parallel()
-		k := Key{Kind: KindTick, Year: 2026, Month: 3, Day: 16, Hour: 23}
-		rng := k.Range()
+		k := Key{Kind: KindTick, TF: Ticks, Year: 2026, Month: 3, Day: 16, Hour: 23}
+		rng, err := k.Range()
+		require.NoError(t, err)
 		require.Equal(t, Timestamp(3600), rng.End-rng.Start)
 	})
 	t.Run("monthly candle year boundary Dec→Jan", func(t *testing.T) {
 		t.Parallel()
 		k := Key{Kind: KindCandle, TF: D1, Year: 2026, Month: 12}
-		rng := k.Range()
+		rng, err := k.Range()
+		require.NoError(t, err)
 		end := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 		require.Equal(t, Timestamp(end.Unix()), rng.End)
 	})
 	t.Run("unsupported key returns zero TimeRange", func(t *testing.T) {
 		t.Parallel()
 		k := Key{Kind: KindCandle, Day: 5, Hour: 3}
-		require.Equal(t, TimeRange{}, k.Range())
+		_, err := k.Range()
+		require.Error(t, err)
 	})
 }
 
@@ -878,7 +882,8 @@ func TestRequiredTickHoursForMonth_AllMonths(t *testing.T) {
 		m := m
 		t.Run(time.Month(m).String(), func(t *testing.T) {
 			t.Parallel()
-			keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, m)
+			keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, m)
+			require.NoError(t, err)
 			require.NotEmpty(t, keys)
 			for _, k := range keys {
 				require.Equal(t, m, k.Month)
@@ -894,7 +899,8 @@ func TestRequiredTickHoursForMonth_LeapFeb(t *testing.T) {
 	t.Parallel()
 
 	// 2024 is a leap year — Feb has 29 days
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2024, 2)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2024, 2)
+	require.NoError(t, err)
 	require.NotEmpty(t, keys)
 
 	maxDay := 0
@@ -909,7 +915,8 @@ func TestRequiredTickHoursForMonth_LeapFeb(t *testing.T) {
 func TestRequiredTickHoursForMonth_NonLeapFeb(t *testing.T) {
 	t.Parallel()
 
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 2)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 2)
+	require.NoError(t, err)
 	require.NotEmpty(t, keys)
 
 	maxDay := 0
@@ -925,7 +932,8 @@ func TestRequiredTickHoursForMonth_InstrumentNormalized(t *testing.T) {
 	t.Parallel()
 
 	// EUR_USD should be normalized to EURUSD
-	keys := RequiredTickHoursForMonth("dukascopy", "EUR_USD", 2026, 1)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EUR_USD", 2026, 1)
+	require.NoError(t, err)
 	for _, k := range keys {
 		require.Equal(t, "EURUSD", k.Instrument)
 		require.NotContains(t, k.Instrument, "_")
@@ -1123,7 +1131,7 @@ func TestStoreDelete_FileNotFound(t *testing.T) {
 		Month:      9,
 	}
 	err := s.Delete(k)
-	require.Error(t, err) // os.Remove on missing file returns an error
+	require.NoError(t, err)
 }
 
 // =============================================================================
@@ -1166,12 +1174,12 @@ func TestNewDataManager_Fields(t *testing.T) {
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
-	insts := []string{"EURUSD", "GBPUSD", "USDJPY"}
+	insts := []string{"EURUSD", "GBPUSD", "USDJPY", "gbpusd"}
 
 	dm := NewDataManager(insts, start, end)
 	require.Equal(t, start, dm.Start)
 	require.Equal(t, end, dm.End)
-	require.Equal(t, insts, dm.Instruments)
+	require.Equal(t, []string{"EURUSD", "GBPUSD", "USDJPY"}, dm.Instruments)
 	require.Nil(t, dm.downloader)
 }
 
@@ -1278,6 +1286,8 @@ func TestInventoryTicksComplete_Partial(t *testing.T) {
 	}
 	inv.Put(Asset{Key: k, Exists: true, Complete: true, Size: 100})
 
-	complete, _ := inv.TicksComplete(base)
-	require.False(t, complete) // not all hours present
+	complete, _, missing, err := inv.TicksComplete(base)
+	require.NoError(t, err)
+	require.False(t, complete)   // not all hours present
+	require.NotEmpty(t, missing) // not all hours present
 }

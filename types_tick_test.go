@@ -55,3 +55,29 @@ func TestTickMid_RoundsHalfUp_Phase1(t *testing.T) {
 	odd := Tick{BA: BA{Bid: 100, Ask: 103}}
 	assert.Equal(t, Price(102), odd.Mid())
 }
+
+func TestPriceMid(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		bid      Price
+		ask      Price
+		expected Price
+	}{
+		{"simple", 10, 30, 20},
+		{"same", 25, 25, 25},
+		{"zero", 0, 0, 0},
+		{"negative", -20, 20, 0},
+		{"fractional", 11, 13, 12},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := Tick{BA: BA{Bid: tt.bid, Ask: tt.ask}}
+			assert.Equal(t, tt.expected, p.Mid())
+		})
+	}
+}

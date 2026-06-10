@@ -5,7 +5,7 @@ paths:
   backtest_results_root: ~/Documents/trading-journal/backtests
   config_root: ~/src/trader/testdata
   journal_root: ~/Documents/trading-journal
-  sqlite_path: ~/Documents/trading-journal/backtests/backtests.db
+  journal_path: ~/Documents/trading-journal/backtests/backtests
 
 defaults:
   starting_balance: 10000

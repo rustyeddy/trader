@@ -11,7 +11,7 @@ import (
 func testSizedAccount() *Account {
 	acct := NewAccount("test", MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
-	acct.RiskPct = RateFromFloat(0.01)
+	acct.RiskFraction = RateFromFloat(0.01)
 	return acct
 }
 
@@ -30,7 +30,7 @@ func testOpenLot(t *testing.T, acct *Account, inst string, side Side, units Unit
 		RemainingUnits: units,
 		State:          LotOpen,
 	}
-	require.NoError(t, acct.AddLot(context.Background(), lot))
+	require.NoError(t, acct.AddLot(lot))
 	return lot
 }
 

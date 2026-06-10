@@ -1,7 +1,7 @@
 package trader
 
 // This file implements the in-memory log stack: a bounded, thread-safe slice
-// of captured log entries that can be read or cleared at any time.  The stack
+// of captured log entries that can be read or cleared at any time. The stack
 // is enabled by setting LogConfig.Memory = true in a Setup call.
 //
 // Typical usage:
@@ -41,8 +41,10 @@ var (
 	logStack []LogEntry
 )
 
+const maxLogEntries = 1000
+
 // Entries returns a snapshot (copy) of all log entries currently held in the
-// in-memory stack.  It is safe to call from multiple goroutines.
+// in-memory stack. It is safe to call from multiple goroutines.
 func Entries() []LogEntry {
 	stackMu.RLock()
 	defer stackMu.RUnlock()
@@ -50,7 +52,13 @@ func Entries() []LogEntry {
 		return nil
 	}
 	cp := make([]LogEntry, len(logStack))
-	copy(cp, logStack)
+	for i, entry := range logStack {
+		cp[i] = entry
+		if len(entry.Attrs) > 0 {
+			cp[i].Attrs = make([]slog.Attr, len(entry.Attrs))
+			copy(cp[i].Attrs, entry.Attrs)
+		}
+	}
 	return cp
 }
 
@@ -92,6 +100,11 @@ func (h *stackHandler) Handle(_ context.Context, r slog.Record) error {
 
 	stackMu.Lock()
 	logStack = append(logStack, e)
+	if len(logStack) > maxLogEntries {
+		overflow := len(logStack) - maxLogEntries
+		copy(logStack, logStack[overflow:])
+		logStack = logStack[:maxLogEntries]
+	}
 	stackMu.Unlock()
 	return nil
 }

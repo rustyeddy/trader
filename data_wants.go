@@ -17,6 +17,15 @@ const (
 	WantStale      WantReason = "stale"
 )
 
+func (wr WantReason) Valid() bool {
+	switch wr {
+	case WantMissing, WantIncomplete, WantStale:
+		return true
+	default:
+		return false
+	}
+}
+
 func NewWantlist() *Wantlist {
 	return &Wantlist{
 		items: NewKeymap[Want](),
@@ -25,6 +34,13 @@ func NewWantlist() *Wantlist {
 
 func (wl *Wantlist) Put(w Want) {
 	wl.items.Put(w.Key, w)
+}
+
+func (wl *Wantlist) PutKey(key Key, reason WantReason) {
+	wl.Put(Want{
+		Key:        key,
+		WantReason: reason,
+	})
 }
 
 func (wl *Wantlist) Get(key Key) (Want, bool) {
@@ -48,9 +64,13 @@ func (wl *Wantlist) List() []Want {
 }
 
 func (wl *Wantlist) Len() int {
-	return len(wl.items.m)
+	return wl.items.Len()
 }
 
 func (wl *Wantlist) Update(key Key, fn func(*Want) error) error {
 	return wl.items.Update(key, fn)
+}
+
+func (wl *Wantlist) Range(fn func(Key, Want) bool) {
+	wl.items.Range(fn)
 }

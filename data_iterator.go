@@ -82,8 +82,6 @@ type candleSetIterator struct {
 	rng      TimeRange
 	useRange bool
 
-	cur    Candle
-	ts     Timestamp
 	err    error
 	done   bool
 	closed bool
@@ -99,8 +97,6 @@ func newCandleSetIterator(cs *candleSet, rng TimeRange) CandleIterator {
 
 func (it *candleSetIterator) Next() (CandleTime, bool) {
 	if it.closed || it.done || it.err != nil {
-		it.cur = Candle{}
-		it.ts = 0
 		return CandleTime{}, false
 	}
 
@@ -110,14 +106,10 @@ func (it *candleSetIterator) Next() (CandleTime, bool) {
 			continue
 		}
 
-		it.cur = it.base.Candle()
-		it.ts = ts
-		return CandleTime{Candle: it.cur, Timestamp: it.ts}, true
+		return CandleTime{Candle: it.base.Candle(), Timestamp: ts}, true
 	}
 
 	it.done = true
-	it.cur = Candle{}
-	it.ts = 0
 	return CandleTime{}, false
 }
 
@@ -133,15 +125,9 @@ func (it *candleSetIterator) Close() error {
 	return nil
 }
 
-func (it *candleSetIterator) CandleSet() *candleSet {
-	return it.base.CandleSet()
-}
-
 type chainedCandleIterator struct {
 	iters  []CandleIterator
 	idx    int
-	cur    Candle
-	ts     Timestamp
 	err    error
 	closed bool
 }
@@ -154,8 +140,6 @@ func newChainedCandleIterator(iters ...CandleIterator) CandleIterator {
 
 func (it *chainedCandleIterator) Next() (CandleTime, bool) {
 	if it.closed || it.err != nil {
-		it.cur = Candle{}
-		it.ts = 0
 		return CandleTime{}, false
 	}
 
@@ -167,30 +151,22 @@ func (it *chainedCandleIterator) Next() (CandleTime, bool) {
 		}
 
 		if ct, ok := curIt.Next(); ok {
-			it.cur = ct.Candle
-			it.ts = ct.Timestamp
 			return ct, true
 		}
 
 		if err := curIt.Err(); err != nil {
 			it.err = err
-			it.cur = Candle{}
-			it.ts = 0
 			return CandleTime{}, false
 		}
 
 		if err := curIt.Close(); err != nil {
 			it.err = err
-			it.cur = Candle{}
-			it.ts = 0
 			return CandleTime{}, false
 		}
 
 		it.idx++
 	}
 
-	it.cur = Candle{}
-	it.ts = 0
 	return CandleTime{}, false
 }
 
@@ -210,6 +186,19 @@ func (it *chainedCandleIterator) Close() error {
 			continue
 		}
 		if err := sub.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func closeCandleIterators(iters []CandleIterator) error {
+	var firstErr error
+	for _, it := range iters {
+		if it == nil {
+			continue
+		}
+		if err := it.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

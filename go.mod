@@ -3,7 +3,6 @@ module github.com/rustyeddy/trader
 go 1.24
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/ulikunitz/xz v0.5.15

@@ -1,7 +1,6 @@
 package trader
 
 import (
-	"context"
 	"fmt"
 	"math"
 )
@@ -12,43 +11,36 @@ import (
 //   - Equity = Balance + UnrealizedPL
 //   - FreeMargin = Equity − MarginUsed
 type Account struct {
-	ID          string
-	Name        string
-	Currency    string // account denomination (e.g. "USD")
-	Balance     Money  // realised cash; updated on every close
-	Equity      Money  // Balance + sum of unrealised P/L across open lots
-	MarginUsed  Money  // sum of margin reserved by open lots
-	FreeMargin  Money  // Equity − MarginUsed
-	MarginLevel Money  // Equity / MarginUsed × MoneyScale (0 when flat)
-	RiskPct     Rate   // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
+	ID           string
+	Name         string
+	Currency     string // account denomination (e.g. "USD")
+	Balance      Money  // realised cash; updated on every close
+	Equity       Money  // Balance + sum of unrealised P/L across open lots
+	MarginUsed   Money  // sum of margin reserved by open lots
+	FreeMargin   Money  // Equity − MarginUsed
+	MarginLevel  Money  // Equity / MarginUsed × MoneyScale (0 when flat)
+	RiskFraction Rate   // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
 
-	Lots    LotBook
-	Matcher CloseMatcher
-	Trades  []*Trade // closed trades, appended by CloseLot
+	Lots   LotBook
+	Trades []*Trade // closed trades, appended by CloseLot
 }
 
 // NewAccount creates an Account with the given name and opening deposit.
-// Currency defaults to "USD"; RiskPct defaults to 0.5 %; Matcher to FIFO.
+// Currency defaults to "USD"; RiskFraction defaults to 0.5 %.
 func NewAccount(name string, deposit Money) *Account {
-	act := &Account{
-		ID:         NewULID(),
-		Name:       name,
-		Currency:   "USD",
-		Balance:    deposit,
-		Equity:     deposit,
-		MarginUsed: 0.0,
-		RiskPct:    RateFromFloat(0.005),
-		Matcher:    FIFOMatcher{},
+	acct := &Account{
+		ID:           NewULID(),
+		Name:         name,
+		Currency:     "USD",
+		Balance:      deposit,
+		Equity:       deposit,
+		MarginUsed:   0.0,
+		RiskFraction: RateFromFloat(0.005),
 	}
-	return act
+	return acct
 }
 
-// Print writes a debug dump of the account to stdout.
-func (act *Account) Print() {
-	fmt.Printf("Account: %+v\n", act)
-}
-
-// QuoteToAccount returns the current conversion rate from an instrument's
+// quoteToAccountRate returns the current conversion rate from an instrument's
 // quote currency into the account's base currency.
 //
 // It is used for position sizing and risk calculations when a price move
@@ -60,16 +52,16 @@ func (act *Account) Print() {
 //   - EURGBP -> GBPUSD, or 1 / USDGBP if only the inverse exists
 //
 // The returned Rate is scaled by RateScale.
-func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
+func (acct *Account) quoteToAccountRate(inst string, price Price) (Rate, error) {
 	meta := GetInstrument(inst)
 	if meta == nil {
-		return 0, fmt.Errorf("failed to find instrument %s", inst)
+		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
-	if meta.QuoteCurrency == act.Currency {
+	if meta.QuoteCurrency == acct.Currency {
 		return Rate(rateScale), nil
 	}
 
-	if meta.BaseCurrency == act.Currency {
+	if meta.BaseCurrency == acct.Currency {
 		r, err := mulDiv64(int64(MoneyScale), int64(PriceScale), int64(price))
 		if err != nil {
 			return 0, err
@@ -81,43 +73,61 @@ func (act *Account) QuoteToAccount(inst string, price Price) (Rate, error) {
 	// Use a static approximate USD rate per currency. This introduces a
 	// bounded error (~±30% over long backtests) on absolute dollar P/L but
 	// does not affect win/loss decisions or relative return percentages.
-	if act.Currency == "USD" {
+	if acct.Currency == "USD" {
 		if r, ok := ApproxUSDPerUnit[meta.QuoteCurrency]; ok {
 			return RateFromFloat(r), nil
 		}
 	}
-	return 0, fmt.Errorf("cross conversion not implemented for %s → %s", meta.QuoteCurrency, act.Currency)
+	return 0, fmt.Errorf("unsupported quote-to-account conversion: %s -> %s", meta.QuoteCurrency, acct.Currency)
 }
 
 // AddLot registers a newly opened lot with the account and immediately
 // revalues all open positions at the lot's entry price.
-func (act *Account) AddLot(ctx context.Context, lot *Lot) error {
-	if act == nil {
-		return fmt.Errorf("nil account")
+func (acct *Account) AddLot(lot *Lot) error {
+	if acct == nil {
+		return fmt.Errorf("account is nil")
 	}
 	if lot.Instrument == "" {
-		return fmt.Errorf("position instrument is nil")
+		return fmt.Errorf("position instrument must not be empty")
 	}
 	if lot.Units <= 0 {
 		return fmt.Errorf("position units must be > 0")
 	}
 	if lot.EntryPrice <= 0 {
-		return fmt.Errorf("position price must be > 0")
+		return fmt.Errorf("position entry price must be > 0")
 	}
 	if lot.ID == "" {
-		return fmt.Errorf("pos.common.id is nil")
+		return fmt.Errorf("position id must not be empty")
 	}
 
-	act.Lots.Add(lot)
-	return act.ResolveWithMarks(map[string]Price{
+	acct.Lots.Add(lot)
+	return acct.ResolveWithMarks(map[string]Price{
 		lot.Instrument: lot.EntryPrice,
 	})
 }
 
-// Resolve recomputes Equity, MarginUsed, FreeMargin, and MarginLevel
-// using each lot's last known entry price as its mark.
-func (act *Account) Resolve() error {
-	return act.ResolveWithMarks(nil)
+// CloseLot realizes P/L for the lot, appends the trade to the account's
+// Trades history, removes the lot from the LotBook, and revalues remaining
+// open lots at the exit price.
+func (acct *Account) CloseLot(lot *Lot, trade *Trade) error {
+	if acct == nil {
+		return fmt.Errorf("account is nil")
+	}
+	if lot.Instrument == "" {
+		return fmt.Errorf("position instrument must not be empty")
+	}
+	if trade.ExitPrice <= 0 {
+		return fmt.Errorf("trade exit price must be > 0")
+	}
+
+	pnl, err := acct.realizePNL(lot, trade)
+	if err != nil {
+		return err
+	}
+	trade.PNL = pnl
+	acct.Trades = append(acct.Trades, trade)
+	acct.Lots.Delete(lot.ID)
+	return acct.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
 }
 
 // lotUnrealizedPNL computes the open profit/loss for a single lot at the
@@ -193,18 +203,18 @@ func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 // ResolveWithMarks recomputes all account-level derived fields (Equity,
 // MarginUsed, FreeMargin, MarginLevel) using the provided mark prices.
 // If a lot's instrument has no entry in marks, the lot's EntryPrice is used.
-// Pass nil to revalue everything at entry (same as Resolve).
-func (act *Account) ResolveWithMarks(marks map[string]Price) error {
-	if act == nil {
-		return fmt.Errorf("nil account")
+// Pass nil to revalue everything at entry.
+func (acct *Account) ResolveWithMarks(marks map[string]Price) error {
+	if acct == nil {
+		return fmt.Errorf("account is nil")
 	}
 
-	equity := act.Balance
+	equity := acct.Balance
 	var marginUsed Money
 
-	err := act.Lots.Range(func(lot *Lot) error {
+	err := acct.Lots.Range(func(lot *Lot) error {
 		if lot.Instrument == "" {
-			return fmt.Errorf("position %q has nil instrument", lot.ID)
+			return fmt.Errorf("position %q has empty instrument", lot.ID)
 		}
 		if lot.RemainingUnits <= 0 {
 			return fmt.Errorf("position %q has invalid units %d", lot.ID, lot.RemainingUnits)
@@ -223,23 +233,18 @@ func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 			}
 		}
 
-		inst := GetInstrument(lot.Instrument)
-		if inst == nil {
-			return fmt.Errorf("instrument is nil %s", lot.Instrument)
-		}
-
-		qta, err := act.QuoteToAccount(lot.Instrument, mark)
+		quoteToAccountRate, err := acct.quoteToAccountRate(lot.Instrument, mark)
 		if err != nil {
 			return err
 		}
 
-		pnl, err := lotUnrealizedPNL(lot, mark, qta)
+		pnl, err := lotUnrealizedPNL(lot, mark, quoteToAccountRate)
 		if err != nil {
 			return err
 		}
 		equity += pnl
 
-		m, err := act.TradeMargin(lot.RemainingUnits, mark, lot.Instrument)
+		m, err := acct.marginRequired(lot.RemainingUnits, mark, lot.Instrument)
 		if err != nil {
 			return err
 		}
@@ -251,95 +256,71 @@ func (act *Account) ResolveWithMarks(marks map[string]Price) error {
 		return err
 	}
 
-	act.Equity = equity
-	act.MarginUsed = marginUsed
-	act.FreeMargin = act.Equity - act.MarginUsed
+	acct.Equity = equity
+	acct.MarginUsed = marginUsed
+	acct.FreeMargin = acct.Equity - acct.MarginUsed
 
-	if act.MarginUsed > 0 {
-		v, err := signedMulDivRound(int64(act.Equity), int64(MoneyScale), int64(act.MarginUsed))
+	if acct.MarginUsed > 0 {
+		v, err := signedMulDivRound(int64(acct.Equity), int64(MoneyScale), int64(acct.MarginUsed))
 		if err != nil {
 			return err
 		}
-		act.MarginLevel = Money(v)
+		acct.MarginLevel = Money(v)
 	} else {
-		act.MarginLevel = 0
+		acct.MarginLevel = 0
 	}
 
 	return nil
 }
 
-// RealizePNL closes out a lot's unrealised P/L into the account Balance.
+// realizePNL closes out a lot's unrealised P/L into the account Balance.
 // It updates Balance and resets Equity to the new Balance (caller must call
 // ResolveWithMarks to account for any remaining open lots afterwards).
 // Returns the realised P/L amount.
-func (act *Account) RealizePNL(lot *Lot, trade *Trade) (Money, error) {
-	if act == nil {
-		return 0, fmt.Errorf("nil account")
+func (acct *Account) realizePNL(lot *Lot, trade *Trade) (Money, error) {
+	if acct == nil {
+		return 0, fmt.Errorf("account is nil")
 	}
 	if lot == nil {
-		return 0, fmt.Errorf("nil position")
+		return 0, fmt.Errorf("position is nil")
 	}
 	if trade == nil {
-		return 0, fmt.Errorf("nil trade")
+		return 0, fmt.Errorf("trade is nil")
 	}
 	if lot.Instrument == "" {
-		return 0, fmt.Errorf("position instrument is empty")
+		return 0, fmt.Errorf("position instrument must not be empty")
 	}
-	if lot.Units <= 0 {
-		return 0, fmt.Errorf("position units must be > 0")
+	if lot.RemainingUnits <= 0 {
+		return 0, fmt.Errorf("position remaining units must be > 0")
 	}
 	if trade.ExitPrice <= 0 {
-		return 0, fmt.Errorf("trade fill price must be > 0")
+		return 0, fmt.Errorf("trade exit price must be > 0")
 	}
 
-	qta, err := act.QuoteToAccount(lot.Instrument, trade.ExitPrice)
+	quoteToAccountRate, err := acct.quoteToAccountRate(lot.Instrument, trade.ExitPrice)
 	if err != nil {
 		return 0, err
 	}
 
-	pnlMoney, err := lotUnrealizedPNL(lot, trade.ExitPrice, qta)
+	pnlMoney, err := lotUnrealizedPNL(lot, trade.ExitPrice, quoteToAccountRate)
 	if err != nil {
 		return 0, err
 	}
 
-	act.Balance += pnlMoney
-	act.Equity = act.Balance
+	acct.Balance += pnlMoney
+	acct.Equity = acct.Balance
 
 	return pnlMoney, nil
 }
 
-// CloseLot realizes P/L for the lot, appends the trade to the account's
-// Trades history, removes the lot from the LotBook, and revalues remaining
-// open lots at the exit price.
-func (act *Account) CloseLot(lot *Lot, trade *Trade) error {
-	if act == nil {
-		return fmt.Errorf("nil account")
-	}
-	if lot.Instrument == "" {
-		return fmt.Errorf("position instrument is empty")
-	}
-	if trade.ExitPrice <= 0 {
-		return fmt.Errorf("exit price must be > 0")
-	}
-
-	pnl, err := act.RealizePNL(lot, trade)
-	if err != nil {
-		return err
-	}
-	trade.PNL = pnl
-	act.Trades = append(act.Trades, trade)
-	act.Lots.Delete(lot.ID)
-	return act.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
-}
-
-// TradeMargin returns the margin required to hold a position of the given
+// marginRequired returns the margin required to hold a position of the given
 // size at the given price for the named instrument, expressed in account
 // currency (Money-scaled). It uses the instrument's MarginRate and the
-// account's QuoteToAccount conversion.
-func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, error) {
+// account's quote-to-account conversion.
+func (acct *Account) marginRequired(units Units, price Price, inst string) (Money, error) {
 	meta := GetInstrument(inst)
 	if meta == nil {
-		return 0, fmt.Errorf("no such instrument %s\n", inst)
+		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
 
 	if meta.MarginRate <= 0 {
@@ -361,12 +342,12 @@ func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, e
 		return 0, err
 	}
 
-	qta, err := act.QuoteToAccount(meta.Name, price)
+	quoteToAccountRate, err := acct.quoteToAccountRate(meta.Name, price)
 	if err != nil {
 		return 0, err
 	}
 
-	notionalAcctMicro, err := mulDiv64(notionalQuoteMicro, int64(qta), int64(rateScale))
+	notionalAcctMicro, err := mulDiv64(notionalQuoteMicro, int64(quoteToAccountRate), int64(rateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -377,233 +358,4 @@ func (act *Account) TradeMargin(units Units, price Price, inst string) (Money, e
 	}
 
 	return Money(marginMicro), nil
-}
-
-// riskBudget returns the max allowed loss in account-money micro-units.
-func (acct *Account) riskBudget() (Money, error) {
-	if acct.Equity <= 0 {
-		return 0, fmt.Errorf("account equity must be > 0")
-	}
-	if acct.RiskPct <= 0 {
-		return 0, fmt.Errorf("account risk_pct must be > 0")
-	}
-
-	v, err := mulDivFloor64(int64(acct.Equity), int64(acct.RiskPct), int64(rateScale))
-	if err != nil {
-		return 0, err
-	}
-	if v <= 0 {
-		return 0, fmt.Errorf("risk budget must be > 0")
-	}
-	return Money(v), nil
-}
-
-// lossPerUnit returns stop-loss exposure for 1 unit in account-money micro-units.
-// It uses ceil so we never underestimate loss and accidentally oversize.
-func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
-	priceDist := abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
-	if priceDist == 0 {
-		return 0, fmt.Errorf("entry and stop must differ")
-	}
-
-	qta, err := acct.QuoteToAccount(req.TradeCommon.Instrument, req.Price)
-	if err != nil {
-		return 0, err
-	}
-
-	v, err := mulDivCeil64(priceDist, int64(MoneyScale), int64(PriceScale))
-	if err != nil {
-		return 0, err
-	}
-	v, err = mulDivCeil64(v, int64(qta), int64(rateScale))
-	if err != nil {
-		return 0, err
-	}
-	if v <= 0 {
-		return 0, fmt.Errorf("loss per unit must be > 0")
-	}
-
-	return Money(v), nil
-}
-
-// marginPerUnit returns margin needed for 1 unit in account-money micro-units.
-// It uses ceil so we never underestimate required margin.
-func (acct *Account) marginPerUnit(inst *Instrument, price Price) (Money, error) {
-	if inst == nil {
-		return 0, fmt.Errorf("instrument is nil")
-	}
-	if inst.MarginRate <= 0 {
-		return 0, fmt.Errorf("invalid margin rate for %s: %d", inst.Name, inst.MarginRate)
-	}
-	if price <= 0 {
-		return 0, fmt.Errorf("invalid price %d", price)
-	}
-
-	qta, err := acct.QuoteToAccount(inst.Name, price)
-	if err != nil {
-		return 0, err
-	}
-
-	v, err := mulDivCeil64(int64(price), int64(MoneyScale), int64(PriceScale))
-	if err != nil {
-		return 0, err
-	}
-
-	v, err = mulDivCeil64(v, int64(qta), int64(rateScale))
-	if err != nil {
-		return 0, err
-	}
-
-	v, err = mulDivCeil64(v, int64(inst.MarginRate), int64(rateScale))
-	if err != nil {
-		return 0, err
-	}
-	if v <= 0 {
-		return 0, fmt.Errorf("margin per unit must be > 0")
-	}
-
-	return Money(v), nil
-}
-
-// availableMargin returns the usable margin for new positions.
-// It prefers the cached FreeMargin but falls back to computing Equity − MarginUsed
-// in case the field is stale.
-func (acct *Account) availableMargin() Money {
-	if acct.FreeMargin > 0 {
-		return acct.FreeMargin
-	}
-
-	fm := acct.Equity - acct.MarginUsed
-	if fm > 0 {
-		return fm
-	}
-	return 0
-}
-
-// unitsByRisk returns how many units can be opened without exceeding the
-// account's per-trade risk budget (RiskPct × Equity).
-func (acct *Account) unitsByRisk(req *OpenRequest) (Units, error) {
-	riskBudget, err := acct.riskBudget()
-	if err != nil {
-		return 0, err
-	}
-
-	lossPerUnit, err := acct.lossPerUnit(req)
-	if err != nil {
-		return 0, err
-	}
-
-	units := Units(int64(riskBudget) / int64(lossPerUnit))
-	if units <= 0 {
-		return 0, fmt.Errorf("risk budget too small for stop distance")
-	}
-	return units, nil
-}
-
-// unitsByMargin returns how many units can be opened given the account's
-// current free margin.
-func (acct *Account) unitsByMargin(req *OpenRequest) (Units, error) {
-	freeMargin := acct.availableMargin()
-	if freeMargin <= 0 {
-		return 0, fmt.Errorf("free margin must be > 0")
-	}
-
-	inst := GetInstrument(req.TradeCommon.Instrument)
-	if inst == nil {
-		return 0, fmt.Errorf("unknown instrument %s", req.TradeCommon.Instrument)
-	}
-	marginPerUnit, err := acct.marginPerUnit(inst, req.Price)
-	if err != nil {
-		return 0, err
-	}
-
-	units := Units(int64(freeMargin) / int64(marginPerUnit))
-	if units <= 0 {
-		return 0, fmt.Errorf("free margin too small for minimum position")
-	}
-	return units, nil
-}
-
-// minUnits returns the smaller of two Units values.
-func minUnits(a, b Units) Units {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// SizePosition computes and sets req.Units as the lesser of:
-//   - the units allowed by the risk budget (unitsByRisk)
-//   - the units allowed by available margin (unitsByMargin)
-//
-// Returns an error if the computed size is below the instrument's minimum
-// trade size or if any input is invalid.
-func (acct *Account) SizePosition(req *OpenRequest) error {
-	if acct == nil {
-		return fmt.Errorf("account is nil")
-	}
-	if req == nil {
-		return fmt.Errorf("request is nil")
-	}
-	if req.Instrument == "" {
-		return fmt.Errorf("req.TradeCommon.Instrument is nil")
-	}
-	if req.Price <= 0 || req.Stop <= 0 {
-		return fmt.Errorf("entry and stop must be > 0")
-	}
-	if req.Price == req.Stop {
-		return fmt.Errorf("entry and stop must differ")
-	}
-
-	switch req.Side {
-	case Short:
-		if req.TradeCommon.Stop <= req.Price {
-			return fmt.Errorf("short stop must be greater than price")
-		}
-	case Long:
-		if req.Stop >= req.Price {
-			return fmt.Errorf("long stop must be less than price")
-		}
-	default:
-		return fmt.Errorf("invalid side %v", req.TradeCommon.Side)
-	}
-
-	unitsRisk, err := acct.unitsByRisk(req)
-	if err != nil {
-		return err
-	}
-
-	unitsMargin, err := acct.unitsByMargin(req)
-	if err != nil {
-		return err
-	}
-
-	inst := GetInstrument(req.TradeCommon.Instrument)
-	if inst == nil {
-		return fmt.Errorf("unknown instrument %s\n", req.TradeCommon.Instrument)
-	}
-
-	units := minUnits(unitsRisk, unitsMargin)
-	if units < inst.MinimumTradeSize {
-		return fmt.Errorf(
-			"computed units %d < minimum trade size %d (risk=%d margin=%d)",
-			units,
-			inst.MinimumTradeSize,
-			unitsRisk,
-			unitsMargin,
-		)
-	}
-	req.Units = units
-	return nil
-}
-
-// RR returns the reward-to-risk ratio for a trade setup as a plain float.
-// A ratio of 2.0 means the potential reward is twice the risk.
-func RR(entry, stop, takeProfit float64) float64 {
-	risk := math.Abs(entry - stop)
-	reward := math.Abs(takeProfit - entry)
-	if risk == 0 {
-		return 0
-	}
-	return reward / risk
 }

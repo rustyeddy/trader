@@ -83,10 +83,10 @@ func TestD1ChoppinessFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	f.Tick(h1CT(base.Add(1*time.Hour), 10200, 11000, 10100, 10800))
 	f.Tick(h1CT(base.Add(2*time.Hour), 10800, 10900, 9500, 9600))
 
-	assert.Equal(t, Price(10000), f.dayOpen,  "open from first bar")
-	assert.Equal(t, Price(11000), f.dayHigh,  "high from second bar")
-	assert.Equal(t, Price(9500),  f.dayLow,   "low from third bar")
-	assert.Equal(t, Price(9600),  f.dayClose, "close from latest bar")
+	assert.Equal(t, Price(10000), f.dayOpen, "open from first bar")
+	assert.Equal(t, Price(11000), f.dayHigh, "high from second bar")
+	assert.Equal(t, Price(9500), f.dayLow, "low from third bar")
+	assert.Equal(t, Price(9600), f.dayClose, "close from latest bar")
 }
 
 func TestD1ChoppinessFilter_TrendingBlocksWhenChoppy(t *testing.T) {
@@ -148,4 +148,32 @@ func TestD1ChoppinessFilter_WarmupAlwaysTrending(t *testing.T) {
 	}
 	assert.False(t, f.Ready())
 	assert.True(t, f.Trending(), "must not suppress entries during warmup")
+}
+
+func TestD1ChoppinessFilter_RejectsInvalidThreshold(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewD1ChoppinessFilter(14, 0, PriceScale)
+	require.Error(t, err)
+}
+
+func TestD1ChoppinessFilter_ChoppinessAccessorMatchesValue(t *testing.T) {
+	t.Parallel()
+
+	scale := Scale6(100_000)
+	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
+	require.NoError(t, err)
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for d := 0; d < 4; d++ {
+		open := Price(10000 + d*500)
+		high := open + 490
+		low := open - 10
+		close := high
+		feedDay(f, base.AddDate(0, 0, d), open, high, low, close)
+	}
+	feedDay(f, base.AddDate(0, 0, 4), 12000, 12490, 11990, 12490)
+
+	require.True(t, f.Ready())
+	assert.Equal(t, f.Choppiness(), f.Value())
 }

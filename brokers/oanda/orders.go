@@ -25,11 +25,11 @@ type marketOrderBody struct {
 }
 
 type marketOrderSpec struct {
-	Type                string          `json:"type"`
-	Instrument          string          `json:"instrument"`
-	Units               string          `json:"units"`
-	StopLossOnFill      *stopLossSpec   `json:"stopLossOnFill,omitempty"`
-	TimeInForce         string          `json:"timeInForce"`
+	Type           string        `json:"type"`
+	Instrument     string        `json:"instrument"`
+	Units          string        `json:"units"`
+	StopLossOnFill *stopLossSpec `json:"stopLossOnFill,omitempty"`
+	TimeInForce    string        `json:"timeInForce"`
 }
 
 type stopLossSpec struct {
@@ -60,7 +60,7 @@ type orderResp struct {
 		Reason string `json:"reason"`
 	} `json:"orderCancelTransaction"`
 	OrderRejectTransaction struct {
-		Reason      string `json:"reason"`
+		Reason       string `json:"reason"`
 		RejectReason string `json:"rejectReason"`
 	} `json:"orderRejectTransaction"`
 	RelatedTransactionIDs []string `json:"relatedTransactionIDs"`
@@ -141,8 +141,14 @@ func (c *Client) SubmitMarketOrder(ctx context.Context, accountID, instrument st
 		return nil, fmt.Errorf("oanda: order not filled (no fill transaction in response)")
 	}
 
-	fillUnits, _ := strconv.ParseInt(or.OrderFillTransaction.Units, 10, 64)
-	fillPrice, _ := strconv.ParseFloat(or.OrderFillTransaction.Price, 64)
+	fillUnits, err := parseIntField("fill units", or.OrderFillTransaction.Units)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
+	fillPrice, err := parseFloatField("fill price", or.OrderFillTransaction.Price)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
 
 	tradeID := or.OrderFillTransaction.TradeOpened.TradeID
 	if tradeID == "" && len(or.OrderFillTransaction.TradesClosed) > 0 {

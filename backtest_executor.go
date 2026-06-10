@@ -62,7 +62,7 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 		return fmt.Errorf("nil account")
 	}
 	if run.Request.RiskPct != 0 {
-		acct.RiskPct = run.Request.RiskPct
+		acct.RiskFraction = run.Request.RiskPct
 	}
 	t.Broker.Account = acct
 

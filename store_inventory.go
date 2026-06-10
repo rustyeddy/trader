@@ -19,7 +19,6 @@ const (
 	SourceCandles   = "candles"
 )
 
-
 type AssetFlags uint32
 
 const (
@@ -97,7 +96,7 @@ func (inv *Inventory) List() []Asset {
 }
 
 func (inv *Inventory) Len() int {
-	return len(inv.items.m)
+	return inv.items.Len()
 }
 
 func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
@@ -106,42 +105,56 @@ func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
 
 func (inv *Inventory) HasComplete(key Key) bool {
 	a, ok := inv.items.Get(key)
-	return ok && a.Exists && a.Complete
+	return assetExistsAndComplete(a, ok)
+}
+
+func (inv *Inventory) WantReasonFor(key Key) (WantReason, bool) {
+	a, ok := inv.items.Get(key)
+	return assetWantReason(a, ok)
 }
 
 func (inv *Inventory) MissingComplete(keys []Key) []Key {
 	out := make([]Key, 0)
 	for _, k := range keys {
-		if !inv.HasComplete(k) {
+		a, ok := inv.items.Get(k)
+		if !assetExistsAndComplete(a, ok) {
 			out = append(out, k)
 		}
 	}
 	return out
 }
 
-func (inv *Inventory) TicksComplete(k Key) (bool, []Key) {
-	var keys []Key
-	for day := 1; day <= daysInMonth(k.Year, k.Month-1); day++ {
-		for hour := 0; hour < 24; hour++ {
-			t := time.Date(k.Year, time.Month(k.Month), day, hour, 0, 0, 0, time.UTC)
-			if isForexMarketClosed(t) {
-				continue
-			}
-
-			key := k
-			key.Source = "dukascopy"
-			key.Kind = KindTick
-			key.TF = Ticks
-			key.Day = day
-			key.Hour = hour
-			asset, ok := inv.Get(key)
-			if !ok || !asset.Exists || !asset.Complete || asset.Size <= 0 {
-				return false, nil
-			}
-			keys = append(keys, key)
+func (inv *Inventory) TicksComplete(k Key) (complete bool, required []Key, missing []Key, err error) {
+	required, err = RequiredTickHoursForMonth(SourceDukascopy, k.Instrument, k.Year, k.Month)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	missing = make([]Key, 0)
+	for _, key := range required {
+		asset, ok := inv.Get(key)
+		if !assetUsableTickFile(asset, ok) {
+			missing = append(missing, key)
 		}
 	}
-	return true, keys
+	return len(missing) == 0, required, missing, nil
+}
+
+func assetWantReason(a Asset, ok bool) (WantReason, bool) {
+	if !ok || !a.Exists {
+		return WantMissing, true
+	}
+	if !a.Complete {
+		return WantIncomplete, true
+	}
+	return "", false
+}
+
+func assetExistsAndComplete(a Asset, ok bool) bool {
+	return ok && a.Exists && a.Complete
+}
+
+func assetUsableTickFile(a Asset, ok bool) bool {
+	return assetExistsAndComplete(a, ok) && a.Size > 0
 }
 
 type BuildStatus int

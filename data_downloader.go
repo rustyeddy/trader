@@ -2,6 +2,7 @@ package trader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,34 +13,59 @@ import (
 )
 
 type downloader struct {
-	*http.Client
-	downloaders int
+	client  *http.Client
+	workers int
 }
 
-type saveResult struct {
-	Key       Key
-	Path      string
-	Size      int64
-	Exists    bool
-	Complete  bool
-	UpdatedAt time.Time
-}
+const (
+	defaultDownloadWorkers = 8
+	downloadRequestTimeout = 120 * time.Second
+)
 
 func NewDownloader() *downloader {
 	return &downloader{
-		Client:      newHTTPClient(),
-		downloaders: 8,
+		client:  newHTTPClient(),
+		workers: defaultDownloadWorkers,
 	}
 }
 
-func (dl *downloader) download(ctx context.Context, key Key) (*saveResult, error) {
+func newHTTPClient() *http.Client {
+	tr := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          200,
+		MaxIdleConnsPerHost:   200,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   0, // use per-request ctx timeout
+	}
+}
+
+func (dl *downloader) httpClient() *http.Client {
+	if dl.client == nil {
+		dl.client = newHTTPClient()
+	}
+	return dl.client
+}
+
+func (dl *downloader) workerCount() int {
+	if dl.workers <= 0 {
+		return defaultDownloadWorkers
+	}
+	return dl.workers
+}
+
+func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 	provider, err := data.Get(key.Source)
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", key.Instrument, err)
+		return Asset{}, fmt.Errorf("download %+v: %w", key, err)
 	}
 
-	// Correctness-first timeout
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, downloadRequestTimeout)
 	defer cancel()
 
 	url := provider.SourceURL(data.SourceParams{
@@ -49,54 +75,67 @@ func (dl *downloader) download(ctx context.Context, key Key) (*saveResult, error
 	})
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("new request: %w", err)
+		return Asset{}, fmt.Errorf("new request %s: %w", url, err)
 	}
 
-	// resp, err := http.DefaultClient.Do(req)
-	resp, err := dl.Client.Do(req)
+	resp, err := dl.httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
+		return Asset{}, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: http %d", url, resp.StatusCode)
+		return Asset{}, fmt.Errorf("GET %s: http %d", url, resp.StatusCode)
 	}
 
-	// TODO 1. Log error, 2. Makesure inventory is updated
 	path, err := store.SaveFile(key, resp.Body)
 	if err != nil {
-		return nil, err
+		return Asset{}, fmt.Errorf("save %+v: %w", key, err)
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", path, err)
+		return Asset{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	result := &saveResult{
+	rng, _ := key.Range()
+	return Asset{
 		Key:       key,
 		Path:      path,
 		Size:      info.Size(),
 		Exists:    true,
-		Complete:  true,
+		Complete:  info.Size() > 0,
 		UpdatedAt: info.ModTime(),
+		Range:     rng,
+		Flags:     FlagUsable,
+	}, nil
+}
+
+func downloadFailureAsset(key Key, err error) Asset {
+	path, pathErr := store.PathForAsset(key)
+	if pathErr != nil {
+		path = ""
 	}
-	return result, nil
+	rng, _ := key.Range()
+	return Asset{
+		Key:    key,
+		Path:   path,
+		Range:  rng,
+		Reason: err.Error(),
+		Flags:  FlagDownloadFailed,
+	}
 }
 
 // runDownloadPool starts N workers that read from dlQ until dlQ is closed
 // or ctx is cancelled. It returns a WaitGroup you can Wait() on.
 func (dl *downloader) startDownloader(ctx context.Context, dm *DataManager, dlQ <-chan Key) *sync.WaitGroup {
-	if dl.downloaders <= 0 {
-		dl.downloaders = 8
-	}
+	workers := dl.workerCount()
 
 	var wg sync.WaitGroup
-	wg.Add(dl.downloaders)
+	wg.Add(workers)
 
-	for i := 0; i < dl.downloaders; i++ {
-		go func(workerID int) {
+	for i := 0; i < workers; i++ {
+		go func() {
 			defer wg.Done()
 
 			for {
@@ -105,27 +144,20 @@ func (dl *downloader) startDownloader(ctx context.Context, dm *DataManager, dlQ 
 					return
 				case key, ok := <-dlQ:
 					if !ok {
-						return // channel closed, we're done
+						return
 					}
-					result, err := dl.download(ctx, key)
+					asset, err := dl.download(ctx, key)
 					if err != nil {
-						fmt.Printf("\terror downloading %+v: %v\n", key, err)
+						if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+							return
+						}
+						dm.inventory.Put(downloadFailureAsset(key, err))
 						continue
 					}
-					dm.inventory.Put(Asset{
-						Key:       result.Key,
-						Path:      result.Path,
-						Exists:    result.Exists,
-						Complete:  result.Size > 0,
-						Size:      result.Size,
-						UpdatedAt: result.UpdatedAt,
-						Range:     key.Range(),
-					})
-				case <-ctx.Done():
-					return
+					dm.inventory.Put(asset)
 				}
 			}
-		}(i)
+		}()
 	}
 
 	return &wg

@@ -54,13 +54,14 @@ type DaemonConfig struct {
 // New returns the "serve" cobra command.
 func New(rc *trader.RootConfig) *cobra.Command {
 	var (
-		cfgFile    string
-		addr       string
-		token      string
-		accountID  string
-		env        string
-		journalDB  string
-		reportsDir string
+		cfgFile       string
+		addr          string
+		token         string
+		accountID     string
+		env           string
+		journalTrades string
+		journalEquity string
+		reportsDir    string
 	)
 
 	cmd := &cobra.Command{
@@ -86,8 +87,9 @@ Example config file (see deploy/trader.yaml.example):
   rest:
     addr: ":9999"
   journal:
-    kind: sqlite
-    sqlite_path: /var/lib/trader/journal.db
+    kind: json
+    trades_path: /var/lib/trader/live-trades.jsonl
+    equity_path: /var/lib/trader/live-equity.jsonl
   log:
     level: info
 `,
@@ -122,9 +124,13 @@ Example config file (see deploy/trader.yaml.example):
 			if cmd.Flags().Changed("log-format") {
 				cfg.Log.Format = rc.LogFormat
 			}
-			if journalDB != "" {
-				cfg.Journal.Kind = "sqlite"
-				cfg.Journal.SQLitePath = journalDB
+			if journalTrades != "" {
+				cfg.Journal.Kind = "json"
+				cfg.Journal.TradesPath = journalTrades
+			}
+			if journalEquity != "" {
+				cfg.Journal.Kind = "json"
+				cfg.Journal.EquityPath = journalEquity
 			}
 
 			// Apply defaults.
@@ -135,10 +141,13 @@ Example config file (see deploy/trader.yaml.example):
 				cfg.REST.Addr = ":9999"
 			}
 			if cfg.Journal.Kind == "" {
-				cfg.Journal.Kind = "sqlite"
+				cfg.Journal.Kind = "json"
 			}
-			if cfg.Journal.SQLitePath == "" {
-				cfg.Journal.SQLitePath = "./trader.db"
+			if cfg.Journal.TradesPath == "" {
+				cfg.Journal.TradesPath = "./live-trades.jsonl"
+			}
+			if cfg.Journal.EquityPath == "" {
+				cfg.Journal.EquityPath = "./live-equity.jsonl"
 			}
 			if cfg.Log.Level == "" {
 				cfg.Log.Level = "info"
@@ -259,7 +268,8 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().StringVar(&journalDB, "journal-db", "", "SQLite journal path (default ./trader.db)")
+	cmd.Flags().StringVar(&journalTrades, "journal-trades", "", "Journal trade-record path (default ./live-trades.jsonl)")
+	cmd.Flags().StringVar(&journalEquity, "journal-equity", "", "Journal equity-record path (default ./live-equity.jsonl)")
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
 
 	return cmd

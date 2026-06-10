@@ -43,6 +43,26 @@ func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 	assert.True(t, f.Ready())
 }
 
+func TestATRPercentileFilter_ReadyBeforeWindowIsFull(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewATRPercentileFilter(3, 50, 20.0, PriceScale)
+	require.NoError(t, err)
+
+	candles := []CandleTime{
+		atrPCT(100000, 101000, 99000, 100500),
+		atrPCT(100500, 101500, 99500, 101000),
+		atrPCT(101000, 102000, 100000, 101500),
+		atrPCT(101500, 102500, 100500, 102000),
+	}
+	for _, ct := range candles {
+		f.Tick(ct)
+	}
+
+	require.True(t, f.Ready())
+	assert.Equal(t, 1, f.count, "the filter should start classifying after the first ATR sample")
+}
+
 func TestATRPercentileFilter_AllowSideAlwaysTrue(t *testing.T) {
 	t.Parallel()
 	f, err := NewATRPercentileFilter(3, 10, 20.0, PriceScale)
@@ -97,6 +117,31 @@ func TestATRPercentileFilter_TrendingFalseWhenLowVolatility(t *testing.T) {
 	}
 	require.True(t, f.Ready())
 	assert.False(t, f.Trending(), "low ATR percentile must return Trending=false")
+}
+
+func TestATRPercentileFilter_FlatWindowUsesTieAwarePercentile(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewATRPercentileFilter(1, 5, 20.0, PriceScale)
+	require.NoError(t, err)
+
+	for i := 0; i < 7; i++ {
+		f.Tick(atrPCT(100000, 101000, 99000, 100000))
+	}
+
+	require.True(t, f.Ready())
+	assert.Equal(t, 50.0, f.Percentile())
+	assert.True(t, f.Trending(), "flat ATR history should not collapse to the 0th percentile")
+}
+
+func TestATRPercentileFilter_RejectsInvalidThreshold(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewATRPercentileFilter(5, 50, -0.1, PriceScale)
+	require.Error(t, err)
+
+	_, err = NewATRPercentileFilter(5, 50, 100.1, PriceScale)
+	require.Error(t, err)
 }
 
 func TestATRPercentileFilter_FactoryRoundtrip(t *testing.T) {

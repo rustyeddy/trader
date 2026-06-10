@@ -26,15 +26,22 @@ func (s *Store) WriteMonthlyCandles(source, instrument string, tf Timeframe, mon
 	}
 
 	monthStart = monthStart.UTC()
-	cs := &candleSet{
-		Instrument: NormalizeInstrument(instrument),
-		Start:      FromTime(monthStart),
-		Timeframe:  tf,
-		Scale:      PriceScale,
-		Source:     source,
-		Candles:    candles,
-		Valid:      make([]uint64, (len(candles)+63)/64),
+	cs, err := newMonthlyCandleSet(
+		NormalizeInstrument(instrument),
+		tf,
+		FromTime(monthStart),
+		PriceScale,
+		source,
+	)
+	if err != nil {
+		return err
 	}
+	if len(candles) > len(cs.Candles) {
+		return fmt.Errorf("wrong candle count for %s %s %s: got %d max %d",
+			cs.Instrument, monthStart.Format("2006-01"), tf, len(candles), len(cs.Candles))
+	}
+
+	copy(cs.Candles, candles)
 
 	for i := range candles {
 		if !candles[i].IsZero() {

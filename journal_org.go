@@ -9,25 +9,21 @@ import (
 // It purposely includes narrative placeholders (Thesis/Execution/Review) while keeping all
 // structured facts in a PROPERTIES drawer for easy search.
 func FormatTradeOrg(t TradeRecord) string {
-	heading := fmt.Sprintf("** Trade: %s (%s)", t.Instrument, shortID(t.TradeID))
-	// Use RFC3339 for copy/paste friendliness.
-	open := t.OpenTime.String()
-	close := t.CloseTime.String()
+	heading := fmt.Sprintf("** Trade: %s (%s)", t.Instrument, ShortDisplayID(t.TradeID))
 
 	var b strings.Builder
 	b.WriteString(heading)
 	b.WriteString("\n")
 	b.WriteString(":PROPERTIES:\n")
-	b.WriteString(fmt.Sprintf(":TRADE_ID: %s\n", t.TradeID))
-	b.WriteString(fmt.Sprintf(":ID: %s\n", t.TradeID))
-	b.WriteString(fmt.Sprintf(":INSTRUMENT: %s\n", t.Instrument))
-	b.WriteString(fmt.Sprintf(":UNITS: %d\n", t.Units))
-	b.WriteString(fmt.Sprintf(":ENTRY_PRICE: %.5f\n", float64(t.EntryPrice)/float64(PriceScale)))
-	b.WriteString(fmt.Sprintf(":EXIT_PRICE: %.5f\n", float64(t.ExitPrice)/float64(PriceScale)))
-	b.WriteString(fmt.Sprintf(":OPEN_TIME: %s\n", open))
-	b.WriteString(fmt.Sprintf(":CLOSE_TIME: %s\n", close))
-	b.WriteString(fmt.Sprintf(":REALIZED_PL: %.2f\n", t.RealizedPL.Float64()))
-	b.WriteString(fmt.Sprintf(":REASON: %s\n", t.Reason))
+	writeOrgProperty(&b, "TRADE_ID", t.TradeID)
+	writeOrgProperty(&b, "INSTRUMENT", t.Instrument)
+	writeOrgProperty(&b, "UNITS", t.Units.String())
+	writeOrgProperty(&b, "ENTRY_PRICE", formatNumber(t.EntryPrice, int32(PriceScale)))
+	writeOrgProperty(&b, "EXIT_PRICE", formatNumber(t.ExitPrice, int32(PriceScale)))
+	writeOrgProperty(&b, "OPEN_TIME", t.OpenTime.String())
+	writeOrgProperty(&b, "CLOSE_TIME", t.CloseTime.String())
+	writeOrgProperty(&b, "REALIZED_PL", fmt.Sprintf("%.2f", t.RealizedPL.Float64()))
+	writeOrgProperty(&b, "REASON", t.Reason)
 	b.WriteString(":END:\n")
 	b.WriteString("\n")
 	b.WriteString("*** Thesis\n- \n\n")
@@ -49,9 +45,10 @@ func FormatTradesOrg(trades []TradeRecord) string {
 	return b.String()
 }
 
-func shortID(full string) string {
-	if len(full) <= 8 {
-		return full
-	}
-	return full[:8]
+func writeOrgProperty(b *strings.Builder, key, value string) {
+	b.WriteString(":")
+	b.WriteString(key)
+	b.WriteString(": ")
+	b.WriteString(value)
+	b.WriteString("\n")
 }

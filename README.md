@@ -13,7 +13,7 @@ make build          # → bin/trader
 make install        # install to $GOPATH/bin
 ```
 
-Requires Go 1.22+. No C dependencies (default build). SQLite journal requires `make build-sqlite`.
+Requires Go 1.22+.
 
 ---
 
@@ -64,6 +64,8 @@ Open `http://localhost:9999` for the dashboard.
 | `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
 | `trader data oanda` | Download candles directly from OANDA into the candle store |
+| `trader data candles` | Print local candles in canonical CSV format |
+| `trader data validate-candles` | Scan local candle months for missing expected bars and raw-source mismatches |
 | `trader data stats` | Print statistics for a historical candle dataset |
 | `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
@@ -77,6 +79,8 @@ Open `http://localhost:9999` for the dashboard.
 | `trader mcp` | Expose trader as typed Claude tools over stdio (MCP protocol) |
 
 All commands accept `--help`.
+
+Live journaling defaults to newline-delimited JSON files (`*.jsonl`) for trades and equity snapshots so the records stay easy to inspect now and easy to import into a database later.
 
 ---
 
@@ -326,7 +330,65 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 /srv/trading/data/candles/<source>/<INSTRUMENT>/<YYYY>/<MM>/
 ```
 
+When OANDA candles are downloaded with raw preservation enabled, the bid+ask source rows are also written under the sibling raw tree:
+
+```
+/srv/trading/data/raw/oanda/<INSTRUMENT>/<YYYY>/<MM>/
+```
+
 `testdata/candles/` contains small fixtures used by unit tests — do not use for real backtests.
+
+### Candle Completeness and Validation
+
+Monthly candle files are no longer treated as complete just because the CSV exists and is non-empty. Inventory scanning reads the candle validity bits and marks a month incomplete if expected open-market slots are missing. Closed-market periods are allowed; missing bars during expected trading windows are not.
+
+Use `trader data validate-candles` to scan stored months and optionally compare canonical OANDA candle coverage with preserved raw OANDA monthly files:
+
+```bash
+trader data validate-candles \
+  --instruments EURUSD,USDJPY \
+  --timeframe H1 \
+  --from 2026-01 \
+  --to 2026-03 \
+  --source oanda \
+  --check-raw \
+  --report /tmp/candle-validation.json
+```
+
+What it reports:
+
+| Issue kind | Meaning |
+|---|---|
+| `missing_candle_month` | The canonical monthly candle CSV is missing entirely |
+| `missing_expected_candles` | Expected open-market bars are missing from the month |
+| `invalid_candles` | Present bars have invalid OHLC shape |
+| `missing_raw_source` | Raw OANDA monthly preservation file is missing |
+| `raw_complete_missing_canonical` | Raw OANDA has complete bars that are absent from canonical candles |
+| `canonical_missing_raw_complete` | Canonical candles contain valid bars not backed by raw OANDA complete rows |
+
+The command prints a summary to stdout and, with `--report`, writes a JSON report containing per-month counts, paths, and sample missing timestamps. This is the easiest way to keep an auditable record of gaps that should exist but do not.
+
+### Candle CSV Export
+
+Raw local candle reads go through `Service.CandlesCSV`, which streams candles from the canonical store and returns the same scaled integer CSV format used on disk. The service is shared by CLI, REST, and MCP so callers get consistent output:
+
+```csv
+# schema=v1 source=oanda instrument=EURUSD tf=h1 scale=100000
+Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags
+1704067200,110100,110000,109900,110050,10,15,60,0x0001
+```
+
+CLI:
+
+```bash
+trader data candles \
+  --instrument EUR_USD \
+  --timeframe  H1 \
+  --from       2024-01-01 \
+  --to         2024-01-31
+```
+
+`--to` is optional and defaults to now/latest available. Dates are inclusive at the caller boundary. Prices and spreads are emitted as fixed-point scaled integers, not floats.
 
 ### Dataset Statistics
 
@@ -428,11 +490,12 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 
 ## REST API
 
-`trader serve` (port :9999) exposes the following endpoints. All return JSON.
+`trader serve` (port :9999) exposes the following endpoints. Most return JSON; the raw candle export returns `text/csv`.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/health` | Health check |
+| `GET` | `/api/v1/candles/{instrument}` | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`) |
 | `GET` | `/api/v1/account` | OANDA account summary |
 | `GET` | `/api/v1/trades` | Open trades |
 | `POST` | `/api/v1/trades` | Place a risk-sized market order |
@@ -449,6 +512,32 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 | `GET` | `/api/v1/stream/backtest/{id}` | SSE: live backtest progress |
 
 OANDA endpoints return `503` when the server starts without a token (backtest-only mode).
+
+Example candle CSV request:
+
+```bash
+curl -s 'http://localhost:9999/api/v1/candles/EUR_USD?from=2024-01-01&to=2024-01-31&timeframe=H1'
+```
+
+---
+
+## MCP Tools
+
+`trader mcp serve` exposes typed tools over stdio. The `get_candles_csv` tool calls `Service.CandlesCSV` and returns local stored candles as `text/csv`; it does not require an OANDA token because it reads the local candle store. Live account and trade tools require `--token`, and write tools also require `--enable-write`.
+
+Local config example:
+
+```json
+{
+  "mcpServers": {
+    "trader": {
+      "type": "stdio",
+      "command": "trader",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
 
 ---
 
@@ -540,7 +629,7 @@ The signal summary bar below the controls shows counts for each kind. The chart 
 cp deploy/env.example .env
 # edit .env: OANDA_TOKEN, OANDA_ACCOUNT_ID, INSTRUMENT, STRATEGY
 
-# Start the live bot + Postgres journal
+# Start the live bot + Postgres services
 docker compose up -d live postgres
 
 # Run a one-off backtest
@@ -578,7 +667,7 @@ Config (YAML)
   → RegimeFilter (suppresses entries in ranging markets)
   → Broker       (fills orders, emits Events)
   → Account      (updates equity, margin, P/L)
-  → Journal      (records closed trades — CSV or SQLite)
+  → Journal      (records closed trades — CSV or JSON)
 ```
 
 **Numeric types** — all prices and money are fixed-point integers, never floats:
@@ -613,7 +702,7 @@ go test -run TestName ./...
 TRADER_RUN_DUKASCOPY_TESTS=1 go test ./...
 ```
 
-Every code change must ship with tests — see `CLAUDE.md` for conventions.
+Every code change must ship with tests — see `docs/CLAUDE.md` for conventions.
 
 ### Live Integration Smoke Test
 
@@ -646,18 +735,18 @@ cmd/            CLI entry points (Cobra)
 api/rest/       REST handlers and routing
 api/mcp/        Claude MCP tool server
 brokers/oanda/  OANDA REST + streaming client
-service/        Business logic (orders, live runner, replay, journal)
+service/        Business logic (orders, candle CSV export, live runner, replay, journal)
 strategies/     Strategy implementations
 data/           Candle loading, Dukascopy parser
 ui/             Embedded SvelteKit frontend (build → ui/dist/)
 deploy/         Dockerfile, docker-compose, systemd unit, example configs
 testdata/       Config fixtures and candle fixtures
 lots-of.go	    Trader core source code
-ROADMAP.md      Planned features and known gaps
+docs/           Project notes, roadmap, service docs, and plans
 ```
 
 ---
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features including walk-forward testing, external/plugin strategies, and more.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features including walk-forward testing, external/plugin strategies, and more.

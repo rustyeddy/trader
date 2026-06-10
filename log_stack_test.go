@@ -86,6 +86,22 @@ func TestStack_Entries_ReturnsCopy(t *testing.T) {
 	assert.Len(t, snap, 1, "snapshot should not reflect entries added after the call")
 }
 
+func TestStack_Entries_DeepCopiesAttrs(t *testing.T) {
+	tlog.ClearEntries()
+	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
+
+	tlog.Info("with attrs", "instrument", "EURUSD")
+	snap := tlog.Entries()
+	require.Len(t, snap, 1)
+	require.Len(t, snap[0].Attrs, 1)
+
+	snap[0].Attrs[0].Key = "mutated"
+
+	entries := tlog.Entries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "instrument", entries[0].Attrs[0].Key)
+}
+
 func TestStack_Attrs_Captured(t *testing.T) {
 	tlog.ClearEntries()
 	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
@@ -158,4 +174,24 @@ func TestStack_WithGroup_PropagatesToAttrs(t *testing.T) {
 	assert.True(t, got["module"])
 	assert.True(t, got["session.id"])
 	assert.True(t, got["session.state"])
+}
+
+func TestStack_Bounded(t *testing.T) {
+	tlog.ClearEntries()
+	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "debug", Memory: true}))
+
+	for i := 0; i < 1100; i++ {
+		tlog.Info("bounded", "n", i)
+	}
+
+	entries := tlog.Entries()
+	require.Len(t, entries, 1000)
+	assert.Equal(t, "bounded", entries[0].Message)
+	foundZero := false
+	for _, a := range entries[0].Attrs {
+		if a.Key == "n" && a.Value.Any() == 0 {
+			foundZero = true
+		}
+	}
+	assert.False(t, foundZero, "oldest entries should be evicted when the stack reaches capacity")
 }

@@ -207,12 +207,14 @@ func TestKeyRange(t *testing.T) {
 		t.Parallel()
 		k := Key{
 			Kind:  KindTick,
+			TF:    Ticks,
 			Year:  2026,
 			Month: 3,
 			Day:   15,
 			Hour:  10,
 		}
-		rng := k.Range()
+		rng, err := k.Range()
+		require.NoError(t, err)
 		start := time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC)
 		require.Equal(t, Timestamp(start.Unix()), rng.Start)
 		require.Equal(t, Timestamp(start.Add(time.Hour).Unix()), rng.End)
@@ -229,7 +231,8 @@ func TestKeyRange(t *testing.T) {
 			Day:   0,
 			Hour:  0,
 		}
-		rng := k.Range()
+		rng, err := k.Range()
+		require.NoError(t, err)
 		start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 		end := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 		require.Equal(t, Timestamp(start.Unix()), rng.Start)
@@ -240,15 +243,16 @@ func TestKeyRange(t *testing.T) {
 	t.Run("unsupported key returns empty range", func(t *testing.T) {
 		t.Parallel()
 		k := Key{Kind: KindCandle, Day: 1, Hour: 1}
-		rng := k.Range()
-		require.Equal(t, TimeRange{}, rng)
+		_, err := k.Range()
+		require.Error(t, err)
 	})
 }
 
 func TestRequiredTickHoursForMonth(t *testing.T) {
 	t.Parallel()
 
-	keys := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 3)
+	keys, err := RequiredTickHoursForMonth("dukascopy", "EURUSD", 2026, 3)
+	require.NoError(t, err)
 	require.NotEmpty(t, keys)
 
 	for _, k := range keys {

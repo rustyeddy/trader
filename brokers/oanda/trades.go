@@ -17,7 +17,7 @@ type OpenTrade struct {
 	ID           string
 	Instrument   string
 	EntryPrice   float64
-	Units        int64   // positive = long, negative = short
+	Units        int64 // positive = long, negative = short
 	UnrealizedPL float64
 	StopLoss     float64   // 0 if none
 	TakeProfit   float64   // 0 if none
@@ -26,12 +26,12 @@ type OpenTrade struct {
 
 type openTradesResp struct {
 	Trades []struct {
-		ID           string `json:"id"`
-		Instrument   string `json:"instrument"`
-		Price        string `json:"price"`
-		CurrentUnits string `json:"currentUnits"`
-		UnrealizedPL string `json:"unrealizedPL"`
-		OpenTime     string `json:"openTime"` // RFC3339Nano, e.g. "2024-01-15T10:30:00.000000Z"
+		ID            string `json:"id"`
+		Instrument    string `json:"instrument"`
+		Price         string `json:"price"`
+		CurrentUnits  string `json:"currentUnits"`
+		UnrealizedPL  string `json:"unrealizedPL"`
+		OpenTime      string `json:"openTime"` // RFC3339Nano, e.g. "2024-01-15T10:30:00.000000Z"
 		StopLossOrder *struct {
 			Price string `json:"price"`
 		} `json:"stopLossOrder"`
@@ -59,30 +59,47 @@ func (c *Client) GetOpenTrades(ctx context.Context, accountID string) ([]OpenTra
 		return nil, fmt.Errorf("oanda: parse open trades: %w", err)
 	}
 
-	parse := func(s string) float64 {
-		v, _ := strconv.ParseFloat(s, 64)
-		return v
-	}
-
 	out := make([]OpenTrade, 0, len(resp.Trades))
 	for _, t := range resp.Trades {
+		entryPrice, err := parseFloatField("open trade price", t.Price)
+		if err != nil {
+			return nil, fmt.Errorf("oanda: %w", err)
+		}
+		units, err := parseIntField("open trade currentUnits", t.CurrentUnits)
+		if err != nil {
+			return nil, fmt.Errorf("oanda: %w", err)
+		}
+		unrealizedPL, err := parseFloatField("open trade unrealizedPL", t.UnrealizedPL)
+		if err != nil {
+			return nil, fmt.Errorf("oanda: %w", err)
+		}
 		ot := OpenTrade{
 			ID:           t.ID,
 			Instrument:   t.Instrument,
-			EntryPrice:   parse(t.Price),
-			Units:        int64(parse(t.CurrentUnits)),
-			UnrealizedPL: parse(t.UnrealizedPL),
+			EntryPrice:   entryPrice,
+			Units:        units,
+			UnrealizedPL: unrealizedPL,
 		}
 		if t.OpenTime != "" {
-			if ts, err := time.Parse(time.RFC3339Nano, t.OpenTime); err == nil {
-				ot.OpenTime = ts
+			ts, err := parseTimeField("open trade time", t.OpenTime)
+			if err != nil {
+				return nil, fmt.Errorf("oanda: %w", err)
 			}
+			ot.OpenTime = ts
 		}
 		if t.StopLossOrder != nil {
-			ot.StopLoss = parse(t.StopLossOrder.Price)
+			stopLoss, err := parseFloatField("open trade stopLoss", t.StopLossOrder.Price)
+			if err != nil {
+				return nil, fmt.Errorf("oanda: %w", err)
+			}
+			ot.StopLoss = stopLoss
 		}
 		if t.TakeProfitOrder != nil {
-			ot.TakeProfit = parse(t.TakeProfitOrder.Price)
+			takeProfit, err := parseFloatField("open trade takeProfit", t.TakeProfitOrder.Price)
+			if err != nil {
+				return nil, fmt.Errorf("oanda: %w", err)
+			}
+			ot.TakeProfit = takeProfit
 		}
 		out = append(out, ot)
 	}
@@ -103,7 +120,7 @@ type closeTradeReq struct {
 
 type closeTradeResp struct {
 	OrderFillTransaction struct {
-		ID          string `json:"id"`
+		ID           string `json:"id"`
 		TradesClosed []struct {
 			TradeID string `json:"tradeID"`
 			Units   string `json:"units"`
@@ -162,14 +179,21 @@ func (c *Client) CloseTrade(ctx context.Context, accountID, tradeID string, unit
 		return nil, fmt.Errorf("oanda: parse close trade response: %w", err)
 	}
 
+	price, err := parseFloatField("close trade fill price", cr.OrderFillTransaction.Price)
+	if err != nil {
+		return nil, fmt.Errorf("oanda: %w", err)
+	}
 	result := &CloseTradeResult{
 		OrderID: cr.OrderFillTransaction.ID,
-		Price:   func() float64 { v, _ := strconv.ParseFloat(cr.OrderFillTransaction.Price, 64); return v }(),
+		Price:   price,
 	}
 	if len(cr.OrderFillTransaction.TradesClosed) > 0 {
 		tc := cr.OrderFillTransaction.TradesClosed[0]
 		result.TradeID = tc.TradeID
-		result.Units, _ = strconv.ParseInt(tc.Units, 10, 64)
+		result.Units, err = parseIntField("close trade units", tc.Units)
+		if err != nil {
+			return nil, fmt.Errorf("oanda: %w", err)
+		}
 	}
 	return result, nil
 }

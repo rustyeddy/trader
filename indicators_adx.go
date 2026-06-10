@@ -1,16 +1,8 @@
 package trader
 
-import (
-	"fmt"
-	"math"
-)
+import "fmt"
 
 // ADX computes the Average Directional Index (Wilder) over candle OHLC.
-//
-// Pricing note:
-// - trader.Candle prices are scaled integers.
-// - ADX outputs float64 (0..100-ish) and uses float math internally.
-// - Pass the same scale used to build your CandleSet (e.g. 1_000_000 for Dukascopy).
 //
 // Readiness / warmup:
 // - ADX needs:
@@ -20,33 +12,31 @@ import (
 // - Practically, that's about 2N "periods" (differences between candles), plus the first candle.
 // - We expose Warmup() as 2N to keep it simple/consistent with your other indicators.
 type ADX struct {
-	n     int
-	scale float64
-	name  string
+	n    int
+	name string
 
 	// candle tracking
-	seen    int
 	prev    Candle
 	hasPrev bool
 	ready   bool
-	adx     float64
-	plusDI  float64
-	minusDI float64
-	lastDX  float64
+	adx     int64
+	plusDI  int64
+	minusDI int64
+	lastDX  int64
 	periods int // number of computed periods (needs prev)
 
 	// initial accumulation for first N periods
-	sumTR      float64
-	sumPlusDM  float64
-	sumMinusDM float64
+	sumTR      PriceSum
+	sumPlusDM  PriceSum
+	sumMinusDM PriceSum
 
 	// Wilder smoothed values after initialization
-	smTR      float64
-	smPlusDM  float64
-	smMinusDM float64
+	smTR      PriceSum
+	smPlusDM  PriceSum
+	smMinusDM PriceSum
 
 	// seeding ADX: average of first N DX values
-	dxSum   float64
+	dxSum   int64
 	dxCount int
 }
 
@@ -58,29 +48,26 @@ func NewADX(period int, scale Scale6) (*ADX, error) {
 		return nil, fmt.Errorf("ADX scale must be > 0")
 	}
 	return &ADX{
-		n:     period,
-		scale: float64(scale),
-		name:  fmt.Sprintf("ADX(%d)", period),
+		n:    period,
+		name: fmt.Sprintf("ADX(%d)", period),
 	}, nil
 }
 
 func (a *ADX) Name() string     { return a.name }
+func (a *ADX) Period() int      { return a.n }
 func (a *ADX) Warmup() int      { return 2 * a.n }
 func (a *ADX) Ready() bool      { return a.ready }
-func (a *ADX) Float64() float64 { return a.adx }
+func (a *ADX) Float64() float64 { return fixedScaledToFloat64(a.adx) }
 
 func (a *ADX) Reset() {
 	*a = ADX{
-		n:     a.n,
-		scale: a.scale,
-		name:  a.name,
+		n:    a.n,
+		name: a.name,
 	}
 }
 
 // Update consumes the next closed candle.
 func (a *ADX) Update(c Candle) {
-	a.seen++
-
 	// Need a previous candle to form a "period"
 	if !a.hasPrev {
 		a.prev = c
@@ -88,22 +75,17 @@ func (a *ADX) Update(c Candle) {
 		return
 	}
 
-	// Convert scaled ints -> float price units
-	prevH := float64(a.prev.High) / a.scale
-	prevL := float64(a.prev.Low) / a.scale
-	prevC := float64(a.prev.Close) / a.scale
-
-	h := float64(c.High) / a.scale
-	l := float64(c.Low) / a.scale
-
-	// True Range (Wilder)
-	tr := max3(h-l, math.Abs(h-prevC), math.Abs(l-prevC))
+	tr := max3Int64(
+		int64(c.High-c.Low),
+		absPriceDiff(c.High, a.prev.Close),
+		absPriceDiff(c.Low, a.prev.Close),
+	)
 
 	// Directional Movement
-	upMove := h - prevH
-	downMove := prevL - l
+	upMove := int64(c.High - a.prev.High)
+	downMove := int64(a.prev.Low - c.Low)
 
-	var plusDM, minusDM float64
+	var plusDM, minusDM int64
 	if upMove > downMove && upMove > 0 {
 		plusDM = upMove
 	}
@@ -116,9 +98,9 @@ func (a *ADX) Update(c Candle) {
 
 	// 1) Accumulate first N periods to initialize Wilder smoothing
 	if a.periods <= a.n {
-		a.sumTR += tr
-		a.sumPlusDM += plusDM
-		a.sumMinusDM += minusDM
+		a.sumTR += PriceSum(tr)
+		a.sumPlusDM += PriceSum(plusDM)
+		a.sumMinusDM += PriceSum(minusDM)
 
 		// When we have N periods accumulated, initialize smoothed values
 		if a.periods == a.n {
@@ -126,8 +108,8 @@ func (a *ADX) Update(c Candle) {
 			a.smPlusDM = a.sumPlusDM
 			a.smMinusDM = a.sumMinusDM
 
-			a.plusDI, a.minusDI = di(a.smPlusDM, a.smMinusDM, a.smTR)
-			dx := dx(a.plusDI, a.minusDI)
+			a.plusDI, a.minusDI = diScaled(int64(a.smPlusDM), int64(a.smMinusDM), int64(a.smTR))
+			dx := dxScaled(a.plusDI, a.minusDI)
 			a.lastDX = dx
 
 			a.dxSum = dx
@@ -141,13 +123,12 @@ func (a *ADX) Update(c Candle) {
 
 	// 2) Wilder smoothing after initialization:
 	// smoothed = prior_smoothed - (prior_smoothed / N) + current
-	nf := float64(a.n)
-	a.smTR = a.smTR - (a.smTR / nf) + tr
-	a.smPlusDM = a.smPlusDM - (a.smPlusDM / nf) + plusDM
-	a.smMinusDM = a.smMinusDM - (a.smMinusDM / nf) + minusDM
+	a.smTR = PriceSum(roundDivPositive(int64(a.smTR)*int64(a.n-1), int64(a.n)) + tr)
+	a.smPlusDM = PriceSum(roundDivPositive(int64(a.smPlusDM)*int64(a.n-1), int64(a.n)) + plusDM)
+	a.smMinusDM = PriceSum(roundDivPositive(int64(a.smMinusDM)*int64(a.n-1), int64(a.n)) + minusDM)
 
-	a.plusDI, a.minusDI = di(a.smPlusDM, a.smMinusDM, a.smTR)
-	dxVal := dx(a.plusDI, a.minusDI)
+	a.plusDI, a.minusDI = diScaled(int64(a.smPlusDM), int64(a.smMinusDM), int64(a.smTR))
+	dxVal := dxScaled(a.plusDI, a.minusDI)
 	a.lastDX = dxVal
 
 	// Seed ADX using the first N DX values, then Wilder-smooth ADX
@@ -155,45 +136,41 @@ func (a *ADX) Update(c Candle) {
 		a.dxSum += dxVal
 		a.dxCount++
 		if a.dxCount >= a.n {
-			a.adx = a.dxSum / nf
+			a.adx = roundDivPositive(a.dxSum, int64(a.n))
 			a.ready = true
 		}
 	} else {
 		// ADX Wilder smoothing: (prevADX*(N-1) + DX) / N
-		a.adx = (a.adx*(nf-1.0) + dxVal) / nf
+		a.adx = roundDivPositive(a.adx*int64(a.n-1)+dxVal, int64(a.n))
 	}
 
 	a.prev = c
 }
 
 // Optional: expose DI values if you want them in strategies/debugging.
-func (a *ADX) PlusDI() float64  { return a.plusDI }
-func (a *ADX) MinusDI() float64 { return a.minusDI }
-func (a *ADX) DX() float64      { return a.lastDX }
+func (a *ADX) PlusDI() float64  { return fixedScaledToFloat64(a.plusDI) }
+func (a *ADX) MinusDI() float64 { return fixedScaledToFloat64(a.minusDI) }
+func (a *ADX) DX() float64      { return fixedScaledToFloat64(a.lastDX) }
 
-func di(smPlusDM, smMinusDM, smTR float64) (plusDI, minusDI float64) {
+func diScaled(smPlusDM, smMinusDM, smTR int64) (plusDI, minusDI int64) {
 	if smTR <= 0 {
 		return 0, 0
 	}
-	plusDI = 100.0 * (smPlusDM / smTR)
-	minusDI = 100.0 * (smMinusDM / smTR)
+	plusDI = percentScaled(smPlusDM, smTR)
+	minusDI = percentScaled(smMinusDM, smTR)
 	return plusDI, minusDI
 }
 
-func dx(plusDI, minusDI float64) float64 {
+func dxScaled(plusDI, minusDI int64) int64 {
 	den := plusDI + minusDI
 	if den <= 0 {
 		return 0
 	}
-	return 100.0 * (math.Abs(plusDI-minusDI) / den)
+	diff := plusDI - minusDI
+	if diff < 0 {
+		diff = -diff
+	}
+	return percentScaled(diff, den)
 }
 
-func max3(a, b, c float64) float64 {
-	if a >= b && a >= c {
-		return a
-	}
-	if b >= a && b >= c {
-		return b
-	}
-	return c
-}
+var _ Float64Indicator = (*ADX)(nil)

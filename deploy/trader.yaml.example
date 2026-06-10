@@ -11,10 +11,9 @@ rest:
   addr: ":9999"        # TCP address for REST API
 
 journal:
-  kind: sqlite                              # sqlite | csv
-  sqlite_path: /var/lib/trader/journal.db   # when kind=sqlite
-  csv_trades: /var/lib/trader/trades.csv    # when kind=csv
-  csv_equity: /var/lib/trader/equity.csv
+  kind: json                                # json | csv
+  trades_path: /var/lib/trader/live-trades.jsonl
+  equity_path: /var/lib/trader/live-equity.jsonl
 
 data:
   dir: /data/candles   # root directory for candle data

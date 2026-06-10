@@ -33,7 +33,7 @@ func init() {
 // New returns a ULID string (time-sortable identifier).
 //
 // ULIDs are lexicographically sortable by generation time, which makes them
-// ideal for journaling/trading records and SQLite indexes.
+// ideal for journaling/trading records and database indexes.
 func NewULID() string {
 	ulidMu.Lock()
 	defer ulidMu.Unlock()
@@ -45,4 +45,12 @@ func NewULID() string {
 		id = ulid.Make()
 	}
 	return id.String()
+}
+
+// ShortDisplayID returns a short, human-friendly prefix for headings and logs.
+func ShortDisplayID(full string) string {
+	if len(full) <= 8 {
+		return full
+	}
+	return full[:8]
 }

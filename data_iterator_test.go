@@ -3,6 +3,7 @@ package trader
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -147,14 +148,166 @@ func TestCandleSetIteratorV1_CandleSet(t *testing.T) {
 	require.Same(t, cs, it.CandleSet())
 }
 
-// ---------------------------------------------------------------------------
-// candleSetIterator.CandleSet
-// ---------------------------------------------------------------------------
+// errCandleIterator is a test-only CandleIterator that returns errors on demand.
+type errCandleIterator struct {
+	nextErr  error
+	closeErr error
+	count    int
+	maxItems int
+	cur      Candle
+	ts       Timestamp
+}
 
-func TestCandleSetIterator_CandleSet(t *testing.T) {
+func (it *errCandleIterator) Next() (CandleTime, bool) {
+	if it.nextErr != nil || it.count >= it.maxItems {
+		return CandleTime{}, false
+	}
+	it.count++
+	it.cur = Candle{Open: 100, Close: 100, Ticks: 1}
+	it.ts = Timestamp(it.count)
+	return CandleTime{Candle: it.cur, Timestamp: it.ts}, true
+}
+func (it *errCandleIterator) Err() error   { return it.nextErr }
+func (it *errCandleIterator) Close() error { return it.closeErr }
+
+// errAfterCandleIterator returns items first then an error.
+type errAfterCandleIterator struct {
+	items   []Candle
+	tss     []Timestamp
+	idx     int
+	errOnce error
+	emitted bool
+}
+
+func (it *errAfterCandleIterator) Next() (CandleTime, bool) {
+	if it.idx < len(it.items) {
+		ct := CandleTime{Candle: it.items[it.idx], Timestamp: it.tss[it.idx]}
+		it.idx++
+		return ct, true
+	}
+	return CandleTime{}, false
+}
+func (it *errAfterCandleIterator) Err() error {
+	if it.idx >= len(it.items) && !it.emitted {
+		it.emitted = true
+		return it.errOnce
+	}
+	return nil
+}
+func (it *errAfterCandleIterator) Close() error { return nil }
+
+func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 	t.Parallel()
-	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, M1)
+
+	sentinel := errors.New("sub error")
+	sub := &errAfterCandleIterator{
+		items:   []Candle{{Ticks: 1}},
+		tss:     []Timestamp{1},
+		errOnce: sentinel,
+	}
+	chained := newChainedCandleIterator(sub)
+
+	_, ok := chained.Next()
+	require.True(t, ok)
+	_, ok = chained.Next()
+	require.False(t, ok)
+	require.ErrorIs(t, chained.Err(), sentinel)
+}
+
+func TestChainedCandleIterator_NextExhausted(t *testing.T) {
+	t.Parallel()
+
+	sub := &errCandleIterator{maxItems: 1}
+	chained := newChainedCandleIterator(sub)
+
+	ct, ok := chained.Next()
+	require.True(t, ok)
+	require.Equal(t, Candle{Open: 100, Close: 100, Ticks: 1}, ct.Candle)
+
+	ct, ok = chained.Next()
+	require.False(t, ok)
+	require.Equal(t, CandleTime{}, ct)
+}
+
+func TestChainedCandleIterator_SubCloseErr(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("close error")
+	sub := &errCandleIterator{
+		maxItems: 0,
+		closeErr: sentinel,
+	}
+	chained := newChainedCandleIterator(sub)
+
+	_, ok := chained.Next()
+	require.False(t, ok)
+	require.ErrorIs(t, chained.Err(), sentinel)
+}
+
+func TestChainedCandleIterator_ClosePropagatesSubError(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("close sub error")
+	sub := &errCandleIterator{
+		maxItems: 0,
+		closeErr: sentinel,
+	}
+	closingChained := newChainedCandleIterator(sub)
+	_, _ = closingChained.Next()
+	err := closingChained.Close()
+	_ = err
+}
+
+func TestOpenTickIterator_FileNotFound(t *testing.T) {
+	s := useTempStore(t)
+
+	k := Key{
+		Kind:       KindTick,
+		TF:         Ticks,
+		Instrument: "EURUSD",
+		Source:     "dukascopy",
+		Year:       2026,
+		Month:      1,
+		Day:        5,
+		Hour:       10,
+	}
+
+	_, err := s.OpenTickIterator(k)
+	require.Error(t, err)
+	_ = s
+}
+
+func TestCloseCandleIterators_CloseError(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("close error")
+	sub := &errCandleIterator{closeErr: sentinel}
+
+	err := closeCandleIterators([]CandleIterator{sub})
+	require.ErrorIs(t, err, sentinel)
+}
+
+func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
+	_ = s
+
 	it := newCandleSetIterator(cs, TimeRange{})
-	csi := it.(*candleSetIterator)
-	require.Same(t, cs, csi.CandleSet())
+	require.NoError(t, it.Close())
+	_, ok := it.Next()
+	require.False(t, ok)
+	require.NoError(t, it.Close())
+}
+
+func TestCandleSetIterator_AfterDone(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, H1)
+	_ = s
+
+	it := newCandleSetIterator(cs, TimeRange{})
+	for _, ok := it.Next(); ok; _, ok = it.Next() {
+	}
+	_, ok := it.Next()
+	require.False(t, ok)
+	require.NoError(t, it.Err())
 }

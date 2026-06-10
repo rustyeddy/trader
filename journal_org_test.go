@@ -35,7 +35,6 @@ func TestFormatTradeOrg(t *testing.T) {
 	// Check properties drawer
 	assert.Contains(t, result, ":PROPERTIES:")
 	assert.Contains(t, result, ":TRADE_ID: trade-12345678-abcd")
-	assert.Contains(t, result, ":ID: trade-12345678-abcd")
 	assert.Contains(t, result, ":INSTRUMENT: EUR_USD")
 	assert.Contains(t, result, ":UNITS: 1000")
 	assert.Contains(t, result, ":ENTRY_PRICE: 1.08500")
@@ -166,7 +165,7 @@ func TestFormatTradesOrgSingle(t *testing.T) {
 	assert.NotContains(t, result, "\n\n\n")
 }
 
-func TestShortID(t *testing.T) {
+func TestShortDisplayID(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -203,9 +202,9 @@ func TestShortID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shortID(tt.input)
+			result := ShortDisplayID(tt.input)
 			assert.Equal(t, tt.expected, result)
-			assert.LessOrEqual(t, len(result), 8, "shortID result should be at most 8 characters")
+			assert.LessOrEqual(t, len(result), 8, "ShortDisplayID result should be at most 8 characters")
 		})
 	}
 }

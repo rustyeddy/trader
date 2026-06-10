@@ -111,6 +111,29 @@ func TestWeeklyEMAFilter_AggregatesWithinWeek(t *testing.T) {
 	assert.False(t, f.Ready(), "EMA not ready before any week has closed")
 }
 
+func TestWeeklyEMAFilter_AllowSideUsesInProgressWeekClose(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
+
+	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	weeks := mondays(base, 10)
+
+	for i, m := range weeks {
+		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+	}
+
+	currentWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
+	f.Tick(weeklyEMACT(currentWeek, Price(120000)))
+	require.True(t, f.Ready())
+	assert.True(t, f.AllowSide(Long), "high in-progress weekly close should allow Long")
+
+	f.Tick(weeklyEMACT(currentWeek.Add(24*time.Hour), Price(90000)))
+	assert.False(t, f.AllowSide(Long), "lower in-progress weekly close should flip Long permission")
+	assert.True(t, f.AllowSide(Short), "lower in-progress weekly close should allow Short")
+}
+
 func TestWeeklyEMAFilter_FactoryRoundtrip(t *testing.T) {
 	t.Parallel()
 	f, err := GetRegimeFilter(RegimeConfig{
@@ -137,4 +160,20 @@ func TestWeeklyEMAFilter_Name(t *testing.T) {
 	f, err := NewWeeklyEMAFilter(20, PriceScale)
 	require.NoError(t, err)
 	assert.Equal(t, "WeeklyEMA(20)", f.Name())
+}
+
+func TestWeeklyEMAFilter_EMAAccessorMatchesEMAValue(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	require.NoError(t, err)
+
+	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	for i, m := range mondays(base, 10) {
+		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+	}
+	f.Tick(weeklyEMACT(base.Add(10*7*24*time.Hour), Price(120000)))
+
+	require.True(t, f.Ready())
+	assert.Equal(t, f.EMA(), f.EMAValue())
 }

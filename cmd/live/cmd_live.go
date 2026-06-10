@@ -39,9 +39,8 @@ func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
 		token        string
 		env          string
 		journalKind  string
-		csvTrades    string
-		csvEquity    string
-		sqlitePath   string
+		tradesPath   string
+		equityPath   string
 		backfillFrom int64
 	)
 	cmd := &cobra.Command{
@@ -88,9 +87,8 @@ func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
 
 			journal, err := svc.OpenJournal(service.JournalConfig{
 				Kind:       journalKind,
-				CSVTrades:  csvTrades,
-				CSVEquity:  csvEquity,
-				SQLitePath: sqlitePath,
+				TradesPath: tradesPath,
+				EquityPath: equityPath,
 			})
 			if err != nil {
 				return err
@@ -114,10 +112,9 @@ func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (auto-discovered if omitted)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (falls back to ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().StringVar(&journalKind, "journal", "csv", "Journal backend: csv|sqlite")
-	cmd.Flags().StringVar(&csvTrades, "csv-trades", "live-trades.csv", "Path for CSV trades file (when --journal=csv)")
-	cmd.Flags().StringVar(&csvEquity, "csv-equity", "live-equity.csv", "Path for CSV equity file (when --journal=csv)")
-	cmd.Flags().StringVar(&sqlitePath, "sqlite", "live.db", "Path for SQLite db (when --journal=sqlite)")
+	cmd.Flags().StringVar(&journalKind, "journal", "json", "Journal backend: csv|json")
+	cmd.Flags().StringVar(&tradesPath, "trades-file", "live-trades.jsonl", "Path for journal trade records")
+	cmd.Flags().StringVar(&equityPath, "equity-file", "live-equity.jsonl", "Path for journal equity records")
 	cmd.Flags().Int64Var(&backfillFrom, "backfill-from", 0, "If >0, poll GetTransactions from this ID before starting the stream")
 	return cmd
 }

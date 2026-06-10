@@ -72,10 +72,10 @@ func TestD1ADXFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	f.Tick(h1CT(base.Add(1*time.Hour), 10200, 11000, 10100, 10800))
 	f.Tick(h1CT(base.Add(2*time.Hour), 10800, 10900, 9500, 9600))
 
-	assert.Equal(t, Price(10000), f.dayOpen,  "open from first bar")
-	assert.Equal(t, Price(11000), f.dayHigh,  "high from second bar")
-	assert.Equal(t, Price(9500),  f.dayLow,   "low from third bar")
-	assert.Equal(t, Price(9600),  f.dayClose, "close from latest bar")
+	assert.Equal(t, Price(10000), f.dayOpen, "open from first bar")
+	assert.Equal(t, Price(11000), f.dayHigh, "high from second bar")
+	assert.Equal(t, Price(9500), f.dayLow, "low from third bar")
+	assert.Equal(t, Price(9600), f.dayClose, "close from latest bar")
 }
 
 func TestD1ADXFilter_TrendingAllowsWhenTrending(t *testing.T) {
@@ -136,4 +136,30 @@ func TestD1ADXFilter_Name(t *testing.T) {
 	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
 	require.NoError(t, err)
 	assert.Equal(t, "D1-ADX(14,20.0)", f.Name())
+}
+
+func TestD1ADXFilter_RejectsInvalidThreshold(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewD1ADXFilter(14, -0.1, PriceScale)
+	require.Error(t, err)
+
+	_, err = NewD1ADXFilter(14, 100.1, PriceScale)
+	require.Error(t, err)
+}
+
+func TestD1ADXFilter_ADXAccessorMatchesADXValue(t *testing.T) {
+	t.Parallel()
+
+	f, err := NewD1ADXFilter(3, 20.0, PriceScale)
+	require.NoError(t, err)
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for d := 0; d <= 6; d++ {
+		open := Price(10000 + d*500)
+		feedDayADX(f, base.AddDate(0, 0, d), open, open+490, open-10, open+490)
+	}
+
+	require.True(t, f.Ready())
+	assert.Equal(t, f.ADX(), f.ADXValue())
 }
