@@ -3,10 +3,12 @@
 package trader
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"log/syslog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -50,68 +52,67 @@ func TestLevelToPriorityTable(t *testing.T) {
 
 	tests := []struct {
 		name string
-		msg  string
+		lvl  slog.Level
 		want syslog.Priority
 	}{
-		{name: "text debug", msg: "time=2026-01-01T00:00:00Z level=" + slog.LevelDebug.String() + " msg=test", want: syslog.LOG_DEBUG},
-		{name: "text warn", msg: "time=2026-01-01T00:00:00Z level=" + slog.LevelWarn.String() + " msg=test", want: syslog.LOG_WARNING},
-		{name: "text error", msg: "time=2026-01-01T00:00:00Z level=" + slog.LevelError.String() + " msg=test", want: syslog.LOG_ERR},
-		{name: "json debug", msg: `{"time":"2026-01-01T00:00:00Z","level":"` + slog.LevelDebug.String() + `","msg":"test"}`, want: syslog.LOG_DEBUG},
-		{name: "json warn", msg: `{"time":"2026-01-01T00:00:00Z","level":"` + slog.LevelWarn.String() + `","msg":"test"}`, want: syslog.LOG_WARNING},
-		{name: "json error", msg: `{"time":"2026-01-01T00:00:00Z","level":"` + slog.LevelError.String() + `","msg":"test"}`, want: syslog.LOG_ERR},
-		{name: "default info", msg: "time=2026-01-01T00:00:00Z msg=test", want: syslog.LOG_INFO},
+		{name: "debug", lvl: slog.LevelDebug, want: syslog.LOG_DEBUG},
+		{name: "warn", lvl: slog.LevelWarn, want: syslog.LOG_WARNING},
+		{name: "error", lvl: slog.LevelError, want: syslog.LOG_ERR},
+		{name: "info", lvl: slog.LevelInfo, want: syslog.LOG_INFO},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, levelToPriority(tc.msg))
+			assert.Equal(t, tc.want, levelToPriority(tc.lvl))
 		})
 	}
 }
 
-func TestSyslogWriterWriteMappingAndTrim(t *testing.T) {
+func TestSyslogHandlerMappingAndFormatting(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name       string
-		input      string
+		level      slog.Level
 		wantMethod string
 	}{
-		{name: "debug", input: "time=2026-01-01T00:00:00Z level=DEBUG msg=test\n", wantMethod: "debug"},
-		{name: "warn", input: "time=2026-01-01T00:00:00Z level=WARN msg=test\n", wantMethod: "warning"},
-		{name: "error", input: "time=2026-01-01T00:00:00Z level=ERROR msg=test\n", wantMethod: "err"},
-		{name: "default", input: "time=2026-01-01T00:00:00Z msg=test\n", wantMethod: "info"},
+		{name: "debug", level: slog.LevelDebug, wantMethod: "debug"},
+		{name: "warn", level: slog.LevelWarn, wantMethod: "warning"},
+		{name: "error", level: slog.LevelError, wantMethod: "err"},
+		{name: "default", level: slog.LevelInfo, wantMethod: "info"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &fakeSyslogBackend{}
-			sw := &syslogWriter{w: backend}
+			h := &syslogHandler{w: backend, attrs: []slog.Attr{slog.String("module", "test")}}
+			r := slog.NewRecord(testTime(t), tc.level, "test", 0)
+			r.AddAttrs(slog.String("instrument", "EURUSD"))
 
-			n, err := sw.Write([]byte(tc.input))
+			err := h.Handle(context.Background(), r)
 			assert.NoError(t, err)
-			assert.Equal(t, len(tc.input), n)
 			assert.Equal(t, tc.wantMethod, backend.lastMethod)
-			assert.NotContains(t, backend.lastMsg, "\n")
+			assert.Contains(t, backend.lastMsg, "test")
+			assert.Contains(t, backend.lastMsg, "module=test")
+			assert.Contains(t, backend.lastMsg, "instrument=EURUSD")
 		})
 	}
 }
 
-func TestSyslogWriterWritePropagatesError(t *testing.T) {
+func TestSyslogHandlerPropagatesError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("backend failed")
 	backend := &fakeSyslogBackend{err: wantErr}
-	sw := &syslogWriter{w: backend}
-	input := "time=2026-01-01T00:00:00Z level=ERROR msg=test\n"
+	h := &syslogHandler{w: backend}
+	r := slog.NewRecord(testTime(t), slog.LevelError, "test", 0)
 
-	n, err := sw.Write([]byte(input))
-	assert.Equal(t, len(input), n)
+	err := h.Handle(context.Background(), r)
 	assert.ErrorIs(t, err, wantErr)
 	assert.Equal(t, "err", backend.lastMethod)
 }
 
-func TestNewSyslogWriter_SuccessAndError(t *testing.T) {
+func TestNewSyslogHandler_SuccessAndError(t *testing.T) {
 	t.Parallel()
 
 	orig := syslogNew
@@ -125,7 +126,7 @@ func TestNewSyslogWriter_SuccessAndError(t *testing.T) {
 			return backend, nil
 		}
 
-		sw, err := newSyslogWriter("trader-test")
+		sw, err := newSyslogHandler("trader-test")
 		assert.NoError(t, err)
 		assert.NotNil(t, sw)
 		assert.Same(t, backend, sw.w)
@@ -137,7 +138,7 @@ func TestNewSyslogWriter_SuccessAndError(t *testing.T) {
 			return nil, wantErr
 		}
 
-		sw, err := newSyslogWriter("trader-test")
+		sw, err := newSyslogHandler("trader-test")
 		assert.Nil(t, sw)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, wantErr)
@@ -145,14 +146,19 @@ func TestNewSyslogWriter_SuccessAndError(t *testing.T) {
 	})
 }
 
-func TestSyslogWriterClose(t *testing.T) {
+func TestSyslogHandlerClose(t *testing.T) {
 	t.Parallel()
 
 	backend := &fakeSyslogBackend{}
-	sw := &syslogWriter{w: backend}
+	sw := &syslogHandler{w: backend}
 	assert.NoError(t, sw.Close())
 
 	wantErr := errors.New("close failed")
-	swErr := &syslogWriter{w: &fakeSyslogBackend{err: wantErr}}
+	swErr := &syslogHandler{w: &fakeSyslogBackend{err: wantErr}}
 	assert.ErrorIs(t, swErr.Close(), wantErr)
+}
+
+func testTime(t *testing.T) time.Time {
+	t.Helper()
+	return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 }

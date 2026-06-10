@@ -24,6 +24,7 @@ package trader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -141,13 +142,10 @@ func Setup(cfg LogConfig) error {
 		cfg.File = defaultLogFile
 	}
 
-	if err := closeSinksLocked(); err != nil {
-		return err
-	}
-
-	// --- build io.Writer + closers ---
+	// --- build outputs + closers ---
 	var writers []io.Writer
-	closers := make([]io.Closer, 0, 2)
+	var handlers []slog.Handler
+	newClosers := make([]io.Closer, 0, 2)
 	if cfg.Stdout {
 		writers = append(writers, os.Stdout)
 	}
@@ -163,41 +161,48 @@ func Setup(cfg LogConfig) error {
 			return fmt.Errorf("log: open log file %q: %w", cfg.File, err)
 		}
 		writers = append(writers, f)
-		closers = append(closers, f)
+		newClosers = append(newClosers, f)
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	if len(writers) > 0 {
+		w := io.MultiWriter(writers...)
+		if strings.ToLower(cfg.Format) == "json" {
+			handlers = append(handlers, slog.NewJSONHandler(w, opts))
+		} else {
+			handlers = append(handlers, slog.NewTextHandler(w, opts))
+		}
 	}
 
 	if cfg.Syslog {
-		sw, err := newSyslogWriter("trader")
+		sh, err := newSyslogHandler("trader")
 		if err != nil {
+			closeSinks(newClosers)
 			return fmt.Errorf("log: open syslog: %w", err)
 		}
-		writers = append(writers, sw)
-		if c, ok := any(sw).(io.Closer); ok {
-			closers = append(closers, c)
-		}
-	}
-	if len(writers) == 0 {
-		writers = append(writers, io.Discard)
-	}
-
-	w := io.MultiWriter(writers...)
-
-	// --- handler ---
-	opts := &slog.HandlerOptions{Level: level}
-	var h slog.Handler
-	if strings.ToLower(cfg.Format) == "json" {
-		h = slog.NewJSONHandler(w, opts)
-	} else {
-		h = slog.NewTextHandler(w, opts)
+		handlers = append(handlers, sh)
+		newClosers = append(newClosers, sh)
 	}
 
 	if cfg.Memory {
-		h = &multiHandler{handlers: []slog.Handler{h, &stackHandler{}}}
+		handlers = append(handlers, &stackHandler{})
 	}
 
+	if len(handlers) == 0 {
+		handlers = append(handlers, slog.NewTextHandler(io.Discard, opts))
+	}
+
+	var h slog.Handler
+	if len(handlers) == 1 {
+		h = handlers[0]
+	} else {
+		h = &multiHandler{handlers: handlers}
+	}
+
+	oldClosers := sinkClosers
 	handlerState.Set(h)
-	sinkClosers = closers
-	return nil
+	sinkClosers = newClosers
+	return closeSinks(oldClosers)
 }
 
 // -------------------------------------------------------------------------
@@ -208,6 +213,10 @@ func Setup(cfg LogConfig) error {
 // "module"=name.  The same logger is returned on subsequent calls with the
 // same name.
 func Module(name string) *slog.Logger {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "trader"
+	}
 	modulesMu.RLock()
 	if l, ok := modules[name]; ok {
 		modulesMu.RUnlock()
@@ -250,14 +259,25 @@ func Fatal(msg string, args ...any) {
 // -------------------------------------------------------------------------
 
 func closeSinksLocked() error {
-	var firstErr error
-	for _, c := range sinkClosers {
-		if err := c.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("log: close previous sink: %w", err)
+	err := closeSinks(sinkClosers)
+	sinkClosers = nil
+	return err
+}
+
+func closeSinks(closers []io.Closer) error {
+	if len(closers) == 0 {
+		return nil
+	}
+	var errs []error
+	for _, c := range closers {
+		if c == nil {
+			continue
+		}
+		if err := c.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("log: close previous sink: %w", err))
 		}
 	}
-	sinkClosers = nil
-	return firstErr
+	return errors.Join(errs...)
 }
 
 type switchHandlerState struct {

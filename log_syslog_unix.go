@@ -3,18 +3,18 @@
 package trader
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"log/syslog"
 	"strings"
 )
 
-// syslogWriter wraps a *syslog.Writer so that it implements io.Writer and
-// maps slog severity levels to syslog priorities.  When used as a plain
-// io.Writer (e.g. inside a slog.TextHandler / slog.JSONHandler), every write
-// is forwarded as syslog.LOG_INFO.
-type syslogWriter struct {
-	w syslogBackend
+type syslogHandler struct {
+	w      syslogBackend
+	attrs  []slog.Attr
+	groups []string
 }
 
 type syslogBackend interface {
@@ -29,76 +29,117 @@ var syslogNew = func(p syslog.Priority, tag string) (syslogBackend, error) {
 	return syslog.New(p, tag)
 }
 
-// newSyslogWriter creates a syslogWriter connected to the local syslog
+// newSyslogHandler creates a syslogHandler connected to the local syslog
 // daemon under the given program tag.
-func newSyslogWriter(tag string) (*syslogWriter, error) {
+func newSyslogHandler(tag string) (*syslogHandler, error) {
 	w, err := syslogNew(syslog.LOG_INFO|syslog.LOG_USER, tag)
 	if err != nil {
 		return nil, fmt.Errorf("syslog.New: %w", err)
 	}
-	return &syslogWriter{w: w}, nil
+	return &syslogHandler{w: w}, nil
 }
 
-// Write implements io.Writer.  It strips a trailing newline (syslog adds its
-// own) and derives the priority from the slog level field in the record.
-// Both text format ("… level=DEBUG …") and JSON format ("level":"DEBUG") are
-// recognised.  The level field is matched with a leading space or quote so
-// that message content containing the same substring is not misidentified.
-func (sw *syslogWriter) Write(p []byte) (int, error) {
-	msg := strings.TrimRight(string(p), "\n")
-	n := len(p)
+func (h *syslogHandler) Enabled(_ context.Context, l slog.Level) bool {
+	return l >= level.Level()
+}
 
-	pri := levelToPriority(msg)
-	switch pri {
+func (h *syslogHandler) Handle(_ context.Context, r slog.Record) error {
+	msg := formatSyslogMessage(r, h.attrs, h.groups)
+	switch levelToPriority(r.Level) {
 	case syslog.LOG_DEBUG:
-		return n, sw.w.Debug(msg)
+		return h.w.Debug(msg)
 	case syslog.LOG_WARNING:
-		return n, sw.w.Warning(msg)
+		return h.w.Warning(msg)
 	case syslog.LOG_ERR:
-		return n, sw.w.Err(msg)
+		return h.w.Err(msg)
 	default:
-		return n, sw.w.Info(msg)
+		return h.w.Info(msg)
 	}
 }
 
-func (sw *syslogWriter) Close() error {
-	return sw.w.Close()
-}
-
-// levelToPriority maps the slog level field embedded in a formatted log
-// record to a syslog priority.  It handles both slog text format
-// (" level=DEBUG ") and JSON format (`"level":"DEBUG"`).
-func levelToPriority(s string) syslog.Priority {
-	// Text format: fields are space-separated; level appears as " level=NAME"
-	// (always preceded by a space because "time=…" comes first).
-	textPrefixes := []struct {
-		pat string
-		pri syslog.Priority
-	}{
-		{" level=" + slog.LevelDebug.String(), syslog.LOG_DEBUG},
-		{" level=" + slog.LevelWarn.String(), syslog.LOG_WARNING},
-		{" level=" + slog.LevelError.String(), syslog.LOG_ERR},
+func (h *syslogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
 	}
-	for _, p := range textPrefixes {
-		if strings.Contains(s, p.pat) {
-			return p.pri
+	qualified := attrs
+	if len(h.groups) > 0 {
+		qualified = make([]slog.Attr, len(attrs))
+		for i, a := range attrs {
+			qualified[i] = qualifyWithGroups(a, h.groups)
 		}
 	}
-
-	// JSON format: `"level":"DEBUG"` etc.
-	jsonPairs := []struct {
-		pat string
-		pri syslog.Priority
-	}{
-		{`"level":"` + slog.LevelDebug.String() + `"`, syslog.LOG_DEBUG},
-		{`"level":"` + slog.LevelWarn.String() + `"`, syslog.LOG_WARNING},
-		{`"level":"` + slog.LevelError.String() + `"`, syslog.LOG_ERR},
-	}
-	for _, p := range jsonPairs {
-		if strings.Contains(s, p.pat) {
-			return p.pri
-		}
-	}
-
-	return syslog.LOG_INFO
+	combined := make([]slog.Attr, len(h.attrs)+len(qualified))
+	copy(combined, h.attrs)
+	copy(combined[len(h.attrs):], qualified)
+	return &syslogHandler{w: h.w, attrs: combined, groups: h.groups}
 }
+
+func (h *syslogHandler) WithGroup(name string) slog.Handler {
+	groups := make([]string, len(h.groups)+1)
+	copy(groups, h.groups)
+	groups[len(groups)-1] = name
+	return &syslogHandler{w: h.w, attrs: h.attrs, groups: groups}
+}
+
+func (h *syslogHandler) Close() error {
+	return h.w.Close()
+}
+
+func formatSyslogMessage(r slog.Record, baseAttrs []slog.Attr, groups []string) string {
+	var b strings.Builder
+	b.WriteString(r.Message)
+
+	writeAttr := func(a slog.Attr) {
+		a.Value = a.Value.Resolve()
+		if a.Equal(slog.Attr{}) || a.Key == "" {
+			return
+		}
+		b.WriteString(" ")
+		b.WriteString(a.Key)
+		b.WriteString("=")
+		b.WriteString(attrValueString(a.Value))
+	}
+
+	for _, a := range baseAttrs {
+		writeAttr(a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		writeAttr(qualifyWithGroups(a, groups))
+		return true
+	})
+	return b.String()
+}
+
+func attrValueString(v slog.Value) string {
+	switch v.Kind() {
+	case slog.KindString:
+		return v.String()
+	case slog.KindBool:
+		if v.Bool() {
+			return "true"
+		}
+		return "false"
+	case slog.KindDuration:
+		return v.Duration().String()
+	case slog.KindTime:
+		return v.Time().Format("2006-01-02T15:04:05Z07:00")
+	default:
+		return fmt.Sprint(v.Any())
+	}
+}
+
+func levelToPriority(l slog.Level) syslog.Priority {
+	switch {
+	case l <= slog.LevelDebug:
+		return syslog.LOG_DEBUG
+	case l >= slog.LevelError:
+		return syslog.LOG_ERR
+	case l >= slog.LevelWarn:
+		return syslog.LOG_WARNING
+	default:
+		return syslog.LOG_INFO
+	}
+}
+
+var _ io.Closer = (*syslogHandler)(nil)
+var _ io.Closer = (*syslogHandler)(nil)

@@ -141,6 +141,14 @@ func TestModule_DifferentNames(t *testing.T) {
 	assert.NotSame(t, x, y)
 }
 
+func TestModule_NormalizesWhitespace(t *testing.T) {
+	require.NoError(t, tlog.Setup(tlog.LogConfig{}))
+
+	a := tlog.Module(" alpha ")
+	b := tlog.Module("alpha")
+	assert.Same(t, a, b)
+}
+
 func TestModuleLoggers_Wired(t *testing.T) {
 	require.NoError(t, tlog.Setup(tlog.LogConfig{}))
 
@@ -203,6 +211,24 @@ func TestSetup_ReInitialisation(t *testing.T) {
 	data2, err := os.ReadFile(logPath2)
 	require.NoError(t, err)
 	assert.Contains(t, string(data2), "second setup")
+}
+
+func TestSetup_ReconfigurationFailureKeepsPreviousSinkActive(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stable.log")
+
+	require.NoError(t, tlog.Setup(tlog.LogConfig{Level: "info", File: logPath}))
+	tlog.Info("before failure")
+
+	err := tlog.Setup(tlog.LogConfig{Level: "info", File: "/nonexistent-dir/bad/path.log"})
+	require.Error(t, err)
+
+	tlog.Info("after failure")
+
+	data, readErr := os.ReadFile(logPath)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(data), "before failure")
+	assert.Contains(t, string(data), "after failure")
 }
 
 // -------------------------------------------------------------------------
