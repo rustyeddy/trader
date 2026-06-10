@@ -19,10 +19,10 @@ func TestUnitsInt64AndString_Phase1(t *testing.T) {
 func TestPipsFromFloat_RoundingCases_Phase1(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, Pips(0), pipsFromFloat(0.0))
-	assert.Equal(t, Pips(13), pipsFromFloat(1.25))
-	assert.Equal(t, Pips(14), pipsFromFloat(1.35))
-	assert.Equal(t, Pips(-13), pipsFromFloat(-1.25))
+	assert.Equal(t, Pips(0), PipsFromFloat(0.0))
+	assert.Equal(t, Pips(13), PipsFromFloat(1.25))
+	assert.Equal(t, Pips(14), PipsFromFloat(1.35))
+	assert.Equal(t, Pips(-13), PipsFromFloat(-1.25))
 }
 
 // TestPipsFloat64_Phase1 verifies expected behavior for this component.

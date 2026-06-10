@@ -40,8 +40,8 @@ type Pips int32
 
 const pipScale = 10 // tenths of a pip
 
-// pipsFromFloat is an internal helper for trader type processing.
-func pipsFromFloat(v float64) Pips {
+// PipsFromFloat converts a pip count expressed as float64 to the Pips type.
+func PipsFromFloat(v float64) Pips {
 	return Pips(math.Round(v * pipScale))
 }
 

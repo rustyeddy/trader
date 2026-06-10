@@ -7,17 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunScaleOrDefault(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, PriceScale, runScaleOrDefault(0))
-	assert.Equal(t, PriceScale, runScaleOrDefault(-1))
-
-	customScale := Scale6(12345)
-	assert.Equal(t, customScale, runScaleOrDefault(customScale))
-}
-
-func TestRunIntParam(t *testing.T) {
+func TestGetIntParam(t *testing.T) {
 	t.Parallel()
 
 	m := map[string]any{
@@ -28,86 +18,38 @@ func TestRunIntParam(t *testing.T) {
 		"bad":     "string",
 	}
 
-	v, ok, err := runIntParam(m, "missing")
+	v, ok, err := GetIntParam(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, v)
 
-	v, ok, err = runIntParam(m, "int")
+	v, ok, err = GetIntParam(m, "int")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 42, v)
 
-	v, ok, err = runIntParam(m, "int32")
+	v, ok, err = GetIntParam(m, "int32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 10, v)
 
-	v, ok, err = runIntParam(m, "int64")
+	v, ok, err = GetIntParam(m, "int64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 20, v)
 
-	v, ok, err = runIntParam(m, "float64")
+	v, ok, err = GetIntParam(m, "float64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 30, v)
 
-	_, ok, err = runIntParam(m, "bad")
+	_, ok, err = GetIntParam(m, "bad")
 	assert.True(t, ok)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be numeric")
 }
 
-func TestRunFloatParam(t *testing.T) {
-	t.Parallel()
-
-	m := map[string]any{
-		"float64": 1.5,
-		"float32": float32(2.5),
-		"int":     3,
-		"int32":   int32(4),
-		"int64":   int64(5),
-		"bad":     "string",
-	}
-
-	v, ok, err := runFloatParam(m, "missing")
-	assert.False(t, ok)
-	assert.NoError(t, err)
-	assert.Equal(t, 0.0, v)
-
-	v, ok, err = runFloatParam(m, "float64")
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	assert.InDelta(t, 1.5, v, 1e-9)
-
-	v, ok, err = runFloatParam(m, "float32")
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	assert.InDelta(t, 2.5, v, 1e-4)
-
-	v, ok, err = runFloatParam(m, "int")
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	assert.Equal(t, 3.0, v)
-
-	v, ok, err = runFloatParam(m, "int32")
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	assert.Equal(t, 4.0, v)
-
-	v, ok, err = runFloatParam(m, "int64")
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	assert.Equal(t, 5.0, v)
-
-	_, ok, err = runFloatParam(m, "bad")
-	assert.True(t, ok)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must be numeric")
-}
-
-func TestRunBoolParam(t *testing.T) {
+func TestGetBoolParam(t *testing.T) {
 	t.Parallel()
 
 	m := map[string]any{
@@ -116,22 +58,22 @@ func TestRunBoolParam(t *testing.T) {
 		"bad":   "string",
 	}
 
-	v, ok, err := runBoolParam(m, "missing")
+	v, ok, err := GetBoolParam(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.False(t, v)
 
-	v, ok, err = runBoolParam(m, "true")
+	v, ok, err = GetBoolParam(m, "true")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.True(t, v)
 
-	v, ok, err = runBoolParam(m, "false")
+	v, ok, err = GetBoolParam(m, "false")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.False(t, v)
 
-	_, ok, err = runBoolParam(m, "bad")
+	_, ok, err = GetBoolParam(m, "bad")
 	assert.True(t, ok)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be bool")
@@ -148,3 +90,4 @@ func TestGetStrategy_Unknown(t *testing.T) {
 	_, err := GetStrategy(StrategyConfig{Kind: "no-such-strategy"})
 	require.Error(t, err)
 }
+

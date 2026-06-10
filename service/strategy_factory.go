@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/rustyeddy/trader"
@@ -95,7 +96,7 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (trad
 		if granularity == "" {
 			granularity = "M1"
 		}
-		st, err := stress.New(stress.Config{TradeEvery: tradeEvery, StopBps: int(stopPct * 100), Side: side})
+		st, err := stress.New(stress.Config{TradeEvery: tradeEvery, StopBps: int(math.Round(stopPct * 100)), Side: side})
 		if err != nil {
 			return nil, err
 		}
@@ -118,6 +119,10 @@ func toInt(v any, def int) int {
 	switch x := v.(type) {
 	case int:
 		return x
+	case int32:
+		return int(x)
+	case int64:
+		return int(x)
 	case float64:
 		return int(x)
 	}
