@@ -15,7 +15,6 @@ func init() {
 }
 
 type Config struct {
-	trader.StrategyBaseConfig
 
 	Lookback  int
 	Threshold float64

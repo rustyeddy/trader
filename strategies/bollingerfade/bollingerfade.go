@@ -36,7 +36,6 @@ type Fade struct {
 
 // Config holds constructor parameters.
 type Config struct {
-	trader.StrategyBaseConfig
 
 	Period     int
 	Multiplier float64

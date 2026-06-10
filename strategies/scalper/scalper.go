@@ -15,7 +15,6 @@ func init() {
 
 // Config holds scalper parameters.
 type Config struct {
-	trader.StrategyBaseConfig
 
 	FastPeriod     int
 	SlowPeriod     int

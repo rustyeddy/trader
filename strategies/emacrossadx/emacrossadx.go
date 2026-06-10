@@ -26,7 +26,6 @@ type Strategy struct {
 }
 
 type Config struct {
-	trader.StrategyBaseConfig
 
 	FastPeriod      int
 	SlowPeriod      int
