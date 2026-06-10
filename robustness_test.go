@@ -1166,12 +1166,12 @@ func TestNewDataManager_Fields(t *testing.T) {
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
-	insts := []string{"EURUSD", "GBPUSD", "USDJPY"}
+	insts := []string{"EURUSD", "GBPUSD", "USDJPY", "gbpusd"}
 
 	dm := NewDataManager(insts, start, end)
 	require.Equal(t, start, dm.Start)
 	require.Equal(t, end, dm.End)
-	require.Equal(t, insts, dm.Instruments)
+	require.Equal(t, []string{"EURUSD", "GBPUSD", "USDJPY"}, dm.Instruments)
 	require.Nil(t, dm.downloader)
 }
 

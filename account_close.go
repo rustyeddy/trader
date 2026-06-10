@@ -18,7 +18,6 @@ type CloseMatcher interface {
 type FIFOMatcher struct{}
 
 func (FIFOMatcher) Match(lots []*Lot, units Units) ([]LotMatch, error) {
-	// filter to LotOpen with RemainingUnits > 0
 	open := make([]*Lot, 0, len(lots))
 	for _, lot := range lots {
 		if lot != nil && lot.State == LotOpen && lot.RemainingUnits > 0 {
@@ -26,12 +25,10 @@ func (FIFOMatcher) Match(lots []*Lot, units Units) ([]LotMatch, error) {
 		}
 	}
 
-	// sort by EntryTime ascending (oldest first)
 	sort.Slice(open, func(i, j int) bool {
 		return open[i].EntryTime < open[j].EntryTime
 	})
 
-	// compute total available
 	var total Units
 	for _, lot := range open {
 		total += lot.RemainingUnits
@@ -40,7 +37,6 @@ func (FIFOMatcher) Match(lots []*Lot, units Units) ([]LotMatch, error) {
 		return nil, fmt.Errorf("requested %d units but only %d available", units, total)
 	}
 
-	// consume units from oldest first
 	var matches []LotMatch
 	remaining := units
 	for _, lot := range open {

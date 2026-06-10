@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var defaultDataManagerInstruments = []string{"EURUSD", "USDJPY", "GBPUSD"}
+
 // DataManager is responsible for identifing data files that are
 // missing accross all instruments. For missing datasets, ensure they
 // are downloaded, for datasets that are downloaded, make sure they
@@ -28,7 +30,7 @@ type DataManager struct {
 func GetDataManager() *DataManager {
 	end := time.Now()
 	start := time.Date(2014, time.January, 1, 1, 0, 0, 0, time.UTC)
-	return NewDataManager([]string{"EURUSD", "USDJPY", "USDGBP"}, start, end)
+	return NewDataManager(defaultDataManagerInstruments, start, end)
 }
 
 // NewDataManager constructs a DataManager for the given instruments and time range.
@@ -36,7 +38,7 @@ func NewDataManager(instruments []string, start, end time.Time) *DataManager {
 	return &DataManager{
 		Start:       start,
 		End:         end,
-		Instruments: instruments,
+		Instruments: normalizeInstruments(instruments),
 	}
 }
 
@@ -47,7 +49,28 @@ func (dm *DataManager) Init() {
 	}
 }
 
-func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
+func normalizeInstruments(instruments []string) []string {
+	if len(instruments) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(instruments))
+	seen := make(map[string]struct{}, len(instruments))
+	for _, instrument := range instruments {
+		inst := NormalizeInstrument(instrument)
+		if inst == "" {
+			continue
+		}
+		if _, ok := seen[inst]; ok {
+			continue
+		}
+		seen[inst] = struct{}{}
+		out = append(out, inst)
+	}
+	return out
+}
+
+func (dm *DataManager) rebuildPlanState(ctx context.Context) error {
 	var err error
 
 	Info("Building inventory")
@@ -68,6 +91,13 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 		return err
 	}
 	dm.plan.Log()
+	return nil
+}
+
+func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
+	if err := dm.rebuildPlanState(ctx); err != nil {
+		return err
+	}
 
 	if download {
 		Info("Starting downloads")
@@ -77,24 +107,9 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 	}
 
 	if build {
-		Info("Re-building inventory")
-		dm.inventory, err = BuildInventory(ctx)
-		if err != nil {
+		if err := dm.rebuildPlanState(ctx); err != nil {
 			return err
 		}
-
-		Info("Re-building wantlist")
-		dm.wants, err = dm.BuildWantList(ctx)
-		if err != nil {
-			return err
-		}
-
-		Info("Re-planning wantlist")
-		dm.plan, err = dm.Plan(ctx)
-		if err != nil {
-			return err
-		}
-		dm.plan.Log()
 
 		Info("Making candles")
 		if err := dm.candleMaker(ctx); err != nil {
@@ -106,6 +121,9 @@ func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
 }
 
 func BuildInventory(ctx context.Context) (*Inventory, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	inv := NewInventory()
 	if err := store.scanFiles(inv); err != nil {
 		return nil, err
@@ -116,7 +134,13 @@ func BuildInventory(ctx context.Context) (*Inventory, error) {
 func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 	w := NewWantlist()
 	for _, sym := range dm.Instruments {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for year := dm.End.Year(); year >= dm.Start.Year(); year-- {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			startMonth := 1
 			endMonth := 12
 			if year == dm.Start.Year() {
@@ -134,37 +158,22 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 				}
 			}
 			for month := startMonth; month <= endMonth; month++ {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				for _, tf := range []Timeframe{M1, H1, D1} {
-					key := Key{sym, "candles", KindCandle, tf, year, month, 0, 0}
-					if !dm.inventory.HasComplete(key) {
-						want := Want{
-							Key:        key,
-							WantReason: WantMissing,
-						}
-						w.Put(want)
+					key := Key{sym, SourceCandles, KindCandle, tf, year, month, 0, 0}
+					if reason, needed := dm.inventory.WantReasonFor(key); needed {
+						w.PutKey(key, reason)
 					}
 				}
 
-				// now find all the ticks we are going to want
-				ndays := daysInMonth(year, month-1)
-				for day := 1; day <= ndays; day++ {
-					for hour := 0; hour < 24; hour++ {
-						t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
-						if isForexMarketClosed(t) {
-							continue
-						}
-						select {
-						case <-ctx.Done():
-						default:
-						}
-						key := Key{sym, "dukascopy", KindTick, Ticks, year, month, day, hour}
-						if !dm.inventory.HasComplete(key) {
-							want := Want{
-								Key:        key,
-								WantReason: WantMissing,
-							}
-							w.Put(want)
-						}
+				for _, key := range RequiredTickHoursForMonth(SourceDukascopy, sym, year, month) {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+					if reason, needed := dm.inventory.WantReasonFor(key); needed {
+						w.PutKey(key, reason)
 					}
 				}
 			}
@@ -173,14 +182,13 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 	return w, nil
 }
 
-func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
-
-	plan = &Plan{}
+func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
+	plan := &Plan{}
 
 	// walk through the want list.  For all ticks on the want list enque on download list
 	// For all candles on want list determine if the provider is complete and ready
 	var walkErr error
-	dm.wants.items.Range(func(k Key, w Want) bool {
+	dm.wants.Range(func(k Key, w Want) bool {
 		select {
 		case <-ctx.Done():
 			return false
@@ -204,7 +212,6 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 					bt := BuildTask{
 						Key:    k,
 						Inputs: keys,
-						Kind:   BuildM1,
 					}
 					plan.BuildM1 = append(plan.BuildM1, bt)
 				}
@@ -219,7 +226,6 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 					bt := BuildTask{
 						Key:    k,
 						Inputs: []Key{km1},
-						Kind:   BuildH1,
 					}
 					plan.BuildH1 = append(plan.BuildH1, bt)
 				}
@@ -234,7 +240,6 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 					bt := BuildTask{
 						Key:    k,
 						Inputs: []Key{kh1},
-						Kind:   BuildD1,
 					}
 					plan.BuildD1 = append(plan.BuildD1, bt)
 				}
@@ -246,7 +251,7 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 			}
 
 		default:
-			walkErr = fmt.Errorf("unknown k.Kind %q for key %+v", string(k.Kind), k)
+			walkErr = fmt.Errorf("unknown key kind %v for key %+v", k.Kind, k)
 			return false
 		}
 		return true
@@ -255,25 +260,28 @@ func (dm *DataManager) Plan(ctx context.Context) (plan *Plan, err error) {
 	if walkErr != nil {
 		return plan, walkErr
 	}
-	return plan, err
+	return plan, nil
 }
 
 func (dm *DataManager) candleMaker(ctx context.Context) error {
-	for _, bt := range dm.plan.BuildM1 {
-		if err := buildM1(ctx, bt.Key, bt.Inputs, dm.wants); err != nil {
-			return err
-		}
+	if dm.plan == nil || dm.plan.Empty() {
+		return nil
 	}
 
-	for _, bt := range dm.plan.BuildH1 {
-		if err := buildH1(ctx, bt.Key, bt.Inputs, dm.wants); err != nil {
-			return err
-		}
+	builders := []struct {
+		tf Timeframe
+		fn func(context.Context, Key, []Key, *Wantlist) error
+	}{
+		{tf: M1, fn: buildM1},
+		{tf: H1, fn: buildH1},
+		{tf: D1, fn: buildD1},
 	}
 
-	for _, bt := range dm.plan.BuildD1 {
-		if err := buildD1(ctx, bt.Key, bt.Inputs, dm.wants); err != nil {
-			return err
+	for _, builder := range builders {
+		for _, bt := range dm.plan.BuildTasks(builder.tf) {
+			if err := builder.fn(ctx, bt.Key, bt.Inputs, dm.wants); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -606,6 +614,12 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 }
 
 func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dm.plan == nil {
+		return fmt.Errorf("nil plan")
+	}
 	if len(dm.plan.Download) == 0 {
 		return nil
 	}
@@ -623,7 +637,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case q <- key:
 		}
 	}
@@ -641,9 +655,13 @@ func (cr CandleRequest) timeframe() Timeframe {
 	return cr.Range.TF
 }
 func (cr CandleRequest) Key() Key {
+	source := normalizeSource(cr.Source)
+	if source == "" {
+		source = SourceOanda
+	}
 	return Key{
 		Instrument: cr.Instrument,
-		Source:     "candles",
+		Source:     source,
 		Kind:       KindCandle,
 		TF:         cr.timeframe(),
 	}
@@ -692,7 +710,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 			Month:      ym.Month,
 		}
 
-		cs, err := dm.loadCandleSet(ctx, key)
+		cs, err := store.ReadCSV(key)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) && !req.Strict {
 				continue
@@ -705,24 +723,4 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (CandleIt
 	}
 
 	return newChainedCandleIterator(iters...), nil
-}
-
-func (dm *DataManager) loadCandleSet(ctx context.Context, key Key) (*candleSet, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return store.ReadCSV(key)
-}
-
-func closeCandleIterators(iters []CandleIterator) error {
-	var firstErr error
-	for _, it := range iters {
-		if it == nil {
-			continue
-		}
-		if err := it.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
 }

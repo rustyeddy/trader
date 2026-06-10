@@ -11,6 +11,15 @@ type BA struct {
 	Ask Price
 }
 
+func (ba BA) Mid() Price {
+	sum := int64(ba.Bid) + int64(ba.Ask)
+	return Price((sum + 1) / 2)
+}
+
+func (ba BA) Spread() Price {
+	return ba.Ask - ba.Bid
+}
+
 // Tick represents a trader domain type.
 type Tick struct {
 	Instrument string
@@ -20,14 +29,12 @@ type Tick struct {
 
 // Mid is an internal helper for trader type processing.
 func (t Tick) Mid() Price {
-	sum := int64(t.Bid) + int64(t.Ask)
-	mid := (sum + 1) / 2 // round half up
-	return Price(mid)
+	return t.BA.Mid()
 }
 
 // Spread is an internal helper for trader type processing.
 func (t Tick) Spread() Price {
-	return t.Ask - t.Bid
+	return t.BA.Spread()
 }
 
 // tickStore represents a trader domain type.

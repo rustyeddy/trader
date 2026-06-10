@@ -9,37 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ============================================================================
-// Example: Using Synthetic Data with TestTrader
-// ============================================================================
-
-// demonstrateSyntheticDataUsage shows how to feed a year's worth of synthetic
-// candles to the trader to test for infinite loops or processing issues.
-func demonstrateSyntheticDataUsage() {
-	// Setup: Generate year of synthetic data
-	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = H1 // Hourly for reasonable test size (~700 candles/month)
-
-	candleSets, _ := cfg.GenerateSyntheticYearlyCandles(2025)
-
-	// Process through trader
-	totalCandles := 0
-	for _, cs := range candleSets {
-		iter := newCandleSetIterator(cs, TimeRange{})
-		for _, ok := iter.Next(); ok; _, ok = iter.Next() {
-			totalCandles++
-		}
-		iter.Close()
-	}
-
-	// If this completes without hanging, the infinite loop issue is fixed
-	println("Processed", totalCandles, "candles successfully")
-}
-
-// ============================================================================
-// Tests: Verifying Infinite Loop Fix
-// ============================================================================
-
 // TestTraderWithYearOfSyntheticHourly tests that trader can process a full year
 // of hourly candles without infinite loops. This is useful for reproducible
 // testing of the infinite loop issue on CI/CD systems.
@@ -224,10 +193,6 @@ func TestTraderWithDifferentSeeds(t *testing.T) {
 
 	assert.Greater(t, differences, 0, "different seeds should produce different candles")
 }
-
-// ============================================================================
-// Performance Tests
-// ============================================================================
 
 // BenchmarkSyntheticCandleGeneration benchmarks how fast we can generate candles
 func BenchmarkSyntheticCandleGeneration(b *testing.B) {

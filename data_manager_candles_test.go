@@ -254,3 +254,135 @@ func TestDataManagerCandles_StrictTrueErrorsOnMissingMonth(t *testing.T) {
 
 	require.True(t, errors.Is(err, os.ErrNotExist) || err != nil)
 }
+
+func TestCandles_CancelledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dm := &DataManager{}
+	_, err := dm.Candles(ctx, CandleRequest{
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
+		},
+	})
+	require.Error(t, err)
+}
+
+func TestCandles_BlankInstrument(t *testing.T) {
+	t.Parallel()
+
+	dm := &DataManager{}
+	_, err := dm.Candles(context.Background(), CandleRequest{
+		Instrument: "",
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "blank instrument")
+}
+
+func TestCandles_UnsupportedTimeframe(t *testing.T) {
+	t.Parallel()
+
+	dm := &DataManager{}
+	_, err := dm.Candles(context.Background(), CandleRequest{
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    Ticks,
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported candle timeframe")
+}
+
+func TestCandles_InvalidRange(t *testing.T) {
+	t.Parallel()
+
+	dm := &DataManager{}
+	_, err := dm.Candles(context.Background(), CandleRequest{
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			TF: H1,
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid candle range")
+}
+
+func TestCandles_DefaultSourceFallsBackToCandles(t *testing.T) {
+	s := useTempStore(t)
+
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.January, nil)
+
+	dm := &DataManager{}
+	req := CandleRequest{
+		Source:     "",
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			Start: FromTime(start),
+			End:   FromTime(end),
+			TF:    H1,
+		},
+		Strict: false,
+	}
+	it, err := dm.Candles(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, it)
+	require.NoError(t, it.Close())
+}
+
+func TestCandles_StrictMissingFileWrapsError(t *testing.T) {
+	s := useTempStore(t)
+	_ = s
+
+	dm := &DataManager{}
+	req := CandleRequest{
+		Source:     SourceCandles,
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
+		},
+		Strict: true,
+	}
+	_, err := dm.Candles(context.Background(), req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "load candles")
+}
+
+func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
+	s := useTempStore(t)
+
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.January, nil)
+	writeMonthlyCandles(t, s, "EURUSD", H1, 2026, time.February, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dm := &DataManager{}
+	req := CandleRequest{
+		Source:     SourceCandles,
+		Instrument: "EURUSD",
+		Range: TimeRange{
+			Start: FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    H1,
+		},
+	}
+	_, err := dm.Candles(ctx, req)
+	require.Error(t, err)
+}

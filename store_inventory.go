@@ -19,7 +19,6 @@ const (
 	SourceCandles   = "candles"
 )
 
-
 type AssetFlags uint32
 
 const (
@@ -107,6 +106,17 @@ func (inv *Inventory) Update(key Key, fn func(*Asset) error) error {
 func (inv *Inventory) HasComplete(key Key) bool {
 	a, ok := inv.items.Get(key)
 	return ok && a.Exists && a.Complete
+}
+
+func (inv *Inventory) WantReasonFor(key Key) (WantReason, bool) {
+	a, ok := inv.items.Get(key)
+	if !ok || !a.Exists {
+		return WantMissing, true
+	}
+	if !a.Complete {
+		return WantIncomplete, true
+	}
+	return "", false
 }
 
 func (inv *Inventory) MissingComplete(keys []Key) []Key {

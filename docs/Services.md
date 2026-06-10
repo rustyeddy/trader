@@ -21,14 +21,14 @@ Binary: `trader`
 
 Global flags (available on every subcommand):
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | _(none)_ | Path to a YAML config file or directory |
-| `--db` | `./trader.db` | SQLite journal database path |
-| `--report` | _(none)_ | Backtest report output path |
-| `--data-dir` | `/data/candles` | Root directory for candle data |
-| `--log-level` | `debug` | Log level: `debug\|info\|warn\|error` |
-| `--no-color` | `false` | Disable colored output |
+| Flag          | Default         | Description                             |
+|---------------|-----------------|-----------------------------------------|
+| `--config`    | _(none)_        | Path to a YAML config file or directory |
+| `--db`        | `./trader.db`   | SQLite journal database path            |
+| `--report`    | _(none)_        | Backtest report output path             |
+| `--data-dir`  | `/data/candles` | Root directory for candle data          |
+| `--log-level` | `debug`         | Log level: `debug\|info\|warn\|error`   |
+| `--no-color`  | `false`         | Disable colored output                  |
 
 ---
 

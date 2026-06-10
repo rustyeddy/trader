@@ -65,6 +65,7 @@ Open `http://localhost:9999` for the dashboard.
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
 | `trader data oanda` | Download candles directly from OANDA into the candle store |
 | `trader data candles` | Print local candles in canonical CSV format |
+| `trader data validate-candles` | Scan local candle months for missing expected bars and raw-source mismatches |
 | `trader data stats` | Print statistics for a historical candle dataset |
 | `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
@@ -327,7 +328,43 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 /srv/trading/data/candles/<source>/<INSTRUMENT>/<YYYY>/<MM>/
 ```
 
+When OANDA candles are downloaded with raw preservation enabled, the bid+ask source rows are also written under the sibling raw tree:
+
+```
+/srv/trading/data/raw/oanda/<INSTRUMENT>/<YYYY>/<MM>/
+```
+
 `testdata/candles/` contains small fixtures used by unit tests — do not use for real backtests.
+
+### Candle Completeness and Validation
+
+Monthly candle files are no longer treated as complete just because the CSV exists and is non-empty. Inventory scanning reads the candle validity bits and marks a month incomplete if expected open-market slots are missing. Closed-market periods are allowed; missing bars during expected trading windows are not.
+
+Use `trader data validate-candles` to scan stored months and optionally compare canonical OANDA candle coverage with preserved raw OANDA monthly files:
+
+```bash
+trader data validate-candles \
+  --instruments EURUSD,USDJPY \
+  --timeframe H1 \
+  --from 2026-01 \
+  --to 2026-03 \
+  --source oanda \
+  --check-raw \
+  --report /tmp/candle-validation.json
+```
+
+What it reports:
+
+| Issue kind | Meaning |
+|---|---|
+| `missing_candle_month` | The canonical monthly candle CSV is missing entirely |
+| `missing_expected_candles` | Expected open-market bars are missing from the month |
+| `invalid_candles` | Present bars have invalid OHLC shape |
+| `missing_raw_source` | Raw OANDA monthly preservation file is missing |
+| `raw_complete_missing_canonical` | Raw OANDA has complete bars that are absent from canonical candles |
+| `canonical_missing_raw_complete` | Canonical candles contain valid bars not backed by raw OANDA complete rows |
+
+The command prints a summary to stdout and, with `--report`, writes a JSON report containing per-month counts, paths, and sample missing timestamps. This is the easiest way to keep an auditable record of gaps that should exist but do not.
 
 ### Candle CSV Export
 

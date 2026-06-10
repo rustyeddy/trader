@@ -286,8 +286,9 @@ func (s *Store) walkRoot(root string, inv *Inventory) error {
 				// log.Println("Failed to parse candle path ", path)
 				return nil
 			}
-			rng = monthRange(key.Year, key.Month)
-			descriptor = "Candles"
+			asset := s.inspectCandleAsset(key, path, info)
+			inv.Put(asset)
+			return nil
 
 		default:
 			return nil
@@ -306,6 +307,75 @@ func (s *Store) walkRoot(root string, inv *Inventory) error {
 		inv.Put(asset)
 		return nil
 	})
+}
+
+func (s *Store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset {
+	asset := Asset{
+		Key:        key,
+		Path:       path,
+		Range:      monthRange(key.Year, key.Month),
+		Exists:     true,
+		Complete:   info.Size() > 0,
+		Size:       info.Size(),
+		UpdatedAt:  info.ModTime(),
+		Descriptor: "Candles",
+	}
+	if info.Size() <= 0 {
+		asset.Reason = "empty candle file"
+		return asset
+	}
+
+	cs, err := s.ReadCSV(key)
+	if err != nil {
+		asset.Complete = false
+		asset.Reason = fmt.Sprintf("read candle file: %v", err)
+		return asset
+	}
+
+	missingExpected, expected := candleSetMissingExpectedSlots(cs)
+	asset.Complete = missingExpected == 0
+	asset.Buildable = expected > 0
+	asset.MissingInputs = missingExpected
+	if missingExpected > 0 {
+		asset.Reason = fmt.Sprintf("%d expected candles missing", missingExpected)
+	}
+	return asset
+}
+
+func candleSetMissingExpectedSlots(cs *candleSet) (missing int, expected int) {
+	if cs == nil || cs.Timeframe <= 0 {
+		return 0, 0
+	}
+
+	step := time.Duration(cs.Timeframe) * time.Second
+	start := time.Unix(int64(cs.Start), 0).UTC()
+	for i := range cs.Candles {
+		slotStart := start.Add(time.Duration(i) * step)
+		slotEnd := slotStart.Add(step)
+		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
+			continue
+		}
+		expected++
+		if !cs.IsValid(i) {
+			missing++
+		}
+	}
+	return missing, expected
+}
+
+func timeRangeMayHaveForexData(start, end time.Time) bool {
+	start = start.UTC()
+	end = end.UTC()
+	if !start.Before(end) {
+		return false
+	}
+
+	for probe := start; probe.Before(end); probe = probe.Add(time.Hour) {
+		if !isForexMarketClosed(probe) {
+			return true
+		}
+	}
+	return false
 }
 
 func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
