@@ -17,10 +17,7 @@ func (testFake) Name() string            { return "Fake" }
 func (testFake) Reset()                  {}
 func (testFake) Ready() bool             { return true }
 func (testFake) StopDescription() string { return "" }
-func (testFake) Update(ctx context.Context, c *CandleTime, run *Backtest) *StrategyPlan {
-	_ = ctx
-	_ = c
-	_ = run
+func (testFake) Update(_ context.Context, _ *CandleTime, _ *Backtest) *StrategyPlan {
 	return &DefaultStrategyPlan
 }
 

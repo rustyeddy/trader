@@ -60,7 +60,7 @@ func (c *ChandelierExit) UpdateStop(side Side, currentStop Price, _ Price, extre
 	case Long:
 		// Update extreme to highest high
 		newExtreme := extreme
-		if candle.High > newExtreme {
+		if candle.High > newExtreme || newExtreme == 0 {
 			newExtreme = candle.High
 		}
 		candidate := newExtreme - offset

@@ -165,7 +165,7 @@ func normalizeRegimeKind(kind string) string {
 }
 
 func positiveIntParamOrDefault(params map[string]any, key string, def int) (int, error) {
-	v, ok, err := getInt32Param(params, key)
+	v, ok, err := GetInt32Param(params, key)
 	if err != nil {
 		return 0, err
 	}
@@ -176,7 +176,7 @@ func positiveIntParamOrDefault(params map[string]any, key string, def int) (int,
 }
 
 func positiveFloat64ParamOrDefault(params map[string]any, key string, def float64) (float64, error) {
-	v, ok, err := getFloat64Param(params, key)
+	v, ok, err := GetFloat64Param(params, key)
 	if err != nil {
 		return 0, err
 	}
@@ -187,7 +187,7 @@ func positiveFloat64ParamOrDefault(params map[string]any, key string, def float6
 }
 
 func float64ParamOrDefault(params map[string]any, key string, def float64) (float64, error) {
-	v, ok, err := getFloat64Param(params, key)
+	v, ok, err := GetFloat64Param(params, key)
 	if err != nil {
 		return 0, err
 	}
@@ -199,14 +199,14 @@ func float64ParamOrDefault(params map[string]any, key string, def float64) (floa
 
 func sessionWindowFromParams(params map[string]any) (int, int, error) {
 	start := 7
-	if v, ok, err := getInt32Param(params, "session_start"); err != nil {
+	if v, ok, err := GetInt32Param(params, "session_start"); err != nil {
 		return 0, 0, err
 	} else if ok {
 		start = int(v)
 	}
 
 	end := 17
-	if v, ok, err := getInt32Param(params, "session_end"); err != nil {
+	if v, ok, err := GetInt32Param(params, "session_end"); err != nil {
 		return 0, 0, err
 	} else if ok {
 		end = int(v)

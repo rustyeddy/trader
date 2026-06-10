@@ -136,10 +136,10 @@ func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, default
 	req.ConfigHash = hashBacktestConfig(cfg, defaults)
 	req.StartingBalance = MoneyFromFloat(defaults.StartingBalance)
 	req.RiskPct = RateFromFloat(defaults.RiskPct / 100.0)
-	req.DefaultStopPips = pipsFromFloat(float64(defaults.StopPips))
-	req.DefaultTakePips = pipsFromFloat(float64(defaults.TakePips))
-	req.SlippagePips = pipsFromFloat(defaults.SlippagePips)
-	req.MaxSpreadPips = pipsFromFloat(defaults.MaxSpreadPips)
+	req.DefaultStopPips = PipsFromFloat(float64(defaults.StopPips))
+	req.DefaultTakePips = PipsFromFloat(float64(defaults.TakePips))
+	req.SlippagePips = PipsFromFloat(defaults.SlippagePips)
+	req.MaxSpreadPips = PipsFromFloat(defaults.MaxSpreadPips)
 }
 
 // BuildBacktestResult snapshots the account state into a BacktestResult and

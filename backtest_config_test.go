@@ -245,7 +245,7 @@ func TestFirstNonEmpty(t *testing.T) {
 
 // ─── ApplyCommonParamOverrides ────────────────────────────────────────────────
 
-// ─── getInt32Param ────────────────────────────────────────────────────────────
+// ─── GetInt32Param ────────────────────────────────────────────────────────────
 
 func TestGetInt32Param(t *testing.T) {
 	m := map[string]any{
@@ -256,37 +256,37 @@ func TestGetInt32Param(t *testing.T) {
 		"bad":     "string",
 	}
 
-	v, ok, err := getInt32Param(m, "missing")
+	v, ok, err := GetInt32Param(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), v)
 
-	v, ok, err = getInt32Param(m, "int")
+	v, ok, err = GetInt32Param(m, "int")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(42), v)
 
-	v, ok, err = getInt32Param(m, "int32")
+	v, ok, err = GetInt32Param(m, "int32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(10), v)
 
-	v, ok, err = getInt32Param(m, "int64")
+	v, ok, err = GetInt32Param(m, "int64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(20), v)
 
-	v, ok, err = getInt32Param(m, "float64")
+	v, ok, err = GetInt32Param(m, "float64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(30), v)
 
-	_, ok, err = getInt32Param(m, "bad")
+	_, ok, err = GetInt32Param(m, "bad")
 	assert.True(t, ok)
 	assert.Error(t, err)
 }
 
-// ─── getFloat64Param ──────────────────────────────────────────────────────────
+// ─── GetFloat64Param ──────────────────────────────────────────────────────────
 
 func TestGetFloat64Param(t *testing.T) {
 	m := map[string]any{
@@ -298,37 +298,37 @@ func TestGetFloat64Param(t *testing.T) {
 		"bad":     "string",
 	}
 
-	v, ok, err := getFloat64Param(m, "missing")
+	v, ok, err := GetFloat64Param(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 0.0, v)
 
-	v, ok, err = getFloat64Param(m, "float64")
+	v, ok, err = GetFloat64Param(m, "float64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.InDelta(t, 1.5, v, 1e-9)
 
-	v, ok, err = getFloat64Param(m, "float32")
+	v, ok, err = GetFloat64Param(m, "float32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.InDelta(t, 2.5, v, 1e-4)
 
-	v, ok, err = getFloat64Param(m, "int")
+	v, ok, err = GetFloat64Param(m, "int")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 3.0, v)
 
-	v, ok, err = getFloat64Param(m, "int32")
+	v, ok, err = GetFloat64Param(m, "int32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 4.0, v)
 
-	v, ok, err = getFloat64Param(m, "int64")
+	v, ok, err = GetFloat64Param(m, "int64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 5.0, v)
 
-	_, ok, err = getFloat64Param(m, "bad")
+	_, ok, err = GetFloat64Param(m, "bad")
 	assert.True(t, ok)
 	assert.Error(t, err)
 }

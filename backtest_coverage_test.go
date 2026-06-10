@@ -105,10 +105,10 @@ func TestApplyBacktestExecutionDefaults(t *testing.T) {
 	assert.Equal(t, hashBacktestConfig(rc, defaults), req.ConfigHash)
 	assert.Equal(t, MoneyFromFloat(10_000), req.StartingBalance)
 	assert.Equal(t, RateFromFloat(0.015), req.RiskPct)
-	assert.Equal(t, pipsFromFloat(20), req.DefaultStopPips)
-	assert.Equal(t, pipsFromFloat(40), req.DefaultTakePips)
-	assert.Equal(t, pipsFromFloat(0.5), req.SlippagePips)
-	assert.Equal(t, pipsFromFloat(2.0), req.MaxSpreadPips)
+	assert.Equal(t, PipsFromFloat(20), req.DefaultStopPips)
+	assert.Equal(t, PipsFromFloat(40), req.DefaultTakePips)
+	assert.Equal(t, PipsFromFloat(0.5), req.SlippagePips)
+	assert.Equal(t, PipsFromFloat(2.0), req.MaxSpreadPips)
 }
 
 func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
@@ -143,8 +143,8 @@ func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 	for _, run := range runs {
 		assert.Equal(t, MoneyFromFloat(12_500), run.Request.StartingBalance)
 		assert.Equal(t, RateFromFloat(0.015), run.Request.RiskPct)
-		assert.Equal(t, pipsFromFloat(20), run.Request.DefaultStopPips)
-		assert.Equal(t, pipsFromFloat(40), run.Request.DefaultTakePips)
+		assert.Equal(t, PipsFromFloat(20), run.Request.DefaultStopPips)
+		assert.Equal(t, PipsFromFloat(40), run.Request.DefaultTakePips)
 		assert.NotEmpty(t, run.ID)
 	}
 
@@ -237,7 +237,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 			TimeRange:       TimeRange{Start: Timestamp(1), End: Timestamp(3601), TF: H1},
 			StartingBalance: MoneyFromFloat(10_000),
 			RiskPct:         RateFromFloat(0.01),
-			DefaultStopPips: pipsFromFloat(20),
+			DefaultStopPips: PipsFromFloat(20),
 		},
 		State: &BacktestRun{},
 		Result: &BacktestResult{

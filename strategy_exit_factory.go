@@ -16,14 +16,14 @@ func GetExitStrategy(cfg ExitConfig, scale Scale6) (ExitStrategy, error) {
 		return NoopExit{}, nil
 
 	case "chandelier":
-		period, _, err := getInt32Param(cfg.Params, "atr_period")
+		period, _, err := GetInt32Param(cfg.Params, "atr_period")
 		if err != nil {
 			return nil, err
 		}
 		if period <= 0 {
 			period = 14
 		}
-		mult, _, err := getFloat64Param(cfg.Params, "multiplier")
+		mult, _, err := GetFloat64Param(cfg.Params, "multiplier")
 		if err != nil {
 			return nil, err
 		}
