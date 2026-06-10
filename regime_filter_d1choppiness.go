@@ -11,74 +11,45 @@ import "fmt"
 // moment of entry when measured on its own timeframe. The daily CI captures
 // whether the broader market context is trending over multiple days, which is
 // independent of any individual H1 breakout signal.
+// AllowSide() always returns true because this is a regime gate, not a
+// directional filter. Trending() returns true before Ready() as a defensive
+// contract, although the main callers already gate on Ready() before
+// consulting the regime state.
 //
 // Registered in the factory as "choppiness-d1".
 type D1ChoppinessFilter struct {
+	period    int
 	ci        *ChoppinessIndex
 	threshold float64
 
 	// Intraday accumulation for the current partial daily bar.
-	dayNum   int64 // unix_sec / 86400 for the bar being accumulated
-	dayOpen  Price
-	dayHigh  Price
-	dayLow   Price
-	dayClose Price
-	hasDay   bool
+	dailyCandleAccumulator
 }
 
 func NewD1ChoppinessFilter(period int, threshold float64, scale Scale6) (*D1ChoppinessFilter, error) {
+	if err := validateChoppinessThreshold(threshold); err != nil {
+		return nil, err
+	}
 	ci, err := NewChoppinessIndex(period, scale)
 	if err != nil {
 		return nil, err
 	}
 	return &D1ChoppinessFilter{
+		period:    period,
 		ci:        ci,
 		threshold: threshold,
 	}, nil
 }
 
 func (f *D1ChoppinessFilter) Name() string {
-	return fmt.Sprintf("D1-Choppiness(%d,%.1f)", f.ci.n, f.threshold)
+	return fmt.Sprintf("D1-Choppiness(%d,%.1f)", f.period, f.threshold)
 }
 
 func (f *D1ChoppinessFilter) Ready() bool { return f.ci.Ready() }
 
 func (f *D1ChoppinessFilter) Tick(ct CandleTime) {
-	dayNum := int64(ct.Timestamp) / 86400
-
-	if !f.hasDay {
-		f.dayNum = dayNum
-		f.dayOpen = ct.Open
-		f.dayHigh = ct.High
-		f.dayLow = ct.Low
-		f.dayClose = ct.Close
-		f.hasDay = true
-		return
-	}
-
-	if dayNum != f.dayNum {
-		// Day rolled — finalise the completed daily bar and update CI.
-		f.ci.Update(Candle{
-			Open:  f.dayOpen,
-			High:  f.dayHigh,
-			Low:   f.dayLow,
-			Close: f.dayClose,
-		})
-		// Start a fresh accumulation for the new day.
-		f.dayNum = dayNum
-		f.dayOpen = ct.Open
-		f.dayHigh = ct.High
-		f.dayLow = ct.Low
-		f.dayClose = ct.Close
-	} else {
-		// Same day — extend the current daily bar.
-		if ct.High > f.dayHigh {
-			f.dayHigh = ct.High
-		}
-		if ct.Low < f.dayLow {
-			f.dayLow = ct.Low
-		}
-		f.dayClose = ct.Close
+	if daily, rolled := f.dailyCandleAccumulator.Tick(ct); rolled {
+		f.ci.Update(daily)
 	}
 }
 
@@ -91,5 +62,8 @@ func (f *D1ChoppinessFilter) Trending() bool {
 
 func (f *D1ChoppinessFilter) AllowSide(_ Side) bool { return true }
 
+// Choppiness exposes the raw CI value for debugging.
+func (f *D1ChoppinessFilter) Choppiness() float64 { return f.ci.Float64() }
+
 // Value exposes the raw CI value for debugging.
-func (f *D1ChoppinessFilter) Value() float64 { return f.ci.Float64() }
+func (f *D1ChoppinessFilter) Value() float64 { return f.Choppiness() }

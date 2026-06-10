@@ -18,7 +18,7 @@ func TestGetRegimeFilter_Noop(t *testing.T) {
 func TestGetRegimeFilter_Session(t *testing.T) {
 	t.Parallel()
 	f, err := GetRegimeFilter(RegimeConfig{
-		Kind:   "session",
+		Kind:   " Session ",
 		Params: map[string]any{"session_start": 8, "session_end": 16},
 	}, PriceScale)
 	require.NoError(t, err)
@@ -38,10 +38,39 @@ func TestGetRegimeFilter_SessionDefaults(t *testing.T) {
 	assert.Equal(t, 17, sf.end)
 }
 
+func TestGetRegimeFilter_SessionAllowsMidnightStart(t *testing.T) {
+	t.Parallel()
+	f, err := GetRegimeFilter(RegimeConfig{
+		Kind:   "session",
+		Params: map[string]any{"session_start": 0, "session_end": 8},
+	}, PriceScale)
+	require.NoError(t, err)
+	sf, ok := f.(*SessionFilter)
+	require.True(t, ok)
+	assert.Equal(t, 0, sf.start)
+	assert.Equal(t, 8, sf.end)
+}
+
+func TestGetRegimeFilter_SessionRejectsInvalidWindows(t *testing.T) {
+	t.Parallel()
+
+	tests := []RegimeConfig{
+		{Kind: "session", Params: map[string]any{"session_start": -1, "session_end": 8}},
+		{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 25}},
+		{Kind: "session", Params: map[string]any{"session_start": 17, "session_end": 7}},
+		{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 7}},
+	}
+
+	for _, cfg := range tests {
+		_, err := GetRegimeFilter(cfg, PriceScale)
+		require.Error(t, err)
+	}
+}
+
 func TestGetRegimeFilter_ADXD1(t *testing.T) {
 	t.Parallel()
 	f, err := GetRegimeFilter(RegimeConfig{
-		Kind:   "adx-d1",
+		Kind:   " ADX-D1 ",
 		Params: map[string]any{"period": 10, "threshold": 25.0},
 	}, PriceScale)
 	require.NoError(t, err)
@@ -59,6 +88,30 @@ func TestGetRegimeFilter_ADXD1Defaults(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 14, af.period)
 	assert.Equal(t, 20.0, af.threshold)
+}
+
+func TestGetRegimeFilter_ADXD1AllowsZeroThreshold(t *testing.T) {
+	t.Parallel()
+
+	f, err := GetRegimeFilter(RegimeConfig{
+		Kind:   "adx-d1",
+		Params: map[string]any{"period": 10, "threshold": 0.0},
+	}, PriceScale)
+	require.NoError(t, err)
+
+	af, ok := f.(*D1ADXFilter)
+	require.True(t, ok)
+	assert.Equal(t, 0.0, af.threshold)
+}
+
+func TestGetRegimeFilter_ADXD1RejectsOutOfRangeThreshold(t *testing.T) {
+	t.Parallel()
+
+	_, err := GetRegimeFilter(RegimeConfig{
+		Kind:   "adx-d1",
+		Params: map[string]any{"threshold": 101.0},
+	}, PriceScale)
+	require.Error(t, err)
 }
 
 func TestGetRegimeFilter_Composite(t *testing.T) {
@@ -79,14 +132,65 @@ func TestGetRegimeFilter_Composite(t *testing.T) {
 
 func TestGetRegimeFilter_CompositeEmpty(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: "composite"}, PriceScale)
+	_, err := GetRegimeFilter(RegimeConfig{Kind: "composite"}, PriceScale)
+	require.Error(t, err)
+}
+
+func TestGetRegimeFilter_CompositeSingleChildReturnsChild(t *testing.T) {
+	t.Parallel()
+	f, err := GetRegimeFilter(RegimeConfig{
+		Kind: "composite",
+		Filters: []RegimeConfig{
+			{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 17}},
+		},
+	}, PriceScale)
 	require.NoError(t, err)
-	assert.IsType(t, NoopRegime{}, f)
+	_, ok := f.(*SessionFilter)
+	require.True(t, ok)
 }
 
 func TestGetRegimeFilter_UnknownKind(t *testing.T) {
 	t.Parallel()
-	_, err := GetRegimeFilter(RegimeConfig{Kind: "does-not-exist"}, PriceScale)
+	_, err := GetRegimeFilter(RegimeConfig{Kind: " does-not-exist "}, PriceScale)
+	require.Error(t, err)
+}
+
+func TestCompositeRegimeFilter_NameSkipsEmptyNames(t *testing.T) {
+	t.Parallel()
+
+	sf, err := NewSessionFilter(7, 17)
+	require.NoError(t, err)
+	comp := NewCompositeRegimeFilter([]RegimeFilter{NoopRegime{}, sf})
+	assert.Equal(t, "Composite(Session(07:00-17:00UTC))", comp.Name())
+}
+
+func TestGetRegimeFilter_ATRPercentileAllowsZeroThreshold(t *testing.T) {
+	t.Parallel()
+
+	f, err := GetRegimeFilter(RegimeConfig{
+		Kind: "atr-percentile",
+		Params: map[string]any{
+			"atr_period":  10,
+			"window_size": 100,
+			"threshold":   0.0,
+		},
+	}, PriceScale)
+	require.NoError(t, err)
+
+	af, ok := f.(*ATRPercentileFilter)
+	require.True(t, ok)
+	assert.Equal(t, 0.0, af.threshold)
+}
+
+func TestGetRegimeFilter_ATRPercentileRejectsOutOfRangeThreshold(t *testing.T) {
+	t.Parallel()
+
+	_, err := GetRegimeFilter(RegimeConfig{
+		Kind: "atr-percentile",
+		Params: map[string]any{
+			"threshold": 101.0,
+		},
+	}, PriceScale)
 	require.Error(t, err)
 }
 
@@ -118,7 +222,7 @@ func TestCompositeRegimeFilter_AllowSideRequiresAll(t *testing.T) {
 	// weekly-ema blocks Short when rising; all others allow both sides.
 	// Use a minimal weekly-ema (period=3) as the directional sub-filter.
 	wf, err := NewWeeklyEMAFilter(3, PriceScale)
-		require.NoError(t, err)
+	require.NoError(t, err)
 	comp := NewCompositeRegimeFilter([]RegimeFilter{wf})
 
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)

@@ -9,11 +9,15 @@ import (
 // into ISO weekly bars and runs an EMA(period) over weekly closes.
 //
 // Trending() always returns true — this is a direction-only filter.
-// AllowSide(Long)  returns true when the latest weekly close is above the EMA.
-// AllowSide(Short) returns true when the latest weekly close is below the EMA.
+// AllowSide(Long)  returns true when the current week's in-progress close is
+// above the EMA computed from completed weekly closes. AllowSide(Short)
+// returns true when that in-progress close is below the EMA, so directional
+// permission can change within a week as the partial weekly close moves.
 //
-// During warmup (EMA not yet ready) AllowSide returns true so no entries are
-// suppressed before enough weekly data has accumulated.
+// During warmup (EMA not yet ready) AllowSide returns true as a defensive
+// contract so no entries are suppressed before enough weekly data has
+// accumulated, although the main callers already gate on Ready() before
+// consulting directional permission.
 //
 // Registered in the factory as "weekly-ema".
 type WeeklyEMAFilter struct {
@@ -107,5 +111,8 @@ func (f *WeeklyEMAFilter) AllowSide(side Side) bool {
 	}
 }
 
+// EMA exposes the current weekly EMA value for debugging.
+func (f *WeeklyEMAFilter) EMA() float64 { return f.ema.Float64() }
+
 // EMAValue exposes the current EMA value for debugging.
-func (f *WeeklyEMAFilter) EMAValue() float64 { return f.ema.Float64() }
+func (f *WeeklyEMAFilter) EMAValue() float64 { return f.EMA() }
