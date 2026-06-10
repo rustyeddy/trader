@@ -10,7 +10,7 @@ import "fmt"
 // concurrent lots each maintain their own watermark.
 type ChandelierExit struct {
 	atr        *ATR
-	multiplier float64
+	multiplier Units // fixed-point; use UnitsFromFloat at construction, Float64() at output boundaries
 }
 
 func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*ChandelierExit, error) {
@@ -20,31 +20,40 @@ func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*Chande
 	}
 	return &ChandelierExit{
 		atr:        atr,
-		multiplier: multiplier,
+		multiplier: UnitsFromFloat(multiplier),
 	}, nil
 }
 
 func (c *ChandelierExit) Name() string {
-	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.n, c.multiplier)
+	// Convert back to float64 only for display.
+	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.n, c.multiplier.Float64())
 }
 
 func (c *ChandelierExit) Ready() bool { return c.atr.Ready() }
 
 func (c *ChandelierExit) Tick(candle Candle) { c.atr.Update(candle) }
 
+// atrOffset returns the ATR-based stop offset in scaled Price units.
+// All arithmetic is integer; no float64 round-trip.
+func (c *ChandelierExit) atrOffset() Price {
+	return Price(roundDivPositive(int64(c.atr.PriceSum())*int64(c.multiplier), UnitsScale))
+}
+
 func (c *ChandelierExit) InitialStop(side Side, entry Price, candle Candle) Price {
 	if !c.atr.Ready() {
 		return 0
 	}
-	offset := Price(c.atr.Float64() * c.multiplier * float64(PriceScale))
+	offset := c.atrOffset()
 	switch side {
 	case Long:
 		stop := entry - offset
+		// entry - offset can underflow for very large ATR values; clamp to zero.
 		if stop < 0 {
 			return 0
 		}
 		return stop
 	case Short:
+		// Short stop is always above entry, so no underflow risk.
 		return entry + offset
 	}
 	return 0
@@ -54,26 +63,18 @@ func (c *ChandelierExit) UpdateStop(side Side, currentStop Price, _ Price, extre
 	if !c.atr.Ready() {
 		return currentStop
 	}
-	offset := Price(c.atr.Float64() * c.multiplier * float64(PriceScale))
+	offset := c.atrOffset()
 
+	// extreme is already the current-bar watermark advanced by the caller
+	// (highest-high for Long, lowest-low for Short). Use it directly.
 	switch side {
 	case Long:
-		// Update extreme to highest high
-		newExtreme := extreme
-		if candle.High > newExtreme || newExtreme == 0 {
-			newExtreme = candle.High
-		}
-		candidate := newExtreme - offset
+		candidate := extreme - offset
 		if candidate > currentStop {
 			return candidate
 		}
 	case Short:
-		// Update extreme to lowest low
-		newExtreme := extreme
-		if candle.Low < newExtreme || newExtreme == 0 {
-			newExtreme = candle.Low
-		}
-		candidate := newExtreme + offset
+		candidate := extreme + offset
 		if currentStop == 0 || candidate < currentStop {
 			return candidate
 		}
