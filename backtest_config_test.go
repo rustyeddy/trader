@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -253,6 +254,8 @@ func TestGetInt32Param(t *testing.T) {
 		"int32":   int32(10),
 		"int64":   int64(20),
 		"float64": float64(30),
+		"frac":    float64(30.5),
+		"huge":    int64(math.MaxInt32) + 1,
 		"bad":     "string",
 	}
 
@@ -280,6 +283,16 @@ func TestGetInt32Param(t *testing.T) {
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(30), v)
+
+	_, ok, err = GetInt32Param(m, "frac")
+	assert.True(t, ok)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must be an integer")
+
+	_, ok, err = GetInt32Param(m, "huge")
+	assert.True(t, ok)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows int32")
 
 	_, ok, err = GetInt32Param(m, "bad")
 	assert.True(t, ok)

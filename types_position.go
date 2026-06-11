@@ -1,72 +1,64 @@
 package trader
 
 // Position is the computed aggregate view of all open lots for one instrument.
+// Hedged books keep separate long/short exposure and entry prices.
 type Position struct {
-	Instrument    string
-	NetUnits      Units
-	AvgEntryPrice Price
-	UnrealizedPL  Money
-	MarginUsed    Money
+	Instrument         string
+	LongUnits          Units
+	LongAvgEntryPrice  Price
+	ShortUnits         Units
+	ShortAvgEntryPrice Price
+	NetUnits           Units
+}
+
+type positionAccum struct {
+	pos             Position
+	longWeightedPx  int64
+	shortWeightedPx int64
 }
 
 // InstrumentPositions derives per-instrument Position from all open lots.
-func InstrumentPositions(lb *LotBook) map[string]*Position {
+func InstrumentPositions(lb *LotBook) map[string]Position {
 	if lb == nil {
 		return nil
 	}
-	result := make(map[string]*Position)
+
+	accums := make(map[string]*positionAccum)
 	_ = lb.Range(func(lot *Lot) error {
 		if lot == nil || lot.State != LotOpen || lot.RemainingUnits <= 0 {
 			return nil
 		}
-		pos, ok := result[lot.Instrument]
+
+		accum, ok := accums[lot.Instrument]
 		if !ok {
-			pos = &Position{Instrument: lot.Instrument}
-			result[lot.Instrument] = pos
+			accum = &positionAccum{pos: Position{Instrument: lot.Instrument}}
+			accums[lot.Instrument] = accum
 		}
-		// accumulate net units (positive=long, negative=short)
-		if lot.Side == Long {
-			pos.NetUnits += lot.RemainingUnits
-		} else {
-			pos.NetUnits -= lot.RemainingUnits
+
+		units := int64(lot.RemainingUnits)
+		weightedPx := int64(lot.EntryPrice) * units
+		switch lot.Side {
+		case Long:
+			accum.pos.LongUnits += lot.RemainingUnits
+			accum.longWeightedPx += weightedPx
+			accum.pos.NetUnits += lot.RemainingUnits
+		case Short:
+			accum.pos.ShortUnits += lot.RemainingUnits
+			accum.shortWeightedPx += weightedPx
+			accum.pos.NetUnits -= lot.RemainingUnits
 		}
 		return nil
 	})
 
-	// compute AvgEntryPrice per instrument (simple average of open lots)
-	// We need a second pass to compute weighted average entry price
-	type lotAccum struct {
-		totalUnits Units
-		weightedPx int64
-	}
-	accums := make(map[string]*lotAccum)
-	_ = lb.Range(func(lot *Lot) error {
-		if lot == nil || lot.State != LotOpen || lot.RemainingUnits <= 0 {
-			return nil
+	result := make(map[string]Position, len(accums))
+	for inst, accum := range accums {
+		if accum.pos.LongUnits > 0 {
+			accum.pos.LongAvgEntryPrice = Price(accum.longWeightedPx / int64(accum.pos.LongUnits))
 		}
-		a, ok := accums[lot.Instrument]
-		if !ok {
-			a = &lotAccum{}
-			accums[lot.Instrument] = a
+		if accum.pos.ShortUnits > 0 {
+			accum.pos.ShortAvgEntryPrice = Price(accum.shortWeightedPx / int64(accum.pos.ShortUnits))
 		}
-		u := int64(lot.RemainingUnits)
-		if u < 0 {
-			u = -u
-		}
-		a.totalUnits += lot.RemainingUnits
-		a.weightedPx += int64(lot.EntryPrice) * u
-		return nil
-	})
-	for inst, a := range accums {
-		if pos, ok := result[inst]; ok {
-			absUnits := int64(a.totalUnits)
-			if absUnits < 0 {
-				absUnits = -absUnits
-			}
-			if absUnits > 0 {
-				pos.AvgEntryPrice = Price(a.weightedPx / absUnits)
-			}
-		}
+		result[inst] = accum.pos
 	}
 
 	return result

@@ -7,9 +7,6 @@ import (
 	"strings"
 )
 
-// dollars represents a trader domain type.
-type dollars float64
-
 // Money represents a trader domain type.
 type Money int64
 
@@ -28,11 +25,38 @@ type Scale7 int64
 const (
 	PriceScale Scale6 = 100_000
 	MoneyScale Scale7 = 1_000_000
+	RateScale  Scale7 = MoneyScale
 )
+
+func mustScaledInt64(name string, f float64, scale int64) int64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		panic(fmt.Sprintf("%s: non-finite value %v", name, f))
+	}
+
+	scaled := math.Round(f * float64(scale))
+	if math.IsNaN(scaled) || math.IsInf(scaled, 0) || scaled < math.MinInt64 || scaled > math.MaxInt64 {
+		panic(fmt.Sprintf("%s: value %v out of int64 range at scale %d", name, f, scale))
+	}
+
+	return int64(scaled)
+}
+
+func mustScaledInt32(name string, f float64, scale int32) int32 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		panic(fmt.Sprintf("%s: non-finite value %v", name, f))
+	}
+
+	scaled := math.Round(f * float64(scale))
+	if math.IsNaN(scaled) || math.IsInf(scaled, 0) || scaled < math.MinInt32 || scaled > math.MaxInt32 {
+		panic(fmt.Sprintf("%s: value %v out of int32 range at scale %d", name, f, scale))
+	}
+
+	return int32(scaled)
+}
 
 // MoneyFromFloat is an internal helper for trader type processing.
 func MoneyFromFloat(f float64) Money {
-	return Money(math.Round(f * float64(MoneyScale)))
+	return Money(mustScaledInt64("MoneyFromFloat", f, int64(MoneyScale)))
 }
 
 // String is an internal helper for trader type processing.
@@ -49,7 +73,7 @@ func (m Money) Float64() float64 {
 
 // PriceFromFloat is an internal helper for trader type processing.
 func PriceFromFloat(f float64) Price {
-	return Price(math.Round(f * float64(PriceScale)))
+	return Price(mustScaledInt32("PriceFromFloat", f, int32(PriceScale)))
 }
 
 // Float64 is an internal helper for trader type processing.
@@ -60,7 +84,7 @@ func (p Price) Float64() float64 {
 //	func PriceToFloat(price int32, scale int32) float64 {
 //		return float64(price) / math.Pow10(int(scale))
 //	}
-func formatNumber(price Price, scale int32) string {
+func formatScaledPrice(price Price, scale int32) string {
 	decimals := 0
 	for s := scale; s > 1; s /= 10 {
 		decimals++
@@ -68,9 +92,8 @@ func formatNumber(price Price, scale int32) string {
 	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
-// parsePrice parses a CSV field as a raw Price (int32) value.
-// TODO MOVE TO Type
-func parsePrice(s string) (Price, error) {
+// parseRawPrice parses a CSV field as a raw scaled Price (int32) value.
+func parseRawPrice(s string) (Price, error) {
 	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
 	if err != nil {
 		return 0, err
@@ -80,22 +103,20 @@ func parsePrice(s string) (Price, error) {
 
 // String is an internal helper for trader type processing.
 func (p Price) String() string {
-	return formatNumber(p, int32(PriceScale))
+	return formatScaledPrice(p, int32(PriceScale))
 }
 
 // Rate represents a trader domain type.
 type Rate int64
 
-const rateScale = MoneyScale
-
 // RateFromFloat is an internal helper for trader type processing.
 func RateFromFloat(f float64) Rate {
-	return Rate(math.Round(f * float64(rateScale)))
+	return Rate(mustScaledInt64("RateFromFloat", f, int64(RateScale)))
 }
 
 // Float64 is an internal helper for trader type processing.
 func (r Rate) Float64() float64 {
-	return float64(r) / float64(rateScale)
+	return float64(r) / float64(RateScale)
 }
 
 // String is an internal helper for trader type processing.

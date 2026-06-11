@@ -11,7 +11,7 @@ func (acct *Account) riskBudget() (Money, error) {
 		return 0, fmt.Errorf("account risk fraction must be > 0")
 	}
 
-	v, err := mulDivFloor64(int64(acct.Equity), int64(acct.RiskFraction), int64(rateScale))
+	v, err := mulDivFloor64(int64(acct.Equity), int64(acct.RiskFraction), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -24,7 +24,10 @@ func (acct *Account) riskBudget() (Money, error) {
 // lossPerUnit returns stop-loss exposure for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate loss and accidentally oversize.
 func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
-	priceDist := abs64(int64(req.Price) - int64(req.TradeCommon.Stop))
+	priceDist, err := absInt64Checked(int64(req.Price) - int64(req.TradeCommon.Stop))
+	if err != nil {
+		return 0, err
+	}
 	if priceDist == 0 {
 		return 0, fmt.Errorf("entry and stop must differ")
 	}
@@ -38,7 +41,7 @@ func (acct *Account) lossPerUnit(req *OpenRequest) (Money, error) {
 	if err != nil {
 		return 0, err
 	}
-	v, err = mulDivCeil64(v, int64(quoteToAccountRate), int64(rateScale))
+	v, err = mulDivCeil64(v, int64(quoteToAccountRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -72,12 +75,12 @@ func (acct *Account) marginRequiredPerUnit(inst *Instrument, price Price) (Money
 		return 0, err
 	}
 
-	v, err = mulDivCeil64(v, int64(quoteToAccountRate), int64(rateScale))
+	v, err = mulDivCeil64(v, int64(quoteToAccountRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	v, err = mulDivCeil64(v, int64(inst.MarginRate), int64(rateScale))
+	v, err = mulDivCeil64(v, int64(inst.MarginRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}

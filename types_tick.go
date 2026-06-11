@@ -2,8 +2,11 @@ package trader
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
+
+var ErrTickNotFound = errors.New("tick not found")
 
 // BA represents a trader domain type.
 type BA struct {
@@ -11,6 +14,21 @@ type BA struct {
 	Ask Price
 }
 
+// Validate is an internal helper for trader type processing.
+func (ba BA) Validate() error {
+	if ba.Bid <= 0 {
+		return fmt.Errorf("bid must be > 0")
+	}
+	if ba.Ask <= 0 {
+		return fmt.Errorf("ask must be > 0")
+	}
+	if ba.Ask < ba.Bid {
+		return fmt.Errorf("ask must be >= bid")
+	}
+	return nil
+}
+
+// Mid returns the midpoint rounded half-up to the nearest scaled price unit.
 func (ba BA) Mid() Price {
 	sum := int64(ba.Bid) + int64(ba.Ask)
 	return Price((sum + 1) / 2)
@@ -25,6 +43,14 @@ type Tick struct {
 	Instrument string
 	Timestamp  Timestamp
 	BA
+}
+
+// Validate is an internal helper for trader type processing.
+func (t Tick) Validate() error {
+	if NormalizeInstrument(t.Instrument) == "" {
+		return fmt.Errorf("tick instrument must not be empty")
+	}
+	return t.BA.Validate()
 }
 
 // Mid is an internal helper for trader type processing.
@@ -49,19 +75,31 @@ func newTickStore() *tickStore {
 }
 
 // Set is an internal helper for trader type processing.
-func (ps *tickStore) Set(p Tick) {
+func (ps *tickStore) Set(p Tick) error {
+	if ps == nil {
+		return fmt.Errorf("tick store is nil")
+	}
+	p.Instrument = NormalizeInstrument(p.Instrument)
+	if err := p.Validate(); err != nil {
+		return err
+	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.ticks[p.Instrument] = p
+	return nil
 }
 
 // Get is an internal helper for trader type processing.
 func (ps *tickStore) Get(instr string) (Tick, error) {
+	if ps == nil {
+		return Tick{}, fmt.Errorf("tick store is nil")
+	}
+	instr = NormalizeInstrument(instr)
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	p, ok := ps.ticks[instr]
 	if !ok {
-		return Tick{}, errors.New("price not found")
+		return Tick{}, ErrTickNotFound
 	}
 	return p, nil
 }

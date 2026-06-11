@@ -67,7 +67,7 @@ func snapshotLots(src *LotBook) *LotBook {
 	}
 	_ = src.Range(func(lot *Lot) error {
 		if lot != nil && (lot.State == LotOpen || lot.State == LotOpenRequested || lot.State == LotCloseRequested) {
-			out.Add(lot)
+			_ = out.Add(lot.Clone())
 		}
 		return nil
 	})

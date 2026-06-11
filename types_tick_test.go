@@ -1,9 +1,11 @@
 package trader
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPriceStore_SetGet verifies expected behavior for this component.
@@ -19,11 +21,12 @@ func TestPriceStore_SetGet(t *testing.T) {
 		},
 	}
 
-	ps.Set(p)
+	require.NoError(t, ps.Set(p))
 
 	got, err := ps.Get("EUR_USD")
 	assert.NoError(t, err)
-	assert.Equal(t, p, got)
+	assert.Equal(t, "EURUSD", got.Instrument)
+	assert.Equal(t, Tick{Instrument: "EURUSD", BA: BA{Bid: 11, Ask: 12}}, got)
 }
 
 // TestPriceStore_GetMissing verifies expected behavior for this component.
@@ -34,7 +37,25 @@ func TestPriceStore_GetMissing(t *testing.T) {
 
 	got, err := ps.Get("NO_SUCH")
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTickNotFound))
 	assert.Equal(t, Tick{}, got)
+}
+
+func TestPriceStore_NormalizesInstrument(t *testing.T) {
+	t.Parallel()
+
+	ps := newTickStore()
+	require.NoError(t, ps.Set(Tick{
+		Instrument: " eur_usd ",
+		BA: BA{
+			Bid: 100,
+			Ask: 102,
+		},
+	}))
+
+	got, err := ps.Get("EUR/USD")
+	require.NoError(t, err)
+	assert.Equal(t, "EURUSD", got.Instrument)
 }
 
 // TestTickSpread_Phase1 verifies expected behavior for this component.
@@ -80,4 +101,23 @@ func TestPriceMid(t *testing.T) {
 			assert.Equal(t, tt.expected, p.Mid())
 		})
 	}
+}
+
+func TestTickValidate(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, Tick{
+		Instrument: "EUR_USD",
+		BA:         BA{Bid: 100, Ask: 102},
+	}.Validate())
+
+	require.EqualError(t, Tick{
+		Instrument: "",
+		BA:         BA{Bid: 100, Ask: 102},
+	}.Validate(), "tick instrument must not be empty")
+
+	require.EqualError(t, Tick{
+		Instrument: "EURUSD",
+		BA:         BA{Bid: 102, Ask: 100},
+	}.Validate(), "ask must be >= bid")
 }

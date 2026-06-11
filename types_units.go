@@ -2,7 +2,6 @@ package trader
 
 import (
 	"fmt"
-	"math"
 )
 
 // Units represents a trader domain type.
@@ -14,7 +13,7 @@ const UnitsScale int64 = 1_000_000
 
 // UnitsFromFloat converts a float64 multiplier to a fixed-point Units value.
 func UnitsFromFloat(f float64) Units {
-	return Units(math.Round(f * float64(UnitsScale)))
+	return Units(mustScaledInt64("UnitsFromFloat", f, UnitsScale))
 }
 
 // Float64 converts a fixed-point Units multiplier back to float64.
@@ -41,12 +40,21 @@ const (
 	Long  Side = 1
 )
 
+// Valid is an internal helper for trader type processing.
+func (s Side) Valid() bool {
+	return s == Short || s == Long
+}
+
 // String is an internal helper for trader type processing.
 func (s Side) String() string {
-	if s == Short {
+	switch s {
+	case Short:
 		return "short"
+	case Long:
+		return "long"
+	default:
+		return "unknown"
 	}
-	return "long"
 }
 
 // Pips stores tenths of a pip (deci-pips):
@@ -57,7 +65,7 @@ const pipScale = 10 // deci-pips per pip
 
 // PipsFromFloat converts a whole/decimal pip count into internal deci-pips.
 func PipsFromFloat(v float64) Pips {
-	return Pips(math.Round(v * pipScale))
+	return Pips(mustScaledInt32("PipsFromFloat", v, pipScale))
 }
 
 // Float64 is an internal helper for trader type processing.

@@ -296,7 +296,9 @@ func TestBrokerSubmitCloseSuccessEmitsEvent(t *testing.T) {
 		require.NotNil(t, evt)
 		assert.Equal(t, EventPositionClosed, evt.Type)
 		assert.Same(t, lot, evt.Lot)
-		assert.Same(t, trade, evt.Trade)
+		require.NotNil(t, evt.Trade)
+		assert.Equal(t, *trade, *evt.Trade)
+		assert.NotSame(t, trade, evt.Trade)
 	default:
 		t.Fatal("expected close event to be queued")
 	}

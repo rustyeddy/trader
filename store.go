@@ -476,27 +476,27 @@ func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := parsePrice(fields[1])
+		highv, err := parseRawPrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
-		openv, err := parsePrice(fields[2])
+		openv, err := parseRawPrice(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := parsePrice(fields[3])
+		lowv, err := parseRawPrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := parsePrice(fields[4])
+		closev, err := parseRawPrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := parsePrice(fields[5])
+		avgSpread, err := parseRawPrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := parsePrice(fields[6])
+		maxSpread, err := parseRawPrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}

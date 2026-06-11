@@ -125,14 +125,18 @@ func parseTickRow(row []string) (Tick, bool, error) {
 		return Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return Tick{
+	tick := Tick{
 		Timestamp:  tstamp,
 		Instrument: inst,
 		BA: BA{
 			Bid: PriceFromFloat(bid),
 			Ask: PriceFromFloat(ask),
 		},
-	}, true, nil
+	}
+	if err := tick.Validate(); err != nil {
+		return Tick{}, false, err
+	}
+	return tick, true, nil
 }
 
 // inRange reports whether t falls within [from, to). A zero from or to

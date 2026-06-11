@@ -6,79 +6,46 @@ import (
 	"math/bits"
 )
 
-// MulDiv64Ceil computes ceil((a*b)/den) using 128-bit intermediate precision.
-// Inputs must be non-negative. den must be > 0.
-func mulDiv64(a, b, den int64) (int64, error) {
+func mulDivNonNegative64(a, b, den int64, fnName string) (q, r int64, err error) {
 	if a < 0 || b < 0 || den <= 0 {
-		return 0, fmt.Errorf("MulDiv64Ceil: invalid args a=%d b=%d den=%d", a, b, den)
+		return 0, 0, fmt.Errorf("%s: invalid args a=%d b=%d den=%d", fnName, a, b, den)
 	}
 
 	hi, lo := bits.Mul64(uint64(a), uint64(b))
-	// bits.Div64 panics if hi >= den (quotient overflows uint64); catch it early.
 	if hi >= uint64(den) {
-		return 0, fmt.Errorf("MulDiv64Ceil: overflow result")
+		return 0, 0, fmt.Errorf("%s: overflow result", fnName)
 	}
-	q, r := bits.Div64(hi, lo, uint64(den))
-
-	// If remainder != 0, bump q by 1 (ceiling)
-	if r != 0 {
-		q++
+	q64, r64 := bits.Div64(hi, lo, uint64(den))
+	if q64 > uint64(math.MaxInt64) {
+		return 0, 0, fmt.Errorf("%s: overflow result", fnName)
 	}
-
-	if q > uint64(math.MaxInt64) {
-		return 0, fmt.Errorf("MulDiv64Ceil: overflow result")
-	}
-	return int64(q), nil
+	return int64(q64), int64(r64), nil
 }
 
 // mulDivFloor64 computes floor((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
 func mulDivFloor64(a, b, den int64) (int64, error) {
-	if a < 0 || b < 0 || den <= 0 {
-		return 0, fmt.Errorf("mulDivFloor64: invalid args a=%d b=%d den=%d", a, b, den)
-	}
-
-	hi, lo := bits.Mul64(uint64(a), uint64(b))
-	if hi >= uint64(den) {
-		return 0, fmt.Errorf("mulDivFloor64: overflow result")
-	}
-	q, _ := bits.Div64(hi, lo, uint64(den))
-	if q > uint64(^uint64(0)>>1) {
-		return 0, fmt.Errorf("mulDivFloor64: overflow result")
-	}
-	return int64(q), nil
+	q, _, err := mulDivNonNegative64(a, b, den, "mulDivFloor64")
+	return q, err
 }
 
 // mulDivCeil64 computes ceil((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
 func mulDivCeil64(a, b, den int64) (int64, error) {
-	if a < 0 || b < 0 || den <= 0 {
-		return 0, fmt.Errorf("mulDivCeil64: invalid args a=%d b=%d den=%d", a, b, den)
+	q, r, err := mulDivNonNegative64(a, b, den, "mulDivCeil64")
+	if err != nil {
+		return 0, err
 	}
-
-	hi, lo := bits.Mul64(uint64(a), uint64(b))
-	if hi >= uint64(den) {
-		return 0, fmt.Errorf("mulDivCeil64: overflow result")
-	}
-	q, r := bits.Div64(hi, lo, uint64(den))
 	if r != 0 {
 		q++
 	}
-	if q > uint64(^uint64(0)>>1) {
+	if q > math.MaxInt64 {
 		return 0, fmt.Errorf("mulDivCeil64: overflow result")
 	}
-	return int64(q), nil
+	return q, nil
 }
 
-// abs64 is an internal helper for trader type processing.
-func abs64(x int64) int64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// mulChecked64 is an internal helper for trader type processing.
+// mulChecked64 multiplies two non-negative int64 values and reports overflow.
 func mulChecked64(a, b int64) (int64, error) {
 	if a < 0 || b < 0 {
 		return 0, fmt.Errorf("mulChecked64: invalid args a=%d b=%d", a, b)
@@ -147,19 +114,4 @@ func signedMulDivRound(a, b, den int64) (int64, error) {
 	}
 
 	return q, nil
-}
-
-// Signed represents any signed integer or float type.
-// The `~` allows named types whose underlying type matches.
-type signed interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~float32 | ~float64
-}
-
-// abs returns the absolute value of any signed numeric type.
-func abs[T signed](v T) T {
-	if v < 0 {
-		return -v
-	}
-	return v
 }

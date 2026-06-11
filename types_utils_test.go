@@ -74,6 +74,10 @@ func TestParseToUnix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 5, 0, 0, 0, time.UTC).Unix()), got)
 
+	got, err = parseToUnix(" 2024-01-15T00:00:00Z ")
+	require.NoError(t, err)
+	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), got)
+
 	got, err = parseToUnix("2024-01-15T00:00:00Z")
 	require.NoError(t, err)
 	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), got)
@@ -84,7 +88,7 @@ func TestParseToUnix(t *testing.T) {
 
 	_, err = parseToUnix("bad-date")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Error parsing date")
+	assert.Contains(t, err.Error(), "parse timestamp")
 }
 
 // TestParseEST verifies parseEST parses EST timestamps and rejects bad values.
@@ -107,11 +111,18 @@ func TestFastPrice(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Price(1035030), got)
 
+	got, err = fastPrice(" 1.035030 ")
+	require.NoError(t, err)
+	assert.Equal(t, Price(1035030), got)
+
 	got, err = fastPrice("1035030")
 	require.NoError(t, err)
 	assert.Equal(t, Price(1035030), got)
 
 	_, err = fastPrice("not-a-price")
+	require.Error(t, err)
+
+	_, err = fastPrice("1.2.3")
 	require.Error(t, err)
 }
 

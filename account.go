@@ -58,11 +58,11 @@ func (acct *Account) quoteToAccountRate(inst string, price Price) (Rate, error) 
 		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
 	if meta.QuoteCurrency == acct.Currency {
-		return Rate(rateScale), nil
+		return Rate(RateScale), nil
 	}
 
 	if meta.BaseCurrency == acct.Currency {
-		r, err := mulDiv64(int64(MoneyScale), int64(PriceScale), int64(price))
+		r, err := mulDivCeil64(int64(MoneyScale), int64(PriceScale), int64(price))
 		if err != nil {
 			return 0, err
 		}
@@ -87,8 +87,8 @@ func (acct *Account) AddLot(lot *Lot) error {
 	if acct == nil {
 		return fmt.Errorf("account is nil")
 	}
-	if lot.Instrument == "" {
-		return fmt.Errorf("position instrument must not be empty")
+	if err := lot.Validate(); err != nil {
+		return err
 	}
 	if lot.Units <= 0 {
 		return fmt.Errorf("position units must be > 0")
@@ -96,11 +96,10 @@ func (acct *Account) AddLot(lot *Lot) error {
 	if lot.EntryPrice <= 0 {
 		return fmt.Errorf("position entry price must be > 0")
 	}
-	if lot.ID == "" {
-		return fmt.Errorf("position id must not be empty")
-	}
 
-	acct.Lots.Add(lot)
+	if err := acct.Lots.Add(lot); err != nil {
+		return err
+	}
 	return acct.ResolveWithMarks(map[string]Price{
 		lot.Instrument: lot.EntryPrice,
 	})
@@ -125,7 +124,7 @@ func (acct *Account) CloseLot(lot *Lot, trade *Trade) error {
 		return err
 	}
 	trade.PNL = pnl
-	acct.Trades = append(acct.Trades, trade)
+	acct.Trades = append(acct.Trades, trade.Clone())
 	acct.Lots.Delete(lot.ID)
 	return acct.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
 }
@@ -327,17 +326,20 @@ func (acct *Account) marginRequired(units Units, price Price, inst string) (Mone
 		return 0, fmt.Errorf("invalid margin rate for %s: %d", meta.Name, meta.MarginRate)
 	}
 
-	u := abs64(int64(units))
+	u, err := absInt64Checked(int64(units))
+	if err != nil {
+		return 0, err
+	}
 	p := int64(price)
 	if p <= 0 {
 		return 0, fmt.Errorf("invalid price: %d", p)
 	}
 
-	up, err := mulDiv64(u, p, int64(PriceScale))
+	up, err := mulDivCeil64(u, p, int64(PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	notionalQuoteMicro, err := mulDiv64(up, int64(MoneyScale), 1)
+	notionalQuoteMicro, err := mulDivCeil64(up, int64(MoneyScale), 1)
 	if err != nil {
 		return 0, err
 	}
@@ -347,12 +349,12 @@ func (acct *Account) marginRequired(units Units, price Price, inst string) (Mone
 		return 0, err
 	}
 
-	notionalAcctMicro, err := mulDiv64(notionalQuoteMicro, int64(quoteToAccountRate), int64(rateScale))
+	notionalAcctMicro, err := mulDivCeil64(notionalQuoteMicro, int64(quoteToAccountRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	marginMicro, err := mulDiv64(notionalAcctMicro, int64(meta.MarginRate), int64(rateScale))
+	marginMicro, err := mulDivCeil64(notionalAcctMicro, int64(meta.MarginRate), int64(RateScale))
 	if err != nil {
 		return 0, err
 	}

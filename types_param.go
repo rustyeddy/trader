@@ -1,6 +1,42 @@
 package trader
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
+
+var (
+	maxInt = int64(^uint(0) >> 1)
+	minInt = -maxInt - 1
+)
+
+func requireIntegralFloatParam(key string, v float64) error {
+	if math.Trunc(v) != v {
+		return fmt.Errorf("param %q must be an integer, got %v", key, v)
+	}
+	return nil
+}
+
+func requireIntRangeParam(key string, v int64) error {
+	if v < minInt || v > maxInt {
+		return fmt.Errorf("param %q=%d overflows int", key, v)
+	}
+	return nil
+}
+
+func requireFloatIntRangeParam(key string, v float64, min, max int64, kind string) error {
+	if v < float64(min) || v > float64(max) {
+		return fmt.Errorf("param %q=%v overflows %s", key, v, kind)
+	}
+	return nil
+}
+
+func requireInt32RangeParam(key string, v int64) error {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return fmt.Errorf("param %q=%d overflows int32", key, v)
+	}
+	return nil
+}
 
 // GetIntParam extracts an int from a params map, accepting the numeric types
 // produced by YAML/JSON decoding. Returns (0, false, nil) when the key is
@@ -17,9 +53,18 @@ func GetIntParam(m map[string]any, key string) (int, bool, error) {
 	case int32:
 		return int(x), true, nil
 	case int64:
+		if err := requireIntRangeParam(key, x); err != nil {
+			return 0, true, err
+		}
 		return int(x), true, nil
 	case float64:
-		return int(x), true, nil
+		if err := requireIntegralFloatParam(key, x); err != nil {
+			return 0, true, err
+		}
+		if err := requireFloatIntRangeParam(key, x, minInt, maxInt, "int"); err != nil {
+			return 0, true, err
+		}
+		return int(int64(x)), true, nil
 	default:
 		return 0, true, fmt.Errorf("param %q must be numeric, got %T", key, v)
 	}
@@ -32,6 +77,9 @@ func GetInt32Param(m map[string]any, key string) (int32, bool, error) {
 	v, ok, err := GetIntParam(m, key)
 	if err != nil || !ok {
 		return 0, ok, err
+	}
+	if err := requireInt32RangeParam(key, int64(v)); err != nil {
+		return 0, true, err
 	}
 	return int32(v), true, nil
 }

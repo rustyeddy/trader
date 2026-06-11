@@ -37,6 +37,9 @@ func (e *Sim) UpdatePrice(tick trader.Tick) error {
 		return fmt.Errorf("blank instrument")
 	}
 	tick.Instrument = inst
+	if err := tick.Validate(); err != nil {
+		return err
+	}
 	e.prices[inst] = tick
 
 	marks := make(map[string]trader.Price, len(e.prices))
@@ -65,7 +68,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		exitPrice := px.Mid()
 		exitTime := trader.FromTime(time.Now().UTC())
 		trade := &trader.Trade{
-			TradeCommon: lot.TradeCommon,
+			TradeCommon: lot.TradeCommon.Clone(),
 			EntryPrice:  lot.EntryPrice,
 			EntryTime:   lot.EntryTime,
 			ExitPrice:   exitPrice,

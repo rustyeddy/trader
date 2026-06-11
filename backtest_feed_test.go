@@ -90,6 +90,12 @@ func TestParseTickRow(t *testing.T) {
 			wantOk:  false,
 			wantErr: true,
 		},
+		{
+			name:    "ask below bid",
+			row:     []string{"2026-01-24T09:30:00Z", "EUR_USD", "1.1002", "1.1000"},
+			wantOk:  false,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -557,7 +557,7 @@ func (lt *liveLotsTracker) setInitialStop(tradeID string, stop trader.Price) {
 func (lt *liveLotsTracker) toLotBook() *trader.LotBook {
 	lb := &trader.LotBook{}
 	for _, lot := range lt.byID {
-		lb.Add(lot)
+		_ = lb.Add(lot.Clone())
 	}
 	return lb
 }

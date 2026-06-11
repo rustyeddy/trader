@@ -20,18 +20,29 @@ const (
 	HourInMS    timemilli = 3_600_000
 )
 
+const dateLayout = "2006-01-02"
+
 // FromTime is an internal helper for trader type processing.
 func FromTime(t time.Time) Timestamp {
 	return Timestamp(t.Unix())
 }
 
+// ParseDateTimestamp parses a YYYY-MM-DD date string into a UTC midnight Timestamp.
+func ParseDateTimestamp(s string) (Timestamp, error) {
+	t, err := time.Parse(dateLayout, strings.TrimSpace(s))
+	if err != nil {
+		return 0, err
+	}
+	return FromTime(t.UTC()), nil
+}
+
 // FromString is an internal helper for trader type processing.
 func FromString(s string) Timestamp {
-	t, err := time.Parse("2006-01-02", s)
+	t, err := ParseDateTimestamp(s)
 	if err != nil {
-		return Timestamp(0)
+		return 0
 	}
-	return FromTime(t)
+	return t
 }
 
 // Int64 is an internal helper for trader type processing.
@@ -41,7 +52,7 @@ func (t Timestamp) Int64() int64 {
 
 // Time is an internal helper for trader type processing.
 func (t Timestamp) Time() time.Time {
-	return time.Unix(t.Int64(), 0)
+	return time.Unix(t.Int64(), 0).UTC()
 }
 
 // IsZero is an internal helper for trader type processing.
@@ -148,12 +159,12 @@ func timeRangeLocation(fromStr, toStr, tfstr string, loc *time.Location) (TimeRa
 		return TimeRange{}, err
 	}
 
-	from, err := time.ParseInLocation("2006-01-02", fromStr, loc)
+	from, err := time.ParseInLocation(dateLayout, strings.TrimSpace(fromStr), loc)
 	if err != nil {
 		return TimeRange{}, fmt.Errorf("bad from date %q: %w", fromStr, err)
 	}
 
-	to, err := time.ParseInLocation("2006-01-02", toStr, loc)
+	to, err := time.ParseInLocation(dateLayout, strings.TrimSpace(toStr), loc)
 	if err != nil {
 		return TimeRange{}, fmt.Errorf("bad to date %q: %w", toStr, err)
 	}
@@ -314,8 +325,8 @@ const (
 // ParseTimeframe parses a timeframe string into its canonical Timeframe value.
 // It accepts common aliases and returns an error for unknown values.
 func ParseTimeframe(s string) (Timeframe, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "ticks":
+	switch normalizeTF(s) {
+	case "1", "tick", "ticks":
 		return Ticks, nil
 	case "m1":
 		return M1, nil
@@ -330,7 +341,7 @@ func ParseTimeframe(s string) (Timeframe, error) {
 
 // normalizeTF is an internal helper for trader type processing.
 func normalizeTF(tf string) string {
-	tf = strings.TrimSpace(strings.ToUpper(tf))
+	tf = strings.ToLower(strings.TrimSpace(tf))
 	// allow "60" etc if you ever pass seconds
 	switch tf {
 	case "60":
@@ -362,6 +373,6 @@ func (tf Timeframe) String() string {
 		return "d1"
 
 	default:
-		return "UNKNOWN"
+		return fmt.Sprintf("timeframe(%d)", tf)
 	}
 }

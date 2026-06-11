@@ -27,17 +27,8 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*Lot, error)
 	if b.Account == nil {
 		return nil, fmt.Errorf("broker account is nil")
 	}
-	if req == nil {
-		return nil, fmt.Errorf("open request is nil")
-	}
-	if req.TradeCommon == nil {
-		return nil, fmt.Errorf("open request missing trade common")
-	}
-	if req.Instrument == "" {
-		return nil, fmt.Errorf("open request instrument must not be empty")
-	}
-	if req.Price <= 0 {
-		return nil, fmt.Errorf("open request price must be > 0")
+	if err := req.Validate(); err != nil {
+		return nil, err
 	}
 
 	units := req.TradeCommon.Units
@@ -70,29 +61,12 @@ func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
 	if b.Account == nil {
 		return fmt.Errorf("broker account is nil")
 	}
-	if req == nil {
-		return fmt.Errorf("close request is nil")
-	}
-	if req.Lot == nil {
-		return fmt.Errorf("close request missing position")
-	}
-	if req.Lot.TradeCommon == nil {
-		return fmt.Errorf("close request position missing trade common")
-	}
-	if req.Price <= 0 {
-		return fmt.Errorf("close request price must be > 0")
-	}
-	if req.Request.TradeCommon != nil {
-		if req.Request.ID != "" && req.Request.ID != req.Lot.ID {
-			return fmt.Errorf("close request id %q does not match position id %q", req.Request.ID, req.Lot.ID)
-		}
-		if req.Request.Instrument != "" && req.Request.Instrument != req.Lot.Instrument {
-			return fmt.Errorf("close request instrument %q does not match position instrument %q", req.Request.Instrument, req.Lot.Instrument)
-		}
+	if err := req.Validate(); err != nil {
+		return err
 	}
 
 	trade := &Trade{
-		TradeCommon: req.Lot.TradeCommon,
+		TradeCommon: req.Lot.TradeCommon.Clone(),
 		EntryPrice:  req.Lot.EntryPrice,
 		EntryTime:   req.Lot.EntryTime,
 		ExitPrice:   req.Price,

@@ -159,14 +159,18 @@ func parseTickRowCompat(row []string) (trader.Tick, bool, error) {
 		return trader.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	return trader.Tick{
+	tick := trader.Tick{
 		Timestamp:  trader.FromTime(t),
 		Instrument: inst,
 		BA: trader.BA{
 			Bid: trader.PriceFromFloat(bid),
 			Ask: trader.PriceFromFloat(ask),
 		},
-	}, true, nil
+	}
+	if err := tick.Validate(); err != nil {
+		return trader.Tick{}, false, err
+	}
+	return tick, true, nil
 }
 
 func parseFloat(s string) (float64, error) {

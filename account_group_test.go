@@ -180,6 +180,8 @@ func TestAccountClosePositionAndPlaceholderClosePosition(t *testing.T) {
 	require.Len(t, acct.Trades, 1)
 	assert.Equal(t, MoneyFromFloat(100), trade.PNL)
 	assert.Equal(t, MoneyFromFloat(10_100), acct.Balance)
+	trade.TradeCommon.Instrument = "GBPUSD"
+	assert.Equal(t, "EURUSD", acct.Trades[0].Instrument)
 
 	var nilAcct *Account
 	var err error

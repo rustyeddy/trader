@@ -18,7 +18,7 @@ func TestLotUnrealizedPL_LongAndShort(t *testing.T) {
 
 	// +10 pips move on 1,000 units is +1.00 in quote currency.
 	upMove := PriceFromFloat(1.20100)
-	qta := Rate(rateScale) // 1:1 conversion
+	qta := Rate(RateScale) // 1:1 conversion
 
 	longPL, err := lotUnrealizedPNL(longLot, upMove, qta)
 	require.NoError(t, err)
@@ -46,8 +46,8 @@ func TestLotUnrealizedPL_QuoteToAccountConversion(t *testing.T) {
 	units := Units(1000)
 	lot := &Lot{TradeCommon: &TradeCommon{Side: Long, Units: units}, EntryPrice: PriceFromFloat(1.20000), OriginalUnits: units, RemainingUnits: units}
 	current := PriceFromFloat(1.20100) // +1.00 quote currency P/L
-	// quoteToAccount as Rate (scaled by rateScale)
-	qta := Rate(int64(PriceFromFloat(1.500)) * int64(rateScale) / int64(PriceScale))
+	// quoteToAccount as Rate (scaled by RateScale)
+	qta := Rate(int64(PriceFromFloat(1.500)) * int64(RateScale) / int64(PriceScale))
 
 	pl, err := lotUnrealizedPNL(lot, current, qta)
 	require.NoError(t, err)

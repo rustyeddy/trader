@@ -37,10 +37,10 @@ func TestTimeframeParseNormalizeAndString(t *testing.T) {
 
 	assert.Equal(t, "m1", normalizeTF("60"))
 	assert.Equal(t, "h1", normalizeTF("3600"))
-	assert.Equal(t, "M1", normalizeTF(" m1 "))
+	assert.Equal(t, "m1", normalizeTF(" m1 "))
 
 	assert.Equal(t, "m1", M1.String())
-	assert.Equal(t, "UNKNOWN", Timeframe(999).String())
+	assert.Equal(t, "timeframe(999)", Timeframe(999).String())
 }
 
 func TestParseTimeframe(t *testing.T) {
@@ -58,6 +58,11 @@ func TestParseTimeframe(t *testing.T) {
 		{"D1", D1, false},
 		{"D", D1, false},
 		{"d1", D1, false},
+		{"60", M1, false},
+		{"3600", H1, false},
+		{"86400", D1, false},
+		{"tick", Ticks, false},
+		{"1", Ticks, false},
 		{"ticks", Ticks, false},
 		{"W1", TF0, true},
 		{"", TF0, true},
@@ -141,7 +146,15 @@ func TestFromStringAndTimeRangeLocation(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), FromString("2024-01-15"))
+	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), FromString(" 2024-01-15 "))
 	assert.Equal(t, Timestamp(0), FromString("not-a-date"))
+
+	ts, err := ParseDateTimestamp("2024-01-15")
+	require.NoError(t, err)
+	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), ts)
+
+	_, err = ParseDateTimestamp("bad")
+	require.Error(t, err)
 
 	loc := time.UTC
 	rng, err := timeRangeLocation("2024-01-01", "2024-01-10", "H1", loc)

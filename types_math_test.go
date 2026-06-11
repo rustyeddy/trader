@@ -8,18 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMulDiv64 verifies expected behavior for this component.
-func TestMulDiv64(t *testing.T) {
-	t.Parallel()
-
-	v, err := mulDiv64(10, 3, 4)
-	require.NoError(t, err)
-	assert.Equal(t, int64(8), v)
-
-	_, err = mulDiv64(-1, 3, 4)
-	assert.Error(t, err)
-}
-
 // TestMulDivFloor64 verifies expected behavior for this component.
 func TestMulDivFloor64(t *testing.T) {
 	t.Parallel()
@@ -44,14 +32,12 @@ func TestMulDivCeil64(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestAbs64AndAbsGeneric verifies expected behavior for this component.
-func TestAbs64AndAbsGeneric(t *testing.T) {
+// TestMulDivCeil64_InvalidArgs verifies expected behavior for this component.
+func TestMulDivCeil64_InvalidArgs(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, int64(5), abs64(-5))
-	assert.Equal(t, int64(0), abs64(0))
-	assert.Equal(t, 7, abs(-7))
-	assert.Equal(t, float64(2.5), abs(-2.5))
+	_, err := mulDivCeil64(-1, 3, 4)
+	assert.Error(t, err)
 }
 
 // TestMulChecked64AndRoundHelpers_Phase2 verifies expected behavior for this component.
@@ -119,10 +105,7 @@ func TestAbsInt64CheckedAndSignedMulDivRound_Phase2(t *testing.T) {
 func TestMulDivVariants_OverflowBranches_Phase2(t *testing.T) {
 	t.Parallel()
 
-	_, err := mulDiv64(math.MaxInt64, math.MaxInt64, 1)
-	assert.Error(t, err)
-
-	_, err = mulDivFloor64(math.MaxInt64, math.MaxInt64, 1)
+	_, err := mulDivFloor64(math.MaxInt64, math.MaxInt64, 1)
 	assert.Error(t, err)
 
 	_, err = mulDivCeil64(math.MaxInt64, math.MaxInt64, 1)
