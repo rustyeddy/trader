@@ -137,6 +137,9 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	bad := make(chan error, 1)
 	bad <- errors.New("from broker")
 	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
+
+	b.evtQ <- &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}
+	require.ErrorContains(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 
 func TestSnapshotLots_FiltersByState(t *testing.T) {
@@ -195,7 +198,6 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 			TimeRange:       TimeRange{Start: Timestamp(1704067200), End: Timestamp(1704070800), TF: H1},
 			StartingBalance: MoneyFromFloat(10_000),
 		},
-		State: &BacktestRun{},
 	}
 
 	var nilTrader *Trader
@@ -230,6 +232,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	dm := NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &Trader{Broker: broker, DataManager: dm}
 	require.NoError(t, okTrader.Backtest(ctx, run))
+	require.NotNil(t, run.State)
 	require.NotNil(t, run.Result)
 	assert.Equal(t, 0, run.Result.Trades)
 }

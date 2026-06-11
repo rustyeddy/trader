@@ -100,7 +100,7 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return nil
+			return fmt.Errorf("broker did not become idle within %s (evtQueueLen=%d pendingState=%t)", timeout, queueLen, pendingState)
 		}
 		time.Sleep(1 * time.Millisecond)
 	}
@@ -114,6 +114,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 	strategy := run.Request.Strategy
 	if strategy == nil {
 		return fmt.Errorf("nil strategy")
+	}
+	if run.State == nil {
+		run.State = &BacktestRun{}
 	}
 	strategy.Reset()
 
