@@ -13,16 +13,9 @@ import (
 func useTempStore(t *testing.T) *Store {
 	t.Helper()
 
-	oldStore := store
-
-	s := &Store{
-		basedir: t.TempDir(),
-	}
-	store = s
-
-	t.Cleanup(func() {
-		store = oldStore
-	})
+	s := NewStoreAt(t.TempDir())
+	restore := SwapStore(s)
+	t.Cleanup(restore)
 
 	return s
 }

@@ -51,6 +51,9 @@ func (r *LinearCongruentialRandom) NextGaussian() float64 {
 	r.state = (a*r.state + c) % m
 
 	u1 := float64(r.state) / float64(m)
+	if u1 == 0 {
+		u1 = 1.0 / float64(m)
+	}
 
 	r.state = (a*r.state + c) % m
 	u2 := float64(r.state) / float64(m)
@@ -104,7 +107,7 @@ func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, p
 	highPrice := Price(high)
 	lowPrice := Price(low)
 
-	// Realistic spread (bid-ask can be 1-3 pips for major pairs)
+	// Tight synthetic spread: roughly 0.1-0.3 pips at PriceScale=100_000.
 	spread := Price(int64(rng.NextUniform()*3 + 1))
 
 	return Candle{

@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "ema-cross")
+	trader.MustRegisterStrategy(build, "ema-cross")
 }
 
 // Core holds the shared EMA-cross state used by both ema-cross and
@@ -36,7 +36,6 @@ type Cross struct {
 }
 
 type Config struct {
-
 	FastPeriod    int
 	SlowPeriod    int
 	Scale         trader.Scale6
@@ -113,7 +112,7 @@ func (x *Cross) Ready() bool {
 func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 	c := ct.Candle
 	x.core.Fast.Update(c)

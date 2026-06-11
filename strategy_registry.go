@@ -19,14 +19,34 @@ var (
 // RegisterStrategy adds a strategy constructor under one or more names.
 // Typically called from an implementation package's init() function.
 // Multiple aliases are supported (e.g. "donchian", "donchian-breakout").
-func RegisterStrategy(ctor StrategyConstructor, names ...string) {
-	if ctor == nil || len(names) == 0 {
-		return
+func RegisterStrategy(ctor StrategyConstructor, names ...string) error {
+	if ctor == nil {
+		return fmt.Errorf("RegisterStrategy: nil constructor")
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("RegisterStrategy: no strategy names provided")
 	}
 	strategyMu.Lock()
 	defer strategyMu.Unlock()
 	for _, name := range names {
-		strategyRegistry[strings.ToLower(strings.TrimSpace(name))] = ctor
+		normalized := strings.ToLower(strings.TrimSpace(name))
+		if normalized == "" {
+			return fmt.Errorf("RegisterStrategy: blank strategy name")
+		}
+		if _, exists := strategyRegistry[normalized]; exists {
+			return fmt.Errorf("RegisterStrategy: duplicate strategy name %q", normalized)
+		}
+		strategyRegistry[normalized] = ctor
+	}
+	return nil
+}
+
+// MustRegisterStrategy registers a strategy and panics on error.
+// Intended for use in package init() registration paths so invalid
+// registrations fail fast at startup.
+func MustRegisterStrategy(ctor StrategyConstructor, names ...string) {
+	if err := RegisterStrategy(ctor, names...); err != nil {
+		panic(err)
 	}
 }
 
@@ -56,7 +76,7 @@ func RegisteredStrategies() []string {
 func GetStrategy(scfg StrategyConfig) (Strategy, error) {
 	name := strings.ToLower(strings.TrimSpace(scfg.Kind))
 	if name == "" {
-		name = "fake" // historical default
+		return nil, fmt.Errorf("strategy.kind is required")
 	}
 	ctor := LookupStrategy(name)
 	if ctor == nil {

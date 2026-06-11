@@ -6,16 +6,16 @@ package scalper
 import (
 	"context"
 	"fmt"
+
 	"github.com/rustyeddy/trader"
 )
 
 func init() {
-	trader.RegisterStrategy(build, "scalper")
+	trader.MustRegisterStrategy(build, "scalper")
 }
 
 // Config holds scalper parameters.
 type Config struct {
-
 	FastPeriod     int
 	SlowPeriod     int
 	ATRPeriod      int
@@ -100,7 +100,7 @@ func (s *Strategy) Reset() {
 // Update receives each completed M1 candle and returns a StrategyPlan.
 func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	c := ct.Candle

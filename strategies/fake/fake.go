@@ -9,8 +9,8 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(buildFake, "fake")
-	trader.RegisterStrategy(buildFake02, "fake-02")
+	trader.MustRegisterStrategy(buildFake, "fake")
+	trader.MustRegisterStrategy(buildFake02, "fake-02")
 }
 
 // Fake opens long on higher highs, closes on stop loss on lower lows.

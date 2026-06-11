@@ -18,19 +18,19 @@ func (testFake) Reset()                  {}
 func (testFake) Ready() bool             { return true }
 func (testFake) StopDescription() string { return "" }
 func (testFake) Update(_ context.Context, _ *CandleTime, _ *Backtest) *StrategyPlan {
-	return &DefaultStrategyPlan
+	return DefaultPlan()
 }
 
 func init() {
 	build := func(map[string]any) (Strategy, error) {
 		return testFake{}, nil
 	}
-	RegisterStrategy(build, "fake")
-	RegisterStrategy(build, "noop", "no-op")
-	RegisterStrategy(build, "fake-02")
-	RegisterStrategy(build, "lifecycle-test")
-	RegisterStrategy(build, "template")
-	RegisterStrategy(build, "ema-cross")
-	RegisterStrategy(build, "ema-cross-adx")
-	RegisterStrategy(build, "donchian", "donchian-breakout")
+	MustRegisterStrategy(build, "fake")
+	MustRegisterStrategy(build, "noop", "no-op")
+	MustRegisterStrategy(build, "fake-02")
+	MustRegisterStrategy(build, "lifecycle-test")
+	MustRegisterStrategy(build, "template")
+	MustRegisterStrategy(build, "ema-cross")
+	MustRegisterStrategy(build, "ema-cross-adx")
+	MustRegisterStrategy(build, "donchian", "donchian-breakout")
 }

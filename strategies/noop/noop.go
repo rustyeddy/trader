@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "noop", "no-op")
+	trader.MustRegisterStrategy(build, "noop", "no-op")
 }
 
 type Strategy struct{}
@@ -21,7 +21,7 @@ func (Strategy) StopDescription() string { return "" }
 func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	_ = c
-	return &trader.DefaultStrategyPlan
+	return trader.DefaultPlan()
 }
 
 func build(params map[string]any) (trader.Strategy, error) {

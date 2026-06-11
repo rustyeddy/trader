@@ -1045,12 +1045,34 @@ func TestNewTestStore_IsIsolated(t *testing.T) {
 }
 
 func TestUseTempStore_SetsGlobal(t *testing.T) {
-	before := store.basedir
+	before := GetStore().basedir
 
 	s := useTempStore(t)
-	require.NotEqual(t, before, store.basedir)
-	require.Equal(t, s.basedir, store.basedir)
+	require.NotEqual(t, before, GetStore().basedir)
+	require.Equal(t, s.basedir, GetStore().basedir)
 	// After test cleanup the global store is restored (handled by t.Cleanup in useTempStore)
+}
+
+func TestSwapStore_OutOfOrderRestore(t *testing.T) {
+	before := GetStore().basedir
+	defer SetDataDir(before)
+
+	SetDataDir(t.TempDir())
+	base := GetStore()
+
+	first := NewStoreAt(t.TempDir())
+	restoreFirst := SwapStore(first)
+	require.Same(t, first, GetStore())
+
+	second := NewStoreAt(t.TempDir())
+	restoreSecond := SwapStore(second)
+	require.Same(t, second, GetStore())
+
+	restoreFirst()
+	require.Same(t, second, GetStore())
+
+	restoreSecond()
+	require.Same(t, base, GetStore())
 }
 
 // =============================================================================

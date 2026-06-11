@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "ema-cross-adx")
+	trader.MustRegisterStrategy(build, "ema-cross-adx")
 }
 
 type Strategy struct {
@@ -26,7 +26,6 @@ type Strategy struct {
 }
 
 type Config struct {
-
 	FastPeriod      int
 	SlowPeriod      int
 	ADXPeriod       int
@@ -126,7 +125,7 @@ func (x *Strategy) Ready() bool {
 func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 	c := ct.Candle
 	x.core.Fast.Update(c)
@@ -136,7 +135,7 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		x.core.ATR.Update(c)
 	}
 
-	dec := &trader.DefaultStrategyPlan
+	dec := trader.DefaultPlan()
 
 	if !x.core.Fast.Ready() || !x.core.Slow.Ready() {
 		dec.Reason = "warming up EMAs"

@@ -16,21 +16,21 @@ func GetExitStrategy(cfg ExitConfig, scale Scale6) (ExitStrategy, error) {
 		return NoopExit{}, nil
 
 	case "chandelier":
-		period, _, err := GetInt32Param(cfg.Params, "atr_period")
+		period, ok, err := GetIntParam(cfg.Params, "atr_period")
 		if err != nil {
 			return nil, err
 		}
-		if period <= 0 {
+		if !ok || period <= 0 {
 			period = 14
 		}
-		mult, _, err := GetFloat64Param(cfg.Params, "multiplier")
+		mult, ok, err := GetFloat64Param(cfg.Params, "multiplier")
 		if err != nil {
 			return nil, err
 		}
-		if mult <= 0 {
+		if !ok || mult <= 0 {
 			mult = 2.0
 		}
-		return NewChandelierExit(int(period), mult, scale)
+		return NewChandelierExit(period, mult, scale)
 
 	default:
 		return nil, fmt.Errorf("unknown exit strategy %q", cfg.Kind)

@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "lifecycle-test")
+	trader.MustRegisterStrategy(build, "lifecycle-test")
 }
 
 // Strategy opens long on bar 1 and closes on bar 3. With a canned dataset

@@ -1,5 +1,5 @@
 // Package tmpl is a strategy template / starting point for new strategy
-// implementations. Returns DefaultStrategyPlan; copy and edit to build a
+// implementations. Returns a fresh default plan; copy and edit to build a
 // new strategy. Registers under "template".
 package tmpl
 
@@ -11,11 +11,10 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "template")
+	trader.MustRegisterStrategy(build, "template")
 }
 
 type Config struct {
-
 	Lookback  int
 	Threshold float64
 	Scale     trader.Scale6
@@ -58,7 +57,7 @@ func (s *Strategy) Ready() bool { return s.ready }
 
 func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 	c := ct.Candle
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
@@ -66,7 +65,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	s.bars++
 	if s.bars < s.cfg.Lookback {
 		s.lastClose = closePx
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	s.ready = true
@@ -75,16 +74,16 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		change := closePx - s.lastClose
 		if change > s.cfg.Threshold {
 			s.lastClose = closePx
-			return &trader.DefaultStrategyPlan
+			return trader.DefaultPlan()
 		}
 		if change < -s.cfg.Threshold {
 			s.lastClose = closePx
-			return &trader.DefaultStrategyPlan
+			return trader.DefaultPlan()
 		}
 	}
 
 	s.lastClose = closePx
-	return &trader.DefaultStrategyPlan
+	return trader.DefaultPlan()
 }
 
 func build(params map[string]any) (trader.Strategy, error) {

@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "donchian-v2", "donchian-breakout-v2")
+	trader.MustRegisterStrategy(build, "donchian-v2", "donchian-breakout-v2")
 }
 
 // Breakout is the v2 Donchian strategy.
@@ -44,7 +44,6 @@ type Breakout struct {
 
 // Config holds constructor parameters.
 type Config struct {
-
 	Period        int     // N-bar lookback (e.g. 20)
 	CloseStrength float64 // 0.5 = no filter; 0.6 = close in upper/lower 40% of bar
 	ConfirmBars   int     // consecutive closes beyond channel required (default 2)
@@ -126,7 +125,7 @@ func closeStrengthOK(c trader.Candle, side trader.Side, threshold float64) bool 
 func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	if !d.Ready() {

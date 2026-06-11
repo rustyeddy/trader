@@ -41,7 +41,7 @@ func TestStrategy_UpdateWithValues(t *testing.T) {
 
 	plan := Strategy{}.Update(context.Background(), c, nil)
 	require.NotNil(t, plan)
-	assert.Equal(t, &trader.DefaultStrategyPlan, plan)
+	assert.Equal(t, "hold", plan.Reason)
 	assert.Empty(t, plan.Opens)
 	assert.Empty(t, plan.Closes)
 }

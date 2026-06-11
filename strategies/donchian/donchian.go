@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "donchian", "donchian-breakout")
+	trader.MustRegisterStrategy(build, "donchian", "donchian-breakout")
 }
 
 // Breakout enters when the close breaks above the N-bar high (long) or
@@ -38,7 +38,6 @@ type Breakout struct {
 }
 
 type Config struct {
-
 	Period        int     // N-bar lookback (e.g. 20)
 	CloseStrength float64 // 0.5 = no filter; 0.6 = close in upper/lower 40% of bar
 	AllowStacking bool    // true allows repeated same-direction entries
@@ -121,7 +120,7 @@ func closeStrengthOK(c trader.Candle, side trader.Side, threshold float64) bool 
 func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	if !d.Ready() {

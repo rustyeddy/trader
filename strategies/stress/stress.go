@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "stress")
+	trader.MustRegisterStrategy(build, "stress")
 }
 
 // Config holds stress strategy parameters.
@@ -72,7 +72,7 @@ func (s *Strategy) Reset() {
 // TradeEvery candles when no position is already open.
 func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	// Netting account: one position at a time.

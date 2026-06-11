@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -52,6 +53,16 @@ func TestLinearCongruentialRandom_DifferentSeeds(t *testing.T) {
 
 	// Should eventually differ (probabilistically almost certain)
 	assert.NotEqual(t, vals1, vals2)
+}
+
+func TestLinearCongruentialRandom_NextGaussianZeroUniformGuard(t *testing.T) {
+	t.Parallel()
+
+	rng := &LinearCongruentialRandom{state: 230538014}
+	value := rng.NextGaussian()
+
+	assert.False(t, math.IsNaN(value))
+	assert.False(t, math.IsInf(value, 0))
 }
 
 // ============================================================================

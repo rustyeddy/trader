@@ -214,7 +214,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 
 	useTempStore(t)
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := &Store{basedir: store.basedir}
+	s := &Store{basedir: GetStore().basedir}
 	writeMonthlyCandles(t, s, "EURUSD", H1, 2024, time.January, map[time.Time]Candle{
 		ts: {
 			Open:      Price(1100000),

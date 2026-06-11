@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "donchian-v5", "donchian-breakout-v5")
+	trader.MustRegisterStrategy(build, "donchian-v5", "donchian-breakout-v5")
 }
 
 // Breakout is the v5 Donchian strategy.
@@ -53,7 +53,6 @@ type Breakout struct {
 
 // Config holds constructor parameters.
 type Config struct {
-
 	Period        int
 	CloseStrength float64
 	ConfirmBars   int
@@ -172,7 +171,7 @@ func (d *Breakout) adxGatePass(side trader.Side) bool {
 func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	if !d.Ready() {

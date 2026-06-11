@@ -308,7 +308,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		run.State.Lots = lots
 		plan := strategy.Update(runCtx, &candle, run)
 		if plan == nil {
-			plan = &DefaultStrategyPlan
+			plan = DefaultPlan()
 		}
 
 		// Regime filter: suppress new entries in ranging/consolidating markets.

@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	trader.RegisterStrategy(build, "bb-fade", "bollinger-fade")
+	trader.MustRegisterStrategy(build, "bb-fade", "bollinger-fade")
 }
 
 // Fade is the Bollinger Band fade strategy.
@@ -36,7 +36,6 @@ type Fade struct {
 
 // Config holds constructor parameters.
 type Config struct {
-
 	Period     int
 	Multiplier float64
 	ATRPeriod  int
@@ -89,7 +88,7 @@ func (f *Fade) Reset() {
 func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return &trader.DefaultStrategyPlan
+		return trader.DefaultPlan()
 	}
 
 	f.bb.Update(ct.Candle)
