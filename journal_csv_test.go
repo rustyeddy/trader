@@ -95,12 +95,12 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 	want := []string{
 		"T1",
 		"EUR_USD",
-		units.String(),
-		entryPrice.String(),
-		exitPrice.String(),
+		"123456",
+		"1.23457",
+		"1.34568",
 		FromTime(open).String(),
 		FromTime(closeT).String(),
-		realizedPL.String(),
+		"-12.500000",
 		"test",
 	}
 	assert.Equal(t, want, row)
@@ -147,11 +147,11 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 
 	want := []string{
 		FromTime(ts).String(),
-		balance.String(),
-		equity.String(),
-		marginUsed.String(),
-		freeMargin.String(),
-		marginLevel.String(),
+		"1000.100000",
+		"999.900000",
+		"10.500000",
+		"989.400000",
+		"99.990000",
 	}
 	assert.Equal(t, want, row)
 }

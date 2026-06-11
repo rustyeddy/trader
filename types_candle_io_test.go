@@ -2,6 +2,7 @@ package trader
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,8 @@ func TestCandleFormattingHelpers(t *testing.T) {
 	assert.Equal(t, "1, 2, 3, 4: avg spread 5, max spread 6, ticks: 7", c.FullString())
 
 	ct := candleTime{Candle: c, Timestamp: Timestamp(100)}
-	assert.Equal(t, c.String(), String(ct))
+	assert.Equal(t, c.String(), ct.String())
+	assert.Equal(t, c.String(), fmt.Sprint(ct))
 }
 
 // TestCandleSetFilenameTimeAndBitHelpers verifies expected behavior for this component.
@@ -52,11 +54,11 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 	assert.Equal(t, time.Date(2026, time.March, 1, 1, 0, 0, 0, time.UTC), h1.Time(1))
 
 	valid := make([]uint64, 2)
-	setValid(valid, 5)
-	setValid(valid, 70)
-	assert.True(t, isValid(valid, 5))
-	assert.True(t, isValid(valid, 70))
-	assert.False(t, isValid(valid, 6))
+	bitSet(valid, 5)
+	bitSet(valid, 70)
+	assert.True(t, bitIsSet(valid, 5))
+	assert.True(t, bitIsSet(valid, 70))
+	assert.False(t, bitIsSet(valid, 6))
 }
 
 // TestCandleSetScanBoundsAndBuildDenseFromFile verifies expected behavior for this component.

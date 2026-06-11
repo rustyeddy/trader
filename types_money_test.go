@@ -19,12 +19,12 @@ func TestMoneyFromFloatAndFloat64(t *testing.T) {
 	}
 }
 
-// TestMoneyStringRawScaledValue verifies expected behavior for this component.
-func TestMoneyStringRawScaledValue(t *testing.T) {
+// TestMoneyStringScaledValue verifies expected behavior for this component.
+func TestMoneyStringScaledValue(t *testing.T) {
 	t.Parallel()
 
 	m := MoneyFromFloat(1.5)
-	assert.Equal(t, "1500000.000000", m.String())
+	assert.Equal(t, "1.500000", m.String())
 }
 
 // TestPriceFromFloatScaling verifies expected behavior for this component.
@@ -41,6 +41,13 @@ func TestFormatNumber(t *testing.T) {
 
 	assert.Equal(t, "1.23450", formatNumber(PriceFromFloat(1.2345), int32(PriceScale)))
 	assert.Equal(t, "1.5", formatNumber(15, 10))
+}
+
+// TestPriceStringScaledValue verifies expected behavior for this component.
+func TestPriceStringScaledValue(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "1.23450", PriceFromFloat(1.2345).String())
 }
 
 // TestParsePrice verifies expected behavior for this component.

@@ -5,23 +5,6 @@ import (
 	"strings"
 )
 
-// symbol represents a trader domain type.
-type symbol string
-
-const (
-	EUR_USD symbol = "EUR_USD"
-	GBP_USD symbol = "GBP_USD"
-	USD_JPY symbol = "USD_JPY"
-	USD_CHF symbol = "USD_CHF"
-	AUD_USD symbol = "AUD_USD"
-	USD_CAD symbol = "USD_CAD"
-	NZD_USD symbol = "NZD_USD"
-	EUR_GBP symbol = "EUR_GBP"
-	GBP_JPY symbol = "GBP_JPY"
-	EUR_JPY symbol = "EUR_JPY"
-	AUD_JPY symbol = "AUD_JPY"
-)
-
 // Instrument represents a trader domain type.
 type Instrument struct {
 	Name                string
@@ -157,20 +140,6 @@ var Instruments = map[string]*Instrument{
 	},
 }
 
-var symmap = map[string]string{
-	"EUR_USD": "EURUSD",
-	"GBP_USD": "GBPUSD",
-	"USD_JPY": "USDJPY",
-	"USD_CHF": "USDCHF",
-	"AUD_USD": "AUDUSD",
-	"USD_CAD": "USDCAD",
-	"NZD_USD": "NZDUSD",
-	"EUR_GBP": "EURGBP",
-	"GBP_JPY": "GBPJPY",
-	"EUR_JPY": "EURJPY",
-	"AUD_JPY": "AUDJPY",
-}
-
 // ApproxUSDPerUnit provides static approximate USD values for non-USD currencies.
 // Used for cross-pair P/L conversion and position sizing when a live complementary
 // rate is not available. Accuracy ±30% over long periods; correct in order of magnitude.
@@ -186,16 +155,7 @@ var ApproxUSDPerUnit = map[string]float64{
 
 // GetInstrument is an internal helper for trader type processing.
 func GetInstrument(symbol string) *Instrument {
-	if inst, ok := Instruments[symbol]; ok {
-		return inst
-	} else {
-		if symbol, ok = symmap[symbol]; ok {
-			if inst, ok = Instruments[symbol]; ok {
-				return inst
-			}
-		}
-	}
-	return nil
+	return Instruments[NormalizeInstrument(symbol)]
 }
 
 // PriceUnitsPerPip is an internal helper for trader type processing.

@@ -138,10 +138,10 @@ func TestFuncIterator_CloseError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// candleSetIteratorV1.CandleSet
+// candleSetIterator.CandleSet
 // ---------------------------------------------------------------------------
 
-func TestCandleSetIteratorV1_CandleSet(t *testing.T) {
+func TestCandleSetIterator_CandleSet(t *testing.T) {
 	t.Parallel()
 	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, M1)
 	it := cs.Iterator()

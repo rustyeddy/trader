@@ -1,12 +1,70 @@
 package trader
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func parseEST(s string) (time.Time, error) {
+	t, err := time.ParseInLocation(layout, s, estNoDST)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
+}
+
+func secondsToTFString(sec Timestamp) (string, error) {
+	if sec <= 0 {
+		return "", fmt.Errorf("invalid timeframe seconds: %d", sec)
+	}
+	if sec < 3600 && sec%60 == 0 {
+		return fmt.Sprintf("M%d", sec/60), nil
+	}
+	if sec < 86400 && sec%3600 == 0 {
+		return fmt.Sprintf("H%d", sec/3600), nil
+	}
+	if sec%86400 == 0 {
+		days := sec / 86400
+		if days == 7 {
+			return "W1", nil
+		}
+		if days == 30 {
+			return "MN1", nil
+		}
+		return fmt.Sprintf("D%d", days), nil
+	}
+
+	return "", fmt.Errorf("cannot map timeframe: %d seconds", sec)
+}
+
+func tfStringToSeconds(tf string) (Timestamp, error) {
+	switch tf {
+	case "M1":
+		return 60, nil
+	case "M5":
+		return 300, nil
+	case "M15":
+		return 900, nil
+	case "M30":
+		return 1800, nil
+	case "H1":
+		return 3600, nil
+	case "H4":
+		return 14400, nil
+	case "D1":
+		return 86400, nil
+	case "W1":
+		return 604800, nil
+	case "MN1":
+		return 2592000, nil
+	default:
+		return 0, fmt.Errorf("unsupported timeframe string: %s", tf)
+	}
+}
 
 // TestParseToUnix verifies parseToUnix handles supported formats and invalid input.
 func TestParseToUnix(t *testing.T) {

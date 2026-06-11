@@ -57,7 +57,7 @@ type candleTime struct {
 type CandleTime = candleTime
 
 // String is an internal helper for trader type processing.
-func String(c candleTime) string {
+func (c candleTime) String() string {
 	return c.Candle.String()
 }
 
@@ -211,12 +211,12 @@ func (cs *candleSet) Merge(src *candleSet) error {
 
 // SetValid is an internal helper for trader type processing.
 func (cs *candleSet) SetValid(idx int) {
-	cs.Valid[idx/64] |= uint64(1) << uint(idx%64)
+	bitSet(cs.Valid, idx)
 }
 
 // IsValid is an internal helper for trader type processing.
 func (cs *candleSet) IsValid(idx int) bool {
-	return cs.Valid[idx/64]&(uint64(1)<<uint(idx%64)) != 0
+	return bitIsSet(cs.Valid, idx)
 }
 
 // CountValid is an internal helper for trader type processing.
@@ -253,16 +253,6 @@ func (cs *candleSet) Filename() string {
 		return fmt.Sprintf("%s-%s-all", inst, tfstr)
 	}
 	return fmt.Sprintf("%s-%s-%d", inst, tfstr, year)
-}
-
-// setValid is an internal helper for trader type processing.
-func setValid(valid []uint64, idx int) {
-	valid[idx/64] |= 1 << (idx % 64)
-}
-
-// isValid is an internal helper for trader type processing.
-func isValid(valid []uint64, idx int) bool {
-	return valid[idx/64]&(1<<(idx%64)) != 0
 }
 
 // scanBounds is an internal helper for trader type processing.
@@ -712,16 +702,6 @@ func (cs *candleSet) Aggregate(outTF Timeframe) (*candleSet, error) {
 
 	hasValidBits := len(cs.Valid) > 0
 
-	isValid := func(i int) bool {
-		if !hasValidBits {
-			return true
-		}
-		return (cs.Valid[i>>6] & (1 << uint(i&63))) != 0
-	}
-	setValid := func(i int) {
-		out.Valid[i>>6] |= 1 << uint(i&63)
-	}
-
 	for oi := 0; oi < outLen; oi++ {
 		start := oi * ratio
 		end := start + ratio
@@ -739,7 +719,7 @@ func (cs *candleSet) Aggregate(outTF Timeframe) (*candleSet, error) {
 
 		for ii := start; ii < end; ii++ {
 			c := cs.Candles[ii]
-			valid := isValid(ii)
+			valid := !hasValidBits || bitIsSet(cs.Valid, ii)
 
 			// Skip completely empty/invalid candles.
 			if !valid && c.Ticks == 0 {
@@ -785,28 +765,28 @@ func (cs *candleSet) Aggregate(outTF Timeframe) (*candleSet, error) {
 		}
 
 		out.Candles[oi] = outC
-		setValid(oi)
+		bitSet(out.Valid, oi)
 	}
 
 	return out, nil
 }
 
-// candleSetIteratorV1 represents a trader domain type.
-type candleSetIteratorV1 struct {
+// candleSetIterator represents a trader domain type.
+type candleSetIterator struct {
 	cs  *candleSet
 	idx int
 }
 
 // Iterator is an internal helper for trader type processing.
-func (cs *candleSet) Iterator() *candleSetIteratorV1 {
-	return &candleSetIteratorV1{
+func (cs *candleSet) Iterator() *candleSetIterator {
+	return &candleSetIterator{
 		cs:  cs,
 		idx: -1,
 	}
 }
 
 // NextCandle is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) NextCandle() (Candle, bool) {
+func (it *candleSetIterator) NextCandle() (Candle, bool) {
 	if it.Next() {
 		return it.Candle(), true
 	}
@@ -814,7 +794,7 @@ func (it *candleSetIteratorV1) NextCandle() (Candle, bool) {
 }
 
 // Next is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) Next() bool {
+func (it *candleSetIterator) Next() bool {
 	n := len(it.cs.Candles)
 
 	for {
@@ -829,31 +809,31 @@ func (it *candleSetIteratorV1) Next() bool {
 }
 
 // Candle is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) Candle() Candle {
+func (it *candleSetIterator) Candle() Candle {
 	return it.cs.Candles[it.idx]
 }
 
 // Index is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) Index() int {
+func (it *candleSetIterator) Index() int {
 	return it.idx
 }
 
 // Timestamp is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) Timestamp() Timestamp {
+func (it *candleSetIterator) Timestamp() Timestamp {
 	return it.cs.Timestamp(it.idx)
 }
 
 // Time is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) Time() time.Time {
+func (it *candleSetIterator) Time() time.Time {
 	return it.cs.Time(it.idx)
 }
 
 // StartTime is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) StartTime() Timestamp {
+func (it *candleSetIterator) StartTime() Timestamp {
 	return it.cs.Start
 }
 
 // CandleSet is an internal helper for trader type processing.
-func (it *candleSetIteratorV1) CandleSet() *candleSet {
+func (it *candleSetIterator) CandleSet() *candleSet {
 	return it.cs
 }

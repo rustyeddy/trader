@@ -77,8 +77,8 @@ type CandleIterator interface {
 	Close() error
 }
 
-type candleSetIterator struct {
-	base     *candleSetIteratorV1
+type rangedCandleIterator struct {
+	base     *candleSetIterator
 	rng      TimeRange
 	useRange bool
 
@@ -88,14 +88,14 @@ type candleSetIterator struct {
 }
 
 func newCandleSetIterator(cs *candleSet, rng TimeRange) CandleIterator {
-	return &candleSetIterator{
+	return &rangedCandleIterator{
 		base:     cs.Iterator(),
 		rng:      rng,
 		useRange: rng.Valid(),
 	}
 }
 
-func (it *candleSetIterator) Next() (CandleTime, bool) {
+func (it *rangedCandleIterator) Next() (CandleTime, bool) {
 	if it.closed || it.done || it.err != nil {
 		return CandleTime{}, false
 	}
@@ -113,11 +113,11 @@ func (it *candleSetIterator) Next() (CandleTime, bool) {
 	return CandleTime{}, false
 }
 
-func (it *candleSetIterator) Err() error {
+func (it *rangedCandleIterator) Err() error {
 	return it.err
 }
 
-func (it *candleSetIterator) Close() error {
+func (it *rangedCandleIterator) Close() error {
 	if it.closed {
 		return nil
 	}

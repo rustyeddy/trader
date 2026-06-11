@@ -37,7 +37,7 @@ func MoneyFromFloat(f float64) Money {
 
 // String is an internal helper for trader type processing.
 func (m Money) String() string {
-	return fmt.Sprintf("%f", float64(m))
+	return strconv.FormatFloat(m.Float64(), 'f', 6, 64)
 }
 
 // Float64 is an internal helper for trader type processing.
@@ -80,7 +80,7 @@ func parsePrice(s string) (Price, error) {
 
 // String is an internal helper for trader type processing.
 func (p Price) String() string {
-	return fmt.Sprintf("%f", float64(p))
+	return formatNumber(p, int32(PriceScale))
 }
 
 // Rate represents a trader domain type.

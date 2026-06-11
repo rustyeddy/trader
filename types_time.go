@@ -247,7 +247,7 @@ var newYorkLoc = func() *time.Location {
 }()
 
 // isFXMarketClosed is retained for backward compatibility.
-// It delegates to IsForexMarketClosed, which is the canonical market-close logic.
+// Deprecated: use IsForexMarketClosed or isForexMarketClosed instead.
 func isFXMarketClosed(t time.Time) bool {
 	return isForexMarketClosed(t)
 }

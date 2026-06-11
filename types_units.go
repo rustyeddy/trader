@@ -49,13 +49,13 @@ func (s Side) String() string {
 	return "long"
 }
 
-// Pips is scaled such that 1 == .1 pip
-// and 20 == 2 pips
+// Pips stores tenths of a pip (deci-pips):
+// 1 == 0.1 pip and 20 == 2.0 pips.
 type Pips int32
 
-const pipScale = 10 // tenths of a pip
+const pipScale = 10 // deci-pips per pip
 
-// PipsFromFloat converts a pip count expressed as float64 to the Pips type.
+// PipsFromFloat converts a whole/decimal pip count into internal deci-pips.
 func PipsFromFloat(v float64) Pips {
 	return Pips(math.Round(v * pipScale))
 }

@@ -18,6 +18,10 @@ func TestGetInstrument_DirectAndMappedSymbols_Phase2(t *testing.T) {
 	mapped := GetInstrument("EUR_USD")
 	require.NotNil(t, mapped)
 	assert.Equal(t, "EURUSD", mapped.Name)
+
+	normalized := GetInstrument(" eur/usd ")
+	require.NotNil(t, normalized)
+	assert.Equal(t, "EURUSD", normalized.Name)
 }
 
 // TestGetInstrument_UnknownReturnsNil_Phase2 verifies expected behavior for this component.
