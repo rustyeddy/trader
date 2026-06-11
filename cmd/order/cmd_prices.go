@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/brokers/oanda"
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
 func pricesCmd(rc *trader.RootConfig) *cobra.Command {
@@ -32,7 +32,7 @@ Defaults to all seven major pairs. Supply --instruments to restrict the list.`,
 				return err
 			}
 
-			names := trader.Majors
+			names := trader.MajorInstruments()
 			if instrumentsCSV != "" {
 				names = splitInstrumentCSV(instrumentsCSV)
 			}

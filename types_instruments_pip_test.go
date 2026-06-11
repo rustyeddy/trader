@@ -39,7 +39,7 @@ func TestPipValueUSD_AllMajors(t *testing.T) {
 		"USDCHF": 0.90,
 		"USDCAD": 1.36,
 	}
-	for _, name := range Majors {
+	for _, name := range MajorInstruments() {
 		inst := GetInstrument(name)
 		rate := rates[name]
 		v := inst.PipValueUSD(rate, 100_000, 1)

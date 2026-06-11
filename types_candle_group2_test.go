@@ -70,13 +70,13 @@ func TestCandleSetBuildGapReportAndStats(t *testing.T) {
 	assert.Equal(t, "suspicious", cs.Gaps[3].Kind)
 
 	s := cs.Stats()
-	assert.Equal(t, 1500, s.TotalMinutes)
-	assert.Equal(t, 4, s.PresentMinutes)
-	assert.Equal(t, 1496, s.MissingMinutes)
+	assert.Equal(t, 1500, s.TotalBars)
+	assert.Equal(t, 4, s.PresentBars)
+	assert.Equal(t, 1496, s.MissingBars)
 	assert.Equal(t, 4, s.GapCount)
 	assert.Equal(t, 1, s.WeekendGaps)
 	assert.Equal(t, 2, s.SuspiciousGaps)
-	assert.Equal(t, 1440, s.LongestGap)
+	assert.Equal(t, 1440, s.LongestGapBars)
 	assert.Equal(t, "weekend", s.LongestGapKind)
 }
 

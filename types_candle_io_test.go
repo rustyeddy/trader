@@ -33,8 +33,8 @@ func TestCandleFormattingHelpers(t *testing.T) {
 	t.Parallel()
 
 	c := Candle{Open: 1, High: 2, Low: 3, Close: 4, AvgSpread: 5, MaxSpread: 6, Ticks: 7}
-	assert.Equal(t, "1, 2, 3, 4", c.String())
-	assert.Equal(t, "1, 2, 3, 4: avg spread 5, max spread 6, ticks: 7", c.FullString())
+	assert.Equal(t, "0.00001, 0.00002, 0.00003, 0.00004", c.String())
+	assert.Equal(t, "0.00001, 0.00002, 0.00003, 0.00004: avg spread 0.00005, max spread 0.00006, ticks: 7", c.FullString())
 
 	ct := candleTime{Candle: c, Timestamp: Timestamp(100)}
 	assert.Equal(t, c.String(), ct.String())
@@ -125,20 +125,14 @@ func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 	bitSet(cs.Valid, 0)
 	bitSet(cs.Valid, 12)
 
-	assert.InDelta(t, 12.34567, cs.Float64(1234567), 1e-9)
-	assert.Equal(t, int32(123457), cs.Int32(1.234567))
-	assert.InDelta(t, 0.0001, cs.PipSize(), 1e-12)
-	assert.InDelta(t, 10.0, cs.UnitsPerPip(), 1e-9)
-	assert.InDelta(t, 25.0, cs.DeltaToPips(250), 1e-9)
-	assert.Equal(t, int32(25), cs.PipsToDelta(2.5))
-
 	buf := &bufferWriteCloser{}
 	cs.PrintStats(buf)
 	out := buf.String()
 	assert.Contains(t, out, "CandleSet Stats")
-	assert.Contains(t, out, "Total Minutes: 20")
-	assert.Contains(t, out, "Present Minutes: 2")
-	assert.Contains(t, out, "Missing Minutes: 18")
+	assert.Contains(t, out, "Timeframe: m1")
+	assert.Contains(t, out, "Total Bars: 20")
+	assert.Contains(t, out, "Present Bars: 2")
+	assert.Contains(t, out, "Missing Bars: 18")
 	assert.Contains(t, out, "Longest Gap")
 }
 

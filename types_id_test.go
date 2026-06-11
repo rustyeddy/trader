@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,7 +52,43 @@ func TestNewULIDLexicographicNonDecreasing(t *testing.T) {
 	}
 }
 
-// TestULIDEntropyReaderInitialized_Phase2 verifies expected behavior for this component.
-func TestULIDEntropyReaderInitialized_Phase2(t *testing.T) {
-	assert.NotNil(t, mono)
+// TestULIDGeneratorInitialized verifies expected behavior for this component.
+func TestULIDGeneratorInitialized(t *testing.T) {
+	require.NotNil(t, defaultULIDGenerator)
+	assert.NotNil(t, defaultULIDGenerator.entropy)
+}
+
+// TestNewULIDConcurrentUniqueness verifies expected behavior for this component.
+func TestNewULIDConcurrentUniqueness(t *testing.T) {
+	t.Parallel()
+
+	const (
+		workers    = 8
+		perWorker  = 250
+		totalCount = workers * perWorker
+	)
+
+	ids := make(chan string, totalCount)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perWorker; j++ {
+				ids <- NewULID()
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(ids)
+
+	seen := make(map[string]struct{}, totalCount)
+	for id := range ids {
+		require.NotEmpty(t, id)
+		_, exists := seen[id]
+		require.False(t, exists, "duplicate ULID generated concurrently: %s", id)
+		seen[id] = struct{}{}
+	}
 }

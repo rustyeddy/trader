@@ -158,7 +158,7 @@ func (c *appConfig) Validate() error {
 		return fmt.Errorf("strategy.instrument is required")
 	}
 	// Validate that the instrument exists in the market
-	if _, ok := Instruments[c.Strategy.Instrument]; !ok {
+	if GetInstrument(c.Strategy.Instrument) == nil {
 		return fmt.Errorf("unknown instrument: %s", c.Strategy.Instrument)
 	}
 	if c.Strategy.StopPips <= 0 {

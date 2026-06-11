@@ -11,23 +11,41 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-var (
-	ulidMu sync.Mutex
-	mono   io.Reader
-)
+const shortDisplayIDLen = 8
 
-// init is an internal helper for trader type processing.
-func init() {
+type ulidGenerator struct {
+	mu      sync.Mutex
+	entropy io.Reader
+}
+
+var defaultULIDGenerator = newULIDGenerator()
+
+func newULIDGenerator() *ulidGenerator {
 	// Seed a PRNG from crypto/rand so ULID entropy is unpredictable.
 	// We use ulid.Monotonic so IDs generated within the same millisecond remain
 	// lexicographically increasing.
 	var seed int64
-	binary.Read(cryptoRand.Reader, binary.LittleEndian, &seed)
-	if seed == 0 {
+	if err := binary.Read(cryptoRand.Reader, binary.LittleEndian, &seed); err != nil || seed == 0 {
 		seed = time.Now().UnixNano()
 	}
 
-	mono = ulid.Monotonic(rand.New(rand.NewSource(seed)), 0)
+	return &ulidGenerator{
+		entropy: ulid.Monotonic(rand.New(rand.NewSource(seed)), 0),
+	}
+}
+
+func (g *ulidGenerator) New() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	id, err := ulid.New(ulid.Timestamp(time.Now().UTC()), g.entropy)
+	if err != nil {
+		// If the monotonic entropy source cannot produce the next value in the
+		// current millisecond, fall back to a valid ULID that may no longer
+		// preserve the same monotonic ordering guarantee.
+		id = ulid.Make()
+	}
+	return id.String()
 }
 
 // New returns a ULID string (time-sortable identifier).
@@ -35,22 +53,13 @@ func init() {
 // ULIDs are lexicographically sortable by generation time, which makes them
 // ideal for journaling/trading records and database indexes.
 func NewULID() string {
-	ulidMu.Lock()
-	defer ulidMu.Unlock()
-
-	id, err := ulid.New(ulid.Timestamp(time.Now().UTC()), mono)
-	if err != nil {
-		// Extremely unlikely (entropy overflow within same millisecond).
-		// Fall back to a non-monotonic but still unique and valid ULID.
-		id = ulid.Make()
-	}
-	return id.String()
+	return defaultULIDGenerator.New()
 }
 
 // ShortDisplayID returns a short, human-friendly prefix for headings and logs.
 func ShortDisplayID(full string) string {
-	if len(full) <= 8 {
+	if len(full) <= shortDisplayIDLen {
 		return full
 	}
-	return full[:8]
+	return full[:shortDisplayIDLen]
 }

@@ -24,6 +24,21 @@ func TestGetInstrument_DirectAndMappedSymbols_Phase2(t *testing.T) {
 	assert.Equal(t, "EURUSD", normalized.Name)
 }
 
+// TestGetInstrument_ReturnsCopy verifies expected behavior for this component.
+func TestGetInstrument_ReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	first := GetInstrument("EURUSD")
+	require.NotNil(t, first)
+	first.Name = "MUTATED"
+	first.MarginRate = 0
+
+	second := GetInstrument("EURUSD")
+	require.NotNil(t, second)
+	assert.Equal(t, "EURUSD", second.Name)
+	assert.Equal(t, Rate(20_000), second.MarginRate)
+}
+
 // TestGetInstrument_UnknownReturnsNil_Phase2 verifies expected behavior for this component.
 func TestGetInstrument_UnknownReturnsNil_Phase2(t *testing.T) {
 	t.Parallel()
@@ -37,6 +52,31 @@ func TestNormalizeInstrument_Phase2(t *testing.T) {
 
 	assert.Equal(t, "EURUSD", NormalizeInstrument(" eur/usd "))
 	assert.Equal(t, "USDJPY", NormalizeInstrument("usd_jpy"))
+}
+
+// TestMajorInstruments_ReturnsCopy verifies expected behavior for this component.
+func TestMajorInstruments_ReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	first := MajorInstruments()
+	require.NotEmpty(t, first)
+	first[0] = "MUTATED"
+
+	second := MajorInstruments()
+	require.NotEmpty(t, second)
+	assert.Equal(t, "EURUSD", second[0])
+}
+
+// TestApproximateUSDPerUnit verifies expected behavior for this component.
+func TestApproximateUSDPerUnit(t *testing.T) {
+	t.Parallel()
+
+	rate, ok := ApproximateUSDPerUnit("jpy")
+	require.True(t, ok)
+	assert.InDelta(t, 0.0067, rate, 1e-9)
+
+	_, ok = ApproximateUSDPerUnit("NOPE")
+	assert.False(t, ok)
 }
 
 // TestInstrumentPriceAndPipMath_Phase2 verifies expected behavior for this component.

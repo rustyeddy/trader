@@ -189,7 +189,7 @@ func quoteToUSDRate(instrument string) float64 {
 	if inst.QuoteCurrency == "USD" {
 		return 1.0
 	}
-	if r, ok := trader.ApproxUSDPerUnit[inst.QuoteCurrency]; ok {
+	if r, ok := trader.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
 		return r
 	}
 	return 1.0

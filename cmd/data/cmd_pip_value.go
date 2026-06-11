@@ -111,7 +111,7 @@ func printPipValues(units int64, rates map[string]float64, live bool) {
 		"──────────", "──────────", "──────────", "──────────", "────────────")
 
 	var notedPairs []string
-	for _, name := range trader.Majors {
+	for _, name := range trader.MajorInstruments() {
 		inst := trader.GetInstrument(name)
 		if inst == nil {
 			continue

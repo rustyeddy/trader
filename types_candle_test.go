@@ -45,9 +45,9 @@ func TestIterator(t *testing.T) {
 func TestReadCandleSetFile(t *testing.T) {
 	cs := loadCandleSet(t)
 	s := cs.Stats()
-	assert.Equal(t, 524158, s.TotalMinutes)
-	assert.Equal(t, 372024, s.PresentMinutes)
-	assert.Equal(t, 152134, s.MissingMinutes)
+	assert.Equal(t, 524158, s.TotalBars)
+	assert.Equal(t, 372024, s.PresentBars)
+	assert.Equal(t, 152134, s.MissingBars)
 	assert.Equal(t, 965, s.GapCount)
 	assert.Equal(t, 52, s.WeekendGaps)
 	assert.Equal(t, 15, s.SuspiciousGaps)
@@ -61,13 +61,13 @@ func TestAggregateH1(t *testing.T) {
 	h1.BuildGapReport()
 	s := h1.Stats()
 
-	assert.Equal(t, 8736, s.TotalMinutes)
-	assert.Equal(t, 6212, s.PresentMinutes)
-	assert.Equal(t, 2524, s.MissingMinutes)
+	assert.Equal(t, 8736, s.TotalBars)
+	assert.Equal(t, 6212, s.PresentBars)
+	assert.Equal(t, 2524, s.MissingBars)
 	assert.Equal(t, 54, s.GapCount)
 	assert.Equal(t, 52, s.WeekendGaps)
 	assert.Equal(t, 2, s.SuspiciousGaps)
-	assert.Equal(t, 49, s.LongestGap)
+	assert.Equal(t, 49, s.LongestGapBars)
 
 	// fmt.Printf("H1: %+v\n", h1)
 }

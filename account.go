@@ -74,7 +74,7 @@ func (acct *Account) quoteToAccountRate(inst string, price Price) (Rate, error) 
 	// bounded error (~±30% over long backtests) on absolute dollar P/L but
 	// does not affect win/loss decisions or relative return percentages.
 	if acct.Currency == "USD" {
-		if r, ok := ApproxUSDPerUnit[meta.QuoteCurrency]; ok {
+		if r, ok := ApproximateUSDPerUnit(meta.QuoteCurrency); ok {
 			return RateFromFloat(r), nil
 		}
 	}

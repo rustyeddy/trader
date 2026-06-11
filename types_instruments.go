@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"fmt"
 	"math"
 	"strings"
 )
@@ -16,7 +17,7 @@ type Instrument struct {
 	MarginRate          Rate
 }
 
-var instrumentList = []string{
+var majorInstrumentNames = []string{
 	"EURUSD",
 	"GBPUSD",
 	"USDJPY",
@@ -26,124 +27,37 @@ var instrumentList = []string{
 	"NZDUSD",
 }
 
-// Majors is the ordered list of seven major FX pairs tracked by this engine.
-var Majors = instrumentList
-
-var Instruments = map[string]*Instrument{
-	"EURUSD": {
-		Name:                "EURUSD",
-		BaseCurrency:        "EUR",
-		QuoteCurrency:       "USD",
-		PipLocation:         -4,
+func makeInstrument(name, base, quote string, pipLocation int, marginRate Rate) Instrument {
+	return Instrument{
+		Name:                name,
+		BaseCurrency:        base,
+		QuoteCurrency:       quote,
+		PipLocation:         pipLocation,
 		TradeUnitsPrecision: 0,
 		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000), // 2% (50:1)
-	},
-	"GBPUSD": {
-		Name:                "GBPUSD",
-		BaseCurrency:        "GBP",
-		QuoteCurrency:       "USD",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20000),
-	},
-	"USDJPY": {
-		Name:                "USDJPY",
-		BaseCurrency:        "USD",
-		QuoteCurrency:       "JPY",
-		PipLocation:         -2,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"USDCHF": {
-		Name:                "USDCHF",
-		BaseCurrency:        "USD",
-		QuoteCurrency:       "CHF",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"AUDUSD": {
-		Name:                "AUDUSD",
-		BaseCurrency:        "AUD",
-		QuoteCurrency:       "USD",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"USDCAD": {
-		Name:                "USDCAD",
-		BaseCurrency:        "USD",
-		QuoteCurrency:       "CAD",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"NZDUSD": {
-		Name:                "NZDUSD",
-		BaseCurrency:        "NZD",
-		QuoteCurrency:       "USD",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"XAUUSD": {
-		Name:                "XAUUSD",
-		BaseCurrency:        "XAU",
-		QuoteCurrency:       "USD",
-		PipLocation:         -2, // Gold pip = 0.01
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(50_000), // 5% (20:1 typical retail gold)
-	},
-	"EURGBP": {
-		Name:                "EURGBP",
-		BaseCurrency:        "EUR",
-		QuoteCurrency:       "GBP",
-		PipLocation:         -4,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"GBPJPY": {
-		Name:                "GBPJPY",
-		BaseCurrency:        "GBP",
-		QuoteCurrency:       "JPY",
-		PipLocation:         -2,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"EURJPY": {
-		Name:                "EURJPY",
-		BaseCurrency:        "EUR",
-		QuoteCurrency:       "JPY",
-		PipLocation:         -2,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
-	"AUDJPY": {
-		Name:                "AUDJPY",
-		BaseCurrency:        "AUD",
-		QuoteCurrency:       "JPY",
-		PipLocation:         -2,
-		TradeUnitsPrecision: 0,
-		MinimumTradeSize:    1,
-		MarginRate:          Rate(20_000),
-	},
+		MarginRate:          marginRate,
+	}
 }
 
-// ApproxUSDPerUnit provides static approximate USD values for non-USD currencies.
+var instrumentRegistry = map[string]Instrument{
+	"EURUSD": makeInstrument("EURUSD", "EUR", "USD", -4, Rate(20_000)),
+	"GBPUSD": makeInstrument("GBPUSD", "GBP", "USD", -4, Rate(20_000)),
+	"USDJPY": makeInstrument("USDJPY", "USD", "JPY", -2, Rate(20_000)),
+	"USDCHF": makeInstrument("USDCHF", "USD", "CHF", -4, Rate(20_000)),
+	"AUDUSD": makeInstrument("AUDUSD", "AUD", "USD", -4, Rate(20_000)),
+	"USDCAD": makeInstrument("USDCAD", "USD", "CAD", -4, Rate(20_000)),
+	"NZDUSD": makeInstrument("NZDUSD", "NZD", "USD", -4, Rate(20_000)),
+	"XAUUSD": makeInstrument("XAUUSD", "XAU", "USD", -2, Rate(50_000)),
+	"EURGBP": makeInstrument("EURGBP", "EUR", "GBP", -4, Rate(20_000)),
+	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, Rate(20_000)),
+	"EURJPY": makeInstrument("EURJPY", "EUR", "JPY", -2, Rate(20_000)),
+	"AUDJPY": makeInstrument("AUDJPY", "AUD", "JPY", -2, Rate(20_000)),
+}
+
+// approximateUSDPerUnit provides static approximate USD values for non-USD currencies.
 // Used for cross-pair P/L conversion and position sizing when a live complementary
 // rate is not available. Accuracy ±30% over long periods; correct in order of magnitude.
-var ApproxUSDPerUnit = map[string]float64{
+var approximateUSDPerUnit = map[string]float64{
 	"EUR": 1.08,
 	"GBP": 1.26,
 	"JPY": 0.0067, // ~1/150
@@ -153,13 +67,70 @@ var ApproxUSDPerUnit = map[string]float64{
 	"CHF": 1.10,
 }
 
+func init() {
+	validateInstrumentRegistry()
+}
+
+func validateInstrumentRegistry() {
+	for key, inst := range instrumentRegistry {
+		if NormalizeInstrument(key) != key {
+			panic(fmt.Sprintf("instrument key must be normalized: %q", key))
+		}
+		if inst.Name != key {
+			panic(fmt.Sprintf("instrument name mismatch for %q: %q", key, inst.Name))
+		}
+		if inst.BaseCurrency == "" || inst.QuoteCurrency == "" {
+			panic(fmt.Sprintf("instrument %q has blank currencies", key))
+		}
+		if inst.MinimumTradeSize <= 0 {
+			panic(fmt.Sprintf("instrument %q has non-positive minimum trade size", key))
+		}
+		if inst.MarginRate <= 0 {
+			panic(fmt.Sprintf("instrument %q has non-positive margin rate", key))
+		}
+		if inst.PriceUnitsPerPip() <= 0 {
+			panic(fmt.Sprintf("instrument %q has invalid pip configuration", key))
+		}
+	}
+
+	for _, name := range majorInstrumentNames {
+		if _, ok := instrumentRegistry[name]; !ok {
+			panic(fmt.Sprintf("major instrument %q missing from registry", name))
+		}
+	}
+}
+
+// MajorInstruments returns the ordered list of seven major FX pairs tracked by this engine.
+func MajorInstruments() []string {
+	return append([]string(nil), majorInstrumentNames...)
+}
+
+// ApproximateUSDPerUnit reports a rough USD conversion for a non-USD currency.
+func ApproximateUSDPerUnit(currency string) (float64, bool) {
+	rate, ok := approximateUSDPerUnit[strings.ToUpper(strings.TrimSpace(currency))]
+	return rate, ok
+}
+
+// LookupInstrument returns a copy of the instrument metadata and whether it exists.
+func LookupInstrument(symbol string) (Instrument, bool) {
+	inst, ok := instrumentRegistry[NormalizeInstrument(symbol)]
+	return inst, ok
+}
+
 // GetInstrument is an internal helper for trader type processing.
 func GetInstrument(symbol string) *Instrument {
-	return Instruments[NormalizeInstrument(symbol)]
+	inst, ok := LookupInstrument(symbol)
+	if !ok {
+		return nil
+	}
+	return &inst
 }
 
 // PriceUnitsPerPip is an internal helper for trader type processing.
 func (inst *Instrument) PriceUnitsPerPip() Price {
+	if inst == nil {
+		return 0
+	}
 	units := int64(PriceScale)
 	for i := 0; i < -inst.PipLocation; i++ {
 		units /= 10
@@ -195,6 +166,9 @@ func NormalizeInstrument(sym string) string {
 
 // PipSize is an internal helper for trader type processing.
 func (inst *Instrument) PipSize() float64 {
+	if inst == nil {
+		return 0
+	}
 	return math.Pow10(inst.PipLocation)
 }
 
@@ -205,6 +179,9 @@ func (inst *Instrument) PipSize() float64 {
 // value is denominated in the quote currency, so rate (the current pair price)
 // is required to convert back to USD.  Returns 0 if rate ≤ 0.
 func (inst *Instrument) PipValueUSD(rate float64, units int64, pips float64) float64 {
+	if inst == nil {
+		return 0
+	}
 	pip := inst.PipSize()
 	if inst.QuoteCurrency == "USD" {
 		return pip * float64(units) * pips
@@ -222,6 +199,9 @@ func (inst *Instrument) PipValueUSD(rate float64, units int64, pips float64) flo
 //   - 5-decimal pairs (EURUSD, PipLocation=−4): native scale 100,000  → multiplier = 1
 //   - 3-decimal pairs (USDJPY, PipLocation=−2): native scale   1,000  → multiplier = 100
 func (inst *Instrument) DukascopyPriceMultiplier() uint32 {
+	if inst == nil {
+		return 0
+	}
 	nativeDecimals := -inst.PipLocation + 1
 	nativeScale := int64(math.Pow10(nativeDecimals))
 	return uint32(int64(PriceScale) / nativeScale)
