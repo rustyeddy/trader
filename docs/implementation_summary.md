@@ -184,13 +184,13 @@ Each CSV contains:
 
 ## Performance
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Generate 1 month (H1) | 1-2ms | ~520 candles |
+| Operation               | Time    | Notes         |
+|-------------------------|---------|---------------|
+| Generate 1 month (H1)   | 1-2ms   | ~520 candles  |
 | Generate 12 months (H1) | 20-30ms | ~6200 candles |
-| Write 1 month to CSV | 10-15ms | ~35 KB file |
-| Iterate 1 month | <500µs | 520 candles |
-| Iterate full year | <10ms | 6200 candles |
+| Write 1 month to CSV    | 10-15ms | ~35 KB file   |
+| Iterate 1 month         | <500µs  | 520 candles   |
+| Iterate full year       | <10ms   | 6200 candles  |
 
 ## API Cheat Sheet
 
