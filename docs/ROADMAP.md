@@ -151,6 +151,57 @@ use `npx playwright test` against `httptest.NewServer` or a local dev instance.
 
 ---
 
+## MCP
+
+The MCP server covers the core account/trade/backtest/candle surface. The
+following gaps remain between MCP and the full CLI + REST capability set.
+SSE streams and live-run commands are intentionally absent (wrong transport
+and too dangerous for autonomous invocation respectively).
+
+### replay tool
+`POST /api/v1/replay` has no MCP equivalent. A `replay` tool would let
+Claude tune strategy parameters interactively — feed an instrument/strategy/
+date range, inspect the signal log, adjust ATR multiplier or regime filter,
+repeat. High value because this is exactly the kind of iterative analysis
+Claude is well-suited for.
+
+### parse_analysis tool
+The `trader analysis` CLI and `POST /api/v1/analysis` REST endpoint parse a
+ChatGPT-generated forex analysis CSV into tradeable/watchlist/no-trade rows.
+An MCP tool would accept a file path (server-side) and return the same
+partitioned JSON, making it easy for Claude to reason over the candidates and
+propose which to act on.
+
+### list_backtests tool
+Backtest reports are currently exposed only as the `backtest://results`
+resource, which lists all `.org` files with no filtering. A `list_backtests`
+tool with optional `instrument` and `strategy` query params (matching
+`GET /api/v1/backtests`) would let Claude search and compare reports without
+reading every file.
+
+### get_backtest_candles tool
+`GET /api/v1/backtests/{name}/candles` returns the OHLC bars for a saved
+report. An MCP equivalent enables Claude to correlate candle data with signal
+logs returned by `run_backtest`.
+
+### get_prices tool
+`trader order prices` fetches live bid/ask for the major pairs but has no
+REST or MCP equivalent. An MCP `get_prices` tool (wrapping the OANDA pricing
+endpoint) gives Claude real-time context when evaluating analysis candidates
+or sizing orders.
+
+### data_stats tool
+`trader data stats` returns swing range, spread, trend ratio, and session
+distributions for a candle dataset. Exposing this as an MCP tool lets Claude
+characterise an instrument before recommending strategy parameters.
+
+### list_bots / get_bot tools
+The bot manager (`POST /api/v1/bots`, `GET /api/v1/bots`, etc.) has no MCP
+surface. Read-only tools (`list_bots`, `get_bot`) would let Claude report on
+running strategies without requiring `--enable-write`.
+
+---
+
 ## Infrastructure
 
 ### SQLite Journal for Live Trading

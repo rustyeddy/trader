@@ -9,7 +9,9 @@ INSTALL_DIR := $(GOPATH)/bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
 
-.PHONY: all build ui build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean
+TULIP_DIR ?= ../tulip
+
+.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean
 
 all: vet build
 
@@ -21,6 +23,17 @@ build:
 # Build the SvelteKit UI, then rebuild the Go binary with fresh assets.
 ui:
 	cd ui && npm run build
+
+# Copy the pre-built tulip dist into ui/dist/ and rebuild the Go binary.
+# Override the source with: make tulip-sync TULIP_DIR=/path/to/tulip
+tulip-sync:
+	@test -d $(TULIP_DIR)/dist || (echo "error: $(TULIP_DIR)/dist not found — run 'npm run build' in tulip first" && exit 1)
+	rsync -a --delete $(TULIP_DIR)/dist/ ui/dist/
+
+# Build tulip, sync its dist, then rebuild the Go binary.
+build-tulip:
+	cd $(TULIP_DIR) && npm run build
+	$(MAKE) tulip-sync build
 
 build-full: ui build
 

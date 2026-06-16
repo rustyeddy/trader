@@ -22,8 +22,9 @@ type Server struct {
 	svc        *service.Service
 	addr       string
 	log        *slog.Logger
-	staticFS   fs.FS  // nil when no UI assets are embedded
-	reportsDir string // directory for backtest JSON reports
+	staticFS   fs.FS         // nil when no UI assets are embedded
+	reportsDir string        // directory for backtest JSON reports
+	mcpHandler http.Handler  // optional MCP handler mounted at POST /mcp
 }
 
 // New creates a Server. svc may have a nil OANDA client for backtest-only
@@ -34,6 +35,13 @@ func New(svc *service.Service, addr string) *Server {
 		log = slog.Default()
 	}
 	return &Server{svc: svc, addr: addr, log: log}
+}
+
+// WithMCPHandler mounts an MCP HTTP handler at POST /mcp so that the MCP
+// server is reachable on the same port as the REST API when running
+// trader serve. Pass the result of mcp.Server.HTTPHandler().
+func (s *Server) WithMCPHandler(h http.Handler) {
+	s.mcpHandler = h
 }
 
 // WithStatic sets the fs.FS from which the UI static assets are served.
@@ -87,6 +95,11 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /api/v1/health", health)
 	mux.HandleFunc("GET /health", health)
+
+	// MCP over HTTP — optional; enabled when trader serve starts with MCP.
+	if s.mcpHandler != nil {
+		mux.Handle("POST /mcp", s.mcpHandler)
+	}
 
 	// Static UI — registered last so /api/* routes take priority.
 	if s.staticFS != nil {

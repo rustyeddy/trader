@@ -5,11 +5,13 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 
@@ -124,32 +126,62 @@ const (
 	errInvalidRequest = -32600
 	errMethodNotFound = -32601
 	errInvalidParams  = -32602
-	errInternal       = -32603
 )
 
-func (s *Server) handleLine(ctx context.Context, line []byte) {
+// process handles one JSON-RPC line and returns the response bytes (with
+// trailing newline), or nil for notifications that require no reply.
+func (s *Server) process(ctx context.Context, line []byte) []byte {
 	var req request
 	if err := json.Unmarshal(line, &req); err != nil {
-		s.sendError(nil, errParse, "parse error")
-		return
+		b, _ := json.Marshal(response{JSONRPC: "2.0", Error: &rpcError{Code: errParse, Message: "parse error"}})
+		return append(b, '\n')
 	}
 	if req.JSONRPC != "2.0" {
-		s.sendError(req.ID, errInvalidRequest, "jsonrpc must be '2.0'")
-		return
+		b, _ := json.Marshal(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: errInvalidRequest, Message: "jsonrpc must be '2.0'"}})
+		return append(b, '\n')
 	}
-
 	// Notifications have no id — dispatch but don't reply.
 	if req.ID == nil || string(req.ID) == "null" {
 		s.dispatchNotification(ctx, req)
-		return
+		return nil
 	}
-
 	result, rpcErr := s.dispatch(ctx, req)
+	var resp response
 	if rpcErr != nil {
-		s.sendError(req.ID, rpcErr.Code, rpcErr.Message)
+		resp = response{JSONRPC: "2.0", ID: req.ID, Error: rpcErr}
+	} else {
+		resp = response{JSONRPC: "2.0", ID: req.ID, Result: result}
+	}
+	b, _ := json.Marshal(resp)
+	return append(b, '\n')
+}
+
+func (s *Server) handleLine(ctx context.Context, line []byte) {
+	b := s.process(ctx, line)
+	if b == nil {
 		return
 	}
-	s.sendResult(req.ID, result)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, _ = s.out.Write(b)
+}
+
+// HTTPHandler returns an http.Handler that accepts a single JSON-RPC POST
+// body and writes the JSON-RPC response. Use this to expose MCP alongside
+// the REST API when running trader serve.
+//
+//	POST /mcp   Content-Type: application/json
+func (s *Server) HTTPHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if err != nil {
+			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := s.process(r.Context(), bytes.TrimSpace(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.TrimRight(resp, "\n"))
+	})
 }
 
 func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
@@ -213,26 +245,6 @@ func (s *Server) handleInitialize(raw json.RawMessage) (any, *rpcError) {
 	}, nil
 }
 
-// ── wire helpers ──────────────────────────────────────────────────────────
-
-func (s *Server) sendResult(id json.RawMessage, result any) {
-	s.write(response{JSONRPC: "2.0", ID: id, Result: result})
-}
-
-func (s *Server) sendError(id json.RawMessage, code int, msg string) {
-	s.write(response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}})
-}
-
-func (s *Server) write(v any) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		s.log.Error("mcp: marshal response", "err", err)
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, _ = fmt.Fprintf(s.out, "%s\n", b)
-}
 
 // ── MCP content helpers ───────────────────────────────────────────────────
 

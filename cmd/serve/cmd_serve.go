@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader"
+	mcpserver "github.com/rustyeddy/trader/api/mcp"
 	"github.com/rustyeddy/trader/api/rest"
 	"github.com/rustyeddy/trader/service"
 	traderui "github.com/rustyeddy/trader/ui"
@@ -54,14 +55,15 @@ type DaemonConfig struct {
 // New returns the "serve" cobra command.
 func New(rc *trader.RootConfig) *cobra.Command {
 	var (
-		cfgFile       string
-		addr          string
-		token         string
-		accountID     string
-		env           string
-		journalTrades string
-		journalEquity string
-		reportsDir    string
+		cfgFile        string
+		addr           string
+		token          string
+		accountID      string
+		env            string
+		journalTrades  string
+		journalEquity  string
+		reportsDir     string
+		mcpEnableWrite bool
 	)
 
 	cmd := &cobra.Command{
@@ -210,7 +212,7 @@ Example config file (see deploy/trader.yaml.example):
 			var wg sync.WaitGroup
 			errs := make(chan error, 2)
 
-			// REST API — with embedded UI assets.
+			// REST API — with embedded UI assets and MCP.
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -220,6 +222,13 @@ Example config file (see deploy/trader.yaml.example):
 					srv.WithReportsDir(reportsDir)
 					log.Info("serve: reports dir", "path", reportsDir)
 				}
+				// MCP over HTTP at POST /mcp (read-only by default).
+				mcpSrv := mcpserver.New(svc, mcpEnableWrite)
+				if reportsDir != "" {
+					mcpSrv.WithReportsDir(reportsDir)
+				}
+				srv.WithMCPHandler(mcpSrv.HTTPHandler())
+				log.Info("serve: MCP available", "endpoint", "POST /mcp", "write", mcpEnableWrite)
 				// Serve the SvelteKit UI from the embedded dist/ directory.
 				uiFS, fsErr := traderui.SubFS()
 				if fsErr == nil {
@@ -271,6 +280,7 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&journalTrades, "journal-trades", "", "Journal trade-record path (default ./live-trades.jsonl)")
 	cmd.Flags().StringVar(&journalEquity, "journal-equity", "", "Journal equity-record path (default ./live-equity.jsonl)")
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
+	cmd.Flags().BoolVar(&mcpEnableWrite, "mcp-enable-write", false, "Enable MCP write tools (place_order, close_trade, update_stop) over HTTP")
 
 	return cmd
 }
