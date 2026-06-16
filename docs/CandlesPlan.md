@@ -42,14 +42,31 @@ Prices and spreads remain scaled integers. Float conversion belongs at input/out
 
 ## Redundancy cleanup
 
-- Reuse `Service.CandlesCSV` or a shared lower-level candle streaming helper anywhere an edge layer currently opens `DataManager.Candles` directly.
-- Keep `GET /api/v1/backtests/{name}/candles` only for chart-friendly JSON tied to a saved backtest report, but route candle loading through the service layer where practical.
-- Consider moving replay bar-loading toward the same candle service helper so REST replay and future CLI/MCP replay do not duplicate candle traversal or OHLC conversion.
-- Keep `trader data stats` as aggregate analysis output, but make future raw candle output use `trader data candles` rather than adding ad hoc commands.
-- MCP should expose one canonical read tool for candle CSV; `download_candles` remains write-only and should not duplicate read/export behavior.
+- Reuse `Service.CandlesCSV` or a shared lower-level candle streaming
+  helper anywhere an edge layer currently opens `DataManager.Candles`
+  directly.
+
+- Keep `GET /api/v1/backtests/{name}/candles` only for chart-friendly
+  JSON tied to a saved backtest report, but route candle loading
+  through the service layer where practical.
+
+- Consider moving replay bar-loading toward the same candle service
+  helper so REST replay and future CLI/MCP replay do not duplicate
+  candle traversal or OHLC conversion.
+
+- Keep `trader data stats` as aggregate analysis output, but make
+  future raw candle output use `trader data candles` rather than
+  adding ad hoc commands.
+
+- MCP should expose one canonical read tool for candle CSV;
+  `download_candles` remains write-only and should not duplicate
+  read/export behavior.
 
 ## Notes
 
 - Keep CLI/REST/MCP thin: parse inputs, call service, return output.
-- Do not put business/store traversal logic in command handlers or HTTP/MCP handlers.
-- The service reads the local canonical candle store; `trader data oanda` and MCP `download_candles` remain responsible for fetching and writing candles.
+- Do not put business/store traversal logic in command handlers or
+  HTTP/MCP handlers.
+- The service reads the local canonical candle store; `trader data
+  oanda` and MCP `download_candles` remain responsible for fetching
+  and writing candles.

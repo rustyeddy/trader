@@ -60,6 +60,7 @@ Open `http://localhost:9999` for the dashboard.
 
 | Command | Description |
 |---|---|
+| `trader analysis` | Parse a ChatGPT forex analysis CSV and print trade candidates and watchlist |
 | `trader backtest` | Run backtests against historical candles |
 | `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
 | `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
@@ -507,6 +508,7 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 | `GET` | `/api/v1/backtests/{name}` | Get a single backtest report |
 | `GET` | `/api/v1/backtests/{name}/candles` | OHLC bars for a saved report |
 | `POST` | `/api/v1/replay` | Run a strategy replay; returns bars + signal log |
+| `POST` | `/api/v1/analysis` | Parse a ChatGPT forex analysis CSV upload; returns rows split by status |
 | `GET` | `/api/v1/stream/account` | SSE: account equity stream |
 | `GET` | `/api/v1/stream/events` | SSE: broker event stream |
 | `GET` | `/api/v1/stream/backtest/{id}` | SSE: live backtest progress |
@@ -621,6 +623,83 @@ The signal summary bar below the controls shows counts for each kind. The chart 
 
 ---
 
+## Analysis
+
+The analysis feature reads a ChatGPT-generated forex analysis CSV and classifies each pair as a trade candidate, watchlist item, or no-trade.
+
+### CSV Format
+
+The CSV must have these nine columns (row 1 is a header):
+
+| Column | Example |
+|---|---|
+| Group | `Major Pairs` |
+| Pair | `EUR/USD` |
+| Structure | `Near 1.1590; USD softer after risk-on headline…` |
+| Setup Bias | `Breakout continuation only after clean 4H close…` |
+| Trend | `Bullish EUR / bearish USD` |
+| Volatility | `Medium-High` |
+| Support zone | `1.1570–1.1590` |
+| Resistance Zone | `1.1600–1.1625` |
+| Status | `Tradeable watch list` \| `Watchlist` \| `No Trade` |
+
+Support and resistance zones are price ranges separated by an en dash (`–`), em dash (`—`), or hyphen.
+
+### CLI
+
+```bash
+# Print watchlist and trade candidates (No Trade rows hidden by default)
+trader analysis --file forex_analysis_2026-06-15.csv
+
+# Include No Trade rows
+trader analysis --file forex_analysis_2026-06-15.csv --all
+```
+
+Example output:
+```
+PAIR     STATUS                TREND                      VOLATILITY   SUPPORT          RESISTANCE
+----     ------                -----                      ----------   -------          ----------
+EUR/USD  Tradeable watch list  Bullish EUR / bearish USD  Medium-High  1.1570–1.1590    1.1600–1.1625
+GBP/USD  Watchlist             Mild bullish GBP           High         1.3400–1.3410    1.3420–1.3460
+AUD/USD  Tradeable watch list  Mild bullish AUD           High         0.7050–0.7070    0.7080–0.7100
+EUR/CAD  Tradeable watch list  Mild bullish EUR           Medium-High  1.6150–1.6210    1.6260–1.6320
+```
+
+### REST API
+
+`POST /api/v1/analysis` accepts a multipart form upload with field name `file` and returns the parsed rows pre-partitioned into three slices.
+
+```bash
+curl -s -X POST http://localhost:9999/api/v1/analysis \
+  -F "file=@forex_analysis_2026-06-15.csv"
+```
+
+Response:
+```json
+{
+  "total": 19,
+  "tradeable": [
+    {
+      "group": "Major Pairs",
+      "pair": "EUR/USD",
+      "structure": "Near 1.1590; USD softer after risk-on headline…",
+      "setup_bias": "Breakout continuation only after clean 4H close…",
+      "trend": "Bullish EUR / bearish USD",
+      "volatility": "Medium-High",
+      "support_low": 1.157,
+      "support_high": 1.159,
+      "resistance_low": 1.16,
+      "resistance_high": 1.1625,
+      "status": "Tradeable watch list"
+    }
+  ],
+  "watchlist": [ ... ],
+  "no_trade":  [ ... ]
+}
+```
+
+---
+
 ## Deployment
 
 ### Docker
@@ -732,6 +811,7 @@ Config: `testdata/configs/smoke-test.yml` — EUR_USD M1 pulse, trades every ~90
 
 ```
 cmd/            CLI entry points (Cobra)
+cmd/analysis/   ChatGPT forex analysis CSV parser and classifier
 api/rest/       REST handlers and routing
 api/mcp/        Claude MCP tool server
 brokers/oanda/  OANDA REST + streaming client

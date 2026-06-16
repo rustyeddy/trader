@@ -67,6 +67,9 @@ func (s *Server) Handler() http.Handler {
 	// Strategy replay — runs a strategy against stored candles, returns bars + signals
 	mux.HandleFunc("POST /api/v1/replay", s.handleReplay)
 
+	// Analysis — parse a ChatGPT forex analysis CSV upload
+	mux.HandleFunc("POST /api/v1/analysis", s.handleAnalysis)
+
 	// Bot manager — start/stop/list live strategy bots
 	mux.HandleFunc("POST /api/v1/bots", s.handleStartBot)
 	mux.HandleFunc("GET /api/v1/bots", s.handleListBots)
