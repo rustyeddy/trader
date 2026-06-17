@@ -273,41 +273,41 @@ Notes:
 
 ** Account & Trades
 
-| Service            | REST API                          | CLI                      | MCP                        |
-|--------------------+-----------------------------------+--------------------------+----------------------------|
-| Account summary    | GET /api/v1/account               | —                        | get_account_summary        |
-| Live bid/ask prices | GET /api/v1/prices               | order prices             | get_prices                 |
-| List open trades   | GET /api/v1/trades                | order list               | list_open_trades           |
-| Place order        | POST /api/v1/trades               | order new                | place_order *(write-mode)* |
-| Close trade        | DELETE /api/v1/trades/{id}        | order close              | close_trade *(write-mode)* |
-| Update stop/TP     | PATCH /api/v1/trades/{id}/stop    | —                        | update_stop *(write-mode)* |
-| Transactions       | GET /api/v1/transactions          | order transactions       | get_transactions           |
-| Transaction stream | GET /api/v1/stream/account        | order transactions-stream | —                         |
+| Service             | REST API                       | CLI                       | MCP                        |
+|---------------------+--------------------------------+---------------------------+----------------------------|
+| Account summary     | GET /api/v1/account            | order account             | get_account_summary        |
+| Live bid/ask prices | GET /api/v1/prices             | order prices              | get_prices                 |
+| List open trades    | GET /api/v1/trades             | order list                | list_open_trades           |
+| Place order         | POST /api/v1/trades            | order new                 | place_order *(write-mode)* |
+| Close trade         | DELETE /api/v1/trades/{id}     | order close               | close_trade *(write-mode)* |
+| Update stop/TP      | PATCH /api/v1/trades/{id}/stop | order update-stop         | update_stop *(write-mode)* |
+| Transactions        | GET /api/v1/transactions       | order transactions        | get_transactions           |
+| Transaction stream  | GET /api/v1/stream/account     | order transactions-stream | —                          |
 
 ** Candle Data
 
-| Service              | REST API                       | CLI                  | MCP                           |
-|----------------------+--------------------------------+----------------------+-------------------------------|
-| Fetch candles CSV    | GET /api/v1/candles/{instrument} | data candles       | get_candles_csv               |
-| Download from OANDA  | —                              | data oanda           | download_candles *(write-mode)* |
-| Candle stats         | —                              | data stats           | —                             |
-| Validate candle store | —                             | data validate-candles | —                            |
-| Sync (tulip)         | —                              | data sync            | —                             |
-| Pip value calc       | —                              | data pip-value       | —                             |
-| Position/notional    | —                              | data position        | —                             |
+| Service               | REST API                         | CLI                   | MCP                             |
+|-----------------------+----------------------------------+-----------------------+---------------------------------|
+| Fetch candles CSV     | GET /api/v1/candles/{instrument} | data candles          | get_candles_csv                 |
+| Download from OANDA   | —                                | data oanda            | download_candles *(write-mode)* |
+| Candle stats          | —                                | data stats            | —                               |
+| Validate candle store | —                                | data validate-candles | —                               |
+| Sync (tulip)          | —                                | data sync             | —                               |
+| Pip value calc        | —                                | data pip-value        | —                               |
+| Position/notional     | —                                | data position         | —                               |
 
 ** Backtests
 
-| Service              | REST API                           | CLI               | MCP                           |
-|----------------------+------------------------------------+-------------------+-------------------------------|
-| Run backtest         | POST /api/v1/backtests/run         | backtest run      | run_backtest                  |
-| List results         | GET /api/v1/backtests              | —                 | backtest://results *(resource)* |
-| Get result           | GET /api/v1/backtests/{name}       | —                 | backtest://results/{name} *(resource)* |
-| Get org report       | GET /api/v1/backtests/{name}/org   | —                 | —                             |
-| Get backtest candles | GET /api/v1/backtests/{name}/candles | —               | —                             |
-| Regression check     | —                                  | backtest regress  | —                             |
-| Stream backtest      | GET /api/v1/stream/backtest/{id}   | —                 | —                             |
-| Browse configs       | —                                  | —                 | config://configs *(resource)* |
+| Service              | REST API                             | CLI              | MCP                                    |
+|----------------------+--------------------------------------+------------------+----------------------------------------|
+| Run backtest         | POST /api/v1/backtests/run           | backtest run     | run_backtest                           |
+| List results         | GET /api/v1/backtests                | —                | backtest://results *(resource)*        |
+| Get result           | GET /api/v1/backtests/{name}         | —                | backtest://results/{name} *(resource)* |
+| Get org report       | GET /api/v1/backtests/{name}/org     | —                | —                                      |
+| Get backtest candles | GET /api/v1/backtests/{name}/candles | —                | —                                      |
+| Regression check     | —                                    | backtest regress | —                                      |
+| Stream backtest      | GET /api/v1/stream/backtest/{id}     | —                | —                                      |
+| Browse configs       | —                                    | —                | config://configs *(resource)*          |
 
 ** Live Trading
 

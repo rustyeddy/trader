@@ -38,9 +38,11 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 		Use:   "order",
 		Short: "Live order management (OANDA demo)",
 	}
+	cmd.AddCommand(accountSummaryCmd(rc))
 	cmd.AddCommand(newOrderCmd(rc))
 	cmd.AddCommand(listOrdersCmd(rc))
 	cmd.AddCommand(closeOrderCmd(rc))
+	cmd.AddCommand(updateStopCmd(rc))
 	cmd.AddCommand(transactionsCmd(rc))
 	cmd.AddCommand(transactionsStreamCmd(rc))
 	cmd.AddCommand(pricesCmd(rc))
@@ -401,6 +403,97 @@ func transactionsStreamCmd(rc *traderpkg.RootConfig) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&showHeartbeats, "heartbeats", false, "Also print heartbeat messages")
+	addCommonFlags(cmd)
+	return cmd
+}
+
+// ── order account ─────────────────────────────────────────────────────────
+
+func accountSummaryCmd(rc *traderpkg.RootConfig) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "account",
+		Short: "Print account balance, NAV, margin, and unrealized P/L",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			svc, err := buildService(ctx, cmd, rc)
+			if err != nil {
+				return err
+			}
+			summary, err := svc.GetAccountSummary(ctx)
+			if err != nil {
+				return err
+			}
+			bar := strings.Repeat("─", 36)
+			fmt.Println(bar)
+			fmt.Printf("  %-20s %12s\n", "Account ID", summary.ID)
+			fmt.Println(bar)
+			fmt.Printf("  %-20s %12.2f\n", "Balance", summary.Balance)
+			fmt.Printf("  %-20s %12.2f\n", "NAV (equity)", summary.NAV)
+			fmt.Printf("  %-20s %+12.2f\n", "Unrealized P/L", summary.UnrealizedPL)
+			fmt.Printf("  %-20s %12.2f\n", "Margin used", summary.MarginUsed)
+			fmt.Printf("  %-20s %12.2f\n", "Margin available", summary.MarginAvail)
+			fmt.Println(bar)
+			return nil
+		},
+	}
+	addCommonFlags(cmd)
+	return cmd
+}
+
+// ── order update-stop ─────────────────────────────────────────────────────
+
+func updateStopCmd(rc *traderpkg.RootConfig) *cobra.Command {
+	var (
+		stopPrice float64
+		takePrice float64
+	)
+	cmd := &cobra.Command{
+		Use:   "update-stop",
+		Short: "Update stop-loss and/or take-profit on an open trade",
+		Long: `Update the stop-loss and/or take-profit price on an open trade.
+
+Use 0 to leave a value unchanged, or a negative value to cancel it.
+
+Examples:
+  trader order update-stop --trade-id 12345 --stop 1.08200
+  trader order update-stop --trade-id 12345 --stop 1.08200 --take 1.09500
+  trader order update-stop --trade-id 12345 --take -1  # cancel take-profit`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Fail fast if neither flag is set
+			if stopPrice == 0 && takePrice == 0 {
+				return fmt.Errorf("at least one of --stop or --take must be non-zero")
+			}
+			ctx := context.Background()
+			svc, err := buildService(ctx, cmd, rc)
+			if err != nil {
+				return err
+			}
+			if err := svc.UpdateTradeStop(ctx, tradeID, stopPrice, takePrice); err != nil {
+				return err
+			}
+			fmt.Printf("Updated trade %s", tradeID)
+			if stopPrice != 0 {
+				if stopPrice < 0 {
+					fmt.Printf("  stop=cancelled")
+				} else {
+					fmt.Printf("  stop=%.5f", stopPrice)
+				}
+			}
+			if takePrice != 0 {
+				if takePrice < 0 {
+					fmt.Printf("  take=cancelled")
+				} else {
+					fmt.Printf("  take=%.5f", takePrice)
+				}
+			}
+			fmt.Println()
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&tradeID, "trade-id", "", "Trade ID to update (required)")
+	cmd.Flags().Float64Var(&stopPrice, "stop", 0, "New stop-loss price (0=unchanged, <0=cancel)")
+	cmd.Flags().Float64Var(&takePrice, "take", 0, "New take-profit price (0=unchanged, <0=cancel)")
+	_ = cmd.MarkFlagRequired("trade-id")
 	addCommonFlags(cmd)
 	return cmd
 }
