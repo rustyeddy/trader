@@ -181,7 +181,7 @@ Notes:
 Notes:
 - Silent build failures will undermine trust in the pipeline.
 
-** TODO Keep recent downloads first and document why
+** DONE Keep recent downloads first and document why
 :PROPERTIES:
 :ID: trader-cleanup-download-reverse-comment
 :END:
