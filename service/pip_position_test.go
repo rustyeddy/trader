@@ -76,7 +76,7 @@ func TestPositionCalc_RejectsNaNPrice(t *testing.T) {
 		Price:      math.NaN(),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "price must be >= 0")
+	assert.Contains(t, err.Error(), "valid number")
 }
 
 func TestPositionCalc_RejectsNegativeUnits(t *testing.T) {
