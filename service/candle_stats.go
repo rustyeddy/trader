@@ -11,9 +11,9 @@ import (
 // CandleStatsRequest parameterises CandleStats.
 type CandleStatsRequest struct {
 	Instrument string // e.g. "EURUSD"
-	Timeframe  string // "M1", "H1", "D1"
-	From       string // YYYY-MM-DD inclusive
-	To         string // YYYY-MM-DD inclusive
+	Timeframe  string // "M1", "H1", "D1"; defaults to "H1" when empty
+	From       string // YYYY-MM-DD inclusive; from == to is a single-day range
+	To         string // YYYY-MM-DD inclusive; must not be before From
 	Source     string // optional; defaults to "oanda"
 	Units      int64  // optional; >0 adds USD column (100000 = standard lot)
 }
@@ -66,12 +66,17 @@ func (s *Service) CandleStats(ctx context.Context, req CandleStatsRequest) (*Can
 	if err != nil {
 		return nil, fmt.Errorf("bad to %q: %w", req.To, err)
 	}
-	if !from.Before(to) {
-		return nil, fmt.Errorf("from must be before to")
+	if to.Before(from) {
+		return nil, fmt.Errorf("from must not be after to")
 	}
 	toExcl := to.AddDate(0, 0, 1)
 
-	tr, err := trader.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), req.Timeframe)
+	tf := req.Timeframe
+	if tf == "" {
+		tf = "H1"
+	}
+
+	tr, err := trader.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), tf)
 	if err != nil {
 		return nil, fmt.Errorf("bad range: %w", err)
 	}
@@ -96,10 +101,6 @@ func (s *Service) CandleStats(ctx context.Context, req CandleStatsRequest) (*Can
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 
-	tf := req.Timeframe
-	if tf == "" {
-		tf = "H1"
-	}
 	rate := candleStatsRates[inst]
 
 	result := &CandleStatsResult{

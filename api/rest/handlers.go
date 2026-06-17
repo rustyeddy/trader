@@ -363,29 +363,49 @@ func (s *Server) handlePosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parseFloat := func(key string) float64 {
-		if v := q.Get(key); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				return f
-			}
+	var price float64
+	if v := q.Get("price"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "price must be a number")
+			return
 		}
-		return 0
+		price = f
 	}
-	parseInt := func(key string) int64 {
-		if v := q.Get(key); v != "" {
-			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-				return i
-			}
+	var units int64
+	if v := q.Get("units"); v != "" {
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "units must be an integer")
+			return
 		}
-		return 0
+		units = i
+	}
+	var notional float64
+	if v := q.Get("notional"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "notional must be a number")
+			return
+		}
+		notional = f
+	}
+	var pips float64
+	if v := q.Get("pips"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "pips must be a number")
+			return
+		}
+		pips = f
 	}
 
 	result, err := s.svc.PositionCalc(r.Context(), service.PositionCalcRequest{
 		Instrument: instrument,
-		Price:      parseFloat("price"),
-		Units:      parseInt("units"),
-		Notional:   parseFloat("notional"),
-		Pips:       parseFloat("pips"),
+		Price:      price,
+		Units:      units,
+		Notional:   notional,
+		Pips:       pips,
 	})
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("position calc: %v", err))

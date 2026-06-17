@@ -45,6 +45,22 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		return nil, fmt.Errorf("unknown instrument: %s", req.Instrument)
 	}
 
+	if math.IsNaN(req.Price) || req.Price < 0 {
+		return nil, fmt.Errorf("price must be >= 0 (use 0 to fetch from OANDA)")
+	}
+	if req.Units < 0 {
+		return nil, fmt.Errorf("units must be >= 0")
+	}
+	if req.Notional < 0 {
+		return nil, fmt.Errorf("notional must be >= 0")
+	}
+	if req.Pips < 0 {
+		return nil, fmt.Errorf("pips must be >= 0")
+	}
+	if req.Units > 0 && req.Notional > 0 {
+		return nil, fmt.Errorf("specify units or notional, not both")
+	}
+
 	price := req.Price
 	if price == 0 {
 		if s.OANDA == nil {

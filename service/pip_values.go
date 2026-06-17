@@ -68,7 +68,10 @@ func (s *Service) PipValues(ctx context.Context, req PipValuesRequest) (*PipValu
 
 	// Explicit overrides always win over live.
 	for k, v := range req.Rates {
-		rates[k] = v
+		if v <= 0 {
+			continue // non-positive rates produce meaningless pip values; skip
+		}
+		rates[trader.NormalizeInstrument(k)] = v
 		live = false
 	}
 
@@ -78,7 +81,8 @@ func (s *Service) PipValues(ctx context.Context, req PipValuesRequest) (*PipValu
 		if inst == nil {
 			continue
 		}
-		rate := rates[name]
+		norm := trader.NormalizeInstrument(name)
+		rate := rates[norm]
 		row := PipValueRow{
 			Instrument: name,
 			Pips1:      inst.PipValueUSD(rate, units, 1),
