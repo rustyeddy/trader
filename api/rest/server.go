@@ -64,7 +64,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/trades/{id}/stop", s.handleUpdateStop)
 	mux.HandleFunc("DELETE /api/v1/trades/{id}", s.handleCloseTrade)
 	mux.HandleFunc("GET /api/v1/transactions", s.handleGetTransactions)
+	mux.HandleFunc("GET /api/v1/candles/validate", s.handleValidateCandles)
 	mux.HandleFunc("GET /api/v1/candles/{instrument}", s.handleGetCandlesCSV)
+	mux.HandleFunc("GET /api/v1/candles/{instrument}/stats", s.handleCandleStats)
+	mux.HandleFunc("GET /api/v1/pip-values", s.handlePipValues)
+	mux.HandleFunc("GET /api/v1/position", s.handlePosition)
 
 	// Backtests — run + browse saved reports
 	mux.HandleFunc("POST /api/v1/backtests/run", s.handleRunBacktest)
