@@ -17,13 +17,29 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-// Store enforces a file naming convention like:
+// Store manages candle CSVs and raw tick files under a pair of symmetric
+// directory trees that share a common root:
 //
-//	GBPUSD-M1-2026-01.csv
-//	GBPUSD-H1-2026-02.csv
-//	GBPUSD-D1-2026-02.csv
+//	/srv/trading/data/
+//	├── candles/<provider>/<instrument>/<year>/<month>/<filename>.csv
+//	└── raw/<provider>/<instrument>/<year>/<month>/<day>/<hh>h_ticks.bi5
+//
+// The "candles" tree is rooted at basedir; the "raw" tree is its sibling
+// (rawRoot = filepath.Dir(basedir) + "/raw").  Providers are source names
+// such as "oanda" or "dukascopy".
+//
+// Candle filenames embed every identifying dimension so the file is
+// self-describing without its path:
+//
+//	gbpusd-2026-01-h1.csv   (instrument-year-month-tf)
+//	eurusd-2025-08-m1.csv
+//	usdchf-2024-12-d1.csv
+//
+// Raw tick files follow the Dukascopy bi5 naming convention:
+//
+//	/srv/trading/data/raw/dukascopy/EURUSD/2025/01/02/13h_ticks.bi5
 type Store struct {
-	basedir string // e.g. "data/candles"
+	basedir string // root of the candles tree, e.g. "/srv/trading/data/candles"
 }
 
 func (s *Store) PathForAsset(k Key) (string, error) {
