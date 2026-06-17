@@ -288,13 +288,13 @@ Notes:
 
 | Service               | REST API                         | CLI                   | MCP                             |
 |-----------------------+----------------------------------+-----------------------+---------------------------------|
-| Fetch candles CSV     | GET /api/v1/candles/{instrument} | data candles          | get_candles_csv                 |
-| Download from OANDA   | —                                | data oanda            | download_candles *(write-mode)* |
-| Candle stats          | —                                | data stats            | —                               |
-| Validate candle store | —                                | data validate-candles | —                               |
-| Sync (tulip)          | —                                | data sync             | —                               |
-| Pip value calc        | —                                | data pip-value        | —                               |
-| Position/notional     | —                                | data position         | —                               |
+| Fetch candles CSV     | GET /api/v1/candles/{instrument}      | data candles          | get_candles_csv                 |
+| Download from OANDA   | —                                     | data oanda            | download_candles *(write-mode)* |
+| Candle stats          | GET /api/v1/candles/{instrument}/stats | data stats            | get_candle_stats                |
+| Validate candle store | GET /api/v1/candles/validate          | data validate-candles | validate_candles                |
+| Sync (tulip)          | —                                     | data sync             | —                               |
+| Pip value calc        | GET /api/v1/pip-values                | data pip-value        | get_pip_values                  |
+| Position/notional     | GET /api/v1/position                  | data position         | get_position                    |
 
 ** Backtests
 
@@ -311,16 +311,16 @@ Notes:
 
 ** Live Trading
 
-| Service           | REST API                | CLI             | MCP |
-|-------------------+-------------------------+-----------------+-----|
-| Run live strategy | —                       | live run        | —   |
-| Run live portfolio | —                      | live portfolio  | —   |
-| Journal           | —                       | live journal    | —   |
-| Start bot         | POST /api/v1/bots       | —               | —   |
-| List bots         | GET /api/v1/bots        | —               | —   |
-| Get bot           | GET /api/v1/bots/{id}   | —               | —   |
-| Stop bot          | DELETE /api/v1/bots/{id} | —              | —   |
-| Event stream      | GET /api/v1/stream/events | —             | —   |
+| Service            | REST API                  | CLI            | MCP |
+|--------------------+---------------------------+----------------+-----|
+| Run live strategy  | —                         | live run       | —   |
+| Run live portfolio | —                         | live portfolio | —   |
+| Journal            | —                         | live journal   | —   |
+| Start bot          | POST /api/v1/bots         | —              | —   |
+| List bots          | GET /api/v1/bots          | —              | —   |
+| Get bot            | GET /api/v1/bots/{id}     | —              | —   |
+| Stop bot           | DELETE /api/v1/bots/{id}  | —              | —   |
+| Event stream       | GET /api/v1/stream/events | —              | —   |
 
 ** Other
 

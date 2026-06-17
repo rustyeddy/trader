@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rustyeddy/trader/service"
 )
@@ -169,7 +170,7 @@ func (s *Server) handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	var instruments []string
 	if q := r.URL.Query().Get("instruments"); q != "" {
-		for _, p := range strings.Split(q, ",") {
+		for p := range strings.SplitSeq(q, ",") {
 			if p = strings.TrimSpace(p); p != "" {
 				instruments = append(instruments, p)
 			}
@@ -213,4 +214,202 @@ func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
 		"count":     len(summaries),
 		"summaries": summaries,
 	})
+}
+
+// ── GET /api/v1/candles/{instrument}/stats ────────────────────────────────
+// Query: timeframe (default H1), from (YYYY-MM-DD), to (YYYY-MM-DD), units (int)
+
+func (s *Server) handleCandleStats(w http.ResponseWriter, r *http.Request) {
+	instrument := r.PathValue("instrument")
+	if instrument == "" {
+		writeErr(w, http.StatusBadRequest, "instrument required")
+		return
+	}
+	q := r.URL.Query()
+	from := q.Get("from")
+	to := q.Get("to")
+	if from == "" || to == "" {
+		writeErr(w, http.StatusBadRequest, "from and to are required (YYYY-MM-DD)")
+		return
+	}
+	tf := q.Get("timeframe")
+	if tf == "" {
+		tf = "H1"
+	}
+	var units int64
+	if u := q.Get("units"); u != "" {
+		parsed, err := strconv.ParseInt(u, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "units must be an integer")
+			return
+		}
+		units = parsed
+	}
+	result, err := s.svc.CandleStats(r.Context(), service.CandleStatsRequest{
+		Instrument: instrument,
+		Timeframe:  tf,
+		From:       from,
+		To:         to,
+		Source:     q.Get("source"),
+		Units:      units,
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("candle stats: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ── GET /api/v1/candles/validate ─────────────────────────────────────────
+// Query: instruments (CSV), from (YYYY-MM), to (YYYY-MM), timeframe, source
+
+func (s *Server) handleValidateCandles(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	instrumentsCSV := q.Get("instruments")
+	if instrumentsCSV == "" {
+		writeErr(w, http.StatusBadRequest, "instruments required (comma-separated)")
+		return
+	}
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	if fromStr == "" || toStr == "" {
+		writeErr(w, http.StatusBadRequest, "from and to required (YYYY-MM)")
+		return
+	}
+
+	var instruments []string
+	for p := range strings.SplitSeq(instrumentsCSV, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			instruments = append(instruments, p)
+		}
+	}
+	from, err := time.Parse("2006-01", fromStr)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("bad from: %v", err))
+		return
+	}
+	// to is inclusive; end of that month exclusive = first day of next month.
+	toMonth, err := time.Parse("2006-01", toStr)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("bad to: %v", err))
+		return
+	}
+	toExcl := toMonth.AddDate(0, 1, 0)
+
+	tf := q.Get("timeframe")
+	if tf == "" {
+		tf = "H1"
+	}
+	src := q.Get("source")
+	if src == "" {
+		src = "oanda"
+	}
+
+	report, err := s.svc.ValidateCandleData(r.Context(), service.ValidateCandleDataRequest{
+		Instruments: instruments,
+		Source:      src,
+		Timeframe:   tf,
+		From:        from,
+		To:          toExcl,
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("validate candles: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// ── GET /api/v1/pip-values ────────────────────────────────────────────────
+// Query: units (int, default 100000), instruments (CSV, default all majors)
+
+func (s *Server) handlePipValues(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var units int64 = 100_000
+	if u := q.Get("units"); u != "" {
+		parsed, err := strconv.ParseInt(u, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "units must be an integer")
+			return
+		}
+		units = parsed
+	}
+	var instruments []string
+	if iv := q.Get("instruments"); iv != "" {
+		for p := range strings.SplitSeq(iv, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				instruments = append(instruments, p)
+			}
+		}
+	}
+	result, err := s.svc.PipValues(r.Context(), service.PipValuesRequest{
+		Units:       units,
+		Instruments: instruments,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("pip values: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ── GET /api/v1/position ──────────────────────────────────────────────────
+// Query: instrument (required), price (float), units (int), notional (float), pips (float)
+
+func (s *Server) handlePosition(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	instrument := q.Get("instrument")
+	if instrument == "" {
+		writeErr(w, http.StatusBadRequest, "instrument required")
+		return
+	}
+
+	var price float64
+	if v := q.Get("price"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "price must be a number")
+			return
+		}
+		price = f
+	}
+	var units int64
+	if v := q.Get("units"); v != "" {
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "units must be an integer")
+			return
+		}
+		units = i
+	}
+	var notional float64
+	if v := q.Get("notional"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "notional must be a number")
+			return
+		}
+		notional = f
+	}
+	var pips float64
+	if v := q.Get("pips"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "pips must be a number")
+			return
+		}
+		pips = f
+	}
+
+	result, err := s.svc.PositionCalc(r.Context(), service.PositionCalcRequest{
+		Instrument: instrument,
+		Price:      price,
+		Units:      units,
+		Notional:   notional,
+		Pips:       pips,
+	})
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("position calc: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

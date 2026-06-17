@@ -69,6 +69,9 @@ Open `http://localhost:9999` for the dashboard.
 | `trader data validate-candles` | Scan local candle months for missing expected bars and raw-source mismatches |
 | `trader data stats` | Print statistics for a historical candle dataset |
 | `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
+| `trader data position` | Convert between position size, USD notional value, and pip P&L |
+| `trader order account` | Print OANDA account balance, NAV, margin, and unrealized P/L |
+| `trader order update-stop` | Update stop-loss and/or take-profit on an open trade |
 | `trader live run` | Run a single-instrument live strategy against OANDA |
 | `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
 | `trader order prices` | Fetch live bid/ask prices from OANDA for the major pairs |
@@ -496,13 +499,18 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/health` | Health check |
-| `GET` | `/api/v1/candles/{instrument}` | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`) |
-| `GET` | `/api/v1/account` | OANDA account summary |
+| `GET` | `/api/v1/account` | OANDA account summary (balance, NAV, margin, unrealized P/L) |
+| `GET` | `/api/v1/prices` | Live bid/ask prices and spread in pips (`?instruments=EURUSD,GBPUSD`, default all majors) |
 | `GET` | `/api/v1/trades` | Open trades |
 | `POST` | `/api/v1/trades` | Place a risk-sized market order |
 | `PATCH` | `/api/v1/trades/{id}/stop` | Update stop / take-profit on an open trade |
 | `DELETE` | `/api/v1/trades/{id}` | Close a trade (full or partial) |
-| `GET` | `/api/v1/transactions` | OANDA transaction history |
+| `GET` | `/api/v1/transactions` | OANDA transaction history (`?since_id=N`) |
+| `GET` | `/api/v1/candles/{instrument}` | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`) |
+| `GET` | `/api/v1/candles/{instrument}/stats` | Candle dataset statistics — swing, spread, trend, session (`from`, `to`, `timeframe`, `units`) |
+| `GET` | `/api/v1/candles/validate` | Validate local candle store for gaps and raw-source mismatches (`instruments`, `from`, `to`, `timeframe`) |
+| `GET` | `/api/v1/pip-values` | USD pip values for major pairs (`?units=100000`, `?instruments=EURUSD,USDJPY`) |
+| `GET` | `/api/v1/position` | Position sizing table — notional, margin, pip P&L (`?instrument=EURUSD&price=1.08&units=100000&pips=20`) |
 | `POST` | `/api/v1/backtests/run` | Run one or more backtest configs |
 | `GET` | `/api/v1/backtests` | List saved backtest reports |
 | `GET` | `/api/v1/backtests/{name}` | Get a single backtest report |
@@ -525,7 +533,24 @@ curl -s 'http://localhost:9999/api/v1/candles/EUR_USD?from=2024-01-01&to=2024-01
 
 ## MCP Tools
 
-`trader mcp serve` exposes typed tools over stdio. The `get_candles_csv` tool calls `Service.CandlesCSV` and returns local stored candles as `text/csv`; it does not require an OANDA token because it reads the local candle store. Live account and trade tools require `--token`, and write tools also require `--enable-write`.
+`trader mcp serve` exposes typed tools over stdio. Tools that read local data or perform pure calculations work without an OANDA token. Live account and trade tools require `--token`. Write tools (`download_candles`, `place_order`, `close_trade`, `update_stop`) also require `--enable-write`.
+
+| Tool | Needs OANDA | Write? | Description |
+|---|---|---|---|
+| `get_account_summary` | yes | — | Account balance, NAV, margin, unrealized P/L |
+| `get_prices` | yes | — | Live bid/ask and spread in pips for major pairs |
+| `list_open_trades` | yes | — | All open positions |
+| `get_transactions` | yes | — | Transaction history since a given ID |
+| `get_candles_csv` | no | — | Local candles in canonical CSV |
+| `get_candle_stats` | no | — | Swing, spread, trend, session statistics for a candle dataset |
+| `validate_candles` | no | — | Scan stored months for gaps and raw-source mismatches |
+| `get_pip_values` | optional | — | USD pip values for major pairs (live rates when OANDA available) |
+| `get_position` | optional | — | Position sizing — notional, margin, pip P&L (live price when OANDA available) |
+| `run_backtest` | no | — | Run backtest configs and return summaries |
+| `download_candles` | yes | yes | Download and store OANDA candles |
+| `place_order` | yes | yes | Size and submit a risk-based market order |
+| `close_trade` | yes | yes | Close an open trade fully or partially |
+| `update_stop` | yes | yes | Update stop-loss and/or take-profit on an open trade |
 
 Local config example:
 

@@ -63,6 +63,48 @@ func (s *Server) tools() []toolDef {
 				"source":     prop("string", "Optional local candle source override, default oanda"),
 			}, []string{"instrument", "timeframe", "from"}),
 		},
+		{
+			Name:        "get_candle_stats",
+			Description: "Analyse a local candle dataset and return swing range, spread, trend, and session statistics.",
+			InputSchema: schema(map[string]any{
+				"instrument": prop("string", "Instrument, e.g. EURUSD"),
+				"timeframe":  prop("string", "Candle timeframe: M1, H1, or D1 (default H1)"),
+				"from":       prop("string", "Start date inclusive, format YYYY-MM-DD"),
+				"to":         prop("string", "End date inclusive, format YYYY-MM-DD"),
+				"source":     prop("string", "Optional data source override (default oanda)"),
+				"units":      prop("integer", "Position size for USD column (e.g. 100000 = standard lot; 0 = omit)"),
+			}, []string{"instrument", "from", "to"}),
+		},
+		{
+			Name:        "validate_candles",
+			Description: "Scan local candle months for missing expected bars and raw-source mismatches. Returns a validation report.",
+			InputSchema: schema(map[string]any{
+				"instruments": prop("array", "Instruments to validate, e.g. [\"EURUSD\",\"GBPUSD\"]"),
+				"from":        prop("string", "Start month inclusive, format YYYY-MM"),
+				"to":          prop("string", "End month inclusive, format YYYY-MM"),
+				"timeframe":   prop("string", "Candle timeframe to validate: M1, H1, or D1 (default H1)"),
+				"source":      prop("string", "Stored candle source to validate (default oanda)"),
+			}, []string{"instruments", "from", "to"}),
+		},
+		{
+			Name:        "get_pip_values",
+			Description: "Return the USD pip value for 1/10/100/1000 pips per major FX pair at a given position size.",
+			InputSchema: schema(map[string]any{
+				"units":       prop("integer", "Position size in units (default 100000 = standard lot)"),
+				"instruments": prop("array", "Subset of instruments, e.g. [\"EURUSD\",\"USDJPY\"]. Empty = all major pairs."),
+			}, nil),
+		},
+		{
+			Name:        "get_position",
+			Description: "Calculate notional value, margin required, and pip P&L for a position. Omit units and notional to get a micro/mini/standard lot table.",
+			InputSchema: schema(map[string]any{
+				"instrument": prop("string", "FX pair, e.g. EURUSD"),
+				"price":      prop("number", "Mid price (fetched live from OANDA if omitted and OANDA is configured)"),
+				"units":      prop("integer", "Specific position size; omit for standard table"),
+				"notional":   prop("number", "Target USD notional; converted to units (use instead of units)"),
+				"pips":       prop("number", "Include USD value of this many pips in the result"),
+			}, []string{"instrument"}),
+		},
 	}
 
 	if s.writeEnable {
@@ -129,8 +171,9 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 
 	if s.svc.OANDA == nil {
 		switch p.Name {
-		case "run_backtest", "get_candles_csv":
-			// allowed without OANDA because they use local data only
+		case "run_backtest", "get_candles_csv", "get_candle_stats", "validate_candles",
+			"get_pip_values", "get_position":
+			// allowed without OANDA — local data or pure calculation
 		default:
 			return errContent("OANDA not configured — start server with --token to enable live endpoints"), nil
 		}
@@ -149,6 +192,14 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return s.toolRunBacktest(ctx, p.Arguments)
 	case "get_candles_csv":
 		return s.toolGetCandlesCSV(ctx, p.Arguments)
+	case "get_candle_stats":
+		return s.toolGetCandleStats(ctx, p.Arguments)
+	case "validate_candles":
+		return s.toolValidateCandles(ctx, p.Arguments)
+	case "get_pip_values":
+		return s.toolGetPipValues(ctx, p.Arguments)
+	case "get_position":
+		return s.toolGetPosition(ctx, p.Arguments)
 	case "download_candles":
 		if !s.writeEnable {
 			return errContent("download_candles requires --enable-write"), nil
@@ -394,6 +445,123 @@ func (s *Server) toolDownloadCandles(ctx context.Context, raw json.RawMessage) (
 		"candles_written":  result.CandlesWritten,
 		"progress":         progress,
 	}), nil
+}
+
+func (s *Server) toolGetCandleStats(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instrument string `json:"instrument"`
+		Timeframe  string `json:"timeframe"`
+		From       string `json:"from"`
+		To         string `json:"to"`
+		Source     string `json:"source"`
+		Units      int64  `json:"units"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &args)
+	}
+	if args.Instrument == "" || args.From == "" || args.To == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, from, and to are required"}
+	}
+	result, err := s.svc.CandleStats(ctx, service.CandleStatsRequest{
+		Instrument: args.Instrument,
+		Timeframe:  args.Timeframe,
+		From:       args.From,
+		To:         args.To,
+		Source:     args.Source,
+		Units:      args.Units,
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("get_candle_stats: %v", err)), nil
+	}
+	return jsonContent(result), nil
+}
+
+func (s *Server) toolValidateCandles(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instruments []string `json:"instruments"`
+		From        string   `json:"from"`
+		To          string   `json:"to"`
+		Timeframe   string   `json:"timeframe"`
+		Source      string   `json:"source"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &args)
+	}
+	if len(args.Instruments) == 0 || args.From == "" || args.To == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instruments, from, and to are required"}
+	}
+	from, err := time.Parse("2006-01", args.From)
+	if err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: "from must be YYYY-MM"}
+	}
+	toMonth, err := time.Parse("2006-01", args.To)
+	if err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: "to must be YYYY-MM"}
+	}
+	tf := args.Timeframe
+	if tf == "" {
+		tf = "H1"
+	}
+	src := args.Source
+	if src == "" {
+		src = "oanda"
+	}
+	report, err := s.svc.ValidateCandleData(ctx, service.ValidateCandleDataRequest{
+		Instruments: args.Instruments,
+		Source:      src,
+		Timeframe:   tf,
+		From:        from,
+		To:          toMonth.AddDate(0, 1, 0),
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("validate_candles: %v", err)), nil
+	}
+	return jsonContent(report), nil
+}
+
+func (s *Server) toolGetPipValues(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Units       int64    `json:"units"`
+		Instruments []string `json:"instruments"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &args)
+	}
+	result, err := s.svc.PipValues(ctx, service.PipValuesRequest{
+		Units:       args.Units,
+		Instruments: args.Instruments,
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("get_pip_values: %v", err)), nil
+	}
+	return jsonContent(result), nil
+}
+
+func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instrument string  `json:"instrument"`
+		Price      float64 `json:"price"`
+		Units      int64   `json:"units"`
+		Notional   float64 `json:"notional"`
+		Pips       float64 `json:"pips"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &args)
+	}
+	if args.Instrument == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instrument is required"}
+	}
+	result, err := s.svc.PositionCalc(ctx, service.PositionCalcRequest{
+		Instrument: args.Instrument,
+		Price:      args.Price,
+		Units:      args.Units,
+		Notional:   args.Notional,
+		Pips:       args.Pips,
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("get_position: %v", err)), nil
+	}
+	return jsonContent(result), nil
 }
 
 // ── schema helpers ────────────────────────────────────────────────────────
