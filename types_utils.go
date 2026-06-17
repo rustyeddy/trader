@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+var estNoDST = time.FixedZone("EST", -5*60*60)
+
+const layout = "20060102 150405"
+
 // parseToUnix parses a timestamp string and returns a minute-aligned UTC Unix timestamp.
 func parseToUnix(s string) (Timestamp, error) {
 	s = strings.TrimSpace(s)

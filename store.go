@@ -55,28 +55,32 @@ func (s *Store) PathForAsset(k Key) (string, error) {
 	}
 }
 
-func (s *Store) pathForMonthlyCandle(k Key) string {
+// monthlyCandle builds a monthly candle path under root.
+// Used for both the canonical candle tree (basedir) and the raw preservation
+// tree (rawRoot) so path structure stays consistent across both.
+func monthlyCandle(root string, k Key) string {
 	source := normalizeSource(k.Source)
 	if source == "" {
 		source = "unknown"
 	}
 	instrument := NormalizeInstrument(k.Instrument)
 	tf := strings.ToLower(k.TF.String())
+	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv", instrument, k.Year, k.Month, tf)
+	return filepath.Join(root, source, instrument,
+		fmt.Sprintf("%04d", k.Year), fmt.Sprintf("%02d", k.Month), filename)
+}
 
-	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
-		instrument,
-		k.Year,
-		k.Month,
-		tf,
-	)
+func (s *Store) pathForMonthlyCandle(k Key) string {
+	return monthlyCandle(s.basedir, k)
+}
 
-	return filepath.Join(
-		s.basedir,
-		source,
-		instrument,
-		fmt.Sprintf("%04d", k.Year),
-		fmt.Sprintf("%02d", k.Month),
-		filename)
+// RawCandlePath returns the path for a monthly candle CSV under the raw tree.
+// It mirrors PathForAsset but roots in rawRoot instead of basedir.
+func (s *Store) RawCandlePath(k Key) (string, error) {
+	if k.Kind != KindCandle || k.Day != 0 || k.Hour != 0 {
+		return "", fmt.Errorf("RawCandlePath requires a monthly candle key (Day=0, Hour=0)")
+	}
+	return monthlyCandle(s.rawRoot(), k), nil
 }
 
 func parseCandlePath(path string) (k Key, ok bool) {

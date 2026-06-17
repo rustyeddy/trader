@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -274,7 +273,7 @@ type rawOandaCoverage struct {
 }
 
 func compareRawOandaMonth(key Key, cs *candleSet, rawDir string) ([]CandleValidationIssue, error) {
-	rawPath := rawOandaMonthPath(rawDir, key)
+	rawPath := monthlyCandle(rawDir, key)
 	coverage, err := readRawOandaMonth(rawPath, key)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -366,13 +365,6 @@ func diffSample(left, right map[int]struct{}, key Key) []string {
 	return out
 }
 
-func rawOandaMonthPath(rawDir string, key Key) string {
-	return filepath.Join(rawDir, "oanda", NormalizeInstrument(key.Instrument),
-		fmt.Sprintf("%04d", key.Year),
-		fmt.Sprintf("%02d", key.Month),
-		fmt.Sprintf("%s-%04d-%02d-%s.csv",
-			NormalizeInstrument(key.Instrument), key.Year, key.Month, strings.ToLower(key.TF.String())))
-}
 
 func readRawOandaMonth(path string, key Key) (*rawOandaCoverage, error) {
 	f, err := os.Open(path)

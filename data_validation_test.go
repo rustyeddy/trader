@@ -15,7 +15,7 @@ import (
 func writeRawOandaMonthFile(t *testing.T, rawDir string, key Key, rows []string) string {
 	t.Helper()
 
-	path := rawOandaMonthPath(rawDir, key)
+	path := monthlyCandle(rawDir, key)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 
 	content := fmt.Sprintf("# schema=raw-v1 source=oanda instrument=%s tf=%s year=%d month=%02d\n",
