@@ -40,9 +40,6 @@ func RunAnalysis(ctx context.Context, itr CandleIterator, analyzers []Analyzer) 
 		if !ok {
 			break
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		for _, a := range analyzers {
 			a.Update(&ct)
 		}

@@ -123,7 +123,6 @@ func TestSwingAnalyzer_SingleCandle(t *testing.T) {
 	assert.Equal(t, "1", stats["count"])
 	assert.Equal(t, "2.0 pips", stats["mean"])
 	assert.Equal(t, "2.0 pips", stats["p0"])
-	assert.Equal(t, "2.0 pips", stats["min"])
 	assert.Equal(t, "2.0 pips", stats["max"])
 	assert.Equal(t, "2.0 pips", stats["p50"])
 }
@@ -138,7 +137,6 @@ func TestSwingAnalyzer_MultipleCandles(t *testing.T) {
 	assert.Equal(t, "3", stats["count"])
 	assert.Equal(t, "2.0 pips", stats["mean"])
 	assert.Equal(t, "1.0 pips", stats["p0"])
-	assert.Equal(t, "1.0 pips", stats["min"])
 	assert.Equal(t, "3.0 pips", stats["max"])
 	assert.Equal(t, "2.0 pips", stats["p50"])
 }

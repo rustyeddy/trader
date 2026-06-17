@@ -37,7 +37,6 @@ func (a *SwingAnalyzer) Stats() []Stat {
 		{Name: "count", Value: fmt.Sprintf("%d", a.ranges.Len())},
 		pipStat("mean", a.ranges.MeanPips(uPip), 1),
 		pipStat("p0", a.ranges.percentilePips(0, uPip, sorted), 1),
-		pipStat("min", a.ranges.MinPips(uPip), 1),
 		pipStat("p25", a.ranges.percentilePips(25, uPip, sorted), 1),
 		pipStat("p50", a.ranges.percentilePips(50, uPip, sorted), 1),
 		pipStat("p75", a.ranges.percentilePips(75, uPip, sorted), 1),
