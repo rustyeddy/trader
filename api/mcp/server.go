@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/rustyeddy/trader/service"
@@ -126,6 +127,7 @@ const (
 	errInvalidRequest = -32600
 	errMethodNotFound = -32601
 	errInvalidParams  = -32602
+	errInternal       = -32603
 )
 
 // process handles one JSON-RPC line and returns the response bytes (with
@@ -171,14 +173,31 @@ func (s *Server) handleLine(ctx context.Context, line []byte) {
 // the REST API when running trader serve.
 //
 //	POST /mcp   Content-Type: application/json
+//
+// Note: POST /mcp is covered by the REST server's CORS middleware, which
+// allows all origins. If --mcp-enable-write is set, any browser origin can
+// invoke write tools (place_order, close_trade, update_stop). Restrict the
+// CORS origin or add bearer-token authentication before enabling writes in
+// a production environment.
 func (s *Server) HTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ct := r.Header.Get("Content-Type")
+		if ct != "" && !strings.HasPrefix(ct, "application/json") {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		resp := s.process(r.Context(), bytes.TrimSpace(body))
+		// A nil response means the request was a notification; no reply is
+		// required by the JSON-RPC spec.
+		if resp == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(bytes.TrimRight(resp, "\n"))
 	})

@@ -229,6 +229,10 @@ Example config file (see deploy/trader.yaml.example):
 				}
 				srv.WithMCPHandler(mcpSrv.HTTPHandler())
 				log.Info("serve: MCP available", "endpoint", "POST /mcp", "write", mcpEnableWrite)
+				if mcpEnableWrite {
+					log.Warn("serve: MCP write tools enabled over HTTP — POST /mcp has no authentication; " +
+						"restrict network access or add a reverse-proxy auth layer before exposing to untrusted origins")
+				}
 				// Serve the SvelteKit UI from the embedded dist/ directory.
 				uiFS, fsErr := traderui.SubFS()
 				if fsErr == nil {

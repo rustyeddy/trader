@@ -32,6 +32,7 @@ tulip-sync:
 
 # Build tulip, sync its dist, then rebuild the Go binary.
 build-tulip:
+	@test -d $(TULIP_DIR) || (echo "error: $(TULIP_DIR) not found — set TULIP_DIR to the tulip repo path" && exit 1)
 	cd $(TULIP_DIR) && npm run build
 	$(MAKE) tulip-sync build
 
