@@ -102,7 +102,7 @@ Notes:
 Notes:
 - Split ownership of candle roots will keep causing bugs and confusion.
 
-** TODO Update inventory candle scanning to understand monthly candle files
+** DONE Update inventory candle scanning to understand monthly candle files
 :PROPERTIES:
 :ID: trader-cleanup-inventory-monthly-candles
 :END:
