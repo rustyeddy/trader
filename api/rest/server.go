@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Account & trades (OANDA required)
 	mux.HandleFunc("GET /api/v1/account", s.handleGetAccount)
+	mux.HandleFunc("GET /api/v1/prices", s.handleGetPrices)
 	mux.HandleFunc("GET /api/v1/trades", s.handleListTrades)
 	mux.HandleFunc("POST /api/v1/trades", s.handlePlaceOrder)
 	mux.HandleFunc("PATCH /api/v1/trades/{id}/stop", s.handleUpdateStop)

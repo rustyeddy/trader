@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/rustyeddy/trader/service"
 )
@@ -158,6 +159,30 @@ func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
 		"transactions":        txns,
 		"last_transaction_id": lastID,
 	})
+}
+
+// ── GET /api/v1/prices ───────────────────────────────────────────────────
+
+func (s *Server) handleGetPrices(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOANDA(w) {
+		return
+	}
+	var instruments []string
+	if q := r.URL.Query().Get("instruments"); q != "" {
+		for _, p := range strings.Split(q, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				instruments = append(instruments, p)
+			}
+		}
+	}
+	prices, err := s.svc.GetPrices(r.Context(), service.GetPricesRequest{
+		Instruments: instruments,
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("get prices: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prices": prices})
 }
 
 // ── POST /api/v1/backtests/run ────────────────────────────────────────────
