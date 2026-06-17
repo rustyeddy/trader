@@ -26,7 +26,7 @@ accuracy, planner correctness, and pipeline efficiency.
 Clean up and stabilize first.
 Then improve planning accuracy, build correctness, and performance.
 
-* TODO Cleanup backlog
+* DONE Cleanup backlog
 
 ** DONE Move datafile.download to downloader.go
 ** DONE Choose and document the candle storage convention
@@ -47,7 +47,7 @@ Then improve planning accuracy, build correctness, and performance.
 Notes:
 - This is the foundation item because several other mismatches come from competing storage models.
 
-** TODO Move all candle CSV read/write logic into =data/store.go=
+** DONE Move all candle CSV read/write logic into =data/store.go=
 :PROPERTIES:
 :ID: trader-cleanup-store-single-owner
 :END:
@@ -102,7 +102,7 @@ Notes:
 Notes:
 - Split ownership of candle roots will keep causing bugs and confusion.
 
-** TODO Update inventory candle scanning to understand monthly candle files
+** DONE Update inventory candle scanning to understand monthly candle files
 :PROPERTIES:
 :ID: trader-cleanup-inventory-monthly-candles
 :END:
@@ -125,7 +125,7 @@ Notes:
 Notes:
 - Inventory must match the real candle file layout exactly or planner/build logic will drift.
 
-** TODO Align planner candle targets with the monthly storage model
+** DONE Align planner candle targets with the monthly storage model
 :PROPERTIES:
 :ID: trader-cleanup-planner-monthly-targets
 :END:
@@ -139,8 +139,7 @@ Notes:
 
 Notes:
 - Planner, store, and inventory must agree on target granularity.
-
-** TODO Decide which M1 build path is the keeper and remove the competing path
+** DONE Decide which M1 build path is the keeper and remove the competing path
 :PROPERTIES:
 :ID: trader-cleanup-pick-one-m1-path
 :END:
@@ -156,7 +155,7 @@ Notes:
 Notes:
 - Keeping two competing M1 build paths is making cleanup harder.
 
-** TODO Add a proper =sync.WaitGroup= for the =plan.BuildM1= loop
+** DONE Add a proper =sync.WaitGroup= for the =plan.BuildM1= loop
 :PROPERTIES:
 :ID: trader-cleanup-buildm1-waitgroup
 :END:
@@ -168,7 +167,7 @@ Notes:
 Notes:
 - This is a correctness issue, not just cleanup.
 
-** TODO Add build error collection/reporting for the =plan.BuildM1= loop
+** DONE Add build error collection/reporting for the =plan.BuildM1= loop
 :PROPERTIES:
 :ID: trader-cleanup-buildm1-errors
 :END:
@@ -182,7 +181,7 @@ Notes:
 Notes:
 - Silent build failures will undermine trust in the pipeline.
 
-** TODO Keep recent downloads first and document why
+** DONE Keep recent downloads first and document why
 :PROPERTIES:
 :ID: trader-cleanup-download-reverse-comment
 :END:
@@ -195,7 +194,7 @@ Notes:
 Notes:
 - This is not a bug; it should just be documented so it does not look accidental later.
 
-** TODO Fix printing of =Money= and =Price=
+** DONE Fix printing of =Money= and =Price=
 :PROPERTIES:
 :ID: trader-cleanup-money-price-string
 :END:
@@ -208,7 +207,7 @@ Notes:
 Notes:
 - This is not pipeline-critical, but it improves debugging and reduces confusion.
 
-** TODO Audit candle file naming and parsing for redundancy and consistency
+** DONE Audit candle file naming and parsing for redundancy and consistency
 :PROPERTIES:
 :ID: trader-cleanup-filename-consistency
 :END:
@@ -224,7 +223,7 @@ Notes:
 Notes:
 - This supports both inventory correctness and human readability.
 
-** TODO Audit all candle path construction and remove duplicates
+** DONE Audit all candle path construction and remove duplicates
 :PROPERTIES:
 :ID: trader-cleanup-candle-path-audit
 :END:
@@ -238,7 +237,7 @@ Notes:
 
 * Suggested working order
 
-** TODO Work in this order unless a compile error forces a slight change
+** DONE Work in this order unless a compile error forces a slight change
 :PROPERTIES:
 :ID: trader-cleanup-working-order
 :END:
@@ -258,7 +257,7 @@ Notes:
 
 * Per-item workflow template
 
-** TODO Use this workflow for each cleanup item
+** DONE Use this workflow for each cleanup item
 :PROPERTIES:
 :ID: trader-cleanup-item-workflow
 :END:
@@ -277,13 +276,13 @@ Notes:
 | Service            | REST API                          | CLI                      | MCP                        |
 |--------------------+-----------------------------------+--------------------------+----------------------------|
 | Account summary    | GET /api/v1/account               | —                        | get_account_summary        |
+| Live bid/ask prices | GET /api/v1/prices               | order prices             | get_prices                 |
 | List open trades   | GET /api/v1/trades                | order list               | list_open_trades           |
 | Place order        | POST /api/v1/trades               | order new                | place_order *(write-mode)* |
 | Close trade        | DELETE /api/v1/trades/{id}        | order close              | close_trade *(write-mode)* |
 | Update stop/TP     | PATCH /api/v1/trades/{id}/stop    | —                        | update_stop *(write-mode)* |
 | Transactions       | GET /api/v1/transactions          | order transactions       | get_transactions           |
 | Transaction stream | GET /api/v1/stream/account        | order transactions-stream | —                         |
-| Live bid/ask prices | —                                | order prices             | —                          |
 
 ** Candle Data
 

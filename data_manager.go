@@ -637,6 +637,8 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 	defer wg.Wait()
 	defer close(q)
 
+	// Reverse so the most recent months download first — downloads take weeks
+	// and recent data is immediately useful for backtesting.
 	slices.Reverse(dm.plan.Download)
 	for _, key := range dm.plan.Download {
 

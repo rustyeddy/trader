@@ -46,6 +46,13 @@ func (s *Server) tools() []toolDef {
 			}, []string{"config_paths"}),
 		},
 		{
+			Name:        "get_prices",
+			Description: "Return live bid/ask prices and spread in pips for one or more instruments. Defaults to all major pairs.",
+			InputSchema: schema(map[string]any{
+				"instruments": prop("array", "Trader-format instrument symbols to query, e.g. [\"EURUSD\",\"GBPUSD\"]. Empty = all major pairs."),
+			}, nil),
+		},
+		{
 			Name:        "get_candles_csv",
 			Description: "Return local candles for an instrument/timeframe/date-range in canonical CSV format.",
 			InputSchema: schema(map[string]any{
@@ -132,6 +139,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	switch p.Name {
 	case "get_account_summary":
 		return s.toolGetAccountSummary(ctx)
+	case "get_prices":
+		return s.toolGetPrices(ctx, p.Arguments)
 	case "list_open_trades":
 		return s.toolListOpenTrades(ctx)
 	case "get_transactions":
@@ -173,6 +182,22 @@ func (s *Server) toolGetAccountSummary(ctx context.Context) (any, *rpcError) {
 		return errContent(fmt.Sprintf("get_account_summary: %v", err)), nil
 	}
 	return jsonContent(summary), nil
+}
+
+func (s *Server) toolGetPrices(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instruments []string `json:"instruments"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &args)
+	}
+	prices, err := s.svc.GetPrices(ctx, service.GetPricesRequest{
+		Instruments: args.Instruments,
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("get_prices: %v", err)), nil
+	}
+	return jsonContent(map[string]any{"prices": prices}), nil
 }
 
 func (s *Server) toolListOpenTrades(ctx context.Context) (any, *rpcError) {

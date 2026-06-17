@@ -125,12 +125,20 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 			nonZero++
 		}
 
-		if err := store.WriteMonthlyCandles("oanda", instrTrader, tf, monthSlotStart, traderCandles); err != nil {
+		if err := store.WriteMonthlyCandles(trader.SourceOanda, instrTrader, tf, monthSlotStart, traderCandles); err != nil {
 			return result, fmt.Errorf("write %s: %w", monthSlotStart.Format("2006-01"), err)
 		}
 
 		if req.RawDir != "" {
-			if err := writeRawOandaMonth(req.RawDir, instrTrader, tfStr, monthSlotStart, candles); err != nil {
+			rawKey := trader.Key{
+				Kind:       trader.KindCandle,
+				Source:     trader.SourceOanda,
+				Instrument: instrTrader,
+				TF:         tf,
+				Year:       cursor.Year(),
+				Month:      int(cursor.Month()),
+			}
+			if err := writeRawOandaMonth(store, rawKey, monthSlotStart, candles); err != nil {
 				return result, fmt.Errorf("write raw %s: %w", monthSlotStart.Format("2006-01"), err)
 			}
 		}
@@ -172,17 +180,15 @@ func toOandaGranularity(s string) string {
 }
 
 // writeRawOandaMonth preserves the bid+ask OHLC exactly as OANDA returned it.
-// Path: <rawDir>/oanda/<INSTR>/<YEAR>/<MM>/<INSTR>-<YEAR>-<MM>-<tf>.csv
-func writeRawOandaMonth(rawDir, instrument, tfStr string, monthStart time.Time, candles []oanda.Candle) error {
-	dir := filepath.Join(rawDir, "oanda", instrument,
-		fmt.Sprintf("%04d", monthStart.Year()),
-		fmt.Sprintf("%02d", int(monthStart.Month())))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// The path is determined by the store so ownership of file placement stays centralised.
+func writeRawOandaMonth(s *trader.Store, key trader.Key, monthStart time.Time, candles []oanda.Candle) error {
+	path, err := s.RawCandlePath(key)
+	if err != nil {
 		return err
 	}
-	filename := fmt.Sprintf("%s-%04d-%02d-%s.csv",
-		instrument, monthStart.Year(), int(monthStart.Month()), strings.ToLower(tfStr))
-	path := filepath.Join(dir, filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
@@ -192,8 +198,9 @@ func writeRawOandaMonth(rawDir, instrument, tfStr string, monthStart time.Time, 
 	}
 	defer f.Close()
 
+	tf := strings.ToLower(key.TF.String())
 	if _, err := fmt.Fprintf(f, "# schema=raw-v1 source=oanda instrument=%s tf=%s year=%d month=%02d\n",
-		instrument, strings.ToLower(tfStr), monthStart.Year(), int(monthStart.Month())); err != nil {
+		key.Instrument, tf, key.Year, key.Month); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(f, "time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume,complete"); err != nil {
