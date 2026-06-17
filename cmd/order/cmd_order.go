@@ -459,6 +459,10 @@ Examples:
   trader order update-stop --trade-id 12345 --stop 1.08200 --take 1.09500
   trader order update-stop --trade-id 12345 --take -1  # cancel take-profit`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Fail fast if neither flag is set
+			if stopPrice == 0 && takePrice == 0 {
+				return fmt.Errorf("at least one of --stop or --take must be non-zero")
+			}
 			ctx := context.Background()
 			svc, err := buildService(ctx, cmd, rc)
 			if err != nil {
