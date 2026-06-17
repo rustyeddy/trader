@@ -270,6 +270,68 @@ Notes:
 - [ ] Commit or checkpoint if the result is good
 - [ ] Then move to the next item
 
+* API Surface Comparison: REST vs CLI vs MCP
+
+** Account & Trades
+
+| Service            | REST API                          | CLI                      | MCP                        |
+|--------------------+-----------------------------------+--------------------------+----------------------------|
+| Account summary    | GET /api/v1/account               | —                        | get_account_summary        |
+| List open trades   | GET /api/v1/trades                | order list               | list_open_trades           |
+| Place order        | POST /api/v1/trades               | order new                | place_order *(write-mode)* |
+| Close trade        | DELETE /api/v1/trades/{id}        | order close              | close_trade *(write-mode)* |
+| Update stop/TP     | PATCH /api/v1/trades/{id}/stop    | —                        | update_stop *(write-mode)* |
+| Transactions       | GET /api/v1/transactions          | order transactions       | get_transactions           |
+| Transaction stream | GET /api/v1/stream/account        | order transactions-stream | —                         |
+| Live bid/ask prices | —                                | order prices             | —                          |
+
+** Candle Data
+
+| Service              | REST API                       | CLI                  | MCP                           |
+|----------------------+--------------------------------+----------------------+-------------------------------|
+| Fetch candles CSV    | GET /api/v1/candles/{instrument} | data candles       | get_candles_csv               |
+| Download from OANDA  | —                              | data oanda           | download_candles *(write-mode)* |
+| Candle stats         | —                              | data stats           | —                             |
+| Validate candle store | —                             | data validate-candles | —                            |
+| Sync (tulip)         | —                              | data sync            | —                             |
+| Pip value calc       | —                              | data pip-value       | —                             |
+| Position/notional    | —                              | data position        | —                             |
+
+** Backtests
+
+| Service              | REST API                           | CLI               | MCP                           |
+|----------------------+------------------------------------+-------------------+-------------------------------|
+| Run backtest         | POST /api/v1/backtests/run         | backtest run      | run_backtest                  |
+| List results         | GET /api/v1/backtests              | —                 | backtest://results *(resource)* |
+| Get result           | GET /api/v1/backtests/{name}       | —                 | backtest://results/{name} *(resource)* |
+| Get org report       | GET /api/v1/backtests/{name}/org   | —                 | —                             |
+| Get backtest candles | GET /api/v1/backtests/{name}/candles | —               | —                             |
+| Regression check     | —                                  | backtest regress  | —                             |
+| Stream backtest      | GET /api/v1/stream/backtest/{id}   | —                 | —                             |
+| Browse configs       | —                                  | —                 | config://configs *(resource)* |
+
+** Live Trading
+
+| Service           | REST API                | CLI             | MCP |
+|-------------------+-------------------------+-----------------+-----|
+| Run live strategy | —                       | live run        | —   |
+| Run live portfolio | —                      | live portfolio  | —   |
+| Journal           | —                       | live journal    | —   |
+| Start bot         | POST /api/v1/bots       | —               | —   |
+| List bots         | GET /api/v1/bots        | —               | —   |
+| Get bot           | GET /api/v1/bots/{id}   | —               | —   |
+| Stop bot          | DELETE /api/v1/bots/{id} | —              | —   |
+| Event stream      | GET /api/v1/stream/events | —             | —   |
+
+** Other
+
+| Service              | REST API              | CLI                            | MCP |
+|----------------------+-----------------------+--------------------------------+-----|
+| Replay pricing       | POST /api/v1/replay   | replay pricing / replay events | —   |
+| Analysis (ChatGPT)   | POST /api/v1/analysis | analysis                       | —   |
+| Health check         | GET /health           | —                              | —   |
+| Version              | —                     | version                        | —   |
+
 * Cleanup notes
 
 ** Notes
