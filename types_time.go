@@ -319,6 +319,7 @@ const (
 	Ticks Timeframe = 1
 	M1    Timeframe = 60
 	H1    Timeframe = 3600
+	H4    Timeframe = 14400
 	D1    Timeframe = 86400
 )
 
@@ -332,6 +333,8 @@ func ParseTimeframe(s string) (Timeframe, error) {
 		return M1, nil
 	case "h1":
 		return H1, nil
+	case "h4":
+		return H4, nil
 	case "d", "d1":
 		return D1, nil
 	default:
@@ -348,6 +351,8 @@ func normalizeTF(tf string) string {
 		return "m1"
 	case "3600":
 		return "h1"
+	case "14400":
+		return "h4"
 	case "86400":
 		return "d1"
 	}
@@ -368,6 +373,9 @@ func (tf Timeframe) String() string {
 
 	case H1:
 		return "h1"
+
+	case H4:
+		return "h4"
 
 	case D1:
 		return "d1"
