@@ -16,6 +16,8 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 func init() {
 	CMDBacktest.AddCommand(CMDBacktestRun)
 	CMDBacktest.AddCommand(CMDBacktestRegress)
+	CMDBacktest.AddCommand(CMDBacktestList)
+	CMDBacktest.AddCommand(CMDBacktestGet)
 }
 
 var CMDBacktest = &cobra.Command{
