@@ -11,7 +11,7 @@ LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
 
 TULIP_DIR ?= ../tulip
 
-.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean
+.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
 
 all: vet build
 
@@ -99,6 +99,26 @@ sweep:
 
 install: build
 	cp $(BIN) $(INSTALL_DIR)/$(APP)
+
+# CANDLE_DIR is the root of the local candle store.
+CANDLE_DIR  ?= /srv/trading/data/candles/oanda
+# GDRIVE_DEST is the rclone remote:path destination.
+# Override with: make backup-candles GDRIVE_DEST=myremote:my-bucket/candles
+GDRIVE_DEST ?= gdrive:trader-candles/oanda
+
+# Incrementally sync the candle store to Google Drive using rclone.
+# M1 data (2005-present, ~1 GB) is not fully re-downloadable from OANDA —
+# back it up. H1/H4/D are small and can be re-downloaded, but are included
+# for completeness. Only changed/new files are transferred after the first run.
+#
+# Prerequisites: install rclone and run `rclone config` once to authorise
+# Google Drive. See README.md § "Candle Backup" for details.
+backup-candles:
+	@command -v rclone >/dev/null 2>&1 || { echo "rclone not found — install with: sudo apt install rclone"; exit 1; }
+	rclone sync $(CANDLE_DIR) $(GDRIVE_DEST) \
+		--progress \
+		--transfers 8 \
+		--checkers 16
 
 clean:
 	@rm -rf $(BIN_DIR) coverage.out coverage.html ui/dist ui/.svelte-kit

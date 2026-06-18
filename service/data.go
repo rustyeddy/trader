@@ -232,10 +232,13 @@ func writeRawOandaMonth(s *trader.Store, key trader.Key, monthStart time.Time, c
 // instruments. From is auto-detected from the store when zero.
 type UpdateOandaCandlesRequest struct {
 	Instruments []string // OANDA format, e.g. ["EUR_USD", "GBP_USD"]
-	Timeframes  []string // e.g. ["M1", "H1", "D"]
+	Timeframes  []string // e.g. ["M1", "H1", "H4", "D"]
 	// To defaults to yesterday (last complete UTC day) when zero.
-	To     time.Time
-	RawDir string
+	To time.Time
+	// SeedFrom is used as the start date when no prior data exists for a
+	// pair (instead of erroring). Zero means error on missing baseline.
+	SeedFrom time.Time
+	RawDir   string
 	// OnProgress is called after each instrument+timeframe completes.
 	OnProgress func(msg string)
 }
@@ -283,14 +286,18 @@ func (s *Service) UpdateOandaCandles(ctx context.Context, req UpdateOandaCandles
 			key := inst + "/" + tf
 			from, err := lastNonZeroCandleDate(trader.GetStore(), inst, tf)
 			if err != nil {
-				result.Results[key] = UpdateItemResult{Err: fmt.Errorf("detect last candle: %w", err)}
-				if req.OnProgress != nil {
-					req.OnProgress(fmt.Sprintf("%-12s %-4s  ERROR: %v", inst, tf, err))
+				if !req.SeedFrom.IsZero() {
+					from = req.SeedFrom
+				} else {
+					result.Results[key] = UpdateItemResult{Err: fmt.Errorf("detect last candle: %w", err)}
+					if req.OnProgress != nil {
+						req.OnProgress(fmt.Sprintf("%-12s %-4s  ERROR: %v (use --from YYYY-MM-DD to seed)", inst, tf, err))
+					}
+					continue
 				}
-				continue
+			} else {
+				from = from.AddDate(0, 0, 1) // day after last complete candle
 			}
-			// Start the day after the last complete candle.
-			from = from.AddDate(0, 0, 1)
 			if !from.Before(to) {
 				result.Results[key] = UpdateItemResult{From: from, To: to, CandlesWritten: 0}
 				if req.OnProgress != nil {

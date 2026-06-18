@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,12 +24,13 @@ var defaultInstruments = []string{
 	"USD_CAD", "USD_CHF", "USD_JPY",
 }
 
-var defaultTimeframes = []string{"M1", "H1", "D"}
+var defaultTimeframes = []string{"M1", "H1", "H4", "D"}
 
 func newUpdateCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	var (
 		instrumentsCSV string
 		timeframesCSV  string
+		fromStr        string
 		token          string
 		env            string
 		rawDir         string
@@ -63,6 +65,15 @@ Examples:
 				timeframes = defaultTimeframes
 			}
 
+			var seedFrom time.Time
+			if fromStr != "" {
+				var err error
+				seedFrom, err = time.Parse("2006-01-02", fromStr)
+				if err != nil {
+					return fmt.Errorf("bad --from %q: %w", fromStr, err)
+				}
+			}
+
 			if dryRun {
 				fmt.Fprintf(cmd.OutOrStdout(), "Dry run — would update %d instruments × %d timeframes:\n",
 					len(instruments), len(timeframes))
@@ -70,6 +81,9 @@ Examples:
 					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", inst)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Timeframes: %s\n", strings.Join(timeframes, ", "))
+				if !seedFrom.IsZero() {
+					fmt.Fprintf(cmd.OutOrStdout(), "Seed from: %s (used when no prior data exists)\n", seedFrom.Format("2006-01-02"))
+				}
 				return nil
 			}
 
@@ -92,6 +106,7 @@ Examples:
 			result, err := svc.UpdateOandaCandles(context.Background(), service.UpdateOandaCandlesRequest{
 				Instruments: instruments,
 				Timeframes:  timeframes,
+				SeedFrom:    seedFrom,
 				RawDir:      rawDir,
 				OnProgress: func(msg string) {
 					fmt.Fprintln(out, msg)
@@ -116,7 +131,8 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&instrumentsCSV, "instruments", "", "Comma-separated instruments to update (default: all 24)")
-	cmd.Flags().StringVar(&timeframesCSV, "timeframes", "", "Comma-separated timeframes (default: M1,H1,D)")
+	cmd.Flags().StringVar(&timeframesCSV, "timeframes", "", "Comma-separated timeframes (default: M1,H1,H4,D)")
+	cmd.Flags().StringVar(&fromStr, "from", "", "Seed start date YYYY-MM-DD; used when no prior data exists for a pair")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
 	cmd.Flags().StringVar(&rawDir, "raw-dir", "/srv/trading/data/raw", "Root for raw bid+ask preservation")

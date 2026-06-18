@@ -24,6 +24,8 @@ func TestToOandaGranularity(t *testing.T) {
 		{"d", "D"},
 		{"H1", "H1"},
 		{"h1", "H1"},
+		{"H4", "H4"},
+		{"h4", "H4"},
 		{"M1", "M1"},
 		{"m1", "M1"},
 	}
@@ -37,6 +39,9 @@ func TestParseTraderTimeframe(t *testing.T) {
 	assert.NoError(t, err)
 
 	_, err = parseTraderTimeframe("D")
+	assert.NoError(t, err)
+
+	_, err = parseTraderTimeframe("H4")
 	assert.NoError(t, err)
 
 	_, err = parseTraderTimeframe("bogus")

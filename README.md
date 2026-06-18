@@ -320,14 +320,22 @@ trader data sync --instruments EUR_USD,GBP_USD --from 2022-01 --to 2024-12
 
 **OANDA** (candles, requires token):
 ```bash
-# All flags are required
+# Single instrument/timeframe
 trader data oanda \
   --instrument EUR_USD \
   --timeframe  H1 \
   --from       2024-01-01 \
   --to         2024-12-31 \
   --env        practice
+
+# Catch-up all instruments from last stored date through yesterday
+trader data update
+
+# First-time seed for a new timeframe (e.g. H4, which has no prior files)
+trader data update --timeframes H4 --from 2005-01-03
 ```
+
+Supported timeframes: `M1`, `H1`, `H4`, `D`. `H4` is fetched natively from OANDA (not derived).
 
 Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) in a hierarchy:
 ```
@@ -371,6 +379,38 @@ What it reports:
 | `canonical_missing_raw_complete` | Canonical candles contain valid bars not backed by raw OANDA complete rows |
 
 The command prints a summary to stdout and, with `--report`, writes a JSON report containing per-month counts, paths, and sample missing timestamps. This is the easiest way to keep an auditable record of gaps that should exist but do not.
+
+### Candle Backup
+
+M1 data goes back to 2005 (~1 GB for 24 instruments) and **cannot be fully re-downloaded from OANDA** — their API retains M1 history for only a limited window. H1, H4, and D are small and re-downloadable, but are included for completeness.
+
+Use [`rclone`](https://rclone.org) to back up incrementally to Google Drive:
+
+**One-time setup:**
+```bash
+sudo apt install rclone
+rclone config   # follow the prompts to authorise Google Drive
+```
+
+**Run a backup** (only new/changed files are transferred after the first run):
+```bash
+make backup-candles
+```
+
+This syncs `/srv/trading/data/candles/oanda` → `gdrive:trader-candles/oanda` with 8 parallel transfers.
+
+Override the destination or source with make variables:
+```bash
+make backup-candles GDRIVE_DEST=myremote:my-bucket/candles
+make backup-candles CANDLE_DIR=/path/to/other/store GDRIVE_DEST=myremote:backup
+```
+
+**Restore:**
+```bash
+rclone sync gdrive:trader-candles/oanda /srv/trading/data/candles/oanda --progress
+```
+
+After a restore, run `trader data update` to fill any gap between the last backup and today.
 
 ### Candle CSV Export
 
