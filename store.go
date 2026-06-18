@@ -74,6 +74,11 @@ func (s *Store) pathForMonthlyCandle(k Key) string {
 	return monthlyCandle(s.basedir, k)
 }
 
+// PathForMonthlyCandle returns the file path for a monthly candle CSV.
+func (s *Store) PathForMonthlyCandle(k Key) string {
+	return s.pathForMonthlyCandle(k)
+}
+
 // RawCandlePath returns the path for a monthly candle CSV under the raw tree.
 // It mirrors PathForAsset but roots in rawRoot instead of basedir.
 func (s *Store) RawCandlePath(k Key) (string, error) {

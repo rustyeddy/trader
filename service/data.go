@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -222,4 +224,199 @@ func writeRawOandaMonth(s *trader.Store, key trader.Key, monthStart time.Time, c
 		}
 	}
 	return nil
+}
+
+// ── update (catch-up download) ────────────────────────────────────────────────
+
+// UpdateOandaCandlesRequest specifies a catch-up download for one or more
+// instruments. From is auto-detected from the store when zero.
+type UpdateOandaCandlesRequest struct {
+	Instruments []string // OANDA format, e.g. ["EUR_USD", "GBP_USD"]
+	Timeframes  []string // e.g. ["M1", "H1", "D"]
+	// To defaults to yesterday (last complete UTC day) when zero.
+	To     time.Time
+	RawDir string
+	// OnProgress is called after each instrument+timeframe completes.
+	OnProgress func(msg string)
+}
+
+// UpdateOandaCandlesResult summarises one update run.
+type UpdateOandaCandlesResult struct {
+	// Results is keyed by "INSTRUMENT/TIMEFRAME", e.g. "EUR_USD/H1".
+	Results map[string]UpdateItemResult
+}
+
+// UpdateItemResult is the outcome for one instrument+timeframe pair.
+type UpdateItemResult struct {
+	From           time.Time
+	To             time.Time
+	CandlesWritten int
+	Err            error
+}
+
+// UpdateOandaCandles downloads candles for every instrument+timeframe pair,
+// starting from the day after the last non-zero candle already on disk.
+// When no existing data is found for a pair it returns an error for that pair
+// (rather than downloading everything since 2000) so the caller can decide
+// whether to seed with a full download first.
+func (s *Service) UpdateOandaCandles(ctx context.Context, req UpdateOandaCandlesRequest) (*UpdateOandaCandlesResult, error) {
+	if len(req.Instruments) == 0 {
+		return nil, fmt.Errorf("update: at least one instrument required")
+	}
+	if len(req.Timeframes) == 0 {
+		return nil, fmt.Errorf("update: at least one timeframe required")
+	}
+
+	to := req.To
+	if to.IsZero() {
+		// Yesterday — last fully-completed UTC day.
+		now := time.Now().UTC()
+		to = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+	}
+
+	result := &UpdateOandaCandlesResult{
+		Results: make(map[string]UpdateItemResult),
+	}
+
+	for _, inst := range req.Instruments {
+		for _, tf := range req.Timeframes {
+			key := inst + "/" + tf
+			from, err := lastNonZeroCandleDate(trader.GetStore(), inst, tf)
+			if err != nil {
+				result.Results[key] = UpdateItemResult{Err: fmt.Errorf("detect last candle: %w", err)}
+				if req.OnProgress != nil {
+					req.OnProgress(fmt.Sprintf("%-12s %-4s  ERROR: %v", inst, tf, err))
+				}
+				continue
+			}
+			// Start the day after the last complete candle.
+			from = from.AddDate(0, 0, 1)
+			if !from.Before(to) {
+				result.Results[key] = UpdateItemResult{From: from, To: to, CandlesWritten: 0}
+				if req.OnProgress != nil {
+					req.OnProgress(fmt.Sprintf("%-12s %-4s  already up to date (%s)", inst, tf, to.Format("2006-01-02")))
+				}
+				continue
+			}
+
+			dl, err := s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
+				Instrument: inst,
+				Timeframe:  tf,
+				From:       from,
+				To:         to,
+				RawDir:     req.RawDir,
+				OnProgress: func(line string) {
+					if req.OnProgress != nil {
+						req.OnProgress("  " + line)
+					}
+				},
+			})
+			itemErr := err
+			written := 0
+			if dl != nil {
+				written = dl.CandlesWritten
+			}
+			result.Results[key] = UpdateItemResult{From: from, To: to, CandlesWritten: written, Err: itemErr}
+			if req.OnProgress != nil {
+				if itemErr != nil {
+					req.OnProgress(fmt.Sprintf("%-12s %-4s  ERROR: %v", inst, tf, itemErr))
+				} else {
+					req.OnProgress(fmt.Sprintf("%-12s %-4s  %s → %s  %d candles",
+						inst, tf, from.Format("2006-01-02"), to.Format("2006-01-02"), written))
+				}
+			}
+		}
+	}
+	return result, nil
+}
+
+// lastNonZeroCandleDate returns the date of the last candle with actual price
+// data in the most recent monthly CSV file for the given instrument+timeframe.
+// It returns an error if no candle files exist yet.
+func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (time.Time, error) {
+	tf, err := trader.ParseTimeframe(timeframe)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unknown timeframe %q", timeframe)
+	}
+	instrTrader := strings.ReplaceAll(instrument, "_", "")
+
+	// Find the latest monthly file that exists on disk.
+	now := time.Now().UTC()
+	var latestPath string
+	var latestKey trader.Key
+	for year := now.Year(); year >= 2010; year-- {
+		startMonth := 12
+		if year == now.Year() {
+			startMonth = int(now.Month())
+		}
+		for month := startMonth; month >= 1; month-- {
+			k := trader.Key{
+				Kind:       trader.KindCandle,
+				Source:     trader.SourceOanda,
+				Instrument: instrTrader,
+				TF:         tf,
+				Year:       year,
+				Month:      month,
+			}
+			path := store.PathForMonthlyCandle(k)
+			if _, err := os.Stat(path); err == nil {
+				latestPath = path
+				latestKey = k
+				goto found
+			}
+		}
+	}
+	return time.Time{}, fmt.Errorf("no candle files found for %s/%s", instrument, timeframe)
+
+found:
+	date, err := lastNonZeroDate(latestPath, latestKey, tf)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return date, nil
+}
+
+// lastNonZeroDate reads a candle CSV and returns the date of the last row
+// that has non-zero OHLC data (the 0x0001 flag indicates a real candle).
+func lastNonZeroDate(path string, key trader.Key, tf trader.Timeframe) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer f.Close()
+
+	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
+	stepSec := int64(tf)
+
+	var lastDate time.Time
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "time") {
+			continue
+		}
+		fields := strings.Split(line, ",")
+		// CSV format: timestamp,open,high,low,close,avgspread,maxspread,ticks,flags
+		if len(fields) < 9 {
+			continue
+		}
+		ts, err := strconv.ParseInt(fields[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		flags := strings.TrimSpace(fields[8])
+		if flags != "0x0001" {
+			continue // zero/empty candle slot
+		}
+		_ = stepSec
+		_ = monthStart
+		t := time.Unix(ts, 0).UTC()
+		if t.After(lastDate) {
+			lastDate = t
+		}
+	}
+	if lastDate.IsZero() {
+		return time.Time{}, fmt.Errorf("no non-zero candles in %s", path)
+	}
+	return lastDate, nil
 }
