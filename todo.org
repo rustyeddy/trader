@@ -311,16 +311,16 @@ Notes:
 
 ** Live Trading
 
-| Service            | REST API                  | CLI            | MCP |
-|--------------------+---------------------------+----------------+-----|
-| Run live strategy  | —                         | live run       | —   |
-| Run live portfolio | —                         | live portfolio | —   |
-| Journal            | —                         | live journal   | —   |
-| Start bot          | POST /api/v1/bots         | bot start      | —   |
-| List bots          | GET /api/v1/bots          | bot list       | —   |
-| Get bot            | GET /api/v1/bots/{id}     | bot get        | —   |
-| Stop bot           | DELETE /api/v1/bots/{id}  | bot stop       | —   |
-| Event stream       | GET /api/v1/stream/events | —              | —   |
+| Service            | REST API                  | CLI            | MCP                      |
+|--------------------+---------------------------+----------------+--------------------------|
+| Run live strategy  | —                         | live run       | —                        |
+| Run live portfolio | —                         | live portfolio | —                        |
+| Journal            | —                         | live journal   | —                        |
+| Start bot          | POST /api/v1/bots         | bot start      | start_bot *(write-mode)* |
+| List bots          | GET /api/v1/bots          | bot list       | list_bots                |
+| Get bot            | GET /api/v1/bots/{id}     | bot get        | get_bot                  |
+| Stop bot           | DELETE /api/v1/bots/{id}  | bot stop       | stop_bot *(write-mode)*  |
+| Event stream       | GET /api/v1/stream/events | —              | —                        |
 
 ** Other
 

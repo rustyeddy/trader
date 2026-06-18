@@ -107,6 +107,45 @@ func (s *Server) tools() []toolDef {
 		},
 	}
 
+	// Bot management — read tools are always available; write tools gated.
+	all = append(all,
+		toolDef{
+			Name:        "list_bots",
+			Description: "List all live strategy bots (running and stopped) managed by the server.",
+			InputSchema: schema(nil, nil),
+		},
+		toolDef{
+			Name:        "get_bot",
+			Description: "Return the status of a single live strategy bot by ID.",
+			InputSchema: schema(map[string]any{
+				"id": prop("string", "Bot ID returned by start_bot or list_bots"),
+			}, []string{"id"}),
+		},
+	)
+
+	if s.writeEnable {
+		all = append(all,
+			toolDef{
+				Name:        "start_bot",
+				Description: "Start a new live strategy bot on the server.",
+				InputSchema: schema(map[string]any{
+					"instrument":    prop("string", "OANDA-format instrument, e.g. EUR_USD"),
+					"strategy":      prop("string", "Strategy kind, e.g. donchian-v6, ema-cross"),
+					"tick_interval": prop("string", "How often the strategy ticks, e.g. 60s, 5m (default 60s)"),
+					"risk_pct":      prop("number", "Percent of account NAV to risk per trade (default 1.0)"),
+					"max_units":     prop("integer", "Maximum position size in units (0 = no limit)"),
+				}, []string{"instrument", "strategy"}),
+			},
+			toolDef{
+				Name:        "stop_bot",
+				Description: "Stop a running live strategy bot by ID.",
+				InputSchema: schema(map[string]any{
+					"id": prop("string", "Bot ID to stop"),
+				}, []string{"id"}),
+			},
+		)
+	}
+
 	if s.writeEnable {
 		all = append(all,
 			toolDef{
@@ -172,8 +211,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	if s.svc.OANDA == nil {
 		switch p.Name {
 		case "run_backtest", "get_candles_csv", "get_candle_stats", "validate_candles",
-			"get_pip_values", "get_position":
-			// allowed without OANDA — local data or pure calculation
+			"get_pip_values", "get_position", "list_bots", "get_bot", "start_bot", "stop_bot":
+			// allowed without OANDA — local data, pure calculation, or bot management
 		default:
 			return errContent("OANDA not configured — start server with --token to enable live endpoints"), nil
 		}
@@ -200,6 +239,20 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return s.toolGetPipValues(ctx, p.Arguments)
 	case "get_position":
 		return s.toolGetPosition(ctx, p.Arguments)
+	case "list_bots":
+		return s.toolListBots()
+	case "get_bot":
+		return s.toolGetBot(p.Arguments)
+	case "start_bot":
+		if !s.writeEnable {
+			return errContent("start_bot requires --enable-write"), nil
+		}
+		return s.toolStartBot(ctx, p.Arguments)
+	case "stop_bot":
+		if !s.writeEnable {
+			return errContent("stop_bot requires --enable-write"), nil
+		}
+		return s.toolStopBot(p.Arguments)
 	case "download_candles":
 		if !s.writeEnable {
 			return errContent("download_candles requires --enable-write"), nil
@@ -562,6 +615,74 @@ func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any,
 		return errContent(fmt.Sprintf("get_position: %v", err)), nil
 	}
 	return jsonContent(result), nil
+}
+
+// ── bot tools ─────────────────────────────────────────────────────────────
+
+func (s *Server) toolListBots() (any, *rpcError) {
+	bots := s.svc.ListBots()
+	return jsonContent(map[string]any{
+		"count": len(bots),
+		"bots":  bots,
+	}), nil
+}
+
+func (s *Server) toolGetBot(raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil || args.ID == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "id is required"}
+	}
+	status, err := s.svc.GetBot(args.ID)
+	if err != nil {
+		return errContent(fmt.Sprintf("get_bot: %v", err)), nil
+	}
+	return jsonContent(status), nil
+}
+
+func (s *Server) toolStartBot(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		Instrument   string  `json:"instrument"`
+		Strategy     string  `json:"strategy"`
+		TickInterval string  `json:"tick_interval"`
+		RiskPct      float64 `json:"risk_pct"`
+		MaxUnits     int64   `json:"max_units"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: "invalid start_bot args"}
+	}
+	if args.Instrument == "" || args.Strategy == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "instrument and strategy are required"}
+	}
+	riskPct := args.RiskPct
+	if riskPct == 0 {
+		riskPct = 1.0
+	}
+	status, err := s.svc.StartBot(ctx, service.BotConfig{
+		Instrument:   args.Instrument,
+		TickInterval: args.TickInterval,
+		RiskPct:      riskPct,
+		MaxUnits:     args.MaxUnits,
+		Strategy:     service.StrategyConfig{Kind: args.Strategy},
+	})
+	if err != nil {
+		return errContent(fmt.Sprintf("start_bot: %v", err)), nil
+	}
+	return jsonContent(status), nil
+}
+
+func (s *Server) toolStopBot(raw json.RawMessage) (any, *rpcError) {
+	var args struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil || args.ID == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "id is required"}
+	}
+	if err := s.svc.StopBot(args.ID); err != nil {
+		return errContent(fmt.Sprintf("stop_bot: %v", err)), nil
+	}
+	return textContent(fmt.Sprintf("bot %s stopped", args.ID)), nil
 }
 
 // ── schema helpers ────────────────────────────────────────────────────────

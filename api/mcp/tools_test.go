@@ -43,6 +43,83 @@ func TestToolGetCandlesCSV(t *testing.T) {
 	assert.Equal(t, "text/csv", metadata["mime_type"])
 }
 
+// ── bot tools ─────────────────────────────────────────────────────────────
+
+func newBotSrv() *Server {
+	return New(&service.Service{Log: slog.Default()}, true)
+}
+
+func TestToolListBots_Empty(t *testing.T) {
+	srv := newBotSrv()
+	got, rpcErr := srv.toolListBots()
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	content := payload["content"].([]map[string]any)
+	assert.Contains(t, content[0]["text"].(string), `"count": 0`)
+}
+
+func TestToolGetBot_MissingID(t *testing.T) {
+	srv := newBotSrv()
+	raw, _ := json.Marshal(map[string]any{})
+	_, rpcErr := srv.toolGetBot(raw)
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "id is required")
+}
+
+func TestToolGetBot_NotFound(t *testing.T) {
+	srv := newBotSrv()
+	raw, _ := json.Marshal(map[string]any{"id": "bot-missing"})
+	got, rpcErr := srv.toolGetBot(raw)
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	assert.Equal(t, true, payload["isError"])
+}
+
+func TestToolStartBot_MissingFields(t *testing.T) {
+	srv := newBotSrv()
+	raw, _ := json.Marshal(map[string]any{"instrument": "EUR_USD"}) // missing strategy
+	_, rpcErr := srv.toolStartBot(context.Background(), raw)
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "strategy")
+}
+
+func TestToolStopBot_MissingID(t *testing.T) {
+	srv := newBotSrv()
+	raw, _ := json.Marshal(map[string]any{})
+	_, rpcErr := srv.toolStopBot(raw)
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "id is required")
+}
+
+func TestToolStopBot_NotFound(t *testing.T) {
+	srv := newBotSrv()
+	raw, _ := json.Marshal(map[string]any{"id": "bot-missing"})
+	got, rpcErr := srv.toolStopBot(raw)
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	assert.Equal(t, true, payload["isError"])
+}
+
+func TestListBotsAllowedWithoutOANDA(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, false) // no OANDA, no write
+	raw, _ := json.Marshal(map[string]any{"name": "list_bots", "arguments": map[string]any{}})
+	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
+	require.Nil(t, rpcErr)
+	assert.NotNil(t, got)
+}
+
+func TestStartBotRequiresWriteEnable(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, false) // write disabled
+	raw, _ := json.Marshal(map[string]any{
+		"name":      "start_bot",
+		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
+	})
+	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	assert.Equal(t, true, payload["isError"])
+}
+
 func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	store := trader.NewStoreAt(t.TempDir())
 	candles := make([]trader.Candle, 744)
