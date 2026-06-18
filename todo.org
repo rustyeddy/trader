@@ -316,10 +316,10 @@ Notes:
 | Run live strategy  | —                         | live run       | —   |
 | Run live portfolio | —                         | live portfolio | —   |
 | Journal            | —                         | live journal   | —   |
-| Start bot          | POST /api/v1/bots         | —              | —   |
-| List bots          | GET /api/v1/bots          | —              | —   |
-| Get bot            | GET /api/v1/bots/{id}     | —              | —   |
-| Stop bot           | DELETE /api/v1/bots/{id}  | —              | —   |
+| Start bot          | POST /api/v1/bots         | bot start      | —   |
+| List bots          | GET /api/v1/bots          | bot list       | —   |
+| Get bot            | GET /api/v1/bots/{id}     | bot get        | —   |
+| Stop bot           | DELETE /api/v1/bots/{id}  | bot stop       | —   |
 | Event stream       | GET /api/v1/stream/events | —              | —   |
 
 ** Other
