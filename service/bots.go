@@ -126,6 +126,27 @@ func (s *Service) ListBots() []BotStatus {
 	return out
 }
 
+// StopAllBots cancels every running bot goroutine and waits for them to exit.
+// It does NOT close open OANDA positions — those remain on the broker.
+// Call this during graceful server shutdown.
+func (s *Service) StopAllBots() {
+	s.botsMu.RLock()
+	entries := make([]*botEntry, 0, len(s.bots))
+	for _, e := range s.bots {
+		if e.Status == "running" {
+			entries = append(entries, e)
+		}
+	}
+	s.botsMu.RUnlock()
+
+	for _, e := range entries {
+		e.cancel()
+	}
+	for _, e := range entries {
+		<-e.done
+	}
+}
+
 // GetBot returns the status of one bot by ID.
 func (s *Service) GetBot(id string) (*BotStatus, error) {
 	s.botsMu.RLock()
