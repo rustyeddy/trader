@@ -351,6 +351,33 @@ func TestHandleRegressBacktest_BadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
+func TestHandleRegressBacktest_EmptyBody(t *testing.T) {
+	// An empty body should be treated as {} (all defaults), not a 400.
+	srv, _ := newTestServer(t, nil)
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	assert.NotEqual(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleRegressBacktest_BaselineDirTraversal(t *testing.T) {
+	srv, dir := newTestServer(t, nil)
+	body := `{"baseline_dir":"` + dir + `/../outside"}`
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleListBacktestConfigs_DirTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{configsDir: dir}
+	// Attempt to traverse outside the configured dir.
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+dir+"/../outside")
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
 func TestHandleRegressBacktest_NoConfigsResolvable(t *testing.T) {
 	srv, _ := newTestServer(t, nil)
 	body := `{"config_paths":["/nonexistent/path"]}`

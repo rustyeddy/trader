@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,18 @@ import (
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
+
+// isWithinDir reports whether path is equal to or nested inside base after
+// both are cleaned. It returns false on any error.
+func isWithinDir(base, path string) bool {
+	base = filepath.Clean(base)
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(rel, "..")
+}
 
 // WithReportsDir sets the directory from which backtest JSON reports are
 // served. Call before Serve. Defaults to /srv/trading/backtests/reports.
@@ -121,6 +134,14 @@ func (s *Server) handleListBacktestConfigs(w http.ResponseWriter, r *http.Reques
 	dir := strings.TrimSpace(r.URL.Query().Get("dir"))
 	if dir == "" {
 		dir = s.effectiveConfigsDir()
+	} else {
+		dir = filepath.Clean(dir)
+		// When a configs directory is configured, restrict overrides to within it
+		// to prevent clients from enumerating arbitrary server paths.
+		if s.configsDir != "" && !isWithinDir(s.configsDir, dir) {
+			writeErr(w, http.StatusBadRequest, "dir must be within the configured configs directory")
+			return
+		}
 	}
 
 	var matches []string
@@ -183,7 +204,7 @@ type regressResult struct {
 // committed JSON baselines, returning per-run pass/fail details.
 func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 	var req regressBacktestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
@@ -196,6 +217,12 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 	baselineDir := strings.TrimSpace(req.BaselineDir)
 	if baselineDir == "" {
 		baselineDir = s.effectiveReportsDir()
+	} else {
+		baselineDir = filepath.Clean(baselineDir)
+		if !isWithinDir(s.effectiveReportsDir(), baselineDir) {
+			writeErr(w, http.StatusBadRequest, "baseline_dir must be within the configured reports directory")
+			return
+		}
 	}
 
 	summaries, err := s.svc.RunBacktestPathSpecs(r.Context(), configPaths)
@@ -214,7 +241,8 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, s2 := range summaries {
-			path := filepath.Join(baselineDir, s2.Name+".json")
+			safeName := filepath.Base(s2.Name)
+			path := filepath.Join(baselineDir, safeName+".json")
 			if err := service.WriteBacktestSummaryJSON(path, s2); err != nil {
 				writeErr(w, http.StatusInternalServerError, fmt.Sprintf("write baseline for %q: %v", s2.Name, err))
 				return
@@ -230,7 +258,8 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 	var results []regressResult
 	anyFailed := false
 	for _, got := range summaries {
-		path := filepath.Join(baselineDir, got.Name+".json")
+		safeName := filepath.Base(got.Name)
+		path := filepath.Join(baselineDir, safeName+".json")
 		baseline, err := service.ReadBacktestSummaryFile(path)
 		if err != nil {
 			results = append(results, regressResult{
