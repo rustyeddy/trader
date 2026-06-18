@@ -37,12 +37,7 @@ instruments:
         take_pips:   0           # no TP; rely on hold_bars close
         risk_pct:    0.1
 
-    regime:
-      kind: session
-      params:
-        start: 13                # London/NY overlap: 13:00–17:00 UTC
-        end:   17                # most liquid window; dense tick coverage
-
+    # No regime filter — smoke test must run at any time of day.
 
   # ── Phase 2: add second instrument here ────────────────────────────────────
   # Uncomment and adjust to begin multi-instrument testing.
@@ -63,8 +58,4 @@ instruments:
   #       take_pips:   0
   #       risk_pct:    0.1
   #
-  #   regime:
-  #     kind: session
-  #     params:
-  #       start: 13
-  #       end:   17
+  #   # No regime filter — smoke test must run at any time of day.
