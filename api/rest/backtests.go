@@ -16,6 +16,8 @@ import (
 
 // isWithinDir reports whether path is equal to or nested inside base after
 // both are cleaned. It returns false on any error.
+// Note: symlinks are not resolved; a symlink that points outside base may
+// pass this check. Ensure mount/link policies are enforced at the OS level.
 func isWithinDir(base, path string) bool {
 	base = filepath.Clean(base)
 	path = filepath.Clean(path)
@@ -136,9 +138,10 @@ func (s *Server) handleListBacktestConfigs(w http.ResponseWriter, r *http.Reques
 		dir = s.effectiveConfigsDir()
 	} else {
 		dir = filepath.Clean(dir)
-		// When a configs directory is configured, restrict overrides to within it
-		// to prevent clients from enumerating arbitrary server paths.
-		if s.configsDir != "" && !isWithinDir(s.configsDir, dir) {
+		// Restrict ?dir= overrides to within the configured configs directory.
+		// If no configs directory is configured, the override is not allowed to
+		// prevent clients enumerating arbitrary server paths.
+		if s.configsDir == "" || !isWithinDir(s.configsDir, dir) {
 			writeErr(w, http.StatusBadRequest, "dir must be within the configured configs directory")
 			return
 		}

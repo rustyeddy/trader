@@ -328,17 +328,26 @@ func TestHandleListBacktestConfigs_ReturnsSortedNames(t *testing.T) {
 }
 
 func TestHandleListBacktestConfigs_DirOverride(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "cfg.yml"), []byte(""), 0o644))
-	srv := &Server{} // configsDir empty — should use ?dir= override
+	parentDir := t.TempDir()
+	subDir := filepath.Join(parentDir, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "cfg.yml"), []byte(""), 0o644))
+	srv := &Server{configsDir: parentDir}
 
-	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+dir)
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+subDir)
 	require.Equal(t, http.StatusOK, rr.Code)
 	var body struct {
 		Count int `json:"count"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	assert.Equal(t, 1, body.Count)
+}
+
+func TestHandleListBacktestConfigs_DirOverrideUnconfiguredBlocked(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{} // configsDir not set — ?dir= override must be rejected
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+dir)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // ── handleRegressBacktest ─────────────────────────────────────────────────────
