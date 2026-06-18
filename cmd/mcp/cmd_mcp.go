@@ -53,11 +53,15 @@ Available tools (read-only by default):
   list_open_trades      All open OANDA positions
   get_transactions      Account transaction history
   run_backtest          Run YAML config(s) and return summaries
+  list_bots             List all live strategy bots (running and stopped)
+  get_bot               Get status of a single bot by ID
 
 Additional tools when --enable-write:
   place_order           Size and submit a market order
   close_trade           Close a position fully or partially
   update_stop           Move stop-loss or take-profit
+  start_bot             Start a new live strategy bot
+  stop_bot              Stop a running bot by ID
 
 Resources:
   backtest://results    List or read backtest .org reports

@@ -206,6 +206,10 @@ type regressResult struct {
 // handleRegressBacktest runs backtest configs and compares results against
 // committed JSON baselines, returning per-run pass/fail details.
 func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "service not configured")
+		return
+	}
 	var req regressBacktestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))

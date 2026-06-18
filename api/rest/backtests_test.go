@@ -2,6 +2,7 @@ package rest
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,7 +27,11 @@ func newTestServer(t *testing.T, summaries []trader.BacktestReportSummary) (*Ser
 		path := filepath.Join(dir, s.Name+".json")
 		require.NoError(t, os.WriteFile(path, append(b, '\n'), 0o644))
 	}
-	srv := &Server{reportsDir: dir}
+	srv := &Server{
+		svc:        &service.Service{Log: slog.Default()},
+		reportsDir: dir,
+		configsDir: dir,
+	}
 	return srv, dir
 }
 
