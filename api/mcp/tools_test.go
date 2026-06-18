@@ -134,6 +134,35 @@ func TestStartBotRequiresOANDA(t *testing.T) {
 	assert.Contains(t, text, "OANDA not configured")
 }
 
+// ── infra tools ───────────────────────────────────────────────────────────
+
+func TestToolGetVersion(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, false)
+	got, rpcErr := srv.toolGetVersion()
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	content := payload["content"].([]map[string]any)
+	assert.Contains(t, content[0]["text"].(string), `"version"`)
+}
+
+func TestToolGetHealth(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, false)
+	got, rpcErr := srv.toolGetHealth()
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	content := payload["content"].([]map[string]any)
+	assert.Contains(t, content[0]["text"].(string), `"status": "ok"`)
+}
+
+func TestGetVersionAllowedWithoutOANDA(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, false)
+	raw, _ := json.Marshal(map[string]any{"name": "get_version", "arguments": map[string]any{}})
+	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	assert.NotEqual(t, true, payload["isError"])
+}
+
 func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	store := trader.NewStoreAt(t.TempDir())
 	candles := make([]trader.Candle, 744)

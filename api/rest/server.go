@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	trader "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -103,6 +104,11 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /api/v1/health", health)
 	mux.HandleFunc("GET /health", health)
+
+	// Version
+	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"version": trader.Version})
+	})
 
 	// MCP over HTTP — optional; enabled when trader serve starts with MCP.
 	if s.mcpHandler != nil {
