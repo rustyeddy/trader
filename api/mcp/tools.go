@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	trader "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -106,6 +107,20 @@ func (s *Server) tools() []toolDef {
 			}, []string{"instrument"}),
 		},
 	}
+
+	// Infra — always available, no OANDA required.
+	all = append(all,
+		toolDef{
+			Name:        "get_version",
+			Description: "Return the trader server version string.",
+			InputSchema: schema(nil, nil),
+		},
+		toolDef{
+			Name:        "get_health",
+			Description: "Return the server health status.",
+			InputSchema: schema(nil, nil),
+		},
+	)
 
 	// Bot management — read tools are always available; write tools gated.
 	all = append(all,
@@ -211,7 +226,8 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	if s.svc.OANDA == nil {
 		switch p.Name {
 		case "run_backtest", "get_candles_csv", "get_candle_stats", "validate_candles",
-			"get_pip_values", "get_position", "list_bots", "get_bot", "stop_bot":
+			"get_pip_values", "get_position", "list_bots", "get_bot", "stop_bot",
+			"get_version", "get_health":
 			// allowed without OANDA — local data, pure calculation, or bot management
 		default:
 			return errContent("OANDA not configured — start server with --token to enable live endpoints"), nil
@@ -239,6 +255,10 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return s.toolGetPipValues(ctx, p.Arguments)
 	case "get_position":
 		return s.toolGetPosition(ctx, p.Arguments)
+	case "get_version":
+		return s.toolGetVersion()
+	case "get_health":
+		return s.toolGetHealth()
 	case "list_bots":
 		return s.toolListBots()
 	case "get_bot":
@@ -683,6 +703,14 @@ func (s *Server) toolStopBot(raw json.RawMessage) (any, *rpcError) {
 		return errContent(fmt.Sprintf("stop_bot: %v", err)), nil
 	}
 	return textContent(fmt.Sprintf("bot %s stopped", args.ID)), nil
+}
+
+func (s *Server) toolGetVersion() (any, *rpcError) {
+	return jsonContent(map[string]string{"version": trader.Version}), nil
+}
+
+func (s *Server) toolGetHealth() (any, *rpcError) {
+	return jsonContent(map[string]string{"status": "ok"}), nil
 }
 
 // ── schema helpers ────────────────────────────────────────────────────────

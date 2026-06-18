@@ -324,12 +324,12 @@ Notes:
 
 ** Other
 
-| Service              | REST API              | CLI                            | MCP |
-|----------------------+-----------------------+--------------------------------+-----|
-| Replay pricing       | POST /api/v1/replay   | replay pricing / replay events | —   |
-| Analysis (ChatGPT)   | POST /api/v1/analysis | analysis                       | —   |
-| Health check         | GET /health           | —                              | —   |
-| Version              | —                     | version                        | —   |
+| Service              | REST API              | CLI                            | MCP         |
+|----------------------+-----------------------+--------------------------------+-------------|
+| Replay pricing       | POST /api/v1/replay   | replay pricing / replay events | —           |
+| Analysis (ChatGPT)   | POST /api/v1/analysis | analysis                       | —           |
+| Health check         | GET /health           | health check                   | get_health  |
+| Version              | GET /api/v1/version   | version / health version       | get_version |
 
 * Cleanup notes
 
