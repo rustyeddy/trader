@@ -34,16 +34,27 @@ func defaultServer() string {
 	return "http://localhost:8080"
 }
 
+type healthResponse struct {
+	Status string `json:"status"`
+}
+
+type versionResponse struct {
+	Version string `json:"version"`
+}
+
 func healthCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Ping the health endpoint and print status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var result map[string]string
+			var result healthResponse
 			if err := apiGet(serverURL+"/health", &result); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "status: %s\n", result["status"])
+			if result.Status == "" {
+				return fmt.Errorf("server response missing status field")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "status: %s\n", result.Status)
 			return nil
 		},
 	}
@@ -54,11 +65,14 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version reported by a running trader serve",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var result map[string]string
+			var result versionResponse
 			if err := apiGet(serverURL+"/api/v1/version", &result); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "server version: %s\n", result["version"])
+			if result.Version == "" {
+				return fmt.Errorf("server response missing version field")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "server version: %s\n", result.Version)
 			return nil
 		},
 	}
@@ -72,6 +86,12 @@ func apiGet(url string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&errBody); jsonErr == nil && errBody.Error != "" {
+			return fmt.Errorf("server returned %s: %s", resp.Status, errBody.Error)
+		}
 		return fmt.Errorf("server returned %s", resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
