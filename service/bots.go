@@ -128,16 +128,20 @@ func (s *Service) ListBots() []BotStatus {
 	return out
 }
 
-// StopAllBots cancels every running bot goroutine and waits for them to exit.
+// StopAllBots cancels every bot goroutine and waits for them to exit.
 // It does NOT close open OANDA positions — those remain on the broker.
 // Call this during graceful server shutdown.
+//
+// All entries are snapshotted (not just Status=="running") because a bot's
+// status field is updated inside the goroutine before close(done) runs; in
+// that brief window the status is already "stopped"/"error" but the goroutine
+// hasn't returned yet. Cancelling an already-cancelled context is a no-op, so
+// calling cancel() on every entry is safe.
 func (s *Service) StopAllBots() {
 	s.botsMu.RLock()
 	entries := make([]*botEntry, 0, len(s.bots))
 	for _, e := range s.bots {
-		if e.Status == "running" {
-			entries = append(entries, e)
-		}
+		entries = append(entries, e)
 	}
 	s.botsMu.RUnlock()
 

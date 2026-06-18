@@ -162,12 +162,14 @@ OANDA positions are NOT closed on stop — they remain on the broker.`,
 }
 
 // startFromConfig reads a portfolio YAML and starts one bot per instrument.
+// It attempts every instrument and returns an error if any of them failed.
 func startFromConfig(cmd *cobra.Command, configFile string) error {
 	cfg, err := service.LoadPortfolioConfig(configFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 	out := cmd.OutOrStdout()
+	var failed []string
 	for _, inst := range cfg.Instruments {
 		riskPct := inst.RiskPct
 		if riskPct <= 0 {
@@ -189,7 +191,11 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 		}
 		if err := startOne(cmd, bc); err != nil {
 			fmt.Fprintf(out, "  ERROR starting %s: %v\n", inst.Instrument, err)
+			failed = append(failed, inst.Instrument)
 		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to start bots for: %s", strings.Join(failed, ", "))
 	}
 	return nil
 }

@@ -86,6 +86,84 @@ func TestListBots_Empty(t *testing.T) {
 	assert.Empty(t, svc.ListBots())
 }
 
+func TestStopAllBots_CancelsAndWaits(t *testing.T) {
+	svc := testService()
+
+	// Start two bots with long tick intervals so they sit idle in the timer wait.
+	cfg := BotConfig{
+		TickInterval: "24h",
+		Strategy: StrategyConfig{
+			Kind:   "pulse",
+			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
+		},
+	}
+
+	cfg.Instrument = "EUR_USD"
+	s1, err := svc.StartBot(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "running", s1.Status)
+
+	cfg.Instrument = "GBP_USD"
+	s2, err := svc.StartBot(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "running", s2.Status)
+
+	// StopAllBots must return without hanging, and all goroutines must be done.
+	done := make(chan struct{})
+	go func() {
+		svc.StopAllBots()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StopAllBots did not return within 5 seconds")
+	}
+
+	// Both bots should now be in a terminal state.
+	for _, id := range []string{s1.ID, s2.ID} {
+		b, err := svc.GetBot(id)
+		require.NoError(t, err)
+		assert.NotEqual(t, "running", b.Status, "bot %s should not be running after StopAllBots", id)
+	}
+}
+
+func TestStopAllBots_AlreadyStoppedBot(t *testing.T) {
+	// StopAllBots must also wait for a bot whose status flipped to "stopped"
+	// before close(done) ran — i.e. it must not skip non-"running" entries.
+	svc := testService()
+
+	status, err := svc.StartBot(context.Background(), BotConfig{
+		Instrument:   "EUR_USD",
+		TickInterval: "24h",
+		Strategy: StrategyConfig{
+			Kind:   "pulse",
+			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
+		},
+	})
+	require.NoError(t, err)
+
+	// Stop the bot via StopBot first so its status becomes "stopped".
+	require.NoError(t, svc.StopBot(status.ID))
+
+	b, _ := svc.GetBot(status.ID)
+	assert.Equal(t, "stopped", b.Status)
+
+	// StopAllBots should return immediately (done is already closed).
+	done := make(chan struct{})
+	go func() {
+		svc.StopAllBots()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StopAllBots hung on an already-stopped bot")
+	}
+}
+
 func TestStartBot_RegistersAndStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
