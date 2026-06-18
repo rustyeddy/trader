@@ -33,6 +33,8 @@ func TestTruncate(t *testing.T) {
 	assert.Equal(t, "hello", truncate("hello", 5))
 	assert.Equal(t, "hell…", truncate("hello!", 5))
 	assert.Equal(t, "…", truncate("ab", 1))
+	assert.Equal(t, "", truncate("ab", 0))
+	assert.Equal(t, "", truncate("ab", -1))
 }
 
 func TestRunBacktestList_Empty(t *testing.T) {

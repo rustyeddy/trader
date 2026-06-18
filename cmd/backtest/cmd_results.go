@@ -150,6 +150,9 @@ func resolveReportsDir(override string) string {
 
 // truncate shortens s to at most n runes, appending "…" if it was clipped.
 func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	runes := []rune(s)
 	if len(runes) <= n {
 		return s
