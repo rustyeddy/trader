@@ -269,6 +269,9 @@ Example config file (see deploy/trader.yaml.example):
 				return err
 			case <-ctx.Done():
 				log.Info("serve: shutting down...")
+				// Stop all bot goroutines cleanly. OANDA positions are left open
+				// so they survive restarts; seedTickCounts picks them back up.
+				svc.StopAllBots()
 				wg.Wait()
 				log.Info("serve: stopped")
 				return nil

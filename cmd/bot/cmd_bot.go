@@ -113,6 +113,7 @@ func botGetCmd() *cobra.Command {
 
 func botStartCmd() *cobra.Command {
 	var (
+		configFile   string
 		instrument   string
 		stratName    string
 		tickInterval string
@@ -123,40 +124,91 @@ func botStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start a new live strategy bot on the server",
-		Long: `Start a live strategy bot inside the running trader serve process.
+		Long: `Start one or more live strategy bots inside the running trader serve process.
 
-The bot runs until stopped with "bot stop <id>" or the server restarts.
-Note: bots are not persisted across server restarts.`,
+Single bot (flags):
+  trader bot start --instrument EUR_USD --strategy pulse
+
+From a portfolio config (starts one bot per instrument):
+  trader bot start --config testdata/configs/smoke-test.yml
+
+Bots run until stopped with "bot stop <id>" or the server restarts.
+OANDA positions are NOT closed on stop — they remain on the broker.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := service.BotConfig{
+			if configFile != "" {
+				return startFromConfig(cmd, configFile)
+			}
+			// Single-bot path.
+			if instrument == "" || stratName == "" {
+				return fmt.Errorf("--instrument and --strategy are required (or use --config)")
+			}
+			return startOne(cmd, service.BotConfig{
 				Instrument:   instrument,
 				TickInterval: tickInterval,
 				RiskPct:      riskPct,
 				MaxUnits:     maxUnits,
 				Strategy:     service.StrategyConfig{Kind: stratName},
-			}
-			var status service.BotStatus
-			if err := apiPost(serverURL+"/api/v1/bots", cfg, &status); err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "Bot started.")
-			fmt.Fprintf(out, "  ID         : %s\n", status.ID)
-			fmt.Fprintf(out, "  Strategy   : %s\n", status.StrategyName)
-			fmt.Fprintf(out, "  Instrument : %s\n", status.Instrument)
-			fmt.Fprintf(out, "  Status     : %s\n", status.Status)
-			return nil
+			})
 		},
 	}
 
-	cmd.Flags().StringVar(&instrument, "instrument", "", "Instrument, e.g. EUR_USD (required)")
-	cmd.Flags().StringVar(&stratName, "strategy", "", "Strategy name, e.g. donchian-v6 (required)")
+	cmd.Flags().StringVar(&configFile, "config", "", "Portfolio YAML config — starts one bot per instrument")
+	cmd.Flags().StringVar(&instrument, "instrument", "", "Instrument, e.g. EUR_USD")
+	cmd.Flags().StringVar(&stratName, "strategy", "", "Strategy name, e.g. donchian-v6, pulse")
 	cmd.Flags().StringVar(&tickInterval, "tick-interval", "60s", "How often the strategy ticks, e.g. 30s, 5m")
 	cmd.Flags().Float64Var(&riskPct, "risk-pct", 1.0, "Percent of account equity to risk per trade")
 	cmd.Flags().Int64Var(&maxUnits, "max-units", 0, "Maximum position size in units (0 = no limit)")
-	_ = cmd.MarkFlagRequired("instrument")
-	_ = cmd.MarkFlagRequired("strategy")
 	return cmd
+}
+
+// startFromConfig reads a portfolio YAML and starts one bot per instrument.
+// It attempts every instrument and returns an error if any of them failed.
+func startFromConfig(cmd *cobra.Command, configFile string) error {
+	cfg, err := service.LoadPortfolioConfig(configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	out := cmd.OutOrStdout()
+	var failed []string
+	for _, inst := range cfg.Instruments {
+		riskPct := inst.RiskPct
+		if riskPct <= 0 {
+			riskPct = cfg.RiskPct
+		}
+		tick := inst.TickInterval
+		if tick == "" {
+			tick = "60s"
+		}
+		bc := service.BotConfig{
+			Instrument:   inst.Instrument,
+			TickInterval: tick,
+			RiskPct:      riskPct,
+			MaxUnits:     inst.MaxUnits,
+			Strategy: service.StrategyConfig{
+				Kind:   inst.Strategy.Kind,
+				Params: inst.Strategy.Params,
+			},
+		}
+		if err := startOne(cmd, bc); err != nil {
+			fmt.Fprintf(out, "  ERROR starting %s: %v\n", inst.Instrument, err)
+			failed = append(failed, inst.Instrument)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to start bots for: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+func startOne(cmd *cobra.Command, cfg service.BotConfig) error {
+	var status service.BotStatus
+	if err := apiPost(serverURL+"/api/v1/bots", cfg, &status); err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Bot started: %-12s %-16s %-10s %s\n",
+		status.ID, status.StrategyName, status.Instrument, status.Status)
+	return nil
 }
 
 // ── bot stop ──────────────────────────────────────────────────────────────

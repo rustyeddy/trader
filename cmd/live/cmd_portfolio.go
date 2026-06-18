@@ -31,6 +31,11 @@ Example:
   trader live portfolio --config configs/demo-portfolio.yml --dry-run
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "DEPRECATED: 'trader live portfolio' is deprecated.")
+			fmt.Fprintln(os.Stderr, "  Use 'trader serve' then 'trader bot start --config <yaml>' instead.")
+			fmt.Fprintln(os.Stderr, "  The standalone portfolio runner will be removed in a future release.")
+			fmt.Fprintln(os.Stderr)
+
 			ctx, cancel := notifyContext(cmd.Context())
 			defer cancel()
 

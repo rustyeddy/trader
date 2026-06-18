@@ -54,7 +54,9 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	}
 
 	id := newBotID()
-	botCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() as the bot's parent — the bot must outlive the
+	// HTTP request that created it. StopBot/StopAllBots cancel it explicitly.
+	botCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	entry := &botEntry{
@@ -124,6 +126,31 @@ func (s *Service) ListBots() []BotStatus {
 		out = append(out, e.BotStatus)
 	}
 	return out
+}
+
+// StopAllBots cancels every bot goroutine and waits for them to exit.
+// It does NOT close open OANDA positions — those remain on the broker.
+// Call this during graceful server shutdown.
+//
+// All entries are snapshotted (not just Status=="running") because a bot's
+// status field is updated inside the goroutine before close(done) runs; in
+// that brief window the status is already "stopped"/"error" but the goroutine
+// hasn't returned yet. Cancelling an already-cancelled context is a no-op, so
+// calling cancel() on every entry is safe.
+func (s *Service) StopAllBots() {
+	s.botsMu.RLock()
+	entries := make([]*botEntry, 0, len(s.bots))
+	for _, e := range s.bots {
+		entries = append(entries, e)
+	}
+	s.botsMu.RUnlock()
+
+	for _, e := range entries {
+		e.cancel()
+	}
+	for _, e := range entries {
+		<-e.done
+	}
 }
 
 // GetBot returns the status of one bot by ID.
