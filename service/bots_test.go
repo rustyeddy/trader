@@ -174,6 +174,7 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 	status, err := svc.StartBot(ctx, BotConfig{
 		Instrument:   "EUR_USD",
 		TickInterval: "24h",
+		RiskPct:      0.5,
 		Strategy: StrategyConfig{
 			Kind:   "pulse",
 			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
@@ -183,6 +184,12 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 	assert.Equal(t, "running", status.Status)
 	assert.Equal(t, "EUR_USD", status.Instrument)
 	assert.NotEmpty(t, status.ID)
+
+	// New fields present on initial status.
+	assert.Equal(t, "pulse", status.StrategyKind)
+	assert.Equal(t, "24h", status.TickInterval)
+	assert.Equal(t, 0.5, status.RiskPct)
+	assert.Nil(t, status.StoppedAt)
 
 	// Listed.
 	bots := svc.ListBots()
@@ -197,8 +204,32 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 	// Stop it.
 	require.NoError(t, svc.StopBot(status.ID))
 
-	// Status should now be "stopped".
+	// Status should now be "stopped" with StoppedAt set.
 	final, err := svc.GetBot(status.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "stopped", final.Status)
+	assert.NotNil(t, final.StoppedAt)
+}
+
+func TestRegisterAndLookupTradeBotID(t *testing.T) {
+	svc := testService()
+
+	// Unknown trade returns "".
+	assert.Equal(t, "", svc.LookupTradeBotID("999"))
+
+	svc.RegisterTradeBotID("trade-1", "bot-abc")
+	svc.RegisterTradeBotID("trade-2", "bot-xyz")
+
+	assert.Equal(t, "bot-abc", svc.LookupTradeBotID("trade-1"))
+	assert.Equal(t, "bot-xyz", svc.LookupTradeBotID("trade-2"))
+	assert.Equal(t, "", svc.LookupTradeBotID("trade-99"))
+}
+
+func TestRegisterTradeBotID_EmptyInputsNoOp(t *testing.T) {
+	svc := testService()
+	// Nil/empty inputs must not panic or pollute the map.
+	svc.RegisterTradeBotID("", "bot-abc")
+	svc.RegisterTradeBotID("trade-1", "")
+	assert.Equal(t, "", svc.LookupTradeBotID(""))
+	assert.Equal(t, "", svc.LookupTradeBotID("trade-1"))
 }

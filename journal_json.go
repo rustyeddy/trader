@@ -57,6 +57,26 @@ func (j *jsonJournal) Close() error {
 	return nil
 }
 
+// ReadTradesJSONL reads all TradeRecords from a JSONL file. Lines that fail
+// to parse are silently skipped (forward-compatible with added fields).
+func ReadTradesJSONL(path string) ([]TradeRecord, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var records []TradeRecord
+	dec := json.NewDecoder(f)
+	for dec.More() {
+		var r TradeRecord
+		if err := dec.Decode(&r); err == nil {
+			records = append(records, r)
+		}
+	}
+	return records, nil
+}
+
 func JournalRecordPaths(base string) (tradesPath, equityPath string) {
 	base = strings.TrimSpace(base)
 	if base == "" {

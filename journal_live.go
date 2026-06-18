@@ -25,6 +25,9 @@ type LiveJournal struct {
 	accountID string
 	journal   Journal
 	log       *slog.Logger
+	// botIDLookup is called on each trade close to find which managed bot
+	// opened the trade. Nil means no bot tagging.
+	botIDLookup func(tradeID string) string
 
 	mu           sync.Mutex
 	pendingOpens map[string]*pendingOpen // by OANDA tradeID
@@ -50,6 +53,15 @@ func NewLiveJournal(client *oanda.Client, accountID string, journal Journal, log
 		log:          log,
 		pendingOpens: make(map[string]*pendingOpen),
 	}
+}
+
+// SetBotIDLookup provides a function the journal calls on each close to find
+// which bot opened a given OANDA trade ID. This lets the centralized journal
+// (one per serve process) tag TradeRecords with the correct bot.
+func (lj *LiveJournal) SetBotIDLookup(fn func(tradeID string) string) {
+	lj.mu.Lock()
+	lj.botIDLookup = fn
+	lj.mu.Unlock()
 }
 
 // LastSeenTxID returns the highest transaction ID we've processed (via
@@ -169,8 +181,13 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 		}
 	}
 
+	var botID string
+	if lj.botIDLookup != nil {
+		botID = lj.botIDLookup(closed.TradeID)
+	}
 	record := TradeRecord{
 		TradeID:    closed.TradeID,
+		BotID:      botID,
 		Instrument: po.Instrument,
 		Units:      po.Units,
 		EntryPrice: po.EntryPrice,

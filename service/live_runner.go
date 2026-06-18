@@ -32,6 +32,10 @@ type LiveRunConfig struct {
 
 	// MaxPositionUSD caps position notional value in account currency. 0 = no cap.
 	MaxPositionUSD float64
+
+	// BotID is the managed-bot identifier. When set, trades written to the
+	// live journal are tagged with this ID so reports can filter by bot.
+	BotID string
 }
 
 // RunLiveStrategy runs a live strategy loop until ctx is cancelled.
@@ -239,6 +243,9 @@ func (s *Service) runOneTick(
 			"price", result.Filled.Price,
 			"reason", plan.Open.Reason,
 		)
+		if cfg.BotID != "" {
+			s.RegisterTradeBotID(result.Filled.TradeID, cfg.BotID)
+		}
 	}
 	return nil
 }

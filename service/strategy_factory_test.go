@@ -10,9 +10,10 @@ import (
 
 func testService() *Service {
 	return &Service{
-		OANDA:     &oanda.Client{BaseURL: "https://api-fxpractice.oanda.com", Token: "test"},
-		AccountID: "test-account",
-		bots:      make(map[string]*botEntry),
+		OANDA:       &oanda.Client{BaseURL: "https://api-fxpractice.oanda.com", Token: "test"},
+		AccountID:   "test-account",
+		bots:        make(map[string]*botEntry),
+		tradeBotMap: make(map[string]string),
 	}
 }
 

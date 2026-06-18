@@ -5,6 +5,7 @@ package trader
 // such as CSV, JSONL, and Org output.
 type TradeRecord struct {
 	TradeID    string
+	BotID      string // set by the bot manager; empty for backtest/journal-only runs
 	Instrument string
 	Units      Units
 	EntryPrice Price
