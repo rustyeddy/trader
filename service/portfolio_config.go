@@ -81,7 +81,35 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 	}
 
 	for _, y := range cfg.Instruments {
-		strategy, err := trader.GetStrategy(trader.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params})
+		scfg := trader.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params}
+
+		riskPct := y.RiskPct
+		if riskPct <= 0 {
+			riskPct = cfg.RiskPct
+		}
+
+		// Native LiveStrategy (e.g. pulse) — bypasses candle adapter entirely.
+		if trader.LookupLiveStrategy(scfg.Kind) != nil {
+			liveStrat, err := trader.GetLiveStrategy(scfg)
+			if err != nil {
+				return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
+			}
+			rc.Instruments = append(rc.Instruments, InstrumentRunConfig{
+				Instrument:   y.Instrument,
+				Granularity:  toOandaGranularity(y.Timeframe),
+				TickInterval: func() time.Duration {
+					d, _ := time.ParseDuration(y.TickInterval)
+					return d
+				}(),
+				Strategy: liveStrat,
+				RiskPct:  riskPct,
+				MaxUnits: y.MaxUnits,
+			})
+			continue
+		}
+
+		// Backtest strategy — wrap in candle adapter for bar-driven live trading.
+		strategy, err := trader.GetStrategy(scfg)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
 		}
@@ -103,10 +131,6 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		localWarmup := y.LocalWarmupBars
 		if localWarmup <= 0 {
 			localWarmup = cfg.LocalWarmupBars
-		}
-		riskPct := y.RiskPct
-		if riskPct <= 0 {
-			riskPct = cfg.RiskPct
 		}
 
 		exitCfg := trader.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}

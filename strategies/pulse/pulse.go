@@ -12,6 +12,48 @@ import (
 	"github.com/rustyeddy/trader"
 )
 
+func init() {
+	trader.MustRegisterLiveStrategy(func(params map[string]any) (trader.LiveStrategy, error) {
+		cfg := DefaultConfig()
+		if v, ok, err := trader.GetInt32Param(params, "trade_every"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.TradeEvery = int(v)
+		}
+		if v, ok, err := trader.GetInt32Param(params, "hold_bars"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.HoldBars = int(v)
+		}
+		if v, ok, err := trader.GetInt32Param(params, "max_positions"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.MaxPositions = int(v)
+		}
+		if v, ok, err := trader.GetStringParam(params, "side"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.Side = v
+		}
+		if v, ok, err := trader.GetFloat64Param(params, "stop_pips"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.StopPips = v
+		}
+		if v, ok, err := trader.GetFloat64Param(params, "take_pips"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.TakePips = v
+		}
+		if v, ok, err := trader.GetFloat64Param(params, "risk_pct"); err != nil {
+			return nil, err
+		} else if ok {
+			cfg.RiskPct = v
+		}
+		return New(cfg)
+	}, "pulse")
+}
+
 // Config controls the pulse strategy's behaviour. All fields map directly to
 // YAML params so the strategy is fully configurable without recompilation.
 type Config struct {
