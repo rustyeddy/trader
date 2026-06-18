@@ -54,7 +54,9 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	}
 
 	id := newBotID()
-	botCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() as the bot's parent — the bot must outlive the
+	// HTTP request that created it. StopBot/StopAllBots cancel it explicitly.
+	botCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	entry := &botEntry{
