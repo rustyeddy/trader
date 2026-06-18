@@ -2,7 +2,6 @@ package data
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -89,13 +88,6 @@ Examples:
 
 			svc, err := service.New(service.Config{Env: env, Token: token})
 			if err != nil {
-				var amb service.AmbiguousAccountError
-				if errors.As(err, &amb) {
-					fmt.Fprintln(cmd.OutOrStdout(), "Multiple accounts — specify one with --account-id:")
-					for _, id := range amb.Accounts {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", id)
-					}
-				}
 				return err
 			}
 

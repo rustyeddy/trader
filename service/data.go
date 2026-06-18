@@ -350,7 +350,6 @@ func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (t
 	// Find the latest monthly file that exists on disk.
 	now := time.Now().UTC()
 	var latestPath string
-	var latestKey trader.Key
 	for year := now.Year(); year >= 2010; year-- {
 		startMonth := 12
 		if year == now.Year() {
@@ -368,7 +367,6 @@ func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (t
 			path := store.PathForMonthlyCandle(k)
 			if _, err := os.Stat(path); err == nil {
 				latestPath = path
-				latestKey = k
 				goto found
 			}
 		}
@@ -376,34 +374,32 @@ func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (t
 	return time.Time{}, fmt.Errorf("no candle files found for %s/%s", instrument, timeframe)
 
 found:
-	date, err := lastNonZeroDate(latestPath, latestKey, tf)
+	date, err := lastNonZeroDate(latestPath)
 	if err != nil {
 		return time.Time{}, err
 	}
 	return date, nil
 }
 
-// lastNonZeroDate reads a candle CSV and returns the date of the last row
-// that has non-zero OHLC data (the 0x0001 flag indicates a real candle).
-func lastNonZeroDate(path string, key trader.Key, tf trader.Timeframe) (time.Time, error) {
+// lastNonZeroDate reads a candle CSV and returns the UTC day (00:00:00)
+// of the latest row that has real candle data (flags bit 0x0001 set).
+func lastNonZeroDate(path string) (time.Time, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return time.Time{}, err
 	}
 	defer f.Close()
 
-	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	stepSec := int64(tf)
-
 	var lastDate time.Time
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "time") {
+		lower := strings.ToLower(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(lower, "timestamp,") || strings.HasPrefix(lower, "time,") {
 			continue
 		}
 		fields := strings.Split(line, ",")
-		// CSV format: timestamp,open,high,low,close,avgspread,maxspread,ticks,flags
+		// CSV format: Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags
 		if len(fields) < 9 {
 			continue
 		}
@@ -411,16 +407,21 @@ func lastNonZeroDate(path string, key trader.Key, tf trader.Timeframe) (time.Tim
 		if err != nil {
 			continue
 		}
-		flags := strings.TrimSpace(fields[8])
-		if flags != "0x0001" {
+		flags, err := strconv.ParseUint(strings.TrimSpace(fields[8]), 0, 64)
+		if err != nil {
+			continue
+		}
+		if flags&0x0001 == 0 {
 			continue // zero/empty candle slot
 		}
-		_ = stepSec
-		_ = monthStart
 		t := time.Unix(ts, 0).UTC()
+		t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		if t.After(lastDate) {
 			lastDate = t
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return time.Time{}, fmt.Errorf("scan %s: %w", path, err)
 	}
 	if lastDate.IsZero() {
 		return time.Time{}, fmt.Errorf("no non-zero candles in %s", path)

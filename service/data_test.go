@@ -149,3 +149,20 @@ func TestLastNonZeroCandleDate_PicksNewestMonth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC), got)
 }
+
+func TestLastNonZeroDate_NormalizesToUTCDate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "candles.csv")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	_, err = fmt.Fprintln(f, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags")
+	require.NoError(t, err)
+	_, err = fmt.Fprintln(f, "1747353599,110000,110100,109900,110050,10,15,100,0x0001") // 2025-05-15T23:59:59Z
+	require.NoError(t, err)
+
+	got, err := lastNonZeroDate(path)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2025, 5, 15, 0, 0, 0, 0, time.UTC), got)
+}
