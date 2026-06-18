@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rustyeddy/trader"
@@ -288,4 +289,111 @@ func TestHandleGetBacktestCandles_EmptyWhenNoCandleFiles(t *testing.T) {
 	assert.Equal(t, "H1", body.Timeframe)
 	assert.NotNil(t, body.Bars, "bars must be [] not null")
 	assert.Empty(t, body.Bars)
+}
+
+// ── handleListBacktestConfigs ─────────────────────────────────────────────────
+
+func TestHandleListBacktestConfigs_Empty(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{configsDir: dir}
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs")
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Count   int      `json:"count"`
+		Configs []string `json:"configs"`
+		Dir     string   `json:"dir"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, 0, body.Count)
+	assert.Empty(t, body.Configs)
+	assert.Equal(t, dir, body.Dir)
+}
+
+func TestHandleListBacktestConfigs_ReturnsSortedNames(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "z-run.yml"), []byte("name: z"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-run.yaml"), []byte("name: a"), 0o644))
+	srv := &Server{configsDir: dir}
+
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Count   int      `json:"count"`
+		Configs []string `json:"configs"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, 2, body.Count)
+	assert.Equal(t, []string{"a-run.yaml", "z-run.yml"}, body.Configs)
+}
+
+func TestHandleListBacktestConfigs_DirOverride(t *testing.T) {
+	parentDir := t.TempDir()
+	subDir := filepath.Join(parentDir, "sub")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "cfg.yml"), []byte(""), 0o644))
+	srv := &Server{configsDir: parentDir}
+
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+subDir)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Count int `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, 1, body.Count)
+}
+
+func TestHandleListBacktestConfigs_DirOverrideUnconfiguredBlocked(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{} // configsDir not set — ?dir= override must be rejected
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+dir)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// ── handleRegressBacktest ─────────────────────────────────────────────────────
+
+func TestHandleRegressBacktest_BadBody(t *testing.T) {
+	srv, _ := newTestServer(t, nil)
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader("not json"))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleRegressBacktest_EmptyBody(t *testing.T) {
+	// An empty body should be treated as {} (all defaults), not a 400.
+	srv, _ := newTestServer(t, nil)
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	assert.NotEqual(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleRegressBacktest_BaselineDirTraversal(t *testing.T) {
+	srv, dir := newTestServer(t, nil)
+	body := `{"baseline_dir":"` + dir + `/../outside"}`
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleListBacktestConfigs_DirTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{configsDir: dir}
+	// Attempt to traverse outside the configured dir.
+	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/configs?dir="+dir+"/../outside")
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleRegressBacktest_NoConfigsResolvable(t *testing.T) {
+	srv, _ := newTestServer(t, nil)
+	body := `{"config_paths":["/nonexistent/path"]}`
+	req := httptest.NewRequest("POST", "/api/v1/backtests/regress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	// Either 500 (can't resolve path) or 422 (no results); either is correct.
+	assert.NotEqual(t, http.StatusOK, rr.Code)
 }
