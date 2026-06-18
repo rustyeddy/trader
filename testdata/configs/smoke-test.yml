@@ -30,12 +30,13 @@ instruments:
     strategy:
       kind: pulse
       params:
-        trade_every: 3           # open every 3 ticks (~90s)
-        hold_bars:   8           # close after 8 ticks (~4 min)
-        side:        long        # netting account — one direction
-        stop_pips:   15          # tight stop to exercise stop-loss path
-        take_pips:   0           # no TP; rely on hold_bars close
-        risk_pct:    0.1
+        trade_every:   3           # open every 3 ticks (~90s)
+        hold_bars:     8           # close after 8 ticks (~4 min)
+        max_positions: 1           # netting account — only one open at a time
+        side:          long        # netting account — one direction
+        stop_pips:     15          # tight stop to exercise stop-loss path
+        take_pips:     0           # no TP; rely on hold_bars close
+        risk_pct:      0.1
 
     # No regime filter — smoke test must run at any time of day.
 
