@@ -33,6 +33,7 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 		botGetCmd(),
 		botStartCmd(),
 		botStopCmd(),
+		botReportCmd(),
 	)
 	return cmd
 }
@@ -91,22 +92,149 @@ func botGetCmd() *cobra.Command {
 			if err := apiGet(serverURL+"/api/v1/bots/"+args[0], &s); err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
-			bar := strings.Repeat("─", 36)
-			fmt.Fprintln(out, bar)
-			fmt.Fprintf(out, "  %-18s %s\n", "ID", s.ID)
-			fmt.Fprintln(out, bar)
-			fmt.Fprintf(out, "  %-18s %s\n", "Status", s.Status)
-			fmt.Fprintf(out, "  %-18s %s\n", "Strategy", s.StrategyName)
-			fmt.Fprintf(out, "  %-18s %s\n", "Instrument", s.Instrument)
-			fmt.Fprintf(out, "  %-18s %s\n", "Started", s.StartedAt.Format(time.RFC3339))
-			if s.Error != "" {
-				fmt.Fprintf(out, "  %-18s %s\n", "Error", s.Error)
-			}
-			fmt.Fprintln(out, bar)
+			printBotDetail(cmd.OutOrStdout(), s)
 			return nil
 		},
 	}
+}
+
+func printBotDetail(out io.Writer, s service.BotStatus) {
+	bar := strings.Repeat("─", 40)
+	fmt.Fprintln(out, bar)
+	fmt.Fprintf(out, "  %-20s %s\n", "ID", s.ID)
+	fmt.Fprintln(out, bar)
+	fmt.Fprintf(out, "  %-20s %s\n", "Status", s.Status)
+	fmt.Fprintf(out, "  %-20s %s\n", "Instrument", s.Instrument)
+	fmt.Fprintf(out, "  %-20s %s (%s)\n", "Strategy", s.StrategyName, s.StrategyKind)
+	fmt.Fprintf(out, "  %-20s %.2f%%\n", "Risk", s.RiskPct)
+	fmt.Fprintf(out, "  %-20s %s\n", "Tick Interval", s.TickInterval)
+	fmt.Fprintf(out, "  %-20s %s\n", "Started", s.StartedAt.Format(time.RFC3339))
+	if s.StoppedAt != nil {
+		dur := s.StoppedAt.Sub(s.StartedAt).Round(time.Second)
+		fmt.Fprintf(out, "  %-20s %s (ran %s)\n", "Stopped", s.StoppedAt.Format(time.RFC3339), dur)
+	} else {
+		dur := time.Since(s.StartedAt).Round(time.Second)
+		fmt.Fprintf(out, "  %-20s running for %s\n", "Uptime", dur)
+	}
+	fmt.Fprintf(out, "  %-20s %d\n", "Ticks", s.Ticks)
+	fmt.Fprintf(out, "  %-20s %d\n", "Opens", s.Opens)
+	fmt.Fprintf(out, "  %-20s %d\n", "Closes", s.Closes)
+	if s.Error != "" {
+		fmt.Fprintf(out, "  %-20s %s\n", "Error", s.Error)
+	}
+	fmt.Fprintln(out, bar)
+}
+
+// ── bot report ────────────────────────────────────────────────────────────
+
+func botReportCmd() *cobra.Command {
+	var (
+		all         bool
+		journalPath string
+	)
+	cmd := &cobra.Command{
+		Use:   "report <id> | --all",
+		Short: "Show a detailed run report for one or all bots",
+		Long: `Show a detailed report for a bot run, including metadata, runtime stats, and P&L.
+
+Accepts a bot ID for a single report, or --all to report every known bot.
+Works for both running and stopped bots.
+
+P&L data is read from the journal file (--journal). Only trades tagged with a
+bot ID (those opened after this feature was introduced) will appear in the P&L
+section.`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) != 0 {
+					return fmt.Errorf("report --all does not accept a bot ID argument")
+				}
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("report requires exactly one bot ID argument (or use --all)")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+
+			// Read journal trades once; filter per-bot below.
+			var allTrades []traderpkg.TradeRecord
+			if journalPath != "" {
+				var err error
+				allTrades, err = traderpkg.ReadTradesJSONL(journalPath)
+				if err != nil {
+					fmt.Fprintf(out, "warning: could not read journal %s: %v\n\n", journalPath, err)
+				}
+			}
+
+			printReport := func(s service.BotStatus) {
+				printBotDetail(out, s)
+				printBotPL(out, s.ID, allTrades)
+				fmt.Fprintln(out)
+			}
+
+			if all {
+				var statuses []service.BotStatus
+				if err := apiGet(serverURL+"/api/v1/bots", &statuses); err != nil {
+					return err
+				}
+				if len(statuses) == 0 {
+					fmt.Fprintln(out, "No bots found.")
+					return nil
+				}
+				for _, s := range statuses {
+					printReport(s)
+				}
+				return nil
+			}
+			var s service.BotStatus
+			if err := apiGet(serverURL+"/api/v1/bots/"+args[0], &s); err != nil {
+				return err
+			}
+			printReport(s)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "Report all bots (running and stopped)")
+	cmd.Flags().StringVar(&journalPath, "journal", "./live-trades.jsonl", "Path to JSONL trades journal for P&L data")
+	return cmd
+}
+
+func printBotPL(out io.Writer, botID string, trades []traderpkg.TradeRecord) {
+	var botTrades []traderpkg.TradeRecord
+	for _, t := range trades {
+		if t.BotID == botID {
+			botTrades = append(botTrades, t)
+		}
+	}
+	if len(botTrades) == 0 {
+		return
+	}
+	bar := strings.Repeat("─", 40)
+	fmt.Fprintln(out, bar)
+	fmt.Fprintf(out, "  %-20s %d trades\n", "Closed Trades", len(botTrades))
+	var totalPL float64
+	wins, losses := 0, 0
+	for _, t := range botTrades {
+		pl := t.RealizedPL.Float64()
+		totalPL += pl
+		if pl >= 0 {
+			wins++
+		} else {
+			losses++
+		}
+		fmt.Fprintf(out, "    %-8s  entry=%.5f  exit=%.5f  pl=%+.2f  %s\n",
+			t.TradeID,
+			t.EntryPrice.Float64(),
+			t.ExitPrice.Float64(),
+			pl,
+			t.Reason,
+		)
+	}
+	fmt.Fprintf(out, "  %-20s %+.2f\n", "Total P&L", totalPL)
+	fmt.Fprintf(out, "  %-20s %d W / %d L\n", "Win/Loss", wins, losses)
+	fmt.Fprintln(out, bar)
 }
 
 // ── bot start ─────────────────────────────────────────────────────────────

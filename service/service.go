@@ -37,6 +37,12 @@ type Service struct {
 
 	botsMu sync.RWMutex
 	bots   map[string]*botEntry
+
+	// tradeBotMu guards tradeBotMap, which maps OANDA tradeID → bot ID.
+	// Populated by the live runner when a trade opens; read by LiveJournal
+	// when the trade closes to tag the journal record.
+	tradeBotMu  sync.RWMutex
+	tradeBotMap map[string]string
 }
 
 // Config bundles the inputs needed to construct a Service.
@@ -80,11 +86,35 @@ func New(cfg Config) (*Service, error) {
 	}
 
 	return &Service{
-		OANDA:     &oanda.Client{BaseURL: baseURL, Token: token},
-		Log:       log,
-		AccountID: cfg.AccountID,
-		bots:      make(map[string]*botEntry),
+		OANDA:       &oanda.Client{BaseURL: baseURL, Token: token},
+		Log:         log,
+		AccountID:   cfg.AccountID,
+		bots:        make(map[string]*botEntry),
+		tradeBotMap: make(map[string]string),
 	}, nil
+}
+
+// RegisterTradeBotID records that the given OANDA trade was opened by botID.
+// Called by the live runner immediately after a successful PlaceMarketOrder.
+func (s *Service) RegisterTradeBotID(tradeID, botID string) {
+	if tradeID == "" || botID == "" {
+		return
+	}
+	s.tradeBotMu.Lock()
+	if s.tradeBotMap == nil {
+		s.tradeBotMap = make(map[string]string)
+	}
+	s.tradeBotMap[tradeID] = botID
+	s.tradeBotMu.Unlock()
+}
+
+// LookupTradeBotID returns the bot ID that opened the given OANDA trade, or
+// empty string if none was registered (e.g. trade opened outside a bot).
+func (s *Service) LookupTradeBotID(tradeID string) string {
+	s.tradeBotMu.RLock()
+	id := s.tradeBotMap[tradeID]
+	s.tradeBotMu.RUnlock()
+	return id
 }
 
 // ResolveAccount fills in s.AccountID by querying OANDA when it wasn't

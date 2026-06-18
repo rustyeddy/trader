@@ -54,6 +54,7 @@ func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, ba
 		return 0, err
 	}
 	lj := trader.NewLiveJournal(s.OANDA, s.AccountID, journal, s.Log)
+	lj.SetBotIDLookup(s.LookupTradeBotID)
 
 	if backfillFrom > 0 {
 		if err := lj.Backfill(ctx, backfillFrom); err != nil {

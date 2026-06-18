@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,4 +139,60 @@ type errWriter struct {
 
 func (w errWriter) Write(_ []byte) (int, error) {
 	return 0, w.err
+}
+
+func TestReadTradesJSONL_BotIDFilter(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tradesPath := filepath.Join(dir, "trades.jsonl")
+	equityPath := filepath.Join(dir, "equity.jsonl")
+
+	j, err := NewJSON(tradesPath, equityPath)
+	require.NoError(t, err)
+
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "1", BotID: "bot-aaa", RealizedPL: MoneyFromFloat(5)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "2", BotID: "bot-bbb", RealizedPL: MoneyFromFloat(-3)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "3", BotID: "bot-aaa", RealizedPL: MoneyFromFloat(10)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "4"})) // no bot ID
+	require.NoError(t, j.Close())
+
+	all, err := ReadTradesJSONL(tradesPath)
+	require.NoError(t, err)
+	assert.Len(t, all, 4)
+
+	var botATrades []TradeRecord
+	for _, r := range all {
+		if r.BotID == "bot-aaa" {
+			botATrades = append(botATrades, r)
+		}
+	}
+	assert.Len(t, botATrades, 2)
+	assert.Equal(t, "1", botATrades[0].TradeID)
+	assert.Equal(t, "3", botATrades[1].TradeID)
+}
+
+func TestReadTradesJSONL_MissingFile(t *testing.T) {
+	t.Parallel()
+	_, err := ReadTradesJSONL(filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
+	assert.Error(t, err)
+}
+
+func TestReadTradesJSONL_SkipsMalformedLines(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "trades.jsonl")
+	content := strings.Join([]string{
+		`{"TradeID":"ok-1","BotID":"bot-a","RealizedPL":100}`,
+		`{"trade_id":"bad-json"`,
+		``,
+		`{"TradeID":"ok-2","BotID":"bot-b","RealizedPL":-50}`,
+	}, "\n")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	got, err := ReadTradesJSONL(path)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "ok-1", got[0].TradeID)
+	assert.Equal(t, "ok-2", got[1].TradeID)
 }

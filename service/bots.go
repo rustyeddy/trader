@@ -5,13 +5,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
+
+	trader "github.com/rustyeddy/trader"
 )
 
 // BotConfig is the payload needed to start a live strategy bot via the API.
 type BotConfig struct {
 	Instrument     string         `json:"instrument"`
-	TickInterval   string         `json:"tick_interval"`    // e.g. "60s", "5m"
+	TickInterval   string         `json:"tick_interval"` // e.g. "60s", "5m"
 	RiskPct        float64        `json:"risk_pct"`
 	MaxUnits       int64          `json:"max_units"`
 	MaxPositionUSD float64        `json:"max_position_usd"`
@@ -20,17 +23,26 @@ type BotConfig struct {
 
 // BotStatus is the public view of a running or stopped bot.
 type BotStatus struct {
-	ID           string    `json:"id"`
-	Instrument   string    `json:"instrument"`
-	StrategyName string    `json:"strategy_name"`
-	StartedAt    time.Time `json:"started_at"`
-	Status       string    `json:"status"` // "running" | "stopped" | "error"
-	Error        string    `json:"error,omitempty"`
+	ID           string     `json:"id"`
+	Instrument   string     `json:"instrument"`
+	StrategyName string     `json:"strategy_name"`
+	StrategyKind string     `json:"strategy_kind"`
+	RiskPct      float64    `json:"risk_pct"`
+	TickInterval string     `json:"tick_interval"`
+	StartedAt    time.Time  `json:"started_at"`
+	StoppedAt    *time.Time `json:"stopped_at,omitempty"`
+	Status       string     `json:"status"` // "running" | "stopped" | "error"
+	Error        string     `json:"error,omitempty"`
+	// Runtime stats — updated each tick.
+	Ticks  int `json:"ticks"`
+	Opens  int `json:"opens"`
+	Closes int `json:"closes"`
 }
 
 // botEntry is the internal record tracking a bot goroutine.
 type botEntry struct {
 	BotStatus
+	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   <-chan struct{}
 }
@@ -59,17 +71,28 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	botCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
+	tickIntervalStr := cfg.TickInterval
+	if tickIntervalStr == "" {
+		tickIntervalStr = "60s"
+	}
+
 	entry := &botEntry{
 		BotStatus: BotStatus{
 			ID:           id,
 			Instrument:   cfg.Instrument,
 			StrategyName: strategy.Name(),
+			StrategyKind: cfg.Strategy.Kind,
+			RiskPct:      cfg.RiskPct,
+			TickInterval: tickIntervalStr,
 			StartedAt:    time.Now().UTC(),
 			Status:       "running",
 		},
 		cancel: cancel,
 		done:   done,
 	}
+
+	// Wrap the strategy so each Tick call updates the bot's stats.
+	tracked := &statsTrackingStrategy{inner: strategy, entry: entry}
 
 	s.botsMu.Lock()
 	if s.bots == nil {
@@ -83,19 +106,24 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 		runErr := s.RunLiveStrategy(botCtx, LiveRunConfig{
 			Instrument:     cfg.Instrument,
 			TickInterval:   interval,
-			Strategy:       strategy,
+			Strategy:       tracked,
 			RiskPct:        cfg.RiskPct,
 			MaxUnits:       cfg.MaxUnits,
 			MaxPositionUSD: cfg.MaxPositionUSD,
+			BotID:          id,
 		})
+		now := time.Now().UTC()
 		s.botsMu.Lock()
 		if e, ok := s.bots[id]; ok {
+			e.mu.Lock()
+			e.StoppedAt = &now
 			if runErr != nil && botCtx.Err() == nil {
 				e.Status = "error"
 				e.Error = runErr.Error()
 			} else {
 				e.Status = "stopped"
 			}
+			e.mu.Unlock()
 		}
 		s.botsMu.Unlock()
 	}()
@@ -123,7 +151,10 @@ func (s *Service) ListBots() []BotStatus {
 	defer s.botsMu.RUnlock()
 	out := make([]BotStatus, 0, len(s.bots))
 	for _, e := range s.bots {
-		out = append(out, e.BotStatus)
+		e.mu.Lock()
+		status := e.BotStatus
+		e.mu.Unlock()
+		out = append(out, status)
 	}
 	return out
 }
@@ -156,13 +187,40 @@ func (s *Service) StopAllBots() {
 // GetBot returns the status of one bot by ID.
 func (s *Service) GetBot(id string) (*BotStatus, error) {
 	s.botsMu.RLock()
-	defer s.botsMu.RUnlock()
 	e, ok := s.bots[id]
+	s.botsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("bots: bot %q not found", id)
 	}
+	e.mu.Lock()
 	status := e.BotStatus
+	e.mu.Unlock()
 	return &status, nil
+}
+
+// ── stats-tracking strategy wrapper ──────────────────────────────────────
+
+// statsTrackingStrategy wraps a LiveStrategy and updates the bot entry's
+// Ticks, Opens, and Closes counters on every tick.
+type statsTrackingStrategy struct {
+	inner trader.LiveStrategy
+	entry *botEntry
+}
+
+func (w *statsTrackingStrategy) Name() string { return w.inner.Name() }
+
+func (w *statsTrackingStrategy) Tick(ctx context.Context, price trader.LivePrice, trades []trader.LiveTrade) *trader.LivePlan {
+	plan := w.inner.Tick(ctx, price, trades)
+	w.entry.mu.Lock()
+	w.entry.Ticks++
+	if plan != nil {
+		if plan.Open != nil {
+			w.entry.Opens++
+		}
+		w.entry.Closes += len(plan.CloseIDs)
+	}
+	w.entry.mu.Unlock()
+	return plan
 }
 
 func newBotID() string {
