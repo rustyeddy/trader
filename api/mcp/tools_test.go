@@ -120,6 +120,20 @@ func TestStartBotRequiresWriteEnable(t *testing.T) {
 	assert.Equal(t, true, payload["isError"])
 }
 
+func TestStartBotRequiresOANDA(t *testing.T) {
+	srv := New(&service.Service{Log: slog.Default()}, true) // write enabled, no OANDA
+	raw, _ := json.Marshal(map[string]any{
+		"name":      "start_bot",
+		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
+	})
+	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
+	require.Nil(t, rpcErr)
+	payload := got.(map[string]any)
+	assert.Equal(t, true, payload["isError"])
+	text := payload["content"].([]map[string]any)[0]["text"].(string)
+	assert.Contains(t, text, "OANDA not configured")
+}
+
 func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	store := trader.NewStoreAt(t.TempDir())
 	candles := make([]trader.Candle, 744)

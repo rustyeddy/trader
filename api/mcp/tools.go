@@ -211,7 +211,7 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	if s.svc.OANDA == nil {
 		switch p.Name {
 		case "run_backtest", "get_candles_csv", "get_candle_stats", "validate_candles",
-			"get_pip_values", "get_position", "list_bots", "get_bot", "start_bot", "stop_bot":
+			"get_pip_values", "get_position", "list_bots", "get_bot", "stop_bot":
 			// allowed without OANDA — local data, pure calculation, or bot management
 		default:
 			return errContent("OANDA not configured — start server with --token to enable live endpoints"), nil
