@@ -1,10 +1,12 @@
 package rest
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rustyeddy/trader"
@@ -108,6 +110,184 @@ func (s *Server) handleGetBacktestOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── GET /api/v1/backtests/{name}/candles ──────────────────────────────────
+
+// ── GET /api/v1/backtests/configs ─────────────────────────────────────────
+
+// handleListBacktestConfigs scans the configs directory for *.yml, *.yaml,
+// and *.json files and returns their names sorted lexically.
+// The directory defaults to $TRADER_BACKTEST_DIR/configs or
+// /srv/trading/backtests/configs and may be overridden with ?dir=.
+func (s *Server) handleListBacktestConfigs(w http.ResponseWriter, r *http.Request) {
+	dir := strings.TrimSpace(r.URL.Query().Get("dir"))
+	if dir == "" {
+		dir = s.effectiveConfigsDir()
+	}
+
+	var matches []string
+	for _, pat := range []string{"*.yml", "*.yaml", "*.json"} {
+		m, err := filepath.Glob(filepath.Join(dir, pat))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("glob %s: %v", pat, err))
+			return
+		}
+		matches = append(matches, m...)
+	}
+	sort.Strings(matches)
+
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, filepath.Base(m))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":   len(names),
+		"configs": names,
+		"dir":     dir,
+	})
+}
+
+func (s *Server) effectiveConfigsDir() string {
+	if s.configsDir != "" {
+		return s.configsDir
+	}
+	return "/srv/trading/backtests/configs"
+}
+
+// WithConfigsDir sets the directory from which backtest config files are
+// listed. Call before Serve. Defaults to /srv/trading/backtests/configs.
+func (s *Server) WithConfigsDir(dir string) {
+	s.configsDir = dir
+}
+
+// ── POST /api/v1/backtests/regress ────────────────────────────────────────
+
+type regressBacktestRequest struct {
+	// ConfigPaths is a list of YAML backtest config file paths on the server.
+	// Defaults to the configs directory when omitted.
+	ConfigPaths []string `json:"config_paths,omitempty"`
+	// Update, when true, writes the current results as new baselines instead
+	// of comparing against existing ones.
+	Update bool `json:"update,omitempty"`
+	// BaselineDir is the directory holding committed baseline JSON reports.
+	// Defaults to the reports directory when omitted.
+	BaselineDir string `json:"baseline_dir,omitempty"`
+}
+
+type regressResult struct {
+	Name   string   `json:"name"`
+	Passed bool     `json:"passed"`
+	Diffs  []string `json:"diffs,omitempty"`
+}
+
+// handleRegressBacktest runs backtest configs and compares results against
+// committed JSON baselines, returning per-run pass/fail details.
+func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
+	var req regressBacktestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+		return
+	}
+
+	configPaths := req.ConfigPaths
+	if len(configPaths) == 0 {
+		configPaths = []string{s.effectiveConfigsDir()}
+	}
+
+	baselineDir := strings.TrimSpace(req.BaselineDir)
+	if baselineDir == "" {
+		baselineDir = s.effectiveReportsDir()
+	}
+
+	summaries, err := s.svc.RunBacktestPathSpecs(r.Context(), configPaths)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("run backtests: %v", err))
+		return
+	}
+	if len(summaries) == 0 {
+		writeErr(w, http.StatusUnprocessableEntity, "no backtest results generated from provided config paths")
+		return
+	}
+
+	if req.Update {
+		if err := os.MkdirAll(baselineDir, 0o755); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("create baseline dir: %v", err))
+			return
+		}
+		for _, s2 := range summaries {
+			path := filepath.Join(baselineDir, s2.Name+".json")
+			if err := service.WriteBacktestSummaryJSON(path, s2); err != nil {
+				writeErr(w, http.StatusInternalServerError, fmt.Sprintf("write baseline for %q: %v", s2.Name, err))
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"updated":      len(summaries),
+			"baseline_dir": baselineDir,
+		})
+		return
+	}
+
+	var results []regressResult
+	anyFailed := false
+	for _, got := range summaries {
+		path := filepath.Join(baselineDir, got.Name+".json")
+		baseline, err := service.ReadBacktestSummaryFile(path)
+		if err != nil {
+			results = append(results, regressResult{
+				Name:   got.Name,
+				Passed: false,
+				Diffs:  []string{fmt.Sprintf("no baseline at %s", path)},
+			})
+			anyFailed = true
+			continue
+		}
+		diffs := diffBacktestSummaries(baseline, got)
+		passed := len(diffs) == 0
+		if !passed {
+			anyFailed = true
+		}
+		results = append(results, regressResult{Name: got.Name, Passed: passed, Diffs: diffs})
+	}
+
+	status := http.StatusOK
+	if anyFailed {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, map[string]any{
+		"passed":  !anyFailed,
+		"results": results,
+	})
+}
+
+// diffBacktestSummaries returns human-readable diff strings for changed metrics.
+func diffBacktestSummaries(baseline, got trader.BacktestReportSummary) []string {
+	var diffs []string
+	diffInt := func(field string, b, g int) {
+		if b != g {
+			diffs = append(diffs, fmt.Sprintf("%s: baseline=%d got=%d", field, b, g))
+		}
+	}
+	diffFloat := func(field string, b, g float64) {
+		if b != g {
+			diffs = append(diffs, fmt.Sprintf("%s: baseline=%v got=%v", field, b, g))
+		}
+	}
+	diffInt("trades", baseline.Trades, got.Trades)
+	diffInt("wins", baseline.Wins, got.Wins)
+	diffInt("losses", baseline.Losses, got.Losses)
+	diffInt("spread_filtered", baseline.SpreadFiltered, got.SpreadFiltered)
+	diffFloat("start_balance", baseline.StartBalance, got.StartBalance)
+	diffFloat("end_balance", baseline.EndBalance, got.EndBalance)
+	diffFloat("net_pl", baseline.NetPL, got.NetPL)
+	diffFloat("return_pct", baseline.ReturnPct, got.ReturnPct)
+	diffFloat("win_rate", baseline.WinRate, got.WinRate)
+	diffFloat("max_drawdown", baseline.MaxDrawdown, got.MaxDrawdown)
+	diffFloat("avg_winner", baseline.AvgWinner, got.AvgWinner)
+	diffFloat("avg_loser", baseline.AvgLoser, got.AvgLoser)
+	diffFloat("rr", baseline.RR, got.RR)
+	diffFloat("avg_spread_pips", baseline.AvgSpreadPips, got.AvgSpreadPips)
+	return diffs
+}
 
 // candleBar is the JSON shape expected by lightweight-charts: unix-second
 // time plus OHLC as floats.

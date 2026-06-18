@@ -18,6 +18,9 @@ func init() {
 	CMDBacktest.AddCommand(CMDBacktestRegress)
 	CMDBacktest.AddCommand(CMDBacktestList)
 	CMDBacktest.AddCommand(CMDBacktestGet)
+	CMDBacktest.AddCommand(CMDBacktestOrg)
+	CMDBacktest.AddCommand(CMDBacktestCandles)
+	CMDBacktest.AddCommand(CMDBacktestConfigs)
 }
 
 var CMDBacktest = &cobra.Command{

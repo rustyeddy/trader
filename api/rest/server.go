@@ -24,6 +24,7 @@ type Server struct {
 	log        *slog.Logger
 	staticFS   fs.FS         // nil when no UI assets are embedded
 	reportsDir string        // directory for backtest JSON reports
+	configsDir string        // directory for backtest config files
 	mcpHandler http.Handler  // optional MCP handler mounted at POST /mcp
 }
 
@@ -72,6 +73,8 @@ func (s *Server) Handler() http.Handler {
 
 	// Backtests — run + browse saved reports
 	mux.HandleFunc("POST /api/v1/backtests/run", s.handleRunBacktest)
+	mux.HandleFunc("POST /api/v1/backtests/regress", s.handleRegressBacktest)
+	mux.HandleFunc("GET /api/v1/backtests/configs", s.handleListBacktestConfigs)
 	mux.HandleFunc("GET /api/v1/backtests", s.handleListBacktests)
 	mux.HandleFunc("GET /api/v1/backtests/{name}", s.handleGetBacktest)
 	mux.HandleFunc("GET /api/v1/backtests/{name}/org", s.handleGetBacktestOrg)

@@ -303,11 +303,11 @@ Notes:
 | Run backtest         | POST /api/v1/backtests/run           | backtest run     | run_backtest                           |
 | List results         | GET /api/v1/backtests                | backtest list    | backtest://results *(resource)*        |
 | Get result           | GET /api/v1/backtests/{name}         | backtest get     | backtest://results/{name} *(resource)* |
-| Get org report       | GET /api/v1/backtests/{name}/org     | —                | —                                      |
-| Get backtest candles | GET /api/v1/backtests/{name}/candles | —                | —                                      |
-| Regression check     | —                                    | backtest regress | —                                      |
+| Get org report       | GET /api/v1/backtests/{name}/org     | backtest org     | —                                      |
+| Get backtest candles | GET /api/v1/backtests/{name}/candles | backtest candles | —                                      |
+| Regression check     | POST /api/v1/backtests/regress       | backtest regress | —                                      |
 | Stream backtest      | GET /api/v1/stream/backtest/{id}     | —                | —                                      |
-| Browse configs       | —                                    | —                | config://configs *(resource)*          |
+| Browse configs       | GET /api/v1/backtests/configs        | backtest configs | config://configs *(resource)*          |
 
 ** Live Trading
 
