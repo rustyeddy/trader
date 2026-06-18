@@ -40,23 +40,22 @@ instruments:
 
     # No regime filter — smoke test must run at any time of day.
 
-  # ── Phase 2: add second instrument here ────────────────────────────────────
-  # Uncomment and adjust to begin multi-instrument testing.
-  #
-  # - instrument: GBP_USD
-  #   timeframe: M1
-  #   tick_interval: 30s
-  #   risk_pct: 0.1
-  #   max_units: 1000
-  #
-  #   strategy:
-  #     kind: pulse
-  #     params:
-  #       trade_every: 4         # slightly offset from EURUSD to stagger opens
-  #       hold_bars:   8
-  #       side:        long
-  #       stop_pips:   15
-  #       take_pips:   0
-  #       risk_pct:    0.1
-  #
-  #   # No regime filter — smoke test must run at any time of day.
+  # ── Phase 2: GBP_USD pulse ────────────────────────────────────────────────
+  - instrument: GBP_USD
+    timeframe: M1
+    tick_interval: 30s
+    risk_pct: 0.1
+    max_units: 1000
+
+    strategy:
+      kind: pulse
+      params:
+        trade_every:   4           # slightly offset from EURUSD to stagger opens
+        hold_bars:     8
+        max_positions: 1           # netting account — only one open at a time
+        side:          long
+        stop_pips:     15
+        take_pips:     0
+        risk_pct:      0.1
+
+    # No regime filter — smoke test must run at any time of day.
