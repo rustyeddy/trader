@@ -187,3 +187,27 @@ func TestDefaultServer_Fallback(t *testing.T) {
 	t.Setenv("TRADER_SERVER", "")
 	assert.Equal(t, "http://localhost:8080", defaultServer())
 }
+
+func TestBotReport_Args(t *testing.T) {
+	srv := fakeServer(t, nil)
+	defer srv.Close()
+	serverURL = srv.URL
+
+	cmd := botReportCmd()
+	err := cmd.Args(cmd, nil)
+	require.Error(t, err)
+
+	cmd = botReportCmd()
+	require.NoError(t, cmd.Flags().Set("all", "true"))
+	err = cmd.Args(cmd, []string{"bot-1"})
+	require.Error(t, err)
+
+	cmd = botReportCmd()
+	require.NoError(t, cmd.Flags().Set("all", "true"))
+	err = cmd.Args(cmd, nil)
+	require.NoError(t, err)
+
+	cmd = botReportCmd()
+	err = cmd.Args(cmd, []string{"bot-1"})
+	require.NoError(t, err)
+}

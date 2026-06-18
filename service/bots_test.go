@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestNewBotID_Unique(t *testing.T) {
 	ids := map[string]struct{}{}
 	for i := 0; i < 100; i++ {
@@ -232,4 +231,12 @@ func TestRegisterTradeBotID_EmptyInputsNoOp(t *testing.T) {
 	svc.RegisterTradeBotID("trade-1", "")
 	assert.Equal(t, "", svc.LookupTradeBotID(""))
 	assert.Equal(t, "", svc.LookupTradeBotID("trade-1"))
+}
+
+func TestRegisterTradeBotID_InitializesNilMap(t *testing.T) {
+	svc := &Service{}
+	assert.NotPanics(t, func() {
+		svc.RegisterTradeBotID("trade-1", "bot-abc")
+	})
+	assert.Equal(t, "bot-abc", svc.LookupTradeBotID("trade-1"))
 }

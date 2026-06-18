@@ -14,7 +14,7 @@ import (
 // BotConfig is the payload needed to start a live strategy bot via the API.
 type BotConfig struct {
 	Instrument     string         `json:"instrument"`
-	TickInterval   string         `json:"tick_interval"`    // e.g. "60s", "5m"
+	TickInterval   string         `json:"tick_interval"` // e.g. "60s", "5m"
 	RiskPct        float64        `json:"risk_pct"`
 	MaxUnits       int64          `json:"max_units"`
 	MaxPositionUSD float64        `json:"max_position_usd"`
@@ -151,7 +151,10 @@ func (s *Service) ListBots() []BotStatus {
 	defer s.botsMu.RUnlock()
 	out := make([]BotStatus, 0, len(s.bots))
 	for _, e := range s.bots {
-		out = append(out, e.BotStatus)
+		e.mu.Lock()
+		status := e.BotStatus
+		e.mu.Unlock()
+		out = append(out, status)
 	}
 	return out
 }

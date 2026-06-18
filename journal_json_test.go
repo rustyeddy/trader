@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,6 +174,25 @@ func TestReadTradesJSONL_BotIDFilter(t *testing.T) {
 
 func TestReadTradesJSONL_MissingFile(t *testing.T) {
 	t.Parallel()
-	_, err := ReadTradesJSONL("/tmp/does-not-exist-xyz.jsonl")
+	_, err := ReadTradesJSONL(filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
 	assert.Error(t, err)
+}
+
+func TestReadTradesJSONL_SkipsMalformedLines(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "trades.jsonl")
+	content := strings.Join([]string{
+		`{"TradeID":"ok-1","BotID":"bot-a","RealizedPL":100}`,
+		`{"trade_id":"bad-json"`,
+		``,
+		`{"TradeID":"ok-2","BotID":"bot-b","RealizedPL":-50}`,
+	}, "\n")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	got, err := ReadTradesJSONL(path)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "ok-1", got[0].TradeID)
+	assert.Equal(t, "ok-2", got[1].TradeID)
 }

@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -57,8 +58,8 @@ func (j *jsonJournal) Close() error {
 	return nil
 }
 
-// ReadTradesJSONL reads all TradeRecords from a JSONL file. Lines that fail
-// to parse are silently skipped (forward-compatible with added fields).
+// ReadTradesJSONL reads all TradeRecords from a JSONL file. Malformed/invalid
+// lines are silently skipped (forward-compatible with mixed journal data).
 func ReadTradesJSONL(path string) ([]TradeRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -67,12 +68,20 @@ func ReadTradesJSONL(path string) ([]TradeRecord, error) {
 	defer f.Close()
 
 	var records []TradeRecord
-	dec := json.NewDecoder(f)
-	for dec.More() {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
 		var r TradeRecord
-		if err := dec.Decode(&r); err == nil {
+		if err := json.Unmarshal([]byte(line), &r); err == nil {
 			records = append(records, r)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 	return records, nil
 }

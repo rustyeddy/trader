@@ -101,6 +101,9 @@ func (s *Service) RegisterTradeBotID(tradeID, botID string) {
 		return
 	}
 	s.tradeBotMu.Lock()
+	if s.tradeBotMap == nil {
+		s.tradeBotMap = make(map[string]string)
+	}
 	s.tradeBotMap[tradeID] = botID
 	s.tradeBotMu.Unlock()
 }

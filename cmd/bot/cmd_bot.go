@@ -133,7 +133,7 @@ func botReportCmd() *cobra.Command {
 		journalPath string
 	)
 	cmd := &cobra.Command{
-		Use:   "report [id]",
+		Use:   "report <id> | --all",
 		Short: "Show a detailed run report for one or all bots",
 		Long: `Show a detailed report for a bot run, including metadata, runtime stats, and P&L.
 
@@ -143,6 +143,18 @@ Works for both running and stopped bots.
 P&L data is read from the journal file (--journal). Only trades tagged with a
 bot ID (those opened after this feature was introduced) will appear in the P&L
 section.`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) != 0 {
+					return fmt.Errorf("report --all does not accept a bot ID argument")
+				}
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("report requires exactly one bot ID argument (or use --all)")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 
@@ -162,7 +174,7 @@ section.`,
 				fmt.Fprintln(out)
 			}
 
-			if all || len(args) == 0 {
+			if all {
 				var statuses []service.BotStatus
 				if err := apiGet(serverURL+"/api/v1/bots", &statuses); err != nil {
 					return err

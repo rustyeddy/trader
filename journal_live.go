@@ -165,6 +165,7 @@ func (lj *LiveJournal) recordOpen(tx oanda.Transaction) {
 func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrade) {
 	lj.mu.Lock()
 	po, ok := lj.pendingOpens[closed.TradeID]
+	botIDLookup := lj.botIDLookup
 	lj.mu.Unlock()
 
 	if !ok {
@@ -182,8 +183,8 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 	}
 
 	var botID string
-	if lj.botIDLookup != nil {
-		botID = lj.botIDLookup(closed.TradeID)
+	if botIDLookup != nil {
+		botID = botIDLookup(closed.TradeID)
 	}
 	record := TradeRecord{
 		TradeID:    closed.TradeID,
