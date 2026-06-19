@@ -1,0 +1,31 @@
+# Tournament account: EURGBP D1 BB-Fade BB(20,2.0) ATR×2.5
+#
+# Backtest result: WFA validated — IS +20.1% (20yr), WFA OOS +21.4% (15 windows)
+# 11/15 OOS windows profitable. Mean-reversion edge confirmed.
+# Spread caution: avg 3-6p; years with high spread see reduced trade counts.
+# 1% risk per trade, $2,000 practice account
+#
+# Usage:
+#   trader serve --account-id <eurgbp-account-id>
+#   trader bot start --config testdata/configs/tournament-eurgbp.yml
+
+env: practice
+risk_pct: 1.0
+drawdown_circuit_pct: 20.0
+local_warmup_bars: 500
+
+instruments:
+
+  - instrument: EUR_GBP
+    timeframe: D1
+    tick_interval: 15m
+    risk_pct: 1.0
+    max_units: 0
+
+    strategy:
+      kind: bb-fade
+      params:
+        period: 20
+        multiplier: 2.0
+        atr_period: 14
+        atr_mult: 2.5

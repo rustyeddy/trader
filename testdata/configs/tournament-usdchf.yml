@@ -1,0 +1,39 @@
+# Tournament account: USDCHF H1 Donchian-v4 ATR×5
+#
+# Backtest result (IS 2015-2025): +7.1%, 315 trades, 37.8% win, RR 1.8
+# 1% risk per trade, $2,000 practice account
+#
+# CHF safe-haven note: ATR×3 was too tight for SNB-style shakeouts.
+# ATR×5 lets the trend resume after risk-off spikes.
+#
+# Usage:
+#   trader serve --account-id <usdchf-account-id>
+#   trader bot start --config testdata/configs/tournament-usdchf.yml
+
+env: practice
+risk_pct: 1.0
+drawdown_circuit_pct: 20.0
+local_warmup_bars: 500
+
+instruments:
+
+  - instrument: USD_CHF
+    timeframe: H1
+    tick_interval: 5m
+    risk_pct: 1.0
+    max_units: 0
+
+    strategy:
+      kind: donchian-breakout-v4
+      params:
+        period: 20
+        close_strength: 0.6
+        confirm_bars: 2
+        adx_period: 14
+        adx_threshold: 25.0
+
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 5.0

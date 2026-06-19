@@ -401,14 +401,27 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 		if tick == "" {
 			tick = "60s"
 		}
+		localWarmup := inst.LocalWarmupBars
+		if localWarmup <= 0 {
+			localWarmup = cfg.LocalWarmupBars
+		}
+		regimeCfg := traderpkg.RegimeConfig{Kind: inst.Regime.Kind, Params: inst.Regime.Params}
+		for _, f := range inst.Regime.Filters {
+			regimeCfg.Filters = append(regimeCfg.Filters, traderpkg.RegimeConfig{Kind: f.Kind, Params: f.Params})
+		}
 		bc := service.BotConfig{
 			Instrument:   inst.Instrument,
 			TickInterval: tick,
 			RiskPct:      riskPct,
 			MaxUnits:     inst.MaxUnits,
 			Strategy: service.StrategyConfig{
-				Kind:   inst.Strategy.Kind,
-				Params: inst.Strategy.Params,
+				Kind:            inst.Strategy.Kind,
+				Granularity:     inst.Timeframe,
+				Params:          inst.Strategy.Params,
+				Exit:            traderpkg.ExitConfig{Kind: inst.Exit.Kind, Params: inst.Exit.Params},
+				Regime:          regimeCfg,
+				WarmupBars:      inst.WarmupBars,
+				LocalWarmupBars: localWarmup,
 			},
 		}
 		if err := startOne(cmd, bc); err != nil {

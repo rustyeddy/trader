@@ -14,9 +14,16 @@ import (
 // StrategyConfig identifies a strategy kind and its parameters.
 // Used by both BotConfig and the CLI live-run command.
 type StrategyConfig struct {
-	Kind        string         `json:"kind"        yaml:"kind"`
-	Granularity string         `json:"granularity" yaml:"granularity"` // candle-based strategies only
-	Params      map[string]any `json:"params"      yaml:"params"`
+	Kind        string              `json:"kind"              yaml:"kind"`
+	Granularity string              `json:"granularity"       yaml:"granularity"` // candle-based strategies only
+	Params      map[string]any      `json:"params"            yaml:"params"`
+	Exit        trader.ExitConfig   `json:"exit"              yaml:"exit"`
+	Regime      trader.RegimeConfig `json:"regime"            yaml:"regime"`
+	// WarmupBars is the number of bars to fetch from OANDA to prime indicators.
+	WarmupBars int `json:"warmup_bars"       yaml:"warmup_bars"`
+	// LocalWarmupBars is the number of bars to read from local candle store before
+	// the OANDA fetch. Use 500+ for long-period regime filters (atr-percentile etc).
+	LocalWarmupBars int `json:"local_warmup_bars" yaml:"local_warmup_bars"`
 }
 
 // BuildLiveStrategy constructs a trader.LiveStrategy from a StrategyConfig.
@@ -111,7 +118,42 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (trad
 		}), nil
 
 	default:
-		return nil, fmt.Errorf("unknown strategy kind %q (supported: pulse, scalper, stress)", kind)
+		// Fall back to the backtest strategy registry — any strategy registered
+		// via trader.MustRegisterStrategy (donchian-v2, donchian-v4, bb-fade, …)
+		// can run live when wrapped in a CandleStrategyAdapter.
+		backtestStrat, err := trader.GetStrategy(trader.StrategyConfig{Kind: kind, Params: p})
+		if err != nil {
+			return nil, fmt.Errorf("unknown strategy kind %q: %w", kind, err)
+		}
+		exit, err := trader.GetExitStrategy(cfg.Exit, trader.PriceScale)
+		if err != nil {
+			return nil, fmt.Errorf("exit strategy for %q: %w", kind, err)
+		}
+		regime, err := trader.GetRegimeFilter(cfg.Regime, trader.PriceScale)
+		if err != nil {
+			return nil, fmt.Errorf("regime filter for %q: %w", kind, err)
+		}
+		granularity := cfg.Granularity
+		if granularity == "" {
+			granularity = "D"
+		}
+		warmup := cfg.WarmupBars
+		if warmup <= 0 {
+			warmup = 100
+		}
+		return NewCandleStrategyAdapter(CandleAdapterConfig{
+			Strategy:        backtestStrat,
+			Exit:            exit,
+			Regime:          regime,
+			Instrument:      instrument,
+			Granularity:     granularity,
+			WarmupBars:      warmup,
+			LocalWarmupBars: cfg.LocalWarmupBars,
+			OANDA:           s.OANDA,
+			AccountID:       s.AccountID,
+			Service:         s,
+			Log:             s.Log,
+		}), nil
 	}
 }
 

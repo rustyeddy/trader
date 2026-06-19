@@ -1,0 +1,44 @@
+# Tournament account: GBPUSD H1 Donchian-v4 ATR×3 session 07-17 UTC
+#
+# Backtest result (IS 2015-2025): +4.9%, OOS: +1.6%
+# Session filter selects London+NY overlap; GBP spread ceiling acts as
+# natural trend gate (only ~3% of signals pass 1.5p spread test).
+# 1% risk per trade, $2,000 practice account
+#
+# Usage:
+#   trader serve --account-id <gbpusd-account-id>
+#   trader bot start --config testdata/configs/tournament-gbpusd.yml
+
+env: practice
+risk_pct: 1.0
+drawdown_circuit_pct: 20.0
+local_warmup_bars: 500
+
+instruments:
+
+  - instrument: GBP_USD
+    timeframe: H1
+    tick_interval: 5m
+    risk_pct: 1.0
+    max_units: 0
+
+    strategy:
+      kind: donchian-breakout-v4
+      params:
+        period: 20
+        close_strength: 0.6
+        confirm_bars: 2
+        adx_period: 14
+        adx_threshold: 25.0
+
+    exit:
+      kind: chandelier
+      params:
+        atr_period: 14
+        multiplier: 3.0
+
+    regime:
+      kind: session
+      params:
+        session_start: 7
+        session_end: 17
