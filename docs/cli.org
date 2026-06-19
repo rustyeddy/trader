@@ -1,0 +1,450 @@
+#+TITLE: Trader CLI Reference
+#+AUTHOR: Rusty Eddy
+#+OPTIONS: toc:2
+
+* trader — Backtesting, replay, and data tooling
+
+** analysis — Parse a ChatGPT forex analysis CSV and print trade candidates and watchlist
+
+Parse a CSV exported from a ChatGPT forex analysis session.  Prints
+tradeable and watchlist pairs in a table; suppresses "No Trade" rows by
+default.
+
+Flags:
+- =--file=  Path to the ChatGPT forex analysis CSV (required)
+- =--all=   Include "No Trade" rows
+
+** api — REST API server for trader (backtest + live trading)
+
+*** api serve — Start the REST API server
+
+Start the trader REST API server.  Without =--token= the server starts in
+backtest-only mode (OANDA endpoints return 503).  With =--token= the server
+can place and manage live orders against OANDA.
+
+Endpoints:
+- =GET    /api/v1/health=
+- =GET    /api/v1/account=
+- =GET    /api/v1/trades=
+- =POST   /api/v1/trades=
+- =PATCH  /api/v1/trades/{id}/stop=
+- =DELETE /api/v1/trades/{id}=
+- =GET    /api/v1/transactions=
+- =POST   /api/v1/backtests/run=
+
+** backtest — Run and inspect historical backtest results
+
+*** backtest run — Run backtest configs and write JSON + org reports
+
+Run one or more YAML backtest configs.  Report filenames are derived from a
+hash of the run parameters, so re-running the same config overwrites the
+same file rather than creating a timestamped copy.  Changing any parameter
+produces a distinct file alongside the previous one.
+
+Flags:
+- =--config=  Backtest config file, directory, or glob
+- =--out=     Output directory for reports
+
+*** backtest list — List saved backtest results
+
+List saved backtest JSON reports from the reports directory.  Filter by
+instrument or strategy name with =--instrument= / =--strategy=.
+
+*** backtest get — Show full details for a saved backtest result
+
+Print the full summary for a named backtest report.  The name argument is
+the report filename without the =.json= extension.
+
+*** backtest candles — Print OHLC candles for a saved backtest result as CSV
+
+Print the OHLC candle data for the instrument/timeframe/range described in
+a named backtest report.  Output is CSV with columns:
+=time,open,high,low,close=.
+
+*** backtest org — Print the org-mode report for a saved backtest result
+
+Print the org-mode formatted report for a named backtest result to stdout.
+
+*** backtest configs — List available backtest config files
+
+List YAML/JSON backtest config files in the configs directory.
+
+*** backtest regress — Compare backtest results against committed baselines; exit 1 on regression
+
+Compare current backtest results against committed baseline JSON files.
+Use =--update= to write current results as new baselines instead of
+comparing.
+
+Flags:
+- =--baselines=  Directory containing committed baseline JSON reports (default =testdata/backtests/reports=)
+- =--update=     Write current results as new baselines
+
+** bot — Manage live strategy bots running inside trader serve
+
+*** bot start — Start a new live strategy bot on the server
+
+Start one or more live strategy bots inside the running =trader serve=
+process.  Single bot via flags or multiple bots from a portfolio YAML
+config.  OANDA positions are NOT closed on stop — they remain on the broker.
+
+#+BEGIN_EXAMPLE
+trader bot start --instrument EUR_USD --strategy pulse
+trader bot start --config testdata/configs/smoke-test.yml
+#+END_EXAMPLE
+
+Flags:
+- =--instrument=  Instrument, e.g. EUR_USD
+- =--config=      Portfolio YAML config (starts one bot per instrument)
+- =--risk-pct=    Percent of account equity to risk per trade (default 1)
+- =--max-units=   Maximum position size in units
+
+*** bot stop — Stop a running bot
+
+Stop a running bot by ID.  The OANDA position is left open.
+
+*** bot list — List all bots (running and stopped) on the server
+
+List all bots on the server, both running and stopped.
+
+*** bot get — Show status of a single bot
+
+Show the current status of one bot by ID.
+
+*** bot report — Show a detailed run report for one or all bots
+
+Show a detailed report for a bot run including metadata, runtime stats, and
+P&L.  P&L data is read from the journal file; only trades tagged with a bot
+ID appear in the P&L section.
+
+Flags:
+- =--all=      Report all bots
+- =--journal=  Path to JSONL trades journal for P&L data
+
+** data — Download, build, inspect, and validate candle data
+
+*** data update — Catch-up download: fill OANDA candle data from last stored date through yesterday
+
+Download OANDA candles for every instrument+timeframe, starting from the
+day after the last non-zero candle on disk and ending at yesterday (last
+complete UTC day).  All 24 tracked instruments and three timeframes (M1,
+H1, D) are updated by default.
+
+#+BEGIN_EXAMPLE
+trader data update
+trader data update --instruments EUR_USD,GBP_USD
+trader data update --timeframes H1,D
+trader data update --dry-run
+#+END_EXAMPLE
+
+Flags:
+- =--instruments=  Comma-separated list to restrict scope
+- =--timeframes=   Comma-separated timeframes to restrict scope
+- =--dry-run=      Print what would be downloaded without fetching
+- =--from=         Seed start date when no prior data exists
+
+*** data oanda — Download candles from OANDA into the canonical candle store
+
+Download a specific instrument/timeframe/date-range directly from OANDA
+and store them in the canonical candle store.
+
+Flags:
+- =--instrument=  OANDA-format instrument, e.g. USD_JPY (required)
+- =--timeframe=   M1, H1, or D (required)
+- =--from=        Start date YYYY-MM-DD (required)
+- =--to=          End date YYYY-MM-DD (required)
+- =--token=       OANDA API token
+
+*** data candles — Print local candles in canonical CSV format
+
+Print stored candles for an instrument/timeframe/date-range to stdout as
+CSV.
+
+Flags:
+- =--instrument=  FX pair, e.g. EURUSD
+- =--timeframe=   M1, H1, or D1 (default H1)
+- =--from=        Start date inclusive (YYYY-MM-DD)
+- =--to=          End date inclusive
+
+*** data stats — Print swing, spread, trend, and session statistics for a candle dataset
+
+Walk a candle dataset and report four analyzer groups:
+- Swing Range Distribution: high-low range distribution in pips
+- Avg Spread Distribution: AvgSpread distribution in pips
+- Trend Distribution: body/range ratio (trending vs consolidating bars)
+- Session: average range and candle count by UTC hour
+
+Flags:
+- =--instrument=  FX pair (e.g. EURUSD)
+- =--timeframe=   M1, H1, or D1 (default H1)
+- =--from=        Start date inclusive (YYYY-MM-DD)
+- =--to=          End date inclusive (YYYY-MM-DD)
+- =--units=       Show USD value per N units alongside pips
+
+*** data sync — Download ticks and build candles (combined)
+
+Download missing tick files and then build candles from them in one step.
+
+Flags:
+- =--instruments=  Comma-separated instruments
+- =--from=         Start month inclusive (YYYY-MM)
+- =--to=           End month inclusive (YYYY-MM)
+
+*** data download-ticks — Download missing tick files
+
+Download missing Dukascopy tick files for the given instruments and month
+range without building candles.
+
+*** data build-candles — Build candles from existing tick data
+
+Build candles from already-downloaded tick files for the given instruments
+and month range.
+
+*** data validate-candles — Scan stored candle months for missing slots and raw-source mismatches
+
+Scan stored candle months for missing expected slots and optionally compare
+canonical candles against raw source data.
+
+Flags:
+- =--instruments=  Comma-separated instruments
+- =--timeframe=    Candle timeframe to validate (default H1)
+- =--from=         Start month inclusive (YYYY-MM)
+- =--to=           End month inclusive (YYYY-MM)
+- =--check-raw=    Also compare canonical candles with raw source (default true)
+- =--report=       Optional JSON report output path
+
+*** data pip-value — Show USD value of 1/10/100/1000 pips for each major pair
+
+Print the USD value of 1, 10, 100, and 1000 pips for every major FX pair
+at the given position size (default: 100,000 units = 1 standard lot).
+Rates are resolved from =--rates= flag, live OANDA prices, or built-in
+defaults.
+
+Flags:
+- =--units=   Position size in units (default 100000)
+- =--rates=   Explicit rates for USD-base pairs, e.g. =USDJPY=152.50=
+- =--token=   OANDA API token for live rate lookup
+
+*** data position — Convert between position size, USD notional value, and pip P&L
+
+Calculate USD notional value, margin required, and pip P&L for a position.
+Without =--units= or =--notional= prints a reference table for
+micro/mini/standard lots.
+
+Flags:
+- =--instrument=  FX pair (required)
+- =--units=       Show notional, margin, and pip P&L for N units
+- =--notional=    Show how many units are needed for $N notional
+- =--pips=        Add a column showing the USD value of N pips
+- =--price=       Price override (fetches live price from OANDA if omitted)
+
+** health — Check the health and version of a running trader serve
+
+*** health check — Ping the health endpoint and print status
+
+Ping the =/api/v1/health= endpoint of a running =trader serve= and print the
+status.
+
+*** health version — Print the version reported by a running trader serve
+
+Fetch and print the version string from a running =trader serve= instance.
+
+** live — Run live strategies against OANDA
+
+*** live run — Run a live strategy against a demo or live OANDA account
+
+Run a configured live strategy, polling prices and placing/closing orders
+on the specified OANDA environment (default: practice).
+
+#+BEGIN_EXAMPLE
+trader live run --config testdata/configs/pulse-demo.yml
+trader live run --config testdata/configs/pulse-demo.yml --dry-run
+#+END_EXAMPLE
+
+Flags:
+- =--config=         Path to live run YAML config file
+- =--instrument=     Instrument override, e.g. EUR_USD
+- =--env=            OANDA environment: practice|live
+- =--tick-interval=  Poll interval, e.g. 30s, 5m
+- =--dry-run=        Print resolved config and exit without trading
+
+*** live portfolio — Run a multi-instrument live portfolio
+
+Run a configured portfolio of strategies concurrently against OANDA.  Each
+instrument runs in its own goroutine.  A shared drawdown circuit breaker
+halts new opens if account equity falls below the configured threshold.
+
+#+BEGIN_EXAMPLE
+trader live portfolio --config configs/demo-portfolio.yml
+#+END_EXAMPLE
+
+Flags:
+- =--config=    Path to portfolio YAML config (required)
+- =--dry-run=   Print resolved config and exit without trading
+
+*** live journal — Subscribe to OANDA transactions and journal closed trades
+
+Subscribe to the OANDA transaction stream and write closed trade records
+and equity snapshots to JSONL journal files.  Reconnects automatically on
+disconnect.
+
+Flags:
+- =--env=           OANDA environment: practice|live
+- =--trades-file=   Path for journal trade records (default =live-trades.jsonl=)
+- =--equity-file=   Path for journal equity records (default =live-equity.jsonl=)
+- =--backfill-from= If >0, poll GetTransactions from this ID before streaming
+
+** mcp — MCP server exposing trader as typed Claude tools
+
+*** mcp serve — Start the MCP server on stdio (for Claude Code / Claude Desktop)
+
+Start the trader MCP server using stdio transport.  Without =--token= only
+backtest tools are available.  With =--token= live account/trade tools are
+enabled.  Write tools (=place_order=, =close_trade=, =update_stop=) require
+=--enable-write=.
+
+Available read-only tools:
+- =get_account_summary=  Current balance, NAV, margin, P/L
+- =list_open_trades=     All open OANDA positions
+- =get_transactions=     Account transaction history
+- =run_backtest=         Run YAML config(s) and return summaries
+- =list_bots=            List all live strategy bots
+
+Add to =~/.claude/mcp_servers.json=:
+#+BEGIN_EXAMPLE
+{
+  "trader": {
+    "command": "trader",
+    "args": ["mcp", "serve"]
+  }
+}
+#+END_EXAMPLE
+
+** order — Live order management (OANDA)
+
+*** order account — Print account balance, NAV, margin, and unrealized P/L
+
+Fetch and display the current OANDA account summary: balance, net asset
+value, margin used/available, and unrealized P/L.
+
+*** order new — Size and submit a market order with confirmation
+
+Size a market order based on account equity and risk percentage, then
+submit it to OANDA with a confirmation prompt.
+
+Flags:
+- =--instrument=  Instrument in OANDA format, e.g. USD_JPY (required)
+- =--side=        Trade direction: long or short (required)
+- =--stop-pips=   Stop distance in pips (required)
+- =--risk-pct=    Percent of account equity to risk per trade (default 1)
+
+*** order list — List open trades from OANDA
+
+Fetch and display all currently open trades on the OANDA account.
+
+*** order close — Close an open trade (full or partial)
+
+Close an open trade fully or partially by trade ID.
+
+Flags:
+- =--trade-id=  Trade ID to close (required)
+- =--units=     Units to close (default 0 = full close)
+
+*** order update-stop — Update stop-loss and/or take-profit on an open trade
+
+Update the stop-loss and/or take-profit price on an open trade.  Use 0 to
+leave a value unchanged or a negative value to cancel it.
+
+#+BEGIN_EXAMPLE
+trader order update-stop --trade-id 12345 --stop 1.08200
+trader order update-stop --trade-id 12345 --stop 1.08200 --take 1.09500
+trader order update-stop --trade-id 12345 --take -1   # cancel take-profit
+#+END_EXAMPLE
+
+Flags:
+- =--trade-id=  Trade ID to update (required)
+- =--stop=      New stop-loss price
+- =--take=      New take-profit price
+
+*** order prices — Fetch live bid/ask prices from OANDA for the major pairs
+
+Query OANDA for current bid/ask prices and print a summary table showing
+bid, ask, mid, spread in pips, and USD pip value per lot.  Defaults to all
+seven major pairs.
+
+Flags:
+- =--instruments=  Comma-separated pairs to query
+- =--units=        Lot size for pip value column (default 100000)
+
+*** order transactions — List OANDA account transactions since a given ID
+
+List recent OANDA account transactions.  Defaults to the 25 most recent.
+
+Flags:
+- =--since=  Return transactions with ID > this value
+- =--limit=  Max transactions to display (default 25)
+
+*** order transactions-stream — Subscribe to OANDA transaction stream (push); Ctrl-C to exit
+
+Subscribe to the OANDA transaction push stream and print events as they
+arrive.  Optionally include heartbeat messages with =--heartbeats=.
+
+** replay — Replay tick datasets through the sim engine
+
+*** replay pricing — Replay pricing ticks from CSV
+
+Replay pricing ticks from a CSV file (columns:
+=time,instrument,bid,ask[,event,p1,p2,p3,p4]=) through the simulation
+engine.
+
+Flags:
+- =--ticks=            CSV path
+- =--from= / =--to=    Optional RFC3339 time bounds
+- =--close-end=        Close open trades at end of replay
+- =--starting-balance= Starting balance (default 100000)
+
+*** replay events — Replay pricing + scripted events from CSV
+
+Replay pricing ticks interleaved with scripted trade events from a CSV
+file (columns: =time,instrument,bid,ask,event,p1,p2,p3,p4=).
+
+Flags:
+- =--ticks=            CSV path
+- =--from= / =--to=    Optional RFC3339 time bounds
+- =--close-end=        Close open trades at end of replay
+- =--starting-balance= Starting balance (default 100000)
+
+** serve — Run trader as a long-running daemon (REST API + live journal)
+
+Start trader in daemon mode.  Boots structured logging, a DataManager with
+warm candle cache, OANDA broker connection, transaction stream → journal
+writer (reconnects on disconnect), and a REST API server (=:9999= by
+default).  Graceful shutdown on SIGTERM / SIGINT.
+
+Flags:
+- =--addr=              REST API listen address (default =:9999=)
+- =--env=               OANDA environment: practice|live (default practice)
+- =--token=             OANDA API token
+- =--account-id=        OANDA account ID
+- =--journal-trades=    Journal trade-record path (default =./live-trades.jsonl=)
+- =--journal-equity=    Journal equity-record path (default =./live-equity.jsonl=)
+- =--reports-dir=       Backtest reports directory
+- =--mcp-enable-write=  Enable MCP write tools over HTTP
+
+Example config file:
+#+BEGIN_EXAMPLE
+env: practice
+token: ""
+account_id: ""
+rest:
+  addr: ":9999"
+journal:
+  kind: json
+  trades_path: /var/lib/trader/live-trades.jsonl
+  equity_path:  /var/lib/trader/live-equity.jsonl
+log:
+  level: info
+#+END_EXAMPLE
+
+** version — Print version information
+
+Print the version, git commit, and build date of the trader binary.

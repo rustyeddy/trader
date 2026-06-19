@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/bot"
 	"github.com/rustyeddy/trader/cmd/data"
+	cmddocs "github.com/rustyeddy/trader/cmd/docs"
 	"github.com/rustyeddy/trader/cmd/health"
 	"github.com/rustyeddy/trader/cmd/live"
 	cmdmcp "github.com/rustyeddy/trader/cmd/mcp"
@@ -113,6 +114,7 @@ func NewRootCmd() *cobra.Command {
 		api.New(rc),
 		backtest.New(rc),
 		bot.New(rc),
+		cmddocs.New(rc),
 		health.New(rc),
 		cmdmcp.New(rc),
 		serve.New(rc),

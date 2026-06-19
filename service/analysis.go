@@ -36,7 +36,7 @@ func ParseAnalysisCSV(r io.Reader) ([]trader.ForexAnalysis, error) {
 		if err != nil {
 			return nil, fmt.Errorf("analysis csv: %w", err)
 		}
-		if len(rec) < 9 {
+		if len(rec) < 8 {
 			continue
 		}
 
