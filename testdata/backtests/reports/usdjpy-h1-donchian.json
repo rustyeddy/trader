@@ -1,261 +1,244 @@
 {
   "name": "usdjpy-h1-donchian",
-  "kind": "",
   "strategy": "DONCHIAN(20,cs=0.60)",
   "instrument": "USDJPY",
   "timeframe": "h1",
-  "dataset": "",
+  "dataset": "oanda",
   "start": "2024-01-01T00:00:00Z",
   "end": "2024-03-31T00:00:00Z",
-  "trades": 21,
-  "wins": 4,
-  "losses": 17,
+  "trades": 15,
+  "wins": 3,
+  "losses": 12,
   "start_balance": 10000,
-  "end_balance": 9693.281338,
-  "net_pl": -306.718662,
-  "return_pct": -3.0672,
-  "win_rate": 19.0476,
+  "end_balance": 9885.612407,
+  "net_pl": -114.387593,
+  "return_pct": -1.1439,
+  "win_rate": 20,
   "risk_pct": 1,
   "stop": "Chandelier(ATR14×3.0)",
   "regime": "Choppiness(14,61.8)",
   "max_spread": "1.5p",
-  "avg_spread_pips": 1.4595238095238097,
-  "spread_filtered": 118,
-  "rr": 2.2980398138663762,
-  "max_drawdown": -433.23143799999997,
-  "avg_winner": 90.27485575,
-  "avg_loser": -39.28341676470589,
+  "avg_spread_pips": 1.4483333333333333,
+  "spread_filtered": 92,
+  "rr": 2.798578,
+  "max_drawdown": -322.285791,
+  "avg_winner": 88.817684,
+  "avg_loser": -31.73672,
   "trade_details": [
     {
-      "id": "01KSASZFWBX0Y2RJ0Q9MDE7CQA",
+      "id": "01KVGKAYQC6D76PGNYWTSPZG4G",
       "instrument": "USDJPY",
       "side": "short",
       "units": 12781,
       "open_price": 144.123,
-      "close_price": 144.19041,
+      "close_price": 144.1904,
       "open_time": "2024-01-05T15:00:00Z",
       "close_time": "2024-01-09T08:00:00Z",
-      "pnl": -5.97583
+      "pnl": -5.974944,
+      "stop_price": 144.17165
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QA38CKMR6",
+      "id": "01KVGKAYQC6D76PGNYWVSQNCEC",
       "instrument": "USDJPY",
       "side": "long",
       "units": 16856,
       "open_price": 144.5645,
-      "close_price": 145.44603,
+      "close_price": 145.44604,
       "open_time": "2024-01-09T18:00:00Z",
       "close_time": "2024-01-11T13:00:00Z",
-      "pnl": 102.170963
+      "pnl": 102.172122,
+      "stop_price": 145.44604
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QC9AQBBM2",
+      "id": "01KVGKAYQC6D76PGNYYJDF950V",
       "instrument": "USDJPY",
       "side": "short",
       "units": 15990,
       "open_price": 146.175,
-      "close_price": 146.95226,
+      "close_price": 146.9523,
       "open_time": "2024-01-31T15:00:00Z",
       "close_time": "2024-01-31T20:00:00Z",
-      "pnl": -84.575176
+      "pnl": -84.579529,
+      "stop_price": 146.93455
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QCKNDFKV6",
+      "id": "01KVGKAYQC6D76PGNYYQV671NP",
       "instrument": "USDJPY",
       "side": "long",
       "units": 15808,
       "open_price": 148.55075,
-      "close_price": 148.37543,
+      "close_price": 148.37538,
       "open_time": "2024-02-02T16:00:00Z",
       "close_time": "2024-02-06T05:00:00Z",
-      "pnl": -18.679631
+      "pnl": -18.684958,
+      "stop_price": 148.37538
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QCYRVTWW1",
+      "id": "01KVGKAYQC6D76PGNYYVC4Z0W2",
       "instrument": "USDJPY",
       "side": "short",
-      "units": 25152,
+      "units": 25145,
       "open_price": 148.089,
-      "close_price": 148.19619,
+      "close_price": 148.19624,
       "open_time": "2024-02-06T15:00:00Z",
       "close_time": "2024-02-07T12:00:00Z",
-      "pnl": -18.192897
+      "pnl": -18.196318,
+      "stop_price": 148.17924
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QD601ZS5G",
-      "instrument": "USDJPY",
-      "side": "short",
-      "units": 24625,
-      "open_price": 147.915,
-      "close_price": 148.19619,
-      "open_time": "2024-02-06T17:00:00Z",
-      "close_time": "2024-02-07T12:00:00Z",
-      "pnl": -46.725202
-    },
-    {
-      "id": "01KSASZFWBX0Y2RJ0QE15QWH33",
+      "id": "01KVGKAYQC6D76PGNYZJ06EPM0",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 34908,
+      "units": 35085,
       "open_price": 149.4675,
-      "close_price": 149.31888,
+      "close_price": 149.31885,
       "open_time": "2024-02-12T15:00:00Z",
       "close_time": "2024-02-13T12:00:00Z",
-      "pnl": -34.749405
+      "pnl": -34.93265,
+      "stop_price": 149.31885
     },
     {
-      "id": "01KSASZFWBX0Y2RJ0QEKYE860J",
+      "id": "01KVGKAYQC6D76PGNYZPFHMS9N",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 23549,
+      "units": 23660,
       "open_price": 150.6015,
-      "close_price": 150.39651,
+      "close_price": 150.39648,
       "open_time": "2024-02-13T15:00:00Z",
       "close_time": "2024-02-14T07:00:00Z",
-      "pnl": -32.101608
+      "pnl": -32.257642,
+      "stop_price": 150.39648
     },
     {
-      "id": "01KSASZFWCZA9D51S80GZGZ7AN",
+      "id": "01KVGKAYQC6D76PGNZ0A7QWVBF",
       "instrument": "USDJPY",
       "side": "short",
-      "units": 40833,
+      "units": 41025,
       "open_price": 149.979,
-      "close_price": 150.05217,
+      "close_price": 150.05219,
       "open_time": "2024-02-20T13:00:00Z",
       "close_time": "2024-02-21T00:00:00Z",
-      "pnl": -19.913358
+      "pnl": -20.012461,
+      "stop_price": 150.03794
     },
     {
-      "id": "01KSASZFWCZA9D51S81B6BQ9PV",
+      "id": "01KVGKAYQDP5YQX8DY3SNEA5PZ",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 43603,
+      "units": 43808,
       "open_price": 150.748,
-      "close_price": 150.52851,
+      "close_price": 150.52852,
       "open_time": "2024-02-28T07:00:00Z",
       "close_time": "2024-02-28T23:00:00Z",
-      "pnl": -63.585887
+      "pnl": -63.881926,
+      "stop_price": 150.52852
     },
     {
-      "id": "01KSASZFWCZA9D51S8223MW74V",
+      "id": "01KVGKAYQDP5YQX8DY42857RBN",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 29711,
-      "open_price": 150.507,
-      "close_price": 150.17682,
-      "open_time": "2024-03-01T07:00:00Z",
-      "close_time": "2024-03-01T15:00:00Z",
-      "pnl": -65.324643
-    },
-    {
-      "id": "01KSASZFWCZA9D51S81T4WK0TW",
-      "instrument": "USDJPY",
-      "side": "long",
-      "units": 24829,
+      "units": 24945,
       "open_price": 150.3635,
-      "close_price": 150.17682,
+      "close_price": 150.17684,
       "open_time": "2024-03-01T01:00:00Z",
       "close_time": "2024-03-01T15:00:00Z",
-      "pnl": -30.864983
+      "pnl": -31.00586,
+      "stop_price": 150.17684
     },
     {
-      "id": "01KSASZFWCZA9D51S82DEW5SZX",
+      "id": "01KVGKAYQDP5YQX8DY42WK8E62",
       "instrument": "USDJPY",
       "side": "short",
-      "units": 40205,
+      "units": 40650,
       "open_price": 150.082,
-      "close_price": 150.15116,
+      "close_price": 150.1512,
       "open_time": "2024-03-05T13:00:00Z",
       "close_time": "2024-03-05T16:00:00Z",
-      "pnl": -18.518648
+      "pnl": -18.734447,
+      "stop_price": 150.13495
     },
     {
-      "id": "01KSASZFWCZA9D51S82RBMKYMX",
+      "id": "01KVGKAYQDP5YQX8DY430GKBMT",
       "instrument": "USDJPY",
       "side": "short",
-      "units": 24398,
-      "open_price": 148.891,
-      "close_price": 148.30469,
-      "open_time": "2024-03-07T00:00:00Z",
-      "close_time": "2024-03-07T15:00:00Z",
-      "pnl": 96.457208
-    },
-    {
-      "id": "01KSASZFWCZA9D51S8305HBJ6X",
-      "instrument": "USDJPY",
-      "side": "short",
-      "units": 20528,
-      "open_price": 147.93,
-      "close_price": 148.30469,
-      "open_time": "2024-03-07T07:00:00Z",
-      "close_time": "2024-03-07T15:00:00Z",
-      "pnl": -51.864704
-    },
-    {
-      "id": "01KSASZFWCZA9D51S82Q6VZSY8",
-      "instrument": "USDJPY",
-      "side": "short",
-      "units": 22715,
+      "units": 22975,
       "open_price": 149.17,
-      "close_price": 148.30469,
+      "close_price": 148.30466,
       "open_time": "2024-03-06T16:00:00Z",
       "close_time": "2024-03-07T15:00:00Z",
-      "pnl": 132.537149
+      "pnl": 134.058841,
+      "stop_price": 148.28991
     },
     {
-      "id": "01KSASZFWCZA9D51S839HK2HGH",
+      "id": "01KVGKAYQDP5YQX8DY451XWQE6",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 23785,
+      "units": 23949,
       "open_price": 147.4265,
-      "close_price": 147.36566,
+      "close_price": 147.36565,
       "open_time": "2024-03-12T02:00:00Z",
       "close_time": "2024-03-12T12:00:00Z",
-      "pnl": -9.819881
+      "pnl": -9.889215,
+      "stop_price": 147.36565
     },
     {
-      "id": "01KSASZFWCZA9D51S83EPGMM25",
+      "id": "01KVGKAYQDP5YQX8DY4KA3J6CE",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 24827,
-      "open_price": 147.527,
-      "close_price": 147.36566,
-      "open_time": "2024-03-12T05:00:00Z",
-      "close_time": "2024-03-12T12:00:00Z",
-      "pnl": -27.181921
-    },
-    {
-      "id": "01KSASZFWCZA9D51S83WPKRSJY",
-      "instrument": "USDJPY",
-      "side": "long",
-      "units": 24699,
+      "units": 24938,
       "open_price": 149.1455,
-      "close_price": 149.32647,
+      "close_price": 149.32646,
       "open_time": "2024-03-15T15:00:00Z",
       "close_time": "2024-03-19T03:00:00Z",
-      "pnl": 29.934103
+      "pnl": 30.222091,
+      "stop_price": 149.32646
     },
     {
-      "id": "01KSASZFWCZA9D51S84QA9YKD7",
+      "id": "01KVGKAYQDP5YQX8DY56MXJ278",
       "instrument": "USDJPY",
       "side": "long",
-      "units": 19912,
+      "units": 20105,
       "open_price": 151.60275,
-      "close_price": 151.28159,
+      "close_price": 151.28156,
       "open_time": "2024-03-21T15:00:00Z",
       "close_time": "2024-03-22T06:00:00Z",
-      "pnl": -42.276935
-    },
-    {
-      "id": "01KSASZFWCZA9D51S84ZQWGJ3S",
-      "instrument": "USDJPY",
-      "side": "long",
-      "units": 25368,
-      "open_price": 151.7895,
-      "close_price": 151.20859,
-      "open_time": "2024-03-22T01:00:00Z",
-      "close_time": "2024-03-22T12:00:00Z",
-      "pnl": -97.467376
+      "pnl": -42.690697,
+      "stop_price": 151.28156
     }
-  ]
+  ],
+  "config_hash": "1e260993",
+  "generated_at": "2026-06-19T18:47:19Z",
+  "config": {
+    "name": "usdjpy-h1-donchian",
+    "data": {
+      "source": "oanda",
+      "instrument": "USDJPY",
+      "timeframe": "H1",
+      "from": "2024-01-01",
+      "to": "2024-03-31",
+      "strict": null
+    },
+    "strategy": {
+      "kind": "donchian-breakout",
+      "params": {
+        "close_strength": 0.6,
+        "period": 20
+      }
+    },
+    "exit": {
+      "kind": "chandelier",
+      "params": {
+        "atr_period": 14,
+        "multiplier": 3
+      }
+    },
+    "regime": {
+      "kind": "choppiness",
+      "params": {
+        "period": 14,
+        "threshold": 61.8
+      },
+      "filters": null
+    }
+  }
 }

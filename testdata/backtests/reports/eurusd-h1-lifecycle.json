@@ -1,10 +1,9 @@
 {
   "name": "eurusd-h1-lifecycle",
-  "kind": "",
   "strategy": "lifecycle-test",
   "instrument": "EURUSD",
   "timeframe": "h1",
-  "dataset": "",
+  "dataset": "oanda",
   "start": "2024-01-01T00:00:00Z",
   "end": "2024-03-31T00:00:00Z",
   "trades": 1,
@@ -26,7 +25,7 @@
   "avg_loser": -0.98,
   "trade_details": [
     {
-      "id": "01KSASZFW916CHQ3KB7F4TQ35D",
+      "id": "01KVGKAYQAT8QBB7X98VJJ8FWF",
       "instrument": "EURUSD",
       "side": "long",
       "units": 1000,
@@ -34,7 +33,37 @@
       "close_price": 1.10375,
       "open_time": "2024-01-01T22:00:00Z",
       "close_time": "2024-01-02T00:00:00Z",
-      "pnl": -0.98
+      "pnl": -0.98,
+      "stop_price": 1.10238
     }
-  ]
+  ],
+  "config_hash": "23372b6c",
+  "generated_at": "2026-06-19T18:47:19Z",
+  "config": {
+    "name": "eurusd-h1-lifecycle",
+    "data": {
+      "source": "oanda",
+      "instrument": "EURUSD",
+      "timeframe": "H1",
+      "from": "2024-01-01",
+      "to": "2024-03-31",
+      "strict": null
+    },
+    "strategy": {
+      "kind": "lifecycle-test",
+      "params": {
+        "stop_pips": 20,
+        "units": 1000
+      }
+    },
+    "exit": {
+      "kind": "",
+      "params": null
+    },
+    "regime": {
+      "kind": "",
+      "params": null,
+      "filters": null
+    }
+  }
 }
