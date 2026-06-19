@@ -184,6 +184,26 @@ func (s *Service) StopAllBots() {
 	}
 }
 
+// WaitBot blocks until the bot with the given ID exits, then returns any
+// runtime error the bot recorded. Use this to run a bot in the foreground
+// (e.g. from the CLI) without polling.
+func (s *Service) WaitBot(id string) error {
+	s.botsMu.RLock()
+	entry, ok := s.bots[id]
+	s.botsMu.RUnlock()
+	if !ok {
+		return fmt.Errorf("bots: bot %q not found", id)
+	}
+	<-entry.done
+	entry.mu.Lock()
+	errStr := entry.Error
+	entry.mu.Unlock()
+	if errStr != "" {
+		return fmt.Errorf("%s", errStr)
+	}
+	return nil
+}
+
 // GetBot returns the status of one bot by ID.
 func (s *Service) GetBot(id string) (*BotStatus, error) {
 	s.botsMu.RLock()

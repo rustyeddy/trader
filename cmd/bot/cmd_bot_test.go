@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -139,7 +140,7 @@ func TestBotStart(t *testing.T) {
 	serverURL = srv.URL
 
 	var buf bytes.Buffer
-	cmd := botStartCmd()
+	cmd := botStartCmd(&traderpkg.RootConfig{})
 	cmd.SetOut(&buf)
 	cmd.Flags().Set("instrument", "EUR_USD")
 	cmd.Flags().Set("strategy", "donchian-v6")

@@ -1,6 +1,5 @@
-// Package live hosts CLI commands for the live trading subsystem. All
-// business logic lives in service; these handlers parse flags, call into
-// the service, and format output.
+// Package live hosts the journal command for streaming OANDA transactions.
+// Strategy bots are managed via 'trader bot' instead.
 package live
 
 import (
@@ -23,8 +22,6 @@ func New(rc *trader.RootConfig) *cobra.Command {
 		Short: "Live trading subsystem",
 	}
 	cmd.AddCommand(newJournalCmd(rc))
-	cmd.AddCommand(newRunCmd(rc))
-	cmd.AddCommand(newPortfolioCmd(rc))
 	return cmd
 }
 

@@ -1,17 +1,25 @@
-// Package bot hosts CLI subcommands for managing live strategy bots running
-// inside a trader serve process. All commands are thin HTTP clients that talk
-// to the REST API — bots run as goroutines inside the server and cannot be
-// managed directly from a separate process.
+// Package bot hosts CLI subcommands for managing live strategy bots.
+//
+// Server mode (default): commands are thin HTTP clients that talk to a running
+// trader serve process via the REST API.
+//
+// Local mode (--local flag on bot start): the bot runs directly as a goroutine
+// in the CLI process — no server required. Output goes to stdout and Ctrl-C
+// stops the bot cleanly. Use this for ad-hoc or development runs.
 package bot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,13 +33,13 @@ var serverURL string
 func New(rc *traderpkg.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bot",
-		Short: "Manage live strategy bots running inside trader serve",
+		Short: "Manage live strategy bots",
 	}
-	cmd.PersistentFlags().StringVar(&serverURL, "server", defaultServer(), "trader serve base URL")
+	cmd.PersistentFlags().StringVar(&serverURL, "server", defaultServer(), "trader serve base URL (server mode)")
 	cmd.AddCommand(
 		botListCmd(),
 		botGetCmd(),
-		botStartCmd(),
+		botStartCmd(rc),
 		botStopCmd(),
 		botReportCmd(),
 	)
@@ -239,7 +247,7 @@ func printBotPL(out io.Writer, botID string, trades []traderpkg.TradeRecord) {
 
 // ── bot start ─────────────────────────────────────────────────────────────
 
-func botStartCmd() *cobra.Command {
+func botStartCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	var (
 		configFile   string
 		instrument   string
@@ -247,36 +255,47 @@ func botStartCmd() *cobra.Command {
 		tickInterval string
 		riskPct      float64
 		maxUnits     int64
+		// Local mode flags — only used when --local is set.
+		local     bool
+		token     string
+		accountID string
+		env       string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start a new live strategy bot on the server",
-		Long: `Start one or more live strategy bots inside the running trader serve process.
+		Short: "Start a new live strategy bot",
+		Long: `Start one or more live strategy bots.
 
-Single bot (flags):
+Server mode (default): the bot runs inside a trader serve process.
   trader bot start --instrument EUR_USD --strategy pulse
-
-From a portfolio config (starts one bot per instrument):
   trader bot start --config testdata/configs/smoke-test.yml
 
-Bots run until stopped with "bot stop <id>" or the server restarts.
+Local mode (--local): runs directly in this process, no server required.
+  trader bot start --local --instrument EUR_USD --strategy pulse
+
+In local mode the process blocks until Ctrl-C, then stops the bot cleanly.
 OANDA positions are NOT closed on stop — they remain on the broker.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if configFile != "" {
-				return startFromConfig(cmd, configFile)
-			}
-			// Single-bot path.
-			if instrument == "" || stratName == "" {
-				return fmt.Errorf("--instrument and --strategy are required (or use --config)")
-			}
-			return startOne(cmd, service.BotConfig{
+			cfg := service.BotConfig{
 				Instrument:   instrument,
 				TickInterval: tickInterval,
 				RiskPct:      riskPct,
 				MaxUnits:     maxUnits,
 				Strategy:     service.StrategyConfig{Kind: stratName},
-			})
+			}
+
+			if local {
+				return startLocal(cmd, rc, cfg, configFile, token, accountID, env)
+			}
+
+			if configFile != "" {
+				return startFromConfig(cmd, configFile)
+			}
+			if instrument == "" || stratName == "" {
+				return fmt.Errorf("--instrument and --strategy are required (or use --config)")
+			}
+			return startOne(cmd, cfg)
 		},
 	}
 
@@ -286,7 +305,82 @@ OANDA positions are NOT closed on stop — they remain on the broker.`,
 	cmd.Flags().StringVar(&tickInterval, "tick-interval", "60s", "How often the strategy ticks, e.g. 30s, 5m")
 	cmd.Flags().Float64Var(&riskPct, "risk-pct", 1.0, "Percent of account equity to risk per trade")
 	cmd.Flags().Int64Var(&maxUnits, "max-units", 0, "Maximum position size in units (0 = no limit)")
+	// Local mode flags.
+	cmd.Flags().BoolVar(&local, "local", false, "Run bot directly in this process (no trader serve required)")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (local mode)")
+	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID (local mode)")
+	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (local mode)")
 	return cmd
+}
+
+// startLocal runs a single bot directly in the current process without a
+// trader serve daemon. It blocks until the bot exits or Ctrl-C is received,
+// then stops the bot and waits for it to finish cleanly.
+func startLocal(cmd *cobra.Command, rc *traderpkg.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
+	if configFile != "" {
+		return fmt.Errorf("--config is not supported with --local; start bots one at a time")
+	}
+	if cfg.Instrument == "" || cfg.Strategy.Kind == "" {
+		return fmt.Errorf("--instrument and --strategy are required in local mode")
+	}
+
+	// Token/account: explicit flag > global config > env var (same precedence as live run).
+	tok := token
+	if !cmd.Flags().Changed("token") {
+		if rc.OANDAToken != "" {
+			tok = rc.OANDAToken
+		}
+	}
+	resolvedAccount := accountID
+	if !cmd.Flags().Changed("account-id") {
+		if rc.OANDAAccountID != "" {
+			resolvedAccount = rc.OANDAAccountID
+		}
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount})
+	if err != nil {
+		return err
+	}
+	if err := svc.ResolveAccount(ctx); err != nil {
+		var amb service.AmbiguousAccountError
+		if errors.As(err, &amb) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Multiple accounts — specify one with --account-id:")
+			for _, id := range amb.Accounts {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  %s\n", id)
+			}
+		}
+		return err
+	}
+
+	// Prevent two local bots from trading the same account simultaneously.
+	_, release, err := acquireAccountLock(svc.AccountID)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	status, err := svc.StartBot(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("start bot: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Bot started: %s | %s | %s | tick=%s\nPress Ctrl-C to stop.\n",
+		status.ID, status.StrategyName, status.Instrument, status.TickInterval)
+
+	// Block until Ctrl-C cancels the context, then stop the bot and wait.
+	<-ctx.Done()
+	fmt.Fprintf(cmd.OutOrStdout(), "\nStopping bot %s...\n", status.ID)
+	_ = svc.StopBot(status.ID)
+
+	if err := svc.WaitBot(status.ID); err != nil {
+		return fmt.Errorf("bot exited with error: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Bot %s stopped.\n", status.ID)
+	return nil
 }
 
 // startFromConfig reads a portfolio YAML and starts one bot per instrument.
