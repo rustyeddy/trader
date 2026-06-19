@@ -26,6 +26,9 @@ func (a *SessionAnalyzer) Update(ct *CandleTime) {
 		return
 	}
 	rng := ct.High - ct.Low
+	if rng == 0 {
+		return // flat candle contributes no meaningful session range
+	}
 	h := ct.Timestamp.Time().UTC().Hour()
 	a.hours[h].count++
 	a.hours[h].totalRange += PriceSum(rng)

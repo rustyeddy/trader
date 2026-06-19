@@ -1,7 +1,7 @@
 APP     := trader
 BIN_DIR := bin
 BIN     := $(BIN_DIR)/$(APP)
-CMD     := ./cmd
+CMD     := ./cmd/main.go
 
 GOPATH  ?= $(shell go env GOPATH)
 INSTALL_DIR := $(GOPATH)/bin

@@ -32,6 +32,9 @@ func (a *TrendAnalyzer) Update(ct *CandleTime) {
 		return
 	}
 	rng := int64(ct.High) - int64(ct.Low)
+	if rng == 0 {
+		return // flat candle — no range to compute ratio against
+	}
 	body := int64(ct.Close) - int64(ct.Open)
 	if body < 0 {
 		body = -body

@@ -21,6 +21,9 @@ func (a *SwingAnalyzer) Update(ct *CandleTime) {
 		return
 	}
 	delta := ct.High - ct.Low
+	if delta == 0 {
+		return // flat candle has no swing range to analyse
+	}
 	a.ranges.Add(delta)
 }
 

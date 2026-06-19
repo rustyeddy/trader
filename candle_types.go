@@ -19,8 +19,9 @@ func (c *Candle) IsZero() bool {
 }
 
 // Validate reports whether the candle has a valid OHLC shape.
+// High == Low is permitted (flat/doji candle — common in M1 thin-market minutes).
 func (c Candle) Validate() bool {
-	return c.High > c.Low &&
+	return c.High >= c.Low &&
 		c.Open >= c.Low && c.Open <= c.High &&
 		c.Close >= c.Low && c.Close <= c.High
 }
