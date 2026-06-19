@@ -5,7 +5,7 @@ import (
 	"os"
 
 	traderpkg "github.com/rustyeddy/trader"
-	"github.com/rustyeddy/trader/cmd/analysis"
+	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/api"
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/bot"
@@ -110,7 +110,7 @@ func NewRootCmd() *cobra.Command {
 
 	// Subcommands
 	cmd.AddCommand(
-		analysis.New(rc),
+		cmdreview.New(rc),
 		api.New(rc),
 		backtest.New(rc),
 		bot.New(rc),

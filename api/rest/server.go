@@ -85,7 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/replay", s.handleReplay)
 
 	// Analysis — parse a ChatGPT forex analysis CSV upload
-	mux.HandleFunc("POST /api/v1/analysis", s.handleAnalysis)
+	mux.HandleFunc("POST /api/v1/review", s.handleReview)
 
 	// Bot manager — start/stop/list live strategy bots
 	mux.HandleFunc("POST /api/v1/bots", s.handleStartBot)

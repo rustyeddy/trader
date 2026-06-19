@@ -8,11 +8,11 @@ import (
 	"github.com/rustyeddy/trader/service"
 )
 
-// POST /api/v1/analysis
+// POST /api/v1/review
 //
 // Accepts a multipart form upload with field name "file".
 // Returns the parsed rows split into three slices: tradeable, watchlist, no_trade.
-func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(4 << 20); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("parse form: %v", err))
 		return
@@ -25,29 +25,29 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	rows, err := service.ParseAnalysisCSV(file)
+	rows, err := service.ParseReviewCSV(file)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("parse csv: %v", err))
 		return
 	}
 
-	result := partitionAnalysis(rows)
+	result := partitionReview(rows)
 	writeJSON(w, http.StatusOK, result)
 }
 
-type analysisResult struct {
-	Total     int                    `json:"total"`
-	Tradeable []trader.ForexAnalysis `json:"tradeable"`
-	Watchlist []trader.ForexAnalysis `json:"watchlist"`
-	NoTrade   []trader.ForexAnalysis `json:"no_trade"`
+type reviewResult struct {
+	Total     int                  `json:"total"`
+	Tradeable []trader.ForexReview `json:"tradeable"`
+	Watchlist []trader.ForexReview `json:"watchlist"`
+	NoTrade   []trader.ForexReview `json:"no_trade"`
 }
 
-func partitionAnalysis(rows []trader.ForexAnalysis) analysisResult {
-	result := analysisResult{
+func partitionReview(rows []trader.ForexReview) reviewResult {
+	result := reviewResult{
 		Total:     len(rows),
-		Tradeable: []trader.ForexAnalysis{},
-		Watchlist: []trader.ForexAnalysis{},
-		NoTrade:   []trader.ForexAnalysis{},
+		Tradeable: []trader.ForexReview{},
+		Watchlist: []trader.ForexReview{},
+		NoTrade:   []trader.ForexReview{},
 	}
 	for _, r := range rows {
 		switch r.Status {

@@ -10,31 +10,31 @@ import (
 	"github.com/rustyeddy/trader"
 )
 
-// ParseAnalysisCSV reads a ChatGPT-generated forex analysis CSV and returns
-// all rows as typed ForexAnalysis values, including "No Trade" rows.
+// ParseReviewCSV reads a ChatGPT-generated forex review CSV and returns
+// all rows as typed ForexReview values, including "No Trade" rows.
 // Callers filter with IsTradeable() / IsWatched() as needed.
 //
 // Expected columns (row 1 is header):
 //
 //	Group, Pair, Structure, Setup Bias, Trend, Volatility,
 //	Support zone, Resistance Zone, Status
-func ParseAnalysisCSV(r io.Reader) ([]trader.ForexAnalysis, error) {
+func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
 
 	// Discard header row.
 	if _, err := cr.Read(); err != nil {
-		return nil, fmt.Errorf("analysis csv: read header: %w", err)
+		return nil, fmt.Errorf("review csv: read header: %w", err)
 	}
 
-	var out []trader.ForexAnalysis
+	var out []trader.ForexReview
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("analysis csv: %w", err)
+			return nil, fmt.Errorf("review csv: %w", err)
 		}
 		if len(rec) < 8 {
 			continue
@@ -42,14 +42,14 @@ func ParseAnalysisCSV(r io.Reader) ([]trader.ForexAnalysis, error) {
 
 		supLo, supHi, err := parseZone(rec[6])
 		if err != nil {
-			return nil, fmt.Errorf("analysis csv: pair %s support %q: %w", rec[1], rec[6], err)
+			return nil, fmt.Errorf("review csv: pair %s support %q: %w", rec[1], rec[6], err)
 		}
 		resLo, resHi, err := parseZone(rec[7])
 		if err != nil {
-			return nil, fmt.Errorf("analysis csv: pair %s resistance %q: %w", rec[1], rec[7], err)
+			return nil, fmt.Errorf("review csv: pair %s resistance %q: %w", rec[1], rec[7], err)
 		}
 
-		out = append(out, trader.ForexAnalysis{
+		out = append(out, trader.ForexReview{
 			Group:          strings.TrimSpace(rec[0]),
 			Pair:           strings.TrimSpace(rec[1]),
 			Structure:      strings.TrimSpace(rec[2]),
@@ -60,7 +60,7 @@ func ParseAnalysisCSV(r io.Reader) ([]trader.ForexAnalysis, error) {
 			SupportHigh:    trader.PriceFromFloat(supHi),
 			ResistanceLow:  trader.PriceFromFloat(resLo),
 			ResistanceHigh: trader.PriceFromFloat(resHi),
-			Status:         trader.AnalysisStatus(strings.TrimSpace(rec[8])),
+			Status:         trader.ReviewStatus(strings.TrimSpace(rec[8])),
 		})
 	}
 	return out, nil

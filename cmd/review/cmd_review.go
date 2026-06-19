@@ -1,4 +1,4 @@
-package analysis
+package review
 
 import (
 	"fmt"
@@ -17,8 +17,8 @@ func New(_ *trader.RootConfig) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "analysis",
-		Short: "Parse a ChatGPT forex analysis CSV and print trade candidates and watchlist",
+		Use:   "review",
+		Short: "Parse a ChatGPT forex review CSV and print trade candidates and watchlist",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := os.Open(filePath)
 			if err != nil {
@@ -26,7 +26,7 @@ func New(_ *trader.RootConfig) *cobra.Command {
 			}
 			defer f.Close()
 
-			rows, err := service.ParseAnalysisCSV(f)
+			rows, err := service.ParseReviewCSV(f)
 			if err != nil {
 				return err
 			}
@@ -49,7 +49,7 @@ func New(_ *trader.RootConfig) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&filePath, "file", "", "Path to the ChatGPT forex analysis CSV")
+	cmd.Flags().StringVar(&filePath, "file", "", "Path to the ChatGPT forex review CSV")
 	cmd.Flags().BoolVar(&all, "all", false, "Include 'No Trade' rows")
 	_ = cmd.MarkFlagRequired("file")
 
