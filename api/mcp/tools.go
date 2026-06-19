@@ -248,7 +248,7 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	case "get_candles_csv":
 		return s.toolGetCandlesCSV(ctx, p.Arguments)
 	case "get_candle_stats":
-		return s.toolGetCandleStats(ctx, p.Arguments)
+		return s.toolGetDataStats(ctx, p.Arguments)
 	case "validate_candles":
 		return s.toolValidateCandles(ctx, p.Arguments)
 	case "get_pip_values":
@@ -520,7 +520,7 @@ func (s *Server) toolDownloadCandles(ctx context.Context, raw json.RawMessage) (
 	}), nil
 }
 
-func (s *Server) toolGetCandleStats(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+func (s *Server) toolGetDataStats(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
 		Instrument string `json:"instrument"`
 		Timeframe  string `json:"timeframe"`
@@ -535,7 +535,7 @@ func (s *Server) toolGetCandleStats(ctx context.Context, raw json.RawMessage) (a
 	if args.Instrument == "" || args.From == "" || args.To == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, from, and to are required"}
 	}
-	result, err := s.svc.CandleStats(ctx, service.CandleStatsRequest{
+	result, err := s.svc.DataStats(ctx, service.DataStatsRequest{
 		Instrument: args.Instrument,
 		Timeframe:  args.Timeframe,
 		From:       args.From,

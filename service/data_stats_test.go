@@ -22,11 +22,11 @@ func buildStatsStore(t *testing.T) func() {
 	return trader.SwapStore(store)
 }
 
-func TestCandleStats_ReturnsAllFourAnalyzers(t *testing.T) {
+func TestDataStats_ReturnsAllFourAnalyzers(t *testing.T) {
 	restore := buildStatsStore(t)
 	defer restore()
 
-	result, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
 		Timeframe:  "H1",
 		From:       "2024-01-01",
@@ -50,11 +50,11 @@ func TestCandleStats_ReturnsAllFourAnalyzers(t *testing.T) {
 	assert.Contains(t, names, "Session (by UTC hour)")
 }
 
-func TestCandleStats_DefaultsTimeframeToH1(t *testing.T) {
+func TestDataStats_DefaultsTimeframeToH1(t *testing.T) {
 	restore := buildStatsStore(t)
 	defer restore()
 
-	result, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
 		From:       "2024-01-01",
 		To:         "2024-01-31",
@@ -63,11 +63,11 @@ func TestCandleStats_DefaultsTimeframeToH1(t *testing.T) {
 	assert.Equal(t, "H1", result.Timeframe)
 }
 
-func TestCandleStats_AllowsSingleDayRange(t *testing.T) {
+func TestDataStats_AllowsSingleDayRange(t *testing.T) {
 	restore := buildStatsStore(t)
 	defer restore()
 
-	result, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
 		Timeframe:  "H1",
 		From:       "2024-01-01",
@@ -78,11 +78,11 @@ func TestCandleStats_AllowsSingleDayRange(t *testing.T) {
 	assert.Equal(t, "2024-01-01", result.To)
 }
 
-func TestCandleStats_NormalizesInstrument(t *testing.T) {
+func TestDataStats_NormalizesInstrument(t *testing.T) {
 	restore := buildStatsStore(t)
 	defer restore()
 
-	result, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EUR_USD",
 		Timeframe:  "H1",
 		From:       "2024-01-01",
@@ -92,8 +92,8 @@ func TestCandleStats_NormalizesInstrument(t *testing.T) {
 	assert.Equal(t, "EURUSD", result.Instrument)
 }
 
-func TestCandleStats_RejectsFromAfterTo(t *testing.T) {
-	_, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+func TestDataStats_RejectsFromAfterTo(t *testing.T) {
+	_, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
 		Timeframe:  "H1",
 		From:       "2024-02-01",
@@ -103,8 +103,8 @@ func TestCandleStats_RejectsFromAfterTo(t *testing.T) {
 	assert.Contains(t, err.Error(), "from must not be after to")
 }
 
-func TestCandleStats_RejectsUnknownInstrument(t *testing.T) {
-	_, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+func TestDataStats_RejectsUnknownInstrument(t *testing.T) {
+	_, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "BOGUS",
 		Timeframe:  "H1",
 		From:       "2024-01-01",
@@ -113,8 +113,8 @@ func TestCandleStats_RejectsUnknownInstrument(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCandleStats_RejectsBlankInstrument(t *testing.T) {
-	_, err := (&Service{}).CandleStats(context.Background(), CandleStatsRequest{
+func TestDataStats_RejectsBlankInstrument(t *testing.T) {
+	_, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "",
 		From:       "2024-01-01",
 		To:         "2024-01-31",

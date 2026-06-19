@@ -219,7 +219,7 @@ func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/v1/candles/{instrument}/stats ────────────────────────────────
 // Query: timeframe (default H1), from (YYYY-MM-DD), to (YYYY-MM-DD), units (int)
 
-func (s *Server) handleCandleStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDataStats(w http.ResponseWriter, r *http.Request) {
 	instrument := r.PathValue("instrument")
 	if instrument == "" {
 		writeErr(w, http.StatusBadRequest, "instrument required")
@@ -245,7 +245,7 @@ func (s *Server) handleCandleStats(w http.ResponseWriter, r *http.Request) {
 		}
 		units = parsed
 	}
-	result, err := s.svc.CandleStats(r.Context(), service.CandleStatsRequest{
+	result, err := s.svc.DataStats(r.Context(), service.DataStatsRequest{
 		Instrument: instrument,
 		Timeframe:  tf,
 		From:       from,
@@ -254,7 +254,7 @@ func (s *Server) handleCandleStats(w http.ResponseWriter, r *http.Request) {
 		Units:      units,
 	})
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("candle stats: %v", err))
+		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("data stats: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

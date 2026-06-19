@@ -8,8 +8,8 @@ import (
 	trader "github.com/rustyeddy/trader"
 )
 
-// CandleStatsRequest parameterises CandleStats.
-type CandleStatsRequest struct {
+// DataStatsRequest parameterises DataStats.
+type DataStatsRequest struct {
 	Instrument string // e.g. "EURUSD"
 	Timeframe  string // "M1", "H1", "D1"; defaults to "H1" when empty
 	From       string // YYYY-MM-DD inclusive; from == to is a single-day range
@@ -18,8 +18,8 @@ type CandleStatsRequest struct {
 	Units      int64  // optional; >0 adds USD column (100000 = standard lot)
 }
 
-// CandleStatsResult holds the complete analysis output.
-type CandleStatsResult struct {
+// DataStatsResult holds the complete stats output.
+type DataStatsResult struct {
 	Instrument string           `json:"instrument"`
 	Timeframe  string           `json:"timeframe"`
 	From       string           `json:"from"`
@@ -41,14 +41,14 @@ type StatRow struct {
 	USD   float64 `json:"usd,omitempty"`
 }
 
-// candleStatsRates are fallback mid-market rates for USD-base pairs.
-var candleStatsRates = map[string]float64{
+// dataStatsRates are fallback mid-market rates for USD-base pairs.
+var dataStatsRates = map[string]float64{
 	"USDJPY": 150.00,
 	"USDCHF": 0.90,
 	"USDCAD": 1.36,
 }
 
-func (s *Service) CandleStats(ctx context.Context, req CandleStatsRequest) (*CandleStatsResult, error) {
+func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataStatsResult, error) {
 	inst := trader.NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
@@ -101,9 +101,9 @@ func (s *Service) CandleStats(ctx context.Context, req CandleStatsRequest) (*Can
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 
-	rate := candleStatsRates[inst]
+	rate := dataStatsRates[inst]
 
-	result := &CandleStatsResult{
+	result := &DataStatsResult{
 		Instrument: inst,
 		Timeframe:  tf,
 		From:       from.Format("2006-01-02"),

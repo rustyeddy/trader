@@ -27,7 +27,7 @@ func buildMCPCandleStore(t *testing.T) func() {
 
 // ── get_candle_stats ──────────────────────────────────────────────────────
 
-func TestToolGetCandleStats_ReturnsAnalyzers(t *testing.T) {
+func TestToolGetDataStats_ReturnsAnalyzers(t *testing.T) {
 	restore := buildMCPCandleStore(t)
 	defer restore()
 
@@ -40,7 +40,7 @@ func TestToolGetCandleStats_ReturnsAnalyzers(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, rpcErr := srv.toolGetCandleStats(context.Background(), raw)
+	got, rpcErr := srv.toolGetDataStats(context.Background(), raw)
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
 	content := payload["content"].([]map[string]any)
@@ -49,7 +49,7 @@ func TestToolGetCandleStats_ReturnsAnalyzers(t *testing.T) {
 	assert.Contains(t, text, "EURUSD")
 }
 
-func TestToolGetCandleStats_DefaultsTimeframeToH1(t *testing.T) {
+func TestToolGetDataStats_DefaultsTimeframeToH1(t *testing.T) {
 	restore := buildMCPCandleStore(t)
 	defer restore()
 
@@ -61,22 +61,22 @@ func TestToolGetCandleStats_DefaultsTimeframeToH1(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, rpcErr := srv.toolGetCandleStats(context.Background(), raw)
+	got, rpcErr := srv.toolGetDataStats(context.Background(), raw)
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
 	content := payload["content"].([]map[string]any)
 	assert.Contains(t, content[0]["text"].(string), `"H1"`)
 }
 
-func TestToolGetCandleStats_RequiresInstrumentFromTo(t *testing.T) {
+func TestToolGetDataStats_RequiresInstrumentFromTo(t *testing.T) {
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, _ := json.Marshal(map[string]any{"instrument": "EURUSD"})
 
-	_, rpcErr := srv.toolGetCandleStats(context.Background(), raw)
+	_, rpcErr := srv.toolGetDataStats(context.Background(), raw)
 	require.NotNil(t, rpcErr)
 }
 
-func TestHandleToolsCall_AllowsGetCandleStatsWithoutOANDA(t *testing.T) {
+func TestHandleToolsCall_AllowsGetDataStatsWithoutOANDA(t *testing.T) {
 	restore := buildMCPCandleStore(t)
 	defer restore()
 

@@ -27,7 +27,7 @@ func buildRestCandleStore(t *testing.T) func() {
 
 // ── GET /api/v1/candles/{instrument}/stats ────────────────────────────────
 
-func TestHandleCandleStats_OK(t *testing.T) {
+func TestHandleDataStats_OK(t *testing.T) {
 	restore := buildRestCandleStore(t)
 	defer restore()
 
@@ -44,7 +44,7 @@ func TestHandleCandleStats_OK(t *testing.T) {
 	assert.Len(t, analyzers, 4)
 }
 
-func TestHandleCandleStats_DefaultsTimeframeToH1(t *testing.T) {
+func TestHandleDataStats_DefaultsTimeframeToH1(t *testing.T) {
 	restore := buildRestCandleStore(t)
 	defer restore()
 
@@ -57,19 +57,19 @@ func TestHandleCandleStats_DefaultsTimeframeToH1(t *testing.T) {
 	assert.Equal(t, "H1", body["timeframe"])
 }
 
-func TestHandleCandleStats_MissingFrom(t *testing.T) {
+func TestHandleDataStats_MissingFrom(t *testing.T) {
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?to=2024-01-31")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
-func TestHandleCandleStats_MissingTo(t *testing.T) {
+func TestHandleDataStats_MissingTo(t *testing.T) {
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
-func TestHandleCandleStats_BadUnits(t *testing.T) {
+func TestHandleDataStats_BadUnits(t *testing.T) {
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01&to=2024-01-31&units=notanumber")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)

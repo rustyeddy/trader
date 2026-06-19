@@ -68,7 +68,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/transactions", s.handleGetTransactions)
 	mux.HandleFunc("GET /api/v1/candles/validate", s.handleValidateCandles)
 	mux.HandleFunc("GET /api/v1/candles/{instrument}", s.handleGetCandlesCSV)
-	mux.HandleFunc("GET /api/v1/candles/{instrument}/stats", s.handleCandleStats)
+	mux.HandleFunc("GET /api/v1/candles/{instrument}/stats", s.handleDataStats)
 	mux.HandleFunc("GET /api/v1/pip-values", s.handlePipValues)
 	mux.HandleFunc("GET /api/v1/position", s.handlePosition)
 
