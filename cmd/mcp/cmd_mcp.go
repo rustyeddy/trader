@@ -1,9 +1,13 @@
-// Package mcp hosts the CLI command for starting the MCP server.
+// Package mcp hosts the CLI command for starting the MCP stdio server.
+// This runs as a subprocess spawned by Claude Code or Claude Desktop;
+// it is not a daemon and must not be combined with trader serve.
 package mcp
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,17 +16,9 @@ import (
 	"github.com/rustyeddy/trader/service"
 )
 
-// New returns the top-level "mcp" cobra command.
+// New returns the "mcp" cobra command. It runs the MCP server directly
+// on stdio — there is no subcommand layer.
 func New(rc *trader.RootConfig) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "mcp",
-		Short: "MCP server: expose trader as typed Claude tools (stdio transport)",
-	}
-	cmd.AddCommand(newServeCmd(rc))
-	return cmd
-}
-
-func newServeCmd(rc *trader.RootConfig) *cobra.Command {
 	var (
 		token       string
 		accountID   string
@@ -32,15 +28,15 @@ func newServeCmd(rc *trader.RootConfig) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the MCP server on stdio (for Claude Code / Claude Desktop)",
+		Use:   "mcp",
+		Short: "MCP server: expose trader as typed Claude tools (stdio transport)",
 		Long: `Start the trader MCP server using stdio transport.
 
 Add to ~/.claude/mcp_servers.json or your Claude Desktop config:
   {
     "trader": {
       "command": "trader",
-      "args": ["mcp", "serve"]
+      "args": ["mcp"]
     }
   }
 
@@ -71,13 +67,28 @@ Resources:
 			ctx := cmd.Context()
 			log := trader.L
 
+			// Token: explicit flag > global config > env var > token file.
+			tok := token
+			if !cmd.Flags().Changed("token") {
+				if rc.OANDAToken != "" {
+					tok = rc.OANDAToken
+				} else {
+					tok = resolveTokenFile()
+				}
+			}
+			// Account: explicit flag > global config > env var.
+			resolvedAccount := accountID
+			if !cmd.Flags().Changed("account-id") && rc.OANDAAccountID != "" {
+				resolvedAccount = rc.OANDAAccountID
+			}
+
 			var svc *service.Service
-			if tok := resolveToken(token); tok != "" {
+			if tok != "" {
 				var err error
 				svc, err = service.New(service.Config{
 					Env:       env,
 					Token:     tok,
-					AccountID: accountID,
+					AccountID: resolvedAccount,
 					Log:       log,
 				})
 				if err != nil {
@@ -98,27 +109,21 @@ Resources:
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (enables live endpoints)")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().BoolVar(&writeEnable, "enable-write", false, "Enable write tools: place_order, close_trade, update_stop")
-	cmd.Flags().StringVar(&reportsDir, "reports-dir", "/srv/trading/backtests/reports", "Backtest reports directory for run_backtest output and backtest://results")
+	cmd.Flags().BoolVar(&writeEnable, "enable-write", false, "Enable write tools: place_order, close_trade, update_stop, start_bot, stop_bot")
+	cmd.Flags().StringVar(&reportsDir, "reports-dir", "/srv/trading/backtests/reports", "Backtest reports directory")
 
 	return cmd
 }
 
-func resolveToken(flagVal string) string {
-	if flagVal != "" {
-		return flagVal
-	}
+// resolveTokenFile reads the OANDA token from ~/.config/oanda/pat.txt.
+func resolveTokenFile() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(home + "/.config/oanda/pat.txt")
+	data, err := os.ReadFile(filepath.Join(home, ".config", "oanda", "pat.txt"))
 	if err != nil {
 		return ""
 	}
-	s := string(data)
-	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r' || s[len(s)-1] == ' ') {
-		s = s[:len(s)-1]
-	}
-	return s
+	return strings.TrimSpace(string(data))
 }
