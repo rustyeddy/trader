@@ -88,6 +88,14 @@ func (s *Store) RawCandlePath(k Key) (string, error) {
 	return monthlyCandle(s.rawRoot(), k), nil
 }
 
+// RawRoot returns the root directory for raw source data.
+// e.g. basedir=/srv/trading/data/candles → /srv/trading/data/raw
+func (s *Store) RawRoot() string { return s.rawRoot() }
+
+// RawCandlePathAt returns the path for a monthly candle CSV under a custom
+// raw root (e.g. when --raw-dir overrides the default).
+func RawCandlePathAt(rawDir string, k Key) string { return monthlyCandle(rawDir, k) }
+
 func parseCandlePath(path string) (k Key, ok bool) {
 	p := filepath.ToSlash(path)
 	parts := strings.Split(p, "/")
@@ -395,6 +403,12 @@ func candleSetMissingExpectedSlots(cs *candleSet) (missing int, expected int) {
 		}
 	}
 	return missing, expected
+}
+
+// SlotMayHaveForexData reports whether a time slot (start inclusive, end exclusive)
+// could contain forex trading activity. Exported for use by the service layer.
+func SlotMayHaveForexData(start, end time.Time) bool {
+	return timeRangeMayHaveForexData(start, end)
 }
 
 func timeRangeMayHaveForexData(start, end time.Time) bool {

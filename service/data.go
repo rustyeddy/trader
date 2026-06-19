@@ -226,6 +226,141 @@ func writeRawOandaMonth(s *trader.Store, key trader.Key, monthStart time.Time, c
 	return nil
 }
 
+// ── derive canonical from raw ─────────────────────────────────────────────────
+
+// DeriveResult is returned by DeriveCanonicalFromRaw.
+type DeriveResult struct {
+	CandlesWritten int
+	// MissingSlots is the count of market-hours slots the raw file had no data for.
+	MissingSlots int
+	// SampleMissing holds up to 10 RFC3339 timestamps of missing market-hours slots.
+	SampleMissing []string
+}
+
+// DeriveCanonicalFromRaw reads a raw OANDA month CSV (bid+ask OHLC) from
+// rawPath and writes the canonical candle CSV for key into the store.
+// It also checks every expected market-hours slot and reports any that the raw
+// file did not contain, so gaps can be surfaced immediately rather than found
+// by a follow-up validate pass.
+func (s *Service) DeriveCanonicalFromRaw(ctx context.Context, rawPath string, key trader.Key) (*DeriveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	tf := key.TF
+	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	stepSec := int64(tf)
+	slotCount := int(monthEnd.Sub(monthStart).Seconds() / float64(stepSec))
+
+	candles := make([]trader.Candle, slotCount)
+	filled := make([]bool, slotCount)
+
+	f, err := os.Open(rawPath)
+	if err != nil {
+		return nil, fmt.Errorf("open raw %s: %w", rawPath, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, ",")
+		if len(fields) < 11 {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(fields[0])) == "time" {
+			continue
+		}
+
+		ts, err := time.Parse(time.RFC3339, strings.TrimSpace(fields[0]))
+		if err != nil {
+			continue
+		}
+		ts = ts.UTC()
+		if ts.Before(monthStart) || !ts.Before(monthEnd) {
+			continue
+		}
+
+		complete, err := strconv.ParseBool(strings.TrimSpace(fields[10]))
+		if err != nil || !complete {
+			continue
+		}
+
+		parseF := func(s string) float64 {
+			v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+			return v
+		}
+		bidO := parseF(fields[1])
+		bidH := parseF(fields[2])
+		bidL := parseF(fields[3])
+		bidC := parseF(fields[4])
+		askO := parseF(fields[5])
+		askH := parseF(fields[6])
+		askL := parseF(fields[7])
+		askC := parseF(fields[8])
+		vol, _ := strconv.ParseInt(strings.TrimSpace(fields[9]), 10, 64)
+
+		if bidC == 0 && askC == 0 {
+			continue
+		}
+
+		idx := int((ts.Unix() - monthStart.Unix()) / stepSec)
+		if idx < 0 || idx >= slotCount {
+			continue
+		}
+
+		spreads := [4]float64{askO - bidO, askH - bidH, askL - bidL, askC - bidC}
+		var sumSpread, maxSpread float64
+		for _, sp := range spreads {
+			sumSpread += sp
+			if sp > maxSpread {
+				maxSpread = sp
+			}
+		}
+		candles[idx] = trader.Candle{
+			Open:      trader.PriceFromFloat(bidO),
+			High:      trader.PriceFromFloat(bidH),
+			Low:       trader.PriceFromFloat(bidL),
+			Close:     trader.PriceFromFloat(bidC),
+			AvgSpread: trader.PriceFromFloat(sumSpread / 4),
+			MaxSpread: trader.PriceFromFloat(maxSpread),
+			Ticks:     int32(vol),
+		}
+		filled[idx] = true
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan raw %s: %w", rawPath, err)
+	}
+
+	// Check every expected market-hours slot for gaps in the raw file.
+	result := &DeriveResult{}
+	step := time.Duration(stepSec) * time.Second
+	for i := 0; i < slotCount; i++ {
+		slotStart := monthStart.Add(time.Duration(i) * step)
+		if !trader.SlotMayHaveForexData(slotStart, slotStart.Add(step)) {
+			continue
+		}
+		if filled[i] {
+			result.CandlesWritten++
+		} else {
+			result.MissingSlots++
+			if len(result.SampleMissing) < 10 {
+				result.SampleMissing = append(result.SampleMissing, slotStart.UTC().Format(time.RFC3339))
+			}
+		}
+	}
+
+	store := trader.GetStore()
+	if err := store.WriteMonthlyCandles(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
+		return nil, fmt.Errorf("write canonical %s: %w", rawPath, err)
+	}
+	return result, nil
+}
+
 // ── update (catch-up download) ────────────────────────────────────────────────
 
 // UpdateOandaCandlesRequest specifies a catch-up download for one or more

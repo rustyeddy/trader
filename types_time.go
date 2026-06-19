@@ -279,7 +279,23 @@ func isForexMarketClosed(t time.Time) bool {
 	case time.Saturday:
 		return true
 	case time.Sunday:
-		return h < 17
+		if h < 17 {
+			return true
+		}
+		// Sunday evening session is closed when Sunday itself is a major holiday
+		// (e.g. Jan 1 or Dec 25 falls on Sunday — OANDA has no data that evening).
+		sm, sd := nt.Month(), nt.Day()
+		if (sm == time.January && sd == 1) ||
+			(sm == time.December && sd == 25) ||
+			(sm == time.December && sd == 26) {
+			return true
+		}
+		// Also closed when Monday is a major holiday.
+		nextDay := nt.AddDate(0, 0, 1)
+		nm, nd := nextDay.Month(), nextDay.Day()
+		return (nm == time.January && nd == 1) ||
+			(nm == time.December && nd == 25) ||
+			(nm == time.December && nd == 26)
 	case time.Friday:
 		return h >= 17
 	default:
@@ -297,6 +313,9 @@ func isMajorForexHolidayClosed(t time.Time) bool {
 		return true
 	}
 	if month == time.December && day == 25 {
+		return true
+	}
+	if month == time.December && day == 26 {
 		return true
 	}
 	if month == time.December && day == 24 && h >= 13 {

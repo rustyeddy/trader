@@ -69,7 +69,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 	}
 
 	switch req.Timeframe {
-	case M1, H1, D1:
+	case M1, H1, H4, D1:
 	default:
 		return nil, fmt.Errorf("unsupported timeframe: %v", req.Timeframe)
 	}
@@ -143,6 +143,9 @@ type candleCoverage struct {
 }
 
 func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValidationIssue, error) {
+	// Slots in the future (after the current hour) are not expected to have data.
+	now := time.Now().UTC().Truncate(time.Hour)
+
 	path, err := store.PathForAsset(key)
 	if err != nil {
 		return nil, err
@@ -151,7 +154,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	cs, err := store.ReadCSV(key)
 	if err != nil {
 		if os.IsNotExist(err) {
-			expected := expectedOpenSlotCount(key.Year, key.Month, key.TF)
+			expected := expectedOpenSlotCount(key.Year, key.Month, key.TF, now)
 			issue := CandleValidationIssue{
 				Kind:       "missing_candle_month",
 				Severity:   "error",
@@ -177,7 +180,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	coverage := analyzeCandleCoverage(cs)
+	coverage := analyzeCandleCoverage(cs, now)
 	issues := make([]CandleValidationIssue, 0, 4)
 	if coverage.Missing > 0 {
 		issues = append(issues, CandleValidationIssue{
@@ -223,7 +226,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	return issues, nil
 }
 
-func analyzeCandleCoverage(cs *candleSet) candleCoverage {
+func analyzeCandleCoverage(cs *candleSet, now time.Time) candleCoverage {
 	if cs == nil || cs.Timeframe <= 0 {
 		return candleCoverage{}
 	}
@@ -234,6 +237,9 @@ func analyzeCandleCoverage(cs *candleSet) candleCoverage {
 	for i := range cs.Candles {
 		slotStart := start.Add(time.Duration(i) * step)
 		slotEnd := slotStart.Add(step)
+		if !slotStart.Before(now) {
+			break // don't expect future slots
+		}
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
@@ -253,12 +259,15 @@ func analyzeCandleCoverage(cs *candleSet) candleCoverage {
 	return cov
 }
 
-func expectedOpenSlotCount(year, month int, tf Timeframe) int {
+func expectedOpenSlotCount(year, month int, tf Timeframe, now time.Time) int {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	step := time.Duration(tf) * time.Second
 	count := 0
 	for slotStart := start; slotStart.Before(end); slotStart = slotStart.Add(step) {
+		if !slotStart.Before(now) {
+			break // don't expect future slots
+		}
 		if timeRangeMayHaveForexData(slotStart, slotStart.Add(step)) {
 			count++
 		}
