@@ -10,6 +10,7 @@ import (
 // AccountSummary holds the key financial fields from OANDA's account summary.
 type AccountSummary struct {
 	ID           string
+	Alias        string  // human-readable account name (OANDA "alias")
 	Currency     string
 	Balance      float64
 	NAV          float64 // Net Asset Value (equity)
@@ -21,6 +22,7 @@ type AccountSummary struct {
 type accountSummaryResp struct {
 	Account struct {
 		ID           string `json:"id"`
+		Alias        string `json:"alias"`
 		Currency     string `json:"currency"`
 		Balance      string `json:"balance"`
 		NAV          string `json:"NAV"`
@@ -72,6 +74,7 @@ func (c *Client) GetAccountSummary(ctx context.Context, accountID string) (*Acco
 
 	return &AccountSummary{
 		ID:           a.ID,
+		Alias:        a.Alias,
 		Currency:     a.Currency,
 		Balance:      balance,
 		NAV:          nav,

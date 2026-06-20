@@ -38,7 +38,6 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 		Use:   "order",
 		Short: "Live order management (OANDA demo)",
 	}
-	cmd.AddCommand(accountSummaryCmd(rc))
 	cmd.AddCommand(newOrderCmd(rc))
 	cmd.AddCommand(listOrdersCmd(rc))
 	cmd.AddCommand(closeOrderCmd(rc))
@@ -407,38 +406,6 @@ func transactionsStreamCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-// ── order account ─────────────────────────────────────────────────────────
-
-func accountSummaryCmd(rc *traderpkg.RootConfig) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "account",
-		Short: "Print account balance, NAV, margin, and unrealized P/L",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-			svc, err := buildService(ctx, cmd, rc)
-			if err != nil {
-				return err
-			}
-			summary, err := svc.GetAccountSummary(ctx)
-			if err != nil {
-				return err
-			}
-			bar := strings.Repeat("─", 36)
-			fmt.Println(bar)
-			fmt.Printf("  %-20s %12s\n", "Account ID", summary.ID)
-			fmt.Println(bar)
-			fmt.Printf("  %-20s %12.2f\n", "Balance", summary.Balance)
-			fmt.Printf("  %-20s %12.2f\n", "NAV (equity)", summary.NAV)
-			fmt.Printf("  %-20s %+12.2f\n", "Unrealized P/L", summary.UnrealizedPL)
-			fmt.Printf("  %-20s %12.2f\n", "Margin used", summary.MarginUsed)
-			fmt.Printf("  %-20s %12.2f\n", "Margin available", summary.MarginAvail)
-			fmt.Println(bar)
-			return nil
-		},
-	}
-	addCommonFlags(cmd)
-	return cmd
-}
 
 // ── order update-stop ─────────────────────────────────────────────────────
 

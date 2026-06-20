@@ -609,7 +609,7 @@ trader bot start [flags]
       --risk-pct float         Percent of account equity to risk per trade (default 1)
       --strategy string        Strategy name, e.g. donchian-v6, pulse
       --tick-interval string   How often the strategy ticks, e.g. 30s, 5m (default "60s")
-      --token string           OANDA API token (local mode)
+      --token string           OANDA API token (local mode) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1147,7 +1147,7 @@ trader data oanda [flags]
       --raw-dir string      Root directory for raw bid+ask candle preservation (default "/srv/trading/data/raw")
       --timeframe string    Timeframe: M1, H1, D (required)
       --to string           End date YYYY-MM-DD inclusive (required)
-      --token string        OANDA API token (falls back to ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (falls back to ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1194,7 +1194,7 @@ trader data pip-value [flags]
       --env string          OANDA environment: practice|live (default "practice")
   -h, --help                help for pip-value
       --rates string        Explicit rates for USD-base pairs, e.g. USDJPY=152.50,USDCHF=0.88
-      --token string        OANDA API token (for live rate lookup)
+      --token string        OANDA API token (for live rate lookup) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --units int           Position size in units (100000 = 1 standard lot) (default 100000)
 ```
 
@@ -1251,7 +1251,7 @@ trader data position [flags]
       --notional float      Show units needed for this USD notional amount
       --pips float          Show USD value of N pips alongside each position size
       --price float         Current mid price (fetched from OANDA if omitted)
-      --token string        OANDA API token (for live price lookup)
+      --token string        OANDA API token (for live price lookup) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --units int           Show notional and margin for this position size
 ```
 
@@ -1390,7 +1390,7 @@ trader data update [flags]
       --instruments string   Comma-separated instruments to update (default: all 24)
       --raw-dir string       Root for raw bid+ask preservation (default "/srv/trading/data/raw")
       --timeframes string    Comma-separated timeframes (default: M1,H1,H4,D)
-      --token string         OANDA API token
+      --token string         OANDA API token (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1415,6 +1415,27 @@ trader data update [flags]
 
 Scan stored candle months for missing expected slots and raw-source mismatches
 
+### Synopsis
+
+Validate derived candle data in the local store.
+
+By default all instruments, the full date range, and all timeframes (M1, H1,
+H4, D1) are validated. Supply --timeframe to check a single one.
+Supply --instruments, --from, or --to to narrow the scope.
+
+Output shows one row per instrument per year:
+
+  EURUSD 2024  .  .  !  .  .  .  .  .  .  .  .  .
+
+  .  month in range, no issues
+  !  month has one or more issues
+  -  month outside the requested range
+
+Use --quiet to suppress the grid and show only the summary line and issues.
+
+Use --repair to re-download every month that has missing expected slots from
+OANDA. All validated timeframes are repaired.
+
 ```
 trader data validate-candles [flags]
 ```
@@ -1423,14 +1444,18 @@ trader data validate-candles [flags]
 
 ```
       --check-raw            Also compare canonical candles with raw source data when supported (default true)
-      --from string          Start month inclusive, format YYYY-MM
+      --env string           OANDA environment: practice|live (used with --repair) (default "practice")
+      --from string          Start month inclusive YYYY-MM; default: earliest in store
   -h, --help                 help for validate-candles
-      --instruments string   Comma-separated instruments (e.g. EURUSD,USDJPY)
+      --instruments string   Comma-separated instruments; default: all in store
+      --quiet                Suppress the per-instrument month grid; show only summary and issues
       --raw-dir string       Optional root dir for raw source validation (defaults to the store sibling raw dir)
-      --report string        Optional JSON report output path
+      --repair               Re-download from OANDA every month that has missing expected candle slots
+      --report string        Optional JSON report output path (single-timeframe only)
       --source string        Stored candle source to validate (default "oanda")
-      --timeframe string     Candle timeframe to validate: M1, H1, or D1 (default "H1")
-      --to string            End month inclusive, format YYYY-MM
+      --timeframe string     Candle timeframe(s) to validate: M1, H1, H4, D1 (default: all)
+      --to string            End month inclusive YYYY-MM; default: latest in store
+      --token string         OANDA API token (used with --repair) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1753,7 +1778,7 @@ trader live journal [flags]
       --equity-file string   Path for journal equity records (default "live-equity.jsonl")
   -h, --help                 help for journal
       --journal string       Journal backend: csv|json (default "json")
-      --token string         OANDA API token (falls back to ~/.config/oanda/pat.txt)
+      --token string         OANDA API token (falls back to ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --trades-file string   Path for journal trade records (default "live-trades.jsonl")
 ```
 
@@ -1827,7 +1852,7 @@ trader mcp [flags]
       --env string           OANDA environment: practice|live (default "practice")
   -h, --help                 help for mcp
       --reports-dir string   Backtest reports directory (default "/srv/trading/backtests/reports")
-      --token string         OANDA API token (enables live endpoints)
+      --token string         OANDA API token (enables live endpoints) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1898,7 +1923,7 @@ trader order account [flags]
       --account-id string   OANDA account ID (takes precedence over global config and OANDA_ACCOUNT_ID env var)
       --env string          OANDA environment: practice|live (takes precedence over global config) (default "practice")
   -h, --help                help for account
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -1933,7 +1958,7 @@ trader order close [flags]
       --account-id string   OANDA account ID (takes precedence over global config and OANDA_ACCOUNT_ID env var)
       --env string          OANDA environment: practice|live (takes precedence over global config) (default "practice")
   -h, --help                help for close
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --trade-id string     Trade ID to close (required)
       --units int           Units to close (default 0 = full close)
 ```
@@ -2007,7 +2032,7 @@ trader order list [flags]
       --account-id string   OANDA account ID (takes precedence over global config and OANDA_ACCOUNT_ID env var)
       --env string          OANDA environment: practice|live (takes precedence over global config) (default "practice")
   -h, --help                help for list
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -2046,7 +2071,7 @@ trader order new [flags]
       --risk-pct float      Percent of account equity to risk per trade (default 1)
       --side string         Trade direction: long or short (required)
       --stop-pips float     Stop distance in pips (required)
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -2089,7 +2114,7 @@ trader order prices [flags]
       --env string           OANDA environment: practice|live (takes precedence over global config) (default "practice")
   -h, --help                 help for prices
       --instruments string   Comma-separated pairs to query (default: all majors)
-      --token string         OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string         OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --units int            Lot size for pip value column (100000 = 1 standard lot) (default 100000)
 ```
 
@@ -2127,7 +2152,7 @@ trader order transactions [flags]
   -h, --help                help for transactions
       --limit int           Max transactions to display (0 = all). Most-recent are shown. (default 25)
       --since int           Return transactions with ID > this value (0 = from the start)
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -2163,7 +2188,7 @@ trader order transactions-stream [flags]
       --env string          OANDA environment: practice|live (takes precedence over global config) (default "practice")
       --heartbeats          Also print heartbeat messages
   -h, --help                help for transactions-stream
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
@@ -2211,7 +2236,7 @@ trader order update-stop [flags]
   -h, --help                help for update-stop
       --stop float          New stop-loss price (0=unchanged, <0=cancel)
       --take float          New take-profit price (0=unchanged, <0=cancel)
-      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)
+      --token string        OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt) (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
       --trade-id string     Trade ID to update (required)
 ```
 
@@ -2459,7 +2484,7 @@ trader serve [flags]
       --journal-trades string   Journal trade-record path (default ./live-trades.jsonl)
       --mcp-enable-write        Enable MCP write tools (place_order, close_trade, update_stop) over HTTP
       --reports-dir string      Backtest reports directory (default /srv/trading/backtests/reports)
-      --token string            OANDA API token
+      --token string            OANDA API token (default "4006f6797965ac2c4dcae1257180d9a6-0218b6910726135fc5069d5dfc143689")
 ```
 
 ### Options inherited from parent commands
