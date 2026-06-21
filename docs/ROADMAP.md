@@ -1,218 +1,209 @@
 # Trader Roadmap
 
-Items are roughly ordered by priority within each section. Nothing here is
-committed to a timeline — this is a living document of known gaps and future
-directions.
+This document contains future work only. It is not a release commitment or a
+substitute for GitHub issues. Current behavior is documented in
+[architecture.org](architecture.org), [Configuration.md](Configuration.md),
+[Services.md](Services.md), and [oanda.md](oanda.md).
 
----
+Completed work is removed rather than retained as a historical checklist; Git
+history and the changelog provide that record.
 
-## Deployment
+## Priority: correctness and safety
 
-### Ansible Roles
-Four roles covering the multi-node setup: `trader-common` (install binary,
-user, dirs, NFS mount), `trader-live` (serve + live bot systemd units),
-`trader-data` (nightly candle sync cron), `trader-backtest` (on-demand).
-Separate `prod` and `demo` inventories; secrets in Ansible Vault with
-distinct passwords per environment.
+### Automatic margin-call liquidation
 
-### prod vs demo Pipeline
-Tagged releases deploy to real-money nodes; `main` edge builds deploy to
-practice nodes. `make deploy-prod version=v1.2.3` requires an explicit tag;
-`make deploy-demo` pulls the latest edge artifact.
+Implement deterministic forced liquidation after account revaluation makes
+`FreeMargin < 0`. Positions must close through the normal broker/account event
+path until margin is restored or no positions remain.
 
-### Raspberry Pi
-Cross-compile targets in Makefile (`build-arm64`); `make deploy-pi
-PI_HOST=pi1.local` rsync the binary and restart the unit. Candle data on a
-shared NFS volume; SQLite journal on local USB SSD to reduce SD card wear.
+Tracking: [issue #147](https://github.com/rustyeddy/trader/issues/147).
 
----
+### Eliminate internal floating-point arithmetic
 
-## Live Trading
+Convert prices, indicators, strategies, account calculations, live adapters,
+and sizing logic to scaled domain types immediately after external input.
+Retain floating point only at configuration, broker-wire, and presentation
+boundaries, with a static check preventing regression.
 
-### Reconnect with Existing Open Trades
-When the live runner restarts, `tickCounts` resets to zero so pre-existing
-broker positions appear as age=1. The strategy may hold them far longer than
-intended (or never close them via `hold_bars`).
+Tracking: [issue #148](https://github.com/rustyeddy/trader/issues/148).
 
-**Fix options:**
-- Query `openTime` from OANDA on startup; divide elapsed time by `tick_interval`
-  to synthesize initial tick counts (no state file needed).
-- Persist `tickCounts` to a small JSON state file after each tick; restore on
-  startup (exact, handles multi-day sessions).
+### Stable request model
 
-### Netting-Aware Strategy Mode
-OANDA practice accounts enforce netting/FIFO per instrument — simultaneous long
-and short on the same instrument net out rather than creating two positions.
-Strategies that alternate sides need to be aware of this constraint.
+Unify strategy, alert, webhook, CLI, REST, and broker order inputs around one
+validated request model without leaking transport-specific types into the
+domain.
 
-**Fix options:**
-- Add a `netting: true` config flag; runner closes opposite-side positions
-  before opening a new one.
-- Multi-instrument runner: manage multiple instruments in one loop so separate
-  longs and shorts go on different pairs.
+Tracking: [issue #83](https://github.com/rustyeddy/trader/issues/83).
 
-### FOK Order Retry
-When a Fill-or-Kill order is cancelled by OANDA (now surfaces as an error), the
-runner logs and skips. A configurable retry with jitter would improve fill rate
-on fast-moving markets.
+### Netting-aware live execution
 
-### Position Restore on Crash
-Related to reconnect — if the runner exits uncleanly, any open positions remain
-unmanaged until the next restart. A startup reconciliation step should detect
-and adopt orphaned positions.
+OANDA accounts can net opposite-side exposure on one instrument. Add explicit
+policy for adopting, closing, or rejecting opposite-side trades before a new
+order. Ensure strategy state and broker state cannot silently diverge.
 
----
+### Startup reconciliation and orphan positions
 
-## Strategy Engine
+Live runners already estimate position age from OANDA `openTime` after a
+restart. Remaining work is to reconcile every broker position with a managed
+bot/strategy, define adoption policy for unknown positions, and surface
+unmanaged exposure prominently.
 
-### External / Plugin Strategies
-Allow strategies to be loaded at runtime without modifying core code or
-recompiling the trader binary.
+### Order retry policy
 
-**Preferred approaches:**
-1. **Subprocess JSON stdio** — strategy is any executable; the runner spawns it
-   and communicates via stdin/stdout newline-delimited JSON. Any language, fully
-   isolated, crash-safe. Ideal for live trading.
-2. **Starlark scripting** — `.star` files loaded at runtime, no compilation.
-   Deterministic by design; good for backtesting reproducibility.
-   Library: `go.starlark.net`.
-3. **Yaegi** — interpreted Go; strategies use the existing `Strategy` interface
-   with no new concepts for Go contributors.
+FOK cancellation currently returns an error and the runner skips that order.
+Add an opt-in bounded retry policy with jitter, idempotency safeguards, and
+clear logging. Never retry closes or opens blindly.
 
-**Rejected:** Go `plugin` package — requires identical Go version/build flags,
-Linux-only, cannot be unloaded, fragile shared memory model.
+## Backtesting and research
 
-**Config sketch (subprocess):**
-```yaml
-strategy:
-  kind: external
-  cmd: "./strategies/my_rsi"   # or "python strategies/rsi.py"
-  params:
-    period: 14
-    threshold: 30
-```
+### Walk-forward testing
 
-### Multi-Instrument Runner
-Single runner loop managing several instruments concurrently — each with its own
-price feed, position tracking, and strategy instance. Enables independent longs
-on EUR_USD + GBP_USD without running two separate processes.
+Add in-sample optimisation and out-of-sample validation windows with a combined
+report. Preserve deterministic inputs and make window boundaries explicit.
 
-### Strategy Parameter Optimisation
-Grid/random search over strategy params against historical data; emit a ranked
-result table. Builds on the existing backtest infrastructure.
+### Portfolio backtests
 
-### Stop Strategy Modes
-Add configurable stop-sizing modes so risk can adapt to streaks and edge quality.
+Run several instruments against shared capital and margin state. Define candle
+clock alignment, missing-bar handling, correlation reporting, and deterministic
+order when multiple instruments act at the same timestamp.
 
-- **Martingale** — increase risk/size after a loss so one win can recover prior
-  losses. Reset to base risk after a profitable trade.
-- **Anti-martingale** — increase risk/size after wins and reduce after losses
-  (pyramiding into momentum, de-risking during drawdowns).
-- **Kelly method** — size risk as a fraction derived from estimated win rate and
-  payoff ratio (`f* = p - (1-p)/b`), typically using fractional Kelly in
-  production to reduce volatility.
+### Parameter optimisation
 
----
+Add grid and bounded random search over registered strategy parameters. Record
+the complete search space, seed, data hash, ranking metric, and out-of-sample
+results so rankings are reproducible.
 
-## Backtesting
+### Execution-cost model
 
-### Walk-Forward Testing
-Divide the date range into in-sample and out-of-sample windows; run optimisation
-on in-sample, validate on out-of-sample, report combined equity curve. Prevents
-overfitting to a single period.
+Fixed adverse slippage and candle spread filtering are implemented. Remaining
+work includes commission, financing/rollover, configurable stochastic
+slippage, and sensitivity reports. Any random model must use an explicit seed.
 
-### Portfolio Backtest
-Run multiple instruments simultaneously with shared capital, margin accounting,
-and correlation-aware position sizing.
+### Equity and exposure time series
 
-### Slippage and Commission Model
-Current backtest fills at the exact bar price. A configurable slippage model
-(fixed pips, or random within spread) would give more realistic P/L estimates.
+Persist per-bar equity, drawdown, margin, and exposure snapshots in backtest
+results so UI charts and portfolio analysis do not reconstruct them from
+closed trades.
 
----
+## Strategy engine
+
+### External strategies
+
+Allow strategies to run without recompiling the main binary. Preferred
+direction is a versioned subprocess protocol over newline-delimited JSON:
+
+- language-independent and process-isolated;
+- explicit startup/health/shutdown lifecycle;
+- bounded message sizes and deadlines;
+- deterministic replay support;
+- no access to broker credentials by default.
+
+Starlark remains a possible deterministic scripting option. Go's `plugin`
+package remains unsuitable because of platform and build-identity constraints.
+
+### Risk-sizing modes
+
+Support explicit, testable sizing policies rather than embedding sizing rules
+inside strategies. Candidate policies include fixed fractional,
+anti-martingale, volatility targeting, and capped fractional Kelly.
+
+Martingale sizing should not be a production default; if implemented for
+research, it must carry hard exposure/drawdown caps and prominent warnings.
+
+### Strategy metadata
+
+Expose machine-readable parameter schemas, defaults, warmup needs, compatible
+timeframes, and descriptions from each registered strategy. Reuse that
+metadata in CLI help, validation, MCP, and the UI.
 
 ## UI
 
-### Update Stop / Take on Open Position
-The trades page side panel already has the form wired up; verify end-to-end
-with a live account and add a confirmation step for safety.
+### Backtest browser and result comparison
 
-### Live Bot Controls
-Start / stop / configure the live runner from the UI rather than the CLI.
-Requires a runner lifecycle API (`POST /api/v1/bot/start`, `DELETE /api/v1/bot`).
+Complete searchable result browsing, side-by-side diffs, equity/drawdown
+charts, and links to candle/signal context.
 
-### Backtest Equity Curve Chart
-The `/charts` page exists but is unpopulated. Wire it to the trade details from
-a selected backtest summary to render an equity curve.
+Tracking: [issue #114](https://github.com/rustyeddy/trader/issues/114).
 
-### Playwright UI Tests
-Third blackbox test layer (after REST and MCP). Requires a running server;
-use `npx playwright test` against `httptest.NewServer` or a local dev instance.
+### Strategy launcher
 
----
+Run backtests and parameter sweeps from the UI with explicit resource limits
+and progress/error reporting.
 
-## MCP
+Tracking: [issue #115](https://github.com/rustyeddy/trader/issues/115).
 
-The MCP server covers the core account/trade/backtest/candle surface. The
-following gaps remain between MCP and the full CLI + REST capability set.
-SSE streams and live-run commands are intentionally absent (wrong transport
-and too dangerous for autonomous invocation respectively).
+### Live chart and overlays
 
-### replay tool
-`POST /api/v1/replay` has no MCP equivalent. A `replay` tool would let
-Claude tune strategy parameters interactively — feed an instrument/strategy/
-date range, inspect the signal log, adjust ATR multiplier or regime filter,
-repeat. High value because this is exactly the kind of iterative analysis
-Claude is well-suited for.
+Stream current candles and position overlays, then add ATR, ADX, and
+Choppiness panels.
 
-### parse_analysis tool
-The `trader analysis` CLI and `POST /api/v1/analysis` REST endpoint parse a
-ChatGPT-generated forex analysis CSV into tradeable/watchlist/no-trade rows.
-An MCP tool would accept a file path (server-side) and return the same
-partitioned JSON, making it easy for Claude to reason over the candidates and
-propose which to act on.
+Tracking:
+[issue #117](https://github.com/rustyeddy/trader/issues/117) and
+[issue #118](https://github.com/rustyeddy/trader/issues/118).
 
-### list_backtests tool
-Backtest reports are currently exposed only as the `backtest://results`
-resource, which lists all `.org` files with no filtering. A `list_backtests`
-tool with optional `instrument` and `strategy` query params (matching
-`GET /api/v1/backtests`) would let Claude search and compare reports without
-reading every file.
+### Live bot controls
 
-### get_backtest_candles tool
-`GET /api/v1/backtests/{name}/candles` returns the OHLC bars for a saved
-report. An MCP equivalent enables Claude to correlate candle data with signal
-logs returned by `run_backtest`.
+REST and service bot lifecycle APIs exist. Remaining UI work is to list,
+start, stop, and inspect bots safely, with clear practice/live status and
+confirmation for side effects.
 
-### get_prices tool
-`trader order prices` fetches live bid/ask for the major pairs but has no
-REST or MCP equivalent. An MCP `get_prices` tool (wrapping the OANDA pricing
-endpoint) gives Claude real-time context when evaluating analysis candidates
-or sizing orders.
+### Browser tests
 
-### data_stats tool
-`trader data stats` returns swing range, spread, trend ratio, and session
-distributions for a candle dataset. Exposing this as an MCP tool lets Claude
-characterise an instrument before recommending strategy parameters.
+Add Playwright coverage for dashboard, trades, backtests, charts, replay, and
+bot controls against an isolated test server. Live broker calls must be mocked.
 
-### list_bots / get_bot tools
-The bot manager (`POST /api/v1/bots`, `GET /api/v1/bots`, etc.) has no MCP
-surface. Read-only tools (`list_bots`, `get_bot`) would let Claude report on
-running strategies without requiring `--enable-write`.
+## API and MCP
 
----
+The MCP server already exposes account/trade data, prices, candle CSV/stats,
+validation, pip/position calculations, backtests, bot reads, and gated write
+tools.
 
-## Infrastructure
+Remaining high-value parity work:
 
-### SQLite Journal for Live Trading
-The CSV journal works but SQLite (`live.db`) supports richer queries and
-concurrent reads from the UI. The backend already exists; needs wiring into the
-default serve config.
+- `replay`: expose `service.RunReplay` for iterative strategy analysis;
+- `review`: parse uploaded/server-side review CSV through
+  `service.ParseReviewCSV`;
+- `list_backtests`: filtered saved-report discovery rather than only resource
+  listing;
+- `get_backtest_candles`: retrieve candle context for a saved result.
 
-### Configurable Logging
-Structured log levels per subsystem (runner, broker, service) via the serve
-config; runtime level changes via an API endpoint.
+SSE streaming is intentionally an HTTP concern rather than an MCP tool.
+Autonomous live-run loops should remain outside MCP unless a strong
+authorization and lifecycle model is added.
 
-### Docker / Systemd Packaging
-Single-binary deployment is already possible; add a `Dockerfile` and a systemd
-unit file so the daemon can run as a managed service.
+## Operations and deployment
+
+### Configuration cleanup
+
+Unify configuration naming and precedence where command-specific `--config`
+flags currently overlap global configuration. Add strict unknown-field
+validation and remove the legacy private `appConfig`.
+
+Tracking: [issue #120](https://github.com/rustyeddy/trader/issues/120).
+
+### Logging fan-out
+
+Add an in-memory bounded log stream with subscriber fan-out for the UI and
+diagnostics, without allowing slow consumers to block trading loops.
+
+Tracking: [issue #119](https://github.com/rustyeddy/trader/issues/119).
+
+### Deployment automation
+
+Docker, Compose, and systemd assets exist. Remaining work is repeatable
+environment provisioning, secret delivery, upgrade/rollback, health checks,
+and separate practice/live inventories. Ansible roles are one possible
+implementation.
+
+### Durable journal backend
+
+CSV and JSONL journals are implemented; PostgreSQL is named but not
+implemented. Select and implement a queryable durable backend only after
+retention, migration, concurrency, backup, and operational requirements are
+defined. Do not describe the removed SQLite backend as available.
+
+### Data backup and recovery
+
+Automate backups for raw and canonical candle data, journal records, configs,
+and reports. Document restore verification rather than treating a successful
+upload as a tested backup.

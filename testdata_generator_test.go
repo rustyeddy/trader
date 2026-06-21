@@ -74,7 +74,7 @@ func TestGenerateSyntheticCandle_ValidRange(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
 	rng := NewLCRandom(42)
 
-	prevClose := Price(1080000)
+	prevClose := Price(108000)
 	candle := cfg.generateCandle(rng, prevClose)
 
 	// High >= max(open, close)
@@ -97,7 +97,7 @@ func TestGenerateSyntheticCandle_Deterministic(t *testing.T) {
 
 	rng1 := NewLCRandom(42)
 	rng2 := NewLCRandom(42)
-	prevClose := Price(1080000)
+	prevClose := Price(108000)
 
 	candle1 := cfg.generateCandle(rng1, prevClose)
 	candle2 := cfg.generateCandle(rng2, prevClose)

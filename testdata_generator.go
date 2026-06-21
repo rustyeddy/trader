@@ -22,9 +22,9 @@ func DefaultSyntheticConfig(instrument string) SyntheticCandleConfig {
 	return SyntheticCandleConfig{
 		Instrument:  instrument,
 		Timeframe:   H1,
-		StartPrice:  Price(1080000), // 1.08000 in scale
-		Volatility:  0.002,          // 0.2% volatility
-		Trend:       0.00005,        // +0.005% trend per hour
+		StartPrice:  Price(108000), // 1.08000 at PriceScale=100_000
+		Volatility:  0.002,         // 0.2% volatility
+		Trend:       0.00005,       // +0.005% trend per hour
 		TicksPerBar: 50,
 	}
 }

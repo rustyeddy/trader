@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTraderWithYearOfSyntheticHourly tests that trader can process a full year
-// of hourly candles without infinite loops. This is useful for reproducible
-// testing of the infinite loop issue on CI/CD systems.
+// TestTraderWithYearOfSyntheticHourly verifies that a full synthetic H1 year
+// can be traversed with stable bounds. It is an iterator/generator stress test;
+// it does not execute the Trader backtest loop.
 func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping year-long test in short mode")
@@ -83,8 +83,8 @@ func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 	assert.Less(t, candleCount, 30)
 }
 
-// TestTraderTimeoutDetection verifies we can detect infinite loops with timeouts.
-// This ensures that if the infinite loop still exists, the test will fail decisively.
+// TestTraderTimeoutDetection places a defensive upper time bound on synthetic
+// candle traversal so iterator regressions fail decisively.
 func TestTraderTimeoutDetection(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
 	cfg.Timeframe = H1
@@ -155,7 +155,7 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	}
 
 	// Calculate price range
-	priceRange := float64(maxPrice-minPrice) / float64(Price(1080000))
+	priceRange := float64(maxPrice-minPrice) / float64(Price(108000))
 	assert.NotZero(t, priceRange)
 }
 

@@ -1,211 +1,247 @@
-# OANDA Integration Guide
+# OANDA Integration
 
-This document provides a comprehensive guide for using the OANDA API integration in the trader library.
+Trader uses OANDA v20 as its live broker and as one source of historical
+bid/ask candles. The wire client lives in `brokers/oanda`; application code
+normally accesses it through `service.Service`.
 
-## Overview
+## Safety status
 
-The OANDA integration allows you to download historic candlestick data
-from your OANDA account and use it with the trader library for
-backtesting, analysis, and research.
+Only the OANDA **practice** environment is enabled. `oanda.BaseURL("live")`
+returns `Not Live Trading Allowed`; changing a CLI flag to `--env live` does
+not bypass that guard.
 
-## Getting Started
+Order placement, trade closure, and stop changes are external side effects.
+Use a practice account and explicit confirmation/write-enable controls.
 
-### 1. Get Your OANDA Access Token
+## Credentials
 
-**Practice Account:**
-- Visit: https://www.oanda.com/demo-account/tpa/personal_token
-- Generate a personal access token
+Create a personal access token from the OANDA account portal and keep it out
+of source control.
 
-**Live Account:**
-- Visit: https://www.oanda.com/account/tpa/personal_token
-- Generate a personal access token
+Common credential sources are:
 
-⚠️ **Security Note**: Never commit your access token to version control.
+1. A command-specific `--token` or `--account-id`
+2. Merged trader global configuration
+3. `OANDA_TOKEN` and `OANDA_ACCOUNT_ID`
+4. `~/.config/oanda/pat.txt` as the token fallback
 
-### 2. Basic Usage
+See [Configuration.md](Configuration.md) for command-specific precedence.
+
+```bash
+export OANDA_TOKEN='practice-token'
+export OANDA_ACCOUNT_ID='101-...'
+```
+
+If a token exposes exactly one account, `service.ResolveAccount` can discover
+it. Multiple accounts require an explicit account ID.
+
+## Recommended CLI workflows
+
+### Inspect the account
+
+```bash
+trader account list
+trader account summary
+trader order prices
+trader order list
+trader order transactions --since 0 --limit 25
+```
+
+Use `trader <command> --help` for current flags.
+
+### Download historical candles
+
+```bash
+trader data oanda \
+  --instrument EUR_USD \
+  --timeframe H1 \
+  --from 2024-01-01 \
+  --to 2024-12-31
+```
+
+This path downloads OANDA bid/ask candles, preserves raw source CSV, converts
+values at the boundary, and writes canonical candles under the configured
+store root. `--raw-dir` defaults to `/srv/trading/data/raw`.
+
+For incremental maintenance:
+
+```bash
+trader data update --dry-run
+trader data update
+```
+
+Validate stored results separately:
+
+```bash
+trader data validate-candles --source oanda
+```
+
+### Manage orders
+
+```bash
+# Preview is the default behavior.
+trader order new \
+  --instrument EUR_USD \
+  --side long \
+  --risk-pct 1 \
+  --stop-pips 20
+
+trader order list
+trader order update-stop --help
+trader order close --help
+```
+
+Do not script live side effects from examples without retaining the command's
+confirmation and environment checks.
+
+### Journal transactions
+
+```bash
+trader live journal \
+  --journal json \
+  --trades-file live-trades.jsonl \
+  --equity-file live-equity.jsonl
+```
+
+The standalone command streams until cancellation. `trader serve` runs the
+same journal flow with reconnect backoff.
+
+## Go client
+
+The current package path is:
 
 ```go
-package main
+import "github.com/rustyeddy/trader/brokers/oanda"
+```
 
-import (
-    "context"
-    "fmt"
-    "log"
-    
-    "github.com/rustyeddy/trader/oanda"
-)
+There is no `oanda.NewClient` constructor. Construct a client with the
+validated base URL, or let `service.New` do it:
 
-func main() {
-    // Create client (true = practice, false = live)
-    client := oanda.NewClient("your-token-here", true)
-    
-    // Fetch last 100 5-minute candles
-    candles, err := client.GetCandles(context.Background(), oanda.CandlesRequest{
-        Instrument:  "EUR_USD",
-        Price:       oanda.MidPrice,
-        Granularity: oanda.M5,
-        Count:       100,
-    })
-    
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    fmt.Printf("Downloaded %d candles\n", len(candles))
+```go
+baseURL, err := oanda.BaseURL("practice")
+if err != nil {
+    return err
+}
+
+client := &oanda.Client{
+    BaseURL: baseURL,
+    Token:   token,
+    HTTP:    &http.Client{Timeout: 30 * time.Second},
 }
 ```
 
-## Configuration Options
-
-### Instruments
-
-The OANDA API supports many instruments. Common examples:
-- Currency pairs: `EUR_USD`, `USD_JPY`, `GBP_USD`, `AUD_USD`
-- Metals: `XAU_USD` (Gold), `XAG_USD` (Silver)
-- Indices: `SPX500_USD`, `US30_USD`
-
-### Price Components
+For application use:
 
 ```go
-oanda.MidPrice  // Average of bid and ask (default)
-oanda.BidPrice  // Bid prices only
-oanda.AskPrice  // Ask prices only
-oanda.BidAsk    // Both bid and ask (not yet implemented)
-
-```
-
-### Granularities
-
-**Seconds**: `S5`, `S10`, `S15`, `S30`
-**Minutes**: `M1`, `M2`, `M4`, `M5`, `M10`, `M15`, `M30`
-**Hours**: `H1`, `H2`, `H3`, `H4`, `H6`, `H8`, `H12`
-**Days**: `D`
-**Weeks**: `W`
-**Months**: `M`
-
-## Advanced Usage
-
-### Fetching by Time Range
-
-```go
-from := time.Now().AddDate(0, 0, -30) // 30 days ago
-to := time.Now()
-
-candles, err := client.GetCandles(ctx, oanda.CandlesRequest{
-    Instrument:  "EUR_USD",
-    Granularity: oanda.H1,
-    From:        &from,
-    To:          &to,
+svc, err := service.New(service.Config{
+    Env:       "practice",
+    Token:     token,
+    AccountID: accountID,
+    Log:       logger,
 })
 ```
 
-### Using with Trading Engine
+`Client.HTTP` is optional and falls back to `http.DefaultClient`, but callers
+should inject a client with an appropriate timeout for non-streaming calls and
+for tests.
+
+## Implemented client surface
+
+| Method                 | Purpose                                  |
+|------------------------|------------------------------------------|
+| `GetAccounts`          | List accounts visible to the token       |
+| `GetAccountSummary`    | Balance, NAV, margin, and unrealized P/L |
+| `GetPricing`           | Current bid/ask snapshots                |
+| `StreamPricingToCSV`   | Pricing stream written as CSV            |
+| `GetOpenTrades`        | List open OANDA trades                   |
+| `SubmitMarketOrder`    | Submit a market order with optional stop |
+| `CloseTrade`           | Full or partial trade close              |
+| `UpdateTradeStop`      | Replace/cancel stop-loss or take-profit  |
+| `GetTransactions`      | Poll transactions after an ID            |
+| `StreamTransactions`   | Transaction and heartbeat stream         |
+| `FetchCandles`         | Paginated bid/ask candle download        |
+| `DownloadCandlesToCSV` | Single-request M/B/A candle export       |
+
+The service layer wraps account, order, candle, transaction, pricing, live
+runner, bot, and journal use cases. Transport handlers should call service
+methods instead of using the client directly.
+
+## Candle APIs
+
+### Paginated bid/ask fetch
+
+`FetchCandles` is the normal ingestion primitive:
 
 ```go
-import (
-    "github.com/rustyeddy/trader/oanda"
-    "github.com/rustyeddy/trader/broker/sim"
-)
-
-func backtest() {
-    // Download historic data
-    client := oanda.NewClient(token, true)
-    candles, err := client.GetCandles(ctx, oanda.CandlesRequest{
-        Instrument:  "EUR_USD",
-        Granularity: oanda.M5,
-        Count:       1000,
-    })
-    
-    // Use with simulation engine
-    engine := sim.NewEngine(account, journal)
-    
-    // Feed candles into engine for backtesting
-    for _, candle := range candles {
-        engine.UpdatePrice(broker.Price{
-            Instrument: "EUR_USD",
-            Bid:        candle.Close - 0.0001, // Approximate bid
-            Ask:        candle.Close + 0.0001, // Approximate ask
-            Time:       candle.Time,
-        })
-    }
-}
+candles, err := client.FetchCandles(ctx, oanda.FetchCandlesOptions{
+    Instrument:  "EUR_USD",
+    Granularity: "H1",
+    From:        from,
+    To:          to,
+    ChunkSize:   5000,
+})
 ```
 
-### Error Handling
+It requests `price=BA`, automatically paginates at up to 5000 candles per
+request, and returns bid and ask OHLC values. The implementation treats the
+end bound as exclusive.
+
+Each returned `oanda.Candle` includes `Complete`. Consumers must decide
+whether an incomplete/forming candle is valid for their use case; the low-level
+client does not silently discard it.
+
+### Direct CSV export
+
+`DownloadCandlesToCSV` supports `M`, `B`, or `A` price components and writes
+OANDA wire-format decimal values:
 
 ```go
-candles, err := client.GetCandles(ctx, req)
-if err != nil {
-    // Check for specific error types
-    switch {
-    case strings.Contains(err.Error(), "401"):
-        log.Fatal("Invalid access token")
-    case strings.Contains(err.Error(), "instrument is required"):
-        log.Fatal("Missing instrument parameter")
-    case strings.Contains(err.Error(), "cannot exceed 5000"):
-        log.Fatal("Too many candles requested")
-    default:
-        log.Fatalf("API error: %v", err)
-    }
-}
+n, err := client.DownloadCandlesToCSV(ctx, oanda.CandlesOptions{
+    Instrument:  "EUR_USD",
+    Granularity: "H1",
+    Price:       "M",
+    From:        from,
+    To:          to,
+}, writer)
 ```
 
-## Best Practices
+`BA` is rejected by this CSV helper. Use `FetchCandles` for bid-and-ask data.
+This wire CSV is not the same format as Trader's scaled canonical candle CSV.
 
-1. **Rate Limiting**: OANDA has rate limits. Implement exponential backoff for production use.
+## Instrument and granularity formats
 
-2. **Data Storage**: For large datasets, cache downloaded candles to avoid repeated API calls:
-   ```go
-   // Save to file
-   data, _ := json.Marshal(candles)
-   os.WriteFile("candles_cache.json", data, 0644)
-   ```
+OANDA requests use underscore-separated instruments such as `EUR_USD`.
+Trader store keys use normalized symbols such as `EURUSD`. Normalize before
+registry lookup or path construction, but preserve OANDA format on outbound
+requests.
 
-3. **Environment Variables**: Always use environment variables for tokens:
-   ```bash
-   export OANDA_TOKEN="your-token"
-   export OANDA_PRACTICE="true"
-   ```
+Granularity strings are OANDA values such as `M1`, `H1`, `H4`, and `D`.
+Availability and history depend on the OANDA account and API.
 
-4. **Context Timeouts**: Use timeouts for API calls:
-   ```go
-   ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-   defer cancel()
-   candles, err := client.GetCandles(ctx, req)
-   ```
+## Error and stream handling
 
-5. **Incomplete Candles**: The library automatically filters incomplete candles. Current/forming candles are not included in results.
+The client returns contextual Go errors containing the operation and HTTP
+status/body excerpt. There are no stable typed errors for individual HTTP
+statuses, so callers should add context rather than build control flow from
+matching error strings.
 
-## Limitations
+All calls accept `context.Context`. Cancel contexts on shutdown. Transaction
+and pricing streams use OANDA's streaming host and may emit heartbeats.
+`trader serve` owns transaction-stream reconnection; direct client users own
+their own retry policy.
 
-- **Max Count**: Maximum 5000 candles per request
-- **Date Range**: Cannot use `Count` with both `From` and `To`
-- **Historic Data**: OANDA limits how far back you can fetch data (varies by granularity)
-- **Rate Limits**: Subject to OANDA's API rate limits
+Never log authorization headers, tokens, or full error bodies that may contain
+sensitive account data.
 
-## Troubleshooting
+## Known limitations
 
-### "Invalid access token"
-- Verify your token is correct
-- Check if token has expired
-- Ensure you're using the right environment (practice vs live)
+- Live-environment URLs are deliberately disabled.
+- Internal live DTOs still contain floating-point broker values; fixed-point
+  boundary migration is tracked in
+  [issue #148](https://github.com/rustyeddy/trader/issues/148).
+- Automatic margin-call liquidation in the simulation/backtest domain is not
+  implemented; see [issue #147](https://github.com/rustyeddy/trader/issues/147).
+- Broker API limits and instrument availability remain controlled by OANDA.
 
-### "Unknown instrument"
-- Verify instrument name format (e.g., `EUR_USD` not `EURUSD`)
-- Check if instrument is available in your account type
-
-### "Request timeout"
-- Reduce the number of candles requested
-- Check your internet connection
-- OANDA API may be experiencing issues
-
-## Related Documentation
-
-- [OANDA REST API v20 Documentation](https://developer.oanda.com/rest-live-v20/introduction/)
-- [Examples Directory](../examples/oanda/)
-- [Market Package](../market/)
-
-## Support
-
-For issues with the trader library, please open an issue on GitHub.
-For OANDA API issues, contact OANDA support or check their developer forum.
+OANDA API reference:
+[REST v20 introduction](https://developer.oanda.com/rest-live-v20/introduction/).
