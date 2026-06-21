@@ -3,16 +3,15 @@ package service
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	// Register backtest strategies so the default live-strategy fallback can
 	// find them during tests.
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
-	_ "github.com/rustyeddy/trader/strategies/donchianv2"
-	_ "github.com/rustyeddy/trader/strategies/donchianv4"
+	_ "github.com/rustyeddy/trader/strategies/donchian"
 )
 
 func testService() *Service {
@@ -80,10 +79,10 @@ func TestBuildLiveStrategy_ScalperInvalidParams(t *testing.T) {
 
 // ── generic backtest strategy fallback ───────────────────────────────────────
 
-func TestBuildLiveStrategy_DonchianV2(t *testing.T) {
+func TestBuildLiveStrategy_Donchian(t *testing.T) {
 	svc := testService()
 	strat, err := svc.BuildLiveStrategy(StrategyConfig{
-		Kind:        "donchian-breakout-v2",
+		Kind:        "donchian-breakout",
 		Granularity: "D",
 		Params:      map[string]any{"period": 55, "close_strength": 0.6, "confirm_bars": 1},
 		Exit:        trader.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 6.0}},
@@ -92,10 +91,10 @@ func TestBuildLiveStrategy_DonchianV2(t *testing.T) {
 	assert.NotNil(t, strat)
 }
 
-func TestBuildLiveStrategy_DonchianV4WithRegime(t *testing.T) {
+func TestBuildLiveStrategy_DonchianWithRegime(t *testing.T) {
 	svc := testService()
 	strat, err := svc.BuildLiveStrategy(StrategyConfig{
-		Kind:        "donchian-breakout-v4",
+		Kind:        "donchian-breakout",
 		Granularity: "H1",
 		Params:      map[string]any{"period": 20, "close_strength": 0.6, "confirm_bars": 2, "adx_period": 14, "adx_threshold": 25.0},
 		Exit:        trader.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 3.0}},
@@ -119,9 +118,9 @@ func TestBuildLiveStrategy_BBFade(t *testing.T) {
 func TestBuildLiveStrategy_BadExit(t *testing.T) {
 	svc := testService()
 	_, err := svc.BuildLiveStrategy(StrategyConfig{
-		Kind: "donchian-breakout-v2",
+		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
-		Exit: trader.ExitConfig{Kind: "bad-exit"},
+		Exit:   trader.ExitConfig{Kind: "bad-exit"},
 	}, "USD_JPY")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exit strategy")
@@ -130,7 +129,7 @@ func TestBuildLiveStrategy_BadExit(t *testing.T) {
 func TestBuildLiveStrategy_BadRegime(t *testing.T) {
 	svc := testService()
 	_, err := svc.BuildLiveStrategy(StrategyConfig{
-		Kind:   "donchian-breakout-v2",
+		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
 		Regime: trader.RegimeConfig{Kind: "bad-regime"},
 	}, "USD_JPY")

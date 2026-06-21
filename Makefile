@@ -49,7 +49,7 @@ test:
 
 cover:
 	go test ./... -coverprofile=coverage.out
-	go tool cover -func=coverage.out
+
 
 cover-html:
 	go test ./... -coverprofile=coverage.out

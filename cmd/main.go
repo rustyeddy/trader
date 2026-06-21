@@ -5,7 +5,6 @@ import (
 	"os"
 
 	traderpkg "github.com/rustyeddy/trader"
-	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/account"
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/bot"
@@ -16,6 +15,7 @@ import (
 	cmdmcp "github.com/rustyeddy/trader/cmd/mcp"
 	"github.com/rustyeddy/trader/cmd/order"
 	"github.com/rustyeddy/trader/cmd/replay"
+	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/serve"
 	"github.com/spf13/cobra"
 
@@ -25,11 +25,6 @@ import (
 	// Strategy registration via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
 	_ "github.com/rustyeddy/trader/strategies/donchian"
-	_ "github.com/rustyeddy/trader/strategies/donchianv2"
-	_ "github.com/rustyeddy/trader/strategies/donchianv3"
-	_ "github.com/rustyeddy/trader/strategies/donchianv4"
-	_ "github.com/rustyeddy/trader/strategies/donchianv5"
-	_ "github.com/rustyeddy/trader/strategies/donchianv6"
 	_ "github.com/rustyeddy/trader/strategies/emacross"
 	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
 	_ "github.com/rustyeddy/trader/strategies/fake"
