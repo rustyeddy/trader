@@ -1,0 +1,1527 @@
+#+TITLE: Strategy Manager Architecture and Development Plan
+#+AUTHOR: Rusty Eddy
+#+DATE: 2026-06-21
+#+FILETAGS: :trader:architecture:strategy-manager:regime:risk:live-trading:
+
+* Purpose
+
+This document describes the proposed Strategy Manager architecture for the Trader system.
+
+The goal is to evolve live trading from:
+
+#+begin_src text
+one manually configured live strategy per instrument
+#+end_src
+
+toward:
+
+#+begin_src text
+one trader process owns one account
+one account manages multiple <instrument, strategy> tuples
+one instrument/account has at most one active strategy
+regime and opportunity state determine which strategy should run
+risk management controls whether orders are allowed and how large they are
+#+end_src
+
+This is not intended to replace the current strategy, backtest, or live runner architecture. It adds an orchestration layer above existing strategy execution.
+
+* Current Relevant Architecture
+
+The current system already has several useful building blocks.
+
+** LiveStrategy
+
+The root =trader= package defines =LiveStrategy=:
+
+#+begin_src go
+type LiveStrategy interface {
+    Name() string
+    Tick(ctx context.Context, price LivePrice, openTrades []LiveTrade) *LivePlan
+}
+#+end_src
+
+This is the live trading interface. A strategy receives the current price and open trades for its instrument, then returns a =LivePlan=.
+
+** Live Runner
+
+The service layer has =RunLiveStrategy=, which runs one live strategy loop.
+
+The current runner:
+
+#+begin_src text
+1. fetches current broker price
+2. fetches open broker trades
+3. converts broker state into LivePrice and LiveTrade values
+4. calls strategy.Tick
+5. executes closes first
+6. opens at most one new position
+7. records broker trade ownership for journaling
+#+end_src
+
+This is a good low-level runner, but it is not yet the Strategy Manager.
+
+** Candle Strategy Adapter
+
+The current =CandleStrategyAdapter= wraps backtest-style candle strategies as live strategies.
+
+It already:
+
+#+begin_src text
+- fetches completed OANDA candles
+- warms strategy indicators
+- feeds closed candles to the strategy
+- advances regime and exit filters
+- blocks opens that fail the regime filter
+- converts StrategyPlan into LivePlan
+#+end_src
+
+This is important because live candle strategies can reuse existing backtest strategy logic.
+
+** Existing Gap
+
+The current system can run strategies live, but it does not yet have a full account-level orchestration layer that decides:
+
+#+begin_src text
+- which instruments should be watched
+- which instruments are near a tradeable setup
+- which strategy should own a specific instrument slot
+- whether multiple strategies conflict
+- whether account-level risk permits a new trade
+- whether one trader process has exclusive ownership of the account
+#+end_src
+
+The proposed Strategy Manager fills this gap.
+
+* Target Architecture
+
+** High-Level Flow
+
+#+begin_src text
+Market Data / Candle Store / Broker Prices
+        |
+        v
+Review Layer / Regime Classifier
+        |
+        v
+Watchlist Manager
+        |
+        v
+Opportunity Detector
+        |
+        v
+Strategy Manager
+        |
+        v
+Risk Manager / Position Sizer
+        |
+        v
+Strategy Runner
+        |
+        v
+Signal / Order Manager
+        |
+        v
+Broker Adapter
+#+end_src
+
+** Operating Rule
+
+#+begin_src text
+One running trader process owns exactly one account.
+
+One account may have multiple active <instrument, strategy> tuples.
+
+For each <account, instrument> slot:
+- zero or one active strategy
+- zero or more observer strategies
+- one active position owner
+- risk manager can override everything
+#+end_src
+
+** Why One Active Strategy Per Instrument?
+
+Multiple active strategies on the same instrument/account create unclear ownership.
+
+Bad live-trading state:
+
+#+begin_src text
+EUR/USD + EMA Pullback Strategy -> wants long
+EUR/USD + Breakout Strategy     -> wants long
+EUR/USD + Mean Reversion        -> wants short
+EUR/USD + Exit Strategy A       -> wants exit
+EUR/USD + Exit Strategy B       -> wants hold
+#+end_src
+
+Clean live-trading state:
+
+#+begin_src text
+Account: OANDA-Demo
+
+Active:
+- EUR/USD -> EMA Pullback Strategy
+- GBP/USD -> Donchian Breakout Strategy
+- USD/JPY -> Trend Continuation Strategy
+- AUD/USD -> Bollinger Fade Strategy
+#+end_src
+
+Other strategies can still run in =observer= or =paper= mode, but only one strategy should be allowed to place live orders for a given account/instrument.
+
+* Core Concepts
+
+** Account Owner
+
+A =TraderProcess= owns exactly one account.
+
+#+begin_src text
+trader-demo-oanda -> OANDA demo account
+trader-live-oanda -> OANDA live account
+trader-ibkr-paper -> IBKR paper account
+trader-ibkr-live  -> IBKR live account
+#+end_src
+
+The system should prevent two live trader processes from owning the same account.
+
+Recommended rule:
+
+#+begin_src text
+account_id -> exactly one active trader owner
+#+end_src
+
+** Instrument Slot
+
+An =InstrumentSlot= represents one instrument in one account.
+
+Example:
+
+#+begin_src text
+<OANDA-Demo, EUR_USD>
+<OANDA-Demo, USD_JPY>
+<OANDA-Live, EUR_USD>
+#+end_src
+
+The Strategy Manager should manage state per instrument slot.
+
+** Instrument Slot State
+
+Suggested lifecycle:
+
+#+begin_src text
+Inactive
+  -> Watching
+  -> NearSetup
+  -> TradeCandidate
+  -> StrategyActive
+  -> PositionOpen
+  -> Cooldown
+  -> Invalidated
+#+end_src
+
+State descriptions:
+
+| State              | Meaning                                                  |
+|--------------------+----------------------------------------------------------|
+| =Inactive=         | Instrument is not currently interesting                  |
+| =Watching=         | Higher timeframe regime says it is worth watching        |
+| =NearSetup=        | Price is approaching a tradeable setup area              |
+| =TradeCandidate=   | Setup confirmed enough to select a strategy              |
+| =StrategyActive=   | A strategy has been assigned and is receiving candles     |
+| =PositionOpen=     | Broker has an open position owned by the strategy         |
+| =Cooldown=         | Recently exited; wait before re-entry                    |
+| =Invalidated=      | Regime/setup broke; remove from active consideration      |
+
+** Strategy Assignment
+
+A strategy assignment binds an instrument slot to one active strategy.
+
+#+begin_src text
+account_id
+instrument
+strategy_name
+strategy_instance_id
+mode
+assigned_at
+assignment_reason
+#+end_src
+
+Modes:
+
+#+begin_src text
+disabled
+watch_only
+paper_only
+active
+#+end_src
+
+Only one strategy can be =active= per =<account, instrument>=.
+
+** Position Ownership
+
+Each broker position should have exactly one owning strategy instance.
+
+#+begin_src text
+account_id
+instrument
+broker_trade_id
+strategy_name
+strategy_instance_id
+entry_signal_id
+risk_model_id
+opened_at
+#+end_src
+
+Only the owning strategy should emit strategy-based exits.
+
+The Risk Manager may still force exits globally.
+
+* Review Layer / Regime Classifier
+
+** Responsibility
+
+The Review Layer identifies the strategic regime for each instrument and timeframe.
+
+Examples:
+
+#+begin_src text
+EUR/USD D1 = bullish trend
+GBP/USD H4 = range
+USD/JPY D1 = bullish trend but intervention risk
+AUD/USD H1 = compression
+#+end_src
+
+** Daily or Realtime?
+
+Use both, but for different purposes.
+
+#+begin_src text
+D1 / H4 review:
+  strategic regime and trade context
+
+H1 / M15 / realtime candles:
+  tactical confirmation, invalidation, and opportunity state
+#+end_src
+
+The daily review should answer:
+
+#+begin_src text
+- Is this instrument worth watching today?
+- What is the higher-timeframe regime?
+- What direction is favored?
+- What strategy families are eligible?
+- What support/resistance zones matter?
+#+end_src
+
+The realtime layer should answer:
+
+#+begin_src text
+- Has the setup confirmed?
+- Has the regime degraded?
+- Has price entered a no-trade zone?
+- Has spread or volatility become unacceptable?
+- Should the instrument move from Watching to TradeCandidate?
+#+end_src
+
+** Proposed Types
+
+#+begin_src go
+type Regime string
+
+const (
+    RegimeUnknown          Regime = "unknown"
+    RegimeTrendingBullish  Regime = "trending_bullish"
+    RegimeTrendingBearish  Regime = "trending_bearish"
+    RegimeRanging          Regime = "ranging"
+    RegimeCompression      Regime = "compression"
+    RegimeVolatile         Regime = "volatile"
+    RegimeNoTrade          Regime = "no_trade"
+)
+
+type RegimeSnapshot struct {
+    Instrument  string
+    Timeframe   string
+    Regime      Regime
+    Confidence  float64
+    Direction   string
+    UpdatedAt   time.Time
+    Reasons     []string
+}
+#+end_src
+
+** Implementation Notes
+
+The current =RegimeFilter= is strategy/backtest oriented. It is good for per-strategy safety, but the Strategy Manager also needs account-level regime snapshots.
+
+Recommended distinction:
+
+#+begin_src text
+RegimeFilter:
+  strategy-local guard used during backtests and live candle execution
+
+RegimeClassifier / ReviewLayer:
+  system-level service that classifies instruments and updates watchlist state
+#+end_src
+
+* Watchlist Manager
+
+** Responsibility
+
+The Watchlist Manager tracks which instruments deserve attention.
+
+It does not place trades.
+
+It should promote/demote instruments based on review and realtime state.
+
+#+begin_src text
+Review says:
+  EUR/USD is bullish trending and worth watching
+
+Watchlist says:
+  EUR/USD is Watching
+
+Realtime says:
+  EUR/USD is pulling back toward EMA20
+
+Watchlist says:
+  EUR/USD is NearSetup
+#+end_src
+
+** Proposed Type
+
+#+begin_src go
+type WatchState string
+
+const (
+    WatchInactive       WatchState = "inactive"
+    WatchWatching       WatchState = "watching"
+    WatchNearSetup      WatchState = "near_setup"
+    WatchTradeCandidate WatchState = "trade_candidate"
+    WatchActive         WatchState = "active"
+    WatchCooldown       WatchState = "cooldown"
+    WatchInvalidated    WatchState = "invalidated"
+)
+
+type InstrumentWatch struct {
+    AccountID     string
+    Instrument    string
+    State         WatchState
+    Regime        RegimeSnapshot
+    PreferredSide string
+    CandidateStrategies []string
+    UpdatedAt     time.Time
+    Reason        string
+}
+#+end_src
+
+** New Code Needed
+
+Create new package or files:
+
+#+begin_src text
+service/watchlist.go
+service/watchlist_test.go
+#+end_src
+
+Potential root-domain types may go in:
+
+#+begin_src text
+watchlist.go
+regime_snapshot.go
+#+end_src
+
+depending on how much should be shared outside the service layer.
+
+* Opportunity Detector
+
+** Responsibility
+
+The Opportunity Detector decides when a watched instrument becomes actionable.
+
+The Watchlist Manager says:
+
+#+begin_src text
+EUR/USD is interesting
+#+end_src
+
+The Opportunity Detector says:
+
+#+begin_src text
+EUR/USD has confirmed a tradeable setup
+#+end_src
+
+Examples:
+
+#+begin_src text
+- H1 candle closes above EMA20 in bullish trend
+- price breaks Donchian channel in trending regime
+- price reaches range support in ranging regime
+- compression breakout confirms with close and volatility expansion
+#+end_src
+
+** Why Separate It From Strategy Manager?
+
+The Strategy Manager should select and run strategies.
+
+The Opportunity Detector should decide whether an instrument has become actionable enough to assign a strategy.
+
+This keeps responsibilities clean.
+
+** Proposed Type
+
+#+begin_src go
+type Opportunity struct {
+    AccountID     string
+    Instrument    string
+    Timeframe     string
+    Side          string
+    Regime        RegimeSnapshot
+    StrategyFamily string
+    CandidateStrategies []string
+    Confidence    float64
+    Reason        string
+    DetectedAt    time.Time
+}
+#+end_src
+
+** New Code Needed
+
+#+begin_src text
+service/opportunity_detector.go
+service/opportunity_detector_test.go
+#+end_src
+
+For v1, this can be rule-based and simple.
+
+* Strategy Manager
+
+** Responsibility
+
+The Strategy Manager assigns one active strategy to one instrument slot.
+
+It should answer:
+
+#+begin_src text
+Given this account, instrument, regime, and opportunity,
+what single strategy should be active?
+#+end_src
+
+It should not perform broker execution directly.
+
+** Responsibilities
+
+#+begin_src text
+- maintain instrument slot state
+- select one active strategy per <account, instrument>
+- start/stop strategy runners
+- keep strategy assignment records
+- prevent multiple active strategies on same slot
+- allow observer/paper strategies separately
+- consult risk manager before allowing active order flow
+- expose status to CLI/REST/MCP/UI
+#+end_src
+
+** Proposed Types
+
+#+begin_src go
+type StrategyMode string
+
+const (
+    StrategyDisabled StrategyMode = "disabled"
+    StrategyWatchOnly StrategyMode = "watch_only"
+    StrategyPaperOnly StrategyMode = "paper_only"
+    StrategyActive    StrategyMode = "active"
+)
+
+type StrategyAssignment struct {
+    AccountID          string
+    Instrument         string
+    StrategyName       string
+    StrategyInstanceID string
+    Mode               StrategyMode
+    AssignedAt         time.Time
+    Reason             string
+}
+
+type InstrumentSlot struct {
+    AccountID     string
+    Instrument    string
+    State         WatchState
+    Active        *StrategyAssignment
+    Observers     []StrategyAssignment
+    LastRegime    RegimeSnapshot
+    LastOpportunity *Opportunity
+    UpdatedAt     time.Time
+}
+#+end_src
+
+** Suggested Interface
+
+#+begin_src go
+type StrategyManager interface {
+    UpdateRegime(ctx context.Context, snapshot RegimeSnapshot) error
+    UpdateOpportunity(ctx context.Context, opp Opportunity) error
+    Assign(ctx context.Context, opp Opportunity) (*StrategyAssignment, error)
+    StopInstrument(ctx context.Context, accountID, instrument, reason string) error
+    Status(ctx context.Context) ([]InstrumentSlot, error)
+}
+#+end_src
+
+** New Code Needed
+
+#+begin_src text
+service/strategy_manager.go
+service/strategy_manager_test.go
+service/strategy_assignment.go
+service/instrument_slot.go
+#+end_src
+
+Potentially root package types:
+
+#+begin_src text
+strategy_manager_types.go
+#+end_src
+
+if these types need to be shared across CLI, REST, MCP, and UI without importing =service= internals.
+
+* Strategy Registry Improvements
+
+** Current Direction
+
+Strategies already register by name for backtests.
+
+The Strategy Manager needs more metadata than name alone.
+
+** Needed Metadata
+
+Each strategy should declare:
+
+#+begin_src text
+- name
+- family
+- supported regimes
+- supported sides
+- supported timeframes
+- whether it can run live
+- whether it requires closed candles
+- warmup bars
+- default exit strategy
+- default regime guard
+- priority
+#+end_src
+
+** Proposed Type
+
+#+begin_src go
+type StrategyFamily string
+
+const (
+    StrategyFamilyTrend          StrategyFamily = "trend"
+    StrategyFamilyBreakout       StrategyFamily = "breakout"
+    StrategyFamilyMeanReversion  StrategyFamily = "mean_reversion"
+    StrategyFamilyVolatility     StrategyFamily = "volatility"
+)
+
+type StrategyDescriptor struct {
+    Name             string
+    Family           StrategyFamily
+    SupportedRegimes []Regime
+    SupportedSides   []string
+    SupportedTFs     []string
+    LiveCapable      bool
+    RequiresClosedBar bool
+    WarmupBars       int
+    Priority         int
+}
+#+end_src
+
+** New Code Needed
+
+Modify strategy registry code to support descriptors.
+
+Possible files:
+
+#+begin_src text
+strategy_registry.go
+strategy_descriptor.go
+#+end_src
+
+Modify individual strategies gradually:
+
+#+begin_src text
+strategies/emacross/emacross.go
+strategies/donchian/donchian.go
+strategies/bollingerfade/bollingerfade.go
+strategies/pulse/pulse.go
+#+end_src
+
+Do not require every strategy to supply full metadata immediately. Add defaults so existing strategies continue to compile.
+
+* Risk Manager
+
+** Current State
+
+Live orders already support risk percentage, max units, and max position USD through =LiveOpenRequest= and =LiveRunConfig=.
+
+That is useful, but it is local to the live runner.
+
+The Strategy Manager needs an account-level Risk Manager that can decide whether a new trade is allowed before the order request reaches the broker.
+
+** Responsibilities
+
+#+begin_src text
+- account-level max open trades
+- max risk per trade
+- max total open risk
+- max risk per instrument
+- max risk per strategy family
+- max correlated exposure
+- max drawdown circuit breaker
+- max position notional
+- spread/volatility guards
+- confidence-adjusted sizing
+#+end_src
+
+** Proposed Types
+
+#+begin_src go
+type RiskDecision struct {
+    Allowed     bool
+    Reason      string
+    RiskPct     float64
+    MaxUnits    int64
+    Confidence  float64
+}
+
+type RiskRequest struct {
+    AccountID     string
+    Instrument    string
+    Side          string
+    StrategyName  string
+    StrategyFamily StrategyFamily
+    StopPips      float64
+    Confidence    float64
+    OpenPositions []LiveTrade
+}
+#+end_src
+
+** Proposed Interface
+
+#+begin_src go
+type RiskManager interface {
+    Evaluate(ctx context.Context, req RiskRequest) RiskDecision
+}
+#+end_src
+
+** New Code Needed
+
+#+begin_src text
+service/risk_manager.go
+service/risk_manager_test.go
+#+end_src
+
+Initial implementation can be conservative and simple.
+
+V1 should support:
+
+#+begin_src text
+- max open trades
+- max one open trade per instrument
+- max risk per trade
+- max units
+- max position USD
+- block if spread is too wide
+#+end_src
+
+* Live Runner Changes
+
+** Current Runner
+
+=RunLiveStrategy= currently runs one strategy for one instrument and directly executes the returned =LivePlan=.
+
+** Needed Change
+
+Keep =RunLiveStrategy= as the low-level runner, but add a higher-level managed runner that wraps or coordinates it.
+
+** Option A: Keep Existing Runner and Add Strategy Manager Above It
+
+#+begin_src text
+Strategy Manager starts/stops RunLiveStrategy goroutines.
+Each active <instrument, strategy> tuple gets one runner.
+#+end_src
+
+Pros:
+
+#+begin_src text
+- minimal rewrite
+- reuses existing tested live execution path
+- easy v1
+#+end_src
+
+Cons:
+
+#+begin_src text
+- account-level risk checks may be duplicated or awkward
+- harder to coordinate cross-instrument exposure before strategy.Tick
+#+end_src
+
+** Option B: Create Account-Level Live Orchestrator
+
+#+begin_src text
+One account-level loop owns broker polling, open trade state, watchlist state, risk checks, and strategy assignment.
+#+end_src
+
+Pros:
+
+#+begin_src text
+- cleaner long-term architecture
+- easier account-level risk
+- easier one-account ownership
+- easier UI status
+#+end_src
+
+Cons:
+
+#+begin_src text
+- more new code
+- more careful concurrency design
+#+end_src
+
+** Recommendation
+
+Use Option A for v1 and evolve toward Option B.
+
+V1:
+
+#+begin_src text
+Strategy Manager starts/stops existing RunLiveStrategy loops.
+Risk checks are inserted before order placement.
+#+end_src
+
+V2:
+
+#+begin_src text
+Account-level LiveOrchestrator owns all instrument slots and order flow.
+#+end_src
+
+** Code to Modify
+
+#+begin_src text
+service/live_runner.go
+live_strategy.go
+service/candle_strategy_adapter.go
+#+end_src
+
+Specific changes:
+
+#+begin_src text
+- add StrategyInstanceID and AccountID to live plan/order metadata
+- add optional RiskManager hook before PlaceMarketOrder
+- ensure one open trade per active instrument slot if configured
+- add order rejection logging with structured reasons
+- record strategy ownership for every opened broker trade
+#+end_src
+
+* Account Ownership Lock
+
+** Why Needed
+
+Only one running trader should own a live account.
+
+Without an ownership lock, two processes could accidentally trade the same account.
+
+** V1 Implementation
+
+Use a local filesystem lock for desktop/local operation.
+
+#+begin_src text
+~/.local/state/trader/account-locks/<account-id>.lock
+#+end_src
+
+The process should:
+
+#+begin_src text
+1. acquire lock on startup
+2. write process id, hostname, account id, started_at
+3. refresh heartbeat periodically
+4. refuse to trade if lock is held by another live process
+5. release on clean shutdown
+#+end_src
+
+** V2 Implementation
+
+Use SQLite or another durable lease store.
+
+#+begin_src text
+account_leases
+--------------
+account_id
+owner_id
+hostname
+pid
+started_at
+heartbeat_at
+expires_at
+#+end_src
+
+** New Code Needed
+
+#+begin_src text
+service/account_lock.go
+service/account_lock_test.go
+#+end_src
+
+* Configuration Changes
+
+** Current Model
+
+Backtest configuration already has =strategy=, =exit=, and =regime= sections.
+
+Live configuration currently needs to evolve toward account-level portfolio management.
+
+** Proposed Live Config
+
+#+begin_src yaml
+live:
+  account_id: oanda-demo
+  account_owner_lock: true
+
+  risk:
+    max_open_trades: 4
+    max_open_trades_per_instrument: 1
+    max_risk_per_trade_pct: 0.50
+    max_total_open_risk_pct: 2.00
+    max_position_usd: 25000
+    max_units: 20000
+
+  review:
+    enabled: true
+    strategic_timeframes: ["D", "H4"]
+    tactical_timeframes: ["H1"]
+    update_interval: "24h"
+
+  watchlist:
+    instruments:
+      - EUR_USD
+      - GBP_USD
+      - USD_JPY
+      - USD_CHF
+      - AUD_USD
+      - NZD_USD
+      - USD_CAD
+
+  strategy_manager:
+    one_active_strategy_per_instrument: true
+    allow_observers: true
+
+    regime_routes:
+      trending_bullish:
+        active_families: ["trend", "breakout"]
+        preferred_strategies: ["ema_pullback", "ema_cross", "donchian"]
+
+      trending_bearish:
+        active_families: ["trend", "breakout"]
+        preferred_strategies: ["ema_pullback", "ema_cross", "donchian"]
+
+      ranging:
+        active_families: ["mean_reversion"]
+        preferred_strategies: ["bollinger_fade"]
+
+      compression:
+        active_families: ["breakout"]
+        preferred_strategies: ["donchian"]
+        mode: "watch_only"
+
+      unknown:
+        mode: "disabled"
+#+end_src
+
+** Code to Modify
+
+#+begin_src text
+config.go
+config_live.go
+cmd/live*.go
+service/live*.go
+#+end_src
+
+Actual file names may differ, but the configuration model needs:
+
+#+begin_src text
+- account-level live config
+- watchlist config
+- strategy routing config
+- risk config
+- account lock config
+#+end_src
+
+* CLI / REST / MCP / UI Changes
+
+** CLI
+
+Add commands:
+
+#+begin_src text
+trader strategy-manager status
+trader strategy-manager run
+trader watchlist status
+trader watchlist review
+trader opportunities list
+#+end_src
+
+Possible implementation files:
+
+#+begin_src text
+cmd/strategy_manager.go
+cmd/watchlist.go
+cmd/live_portfolio.go
+#+end_src
+
+** REST
+
+Add endpoints:
+
+#+begin_src text
+GET  /api/strategy-manager/status
+GET  /api/watchlist
+GET  /api/opportunities
+POST /api/strategy-manager/start
+POST /api/strategy-manager/stop
+#+end_src
+
+** MCP
+
+Add read-only tools first:
+
+#+begin_src text
+strategy_manager_status
+watchlist_status
+opportunity_status
+risk_status
+#+end_src
+
+Write tools should remain disabled unless explicitly enabled.
+
+** UI
+
+Initial UI can be simple:
+
+#+begin_src text
+- account status
+- instrument slots
+- current regime
+- active strategy
+- open position
+- last signal
+- risk decision
+- current state
+#+end_src
+
+* Testing Strategy
+
+** Unit Tests
+
+#+begin_src text
+service/watchlist_test.go
+service/opportunity_detector_test.go
+service/strategy_manager_test.go
+service/risk_manager_test.go
+service/account_lock_test.go
+#+end_src
+
+Test cases:
+
+#+begin_src text
+- trending regime promotes instrument to Watching
+- invalid regime demotes instrument to Invalidated
+- opportunity assigns exactly one active strategy
+- second active strategy on same instrument is rejected
+- observer strategy can coexist with active strategy
+- risk manager blocks trade when max open trades reached
+- risk manager blocks second trade on same instrument
+- risk manager sizes trade according to configured risk
+- account lock rejects duplicate owner
+#+end_src
+
+** Integration Tests
+
+#+begin_src text
+- fake broker + fake strategies
+- two instruments in one account
+- one strategy per instrument
+- rejected conflicting strategy assignment
+- strategy emits signal but risk manager blocks order
+- strategy emits signal and order request is accepted
+#+end_src
+
+** Backtest/Research Tests
+
+The Strategy Manager itself should not make historical backtests nondeterministic.
+
+For research, add a separate simulation mode later:
+
+#+begin_src text
+historical regime review
+watchlist transitions
+strategy assignment decisions
+risk decisions
+strategy runner decisions
+#+end_src
+
+* Development Phases
+
+** Phase 0 — Document and Align
+
+Deliverables:
+
+#+begin_src text
+- docs/strategy_manager.org
+- issue list or TODO list
+- rough config example
+#+end_src
+
+Effort:
+
+#+begin_src text
+0.5 to 1 day
+#+end_src
+
+** Phase 1 — Types and Metadata
+
+Deliverables:
+
+#+begin_src text
+- RegimeSnapshot
+- WatchState
+- InstrumentSlot
+- Opportunity
+- StrategyAssignment
+- StrategyDescriptor
+- StrategyMode
+#+end_src
+
+Files:
+
+#+begin_src text
+strategy_manager_types.go
+strategy_descriptor.go
+service/instrument_slot.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+1 to 2 days
+#+end_src
+
+** Phase 2 — Watchlist Manager
+
+Deliverables:
+
+#+begin_src text
+- watchlist state machine
+- promotion/demotion logic
+- watchlist status output
+- unit tests
+#+end_src
+
+Files:
+
+#+begin_src text
+service/watchlist.go
+service/watchlist_test.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+2 to 4 days
+#+end_src
+
+** Phase 3 — Strategy Registry Metadata
+
+Deliverables:
+
+#+begin_src text
+- strategy descriptors
+- default descriptor fallback
+- metadata for initial strategies
+#+end_src
+
+Strategies to update first:
+
+#+begin_src text
+- EMA cross
+- Donchian breakout
+- Bollinger fade
+- Pulse / experimental strategy if still relevant
+#+end_src
+
+Effort:
+
+#+begin_src text
+1 to 3 days
+#+end_src
+
+** Phase 4 — Strategy Manager V1
+
+Deliverables:
+
+#+begin_src text
+- one active strategy per <account, instrument>
+- assignment from opportunity
+- start/stop existing RunLiveStrategy loops
+- slot status
+- observer mode placeholder
+- tests
+#+end_src
+
+Files:
+
+#+begin_src text
+service/strategy_manager.go
+service/strategy_manager_test.go
+service/strategy_assignment.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+3 to 6 days
+#+end_src
+
+** Phase 5 — Risk Manager V1
+
+Deliverables:
+
+#+begin_src text
+- max open trades
+- max one open trade per instrument
+- max risk per trade
+- max units
+- max position USD
+- structured risk decisions
+- integration with live order path
+#+end_src
+
+Files:
+
+#+begin_src text
+service/risk_manager.go
+service/risk_manager_test.go
+service/live_runner.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+2 to 5 days
+#+end_src
+
+** Phase 6 — Account Ownership Lock
+
+Deliverables:
+
+#+begin_src text
+- account lock acquire/release
+- heartbeat
+- startup refusal if account already owned
+- tests
+#+end_src
+
+Files:
+
+#+begin_src text
+service/account_lock.go
+service/account_lock_test.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+1 to 3 days
+#+end_src
+
+** Phase 7 — Opportunity Detector V1
+
+Deliverables:
+
+#+begin_src text
+- simple rule-based detector
+- candle-close confirmation
+- route to strategy family
+- confidence score placeholder
+- tests
+#+end_src
+
+Files:
+
+#+begin_src text
+service/opportunity_detector.go
+service/opportunity_detector_test.go
+#+end_src
+
+Effort:
+
+#+begin_src text
+2 to 5 days
+#+end_src
+
+** Phase 8 — CLI / Status Output
+
+Deliverables:
+
+#+begin_src text
+- strategy-manager status
+- watchlist status
+- risk status
+- opportunity list
+#+end_src
+
+Effort:
+
+#+begin_src text
+1 to 3 days
+#+end_src
+
+** Phase 9 — REST/MCP/UI Integration
+
+Deliverables:
+
+#+begin_src text
+- read-only REST status endpoints
+- read-only MCP tools
+- basic UI panels
+#+end_src
+
+Effort:
+
+#+begin_src text
+3 to 8 days
+#+end_src
+
+* Overall Effort Estimate
+
+** Minimal Useful V1
+
+Includes:
+
+#+begin_src text
+- types
+- strategy metadata
+- watchlist manager
+- simple opportunity detector
+- strategy manager
+- one active strategy per instrument
+- risk manager v1
+- account lock
+- CLI status
+#+end_src
+
+Estimated effort:
+
+#+begin_src text
+2 to 4 focused weeks
+#+end_src
+
+** More Complete V2
+
+Adds:
+
+#+begin_src text
+- account-level orchestrator
+- richer realtime regime updates
+- confidence scoring
+- correlation-aware risk
+- REST/MCP/UI status
+- observer/paper strategy modes
+- persistent strategy assignments
+- historical simulation of manager decisions
+#+end_src
+
+Estimated effort:
+
+#+begin_src text
+4 to 8 additional weeks
+#+end_src
+
+** Practical Recommendation
+
+Build the smallest useful version first:
+
+#+begin_src text
+1. account lock
+2. risk manager v1
+3. strategy metadata
+4. strategy manager that starts/stops existing live runners
+5. one active strategy per account/instrument
+6. CLI status
+#+end_src
+
+Then add watchlist/opportunity automation.
+
+This reduces the chance of designing a beautiful orchestrator before the live safety rules are solid.
+
+* Code Created From Scratch
+
+#+begin_src text
+service/strategy_manager.go
+service/strategy_manager_test.go
+service/watchlist.go
+service/watchlist_test.go
+service/opportunity_detector.go
+service/opportunity_detector_test.go
+service/risk_manager.go
+service/risk_manager_test.go
+service/account_lock.go
+service/account_lock_test.go
+strategy_descriptor.go
+strategy_manager_types.go
+#+end_src
+
+Optional later:
+
+#+begin_src text
+api/rest/strategy_manager.go
+api/mcp/strategy_manager.go
+cmd/strategy_manager.go
+cmd/watchlist.go
+ui strategy manager dashboard components
+#+end_src
+
+* Code To Modify
+
+Likely modified files:
+
+#+begin_src text
+live_strategy.go
+service/live_runner.go
+service/candle_strategy_adapter.go
+config.go
+cmd/main.go
+cmd/live*.go
+strategy registry files
+strategies/*/*.go
+docs/architecture.org
+docs/ROADMAP.md
+#+end_src
+
+Specific modifications:
+
+#+begin_src text
+live_strategy.go:
+  add optional metadata fields to LivePlan / LiveOpenRequest
+  include StrategyInstanceID / SignalID / Confidence if needed
+
+service/live_runner.go:
+  add RiskManager hook before PlaceMarketOrder
+  include account/instrument strategy ownership checks
+  improve structured rejection logs
+
+service/candle_strategy_adapter.go:
+  preserve strategy-level regime guard
+  add strategy instance metadata to LivePlan
+  optionally expose last bar/regime status for manager status output
+
+config.go:
+  add live account-level manager config
+  add risk config
+  add watchlist config
+  add strategy route config
+
+strategy registry:
+  add descriptors and default metadata
+
+strategies:
+  gradually add supported regime/family/timeframe metadata
+#+end_src
+
+* Recommended First Pull Request
+
+The first implementation PR should avoid touching broker execution too much.
+
+Suggested scope:
+
+#+begin_src text
+PR 1: Strategy Manager Types and Design Skeleton
+
+- add docs/strategy_manager.org
+- add StrategyDescriptor
+- add RegimeSnapshot
+- add WatchState
+- add InstrumentSlot
+- add StrategyAssignment
+- add RiskRequest/RiskDecision types
+- add no-op RiskManager
+- add account lock skeleton
+- add unit tests for pure types/state transitions
+#+end_src
+
+This gives the architecture somewhere to grow without destabilizing live trading.
+
+* Recommended Second Pull Request
+
+#+begin_src text
+PR 2: Risk Manager V1 and Live Runner Hook
+
+- implement basic RiskManager
+- add pre-order risk check to RunLiveStrategy
+- block second trade on same instrument when configured
+- enforce max open trades
+- enforce max units / max position USD
+- log structured risk rejection reasons
+#+end_src
+
+* Recommended Third Pull Request
+
+#+begin_src text
+PR 3: Strategy Manager V1
+
+- one active strategy per instrument slot
+- start/stop existing live strategy loops
+- slot status
+- simple assignment by configured strategy route
+- CLI status command
+#+end_src
+
+* Recommended Fourth Pull Request
+
+#+begin_src text
+PR 4: Watchlist and Opportunity Detector
+
+- update watchlist from regime snapshots
+- detect simple opportunities
+- promote TradeCandidate to Strategy Manager
+- add observer mode placeholder
+#+end_src
+
+* Design Decisions To Preserve
+
+#+begin_src text
+- one trader process owns one account
+- one account can manage many instruments
+- one account/instrument has at most one active strategy
+- observer strategies may exist but cannot place live orders
+- every live position has one owning strategy instance
+- risk manager can override strategy decisions
+- strategy-level regime checks remain as an insurance policy
+- daily/H4 review provides strategic context
+- realtime candles provide tactical confirmation and invalidation
+#+end_src
+
+* Final Recommendation
+
+Do not rewrite the existing live runner first.
+
+The current live runner and candle adapter already provide a useful execution path. Build the Strategy Manager as an orchestration layer above them.
+
+Recommended build sequence:
+
+#+begin_src text
+1. Add account ownership lock.
+2. Add account-level risk manager.
+3. Add strategy metadata/descriptors.
+4. Add strategy manager state and assignment.
+5. Use the existing live runner as the execution worker.
+6. Add watchlist and opportunity detection.
+7. Later evolve into a full account-level live orchestrator.
+#+end_src
+
+This gives the system better safety and control quickly while preserving existing backtest/live strategy reuse.
