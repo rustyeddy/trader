@@ -1,120 +1,440 @@
-* Data Architecture
+#+TITLE: Trader Architecture
+#+OPTIONS: toc:3 num:nil
 
+* Purpose
 
-** DataManager
+Trader is an FX research, backtesting, replay, and live-trading system.  One
+domain model is shared by offline backtests, broker simulation, live OANDA
+operations, the CLI, the REST API, and the MCP server.
 
-Orchestrator, lifecycle and policy
+This document describes the architecture implemented by the current source.
+Planned work belongs in =docs/ROADMAP.md= or a GitHub issue, not in descriptions
+of current behavior.
 
-What does DataManager do?
+The primary design goals are:
 
-*** What instruments do we support?
-The 7 major currency pairs
-*** What date range do we require? (Yesterday - 2008)
-*** What dates (sources) are we missing?
-*** What derived candles are missing (or stale)?
-*** What order should data be built
-*** How do we reconcile ticks -> M1 -> H1 -> D1
+- deterministic backtests from identical configuration and candle data;
+- exact fixed-point accounting inside the trading domain;
+- thin protocol adapters around a reusable business-service layer;
+- explicit separation between data acquisition, persistence, planning, and
+  trading decisions;
+- safe defaults for live broker operations.
 
-DataManager does
+* System boundaries
 
-*** Enumerate required work
+The dependency direction is inward toward the domain:
 
-Identify the data we need and what's missing.
+#+begin_example
+CLI (cmd/)       REST (api/rest/)       MCP (api/mcp/)
+      \                 |                    /
+                   service/
+                      |
+      +---------------+----------------+
+      |               |                |
+ root trader      brokers/oanda    data providers
+ domain/engine     live boundary    (data/...)
+      |
+ filesystem candle store and generated reports/journals
+#+end_example
 
-*** call download/acquisition
+Presentation layers parse protocol input, call typed =service.Service= methods,
+and map typed results or errors back to their protocol.  They must not contain
+trading, order, replay, journal, or data-management policy.
 
-Call downloader to download raw Dukascopy data.
+The =service= package is protocol-agnostic.  Cobra, HTTP, and MCP types must not
+leak into it.  The root =trader= package owns the core domain types, accounting,
+backtest execution, indicators, store, and data-planning primitives.
 
-*** call decoders
+* Package map
 
-Translate from raw compressed format .bi5 (lzh) current Tick format
-into candles. 
+| Path              | Responsibility                                                                                                |
+|-------------------+---------------------------------------------------------------------------------------------------------------|
+| =cmd/=            | Cobra entrypoint and command adapters; registers providers and strategies through blank imports               |
+| =service/=        | Shared use cases for backtests, live runs, portfolios, bots, orders, replay, journals, data, and reports      |
+| =api/rest/=       | HTTP routing, request validation, response encoding, streaming, and error/status mapping                      |
+| =api/mcp/=        | JSON-RPC/MCP tools and resources over stdio or HTTP                                                           |
+| =brokers/oanda/=  | OANDA REST and streaming wire client; external numeric and instrument-format boundary                         |
+| =brokers/sim/=    | Tick-driven simulated broker used by replay and focused simulation workflows                                  |
+| =data/=           | Provider interfaces and registry                                                                              |
+| =data/dukascopy/= | Dukascopy download, BI5 decoding, and provider registration                                                   |
+| =strategies/=     | Backtest strategy implementations registered by name                                                          |
+| =ui/=             | SvelteKit frontend embedded from =ui/dist= into the Go binary                                                 |
+| root Go package   | Domain types, fixed-point math, account, broker, backtest loop, indicators, data manager, store, and journals |
 
-*** Aggregation
+The root package is intentionally broad today.  New protocol-specific behavior
+should still remain at the edges rather than increasing coupling to it.
 
-**** Consume: external raw data: Dukascopy  ( -> dukas)
-**** Convert: raw data to internal Candle   (dukas -> candle.m1)
-**** Aggregate: Candle -> Candle (eg. tick -> m1, m1 -> h1, h1 - d1)
-**** Store: save the CandleSet to file in .csv form
-**** TODO Index: develop a path manager to ensure directory structure.
-**** TODO Validate existing data and report missing data
+* Domain model and numeric rules
 
+** Fixed-point values
 
-DataManager should *NOT* 
+Internal trading calculations use scaled integers:
 
-*** Know anything about fileformats .csv, .bi5, etc.
-*** No candle math
+| Type        | Representation | Scale/meaning                                           |
+|-------------+----------------+---------------------------------------------------------|
+| =Price=     | =int32=        | =PriceScale=, 100,000 units per whole price             |
+| =Money=     | =int64=        | =MoneyScale=, 1,000,000 units per whole currency amount |
+| =Rate=      | =int64=        | =RateScale=, 1,000,000 units per whole ratio            |
+| =Units=     | =int64=        | =UnitsScale=, 1,000,000 units per whole size/multiplier |
+| =Pips=      | =int32=        | deci-pips; =1= represents 0.1 pip                       |
+| =Timestamp= | =int64=        | UTC Unix seconds used by engine records                 |
 
-** CandleSet
+Floating point is allowed only while parsing configuration or provider input,
+formatting output, or satisfying an external API wire format.  Boundary values
+must be validated and converted immediately.  Existing violations are tracked
+by [[https://github.com/rustyeddy/trader/issues/148][GitHub issue #148]] and must not be copied into new code.
 
-In memory cononical candle representation.
+Fixed-point helpers must define overflow handling and rounding direction.
+Accounting and regression tests compare exact domain values.
 
+** Core entities
 
-*** Represents a series of candle ticks. Each CandleSet represents
+- =Account= owns balance, equity, margin state, open lots, and closed trades.
+- =Lot= is an open position with side, units, entry, stop, take-profit, and
+  lifecycle state.
+- =Trade= is a closed position with realized P/L and a close cause.
+- =Candle= contains scaled OHLC and spread values; =CandleTime= adds time.
+- =Instrument= contains currency, pip, margin, and conversion metadata.
+- =BacktestRequest= is the immutable execution input for one run.
+- =BacktestRun= is mutable execution state; =BacktestResult= is the final
+  calculated result.
+- =StrategyPlan= contains requested opens, closes, and cancellations for one bar.
 
-**** One instrument (EURUSD)
-**** One timeframe (m1, h1, d1, etc)
-**** One contiguous dense range
-**** candles, validity map and metadata
-  
-*** Responsibilities
+** Accounting and execution invariants
 
-**** Time(i)
-**** Timestamp(i)
-**** Aggregate()
-**** Gap reporting + stats
-**** Candle Iterator
-**** Candles are 
+- =Equity = Balance + UnrealizedPL=.
+- =FreeMargin = Equity - MarginUsed=.
+- A long opens at ask and closes at bid; a short opens at bid and closes at ask.
+- P/L is calculated in quote currency and converted to account currency.
+- Stops and take-profits are inclusive.
+- If both stop and take-profit are touched by one OHLC bar, the backtest assumes
+  the stop was hit first.  This is deliberately pessimistic and deterministic.
+- Slippage is always adverse; spread is applied on the buying side of a fill.
+- End-of-backtest positions close using the final candle.
 
-*** Should NOT
+Automatic margin-call liquidation is not implemented.  Code must not assume
+that =FreeMargin < 0= closes a position.  The work is tracked by
+[[https://github.com/rustyeddy/trader/issues/147][GitHub issue #147]].
 
-**** know anything about files, paths or downloading
-**** know how discover missing years
-**** know raw file formats
+* Backtest architecture
 
-** datafile
+** Configuration and compilation
 
-Source File decoder, very narrow and concrete.
+=LoadConfig= decodes YAML or JSON into =Config=.  A configuration contains
+shared =defaults= and one or more =runs=.  Each run has nested =data=,
+=strategy=, =exit=, and =regime= sections.
 
-*** Responsibilities
+=CompileBacktests= performs the construction phase:
 
-**** one raw source file
-**** decodes ticks
-**** validate it's own local assumptions
-**** TODO Tick iterator
-**** build M1 candles from ticks
+1. cascade applicable defaults into each run;
+2. parse and validate the half-open time range;
+3. resolve strategy, exit, and regime implementations from registries;
+4. convert boundary numbers to fixed-point request values;
+5. calculate the stable configuration hash;
+6. return immutable =CompiledBacktest= values.
 
+=CompiledBacktest.NewRun= creates fresh mutable backtest and result state.
+Execution also constructs a fresh account and broker.  The compiled request
+contains the strategy instance; =Trader= calls =Strategy.Reset= before each
+execution, so implementations must completely clear their mutable state there.
 
-*** Should *NOT*
+The candle data root is global application configuration.  It defaults to
+=/srv/trading/data/candles= and can be overridden by global config or
+=--data-dir=.  It is not part of backtest =defaults=.
 
-**** Anything about csv format
-**** Know about the majors or instruments
-**** Anything about historical completeness
-**** Aggregating timeframes
+** Execution ownership
 
-** CandleStore / Store
+=service.Service.RunBacktest= creates a fresh run and delegates through the
+=BacktestExecutor= interface.  =TraderBacktestExecutor= constructs a fresh
+=Trader=, in-process =Broker=, and =Account= for every execution.
 
-All about persistence not orchestration.
+=Trader.Backtest= requests a =CandleIterator= through the narrow =CandleSource=
+interface.  This keeps the engine independent of concrete filesystem loading
+and allows tests to inject deterministic iterators.
 
-*** Responsibilities
+** Per-bar order
 
-**** where is it?
-**** does it exist?
-**** read it
-**** write it
+For each candle, the engine performs these operations in order:
 
-*** Will do
+1. revalue the account at the candle close;
+2. tick the regime filter and exit-strategy indicators;
+3. advance position extremes and update trailing stops;
+4. submit automatic stop/take-profit closes from the bar OHLC;
+5. snapshot open lots for strategy inspection;
+6. call =Strategy.Update(ctx, *CandleTime, *Backtest)=;
+7. suppress opens rejected by the regime or max-spread filters;
+8. apply spread and slippage to requested closes and submit them;
+9. apply the configured initial exit stop and size zero-unit open requests;
+10. apply spread and slippage to opens and submit them.
 
-**** Canonical paths
-**** Ensure filesystem and directory structure
-**** Read/Write CandleSet files
-**** List Available years timeframe (same as datamanager)
-**** TODO atomic writes / temp files / metadata files
+The broker changes account state and publishes bounded-queue events for fills
+and closes.  A dedicated handler drains events during a run.  Event-processing
+errors terminate execution, and the runner waits for pending broker work before
+building the final result.  Queue overflow currently logs and drops the event;
+callers must not rely on the event stream as the sole record of account state.
 
-*** Will NOT do
+=StrategyPlan.Cancel= is present in the model but cancellation is not
+implemented by the backtest loop.
 
-**** Decide what should exist
-**** decide what to build next
-**** decode raw ticks
-**** compute aggregates.
+** Reports
 
+Results are summarized into =BacktestReportSummary=.  Service helpers write
+JSON and Org reports using =<run-name>-<config-hash>= stems and rebuild the Org
+index.  Stable hashes and exact numeric comparisons support regression runs.
+
+* Strategy extension points
+
+** Entry strategies
+
+=Strategy= owns entry/close decisions:
+
+#+begin_src go
+type Strategy interface {
+    Name() string
+    Reset()
+    Ready() bool
+    Update(context.Context, *CandleTime, *Backtest) *StrategyPlan
+    StopDescription() string
+}
+#+end_src
+
+Constructors register under names through =MustRegisterStrategy=.  The binary
+must blank-import the implementation from =cmd/main.go= so its =init= function
+runs.
+
+** Exit strategies
+
+=ExitStrategy= warms its indicators on every bar, supplies an initial stop, and
+may move an existing stop using the position's extreme-price watermark.  It
+must never move a stop against the position.  Empty configuration resolves to
+=NoopExit=.
+
+** Regime filters
+
+=RegimeFilter= classifies the market and can allow only a specific side.
+Filters suppress new opens but do not stop management of existing positions.
+Empty configuration resolves to =NoopRegime=.
+
+Factories receive untyped configuration parameters only at construction.
+Implementations must validate and convert them before trading begins.
+
+* Live-trading architecture
+
+Live trading uses =service.RunLiveStrategy= and =brokers/oanda=.  It does not
+reuse the in-process backtest broker.
+
+On each polling tick the runner:
+
+1. pauses if the FX market is closed;
+2. fetches the current OANDA bid/ask price;
+3. fetches and filters current open trades;
+4. adapts broker data into =LivePrice= and =LiveTrade= inputs;
+5. asks the =LiveStrategy= for a plan;
+6. executes closes first;
+7. sizes and places at most the planned new order;
+8. records broker trade-to-bot ownership for journaling.
+
+Portfolio mode runs one goroutine per configured instrument and shares a
+drawdown circuit breaker.  Managed bots keep cancellation functions and status
+under service-owned mutexes.  Context cancellation is the normal shutdown
+mechanism.
+
+The live journal consumes OANDA transaction events, reconnects with backoff in
+serve mode, and writes completed trade records through the =Journal= interface.
+
+The current live DTOs contain =float64= broker values.  Moving calculations
+behind immediate fixed-point boundary conversion is part of
+[[https://github.com/rustyeddy/trader/issues/148][issue #148]].
+
+Live operations are external side effects.  The CLI, REST API, and MCP server
+must keep read and write capabilities explicit.  MCP write tools require
+=--enable-write=.  Enabling MCP writes over HTTP without authentication and
+restricted CORS is unsafe and is not a production deployment architecture.
+
+* Service and transport architecture
+
+** Service layer
+
+=service.Service= is the shared application surface.  It owns the OANDA client,
+resolved account ID, logger, injectable backtest executor, bot registry, and
+live trade-to-bot mapping.  It returns contextual Go errors without embedding
+presentation concerns.
+
+Backtest-only service operations can use a service value without an OANDA
+client.  Live operations require configured credentials and account
+resolution.
+
+** CLI
+
+=cmd/main.go= builds the Cobra command tree, loads global configuration, applies
+flag precedence, initializes logging and the data directory, and registers
+subcommands.  Command packages translate CLI values into service calls.
+
+** REST
+
+=api/rest= owns HTTP routes, decoding, status mapping, JSON responses, and
+streaming.  Internal error details are not exposed for server errors.  Handler
+tests use =httptest= and do not require a listening socket.
+
+** MCP
+
+=api/mcp= implements line-delimited JSON-RPC over stdio and an HTTP handler for
+=/mcp=.  Tools and resources call the same service layer as CLI and REST.
+Write-capable tools are registered only when explicitly enabled.
+
+** Embedded UI
+
+The SvelteKit static build in =ui/dist= is embedded with =go:embed= and mounted
+by =trader serve=.  Source changes require rebuilding the UI before rebuilding
+the Go binary.
+
+* Data architecture
+
+** Storage model
+
+Internal instrument keys are normalized uppercase symbols without separators,
+for example =EURUSD=.  OANDA wire requests use forms such as =EUR_USD=.
+Normalization happens before registry lookup or path construction.
+
+The operational data root has distinct source and derived areas:
+
+#+begin_example
+/srv/trading/data/
+  raw/
+    dukascopy/<INSTRUMENT>/<YYYY>/<MM>/<DD>/<hourly BI5>
+    oanda/<INSTRUMENT>/<YYYY>/<MM>/<source CSV>
+  candles/
+    <source>/<INSTRUMENT>/<YYYY>/<MM>/<canonical candle CSV>
+  news_days/
+#+end_example
+
+=raw/= preserves provider input.  =candles/= contains canonical derived data
+consumed by backtests.  Tests use temporary stores or committed fixtures and
+must not mutate the operational data root.
+
+** Responsibilities
+
+*** DataManager
+
+=DataManager= is orchestration and policy.  It:
+
+- scans store inventory;
+- builds the wanted dataset for instruments and a half-open date range;
+- plans downloads and M1/H1/D1 build tasks;
+- executes acquisition and candle builds;
+- provides =CandleIterator= values to the engine.
+
+It decides what work is required, not how a provider wire format is decoded.
+
+*** Provider registry
+
+=data.Provider= is the acquisition boundary.  Providers register by source
+name; =data/dukascopy= implements Dukascopy retrieval and decoding.  OANDA
+candle import is coordinated by the service layer and stored in the same
+canonical layout.
+
+*** Store and keys
+
+=Store= and =Key= own canonical paths, inventory scanning, existence checks,
+and candle/tick persistence.  The store does not decide which historical
+datasets should exist or which task should run next.
+
+*** Candle sets and iterators
+
+A candle set represents one normalized instrument, source, timeframe, and
+bounded period with candle data and validity metadata.  Iterators expose
+ordered traversal without leaking storage details into the backtest engine.
+
+** Build dependency order
+
+The planner models derived data dependencies:
+
+#+begin_example
+Dukascopy hourly BI5 ticks -> monthly M1 candles -> monthly H1 candles
+                                             \-> monthly D1 candles
+#+end_example
+
+Inventory completeness gates downstream build tasks.  Derived data is
+rebuildable; raw source data is not overwritten with processed output.
+
+* Journals and persistence
+
+=Journal= is a write-oriented contract:
+
+#+begin_src go
+type Journal interface {
+    RecordTrade(TradeRecord) error
+    RecordEquity(EquitySnapshot) error
+    Close() error
+}
+#+end_src
+
+CSV and JSONL implementations persist trade and equity streams.  Org rendering
+supports human review and report output.  Journals record completed facts and
+must not drive account or strategy state.
+
+Replay reads historical events or candles through service adapters and uses
+the simulation/domain components; it is not a separate top-level engine
+package.
+
+* Concurrency and lifecycle
+
+The system is not globally thread-safe.  Concurrency is explicit and scoped:
+
+- a backtest owns fresh mutable account, broker, and result state and resets
+  its compiled strategy before execution;
+- the broker uses a bounded event channel and the trader drains it in a
+  dedicated goroutine;
+- portfolio instruments run in separate goroutines under one parent context;
+- service bot and trade-owner maps have dedicated mutexes;
+- MCP serializes writes to its output stream;
+- live journal streaming reconnects under daemon lifecycle control.
+
+Long-running operations accept =context.Context=.  Cancellation must propagate
+through data access, service methods, runners, and broker calls.  Goroutines
+must have an owner and a defined termination path.
+
+* Configuration, credentials, and safety
+
+Global configuration and backtest configuration are separate:
+
+- global configuration selects logging, candle data directory, journal path,
+  and OANDA credentials/environment;
+- backtest configuration describes deterministic runs and execution inputs.
+
+CLI flags override loaded global configuration.  OANDA credentials may come
+from configuration, environment-specific command handling, or the token-file
+fallback.  Secrets must never be logged, written to reports, or returned in
+server errors.
+
+No test or routine development command may place live orders, close live
+trades, enable MCP writes, or modify =/srv/trading/data=.  Such operations
+require explicit operator intent.
+
+* Verification strategy
+
+- Domain math and accounting use exact unit tests and regression fixtures.
+- Strategies use deterministic synthetic candle sequences.
+- Store and data tests use temporary directories.
+- Service tests inject broker/backtest dependencies where available.
+- REST handlers use =httptest=; MCP tests exercise JSON-RPC framing directly.
+- Network-hitting Dukascopy and live OANDA checks are opt-in.
+- =make sweep= exercises all registered strategies across a broad smoke matrix.
+
+The standard Go validation path is =gofmt=, =make vet=, and =make test=.
+Strategy changes additionally run =make sweep=; UI changes run the Svelte
+checker and static build.
+
+* Known architectural gaps
+
+- Automatic liquidation for negative free margin is pending
+  [[https://github.com/rustyeddy/trader/issues/147][issue #147]].
+- Removal and enforcement of all internal floating-point calculations is
+  pending [[https://github.com/rustyeddy/trader/issues/148][issue #148]].
+- =StrategyPlan.Cancel= is modeled but ignored by the backtest loop.
+- Broker event queue overflow is logged and dropped instead of being returned
+  to the order submitter.
+- The root =trader= package contains several subsystems; future package splits
+  must preserve the service and domain dependency direction described here.
+
+Feature proposals and longer-term plans are maintained in =docs/ROADMAP.md=.
