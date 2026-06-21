@@ -5,6 +5,7 @@ storage, inventory, planner, and build-loop issues.
 
 For each fix:
 - make one focused change
+- create one or more tests to verify that change
 - compile
 - run
 - verify behavior
@@ -16,6 +17,7 @@ accuracy, planner correctness, and pipeline efficiency.
 ** Cleanup strategy
 *** Rules
 - [ ] Make one change at a time
+- [ ] Implement test(s) for that change
 - [ ] Compile after every change
 - [ ] Run after every change
 - [ ] Do not mix cleanup with feature improvements
@@ -235,8 +237,6 @@ Notes:
 Notes:
 - This reduces drift and makes future changes much easier.
 
-* Suggested working order
-
 ** DONE Work in this order unless a compile error forces a slight change
 :PROPERTIES:
 :ID: trader-cleanup-working-order
@@ -255,8 +255,6 @@ Notes:
 12. Add/keep comment explaining reversed download priority
 13. Audit candle path and filename construction for leftovers
 
-* Per-item workflow template
-
 ** DONE Use this workflow for each cleanup item
 :PROPERTIES:
 :ID: trader-cleanup-item-workflow
@@ -269,9 +267,9 @@ Notes:
 - [ ] Commit or checkpoint if the result is good
 - [ ] Then move to the next item
 
-* API Surface Comparison: REST vs CLI vs MCP
+* DONE API Surface Comparison: REST vs CLI vs MCP
 
-** Account & Trades
+** DONE Account & Trades
 
 | Service             | REST API                       | CLI                       | MCP                        |
 |---------------------+--------------------------------+---------------------------+----------------------------|
@@ -284,7 +282,7 @@ Notes:
 | Transactions        | GET /api/v1/transactions       | order transactions        | get_transactions           |
 | Transaction stream  | GET /api/v1/stream/account     | order transactions-stream | —                          |
 
-** Candle Data
+** DONE Candle Data
 
 | Service               | REST API                               | CLI                   | MCP                             |
 |-----------------------+----------------------------------------+-----------------------+---------------------------------|
@@ -296,7 +294,7 @@ Notes:
 | Pip value calc        | GET /api/v1/pip-values                 | data pip-value        | get_pip_values                  |
 | Position/notional     | GET /api/v1/position                   | data position         | get_position                    |
 
-** Backtests
+** DONE Backtests
 
 | Service              | REST API                             | CLI              | MCP                                    |
 |----------------------+--------------------------------------+------------------+----------------------------------------|
@@ -309,7 +307,7 @@ Notes:
 | Stream backtest      | GET /api/v1/stream/backtest/{id}     | —                | —                                      |
 | Browse configs       | GET /api/v1/backtests/configs        | backtest configs | config://configs *(resource)*          |
 
-** Live Trading
+** DONE Live Trading
 
 | Service            | REST API                  | CLI            | MCP                      |
 |--------------------+---------------------------+----------------+--------------------------|
@@ -322,7 +320,7 @@ Notes:
 | Stop bot           | DELETE /api/v1/bots/{id}  | bot stop       | stop_bot *(write-mode)*  |
 | Event stream       | GET /api/v1/stream/events | —              | —                        |
 
-** Other
+** DONE Other
 
 | Service              | REST API              | CLI                            | MCP         |
 |----------------------+-----------------------+--------------------------------+-------------|
@@ -341,3 +339,75 @@ Notes:
   - improving incremental rebuild logic
   - improving concurrency and throughput
   - reducing duplicated scans and unnecessary rebuilds
+
+* Test Coverage Gaps
+
+** Goal
+~53% of source files have zero tests. Add coverage in priority order,
+one package at a time. Each item should include tests for all exported
+functions in the file(s) listed.
+
+** Priority 1 — Core Logic (no tests at all)
+
+*** DONE account.go / account_close.go
+- =NewAccount()=, =AddLot()=, =CloseLot()=, =ResolveWithMarks()=
+- =realizePNL()=, =marginRequired()=
+- =FIFOMatcher.Match()= — FIFO lot matching is complex; bugs here silently corrupt P&L
+
+*** TODO backtest.go
+- =CompileBacktests()=, =NewRun()=, =BuildBacktestResult()=
+- Entire backtest compilation and execution pipeline
+
+*** TODO data_manager.go
+- =NewDataManager()=, =BuildInventory()=, =Sync()=, =Plan()=, =Candles()=
+
+*** TODO strategy_exit_chandelier.go
+- =NewChandelierExit()=, =InitialStop()=, =UpdateStop()=
+- ATR-based trailing stop math
+
+*** TODO types_param.go
+- =GetIntParam()=, =GetInt32Param()=, =GetFloat64Param()=, =GetBoolParam()=, =GetStringParam()=
+- Used everywhere; no tests at all
+
+** Priority 2 — Service Layer
+
+*** TODO service/backtest.go
+- =RunBacktest()=, =RunBacktestConfigs()=, =ResolveBacktestConfigPaths()=
+- =WriteBacktestReports()=, =ListBacktestSummaries()=, =ReadBacktestSummaryFile()=
+- 10+ exported functions with zero tests
+
+*** TODO service/portfolio_config.go
+- =LoadPortfolioConfig()=, =BuildPortfolioRunConfig()=
+
+*** TODO service/position_calc.go
+- Position size and notional calculations
+
+*** TODO service/pip_values.go
+- PIP value calculations
+
+** Priority 3 — Broker Parsing
+
+These parse OANDA API responses; bugs cause silent misreads of account state.
+
+*** TODO brokers/oanda/account.go
+*** TODO brokers/oanda/pricing.go
+*** TODO brokers/oanda/transactions.go
+*** TODO brokers/oanda/parse.go
+
+** Priority 4 — Strategies
+
+*** TODO strategies/emacrossadx/emacrossadx.go
+- =New()= and signal generation logic
+
+*** TODO strategies/lifecycle/lifecycle.go
+- Entire file untested
+
+*** TODO live_strategy_registry.go
+- =RegisterLiveStrategy()=, =LookupLiveStrategy()=, =GetLiveStrategy()=
+
+** Priority 5 — Data Statistics
+
+*** TODO data_stats_session.go
+*** TODO data_stats_spread.go
+*** TODO data_stats_swing.go
+*** TODO data_stats_trend.go
