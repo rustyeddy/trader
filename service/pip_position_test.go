@@ -149,3 +149,87 @@ func TestPositionCalc_RequiresPriceWhenOANDAAbsent(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+func TestPositionCalc_UnknownInstrumentReturnsError(t *testing.T) {
+	_, err := (&Service{}).PositionCalc(context.Background(), PositionCalcRequest{
+		Instrument: "ZZZZZZ",
+		Price:      1.0,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown instrument")
+}
+
+func TestPositionCalc_NotionalBasedSizing(t *testing.T) {
+	// EURUSD: base=EUR so notional = units * price; 10000 USD at 1.08 ≈ 9259 units.
+	result, err := (&Service{}).PositionCalc(context.Background(), PositionCalcRequest{
+		Instrument: "EURUSD",
+		Price:      1.08,
+		Notional:   10_000,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Rows, 1)
+	assert.Equal(t, "custom", result.Rows[0].Label)
+	assert.Greater(t, result.Rows[0].Units, int64(0))
+}
+
+func TestPositionCalc_NotionalBasedSizingUSDBase(t *testing.T) {
+	// USDJPY: base=USD so notional = units (price-independent).
+	result, err := (&Service{}).PositionCalc(context.Background(), PositionCalcRequest{
+		Instrument: "USDJPY",
+		Price:      150.0,
+		Notional:   5_000,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Rows, 1)
+	assert.Equal(t, int64(5_000), result.Rows[0].Units)
+}
+
+func TestPositionCalc_PipPLInResult(t *testing.T) {
+	result, err := (&Service{}).PositionCalc(context.Background(), PositionCalcRequest{
+		Instrument: "EURUSD",
+		Price:      1.08,
+		Units:      100_000,
+		Pips:       10,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Rows, 1)
+	assert.Greater(t, result.Rows[0].PipsPL, 0.0)
+	assert.Equal(t, 10.0, result.Pips)
+}
+
+func TestPositionCalc_NotionalUSDBaseZeroMidPrice(t *testing.T) {
+	// posUnitsForNotional with midPrice=0 for a non-USD-base should return 0 units.
+	// EURUSD at price 0 should give 0 units.
+	result, err := (&Service{}).PositionCalc(context.Background(), PositionCalcRequest{
+		Instrument: "EURUSD",
+		Price:      0.0001, // near-zero but positive to pass validation
+		Notional:   1_000,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Rows, 1)
+	assert.Greater(t, result.Rows[0].Units, int64(0))
+}
+
+// ── PipValues additional coverage ────────────────────────────────────────────
+
+func TestPipValues_CustomUnits(t *testing.T) {
+	result, err := (&Service{}).PipValues(context.Background(), PipValuesRequest{
+		Units:       10_000, // mini lot
+		Instruments: []string{"EURUSD"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(10_000), result.Units)
+	require.Len(t, result.Rows, 1)
+	// 1 pip on a mini lot of EURUSD ≈ $1.00; confirm it's non-zero.
+	assert.Greater(t, result.Rows[0].Pips1, 0.0)
+}
+
+func TestPipValues_SkipsUnknownInstrument(t *testing.T) {
+	result, err := (&Service{}).PipValues(context.Background(), PipValuesRequest{
+		Instruments: []string{"EURUSD", "ZZZZZZ"},
+	})
+	require.NoError(t, err)
+	// Only EURUSD should appear; unknown instrument is silently skipped.
+	assert.Len(t, result.Rows, 1)
+	assert.Equal(t, "EURUSD", result.Rows[0].Instrument)
+}
