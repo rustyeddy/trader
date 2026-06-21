@@ -6,9 +6,19 @@ import (
 	"strings"
 )
 
+// AssetClass identifies the broad market category of an instrument.
+type AssetClass int
+
+const (
+	AssetForex   AssetClass = iota // currency pairs (default zero value)
+	AssetEquity                    // stocks and ETFs
+	AssetFutures                   // futures contracts
+)
+
 // Instrument represents a trader domain type.
 type Instrument struct {
 	Name                string
+	AssetClass          AssetClass
 	BaseCurrency        string
 	QuoteCurrency       string
 	PipLocation         int
@@ -30,6 +40,7 @@ var majorInstrumentNames = []string{
 func makeInstrument(name, base, quote string, pipLocation int, marginRate Rate) Instrument {
 	return Instrument{
 		Name:                name,
+		AssetClass:          AssetForex,
 		BaseCurrency:        base,
 		QuoteCurrency:       quote,
 		PipLocation:         pipLocation,

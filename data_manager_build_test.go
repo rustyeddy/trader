@@ -1155,3 +1155,101 @@ func TestInventoryString(t *testing.T) {
 	inv.Put(a)
 	require.Equal(t, 1, inv.Len())
 }
+
+// ---------------------------------------------------------------------------
+// Sync
+// ---------------------------------------------------------------------------
+
+func TestSync_ContextCancelled(t *testing.T) {
+	useTempStore(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dm := NewDataManager([]string{"EURUSD"},
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	)
+	dm.Init()
+
+	err := dm.Sync(ctx, false, false)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestSync_NoBuildNoDownload(t *testing.T) {
+	useTempStore(t)
+
+	dm := NewDataManager([]string{"EURUSD"},
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	)
+	dm.Init()
+
+	err := dm.Sync(context.Background(), false, false)
+	require.NoError(t, err)
+	// rebuildPlanState must have populated inventory and plan
+	require.NotNil(t, dm.inventory)
+	require.NotNil(t, dm.plan)
+}
+
+func TestSync_BuildOnlyEmptyStore(t *testing.T) {
+	// Empty store → no tick files complete → plan has no BuildM1 tasks
+	// → candleMaker is a no-op → Sync returns nil
+	useTempStore(t)
+
+	dm := NewDataManager([]string{"EURUSD"},
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	)
+	dm.Init()
+
+	err := dm.Sync(context.Background(), false, true)
+	require.NoError(t, err)
+}
+
+func TestSync_BuildWithCompleteM1(t *testing.T) {
+	// Write an M1 candle file and an H1 want → Sync(build=true) should build H1 from M1.
+	s := useTempStore(t)
+
+	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, M1)
+	require.NoError(t, s.WriteCSV(cs))
+
+	dm := NewDataManager([]string{"EURUSD"},
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+	)
+	dm.Init()
+
+	// Pre-populate inventory so Plan can see M1 is complete
+	km1 := Key{
+		Instrument: cs.Instrument,
+		Source:     cs.Source,
+		Kind:       KindCandle,
+		TF:         M1,
+		Year:       int(start.Year()),
+		Month:      int(start.Month()),
+	}
+	dm.inventory = NewInventory()
+	dm.inventory.Put(Asset{Key: km1, Exists: true, Complete: true})
+
+	// Build wantlist with H1 wanted, and plan so BuildH1 is scheduled
+	dm.wants = NewWantlist()
+	kh1 := km1
+	kh1.TF = H1
+	dm.wants.PutKey(kh1, WantMissing)
+
+	var planErr error
+	dm.plan, planErr = dm.Plan(context.Background())
+	require.NoError(t, planErr)
+	require.Len(t, dm.plan.BuildH1, 1)
+
+	err := dm.candleMaker(context.Background())
+	require.NoError(t, err)
+
+	// Verify H1 was written
+	kh1check := Key{Instrument: "EURUSD", Source: cs.Source, Kind: KindCandle, TF: H1, Year: 2026, Month: 1}
+	exists, err := s.Exists(kh1check)
+	require.NoError(t, err)
+	require.True(t, exists)
+}

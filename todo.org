@@ -354,18 +354,18 @@ functions in the file(s) listed.
 - =realizePNL()=, =marginRequired()=
 - =FIFOMatcher.Match()= — FIFO lot matching is complex; bugs here silently corrupt P&L
 
-*** TODO backtest.go
+*** DONE backtest.go
 - =CompileBacktests()=, =NewRun()=, =BuildBacktestResult()=
 - Entire backtest compilation and execution pipeline
 
-*** TODO data_manager.go
+*** DONE data_manager.go
 - =NewDataManager()=, =BuildInventory()=, =Sync()=, =Plan()=, =Candles()=
 
-*** TODO strategy_exit_chandelier.go
+*** DONE strategy_exit_chandelier.go
 - =NewChandelierExit()=, =InitialStop()=, =UpdateStop()=
 - ATR-based trailing stop math
 
-*** TODO types_param.go
+*** DONE config_params.go
 - =GetIntParam()=, =GetInt32Param()=, =GetFloat64Param()=, =GetBoolParam()=, =GetStringParam()=
 - Used everywhere; no tests at all
 
