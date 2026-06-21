@@ -74,13 +74,13 @@ for iter.Next() {
 
 ### Main Functions
 
-| Function | Purpose | Example |
-|----------|---------|---------|
-| `DefaultSyntheticConfig(inst)` | Get default config | `cfg := DefaultSyntheticConfig("EURUSD")` |
-| `GenerateSyntheticMonthlyCandles(year, month)` | Generate 1 month | `cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)` |
-| `GenerateSyntheticYearlyCandles(year)` | Generate 12 months | `css, err := cfg.GenerateSyntheticYearlyCandles(2025)` |
-| `TestHelperGenerateSyntheticCandles(t, inst, year, month, tf)` | In tests | `cs := TestHelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)` |
-| `LoadSyntheticCandles(inst, year, month, tf)` | Load or create from disk | `cs, err := LoadSyntheticCandles("EURUSD", 2025, time.January, H1)` |
+| Function                                                       | Purpose                  | Example                                                                         |
+|----------------------------------------------------------------|--------------------------|---------------------------------------------------------------------------------|
+| `DefaultSyntheticConfig(inst)`                                 | Get default config       | `cfg := DefaultSyntheticConfig("EURUSD")`                                       |
+| `GenerateSyntheticMonthlyCandles(year, month)`                 | Generate 1 month         | `cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)`            |
+| `GenerateSyntheticYearlyCandles(year)`                         | Generate 12 months       | `css, err := cfg.GenerateSyntheticYearlyCandles(2025)`                          |
+| `TestHelperGenerateSyntheticCandles(t, inst, year, month, tf)` | In tests                 | `cs := TestHelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, H1)` |
+| `LoadSyntheticCandles(inst, year, month, tf)`                  | Load or create from disk | `cs, err := LoadSyntheticCandles("EURUSD", 2025, time.January, H1)`             |
 
 ### Configuration
 

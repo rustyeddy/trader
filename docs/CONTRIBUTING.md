@@ -1,6 +1,8 @@
 # Contributing to Trader
 
-Thank you for your interest in contributing to the Trader FX simulation platform! This guide will help you get started with development.
+Thank you for your interest in contributing to the Trader FX
+simulation platform! This guide will help you get started with
+development.
 
 ## Development Setup
 

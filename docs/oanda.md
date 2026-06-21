@@ -4,7 +4,9 @@ This document provides a comprehensive guide for using the OANDA API integration
 
 ## Overview
 
-The OANDA integration allows you to download historic candlestick data from your OANDA account and use it with the trader library for backtesting, analysis, and research.
+The OANDA integration allows you to download historic candlestick data
+from your OANDA account and use it with the trader library for
+backtesting, analysis, and research.
 
 ## Getting Started
 

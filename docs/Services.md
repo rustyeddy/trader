@@ -53,15 +53,15 @@ server. Graceful shutdown on SIGTERM / SIGINT.
 trader serve [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | _(none)_ | Path to YAML daemon config file |
-| `--addr` | `:9999` | REST API listen address |
-| `--token` | `$OANDA_TOKEN` | OANDA API token |
+| Flag           | Default             | Description                                   |
+|----------------|---------------------|-----------------------------------------------|
+| `--config`     | _(none)_            | Path to YAML daemon config file               |
+| `--addr`       | `:9999`             | REST API listen address                       |
+| `--token`      | `$OANDA_TOKEN`      | OANDA API token                               |
 | `--account-id` | `$OANDA_ACCOUNT_ID` | OANDA account ID (auto-discovered if omitted) |
-| `--env` | `practice` | OANDA environment: `practice\|live` |
-| `--log-level` | `info` | Log level |
-| `--journal-db` | `./trader.db` | SQLite journal path |
+| `--env`        | `practice`          | OANDA environment: `practice\|live`           |
+| `--log-level`  | `info`              | Log level                                     |
+| `--journal-db` | `./trader.db`       | SQLite journal path                           |
 
 ```bash
 trader serve --config /etc/trader/trader.yaml
@@ -80,12 +80,12 @@ backtest-only deployments. Without `--token`, OANDA endpoints return
 trader api serve [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--addr` | `:8080` | TCP address to listen on |
-| `--token` | `$OANDA_TOKEN` | OANDA API token (enables live order endpoints) |
-| `--account-id` | `$OANDA_ACCOUNT_ID` | OANDA account ID |
-| `--env` | `practice` | OANDA environment: `practice\|live` |
+| Flag           | Default             | Description                                    |
+|----------------|---------------------|------------------------------------------------|
+| `--addr`       | `:8080`             | TCP address to listen on                       |
+| `--token`      | `$OANDA_TOKEN`      | OANDA API token (enables live order endpoints) |
+| `--account-id` | `$OANDA_ACCOUNT_ID` | OANDA account ID                               |
+| `--env`        | `practice`          | OANDA environment: `practice\|live`            |
 
 ```bash
 trader api serve --addr :8080
@@ -109,10 +109,10 @@ JSON + org-mode reports to an output directory. Also rebuilds
 trader backtest regress [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--out` | `../trading/backtests` | Output directory for reports |
-| `--reports` | `reports` | Alternate report directory flag |
+| Flag        | Default                | Description                     |
+|-------------|------------------------|---------------------------------|
+| `--out`     | `../trading/backtests` | Output directory for reports    |
+| `--reports` | `reports`              | Alternate report directory flag |
 
 Config path defaults to `testdata/configs`; override with the global
 `--config` flag.
@@ -132,11 +132,11 @@ Download and prepare OHLC candle data. Parent for four subcommands.
 
 Download missing Dukascopy tick files for the given instruments and month range.
 
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--instruments` | yes | Comma-separated, e.g. `EURUSD,USDJPY` |
-| `--from` | yes | Start month `YYYY-MM` (inclusive) |
-| `--to` | yes | End month `YYYY-MM` (inclusive) |
+| Flag            | Required | Description                           |
+|-----------------|----------|---------------------------------------|
+| `--instruments` | yes      | Comma-separated, e.g. `EURUSD,USDJPY` |
+| `--from`        | yes      | Start month `YYYY-MM` (inclusive)     |
+| `--to`          | yes      | End month `YYYY-MM` (inclusive)       |
 
 ```bash
 trader data download-ticks --instruments EURUSD,GBPUSD --from 2024-01 --to 2024-12

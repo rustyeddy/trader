@@ -88,23 +88,23 @@ Build: 0 warnings, 0 errors
 
 ## 💡 Key Features
 
-| Feature | Benefit |
-|---------|---------|
-| **Deterministic** | Same seed = identical data every run |
-| **Fast** | Generate 1 year in <50ms, process in <1ms |
-| **Realistic** | Geometric Brownian motion for price movement |
-| **Configurable** | Adjust volatility, trend, starting price |
-| **Reproducible** | Run on CI/CD with guaranteed results |
-| **Tested** | 25+ unit tests, 100% pass rate |
+| Feature           | Benefit                                      |
+|-------------------|----------------------------------------------|
+| **Deterministic** | Same seed = identical data every run         |
+| **Fast**          | Generate 1 year in <50ms, process in <1ms    |
+| **Realistic**     | Geometric Brownian motion for price movement |
+| **Configurable**  | Adjust volatility, trend, starting price     |
+| **Reproducible**  | Run on CI/CD with guaranteed results         |
+| **Tested**        | 25+ unit tests, 100% pass rate               |
 
 ## 📖 Documentation Map
 
-| Document | Purpose | Read Time |
-|----------|---------|-----------|
-| **docs/synthetic_candles_quick_start.md** | Fast intro, common scenarios | 5 min |
-| **DEBUGGING_INFINITE_LOOP.md** | Step-by-step fix guide | 10 min |
-| **docs/synthetic_candles.md** | Complete API reference | 15 min |
-| **IMPLEMENTATION_SUMMARY.md** | Technical details | 10 min |
+| Document                                  | Purpose                      | Read Time |
+|-------------------------------------------|------------------------------|-----------|
+| **docs/synthetic_candles_quick_start.md** | Fast intro, common scenarios | 5 min     |
+| **DEBUGGING_INFINITE_LOOP.md**            | Step-by-step fix guide       | 10 min    |
+| **docs/synthetic_candles.md**             | Complete API reference       | 15 min    |
+| **IMPLEMENTATION_SUMMARY.md**             | Technical details            | 10 min    |
 
 ## 🎓 How It Works
 

@@ -13,12 +13,12 @@ This project currently has two configuration entry points:
 
 These values are wired as persistent CLI flags in `NewRootCmd()`:
 
-| Field | CLI flag | Default |
-|---|---|---|
-| `ConfigPath` | `--config` | `""` (empty) |
-| `DBPath` | `--db` | `"./trader.db"` |
-| `LogLevel` | `--log-level` | `"info"` |
-| `NoColor` | `--no-color` | `false` |
+| Field        | CLI flag                  | Default              |
+|--------------|---------------------------|----------------------|
+| `ConfigPath` | `--config`                | `""` (empty)         |
+| `DBPath`     | `--db`                    | `"./trader.db"`      |
+| `LogLevel`   | `--log-level`             | `"info"`             |
+| `NoColor`    | `--no-color`              | `false`              |
 | `GlobalPath` | _(no CLI flag currently)_ | `""` (Go zero value) |
 
 ### How to access
