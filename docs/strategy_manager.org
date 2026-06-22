@@ -5,7 +5,8 @@
 
 * Purpose
 
-This document describes the proposed Strategy Manager architecture for the Trader system.
+This document describes the proposed Strategy Manager architecture for
+the Trader system.
 
 The goal is to evolve live trading from:
 
@@ -23,7 +24,9 @@ regime and opportunity state determine which strategy should run
 risk management controls whether orders are allowed and how large they are
 #+end_src
 
-This is not intended to replace the current strategy, backtest, or live runner architecture. It adds an orchestration layer above existing strategy execution.
+This is not intended to replace the current strategy, backtest, or
+live runner architecture. It adds an orchestration layer above
+existing strategy execution.
 
 * Current Relevant Architecture
 
@@ -62,7 +65,8 @@ This is a good low-level runner, but it is not yet the Strategy Manager.
 
 ** Candle Strategy Adapter
 
-The current =CandleStrategyAdapter= wraps backtest-style candle strategies as live strategies.
+The current =CandleStrategyAdapter= wraps backtest-style candle
+strategies as live strategies.
 
 It already:
 
@@ -75,11 +79,13 @@ It already:
 - converts StrategyPlan into LivePlan
 #+end_src
 
-This is important because live candle strategies can reuse existing backtest strategy logic.
+This is important because live candle strategies can reuse existing
+backtest strategy logic.
 
 ** Existing Gap
 
-The current system can run strategies live, but it does not yet have a full account-level orchestration layer that decides:
+The current system can run strategies live, but it does not yet have a
+full account-level orchestration layer that decides:
 
 #+begin_src text
 - which instruments should be watched
@@ -140,7 +146,8 @@ For each <account, instrument> slot:
 
 ** Why One Active Strategy Per Instrument?
 
-Multiple active strategies on the same instrument/account create unclear ownership.
+Multiple active strategies on the same instrument/account create
+unclear ownership.
 
 Bad live-trading state:
 
@@ -164,7 +171,9 @@ Active:
 - AUD/USD -> Bollinger Fade Strategy
 #+end_src
 
-Other strategies can still run in =observer= or =paper= mode, but only one strategy should be allowed to place live orders for a given account/instrument.
+Other strategies can still run in =observer= or =paper= mode, but only
+one strategy should be allowed to place live orders for a given
+account/instrument.
 
 * Core Concepts
 
@@ -218,16 +227,16 @@ Inactive
 
 State descriptions:
 
-| State              | Meaning                                                  |
-|--------------------+----------------------------------------------------------|
-| =Inactive=         | Instrument is not currently interesting                  |
-| =Watching=         | Higher timeframe regime says it is worth watching        |
-| =NearSetup=        | Price is approaching a tradeable setup area              |
-| =TradeCandidate=   | Setup confirmed enough to select a strategy              |
-| =StrategyActive=   | A strategy has been assigned and is receiving candles     |
-| =PositionOpen=     | Broker has an open position owned by the strategy         |
-| =Cooldown=         | Recently exited; wait before re-entry                    |
-| =Invalidated=      | Regime/setup broke; remove from active consideration      |
+| State            | Meaning                                               |
+|------------------+-------------------------------------------------------|
+| =Inactive=       | Instrument is not currently interesting               |
+| =Watching=       | Higher timeframe regime says it is worth watching     |
+| =NearSetup=      | Price is approaching a tradeable setup area           |
+| =TradeCandidate= | Setup confirmed enough to select a strategy           |
+| =StrategyActive= | A strategy has been assigned and is receiving candles |
+| =PositionOpen=   | Broker has an open position owned by the strategy     |
+| =Cooldown=       | Recently exited; wait before re-entry                 |
+| =Invalidated=    | Regime/setup broke; remove from active consideration  |
 
 ** Strategy Assignment
 
