@@ -1,6 +1,10 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 // ExitConfig mirrors the exit: section of a YAML backtest config.
 type ExitConfig struct {
@@ -10,7 +14,7 @@ type ExitConfig struct {
 
 // GetExitStrategy constructs an ExitStrategy from cfg.
 // If cfg.Kind is empty, NoopExit is returned (pass-through).
-func GetExitStrategy(cfg ExitConfig, scale Scale6) (ExitStrategy, error) {
+func GetExitStrategy(cfg ExitConfig, scale market.Scale6) (ExitStrategy, error) {
 	switch cfg.Kind {
 	case "", "noop":
 		return NoopExit{}, nil

@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "context"
+import (
+	"context"
+
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+)
 
 // StrategyContext is the minimal, read-only view of an in-progress run that a
 // Strategy needs during Update: which instrument is trading and the currently
@@ -17,7 +22,7 @@ type StrategyContext interface {
 // LotView is a read-only view over a set of open lots. *LotBook satisfies it.
 type LotView interface {
 	Len() int
-	Range(func(*Lot) error) error
+	Range(func(*execution.Lot) error) error
 }
 
 // Strategy is the single backtest strategy interface used across the repo.
@@ -25,7 +30,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(context.Context, *CandleTime, StrategyContext) *StrategyPlan
+	Update(context.Context, *market.CandleTime, StrategyContext) *StrategyPlan
 
 	// StopDescription returns a human-readable description of how this strategy
 	// places stops, e.g. "ATR(14)×1.5", "25 pips", or "" if none.

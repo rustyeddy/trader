@@ -1,15 +1,16 @@
-package trader
+package strategy
 
 import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // feedDayADX sends 24 identical hourly bars for the given date to a D1ADXFilter.
-func feedDayADX(f *D1ADXFilter, date time.Time, o, h, l, c Price) {
+func feedDayADX(f *D1ADXFilter, date time.Time, o, h, l, c market.Price) {
 	for hour := 0; hour < 24; hour++ {
 		f.Tick(h1CT(date.Add(time.Duration(hour)*time.Hour), o, h, l, c))
 	}
@@ -17,7 +18,7 @@ func feedDayADX(f *D1ADXFilter, date time.Time, o, h, l, c Price) {
 
 func TestD1ADXFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 	t.Parallel()
-	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, market.PriceScale)
 	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	assert.True(t, f.Trending(), "warmup must allow trading")
@@ -27,13 +28,13 @@ func TestD1ADXFilter_ReadyAfterWarmupDays(t *testing.T) {
 	t.Parallel()
 	// ADX needs 2×period days to become ready.
 	period := 3
-	f, err := NewD1ADXFilter(period, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Feed 2*period days + 1 trigger day.
 	for d := 0; d <= 2*period; d++ {
-		open := Price(10000 + d*100)
+		open := market.Price(10000 + d*100)
 		feedDayADX(f, base.AddDate(0, 0, d), open, open+200, open-50, open+150)
 	}
 	assert.True(t, f.Ready())
@@ -41,7 +42,7 @@ func TestD1ADXFilter_ReadyAfterWarmupDays(t *testing.T) {
 
 func TestD1ADXFilter_DayRolloverAggregation(t *testing.T) {
 	t.Parallel()
-	f, err := NewD1ADXFilter(3, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(3, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -56,15 +57,15 @@ func TestD1ADXFilter_DayRolloverAggregation(t *testing.T) {
 	f.Tick(h1CT(day2, 9000, 9500, 8500, 9200))
 
 	assert.Equal(t, int64(day2.Unix())/86400, f.dayNum)
-	assert.Equal(t, Price(9000), f.dayOpen)
-	assert.Equal(t, Price(9500), f.dayHigh)
-	assert.Equal(t, Price(8500), f.dayLow)
-	assert.Equal(t, Price(9200), f.dayClose)
+	assert.Equal(t, market.Price(9000), f.dayOpen)
+	assert.Equal(t, market.Price(9500), f.dayHigh)
+	assert.Equal(t, market.Price(8500), f.dayLow)
+	assert.Equal(t, market.Price(9200), f.dayClose)
 }
 
 func TestD1ADXFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	t.Parallel()
-	f, err := NewD1ADXFilter(5, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(5, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
@@ -72,22 +73,22 @@ func TestD1ADXFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	f.Tick(h1CT(base.Add(1*time.Hour), 10200, 11000, 10100, 10800))
 	f.Tick(h1CT(base.Add(2*time.Hour), 10800, 10900, 9500, 9600))
 
-	assert.Equal(t, Price(10000), f.dayOpen, "open from first bar")
-	assert.Equal(t, Price(11000), f.dayHigh, "high from second bar")
-	assert.Equal(t, Price(9500), f.dayLow, "low from third bar")
-	assert.Equal(t, Price(9600), f.dayClose, "close from latest bar")
+	assert.Equal(t, market.Price(10000), f.dayOpen, "open from first bar")
+	assert.Equal(t, market.Price(11000), f.dayHigh, "high from second bar")
+	assert.Equal(t, market.Price(9500), f.dayLow, "low from third bar")
+	assert.Equal(t, market.Price(9600), f.dayClose, "close from latest bar")
 }
 
 func TestD1ADXFilter_TrendingAllowsWhenTrending(t *testing.T) {
 	t.Parallel()
 	period := 3
-	f, err := NewD1ADXFilter(period, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Feed strongly trending bars: each day price advances significantly.
 	for d := 0; d <= 2*period; d++ {
-		open := Price(10000 + d*500)
+		open := market.Price(10000 + d*500)
 		feedDayADX(f, base.AddDate(0, 0, d), open, open+490, open-10, open+490)
 	}
 
@@ -99,13 +100,13 @@ func TestD1ADXFilter_BlocksWhenFlat(t *testing.T) {
 	t.Parallel()
 	period := 3
 	// Use a high threshold (80) — even a moderately trending market won't pass.
-	f, err := NewD1ADXFilter(period, 80.0, PriceScale)
+	f, err := NewD1ADXFilter(period, 80.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for d := 0; d <= 2*period; d++ {
 		// Oscillating: even days go up slightly, odd days go down slightly.
-		open := Price(10000)
+		open := market.Price(10000)
 		if d%2 == 0 {
 			feedDayADX(f, base.AddDate(0, 0, d), open, open+50, open-10, open+40)
 		} else {
@@ -119,7 +120,7 @@ func TestD1ADXFilter_BlocksWhenFlat(t *testing.T) {
 
 func TestD1ADXFilter_WarmupAlwaysTrending(t *testing.T) {
 	t.Parallel()
-	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	// Only feed 5 days — well under 2*14 warmup.
@@ -133,7 +134,7 @@ func TestD1ADXFilter_WarmupAlwaysTrending(t *testing.T) {
 
 func TestD1ADXFilter_Name(t *testing.T) {
 	t.Parallel()
-	f, err := NewD1ADXFilter(14, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(14, 20.0, market.PriceScale)
 	require.NoError(t, err)
 	assert.Equal(t, "D1-ADX(14,20.0)", f.Name())
 }
@@ -141,22 +142,22 @@ func TestD1ADXFilter_Name(t *testing.T) {
 func TestD1ADXFilter_RejectsInvalidThreshold(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewD1ADXFilter(14, -0.1, PriceScale)
+	_, err := NewD1ADXFilter(14, -0.1, market.PriceScale)
 	require.Error(t, err)
 
-	_, err = NewD1ADXFilter(14, 100.1, PriceScale)
+	_, err = NewD1ADXFilter(14, 100.1, market.PriceScale)
 	require.Error(t, err)
 }
 
 func TestD1ADXFilter_ADXAccessorMatchesADXValue(t *testing.T) {
 	t.Parallel()
 
-	f, err := NewD1ADXFilter(3, 20.0, PriceScale)
+	f, err := NewD1ADXFilter(3, 20.0, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for d := 0; d <= 6; d++ {
-		open := Price(10000 + d*500)
+		open := market.Price(10000 + d*500)
 		feedDayADX(f, base.AddDate(0, 0, d), open, open+490, open-10, open+490)
 	}
 

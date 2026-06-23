@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
+)
 
 const maxADXThreshold = 100.0
 
@@ -16,7 +21,7 @@ const maxADXThreshold = 100.0
 //
 // Registered in the factory as "adx-d1".
 type D1ADXFilter struct {
-	adx       *ADX
+	adx       *indicator.ADX
 	period    int
 	threshold float64
 
@@ -24,11 +29,11 @@ type D1ADXFilter struct {
 	dailyCandleAccumulator
 }
 
-func NewD1ADXFilter(period int, threshold float64, scale Scale6) (*D1ADXFilter, error) {
+func NewD1ADXFilter(period int, threshold float64, scale market.Scale6) (*D1ADXFilter, error) {
 	if err := validateADXThreshold(threshold); err != nil {
 		return nil, err
 	}
-	adx, err := NewADX(period, scale)
+	adx, err := indicator.NewADX(period, scale)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +50,7 @@ func (f *D1ADXFilter) Name() string {
 
 func (f *D1ADXFilter) Ready() bool { return f.adx.Ready() }
 
-func (f *D1ADXFilter) Tick(ct CandleTime) {
+func (f *D1ADXFilter) Tick(ct market.CandleTime) {
 	if daily, rolled := f.dailyCandleAccumulator.Tick(ct); rolled {
 		f.adx.Update(daily)
 	}
@@ -58,7 +63,7 @@ func (f *D1ADXFilter) Trending() bool {
 	return f.adx.Float64() >= f.threshold
 }
 
-func (f *D1ADXFilter) AllowSide(_ Side) bool { return true }
+func (f *D1ADXFilter) AllowSide(_ market.Side) bool { return true }
 
 // ADX exposes the raw ADX value for debugging.
 func (f *D1ADXFilter) ADX() float64 { return f.adx.Float64() }

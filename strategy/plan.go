@@ -1,8 +1,10 @@
-package trader
+package strategy
+
+import "github.com/rustyeddy/trader/execution"
 
 type StrategyPlan struct {
-	Opens  []*OpenRequest
-	Closes []*CloseRequest
+	Opens  []*execution.OpenRequest
+	Closes []*execution.CloseRequest
 	Cancel []string
 	Reason string
 }

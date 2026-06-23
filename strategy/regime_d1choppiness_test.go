@@ -1,23 +1,24 @@
-package trader
+package strategy
 
 import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // h1CT builds a CandleTime for a given UTC time and OHLC (as raw Price ints).
-func h1CT(ts time.Time, o, h, l, c Price) CandleTime {
-	return CandleTime{
-		Candle:    Candle{Open: o, High: h, Low: l, Close: c},
-		Timestamp: FromTime(ts),
+func h1CT(ts time.Time, o, h, l, c market.Price) market.CandleTime {
+	return market.CandleTime{
+		Candle:    market.Candle{Open: o, High: h, Low: l, Close: c},
+		Timestamp: market.FromTime(ts),
 	}
 }
 
 // feedDay sends 24 identical hourly bars for the given date.
-func feedDay(f *D1ChoppinessFilter, date time.Time, o, h, l, c Price) {
+func feedDay(f *D1ChoppinessFilter, date time.Time, o, h, l, c market.Price) {
 	for hour := 0; hour < 24; hour++ {
 		f.Tick(h1CT(date.Add(time.Duration(hour)*time.Hour), o, h, l, c))
 	}
@@ -25,7 +26,7 @@ func feedDay(f *D1ChoppinessFilter, date time.Time, o, h, l, c Price) {
 
 func TestD1ChoppinessFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(14, 61.8, scale)
 	require.NoError(t, err)
 	assert.False(t, f.Ready())
@@ -34,7 +35,7 @@ func TestD1ChoppinessFilter_NotReadyBeforeEnoughDays(t *testing.T) {
 
 func TestD1ChoppinessFilter_ReadyAfterPeriodDays(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(5, 61.8, scale)
 	require.NoError(t, err)
 
@@ -49,7 +50,7 @@ func TestD1ChoppinessFilter_ReadyAfterPeriodDays(t *testing.T) {
 
 func TestD1ChoppinessFilter_DayRolloverAggregation(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
 	require.NoError(t, err)
 
@@ -66,15 +67,15 @@ func TestD1ChoppinessFilter_DayRolloverAggregation(t *testing.T) {
 
 	// The partial daily bar accumulator should now reflect day 2.
 	assert.Equal(t, int64(day2.Unix())/86400, f.dayNum)
-	assert.Equal(t, Price(9000), f.dayOpen)
-	assert.Equal(t, Price(9500), f.dayHigh)
-	assert.Equal(t, Price(8500), f.dayLow)
-	assert.Equal(t, Price(9200), f.dayClose)
+	assert.Equal(t, market.Price(9000), f.dayOpen)
+	assert.Equal(t, market.Price(9500), f.dayHigh)
+	assert.Equal(t, market.Price(8500), f.dayLow)
+	assert.Equal(t, market.Price(9200), f.dayClose)
 }
 
 func TestD1ChoppinessFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(5, 61.8, scale)
 	require.NoError(t, err)
 
@@ -83,15 +84,15 @@ func TestD1ChoppinessFilter_SameDayBarsExtendAccumulator(t *testing.T) {
 	f.Tick(h1CT(base.Add(1*time.Hour), 10200, 11000, 10100, 10800))
 	f.Tick(h1CT(base.Add(2*time.Hour), 10800, 10900, 9500, 9600))
 
-	assert.Equal(t, Price(10000), f.dayOpen, "open from first bar")
-	assert.Equal(t, Price(11000), f.dayHigh, "high from second bar")
-	assert.Equal(t, Price(9500), f.dayLow, "low from third bar")
-	assert.Equal(t, Price(9600), f.dayClose, "close from latest bar")
+	assert.Equal(t, market.Price(10000), f.dayOpen, "open from first bar")
+	assert.Equal(t, market.Price(11000), f.dayHigh, "high from second bar")
+	assert.Equal(t, market.Price(9500), f.dayLow, "low from third bar")
+	assert.Equal(t, market.Price(9600), f.dayClose, "close from latest bar")
 }
 
 func TestD1ChoppinessFilter_TrendingBlocksWhenChoppy(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	// Use period=3 so we can warm up quickly.
 	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
 	require.NoError(t, err)
@@ -113,7 +114,7 @@ func TestD1ChoppinessFilter_TrendingBlocksWhenChoppy(t *testing.T) {
 
 func TestD1ChoppinessFilter_TrendingAllowsWhenTrending(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
 	require.NoError(t, err)
 
@@ -122,7 +123,7 @@ func TestD1ChoppinessFilter_TrendingAllowsWhenTrending(t *testing.T) {
 	// Feed 4 days of strongly trending bars: each day price advances 500 pips
 	// with a wide range, producing a low CI.
 	for d := 0; d < 4; d++ {
-		open := Price(10000 + d*500)
+		open := market.Price(10000 + d*500)
 		high := open + 490
 		low := open - 10
 		close := high
@@ -137,7 +138,7 @@ func TestD1ChoppinessFilter_TrendingAllowsWhenTrending(t *testing.T) {
 
 func TestD1ChoppinessFilter_WarmupAlwaysTrending(t *testing.T) {
 	t.Parallel()
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(14, 61.8, scale)
 	require.NoError(t, err)
 
@@ -153,20 +154,20 @@ func TestD1ChoppinessFilter_WarmupAlwaysTrending(t *testing.T) {
 func TestD1ChoppinessFilter_RejectsInvalidThreshold(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewD1ChoppinessFilter(14, 0, PriceScale)
+	_, err := NewD1ChoppinessFilter(14, 0, market.PriceScale)
 	require.Error(t, err)
 }
 
 func TestD1ChoppinessFilter_ChoppinessAccessorMatchesValue(t *testing.T) {
 	t.Parallel()
 
-	scale := Scale6(100_000)
+	scale := market.Scale6(100_000)
 	f, err := NewD1ChoppinessFilter(3, 61.8, scale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for d := 0; d < 4; d++ {
-		open := Price(10000 + d*500)
+		open := market.Price(10000 + d*500)
 		high := open + 490
 		low := open - 10
 		close := high

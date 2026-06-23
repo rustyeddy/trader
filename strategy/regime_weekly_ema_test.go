@@ -1,18 +1,19 @@
-package trader
+package strategy
 
 import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // weeklyEMACT builds a CandleTime at a specific UTC timestamp with the given close price.
-func weeklyEMACT(ts time.Time, closePrice Price) CandleTime {
-	return CandleTime{
-		Candle:    Candle{Open: closePrice, High: closePrice + 100, Low: closePrice - 100, Close: closePrice},
-		Timestamp: FromTime(ts),
+func weeklyEMACT(ts time.Time, closePrice market.Price) market.CandleTime {
+	return market.CandleTime{
+		Candle:    market.Candle{Open: closePrice, High: closePrice + 100, Low: closePrice - 100, Close: closePrice},
+		Timestamp: market.FromTime(ts),
 	}
 }
 
@@ -31,22 +32,22 @@ func mondays(base time.Time, n int) []time.Time {
 
 func TestWeeklyEMAFilter_NotReadyBeforeWarmup(t *testing.T) {
 	t.Parallel()
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	// AllowSide returns true during warmup.
-	assert.True(t, f.AllowSide(Long))
-	assert.True(t, f.AllowSide(Short))
+	assert.True(t, f.AllowSide(market.Long))
+	assert.True(t, f.AllowSide(market.Short))
 }
 
 func TestWeeklyEMAFilter_TrendingAlwaysTrue(t *testing.T) {
 	t.Parallel()
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	// Feed several weeks of data.
 	for i, m := range mondays(base, 10) {
-		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+		f.Tick(weeklyEMACT(m, market.Price(100000+i*1000)))
 	}
 	assert.True(t, f.Trending(), "WeeklyEMAFilter.Trending must always return true")
 }
@@ -54,50 +55,50 @@ func TestWeeklyEMAFilter_TrendingAlwaysTrue(t *testing.T) {
 func TestWeeklyEMAFilter_AllowsLongAboveEMA(t *testing.T) {
 	t.Parallel()
 	// EMA(3) on weekly closes: feed rising prices so last close is above EMA.
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	weeks := mondays(base, 10)
 
 	// Rising prices: 100000, 101000, 102000, ...
 	for i, m := range weeks {
-		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+		f.Tick(weeklyEMACT(m, market.Price(100000+i*1000)))
 	}
 	// Deliver one more bar in a new week with a high close to push above EMA.
 	lastWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
-	f.Tick(weeklyEMACT(lastWeek, Price(120000)))
+	f.Tick(weeklyEMACT(lastWeek, market.Price(120000)))
 
 	require.True(t, f.Ready())
-	assert.True(t, f.AllowSide(Long), "rising close above EMA must allow Long")
-	assert.False(t, f.AllowSide(Short), "rising close above EMA must block Short")
+	assert.True(t, f.AllowSide(market.Long), "rising close above EMA must allow Long")
+	assert.False(t, f.AllowSide(market.Short), "rising close above EMA must block Short")
 }
 
 func TestWeeklyEMAFilter_AllowsShortBelowEMA(t *testing.T) {
 	t.Parallel()
 	// EMA(3): feed falling prices so last close is below EMA.
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	weeks := mondays(base, 10)
 
 	// Falling prices: 120000, 119000, 118000, ...
 	for i, m := range weeks {
-		f.Tick(weeklyEMACT(m, Price(120000-i*1000)))
+		f.Tick(weeklyEMACT(m, market.Price(120000-i*1000)))
 	}
 	// Deliver one more bar in a new week with a low close to push below EMA.
 	lastWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
-	f.Tick(weeklyEMACT(lastWeek, Price(100000)))
+	f.Tick(weeklyEMACT(lastWeek, market.Price(100000)))
 
 	require.True(t, f.Ready())
-	assert.False(t, f.AllowSide(Long), "falling close below EMA must block Long")
-	assert.True(t, f.AllowSide(Short), "falling close below EMA must allow Short")
+	assert.False(t, f.AllowSide(market.Long), "falling close below EMA must block Long")
+	assert.True(t, f.AllowSide(market.Short), "falling close below EMA must allow Short")
 }
 
 func TestWeeklyEMAFilter_AggregatesWithinWeek(t *testing.T) {
 	t.Parallel()
 	// Multiple H1 bars within the same ISO week should update only the
 	// running weekly high/low/close, not advance the EMA.
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	monday := time.Date(2024, 1, 8, 9, 0, 0, 0, time.UTC) // a Monday
 	tuesday := monday.Add(24 * time.Hour)
@@ -114,24 +115,24 @@ func TestWeeklyEMAFilter_AggregatesWithinWeek(t *testing.T) {
 func TestWeeklyEMAFilter_AllowSideUsesInProgressWeekClose(t *testing.T) {
 	t.Parallel()
 
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	weeks := mondays(base, 10)
 
 	for i, m := range weeks {
-		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+		f.Tick(weeklyEMACT(m, market.Price(100000+i*1000)))
 	}
 
 	currentWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
-	f.Tick(weeklyEMACT(currentWeek, Price(120000)))
+	f.Tick(weeklyEMACT(currentWeek, market.Price(120000)))
 	require.True(t, f.Ready())
-	assert.True(t, f.AllowSide(Long), "high in-progress weekly close should allow Long")
+	assert.True(t, f.AllowSide(market.Long), "high in-progress weekly close should allow Long")
 
-	f.Tick(weeklyEMACT(currentWeek.Add(24*time.Hour), Price(90000)))
-	assert.False(t, f.AllowSide(Long), "lower in-progress weekly close should flip Long permission")
-	assert.True(t, f.AllowSide(Short), "lower in-progress weekly close should allow Short")
+	f.Tick(weeklyEMACT(currentWeek.Add(24*time.Hour), market.Price(90000)))
+	assert.False(t, f.AllowSide(market.Long), "lower in-progress weekly close should flip Long permission")
+	assert.True(t, f.AllowSide(market.Short), "lower in-progress weekly close should allow Short")
 }
 
 func TestWeeklyEMAFilter_FactoryRoundtrip(t *testing.T) {
@@ -139,7 +140,7 @@ func TestWeeklyEMAFilter_FactoryRoundtrip(t *testing.T) {
 	f, err := GetRegimeFilter(RegimeConfig{
 		Kind:   "weekly-ema",
 		Params: map[string]any{"period": 5},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 	wf, ok := f.(*WeeklyEMAFilter)
 	require.True(t, ok)
@@ -148,7 +149,7 @@ func TestWeeklyEMAFilter_FactoryRoundtrip(t *testing.T) {
 
 func TestWeeklyEMAFilter_FactoryDefaults(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: "weekly-ema"}, PriceScale)
+	f, err := GetRegimeFilter(RegimeConfig{Kind: "weekly-ema"}, market.PriceScale)
 	require.NoError(t, err)
 	wf, ok := f.(*WeeklyEMAFilter)
 	require.True(t, ok)
@@ -157,7 +158,7 @@ func TestWeeklyEMAFilter_FactoryDefaults(t *testing.T) {
 
 func TestWeeklyEMAFilter_Name(t *testing.T) {
 	t.Parallel()
-	f, err := NewWeeklyEMAFilter(20, PriceScale)
+	f, err := NewWeeklyEMAFilter(20, market.PriceScale)
 	require.NoError(t, err)
 	assert.Equal(t, "WeeklyEMA(20)", f.Name())
 }
@@ -165,14 +166,14 @@ func TestWeeklyEMAFilter_Name(t *testing.T) {
 func TestWeeklyEMAFilter_EMAAccessorMatchesEMAValue(t *testing.T) {
 	t.Parallel()
 
-	f, err := NewWeeklyEMAFilter(3, PriceScale)
+	f, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 
 	base := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	for i, m := range mondays(base, 10) {
-		f.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+		f.Tick(weeklyEMACT(m, market.Price(100000+i*1000)))
 	}
-	f.Tick(weeklyEMACT(base.Add(10*7*24*time.Hour), Price(120000)))
+	f.Tick(weeklyEMACT(base.Add(10*7*24*time.Hour), market.Price(120000)))
 
 	require.True(t, f.Ready())
 	assert.Equal(t, f.EMA(), f.EMAValue())

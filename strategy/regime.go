@@ -1,4 +1,6 @@
-package trader
+package strategy
+
+import "github.com/rustyeddy/trader/market"
 
 // RegimeFilter classifies the current market as trending or ranging.
 // The bar loop calls Tick() every bar and suppresses new position opens
@@ -13,7 +15,7 @@ type RegimeFilter interface {
 	// Tick updates internal indicators with the current bar. The full
 	// CandleTime is provided so implementations can use the timestamp
 	// (e.g. to aggregate sub-daily bars into daily bars).
-	Tick(ct CandleTime)
+	Tick(ct market.CandleTime)
 
 	// Trending returns true when the market is in a trending regime and
 	// new entries should be allowed. Returns true while not yet ready so
@@ -23,14 +25,14 @@ type RegimeFilter interface {
 	// AllowSide returns true when new entries on the given side are permitted.
 	// Trending() == false already blocks all opens; AllowSide provides
 	// directional filtering when Trending() == true.
-	AllowSide(side Side) bool
+	AllowSide(side market.Side) bool
 }
 
 // NoopRegime is a pass-through filter that always allows trading.
 type NoopRegime struct{}
 
-func (NoopRegime) Name() string            { return "" }
-func (NoopRegime) Ready() bool             { return true }
-func (NoopRegime) Tick(_ CandleTime)       {}
-func (NoopRegime) Trending() bool          { return true }
-func (NoopRegime) AllowSide(_ Side) bool   { return true }
+func (NoopRegime) Name() string                 { return "" }
+func (NoopRegime) Ready() bool                  { return true }
+func (NoopRegime) Tick(_ market.CandleTime)     {}
+func (NoopRegime) Trending() bool               { return true }
+func (NoopRegime) AllowSide(_ market.Side) bool { return true }

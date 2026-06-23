@@ -1,16 +1,17 @@
-package trader
+package strategy
 
 import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetRegimeFilter_Noop(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: ""}, PriceScale)
+	f, err := GetRegimeFilter(RegimeConfig{Kind: ""}, market.PriceScale)
 	require.NoError(t, err)
 	assert.IsType(t, NoopRegime{}, f)
 }
@@ -20,7 +21,7 @@ func TestGetRegimeFilter_Session(t *testing.T) {
 	f, err := GetRegimeFilter(RegimeConfig{
 		Kind:   " Session ",
 		Params: map[string]any{"session_start": 8, "session_end": 16},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 	sf, ok := f.(*SessionFilter)
 	require.True(t, ok)
@@ -30,7 +31,7 @@ func TestGetRegimeFilter_Session(t *testing.T) {
 
 func TestGetRegimeFilter_SessionDefaults(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: "session"}, PriceScale)
+	f, err := GetRegimeFilter(RegimeConfig{Kind: "session"}, market.PriceScale)
 	require.NoError(t, err)
 	sf, ok := f.(*SessionFilter)
 	require.True(t, ok)
@@ -43,7 +44,7 @@ func TestGetRegimeFilter_SessionAllowsMidnightStart(t *testing.T) {
 	f, err := GetRegimeFilter(RegimeConfig{
 		Kind:   "session",
 		Params: map[string]any{"session_start": 0, "session_end": 8},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 	sf, ok := f.(*SessionFilter)
 	require.True(t, ok)
@@ -62,7 +63,7 @@ func TestGetRegimeFilter_SessionRejectsInvalidWindows(t *testing.T) {
 	}
 
 	for _, cfg := range tests {
-		_, err := GetRegimeFilter(cfg, PriceScale)
+		_, err := GetRegimeFilter(cfg, market.PriceScale)
 		require.Error(t, err)
 	}
 }
@@ -72,7 +73,7 @@ func TestGetRegimeFilter_ADXD1(t *testing.T) {
 	f, err := GetRegimeFilter(RegimeConfig{
 		Kind:   " ADX-D1 ",
 		Params: map[string]any{"period": 10, "threshold": 25.0},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 	af, ok := f.(*D1ADXFilter)
 	require.True(t, ok)
@@ -82,7 +83,7 @@ func TestGetRegimeFilter_ADXD1(t *testing.T) {
 
 func TestGetRegimeFilter_ADXD1Defaults(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: "adx-d1"}, PriceScale)
+	f, err := GetRegimeFilter(RegimeConfig{Kind: "adx-d1"}, market.PriceScale)
 	require.NoError(t, err)
 	af, ok := f.(*D1ADXFilter)
 	require.True(t, ok)
@@ -96,7 +97,7 @@ func TestGetRegimeFilter_ADXD1AllowsZeroThreshold(t *testing.T) {
 	f, err := GetRegimeFilter(RegimeConfig{
 		Kind:   "adx-d1",
 		Params: map[string]any{"period": 10, "threshold": 0.0},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 
 	af, ok := f.(*D1ADXFilter)
@@ -110,7 +111,7 @@ func TestGetRegimeFilter_ADXD1RejectsOutOfRangeThreshold(t *testing.T) {
 	_, err := GetRegimeFilter(RegimeConfig{
 		Kind:   "adx-d1",
 		Params: map[string]any{"threshold": 101.0},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.Error(t, err)
 }
 
@@ -123,7 +124,7 @@ func TestGetRegimeFilter_Composite(t *testing.T) {
 			{Kind: "adx-d1", Params: map[string]any{"period": 14, "threshold": 20.0}},
 		},
 	}
-	f, err := GetRegimeFilter(cfg, PriceScale)
+	f, err := GetRegimeFilter(cfg, market.PriceScale)
 	require.NoError(t, err)
 	cf, ok := f.(*CompositeRegimeFilter)
 	require.True(t, ok)
@@ -132,7 +133,7 @@ func TestGetRegimeFilter_Composite(t *testing.T) {
 
 func TestGetRegimeFilter_CompositeEmpty(t *testing.T) {
 	t.Parallel()
-	_, err := GetRegimeFilter(RegimeConfig{Kind: "composite"}, PriceScale)
+	_, err := GetRegimeFilter(RegimeConfig{Kind: "composite"}, market.PriceScale)
 	require.Error(t, err)
 }
 
@@ -143,7 +144,7 @@ func TestGetRegimeFilter_CompositeSingleChildReturnsChild(t *testing.T) {
 		Filters: []RegimeConfig{
 			{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 17}},
 		},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 	_, ok := f.(*SessionFilter)
 	require.True(t, ok)
@@ -151,7 +152,7 @@ func TestGetRegimeFilter_CompositeSingleChildReturnsChild(t *testing.T) {
 
 func TestGetRegimeFilter_UnknownKind(t *testing.T) {
 	t.Parallel()
-	_, err := GetRegimeFilter(RegimeConfig{Kind: " does-not-exist "}, PriceScale)
+	_, err := GetRegimeFilter(RegimeConfig{Kind: " does-not-exist "}, market.PriceScale)
 	require.Error(t, err)
 }
 
@@ -174,7 +175,7 @@ func TestGetRegimeFilter_ATRPercentileAllowsZeroThreshold(t *testing.T) {
 			"window_size": 100,
 			"threshold":   0.0,
 		},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.NoError(t, err)
 
 	af, ok := f.(*ATRPercentileFilter)
@@ -190,7 +191,7 @@ func TestGetRegimeFilter_ATRPercentileRejectsOutOfRangeThreshold(t *testing.T) {
 		Params: map[string]any{
 			"threshold": 101.0,
 		},
-	}, PriceScale)
+	}, market.PriceScale)
 	require.Error(t, err)
 }
 
@@ -201,19 +202,19 @@ func TestCompositeRegimeFilter_TrendingRequiresAll(t *testing.T) {
 	sessionCfg := RegimeConfig{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 17}}
 	adxCfg := RegimeConfig{Kind: "adx-d1", Params: map[string]any{"period": 3, "threshold": 1.0}}
 
-	sf, _ := GetRegimeFilter(sessionCfg, PriceScale)
-	af, _ := GetRegimeFilter(adxCfg, PriceScale)
+	sf, _ := GetRegimeFilter(sessionCfg, market.PriceScale)
+	af, _ := GetRegimeFilter(adxCfg, market.PriceScale)
 	comp := NewCompositeRegimeFilter([]RegimeFilter{sf, af})
 
 	inside := time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC)  // 10:00 UTC — inside session
 	outside := time.Date(2024, 1, 2, 20, 0, 0, 0, time.UTC) // 20:00 UTC — outside session
 
 	// ADX is in warmup (always trending=true). Session is inside window.
-	comp.Tick(CandleTime{Candle: Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: FromTime(inside)})
+	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: market.FromTime(inside)})
 	assert.True(t, comp.Trending(), "inside session + ADX warmup = trending")
 
 	// Move outside the session window.
-	comp.Tick(CandleTime{Candle: Candle{Open: 10050, High: 10150, Low: 9950, Close: 10100}, Timestamp: FromTime(outside)})
+	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10050, High: 10150, Low: 9950, Close: 10100}, Timestamp: market.FromTime(outside)})
 	assert.False(t, comp.Trending(), "outside session = not trending regardless of ADX")
 }
 
@@ -221,7 +222,7 @@ func TestCompositeRegimeFilter_AllowSideRequiresAll(t *testing.T) {
 	t.Parallel()
 	// weekly-ema blocks Short when rising; all others allow both sides.
 	// Use a minimal weekly-ema (period=3) as the directional sub-filter.
-	wf, err := NewWeeklyEMAFilter(3, PriceScale)
+	wf, err := NewWeeklyEMAFilter(3, market.PriceScale)
 	require.NoError(t, err)
 	comp := NewCompositeRegimeFilter([]RegimeFilter{wf})
 
@@ -230,14 +231,14 @@ func TestCompositeRegimeFilter_AllowSideRequiresAll(t *testing.T) {
 
 	// Feed rising closes so close ends up above EMA.
 	for i, m := range weeks {
-		wf.Tick(weeklyEMACT(m, Price(100000+i*1000)))
+		wf.Tick(weeklyEMACT(m, market.Price(100000+i*1000)))
 	}
 	lastWeek := weeks[len(weeks)-1].Add(7 * 24 * time.Hour)
-	wf.Tick(weeklyEMACT(lastWeek, Price(120000)))
+	wf.Tick(weeklyEMACT(lastWeek, market.Price(120000)))
 
 	require.True(t, comp.Ready())
-	assert.True(t, comp.AllowSide(Long), "composite must pass Long when sub-filter allows it")
-	assert.False(t, comp.AllowSide(Short), "composite must block Short when any sub-filter blocks it")
+	assert.True(t, comp.AllowSide(market.Long), "composite must pass Long when sub-filter allows it")
+	assert.False(t, comp.AllowSide(market.Short), "composite must block Short when any sub-filter blocks it")
 }
 
 func TestCompositeRegimeFilter_ReadyRequiresAll(t *testing.T) {
@@ -247,12 +248,12 @@ func TestCompositeRegimeFilter_ReadyRequiresAll(t *testing.T) {
 	sessionCfg := RegimeConfig{Kind: "session"}
 	adxCfg := RegimeConfig{Kind: "adx-d1", Params: map[string]any{"period": 14, "threshold": 20.0}}
 
-	sf, _ := GetRegimeFilter(sessionCfg, PriceScale)
-	af, _ := GetRegimeFilter(adxCfg, PriceScale)
+	sf, _ := GetRegimeFilter(sessionCfg, market.PriceScale)
+	af, _ := GetRegimeFilter(adxCfg, market.PriceScale)
 	comp := NewCompositeRegimeFilter([]RegimeFilter{sf, af})
 
 	ts := time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC)
-	comp.Tick(CandleTime{Candle: Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: FromTime(ts)})
+	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: market.FromTime(ts)})
 
 	// Session is ready but ADX-D1 is not → composite not ready.
 	assert.False(t, comp.Ready(), "composite not ready until all sub-filters are ready")

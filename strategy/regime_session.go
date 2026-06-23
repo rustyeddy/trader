@@ -1,6 +1,10 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 // SessionFilter is a regime filter that restricts entries to a specified
 // UTC hour window. Bars outside the window return Trending() = false so
@@ -33,7 +37,7 @@ func (f *SessionFilter) Name() string {
 
 func (f *SessionFilter) Ready() bool { return f.ready }
 
-func (f *SessionFilter) Tick(ct CandleTime) {
+func (f *SessionFilter) Tick(ct market.CandleTime) {
 	f.utcHour = int((int64(ct.Timestamp) % 86400) / 3600)
 	f.ready = true
 }
@@ -45,4 +49,4 @@ func (f *SessionFilter) Trending() bool {
 	return f.utcHour >= f.start && f.utcHour < f.end
 }
 
-func (f *SessionFilter) AllowSide(_ Side) bool { return true }
+func (f *SessionFilter) AllowSide(_ market.Side) bool { return true }

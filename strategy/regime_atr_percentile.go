@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
+)
 
 const (
 	minATRPercentileThreshold = 0.0
@@ -20,17 +25,17 @@ const (
 // Default params: atrPeriod=20, windowSize=200, threshold=20.0.
 // Registered in the factory as "atr-percentile".
 type ATRPercentileFilter struct {
-	atr        *ATR
+	atr        *indicator.ATR
 	atrPeriod  int
 	windowSize int
 	threshold  float64
 
-	window []Price // ring buffer of recent ATR readings
-	pos    int     // next write index
-	count  int     // readings accumulated so far (capped at windowSize)
+	window []market.Price // ring buffer of recent ATR readings
+	pos    int            // next write index
+	count  int            // readings accumulated so far (capped at windowSize)
 }
 
-func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale Scale6) (*ATRPercentileFilter, error) {
+func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale market.Scale6) (*ATRPercentileFilter, error) {
 	if windowSize <= 0 {
 		return nil, fmt.Errorf("ATR percentile window size must be > 0")
 	}
@@ -38,7 +43,7 @@ func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale 
 		return nil, fmt.Errorf("ATR percentile threshold must be between %.0f and %.0f, got %.2f",
 			minATRPercentileThreshold, maxATRPercentileThreshold, threshold)
 	}
-	atr, err := NewATR(atrPeriod, scale)
+	atr, err := indicator.NewATR(atrPeriod, scale)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +52,7 @@ func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale 
 		atrPeriod:  atrPeriod,
 		windowSize: windowSize,
 		threshold:  threshold,
-		window:     make([]Price, windowSize),
+		window:     make([]market.Price, windowSize),
 	}, nil
 }
 
@@ -57,7 +62,7 @@ func (f *ATRPercentileFilter) Name() string {
 
 func (f *ATRPercentileFilter) Ready() bool { return f.atr.Ready() && f.count > 0 }
 
-func (f *ATRPercentileFilter) Tick(ct CandleTime) {
+func (f *ATRPercentileFilter) Tick(ct market.CandleTime) {
 	f.atr.Update(ct.Candle)
 	if !f.atr.Ready() {
 		return
@@ -77,7 +82,7 @@ func (f *ATRPercentileFilter) Trending() bool {
 	return f.percentile() >= f.threshold
 }
 
-func (f *ATRPercentileFilter) AllowSide(_ Side) bool { return true }
+func (f *ATRPercentileFilter) AllowSide(_ market.Side) bool { return true }
 
 // Percentile exposes the current ATR percentile rank for debugging.
 // Equal ATR values share the middle of their tie bucket, so a completely flat

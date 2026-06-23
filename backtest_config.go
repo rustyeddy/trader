@@ -60,13 +60,6 @@ type DataConfig struct {
 	Strict     *bool  `json:"strict" yaml:"strict"`
 }
 
-// StrategyConfig names the strategy and carries arbitrary key/value parameters
-// that are passed to the strategy constructor at build time.
-type StrategyConfig struct {
-	Kind   string         `json:"kind" yaml:"kind"`
-	Params map[string]any `json:"params" yaml:"params"`
-}
-
 // LoadConfig reads and parses a YAML or JSON config file from path.
 // The file extension determines the parser (.yaml/.yml → YAML; .json → JSON).
 // Returns an error if the file is missing, unparseable, or contains no runs.

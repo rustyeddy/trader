@@ -1,4 +1,6 @@
-package trader
+package strategy
+
+import "github.com/rustyeddy/trader/market"
 
 // ExitStrategy manages stop placement after a position is open.
 // It is called every bar regardless of position state (to warm up indicators),
@@ -11,25 +13,25 @@ type ExitStrategy interface {
 	Ready() bool
 
 	// Tick updates internal indicators. Called every bar before strategy.Update().
-	Tick(c Candle)
+	Tick(c market.Candle)
 
 	// InitialStop returns the stop price at the moment a position is opened.
-	InitialStop(side Side, entry Price, c Candle) Price
+	InitialStop(side market.Side, entry market.Price, c market.Candle) market.Price
 
 	// UpdateStop returns the new stop price for an open lot each bar.
 	// extreme is the lot's ExtremePrice (highest high for longs, lowest low for shorts).
 	// The implementation must never move the stop against the position.
-	UpdateStop(side Side, currentStop Price, entry Price, extreme Price, c Candle) Price
+	UpdateStop(side market.Side, currentStop market.Price, entry market.Price, extreme market.Price, c market.Candle) market.Price
 }
 
 // NoopExit is a pass-through exit strategy. It never moves stops; the entry
 // strategy is responsible for setting an initial stop via the OpenRequest.
 type NoopExit struct{}
 
-func (NoopExit) Name() string { return "" }
-func (NoopExit) Ready() bool  { return true }
-func (NoopExit) Tick(_ Candle) {}
-func (NoopExit) InitialStop(_ Side, _ Price, _ Candle) Price { return 0 }
-func (NoopExit) UpdateStop(_ Side, currentStop Price, _ Price, _ Price, _ Candle) Price {
+func (NoopExit) Name() string                                                            { return "" }
+func (NoopExit) Ready() bool                                                             { return true }
+func (NoopExit) Tick(_ market.Candle)                                                    {}
+func (NoopExit) InitialStop(_ market.Side, _ market.Price, _ market.Candle) market.Price { return 0 }
+func (NoopExit) UpdateStop(_ market.Side, currentStop market.Price, _ market.Price, _ market.Price, _ market.Candle) market.Price {
 	return currentStop
 }

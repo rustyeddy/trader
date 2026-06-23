@@ -1,8 +1,10 @@
-package trader
+package strategy
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // RegimeConfig mirrors the regime: section of a YAML backtest config.
@@ -45,7 +47,7 @@ func (c *CompositeRegimeFilter) Ready() bool {
 	return true
 }
 
-func (c *CompositeRegimeFilter) Tick(ct CandleTime) {
+func (c *CompositeRegimeFilter) Tick(ct market.CandleTime) {
 	for _, f := range c.filters {
 		f.Tick(ct)
 	}
@@ -60,7 +62,7 @@ func (c *CompositeRegimeFilter) Trending() bool {
 	return true
 }
 
-func (c *CompositeRegimeFilter) AllowSide(side Side) bool {
+func (c *CompositeRegimeFilter) AllowSide(side market.Side) bool {
 	for _, f := range c.filters {
 		if !f.AllowSide(side) {
 			return false
@@ -71,7 +73,7 @@ func (c *CompositeRegimeFilter) AllowSide(side Side) bool {
 
 // GetRegimeFilter constructs a RegimeFilter from cfg.
 // If cfg.Kind is empty, NoopRegime is returned (no filtering).
-func GetRegimeFilter(cfg RegimeConfig, scale Scale6) (RegimeFilter, error) {
+func GetRegimeFilter(cfg RegimeConfig, scale market.Scale6) (RegimeFilter, error) {
 	switch normalizeRegimeKind(cfg.Kind) {
 	case "", "noop":
 		return NoopRegime{}, nil

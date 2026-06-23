@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
+)
 
 // ChandelierExit trails the stop from the highest-high (long) or lowest-low
 // (short) seen since entry, offset by N×ATR. The stop only ever moves in the
@@ -9,18 +14,18 @@ import "fmt"
 // Per-position extreme tracking lives on Lot.ExtremePrice so multiple
 // concurrent lots each maintain their own watermark.
 type ChandelierExit struct {
-	atr        *ATR
-	multiplier Units // fixed-point; use UnitsFromFloat at construction, Float64() at output boundaries
+	atr        *indicator.ATR
+	multiplier market.Units // fixed-point; use UnitsFromFloat at construction, Float64() at output boundaries
 }
 
-func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*ChandelierExit, error) {
-	atr, err := NewATR(atrPeriod, scale)
+func NewChandelierExit(atrPeriod int, multiplier float64, scale market.Scale6) (*ChandelierExit, error) {
+	atr, err := indicator.NewATR(atrPeriod, scale)
 	if err != nil {
 		return nil, err
 	}
 	return &ChandelierExit{
 		atr:        atr,
-		multiplier: UnitsFromFloat(multiplier),
+		multiplier: market.UnitsFromFloat(multiplier),
 	}, nil
 }
 
@@ -31,35 +36,35 @@ func (c *ChandelierExit) Name() string {
 
 func (c *ChandelierExit) Ready() bool { return c.atr.Ready() }
 
-func (c *ChandelierExit) Tick(candle Candle) { c.atr.Update(candle) }
+func (c *ChandelierExit) Tick(candle market.Candle) { c.atr.Update(candle) }
 
 // atrOffset returns the ATR-based stop offset in scaled Price units.
 // All arithmetic is integer; no float64 round-trip.
-func (c *ChandelierExit) atrOffset() Price {
-	return Price(roundDivPositive(int64(c.atr.PriceSum())*int64(c.multiplier), UnitsScale))
+func (c *ChandelierExit) atrOffset() market.Price {
+	return market.Price(indicator.RoundDivPositive(int64(c.atr.PriceSum())*int64(c.multiplier), market.UnitsScale))
 }
 
-func (c *ChandelierExit) InitialStop(side Side, entry Price, candle Candle) Price {
+func (c *ChandelierExit) InitialStop(side market.Side, entry market.Price, candle market.Candle) market.Price {
 	if !c.atr.Ready() {
 		return 0
 	}
 	offset := c.atrOffset()
 	switch side {
-	case Long:
+	case market.Long:
 		stop := entry - offset
 		// entry - offset can underflow for very large ATR values; clamp to zero.
 		if stop < 0 {
 			return 0
 		}
 		return stop
-	case Short:
+	case market.Short:
 		// Short stop is always above entry, so no underflow risk.
 		return entry + offset
 	}
 	return 0
 }
 
-func (c *ChandelierExit) UpdateStop(side Side, currentStop Price, _ Price, extreme Price, candle Candle) Price {
+func (c *ChandelierExit) UpdateStop(side market.Side, currentStop market.Price, _ market.Price, extreme market.Price, candle market.Candle) market.Price {
 	if !c.atr.Ready() {
 		return currentStop
 	}
@@ -68,12 +73,12 @@ func (c *ChandelierExit) UpdateStop(side Side, currentStop Price, _ Price, extre
 	// extreme is already the current-bar watermark advanced by the caller
 	// (highest-high for Long, lowest-low for Short). Use it directly.
 	switch side {
-	case Long:
+	case market.Long:
 		candidate := extreme - offset
 		if candidate > currentStop {
 			return candidate
 		}
-	case Short:
+	case market.Short:
 		candidate := extreme + offset
 		if currentStop == 0 || candidate < currentStop {
 			return candidate

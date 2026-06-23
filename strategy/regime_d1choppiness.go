@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
+)
 
 // D1ChoppinessFilter is a regime filter that applies the Choppiness Index at
 // the daily timeframe while being fed sub-daily bars (e.g. H1). It aggregates
@@ -19,18 +24,18 @@ import "fmt"
 // Registered in the factory as "choppiness-d1".
 type D1ChoppinessFilter struct {
 	period    int
-	ci        *ChoppinessIndex
+	ci        *indicator.ChoppinessIndex
 	threshold float64
 
 	// Intraday accumulation for the current partial daily bar.
 	dailyCandleAccumulator
 }
 
-func NewD1ChoppinessFilter(period int, threshold float64, scale Scale6) (*D1ChoppinessFilter, error) {
+func NewD1ChoppinessFilter(period int, threshold float64, scale market.Scale6) (*D1ChoppinessFilter, error) {
 	if err := validateChoppinessThreshold(threshold); err != nil {
 		return nil, err
 	}
-	ci, err := NewChoppinessIndex(period, scale)
+	ci, err := indicator.NewChoppinessIndex(period, scale)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +52,7 @@ func (f *D1ChoppinessFilter) Name() string {
 
 func (f *D1ChoppinessFilter) Ready() bool { return f.ci.Ready() }
 
-func (f *D1ChoppinessFilter) Tick(ct CandleTime) {
+func (f *D1ChoppinessFilter) Tick(ct market.CandleTime) {
 	if daily, rolled := f.dailyCandleAccumulator.Tick(ct); rolled {
 		f.ci.Update(daily)
 	}
@@ -60,7 +65,7 @@ func (f *D1ChoppinessFilter) Trending() bool {
 	return f.ci.Float64() < f.threshold
 }
 
-func (f *D1ChoppinessFilter) AllowSide(_ Side) bool { return true }
+func (f *D1ChoppinessFilter) AllowSide(_ market.Side) bool { return true }
 
 // Choppiness exposes the raw CI value for debugging.
 func (f *D1ChoppinessFilter) Choppiness() float64 { return f.ci.Float64() }

@@ -1,6 +1,11 @@
-package trader
+package strategy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
+)
 
 const maxChoppinessThreshold = 100.0
 
@@ -12,15 +17,15 @@ const maxChoppinessThreshold = 100.0
 // before consulting the regime state.
 type ChoppinessFilter struct {
 	period    int
-	ci        *ChoppinessIndex
+	ci        *indicator.ChoppinessIndex
 	threshold float64
 }
 
-func NewChoppinessFilter(period int, threshold float64, scale Scale6) (*ChoppinessFilter, error) {
+func NewChoppinessFilter(period int, threshold float64, scale market.Scale6) (*ChoppinessFilter, error) {
 	if err := validateChoppinessThreshold(threshold); err != nil {
 		return nil, err
 	}
-	ci, err := NewChoppinessIndex(period, scale)
+	ci, err := indicator.NewChoppinessIndex(period, scale)
 	if err != nil {
 		return nil, err
 	}
@@ -35,8 +40,8 @@ func (f *ChoppinessFilter) Name() string {
 	return fmt.Sprintf("Choppiness(%d,%.1f)", f.period, f.threshold)
 }
 
-func (f *ChoppinessFilter) Ready() bool        { return f.ci.Ready() }
-func (f *ChoppinessFilter) Tick(ct CandleTime) { f.ci.Update(ct.Candle) }
+func (f *ChoppinessFilter) Ready() bool               { return f.ci.Ready() }
+func (f *ChoppinessFilter) Tick(ct market.CandleTime) { f.ci.Update(ct.Candle) }
 
 func (f *ChoppinessFilter) Trending() bool {
 	if !f.ci.Ready() {
@@ -45,7 +50,7 @@ func (f *ChoppinessFilter) Trending() bool {
 	return f.ci.Float64() < f.threshold
 }
 
-func (f *ChoppinessFilter) AllowSide(_ Side) bool { return true }
+func (f *ChoppinessFilter) AllowSide(_ market.Side) bool { return true }
 
 // Choppiness exposes the raw CI value for logging/debugging.
 func (f *ChoppinessFilter) Choppiness() float64 { return f.ci.Float64() }

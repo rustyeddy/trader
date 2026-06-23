@@ -1,4 +1,4 @@
-package trader
+package strategy
 
 import (
 	"fmt"
@@ -6,6 +6,14 @@ import (
 	"strings"
 	"sync"
 )
+
+// StrategyConfig names the strategy and carries arbitrary key/value parameters
+// that are passed to the strategy constructor at build time. It mirrors the
+// strategy: section of a YAML backtest config.
+type StrategyConfig struct {
+	Kind   string         `json:"kind" yaml:"kind"`
+	Params map[string]any `json:"params" yaml:"params"`
+}
 
 // StrategyConstructor builds a Strategy from a config's Params map.
 // Each implementation owns its own param parsing.

@@ -1,25 +1,27 @@
-package trader
+package strategy
+
+import "github.com/rustyeddy/trader/market"
 
 // dailyCandleAccumulator rolls intraday CandleTime values into completed UTC
 // daily candles while keeping the current partial day available for inspection.
 type dailyCandleAccumulator struct {
 	dayNum   int64
-	dayOpen  Price
-	dayHigh  Price
-	dayLow   Price
-	dayClose Price
+	dayOpen  market.Price
+	dayHigh  market.Price
+	dayLow   market.Price
+	dayClose market.Price
 	hasDay   bool
 }
 
-func (a *dailyCandleAccumulator) Tick(ct CandleTime) (Candle, bool) {
+func (a *dailyCandleAccumulator) Tick(ct market.CandleTime) (market.Candle, bool) {
 	dayNum := int64(ct.Timestamp) / 86400
 	if !a.hasDay {
 		a.start(dayNum, ct.Candle)
-		return Candle{}, false
+		return market.Candle{}, false
 	}
 
 	if dayNum != a.dayNum {
-		completed := Candle{
+		completed := market.Candle{
 			Open:  a.dayOpen,
 			High:  a.dayHigh,
 			Low:   a.dayLow,
@@ -36,10 +38,10 @@ func (a *dailyCandleAccumulator) Tick(ct CandleTime) (Candle, bool) {
 		a.dayLow = ct.Low
 	}
 	a.dayClose = ct.Close
-	return Candle{}, false
+	return market.Candle{}, false
 }
 
-func (a *dailyCandleAccumulator) start(dayNum int64, c Candle) {
+func (a *dailyCandleAccumulator) start(dayNum int64, c market.Candle) {
 	a.dayNum = dayNum
 	a.dayOpen = c.Open
 	a.dayHigh = c.High

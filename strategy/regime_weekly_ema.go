@@ -1,8 +1,11 @@
-package trader
+package strategy
 
 import (
 	"fmt"
 	"time"
+
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 )
 
 // WeeklyEMAFilter is a directional regime filter that aggregates sub-daily bars
@@ -21,21 +24,21 @@ import (
 //
 // Registered in the factory as "weekly-ema".
 type WeeklyEMAFilter struct {
-	ema    *EMA
+	ema    *indicator.EMA
 	period int
 
 	// Weekly bar accumulation.
 	isoYear int
 	isoWeek int
-	wOpen   Price
-	wHigh   Price
-	wLow    Price
-	wClose  Price
+	wOpen   market.Price
+	wHigh   market.Price
+	wLow    market.Price
+	wClose  market.Price
 	hasWeek bool
 }
 
-func NewWeeklyEMAFilter(period int, scale Scale6) (*WeeklyEMAFilter, error) {
-	ema, err := NewEMA(period, scale)
+func NewWeeklyEMAFilter(period int, scale market.Scale6) (*WeeklyEMAFilter, error) {
+	ema, err := indicator.NewEMA(period, scale)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +54,7 @@ func (f *WeeklyEMAFilter) Name() string {
 
 func (f *WeeklyEMAFilter) Ready() bool { return f.ema.Ready() }
 
-func (f *WeeklyEMAFilter) Tick(ct CandleTime) {
+func (f *WeeklyEMAFilter) Tick(ct market.CandleTime) {
 	t := time.Unix(int64(ct.Timestamp), 0).UTC()
 	year, week := t.ISOWeek()
 
@@ -68,7 +71,7 @@ func (f *WeeklyEMAFilter) Tick(ct CandleTime) {
 
 	if year != f.isoYear || week != f.isoWeek {
 		// Week rolled — finalise the completed weekly bar and update EMA.
-		f.ema.Update(Candle{
+		f.ema.Update(market.Candle{
 			Open:  f.wOpen,
 			High:  f.wHigh,
 			Low:   f.wLow,
@@ -95,16 +98,16 @@ func (f *WeeklyEMAFilter) Tick(ct CandleTime) {
 // Trending always returns true; direction is enforced via AllowSide.
 func (f *WeeklyEMAFilter) Trending() bool { return true }
 
-func (f *WeeklyEMAFilter) AllowSide(side Side) bool {
+func (f *WeeklyEMAFilter) AllowSide(side market.Side) bool {
 	if !f.ema.Ready() {
 		return true
 	}
-	closePrice := PriceSum(f.wClose)
+	closePrice := market.PriceSum(f.wClose)
 	emaVal := f.ema.PriceSum()
 	switch side {
-	case Long:
+	case market.Long:
 		return closePrice > emaVal
-	case Short:
+	case market.Short:
 		return closePrice < emaVal
 	default:
 		return true
