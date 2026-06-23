@@ -20,10 +20,10 @@ import (
 func TestOandaCandleToCandleTime_MidPrice(t *testing.T) {
 	t.Parallel()
 	c := oanda.Candle{
-		Time:     time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
-		BidOpen:  1.09000, AskOpen:  1.09010,
-		BidHigh:  1.09500, AskHigh:  1.09510,
-		BidLow:   1.08900, AskLow:   1.08910,
+		Time:    time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
+		BidOpen: 1.09000, AskOpen: 1.09010,
+		BidHigh: 1.09500, AskHigh: 1.09510,
+		BidLow: 1.08900, AskLow: 1.08910,
 		BidClose: 1.09200, AskClose: 1.09210,
 		Complete: true,
 	}
@@ -43,7 +43,7 @@ func TestOandaCandleToCandleTime_SpreadRecorded(t *testing.T) {
 		BidClose: 1.10000, AskClose: 1.10010,
 		BidOpen: 1.10000, AskOpen: 1.10010,
 		BidHigh: 1.10000, AskHigh: 1.10010,
-		BidLow:  1.10000, AskLow:  1.10010,
+		BidLow: 1.10000, AskLow: 1.10010,
 		Complete: true,
 	}
 	ct := oandaCandleToCandleTime(c, "EURUSD")
@@ -102,7 +102,7 @@ func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
 	lt.sync([]trader.LiveTrade{
-		{ID: "long",  Units: 1000},
+		{ID: "long", Units: 1000},
 		{ID: "short", Units: -500},
 	})
 	lb := lt.toLotBook()
@@ -353,11 +353,11 @@ func TestWarmupFromLocalData_NoDataNoError(t *testing.T) {
 // noopStrategy is a minimal Strategy for tests that records no state.
 type noopStrategy struct{}
 
-func (n *noopStrategy) Name() string             { return "noop" }
-func (n *noopStrategy) Reset()                   {}
-func (n *noopStrategy) Ready() bool              { return true }
-func (n *noopStrategy) StopDescription() string  { return "" }
-func (n *noopStrategy) Update(_ context.Context, _ *trader.CandleTime, _ *trader.Backtest) *trader.StrategyPlan {
+func (n *noopStrategy) Name() string            { return "noop" }
+func (n *noopStrategy) Reset()                  {}
+func (n *noopStrategy) Ready() bool             { return true }
+func (n *noopStrategy) StopDescription() string { return "" }
+func (n *noopStrategy) Update(_ context.Context, _ *trader.CandleTime, _ trader.StrategyContext) *trader.StrategyPlan {
 	return nil
 }
 

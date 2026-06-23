@@ -55,7 +55,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return s.ready }
 
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	if ct == nil {
 		return trader.DefaultPlan()
 	}

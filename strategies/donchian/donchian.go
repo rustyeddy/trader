@@ -181,7 +181,7 @@ func (d *Breakout) adxGatePass(side trader.Side) bool {
 	return d.adx.MinusDI() > d.adx.PlusDI()
 }
 
-func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return trader.DefaultPlan()
@@ -300,12 +300,12 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	return plan
 }
 
-func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *trader.StrategyPlan {
+func emitOpen(ct *trader.CandleTime, run trader.StrategyContext, side trader.Side) *trader.StrategyPlan {
 	plan := &trader.StrategyPlan{}
 
 	alreadyOpen := false
-	if run != nil && run.State != nil && run.State.Lots != nil {
-		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil {
+		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -334,8 +334,8 @@ func emitOpen(ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *tr
 	}
 
 	inst := ""
-	if run != nil && run.Request != nil {
-		inst = run.Request.Instrument
+	if run != nil {
+		inst = run.Instrument()
 	}
 	open := trader.NewOpenRequest(inst, ct, side, 0, 0, "donchian-v6-breakout")
 	plan.Opens = append(plan.Opens, open)

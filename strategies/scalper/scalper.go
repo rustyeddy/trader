@@ -98,7 +98,7 @@ func (s *Strategy) Reset() {
 }
 
 // Update receives each completed M1 candle and returns a StrategyPlan.
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	if ct == nil {
 		return trader.DefaultPlan()
 	}
@@ -113,7 +113,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	}
 
 	// Skip if already in a position (netting account: one at a time).
-	if run != nil && run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
+	if run != nil && run.OpenLots().Len() > 0 {
 		return &trader.StrategyPlan{Reason: "in position"}
 	}
 
@@ -133,8 +133,8 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		s.dipSeen = false
 		stop := s.calcStop(ct)
 		instr := ""
-		if run != nil && run.Request != nil {
-			instr = run.Request.Instrument
+		if run != nil {
+			instr = run.Instrument()
 		}
 		return &trader.StrategyPlan{
 			Opens:  []*trader.OpenRequest{trader.NewOpenRequest(instr, ct, trader.Long, stop, 0, "buy-the-dip")},

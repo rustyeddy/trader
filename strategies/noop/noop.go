@@ -18,7 +18,7 @@ func (Strategy) Name() string            { return "NoOp" }
 func (Strategy) Reset()                  {}
 func (Strategy) Ready() bool             { return true }
 func (Strategy) StopDescription() string { return "" }
-func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 	_ = c
 	return trader.DefaultPlan()

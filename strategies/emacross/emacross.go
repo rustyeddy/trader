@@ -109,7 +109,7 @@ func (x *Cross) Ready() bool {
 	return x.core.Fast.Ready() && x.core.Slow.Ready()
 }
 
-func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return trader.DefaultPlan()
@@ -176,11 +176,11 @@ func absPriceSum(v trader.PriceSum) trader.PriceSum {
 
 // EmitOpen closes any opposite open lots, then opens a new position in the
 // given side. Exported so emacrossadx can reuse it.
-func EmitOpen(c *Core, ct *trader.CandleTime, run *trader.Backtest, side trader.Side) *trader.StrategyPlan {
+func EmitOpen(c *Core, ct *trader.CandleTime, run trader.StrategyContext, side trader.Side) *trader.StrategyPlan {
 	plan := &trader.StrategyPlan{}
 
-	if run != nil && run.State != nil && run.State.Lots != nil {
-		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil {
+		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen || lot.Side == side {
 				return nil
 			}
@@ -201,8 +201,8 @@ func EmitOpen(c *Core, ct *trader.CandleTime, run *trader.Backtest, side trader.
 	}
 
 	inst := ""
-	if run != nil && run.Request != nil {
-		inst = run.Request.Instrument
+	if run != nil {
+		inst = run.Instrument()
 	}
 
 	stop := Stop(c, ct, inst, side)

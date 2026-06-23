@@ -70,13 +70,13 @@ func (s *Strategy) Reset() {
 
 // Update is called on every completed candle. Returns an open request every
 // TradeEvery candles when no position is already open.
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	if ct == nil {
 		return trader.DefaultPlan()
 	}
 
 	// Netting account: one position at a time.
-	if run != nil && run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
+	if run != nil && run.OpenLots().Len() > 0 {
 		return &trader.StrategyPlan{Reason: "in position"}
 	}
 
@@ -90,8 +90,8 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	stop := s.calcStop(ct, side)
 
 	instr := ""
-	if run != nil && run.Request != nil {
-		instr = run.Request.Instrument
+	if run != nil {
+		instr = run.Instrument()
 	}
 
 	reason := fmt.Sprintf("stress-%s", side)

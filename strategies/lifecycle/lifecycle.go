@@ -37,7 +37,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return true }
 
-func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 
 	plan := &trader.StrategyPlan{Reason: "hold"}
@@ -55,14 +55,14 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader
 	}
 
 	if s.bar == 1 && !s.opened {
-		inst := trader.GetInstrument(run.Request.Instrument)
+		inst := trader.GetInstrument(run.Instrument())
 		if inst == nil {
 			plan.Reason = "lifecycle-test-missing-instrument"
 			return plan
 		}
 
 		stop := inst.SubPips(c.Close, trader.PipsFromFloat(s.StopPips))
-		op := trader.NewOpenRequest(run.Request.Instrument, c, trader.Long, stop, 0, "lifecycle-test-open-long")
+		op := trader.NewOpenRequest(run.Instrument(), c, trader.Long, stop, 0, "lifecycle-test-open-long")
 		op.Units = s.Units
 
 		plan.Opens = append(plan.Opens, op)
@@ -73,13 +73,13 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader
 	}
 
 	if s.bar == 3 && s.opened && !s.closed {
-		if run.State == nil || run.State.Lots == nil || run.State.Lots.Len() == 0 {
+		if run == nil || run.OpenLots().Len() == 0 {
 			plan.Reason = "lifecycle-test-no-position-to-close"
 			return plan
 		}
 
 		submitted := false
-		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
+		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
 			if submitted {
 				return nil
 			}

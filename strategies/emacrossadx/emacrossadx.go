@@ -122,7 +122,7 @@ func (x *Strategy) Ready() bool {
 	return true
 }
 
-func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return trader.DefaultPlan()

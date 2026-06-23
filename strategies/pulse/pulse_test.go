@@ -88,7 +88,7 @@ func TestTick_OpensWhenDue(t *testing.T) {
 	cfg.MaxPositions = 3
 	s, _ := New(cfg)
 
-	s.Tick(context.Background(), price, nil) // tick 1 — hold
+	s.Tick(context.Background(), price, nil)         // tick 1 — hold
 	plan := s.Tick(context.Background(), price, nil) // tick 2 — open
 
 	require.NotNil(t, plan.Open)

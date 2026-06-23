@@ -85,7 +85,7 @@ func (f *Fade) Reset() {
 	f.atr.Reset()
 }
 
-func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return trader.DefaultPlan()
@@ -106,8 +106,8 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Ba
 
 	// Check open lots: close any that have reverted to the middle band.
 	hasOpen := false
-	if run != nil && run.State != nil && run.State.Lots != nil {
-		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
+	if run != nil {
+		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -165,9 +165,9 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Ba
 	return plan
 }
 
-func instrumentFrom(run *trader.Backtest) string {
-	if run != nil && run.Request != nil {
-		return run.Request.Instrument
+func instrumentFrom(run trader.StrategyContext) string {
+	if run != nil {
+		return run.Instrument()
 	}
 	return ""
 }

@@ -17,6 +17,27 @@ type Backtest struct {
 	Result  *BacktestResult
 }
 
+// emptyLotBook is returned by OpenLots when no lot state exists, so callers can
+// always safely call Len/Range without a nil check.
+var emptyLotBook = &LotBook{}
+
+// Instrument implements StrategyContext: the instrument being traded.
+func (b *Backtest) Instrument() string {
+	if b == nil || b.Request == nil {
+		return ""
+	}
+	return b.Request.Instrument
+}
+
+// OpenLots implements StrategyContext: a read-only view of the open lots. It
+// never returns nil.
+func (b *Backtest) OpenLots() LotView {
+	if b == nil || b.State == nil || b.State.Lots == nil {
+		return emptyLotBook
+	}
+	return b.State.Lots
+}
+
 // CompiledBacktest is the construction-phase output for one backtest run.
 // It is immutable and contains the resolved config snapshot plus the validated
 // request used to instantiate an executable Backtest later.

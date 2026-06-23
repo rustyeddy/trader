@@ -35,7 +35,7 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	f.candles = append(f.candles, c)
 	plan := &trader.StrategyPlan{Reason: "hold"}
 
@@ -43,18 +43,18 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Bac
 		return plan
 	}
 
-	openTrades := run.State.Lots.Len()
+	openTrades := run.OpenLots().Len()
 	if f.highest < c.High {
 		f.highest = c.High
 		if openTrades > 0 {
 			return plan
 		}
-		inst := trader.GetInstrument(run.Request.Instrument)
+		inst := trader.GetInstrument(run.Instrument())
 		if inst == nil {
 			return nil
 		}
 		stop := inst.SubPips(c.Close, trader.PipsFromFloat(10))
-		op := trader.NewOpenRequest(run.Request.Instrument, c, trader.Long, stop, trader.Price(0), "higher highs")
+		op := trader.NewOpenRequest(run.Instrument(), c, trader.Long, stop, trader.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -65,7 +65,7 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Bac
 		}
 
 		submittedClose := false
-		run.State.Lots.Range(func(lot *trader.Lot) error {
+		run.OpenLots().Range(func(lot *trader.Lot) error {
 			if lot.State != trader.LotOpen {
 				return nil
 			}
@@ -121,7 +121,7 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
 	_ = ctx
 
 	plan := &trader.StrategyPlan{Reason: "hold"}
@@ -145,10 +145,10 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 
 	f.bar++
 
-	if run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
+	if run != nil && run.OpenLots().Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
 			submittedClose := false
-			run.State.Lots.Range(func(lot *trader.Lot) error {
+			run.OpenLots().Range(func(lot *trader.Lot) error {
 				if lot.State != trader.LotOpen {
 					return nil
 				}
@@ -189,7 +189,7 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 		side = trader.Short
 	}
 
-	inst := trader.GetInstrument(run.Request.Instrument)
+	inst := trader.GetInstrument(run.Instrument())
 	if inst == nil {
 		plan.Reason = "fake-02-missing-instrument"
 		return plan
@@ -202,7 +202,7 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 		stop = inst.AddPips(c.Close, trader.PipsFromFloat(f.StopPips))
 	}
 
-	op := trader.NewOpenRequest(run.Request.Instrument, c, side, stop, trader.Price(0), "fake-02-open")
+	op := trader.NewOpenRequest(run.Instrument(), c, side, stop, trader.Price(0), "fake-02-open")
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "fake-02-open"
 
