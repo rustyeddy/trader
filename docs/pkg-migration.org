@@ -42,8 +42,16 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   shim (=marketdata_aliases.go=) is DELETED. Only =marketdata/migration_exports.go=
   remains (exports candleSet for the few root tests that build candle sets).
 
-Remaining in root: accounting/execution, backtest engine, strategy/regime/live
-orchestration, config, and a few orphans.
+- =execution= — accounting + order execution: Account (+close/sizing), Broker
+  (+events), and the trade/order types (Trade, TradeCommon, Position, Lot,
+  LotBook, OpenRequest, CloseRequest, TradeHistory, FIFO matcher). Clean leaf on
+  =market=. Engine<->execution couplings resolved by widening the Broker API
+  (=EventQueueLen/Cap=, =EnqueueEvent=) and exporting =CloseCause=. External
+  callers migrated to =execution.X=; the root shim (=execution_aliases.go=) is
+  retained for the engine until wave 6 (the engine is execution's main consumer).
+
+Remaining in root: backtest engine, strategy/regime/live orchestration, config,
+and a few orphans.
 
 * Lessons Learned (waves 1-3)
 
