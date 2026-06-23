@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/review"
 )
 
 // ParseReviewCSV reads a ChatGPT-generated forex review CSV and returns
@@ -18,7 +19,7 @@ import (
 //
 //	Group, Pair, Structure, Setup Bias, Trend, Volatility,
 //	Support zone, Resistance Zone, Status
-func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
+func ParseReviewCSV(r io.Reader) ([]review.ForexReview, error) {
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
 
@@ -27,7 +28,7 @@ func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 		return nil, fmt.Errorf("review csv: read header: %w", err)
 	}
 
-	var out []trader.ForexReview
+	var out []review.ForexReview
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
@@ -49,7 +50,7 @@ func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 			return nil, fmt.Errorf("review csv: pair %s resistance %q: %w", rec[1], rec[7], err)
 		}
 
-		out = append(out, trader.ForexReview{
+		out = append(out, review.ForexReview{
 			Pair:           strings.TrimSpace(rec[1]),
 			Trend:          strings.TrimSpace(rec[4]),
 			Structure:      strings.TrimSpace(rec[2]),
@@ -59,7 +60,7 @@ func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 			ResistanceHigh: trader.PriceFromFloat(resHi),
 			Volatility:     strings.TrimSpace(rec[5]),
 			SetupBias:      strings.TrimSpace(rec[3]),
-			Status:         trader.ReviewStatus(strings.TrimSpace(rec[8])),
+			Status:         review.ReviewStatus(strings.TrimSpace(rec[8])),
 		})
 	}
 	return out, nil

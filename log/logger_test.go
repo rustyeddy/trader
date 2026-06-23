@@ -1,4 +1,4 @@
-package trader_test
+package log_test
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tlog "github.com/rustyeddy/trader"
+	tlog "github.com/rustyeddy/trader/log"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

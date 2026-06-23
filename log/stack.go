@@ -1,4 +1,4 @@
-package trader
+package log
 
 // This file implements the in-memory log stack: a bounded, thread-safe slice
 // of captured log entries that can be read or cleared at any time. The stack

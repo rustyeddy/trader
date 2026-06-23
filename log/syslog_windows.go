@@ -1,6 +1,6 @@
 //go:build windows
 
-package trader
+package log
 
 import "fmt"
 

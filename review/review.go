@@ -1,6 +1,10 @@
-package trader
+package review
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 // ReviewStatus is the action classification from a ChatGPT forex review row.
 type ReviewStatus string
@@ -12,7 +16,7 @@ const (
 )
 
 // ForexReview holds one row from a ChatGPT forex review CSV.
-// Price fields are stored as scaled int32 (Price) matching the rest of the
+// market.Price fields are stored as scaled int32 (market.Price) matching the rest of the
 // engine; JSON output converts them back to decimal via Float64().
 type ForexReview struct {
 	Group          string       `json:"-"`
@@ -21,10 +25,10 @@ type ForexReview struct {
 	SetupBias      string       `json:"-"`
 	Trend          string       `json:"-"`
 	Volatility     string       `json:"-"`
-	SupportLow     Price        `json:"-"`
-	SupportHigh    Price        `json:"-"`
-	ResistanceLow  Price        `json:"-"`
-	ResistanceHigh Price        `json:"-"`
+	SupportLow     market.Price `json:"-"`
+	SupportHigh    market.Price `json:"-"`
+	ResistanceLow  market.Price `json:"-"`
+	ResistanceHigh market.Price `json:"-"`
 	Status         ReviewStatus `json:"-"`
 }
 

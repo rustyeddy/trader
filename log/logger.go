@@ -20,7 +20,7 @@
 //	// or use the pre-wired module variables
 //	Data.Info("download complete", "key", key)
 //	Backtest.Warn("end of data reached")
-package trader
+package log
 
 import (
 	"context"

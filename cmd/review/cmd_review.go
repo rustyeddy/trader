@@ -6,6 +6,7 @@ import (
 	"text/tabwriter"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
 )
@@ -45,7 +46,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "----\t------\t-----\t----------\t-------\t----------")
 
 	for _, r := range rows {
-		if !all && r.Status == trader.StatusNoTrade {
+		if !all && r.Status == review.StatusNoTrade {
 			continue
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s–%s\t%s–%s\n",

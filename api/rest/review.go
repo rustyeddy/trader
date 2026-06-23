@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -37,23 +37,23 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 
 type reviewResult struct {
 	Total     int                  `json:"total"`
-	Tradeable []trader.ForexReview `json:"tradeable"`
-	Watchlist []trader.ForexReview `json:"watchlist"`
-	NoTrade   []trader.ForexReview `json:"no_trade"`
+	Tradeable []review.ForexReview `json:"tradeable"`
+	Watchlist []review.ForexReview `json:"watchlist"`
+	NoTrade   []review.ForexReview `json:"no_trade"`
 }
 
-func partitionReview(rows []trader.ForexReview) reviewResult {
+func partitionReview(rows []review.ForexReview) reviewResult {
 	result := reviewResult{
 		Total:     len(rows),
-		Tradeable: []trader.ForexReview{},
-		Watchlist: []trader.ForexReview{},
-		NoTrade:   []trader.ForexReview{},
+		Tradeable: []review.ForexReview{},
+		Watchlist: []review.ForexReview{},
+		NoTrade:   []review.ForexReview{},
 	}
 	for _, r := range rows {
 		switch r.Status {
-		case trader.StatusTradeable:
+		case review.StatusTradeable:
 			result.Tradeable = append(result.Tradeable, r)
-		case trader.StatusWatchlist:
+		case review.StatusWatchlist:
 			result.Watchlist = append(result.Watchlist, r)
 		default:
 			result.NoTrade = append(result.NoTrade, r)
