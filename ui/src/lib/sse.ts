@@ -1,4 +1,4 @@
-import { readable, type Readable } from 'svelte/store';
+import { get, readable, type Readable } from 'svelte/store';
 
 export type SSEStatus = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -13,36 +13,7 @@ export interface SSEStore<T> {
  * value of the named event. Closes cleanly when the last subscriber leaves.
  */
 export function sseStore<T>(url: string, eventName: string): SSEStore<T> {
-  let es: EventSource | null = null;
-
-  const data = readable<T | null>(null, (set) => {
-    es = new EventSource(url);
-
-    es.addEventListener(eventName, (e: MessageEvent) => {
-      try {
-        set(JSON.parse(e.data) as T);
-      } catch {
-        // malformed JSON — ignore
-      }
-    });
-
-    return () => {
-      es?.close();
-      es = null;
-    };
-  });
-
-  const status = readable<SSEStatus>('connecting', (set) => {
-    // Re-open a separate EventSource just to track readyState.
-    // Both share the same HTTP connection via the browser's SSE layer.
-    const tracker = new EventSource(url);
-    tracker.onopen = () => set('open');
-    tracker.onerror = () =>
-      set(tracker.readyState === EventSource.CLOSED ? 'closed' : 'error');
-    return () => tracker.close();
-  });
-
-  return { data, status };
+  return createSSEStore(readable(url), eventName);
 }
 
 /**
@@ -76,49 +47,7 @@ export function sseLog<T>(url: string, eventName: string, maxItems = 100): Reada
 
 /** Like sseStore, but re-subscribes whenever the URL store changes. */
 export function sseStoreReactive<T>(url: Readable<string>, eventName: string): SSEStore<T> {
-  const data = readable<T | null>(null, (set) => {
-    let es: EventSource | null = null;
-    const unsub = url.subscribe((u) => {
-      es?.close();
-      es = null;
-      set(null);
-      if (!u) return;
-      es = new EventSource(u);
-      es.addEventListener(eventName, (e: MessageEvent) => {
-        try {
-          set(JSON.parse(e.data) as T);
-        } catch {
-          // malformed JSON — ignore
-        }
-      });
-    });
-    return () => {
-      es?.close();
-      unsub();
-    };
-  });
-
-  const status = readable<SSEStatus>('connecting', (set) => {
-    let es: EventSource | null = null;
-    const unsub = url.subscribe((u) => {
-      es?.close();
-      es = null;
-      if (!u) {
-        set('closed');
-        return;
-      }
-      set('connecting');
-      es = new EventSource(u);
-      es.onopen = () => set('open');
-      es.onerror = () => set(es && es.readyState === EventSource.CLOSED ? 'closed' : 'error');
-    });
-    return () => {
-      es?.close();
-      unsub();
-    };
-  });
-
-  return { data, status };
+  return createSSEStore(url, eventName);
 }
 
 /** Like sseLog, but re-subscribes (and resets the log) when the URL changes. */
@@ -147,4 +76,99 @@ export function sseLogReactive<T>(url: Readable<string>, eventName: string, maxI
       unsub();
     };
   });
+}
+
+function createSSEStore<T>(url: Readable<string>, eventName: string): SSEStore<T> {
+  let es: EventSource | null = null;
+  let urlUnsub: (() => void) | null = null;
+  let subscribers = 0;
+  let dataValue: T | null = null;
+  let statusValue: SSEStatus = get(url) ? 'connecting' : 'closed';
+
+  const dataSubs = new Set<(value: T | null) => void>();
+  const statusSubs = new Set<(value: SSEStatus) => void>();
+
+  const setData = (value: T | null) => {
+    dataValue = value;
+    for (const sub of dataSubs) sub(value);
+  };
+  const setStatus = (value: SSEStatus) => {
+    statusValue = value;
+    for (const sub of statusSubs) sub(value);
+  };
+
+  const close = () => {
+    es?.close();
+    es = null;
+  };
+
+  const connect = (u: string) => {
+    close();
+    setData(null);
+    if (!u) {
+      setStatus('closed');
+      return;
+    }
+    setStatus('connecting');
+    const current = new EventSource(u);
+    es = current;
+
+    current.addEventListener(eventName, (e: MessageEvent) => {
+      if (es !== current) return;
+      try {
+        setData(JSON.parse(e.data) as T);
+      } catch {
+        // malformed JSON — ignore
+      }
+    });
+
+    current.onopen = () => {
+      if (es !== current) return;
+      setStatus('open');
+    };
+    current.onerror = () => {
+      if (es !== current) return;
+      setStatus(current.readyState === EventSource.CLOSED ? 'closed' : 'error');
+    };
+  };
+
+  const start = () => {
+    subscribers += 1;
+    if (subscribers !== 1) return;
+    urlUnsub = url.subscribe(connect);
+  };
+
+  const stop = () => {
+    if (subscribers === 0) return;
+    subscribers -= 1;
+    if (subscribers !== 0) return;
+    close();
+    urlUnsub?.();
+    urlUnsub = null;
+  };
+
+  const subscribeData = (run: (value: T | null) => void) => {
+    dataSubs.add(run);
+    run(dataValue);
+    start();
+    return () => {
+      dataSubs.delete(run);
+      stop();
+    };
+  };
+
+  const subscribeStatus = (run: (value: SSEStatus) => void) => {
+    statusSubs.add(run);
+    run(statusValue);
+    start();
+    return () => {
+      statusSubs.delete(run);
+      stop();
+    };
+  };
+
+  return {
+    data: { subscribe: subscribeData },
+    status: { subscribe: subscribeStatus },
+  };
 }

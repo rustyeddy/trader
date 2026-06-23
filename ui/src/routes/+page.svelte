@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { writable, get } from 'svelte/store';
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { writable } from 'svelte/store';
+  import { createQuery } from '@tanstack/svelte-query';
   import { sseStoreReactive, sseLogReactive } from '$lib/sse';
   import { api, type AccountSummary, type OpenTrade, type Transaction, type TransactionsResult } from '$lib/api';
   import { selectedAccountId, accountStreamUrl, eventsStreamUrl } from '$lib/account';
   import EquitySparkline from '$lib/components/EquitySparkline.svelte';
-
-  const qc = useQueryClient();
 
   // SSE — live account stream for the selected account.
   const { data: account, status: accountStatus } = sseStoreReactive<AccountSummary>(
@@ -22,25 +20,22 @@
   // SSE — live transaction events for the selected account.
   const events = sseLogReactive<Transaction>(eventsStreamUrl, 'transaction', 50);
 
-  // Polled open trades for the selected account. The queryFn reads the current
-  // account at call time; switching accounts invalidates below to refetch.
-  const tradesQuery = createQuery({
-    queryKey: ['trades'],
+  // Polled open trades for the selected account.
+  $: tradesQuery = createQuery({
+    queryKey: ['trades', $selectedAccountId],
     queryFn: () => {
-      const id = get(selectedAccountId);
-      return id ? api.trades(id) : Promise.resolve([] as OpenTrade[]);
+      return $selectedAccountId ? api.trades($selectedAccountId) : Promise.resolve([] as OpenTrade[]);
     },
     refetchInterval: 5_000,
     retry: false,
   });
 
   // Recent closed trades — transactions with realized P/L.
-  const txQuery = createQuery({
-    queryKey: ['transactions'],
+  $: txQuery = createQuery({
+    queryKey: ['transactions', $selectedAccountId],
     queryFn: () => {
-      const id = get(selectedAccountId);
-      return id
-        ? api.transactions(id, 0)
+      return $selectedAccountId
+        ? api.transactions($selectedAccountId, 0)
         : Promise.resolve({ transactions: [], last_transaction_id: 0 } as TransactionsResult);
     },
     refetchInterval: 30_000,
@@ -48,12 +43,10 @@
   });
 
   // On account switch, drop the per-account NAV history and refetch the
-  // account-scoped queries immediately rather than waiting for the next poll.
+  // account-scoped NAV history immediately.
   $: $selectedAccountId, onAccountChange();
   function onAccountChange() {
     navHistory.set([]);
-    qc.invalidateQueries({ queryKey: ['trades'] });
-    qc.invalidateQueries({ queryKey: ['transactions'] });
   }
 
   $: closedTrades = ($txQuery.data?.transactions ?? [])

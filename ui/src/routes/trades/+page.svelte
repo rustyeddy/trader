@@ -11,18 +11,14 @@
   // the explicitly-selected account, never a silent default.
   const acctId = () => get(selectedAccountId);
 
-  const tradesQuery = createQuery({
-    queryKey: ['trades'],
+  $: tradesQuery = createQuery({
+    queryKey: ['trades', $selectedAccountId],
     queryFn: () => {
-      const id = acctId();
-      return id ? api.trades(id) : Promise.resolve([] as OpenTrade[]);
+      return $selectedAccountId ? api.trades($selectedAccountId) : Promise.resolve([] as OpenTrade[]);
     },
     refetchInterval: 5_000,
     retry: false,
   });
-
-  // Refetch the open-trades list immediately when the account changes.
-  $: $selectedAccountId, qc.invalidateQueries({ queryKey: ['trades'] });
 
   // ── Selected trade + side panel ───────────────────────────────────────────
 
@@ -47,7 +43,7 @@
       api.updateStop(acctId(), id, stop, take),
     onSuccess: () => {
       updateMsg = 'Updated.';
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
       setTimeout(() => { updateMsg = ''; }, 3000);
     },
     onError: (e: Error) => { updateMsg = e.message; },
@@ -74,7 +70,7 @@
     onSuccess: () => {
       closeMsg = 'Trade closed.';
       selected = null;
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
     },
     onError: (e: Error) => { closeMsg = e.message; },
   });
@@ -96,6 +92,19 @@
   let orderPreview: PlaceOrderProposal | null = null;
   let orderMsg = '';
 
+  // Reset account-scoped UI state when switching accounts so mutations cannot
+  // target a stale trade or show a preview from another account.
+  $: $selectedAccountId, resetForAccount();
+  function resetForAccount() {
+    deselect();
+    showCloseConfirm = false;
+    closeUnits = '';
+    closeMsg = '';
+    updateMsg = '';
+    orderPreview = null;
+    orderMsg = '';
+  }
+
   const previewMutation = createMutation({
     mutationFn: () => api.placeTrade(acctId(), {
       instrument: orderInstrument, side: orderSide,
@@ -113,7 +122,7 @@
     onSuccess: () => {
       orderMsg = 'Order placed!';
       orderPreview = null;
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
       setTimeout(() => { orderMsg = ''; }, 4000);
     },
     onError: (e: Error) => { orderMsg = e.message; orderPreview = null; },

@@ -16,7 +16,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 // acct builds the scoped route prefix for an account's broker operations.
 function acct(accountId: string): string {
-  return `/api/v1/accounts/${encodeURIComponent(accountId)}`;
+  const id = accountId.trim();
+  if (!id) throw new Error('account ID is required');
+  return `/api/v1/accounts/${encodeURIComponent(id)}`;
 }
 
 export const api = {
