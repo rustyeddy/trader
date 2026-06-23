@@ -212,13 +212,27 @@ marketdata -> data (Provider registry)
 
 ** Sequencing
 
-1. Prep PR (small): lift =CandleIterator= interface into =market=.
-2. Big PR: create =marketdata=; move store*.go + data_*.go (incl. stats) AND
-   =candleSet=/=candle_agg/gap/iter= (out of =market=) into it; delete dead
-   =market= candleSet shims; add root shims for =Store=/=DataManager=/etc.;
-   re-point =data/dukascopy= at =marketdata=.
-3. Cleanup PR: migrate external callers (service/cmd/api, ~8 files) off the root
-   shims to =marketdata= directly; drop shims.
+1. DONE: lift =CandleIterator= interface into =market=.
+2. DONE: created =marketdata=; moved store*.go + data_*.go (incl. stats) AND
+   =candleSet=/=candle_agg/gap/iter= (out of =market=) into it; moved the store
+   global in as =store_globals.go=; deleted the dead =market= candleSet shims;
+   added root shims (=marketdata_aliases.go=) for =Store=/=DataManager=/etc.
+3. TODO (cleanup PR): migrate external callers (service/cmd/api) and
+   =data/dukascopy= off the root shims to =marketdata= directly; drop shims.
+
+** Lessons from the big move
+
+- Qualifying a large package against =market.= has more traps than the small
+  ones: besides field names / literal keys / method names, watch (a) =market.X=
+  landing inside STRING LITERALS (corrupted a CSV header and test fixtures —
+  fix with a quote-aware pass), (b) variadic =...Type= skipped by the
+  =(?<!\.)= lookbehind, (c) embedded-field renames (=timemilli= ->
+  =market.TimeMillis= renames the embedded field, so =.timemilli= accessors
+  must become =.TimeMillis=), and (d) accidentally qualifying the package's OWN
+  consts (=KindCandle= etc. belong to marketdata, not market).
+- Several root *_test.go files were really store/data tests; move them with the
+  package. One engine integration test needed reworking to seed its store via
+  exported API rather than unexported test helpers.
 
 * Revised Migration Order
 
@@ -226,7 +240,9 @@ marketdata -> data (Provider registry)
 2. DONE: =indicator=.
 3. DONE: =journal=.
 4. DONE: =log= (free leaf), =review=, and the =StrategyContext= rework.
-5. =marketdata= — store + data layer (incl. stats); reunites =candleSet=; lifts
+5. DONE: =marketdata= — store + data layer (incl. stats); candleSet reunited;
+   CandleIterator lifted to =market=. Cleanup (caller migration + dukascopy
+   re-point + shim removal) still pending.
    =CandleIterator= to =market=. Largest surface; depends only on =market=.
    See "Wave 4" above.
 6. =execution= — account, broker, trade, position, lot, requests, history.
