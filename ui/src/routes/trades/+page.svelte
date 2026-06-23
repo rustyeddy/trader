@@ -1,16 +1,28 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
   import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
   import { api, type OpenTrade, type PlaceOrderProposal } from '$lib/api';
+  import { selectedAccountId } from '$lib/account';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
   const qc = useQueryClient();
 
+  // acctId reads the current account at call time; trades/orders always act on
+  // the explicitly-selected account, never a silent default.
+  const acctId = () => get(selectedAccountId);
+
   const tradesQuery = createQuery({
     queryKey: ['trades'],
-    queryFn: api.trades,
+    queryFn: () => {
+      const id = acctId();
+      return id ? api.trades(id) : Promise.resolve([] as OpenTrade[]);
+    },
     refetchInterval: 5_000,
     retry: false,
   });
+
+  // Refetch the open-trades list immediately when the account changes.
+  $: $selectedAccountId, qc.invalidateQueries({ queryKey: ['trades'] });
 
   // ── Selected trade + side panel ───────────────────────────────────────────
 
@@ -32,7 +44,7 @@
 
   const updateMutation = createMutation({
     mutationFn: ({ id, stop, take }: { id: string; stop: number; take: number }) =>
-      api.updateStop(id, stop, take),
+      api.updateStop(acctId(), id, stop, take),
     onSuccess: () => {
       updateMsg = 'Updated.';
       qc.invalidateQueries({ queryKey: ['trades'] });
@@ -58,7 +70,7 @@
 
   const closeMutation = createMutation({
     mutationFn: ({ id, units }: { id: string; units: number }) =>
-      api.closeTrade(id, units),
+      api.closeTrade(acctId(), id, units),
     onSuccess: () => {
       closeMsg = 'Trade closed.';
       selected = null;
@@ -85,7 +97,7 @@
   let orderMsg = '';
 
   const previewMutation = createMutation({
-    mutationFn: () => api.placeTrade({
+    mutationFn: () => api.placeTrade(acctId(), {
       instrument: orderInstrument, side: orderSide,
       stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: false,
     }),
@@ -94,7 +106,7 @@
   });
 
   const placeMutation = createMutation({
-    mutationFn: () => api.placeTrade({
+    mutationFn: () => api.placeTrade(acctId(), {
       instrument: orderInstrument, side: orderSide,
       stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: true,
     }),

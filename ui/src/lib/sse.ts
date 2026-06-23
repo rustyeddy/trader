@@ -67,3 +67,84 @@ export function sseLog<T>(url: string, eventName: string, maxItems = 100): Reada
     return () => es.close();
   });
 }
+
+// ── reactive variants ───────────────────────────────────────────────────────
+//
+// These take a Readable<string> URL instead of a fixed string. When the URL
+// changes (e.g. the user switches accounts) the underlying EventSource is torn
+// down and reopened against the new URL. An empty URL leaves the stream idle.
+
+/** Like sseStore, but re-subscribes whenever the URL store changes. */
+export function sseStoreReactive<T>(url: Readable<string>, eventName: string): SSEStore<T> {
+  const data = readable<T | null>(null, (set) => {
+    let es: EventSource | null = null;
+    const unsub = url.subscribe((u) => {
+      es?.close();
+      es = null;
+      set(null);
+      if (!u) return;
+      es = new EventSource(u);
+      es.addEventListener(eventName, (e: MessageEvent) => {
+        try {
+          set(JSON.parse(e.data) as T);
+        } catch {
+          // malformed JSON — ignore
+        }
+      });
+    });
+    return () => {
+      es?.close();
+      unsub();
+    };
+  });
+
+  const status = readable<SSEStatus>('connecting', (set) => {
+    let es: EventSource | null = null;
+    const unsub = url.subscribe((u) => {
+      es?.close();
+      es = null;
+      if (!u) {
+        set('closed');
+        return;
+      }
+      set('connecting');
+      es = new EventSource(u);
+      es.onopen = () => set('open');
+      es.onerror = () => set(es && es.readyState === EventSource.CLOSED ? 'closed' : 'error');
+    });
+    return () => {
+      es?.close();
+      unsub();
+    };
+  });
+
+  return { data, status };
+}
+
+/** Like sseLog, but re-subscribes (and resets the log) when the URL changes. */
+export function sseLogReactive<T>(url: Readable<string>, eventName: string, maxItems = 100): Readable<T[]> {
+  return readable<T[]>([], (set) => {
+    let items: T[] = [];
+    let es: EventSource | null = null;
+    const unsub = url.subscribe((u) => {
+      es?.close();
+      es = null;
+      items = [];
+      set(items);
+      if (!u) return;
+      es = new EventSource(u);
+      es.addEventListener(eventName, (e: MessageEvent) => {
+        try {
+          items = [JSON.parse(e.data) as T, ...items].slice(0, maxItems);
+          set(items);
+        } catch {
+          // ignore
+        }
+      });
+    });
+    return () => {
+      es?.close();
+      unsub();
+    };
+  });
+}
