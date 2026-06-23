@@ -70,13 +70,6 @@ func (it *funcIterator[T]) Close() error {
 	return it.closeFn()
 }
 
-// CandleIterator traverses a sequence of timestamped candles.
-type CandleIterator interface {
-	Next() (CandleTime, bool)
-	Err() error
-	Close() error
-}
-
 type rangedCandleIterator struct {
 	base     *candleSetIterator
 	rng      TimeRange

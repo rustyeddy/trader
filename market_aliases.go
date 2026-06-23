@@ -30,8 +30,9 @@ type (
 	AssetClass = market.AssetClass
 	Instrument = market.Instrument
 
-	Candle     = market.Candle
-	CandleTime = market.CandleTime
+	Candle         = market.Candle
+	CandleTime     = market.CandleTime
+	CandleIterator = market.CandleIterator
 )
 
 // Data-source identifiers.

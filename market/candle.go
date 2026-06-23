@@ -50,3 +50,12 @@ type CandleTime = candleTime
 func (c candleTime) String() string {
 	return c.Candle.String()
 }
+
+// CandleIterator traverses a sequence of timestamped candles. It is the
+// data-access contract: the marketdata layer produces iterators, the engine
+// consumes them, so both depend only on this interface, not each other.
+type CandleIterator interface {
+	Next() (CandleTime, bool)
+	Err() error
+	Close() error
+}
