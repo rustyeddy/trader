@@ -58,7 +58,7 @@ func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 			ResistanceLow:  trader.PriceFromFloat(resLo),
 			ResistanceHigh: trader.PriceFromFloat(resHi),
 			Volatility:     strings.TrimSpace(rec[5]),
-			Setup:          strings.TrimSpace(rec[3]),
+			SetupBias:      strings.TrimSpace(rec[3]),
 			Status:         trader.ReviewStatus(strings.TrimSpace(rec[8])),
 		})
 	}
