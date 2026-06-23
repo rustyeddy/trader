@@ -44,27 +44,15 @@ type LiveRunConfig struct {
 //  2. Queries open trades from the broker and increments their tick counter.
 //  3. Calls strategy.Tick to get a plan.
 //  4. Executes closes, then the open (if any).
-func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error {
-	if cfg.Strategy == nil {
-		return fmt.Errorf("live runner: strategy is required")
+func (a *Account) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error {
+	if err := validateLiveRunConfig(&cfg); err != nil {
+		return err
 	}
-	if cfg.Instrument == "" {
-		return fmt.Errorf("live runner: instrument is required")
-	}
-	if cfg.TickInterval <= 0 {
-		cfg.TickInterval = 60 * time.Second
-	}
-	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = 0.1
-	}
-	if s.OANDA == nil {
+	if a.svc.OANDA == nil {
 		return fmt.Errorf("live runner: OANDA client not configured")
 	}
-	if err := s.ResolveAccount(ctx); err != nil {
-		return fmt.Errorf("live runner: %w", err)
-	}
 
-	log := s.Log
+	log := a.svc.Log
 	if log == nil {
 		log = slog.Default()
 	}
@@ -77,7 +65,7 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 
 	// tickCounts tracks how many ticks each open trade has been held.
 	// Seeded from OANDA open-time on startup so a restart doesn't reset ages.
-	tickCounts := s.seedTickCounts(ctx, cfg, log)
+	tickCounts := a.seedTickCounts(ctx, cfg, log)
 
 	ticker := time.NewTicker(cfg.TickInterval)
 	defer ticker.Stop()
@@ -96,7 +84,7 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 			log.Info("live runner: market open, resuming", "instrument", cfg.Instrument)
 			marketWasClosed = false
 		}
-		if err := s.runOneTick(ctx, cfg, tickCounts, log); err != nil {
+		if err := a.runOneTick(ctx, cfg, tickCounts, log); err != nil {
 			log.Warn("live runner: tick error", "err", err)
 		}
 	}
@@ -115,14 +103,48 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	}
 }
 
-func (s *Service) runOneTick(
+// validateLiveRunConfig checks required fields and applies defaults in place.
+func validateLiveRunConfig(cfg *LiveRunConfig) error {
+	if cfg.Strategy == nil {
+		return fmt.Errorf("live runner: strategy is required")
+	}
+	if cfg.Instrument == "" {
+		return fmt.Errorf("live runner: instrument is required")
+	}
+	if cfg.TickInterval <= 0 {
+		cfg.TickInterval = 60 * time.Second
+	}
+	if cfg.RiskPct <= 0 {
+		cfg.RiskPct = 0.1
+	}
+	return nil
+}
+
+// RunLiveStrategy runs a live strategy loop on the default account. Config is
+// validated (and the OANDA client checked) before the account is resolved so
+// callers see precise errors without a network round-trip.
+func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error {
+	if err := validateLiveRunConfig(&cfg); err != nil {
+		return err
+	}
+	if s.OANDA == nil {
+		return fmt.Errorf("live runner: OANDA client not configured")
+	}
+	acc, err := s.DefaultAccount(ctx)
+	if err != nil {
+		return fmt.Errorf("live runner: %w", err)
+	}
+	return acc.RunLiveStrategy(ctx, cfg)
+}
+
+func (a *Account) runOneTick(
 	ctx context.Context,
 	cfg LiveRunConfig,
 	tickCounts map[string]int,
 	log *slog.Logger,
 ) error {
 	// 1. Current price.
-	prices, err := s.OANDA.GetPricing(ctx, s.AccountID, cfg.Instrument)
+	prices, err := a.svc.OANDA.GetPricing(ctx, a.ID, cfg.Instrument)
 	if err != nil {
 		return fmt.Errorf("get pricing: %w", err)
 	}
@@ -138,7 +160,7 @@ func (s *Service) runOneTick(
 	}
 
 	// 2. Open trades on the account, filtered to this instrument.
-	allTrades, err := s.OANDA.GetOpenTrades(ctx, s.AccountID)
+	allTrades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
 	if err != nil {
 		return fmt.Errorf("get open trades: %w", err)
 	}
@@ -194,7 +216,7 @@ func (s *Service) runOneTick(
 
 	// 4. Execute closes first.
 	for _, id := range plan.CloseIDs {
-		if _, err := s.OANDA.CloseTrade(ctx, s.AccountID, id, 0); err != nil {
+		if _, err := a.svc.OANDA.CloseTrade(ctx, a.ID, id, 0); err != nil {
 			log.Warn("live runner: close trade failed", "trade_id", id, "err", err)
 			continue
 		}
@@ -222,7 +244,7 @@ func (s *Service) runOneTick(
 		"reason", plan.Open.Reason,
 	)
 
-	result, err := s.PlaceMarketOrder(ctx, PlaceMarketOrderRequest{
+	result, err := a.PlaceMarketOrder(ctx, PlaceMarketOrderRequest{
 		Instrument:     cfg.Instrument,
 		Side:           plan.Open.Side,
 		RiskPct:        riskPct,
@@ -244,7 +266,7 @@ func (s *Service) runOneTick(
 			"reason", plan.Open.Reason,
 		)
 		if cfg.BotID != "" {
-			s.RegisterTradeBotID(result.Filled.TradeID, cfg.BotID)
+			a.svc.RegisterTradeBotID(result.Filled.TradeID, cfg.BotID)
 		}
 	}
 	return nil
@@ -257,9 +279,9 @@ func (s *Service) runOneTick(
 // The estimate is: elapsed = now − openTime, ticks = elapsed ÷ tickInterval.
 // We seed with (ticks - 1) so that the first increment in runOneTick brings
 // the count to the correct estimated value.
-func (s *Service) seedTickCounts(ctx context.Context, cfg LiveRunConfig, log *slog.Logger) map[string]int {
+func (a *Account) seedTickCounts(ctx context.Context, cfg LiveRunConfig, log *slog.Logger) map[string]int {
 	counts := map[string]int{}
-	trades, err := s.OANDA.GetOpenTrades(ctx, s.AccountID)
+	trades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
 	if err != nil {
 		log.Warn("live runner: could not seed tick counts from open trades", "err", err)
 		return counts

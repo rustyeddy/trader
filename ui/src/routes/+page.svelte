@@ -1,13 +1,14 @@
 <script lang="ts">
   import { writable } from 'svelte/store';
   import { createQuery } from '@tanstack/svelte-query';
-  import { sseStore, sseLog } from '$lib/sse';
-  import { api, type AccountSummary, type Transaction } from '$lib/api';
+  import { sseStoreReactive, sseLogReactive } from '$lib/sse';
+  import { api, type AccountSummary, type OpenTrade, type Transaction, type TransactionsResult } from '$lib/api';
+  import { selectedAccountId, accountStreamUrl, eventsStreamUrl } from '$lib/account';
   import EquitySparkline from '$lib/components/EquitySparkline.svelte';
 
-  // SSE — live account stream.
-  const { data: account, status: accountStatus } = sseStore<AccountSummary>(
-    '/api/v1/stream/account', 'account',
+  // SSE — live account stream for the selected account.
+  const { data: account, status: accountStatus } = sseStoreReactive<AccountSummary>(
+    accountStreamUrl, 'account',
   );
 
   // Build a rolling NAV history for the sparkline (last 120 samples ≈ 10 min).
@@ -16,24 +17,37 @@
     navHistory.update(h => [...h, $account!.NAV].slice(-120));
   }
 
-  // SSE — live transaction events.
-  const events = sseLog<Transaction>('/api/v1/stream/events', 'transaction', 50);
+  // SSE — live transaction events for the selected account.
+  const events = sseLogReactive<Transaction>(eventsStreamUrl, 'transaction', 50);
 
-  // Polled open trades.
-  const tradesQuery = createQuery({
-    queryKey: ['trades'],
-    queryFn: api.trades,
+  // Polled open trades for the selected account.
+  $: tradesQuery = createQuery({
+    queryKey: ['trades', $selectedAccountId],
+    queryFn: () => {
+      return $selectedAccountId ? api.trades($selectedAccountId) : Promise.resolve([] as OpenTrade[]);
+    },
     refetchInterval: 5_000,
     retry: false,
   });
 
   // Recent closed trades — transactions with realized P/L.
-  const txQuery = createQuery({
-    queryKey: ['transactions'],
-    queryFn: () => api.transactions(0),
+  $: txQuery = createQuery({
+    queryKey: ['transactions', $selectedAccountId],
+    queryFn: () => {
+      return $selectedAccountId
+        ? api.transactions($selectedAccountId, 0)
+        : Promise.resolve({ transactions: [], last_transaction_id: 0 } as TransactionsResult);
+    },
     refetchInterval: 30_000,
     retry: false,
   });
+
+  // On account switch, drop the per-account NAV history and refetch the
+  // account-scoped NAV history immediately.
+  $: $selectedAccountId, onAccountChange();
+  function onAccountChange() {
+    navHistory.set([]);
+  }
 
   $: closedTrades = ($txQuery.data?.transactions ?? [])
     .filter(t => t.Type === 'ORDER_FILL' && t.PL !== 0)

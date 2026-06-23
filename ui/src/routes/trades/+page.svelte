@@ -1,13 +1,21 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
   import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
   import { api, type OpenTrade, type PlaceOrderProposal } from '$lib/api';
+  import { selectedAccountId } from '$lib/account';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
   const qc = useQueryClient();
 
-  const tradesQuery = createQuery({
-    queryKey: ['trades'],
-    queryFn: api.trades,
+  // acctId reads the current account at call time; trades/orders always act on
+  // the explicitly-selected account, never a silent default.
+  const acctId = () => get(selectedAccountId);
+
+  $: tradesQuery = createQuery({
+    queryKey: ['trades', $selectedAccountId],
+    queryFn: () => {
+      return $selectedAccountId ? api.trades($selectedAccountId) : Promise.resolve([] as OpenTrade[]);
+    },
     refetchInterval: 5_000,
     retry: false,
   });
@@ -32,10 +40,10 @@
 
   const updateMutation = createMutation({
     mutationFn: ({ id, stop, take }: { id: string; stop: number; take: number }) =>
-      api.updateStop(id, stop, take),
+      api.updateStop(acctId(), id, stop, take),
     onSuccess: () => {
       updateMsg = 'Updated.';
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
       setTimeout(() => { updateMsg = ''; }, 3000);
     },
     onError: (e: Error) => { updateMsg = e.message; },
@@ -58,11 +66,11 @@
 
   const closeMutation = createMutation({
     mutationFn: ({ id, units }: { id: string; units: number }) =>
-      api.closeTrade(id, units),
+      api.closeTrade(acctId(), id, units),
     onSuccess: () => {
       closeMsg = 'Trade closed.';
       selected = null;
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
     },
     onError: (e: Error) => { closeMsg = e.message; },
   });
@@ -84,8 +92,24 @@
   let orderPreview: PlaceOrderProposal | null = null;
   let orderMsg = '';
 
+  // Reset account-scoped UI state when switching accounts so mutations cannot
+  // target a stale trade or show a preview from another account.
+  $: {
+    $selectedAccountId;
+    resetForAccount();
+  }
+  function resetForAccount() {
+    deselect();
+    showCloseConfirm = false;
+    closeUnits = '';
+    closeMsg = '';
+    updateMsg = '';
+    orderPreview = null;
+    orderMsg = '';
+  }
+
   const previewMutation = createMutation({
-    mutationFn: () => api.placeTrade({
+    mutationFn: () => api.placeTrade(acctId(), {
       instrument: orderInstrument, side: orderSide,
       stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: false,
     }),
@@ -94,14 +118,14 @@
   });
 
   const placeMutation = createMutation({
-    mutationFn: () => api.placeTrade({
+    mutationFn: () => api.placeTrade(acctId(), {
       instrument: orderInstrument, side: orderSide,
       stop_pips: orderStopPips, risk_pct: orderRiskPct, confirm: true,
     }),
     onSuccess: () => {
       orderMsg = 'Order placed!';
       orderPreview = null;
-      qc.invalidateQueries({ queryKey: ['trades'] });
+      qc.invalidateQueries({ queryKey: ['trades', acctId()] });
       setTimeout(() => { orderMsg = ''; }, 4000);
     },
     onError: (e: Error) => { orderMsg = e.message; orderPreview = null; },

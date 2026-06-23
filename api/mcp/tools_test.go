@@ -51,11 +51,53 @@ func newBotSrv() *Server {
 
 func TestToolListBots_Empty(t *testing.T) {
 	srv := newBotSrv()
-	got, rpcErr := srv.toolListBots()
+	got, rpcErr := srv.toolListBots(context.Background(), nil)
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
 	content := payload["content"].([]map[string]any)
 	assert.Contains(t, content[0]["text"].(string), `"count": 0`)
+}
+
+func TestListAccountsToolRegistered(t *testing.T) {
+	srv := newBotSrv()
+	names := map[string]bool{}
+	for _, td := range srv.tools() {
+		names[td.Name] = true
+	}
+	assert.True(t, names["list_accounts"], "list_accounts tool must be advertised")
+}
+
+// TestWriteToolsRequireAccountID verifies mutating tools reject a missing
+// account_id rather than silently defaulting to the first account.
+func TestWriteToolsRequireAccountID(t *testing.T) {
+	srv := newBotSrv() // write enabled, no OANDA — writeAccount fires before any network
+
+	_, rpcErr := srv.toolPlaceOrder(context.Background(), mustJSON(t, map[string]any{
+		"instrument": "EUR_USD", "side": "long", "stop_pips": 20.0,
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "account_id is required")
+
+	_, rpcErr = srv.toolCloseTrade(context.Background(), mustJSON(t, map[string]any{"trade_id": "123"}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "account_id is required")
+
+	_, rpcErr = srv.toolUpdateStop(context.Background(), mustJSON(t, map[string]any{"trade_id": "123", "stop_price": 1.1}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "account_id is required")
+
+	_, rpcErr = srv.toolStartBot(context.Background(), mustJSON(t, map[string]any{
+		"instrument": "EUR_USD", "strategy": "noop",
+	}))
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "account_id is required")
+}
+
+func mustJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }
 
 func TestToolGetBot_MissingID(t *testing.T) {

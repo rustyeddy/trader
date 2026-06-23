@@ -14,30 +14,43 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return res.json() as Promise<T>;
 }
 
+// acct builds the scoped route prefix for an account's broker operations.
+function acct(accountId: string): string {
+  const id = accountId.trim();
+  if (!id) throw new Error('account ID is required');
+  return `/api/v1/accounts/${encodeURIComponent(id)}`;
+}
+
 export const api = {
   health: () => request<{ status: string }>('GET', '/health'),
 
-  account: () => request<AccountSummary>('GET', '/api/v1/account'),
+  // Accounts the configured token can access; default flagged for the UI.
+  accounts: () => request<AccountsResult>('GET', '/api/v1/accounts'),
+  defaultAccount: () => request<AccountInfo>('GET', '/api/v1/accounts/default'),
 
-  trades: () => request<OpenTrade[]>('GET', '/api/v1/trades'),
+  account: (accountId: string) =>
+    request<AccountSummary>('GET', `${acct(accountId)}/account`),
 
-  closeTrade: (tradeId: string, units = 0) =>
-    request<CloseTradeResult>('DELETE', `/api/v1/trades/${tradeId}?units=${units}`),
+  trades: (accountId: string) =>
+    request<OpenTrade[]>('GET', `${acct(accountId)}/trades`),
 
-  updateStop: (tradeId: string, stopPrice: number, takePrice: number) =>
+  closeTrade: (accountId: string, tradeId: string, units = 0) =>
+    request<CloseTradeResult>('DELETE', `${acct(accountId)}/trades/${tradeId}?units=${units}`),
+
+  updateStop: (accountId: string, tradeId: string, stopPrice: number, takePrice: number) =>
     request<{ trade_id: string; status: string }>(
-      'PATCH', `/api/v1/trades/${tradeId}/stop`,
+      'PATCH', `${acct(accountId)}/trades/${tradeId}/stop`,
       { stop_price: stopPrice, take_price: takePrice },
     ),
 
-  transactions: (sinceId = 0) =>
-    request<TransactionsResult>('GET', `/api/v1/transactions?since_id=${sinceId}`),
+  transactions: (accountId: string, sinceId = 0) =>
+    request<TransactionsResult>('GET', `${acct(accountId)}/transactions?since_id=${sinceId}`),
 
-  placeTrade: (req: {
+  placeTrade: (accountId: string, req: {
     instrument: string; side: string;
     risk_pct: number; stop_pips: number;
     units?: number; confirm: boolean;
-  }) => request<PlaceOrderResult>('POST', '/api/v1/trades', req),
+  }) => request<PlaceOrderResult>('POST', `${acct(accountId)}/trades`, req),
 
   runBacktest: (configPaths: string[]) =>
     request<BacktestResult>('POST', '/api/v1/backtests/run', { config_paths: configPaths }),
@@ -61,6 +74,15 @@ export const api = {
 };
 
 // ── Types (mirror Go / OANDA JSON field names) ────────────────────────────
+
+export interface AccountInfo {
+  id: string;
+  is_default: boolean;
+}
+
+export interface AccountsResult {
+  accounts: AccountInfo[];
+}
 
 export interface AccountSummary {
   // Fields from oanda.AccountSummary (Go uses PascalCase → JSON default)
