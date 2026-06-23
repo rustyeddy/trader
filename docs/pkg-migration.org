@@ -36,9 +36,11 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   prerequisite for extracting strategy/regime without the engine.
 - =marketdata= — store + data layer: store/keys/inventory/keymap, DataManager,
   downloader, validation, iterators, plan/wants/writer/ticks, data_stats
-  analyzers, synthetic candle generators, and the candleSet machinery. Shims:
-  =marketdata_aliases.go=, =marketdata/migration_exports.go=. Cleanup pending:
-  migrate service/cmd/api and =data/dukascopy= off the root shims; drop shims.
+  analyzers, synthetic candle generators, the candleSet machinery, AND the data
+  Provider registry (=data/= folded in) plus =marketdata/dukascopy=. All callers
+  (service/cmd/api, root engine, dukascopy) migrated to =marketdata.X=; the root
+  shim (=marketdata_aliases.go=) is DELETED. Only =marketdata/migration_exports.go=
+  remains (exports candleSet for the few root tests that build candle sets).
 
 Remaining in root: accounting/execution, backtest engine, strategy/regime/live
 orchestration, config, and a few orphans.
