@@ -58,17 +58,13 @@ type OrderProposal struct {
 //  4. Build proposal
 //  5. If Confirm: submit to OANDA and return the fill result
 //  6. Otherwise: return the proposal for caller to confirm with the user
-func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequest) (*PlaceMarketOrderResult, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return nil, err
-	}
-
+func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequest) (*PlaceMarketOrderResult, error) {
 	side := strings.ToLower(strings.TrimSpace(req.Side))
 	if side != "long" && side != "short" {
 		return nil, fmt.Errorf("side must be 'long' or 'short', got %q", req.Side)
 	}
 
-	prices, err := s.OANDA.GetPricing(ctx, s.AccountID, req.Instrument)
+	prices, err := a.svc.OANDA.GetPricing(ctx, a.ID, req.Instrument)
 	if err != nil {
 		return nil, fmt.Errorf("get pricing: %w", err)
 	}
@@ -81,7 +77,7 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		entry = px.Bid
 	}
 
-	acct, err := s.OANDA.GetAccountSummary(ctx, s.AccountID)
+	acct, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get account: %w", err)
 	}
@@ -164,12 +160,12 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return result, nil
 	}
 
-	fill, err := s.OANDA.SubmitMarketOrder(ctx, s.AccountID, req.Instrument, units, stop)
+	fill, err := a.svc.OANDA.SubmitMarketOrder(ctx, a.ID, req.Instrument, units, stop)
 	if err != nil {
 		return result, fmt.Errorf("submit order: %w", err)
 	}
 	result.Filled = fill
-	s.Log.Info("service: market order filled",
+	a.svc.Log.Info("service: market order filled",
 		"order_id", fill.OrderID, "trade_id", fill.TradeID,
 		"instrument", fill.Instrument, "units", fill.Units, "price", fill.Price,
 	)
@@ -196,15 +192,12 @@ func quoteToUSDRate(instrument string) float64 {
 }
 
 // CloseTrade closes a trade by ID. Units=0 means full close; >0 is partial.
-func (s *Service) CloseTrade(ctx context.Context, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return nil, err
-	}
-	res, err := s.OANDA.CloseTrade(ctx, s.AccountID, tradeID, units)
+func (a *Account) CloseTrade(ctx context.Context, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
+	res, err := a.svc.OANDA.CloseTrade(ctx, a.ID, tradeID, units)
 	if err != nil {
 		return nil, fmt.Errorf("close trade %s: %w", tradeID, err)
 	}
-	s.Log.Info("service: trade closed",
+	a.svc.Log.Info("service: trade closed",
 		"trade_id", res.TradeID, "units", res.Units, "price", res.Price,
 	)
 	return res, nil
@@ -213,24 +206,56 @@ func (s *Service) CloseTrade(ctx context.Context, tradeID string, units int64) (
 // UpdateTradeStop updates the broker-side stop and/or take-profit on an
 // open trade. stopPx/takePx use the same convention as
 // oanda.Client.UpdateTradeStop: >0 sets, 0 leaves unchanged, <0 cancels.
-func (s *Service) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, takePx float64) error {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return err
-	}
-	if err := s.OANDA.UpdateTradeStop(ctx, s.AccountID, tradeID, stopPx, takePx); err != nil {
+func (a *Account) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, takePx float64) error {
+	if err := a.svc.OANDA.UpdateTradeStop(ctx, a.ID, tradeID, stopPx, takePx); err != nil {
 		return fmt.Errorf("update stop %s: %w", tradeID, err)
 	}
 	return nil
 }
 
 // ListOpenTrades returns the open positions on the account.
-func (s *Service) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return nil, err
-	}
-	trades, err := s.OANDA.GetOpenTrades(ctx, s.AccountID)
+func (a *Account) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
+	trades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get open trades: %w", err)
 	}
 	return trades, nil
+}
+
+// ── default-account back-compat wrappers ─────────────────────────────────────
+
+// PlaceMarketOrder runs the risk-sized order workflow on the default account.
+func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequest) (*PlaceMarketOrderResult, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return acc.PlaceMarketOrder(ctx, req)
+}
+
+// CloseTrade closes a trade on the default account.
+func (s *Service) CloseTrade(ctx context.Context, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return acc.CloseTrade(ctx, tradeID, units)
+}
+
+// UpdateTradeStop updates a stop/take-profit on the default account.
+func (s *Service) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, takePx float64) error {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return err
+	}
+	return acc.UpdateTradeStop(ctx, tradeID, stopPx, takePx)
+}
+
+// ListOpenTrades returns the open positions on the default account.
+func (s *Service) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return acc.ListOpenTrades(ctx)
 }

@@ -29,11 +29,17 @@ type Service struct {
 	OANDA *oanda.Client
 	Log   *slog.Logger
 
-	// AccountID resolved at construction or via ResolveAccount.
+	// AccountID is the default account: the one used by the back-compat
+	// Service-level broker methods and by ResolveAccount. Account-scoped
+	// callers (REST /accounts/{id}/…) go through Account(ctx, id) instead.
 	AccountID string
 
 	// Backtests optionally overrides how compiled backtests are executed.
 	Backtests trader.BacktestExecutor
+
+	// accounts caches the per-account sessions keyed by OANDA account ID.
+	accountsMu sync.RWMutex
+	accounts   map[string]*Account
 
 	botsMu sync.RWMutex
 	bots   map[string]*botEntry
@@ -89,6 +95,7 @@ func New(cfg Config) (*Service, error) {
 		OANDA:       &oanda.Client{BaseURL: baseURL, Token: token},
 		Log:         log,
 		AccountID:   cfg.AccountID,
+		accounts:    make(map[string]*Account),
 		bots:        make(map[string]*botEntry),
 		tradeBotMap: make(map[string]string),
 	}, nil

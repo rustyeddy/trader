@@ -49,12 +49,9 @@ func (s *Service) OpenJournal(cfg JournalConfig) (trader.Journal, error) {
 // If backfillFrom > 0, transactions with ID > backfillFrom are polled and
 // replayed into the journal before the stream subscription starts —
 // useful for downtime recovery.
-func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return 0, err
-	}
-	lj := trader.NewLiveJournal(s.OANDA, s.AccountID, journal, s.Log)
-	lj.SetBotIDLookup(s.LookupTradeBotID)
+func (a *Account) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
+	lj := trader.NewLiveJournal(a.svc.OANDA, a.ID, journal, a.svc.Log)
+	lj.SetBotIDLookup(a.svc.LookupTradeBotID)
 
 	if backfillFrom > 0 {
 		if err := lj.Backfill(ctx, backfillFrom); err != nil {
@@ -67,4 +64,14 @@ func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, ba
 		return lj.LastSeenTxID(), runErr
 	}
 	return lj.LastSeenTxID(), nil
+}
+
+// RunLiveJournal subscribes the default account's transaction stream to the
+// given journal. See Account.RunLiveJournal.
+func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return acc.RunLiveJournal(ctx, journal, backfillFrom)
 }

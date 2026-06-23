@@ -154,9 +154,9 @@ func TestEstimateTicksOpen(t *testing.T) {
 
 // ── seedTickCounts ────────────────────────────────────────────────────────────
 
-// newSeedService builds a Service backed by a fake OANDA HTTP server that
+// newSeedAccount builds an Account backed by a fake OANDA HTTP server that
 // returns the given open-trades JSON body.
-func newSeedService(t *testing.T, body string) (*Service, func()) {
+func newSeedAccount(t *testing.T, body string) (*Account, func()) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -166,7 +166,9 @@ func newSeedService(t *testing.T, body string) (*Service, func()) {
 		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "test"},
 		AccountID: "acc-1",
 	}
-	return svc, srv.Close
+	acc, err := svc.Account(context.Background(), "acc-1")
+	require.NoError(t, err)
+	return acc, srv.Close
 }
 
 // TestSeedTickCounts_SeedValue verifies that seed = estimated-1 so the first
@@ -176,11 +178,11 @@ func TestSeedTickCounts_SeedValue(t *testing.T) {
 	openTime := time.Now().UTC().Add(-3 * time.Hour)
 	body := fmt.Sprintf(`{"trades":[{"id":"trade-1","instrument":"EUR_USD","price":"1.08","currentUnits":"1000","unrealizedPL":"0","openTime":%q}]}`, openTime.Format(time.RFC3339Nano))
 
-	svc, cleanup := newSeedService(t, body)
+	acc, cleanup := newSeedAccount(t, body)
 	defer cleanup()
 
 	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
-	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+	counts := acc.seedTickCounts(context.Background(), cfg, slog.Default())
 
 	require.Contains(t, counts, "trade-1")
 	assert.Equal(t, 2, counts["trade-1"]) // 3 estimated - 1 = 2
@@ -192,11 +194,11 @@ func TestSeedTickCounts_WrongInstrumentIgnored(t *testing.T) {
 	openTime := time.Now().UTC().Add(-2 * time.Hour)
 	body := fmt.Sprintf(`{"trades":[{"id":"trade-9","instrument":"USD_JPY","price":"150","currentUnits":"1000","unrealizedPL":"0","openTime":%q}]}`, openTime.Format(time.RFC3339Nano))
 
-	svc, cleanup := newSeedService(t, body)
+	acc, cleanup := newSeedAccount(t, body)
 	defer cleanup()
 
 	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
-	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+	counts := acc.seedTickCounts(context.Background(), cfg, slog.Default())
 	assert.Empty(t, counts)
 }
 
@@ -205,11 +207,11 @@ func TestSeedTickCounts_WrongInstrumentIgnored(t *testing.T) {
 func TestSeedTickCounts_ZeroOpenTimeSkipped(t *testing.T) {
 	body := `{"trades":[{"id":"trade-2","instrument":"EUR_USD","price":"1.08","currentUnits":"1000","unrealizedPL":"0"}]}`
 
-	svc, cleanup := newSeedService(t, body)
+	acc, cleanup := newSeedAccount(t, body)
 	defer cleanup()
 
 	cfg := LiveRunConfig{Instrument: "EUR_USD", TickInterval: time.Hour}
-	counts := svc.seedTickCounts(context.Background(), cfg, slog.Default())
+	counts := acc.seedTickCounts(context.Background(), cfg, slog.Default())
 	assert.Empty(t, counts)
 }
 

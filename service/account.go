@@ -8,12 +8,9 @@ import (
 )
 
 // GetAccountSummary returns balance, NAV, margin, and unrealized P/L for
-// the resolved account.
-func (s *Service) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return nil, err
-	}
-	summary, err := s.OANDA.GetAccountSummary(ctx, s.AccountID)
+// this account.
+func (a *Account) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary, error) {
+	summary, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get account summary: %w", err)
 	}
@@ -25,19 +22,40 @@ func (s *Service) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary,
 //
 // OANDA caps responses at 1000; if you get back exactly 1000, call again
 // with the new lastID.
-func (s *Service) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.Transaction, int64, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
-		return nil, 0, err
-	}
-	return s.OANDA.GetTransactions(ctx, s.AccountID, sinceID)
+func (a *Account) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.Transaction, int64, error) {
+	return a.svc.OANDA.GetTransactions(ctx, a.ID, sinceID)
 }
 
 // StreamTransactions opens a push subscription to the OANDA transaction
 // stream. The returned channel closes when ctx is cancelled or the stream
 // errors out (final event carries non-nil Err in the error case).
-func (s *Service) StreamTransactions(ctx context.Context, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
-	if err := s.ResolveAccount(ctx); err != nil {
+func (a *Account) StreamTransactions(ctx context.Context, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
+	return a.svc.OANDA.StreamTransactions(ctx, a.ID, opts)
+}
+
+// GetAccountSummary resolves the default account and returns its summary.
+func (s *Service) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return s.OANDA.StreamTransactions(ctx, s.AccountID, opts)
+	return acc.GetAccountSummary(ctx)
+}
+
+// GetTransactions polls transactions on the default account.
+func (s *Service) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.Transaction, int64, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return acc.GetTransactions(ctx, sinceID)
+}
+
+// StreamTransactions opens a transaction stream on the default account.
+func (s *Service) StreamTransactions(ctx context.Context, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
+	acc, err := s.defaultAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return acc.StreamTransactions(ctx, opts)
 }

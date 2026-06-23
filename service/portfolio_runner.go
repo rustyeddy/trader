@@ -41,7 +41,8 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 	if s.OANDA == nil {
 		return fmt.Errorf("portfolio: OANDA client not configured")
 	}
-	if err := s.ResolveAccount(ctx); err != nil {
+	acct, err := s.defaultAccount(ctx)
+	if err != nil {
 		return fmt.Errorf("portfolio: %w", err)
 	}
 
@@ -51,14 +52,14 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 	}
 
 	cb := &drawdownCircuitBreaker{
-		svc:      s,
+		acct:     acct,
 		limitPct: cfg.DrawdownCircuitPct,
 		log:      log,
 	}
 
 	log.Info("portfolio: starting",
 		"instruments", len(cfg.Instruments),
-		"account", s.AccountID,
+		"account", acct.ID,
 		"drawdown_limit_pct", cfg.DrawdownCircuitPct,
 	)
 
@@ -75,7 +76,7 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 		go func(inst InstrumentRunConfig) {
 			defer wg.Done()
 			strategy := &circuitBreakerStrategy{inner: inst.Strategy, cb: cb}
-			err := s.RunLiveStrategy(ctx, LiveRunConfig{
+			err := acct.RunLiveStrategy(ctx, LiveRunConfig{
 				Instrument:   inst.Instrument,
 				TickInterval: tick,
 				Strategy:     strategy,
@@ -122,7 +123,7 @@ func defaultTickInterval(granularity string) time.Duration {
 type drawdownCircuitBreaker struct {
 	mu       sync.Mutex
 	peakNAV  float64
-	svc      *Service
+	acct     *Account
 	limitPct float64
 	log      *slog.Logger
 }
@@ -132,7 +133,7 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 	if cb.limitPct <= 0 {
 		return true
 	}
-	nav, err := cb.svc.accountNAV(ctx)
+	nav, err := cb.acct.accountNAV(ctx)
 	if err != nil {
 		cb.log.Warn("circuit breaker: could not fetch NAV", "err", err)
 		return true // fail open — don't block on transient errors
@@ -159,8 +160,8 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 }
 
 // accountNAV fetches the current account NAV (equity) from OANDA.
-func (s *Service) accountNAV(ctx context.Context) (float64, error) {
-	summary, err := s.OANDA.GetAccountSummary(ctx, s.AccountID)
+func (a *Account) accountNAV(ctx context.Context) (float64, error) {
+	summary, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
 	if err != nil {
 		return 0, err
 	}
