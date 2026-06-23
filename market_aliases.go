@@ -89,13 +89,9 @@ var ErrTickNotFound = market.ErrTickNotFound
 // These mirror the additive exports in market/migration_exports.go and keep the
 // lowercase call sites in root unchanged during the migration.
 type (
-	timemilli         = market.TimeMillis
-	candleTime        = market.CandleTime
-	candleSet         = market.CandleSet
-	candleSetIterator = market.CandleSetIterator
+	timemilli  = market.TimeMillis
+	candleTime = market.CandleTime
 )
-
-var newMonthlyCandleSet = market.NewMonthlyCandleSet
 
 var (
 	mulDivCeil64          = market.MulDivCeil64

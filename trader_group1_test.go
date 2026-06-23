@@ -214,20 +214,21 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	broker := NewBroker("broker")
 	broker.Account = withAcctBroker.Account
 
-	useTempStore(t)
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := &Store{basedir: GetStore().basedir}
-	writeMonthlyCandles(t, s, "EURUSD", H1, 2024, time.January, map[time.Time]Candle{
-		ts: {
-			Open:      Price(1100000),
-			High:      Price(1102000),
-			Low:       Price(1099000),
-			Close:     Price(1101000),
-			AvgSpread: Price(10),
-			MaxSpread: Price(20),
-			Ticks:     42,
-		},
-	})
+	s := NewStoreAt(t.TempDir())
+	t.Cleanup(SwapStore(s))
+	cs, err := newMonthlyCandleSet("EURUSD", H1, FromTime(ts), PriceScale, SourceCandles)
+	require.NoError(t, err)
+	require.NoError(t, cs.AddCandle(FromTime(ts), Candle{
+		Open:      Price(1100000),
+		High:      Price(1102000),
+		Low:       Price(1099000),
+		Close:     Price(1101000),
+		AvgSpread: Price(10),
+		MaxSpread: Price(20),
+		Ticks:     42,
+	}))
+	require.NoError(t, s.WriteCSV(cs))
 
 	dm := NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &Trader{Broker: broker, DataManager: dm}

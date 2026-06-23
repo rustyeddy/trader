@@ -34,18 +34,6 @@ func NewTimeRange(start, end Timestamp, tf Timeframe) TimeRange { return newTime
 func MonthRange(year, month int) TimeRange                      { return monthRange(year, month) }
 func ParseRawPrice(s string) (Price, error)                     { return parseRawPrice(s) }
 
-// Candle-set machinery still used by the root store/data layer across the
-// boundary. The exported methods (AddCandle, Aggregate, Iterator, ...) are
-// already public; these expose the (unexported) types and constructor.
-type (
-	CandleSet         = candleSet
-	CandleSetIterator = candleSetIterator
-)
-
-func NewMonthlyCandleSet(inst string, tf Timeframe, monthStart Timestamp, scale Scale6, source string) (*CandleSet, error) {
-	return newMonthlyCandleSet(inst, tf, monthStart, scale, source)
-}
-
 // Misc formatting/time helpers still used by root.
 func FormatScaledPrice(price Price, scale int32) string { return formatScaledPrice(price, scale) }
 func TimeMilliFromTime(t time.Time) TimeMillis          { return timeMilliFromTime(t) }
