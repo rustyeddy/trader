@@ -39,7 +39,7 @@ func newBotsTestServer(t *testing.T) *Server {
 
 func TestHandleListBots_Empty(t *testing.T) {
 	srv := newBotsTestServer(t)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/bots", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/accounts/test-account/bots", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -72,7 +72,7 @@ func TestHandleStartBot_NoOANDA(t *testing.T) {
 		Instrument: "EUR_USD",
 		Strategy:   service.StrategyConfig{Kind: "pulse"},
 	})
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots", bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
@@ -80,7 +80,7 @@ func TestHandleStartBot_NoOANDA(t *testing.T) {
 
 func TestHandleStartBot_BadJSON(t *testing.T) {
 	srv := newBotsTestServer(t)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots", bytes.NewReader([]byte("notjson")))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader([]byte("notjson")))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -91,7 +91,7 @@ func TestHandleStartBot_MissingInstrument(t *testing.T) {
 	body, _ := json.Marshal(service.BotConfig{
 		Strategy: service.StrategyConfig{Kind: "pulse"},
 	})
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots", bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -107,7 +107,7 @@ func TestHandleStartBot_UnknownStrategy(t *testing.T) {
 		Instrument: "EUR_USD",
 		Strategy:   service.StrategyConfig{Kind: "bogus"},
 	})
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots", bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -123,7 +123,7 @@ func TestHandleStartBot_CreatesBot(t *testing.T) {
 			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
 		},
 	})
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots", bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -135,7 +135,7 @@ func TestHandleStartBot_CreatesBot(t *testing.T) {
 	assert.NotEmpty(t, status.ID)
 
 	// GET /api/v1/bots should list it.
-	r2 := httptest.NewRequest(http.MethodGet, "/api/v1/bots", nil)
+	r2 := httptest.NewRequest(http.MethodGet, "/api/v1/accounts/test-account/bots", nil)
 	w2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w2, r2)
 	require.Equal(t, http.StatusOK, w2.Code)

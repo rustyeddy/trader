@@ -63,24 +63,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/accounts", s.handleListAccounts)
 	mux.HandleFunc("GET /api/v1/accounts/default", s.handleDefaultAccount)
 
-	// Account & trades (OANDA required). Each operation is reachable two ways:
-	//   - legacy, un-scoped: operates on the server's default account
-	//   - scoped: /api/v1/accounts/{accountID}/… targets a specific account
-	// Both map to the same handler; resolveAccount picks the account from the
-	// {accountID} path value when present, else the default.
-	for _, p := range []string{"/api/v1", "/api/v1/accounts/{accountID}"} {
-		mux.HandleFunc("GET "+p+"/account", s.handleGetAccount)
-		mux.HandleFunc("GET "+p+"/prices", s.handleGetPrices)
-		mux.HandleFunc("GET "+p+"/trades", s.handleListTrades)
-		mux.HandleFunc("POST "+p+"/trades", s.handlePlaceOrder)
-		mux.HandleFunc("PATCH "+p+"/trades/{id}/stop", s.handleUpdateStop)
-		mux.HandleFunc("DELETE "+p+"/trades/{id}", s.handleCloseTrade)
-		mux.HandleFunc("GET "+p+"/transactions", s.handleGetTransactions)
-		mux.HandleFunc("POST "+p+"/bots", s.handleStartBot)
-		mux.HandleFunc("GET "+p+"/bots", s.handleListBots)
-		mux.HandleFunc("GET "+p+"/stream/account", s.handleStreamAccount)
-		mux.HandleFunc("GET "+p+"/stream/events", s.handleStreamEvents)
-	}
+	// Account & trades (OANDA required). All account-specific operations are
+	// scoped to an explicit account: /api/v1/accounts/{accountID}/…. There are
+	// no un-scoped account routes — mutations must always name their account.
+	const acct = "/api/v1/accounts/{accountID}"
+	mux.HandleFunc("GET "+acct+"/account", s.handleGetAccount)
+	mux.HandleFunc("GET "+acct+"/trades", s.handleListTrades)
+	mux.HandleFunc("POST "+acct+"/trades", s.handlePlaceOrder)
+	mux.HandleFunc("PATCH "+acct+"/trades/{id}/stop", s.handleUpdateStop)
+	mux.HandleFunc("DELETE "+acct+"/trades/{id}", s.handleCloseTrade)
+	mux.HandleFunc("GET "+acct+"/transactions", s.handleGetTransactions)
+	mux.HandleFunc("POST "+acct+"/bots", s.handleStartBot)
+	mux.HandleFunc("GET "+acct+"/bots", s.handleListBots)
+	mux.HandleFunc("GET "+acct+"/stream/account", s.handleStreamAccount)
+	mux.HandleFunc("GET "+acct+"/stream/events", s.handleStreamEvents)
+
+	// Prices are market data, not account-specific; this read defaults to the
+	// first account internally and stays un-scoped.
+	mux.HandleFunc("GET /api/v1/prices", s.handleGetPrices)
 
 	mux.HandleFunc("GET /api/v1/candles/validate", s.handleValidateCandles)
 	mux.HandleFunc("GET /api/v1/candles/{instrument}", s.handleGetCandlesCSV)
@@ -231,9 +231,11 @@ func (s *Server) requireOANDA(w http.ResponseWriter) bool {
 }
 
 // resolveAccount returns the account a request targets. Scoped routes carry an
-// {accountID} path value; legacy routes have none and resolve to the server's
-// default account. Writes the appropriate HTTP error and returns ok=false when
-// OANDA is unconfigured or the account cannot be resolved.
+// {accountID} path value and resolve to exactly that account. The few un-scoped
+// read routes (e.g. prices) carry none and resolve to the first/default account
+// — appropriate only for reads, never for mutations. Writes the appropriate
+// HTTP error and returns ok=false when OANDA is unconfigured or the account
+// cannot be resolved.
 func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*service.Account, bool) {
 	if !s.requireOANDA(w) {
 		return nil, false
@@ -245,7 +247,7 @@ func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*servic
 	if id := r.PathValue("accountID"); id != "" {
 		acc, err = s.svc.Account(r.Context(), id)
 	} else {
-		acc, err = s.svc.DefaultAccount(r.Context())
+		acc, err = s.svc.FirstAccount(r.Context())
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("resolve account: %v", err))

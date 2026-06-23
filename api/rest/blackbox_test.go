@@ -98,7 +98,7 @@ func TestBlackbox_CORS_Preflight(t *testing.T) {
 
 func TestBlackbox_NoOANDA_Account503(t *testing.T) {
 	ts, _ := newBlackboxServer(t)
-	resp := get(t, ts, "/api/v1/account")
+	resp := get(t, ts, "/api/v1/accounts/acc/account")
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 
 	var body map[string]string
@@ -108,22 +108,22 @@ func TestBlackbox_NoOANDA_Account503(t *testing.T) {
 
 func TestBlackbox_NoOANDA_Trades503(t *testing.T) {
 	ts, _ := newBlackboxServer(t)
-	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/trades").StatusCode)
+	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/accounts/acc/trades").StatusCode)
 }
 
 func TestBlackbox_NoOANDA_Transactions503(t *testing.T) {
 	ts, _ := newBlackboxServer(t)
-	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/transactions").StatusCode)
+	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/accounts/acc/transactions").StatusCode)
 }
 
 func TestBlackbox_NoOANDA_StreamAccount503(t *testing.T) {
 	ts, _ := newBlackboxServer(t)
-	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/stream/account").StatusCode)
+	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/accounts/acc/stream/account").StatusCode)
 }
 
 func TestBlackbox_NoOANDA_StreamEvents503(t *testing.T) {
 	ts, _ := newBlackboxServer(t)
-	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/stream/events").StatusCode)
+	assert.Equal(t, http.StatusServiceUnavailable, get(t, ts, "/api/v1/accounts/acc/stream/events").StatusCode)
 }
 
 // ── Stream backtest placeholder ────────────────────────────────────────────────
@@ -169,7 +169,9 @@ func TestBlackbox_ListBacktests_InstrumentFilter(t *testing.T) {
 	resp := get(t, ts, "/api/v1/backtests?instrument=EUR")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var body struct{ Count int `json:"count"` }
+	var body struct {
+		Count int `json:"count"`
+	}
 	decodeJSON(t, resp, &body)
 	assert.Equal(t, 1, body.Count)
 }
@@ -182,7 +184,9 @@ func TestBlackbox_ListBacktests_StrategyFilter(t *testing.T) {
 	resp := get(t, ts, "/api/v1/backtests?strategy=ema")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var body struct{ Count int `json:"count"` }
+	var body struct {
+		Count int `json:"count"`
+	}
 	decodeJSON(t, resp, &body)
 	assert.Equal(t, 1, body.Count)
 }

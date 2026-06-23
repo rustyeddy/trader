@@ -68,9 +68,10 @@ func (a *Account) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceI
 	return out, nil
 }
 
-// GetPrices fetches current bid/ask snapshots on the default account.
+// GetPrices fetches current bid/ask snapshots. Prices are market data, not
+// account-specific, so this read may default to the first account.
 func (s *Service) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceInfo, error) {
-	acc, err := s.DefaultAccount(ctx)
+	acc, err := s.FirstAccount(ctx)
 	if err != nil {
 		return nil, err
 	}

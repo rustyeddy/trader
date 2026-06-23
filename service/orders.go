@@ -251,9 +251,9 @@ func (s *Service) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, t
 	return acc.UpdateTradeStop(ctx, tradeID, stopPx, takePx)
 }
 
-// ListOpenTrades returns the open positions on the default account.
+// ListOpenTrades returns the open positions on the first/default account (read).
 func (s *Service) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
-	acc, err := s.DefaultAccount(ctx)
+	acc, err := s.FirstAccount(ctx)
 	if err != nil {
 		return nil, err
 	}

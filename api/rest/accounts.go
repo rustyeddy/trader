@@ -24,7 +24,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("list accounts: %v", err))
 		return
 	}
-	def, _ := s.svc.DefaultAccount(r.Context())
+	def, _ := s.svc.FirstAccount(r.Context())
 	out := make([]accountInfo, 0, len(accts))
 	for _, a := range accts {
 		out = append(out, accountInfo{
@@ -43,7 +43,7 @@ func (s *Server) handleDefaultAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOANDA(w) {
 		return
 	}
-	acc, err := s.svc.DefaultAccount(r.Context())
+	acc, err := s.svc.FirstAccount(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("default account: %v", err))
 		return

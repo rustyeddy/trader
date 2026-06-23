@@ -38,8 +38,11 @@ type Service struct {
 	Backtests trader.BacktestExecutor
 
 	// accounts caches the per-account sessions keyed by OANDA account ID.
+	// firstID caches the first account discovered for the token, used by
+	// FirstAccount as the read/UI default when no AccountID is configured.
 	accountsMu sync.RWMutex
 	accounts   map[string]*Account
+	firstID    string
 
 	botsMu sync.RWMutex
 	bots   map[string]*botEntry

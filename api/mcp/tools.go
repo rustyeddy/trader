@@ -23,20 +23,30 @@ type toolDef struct {
 func (s *Server) tools() []toolDef {
 	all := []toolDef{
 		{
+			Name:        "list_accounts",
+			Description: "List the OANDA accounts the configured token can access, flagging the default (first) account.",
+			InputSchema: schema(nil, nil),
+		},
+		{
 			Name:        "get_account_summary",
 			Description: "Return current account balance, NAV, margin, and unrealized P/L from OANDA.",
-			InputSchema: schema(nil, nil),
+			InputSchema: schema(map[string]any{
+				"account_id": propAccountReadOptional,
+			}, nil),
 		},
 		{
 			Name:        "list_open_trades",
 			Description: "Return all open positions on the OANDA account.",
-			InputSchema: schema(nil, nil),
+			InputSchema: schema(map[string]any{
+				"account_id": propAccountReadOptional,
+			}, nil),
 		},
 		{
 			Name:        "get_transactions",
 			Description: "Return OANDA account transactions with ID > since_id.",
 			InputSchema: schema(map[string]any{
-				"since_id": prop("integer", "Return transactions with ID greater than this value (0 = from start)"),
+				"account_id": propAccountReadOptional,
+				"since_id":   prop("integer", "Return transactions with ID greater than this value (0 = from start)"),
 			}, nil),
 		},
 		{
@@ -50,6 +60,7 @@ func (s *Server) tools() []toolDef {
 			Name:        "get_prices",
 			Description: "Return live bid/ask prices and spread in pips for one or more instruments. Defaults to all major pairs.",
 			InputSchema: schema(map[string]any{
+				"account_id":  propAccountReadOptional,
 				"instruments": prop("array", "Trader-format instrument symbols to query, e.g. [\"EURUSD\",\"GBPUSD\"]. Empty = all major pairs."),
 			}, nil),
 		},
@@ -126,8 +137,10 @@ func (s *Server) tools() []toolDef {
 	all = append(all,
 		toolDef{
 			Name:        "list_bots",
-			Description: "List all live strategy bots (running and stopped) managed by the server.",
-			InputSchema: schema(nil, nil),
+			Description: "List live strategy bots (running and stopped) on an account; defaults to the first/default account.",
+			InputSchema: schema(map[string]any{
+				"account_id": propAccountReadOptional,
+			}, nil),
 		},
 		toolDef{
 			Name:        "get_bot",
@@ -144,12 +157,13 @@ func (s *Server) tools() []toolDef {
 				Name:        "start_bot",
 				Description: "Start a new live strategy bot on the server.",
 				InputSchema: schema(map[string]any{
+					"account_id":    propAccountWriteRequired,
 					"instrument":    prop("string", "OANDA-format instrument, e.g. EUR_USD"),
 					"strategy":      prop("string", "Strategy kind, e.g. donchian-v6, ema-cross"),
 					"tick_interval": prop("string", "How often the strategy ticks, e.g. 60s, 5m (default 60s)"),
 					"risk_pct":      prop("number", "Percent of account NAV to risk per trade (default 1.0)"),
 					"max_units":     prop("integer", "Maximum position size in units (0 = no limit)"),
-				}, []string{"instrument", "strategy"}),
+				}, []string{"account_id", "instrument", "strategy"}),
 			},
 			toolDef{
 				Name:        "stop_bot",
@@ -178,29 +192,32 @@ func (s *Server) tools() []toolDef {
 				Name:        "place_order",
 				Description: "Size and submit a risk-based market order. Set confirm=false to preview without submitting.",
 				InputSchema: schema(map[string]any{
+					"account_id": propAccountWriteRequired,
 					"instrument": prop("string", "OANDA instrument e.g. EUR_USD, USD_JPY"),
 					"side":       prop("string", "'long' or 'short'"),
 					"risk_pct":   prop("number", "Percent of account NAV to risk (default 1.0)"),
 					"stop_pips":  prop("number", "Stop distance in pips"),
 					"confirm":    prop("boolean", "true to submit; false (default) to preview only"),
-				}, []string{"instrument", "side", "stop_pips"}),
+				}, []string{"account_id", "instrument", "side", "stop_pips"}),
 			},
 			toolDef{
 				Name:        "close_trade",
 				Description: "Close an open trade fully or partially.",
 				InputSchema: schema(map[string]any{
-					"trade_id": prop("string", "OANDA trade ID"),
-					"units":    prop("integer", "Units to close (0 = full close)"),
-				}, []string{"trade_id"}),
+					"account_id": propAccountWriteRequired,
+					"trade_id":   prop("string", "OANDA trade ID"),
+					"units":      prop("integer", "Units to close (0 = full close)"),
+				}, []string{"account_id", "trade_id"}),
 			},
 			toolDef{
 				Name:        "update_stop",
 				Description: "Update the stop-loss and/or take-profit on an open trade. Use 0 to leave unchanged, <0 to cancel.",
 				InputSchema: schema(map[string]any{
+					"account_id": propAccountWriteRequired,
 					"trade_id":   prop("string", "OANDA trade ID"),
 					"stop_price": prop("number", "New stop-loss price (0 = unchanged, <0 = cancel)"),
 					"take_price": prop("number", "New take-profit price (0 = unchanged, <0 = cancel)"),
-				}, []string{"trade_id"}),
+				}, []string{"account_id", "trade_id"}),
 			},
 		)
 	}
@@ -235,12 +252,14 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	}
 
 	switch p.Name {
+	case "list_accounts":
+		return s.toolListAccounts(ctx)
 	case "get_account_summary":
-		return s.toolGetAccountSummary(ctx)
+		return s.toolGetAccountSummary(ctx, p.Arguments)
 	case "get_prices":
 		return s.toolGetPrices(ctx, p.Arguments)
 	case "list_open_trades":
-		return s.toolListOpenTrades(ctx)
+		return s.toolListOpenTrades(ctx, p.Arguments)
 	case "get_transactions":
 		return s.toolGetTransactions(ctx, p.Arguments)
 	case "run_backtest":
@@ -260,7 +279,7 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 	case "get_health":
 		return s.toolGetHealth()
 	case "list_bots":
-		return s.toolListBots()
+		return s.toolListBots(ctx, p.Arguments)
 	case "get_bot":
 		return s.toolGetBot(p.Arguments)
 	case "start_bot":
@@ -300,8 +319,50 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 
 // ── tool implementations ──────────────────────────────────────────────────
 
-func (s *Server) toolGetAccountSummary(ctx context.Context) (any, *rpcError) {
-	summary, err := s.svc.GetAccountSummary(ctx)
+// readAccount resolves the account for a read tool: the named account, or the
+// first/default account when id is empty.
+func (s *Server) readAccount(ctx context.Context, id string) (*service.Account, error) {
+	if id == "" {
+		return s.svc.FirstAccount(ctx)
+	}
+	return s.svc.Account(ctx, id)
+}
+
+// writeAccount resolves the account for a mutating tool. Mutations must name
+// the account explicitly — an empty account_id is an error, never a default.
+func (s *Server) writeAccount(ctx context.Context, id string) (*service.Account, *rpcError) {
+	if id == "" {
+		return nil, &rpcError{Code: errInvalidParams, Message: "account_id is required for write operations"}
+	}
+	acc, err := s.svc.Account(ctx, id)
+	if err != nil {
+		return nil, &rpcError{Code: errInvalidParams, Message: fmt.Sprintf("resolve account: %v", err)}
+	}
+	return acc, nil
+}
+
+func (s *Server) toolListAccounts(ctx context.Context) (any, *rpcError) {
+	accts, err := s.svc.Accounts(ctx)
+	if err != nil {
+		return errContent(fmt.Sprintf("list_accounts: %v", err)), nil
+	}
+	def, _ := s.svc.FirstAccount(ctx)
+	out := make([]map[string]any, 0, len(accts))
+	for _, a := range accts {
+		out = append(out, map[string]any{
+			"id":         a.ID,
+			"is_default": def != nil && a.ID == def.ID,
+		})
+	}
+	return jsonContent(map[string]any{"accounts": out}), nil
+}
+
+func (s *Server) toolGetAccountSummary(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	acc, err := s.readAccount(ctx, parseAccountID(raw))
+	if err != nil {
+		return errContent(fmt.Sprintf("get_account_summary: %v", err)), nil
+	}
+	summary, err := acc.GetAccountSummary(ctx)
 	if err != nil {
 		return errContent(fmt.Sprintf("get_account_summary: %v", err)), nil
 	}
@@ -310,12 +371,17 @@ func (s *Server) toolGetAccountSummary(ctx context.Context) (any, *rpcError) {
 
 func (s *Server) toolGetPrices(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
+		AccountID   string   `json:"account_id"`
 		Instruments []string `json:"instruments"`
 	}
 	if raw != nil {
 		_ = json.Unmarshal(raw, &args)
 	}
-	prices, err := s.svc.GetPrices(ctx, service.GetPricesRequest{
+	acc, err := s.readAccount(ctx, args.AccountID)
+	if err != nil {
+		return errContent(fmt.Sprintf("get_prices: %v", err)), nil
+	}
+	prices, err := acc.GetPrices(ctx, service.GetPricesRequest{
 		Instruments: args.Instruments,
 	})
 	if err != nil {
@@ -324,8 +390,12 @@ func (s *Server) toolGetPrices(ctx context.Context, raw json.RawMessage) (any, *
 	return jsonContent(map[string]any{"prices": prices}), nil
 }
 
-func (s *Server) toolListOpenTrades(ctx context.Context) (any, *rpcError) {
-	trades, err := s.svc.ListOpenTrades(ctx)
+func (s *Server) toolListOpenTrades(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	acc, err := s.readAccount(ctx, parseAccountID(raw))
+	if err != nil {
+		return errContent(fmt.Sprintf("list_open_trades: %v", err)), nil
+	}
+	trades, err := acc.ListOpenTrades(ctx)
 	if err != nil {
 		return errContent(fmt.Sprintf("list_open_trades: %v", err)), nil
 	}
@@ -334,12 +404,17 @@ func (s *Server) toolListOpenTrades(ctx context.Context) (any, *rpcError) {
 
 func (s *Server) toolGetTransactions(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
-		SinceID int64 `json:"since_id"`
+		AccountID string `json:"account_id"`
+		SinceID   int64  `json:"since_id"`
 	}
 	if raw != nil {
 		_ = json.Unmarshal(raw, &args)
 	}
-	txns, lastID, err := s.svc.GetTransactions(ctx, args.SinceID)
+	acc, err := s.readAccount(ctx, args.AccountID)
+	if err != nil {
+		return errContent(fmt.Sprintf("get_transactions: %v", err)), nil
+	}
+	txns, lastID, err := acc.GetTransactions(ctx, args.SinceID)
 	if err != nil {
 		return errContent(fmt.Sprintf("get_transactions: %v", err)), nil
 	}
@@ -347,6 +422,17 @@ func (s *Server) toolGetTransactions(ctx context.Context, raw json.RawMessage) (
 		"transactions":        txns,
 		"last_transaction_id": lastID,
 	}), nil
+}
+
+// parseAccountID extracts the optional account_id field from raw arguments.
+func parseAccountID(raw json.RawMessage) string {
+	var a struct {
+		AccountID string `json:"account_id"`
+	}
+	if raw != nil {
+		_ = json.Unmarshal(raw, &a)
+	}
+	return a.AccountID
 }
 
 func (s *Server) toolRunBacktest(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
@@ -411,6 +497,7 @@ func (s *Server) toolGetCandlesCSV(ctx context.Context, raw json.RawMessage) (an
 
 func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
+		AccountID  string  `json:"account_id"`
 		Instrument string  `json:"instrument"`
 		Side       string  `json:"side"`
 		RiskPct    float64 `json:"risk_pct"`
@@ -425,11 +512,15 @@ func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, 
 	if args.Instrument == "" || args.Side == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument and side are required"}
 	}
+	acc, rerr := s.writeAccount(ctx, args.AccountID)
+	if rerr != nil {
+		return nil, rerr
+	}
 	riskPct := args.RiskPct
 	if riskPct == 0 {
 		riskPct = 1.0
 	}
-	result, err := s.svc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
 		Instrument: args.Instrument,
 		Side:       strings.ToLower(args.Side),
 		RiskPct:    riskPct,
@@ -446,13 +537,18 @@ func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, 
 
 func (s *Server) toolCloseTrade(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
-		TradeID string `json:"trade_id"`
-		Units   int64  `json:"units"`
+		AccountID string `json:"account_id"`
+		TradeID   string `json:"trade_id"`
+		Units     int64  `json:"units"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil || args.TradeID == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "trade_id is required"}
 	}
-	result, err := s.svc.CloseTrade(ctx, args.TradeID, args.Units)
+	acc, rerr := s.writeAccount(ctx, args.AccountID)
+	if rerr != nil {
+		return nil, rerr
+	}
+	result, err := acc.CloseTrade(ctx, args.TradeID, args.Units)
 	if err != nil {
 		return errContent(fmt.Sprintf("close_trade: %v", err)), nil
 	}
@@ -461,6 +557,7 @@ func (s *Server) toolCloseTrade(ctx context.Context, raw json.RawMessage) (any, 
 
 func (s *Server) toolUpdateStop(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
+		AccountID string  `json:"account_id"`
 		TradeID   string  `json:"trade_id"`
 		StopPrice float64 `json:"stop_price"`
 		TakePrice float64 `json:"take_price"`
@@ -468,7 +565,11 @@ func (s *Server) toolUpdateStop(ctx context.Context, raw json.RawMessage) (any, 
 	if err := json.Unmarshal(raw, &args); err != nil || args.TradeID == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "trade_id is required"}
 	}
-	if err := s.svc.UpdateTradeStop(ctx, args.TradeID, args.StopPrice, args.TakePrice); err != nil {
+	acc, rerr := s.writeAccount(ctx, args.AccountID)
+	if rerr != nil {
+		return nil, rerr
+	}
+	if err := acc.UpdateTradeStop(ctx, args.TradeID, args.StopPrice, args.TakePrice); err != nil {
 		return errContent(fmt.Sprintf("update_stop: %v", err)), nil
 	}
 	return textContent(fmt.Sprintf("stop updated for trade %s", args.TradeID)), nil
@@ -639,8 +740,20 @@ func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any,
 
 // ── bot tools ─────────────────────────────────────────────────────────────
 
-func (s *Server) toolListBots() (any, *rpcError) {
-	bots := s.svc.ListBots()
+// toolListBots lists bots for a specific account when account_id is given,
+// otherwise every bot the server manages across all accounts. The all-accounts
+// view reads in-process state and needs no OANDA connection.
+func (s *Server) toolListBots(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+	var bots []service.BotStatus
+	if id := parseAccountID(raw); id != "" {
+		acc, err := s.svc.Account(ctx, id)
+		if err != nil {
+			return errContent(fmt.Sprintf("list_bots: %v", err)), nil
+		}
+		bots = acc.ListBots()
+	} else {
+		bots = s.svc.ListBots()
+	}
 	return jsonContent(map[string]any{
 		"count": len(bots),
 		"bots":  bots,
@@ -663,6 +776,7 @@ func (s *Server) toolGetBot(raw json.RawMessage) (any, *rpcError) {
 
 func (s *Server) toolStartBot(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var args struct {
+		AccountID    string  `json:"account_id"`
 		Instrument   string  `json:"instrument"`
 		Strategy     string  `json:"strategy"`
 		TickInterval string  `json:"tick_interval"`
@@ -675,11 +789,15 @@ func (s *Server) toolStartBot(ctx context.Context, raw json.RawMessage) (any, *r
 	if args.Instrument == "" || args.Strategy == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument and strategy are required"}
 	}
+	acc, rerr := s.writeAccount(ctx, args.AccountID)
+	if rerr != nil {
+		return nil, rerr
+	}
 	riskPct := args.RiskPct
 	if riskPct == 0 {
 		riskPct = 1.0
 	}
-	status, err := s.svc.StartBot(ctx, service.BotConfig{
+	status, err := acc.StartBot(ctx, service.BotConfig{
 		Instrument:   args.Instrument,
 		TickInterval: args.TickInterval,
 		RiskPct:      riskPct,
@@ -725,6 +843,14 @@ func schema(properties map[string]any, required []string) map[string]any {
 	}
 	return s
 }
+
+// propAccountReadOptional describes the optional account_id argument on read
+// tools, which default to the first/default account when it is omitted.
+var propAccountReadOptional = prop("string", "OANDA account ID; defaults to the first/default account when omitted")
+
+// propAccountWriteRequired describes the required account_id argument on
+// mutating tools, which must always name the account they act on.
+var propAccountWriteRequired = prop("string", "OANDA account ID to act on (required for write operations)")
 
 func prop(typ, description string) map[string]any {
 	m := map[string]any{"type": typ, "description": description}

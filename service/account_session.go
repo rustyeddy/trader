@@ -71,6 +71,43 @@ func (s *Service) Accounts(ctx context.Context) ([]*Account, error) {
 	return out, nil
 }
 
+// FirstAccount returns the account that read-only and UI operations default
+// to: the configured default (s.AccountID) when set, otherwise the first
+// account the token can see. Unlike DefaultAccount it never returns an
+// AmbiguousAccountError — picking the first account is intentional for reads.
+// It does NOT set s.AccountID, so DefaultAccount stays strict for mutations.
+//
+// Mutating operations must never resolve their account through FirstAccount;
+// they require an explicitly named account.
+func (s *Service) FirstAccount(ctx context.Context) (*Account, error) {
+	if s.AccountID != "" {
+		return s.Account(ctx, s.AccountID)
+	}
+
+	s.accountsMu.RLock()
+	id := s.firstID
+	s.accountsMu.RUnlock()
+	if id != "" {
+		return s.Account(ctx, id)
+	}
+
+	if s.OANDA == nil {
+		return nil, fmt.Errorf("account: OANDA client not configured")
+	}
+	refs, err := s.OANDA.GetAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("discover accounts: %w", err)
+	}
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("no accounts found for this token")
+	}
+
+	s.accountsMu.Lock()
+	s.firstID = refs[0].ID
+	s.accountsMu.Unlock()
+	return s.Account(ctx, refs[0].ID)
+}
+
 // DefaultAccount resolves the Service's default account (s.AccountID,
 // auto-discovered via ResolveAccount when unset) and returns its session.
 // The back-compat Service-level broker methods delegate through this so

@@ -65,9 +65,8 @@ func TestListAccounts(t *testing.T) {
 	require.Len(t, body.Accounts, 2)
 	assert.Equal(t, "acc-1", body.Accounts[0].ID)
 	assert.Equal(t, "acc-2", body.Accounts[1].ID)
-	// With two accounts and no preset default, neither can be auto-resolved as
-	// the default — both flags are false rather than a wrong guess.
-	assert.False(t, body.Accounts[0].IsDefault)
+	// With no preset default, the first account is the read/UI default.
+	assert.True(t, body.Accounts[0].IsDefault)
 	assert.False(t, body.Accounts[1].IsDefault)
 }
 
@@ -103,14 +102,12 @@ func TestScopedAccountSummary_TargetsPathAccount(t *testing.T) {
 		"scoped route must query the account from the path")
 }
 
-// TestLegacyAccountSummary_TargetsDefault verifies the un-scoped route resolves
-// to the server's default account.
-func TestLegacyAccountSummary_TargetsDefault(t *testing.T) {
-	srv, hits := newAccountsTestServer(t, "only-acc")
+// TestLegacyAccountRouteRemoved verifies the un-scoped account route no longer
+// exists — account operations are scoped-only.
+func TestLegacyAccountRouteRemoved(t *testing.T) {
+	srv, _ := newAccountsTestServer(t, "only-acc")
 
 	rr := do(t, srv.Handler(), "GET", "/api/v1/account")
-	require.Equal(t, http.StatusOK, rr.Code)
-	require.NotEmpty(t, *hits)
-	assert.Equal(t, "only-acc", (*hits)[len(*hits)-1],
-		"legacy route must query the default account")
+	assert.Equal(t, http.StatusNotFound, rr.Code,
+		"legacy un-scoped /api/v1/account must be gone")
 }
