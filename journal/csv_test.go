@@ -1,4 +1,4 @@
-package trader
+package journal
 
 import (
 	"encoding/csv"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,10 +64,10 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 	open := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	closeT := time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)
 
-	units := Units(123456)
-	entryPrice := PriceFromFloat(1.2345678)
-	exitPrice := PriceFromFloat(1.3456789)
-	realizedPL := MoneyFromFloat(-12.5)
+	units := market.Units(123456)
+	entryPrice := market.PriceFromFloat(1.2345678)
+	exitPrice := market.PriceFromFloat(1.3456789)
+	realizedPL := market.MoneyFromFloat(-12.5)
 
 	err = j.RecordTrade(TradeRecord{
 		TradeID:    "T1",
@@ -74,8 +75,8 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 		Units:      units,
 		EntryPrice: entryPrice,
 		ExitPrice:  exitPrice,
-		OpenTime:   FromTime(open),
-		CloseTime:  FromTime(closeT),
+		OpenTime:   market.FromTime(open),
+		CloseTime:  market.FromTime(closeT),
 		RealizedPL: realizedPL,
 		Reason:     "test",
 	})
@@ -98,8 +99,8 @@ func TestCSVJournalRecordTrade(t *testing.T) {
 		"123456",
 		"1.23457",
 		"1.34568",
-		FromTime(open).String(),
-		FromTime(closeT).String(),
+		market.FromTime(open).String(),
+		market.FromTime(closeT).String(),
 		"-12.500000",
 		"test",
 	}
@@ -118,14 +119,14 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 
 	ts := time.Date(2024, 2, 3, 4, 5, 6, 0, time.UTC)
 
-	balance := MoneyFromFloat(1000.1)
-	equity := MoneyFromFloat(999.9)
-	marginUsed := MoneyFromFloat(10.5)
-	freeMargin := MoneyFromFloat(989.4)
-	marginLevel := MoneyFromFloat(99.99)
+	balance := market.MoneyFromFloat(1000.1)
+	equity := market.MoneyFromFloat(999.9)
+	marginUsed := market.MoneyFromFloat(10.5)
+	freeMargin := market.MoneyFromFloat(989.4)
+	marginLevel := market.MoneyFromFloat(99.99)
 
 	err = j.RecordEquity(EquitySnapshot{
-		Timestamp:   FromTime(ts),
+		Timestamp:   market.FromTime(ts),
 		Balance:     balance,
 		Equity:      equity,
 		MarginUsed:  marginUsed,
@@ -146,7 +147,7 @@ func TestCSVJournalRecordEquity(t *testing.T) {
 	assert.NoError(t, err)
 
 	want := []string{
-		FromTime(ts).String(),
+		market.FromTime(ts).String(),
 		"1000.100000",
 		"999.900000",
 		"10.500000",
@@ -178,7 +179,7 @@ func TestCSVJournalRecordEquityFlushError(t *testing.T) {
 		equityWriter: csv.NewWriter(failingWriter{err: wantErr}),
 	}
 
-	err := j.RecordEquity(EquitySnapshot{Timestamp: FromTime(time.Now().UTC())})
+	err := j.RecordEquity(EquitySnapshot{Timestamp: market.FromTime(time.Now().UTC())})
 	assert.ErrorIs(t, err, wantErr)
 }
 
@@ -290,20 +291,20 @@ func TestCSVJournalReopenAppendsWithoutDuplicatingHeaders(t *testing.T) {
 		TradeID:    "T1",
 		Instrument: "EUR_USD",
 		Units:      1000,
-		EntryPrice: PriceFromFloat(1.1),
-		ExitPrice:  PriceFromFloat(1.2),
-		OpenTime:   FromTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)),
-		CloseTime:  FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
-		RealizedPL: MoneyFromFloat(10),
+		EntryPrice: market.PriceFromFloat(1.1),
+		ExitPrice:  market.PriceFromFloat(1.2),
+		OpenTime:   market.FromTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)),
+		CloseTime:  market.FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
+		RealizedPL: market.MoneyFromFloat(10),
 		Reason:     "first",
 	}))
 	require.NoError(t, j1.RecordEquity(EquitySnapshot{
-		Timestamp:   FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
-		Balance:     MoneyFromFloat(1000),
-		Equity:      MoneyFromFloat(1001),
-		MarginUsed:  MoneyFromFloat(10),
-		FreeMargin:  MoneyFromFloat(991),
-		MarginLevel: MoneyFromFloat(100),
+		Timestamp:   market.FromTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC)),
+		Balance:     market.MoneyFromFloat(1000),
+		Equity:      market.MoneyFromFloat(1001),
+		MarginUsed:  market.MoneyFromFloat(10),
+		FreeMargin:  market.MoneyFromFloat(991),
+		MarginLevel: market.MoneyFromFloat(100),
 	}))
 	require.NoError(t, j1.Close())
 
@@ -313,20 +314,20 @@ func TestCSVJournalReopenAppendsWithoutDuplicatingHeaders(t *testing.T) {
 		TradeID:    "T2",
 		Instrument: "GBP_USD",
 		Units:      2000,
-		EntryPrice: PriceFromFloat(1.3),
-		ExitPrice:  PriceFromFloat(1.4),
-		OpenTime:   FromTime(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)),
-		CloseTime:  FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
-		RealizedPL: MoneyFromFloat(20),
+		EntryPrice: market.PriceFromFloat(1.3),
+		ExitPrice:  market.PriceFromFloat(1.4),
+		OpenTime:   market.FromTime(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)),
+		CloseTime:  market.FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
+		RealizedPL: market.MoneyFromFloat(20),
 		Reason:     "second",
 	}))
 	require.NoError(t, j2.RecordEquity(EquitySnapshot{
-		Timestamp:   FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
-		Balance:     MoneyFromFloat(1002),
-		Equity:      MoneyFromFloat(1003),
-		MarginUsed:  MoneyFromFloat(12),
-		FreeMargin:  MoneyFromFloat(991),
-		MarginLevel: MoneyFromFloat(83.5),
+		Timestamp:   market.FromTime(time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)),
+		Balance:     market.MoneyFromFloat(1002),
+		Equity:      market.MoneyFromFloat(1003),
+		MarginUsed:  market.MoneyFromFloat(12),
+		FreeMargin:  market.MoneyFromFloat(991),
+		MarginLevel: market.MoneyFromFloat(83.5),
 	}))
 	require.NoError(t, j2.Close())
 

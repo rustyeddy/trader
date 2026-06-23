@@ -1,4 +1,4 @@
-package trader
+package journal
 
 import (
 	"bufio"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,20 +29,20 @@ func TestJSONJournalRecordTradeAndEquity(t *testing.T) {
 		TradeID:    "T1",
 		Instrument: "EUR_USD",
 		Units:      123456,
-		EntryPrice: PriceFromFloat(1.23456),
-		ExitPrice:  PriceFromFloat(1.23567),
-		OpenTime:   FromTime(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)),
-		CloseTime:  FromTime(time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)),
-		RealizedPL: MoneyFromFloat(12.5),
+		EntryPrice: market.PriceFromFloat(1.23456),
+		ExitPrice:  market.PriceFromFloat(1.23567),
+		OpenTime:   market.FromTime(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)),
+		CloseTime:  market.FromTime(time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)),
+		RealizedPL: market.MoneyFromFloat(12.5),
 		Reason:     "test",
 	}
 	equity := EquitySnapshot{
-		Timestamp:   FromTime(time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)),
-		Balance:     MoneyFromFloat(1000),
-		Equity:      MoneyFromFloat(1005),
-		MarginUsed:  MoneyFromFloat(10),
-		FreeMargin:  MoneyFromFloat(995),
-		MarginLevel: MoneyFromFloat(100.5),
+		Timestamp:   market.FromTime(time.Date(2024, 1, 2, 4, 5, 6, 0, time.UTC)),
+		Balance:     market.MoneyFromFloat(1000),
+		Equity:      market.MoneyFromFloat(1005),
+		MarginUsed:  market.MoneyFromFloat(10),
+		FreeMargin:  market.MoneyFromFloat(995),
+		MarginLevel: market.MoneyFromFloat(100.5),
 	}
 
 	require.NoError(t, j.RecordTrade(trade))
@@ -151,9 +152,9 @@ func TestReadTradesJSONL_BotIDFilter(t *testing.T) {
 	j, err := NewJSON(tradesPath, equityPath)
 	require.NoError(t, err)
 
-	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "1", BotID: "bot-aaa", RealizedPL: MoneyFromFloat(5)}))
-	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "2", BotID: "bot-bbb", RealizedPL: MoneyFromFloat(-3)}))
-	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "3", BotID: "bot-aaa", RealizedPL: MoneyFromFloat(10)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "1", BotID: "bot-aaa", RealizedPL: market.MoneyFromFloat(5)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "2", BotID: "bot-bbb", RealizedPL: market.MoneyFromFloat(-3)}))
+	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "3", BotID: "bot-aaa", RealizedPL: market.MoneyFromFloat(10)}))
 	require.NoError(t, j.RecordTrade(TradeRecord{TradeID: "4"})) // no bot ID
 	require.NoError(t, j.Close())
 

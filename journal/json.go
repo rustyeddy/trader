@@ -1,4 +1,4 @@
-package trader
+package journal
 
 import (
 	"bufio"

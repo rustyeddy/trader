@@ -110,7 +110,6 @@ var (
 	newTimeRange          = market.NewTimeRange
 	monthRange            = market.MonthRange
 	parseRawPrice         = market.ParseRawPrice
-	formatScaledPrice     = market.FormatScaledPrice
 	timeMilliFromTime     = market.TimeMilliFromTime
 	isFXMarketClosed      = market.IsFXMarketClosed
 )

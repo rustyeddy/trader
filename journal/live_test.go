@@ -1,4 +1,4 @@
-package trader
+package journal
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -72,8 +73,8 @@ func TestLiveJournalHandleTransactionRecordsCloseAndOpenFromMixedFill(t *testing
 
 	require.Len(t, journal.trades, 1)
 	assert.Equal(t, "open-1", journal.trades[0].TradeID)
-	assert.Equal(t, PriceFromFloat(1.11111), journal.trades[0].EntryPrice)
-	assert.Equal(t, FromTime(openTime), journal.trades[0].OpenTime)
+	assert.Equal(t, market.PriceFromFloat(1.11111), journal.trades[0].EntryPrice)
+	assert.Equal(t, market.FromTime(openTime), journal.trades[0].OpenTime)
 	assert.Equal(t, int64(42), lj.LastSeenTxID())
 
 	lj.handleTransaction(oanda.Transaction{
@@ -89,8 +90,8 @@ func TestLiveJournalHandleTransactionRecordsCloseAndOpenFromMixedFill(t *testing
 
 	require.Len(t, journal.trades, 2)
 	assert.Equal(t, "open-2", journal.trades[1].TradeID)
-	assert.Equal(t, PriceFromFloat(1.22222), journal.trades[1].EntryPrice)
-	assert.Equal(t, FromTime(closeTime), journal.trades[1].OpenTime)
+	assert.Equal(t, market.PriceFromFloat(1.22222), journal.trades[1].EntryPrice)
+	assert.Equal(t, market.FromTime(closeTime), journal.trades[1].OpenTime)
 }
 
 func TestLiveJournalRecordClosePreservesPendingOpenOnWriteFailure(t *testing.T) {

@@ -1,10 +1,11 @@
-package trader
+package journal
 
 import (
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,11 +20,11 @@ func TestFormatTradeOrg(t *testing.T) {
 		TradeID:    "trade-12345678-abcd",
 		Instrument: "EUR_USD",
 		Units:      1000,
-		EntryPrice: PriceFromFloat(1.08500),
-		ExitPrice:  PriceFromFloat(1.08750),
-		OpenTime:   FromTime(open),
-		CloseTime:  FromTime(close),
-		RealizedPL: MoneyFromFloat(250.00),
+		EntryPrice: market.PriceFromFloat(1.08500),
+		ExitPrice:  market.PriceFromFloat(1.08750),
+		OpenTime:   market.FromTime(open),
+		CloseTime:  market.FromTime(close),
+		RealizedPL: market.MoneyFromFloat(250.00),
 		Reason:     "trend-following",
 	}
 
@@ -58,11 +59,11 @@ func TestFormatTradeOrgShortID(t *testing.T) {
 		TradeID:    "short",
 		Instrument: "GBP_USD",
 		Units:      500,
-		EntryPrice: PriceFromFloat(1.25000),
-		ExitPrice:  PriceFromFloat(1.25100),
-		OpenTime:   FromTime(time.Now()),
-		CloseTime:  FromTime(time.Now()),
-		RealizedPL: MoneyFromFloat(50.00),
+		EntryPrice: market.PriceFromFloat(1.25000),
+		ExitPrice:  market.PriceFromFloat(1.25100),
+		OpenTime:   market.FromTime(time.Now()),
+		CloseTime:  market.FromTime(time.Now()),
+		RealizedPL: market.MoneyFromFloat(50.00),
 		Reason:     "test",
 	}
 
@@ -77,11 +78,11 @@ func TestFormatTradeOrgNegativePL(t *testing.T) {
 		TradeID:    "loss-trade",
 		Instrument: "USD_JPY",
 		Units:      2000,
-		EntryPrice: PriceFromFloat(150.50),
-		ExitPrice:  PriceFromFloat(150.25),
-		OpenTime:   FromTime(time.Now()),
-		CloseTime:  FromTime(time.Now()),
-		RealizedPL: MoneyFromFloat(-500.00),
+		EntryPrice: market.PriceFromFloat(150.50),
+		ExitPrice:  market.PriceFromFloat(150.25),
+		OpenTime:   market.FromTime(time.Now()),
+		CloseTime:  market.FromTime(time.Now()),
+		RealizedPL: market.MoneyFromFloat(-500.00),
 		Reason:     "stop-loss",
 	}
 
@@ -102,22 +103,22 @@ func TestFormatTradesOrg(t *testing.T) {
 			TradeID:    "trade-001",
 			Instrument: "EUR_USD",
 			Units:      1000,
-			EntryPrice: PriceFromFloat(1.08000),
-			ExitPrice:  PriceFromFloat(1.08200),
-			OpenTime:   FromTime(open1),
-			CloseTime:  FromTime(close1),
-			RealizedPL: MoneyFromFloat(200.00),
+			EntryPrice: market.PriceFromFloat(1.08000),
+			ExitPrice:  market.PriceFromFloat(1.08200),
+			OpenTime:   market.FromTime(open1),
+			CloseTime:  market.FromTime(close1),
+			RealizedPL: market.MoneyFromFloat(200.00),
 			Reason:     "breakout",
 		},
 		{
 			TradeID:    "trade-002",
 			Instrument: "GBP_USD",
 			Units:      500,
-			EntryPrice: PriceFromFloat(1.25000),
-			ExitPrice:  PriceFromFloat(1.24800),
-			OpenTime:   FromTime(open2),
-			CloseTime:  FromTime(close2),
-			RealizedPL: MoneyFromFloat(-100.00),
+			EntryPrice: market.PriceFromFloat(1.25000),
+			ExitPrice:  market.PriceFromFloat(1.24800),
+			OpenTime:   market.FromTime(open2),
+			CloseTime:  market.FromTime(close2),
+			RealizedPL: market.MoneyFromFloat(-100.00),
 			Reason:     "reversal",
 		},
 	}
@@ -149,11 +150,11 @@ func TestFormatTradesOrgSingle(t *testing.T) {
 		TradeID:    "single",
 		Instrument: "USD_CAD",
 		Units:      750,
-		EntryPrice: PriceFromFloat(1.35000),
-		ExitPrice:  PriceFromFloat(1.35100),
-		OpenTime:   FromTime(time.Now()),
-		CloseTime:  FromTime(time.Now()),
-		RealizedPL: MoneyFromFloat(75.00),
+		EntryPrice: market.PriceFromFloat(1.35000),
+		ExitPrice:  market.PriceFromFloat(1.35100),
+		OpenTime:   market.FromTime(time.Now()),
+		CloseTime:  market.FromTime(time.Now()),
+		RealizedPL: market.MoneyFromFloat(75.00),
 		Reason:     "momentum",
 	}
 
@@ -202,9 +203,9 @@ func TestShortDisplayID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ShortDisplayID(tt.input)
+			result := market.ShortDisplayID(tt.input)
 			assert.Equal(t, tt.expected, result)
-			assert.LessOrEqual(t, len(result), 8, "ShortDisplayID result should be at most 8 characters")
+			assert.LessOrEqual(t, len(result), 8, "market.ShortDisplayID result should be at most 8 characters")
 		})
 	}
 }
@@ -216,11 +217,11 @@ func TestFormatTradeOrgStructure(t *testing.T) {
 		TradeID:    "structure-test",
 		Instrument: "AUD_USD",
 		Units:      100,
-		EntryPrice: PriceFromFloat(0.65000),
-		ExitPrice:  PriceFromFloat(0.65500),
-		OpenTime:   FromTime(time.Now()),
-		CloseTime:  FromTime(time.Now()),
-		RealizedPL: MoneyFromFloat(50.00),
+		EntryPrice: market.PriceFromFloat(0.65000),
+		ExitPrice:  market.PriceFromFloat(0.65500),
+		OpenTime:   market.FromTime(time.Now()),
+		CloseTime:  market.FromTime(time.Now()),
+		RealizedPL: market.MoneyFromFloat(50.00),
 		Reason:     "test",
 	}
 
