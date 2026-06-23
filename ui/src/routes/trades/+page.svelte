@@ -94,7 +94,10 @@
 
   // Reset account-scoped UI state when switching accounts so mutations cannot
   // target a stale trade or show a preview from another account.
-  $: $selectedAccountId, resetForAccount();
+  $: {
+    $selectedAccountId;
+    resetForAccount();
+  }
   function resetForAccount() {
     deselect();
     showCloseConfirm = false;

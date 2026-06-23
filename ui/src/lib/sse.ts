@@ -1,4 +1,4 @@
-import { get, readable, type Readable } from 'svelte/store';
+import { readable, type Readable } from 'svelte/store';
 
 export type SSEStatus = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -83,7 +83,7 @@ function createSSEStore<T>(url: Readable<string>, eventName: string): SSEStore<T
   let urlUnsub: (() => void) | null = null;
   let subscribers = 0;
   let dataValue: T | null = null;
-  let statusValue: SSEStatus = get(url) ? 'connecting' : 'closed';
+  let statusValue: SSEStatus = 'closed';
 
   const dataSubs = new Set<(value: T | null) => void>();
   const statusSubs = new Set<(value: SSEStatus) => void>();
