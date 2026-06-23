@@ -28,11 +28,6 @@ import (
 	// Register all real strategies via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
 	_ "github.com/rustyeddy/trader/strategies/donchian"
-	_ "github.com/rustyeddy/trader/strategies/donchianv2"
-	_ "github.com/rustyeddy/trader/strategies/donchianv3"
-	_ "github.com/rustyeddy/trader/strategies/donchianv4"
-	_ "github.com/rustyeddy/trader/strategies/donchianv5"
-	_ "github.com/rustyeddy/trader/strategies/donchianv6"
 	_ "github.com/rustyeddy/trader/strategies/emacross"
 	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
 )
@@ -47,11 +42,6 @@ type sweepStrategy struct {
 
 var sweepStrategies = []sweepStrategy{
 	{kind: "donchian"},
-	{kind: "donchian-v2"},
-	{kind: "donchian-v3"},
-	{kind: "donchian-v4"},
-	{kind: "donchian-v5"},
-	{kind: "donchian-v6"},
 	{kind: "ema-cross", params: map[string]any{
 		"fast": 9,
 		"slow": 21,
@@ -128,7 +118,7 @@ func TestStrategySweep(t *testing.T) {
 							},
 							Strategy: trader.StrategyConfig{Kind: strategy.kind, Params: strategy.params},
 							// Chandelier exit ensures strategies that delegate
-							// stop calculation (donchian-v3+) produce valid stops.
+							// stop calculation (e.g. donchian) produce valid stops.
 							Exit: trader.ExitConfig{
 								Kind: "chandelier",
 								Params: map[string]any{
