@@ -226,7 +226,7 @@ func (a *Account) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error)
 
 // PlaceMarketOrder runs the risk-sized order workflow on the default account.
 func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequest) (*PlaceMarketOrderResult, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 
 // CloseTrade closes a trade on the default account.
 func (s *Service) CloseTrade(ctx context.Context, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func (s *Service) CloseTrade(ctx context.Context, tradeID string, units int64) (
 
 // UpdateTradeStop updates a stop/take-profit on the default account.
 func (s *Service) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, takePx float64) error {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (s *Service) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, t
 
 // ListOpenTrades returns the open positions on the default account.
 func (s *Service) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, err
 	}

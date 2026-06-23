@@ -11,7 +11,8 @@ import (
 // ── POST /api/v1/bots ─────────────────────────────────────────────────────────
 
 func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	var cfg service.BotConfig
@@ -19,7 +20,7 @@ func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	status, err := s.svc.StartBot(r.Context(), cfg)
+	status, err := acc.StartBot(r.Context(), cfg)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("start bot: %v", err))
 		return
@@ -30,7 +31,11 @@ func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/v1/bots ──────────────────────────────────────────────────────────
 
 func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.svc.ListBots())
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, acc.ListBots())
 }
 
 // ── GET /api/v1/bots/{id} ─────────────────────────────────────────────────────

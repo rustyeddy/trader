@@ -14,10 +14,11 @@ import (
 // ── GET /api/v1/account ───────────────────────────────────────────────────
 
 func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
-	summary, err := s.svc.GetAccountSummary(r.Context())
+	summary, err := acc.GetAccountSummary(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("get account: %v", err))
 		return
@@ -28,10 +29,11 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/v1/trades ────────────────────────────────────────────────────
 
 func (s *Server) handleListTrades(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
-	trades, err := s.svc.ListOpenTrades(r.Context())
+	trades, err := acc.ListOpenTrades(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("list trades: %v", err))
 		return
@@ -52,7 +54,8 @@ type placeOrderRequest struct {
 }
 
 func (s *Server) handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	var req placeOrderRequest
@@ -60,7 +63,7 @@ func (s *Server) handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	result, err := s.svc.PlaceMarketOrder(r.Context(), service.PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(r.Context(), service.PlaceMarketOrderRequest{
 		Instrument: req.Instrument,
 		Side:       req.Side,
 		RiskPct:    req.RiskPct,
@@ -88,7 +91,8 @@ type updateStopRequest struct {
 }
 
 func (s *Server) handleUpdateStop(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -101,7 +105,7 @@ func (s *Server) handleUpdateStop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	if err := s.svc.UpdateTradeStop(r.Context(), id, req.StopPrice, req.TakePrice); err != nil {
+	if err := acc.UpdateTradeStop(r.Context(), id, req.StopPrice, req.TakePrice); err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("update stop: %v", err))
 		return
 	}
@@ -111,7 +115,8 @@ func (s *Server) handleUpdateStop(w http.ResponseWriter, r *http.Request) {
 // ── DELETE /api/v1/trades/{id} ────────────────────────────────────────────
 
 func (s *Server) handleCloseTrade(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -128,7 +133,7 @@ func (s *Server) handleCloseTrade(w http.ResponseWriter, r *http.Request) {
 		}
 		units = parsed
 	}
-	result, err := s.svc.CloseTrade(r.Context(), id, units)
+	result, err := acc.CloseTrade(r.Context(), id, units)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("close trade: %v", err))
 		return
@@ -139,7 +144,8 @@ func (s *Server) handleCloseTrade(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/v1/transactions ──────────────────────────────────────────────
 
 func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	var sinceID int64
@@ -151,7 +157,7 @@ func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 		sinceID = parsed
 	}
-	txns, lastID, err := s.svc.GetTransactions(r.Context(), sinceID)
+	txns, lastID, err := acc.GetTransactions(r.Context(), sinceID)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("get transactions: %v", err))
 		return
@@ -165,7 +171,8 @@ func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/v1/prices ───────────────────────────────────────────────────
 
 func (s *Server) handleGetPrices(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	var instruments []string
@@ -176,7 +183,7 @@ func (s *Server) handleGetPrices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	prices, err := s.svc.GetPrices(r.Context(), service.GetPricesRequest{
+	prices, err := acc.GetPrices(r.Context(), service.GetPricesRequest{
 		Instruments: instruments,
 	})
 	if err != nil {

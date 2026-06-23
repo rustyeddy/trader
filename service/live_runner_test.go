@@ -20,9 +20,9 @@ import (
 // stubStrategy is a LiveStrategy that records every Tick call and returns
 // a preset plan.
 type stubStrategy struct {
-	name   string
-	plan   *trader.LivePlan
-	ticks  []tickRecord
+	name  string
+	plan  *trader.LivePlan
+	ticks []tickRecord
 }
 
 type tickRecord struct {

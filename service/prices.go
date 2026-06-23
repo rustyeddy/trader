@@ -25,7 +25,7 @@ type GetPricesRequest struct {
 
 // GetPrices fetches the current bid/ask for the requested instruments from
 // OANDA and returns one PriceInfo per instrument.
-func (s *Service) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceInfo, error) {
+func (a *Account) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceInfo, error) {
 	names := req.Instruments
 	if len(names) == 0 {
 		names = trader.MajorInstruments()
@@ -43,7 +43,7 @@ func (s *Service) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceI
 		instMap[oandaKey] = inst
 	}
 
-	raw, err := s.OANDA.GetPricing(ctx, s.AccountID, oandaNames...)
+	raw, err := a.svc.OANDA.GetPricing(ctx, a.ID, oandaNames...)
 	if err != nil {
 		return nil, err
 	}
@@ -66,4 +66,13 @@ func (s *Service) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceI
 		})
 	}
 	return out, nil
+}
+
+// GetPrices fetches current bid/ask snapshots on the default account.
+func (s *Service) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceInfo, error) {
+	acc, err := s.DefaultAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return acc.GetPrices(ctx, req)
 }

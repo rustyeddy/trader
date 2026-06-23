@@ -23,12 +23,12 @@ type PortfolioRunConfig struct {
 
 // InstrumentRunConfig is one instrument+strategy entry in the portfolio.
 type InstrumentRunConfig struct {
-	Instrument  string        // OANDA format, e.g. "USD_CHF"
-	Granularity string        // "H1" or "D"
+	Instrument   string        // OANDA format, e.g. "USD_CHF"
+	Granularity  string        // "H1" or "D"
 	TickInterval time.Duration // how often to poll; defaults to half the bar period
-	Strategy    trader.LiveStrategy
-	RiskPct     float64
-	MaxUnits    int64
+	Strategy     trader.LiveStrategy
+	RiskPct      float64
+	MaxUnits     int64
 }
 
 // RunPortfolio runs all instruments concurrently until ctx is cancelled.
@@ -41,7 +41,7 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 	if s.OANDA == nil {
 		return fmt.Errorf("portfolio: OANDA client not configured")
 	}
-	acct, err := s.defaultAccount(ctx)
+	acct, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return fmt.Errorf("portfolio: %w", err)
 	}

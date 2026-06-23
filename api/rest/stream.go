@@ -63,7 +63,8 @@ func (s *sseWriter) comment(text string) {
 // snapshot as an "account" SSE event. The connection stays open until the
 // client disconnects.
 func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	sse, ok := newSSEWriter(w)
@@ -75,7 +76,7 @@ func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Send an initial snapshot immediately.
-	if summary, err := s.svc.GetAccountSummary(ctx); err == nil {
+	if summary, err := acc.GetAccountSummary(ctx); err == nil {
 		_ = sse.send("account", summary)
 	}
 
@@ -87,7 +88,7 @@ func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			summary, err := s.svc.GetAccountSummary(ctx)
+			summary, err := acc.GetAccountSummary(ctx)
 			if err != nil {
 				sse.comment("error: " + err.Error())
 				continue
@@ -105,7 +106,8 @@ func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
 // each transaction as a "transaction" SSE event. Heartbeats are forwarded as
 // "heartbeat" events to keep proxies from closing idle connections.
 func (s *Server) handleStreamEvents(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOANDA(w) {
+	acc, ok := s.resolveAccount(w, r)
+	if !ok {
 		return
 	}
 	sse, ok := newSSEWriter(w)
@@ -116,7 +118,7 @@ func (s *Server) handleStreamEvents(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	ch, err := s.svc.StreamTransactions(ctx, oanda.StreamOptions{
+	ch, err := acc.StreamTransactions(ctx, oanda.StreamOptions{
 		OnHeartbeat: func(hb oanda.Heartbeat) {
 			_ = sse.send("heartbeat", map[string]any{
 				"time":   hb.Time,

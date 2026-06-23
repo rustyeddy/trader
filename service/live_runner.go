@@ -130,7 +130,7 @@ func (s *Service) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	if s.OANDA == nil {
 		return fmt.Errorf("live runner: OANDA client not configured")
 	}
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return fmt.Errorf("live runner: %w", err)
 	}

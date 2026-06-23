@@ -130,7 +130,7 @@ func TestDefaultAccount_AutoResolves(t *testing.T) {
 	defer srv.Close()
 
 	svc := &Service{OANDA: &oanda.Client{BaseURL: srv.URL, Token: "test"}}
-	acc, err := svc.defaultAccount(context.Background())
+	acc, err := svc.DefaultAccount(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "only-acc", acc.ID)
 	assert.Equal(t, "only-acc", svc.AccountID, "ResolveAccount should set the default")

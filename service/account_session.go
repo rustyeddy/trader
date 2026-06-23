@@ -71,11 +71,12 @@ func (s *Service) Accounts(ctx context.Context) ([]*Account, error) {
 	return out, nil
 }
 
-// defaultAccount resolves the Service's default account (s.AccountID,
+// DefaultAccount resolves the Service's default account (s.AccountID,
 // auto-discovered via ResolveAccount when unset) and returns its session.
 // The back-compat Service-level broker methods delegate through this so
-// existing single-account callers keep working unchanged.
-func (s *Service) defaultAccount(ctx context.Context) (*Account, error) {
+// existing single-account callers keep working unchanged. Presentation
+// layers use it to back their legacy (un-scoped) routes.
+func (s *Service) DefaultAccount(ctx context.Context) (*Account, error) {
 	if err := s.ResolveAccount(ctx); err != nil {
 		return nil, err
 	}

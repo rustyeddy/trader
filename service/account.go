@@ -35,7 +35,7 @@ func (a *Account) StreamTransactions(ctx context.Context, opts oanda.StreamOptio
 
 // GetAccountSummary resolves the default account and returns its summary.
 func (s *Service) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *Service) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary,
 
 // GetTransactions polls transactions on the default account.
 func (s *Service) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.Transaction, int64, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -53,7 +53,7 @@ func (s *Service) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.T
 
 // StreamTransactions opens a transaction stream on the default account.
 func (s *Service) StreamTransactions(ctx context.Context, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -24,6 +24,7 @@ type BotConfig struct {
 // BotStatus is the public view of a running or stopped bot.
 type BotStatus struct {
 	ID           string     `json:"id"`
+	AccountID    string     `json:"account_id"`
 	Instrument   string     `json:"instrument"`
 	StrategyName string     `json:"strategy_name"`
 	StrategyKind string     `json:"strategy_kind"`
@@ -47,10 +48,12 @@ type botEntry struct {
 	done   <-chan struct{}
 }
 
-// StartBot builds and launches a live strategy bot inside the serve process.
-// Returns the bot's initial status (Status="running"). The bot runs until
-// StopBot is called or the parent context is cancelled.
-func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
+// StartBot builds and launches a live strategy bot on this account inside the
+// serve process. Returns the bot's initial status (Status="running"). The bot
+// runs until StopBot is called or the parent context is cancelled. Bots are
+// tracked in the shared Service registry, tagged with this account's ID.
+func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
+	s := a.svc
 	if cfg.Instrument == "" {
 		return nil, fmt.Errorf("bots: instrument is required")
 	}
@@ -79,6 +82,7 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	entry := &botEntry{
 		BotStatus: BotStatus{
 			ID:           id,
+			AccountID:    a.ID,
 			Instrument:   cfg.Instrument,
 			StrategyName: strategy.Name(),
 			StrategyKind: cfg.Strategy.Kind,
@@ -103,7 +107,7 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 
 	go func() {
 		defer close(done)
-		runErr := s.RunLiveStrategy(botCtx, LiveRunConfig{
+		runErr := a.RunLiveStrategy(botCtx, LiveRunConfig{
 			Instrument:     cfg.Instrument,
 			TickInterval:   interval,
 			Strategy:       tracked,
@@ -130,6 +134,31 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 
 	status := entry.BotStatus
 	return &status, nil
+}
+
+// StartBot launches a bot on the default account. See Account.StartBot.
+func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
+	acc, err := s.DefaultAccount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bots: %w", err)
+	}
+	return acc.StartBot(ctx, cfg)
+}
+
+// ListBots returns a snapshot of this account's bots (running and stopped).
+func (a *Account) ListBots() []BotStatus {
+	a.svc.botsMu.RLock()
+	defer a.svc.botsMu.RUnlock()
+	out := make([]BotStatus, 0)
+	for _, e := range a.svc.bots {
+		e.mu.Lock()
+		status := e.BotStatus
+		e.mu.Unlock()
+		if status.AccountID == a.ID {
+			out = append(out, status)
+		}
+	}
+	return out
 }
 
 // StopBot cancels the bot with the given ID and waits for it to exit.

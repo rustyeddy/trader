@@ -69,7 +69,7 @@ func (a *Account) RunLiveJournal(ctx context.Context, journal trader.Journal, ba
 // RunLiveJournal subscribes the default account's transaction stream to the
 // given journal. See Account.RunLiveJournal.
 func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	acc, err := s.defaultAccount(ctx)
+	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return 0, err
 	}
