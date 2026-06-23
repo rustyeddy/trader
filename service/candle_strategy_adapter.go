@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // CandleStrategyAdapter wraps a backtest trader.Strategy as a trader.LiveStrategy.
@@ -52,7 +53,7 @@ type CandleAdapterConfig struct {
 	Granularity string              // "H1" or "D"
 	WarmupBars  int                 // bars to fetch from OANDA for indicator warmup (default 100)
 	// LocalWarmupBars, when > 0, reads this many bars from the local candle
-	// store (set via trader.SetDataDir / --data-dir) before the OANDA warmup
+	// store (set via marketdata.SetDataDir / --data-dir) before the OANDA warmup
 	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
 	// indicators are fully primed. Falls back gracefully if local data is absent.
 	LocalWarmupBars int
@@ -214,8 +215,8 @@ func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	from := barsBefore(to, a.granularity, a.localWarmupBars)
 	tf := oandaGranToTF(a.granularity)
 
-	dm := trader.NewDataManager([]string{a.instNorm}, from, to)
-	iter, err := dm.Candles(ctx, trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{a.instNorm}, from, to)
+	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
 		Source:     trader.SourceOanda,
 		Instrument: a.instNorm,
 		Range:      trader.TimeRange{Start: trader.FromTime(from), End: trader.FromTime(to), TF: tf},

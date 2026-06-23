@@ -17,10 +17,11 @@ import (
 	"github.com/rustyeddy/trader/cmd/replay"
 	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/serve"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/spf13/cobra"
 
 	// Provider registration via init().
-	_ "github.com/rustyeddy/trader/data/dukascopy"
+	_ "github.com/rustyeddy/trader/marketdata/dukascopy"
 
 	// Strategy registration via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
@@ -94,7 +95,7 @@ func NewRootCmd() *cobra.Command {
 			rc.OANDAEnv = gcfg.OANDA.Env
 		}
 
-		traderpkg.SetDataDir(rc.DataDir)
+		marketdata.SetDataDir(rc.DataDir)
 		return traderpkg.Setup(traderpkg.LogConfig{
 			Level:  rc.LogLevel,
 			Format: rc.LogFormat,

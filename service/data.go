@@ -12,6 +12,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // DownloadOandaCandlesRequest parameterizes the candle download.
@@ -60,7 +61,7 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 	}
 	tfStr := toOandaGranularity(req.Timeframe)
 
-	store := trader.GetStore()
+	store := marketdata.GetStore()
 	instrTrader := strings.ReplaceAll(req.Instrument, "_", "")
 
 	cursor := time.Date(req.From.Year(), req.From.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -132,8 +133,8 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 		}
 
 		if req.RawDir != "" {
-			rawKey := trader.Key{
-				Kind:       trader.KindCandle,
+			rawKey := marketdata.Key{
+				Kind:       marketdata.KindCandle,
 				Source:     trader.SourceOanda,
 				Instrument: instrTrader,
 				TF:         tf,
@@ -183,7 +184,7 @@ func toOandaGranularity(s string) string {
 
 // writeRawOandaMonth preserves the bid+ask OHLC exactly as OANDA returned it.
 // The path is determined by the store so ownership of file placement stays centralised.
-func writeRawOandaMonth(s *trader.Store, key trader.Key, monthStart time.Time, candles []oanda.Candle) error {
+func writeRawOandaMonth(s *marketdata.Store, key marketdata.Key, monthStart time.Time, candles []oanda.Candle) error {
 	path, err := s.RawCandlePath(key)
 	if err != nil {
 		return err
@@ -242,7 +243,7 @@ type DeriveResult struct {
 // It also checks every expected market-hours slot and reports any that the raw
 // file did not contain, so gaps can be surfaced immediately rather than found
 // by a follow-up validate pass.
-func (s *Service) DeriveCanonicalFromRaw(ctx context.Context, rawPath string, key trader.Key) (*DeriveResult, error) {
+func (s *Service) DeriveCanonicalFromRaw(ctx context.Context, rawPath string, key marketdata.Key) (*DeriveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -341,7 +342,7 @@ func (s *Service) DeriveCanonicalFromRaw(ctx context.Context, rawPath string, ke
 	step := time.Duration(stepSec) * time.Second
 	for i := 0; i < slotCount; i++ {
 		slotStart := monthStart.Add(time.Duration(i) * step)
-		if !trader.SlotMayHaveForexData(slotStart, slotStart.Add(step)) {
+		if !marketdata.SlotMayHaveForexData(slotStart, slotStart.Add(step)) {
 			continue
 		}
 		if filled[i] {
@@ -354,7 +355,7 @@ func (s *Service) DeriveCanonicalFromRaw(ctx context.Context, rawPath string, ke
 		}
 	}
 
-	store := trader.GetStore()
+	store := marketdata.GetStore()
 	if err := store.WriteMonthlyCandles(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
 		return nil, fmt.Errorf("write canonical %s: %w", rawPath, err)
 	}
@@ -419,7 +420,7 @@ func (s *Service) UpdateOandaCandles(ctx context.Context, req UpdateOandaCandles
 	for _, inst := range req.Instruments {
 		for _, tf := range req.Timeframes {
 			key := inst + "/" + tf
-			from, err := lastNonZeroCandleDate(trader.GetStore(), inst, tf)
+			from, err := lastNonZeroCandleDate(marketdata.GetStore(), inst, tf)
 			if err != nil {
 				if !req.SeedFrom.IsZero() {
 					from = req.SeedFrom
@@ -475,7 +476,7 @@ func (s *Service) UpdateOandaCandles(ctx context.Context, req UpdateOandaCandles
 // lastNonZeroCandleDate returns the date of the last candle with actual price
 // data in the most recent monthly CSV file for the given instrument+timeframe.
 // It returns an error if no candle files exist yet.
-func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (time.Time, error) {
+func lastNonZeroCandleDate(store *marketdata.Store, instrument, timeframe string) (time.Time, error) {
 	tf, err := trader.ParseTimeframe(timeframe)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("unknown timeframe %q", timeframe)
@@ -491,8 +492,8 @@ func lastNonZeroCandleDate(store *trader.Store, instrument, timeframe string) (t
 			startMonth = int(now.Month())
 		}
 		for month := startMonth; month >= 1; month-- {
-			k := trader.Key{
-				Kind:       trader.KindCandle,
+			k := marketdata.Key{
+				Kind:       marketdata.KindCandle,
 				Source:     trader.SourceOanda,
 				Instrument: instrTrader,
 				TF:         tf,

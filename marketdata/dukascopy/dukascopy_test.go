@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/require"
-	"github.com/rustyeddy/trader"
 )
 
 const dukascopyTestsEnv = "TRADER_RUN_DUKASCOPY_TESTS"
@@ -44,8 +45,8 @@ func TestFileKey(t *testing.T) {
 	k := f.Key()
 	require.Equal(t, sym, k.Instrument)
 	require.Equal(t, "dukascopy", k.Source)
-	require.Equal(t, trader.KindTick, k.Kind)
-	require.Equal(t, trader.Ticks, k.TF)
+	require.Equal(t, marketdata.KindTick, k.Kind)
+	require.Equal(t, market.Ticks, k.TF)
 	require.Equal(t, 2025, k.Year)
 	require.Equal(t, 1, k.Month)
 	require.Equal(t, 2, k.Day)

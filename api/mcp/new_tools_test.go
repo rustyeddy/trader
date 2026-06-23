@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,13 +17,13 @@ import (
 // buildMCPCandleStore seeds a temp store with January 2024 H1 EURUSD candles.
 func buildMCPCandleStore(t *testing.T) func() {
 	t.Helper()
-	store := trader.NewStoreAt(t.TempDir())
+	store := marketdata.NewStoreAt(t.TempDir())
 	candles := make([]trader.Candle, 744)
 	candles[0] = trader.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	candles[1] = trader.Candle{Open: 110050, High: 110200, Low: 110000, Close: 110150, AvgSpread: 11, MaxSpread: 16, Ticks: 55}
 	require.NoError(t, store.WriteMonthlyCandles("oanda", "EURUSD", trader.H1,
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles))
-	return trader.SwapStore(store)
+	return marketdata.SwapStore(store)
 }
 
 // ── get_candle_stats ──────────────────────────────────────────────────────

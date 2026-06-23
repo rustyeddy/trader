@@ -4,7 +4,7 @@
 // This package is deliberately free of trader-package types so it can be
 // imported anywhere without circular dependency. Providers translate
 // these generic params into their own internal types.
-package data
+package marketdata
 
 import "time"
 

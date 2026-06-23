@@ -23,6 +23,7 @@ import (
 	"github.com/rustyeddy/trader"
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
 	"github.com/rustyeddy/trader/api/rest"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	traderui "github.com/rustyeddy/trader/ui"
 )
@@ -155,7 +156,7 @@ Example config file (see deploy/trader.yaml.example):
 				cfg.Log.Level = "info"
 			}
 			if cfg.Data.Dir != "" {
-				trader.SetDataDir(cfg.Data.Dir)
+				marketdata.SetDataDir(cfg.Data.Dir)
 			}
 
 			// Resolve token: YAML/flag > global config > env var > token file.

@@ -1,4 +1,4 @@
-// Package dukascopy implements the data.Provider interface for Dukascopy
+// Package dukascopy implements the marketdata.Provider interface for Dukascopy
 // historical tick files. Raw data is hourly .bi5 files at:
 //
 //	https://datafeed.dukascopy.com/datafeed/<instrument>/<year>/<month-1>/<day>/<hour>h_ticks.bi5
@@ -11,7 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // SourceName is the canonical name under which this provider is registered.
@@ -19,7 +20,7 @@ const SourceName = "dukascopy"
 
 // File represents one hourly tick file at the Dukascopy datafeed.
 type File struct {
-	key trader.Key
+	key marketdata.Key
 
 	symbol  string
 	t       time.Time
@@ -36,14 +37,14 @@ func NewFile(sym string, t time.Time) *File {
 	return f
 }
 
-// Key returns the trader.Key for this file's hourly tick slot.
-func (f *File) Key() trader.Key {
+// Key returns the marketdata.Key for this file's hourly tick slot.
+func (f *File) Key() marketdata.Key {
 	if f.key.Instrument == "" {
-		f.key = trader.Key{
+		f.key = marketdata.Key{
 			Instrument: f.symbol,
 			Source:     SourceName,
-			Kind:       trader.KindTick,
-			TF:         trader.Ticks,
+			Kind:       marketdata.KindTick,
+			TF:         market.Ticks,
 			Year:       f.t.Year(),
 			Month:      int(f.t.Month()),
 			Day:        f.t.Day(),
@@ -73,7 +74,7 @@ func (f *File) URL() string {
 // IsValid checks that the local file for this hour exists and is either
 // a legitimately empty market-closed file or a non-corrupt .bi5.
 func (f *File) IsValid(ctx context.Context) error {
-	store := trader.GetStore()
+	store := marketdata.GetStore()
 	ok, err := store.Exists(f.Key())
 	if err != nil || !ok {
 		return err
@@ -84,7 +85,7 @@ func (f *File) IsValid(ctx context.Context) error {
 		return err
 	}
 	if f.bytes == 0 {
-		if !f.t.IsZero() && trader.IsForexMarketClosed(f.t.UTC()) {
+		if !f.t.IsZero() && market.IsForexMarketClosed(f.t.UTC()) {
 			return nil
 		}
 		return fmt.Errorf("empty file outside market-closed hours: %s", path)
@@ -117,7 +118,7 @@ func (f *File) IsValid(ctx context.Context) error {
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
 func (f *File) baseHourUnixMS() (int64, error) {
-	p, err := trader.GetStore().PathForAsset(f.Key())
+	p, err := marketdata.GetStore().PathForAsset(f.Key())
 	if err != nil {
 		return 0, err
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // CandlesCSVRequest describes a local candle CSV export request.
@@ -68,8 +69,8 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 		source = trader.SourceOanda
 	}
 
-	dm := trader.NewDataManager([]string{instrument}, from, to)
-	iter, err := dm.Candles(ctx, trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{instrument}, from, to)
+	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
 		Source:     source,
 		Instrument: instrument,
 		Range: trader.TimeRange{

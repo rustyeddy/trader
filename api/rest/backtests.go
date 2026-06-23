@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -360,8 +361,8 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	dm := trader.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
-	iter, err := dm.Candles(r.Context(), trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
+	iter, err := dm.Candles(r.Context(), marketdata.CandleRequest{
 		Source:     cfg.Source, // empty → DataManager defaults to SourceOanda
 		Instrument: cfg.Instrument,
 		Range:      tr,

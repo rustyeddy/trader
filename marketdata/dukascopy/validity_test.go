@@ -7,16 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/rustyeddy/trader"
 )
 
-func useTempStore(t *testing.T) *trader.Store {
+func useTempStore(t *testing.T) *marketdata.Store {
 	t.Helper()
-	s := trader.NewStoreAt(t.TempDir())
-	restore := trader.SwapStore(s)
+	s := marketdata.NewStoreAt(t.TempDir())
+	restore := marketdata.SwapStore(s)
 	t.Cleanup(restore)
 	return s
 }

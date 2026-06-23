@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -96,8 +97,8 @@ func runBacktestCandles(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse time range: %w", err)
 	}
 
-	dm := trader.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
-	iter, err := dm.Candles(cmd.Context(), trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
+	iter, err := dm.Candles(cmd.Context(), marketdata.CandleRequest{
 		Source:     cfg.Source,
 		Instrument: cfg.Instrument,
 		Range:      tr,

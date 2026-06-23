@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -215,9 +216,9 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	broker.Account = withAcctBroker.Account
 
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := NewStoreAt(t.TempDir())
-	t.Cleanup(SwapStore(s))
-	cs, err := newMonthlyCandleSet("EURUSD", H1, FromTime(ts), PriceScale, SourceCandles)
+	s := marketdata.NewStoreAt(t.TempDir())
+	t.Cleanup(marketdata.SwapStore(s))
+	cs, err := marketdata.NewMonthlyCandleSet("EURUSD", H1, FromTime(ts), PriceScale, SourceCandles)
 	require.NoError(t, err)
 	require.NoError(t, cs.AddCandle(FromTime(ts), Candle{
 		Open:      Price(1100000),
@@ -230,7 +231,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	}))
 	require.NoError(t, s.WriteCSV(cs))
 
-	dm := NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
+	dm := marketdata.NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &Trader{Broker: broker, DataManager: dm}
 	require.NoError(t, okTrader.Backtest(ctx, run))
 	require.NotNil(t, run.State)

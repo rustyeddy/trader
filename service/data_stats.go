@@ -6,6 +6,7 @@ import (
 	"time"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // DataStatsRequest parameterises DataStats.
@@ -81,15 +82,15 @@ func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataSta
 		return nil, fmt.Errorf("bad range: %w", err)
 	}
 
-	analyzers := []trader.Analyzer{
-		trader.NewSwingAnalyzer(instMeta),
-		trader.NewSpreadAnalyzer(instMeta),
-		trader.NewTrendAnalyzer(),
-		trader.NewSessionAnalyzer(instMeta),
+	analyzers := []marketdata.Analyzer{
+		marketdata.NewSwingAnalyzer(instMeta),
+		marketdata.NewSpreadAnalyzer(instMeta),
+		marketdata.NewTrendAnalyzer(),
+		marketdata.NewSessionAnalyzer(instMeta),
 	}
 
-	dm := trader.NewDataManager([]string{inst}, from, toExcl)
-	itr, err := dm.Candles(ctx, trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{inst}, from, toExcl)
+	itr, err := dm.Candles(ctx, marketdata.CandleRequest{
 		Source:     req.Source,
 		Instrument: inst,
 		Range:      tr,
@@ -97,7 +98,7 @@ func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataSta
 	if err != nil {
 		return nil, fmt.Errorf("open candles: %w", err)
 	}
-	if err := trader.RunAnalysis(ctx, itr, analyzers); err != nil {
+	if err := marketdata.RunAnalysis(ctx, itr, analyzers); err != nil {
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 

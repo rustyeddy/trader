@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // ── oandaCandleToCandleTime ───────────────────────────────────────────────────
@@ -283,7 +284,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	// Write 5 synthetic H1 candles into a temp store. Place them at the end of
 	// the current month so they fall within the barsBefore(now, "H1", 200) window.
 	tmpDir := t.TempDir()
-	s := trader.NewStoreAt(tmpDir)
+	s := marketdata.NewStoreAt(tmpDir)
 	now := time.Now().UTC()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
@@ -307,7 +308,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1, monthStart, candles))
 
 	// Swap the global store to point at our temp dir and restore after.
-	restore := trader.SwapStore(s)
+	restore := marketdata.SwapStore(s)
 	defer restore()
 
 	a := &CandleStrategyAdapter{
@@ -332,7 +333,7 @@ func TestWarmupFromLocalData_NoDataNoError(t *testing.T) {
 	t.Parallel()
 
 	// Empty temp store — no candle files at all.
-	restore := trader.SwapStore(trader.NewStoreAt(t.TempDir()))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
 	defer restore()
 
 	a := &CandleStrategyAdapter{

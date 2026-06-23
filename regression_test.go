@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,7 +88,7 @@ func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
 func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 	t.Parallel()
 
-	cs := &candleSet{
+	cs := &marketdata.CandleSet{
 		Instrument: "EURUSD",
 		Start:      Timestamp(1704067200),
 		Timeframe:  M1,

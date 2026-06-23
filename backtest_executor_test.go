@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestTraderBacktestExecutor_Guards(t *testing.T) {
 	exec := &TraderBacktestExecutor{}
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil data manager")
 
-	exec.DataManager = GetDataManager()
+	exec.DataManager = marketdata.GetDataManager()
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil broker factory")
 
 	exec.BrokerFactory = func() *Broker { return nil }
@@ -37,7 +38,7 @@ func TestTraderBacktestExecutor_Guards(t *testing.T) {
 func TestNewTraderBacktestExecutor_DefaultFactories(t *testing.T) {
 	t.Parallel()
 
-	exec := NewTraderBacktestExecutor(GetDataManager())
+	exec := NewTraderBacktestExecutor(marketdata.GetDataManager())
 	require.NotNil(t, exec)
 	require.NotNil(t, exec.BrokerFactory)
 	require.NotNil(t, exec.AccountFactory)

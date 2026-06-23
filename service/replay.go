@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // ── Signal types ─────────────────────────────────────────────────────────────
@@ -123,8 +124,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 	// Load all bars. We include warmup bars before the requested range.
 	fromWithWarmup := tr.Start.Time().Add(-warmupDuration(req.Timeframe, warmup))
-	dm := trader.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
-	iter, err := dm.Candles(ctx, trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
+	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
 		Source:     trader.SourceOanda,
 		Instrument: inst,
 		Range: trader.TimeRange{

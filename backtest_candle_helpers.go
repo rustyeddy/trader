@@ -1,11 +1,15 @@
 package trader
 
-import "context"
+import (
+	"context"
+
+	"github.com/rustyeddy/trader/marketdata"
+)
 
 // CandleSource provides candle iterators for backtest and replay execution.
 // DataManager satisfies this interface.
 type CandleSource interface {
-	Candles(context.Context, CandleRequest) (CandleIterator, error)
+	Candles(context.Context, marketdata.CandleRequest) (CandleIterator, error)
 }
 
 // fillAdjust returns the price adjustment for spread and slippage.

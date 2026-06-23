@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 func TestToOandaGranularity(t *testing.T) {
@@ -76,12 +77,12 @@ func writeTestCandleCSV(t *testing.T, path string, year, month int, nonZeroDays 
 
 func TestLastNonZeroCandleDate_FindsLastRealRow(t *testing.T) {
 	dir := t.TempDir()
-	restore := trader.SwapStore(trader.NewStoreAt(dir))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(dir))
 	t.Cleanup(restore)
 
-	store := trader.GetStore()
-	k := trader.Key{
-		Kind:       trader.KindCandle,
+	store := marketdata.GetStore()
+	k := marketdata.Key{
+		Kind:       marketdata.KindCandle,
 		Source:     trader.SourceOanda,
 		Instrument: "EURUSD",
 		TF:         trader.H1,
@@ -91,7 +92,7 @@ func TestLastNonZeroCandleDate_FindsLastRealRow(t *testing.T) {
 	path := store.PathForMonthlyCandle(k)
 	writeTestCandleCSV(t, path, 2026, 5, []int{1, 15, 20})
 
-	got, err := lastNonZeroCandleDate(trader.GetStore(), "EUR_USD", "H1")
+	got, err := lastNonZeroCandleDate(marketdata.GetStore(), "EUR_USD", "H1")
 	require.NoError(t, err)
 
 	want := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
@@ -100,22 +101,22 @@ func TestLastNonZeroCandleDate_FindsLastRealRow(t *testing.T) {
 
 func TestLastNonZeroCandleDate_NoFilesError(t *testing.T) {
 	dir := t.TempDir()
-	restore := trader.SwapStore(trader.NewStoreAt(dir))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(dir))
 	t.Cleanup(restore)
 
-	_, err := lastNonZeroCandleDate(trader.GetStore(), "EUR_USD", "H1")
+	_, err := lastNonZeroCandleDate(marketdata.GetStore(), "EUR_USD", "H1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no candle files found")
 }
 
 func TestLastNonZeroCandleDate_AllZerosError(t *testing.T) {
 	dir := t.TempDir()
-	restore := trader.SwapStore(trader.NewStoreAt(dir))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(dir))
 	t.Cleanup(restore)
 
-	store := trader.GetStore()
-	k := trader.Key{
-		Kind:       trader.KindCandle,
+	store := marketdata.GetStore()
+	k := marketdata.Key{
+		Kind:       marketdata.KindCandle,
 		Source:     trader.SourceOanda,
 		Instrument: "EURUSD",
 		TF:         trader.H1,
@@ -124,20 +125,20 @@ func TestLastNonZeroCandleDate_AllZerosError(t *testing.T) {
 	}
 	writeTestCandleCSV(t, store.PathForMonthlyCandle(k), 2026, 5, nil) // no real candles
 
-	_, err := lastNonZeroCandleDate(trader.GetStore(), "EUR_USD", "H1")
+	_, err := lastNonZeroCandleDate(marketdata.GetStore(), "EUR_USD", "H1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no non-zero candles")
 }
 
 func TestLastNonZeroCandleDate_PicksNewestMonth(t *testing.T) {
 	dir := t.TempDir()
-	restore := trader.SwapStore(trader.NewStoreAt(dir))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(dir))
 	t.Cleanup(restore)
 
-	store := trader.GetStore()
-	makeKey := func(month int) trader.Key {
-		return trader.Key{
-			Kind: trader.KindCandle, Source: trader.SourceOanda,
+	store := marketdata.GetStore()
+	makeKey := func(month int) marketdata.Key {
+		return marketdata.Key{
+			Kind: marketdata.KindCandle, Source: trader.SourceOanda,
 			Instrument: "EURUSD", TF: trader.H1, Year: 2026, Month: month,
 		}
 	}
@@ -145,7 +146,7 @@ func TestLastNonZeroCandleDate_PicksNewestMonth(t *testing.T) {
 	writeTestCandleCSV(t, store.PathForMonthlyCandle(makeKey(3)), 2026, 3, []int{10})
 	writeTestCandleCSV(t, store.PathForMonthlyCandle(makeKey(5)), 2026, 5, []int{5})
 
-	got, err := lastNonZeroCandleDate(trader.GetStore(), "EUR_USD", "H1")
+	got, err := lastNonZeroCandleDate(marketdata.GetStore(), "EUR_USD", "H1")
 	require.NoError(t, err)
 	assert.Equal(t, time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC), got)
 }

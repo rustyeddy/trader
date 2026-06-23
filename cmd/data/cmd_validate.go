@@ -11,6 +11,7 @@ import (
 	"time"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
 )
@@ -65,7 +66,7 @@ OANDA. All validated timeframes are repaired.`,
 
 			baseInstruments := splitCSV(instrumentsCSV)
 
-			var allReports []*trader.CandleValidationReport
+			var allReports []*marketdata.CandleValidationReport
 			totalMonths, totalIssues := 0, 0
 
 			for _, tf := range timeframes {
@@ -168,12 +169,12 @@ OANDA. All validated timeframes are repaired.`,
 //  4. Derive canonical candles from the raw file.
 func repairMissingCandles(
 	cmd *cobra.Command,
-	reports []*trader.CandleValidationReport,
+	reports []*marketdata.CandleValidationReport,
 	rawDir, token, env string,
 ) error {
 	// Default rawDir to the store's sibling raw tree.
 	if rawDir == "" {
-		rawDir = trader.GetStore().RawRoot()
+		rawDir = marketdata.GetStore().RawRoot()
 	}
 
 	type monthKey struct {
@@ -211,21 +212,21 @@ func repairMissingCandles(
 	cmd.Printf("\nrepairing %d month(s) (raw dir: %s)...\n", len(toRepair), rawDir)
 
 	type logEntry struct {
-		Instrument    string   `json:"instrument"`
-		Timeframe     string   `json:"timeframe"`
-		Year          int      `json:"year"`
-		Month         int      `json:"month"`
-		Status        string   `json:"status"`
-		CandlesWritten int     `json:"candles_written,omitempty"`
-		MissingSlots  int      `json:"missing_slots,omitempty"`
-		SampleMissing []string `json:"sample_missing,omitempty"`
-		Error         string   `json:"error,omitempty"`
+		Instrument     string   `json:"instrument"`
+		Timeframe      string   `json:"timeframe"`
+		Year           int      `json:"year"`
+		Month          int      `json:"month"`
+		Status         string   `json:"status"`
+		CandlesWritten int      `json:"candles_written,omitempty"`
+		MissingSlots   int      `json:"missing_slots,omitempty"`
+		SampleMissing  []string `json:"sample_missing,omitempty"`
+		Error          string   `json:"error,omitempty"`
 	}
 	type repairLog struct {
-		RunAt      string     `json:"run_at"`
-		RawDir     string     `json:"raw_dir"`
-		Entries    []logEntry `json:"entries"`
-		TotalErrors int       `json:"total_errors"`
+		RunAt       string     `json:"run_at"`
+		RawDir      string     `json:"raw_dir"`
+		Entries     []logEntry `json:"entries"`
+		TotalErrors int        `json:"total_errors"`
 	}
 	log := repairLog{
 		RunAt:  time.Now().UTC().Format(time.RFC3339),
@@ -247,15 +248,15 @@ func repairMissingCandles(
 			continue
 		}
 
-		rawKey := trader.Key{
-			Kind:       trader.KindCandle,
+		rawKey := marketdata.Key{
+			Kind:       marketdata.KindCandle,
 			Source:     trader.SourceOanda,
 			Instrument: k.instrument,
 			TF:         tf,
 			Year:       k.year,
 			Month:      k.month,
 		}
-		rawPath := trader.RawCandlePathAt(rawDir, rawKey)
+		rawPath := marketdata.RawCandlePathAt(rawDir, rawKey)
 
 		// Step 2: check if raw already exists on disk.
 		if _, statErr := os.Stat(rawPath); os.IsNotExist(statErr) {
@@ -318,7 +319,7 @@ func repairMissingCandles(
 	log.TotalErrors = repairErrors
 
 	// Write validation log to the data root.
-	dataRoot := filepath.Dir(trader.GetStore().RawRoot())
+	dataRoot := filepath.Dir(marketdata.GetStore().RawRoot())
 	logPath := filepath.Join(dataRoot, "validation-"+time.Now().UTC().Format("2006-01-02")+".json")
 	if err := writeValidationReport(logPath, log); err != nil {
 		cmd.Printf("\n[warn] could not write validation log %s: %v\n", logPath, err)
@@ -339,7 +340,7 @@ func printValidationGrid(
 	instruments []string,
 	startYear, endYear int,
 	startMonth, endMonth time.Month,
-	report *trader.CandleValidationReport,
+	report *marketdata.CandleValidationReport,
 ) {
 	// Build an issue index: instrument → year → month → true.
 	hasIssue := make(map[string]map[int]map[int]bool)
@@ -414,7 +415,7 @@ func resolveValidateDefaults(
 	source string,
 	tf trader.Timeframe,
 ) (outInstruments []string, outFrom, outTo string, err error) {
-	inv, err := trader.BuildInventory(ctx)
+	inv, err := marketdata.BuildInventory(ctx)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("scan store: %w", err)
 	}
@@ -427,7 +428,7 @@ func resolveValidateDefaults(
 	var minYear, minMonth, maxYear, maxMonth int
 
 	for _, key := range inv.Keys() {
-		if key.Kind != trader.KindCandle {
+		if key.Kind != marketdata.KindCandle {
 			continue
 		}
 		if key.Source != source {

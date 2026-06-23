@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/data"
 	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +20,7 @@ type testDownloadProvider struct {
 
 func (p *testDownloadProvider) Name() string { return p.name }
 
-func (p *testDownloadProvider) SourceURL(_ data.SourceParams) string { return p.url }
+func (p *testDownloadProvider) SourceURL(_ SourceParams) string { return p.url }
 
 // ---------------------------------------------------------------------------
 // BuildInventory
@@ -434,7 +433,7 @@ func TestDownloader_StartDownloaderRecordsFailure(t *testing.T) {
 	defer srv.Close()
 
 	source := fmt.Sprintf("test-downloader-failure-%s", market.NormalizeInstrument(t.Name()))
-	data.Register(&testDownloadProvider{name: source, url: srv.URL})
+	Register(&testDownloadProvider{name: source, url: srv.URL})
 
 	key := Key{
 		Source:     source,
@@ -472,7 +471,7 @@ func TestDownloader_StartDownloaderStoresSuccess(t *testing.T) {
 	defer srv.Close()
 
 	source := fmt.Sprintf("test-downloader-success-%s", market.NormalizeInstrument(t.Name()))
-	data.Register(&testDownloadProvider{name: source, url: srv.URL})
+	Register(&testDownloadProvider{name: source, url: srv.URL})
 
 	key := Key{
 		Source:     source,

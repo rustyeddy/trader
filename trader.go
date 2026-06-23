@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 type Trader struct {
 	DataManager CandleSource
 	*Broker
-	*Store
+	*marketdata.Store
 }
 
 func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event, processed *int64) (<-chan error, <-chan struct{}) {
@@ -475,7 +477,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	}
 	source := firstNonEmpty(run.Request.Source, SourceOanda)
 	// Select the Instrument, TimeRange and TimeFrame
-	candlereq := CandleRequest{
+	candlereq := marketdata.CandleRequest{
 		Source:     source,
 		Instrument: run.Request.Instrument,
 		Range:      run.Request.TimeRange,

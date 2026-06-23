@@ -7,6 +7,7 @@ import (
 	"os"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	}
 
 	// Use the helper from trader package
-	paths, err := trader.GenerateSyntheticYearTestData(*output, *instrument, *year, tf)
+	paths, err := marketdata.GenerateSyntheticYearTestData(*output, *instrument, *year, tf)
 	if err != nil {
 		log.Fatalf("Failed to generate candles: %v", err)
 	}

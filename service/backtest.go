@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 // RunBacktest executes one compiled backtest definition end-to-end and returns
@@ -30,7 +31,7 @@ func (s *Service) backtestExecutor() trader.BacktestExecutor {
 	if s != nil && s.Backtests != nil {
 		return s.Backtests
 	}
-	return trader.NewTraderBacktestExecutor(trader.GetDataManager())
+	return trader.NewTraderBacktestExecutor(marketdata.GetDataManager())
 }
 
 // RunBacktestConfigs loads a slice of YAML config files, expands each
