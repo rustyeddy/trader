@@ -26,7 +26,7 @@ func NewChandelierExit(atrPeriod int, multiplier float64, scale Scale6) (*Chande
 
 func (c *ChandelierExit) Name() string {
 	// Convert back to float64 only for display.
-	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.n, c.multiplier.Float64())
+	return fmt.Sprintf("Chandelier(ATR%d×%.1f)", c.atr.Period(), c.multiplier.Float64())
 }
 
 func (c *ChandelierExit) Ready() bool { return c.atr.Ready() }

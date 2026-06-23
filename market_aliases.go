@@ -29,6 +29,16 @@ type (
 	Timeframe  = market.Timeframe
 	AssetClass = market.AssetClass
 	Instrument = market.Instrument
+
+	Candle     = market.Candle
+	CandleTime = market.CandleTime
+)
+
+// Data-source identifiers.
+const (
+	SourceDukascopy = market.SourceDukascopy
+	SourceOanda     = market.SourceOanda
+	SourceCandles   = market.SourceCandles
 )
 
 // Scales and other numeric constants.
@@ -77,7 +87,14 @@ var ErrTickNotFound = market.ErrTickNotFound
 // Internal helpers still referenced by root files across the package boundary.
 // These mirror the additive exports in market/migration_exports.go and keep the
 // lowercase call sites in root unchanged during the migration.
-type timemilli = market.TimeMillis
+type (
+	timemilli         = market.TimeMillis
+	candleTime        = market.CandleTime
+	candleSet         = market.CandleSet
+	candleSetIterator = market.CandleSetIterator
+)
+
+var newMonthlyCandleSet = market.NewMonthlyCandleSet
 
 var (
 	mulDivCeil64          = market.MulDivCeil64

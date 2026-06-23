@@ -1,6 +1,10 @@
-package trader
+package indicator
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 // ADX computes the Average Directional Index (Wilder) over candle OHLC.
 //
@@ -16,7 +20,7 @@ type ADX struct {
 	name string
 
 	// candle tracking
-	prev    Candle
+	prev    market.Candle
 	hasPrev bool
 	ready   bool
 	adx     int64
@@ -26,21 +30,21 @@ type ADX struct {
 	periods int // number of computed periods (needs prev)
 
 	// initial accumulation for first N periods
-	sumTR      PriceSum
-	sumPlusDM  PriceSum
-	sumMinusDM PriceSum
+	sumTR      market.PriceSum
+	sumPlusDM  market.PriceSum
+	sumMinusDM market.PriceSum
 
 	// Wilder smoothed values after initialization
-	smTR      PriceSum
-	smPlusDM  PriceSum
-	smMinusDM PriceSum
+	smTR      market.PriceSum
+	smPlusDM  market.PriceSum
+	smMinusDM market.PriceSum
 
 	// seeding ADX: average of first N DX values
 	dxSum   int64
 	dxCount int
 }
 
-func NewADX(period int, scale Scale6) (*ADX, error) {
+func NewADX(period int, scale market.Scale6) (*ADX, error) {
 	if period <= 0 {
 		return nil, fmt.Errorf("ADX period must be > 0")
 	}
@@ -67,7 +71,7 @@ func (a *ADX) Reset() {
 }
 
 // Update consumes the next closed candle.
-func (a *ADX) Update(c Candle) {
+func (a *ADX) Update(c market.Candle) {
 	// Need a previous candle to form a "period"
 	if !a.hasPrev {
 		a.prev = c
@@ -98,9 +102,9 @@ func (a *ADX) Update(c Candle) {
 
 	// 1) Accumulate first N periods to initialize Wilder smoothing
 	if a.periods <= a.n {
-		a.sumTR += PriceSum(tr)
-		a.sumPlusDM += PriceSum(plusDM)
-		a.sumMinusDM += PriceSum(minusDM)
+		a.sumTR += market.PriceSum(tr)
+		a.sumPlusDM += market.PriceSum(plusDM)
+		a.sumMinusDM += market.PriceSum(minusDM)
 
 		// When we have N periods accumulated, initialize smoothed values
 		if a.periods == a.n {
@@ -123,9 +127,9 @@ func (a *ADX) Update(c Candle) {
 
 	// 2) Wilder smoothing after initialization:
 	// smoothed = prior_smoothed - (prior_smoothed / N) + current
-	a.smTR = PriceSum(roundDivPositive(int64(a.smTR)*int64(a.n-1), int64(a.n)) + tr)
-	a.smPlusDM = PriceSum(roundDivPositive(int64(a.smPlusDM)*int64(a.n-1), int64(a.n)) + plusDM)
-	a.smMinusDM = PriceSum(roundDivPositive(int64(a.smMinusDM)*int64(a.n-1), int64(a.n)) + minusDM)
+	a.smTR = market.PriceSum(roundDivPositive(int64(a.smTR)*int64(a.n-1), int64(a.n)) + tr)
+	a.smPlusDM = market.PriceSum(roundDivPositive(int64(a.smPlusDM)*int64(a.n-1), int64(a.n)) + plusDM)
+	a.smMinusDM = market.PriceSum(roundDivPositive(int64(a.smMinusDM)*int64(a.n-1), int64(a.n)) + minusDM)
 
 	a.plusDI, a.minusDI = diScaled(int64(a.smPlusDM), int64(a.smMinusDM), int64(a.smTR))
 	dxVal := dxScaled(a.plusDI, a.minusDI)

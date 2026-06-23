@@ -13,12 +13,6 @@ const (
 	KindCandle
 )
 
-const (
-	SourceDukascopy = "dukascopy"
-	SourceOanda     = "oanda"
-	SourceCandles   = "candles"
-)
-
 type AssetFlags uint32
 
 const (

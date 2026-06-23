@@ -1,15 +1,16 @@
-package trader
+package indicator
 
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestIndicatorEMAName(t *testing.T) {
 	t.Parallel()
 
-	ema, err := NewEMA(14, PriceScale)
+	ema, err := NewEMA(14, market.PriceScale)
 	assert.NoError(t, err)
 	assert.Equal(t, "EMA(14)", ema.Name())
 }
@@ -17,7 +18,7 @@ func TestIndicatorEMAName(t *testing.T) {
 func TestIndicatorADXName(t *testing.T) {
 	t.Parallel()
 
-	adx, err := NewADX(14, PriceScale)
+	adx, err := NewADX(14, market.PriceScale)
 	assert.NoError(t, err)
 	assert.Equal(t, "ADX(14)", adx.Name())
 }

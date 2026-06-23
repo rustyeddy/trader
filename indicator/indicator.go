@@ -1,4 +1,6 @@
-package trader
+package indicator
+
+import "github.com/rustyeddy/trader/market"
 
 // CandleIndicator computes a single streaming value from candles.
 // It is deterministic and safe to use in live, replay, and backtests.
@@ -17,7 +19,7 @@ type CandleIndicator interface {
 	Reset()
 
 	// Update consumes the next *closed* candle and updates internal state.
-	Update(c Candle)
+	Update(c market.Candle)
 
 	// Ready reports whether the indicator output is meaningful.
 	Ready() bool
@@ -30,5 +32,5 @@ type Float64Indicator interface {
 }
 
 type PriceIndicator interface {
-	Price() Price
+	Price() market.Price
 }

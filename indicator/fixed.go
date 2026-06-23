@@ -1,6 +1,10 @@
-package trader
+package indicator
 
-import "math/bits"
+import (
+	"math/bits"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 const (
 	indicatorValueScale int64 = 1_000_000
@@ -34,7 +38,7 @@ func max3Int64(a, b, c int64) int64 {
 	return c
 }
 
-func absPriceDiff(a, b Price) int64 {
+func absPriceDiff(a, b market.Price) int64 {
 	if a >= b {
 		return int64(a - b)
 	}
@@ -52,7 +56,7 @@ func fixedScaledToFloat64(v int64) float64 {
 	return float64(v) / float64(indicatorValueScale)
 }
 
-func priceToFloat64(v int64, scale Scale6) float64 {
+func priceToFloat64(v int64, scale market.Scale6) float64 {
 	return float64(v) / float64(scale)
 }
 

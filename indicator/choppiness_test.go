@@ -1,9 +1,10 @@
-package trader
+package indicator
 
 import (
 	"math"
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestChoppinessIndex_ErrorOnBadArgs(t *testing.T) {
 func TestChoppinessIndex_NotReadyBeforeWarmup(t *testing.T) {
 	ci, err := NewChoppinessIndex(5, 100000)
 	require.NoError(t, err)
-	c := Candle{Open: 110000, High: 111000, Low: 109000, Close: 110500}
+	c := market.Candle{Open: 110000, High: 111000, Low: 109000, Close: 110500}
 	for i := 0; i < 4; i++ {
 		ci.Update(c)
 		assert.False(t, ci.Ready())
@@ -31,7 +32,7 @@ func TestChoppinessIndex_PerfectChop(t *testing.T) {
 	// Identical candles: sum(TR) = N × range; HH−LL = range → CI = 100.
 	ci, err := NewChoppinessIndex(5, 100000)
 	require.NoError(t, err)
-	c := Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
+	c := market.Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
 	for i := 0; i < 5; i++ {
 		ci.Update(c)
 	}
@@ -46,9 +47,9 @@ func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 	require.NoError(t, err)
 	scale := 100000.0
 	for i := 0; i < 5; i++ {
-		lo := Price(float64(i) * scale)
-		hi := Price(float64(i+1) * scale)
-		ci.Update(Candle{Open: lo, High: hi, Low: lo, Close: hi})
+		lo := market.Price(float64(i) * scale)
+		hi := market.Price(float64(i+1) * scale)
+		ci.Update(market.Candle{Open: lo, High: hi, Low: lo, Close: hi})
 	}
 	require.True(t, ci.Ready())
 	assert.Less(t, ci.Float64(), 5.0, "expected CI near 0 for perfect trend, got %.2f", ci.Float64())
@@ -57,7 +58,7 @@ func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 func TestChoppinessIndex_Reset(t *testing.T) {
 	ci, err := NewChoppinessIndex(5, 100000)
 	require.NoError(t, err)
-	c := Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
+	c := market.Candle{Open: 105000, High: 110000, Low: 100000, Close: 105000}
 	for i := 0; i < 5; i++ {
 		ci.Update(c)
 	}
@@ -80,11 +81,11 @@ func TestChoppinessIndex_ValueInRange(t *testing.T) {
 		lo := math.Min(prices[i-1], prices[i]) - 0.0005
 		hi := math.Max(prices[i-1], prices[i]) + 0.0005
 		mid := (prices[i-1] + prices[i]) / 2
-		ci.Update(Candle{
-			Open:  Price(mid * 100000),
-			High:  Price(hi * 100000),
-			Low:   Price(lo * 100000),
-			Close: Price(prices[i] * 100000),
+		ci.Update(market.Candle{
+			Open:  market.Price(mid * 100000),
+			High:  market.Price(hi * 100000),
+			Low:   market.Price(lo * 100000),
+			Close: market.Price(prices[i] * 100000),
 		})
 	}
 	require.True(t, ci.Ready())

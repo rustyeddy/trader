@@ -1,4 +1,4 @@
-package trader
+package market
 
 import (
 	"bytes"

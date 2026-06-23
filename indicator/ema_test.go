@@ -1,19 +1,21 @@
-package trader
+package indicator
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/rustyeddy/trader/market"
+	"github.com/stretchr/testify/require"
 )
 
 // helper to create a candle with close only
-func candle(close float64) Candle {
-	return Candle{
-		Close: Price(close * float64(PriceScale)),
+func candle(close float64) market.Candle {
+	return market.Candle{
+		Close: market.Price(close * float64(market.PriceScale)),
 	}
 }
 
 func TestEMA_WarmupAndReady(t *testing.T) {
-	ema, err := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, market.PriceScale)
 	require.NoError(t, err)
 
 	require.False(t, ema.Ready())
@@ -30,7 +32,7 @@ func TestEMA_WarmupAndReady(t *testing.T) {
 }
 
 func TestEMA_KnownSequence(t *testing.T) {
-	ema, err := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, market.PriceScale)
 	require.NoError(t, err)
 
 	// period = 3
@@ -53,13 +55,13 @@ func TestEMA_KnownSequence(t *testing.T) {
 	}
 
 	require.True(t, ema.Ready())
-	require.Equal(t, PriceSum(1212500), ema.PriceSum())
-	require.Equal(t, Price(1212500), ema.Price())
+	require.Equal(t, market.PriceSum(1212500), ema.PriceSum())
+	require.Equal(t, market.Price(1212500), ema.Price())
 	require.InDelta(t, 12.125, result, 1e-9)
 }
 
 func TestEMA_Reset(t *testing.T) {
-	ema, err := NewEMA(3, PriceScale)
+	ema, err := NewEMA(3, market.PriceScale)
 	require.NoError(t, err)
 
 	ema.Update(candle(10))
@@ -70,9 +72,9 @@ func TestEMA_Reset(t *testing.T) {
 
 	require.False(t, ema.Ready())
 	require.Equal(t, 0.0, ema.Float64())
-	require.Equal(t, PriceSum(0), ema.PriceSum())
+	require.Equal(t, market.PriceSum(0), ema.PriceSum())
 
 	ema.Update(candle(20))
-	require.Equal(t, PriceSum(2000000), ema.PriceSum())
+	require.Equal(t, market.PriceSum(2000000), ema.PriceSum())
 	require.Equal(t, 20.0, ema.Float64())
 }

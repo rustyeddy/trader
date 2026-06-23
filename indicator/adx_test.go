@@ -1,13 +1,15 @@
-package trader
+package indicator
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/rustyeddy/trader/market"
+	"github.com/stretchr/testify/require"
 )
 
-func mkCandle(scale int32, o, h, l, c float64) Candle {
-	toP := func(x float64) Price { return Price(x*float64(scale) + 0.5) }
-	return Candle{
+func mkCandle(scale int32, o, h, l, c float64) market.Candle {
+	toP := func(x float64) market.Price { return market.Price(x*float64(scale) + 0.5) }
+	return market.Candle{
 		Open:  toP(o),
 		High:  toP(h),
 		Low:   toP(l),
@@ -37,7 +39,7 @@ func feedUptrend(t *testing.T, adx *ADX, scale int32, nCandles int, start float6
 func TestADX_WarmupAndReady(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx, err := NewADX(n, PriceScale)
+	adx, err := NewADX(n, market.PriceScale)
 	require.NoError(t, err)
 
 	require.False(t, adx.Ready())
@@ -56,7 +58,7 @@ func TestADX_WarmupAndReady(t *testing.T) {
 func TestADX_FlatMarketGoesToZero(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx, err := NewADX(n, PriceScale)
+	adx, err := NewADX(n, market.PriceScale)
 	require.NoError(t, err)
 
 	// Plenty of candles so it becomes ready
@@ -72,7 +74,7 @@ func TestADX_FlatMarketGoesToZero(t *testing.T) {
 func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx, err := NewADX(n, PriceScale)
+	adx, err := NewADX(n, market.PriceScale)
 	require.NoError(t, err)
 
 	// Build a steady uptrend: close increases 1 pip each candle, with small range.
@@ -89,7 +91,7 @@ func TestADX_UptrendHasPlusDIOverMinusDIAndPositiveADX(t *testing.T) {
 func TestADX_Reset(t *testing.T) {
 	scale := int32(10000)
 	n := 14
-	adx, err := NewADX(n, PriceScale)
+	adx, err := NewADX(n, market.PriceScale)
 	require.NoError(t, err)
 
 	feedUptrend(t, adx, scale, 3*n, 1.0000, 0.0001, 0.00005)
