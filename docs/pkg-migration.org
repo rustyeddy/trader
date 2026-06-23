@@ -25,9 +25,17 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   Shim: =indicator_aliases.go=, =indicator/migration_exports.go=.
 - =journal= — Journal interface, TradeRecord/EquitySnapshot, CSV/JSONL/Org
   writers, and the live (OANDA) adapter. Shim: =journal_aliases.go=.
+- =log= — logging infrastructure (loggers, stack, syslog). Pure stdlib leaf.
+  Shim: =log_aliases.go=.
+- =review= — ForexReview / ReviewStatus. Callers migrated directly (no shim);
+  this package is expected to grow.
+- =StrategyContext= rework — =Strategy.Update= no longer takes =*Backtest=; it
+  takes a narrow =StrategyContext= (=Instrument()= + =OpenLots() LotView=).
+  =strategies/= no longer references the engine type at all. This is the
+  prerequisite for extracting strategy/regime without the engine.
 
-Remaining in root (~73 non-test files): store/data layer, accounting/execution,
-backtest engine, strategy/regime/live orchestration, logging, config, testdata
+Remaining in root: store/data layer (wave 4, next), accounting/execution,
+backtest engine, strategy/regime/live orchestration, config, testdata
 generators, and a few orphans.
 
 * Lessons Learned (waves 1-3)
@@ -151,23 +159,84 @@ single highest-leverage change for untangling wave 6, and it is small because
 the real surface is two methods. (Nothing is sacred — this is the rework the
 thin dependency invites.)
 
+* Wave 4: the marketdata arrangement (next)
+
+Detailed design for the store/data extraction, derived from re-assessing the
+actual dependency graph.
+
+** Findings
+
+- store/data (~4,500 lines core + ~870 lines stats) has ZERO upward
+  dependencies — a clean leaf on =market=.
+- =candleSet= + =candle_agg/gap/iter= (~500 lines, currently in =market=) are
+  used ONLY by the store/loader, the candle files themselves, and
+  =testdata_generator=. The engine/strategy code never touches =candleSet= — it
+  only uses =Candle=, =CandleTime=, and =CandleIterator=.
+- =data/= is already a dependency-free =Provider= interface + registry.
+  =data/dukascopy= registers there and depends UP on root's =Store=/=Key=. Root
+  fetches providers via =data.Get()= and never imports dukascopy (blank-imported
+  in =cmd=). Preserve this inversion.
+- =Store= reads/writes =candleSet= (store.go uses it 5x) and =DataManager= uses
+  =Store= 14x — one cohesive subsystem; do not split =store= out (it would cycle
+  with =candleSet=).
+- =data_stats_*= depend only on =Candle=/=CandleTime=/=CandleIterator=, but they
+  are folded INTO =marketdata= (decision: one package, clearly named).
+
+** Two structural decisions
+
+1. *candleSet reunion*: move =candleSet= + =candle_agg/gap/iter= OUT of =market=
+   and INTO =marketdata=. =candleSet= is storage machinery (monthly files,
+   validity bitmaps, gap reports), not a value primitive. =market= keeps only
+   the pure =Candle= value. Deletes the =market= candleSet shims.
+
+2. *CandleIterator -> market*: lift the =CandleIterator= interface (yields
+   =CandleTime=) into =market=. The engine CONSUMES iterators; =marketdata=
+   PRODUCES them. With the interface in =market=, the engine depends on
+   =market.CandleIterator= and not on =marketdata= just for the contract. Same
+   inversion pattern as =StrategyContext=. Concrete impls stay in =marketdata=.
+
+** Target shape
+
+#+begin_src text
+market        Candle, CandleTime, CandleIterator (interface), Price/Money/...
+                ^                         ^
+marketdata    candleSet + agg/gap/iter (reunited)
+              Store, StoreKey, StoreKeymap, inventory
+              DataManager, downloader, validation, plan/wants/writer/ticks
+              concrete CandleIterator impls; data_stats (folded in)
+                ^                ^
+data/dukascopy  |                | engine (root) -> marketdata, market
+  -> data, marketdata, market
+marketdata -> data (Provider registry)
+#+end_src
+
+** Sequencing
+
+1. Prep PR (small): lift =CandleIterator= interface into =market=.
+2. Big PR: create =marketdata=; move store*.go + data_*.go (incl. stats) AND
+   =candleSet=/=candle_agg/gap/iter= (out of =market=) into it; delete dead
+   =market= candleSet shims; add root shims for =Store=/=DataManager=/etc.;
+   re-point =data/dukascopy= at =marketdata=.
+3. Cleanup PR: migrate external callers (service/cmd/api, ~8 files) off the root
+   shims to =marketdata= directly; drop shims.
+
 * Revised Migration Order
 
 1. DONE: =market= (primitives + candle).
 2. DONE: =indicator=.
 3. DONE: =journal=.
-4. =log= — free leaf; do it whenever convenient (good warm-up / low-risk PR).
-5. =marketdata= / =store= — store + data layer; reunites =candleSet= with its
-   users. Largest surface; depends only on =market=.
+4. DONE: =log= (free leaf), =review=, and the =StrategyContext= rework.
+5. =marketdata= — store + data layer (incl. stats); reunites =candleSet=; lifts
+   =CandleIterator= to =market=. Largest surface; depends only on =market=.
+   See "Wave 4" above.
 6. =execution= — account, broker, trade, position, lot, requests, history.
    Clean leaf on =market=; gate on accounting-invariant tests.
-7. Introduce =StrategyContext= and migrate =Strategy.Update= off =*Backtest=.
-   (Can be done as its own refactor PR before the strategy extraction.)
-8. =strategy= + =regime= — depend on =market=, =indicator=, =execution=
+7. =strategy= + =regime= — depend on =market=, =indicator=, =execution=
    (for Lot view), and =StrategyContext=; no longer on =backtest=.
-9. =backtest= / =engine= — the orchestration layer, now sitting on clean APIs.
-10. Opportunistic: =synth= (testdata generators), =review= (ForexReview),
-    =config= — fold in where they reduce root clutter.
+   (StrategyContext groundwork already DONE.)
+8. =backtest= / =engine= — the orchestration layer, now sitting on clean APIs.
+9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
+   reduce root clutter.
 
 * Practical Migration Rules
 
