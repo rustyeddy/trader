@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -506,7 +507,7 @@ type lotMeta struct {
 // liveLotsTracker maintains a shadow lot book that mirrors OANDA open trades.
 // Lot IDs are set to the OANDA trade ID so close requests can be routed back.
 type liveLotsTracker struct {
-	byID map[string]*trader.Lot // key = OANDA trade ID
+	byID map[string]*execution.Lot // key = OANDA trade ID
 	meta map[string]*lotMeta
 }
 
@@ -515,7 +516,7 @@ func (lt *liveLotsTracker) sync(trades []trader.LiveTrade) {
 	for _, t := range trades {
 		seen[t.ID] = struct{}{}
 		if lt.byID == nil {
-			lt.byID = map[string]*trader.Lot{}
+			lt.byID = map[string]*execution.Lot{}
 			lt.meta = map[string]*lotMeta{}
 		}
 		if _, ok := lt.byID[t.ID]; !ok {
@@ -523,15 +524,15 @@ func (lt *liveLotsTracker) sync(trades []trader.LiveTrade) {
 			if t.Units < 0 {
 				side = trader.Short
 			}
-			tc := &trader.TradeCommon{ID: t.ID}
+			tc := &execution.TradeCommon{ID: t.ID}
 			tc.Side = side
 			scale := float64(trader.PriceScale)
 			entryPrice := trader.Price(math.Round(t.EntryPrice * scale))
 			tc.Stop = entryPrice // placeholder; real stop set by adapter
-			lt.byID[t.ID] = &trader.Lot{
+			lt.byID[t.ID] = &execution.Lot{
 				TradeCommon: tc,
 				EntryPrice:  entryPrice,
-				State:       trader.LotOpen,
+				State:       execution.LotOpen,
 			}
 			lt.meta[t.ID] = &lotMeta{}
 		}
@@ -555,8 +556,8 @@ func (lt *liveLotsTracker) setInitialStop(tradeID string, stop trader.Price) {
 	}
 }
 
-func (lt *liveLotsTracker) toLotBook() *trader.LotBook {
-	lb := &trader.LotBook{}
+func (lt *liveLotsTracker) toLotBook() *execution.LotBook {
+	lb := &execution.LotBook{}
 	for _, lot := range lt.byID {
 		_ = lb.Add(lot.Clone())
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func mkClose(close float64) trader.Candle {
@@ -75,7 +76,7 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
 	plans := feedPlans(s, closes)
 	require.NotEmpty(t, plans)
 
-	var opens []*trader.OpenRequest
+	var opens []*execution.OpenRequest
 	for _, plan := range plans {
 		require.NotNil(t, plan)
 		require.Empty(t, plan.Closes, "no lots in test so no closes expected")

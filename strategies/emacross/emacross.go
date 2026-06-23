@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -180,21 +181,21 @@ func EmitOpen(c *Core, ct *trader.CandleTime, run trader.StrategyContext, side t
 	plan := &trader.StrategyPlan{}
 
 	if run != nil {
-		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen || lot.Side == side {
+		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen || lot.Side == side {
 				return nil
 			}
-			plan.Closes = append(plan.Closes, &trader.CloseRequest{
-				Request: trader.Request{
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "ema-cross-reverse",
 					Candle:      ct.Candle,
-					RequestType: trader.RequestClose,
+					RequestType: execution.RequestClose,
 					Price:       ct.Close,
 					Timestamp:   ct.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: trader.CloseManual,
+				CloseCause: execution.CloseManual,
 			})
 			return nil
 		})
@@ -206,7 +207,7 @@ func EmitOpen(c *Core, ct *trader.CandleTime, run trader.StrategyContext, side t
 	}
 
 	stop := Stop(c, ct, inst, side)
-	plan.Opens = append(plan.Opens, trader.NewOpenRequest(inst, ct, side, stop, 0, "ema-cross"))
+	plan.Opens = append(plan.Opens, execution.NewOpenRequest(inst, ct, side, stop, 0, "ema-cross"))
 	return plan
 }
 

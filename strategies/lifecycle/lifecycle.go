@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -62,7 +63,7 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.
 		}
 
 		stop := inst.SubPips(c.Close, trader.PipsFromFloat(s.StopPips))
-		op := trader.NewOpenRequest(run.Instrument(), c, trader.Long, stop, 0, "lifecycle-test-open-long")
+		op := execution.NewOpenRequest(run.Instrument(), c, trader.Long, stop, 0, "lifecycle-test-open-long")
 		op.Units = s.Units
 
 		plan.Opens = append(plan.Opens, op)
@@ -79,25 +80,25 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.
 		}
 
 		submitted := false
-		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
+		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
 			if submitted {
 				return nil
 			}
-			if lot == nil || lot.State != trader.LotOpen {
+			if lot == nil || lot.State != execution.LotOpen {
 				return nil
 			}
 
-			cl := &trader.CloseRequest{
-				Request: trader.Request{
+			cl := &execution.CloseRequest{
+				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
-					RequestType: trader.RequestClose,
+					RequestType: execution.RequestClose,
 					Price:       c.Close,
 					Timestamp:   c.Timestamp,
 					Candle:      c.Candle,
 					Reason:      "lifecycle-test-close-long",
 				},
 				Lot:        lot,
-				CloseCause: trader.CloseManual,
+				CloseCause: execution.CloseManual,
 			}
 
 			plan.Closes = append(plan.Closes, cl)

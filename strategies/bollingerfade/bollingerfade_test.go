@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 const scale = float64(trader.PriceScale) // 100_000
@@ -32,11 +33,11 @@ func warmup(t *testing.T, f *Fade) {
 }
 
 // makeLot builds a minimal open lot snapshot for the given side.
-func makeLot(side trader.Side) *trader.LotBook {
-	lb := &trader.LotBook{}
-	tc := &trader.TradeCommon{ID: "test-lot"}
+func makeLot(side trader.Side) *execution.LotBook {
+	lb := &execution.LotBook{}
+	tc := &execution.TradeCommon{ID: "test-lot"}
 	tc.Side = side
-	lb.Add(&trader.Lot{TradeCommon: tc, State: trader.LotOpen})
+	lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
 	return lb
 }
 

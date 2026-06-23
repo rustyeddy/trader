@@ -6,20 +6,21 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 type Sim struct {
-	account *trader.Account
+	account *execution.Account
 	journal trader.Journal
 	prices  map[string]trader.Tick
 }
 
-func NewSimBroker(acct *trader.Account, j trader.Journal) *Sim {
+func NewSimBroker(acct *execution.Account, j trader.Journal) *Sim {
 	if acct == nil {
-		acct = trader.NewAccount("sim", 0)
+		acct = execution.NewAccount("sim", 0)
 	}
 	if acct.Lots.All() == nil {
-		acct.Lots = trader.LotBook{}
+		acct.Lots = execution.LotBook{}
 	}
 	return &Sim{
 		account: acct,
@@ -54,8 +55,8 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		return fmt.Errorf("sim broker account is nil")
 	}
 
-	var lots []*trader.Lot
-	_ = e.account.Lots.Range(func(lot *trader.Lot) error {
+	var lots []*execution.Lot
+	_ = e.account.Lots.Range(func(lot *execution.Lot) error {
 		lots = append(lots, lot)
 		return nil
 	})
@@ -67,7 +68,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		}
 		exitPrice := px.Mid()
 		exitTime := trader.FromTime(time.Now().UTC())
-		trade := &trader.Trade{
+		trade := &execution.Trade{
 			TradeCommon: lot.TradeCommon.Clone(),
 			EntryPrice:  lot.EntryPrice,
 			EntryTime:   lot.EntryTime,
@@ -106,7 +107,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 	return nil
 }
 
-func (e *Sim) GetAccount(context.Context) (*trader.Account, error) {
+func (e *Sim) GetAccount(context.Context) (*execution.Account, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("sim broker account is nil")
 	}

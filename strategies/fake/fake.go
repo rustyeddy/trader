@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -54,7 +55,7 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run trader.Stra
 			return nil
 		}
 		stop := inst.SubPips(c.Close, trader.PipsFromFloat(10))
-		op := trader.NewOpenRequest(run.Instrument(), c, trader.Long, stop, trader.Price(0), "higher highs")
+		op := execution.NewOpenRequest(run.Instrument(), c, trader.Long, stop, trader.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -65,23 +66,23 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run trader.Stra
 		}
 
 		submittedClose := false
-		run.OpenLots().Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen {
+		run.OpenLots().Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
 				return nil
 			}
 
 			if (lot.Side == trader.Long && c.Close <= lot.Stop) ||
 				(lot.Side == trader.Short && c.Close >= lot.Stop) {
-				cl := &trader.CloseRequest{
-					Request: trader.Request{
+				cl := &execution.CloseRequest{
+					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
 						Reason:      "CloseStop",
 						Candle:      c.Candle,
-						RequestType: trader.RequestClose,
+						RequestType: execution.RequestClose,
 						Price:       c.Close,
 						Timestamp:   c.Timestamp,
 					},
-					CloseCause: trader.CloseStopLoss,
+					CloseCause: execution.CloseStopLoss,
 					Lot:        lot,
 				}
 				plan.Closes = append(plan.Closes, cl)
@@ -148,21 +149,21 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run trader.St
 	if run != nil && run.OpenLots().Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
 			submittedClose := false
-			run.OpenLots().Range(func(lot *trader.Lot) error {
-				if lot.State != trader.LotOpen {
+			run.OpenLots().Range(func(lot *execution.Lot) error {
+				if lot.State != execution.LotOpen {
 					return nil
 				}
-				cl := &trader.CloseRequest{
-					Request: trader.Request{
+				cl := &execution.CloseRequest{
+					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
 						Reason:      "fake-02-close",
 						Candle:      c.Candle,
-						RequestType: trader.RequestClose,
+						RequestType: execution.RequestClose,
 						Price:       c.Close,
 						Timestamp:   c.Timestamp,
 					},
 					Lot:        lot,
-					CloseCause: trader.CloseManual,
+					CloseCause: execution.CloseManual,
 				}
 				plan.Closes = append(plan.Closes, cl)
 				submittedClose = true
@@ -202,7 +203,7 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run trader.St
 		stop = inst.AddPips(c.Close, trader.PipsFromFloat(f.StopPips))
 	}
 
-	op := trader.NewOpenRequest(run.Instrument(), c, side, stop, trader.Price(0), "fake-02-open")
+	op := execution.NewOpenRequest(run.Instrument(), c, side, stop, trader.Price(0), "fake-02-open")
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "fake-02-open"
 

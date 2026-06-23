@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,9 +25,9 @@ func minCandle(close float64) *trader.CandleTime {
 }
 
 // minRun builds a minimal Backtest sufficient for the lifecycle strategy.
-func minRun(lots *trader.LotBook) *trader.Backtest {
+func minRun(lots *execution.LotBook) *trader.Backtest {
 	if lots == nil {
-		lots = &trader.LotBook{}
+		lots = &execution.LotBook{}
 	}
 	return &trader.Backtest{
 		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
@@ -35,10 +36,10 @@ func minRun(lots *trader.LotBook) *trader.Backtest {
 }
 
 // openLot builds and adds a minimal open lot to a fresh LotBook.
-func openLot() *trader.LotBook {
-	lb := &trader.LotBook{}
-	lot := &trader.Lot{
-		TradeCommon: &trader.TradeCommon{
+func openLot() *execution.LotBook {
+	lb := &execution.LotBook{}
+	lot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{
 			ID:         "lot-1",
 			Instrument: "EURUSD",
 			Side:       trader.Long,
@@ -48,7 +49,7 @@ func openLot() *trader.LotBook {
 		EntryTime:      1000,
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          trader.LotOpen,
+		State:          execution.LotOpen,
 	}
 	_ = lb.Add(lot)
 	return lb

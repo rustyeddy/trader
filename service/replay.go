@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -151,7 +152,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 	bt := &trader.Backtest{
 		Request: &trader.BacktestRequest{Instrument: inst},
-		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
+		State:   &trader.BacktestRun{Lots: &execution.LotBook{}},
 	}
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
@@ -296,16 +297,16 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			})
 
 			// Add to the synthetic LotBook so the strategy can see open positions.
-			tc := &trader.TradeCommon{ID: posID}
+			tc := &execution.TradeCommon{ID: posID}
 			tc.Side = op.Side
 			tc.Stop = stop
 			tc.Instrument = inst
-			bt.State.Lots.Add(&trader.Lot{
+			bt.State.Lots.Add(&execution.Lot{
 				TradeCommon:    tc,
 				EntryPrice:     candle.Close,
 				OriginalUnits:  1,
 				RemainingUnits: 1,
-				State:          trader.LotOpen,
+				State:          execution.LotOpen,
 			})
 
 			positions = append(positions, &replayPosition{

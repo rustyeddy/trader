@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func ct(close float64) *trader.CandleTime {
@@ -95,8 +96,8 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	require.Len(t, plan.Opens, 1)
 
 	// Simulate position open by adding a lot.
-	lb := &trader.LotBook{}
-	lb.Add(&trader.Lot{TradeCommon: &trader.TradeCommon{ID: "test-lot-1"}})
+	lb := &execution.LotBook{}
+	lb.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "test-lot-1"}})
 	run.State.Lots = lb
 
 	// Subsequent calls skip because a position is open.

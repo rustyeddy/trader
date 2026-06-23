@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -305,25 +306,25 @@ func emitOpen(ct *trader.CandleTime, run trader.StrategyContext, side trader.Sid
 
 	alreadyOpen := false
 	if run != nil {
-		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen {
+		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
 				return nil
 			}
 			if lot.Side == side {
 				alreadyOpen = true
 				return nil
 			}
-			plan.Closes = append(plan.Closes, &trader.CloseRequest{
-				Request: trader.Request{
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "donchian-v6-reverse",
 					Candle:      ct.Candle,
-					RequestType: trader.RequestClose,
+					RequestType: execution.RequestClose,
 					Price:       ct.Close,
 					Timestamp:   ct.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: trader.CloseManual,
+				CloseCause: execution.CloseManual,
 			})
 			return nil
 		})
@@ -337,7 +338,7 @@ func emitOpen(ct *trader.CandleTime, run trader.StrategyContext, side trader.Sid
 	if run != nil {
 		inst = run.Instrument()
 	}
-	open := trader.NewOpenRequest(inst, ct, side, 0, 0, "donchian-v6-breakout")
+	open := execution.NewOpenRequest(inst, ct, side, 0, 0, "donchian-v6-breakout")
 	plan.Opens = append(plan.Opens, open)
 	return plan
 }

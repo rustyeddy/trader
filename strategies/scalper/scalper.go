@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -137,7 +138,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader
 			instr = run.Instrument()
 		}
 		return &trader.StrategyPlan{
-			Opens:  []*trader.OpenRequest{trader.NewOpenRequest(instr, ct, trader.Long, stop, 0, "buy-the-dip")},
+			Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, trader.Long, stop, 0, "buy-the-dip")},
 			Reason: "buy-the-dip",
 		}
 	}

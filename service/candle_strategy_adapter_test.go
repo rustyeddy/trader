@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -108,7 +109,7 @@ func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 	})
 	lb := lt.toLotBook()
 	var sides []trader.Side
-	_ = lb.Range(func(lot *trader.Lot) error {
+	_ = lb.Range(func(lot *execution.Lot) error {
 		sides = append(sides, lot.Side)
 		return nil
 	})
@@ -149,14 +150,14 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	close := trader.Price(math.Round(1.10000 * scale))
 	stop := trader.Price(math.Round(1.09000 * scale)) // 100-pip stop
 
-	tc := &trader.TradeCommon{}
+	tc := &execution.TradeCommon{}
 	tc.Side = trader.Long
-	open := trader.NewOpenRequest("EURUSD", &trader.CandleTime{
+	open := execution.NewOpenRequest("EURUSD", &trader.CandleTime{
 		Candle:    trader.Candle{Close: close},
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, stop, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*trader.OpenRequest{open}}
+	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: close}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -174,12 +175,12 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 	close := trader.Price(math.Round(1.10000 * scale))
 
 	// Stop == 0: strategy forgot to set it.
-	open := trader.NewOpenRequest("EURUSD", &trader.CandleTime{
+	open := execution.NewOpenRequest("EURUSD", &trader.CandleTime{
 		Candle:    trader.Candle{Close: close},
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, 0 /*stop*/, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*trader.OpenRequest{open}}
+	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: close}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -216,12 +217,12 @@ func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
 	closePrice := trader.Price(math.Round(1.12500 * scale))
 
 	// Strategy returns stop=0; exit strategy should fill it in.
-	open := trader.NewOpenRequest("EURUSD", &trader.CandleTime{
+	open := execution.NewOpenRequest("EURUSD", &trader.CandleTime{
 		Candle:    trader.Candle{Close: closePrice},
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, 0 /*stop*/, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*trader.OpenRequest{open}}
+	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: closePrice}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -235,17 +236,17 @@ func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
 
-	tc := &trader.TradeCommon{ID: "oanda-trade-999"}
-	lot := &trader.Lot{TradeCommon: tc, State: trader.LotOpen}
-	cr := &trader.CloseRequest{
-		Request: trader.Request{
+	tc := &execution.TradeCommon{ID: "oanda-trade-999"}
+	lot := &execution.Lot{TradeCommon: tc, State: execution.LotOpen}
+	cr := &execution.CloseRequest{
+		Request: execution.Request{
 			TradeCommon: tc,
-			RequestType: trader.RequestClose,
+			RequestType: execution.RequestClose,
 		},
 		Lot: lot,
 	}
 
-	plan := &trader.StrategyPlan{Closes: []*trader.CloseRequest{cr}}
+	plan := &trader.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
 	live := a.convertPlan(plan, trader.CandleTime{}, trader.LivePrice{})
 	require.NotNil(t, live)
 	assert.Equal(t, []string{"oanda-trade-999"}, live.CloseIDs)

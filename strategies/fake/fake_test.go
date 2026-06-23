@@ -8,12 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func fakeRun(instrument string) *trader.Backtest {
 	return &trader.Backtest{
 		Request: &trader.BacktestRequest{Instrument: instrument},
-		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
+		State:   &trader.BacktestRun{Lots: &execution.LotBook{}},
 	}
 }
 
@@ -76,8 +77,8 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 	f := &Fake{CandleCount: 1, highest: trader.PriceFromFloat(2.0)}
 	run := fakeRun("EURUSD")
 
-	lot := &trader.Lot{
-		TradeCommon: &trader.TradeCommon{
+	lot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{
 			ID:         trader.NewULID(),
 			Instrument: "EURUSD",
 			Side:       trader.Long,
@@ -86,14 +87,14 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 		},
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          trader.LotOpen,
+		State:          execution.LotOpen,
 	}
 	run.State.Lots.Add(lot)
 
 	plan := f.Update(context.Background(), fakeCandle(10, 1.0940, 1.0900, 1.0890), run)
 	require.NotNil(t, plan)
 	require.Len(t, plan.Closes, 1)
-	assert.Equal(t, trader.CloseStopLoss, plan.Closes[0].CloseCause)
+	assert.Equal(t, execution.CloseStopLoss, plan.Closes[0].CloseCause)
 	assert.Equal(t, lot.ID, plan.Closes[0].Lot.ID)
 }
 
@@ -122,7 +123,7 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	require.Len(t, openPlan.Opens, 1)
 	assert.Equal(t, "fake-02-open", openPlan.Reason)
 
-	openLot := &trader.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: trader.LotOpen}
+	openLot := &execution.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: execution.LotOpen}
 	run.State.Lots.Add(openLot)
 
 	holdPlan := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
@@ -133,7 +134,7 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	require.NotNil(t, closePlan)
 	require.Len(t, closePlan.Closes, 1)
 	assert.Equal(t, "fake-02-close", closePlan.Reason)
-	assert.Equal(t, trader.CloseManual, closePlan.Closes[0].CloseCause)
+	assert.Equal(t, execution.CloseManual, closePlan.Closes[0].CloseCause)
 }
 
 func TestFake02_Update_MissingInstrument(t *testing.T) {

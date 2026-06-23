@@ -19,6 +19,7 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -107,8 +108,8 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.Str
 	// Check open lots: close any that have reverted to the middle band.
 	hasOpen := false
 	if run != nil {
-		_ = run.OpenLots().Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen {
+		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
 				return nil
 			}
 			hasOpen = true
@@ -120,17 +121,17 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.Str
 				shouldClose = ct.Close <= middle
 			}
 			if shouldClose {
-				plan.Closes = append(plan.Closes, &trader.CloseRequest{
-					Request: trader.Request{
+				plan.Closes = append(plan.Closes, &execution.CloseRequest{
+					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
 						Reason:      "bb-revert",
 						Candle:      ct.Candle,
-						RequestType: trader.RequestClose,
+						RequestType: execution.RequestClose,
 						Price:       ct.Close,
 						Timestamp:   ct.Timestamp,
 					},
 					Lot:        lot,
-					CloseCause: trader.CloseManual,
+					CloseCause: execution.CloseManual,
 				})
 			}
 			return nil
@@ -148,7 +149,7 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.Str
 	case ct.Close < lower:
 		// Price closed below lower band — fade the drop, expect reversion up.
 		stop := ct.Close - atrPrice
-		open := trader.NewOpenRequest(instrumentFrom(run), ct, trader.Long, stop, 0, "bb-fade-long")
+		open := execution.NewOpenRequest(instrumentFrom(run), ct, trader.Long, stop, 0, "bb-fade-long")
 		plan.Opens = append(plan.Opens, open)
 		plan.Reason = fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
 			float64(ct.Close)/f.scale, float64(lower)/f.scale)
@@ -156,7 +157,7 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.Str
 	case ct.Close > upper:
 		// Price closed above upper band — fade the rise, expect reversion down.
 		stop := ct.Close + atrPrice
-		open := trader.NewOpenRequest(instrumentFrom(run), ct, trader.Short, stop, 0, "bb-fade-short")
+		open := execution.NewOpenRequest(instrumentFrom(run), ct, trader.Short, stop, 0, "bb-fade-short")
 		plan.Opens = append(plan.Opens, open)
 		plan.Reason = fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
 			float64(ct.Close)/f.scale, float64(upper)/f.scale)

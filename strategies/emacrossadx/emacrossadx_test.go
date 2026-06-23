@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -222,7 +223,7 @@ func TestStrategy_Update_CrossUpEmitsLongOpen(t *testing.T) {
 	}
 
 	plans := feedUpdates(s, closes)
-	var opens []*trader.OpenRequest
+	var opens []*execution.OpenRequest
 	for _, plan := range plans {
 		opens = append(opens, plan.Opens...)
 	}
@@ -251,7 +252,7 @@ func TestStrategy_Update_CrossDownEmitsShortOpen(t *testing.T) {
 	}
 
 	plans := feedUpdates(s, closes)
-	var opens []*trader.OpenRequest
+	var opens []*execution.OpenRequest
 	for _, plan := range plans {
 		opens = append(opens, plan.Opens...)
 	}

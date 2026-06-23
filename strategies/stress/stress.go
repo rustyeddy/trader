@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
 )
 
 func init() {
@@ -96,7 +97,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader
 
 	reason := fmt.Sprintf("stress-%s", side)
 	return &trader.StrategyPlan{
-		Opens:  []*trader.OpenRequest{trader.NewOpenRequest(instr, ct, side, stop, 0, reason)},
+		Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, side, stop, 0, reason)},
 		Reason: reason,
 	}
 }
