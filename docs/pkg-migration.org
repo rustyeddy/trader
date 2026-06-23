@@ -18,9 +18,10 @@ the root package from the leaves inward.
 Done (each landed behind temporary root re-export shims; callers unchanged):
 
 - =market= — fixed-point/domain primitives (Price, Money, Rate, Units, Pips,
-  Tick, Timestamp, Timeframe, Instrument) *and the full candle family*
-  (Candle, candleSet, iterators, aggregation, gap analysis) *and the Source*
-  data-source constants. Shims: =market_aliases.go=, =market/migration_exports.go=.
+  Tick, Timestamp, Timeframe, Instrument), the pure =Candle= value, the
+  =CandleIterator= contract, and the Source data-source constants. Shims:
+  =market_aliases.go=, =market/migration_exports.go=. (candleSet and the
+  candle aggregation/gap/iter machinery were moved on to =marketdata=.)
 - =indicator= — EMA, ATR, ADX, Bollinger, Choppiness + fixed-point helpers.
   Shim: =indicator_aliases.go=, =indicator/migration_exports.go=.
 - =journal= — Journal interface, TradeRecord/EquitySnapshot, CSV/JSONL/Org
@@ -33,10 +34,14 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   takes a narrow =StrategyContext= (=Instrument()= + =OpenLots() LotView=).
   =strategies/= no longer references the engine type at all. This is the
   prerequisite for extracting strategy/regime without the engine.
+- =marketdata= — store + data layer: store/keys/inventory/keymap, DataManager,
+  downloader, validation, iterators, plan/wants/writer/ticks, data_stats
+  analyzers, synthetic candle generators, and the candleSet machinery. Shims:
+  =marketdata_aliases.go=, =marketdata/migration_exports.go=. Cleanup pending:
+  migrate service/cmd/api and =data/dukascopy= off the root shims; drop shims.
 
-Remaining in root: store/data layer (wave 4, next), accounting/execution,
-backtest engine, strategy/regime/live orchestration, config, testdata
-generators, and a few orphans.
+Remaining in root: accounting/execution, backtest engine, strategy/regime/live
+orchestration, config, and a few orphans.
 
 * Lessons Learned (waves 1-3)
 
