@@ -1,9 +1,11 @@
-package trader
+package execution
 
 import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // lotState represents a trader domain type.
@@ -38,14 +40,14 @@ func (s lotState) String() string {
 // Lot represents a trader domain type.
 type Lot struct {
 	*TradeCommon
-	EntryPrice     Price
-	EntryTime      Timestamp
-	OriginalUnits  Units
-	RemainingUnits Units
+	EntryPrice     market.Price
+	EntryTime      market.Timestamp
+	OriginalUnits  market.Units
+	RemainingUnits market.Units
 	State          lotState
 	// ExtremePrice tracks the highest-high (long) or lowest-low (short) seen
 	// since entry. Used by trailing/chandelier exit strategies.
-	ExtremePrice Price
+	ExtremePrice market.Price
 }
 
 // Clone is an internal helper for trader type processing.

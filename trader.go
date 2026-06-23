@@ -84,8 +84,8 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 		}
 
 		queueLen := 0
-		if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
-			queueLen = len(t.Broker.evtQ)
+		if t != nil {
+			queueLen = t.Broker.EventQueueLen()
 		}
 
 		pendingState := false
@@ -170,8 +170,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 			}
 
 			pending := 0
-			if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
-				pending = len(t.Broker.evtQ)
+			if t != nil {
+				pending = t.Broker.EventQueueLen()
 			}
 			if pending == 0 {
 				break
@@ -218,9 +218,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 
 				queueLen := 0
 				queueCap := 0
-				if t != nil && t.Broker != nil && t.Broker.evtQ != nil {
-					queueLen = len(t.Broker.evtQ)
-					queueCap = cap(t.Broker.evtQ)
+				if t != nil {
+					queueLen = t.Broker.EventQueueLen()
+					queueCap = t.Broker.EventQueueCap()
 				}
 
 				if lag > 30*time.Second {

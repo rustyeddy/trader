@@ -9,53 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLotUnrealizedPL_LongAndShort verifies expected behavior for this component.
-func TestLotUnrealizedPL_LongAndShort(t *testing.T) {
-	t.Parallel()
-
-	units := Units(1000)
-	longLot := &Lot{TradeCommon: &TradeCommon{Side: Long, Units: units}, EntryPrice: PriceFromFloat(1.20000), OriginalUnits: units, RemainingUnits: units}
-	shortLot := &Lot{TradeCommon: &TradeCommon{Side: Short, Units: units}, EntryPrice: PriceFromFloat(1.20000), OriginalUnits: units, RemainingUnits: units}
-
-	// +10 pips move on 1,000 units is +1.00 in quote currency.
-	upMove := PriceFromFloat(1.20100)
-	qta := Rate(RateScale) // 1:1 conversion
-
-	longPL, err := lotUnrealizedPNL(longLot, upMove, qta)
-	require.NoError(t, err)
-	assert.Equal(t, Money(MoneyScale), longPL)
-
-	shortPL, err := lotUnrealizedPNL(shortLot, upMove, qta)
-	require.NoError(t, err)
-	assert.Equal(t, -Money(MoneyScale), shortPL)
-
-	// -10 pips move on 1,000 units is -1.00 for long and +1.00 for short.
-	downMove := PriceFromFloat(1.19900)
-	longPL2, err := lotUnrealizedPNL(longLot, downMove, qta)
-	require.NoError(t, err)
-	assert.Equal(t, -Money(MoneyScale), longPL2)
-
-	shortPL2, err := lotUnrealizedPNL(shortLot, downMove, qta)
-	require.NoError(t, err)
-	assert.Equal(t, Money(MoneyScale), shortPL2)
-}
-
-// TestLotUnrealizedPL_QuoteToAccountConversion verifies expected behavior for this component.
-func TestLotUnrealizedPL_QuoteToAccountConversion(t *testing.T) {
-	t.Parallel()
-
-	units := Units(1000)
-	lot := &Lot{TradeCommon: &TradeCommon{Side: Long, Units: units}, EntryPrice: PriceFromFloat(1.20000), OriginalUnits: units, RemainingUnits: units}
-	current := PriceFromFloat(1.20100) // +1.00 quote currency P/L
-	// quoteToAccount as Rate (scaled by RateScale)
-	qta := Rate(int64(PriceFromFloat(1.500)) * int64(RateScale) / int64(PriceScale))
-
-	pl, err := lotUnrealizedPNL(lot, current, qta)
-	require.NoError(t, err)
-	// +1.00 quote * 1.5 conversion = +1.50 account
-	assert.Equal(t, Money(1_500_000), pl)
-}
-
 // TestIsFXMarketClosed_BackCompatWrapper verifies expected behavior for this component.
 func TestIsFXMarketClosed_BackCompatWrapper(t *testing.T) {
 	t.Parallel()

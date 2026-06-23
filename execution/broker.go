@@ -1,8 +1,10 @@
-package trader
+package execution
 
 import (
 	"context"
 	"fmt"
+
+	"github.com/rustyeddy/trader/log"
 )
 
 const brokerEventQueueSize = 1024
@@ -116,7 +118,7 @@ func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
 
 func (b *Broker) publishEvent(ctx context.Context, evt *Event) {
 	if err := b.emitEvent(ctx, evt); err != nil {
-		L.Warn("dropping broker event", "type", evt.Type.String(), "err", err)
+		log.L.Warn("dropping broker event", "type", evt.Type.String(), "err", err)
 	}
 }
 
@@ -125,4 +127,35 @@ func (b *Broker) ensureEventQueue() chan *Event {
 		b.evtQ = make(chan *Event, brokerEventQueueSize)
 	}
 	return b.evtQ
+}
+
+// EventQueueLen returns the number of pending broker events, or 0 if the queue
+// has not been initialized. Used by the engine to detect broker idleness.
+func (b *Broker) EventQueueLen() int {
+	if b == nil || b.evtQ == nil {
+		return 0
+	}
+	return len(b.evtQ)
+}
+
+// EventQueueCap returns the capacity of the broker event queue, or 0 if it has
+// not been initialized.
+func (b *Broker) EventQueueCap() int {
+	if b == nil || b.evtQ == nil {
+		return 0
+	}
+	return cap(b.evtQ)
+}
+
+// EnqueueEvent places evt on the broker event queue without blocking, returning
+// true if it was accepted. The queue is initialized on first use. Useful for
+// injecting events from outside the normal Submit path (e.g. tests, replay).
+func (b *Broker) EnqueueEvent(evt *Event) bool {
+	q := b.ensureEventQueue()
+	select {
+	case q <- evt:
+		return true
+	default:
+		return false
+	}
 }

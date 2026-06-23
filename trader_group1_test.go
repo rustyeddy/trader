@@ -131,7 +131,6 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 
 	b := NewBroker("idle")
 	b.Account = NewAccount("acct", MoneyFromFloat(10_000))
-	b.evtQ = make(chan *Event, 1)
 	idle := &Trader{Broker: b}
 	require.NoError(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
@@ -139,7 +138,7 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	bad <- errors.New("from broker")
 	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 
-	b.evtQ <- &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}
+	require.True(t, b.EnqueueEvent(&Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}))
 	require.ErrorContains(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 

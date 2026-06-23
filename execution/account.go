@@ -1,25 +1,27 @@
-package trader
+package execution
 
 import (
 	"fmt"
 	"math"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // Account holds the financial state for a single trading account.
-// All monetary values are scaled integers (Money = int64 × MoneyScale).
+// All monetary values are scaled integers (market.Money = int64 × market.MoneyScale).
 // Invariants that must hold after every operation:
 //   - Equity = Balance + UnrealizedPL
 //   - FreeMargin = Equity − MarginUsed
 type Account struct {
 	ID           string
 	Name         string
-	Currency     string // account denomination (e.g. "USD")
-	Balance      Money  // realised cash; updated on every close
-	Equity       Money  // Balance + sum of unrealised P/L across open lots
-	MarginUsed   Money  // sum of margin reserved by open lots
-	FreeMargin   Money  // Equity − MarginUsed
-	MarginLevel  Money  // Equity / MarginUsed × MoneyScale (0 when flat)
-	RiskFraction Rate   // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
+	Currency     string       // account denomination (e.g. "USD")
+	Balance      market.Money // realised cash; updated on every close
+	Equity       market.Money // Balance + sum of unrealised P/L across open lots
+	MarginUsed   market.Money // sum of margin reserved by open lots
+	FreeMargin   market.Money // Equity − MarginUsed
+	MarginLevel  market.Money // Equity / MarginUsed × market.MoneyScale (0 when flat)
+	RiskFraction market.Rate  // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
 
 	Lots   LotBook
 	Trades []*Trade // closed trades, appended by CloseLot
@@ -27,15 +29,15 @@ type Account struct {
 
 // NewAccount creates an Account with the given name and opening deposit.
 // Currency defaults to "USD"; RiskFraction defaults to 0.5 %.
-func NewAccount(name string, deposit Money) *Account {
+func NewAccount(name string, deposit market.Money) *Account {
 	acct := &Account{
-		ID:           NewULID(),
+		ID:           market.NewULID(),
 		Name:         name,
 		Currency:     "USD",
 		Balance:      deposit,
 		Equity:       deposit,
 		MarginUsed:   0.0,
-		RiskFraction: RateFromFloat(0.005),
+		RiskFraction: market.RateFromFloat(0.005),
 	}
 	return acct
 }
@@ -51,22 +53,22 @@ func NewAccount(name string, deposit Money) *Account {
 //   - USDJPY -> 1 / USDJPY
 //   - EURGBP -> GBPUSD, or 1 / USDGBP if only the inverse exists
 //
-// The returned Rate is scaled by RateScale.
-func (acct *Account) quoteToAccountRate(inst string, price Price) (Rate, error) {
-	meta := GetInstrument(inst)
+// The returned market.Rate is scaled by market.RateScale.
+func (acct *Account) quoteToAccountRate(inst string, price market.Price) (market.Rate, error) {
+	meta := market.GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
 	if meta.QuoteCurrency == acct.Currency {
-		return Rate(RateScale), nil
+		return market.Rate(market.RateScale), nil
 	}
 
 	if meta.BaseCurrency == acct.Currency {
-		r, err := mulDivCeil64(int64(MoneyScale), int64(PriceScale), int64(price))
+		r, err := market.MulDivCeil64(int64(market.MoneyScale), int64(market.PriceScale), int64(price))
 		if err != nil {
 			return 0, err
 		}
-		return Rate(r), nil
+		return market.Rate(r), nil
 	}
 
 	// Cross pair: neither quote nor base is the account currency.
@@ -74,8 +76,8 @@ func (acct *Account) quoteToAccountRate(inst string, price Price) (Rate, error) 
 	// bounded error (~±30% over long backtests) on absolute dollar P/L but
 	// does not affect win/loss decisions or relative return percentages.
 	if acct.Currency == "USD" {
-		if r, ok := ApproximateUSDPerUnit(meta.QuoteCurrency); ok {
-			return RateFromFloat(r), nil
+		if r, ok := market.ApproximateUSDPerUnit(meta.QuoteCurrency); ok {
+			return market.RateFromFloat(r), nil
 		}
 	}
 	return 0, fmt.Errorf("unsupported quote-to-account conversion: %s -> %s", meta.QuoteCurrency, acct.Currency)
@@ -100,7 +102,7 @@ func (acct *Account) AddLot(lot *Lot) error {
 	if err := acct.Lots.Add(lot); err != nil {
 		return err
 	}
-	return acct.ResolveWithMarks(map[string]Price{
+	return acct.ResolveWithMarks(map[string]market.Price{
 		lot.Instrument: lot.EntryPrice,
 	})
 }
@@ -126,14 +128,14 @@ func (acct *Account) CloseLot(lot *Lot, trade *Trade) error {
 	trade.PNL = pnl
 	acct.Trades = append(acct.Trades, trade.Clone())
 	acct.Lots.Delete(lot.ID)
-	return acct.ResolveWithMarks(map[string]Price{lot.Instrument: trade.ExitPrice})
+	return acct.ResolveWithMarks(map[string]market.Price{lot.Instrument: trade.ExitPrice})
 }
 
 // lotUnrealizedPNL computes the open profit/loss for a single lot at the
-// given mark price. qta is the quote-to-account rate (RateScale-scaled).
+// given mark price. qta is the quote-to-account rate (market.RateScale-scaled).
 // The sign follows the lot's side: long gains when mark > entry; short gains
 // when mark < entry.
-func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
+func lotUnrealizedPNL(lot *Lot, mark market.Price, qta market.Rate) (market.Money, error) {
 	if lot == nil {
 		return 0, fmt.Errorf("nil position")
 	}
@@ -149,33 +151,33 @@ func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 		return 0, nil
 	}
 
-	absDelta, err := absInt64Checked(priceDelta)
+	absDelta, err := market.AbsInt64Checked(priceDelta)
 	if err != nil {
 		return 0, err
 	}
-	absUnits, err := absInt64Checked(int64(lot.RemainingUnits))
-	if err != nil {
-		return 0, err
-	}
-
-	deltaUnits, err := mulChecked64(absDelta, absUnits)
+	absUnits, err := market.AbsInt64Checked(int64(lot.RemainingUnits))
 	if err != nil {
 		return 0, err
 	}
 
-	whole := deltaUnits / int64(PriceScale)
-	frac := deltaUnits % int64(PriceScale)
-
-	base, err := mulChecked64(whole, int64(qta))
+	deltaUnits, err := market.MulChecked64(absDelta, absUnits)
 	if err != nil {
 		return 0, err
 	}
 
-	fracNum, err := mulChecked64(frac, int64(qta))
+	whole := deltaUnits / int64(market.PriceScale)
+	frac := deltaUnits % int64(market.PriceScale)
+
+	base, err := market.MulChecked64(whole, int64(qta))
 	if err != nil {
 		return 0, err
 	}
-	fracPart, err := roundHalfAwayFromZero(fracNum, int64(PriceScale))
+
+	fracNum, err := market.MulChecked64(frac, int64(qta))
+	if err != nil {
+		return 0, err
+	}
+	fracPart, err := market.RoundHalfAwayFromZero(fracNum, int64(market.PriceScale))
 	if err != nil {
 		return 0, err
 	}
@@ -186,7 +188,7 @@ func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 	totalAbs := base + fracPart
 
 	sign := int64(lot.Side)
-	if sign != int64(Long) && sign != int64(Short) {
+	if sign != int64(market.Long) && sign != int64(market.Short) {
 		return 0, fmt.Errorf("position %q has invalid side %d", lot.ID, lot.Side)
 	}
 	if priceDelta < 0 {
@@ -196,20 +198,20 @@ func lotUnrealizedPNL(lot *Lot, mark Price, qta Rate) (Money, error) {
 		totalAbs = -totalAbs
 	}
 
-	return Money(totalAbs), nil
+	return market.Money(totalAbs), nil
 }
 
 // ResolveWithMarks recomputes all account-level derived fields (Equity,
 // MarginUsed, FreeMargin, MarginLevel) using the provided mark prices.
 // If a lot's instrument has no entry in marks, the lot's EntryPrice is used.
 // Pass nil to revalue everything at entry.
-func (acct *Account) ResolveWithMarks(marks map[string]Price) error {
+func (acct *Account) ResolveWithMarks(marks map[string]market.Price) error {
 	if acct == nil {
 		return fmt.Errorf("account is nil")
 	}
 
 	equity := acct.Balance
-	var marginUsed Money
+	var marginUsed market.Money
 
 	err := acct.Lots.Range(func(lot *Lot) error {
 		if lot.Instrument == "" {
@@ -260,11 +262,11 @@ func (acct *Account) ResolveWithMarks(marks map[string]Price) error {
 	acct.FreeMargin = acct.Equity - acct.MarginUsed
 
 	if acct.MarginUsed > 0 {
-		v, err := signedMulDivRound(int64(acct.Equity), int64(MoneyScale), int64(acct.MarginUsed))
+		v, err := market.SignedMulDivRound(int64(acct.Equity), int64(market.MoneyScale), int64(acct.MarginUsed))
 		if err != nil {
 			return err
 		}
-		acct.MarginLevel = Money(v)
+		acct.MarginLevel = market.Money(v)
 	} else {
 		acct.MarginLevel = 0
 	}
@@ -276,7 +278,7 @@ func (acct *Account) ResolveWithMarks(marks map[string]Price) error {
 // It updates Balance and resets Equity to the new Balance (caller must call
 // ResolveWithMarks to account for any remaining open lots afterwards).
 // Returns the realised P/L amount.
-func (acct *Account) realizePNL(lot *Lot, trade *Trade) (Money, error) {
+func (acct *Account) realizePNL(lot *Lot, trade *Trade) (market.Money, error) {
 	if acct == nil {
 		return 0, fmt.Errorf("account is nil")
 	}
@@ -314,10 +316,10 @@ func (acct *Account) realizePNL(lot *Lot, trade *Trade) (Money, error) {
 
 // marginRequired returns the margin required to hold a position of the given
 // size at the given price for the named instrument, expressed in account
-// currency (Money-scaled). It uses the instrument's MarginRate and the
+// currency (market.Money-scaled). It uses the instrument's MarginRate and the
 // account's quote-to-account conversion.
-func (acct *Account) marginRequired(units Units, price Price, inst string) (Money, error) {
-	meta := GetInstrument(inst)
+func (acct *Account) marginRequired(units market.Units, price market.Price, inst string) (market.Money, error) {
+	meta := market.GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
@@ -326,7 +328,7 @@ func (acct *Account) marginRequired(units Units, price Price, inst string) (Mone
 		return 0, fmt.Errorf("invalid margin rate for %s: %d", meta.Name, meta.MarginRate)
 	}
 
-	u, err := absInt64Checked(int64(units))
+	u, err := market.AbsInt64Checked(int64(units))
 	if err != nil {
 		return 0, err
 	}
@@ -335,11 +337,11 @@ func (acct *Account) marginRequired(units Units, price Price, inst string) (Mone
 		return 0, fmt.Errorf("invalid price: %d", p)
 	}
 
-	up, err := mulDivCeil64(u, p, int64(PriceScale))
+	up, err := market.MulDivCeil64(u, p, int64(market.PriceScale))
 	if err != nil {
 		return 0, err
 	}
-	notionalQuoteMicro, err := mulDivCeil64(up, int64(MoneyScale), 1)
+	notionalQuoteMicro, err := market.MulDivCeil64(up, int64(market.MoneyScale), 1)
 	if err != nil {
 		return 0, err
 	}
@@ -349,15 +351,15 @@ func (acct *Account) marginRequired(units Units, price Price, inst string) (Mone
 		return 0, err
 	}
 
-	notionalAcctMicro, err := mulDivCeil64(notionalQuoteMicro, int64(quoteToAccountRate), int64(RateScale))
+	notionalAcctMicro, err := market.MulDivCeil64(notionalQuoteMicro, int64(quoteToAccountRate), int64(market.RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	marginMicro, err := mulDivCeil64(notionalAcctMicro, int64(meta.MarginRate), int64(RateScale))
+	marginMicro, err := market.MulDivCeil64(notionalAcctMicro, int64(meta.MarginRate), int64(market.RateScale))
 	if err != nil {
 		return 0, err
 	}
 
-	return Money(marginMicro), nil
+	return market.Money(marginMicro), nil
 }

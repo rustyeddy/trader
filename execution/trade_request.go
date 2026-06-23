@@ -1,6 +1,10 @@
-package trader
+package execution
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/market"
+)
 
 // RequestType represents a trader domain type.
 type RequestType uint8
@@ -32,10 +36,10 @@ func (t RequestType) String() string {
 type Request struct {
 	*TradeCommon
 	RequestType
-	Price
-	Timestamp
+	market.Price
+	market.Timestamp
 	Reason string
-	Candle Candle
+	Candle market.Candle
 }
 
 // OpenRequest represents a trader domain type.
@@ -47,7 +51,7 @@ type OpenRequest struct {
 type CloseRequest struct {
 	Request
 	*Lot
-	CloseCause closeCause
+	CloseCause CloseCause
 }
 
 // Validate is an internal helper for trader type processing.
@@ -64,7 +68,7 @@ func (r *OpenRequest) Validate() error {
 	if r.Instrument == "" {
 		return fmt.Errorf("open request instrument must not be empty")
 	}
-	if r.Side != Long && r.Side != Short {
+	if r.Side != market.Long && r.Side != market.Short {
 		return fmt.Errorf("open request side must be long or short")
 	}
 	if r.Units <= 0 {
@@ -107,10 +111,10 @@ func (r *CloseRequest) Validate() error {
 // NewOpenRequest is an internal helper for trader type processing.
 func NewOpenRequest(
 	instr string,
-	c *CandleTime,
-	side Side,
-	stop Price,
-	take Price,
+	c *market.CandleTime,
+	side market.Side,
+	stop market.Price,
+	take market.Price,
 	reason string) *OpenRequest {
 	if c == nil {
 		panic("NewOpenRequest: candle time is nil")
@@ -118,7 +122,7 @@ func NewOpenRequest(
 	op := &OpenRequest{
 		Request: Request{
 			TradeCommon: &TradeCommon{
-				ID:         NewULID(),
+				ID:         market.NewULID(),
 				Instrument: instr,
 				Side:       side,
 				Stop:       stop,
@@ -134,11 +138,11 @@ func NewOpenRequest(
 	return op
 }
 
-// closeCause represents a trader domain type.
-type closeCause int
+// CloseCause represents a trader domain type.
+type CloseCause int
 
 const (
-	CloseUnknown closeCause = iota
+	CloseUnknown CloseCause = iota
 	CloseManual
 	CloseStopLoss
 	CloseTakeProfit
@@ -146,7 +150,7 @@ const (
 )
 
 // String is an internal helper for trader type processing.
-func (c closeCause) String() string {
+func (c CloseCause) String() string {
 	switch c {
 	case CloseManual:
 		return "Manual"

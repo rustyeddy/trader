@@ -1,14 +1,16 @@
-package trader
+package execution
+
+import "github.com/rustyeddy/trader/market"
 
 // Position is the computed aggregate view of all open lots for one instrument.
 // Hedged books keep separate long/short exposure and entry prices.
 type Position struct {
 	Instrument         string
-	LongUnits          Units
-	LongAvgEntryPrice  Price
-	ShortUnits         Units
-	ShortAvgEntryPrice Price
-	NetUnits           Units
+	LongUnits          market.Units
+	LongAvgEntryPrice  market.Price
+	ShortUnits         market.Units
+	ShortAvgEntryPrice market.Price
+	NetUnits           market.Units
 }
 
 type positionAccum struct {
@@ -38,11 +40,11 @@ func InstrumentPositions(lb *LotBook) map[string]Position {
 		units := int64(lot.RemainingUnits)
 		weightedPx := int64(lot.EntryPrice) * units
 		switch lot.Side {
-		case Long:
+		case market.Long:
 			accum.pos.LongUnits += lot.RemainingUnits
 			accum.longWeightedPx += weightedPx
 			accum.pos.NetUnits += lot.RemainingUnits
-		case Short:
+		case market.Short:
 			accum.pos.ShortUnits += lot.RemainingUnits
 			accum.shortWeightedPx += weightedPx
 			accum.pos.NetUnits -= lot.RemainingUnits
@@ -53,10 +55,10 @@ func InstrumentPositions(lb *LotBook) map[string]Position {
 	result := make(map[string]Position, len(accums))
 	for inst, accum := range accums {
 		if accum.pos.LongUnits > 0 {
-			accum.pos.LongAvgEntryPrice = Price(accum.longWeightedPx / int64(accum.pos.LongUnits))
+			accum.pos.LongAvgEntryPrice = market.Price(accum.longWeightedPx / int64(accum.pos.LongUnits))
 		}
 		if accum.pos.ShortUnits > 0 {
-			accum.pos.ShortAvgEntryPrice = Price(accum.shortWeightedPx / int64(accum.pos.ShortUnits))
+			accum.pos.ShortAvgEntryPrice = market.Price(accum.shortWeightedPx / int64(accum.pos.ShortUnits))
 		}
 		result[inst] = accum.pos
 	}

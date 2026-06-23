@@ -1,20 +1,21 @@
-package trader
+package execution
 
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func makeOpenRequest(instrument string, side Side, entry, stop float64) *OpenRequest {
+func makeOpenRequest(instrument string, side market.Side, entry, stop float64) *OpenRequest {
 	th := NewTradeHistory(instrument)
 	th.Side = side
-	th.Stop = PriceFromFloat(stop)
+	th.Stop = market.PriceFromFloat(stop)
 	return &OpenRequest{
 		Request: Request{
 			TradeCommon: th.TradeCommon,
-			Price:       PriceFromFloat(entry),
+			Price:       market.PriceFromFloat(entry),
 		},
 	}
 }
@@ -23,38 +24,38 @@ func sizedAccount(equity float64, riskPct float64) Account {
 	return Account{
 		ID:           "test",
 		Currency:     "USD",
-		Balance:      MoneyFromFloat(equity),
-		Equity:       MoneyFromFloat(equity),
-		RiskFraction: RateFromFloat(riskPct),
+		Balance:      market.MoneyFromFloat(equity),
+		Equity:       market.MoneyFromFloat(equity),
+		RiskFraction: market.RateFromFloat(riskPct),
 	}
 }
 
 func TestAvailableMargin_UsesFreeMarginWhenSet(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{FreeMargin: MoneyFromFloat(500), Equity: MoneyFromFloat(1000), MarginUsed: MoneyFromFloat(200)}
-	assert.Equal(t, MoneyFromFloat(500), acct.availableMargin())
+	acct := Account{FreeMargin: market.MoneyFromFloat(500), Equity: market.MoneyFromFloat(1000), MarginUsed: market.MoneyFromFloat(200)}
+	assert.Equal(t, market.MoneyFromFloat(500), acct.availableMargin())
 }
 
 func TestAvailableMargin_ComputesFromEquityMinusMargin(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{FreeMargin: 0, Equity: MoneyFromFloat(1000), MarginUsed: MoneyFromFloat(200)}
-	assert.Equal(t, MoneyFromFloat(800), acct.availableMargin())
+	acct := Account{FreeMargin: 0, Equity: market.MoneyFromFloat(1000), MarginUsed: market.MoneyFromFloat(200)}
+	assert.Equal(t, market.MoneyFromFloat(800), acct.availableMargin())
 }
 
 func TestAvailableMargin_ReturnsZeroWhenOverMargin(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{FreeMargin: 0, Equity: MoneyFromFloat(100), MarginUsed: MoneyFromFloat(200)}
-	assert.Equal(t, Money(0), acct.availableMargin())
+	acct := Account{FreeMargin: 0, Equity: market.MoneyFromFloat(100), MarginUsed: market.MoneyFromFloat(200)}
+	assert.Equal(t, market.Money(0), acct.availableMargin())
 }
 
 func TestMarginRequiredPerUnit_NilInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	_, err := acct.marginRequiredPerUnit(nil, PriceFromFloat(1.3))
+	_, err := acct.marginRequiredPerUnit(nil, market.PriceFromFloat(1.3))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "instrument metadata is nil")
 }
@@ -63,8 +64,8 @@ func TestMarginRequiredPerUnit_InvalidMarginRate(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	inst := &Instrument{Name: "EURUSD", MarginRate: 0, QuoteCurrency: "USD"}
-	_, err := acct.marginRequiredPerUnit(inst, PriceFromFloat(1.3))
+	inst := &market.Instrument{Name: "EURUSD", MarginRate: 0, QuoteCurrency: "USD"}
+	_, err := acct.marginRequiredPerUnit(inst, market.PriceFromFloat(1.3))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid margin rate")
 }
@@ -73,7 +74,7 @@ func TestMarginRequiredPerUnit_InvalidPrice(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	inst := GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 	_, err := acct.marginRequiredPerUnit(inst, 0)
 	require.Error(t, err)
@@ -83,10 +84,10 @@ func TestMarginRequiredPerUnit_InvalidPrice(t *testing.T) {
 func TestMarginRequiredPerUnit_HappyPath_EURUSD(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{ID: "test", Currency: "USD", Equity: MoneyFromFloat(10_000)}
-	inst := GetInstrument("EURUSD")
+	acct := Account{ID: "test", Currency: "USD", Equity: market.MoneyFromFloat(10_000)}
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
-	m, err := acct.marginRequiredPerUnit(inst, PriceFromFloat(1.30))
+	m, err := acct.marginRequiredPerUnit(inst, market.PriceFromFloat(1.30))
 	require.NoError(t, err)
 	assert.Greater(t, int64(m), int64(0))
 }
@@ -97,11 +98,11 @@ func TestUnitsByMargin_NoFreeMargin(t *testing.T) {
 	acct := Account{
 		ID:         "test",
 		Currency:   "USD",
-		Equity:     MoneyFromFloat(100),
-		MarginUsed: MoneyFromFloat(200),
+		Equity:     market.MoneyFromFloat(100),
+		MarginUsed: market.MoneyFromFloat(200),
 		FreeMargin: 0,
 	}
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	_, err := acct.unitsByMargin(req)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "free margin")
@@ -117,7 +118,7 @@ func TestUnitsByMargin_UnitsTooSmall(t *testing.T) {
 		Equity:     0,
 		FreeMargin: 1,
 	}
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	_, err := acct.unitsByMargin(req)
 	require.Error(t, err)
 	assert.Error(t, err)
@@ -127,7 +128,7 @@ func TestLossPerUnit_ZeroStopDistance(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	req.Stop = req.Price
 	_, err := acct.lossPerUnit(req)
 	require.Error(t, err)
@@ -137,17 +138,17 @@ func TestLossPerUnit_ZeroStopDistance(t *testing.T) {
 func TestMarginRequired_HappyPath(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{ID: "test", Currency: "USD", Equity: MoneyFromFloat(10_000)}
-	m, err := acct.marginRequired(10_000, PriceFromFloat(1.1), "EURUSD")
+	acct := Account{ID: "test", Currency: "USD", Equity: market.MoneyFromFloat(10_000)}
+	m, err := acct.marginRequired(10_000, market.PriceFromFloat(1.1), "EURUSD")
 	require.NoError(t, err)
-	assert.Equal(t, MoneyFromFloat(220), m)
+	assert.Equal(t, market.MoneyFromFloat(220), m)
 }
 
 func TestMarginRequired_NegativeUnitsSymmetric(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{ID: "test", Currency: "USD", Equity: MoneyFromFloat(10_000)}
-	price := PriceFromFloat(1.2345)
+	acct := Account{ID: "test", Currency: "USD", Equity: market.MoneyFromFloat(10_000)}
+	price := market.PriceFromFloat(1.2345)
 
 	pos, err := acct.marginRequired(1000, price, "EURUSD")
 	require.NoError(t, err)
@@ -161,10 +162,10 @@ func TestMarginRequired_NegativeUnitsSymmetric(t *testing.T) {
 func TestMarginRequired_ZeroUnits(t *testing.T) {
 	t.Parallel()
 
-	acct := Account{ID: "test", Currency: "USD", Equity: MoneyFromFloat(10_000)}
-	m, err := acct.marginRequired(0, PriceFromFloat(1.5), "EURUSD")
+	acct := Account{ID: "test", Currency: "USD", Equity: market.MoneyFromFloat(10_000)}
+	m, err := acct.marginRequired(0, market.PriceFromFloat(1.5), "EURUSD")
 	require.NoError(t, err)
-	assert.Equal(t, Money(0), m)
+	assert.Equal(t, market.Money(0), m)
 }
 
 func TestMarginRequired_InvalidPriceZero(t *testing.T) {
@@ -180,7 +181,7 @@ func TestMarginRequired_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	_, err := acct.marginRequired(1000, PriceFromFloat(1.1), "XXXYYY")
+	_, err := acct.marginRequired(1000, market.PriceFromFloat(1.1), "XXXYYY")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown instrument")
 }
@@ -189,7 +190,7 @@ func TestSizePosition_HappyPath_EURUSD(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2980)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2980)
 
 	err := acct.SizePosition(req)
 	require.NoError(t, err)
@@ -200,8 +201,8 @@ func TestSizePosition_HappyPath_LongVsShort(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	long := makeOpenRequest("EURUSD", Long, 1.3000, 1.2980)
-	short := makeOpenRequest("EURUSD", Short, 1.2980, 1.3000)
+	long := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2980)
+	short := makeOpenRequest("EURUSD", market.Short, 1.2980, 1.3000)
 
 	err := acct.SizePosition(long)
 	require.NoError(t, err)
@@ -217,7 +218,7 @@ func TestSizePosition_USDJPY(t *testing.T) {
 
 	const usdJpy = 150.0
 	acct := sizedAccount(10_000, 0.01)
-	req := makeOpenRequest("USDJPY", Long, 150.00, 149.50)
+	req := makeOpenRequest("USDJPY", market.Long, 150.00, 149.50)
 
 	err := acct.SizePosition(req)
 	require.NoError(t, err)
@@ -230,7 +231,7 @@ func TestSizePosition_RiskPctZero(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 
 	err := acct.SizePosition(req)
 	assert.Error(t, err)
@@ -241,7 +242,7 @@ func TestSizePosition_NegativeRiskPct(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, -0.01)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 
 	err := acct.SizePosition(req)
 	assert.Error(t, err)
@@ -253,10 +254,10 @@ func TestSizePosition_EquityZero(t *testing.T) {
 
 	acct := Account{
 		ID:           "test",
-		RiskFraction: RateFromFloat(0.02),
+		RiskFraction: market.RateFromFloat(0.02),
 		Equity:       0,
 	}
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 
 	err := acct.SizePosition(req)
 	assert.Error(t, err)
@@ -267,7 +268,7 @@ func TestSizePosition_EntryZero(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	req.Price = 0
 
 	err := acct.SizePosition(req)
@@ -279,7 +280,7 @@ func TestSizePosition_StopZero(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	req.Stop = 0
 
 	err := acct.SizePosition(req)
@@ -291,8 +292,8 @@ func TestSizePosition_EntryEqualsStop(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	price := PriceFromFloat(1.3000)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	price := market.PriceFromFloat(1.3000)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	req.Price = price
 	req.Stop = price
 
@@ -316,7 +317,7 @@ func TestSizePosition_UnknownInstrument(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("XXXYYY", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("XXXYYY", market.Long, 1.3000, 1.2990)
 
 	err := acct.SizePosition(req)
 	assert.Error(t, err)
@@ -327,7 +328,7 @@ func TestSizePosition_UnitsTooSmall(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(1.0, 0.01)
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.1000)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.1000)
 
 	err := acct.SizePosition(req)
 	assert.Error(t, err)
@@ -338,7 +339,7 @@ func TestSizePosition_ResultUnitsNonZero(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(50_000, 0.01)
-	req := makeOpenRequest("EURUSD", Long, 1.2000, 1.1950)
+	req := makeOpenRequest("EURUSD", market.Long, 1.2000, 1.1950)
 
 	err := acct.SizePosition(req)
 	require.NoError(t, err)
@@ -350,7 +351,7 @@ func TestSizePosition_NilAccount(t *testing.T) {
 	t.Parallel()
 
 	var acct *Account
-	req := makeOpenRequest("EURUSD", Long, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Long, 1.3000, 1.2990)
 	err := acct.SizePosition(req)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "account is nil")
@@ -369,7 +370,7 @@ func TestSizePosition_ShortStopBelowPrice(t *testing.T) {
 	t.Parallel()
 
 	acct := sizedAccount(10_000, 0.02)
-	req := makeOpenRequest("EURUSD", Short, 1.3000, 1.2990)
+	req := makeOpenRequest("EURUSD", market.Short, 1.3000, 1.2990)
 	err := acct.SizePosition(req)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "short stop")

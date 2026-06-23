@@ -1,8 +1,9 @@
-package trader
+package execution
 
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,48 +19,48 @@ func TestInstrumentPositionsAggregatesBySide(t *testing.T) {
 
 	var lb LotBook
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "l1", Instrument: "EURUSD", Side: Long},
-		EntryPrice:     PriceFromFloat(1.1000),
+		TradeCommon:    &TradeCommon{ID: "l1", Instrument: "EURUSD", Side: market.Long},
+		EntryPrice:     market.PriceFromFloat(1.1000),
 		EntryTime:      1,
 		OriginalUnits:  100,
 		RemainingUnits: 100,
 		State:          LotOpen,
 	}))
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "l2", Instrument: "EURUSD", Side: Long},
-		EntryPrice:     PriceFromFloat(1.2000),
+		TradeCommon:    &TradeCommon{ID: "l2", Instrument: "EURUSD", Side: market.Long},
+		EntryPrice:     market.PriceFromFloat(1.2000),
 		EntryTime:      2,
 		OriginalUnits:  50,
 		RemainingUnits: 50,
 		State:          LotOpen,
 	}))
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "s1", Instrument: "EURUSD", Side: Short},
-		EntryPrice:     PriceFromFloat(1.3000),
+		TradeCommon:    &TradeCommon{ID: "s1", Instrument: "EURUSD", Side: market.Short},
+		EntryPrice:     market.PriceFromFloat(1.3000),
 		EntryTime:      3,
 		OriginalUnits:  30,
 		RemainingUnits: 30,
 		State:          LotOpen,
 	}))
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "closed", Instrument: "EURUSD", Side: Long},
-		EntryPrice:     PriceFromFloat(1.4000),
+		TradeCommon:    &TradeCommon{ID: "closed", Instrument: "EURUSD", Side: market.Long},
+		EntryPrice:     market.PriceFromFloat(1.4000),
 		EntryTime:      4,
 		OriginalUnits:  25,
 		RemainingUnits: 25,
 		State:          LotClosed,
 	}))
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "zero", Instrument: "EURUSD", Side: Long},
-		EntryPrice:     PriceFromFloat(1.5000),
+		TradeCommon:    &TradeCommon{ID: "zero", Instrument: "EURUSD", Side: market.Long},
+		EntryPrice:     market.PriceFromFloat(1.5000),
 		EntryTime:      5,
 		OriginalUnits:  25,
 		RemainingUnits: 0,
 		State:          LotOpen,
 	}))
 	require.NoError(t, lb.Add(&Lot{
-		TradeCommon:    &TradeCommon{ID: "gbp", Instrument: "GBPUSD", Side: Short},
-		EntryPrice:     PriceFromFloat(1.2500),
+		TradeCommon:    &TradeCommon{ID: "gbp", Instrument: "GBPUSD", Side: market.Short},
+		EntryPrice:     market.PriceFromFloat(1.2500),
 		EntryTime:      6,
 		OriginalUnits:  40,
 		RemainingUnits: 40,
@@ -72,16 +73,16 @@ func TestInstrumentPositionsAggregatesBySide(t *testing.T) {
 	assert.Equal(t, Position{
 		Instrument:         "EURUSD",
 		LongUnits:          150,
-		LongAvgEntryPrice:  Price(113333),
+		LongAvgEntryPrice:  market.Price(113333),
 		ShortUnits:         30,
-		ShortAvgEntryPrice: Price(130000),
+		ShortAvgEntryPrice: market.Price(130000),
 		NetUnits:           120,
 	}, got["EURUSD"])
 
 	assert.Equal(t, Position{
 		Instrument:         "GBPUSD",
 		ShortUnits:         40,
-		ShortAvgEntryPrice: PriceFromFloat(1.2500),
+		ShortAvgEntryPrice: market.PriceFromFloat(1.2500),
 		NetUnits:           -40,
 	}, got["GBPUSD"])
 }

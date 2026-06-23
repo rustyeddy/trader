@@ -31,7 +31,7 @@ func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage 
 		lot    *Lot
 		exitPx Price
 		reason string
-		cause  closeCause
+		cause  CloseCause
 	}
 
 	_ = b.Account.Lots.Range(func(lot *Lot) error {
@@ -50,7 +50,7 @@ func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage 
 			lot    *Lot
 			exitPx Price
 			reason string
-			cause  closeCause
+			cause  CloseCause
 		}{lot, exitPx, reason, cause})
 		return nil
 	})

@@ -1,20 +1,21 @@
-package trader
+package execution
 
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func openLot(id string, entryTime Timestamp, units Units) *Lot {
+func openLot(id string, entryTime market.Timestamp, units market.Units) *Lot {
 	th := NewTradeHistory("EURUSD")
 	th.ID = id
-	th.Side = Long
+	th.Side = market.Long
 	th.Units = units
 	return &Lot{
 		TradeCommon:    th.TradeCommon,
-		EntryPrice:     PriceFromFloat(1.1000),
+		EntryPrice:     market.PriceFromFloat(1.1000),
 		EntryTime:      entryTime,
 		OriginalUnits:  units,
 		RemainingUnits: units,
@@ -30,7 +31,7 @@ func TestFIFOMatcher_ExactUnits(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, lot, matches[0].Lot)
-	assert.Equal(t, Units(100_000), matches[0].Units)
+	assert.Equal(t, market.Units(100_000), matches[0].Units)
 }
 
 func TestFIFOMatcher_PartialUnits(t *testing.T) {
@@ -40,7 +41,7 @@ func TestFIFOMatcher_PartialUnits(t *testing.T) {
 	matches, err := FIFOMatcher{}.Match([]*Lot{lot}, 50_000)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, Units(50_000), matches[0].Units)
+	assert.Equal(t, market.Units(50_000), matches[0].Units)
 }
 
 func TestFIFOMatcher_MultipleLotsOldestFirst(t *testing.T) {
@@ -54,7 +55,7 @@ func TestFIFOMatcher_MultipleLotsOldestFirst(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, old, matches[0].Lot, "oldest lot must be consumed first")
-	assert.Equal(t, Units(60_000), matches[0].Units)
+	assert.Equal(t, market.Units(60_000), matches[0].Units)
 }
 
 func TestFIFOMatcher_SpansMultipleLots(t *testing.T) {
@@ -68,9 +69,9 @@ func TestFIFOMatcher_SpansMultipleLots(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, matches, 2)
 	assert.Equal(t, a, matches[0].Lot)
-	assert.Equal(t, Units(40_000), matches[0].Units)
+	assert.Equal(t, market.Units(40_000), matches[0].Units)
 	assert.Equal(t, b, matches[1].Lot)
-	assert.Equal(t, Units(40_000), matches[1].Units)
+	assert.Equal(t, market.Units(40_000), matches[1].Units)
 }
 
 func TestFIFOMatcher_PartialLastLot(t *testing.T) {
@@ -83,8 +84,8 @@ func TestFIFOMatcher_PartialLastLot(t *testing.T) {
 	matches, err := FIFOMatcher{}.Match([]*Lot{a, b}, 80_000)
 	require.NoError(t, err)
 	require.Len(t, matches, 2)
-	assert.Equal(t, Units(60_000), matches[0].Units)
-	assert.Equal(t, Units(20_000), matches[1].Units)
+	assert.Equal(t, market.Units(60_000), matches[0].Units)
+	assert.Equal(t, market.Units(20_000), matches[1].Units)
 }
 
 func TestFIFOMatcher_InsufficientUnitsError(t *testing.T) {

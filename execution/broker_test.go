@@ -1,10 +1,11 @@
-package trader
+package execution
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,7 @@ import (
 func TestBrokerSubmitOpen_Guards(t *testing.T) {
 	t.Parallel()
 
-	req := &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: NewULID(), Instrument: "EURUSD", Units: 1000, Side: Long}, Price: PriceFromFloat(1.1)}}
+	req := &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: market.NewULID(), Instrument: "EURUSD", Units: 1000, Side: market.Long}, Price: market.PriceFromFloat(1.1)}}
 
 	var nilBroker *Broker
 	lot, err := nilBroker.SubmitOpen(context.Background(), req)
@@ -26,25 +27,25 @@ func TestBrokerSubmitOpen_Guards(t *testing.T) {
 	assert.Nil(t, lot)
 	assert.Contains(t, err.Error(), "broker account is nil")
 
-	b.Account = NewAccount("test", MoneyFromFloat(10000))
+	b.Account = NewAccount("test", market.MoneyFromFloat(10000))
 	lot, err = b.SubmitOpen(context.Background(), nil)
 	require.Error(t, err)
 	assert.Nil(t, lot)
 	assert.Contains(t, err.Error(), "open request is nil")
 
-	badReq := &OpenRequest{Request: Request{TradeCommon: nil, Price: PriceFromFloat(1.1)}}
+	badReq := &OpenRequest{Request: Request{TradeCommon: nil, Price: market.PriceFromFloat(1.1)}}
 	lot, err = b.SubmitOpen(context.Background(), badReq)
 	require.Error(t, err)
 	assert.Nil(t, lot)
 	assert.Contains(t, err.Error(), "missing trade common")
 
-	badReq = &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: NewULID(), Units: 1000, Side: Long}, Price: PriceFromFloat(1.1)}}
+	badReq = &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: market.NewULID(), Units: 1000, Side: market.Long}, Price: market.PriceFromFloat(1.1)}}
 	lot, err = b.SubmitOpen(context.Background(), badReq)
 	require.Error(t, err)
 	assert.Nil(t, lot)
 	assert.Contains(t, err.Error(), "instrument must not be empty")
 
-	badReq = &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: NewULID(), Instrument: "EURUSD", Units: 1000, Side: Long}}}
+	badReq = &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: market.NewULID(), Instrument: "EURUSD", Units: 1000, Side: market.Long}}}
 	lot, err = b.SubmitOpen(context.Background(), badReq)
 	require.Error(t, err)
 	assert.Nil(t, lot)
@@ -54,13 +55,13 @@ func TestBrokerSubmitOpen_Guards(t *testing.T) {
 func TestBrokerSubmitOpen_QueuesFilledLotEvent(t *testing.T) {
 	t.Parallel()
 
-	b := &Broker{Account: NewAccount("test", MoneyFromFloat(10000))}
+	b := &Broker{Account: NewAccount("test", market.MoneyFromFloat(10000))}
 	req := &OpenRequest{
 		Request: Request{
-			TradeCommon: &TradeCommon{ID: NewULID(), Instrument: "EURUSD", Units: 1000, Side: Long},
+			TradeCommon: &TradeCommon{ID: market.NewULID(), Instrument: "EURUSD", Units: 1000, Side: market.Long},
 			RequestType: RequestMarketOpen,
-			Price:       PriceFromFloat(1.1),
-			Timestamp:   Timestamp(100),
+			Price:       market.PriceFromFloat(1.1),
+			Timestamp:   market.Timestamp(100),
 		},
 	}
 
@@ -82,7 +83,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	t.Parallel()
 
 	b := &Broker{
-		Account: NewAccount("test-account", MoneyFromFloat(10_000)),
+		Account: NewAccount("test-account", market.MoneyFromFloat(10_000)),
 		evtQ:    make(chan *Event, 1),
 	}
 	b.evtQ <- &Event{Type: EventOrderFilled}
@@ -90,14 +91,14 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	req := &OpenRequest{
 		Request: Request{
 			TradeCommon: &TradeCommon{
-				ID:         NewULID(),
+				ID:         market.NewULID(),
 				Instrument: "EURUSD",
-				Units:      Units(1000),
-				Side:       Long,
+				Units:      market.Units(1000),
+				Side:       market.Long,
 			},
 			RequestType: RequestMarketOpen,
-			Price:       Price(1100000),
-			Timestamp:   Timestamp(1),
+			Price:       market.Price(1100000),
+			Timestamp:   market.Timestamp(1),
 		},
 	}
 
@@ -127,7 +128,7 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	t.Parallel()
 
 	b := &Broker{
-		Account: NewAccount("test-account", MoneyFromFloat(10_000)),
+		Account: NewAccount("test-account", market.MoneyFromFloat(10_000)),
 		evtQ:    make(chan *Event, 1),
 	}
 	b.evtQ <- &Event{Type: EventOrderFilled}
@@ -135,14 +136,14 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 	req := &OpenRequest{
 		Request: Request{
 			TradeCommon: &TradeCommon{
-				ID:         NewULID(),
+				ID:         market.NewULID(),
 				Instrument: "EURUSD",
-				Units:      Units(1000),
-				Side:       Long,
+				Units:      market.Units(1000),
+				Side:       market.Long,
 			},
 			RequestType: RequestMarketOpen,
-			Price:       Price(1100000),
-			Timestamp:   Timestamp(2),
+			Price:       market.Price(1100000),
+			Timestamp:   market.Timestamp(2),
 		},
 	}
 
@@ -212,20 +213,20 @@ func TestBrokerEventsChannelReceiveEvent(t *testing.T) {
 }
 
 func makeBrokerCloseFixture() (*Broker, *Lot, *CloseRequest) {
-	acct := NewAccount("account", MoneyFromFloat(2_000))
+	acct := NewAccount("account", market.MoneyFromFloat(2_000))
 	broker := &Broker{
 		Account: acct,
 		evtQ:    make(chan *Event, 1),
 	}
 
 	th := NewTradeHistory("EURUSD")
-	th.TradeCommon.Units = Units(1000)
-	th.TradeCommon.Side = Long
+	th.TradeCommon.Units = market.Units(1000)
+	th.TradeCommon.Side = market.Long
 	units := th.TradeCommon.Units
 	lot := &Lot{
 		TradeCommon:    th.TradeCommon,
-		EntryPrice:     Price(1095000),
-		EntryTime:      Timestamp(1),
+		EntryPrice:     market.Price(1095000),
+		EntryTime:      market.Timestamp(1),
 		OriginalUnits:  units,
 		RemainingUnits: units,
 		State:          LotOpen,
@@ -236,8 +237,8 @@ func makeBrokerCloseFixture() (*Broker, *Lot, *CloseRequest) {
 		Request: Request{
 			TradeCommon: th.TradeCommon,
 			RequestType: RequestClose,
-			Price:       Price(1100000),
-			Timestamp:   Timestamp(2),
+			Price:       market.Price(1100000),
+			Timestamp:   market.Timestamp(2),
 		},
 		Lot:        lot,
 		CloseCause: CloseManual,
@@ -259,7 +260,7 @@ func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "broker account is nil")
 
-	broker.Account = NewAccount("acct", MoneyFromFloat(1_000))
+	broker.Account = NewAccount("acct", market.MoneyFromFloat(1_000))
 	err = broker.SubmitClose(context.Background(), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "close request is nil")
@@ -269,7 +270,7 @@ func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing position")
 
 	err = broker.SubmitClose(context.Background(), &CloseRequest{
-		Request: Request{Price: PriceFromFloat(1.1)},
+		Request: Request{Price: market.PriceFromFloat(1.1)},
 		Lot:     &Lot{},
 	})
 	require.Error(t, err)
@@ -288,7 +289,7 @@ func TestBrokerSubmitCloseSuccessEmitsEvent(t *testing.T) {
 	trade := broker.Account.Trades[0]
 	assert.Equal(t, req.Price, trade.ExitPrice)
 	assert.Equal(t, req.Timestamp, trade.ExitTime)
-	assert.Equal(t, MoneyFromFloat(50), trade.PNL)
+	assert.Equal(t, market.MoneyFromFloat(50), trade.PNL)
 	assert.Equal(t, 0, broker.Account.Lots.Len())
 
 	select {
