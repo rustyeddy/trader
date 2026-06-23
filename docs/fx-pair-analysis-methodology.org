@@ -1,0 +1,928 @@
+* FX Research Desk — Pair Analysis Table Methodology
+:PROPERTIES:
+:report_type: fx_research_methodology
+:created: 2026-06-23
+:scope: implementation_reference
+:topic: pair_analysis_table_scoring
+:END:
+
+** Purpose
+
+This note defines a deterministic scoring pipeline for generating the FX Research Desk pair analysis table.
+
+The model is designed for discretionary market review, journaling, and trading-business monitoring only. It does not produce trade recommendations, position sizing, or execution instructions.
+
+** High-Level Model
+
+Each FX pair is evaluated using normalized diagnostics:
+
+- Trend
+- Market structure
+- Support and resistance zones
+- Volatility
+- Setup type
+- Review status
+- Watchlist priority
+
+The calculation should be mostly rules-based, with an optional discretionary override layer for event risk, abnormal liquidity, central-bank risk, or major news catalysts.
+
+** Required Inputs Per Pair
+
+For each pair, request or calculate:
+
+#+begin_src text
+D1 candles
+H4 candles
+H1 candles
+ATR(14)
+ADX(14)
+EMA(20)
+EMA(50)
+EMA(200)
+Recent swing highs/lows
+Session high/low
+Recent range high/low
+Spread
+Macro/news event risk flag
+#+end_src
+
+D1 and H4 should drive the report classification. H1 should be used only for short-term context.
+
+** Pair Analysis Table Columns
+
+#+begin_src text
+Pair
+Trend
+Structure
+SupportLow
+SupportHigh
+ResistanceLow
+ResistanceHigh
+Volatility
+Setup
+Status
+#+end_src
+
+Allowed values:
+
+#+begin_src text
+Trend: Bullish, Bearish, Neutral
+Structure: Trending, Consolidating, Compression, Breakout, Pullback, Range
+Volatility: Low, Moderate, High, Very High
+Setup: Breakout, Mean Reversion, Trend Continuation, Observation Only
+Status: Tradeable, Watchlist, No Trade
+#+end_src
+
+** Trend Classification
+
+Trend is based on price location, EMA alignment, EMA slope, and ADX.
+
+*** Bullish Trend Criteria
+
+#+begin_src text
+Close > EMA20
+Close > EMA50
+EMA20 > EMA50
+EMA50 slope positive
+ADX >= 20
+#+end_src
+
+*** Bearish Trend Criteria
+
+#+begin_src text
+Close < EMA20
+Close < EMA50
+EMA20 < EMA50
+EMA50 slope negative
+ADX >= 20
+#+end_src
+
+*** Suggested Trend Score
+
+#+begin_src text
++1 if close > EMA20
++1 if close > EMA50
++1 if EMA20 > EMA50
++1 if EMA50 slope > 0
++1 if ADX >= 20 and bullish alignment is present
+
+-1 for each inverse bearish condition
+
+Bullish if score >= +3
+Bearish if score <= -3
+Neutral otherwise
+#+end_src
+
+** Structure Classification
+
+Structure describes how price is behaving, not simply direction.
+
+*** Trending
+
+#+begin_src text
+ADX rising
+Price respecting EMA20 or EMA50
+Higher highs and higher lows, or lower highs and lower lows
+Range expansion confirms directional movement
+#+end_src
+
+*** Consolidating
+
+#+begin_src text
+Price is contained between recent support and resistance
+ADX flat or falling
+No decisive breakout close
+#+end_src
+
+*** Compression
+
+#+begin_src text
+ATR percentile low
+Range narrowing
+Lower highs and higher lows
+Price near range apex or compressed zone
+#+end_src
+
+*** Breakout
+
+#+begin_src text
+Close outside prior range
+ATR expanding
+Price clears recent swing high or swing low
+Prior support/resistance flips role
+#+end_src
+
+*** Pullback
+
+#+begin_src text
+Broader trend remains intact
+Price retraces toward EMA20, EMA50, or former breakout level
+ADX remains supportive or only modestly softens
+#+end_src
+
+*** Range
+
+#+begin_src text
+Repeated rejection near support and resistance
+ADX below trend threshold
+Price mean-reverts within a defined band
+#+end_src
+
+** Support and Resistance Zones
+
+The table should use zones rather than single levels.
+
+#+begin_src text
+SupportLow  = lower bound of nearby support zone
+SupportHigh = upper bound of nearby support zone
+
+ResistanceLow  = lower bound of nearby resistance zone
+ResistanceHigh = upper bound of nearby resistance zone
+#+end_src
+
+Candidate levels:
+
+#+begin_src text
+Recent H4 swing highs/lows
+Prior daily high/low
+Weekly high/low
+Session high/low
+Round numbers
+ATR-adjusted pivots
+Volume profile or liquidity nodes, if available
+#+end_src
+
+Suggested zone width:
+
+#+begin_src text
+zoneWidth = ATR14 * 0.10 to 0.20
+#+end_src
+
+** Volatility Ranking
+
+Volatility should be normalized by price so that JPY pairs and non-JPY pairs can be compared fairly.
+
+*** Core Inputs
+
+#+begin_src text
+Normalized ATR = ATR14 / Close
+ATR percentile over last 60 sessions
+Current session range / ATR14
+H1 realized volatility percentile
+Spread-adjusted volatility
+#+end_src
+
+*** Suggested Classification
+
+#+begin_src text
+Very High: ATR percentile >= 85
+High:      ATR percentile >= 65
+Moderate:  ATR percentile >= 35
+Low:       ATR percentile < 35
+#+end_src
+
+*** Suggested Volatility Score
+
+#+begin_src text
+volScore =
+  0.50 * ATR percentile
+  0.30 * current range / ATR
+  0.20 * H1 realized volatility percentile
+#+end_src
+
+Pairs are ranked from highest volScore to lowest volScore.
+
+** Setup Classification
+
+Setup is derived from trend, structure, and volatility.
+
+*** Breakout
+
+#+begin_src text
+Structure = Breakout or Compression
+Price is near range edge
+ATR is expanding or compression is mature
+#+end_src
+
+*** Trend Continuation
+
+#+begin_src text
+Trend = Bullish or Bearish
+Structure = Trending or Pullback
+Price is holding EMA20, EMA50, or former breakout zone
+#+end_src
+
+*** Mean Reversion
+
+#+begin_src text
+Structure = Range or Consolidating
+Price is near support or resistance
+ADX is low or falling
+#+end_src
+
+*** Observation Only
+
+#+begin_src text
+Signals conflict
+Event risk is high
+Spread is abnormal
+Structure is unclear
+Volatility is too disorderly
+#+end_src
+
+** Status Classification
+
+Status is a review-quality label, not a trade instruction.
+
+*** Tradeable
+
+#+begin_src text
+Clean trend or clean range
+Acceptable volatility
+Support and resistance are well-defined
+No major conflicting macro risk
+Spread is normal
+#+end_src
+
+*** Watchlist
+
+#+begin_src text
+Promising structure
+Needs confirmation
+High volatility but still reviewable
+Near important support or resistance
+Upcoming catalyst requires caution
+#+end_src
+
+*** No Trade
+
+#+begin_src text
+Contradictory signals
+Excessive headline risk
+Poor structure
+Abnormal spread
+No clear support or resistance
+#+end_src
+
+*** Suggested Quality Score
+
+#+begin_src text
+qualityScore =
+  trendClarity
+  + structureClarity
+  + levelClarity
+  + volatilitySuitability
+  - eventRiskPenalty
+  - spreadPenalty
+
+Tradeable if score >= 75
+Watchlist if score >= 50
+No Trade otherwise
+#+end_src
+
+** Preferred Scoring Weights
+
+#+begin_src text
+Trend clarity:         25%
+Structure clarity:     25%
+Level clarity:         15%
+Volatility fit:        15%
+Macro alignment:       10%
+Execution cleanliness: 10%
+#+end_src
+
+** Watchlist Prioritization
+
+The watchlist should not be ranked by volatility alone. High-volatility pairs can be less reviewable when event risk is elevated.
+
+Suggested priority inputs:
+
+#+begin_src text
+1. Quality score
+2. Volatility score
+3. Structure clarity
+4. Setup type
+5. Macro/news penalty
+6. Spread penalty
+#+end_src
+
+*** Tier 1
+
+#+begin_src text
+Highest-quality review candidates.
+Clean trend, breakout, or range structure.
+Defined levels.
+Manageable volatility.
+No major unresolved conflict.
+#+end_src
+
+*** Tier 2
+
+#+begin_src text
+Good candidates, but with one or two limitations.
+May require confirmation from H4 or H1.
+May be near a catalyst or important level.
+#+end_src
+
+*** Tier 3
+
+#+begin_src text
+Secondary review candidates.
+Interesting but noisy, conflicted, or less clean.
+Usually monitored rather than prioritized.
+#+end_src
+
+** Go Code Outline
+
+*** Core Types
+
+#+begin_src go
+package fxresearch
+
+import (
+    "math"
+    "sort"
+    "time"
+)
+
+type Candle struct {
+    Time  time.Time
+    Open  float64
+    High  float64
+    Low   float64
+    Close float64
+}
+
+type Trend string
+type Structure string
+type Volatility string
+type Setup string
+type Status string
+
+const (
+    TrendBullish Trend = "Bullish"
+    TrendBearish Trend = "Bearish"
+    TrendNeutral Trend = "Neutral"
+
+    StructureTrending      Structure = "Trending"
+    StructureConsolidating Structure = "Consolidating"
+    StructureCompression   Structure = "Compression"
+    StructureBreakout      Structure = "Breakout"
+    StructurePullback      Structure = "Pullback"
+    StructureRange         Structure = "Range"
+
+    VolLow      Volatility = "Low"
+    VolModerate Volatility = "Moderate"
+    VolHigh     Volatility = "High"
+    VolVeryHigh Volatility = "Very High"
+
+    SetupBreakout          Setup = "Breakout"
+    SetupMeanReversion     Setup = "Mean Reversion"
+    SetupTrendContinuation Setup = "Trend Continuation"
+    SetupObservationOnly   Setup = "Observation Only"
+
+    StatusTradeable Status = "Tradeable"
+    StatusWatchlist Status = "Watchlist"
+    StatusNoTrade   Status = "No Trade"
+)
+#+end_src
+
+*** Diagnostics and Output Rows
+
+#+begin_src go
+type PairDiagnostics struct {
+    Pair string
+
+    D1 []Candle
+    H4 []Candle
+    H1 []Candle
+
+    Close float64
+
+    ATR14       float64
+    ATRPercent float64
+    ADX14       float64
+
+    EMA20  float64
+    EMA50  float64
+    EMA200 float64
+
+    EMA20Slope float64
+    EMA50Slope float64
+
+    RangeHigh float64
+    RangeLow  float64
+
+    SpreadPips float64
+    EventRisk   int // 0 low, 1 medium, 2 high
+}
+
+type PairAnalysis struct {
+    Pair           string
+    Trend          Trend
+    Structure      Structure
+    SupportLow     float64
+    SupportHigh    float64
+    ResistanceLow  float64
+    ResistanceHigh float64
+    Volatility     Volatility
+    Setup           Setup
+    Status          Status
+
+    VolScore     float64
+    QualityScore float64
+}
+#+end_src
+
+*** Main Analysis Function
+
+#+begin_src go
+func AnalyzePair(d PairDiagnostics, atrHistory []float64) PairAnalysis {
+    trend := classifyTrend(d)
+    structure := classifyStructure(d)
+    volatility, volScore := classifyVolatility(d, atrHistory)
+
+    supportLow, supportHigh, resistanceLow, resistanceHigh := calcSupportResistance(d)
+
+    setup := classifySetup(trend, structure, volatility, d)
+    status, qualityScore := classifyStatus(trend, structure, volatility, setup, d)
+
+    return PairAnalysis{
+        Pair:           d.Pair,
+        Trend:          trend,
+        Structure:      structure,
+        SupportLow:     supportLow,
+        SupportHigh:    supportHigh,
+        ResistanceLow:  resistanceLow,
+        ResistanceHigh: resistanceHigh,
+        Volatility:     volatility,
+        Setup:          setup,
+        Status:          status,
+        VolScore:       volScore,
+        QualityScore:   qualityScore,
+    }
+}
+#+end_src
+
+*** Trend Classifier
+
+#+begin_src go
+func classifyTrend(d PairDiagnostics) Trend {
+    score := 0
+
+    if d.Close > d.EMA20 { score++ } else { score-- }
+    if d.Close > d.EMA50 { score++ } else { score-- }
+    if d.EMA20 > d.EMA50 { score++ } else { score-- }
+
+    if d.EMA50Slope > 0 {
+        score++
+    } else if d.EMA50Slope < 0 {
+        score--
+    }
+
+    if d.ADX14 >= 20 {
+        if score > 0 {
+            score++
+        } else if score < 0 {
+            score--
+        }
+    }
+
+    switch {
+    case score >= 3:
+        return TrendBullish
+    case score <= -3:
+        return TrendBearish
+    default:
+        return TrendNeutral
+    }
+}
+#+end_src
+
+*** Structure Classifier
+
+#+begin_src go
+func classifyStructure(d PairDiagnostics) Structure {
+    rangeSize := d.RangeHigh - d.RangeLow
+    if rangeSize <= 0 || d.ATR14 <= 0 {
+        return StructureConsolidating
+    }
+
+    positionInRange := (d.Close - d.RangeLow) / rangeSize
+    rangeATRRatio := rangeSize / d.ATR14
+
+    if d.Close > d.RangeHigh || d.Close < d.RangeLow {
+        return StructureBreakout
+    }
+
+    if d.ADX14 >= 25 && math.Abs(d.EMA50Slope) > 0 {
+        return StructureTrending
+    }
+
+    if d.ADX14 < 18 && rangeATRRatio < 2.0 {
+        return StructureCompression
+    }
+
+    if positionInRange > 0.25 && positionInRange < 0.75 && d.ADX14 < 20 {
+        return StructureRange
+    }
+
+    if d.Close > d.EMA50 && d.Close <= d.EMA20 {
+        return StructurePullback
+    }
+
+    if d.Close < d.EMA50 && d.Close >= d.EMA20 {
+        return StructurePullback
+    }
+
+    return StructureConsolidating
+}
+#+end_src
+
+*** Volatility Classifier
+
+#+begin_src go
+func classifyVolatility(d PairDiagnostics, atrHistory []float64) (Volatility, float64) {
+    if d.Close <= 0 || d.ATR14 <= 0 {
+        return VolModerate, 50
+    }
+
+    currentNormATR := d.ATR14 / d.Close
+    percentile := percentileRank(currentNormATR, atrHistory)
+
+    var label Volatility
+    switch {
+    case percentile >= 85:
+        label = VolVeryHigh
+    case percentile >= 65:
+        label = VolHigh
+    case percentile >= 35:
+        label = VolModerate
+    default:
+        label = VolLow
+    }
+
+    rangeExpansion := 0.0
+    if d.ATR14 > 0 {
+        rangeExpansion = (d.RangeHigh - d.RangeLow) / d.ATR14
+    }
+
+    volScore := 0.75*percentile + 0.25*math.Min(rangeExpansion*50, 100)
+    return label, volScore
+}
+
+func percentileRank(value float64, history []float64) float64 {
+    if len(history) == 0 {
+        return 50
+    }
+
+    count := 0
+    for _, v := range history {
+        if v <= value {
+            count++
+        }
+    }
+
+    return float64(count) / float64(len(history)) * 100
+}
+#+end_src
+
+*** Support and Resistance
+
+#+begin_src go
+func calcSupportResistance(d PairDiagnostics) (float64, float64, float64, float64) {
+    support := nearestSwingLowBelow(d.Close, d.H4)
+    resistance := nearestSwingHighAbove(d.Close, d.H4)
+
+    zoneWidth := d.ATR14 * 0.15
+
+    return support - zoneWidth,
+        support + zoneWidth,
+        resistance - zoneWidth,
+        resistance + zoneWidth
+}
+
+func nearestSwingLowBelow(price float64, candles []Candle) float64 {
+    best := 0.0
+
+    for i := 2; i < len(candles)-2; i++ {
+        low := candles[i].Low
+
+        isSwingLow :=
+            low < candles[i-1].Low &&
+            low < candles[i-2].Low &&
+            low < candles[i+1].Low &&
+            low < candles[i+2].Low
+
+        if isSwingLow && low < price && low > best {
+            best = low
+        }
+    }
+
+    if best == 0 {
+        return price * 0.995
+    }
+
+    return best
+}
+
+func nearestSwingHighAbove(price float64, candles []Candle) float64 {
+    best := math.MaxFloat64
+
+    for i := 2; i < len(candles)-2; i++ {
+        high := candles[i].High
+
+        isSwingHigh :=
+            high > candles[i-1].High &&
+            high > candles[i-2].High &&
+            high > candles[i+1].High &&
+            high > candles[i+2].High
+
+        if isSwingHigh && high > price && high < best {
+            best = high
+        }
+    }
+
+    if best == math.MaxFloat64 {
+        return price * 1.005
+    }
+
+    return best
+}
+#+end_src
+
+*** Setup Classifier
+
+#+begin_src go
+func classifySetup(
+    trend Trend,
+    structure Structure,
+    volatility Volatility,
+    d PairDiagnostics,
+) Setup {
+    switch structure {
+    case StructureBreakout, StructureCompression:
+        if volatility == VolHigh || volatility == VolVeryHigh || structure == StructureCompression {
+            return SetupBreakout
+        }
+
+    case StructureTrending, StructurePullback:
+        if trend == TrendBullish || trend == TrendBearish {
+            return SetupTrendContinuation
+        }
+
+    case StructureRange, StructureConsolidating:
+        if d.ADX14 < 20 {
+            return SetupMeanReversion
+        }
+    }
+
+    return SetupObservationOnly
+}
+#+end_src
+
+*** Status Classifier
+
+#+begin_src go
+func classifyStatus(
+    trend Trend,
+    structure Structure,
+    volatility Volatility,
+    setup Setup,
+    d PairDiagnostics,
+) (Status, float64) {
+    score := 50.0
+
+    if trend == TrendBullish || trend == TrendBearish {
+        score += 15
+    }
+
+    switch structure {
+    case StructureTrending, StructureBreakout, StructureRange:
+        score += 15
+    case StructureCompression, StructurePullback:
+        score += 5
+    default:
+        score -= 5
+    }
+
+    switch setup {
+    case SetupBreakout, SetupTrendContinuation, SetupMeanReversion:
+        score += 10
+    case SetupObservationOnly:
+        score -= 15
+    }
+
+    switch volatility {
+    case VolModerate, VolHigh:
+        score += 10
+    case VolVeryHigh:
+        score -= 5
+    case VolLow:
+        score -= 10
+    }
+
+    score -= float64(d.EventRisk) * 15
+
+    if d.SpreadPips > 3.0 {
+        score -= 10
+    }
+
+    switch {
+    case score >= 75:
+        return StatusTradeable, score
+    case score >= 50:
+        return StatusWatchlist, score
+    default:
+        return StatusNoTrade, score
+    }
+}
+#+end_src
+
+*** Volatility Ranking
+
+#+begin_src go
+func RankByVolatility(rows []PairAnalysis) []PairAnalysis {
+    out := append([]PairAnalysis(nil), rows...)
+
+    sort.Slice(out, func(i, j int) bool {
+        return out[i].VolScore > out[j].VolScore
+    })
+
+    return out
+}
+#+end_src
+
+*** Volatility Buckets
+
+#+begin_src go
+func VolatilityBuckets(rows []PairAnalysis) map[Volatility][]string {
+    buckets := map[Volatility][]string{
+        VolVeryHigh: {},
+        VolHigh:     {},
+        VolModerate: {},
+        VolLow:      {},
+    }
+
+    for _, row := range rows {
+        buckets[row.Volatility] = append(buckets[row.Volatility], row.Pair)
+    }
+
+    return buckets
+}
+#+end_src
+
+*** Watchlist Prioritization
+
+#+begin_src go
+func PrioritizeWatchlist(rows []PairAnalysis) map[string][]PairAnalysis {
+    candidates := make([]PairAnalysis, 0)
+
+    for _, row := range rows {
+        if row.Status == StatusTradeable || row.Status == StatusWatchlist {
+            candidates = append(candidates, row)
+        }
+    }
+
+    sort.Slice(candidates, func(i, j int) bool {
+        return watchlistScore(candidates[i]) > watchlistScore(candidates[j])
+    })
+
+    result := map[string][]PairAnalysis{
+        "Tier 1": {},
+        "Tier 2": {},
+        "Tier 3": {},
+    }
+
+    for i, row := range candidates {
+        switch {
+        case i < 4:
+            result["Tier 1"] = append(result["Tier 1"], row)
+        case i < 9:
+            result["Tier 2"] = append(result["Tier 2"], row)
+        default:
+            result["Tier 3"] = append(result["Tier 3"], row)
+        }
+    }
+
+    return result
+}
+
+func watchlistScore(row PairAnalysis) float64 {
+    score := row.QualityScore
+
+    switch row.Setup {
+    case SetupBreakout:
+        score += 8
+    case SetupTrendContinuation:
+        score += 6
+    case SetupMeanReversion:
+        score += 3
+    case SetupObservationOnly:
+        score -= 10
+    }
+
+    switch row.Structure {
+    case StructureBreakout, StructureTrending:
+        score += 8
+    case StructureCompression:
+        score += 5
+    case StructureRange:
+        score += 3
+    case StructureConsolidating:
+        score += 1
+    }
+
+    if row.Volatility == VolVeryHigh {
+        score -= 5
+    }
+
+    if row.Status == StatusTradeable {
+        score += 5
+    }
+
+    return score
+}
+#+end_src
+
+*** End-to-End Report Flow
+
+#+begin_src go
+func BuildMorningReport(
+    diagnostics []PairDiagnostics,
+    atrHistories map[string][]float64,
+) []PairAnalysis {
+    rows := make([]PairAnalysis, 0, len(diagnostics))
+
+    for _, d := range diagnostics {
+        row := AnalyzePair(d, atrHistories[d.Pair])
+        rows = append(rows, row)
+    }
+
+    return rows
+}
+#+end_src
+
+#+begin_src go
+rows := BuildMorningReport(diagnostics, atrHistories)
+
+volRanked := RankByVolatility(rows)
+watchlist := PrioritizeWatchlist(rows)
+
+_ = volRanked
+_ = watchlist
+#+end_src
+
+** Implementation Notes
+
+- Use D1/H4 as primary classification timeframes.
+- Use H1 for confirmation and context only.
+- Normalize volatility by price before comparing pairs.
+- Penalize abnormal spreads and major macro/event risk.
+- Keep the status label as a review-quality indicator, not a trading instruction.
+- Preserve deterministic outputs for report archiving.
+- Add discretionary override fields only after the base scoring pipeline is stable.
+
+** Related FX Research Desk TODO Items
+
+The uploaded FX Research Desk action plan includes future support for report persistence, CSV export, Org-mode export, historical storage, Trader integration, chart support, and validation. This methodology is intended to support those planned workflows.

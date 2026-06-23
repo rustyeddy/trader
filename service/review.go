@@ -50,16 +50,15 @@ func ParseReviewCSV(r io.Reader) ([]trader.ForexReview, error) {
 		}
 
 		out = append(out, trader.ForexReview{
-			Group:          strings.TrimSpace(rec[0]),
 			Pair:           strings.TrimSpace(rec[1]),
-			Structure:      strings.TrimSpace(rec[2]),
-			SetupBias:      strings.TrimSpace(rec[3]),
 			Trend:          strings.TrimSpace(rec[4]),
-			Volatility:     strings.TrimSpace(rec[5]),
+			Structure:      strings.TrimSpace(rec[2]),
 			SupportLow:     trader.PriceFromFloat(supLo),
 			SupportHigh:    trader.PriceFromFloat(supHi),
 			ResistanceLow:  trader.PriceFromFloat(resLo),
 			ResistanceHigh: trader.PriceFromFloat(resHi),
+			Volatility:     strings.TrimSpace(rec[5]),
+			Setup:          strings.TrimSpace(rec[3]),
 			Status:         trader.ReviewStatus(strings.TrimSpace(rec[8])),
 		})
 	}
