@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
@@ -108,7 +108,7 @@ func (a *CandleStrategyAdapter) Name() string {
 
 // Tick implements trader.LiveStrategy. It is called by the live runner on every
 // price poll tick regardless of bar frequency.
-func (a *CandleStrategyAdapter) Tick(ctx context.Context, price trader.LivePrice, openTrades []trader.LiveTrade) *trader.LivePlan {
+func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, openTrades []live.LiveTrade) *live.LivePlan {
 	// Sync our lot tracker with the current live positions.
 	a.lots.sync(openTrades)
 
@@ -331,17 +331,17 @@ func (a *CandleStrategyAdapter) makeBacktest() *backtest.Backtest {
 }
 
 // convertPlan converts a backtest StrategyPlan to a LivePlan.
-func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct market.CandleTime, _ trader.LivePrice) *trader.LivePlan {
+func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct market.CandleTime, _ live.LivePrice) *live.LivePlan {
 	if plan == nil {
 		return nil
 	}
 
-	live := &trader.LivePlan{Reason: plan.Reason}
+	lp := &live.LivePlan{Reason: plan.Reason}
 
 	// Collect close IDs — map from internal lot ID (which we set to OANDA trade ID).
 	for _, cl := range plan.Closes {
 		if cl.Lot != nil {
-			live.CloseIDs = append(live.CloseIDs, cl.Lot.ID)
+			lp.CloseIDs = append(lp.CloseIDs, cl.Lot.ID)
 		}
 	}
 
@@ -386,7 +386,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct mark
 					"stop_pips", stopPips,
 					"reason", plan.Reason,
 				)
-				live.Open = &trader.LiveOpenRequest{
+				lp.Open = &live.LiveOpenRequest{
 					Side:     side,
 					StopPips: stopPips,
 					Reason:   plan.Reason,
@@ -395,10 +395,10 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct mark
 		}
 	}
 
-	if live.Open == nil && len(live.CloseIDs) == 0 {
+	if lp.Open == nil && len(lp.CloseIDs) == 0 {
 		return nil
 	}
-	return live
+	return lp
 }
 
 // oandaCandleToCandleTime converts an OANDA candle to the internal CandleTime
@@ -514,7 +514,7 @@ type liveLotsTracker struct {
 	meta map[string]*lotMeta
 }
 
-func (lt *liveLotsTracker) sync(trades []trader.LiveTrade) {
+func (lt *liveLotsTracker) sync(trades []live.LiveTrade) {
 	seen := map[string]struct{}{}
 	for _, t := range trades {
 		seen[t.ID] = struct{}{}

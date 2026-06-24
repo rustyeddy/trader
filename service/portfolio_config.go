@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -91,8 +91,8 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		}
 
 		// Native LiveStrategy (e.g. pulse) — bypasses candle adapter entirely.
-		if trader.LookupLiveStrategy(scfg.Kind) != nil {
-			liveStrat, err := trader.GetLiveStrategy(scfg)
+		if live.LookupLiveStrategy(scfg.Kind) != nil {
+			liveStrat, err := live.GetLiveStrategy(scfg)
 			if err != nil {
 				return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
 			}
