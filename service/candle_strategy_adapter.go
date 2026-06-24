@@ -12,9 +12,10 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
-// CandleStrategyAdapter wraps a backtest trader.Strategy as a trader.LiveStrategy.
+// CandleStrategyAdapter wraps a backtest strategy.Strategy as a trader.LiveStrategy.
 //
 // On each Tick it checks whether a new completed bar has arrived since the last
 // call. If yes, it feeds the bar to the underlying strategy, applies the regime
@@ -25,9 +26,9 @@ import (
 // OANDA and replays them silently so all indicators are primed before the first
 // live signal is emitted.
 type CandleStrategyAdapter struct {
-	strategy        trader.Strategy
-	exit            trader.ExitStrategy
-	regime          trader.RegimeFilter
+	strategy        strategy.Strategy
+	exit            strategy.ExitStrategy
+	regime          strategy.RegimeFilter
 	instrument      string // OANDA format, e.g. "EUR_USD"
 	instNorm        string // internal format, e.g. "EURUSD"
 	granularity     string // OANDA granularity, e.g. "H1", "D"
@@ -47,12 +48,12 @@ type CandleStrategyAdapter struct {
 
 // CandleAdapterConfig configures a CandleStrategyAdapter.
 type CandleAdapterConfig struct {
-	Strategy    trader.Strategy
-	Exit        trader.ExitStrategy // nil means NoopExit (no trailing stop)
-	Regime      trader.RegimeFilter // nil means NoopRegime
-	Instrument  string              // OANDA format
-	Granularity string              // "H1" or "D"
-	WarmupBars  int                 // bars to fetch from OANDA for indicator warmup (default 100)
+	Strategy    strategy.Strategy
+	Exit        strategy.ExitStrategy // nil means NoopExit (no trailing stop)
+	Regime      strategy.RegimeFilter // nil means NoopRegime
+	Instrument  string                // OANDA format
+	Granularity string                // "H1" or "D"
+	WarmupBars  int                   // bars to fetch from OANDA for indicator warmup (default 100)
 	// LocalWarmupBars, when > 0, reads this many bars from the local candle
 	// store (set via marketdata.SetDataDir / --data-dir) before the OANDA warmup
 	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
@@ -68,11 +69,11 @@ type CandleAdapterConfig struct {
 func NewCandleStrategyAdapter(cfg CandleAdapterConfig) *CandleStrategyAdapter {
 	regime := cfg.Regime
 	if regime == nil {
-		regime = trader.NoopRegime{}
+		regime = strategy.NoopRegime{}
 	}
 	exit := cfg.Exit
 	if exit == nil {
-		exit = trader.NoopExit{}
+		exit = strategy.NoopExit{}
 	}
 	warmup := cfg.WarmupBars
 	if warmup <= 0 {
@@ -328,7 +329,7 @@ func (a *CandleStrategyAdapter) makeBacktest() *trader.Backtest {
 }
 
 // convertPlan converts a backtest StrategyPlan to a LivePlan.
-func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader.CandleTime, _ trader.LivePrice) *trader.LivePlan {
+func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct trader.CandleTime, _ trader.LivePrice) *trader.LivePlan {
 	if plan == nil {
 		return nil
 	}

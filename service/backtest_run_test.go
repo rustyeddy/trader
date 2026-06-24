@@ -15,6 +15,7 @@ import (
 
 	// Register "noop" strategy for compile-phase tests.
 	_ "github.com/rustyeddy/trader/strategies/noop"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // stubExecutor is a BacktestExecutor that either succeeds or returns a canned
@@ -37,7 +38,7 @@ func minCompiledBacktest(t *testing.T) trader.CompiledBacktest {
 				From:       "2026-01-01",
 				To:         "2026-01-10",
 			},
-			Strategy: trader.StrategyConfig{Kind: "noop"},
+			Strategy: strategy.StrategyConfig{Kind: "noop"},
 		}},
 	}
 	runs, err := trader.CompileBacktests(cfg)

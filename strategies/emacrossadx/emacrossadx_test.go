@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,8 +28,8 @@ func mkCandle(close float64) *trader.CandleTime {
 }
 
 // feedUpdates drives s with a slice of close prices and returns the plans.
-func feedUpdates(s *Strategy, closes []float64) []*trader.StrategyPlan {
-	plans := make([]*trader.StrategyPlan, 0, len(closes))
+func feedUpdates(s *Strategy, closes []float64) []*strategy.StrategyPlan {
+	plans := make([]*strategy.StrategyPlan, 0, len(closes))
 	for _, c := range closes {
 		plans = append(plans, s.Update(context.Background(), mkCandle(c), nil))
 	}

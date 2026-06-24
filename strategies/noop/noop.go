@@ -6,10 +6,11 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "noop", "no-op")
+	strategy.MustRegisterStrategy(build, "noop", "no-op")
 }
 
 type Strategy struct{}
@@ -18,12 +19,12 @@ func (Strategy) Name() string            { return "NoOp" }
 func (Strategy) Reset()                  {}
 func (Strategy) Ready() bool             { return true }
 func (Strategy) StopDescription() string { return "" }
-func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	_ = c
-	return trader.DefaultPlan()
+	return strategy.DefaultPlan()
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
+func build(params map[string]any) (strategy.Strategy, error) {
 	return Strategy{}, nil
 }

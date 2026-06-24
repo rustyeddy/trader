@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/strategy"
 
 	// Register all real strategies via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
@@ -95,12 +96,12 @@ func TestStrategySweep(t *testing.T) {
 		failures []string
 	)
 
-	for _, strategy := range sweepStrategies {
+	for _, strat := range sweepStrategies {
 		for _, tf := range sweepMatrix {
 			for _, inst := range sweepInstruments {
 				// Capture loop vars for parallel subtests.
-				strategy, tf, inst := strategy, tf, inst
-				name := fmt.Sprintf("%s/%s/%s", strategy.kind, tf.timeframe, inst)
+				strat, tf, inst := strat, tf, inst
+				name := fmt.Sprintf("%s/%s/%s", strat.kind, tf.timeframe, inst)
 
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
@@ -116,10 +117,10 @@ func TestStrategySweep(t *testing.T) {
 								From:       tf.from,
 								To:         tf.to,
 							},
-							Strategy: trader.StrategyConfig{Kind: strategy.kind, Params: strategy.params},
+							Strategy: strategy.StrategyConfig{Kind: strat.kind, Params: strat.params},
 							// Chandelier exit ensures strategies that delegate
 							// stop calculation (e.g. donchian) produce valid stops.
-							Exit: trader.ExitConfig{
+							Exit: strategy.ExitConfig{
 								Kind: "chandelier",
 								Params: map[string]any{
 									"atr_period": 14,

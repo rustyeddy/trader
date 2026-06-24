@@ -15,6 +15,7 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // ── oandaCandleToCandleTime ───────────────────────────────────────────────────
@@ -124,8 +125,8 @@ func makeTestAdapter() *CandleStrategyAdapter {
 	return &CandleStrategyAdapter{
 		instNorm: "EURUSD",
 		scale:    trader.PriceScale,
-		regime:   trader.NoopRegime{},
-		exit:     trader.NoopExit{},
+		regime:   strategy.NoopRegime{},
+		exit:     strategy.NoopExit{},
 		log:      slog.Default(),
 	}
 }
@@ -139,7 +140,7 @@ func TestConvertPlan_NilPlanReturnsNil(t *testing.T) {
 func TestConvertPlan_EmptyPlanReturnsNil(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
-	assert.Nil(t, a.convertPlan(&trader.StrategyPlan{}, trader.CandleTime{}, trader.LivePrice{}))
+	assert.Nil(t, a.convertPlan(&strategy.StrategyPlan{}, trader.CandleTime{}, trader.LivePrice{}))
 }
 
 func TestConvertPlan_OpenLongConverted(t *testing.T) {
@@ -157,7 +158,7 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, stop, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: close}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -180,7 +181,7 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, 0 /*stop*/, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: close}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -192,7 +193,7 @@ func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
 	t.Parallel()
 
 	// Build a chandelier exit and warm it up so InitialStop returns non-zero.
-	exit, err := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	exit, err := strategy.NewChandelierExit(3, 2.0, trader.PriceScale)
 	require.NoError(t, err)
 	warmCandles := []trader.Candle{
 		{Open: 110000, High: 111000, Low: 109000, Close: 110500},
@@ -208,7 +209,7 @@ func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
 	a := &CandleStrategyAdapter{
 		instNorm: "EURUSD",
 		scale:    trader.PriceScale,
-		regime:   trader.NoopRegime{},
+		regime:   strategy.NoopRegime{},
 		exit:     exit,
 		log:      slog.Default(),
 	}
@@ -222,7 +223,7 @@ func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
 		Timestamp: trader.FromTime(time.Now()),
 	}, trader.Long, 0 /*stop*/, 0, "test")
 
-	plan := &trader.StrategyPlan{Opens: []*execution.OpenRequest{open}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 	ct := trader.CandleTime{Candle: trader.Candle{Close: closePrice}}
 
 	live := a.convertPlan(plan, ct, trader.LivePrice{})
@@ -246,7 +247,7 @@ func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
 		Lot: lot,
 	}
 
-	plan := &trader.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
+	plan := &strategy.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
 	live := a.convertPlan(plan, trader.CandleTime{}, trader.LivePrice{})
 	require.NotNil(t, live)
 	assert.Equal(t, []string{"oanda-trade-999"}, live.CloseIDs)
@@ -278,7 +279,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	t.Parallel()
 
 	// Build a chandelier exit that needs 3 bars to be ready.
-	exit, err := trader.NewChandelierExit(3, 2.0, trader.PriceScale)
+	exit, err := strategy.NewChandelierExit(3, 2.0, trader.PriceScale)
 	require.NoError(t, err)
 	require.False(t, exit.Ready())
 
@@ -317,7 +318,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 		granularity:     "H1",
 		localWarmupBars: 200,
 		scale:           trader.PriceScale,
-		regime:          trader.NoopRegime{},
+		regime:          strategy.NoopRegime{},
 		exit:            exit,
 		strategy:        &noopStrategy{},
 		log:             slog.Default(),
@@ -342,8 +343,8 @@ func TestWarmupFromLocalData_NoDataNoError(t *testing.T) {
 		granularity:     "H1",
 		localWarmupBars: 100,
 		scale:           trader.PriceScale,
-		regime:          trader.NoopRegime{},
-		exit:            trader.NoopExit{},
+		regime:          strategy.NoopRegime{},
+		exit:            strategy.NoopExit{},
 		strategy:        &noopStrategy{},
 		log:             slog.Default(),
 	}
@@ -359,7 +360,7 @@ func (n *noopStrategy) Name() string            { return "noop" }
 func (n *noopStrategy) Reset()                  {}
 func (n *noopStrategy) Ready() bool             { return true }
 func (n *noopStrategy) StopDescription() string { return "" }
-func (n *noopStrategy) Update(_ context.Context, _ *trader.CandleTime, _ trader.StrategyContext) *trader.StrategyPlan {
+func (n *noopStrategy) Update(_ context.Context, _ *trader.CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
 	return nil
 }
 

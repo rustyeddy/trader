@@ -20,10 +20,11 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "bb-fade", "bollinger-fade")
+	strategy.MustRegisterStrategy(build, "bb-fade", "bollinger-fade")
 }
 
 // Fade is the Bollinger Band fade strategy.
@@ -86,24 +87,24 @@ func (f *Fade) Reset() {
 	f.atr.Reset()
 }
 
-func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 
 	f.bb.Update(ct.Candle)
 	f.atr.Update(ct.Candle)
 
 	if !f.Ready() {
-		return &trader.StrategyPlan{Reason: "warming up"}
+		return &strategy.StrategyPlan{Reason: "warming up"}
 	}
 
 	middle := f.bb.MiddlePrice()
 	lower := f.bb.LowerPrice()
 	upper := f.bb.UpperPrice()
 
-	plan := &trader.StrategyPlan{}
+	plan := &strategy.StrategyPlan{}
 
 	// Check open lots: close any that have reverted to the middle band.
 	hasOpen := false
@@ -166,27 +167,27 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run trader.Str
 	return plan
 }
 
-func instrumentFrom(run trader.StrategyContext) string {
+func instrumentFrom(run strategy.StrategyContext) string {
 	if run != nil {
 		return run.Instrument()
 	}
 	return ""
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
-	period, _, err := trader.GetInt32Param(params, "period")
+func build(params map[string]any) (strategy.Strategy, error) {
+	period, _, err := strategy.GetInt32Param(params, "period")
 	if err != nil {
 		return nil, err
 	}
-	mult, _, err := trader.GetFloat64Param(params, "multiplier")
+	mult, _, err := strategy.GetFloat64Param(params, "multiplier")
 	if err != nil {
 		return nil, err
 	}
-	atrPeriod, _, err := trader.GetInt32Param(params, "atr_period")
+	atrPeriod, _, err := strategy.GetInt32Param(params, "atr_period")
 	if err != nil {
 		return nil, err
 	}
-	atrMult, _, err := trader.GetFloat64Param(params, "atr_mult")
+	atrMult, _, err := strategy.GetFloat64Param(params, "atr_mult")
 	if err != nil {
 		return nil, err
 	}

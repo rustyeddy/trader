@@ -9,6 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func mkClose(close float64) trader.Candle {
@@ -16,8 +17,8 @@ func mkClose(close float64) trader.Candle {
 	return trader.Candle{Close: toP(close)}
 }
 
-func feedPlans(s *Cross, closes []float64) []*trader.StrategyPlan {
-	out := make([]*trader.StrategyPlan, 0, len(closes))
+func feedPlans(s *Cross, closes []float64) []*strategy.StrategyPlan {
+	out := make([]*strategy.StrategyPlan, 0, len(closes))
 	for _, c := range closes {
 		d := s.Update(context.Background(), &trader.CandleTime{Candle: mkClose(c)}, nil)
 		out = append(out, d)
@@ -133,7 +134,7 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 		1.0014, 1.0012, 1.0010, 1.0008, 1.0006, 1.0004, 1.0002, 1.0000,
 	)
 
-	planSignature := func(plans []*trader.StrategyPlan) []string {
+	planSignature := func(plans []*strategy.StrategyPlan) []string {
 		var sigs []string
 		for _, p := range plans {
 			sigs = append(sigs, fmt.Sprintf("%s opens=%d closes=%d", p.Reason, len(p.Opens), len(p.Closes)))

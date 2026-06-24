@@ -73,7 +73,7 @@ func TestBuildPortfolioRunConfig_BacktestStrategy(t *testing.T) {
 			{
 				Instrument: "EUR_USD",
 				Timeframe:  "H1",
-				Strategy:   struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "noop"},
@@ -95,7 +95,7 @@ func TestBuildPortfolioRunConfig_RiskPctFallsBackToPortfolioDefault(t *testing.T
 				Instrument: "EUR_USD",
 				Timeframe:  "H1",
 				RiskPct:    0, // no per-instrument override
-				Strategy:   struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "noop"},
@@ -116,7 +116,7 @@ func TestBuildPortfolioRunConfig_PerInstrumentRiskPctOverridesDefault(t *testing
 				Instrument: "EUR_USD",
 				Timeframe:  "H1",
 				RiskPct:    3.0,
-				Strategy:   struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "noop"},
@@ -135,7 +135,7 @@ func TestBuildPortfolioRunConfig_UnknownStrategyReturnsError(t *testing.T) {
 			{
 				Instrument: "EUR_USD",
 				Timeframe:  "H1",
-				Strategy:   struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "no-such-strategy"},
@@ -154,7 +154,7 @@ func TestBuildPortfolioRunConfig_InvalidTickIntervalReturnsError(t *testing.T) {
 				Instrument:   "EUR_USD",
 				Timeframe:    "H1",
 				TickInterval: "not-a-duration",
-				Strategy:     struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "noop"},
@@ -173,7 +173,7 @@ func TestBuildPortfolioRunConfig_LiveStrategy(t *testing.T) {
 			{
 				Instrument: "EUR_USD",
 				Timeframe:  "H1",
-				Strategy:   struct {
+				Strategy: struct {
 					Kind   string         `yaml:"kind"`
 					Params map[string]any `yaml:"params"`
 				}{Kind: "pulse"},

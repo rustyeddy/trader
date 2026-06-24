@@ -9,10 +9,11 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/strategies/emacross"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "ema-cross-adx")
+	strategy.MustRegisterStrategy(build, "ema-cross-adx")
 }
 
 type Strategy struct {
@@ -122,10 +123,10 @@ func (x *Strategy) Ready() bool {
 	return true
 }
 
-func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 	c := ct.Candle
 	x.core.Fast.Update(c)
@@ -135,7 +136,7 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run trader
 		x.core.ATR.Update(c)
 	}
 
-	dec := trader.DefaultPlan()
+	dec := strategy.DefaultPlan()
 
 	if !x.core.Fast.Ready() || !x.core.Slow.Ready() {
 		dec.Reason = "warming up EMAs"
@@ -235,15 +236,15 @@ func absPriceSum(v trader.PriceSum) trader.PriceSum {
 	return v
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
-	fast, ok, err := trader.GetInt32Param(params, "fast")
+func build(params map[string]any) (strategy.Strategy, error) {
+	fast, ok, err := strategy.GetInt32Param(params, "fast")
 	if err != nil {
 		return nil, err
 	}
 	if !ok || fast <= 0 {
 		return nil, fmt.Errorf("ema-cross-adx: missing or invalid param %q", "fast")
 	}
-	slow, ok, err := trader.GetInt32Param(params, "slow")
+	slow, ok, err := strategy.GetInt32Param(params, "slow")
 	if err != nil {
 		return nil, err
 	}
@@ -253,41 +254,41 @@ func build(params map[string]any) (trader.Strategy, error) {
 	if fast >= slow {
 		return nil, fmt.Errorf("ema-cross-adx: fast (%d) must be < slow (%d)", fast, slow)
 	}
-	adxPeriod, _, err := trader.GetInt32Param(params, "adx_period")
+	adxPeriod, _, err := strategy.GetInt32Param(params, "adx_period")
 	if err != nil {
 		return nil, err
 	}
 	if adxPeriod <= 0 {
 		adxPeriod = 14
 	}
-	adxThreshold, _, err := trader.GetFloat64Param(params, "adx_threshold")
+	adxThreshold, _, err := strategy.GetFloat64Param(params, "adx_threshold")
 	if err != nil {
 		return nil, err
 	}
 	if adxThreshold <= 0 {
 		adxThreshold = 20.0
 	}
-	stopPips, _, err := trader.GetFloat64Param(params, "stop_pips")
+	stopPips, _, err := strategy.GetFloat64Param(params, "stop_pips")
 	if err != nil {
 		return nil, err
 	}
-	minSpread, _, err := trader.GetFloat64Param(params, "min_spread")
+	minSpread, _, err := strategy.GetFloat64Param(params, "min_spread")
 	if err != nil {
 		return nil, err
 	}
-	atrPeriod, _, err := trader.GetInt32Param(params, "atr_period")
+	atrPeriod, _, err := strategy.GetInt32Param(params, "atr_period")
 	if err != nil {
 		return nil, err
 	}
-	atrMult, _, err := trader.GetFloat64Param(params, "atr_multiplier")
+	atrMult, _, err := strategy.GetFloat64Param(params, "atr_multiplier")
 	if err != nil {
 		return nil, err
 	}
-	requireDI, _, err := trader.GetBoolParam(params, "require_di")
+	requireDI, _, err := strategy.GetBoolParam(params, "require_di")
 	if err != nil {
 		return nil, err
 	}
-	requireADXReady, ok, err := trader.GetBoolParam(params, "require_adx_ready")
+	requireADXReady, ok, err := strategy.GetBoolParam(params, "require_adx_ready")
 	if err != nil {
 		return nil, err
 	}

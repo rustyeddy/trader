@@ -50,6 +50,20 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   callers migrated to =execution.X=; the root shim (=execution_aliases.go=) is
   retained for the engine until wave 6 (the engine is execution's main consumer).
 
+- =strategy= — strategy core + exit strategies + regime filters: the =Strategy=
+  interface, =StrategyContext=/=LotView=, =StrategyPlan= + plan helpers, the
+  registry (=Register/MustRegister/Lookup/GetStrategy=), =ExitStrategy= +
+  =ChandelierExit=/=NoopExit= and =GetExitStrategy=, =RegimeFilter= + all concrete
+  filters (ATR-percentile, choppiness, D1 ADX/choppiness, session, weekly-EMA,
+  composite) and =GetRegimeFilter=, plus the config/param parsing helpers and
+  news-day loader. Depends only on =market=, =indicator=, =execution=. External
+  callers migrated to =strategy.X=: all =strategies/*= packages now register via
+  =strategy.MustRegisterStrategy= and =Update= against =strategy.StrategyContext=;
+  =service= (replay, portfolio_config, strategy_factory, candle adapter, sweep)
+  imports =strategy= directly. The root shim (=strategy_aliases.go=) is retained
+  for the in-root engine until wave 8 (engine extraction), mirroring
+  =execution_aliases.go=.
+
 Remaining in root: backtest engine, strategy/regime/live orchestration, config,
 and a few orphans.
 
@@ -262,10 +276,12 @@ marketdata -> data (Provider registry)
    See "Wave 4" above.
 6. =execution= — account, broker, trade, position, lot, requests, history.
    Clean leaf on =market=; gate on accounting-invariant tests.
-7. =strategy= + =regime= — depend on =market=, =indicator=, =execution=
-   (for Lot view), and =StrategyContext=; no longer on =backtest=.
-   (StrategyContext groundwork already DONE.)
+7. DONE: =strategy= + =regime= — depend on =market=, =indicator=, =execution=
+   (for Lot view), and =StrategyContext=; no longer on =backtest=. External
+   callers (=strategies/*=, =service=) migrated off the root shim; the in-root
+   engine still uses =strategy_aliases.go= until wave 8.
 8. =backtest= / =engine= — the orchestration layer, now sitting on clean APIs.
+   Drops both =execution_aliases.go= and =strategy_aliases.go= as it moves out.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.
 

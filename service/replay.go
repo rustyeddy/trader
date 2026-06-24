@@ -9,6 +9,7 @@ import (
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // ── Signal types ─────────────────────────────────────────────────────────────
@@ -61,14 +62,14 @@ type ReplayResult struct {
 
 // ReplayRequest drives a single-instrument strategy replay against stored candles.
 type ReplayRequest struct {
-	Instrument string                `json:"instrument"`  // internal format, e.g. "EURUSD"
-	Timeframe  string                `json:"timeframe"`   // "H1" or "D"
-	From       string                `json:"from"`        // "YYYY-MM-DD"
-	To         string                `json:"to"`          // "YYYY-MM-DD"
-	WarmupBars int                   `json:"warmup_bars"` // bars to prime before recording; default 100
-	Strategy   trader.StrategyConfig `json:"strategy"`
-	Exit       trader.ExitConfig     `json:"exit"`
-	Regime     trader.RegimeConfig   `json:"regime"`
+	Instrument string                  `json:"instrument"`  // internal format, e.g. "EURUSD"
+	Timeframe  string                  `json:"timeframe"`   // "H1" or "D"
+	From       string                  `json:"from"`        // "YYYY-MM-DD"
+	To         string                  `json:"to"`          // "YYYY-MM-DD"
+	WarmupBars int                     `json:"warmup_bars"` // bars to prime before recording; default 100
+	Strategy   strategy.StrategyConfig `json:"strategy"`
+	Exit       strategy.ExitConfig     `json:"exit"`
+	Regime     strategy.RegimeConfig   `json:"regime"`
 }
 
 // ── replayPosition tracks open simulated positions during replay ──────────────
@@ -108,17 +109,17 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		warmup = 100
 	}
 
-	strategy, err := trader.GetStrategy(req.Strategy)
+	strat, err := strategy.GetStrategy(req.Strategy)
 	if err != nil {
 		return nil, fmt.Errorf("build strategy: %w", err)
 	}
 
-	exit, err := trader.GetExitStrategy(req.Exit, trader.PriceScale)
+	exit, err := strategy.GetExitStrategy(req.Exit, trader.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build exit strategy: %w", err)
 	}
 
-	regime, err := trader.GetRegimeFilter(req.Regime, trader.PriceScale)
+	regime, err := strategy.GetRegimeFilter(req.Regime, trader.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build regime filter: %w", err)
 	}
@@ -209,7 +210,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		}
 
 		// Run strategy.
-		plan := strategy.Update(ctx, &ct, bt)
+		plan := strat.Update(ctx, &ct, bt)
 		if plan == nil || (!inRange) {
 			continue
 		}
@@ -326,7 +327,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	return &ReplayResult{
 		Instrument: inst,
 		Timeframe:  req.Timeframe,
-		Strategy:   strategy.Name(),
+		Strategy:   strat.Name(),
 		From:       req.From,
 		To:         req.To,
 		WarmupBars: warmup,

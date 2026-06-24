@@ -7,11 +7,12 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(buildFake, "fake")
-	trader.MustRegisterStrategy(buildFake02, "fake-02")
+	strategy.MustRegisterStrategy(buildFake, "fake")
+	strategy.MustRegisterStrategy(buildFake02, "fake-02")
 }
 
 // Fake opens long on higher highs, closes on stop loss on lower lows.
@@ -36,9 +37,9 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	f.candles = append(f.candles, c)
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 
 	if len(f.candles) < f.CandleCount {
 		return plan
@@ -122,10 +123,10 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 	if c == nil {
 		return plan
 	}
@@ -211,11 +212,11 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run trader.St
 	return plan
 }
 
-func buildFake(params map[string]any) (trader.Strategy, error) {
+func buildFake(params map[string]any) (strategy.Strategy, error) {
 	return &Fake{CandleCount: 10}, nil
 }
 
-func buildFake02(params map[string]any) (trader.Strategy, error) {
+func buildFake02(params map[string]any) (strategy.Strategy, error) {
 	return &Fake02{
 		WaitBars: 8,
 		HoldBars: 6,

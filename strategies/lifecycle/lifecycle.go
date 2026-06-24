@@ -8,10 +8,11 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "lifecycle-test")
+	strategy.MustRegisterStrategy(build, "lifecycle-test")
 }
 
 // Strategy opens long on bar 1 and closes on bar 3. With a canned dataset
@@ -38,10 +39,10 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return true }
 
-func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 	if c == nil || run == nil {
 		return plan
 	}
@@ -117,7 +118,7 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run trader.
 	return plan
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
+func build(params map[string]any) (strategy.Strategy, error) {
 	return &Strategy{
 		Units:    1000,
 		StopPips: 20,

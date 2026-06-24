@@ -12,6 +12,7 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 	_ "github.com/rustyeddy/trader/strategies/fake"
 	_ "github.com/rustyeddy/trader/strategies/noop"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // buildReplayStore writes two months of synthetic H1 EURUSD candles into a
@@ -52,9 +53,9 @@ func TestRunReplay_ReturnsBarsAndSignals(t *testing.T) {
 		From:       "2024-02-01",
 		To:         "2024-02-29",
 		WarmupBars: 50,
-		Strategy:   trader.StrategyConfig{Kind: "fake"},
-		Exit:       trader.ExitConfig{},
-		Regime:     trader.RegimeConfig{},
+		Strategy:   strategy.StrategyConfig{Kind: "fake"},
+		Exit:       strategy.ExitConfig{},
+		Regime:     strategy.RegimeConfig{},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "EURUSD", result.Instrument)
@@ -93,7 +94,7 @@ func TestRunReplay_EmptyStoreReturnsNoBars(t *testing.T) {
 		From:       "2024-01-01",
 		To:         "2024-01-31",
 		WarmupBars: 10,
-		Strategy:   trader.StrategyConfig{Kind: "noop"},
+		Strategy:   strategy.StrategyConfig{Kind: "noop"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, result.Bars)

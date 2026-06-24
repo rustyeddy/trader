@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // PortfolioConfig is the YAML schema for `trader live portfolio`.
@@ -81,7 +82,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 	}
 
 	for _, y := range cfg.Instruments {
-		scfg := trader.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params}
+		scfg := strategy.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params}
 
 		riskPct := y.RiskPct
 		if riskPct <= 0 {
@@ -95,8 +96,8 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 				return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
 			}
 			rc.Instruments = append(rc.Instruments, InstrumentRunConfig{
-				Instrument:   y.Instrument,
-				Granularity:  toOandaGranularity(y.Timeframe),
+				Instrument:  y.Instrument,
+				Granularity: toOandaGranularity(y.Timeframe),
 				TickInterval: func() time.Duration {
 					d, _ := time.ParseDuration(y.TickInterval)
 					return d
@@ -109,16 +110,16 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		}
 
 		// Backtest strategy — wrap in candle adapter for bar-driven live trading.
-		strategy, err := trader.GetStrategy(scfg)
+		strat, err := strategy.GetStrategy(scfg)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
 		}
 
-		regimeCfg := trader.RegimeConfig{Kind: y.Regime.Kind, Params: y.Regime.Params}
+		regimeCfg := strategy.RegimeConfig{Kind: y.Regime.Kind, Params: y.Regime.Params}
 		for _, f := range y.Regime.Filters {
-			regimeCfg.Filters = append(regimeCfg.Filters, trader.RegimeConfig{Kind: f.Kind, Params: f.Params})
+			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
-		regime, err := trader.GetRegimeFilter(regimeCfg, trader.PriceScale)
+		regime, err := strategy.GetRegimeFilter(regimeCfg, trader.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s regime: %w", y.Instrument, err)
 		}
@@ -133,8 +134,8 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			localWarmup = cfg.LocalWarmupBars
 		}
 
-		exitCfg := trader.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
-		exit, err := trader.GetExitStrategy(exitCfg, trader.PriceScale)
+		exitCfg := strategy.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
+		exit, err := strategy.GetExitStrategy(exitCfg, trader.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
 		}
@@ -142,7 +143,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		// Wrap the service so the adapter can update trailing stops on OANDA.
 		svc := &Service{OANDA: oandaClient, AccountID: accountID, Log: log}
 		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
-			Strategy:        strategy,
+			Strategy:        strat,
 			Exit:            exit,
 			Regime:          regime,
 			Instrument:      y.Instrument,

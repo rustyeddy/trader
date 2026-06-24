@@ -20,10 +20,11 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "donchian", "donchian-breakout")
+	strategy.MustRegisterStrategy(build, "donchian", "donchian-breakout")
 }
 
 const (
@@ -182,15 +183,15 @@ func (d *Breakout) adxGatePass(side trader.Side) bool {
 	return d.adx.MinusDI() > d.adx.PlusDI()
 }
 
-func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader.StrategyContext) *trader.StrategyPlan {
+func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 
 	if !d.Ready() {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{Reason: "warming up"}
+		return &strategy.StrategyPlan{Reason: "warming up"}
 	}
 
 	currentDay := int64(ct.Timestamp) / 86400
@@ -199,19 +200,19 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader
 	// Monday block.
 	if d.blockMonday && dow == dowMonday {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{Reason: "monday-block"}
+		return &strategy.StrategyPlan{Reason: "monday-block"}
 	}
 
 	// Friday block (optional).
 	if d.blockFriday && dow == dowFriday {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{Reason: "friday-block"}
+		return &strategy.StrategyPlan{Reason: "friday-block"}
 	}
 
 	// News-day block.
 	if d.blockedDays[currentDay] {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{Reason: "news-day-block"}
+		return &strategy.StrategyPlan{Reason: "news-day-block"}
 	}
 
 	hi, lo := d.channelHighLow()
@@ -250,7 +251,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader
 		d.pendingCount = 0
 		d.pendingLevel = 0
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{Reason: "no breakout"}
+		return &strategy.StrategyPlan{Reason: "no breakout"}
 	}
 
 	if side != d.pendingSide {
@@ -259,7 +260,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader
 			d.pendingCount = 0
 			d.pendingLevel = 0
 			d.advanceBar(ct.Candle)
-			return &trader.StrategyPlan{Reason: "weak close"}
+			return &strategy.StrategyPlan{Reason: "weak close"}
 		}
 		d.pendingSide = side
 		d.pendingCount = 1
@@ -274,14 +275,14 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader
 
 	if d.pendingCount < d.confirmBars {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{
+		return &strategy.StrategyPlan{
 			Reason: fmt.Sprintf("confirming break (%d/%d)", d.pendingCount, d.confirmBars),
 		}
 	}
 
 	if !d.adxGatePass(side) {
 		d.advanceBar(ct.Candle)
-		return &trader.StrategyPlan{
+		return &strategy.StrategyPlan{
 			Reason: fmt.Sprintf("adx-filtered(adx=%.1f,+DI=%.1f,-DI=%.1f)",
 				d.adx.Float64(), d.adx.PlusDI(), d.adx.MinusDI()),
 		}
@@ -301,8 +302,8 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run trader
 	return plan
 }
 
-func emitOpen(ct *trader.CandleTime, run trader.StrategyContext, side trader.Side) *trader.StrategyPlan {
-	plan := &trader.StrategyPlan{}
+func emitOpen(ct *trader.CandleTime, run strategy.StrategyContext, side trader.Side) *strategy.StrategyPlan {
+	plan := &strategy.StrategyPlan{}
 
 	alreadyOpen := false
 	if run != nil {
@@ -343,61 +344,61 @@ func emitOpen(ct *trader.CandleTime, run trader.StrategyContext, side trader.Sid
 	return plan
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
-	period, _, err := trader.GetInt32Param(params, "period")
+func build(params map[string]any) (strategy.Strategy, error) {
+	period, _, err := strategy.GetInt32Param(params, "period")
 	if err != nil {
 		return nil, err
 	}
 	if period <= 1 {
 		period = 20
 	}
-	closeStrength, ok, err := trader.GetFloat64Param(params, "close_strength")
+	closeStrength, ok, err := strategy.GetFloat64Param(params, "close_strength")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		closeStrength = 0.6
 	}
-	confirmBars, ok, err := trader.GetInt32Param(params, "confirm_bars")
+	confirmBars, ok, err := strategy.GetInt32Param(params, "confirm_bars")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		confirmBars = 2
 	}
-	adxPeriod, ok, err := trader.GetInt32Param(params, "adx_period")
+	adxPeriod, ok, err := strategy.GetInt32Param(params, "adx_period")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		adxPeriod = 14
 	}
-	adxThreshold, ok, err := trader.GetFloat64Param(params, "adx_threshold")
+	adxThreshold, ok, err := strategy.GetFloat64Param(params, "adx_threshold")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		adxThreshold = 25.0
 	}
-	blockMonday, ok, err := trader.GetBoolParam(params, "block_monday")
+	blockMonday, ok, err := strategy.GetBoolParam(params, "block_monday")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		blockMonday = true // default: block Monday entries
 	}
-	blockFriday, _, err := trader.GetBoolParam(params, "block_friday")
+	blockFriday, _, err := strategy.GetBoolParam(params, "block_friday")
 	if err != nil {
 		return nil, err
 	}
 
 	var blockedDays map[int64]bool
-	newsDaysFile, ok, err := trader.GetStringParam(params, "news_days_file")
+	newsDaysFile, ok, err := strategy.GetStringParam(params, "news_days_file")
 	if err != nil {
 		return nil, err
 	}
 	if ok && newsDaysFile != "" {
-		blockedDays, err = trader.LoadNewsDays(newsDaysFile)
+		blockedDays, err = strategy.LoadNewsDays(newsDaysFile)
 		if err != nil {
 			return nil, err
 		}
