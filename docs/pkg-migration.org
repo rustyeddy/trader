@@ -2,7 +2,7 @@
 #+author: Codex
 #+date: 2026-06-23
 #+updated: 2026-06-23 (wave 8: root engine fully de-shimmed; ALL *_aliases.go
-#  deleted incl. market_aliases.go — no transition shims remain anywhere)
+#  deleted. Next: split engine + backtest into sibling pkgs — Option A, planned)
 
 * Goal
 
@@ -122,17 +122,83 @@ imports in the few test files whose only market use had been a reverted key.
 
 With this, the root engine no longer rides on ANY re-export shim.
 
-Still remaining for wave 8:
+Still remaining for wave 8: the engine/backtest split (see next section). All
+leaf-package qualification (execution/strategy/market/indicator/journal/log) is
+DONE, so this is no longer blocked on import-name cleanup.
 
-- The engine has NOT been physically relocated to its own package directory yet.
-  All leaf-package qualification (execution/strategy/market/indicator/journal/log)
-  is now DONE, so the relocation is no longer blocked on import-name cleanup.
-  Decision pending: whether the engine needs a distinct =engine=/=backtest=
-  directory at all, or whether root =trader= simply IS the top orchestration
-  layer now that every leaf shim is gone.
+Remaining in root: engine + backtest run orchestration, live orchestration,
+config, and a few orphans.
 
-Remaining in root: backtest engine, strategy/regime/live orchestration, config,
-and a few orphans.
+* Wave 8 follow-up (PLANNED): split engine and backtest into sibling packages
+
+DECIDED layout — Option A: =engine= and =backtest= become sibling directories.
+Root =trader= stops being the engine; the two new packages sit side by side with
+a one-way edge =backtest -> engine= (engine NEVER imports backtest).
+
+#+begin_src text
+trader/
+  engine/      package engine    — Trader + broker/event loop (mechanism only)
+  backtest/    package backtest  — Backtest* run orchestration; imports engine
+#+end_src
+
+** Four-way classification of the 16 remaining root files
+
+The current root package is NOT one layer; it is four concerns tangled together.
+
+1. ENGINE (mechanism, low-level) — the part of =trader.go= that is the =Trader=
+   type and its broker/loop plumbing:
+   - =Trader= struct (=DataManager= + =execution.Broker= + =marketdata.Store=)
+   - =startBrokerEventHandler=, =brokerEventError=, =waitForBrokerIdle=,
+     =processEvent=, =snapshotLots=, =eventPositionID=
+   Pure mechanism: drive a broker, drain events, track lots. No notion of a run.
+
+2. BACKTEST (higher-level run orchestration) -> new =backtest= package:
+   - all nine =backtest_*.go= files PLUS =backtest_config.go=
+     (=Config=/=RunConfig=/=RunDefaults=/=DataConfig=/=LoadConfig=/=hashBacktestConfig=)
+   - PLUS the two loop methods currently MIS-HOMED on =Trader=:
+     =Backtest()= and =backTestWithIterator()=. These reference =*Backtest=, so
+     they are the inversion point (below).
+
+3. LIVE (higher-level, separate concern) — =live_strategy.go= (=LiveStrategy=,
+   =LivePrice=, =LiveTrade=, =LivePlan=, =LiveOpenRequest=) and
+   =live_strategy_registry.go=. Depends on =strategy=, not on backtest. Its own
+   eventual home (=live= package, or fold into =strategy=/=service=) is a SEPARATE
+   decision from the engine/backtest split — out of scope here.
+
+4. CONFIG / ORPHAN — =app_config.go= (=RootConfig=, =appConfig=, ...),
+   =config_global.go= (=GlobalConfig=, ...), and =version.go=. App/global config,
+   not engine. Stay put for now.
+
+** The gating prerequisite: invert =Trader.Backtest=
+
+The one thing that makes =trader.go= LOOK fused is that the run loop hangs off the
+engine type and references the run value:
+
+#+begin_src go
+func (t *Trader) Backtest(ctx, run *Backtest) error
+func (t *Trader) backTestWithIterator(ctx, run *Backtest, itr market.CandleIterator) error
+#+end_src
+
+If =backtest= becomes the higher package, this edge points the WRONG way
+(engine -> backtest -> engine = cycle). So the split's real work is inverting it:
+move =Backtest()= / =backTestWithIterator()= out of =Trader= and into the
+=backtest= package as functions/methods that take a =*engine.Trader= (or a small
+engine interface) and call its lower-level primitives. =Trader= is then left with
+only the broker/store/loop mechanism, and the dependency is cleanly one-way.
+
+Once inverted, the physical move is just =git mv= + package rename for each side.
+
+** External-caller fallout (same pattern as the rest of wave 8)
+
+- =backtest_config.go= defines =Config=/=RunConfig=, consumed by =service=
+  (=CompileBacktests=, the executor) and =cmd/backtest=. When it moves, those
+  callers re-point to =github.com/rustyeddy/trader/backtest= — one more
+  external-caller migration like buckets A/B/C.
+- Anything constructing or driving =Trader= (notably the service backtest
+  executor) re-points to =github.com/rustyeddy/trader/engine=.
+- A transition shim (=engine_aliases.go= / =backtest_aliases.go=) MAY be used to
+  stage callers, but prefer a direct cutover now that the qualification toolkit
+  (=gofmt -r= + =goimports=, Lessons 4 and 6) is well-worn.
 
 * Lessons Learned (waves 1-3)
 
@@ -364,8 +430,8 @@ marketdata -> data (Provider registry)
    migrated (buckets A/B/C). The root engine's own bare market usage (78 symbols)
    was then qualified, and ALL transition shims — =indicator_aliases.go=,
    =journal_aliases.go=, =log_aliases.go=, and =market_aliases.go= — are DELETED.
-   Remaining: decide whether to relocate the engine to its own directory. See
-   "Wave 8" above.
+   DECIDED: split into sibling =engine= and =backtest= packages (Option A),
+   gated on inverting =Trader.Backtest=. See "Wave 8 follow-up" above.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.
 
