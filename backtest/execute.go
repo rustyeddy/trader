@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -154,6 +155,8 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		}
 	}()
 
+	var pl planner.Planner = planner.DefaultPlanner{}
+
 	for {
 		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 		candle, ok := itr.Next()
@@ -222,40 +225,30 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			plan = strategy.DefaultPlan()
 		}
 
-		// Regime filter: suppress new entries in ranging/consolidating markets.
-		// Existing positions continue to be managed by the exit strategy.
-		if regime.Ready() {
-			if !regime.Trending() {
-				plan.Opens = nil
-			} else if len(plan.Opens) > 0 {
-				filtered := plan.Opens[:0]
-				for _, o := range plan.Opens {
-					if regime.AllowSide(o.Side) {
-						filtered = append(filtered, o)
-					}
-				}
-				plan.Opens = filtered
-			}
+		// Finalize the strategy's intent into broker-ready requests: regime gate,
+		// max-spread gate, fill-price adjustment, initial stop, and sizing all
+		// live in the planner now.
+		var stats planner.Stats
+		plan, stats, err = pl.Plan(plan, runPlanContext{
+			acct:      t.Account,
+			exit:      exit,
+			regime:    regime,
+			candle:    candle,
+			slippage:  slippage,
+			maxSpread: maxSpread,
+		})
+		if err != nil {
+			return err
 		}
-
-		// Max-spread filter: skip entries when the bid-ask spread is too wide
-		// (market opens, news events, low-liquidity periods).
-		if maxSpread > 0 && candle.AvgSpread > maxSpread && len(plan.Opens) > 0 {
-			run.State.SpreadFiltered++
-			plan.Opens = nil
-		}
+		run.State.SpreadFiltered += stats.SpreadFiltered
+		run.State.SpreadOpened += stats.SpreadOpened
+		run.State.SpreadSum += stats.SpreadSum
 
 		for _, cancelReq := range plan.Cancel {
 			log.L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
 			log.L.Info("submit close request", "ID", cl.Request.ID)
-
-			// Short closes by buying at ask; long closes by selling at bid.
-			if cl.Lot != nil {
-				isBuy := cl.Lot.Side == market.Short
-				cl.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
-			}
 
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			err = t.Broker.SubmitClose(runCtx, cl)
@@ -270,27 +263,6 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		for _, openReq := range plan.Opens {
 			log.L.Info("Broker event Open Position", "ID", openReq.ID)
-
-			// Long buys at ask; short sells at bid.
-			isBuy := openReq.Side == market.Long
-			openReq.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
-			run.State.SpreadOpened++
-			run.State.SpreadSum += candle.AvgSpread
-
-			// Let the exit strategy override the initial stop when configured.
-			if exit.Ready() {
-				if s := exit.InitialStop(openReq.Side, openReq.Price, candle.Candle); s != 0 {
-					openReq.Stop = s
-				}
-			}
-
-			if openReq.Units == 0 {
-				err := t.Account.SizePosition(openReq)
-				if err != nil {
-					return err
-				}
-			}
-
 			log.L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.SubmitOpen(runCtx, openReq)
@@ -319,7 +291,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		for _, lot := range remaining {
 			isBuy := lot.Side == market.Short
-			closePx := lastCandle.Close + fillAdjust(isBuy, lastCandle.AvgSpread, slippage)
+			closePx := lastCandle.Close + execution.FillAdjust(isBuy, lastCandle.AvgSpread, slippage)
 			cl := &execution.CloseRequest{
 				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
