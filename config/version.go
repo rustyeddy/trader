@@ -1,4 +1,4 @@
-package trader
+package config
 
 // Version is the current build version. Set at build time via:
 //

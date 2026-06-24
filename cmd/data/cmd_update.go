@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -25,7 +25,7 @@ var defaultInstruments = []string{
 
 var defaultTimeframes = []string{"M1", "H1", "H4", "D"}
 
-func newUpdateCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func newUpdateCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrumentsCSV string
 		timeframesCSV  string

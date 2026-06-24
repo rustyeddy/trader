@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/config"
 )
 
 var (
@@ -19,7 +19,7 @@ var (
 )
 
 // New returns the top-level "account" cobra command.
-func New(rc *traderpkg.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account",
 		Short: "Inspect OANDA accounts",
@@ -31,7 +31,7 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func listCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func listCmd(rc *config.RootConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List all OANDA account IDs for the configured token",
@@ -65,7 +65,7 @@ func listCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	}
 }
 
-func summaryCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func summaryCmd(rc *config.RootConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "summary",
 		Short: "Print balance, NAV, margin, and P/L for all accounts",
@@ -110,7 +110,7 @@ func summaryCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	}
 }
 
-func resolveToken(cmd *cobra.Command, rc *traderpkg.RootConfig) string {
+func resolveToken(cmd *cobra.Command, rc *config.RootConfig) string {
 	if cmd.Flags().Changed("token") {
 		return token
 	}
@@ -120,7 +120,7 @@ func resolveToken(cmd *cobra.Command, rc *traderpkg.RootConfig) string {
 	return os.Getenv("OANDA_TOKEN")
 }
 
-func resolveEnv(cmd *cobra.Command, rc *traderpkg.RootConfig) string {
+func resolveEnv(cmd *cobra.Command, rc *config.RootConfig) string {
 	if cmd.Flags().Changed("env") {
 		return env
 	}

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,5 +37,5 @@ func TestGetVersion(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
-	assert.Equal(t, trader.Version, body["version"])
+	assert.Equal(t, config.Version, body["version"])
 }

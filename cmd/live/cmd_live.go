@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
-func New(rc *trader.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "live",
 		Short: "Live trading subsystem",
@@ -30,7 +30,7 @@ func notifyContext(parent context.Context) (context.Context, context.CancelFunc)
 	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 }
 
-func newJournalCmd(rc *trader.RootConfig) *cobra.Command {
+func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		accountID    string
 		token        string

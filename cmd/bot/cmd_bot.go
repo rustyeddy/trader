@@ -24,7 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/strategy"
@@ -32,7 +32,7 @@ import (
 
 var serverURL string
 
-func New(rc *traderpkg.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bot",
 		Short: "Manage live strategy bots",
@@ -249,7 +249,7 @@ func printBotPL(out io.Writer, botID string, trades []journal.TradeRecord) {
 
 // ── bot start ─────────────────────────────────────────────────────────────
 
-func botStartCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func botStartCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		configFile   string
 		instrument   string
@@ -318,7 +318,7 @@ OANDA positions are NOT closed on stop — they remain on the broker.`,
 // startLocal runs a single bot directly in the current process without a
 // trader serve daemon. It blocks until the bot exits or Ctrl-C is received,
 // then stops the bot and waits for it to finish cleanly.
-func startLocal(cmd *cobra.Command, rc *traderpkg.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
+func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
 	if configFile != "" {
 		return fmt.Errorf("--config is not supported with --local; start bots one at a time")
 	}

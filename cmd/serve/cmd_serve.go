@@ -20,9 +20,9 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/rustyeddy/trader"
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
 	"github.com/rustyeddy/trader/api/rest"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
@@ -55,7 +55,7 @@ type DaemonConfig struct {
 }
 
 // New returns the "serve" cobra command.
-func New(rc *trader.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	var (
 		cfgFile        string
 		addr           string

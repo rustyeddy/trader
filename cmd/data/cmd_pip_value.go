@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -26,7 +26,7 @@ var usdBasePairs = []string{"USDJPY", "USDCHF", "USDCAD"}
 
 var pipMultipliers = []float64{1, 10, 100, 1000}
 
-func newPipValueCmd(rc *trader.RootConfig) *cobra.Command {
+func newPipValueCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		units    int64
 		ratesCSV string

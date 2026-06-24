@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
+func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		timeframe  string

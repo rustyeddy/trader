@@ -11,15 +11,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 )
 
 // New returns the "mcp" cobra command. It runs the MCP server directly
 // on stdio — there is no subcommand layer.
-func New(rc *trader.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	var (
 		token       string
 		accountID   string

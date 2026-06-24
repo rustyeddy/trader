@@ -8,14 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/sim"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 )
 
-func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
+func newEventsCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		path string
 

@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/market"
 )
 
-func pricesCmd(rc *trader.RootConfig) *cobra.Command {
+func pricesCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrumentsCSV string
 		units          int64

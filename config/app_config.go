@@ -1,4 +1,4 @@
-package trader
+package config
 
 type RootConfig struct {
 	ConfigPath string

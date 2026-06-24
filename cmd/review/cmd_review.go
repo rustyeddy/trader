@@ -5,7 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
@@ -16,7 +16,7 @@ var (
 	all      bool
 )
 
-func New(_ *trader.RootConfig) *cobra.Command {
+func New(_ *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Parse a ChatGPT forex review CSV and print trade candidates and watchlist",

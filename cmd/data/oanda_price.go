@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
 )
@@ -34,7 +34,7 @@ func defaultOandaAuth() oandaAuth {
 // applyGlobalOANDA overrides auth fields from the global config (rc) for any
 // flag that was not explicitly set by the user. The priority chain is:
 // explicit flag > global config > env var / default.
-func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *trader.RootConfig) {
+func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *config.RootConfig) {
 	if rc == nil {
 		return
 	}

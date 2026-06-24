@@ -8,11 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/market"
 )
 
-func newPositionCmd(rc *trader.RootConfig) *cobra.Command {
+func newPositionCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		price      float64

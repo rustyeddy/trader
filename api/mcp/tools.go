@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -824,7 +824,7 @@ func (s *Server) toolStopBot(raw json.RawMessage) (any, *rpcError) {
 }
 
 func (s *Server) toolGetVersion() (any, *rpcError) {
-	return jsonContent(map[string]string{"version": trader.Version}), nil
+	return jsonContent(map[string]string{"version": config.Version}), nil
 }
 
 func (s *Server) toolGetHealth() (any, *rpcError) {
