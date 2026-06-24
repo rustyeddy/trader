@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"sort"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )
 
-func New(_ *trader.RootConfig) *cobra.Command {
+func New(_ *config.RootConfig) *cobra.Command {
 	var (
 		outFile string
 		outDir  string

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 func TestStrategy_Update(t *testing.T) {
@@ -34,9 +34,9 @@ func TestStrategy_Ready(t *testing.T) {
 func TestStrategy_UpdateWithValues(t *testing.T) {
 	t.Parallel()
 
-	c := &trader.CandleTime{
-		Candle:    trader.Candle{Close: trader.PriceFromFloat(1.1)},
-		Timestamp: trader.Timestamp(100),
+	c := &market.CandleTime{
+		Candle:    market.Candle{Close: market.PriceFromFloat(1.1)},
+		Timestamp: market.Timestamp(100),
 	}
 
 	plan := Strategy{}.Update(context.Background(), c, nil)

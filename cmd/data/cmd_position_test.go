@@ -5,11 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 func TestNotionalUSD_USDQuoted(t *testing.T) {
-	eurusd := trader.GetInstrument("EURUSD")
+	eurusd := market.GetInstrument("EURUSD")
 	// 100,000 units × 1.0845 = $108,450
 	assert.InDelta(t, 108_450.0, notionalUSD(eurusd, 1.0845, 100_000), 0.01)
 	assert.InDelta(t, 10_845.0, notionalUSD(eurusd, 1.0845, 10_000), 0.01)
@@ -17,26 +17,26 @@ func TestNotionalUSD_USDQuoted(t *testing.T) {
 }
 
 func TestNotionalUSD_USDBase(t *testing.T) {
-	usdjpy := trader.GetInstrument("USDJPY")
+	usdjpy := market.GetInstrument("USDJPY")
 	// USD is base, so notional = units regardless of price
 	assert.InDelta(t, 100_000.0, notionalUSD(usdjpy, 150.0, 100_000), 0.01)
 	assert.InDelta(t, 100_000.0, notionalUSD(usdjpy, 125.0, 100_000), 0.01)
 }
 
 func TestUnitsForNotional_USDQuoted(t *testing.T) {
-	eurusd := trader.GetInstrument("EURUSD")
+	eurusd := market.GetInstrument("EURUSD")
 	// $10,845 / 1.0845 = 10,000 units
 	assert.Equal(t, int64(10_000), unitsForNotional(eurusd, 1.0845, 10_845.0))
 }
 
 func TestUnitsForNotional_USDBase(t *testing.T) {
-	usdjpy := trader.GetInstrument("USDJPY")
+	usdjpy := market.GetInstrument("USDJPY")
 	// USD base: $50,000 notional = 50,000 units
 	assert.Equal(t, int64(50_000), unitsForNotional(usdjpy, 150.0, 50_000.0))
 }
 
 func TestUnitsForNotional_ZeroPrice(t *testing.T) {
-	eurusd := trader.GetInstrument("EURUSD")
+	eurusd := market.GetInstrument("EURUSD")
 	assert.Equal(t, int64(0), unitsForNotional(eurusd, 0, 10_000.0))
 }
 
@@ -48,26 +48,26 @@ func TestFmtDollar(t *testing.T) {
 }
 
 func TestPrintPositionTable_NoPanic(t *testing.T) {
-	eurusd := trader.GetInstrument("EURUSD")
+	eurusd := market.GetInstrument("EURUSD")
 	assert.NotPanics(t, func() { printPositionTable(eurusd, 1.0845, 0) })
 }
 
 func TestPrintPositionTable_WithPips_NoPanic(t *testing.T) {
-	eurusd := trader.GetInstrument("EURUSD")
+	eurusd := market.GetInstrument("EURUSD")
 	assert.NotPanics(t, func() { printPositionTable(eurusd, 1.0845, 20) })
 }
 
 func TestPrintSinglePosition_NoPanic(t *testing.T) {
-	usdjpy := trader.GetInstrument("USDJPY")
+	usdjpy := market.GetInstrument("USDJPY")
 	assert.NotPanics(t, func() { printSinglePosition(usdjpy, 150.0, 25_000, 0) })
 }
 
 func TestPrintSinglePosition_WithPips_NoPanic(t *testing.T) {
-	usdjpy := trader.GetInstrument("USDJPY")
+	usdjpy := market.GetInstrument("USDJPY")
 	assert.NotPanics(t, func() { printSinglePosition(usdjpy, 150.0, 25_000, 15) })
 }
 
 func TestPrintUnitsForNotional_NoPanic(t *testing.T) {
-	gbpusd := trader.GetInstrument("GBPUSD")
+	gbpusd := market.GetInstrument("GBPUSD")
 	assert.NotPanics(t, func() { printUnitsForNotional(gbpusd, 1.2720, 5_000.0, 0) })
 }

@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // writeFixture serialises s as JSON into dir/<name>.json.
-func writeFixture(t *testing.T, dir string, s trader.BacktestReportSummary) {
+func writeFixture(t *testing.T, dir string, s backtest.BacktestReportSummary) {
 	t.Helper()
 	b, err := json.MarshalIndent(s, "", "  ")
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestRunBacktestList_ShowsResults(t *testing.T) {
 		listStrategy = ""
 	}()
 
-	writeFixture(t, dir, trader.BacktestReportSummary{
+	writeFixture(t, dir, backtest.BacktestReportSummary{
 		Name:       "eurusd-bbfade-abc12345",
 		Strategy:   "BBFade",
 		Instrument: "EUR_USD",
@@ -73,7 +73,7 @@ func TestRunBacktestList_ShowsResults(t *testing.T) {
 		ReturnPct:  4.2,
 		NetPL:      420.0,
 	})
-	writeFixture(t, dir, trader.BacktestReportSummary{
+	writeFixture(t, dir, backtest.BacktestReportSummary{
 		Name:       "gbpusd-macd-def67890",
 		Strategy:   "MACD",
 		Instrument: "GBP_USD",
@@ -110,10 +110,10 @@ func TestRunBacktestList_FilterInstrument(t *testing.T) {
 		listStrategy = ""
 	}()
 
-	writeFixture(t, dir, trader.BacktestReportSummary{
+	writeFixture(t, dir, backtest.BacktestReportSummary{
 		Name: "eurusd-run", Instrument: "EUR_USD", Strategy: "BBFade",
 	})
-	writeFixture(t, dir, trader.BacktestReportSummary{
+	writeFixture(t, dir, backtest.BacktestReportSummary{
 		Name: "gbpusd-run", Instrument: "GBP_USD", Strategy: "BBFade",
 	})
 
@@ -145,7 +145,7 @@ func TestRunBacktestGet_Found(t *testing.T) {
 	getReportsDir = dir
 	defer func() { getReportsDir = "" }()
 
-	writeFixture(t, dir, trader.BacktestReportSummary{
+	writeFixture(t, dir, backtest.BacktestReportSummary{
 		Name:         "eurusd-bbfade-abc12345",
 		Strategy:     "BBFade",
 		Instrument:   "EUR_USD",

@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,17 +22,17 @@ import (
 // a preset plan.
 type stubStrategy struct {
 	name  string
-	plan  *trader.LivePlan
+	plan  *live.LivePlan
 	ticks []tickRecord
 }
 
 type tickRecord struct {
-	price      trader.LivePrice
-	openTrades []trader.LiveTrade
+	price      live.LivePrice
+	openTrades []live.LiveTrade
 }
 
 func (s *stubStrategy) Name() string { return s.name }
-func (s *stubStrategy) Tick(_ context.Context, p trader.LivePrice, trades []trader.LiveTrade) *trader.LivePlan {
+func (s *stubStrategy) Tick(_ context.Context, p live.LivePrice, trades []live.LiveTrade) *live.LivePlan {
 	s.ticks = append(s.ticks, tickRecord{price: p, openTrades: trades})
 	return s.plan
 }
@@ -110,9 +111,9 @@ func TestLiveRunConfig_DefaultRiskPct(t *testing.T) {
 // ── LiveTrade.Side ────────────────────────────────────────────────────────────
 
 func TestLiveTrade_Side(t *testing.T) {
-	long := trader.LiveTrade{Units: 1000}
-	short := trader.LiveTrade{Units: -500}
-	zero := trader.LiveTrade{Units: 0}
+	long := live.LiveTrade{Units: 1000}
+	short := live.LiveTrade{Units: -500}
+	zero := live.LiveTrade{Units: 0}
 
 	assert.Equal(t, "long", long.Side())
 	assert.Equal(t, "short", short.Side())
@@ -122,7 +123,7 @@ func TestLiveTrade_Side(t *testing.T) {
 // ── LivePrice.Mid ─────────────────────────────────────────────────────────────
 
 func TestLivePrice_Mid(t *testing.T) {
-	p := trader.LivePrice{Bid: 1.0850, Ask: 1.0852}
+	p := live.LivePrice{Bid: 1.0850, Ask: 1.0852}
 	require.InDelta(t, 1.0851, p.Mid(), 0.000001)
 }
 
@@ -221,13 +222,13 @@ func TestSeedTickCounts_ZeroOpenTimeSkipped(t *testing.T) {
 // skips runOneTick when IsForexMarketClosed returns true. We replicate the
 // closure logic here so the guard is tested independently of wall-clock time.
 func TestMarketClosedGate(t *testing.T) {
-	strategy := &stubStrategy{name: "stub", plan: &trader.LivePlan{}}
+	strategy := &stubStrategy{name: "stub", plan: &live.LivePlan{}}
 
 	var tickCalls int
 	runOneTick := func() { tickCalls++ }
 
 	gate := func(now time.Time, marketWasClosed *bool) {
-		if trader.IsForexMarketClosed(now) {
+		if market.IsForexMarketClosed(now) {
 			*marketWasClosed = true
 			return
 		}
@@ -254,10 +255,10 @@ func TestMarketClosedGate(t *testing.T) {
 // ── stubStrategy records ticks correctly ──────────────────────────────────────
 
 func TestStubStrategy_RecordsTicks(t *testing.T) {
-	plan := &trader.LivePlan{Reason: "hold"}
+	plan := &live.LivePlan{Reason: "hold"}
 	s := &stubStrategy{name: "test", plan: plan}
 
-	price := trader.LivePrice{Instrument: "EUR_USD", Bid: 1.08, Ask: 1.081}
+	price := live.LivePrice{Instrument: "EUR_USD", Bid: 1.08, Ask: 1.081}
 	s.Tick(context.Background(), price, nil)
 	s.Tick(context.Background(), price, nil)
 

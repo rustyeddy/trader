@@ -8,23 +8,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
-	_ "github.com/rustyeddy/trader/strategies/noop"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 	_ "github.com/rustyeddy/trader/strategies/fake"
+	_ "github.com/rustyeddy/trader/strategies/noop"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // buildReplayStore writes two months of synthetic H1 EURUSD candles into a
 // temp store and returns a restore function that reverts the global store.
 func buildReplayStore(t *testing.T) (restore func()) {
 	t.Helper()
-	s := trader.NewStoreAt(t.TempDir())
+	s := marketdata.NewStoreAt(t.TempDir())
 
-	base := trader.Price(110000) // 1.10000
-	makeMonth := func(_ int, _ time.Month, rows int) []trader.Candle {
-		candles := make([]trader.Candle, rows)
+	base := market.Price(110000) // 1.10000
+	makeMonth := func(_ int, _ time.Month, rows int) []market.Candle {
+		candles := make([]market.Candle, rows)
 		for i := range candles {
-			p := base + trader.Price(i*10)
-			candles[i] = trader.Candle{
+			p := base + market.Price(i*10)
+			candles[i] = market.Candle{
 				Open: p, High: p + 500, Low: p - 500, Close: p + 100,
 			}
 		}
@@ -32,12 +34,12 @@ func buildReplayStore(t *testing.T) (restore func()) {
 	}
 
 	// Write Jan + Feb 2024 (744 + 696 H1 slots).
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1,
+	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 1, 744)))
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1,
+	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
 		time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 2, 696)))
 
-	return trader.SwapStore(s)
+	return marketdata.SwapStore(s)
 }
 
 func TestRunReplay_ReturnsBarsAndSignals(t *testing.T) {
@@ -46,14 +48,14 @@ func TestRunReplay_ReturnsBarsAndSignals(t *testing.T) {
 
 	svc := &Service{}
 	result, err := svc.RunReplay(context.Background(), ReplayRequest{
-		Instrument:  "EURUSD",
-		Timeframe:   "H1",
-		From:        "2024-02-01",
-		To:          "2024-02-29",
-		WarmupBars:  50,
-		Strategy:    trader.StrategyConfig{Kind: "fake"},
-		Exit:        trader.ExitConfig{},
-		Regime:      trader.RegimeConfig{},
+		Instrument: "EURUSD",
+		Timeframe:  "H1",
+		From:       "2024-02-01",
+		To:         "2024-02-29",
+		WarmupBars: 50,
+		Strategy:   strategy.StrategyConfig{Kind: "fake"},
+		Exit:       strategy.ExitConfig{},
+		Regime:     strategy.RegimeConfig{},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "EURUSD", result.Instrument)
@@ -82,7 +84,7 @@ func TestRunReplay_BadDateErrors(t *testing.T) {
 }
 
 func TestRunReplay_EmptyStoreReturnsNoBars(t *testing.T) {
-	restore := trader.SwapStore(trader.NewStoreAt(t.TempDir()))
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
 	defer restore()
 
 	svc := &Service{}
@@ -92,7 +94,7 @@ func TestRunReplay_EmptyStoreReturnsNoBars(t *testing.T) {
 		From:       "2024-01-01",
 		To:         "2024-01-31",
 		WarmupBars: 10,
-		Strategy:   trader.StrategyConfig{Kind: "noop"},
+		Strategy:   strategy.StrategyConfig{Kind: "noop"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, result.Bars)

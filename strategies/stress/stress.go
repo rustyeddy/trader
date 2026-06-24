@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "stress")
+	strategy.MustRegisterStrategy(build, "stress")
 }
 
 // Config holds stress strategy parameters.
@@ -70,19 +72,19 @@ func (s *Strategy) Reset() {
 
 // Update is called on every completed candle. Returns an open request every
 // TradeEvery candles when no position is already open.
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	if ct == nil {
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 
 	// Netting account: one position at a time.
-	if run != nil && run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
-		return &trader.StrategyPlan{Reason: "in position"}
+	if run != nil && run.OpenLots().Len() > 0 {
+		return &strategy.StrategyPlan{Reason: "in position"}
 	}
 
 	s.candleN++
 	if s.candleN < s.cfg.TradeEvery {
-		return &trader.StrategyPlan{Reason: fmt.Sprintf("waiting (%d/%d)", s.candleN, s.cfg.TradeEvery)}
+		return &strategy.StrategyPlan{Reason: fmt.Sprintf("waiting (%d/%d)", s.candleN, s.cfg.TradeEvery)}
 	}
 	s.candleN = 0
 
@@ -90,38 +92,38 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	stop := s.calcStop(ct, side)
 
 	instr := ""
-	if run != nil && run.Request != nil {
-		instr = run.Request.Instrument
+	if run != nil {
+		instr = run.Instrument()
 	}
 
 	reason := fmt.Sprintf("stress-%s", side)
-	return &trader.StrategyPlan{
-		Opens:  []*trader.OpenRequest{trader.NewOpenRequest(instr, ct, side, stop, 0, reason)},
+	return &strategy.StrategyPlan{
+		Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, side, stop, 0, reason)},
 		Reason: reason,
 	}
 }
 
-func (s *Strategy) nextSide() trader.Side {
+func (s *Strategy) nextSide() market.Side {
 	switch s.cfg.Side {
 	case "long":
-		return trader.Long
+		return market.Long
 	case "short":
-		return trader.Short
+		return market.Short
 	default: // "alternate"
 		s.sideTurn++
 		if s.sideTurn%2 == 1 {
-			return trader.Long
+			return market.Long
 		}
-		return trader.Short
+		return market.Short
 	}
 }
 
-func (s *Strategy) calcStop(ct *trader.CandleTime, side trader.Side) trader.Price {
-	dist := trader.Price(int64(ct.Close) * int64(s.cfg.StopBps) / 10000)
+func (s *Strategy) calcStop(ct *market.CandleTime, side market.Side) market.Price {
+	dist := market.Price(int64(ct.Close) * int64(s.cfg.StopBps) / 10000)
 	if dist <= 0 {
 		dist = 1
 	}
-	if side == trader.Long {
+	if side == market.Long {
 		stop := ct.Close - dist
 		if stop <= 0 {
 			stop = 1
@@ -134,9 +136,9 @@ func (s *Strategy) calcStop(ct *trader.CandleTime, side trader.Side) trader.Pric
 // build is the registry factory. stop_pct is read as a human-friendly
 // percentage (e.g. 0.2 = 0.2%, 1.5 = 1.5%) and converted to basis points
 // once here so the strategy internals stay float-free.
-func build(params map[string]any) (trader.Strategy, error) {
-	tradeEvery, _, _ := trader.GetInt32Param(params, "trade_every")
-	stopPct, _, _ := trader.GetFloat64Param(params, "stop_pct")
+func build(params map[string]any) (strategy.Strategy, error) {
+	tradeEvery, _, _ := strategy.GetInt32Param(params, "trade_every")
+	stopPct, _, _ := strategy.GetFloat64Param(params, "stop_pct")
 	side := ""
 	if v, ok := params["side"]; ok {
 		if s, ok := v.(string); ok {

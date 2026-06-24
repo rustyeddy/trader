@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -75,7 +75,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 
 // updateBaselines writes each summary as a baseline JSON file named
 // <name>.json in dir, creating dir if needed.
-func updateBaselines(dir string, summaries []trader.BacktestReportSummary) error {
+func updateBaselines(dir string, summaries []backtest.BacktestReportSummary) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create baseline dir %q: %w", dir, err)
 	}
@@ -92,7 +92,7 @@ func updateBaselines(dir string, summaries []trader.BacktestReportSummary) error
 // compareBaselines loads the baseline for each summary and diffs every
 // numeric metric. Prints a PASS/FAIL table to stdout and returns an error
 // if any run regresses.
-func compareBaselines(dir string, summaries []trader.BacktestReportSummary) error {
+func compareBaselines(dir string, summaries []backtest.BacktestReportSummary) error {
 	var results []regressResult
 	anyFailed := false
 
@@ -145,12 +145,12 @@ func baselinePath(dir, name string) string {
 }
 
 // loadBaseline reads and JSON-decodes a baseline file.
-func loadBaseline(path string) (*trader.BacktestReportSummary, error) {
+func loadBaseline(path string) (*backtest.BacktestReportSummary, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var s trader.BacktestReportSummary
+	var s backtest.BacktestReportSummary
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parse baseline %q: %w", path, err)
 	}
@@ -160,7 +160,7 @@ func loadBaseline(path string) (*trader.BacktestReportSummary, error) {
 // diffSummaries returns a slice of human-readable difference strings between
 // baseline and got. All comparisons are exact: since all values are derived
 // from scaled-integer arithmetic, any change indicates a real regression.
-func diffSummaries(baseline, got trader.BacktestReportSummary) []string {
+func diffSummaries(baseline, got backtest.BacktestReportSummary) []string {
 	var diffs []string
 
 	diffInt := func(field string, b, g int) {

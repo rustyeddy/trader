@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestWriteBacktestReports_WritesHashNamedReportsAndIndex(t *testing.T) {
 	dir := t.TempDir()
-	summary := trader.BacktestReportSummary{
+	summary := backtest.BacktestReportSummary{
 		Name:       "eurusd-h1-emacross",
 		ConfigHash: "abc12345",
 		Strategy:   "ema-cross",
@@ -22,7 +22,7 @@ func TestWriteBacktestReports_WritesHashNamedReportsAndIndex(t *testing.T) {
 		Trades:     7,
 	}
 
-	require.NoError(t, WriteBacktestReports(dir, []trader.BacktestReportSummary{summary}))
+	require.NoError(t, WriteBacktestReports(dir, []backtest.BacktestReportSummary{summary}))
 
 	jsonPath := filepath.Join(dir, "eurusd-h1-emacross-abc12345.json")
 	orgPath := filepath.Join(dir, "eurusd-h1-emacross-abc12345.org")
@@ -35,7 +35,7 @@ func TestWriteBacktestReports_WritesHashNamedReportsAndIndex(t *testing.T) {
 	data, err := os.ReadFile(jsonPath)
 	require.NoError(t, err)
 
-	var got trader.BacktestReportSummary
+	var got backtest.BacktestReportSummary
 	require.NoError(t, json.Unmarshal(data, &got))
 	assert.Equal(t, summary.Name, got.Name)
 	assert.Equal(t, summary.ConfigHash, got.ConfigHash)
@@ -44,9 +44,9 @@ func TestWriteBacktestReports_WritesHashNamedReportsAndIndex(t *testing.T) {
 
 func TestWriteBacktestReports_FallsBackToNameWithoutHash(t *testing.T) {
 	dir := t.TempDir()
-	summary := trader.BacktestReportSummary{Name: "run-without-hash", Strategy: "ema-cross"}
+	summary := backtest.BacktestReportSummary{Name: "run-without-hash", Strategy: "ema-cross"}
 
-	require.NoError(t, WriteBacktestReports(dir, []trader.BacktestReportSummary{summary}))
+	require.NoError(t, WriteBacktestReports(dir, []backtest.BacktestReportSummary{summary}))
 
 	assert.FileExists(t, filepath.Join(dir, "run-without-hash.json"))
 	assert.FileExists(t, filepath.Join(dir, "run-without-hash.org"))
@@ -55,26 +55,26 @@ func TestWriteBacktestReports_FallsBackToNameWithoutHash(t *testing.T) {
 func TestWriteBacktestSummaryJSON_CreatesParentDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "reports", "run.json")
 
-	require.NoError(t, WriteBacktestSummaryJSON(path, trader.BacktestReportSummary{Name: "run"}))
+	require.NoError(t, WriteBacktestSummaryJSON(path, backtest.BacktestReportSummary{Name: "run"}))
 	assert.FileExists(t, path)
 }
 
 func TestWriteBacktestSummaryOrg_CreatesParentDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "reports", "run.org")
 
-	require.NoError(t, WriteBacktestSummaryOrg(path, trader.BacktestReportSummary{Name: "run", Strategy: "ema-cross"}))
+	require.NoError(t, WriteBacktestSummaryOrg(path, backtest.BacktestReportSummary{Name: "run", Strategy: "ema-cross"}))
 	assert.FileExists(t, path)
 }
 
 func TestRebuildBacktestIndex_WritesComparisonTable(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a.json"), trader.BacktestReportSummary{
+	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a.json"), backtest.BacktestReportSummary{
 		Name:       "run-a",
 		Strategy:   "ema-cross",
 		Instrument: "EURUSD",
 		Timeframe:  "H1",
 	}))
-	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-b.json"), trader.BacktestReportSummary{
+	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-b.json"), backtest.BacktestReportSummary{
 		Name:       "run-b",
 		Strategy:   "donchian",
 		Instrument: "USDJPY",
@@ -93,17 +93,17 @@ func TestRebuildBacktestIndex_WritesComparisonTable(t *testing.T) {
 }
 
 func TestBacktestReportStem(t *testing.T) {
-	assert.Equal(t, "run-a-deadbeef", backtestReportStem(trader.BacktestReportSummary{
+	assert.Equal(t, "run-a-deadbeef", backtestReportStem(backtest.BacktestReportSummary{
 		Name:       "run-a",
 		ConfigHash: "deadbeef",
 	}))
-	assert.Equal(t, "run-b", backtestReportStem(trader.BacktestReportSummary{Name: "run-b"}))
+	assert.Equal(t, "run-b", backtestReportStem(backtest.BacktestReportSummary{Name: "run-b"}))
 }
 
 func TestListBacktestSummaries_SortsNewestFilenameFirst(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a.json"), trader.BacktestReportSummary{Name: "run-a"}))
-	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-b.json"), trader.BacktestReportSummary{Name: "run-b"}))
+	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a.json"), backtest.BacktestReportSummary{Name: "run-a"}))
+	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-b.json"), backtest.BacktestReportSummary{Name: "run-b"}))
 
 	summaries, err := ListBacktestSummaries(dir)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestListBacktestSummaries_SortsNewestFilenameFirst(t *testing.T) {
 
 func TestReadBacktestSummaryByName_UsesFilenameAsCanonicalName(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a-deadbeef.json"), trader.BacktestReportSummary{Name: "run-a"}))
+	require.NoError(t, WriteBacktestSummaryJSON(filepath.Join(dir, "run-a-deadbeef.json"), backtest.BacktestReportSummary{Name: "run-a"}))
 
 	summary, err := ReadBacktestSummaryByName(dir, "run-a-deadbeef")
 	require.NoError(t, err)

@@ -5,20 +5,22 @@ import (
 	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies/pulse"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // StrategyConfig identifies a strategy kind and its parameters.
 // Used by both BotConfig and the CLI live-run command.
 type StrategyConfig struct {
-	Kind        string              `json:"kind"              yaml:"kind"`
-	Granularity string              `json:"granularity"       yaml:"granularity"` // candle-based strategies only
-	Params      map[string]any      `json:"params"            yaml:"params"`
-	Exit        trader.ExitConfig   `json:"exit"              yaml:"exit"`
-	Regime      trader.RegimeConfig `json:"regime"            yaml:"regime"`
+	Kind        string                `json:"kind"              yaml:"kind"`
+	Granularity string                `json:"granularity"       yaml:"granularity"` // candle-based strategies only
+	Params      map[string]any        `json:"params"            yaml:"params"`
+	Exit        strategy.ExitConfig   `json:"exit"              yaml:"exit"`
+	Regime      strategy.RegimeConfig `json:"regime"            yaml:"regime"`
 	// WarmupBars is the number of bars to fetch from OANDA to prime indicators.
 	WarmupBars int `json:"warmup_bars"       yaml:"warmup_bars"`
 	// LocalWarmupBars is the number of bars to read from local candle store before
@@ -29,7 +31,7 @@ type StrategyConfig struct {
 // BuildLiveStrategy constructs a trader.LiveStrategy from a StrategyConfig.
 // Candle-based strategies (scalper, stress) are wrapped in a CandleStrategyAdapter.
 // instrument must be in OANDA format, e.g. "EUR_USD".
-func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (trader.LiveStrategy, error) {
+func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (live.LiveStrategy, error) {
 	kind := strings.ToLower(strings.TrimSpace(cfg.Kind))
 	if kind == "" {
 		kind = "pulse"
@@ -119,17 +121,17 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (trad
 
 	default:
 		// Fall back to the backtest strategy registry — any strategy registered
-		// via trader.MustRegisterStrategy (donchian-v2, donchian-v4, bb-fade, …)
+		// via strategy.MustRegisterStrategy (donchian-v2, donchian-v4, bb-fade, …)
 		// can run live when wrapped in a CandleStrategyAdapter.
-		backtestStrat, err := trader.GetStrategy(trader.StrategyConfig{Kind: kind, Params: p})
+		backtestStrat, err := strategy.GetStrategy(strategy.StrategyConfig{Kind: kind, Params: p})
 		if err != nil {
 			return nil, fmt.Errorf("unknown strategy kind %q: %w", kind, err)
 		}
-		exit, err := trader.GetExitStrategy(cfg.Exit, trader.PriceScale)
+		exit, err := strategy.GetExitStrategy(cfg.Exit, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("exit strategy for %q: %w", kind, err)
 		}
-		regime, err := trader.GetRegimeFilter(cfg.Regime, trader.PriceScale)
+		regime, err := strategy.GetRegimeFilter(cfg.Regime, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("regime filter for %q: %w", kind, err)
 		}

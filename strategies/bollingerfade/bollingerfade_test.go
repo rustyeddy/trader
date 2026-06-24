@@ -7,16 +7,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 )
 
-const scale = float64(trader.PriceScale) // 100_000
+const scale = float64(market.PriceScale) // 100_000
 
 // flat returns a candle where OHLC = close (flat bar at a given price).
-func flat(close float64) *trader.CandleTime {
-	p := trader.Price(close * scale)
-	return &trader.CandleTime{
-		Candle: trader.Candle{Open: p, High: p, Low: p, Close: p},
+func flat(close float64) *market.CandleTime {
+	p := market.Price(close * scale)
+	return &market.CandleTime{
+		Candle: market.Candle{Open: p, High: p, Low: p, Close: p},
 	}
 }
 
@@ -32,11 +34,11 @@ func warmup(t *testing.T, f *Fade) {
 }
 
 // makeLot builds a minimal open lot snapshot for the given side.
-func makeLot(side trader.Side) *trader.LotBook {
-	lb := &trader.LotBook{}
-	tc := &trader.TradeCommon{ID: "test-lot"}
+func makeLot(side market.Side) *execution.LotBook {
+	lb := &execution.LotBook{}
+	tc := &execution.TradeCommon{ID: "test-lot"}
 	tc.Side = side
-	lb.Add(&trader.Lot{TradeCommon: tc, State: trader.LotOpen})
+	lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
 	return lb
 }
 
@@ -63,7 +65,7 @@ func TestFade_LongEntryBelowLowerBand(t *testing.T) {
 	// A move to 0.95 will be well outside the lower band.
 	plan := f.Update(context.Background(), flat(0.95), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
 	assert.NotZero(t, plan.Opens[0].Stop, "stop must be set")
 	assert.True(t, plan.Opens[0].Stop < plan.Opens[0].Price,
 		"long stop must be below entry price")
@@ -78,7 +80,7 @@ func TestFade_ShortEntryAboveUpperBand(t *testing.T) {
 
 	plan := f.Update(context.Background(), flat(1.05), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Short, plan.Opens[0].Side)
+	assert.Equal(t, market.Short, plan.Opens[0].Side)
 	assert.NotZero(t, plan.Opens[0].Stop)
 	assert.True(t, plan.Opens[0].Stop > plan.Opens[0].Price,
 		"short stop must be above entry price")
@@ -103,7 +105,7 @@ func TestFade_NoNewEntryWhenAlreadyOpen(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(trader.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 	// Even with a band-crossing price, no new open when a lot is already active.
 	plan := f.Update(context.Background(), flat(0.95), run)
 	assert.Empty(t, plan.Opens, "must not open when position already exists")
@@ -117,7 +119,7 @@ func TestFade_CloseLongAtMiddle(t *testing.T) {
 	warmup(t, f)
 
 	// Simulate an open long position. Middle band ≈ 1.0 after flat warmup.
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(trader.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 
 	// Price at 1.0 — at or above middle band → should close the long.
 	plan := f.Update(context.Background(), flat(1.0), run)
@@ -132,7 +134,7 @@ func TestFade_CloseShortAtMiddle(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(trader.Short)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Short)}}
 
 	// Price at 1.0 — at or below middle band → should close the short.
 	plan := f.Update(context.Background(), flat(1.0), run)
@@ -147,7 +149,7 @@ func TestFade_LongNotClosedBelowMiddle(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(trader.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 
 	// Price still below middle — long should stay open.
 	plan := f.Update(context.Background(), flat(0.97), run)

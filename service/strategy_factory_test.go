@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -85,7 +85,7 @@ func TestBuildLiveStrategy_Donchian(t *testing.T) {
 		Kind:        "donchian-breakout",
 		Granularity: "D",
 		Params:      map[string]any{"period": 55, "close_strength": 0.6, "confirm_bars": 1},
-		Exit:        trader.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 6.0}},
+		Exit:        strategy.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 6.0}},
 	}, "USD_JPY")
 	require.NoError(t, err)
 	assert.NotNil(t, strat)
@@ -97,8 +97,8 @@ func TestBuildLiveStrategy_DonchianWithRegime(t *testing.T) {
 		Kind:        "donchian-breakout",
 		Granularity: "H1",
 		Params:      map[string]any{"period": 20, "close_strength": 0.6, "confirm_bars": 2, "adx_period": 14, "adx_threshold": 25.0},
-		Exit:        trader.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 3.0}},
-		Regime:      trader.RegimeConfig{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 17}},
+		Exit:        strategy.ExitConfig{Kind: "chandelier", Params: map[string]any{"atr_period": 14, "multiplier": 3.0}},
+		Regime:      strategy.RegimeConfig{Kind: "session", Params: map[string]any{"session_start": 7, "session_end": 17}},
 	}, "GBP_USD")
 	require.NoError(t, err)
 	assert.NotNil(t, strat)
@@ -120,7 +120,7 @@ func TestBuildLiveStrategy_BadExit(t *testing.T) {
 	_, err := svc.BuildLiveStrategy(StrategyConfig{
 		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
-		Exit:   trader.ExitConfig{Kind: "bad-exit"},
+		Exit:   strategy.ExitConfig{Kind: "bad-exit"},
 	}, "USD_JPY")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exit strategy")
@@ -131,7 +131,7 @@ func TestBuildLiveStrategy_BadRegime(t *testing.T) {
 	_, err := svc.BuildLiveStrategy(StrategyConfig{
 		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
-		Regime: trader.RegimeConfig{Kind: "bad-regime"},
+		Regime: strategy.RegimeConfig{Kind: "bad-regime"},
 	}, "USD_JPY")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "regime filter")

@@ -1,0 +1,20 @@
+package backtest
+
+import (
+	"testing"
+
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestBacktestRunGetTrades(t *testing.T) {
+	t.Parallel()
+
+	var nilRun *BacktestRun
+	assert.Nil(t, nilRun.GetTrades())
+
+	trades := []*execution.Trade{{PNL: market.MoneyFromFloat(100)}, nil, {PNL: market.MoneyFromFloat(-25)}}
+	run := &BacktestRun{Trades: trades}
+	assert.Equal(t, trades, run.GetTrades())
+}

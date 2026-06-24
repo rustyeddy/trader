@@ -4,13 +4,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBacktestRunConfigPathPrecedence(t *testing.T) {
 	base := filepath.Join("srv", "trading", "backtests")
-	root := &trader.RootConfig{ConfigPath: "root-config.yml"}
+	root := &config.RootConfig{ConfigPath: "root-config.yml"}
 
 	assert.Equal(t, "arg-config.yml",
 		backtestRunConfigPath(base, []string{"arg-config.yml"}, "local-config.yml", root))

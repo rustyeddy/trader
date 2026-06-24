@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/journal"
 )
 
 // JournalConfig selects the journal backend and its destinations.
@@ -21,16 +21,16 @@ type JournalConfig struct {
 
 // OpenJournal opens the configured Journal. Caller is responsible for
 // calling .Close() on the returned journal.
-func (s *Service) OpenJournal(cfg JournalConfig) (trader.Journal, error) {
+func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
 	switch cfg.Kind {
 	case "csv":
-		j, err := trader.NewCSV(cfg.TradesPath, cfg.EquityPath)
+		j, err := journal.NewCSV(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
 			return nil, fmt.Errorf("open csv journal: %w", err)
 		}
 		return j, nil
 	case "json":
-		j, err := trader.NewJSON(cfg.TradesPath, cfg.EquityPath)
+		j, err := journal.NewJSON(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
 			return nil, fmt.Errorf("open json journal: %w", err)
 		}
@@ -49,8 +49,8 @@ func (s *Service) OpenJournal(cfg JournalConfig) (trader.Journal, error) {
 // If backfillFrom > 0, transactions with ID > backfillFrom are polled and
 // replayed into the journal before the stream subscription starts —
 // useful for downtime recovery.
-func (a *Account) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	lj := trader.NewLiveJournal(a.svc.OANDA, a.ID, journal, a.svc.Log)
+func (a *Account) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
+	lj := journal.NewLiveJournal(a.svc.OANDA, a.ID, jrnl, a.svc.Log)
 	lj.SetBotIDLookup(a.svc.LookupTradeBotID)
 
 	if backfillFrom > 0 {
@@ -68,10 +68,10 @@ func (a *Account) RunLiveJournal(ctx context.Context, journal trader.Journal, ba
 
 // RunLiveJournal subscribes the default account's transaction stream to the
 // given journal. See Account.RunLiveJournal.
-func (s *Service) RunLiveJournal(ctx context.Context, journal trader.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
+func (s *Service) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
 	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return acc.RunLiveJournal(ctx, journal, backfillFrom)
+	return acc.RunLiveJournal(ctx, jrnl, backfillFrom)
 }

@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func TestLotLabel_ArbitraryUnits(t *testing.T) {
 
 func TestPrintAnalysis_NoAnalyzers_NoPanic(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -51,14 +52,14 @@ func TestPrintAnalysis_NoAnalyzers_NoPanic(t *testing.T) {
 
 func TestPrintAnalysis_WithAnalyzers_WritesStatNames(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2024, 3, 31, 0, 0, 0, 0, time.UTC)
 
-	swing := trader.NewSwingAnalyzer(inst)
-	analyzers := []trader.Analyzer{swing}
+	swing := marketdata.NewSwingAnalyzer(inst)
+	analyzers := []marketdata.Analyzer{swing}
 
 	require.NotPanics(t, func() {
 		printAnalysis(&buf, inst, "EURUSD", "H1", from, to, analyzers, 0, 0)
@@ -69,20 +70,20 @@ func TestPrintAnalysis_WithAnalyzers_WritesStatNames(t *testing.T) {
 
 func TestPrintAnalysis_WithUnits_ShowsUSDColumn(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2024, 6, 30, 0, 0, 0, 0, time.UTC)
 
-	swing := trader.NewSwingAnalyzer(inst)
+	swing := marketdata.NewSwingAnalyzer(inst)
 	// Feed one valid candle so swing has a stat with Pips > 0.
-	swing.Update(&trader.CandleTime{
-		Candle:    trader.Candle{Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100},
+	swing.Update(&market.CandleTime{
+		Candle:    market.Candle{Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100},
 		Timestamp: 1_000_000,
 	})
 
-	printAnalysis(&buf, inst, "EURUSD", "H1", from, to, []trader.Analyzer{swing}, 100_000, 1.08)
+	printAnalysis(&buf, inst, "EURUSD", "H1", from, to, []marketdata.Analyzer{swing}, 100_000, 1.08)
 	out := buf.String()
 	// Header should include the lot label.
 	assert.Contains(t, out, "standard lot")

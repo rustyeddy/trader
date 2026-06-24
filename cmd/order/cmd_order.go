@@ -15,8 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -33,7 +33,7 @@ var (
 	closeUnits int64
 )
 
-func New(rc *traderpkg.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "order",
 		Short: "Live order management (OANDA demo)",
@@ -50,7 +50,7 @@ func New(rc *traderpkg.RootConfig) *cobra.Command {
 
 // buildService wires a Service from current flag values + global config + env
 // fallbacks. cmd is used to detect which flags were explicitly set by the user.
-func buildService(ctx context.Context, cmd *cobra.Command, rc *traderpkg.RootConfig) (*service.Service, error) {
+func buildService(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (*service.Service, error) {
 	// Token: explicit flag > global config > env var.
 	tok := token
 	if !cmd.Flags().Changed("token") {
@@ -107,7 +107,7 @@ func addCommonFlags(cmd *cobra.Command) {
 
 // ── order new ─────────────────────────────────────────────────────────────
 
-func newOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func newOrderCmd(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new",
 		Short: "Size and submit a market order with confirmation",
@@ -125,7 +125,7 @@ func newOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func runNewOrder(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
+func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
 	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
@@ -196,7 +196,7 @@ func printProposal(env string, p service.OrderProposal, riskPct float64) {
 
 // ── order list ────────────────────────────────────────────────────────────
 
-func listOrdersCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func listOrdersCmd(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List open trades from OANDA",
@@ -208,7 +208,7 @@ func listOrdersCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func runListOrders(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
+func runListOrders(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
 	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
@@ -240,7 +240,7 @@ func runListOrders(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) 
 
 // ── order close ───────────────────────────────────────────────────────────
 
-func closeOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func closeOrderCmd(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "close",
 		Short: "Close an open trade (full or partial)",
@@ -255,7 +255,7 @@ func closeOrderCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func runCloseOrder(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) error {
+func runCloseOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
 	svc, err := buildService(ctx, cmd, rc)
 	if err != nil {
@@ -291,7 +291,7 @@ func runCloseOrder(cmd *cobra.Command, args []string, rc *traderpkg.RootConfig) 
 
 // ── order transactions ────────────────────────────────────────────────────
 
-func transactionsCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func transactionsCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		sinceID int64
 		limit   int
@@ -353,7 +353,7 @@ func transactionsCmd(rc *traderpkg.RootConfig) *cobra.Command {
 
 // ── order transactions-stream ─────────────────────────────────────────────
 
-func transactionsStreamCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 	var showHeartbeats bool
 	cmd := &cobra.Command{
 		Use:   "transactions-stream",
@@ -406,10 +406,9 @@ func transactionsStreamCmd(rc *traderpkg.RootConfig) *cobra.Command {
 	return cmd
 }
 
-
 // ── order update-stop ─────────────────────────────────────────────────────
 
-func updateStopCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func updateStopCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		stopPrice float64
 		takePrice float64

@@ -8,7 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -83,7 +84,7 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, summary := range summaries {
-		trader.PrintSummary(os.Stdout, summary)
+		backtest.PrintSummary(os.Stdout, summary)
 		l.Info("wrote reports", "name", summary.Name, "config_hash", summary.ConfigHash, "dir", outDir)
 	}
 
@@ -91,7 +92,7 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func backtestRunConfigPath(base string, args []string, localConfig string, root *trader.RootConfig) string {
+func backtestRunConfigPath(base string, args []string, localConfig string, root *config.RootConfig) string {
 	if len(args) > 0 {
 		return args[0]
 	}

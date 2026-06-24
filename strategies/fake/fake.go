@@ -5,21 +5,23 @@ package fake
 import (
 	"context"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(buildFake, "fake")
-	trader.MustRegisterStrategy(buildFake02, "fake-02")
+	strategy.MustRegisterStrategy(buildFake, "fake")
+	strategy.MustRegisterStrategy(buildFake02, "fake-02")
 }
 
 // Fake opens long on higher highs, closes on stop loss on lower lows.
 type Fake struct {
 	CandleCount int
 
-	candles []*trader.CandleTime
-	highest trader.Price
-	lowest  trader.Price
+	candles []*market.CandleTime
+	highest market.Price
+	lowest  market.Price
 }
 
 func (f *Fake) Name() string            { return "Fake" }
@@ -35,26 +37,26 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	f.candles = append(f.candles, c)
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 
 	if len(f.candles) < f.CandleCount {
 		return plan
 	}
 
-	openTrades := run.State.Lots.Len()
+	openTrades := run.OpenLots().Len()
 	if f.highest < c.High {
 		f.highest = c.High
 		if openTrades > 0 {
 			return plan
 		}
-		inst := trader.GetInstrument(run.Request.Instrument)
+		inst := market.GetInstrument(run.Instrument())
 		if inst == nil {
 			return nil
 		}
-		stop := inst.SubPips(c.Close, trader.PipsFromFloat(10))
-		op := trader.NewOpenRequest(run.Request.Instrument, c, trader.Long, stop, trader.Price(0), "higher highs")
+		stop := inst.SubPips(c.Close, market.PipsFromFloat(10))
+		op := execution.NewOpenRequest(run.Instrument(), c, market.Long, stop, market.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -65,23 +67,23 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run *trader.Bac
 		}
 
 		submittedClose := false
-		run.State.Lots.Range(func(lot *trader.Lot) error {
-			if lot.State != trader.LotOpen {
+		run.OpenLots().Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
 				return nil
 			}
 
-			if (lot.Side == trader.Long && c.Close <= lot.Stop) ||
-				(lot.Side == trader.Short && c.Close >= lot.Stop) {
-				cl := &trader.CloseRequest{
-					Request: trader.Request{
+			if (lot.Side == market.Long && c.Close <= lot.Stop) ||
+				(lot.Side == market.Short && c.Close >= lot.Stop) {
+				cl := &execution.CloseRequest{
+					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
 						Reason:      "CloseStop",
 						Candle:      c.Candle,
-						RequestType: trader.RequestClose,
+						RequestType: execution.RequestClose,
 						Price:       c.Close,
 						Timestamp:   c.Timestamp,
 					},
-					CloseCause: trader.CloseStopLoss,
+					CloseCause: execution.CloseStopLoss,
 					Lot:        lot,
 				}
 				plan.Closes = append(plan.Closes, cl)
@@ -121,10 +123,10 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 	if c == nil {
 		return plan
 	}
@@ -145,24 +147,24 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 
 	f.bar++
 
-	if run.State != nil && run.State.Lots != nil && run.State.Lots.Len() > 0 {
+	if run != nil && run.OpenLots().Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
 			submittedClose := false
-			run.State.Lots.Range(func(lot *trader.Lot) error {
-				if lot.State != trader.LotOpen {
+			run.OpenLots().Range(func(lot *execution.Lot) error {
+				if lot.State != execution.LotOpen {
 					return nil
 				}
-				cl := &trader.CloseRequest{
-					Request: trader.Request{
+				cl := &execution.CloseRequest{
+					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
 						Reason:      "fake-02-close",
 						Candle:      c.Candle,
-						RequestType: trader.RequestClose,
+						RequestType: execution.RequestClose,
 						Price:       c.Close,
 						Timestamp:   c.Timestamp,
 					},
 					Lot:        lot,
-					CloseCause: trader.CloseManual,
+					CloseCause: execution.CloseManual,
 				}
 				plan.Closes = append(plan.Closes, cl)
 				submittedClose = true
@@ -184,25 +186,25 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 		return plan
 	}
 
-	side := trader.Long
+	side := market.Long
 	if !f.longNext {
-		side = trader.Short
+		side = market.Short
 	}
 
-	inst := trader.GetInstrument(run.Request.Instrument)
+	inst := market.GetInstrument(run.Instrument())
 	if inst == nil {
 		plan.Reason = "fake-02-missing-instrument"
 		return plan
 	}
 
-	var stop trader.Price
-	if side == trader.Long {
-		stop = inst.SubPips(c.Close, trader.PipsFromFloat(f.StopPips))
+	var stop market.Price
+	if side == market.Long {
+		stop = inst.SubPips(c.Close, market.PipsFromFloat(f.StopPips))
 	} else {
-		stop = inst.AddPips(c.Close, trader.PipsFromFloat(f.StopPips))
+		stop = inst.AddPips(c.Close, market.PipsFromFloat(f.StopPips))
 	}
 
-	op := trader.NewOpenRequest(run.Request.Instrument, c, side, stop, trader.Price(0), "fake-02-open")
+	op := execution.NewOpenRequest(run.Instrument(), c, side, stop, market.Price(0), "fake-02-open")
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "fake-02-open"
 
@@ -210,11 +212,11 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run *trader.B
 	return plan
 }
 
-func buildFake(params map[string]any) (trader.Strategy, error) {
+func buildFake(params map[string]any) (strategy.Strategy, error) {
 	return &Fake{CandleCount: 10}, nil
 }
 
-func buildFake02(params map[string]any) (trader.Strategy, error) {
+func buildFake02(params map[string]any) (strategy.Strategy, error) {
 	return &Fake02{
 		WaitBars: 8,
 		HoldBars: 6,

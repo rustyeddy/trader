@@ -23,16 +23,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/log"
+	"github.com/rustyeddy/trader/strategy"
 
 	// Register all real strategies via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
 	_ "github.com/rustyeddy/trader/strategies/donchian"
-	_ "github.com/rustyeddy/trader/strategies/donchianv2"
-	_ "github.com/rustyeddy/trader/strategies/donchianv3"
-	_ "github.com/rustyeddy/trader/strategies/donchianv4"
-	_ "github.com/rustyeddy/trader/strategies/donchianv5"
-	_ "github.com/rustyeddy/trader/strategies/donchianv6"
 	_ "github.com/rustyeddy/trader/strategies/emacross"
 	_ "github.com/rustyeddy/trader/strategies/emacrossadx"
 )
@@ -47,11 +44,6 @@ type sweepStrategy struct {
 
 var sweepStrategies = []sweepStrategy{
 	{kind: "donchian"},
-	{kind: "donchian-v2"},
-	{kind: "donchian-v3"},
-	{kind: "donchian-v4"},
-	{kind: "donchian-v5"},
-	{kind: "donchian-v6"},
 	{kind: "ema-cross", params: map[string]any{
 		"fast": 9,
 		"slow": 21,
@@ -83,7 +75,7 @@ var sweepInstruments = []string{
 }
 
 // sweepDefaults are the account settings applied to every run.
-var sweepDefaults = trader.RunDefaults{
+var sweepDefaults = backtest.RunDefaults{
 	StartingBalance: 10_000,
 	AccountCCY:      "USD",
 	RiskPct:         0.5,
@@ -94,7 +86,7 @@ var sweepDefaults = trader.RunDefaults{
 
 func TestStrategySweep(t *testing.T) {
 	// Quiet logger — sweep output is the summary table, not per-bar logs.
-	trader.Setup(trader.LogConfig{Level: "error", Stdout: true}) //nolint:errcheck
+	log.Setup(log.LogConfig{Level: "error", Stdout: true}) //nolint:errcheck
 	svc := &Service{Log: slog.Default()}
 
 	var (
@@ -105,31 +97,31 @@ func TestStrategySweep(t *testing.T) {
 		failures []string
 	)
 
-	for _, strategy := range sweepStrategies {
+	for _, strat := range sweepStrategies {
 		for _, tf := range sweepMatrix {
 			for _, inst := range sweepInstruments {
 				// Capture loop vars for parallel subtests.
-				strategy, tf, inst := strategy, tf, inst
-				name := fmt.Sprintf("%s/%s/%s", strategy.kind, tf.timeframe, inst)
+				strat, tf, inst := strat, tf, inst
+				name := fmt.Sprintf("%s/%s/%s", strat.kind, tf.timeframe, inst)
 
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 
-					cfg := &trader.Config{
+					cfg := &backtest.Config{
 						Defaults: sweepDefaults,
-						Runs: []trader.RunConfig{{
+						Runs: []backtest.RunConfig{{
 							Name: name,
-							Data: trader.DataConfig{
+							Data: backtest.DataConfig{
 								Source:     "oanda",
 								Instrument: inst,
 								Timeframe:  tf.timeframe,
 								From:       tf.from,
 								To:         tf.to,
 							},
-							Strategy: trader.StrategyConfig{Kind: strategy.kind, Params: strategy.params},
+							Strategy: strategy.StrategyConfig{Kind: strat.kind, Params: strat.params},
 							// Chandelier exit ensures strategies that delegate
-							// stop calculation (donchian-v3+) produce valid stops.
-							Exit: trader.ExitConfig{
+							// stop calculation (e.g. donchian) produce valid stops.
+							Exit: strategy.ExitConfig{
 								Kind: "chandelier",
 								Params: map[string]any{
 									"atr_period": 14,
@@ -139,7 +131,7 @@ func TestStrategySweep(t *testing.T) {
 						}},
 					}
 
-					runs, err := trader.CompileBacktests(cfg)
+					runs, err := backtest.CompileBacktests(cfg)
 					if err != nil {
 						// Strategy or config not compatible — skip, not fail.
 						mu.Lock()

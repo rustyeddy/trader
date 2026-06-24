@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/live"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var price = trader.LivePrice{Instrument: "EUR_USD", Bid: 1.0850, Ask: 1.0852}
+var price = live.LivePrice{Instrument: "EUR_USD", Bid: 1.0850, Ask: 1.0852}
 
-func makeTrade(id string, ticksOpen int) trader.LiveTrade {
-	return trader.LiveTrade{ID: id, Instrument: "EUR_USD", Units: 1000, TicksOpen: ticksOpen}
+func makeTrade(id string, ticksOpen int) live.LiveTrade {
+	return live.LiveTrade{ID: id, Instrument: "EUR_USD", Units: 1000, TicksOpen: ticksOpen}
 }
 
 // ── New validation ─────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ func TestTick_OpensWhenDue(t *testing.T) {
 	cfg.MaxPositions = 3
 	s, _ := New(cfg)
 
-	s.Tick(context.Background(), price, nil) // tick 1 — hold
+	s.Tick(context.Background(), price, nil)         // tick 1 — hold
 	plan := s.Tick(context.Background(), price, nil) // tick 2 — open
 
 	require.NotNil(t, plan.Open)
@@ -106,7 +106,7 @@ func TestTick_RespectsMaxPositions(t *testing.T) {
 	cfg.HoldBars = 100 // don't close
 	s, _ := New(cfg)
 
-	openTrades := []trader.LiveTrade{
+	openTrades := []live.LiveTrade{
 		makeTrade("t1", 5),
 		makeTrade("t2", 3),
 	}
@@ -122,7 +122,7 @@ func TestTick_OpensWhenUnderMaxPositions(t *testing.T) {
 	cfg.HoldBars = 100
 	s, _ := New(cfg)
 
-	openTrades := []trader.LiveTrade{makeTrade("t1", 2)}
+	openTrades := []live.LiveTrade{makeTrade("t1", 2)}
 	plan := s.Tick(context.Background(), price, openTrades)
 	require.NotNil(t, plan.Open)
 }
@@ -135,7 +135,7 @@ func TestTick_ClosesTradeAfterHoldBars(t *testing.T) {
 	cfg.TradeEvery = 100 // never open
 	s, _ := New(cfg)
 
-	openTrades := []trader.LiveTrade{
+	openTrades := []live.LiveTrade{
 		makeTrade("t1", 5),  // exactly HoldBars → close
 		makeTrade("t2", 4),  // one short → keep
 		makeTrade("t3", 10), // over HoldBars → close
@@ -152,7 +152,7 @@ func TestTick_ClosesAndOpensInSameTick(t *testing.T) {
 	s, _ := New(cfg)
 
 	// 2 trades open, both at HoldBars → close both → active=0 after close → open allowed
-	openTrades := []trader.LiveTrade{
+	openTrades := []live.LiveTrade{
 		makeTrade("t1", 3),
 		makeTrade("t2", 3),
 	}
@@ -170,7 +170,7 @@ func TestTick_MaxPositionsAccountsForPendingCloses(t *testing.T) {
 
 	// 2 trades open: both hit HoldBars (close both), leaving 0 active
 	// → can open (0 < 2)
-	openTrades := []trader.LiveTrade{
+	openTrades := []live.LiveTrade{
 		makeTrade("t1", 1),
 		makeTrade("t2", 1),
 	}
@@ -255,7 +255,7 @@ func TestTick_ReasonIncludesActions(t *testing.T) {
 	cfg.HoldBars = 1
 	s, _ := New(cfg)
 
-	plan := s.Tick(context.Background(), price, []trader.LiveTrade{makeTrade("t1", 1)})
+	plan := s.Tick(context.Background(), price, []live.LiveTrade{makeTrade("t1", 1)})
 	assert.Contains(t, plan.Reason, "close")
 	assert.Contains(t, plan.Reason, "open")
 }
@@ -299,7 +299,7 @@ func TestTick_OpenSchedule(t *testing.T) {
 			s, _ := New(cfg)
 			s.tick = tc.tick - 1 // pre-set so next Tick() is tc.tick
 
-			open := make([]trader.LiveTrade, tc.positions)
+			open := make([]live.LiveTrade, tc.positions)
 			for i := range open {
 				open[i] = makeTrade(fmt.Sprintf("t%d", i), 1)
 			}

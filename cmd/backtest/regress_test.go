@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,14 +17,14 @@ import (
 func TestWriteJSON_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.json")
-	s := trader.BacktestReportSummary{Name: "test-run", Strategy: "ema", Trades: 3}
+	s := backtest.BacktestReportSummary{Name: "test-run", Strategy: "ema", Trades: 3}
 
 	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var got trader.BacktestReportSummary
+	var got backtest.BacktestReportSummary
 	require.NoError(t, json.Unmarshal(data, &got))
 	assert.Equal(t, "test-run", got.Name)
 	assert.Equal(t, 3, got.Trades)
@@ -33,7 +33,7 @@ func TestWriteJSON_CreatesFile(t *testing.T) {
 func TestWriteJSON_CreatesParentDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "deep", "report.json")
-	s := trader.BacktestReportSummary{Name: "nested"}
+	s := backtest.BacktestReportSummary{Name: "nested"}
 
 	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
 	assert.FileExists(t, path)
@@ -42,7 +42,7 @@ func TestWriteJSON_CreatesParentDir(t *testing.T) {
 func TestWriteOrg_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.org")
-	s := trader.BacktestReportSummary{Name: "org-run", Strategy: "rsi"}
+	s := backtest.BacktestReportSummary{Name: "org-run", Strategy: "rsi"}
 
 	require.NoError(t, service.WriteBacktestSummaryOrg(path, s))
 
@@ -55,7 +55,7 @@ func TestWriteOrg_CreatesFile(t *testing.T) {
 
 func TestLoadBaseline_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	s := trader.BacktestReportSummary{Name: "myrun", Trades: 10, NetPL: 123.45}
+	s := backtest.BacktestReportSummary{Name: "myrun", Trades: 10, NetPL: 123.45}
 	path := filepath.Join(dir, "myrun.json")
 	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
 
@@ -83,7 +83,7 @@ func TestLoadBaseline_InvalidJSON(t *testing.T) {
 // ── diffSummaries ─────────────────────────────────────────────────────────────
 
 func TestDiffSummaries_Identical(t *testing.T) {
-	s := trader.BacktestReportSummary{
+	s := backtest.BacktestReportSummary{
 		Trades: 5, Wins: 3, Losses: 2,
 		StartBalance: 10000, EndBalance: 10250, NetPL: 250,
 		ReturnPct: 2.5, WinRate: 60, MaxDrawdown: -80,
@@ -94,8 +94,8 @@ func TestDiffSummaries_Identical(t *testing.T) {
 }
 
 func TestDiffSummaries_IntField(t *testing.T) {
-	base := trader.BacktestReportSummary{Trades: 10, Wins: 6, Losses: 4}
-	got := trader.BacktestReportSummary{Trades: 11, Wins: 6, Losses: 5}
+	base := backtest.BacktestReportSummary{Trades: 10, Wins: 6, Losses: 4}
+	got := backtest.BacktestReportSummary{Trades: 11, Wins: 6, Losses: 5}
 
 	diffs := diffSummaries(base, got)
 	require.Len(t, diffs, 2)
@@ -104,8 +104,8 @@ func TestDiffSummaries_IntField(t *testing.T) {
 }
 
 func TestDiffSummaries_FloatField(t *testing.T) {
-	base := trader.BacktestReportSummary{NetPL: 250.0, EndBalance: 10250.0}
-	got := trader.BacktestReportSummary{NetPL: 249.99, EndBalance: 10249.99}
+	base := backtest.BacktestReportSummary{NetPL: 250.0, EndBalance: 10250.0}
+	got := backtest.BacktestReportSummary{NetPL: 249.99, EndBalance: 10249.99}
 
 	diffs := diffSummaries(base, got)
 	require.Len(t, diffs, 2)
@@ -114,13 +114,13 @@ func TestDiffSummaries_FloatField(t *testing.T) {
 }
 
 func TestDiffSummaries_AllFields(t *testing.T) {
-	base := trader.BacktestReportSummary{
+	base := backtest.BacktestReportSummary{
 		Trades: 5, Wins: 3, Losses: 2, SpreadFiltered: 1,
 		StartBalance: 10000, EndBalance: 10250, NetPL: 250,
 		ReturnPct: 2.5, WinRate: 60, MaxDrawdown: -80,
 		AvgWinner: 150, AvgLoser: -75, RR: 2.0, AvgSpreadPips: 1.2,
 	}
-	got := trader.BacktestReportSummary{} // all zero
+	got := backtest.BacktestReportSummary{} // all zero
 
 	diffs := diffSummaries(base, got)
 	// Every non-zero field in base should produce a diff.
@@ -131,7 +131,7 @@ func TestDiffSummaries_AllFields(t *testing.T) {
 
 func TestUpdateBaselines_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
-	summaries := []trader.BacktestReportSummary{
+	summaries := []backtest.BacktestReportSummary{
 		{Name: "run-a", Trades: 10, NetPL: 200},
 		{Name: "run-b", Trades: 5, NetPL: -50},
 	}
@@ -151,7 +151,7 @@ func TestUpdateBaselines_WritesFiles(t *testing.T) {
 
 func TestUpdateBaselines_CreatesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "new", "nested")
-	summaries := []trader.BacktestReportSummary{{Name: "x"}}
+	summaries := []backtest.BacktestReportSummary{{Name: "x"}}
 
 	require.NoError(t, updateBaselines(dir, summaries))
 	assert.FileExists(t, baselinePath(dir, "x"))
@@ -161,7 +161,7 @@ func TestUpdateBaselines_CreatesDir(t *testing.T) {
 
 func TestCompareBaselines_AllPass(t *testing.T) {
 	dir := t.TempDir()
-	summaries := []trader.BacktestReportSummary{
+	summaries := []backtest.BacktestReportSummary{
 		{Name: "run-a", Trades: 10, NetPL: 200, WinRate: 60},
 		{Name: "run-b", Trades: 5, NetPL: -50, WinRate: 40},
 	}
@@ -173,17 +173,17 @@ func TestCompareBaselines_AllPass(t *testing.T) {
 
 func TestCompareBaselines_Regression(t *testing.T) {
 	dir := t.TempDir()
-	baseline := trader.BacktestReportSummary{Name: "run-a", Trades: 10, NetPL: 200}
-	require.NoError(t, updateBaselines(dir, []trader.BacktestReportSummary{baseline}))
+	baseline := backtest.BacktestReportSummary{Name: "run-a", Trades: 10, NetPL: 200}
+	require.NoError(t, updateBaselines(dir, []backtest.BacktestReportSummary{baseline}))
 
-	regressed := trader.BacktestReportSummary{Name: "run-a", Trades: 9, NetPL: 150}
-	err := compareBaselines(dir, []trader.BacktestReportSummary{regressed})
+	regressed := backtest.BacktestReportSummary{Name: "run-a", Trades: 9, NetPL: 150}
+	err := compareBaselines(dir, []backtest.BacktestReportSummary{regressed})
 	assert.ErrorContains(t, err, "regression")
 }
 
 func TestCompareBaselines_MissingBaseline(t *testing.T) {
 	dir := t.TempDir() // empty — no baseline files
-	summaries := []trader.BacktestReportSummary{{Name: "run-a"}}
+	summaries := []backtest.BacktestReportSummary{{Name: "run-a"}}
 
 	err := compareBaselines(dir, summaries)
 	assert.ErrorContains(t, err, "regression")

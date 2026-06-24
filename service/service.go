@@ -20,7 +20,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
@@ -35,7 +35,7 @@ type Service struct {
 	AccountID string
 
 	// Backtests optionally overrides how compiled backtests are executed.
-	Backtests trader.BacktestExecutor
+	Backtests backtest.BacktestExecutor
 
 	// accounts caches the per-account sessions keyed by OANDA account ID.
 	// firstID caches the first account discovered for the token, used by

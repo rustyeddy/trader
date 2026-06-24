@@ -8,10 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/market"
 )
 
-func newPositionCmd(rc *trader.RootConfig) *cobra.Command {
+func newPositionCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		price      float64
@@ -40,8 +41,8 @@ Notional = units × price  (USD-quoted pairs: EURUSD, GBPUSD, AUDUSD, NZDUSD)
          = units           (USD-base pairs:   USDJPY, USDCHF, USDCAD)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyGlobalOANDA(cmd, &auth, rc)
-			inst := trader.NormalizeInstrument(instrument)
-			instMeta := trader.GetInstrument(inst)
+			inst := market.NormalizeInstrument(instrument)
+			instMeta := market.GetInstrument(inst)
 			if instMeta == nil {
 				return fmt.Errorf("unknown instrument: %s", instrument)
 			}
@@ -89,7 +90,7 @@ Notional = units × price  (USD-quoted pairs: EURUSD, GBPUSD, AUDUSD, NZDUSD)
 }
 
 // notionalUSD returns the USD value of a position of the given size.
-func notionalUSD(inst *trader.Instrument, midPrice float64, units int64) float64 {
+func notionalUSD(inst *market.Instrument, midPrice float64, units int64) float64 {
 	if inst.BaseCurrency == "USD" {
 		return float64(units)
 	}
@@ -97,7 +98,7 @@ func notionalUSD(inst *trader.Instrument, midPrice float64, units int64) float64
 }
 
 // unitsForNotional returns the number of units needed to achieve targetUSD notional.
-func unitsForNotional(inst *trader.Instrument, midPrice float64, targetUSD float64) int64 {
+func unitsForNotional(inst *market.Instrument, midPrice float64, targetUSD float64) int64 {
 	if inst.BaseCurrency == "USD" {
 		return int64(math.Round(targetUSD))
 	}
@@ -107,7 +108,7 @@ func unitsForNotional(inst *trader.Instrument, midPrice float64, targetUSD float
 	return int64(math.Round(targetUSD / midPrice))
 }
 
-func printPositionTable(inst *trader.Instrument, price, pips float64) {
+func printPositionTable(inst *market.Instrument, price, pips float64) {
 	marginPct := inst.MarginRate.Float64() * 100
 	pipsHeader := ""
 	if pips > 0 {
@@ -143,7 +144,7 @@ func printPositionTable(inst *trader.Instrument, price, pips float64) {
 	fmt.Fprintln(os.Stdout)
 }
 
-func printSinglePosition(inst *trader.Instrument, price float64, units int64, pips float64) {
+func printSinglePosition(inst *market.Instrument, price float64, units int64, pips float64) {
 	n := notionalUSD(inst, price, units)
 	m := n * inst.MarginRate.Float64()
 	lots := float64(units) / 100_000
@@ -158,7 +159,7 @@ func printSinglePosition(inst *trader.Instrument, price float64, units int64, pi
 	fmt.Fprintln(os.Stdout)
 }
 
-func printUnitsForNotional(inst *trader.Instrument, price float64, targetUSD float64, pips float64) {
+func printUnitsForNotional(inst *market.Instrument, price float64, targetUSD float64, pips float64) {
 	u := unitsForNotional(inst, price, targetUSD)
 	lots := float64(u) / 100_000
 	actual := notionalUSD(inst, price, u)

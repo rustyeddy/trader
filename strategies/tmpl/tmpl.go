@@ -7,17 +7,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "template")
+	strategy.MustRegisterStrategy(build, "template")
 }
 
 type Config struct {
 	Lookback  int
 	Threshold float64
-	Scale     trader.Scale6
+	Scale     market.Scale6
 }
 
 type Strategy struct {
@@ -55,9 +56,9 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return s.ready }
 
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	if ct == nil {
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 	c := ct.Candle
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
@@ -65,7 +66,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 	s.bars++
 	if s.bars < s.cfg.Lookback {
 		s.lastClose = closePx
-		return trader.DefaultPlan()
+		return strategy.DefaultPlan()
 	}
 
 	s.ready = true
@@ -74,22 +75,22 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run *trade
 		change := closePx - s.lastClose
 		if change > s.cfg.Threshold {
 			s.lastClose = closePx
-			return trader.DefaultPlan()
+			return strategy.DefaultPlan()
 		}
 		if change < -s.cfg.Threshold {
 			s.lastClose = closePx
-			return trader.DefaultPlan()
+			return strategy.DefaultPlan()
 		}
 	}
 
 	s.lastClose = closePx
-	return trader.DefaultPlan()
+	return strategy.DefaultPlan()
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
+func build(params map[string]any) (strategy.Strategy, error) {
 	return New(Config{
 		Lookback:  5,
 		Threshold: 0.0015,
-		Scale:     trader.PriceScale,
+		Scale:     market.PriceScale,
 	})
 }

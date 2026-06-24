@@ -8,11 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
-// CandleStrategyAdapter wraps a backtest trader.Strategy as a trader.LiveStrategy.
+// CandleStrategyAdapter wraps a backtest strategy.Strategy as a trader.LiveStrategy.
 //
 // On each Tick it checks whether a new completed bar has arrived since the last
 // call. If yes, it feeds the bar to the underlying strategy, applies the regime
@@ -23,15 +28,15 @@ import (
 // OANDA and replays them silently so all indicators are primed before the first
 // live signal is emitted.
 type CandleStrategyAdapter struct {
-	strategy        trader.Strategy
-	exit            trader.ExitStrategy
-	regime          trader.RegimeFilter
+	strategy        strategy.Strategy
+	exit            strategy.ExitStrategy
+	regime          strategy.RegimeFilter
 	instrument      string // OANDA format, e.g. "EUR_USD"
 	instNorm        string // internal format, e.g. "EURUSD"
 	granularity     string // OANDA granularity, e.g. "H1", "D"
 	warmupBars      int
 	localWarmupBars int
-	scale           trader.Scale6
+	scale           market.Scale6
 
 	oanda     *oanda.Client
 	accountID string
@@ -45,14 +50,14 @@ type CandleStrategyAdapter struct {
 
 // CandleAdapterConfig configures a CandleStrategyAdapter.
 type CandleAdapterConfig struct {
-	Strategy    trader.Strategy
-	Exit        trader.ExitStrategy // nil means NoopExit (no trailing stop)
-	Regime      trader.RegimeFilter // nil means NoopRegime
-	Instrument  string              // OANDA format
-	Granularity string              // "H1" or "D"
-	WarmupBars  int                 // bars to fetch from OANDA for indicator warmup (default 100)
+	Strategy    strategy.Strategy
+	Exit        strategy.ExitStrategy // nil means NoopExit (no trailing stop)
+	Regime      strategy.RegimeFilter // nil means NoopRegime
+	Instrument  string                // OANDA format
+	Granularity string                // "H1" or "D"
+	WarmupBars  int                   // bars to fetch from OANDA for indicator warmup (default 100)
 	// LocalWarmupBars, when > 0, reads this many bars from the local candle
-	// store (set via trader.SetDataDir / --data-dir) before the OANDA warmup
+	// store (set via marketdata.SetDataDir / --data-dir) before the OANDA warmup
 	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
 	// indicators are fully primed. Falls back gracefully if local data is absent.
 	LocalWarmupBars int
@@ -66,11 +71,11 @@ type CandleAdapterConfig struct {
 func NewCandleStrategyAdapter(cfg CandleAdapterConfig) *CandleStrategyAdapter {
 	regime := cfg.Regime
 	if regime == nil {
-		regime = trader.NoopRegime{}
+		regime = strategy.NoopRegime{}
 	}
 	exit := cfg.Exit
 	if exit == nil {
-		exit = trader.NoopExit{}
+		exit = strategy.NoopExit{}
 	}
 	warmup := cfg.WarmupBars
 	if warmup <= 0 {
@@ -85,11 +90,11 @@ func NewCandleStrategyAdapter(cfg CandleAdapterConfig) *CandleStrategyAdapter {
 		exit:            exit,
 		regime:          regime,
 		instrument:      cfg.Instrument,
-		instNorm:        trader.NormalizeInstrument(cfg.Instrument),
+		instNorm:        market.NormalizeInstrument(cfg.Instrument),
 		granularity:     cfg.Granularity,
 		warmupBars:      warmup,
 		localWarmupBars: cfg.LocalWarmupBars,
-		scale:           trader.PriceScale,
+		scale:           market.PriceScale,
 		oanda:           cfg.OANDA,
 		accountID:       cfg.AccountID,
 		svc:             cfg.Service,
@@ -103,7 +108,7 @@ func (a *CandleStrategyAdapter) Name() string {
 
 // Tick implements trader.LiveStrategy. It is called by the live runner on every
 // price poll tick regardless of bar frequency.
-func (a *CandleStrategyAdapter) Tick(ctx context.Context, price trader.LivePrice, openTrades []trader.LiveTrade) *trader.LivePlan {
+func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, openTrades []live.LiveTrade) *live.LivePlan {
 	// Sync our lot tracker with the current live positions.
 	a.lots.sync(openTrades)
 
@@ -214,11 +219,11 @@ func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	from := barsBefore(to, a.granularity, a.localWarmupBars)
 	tf := oandaGranToTF(a.granularity)
 
-	dm := trader.NewDataManager([]string{a.instNorm}, from, to)
-	iter, err := dm.Candles(ctx, trader.CandleRequest{
-		Source:     trader.SourceOanda,
+	dm := marketdata.NewDataManager([]string{a.instNorm}, from, to)
+	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
+		Source:     market.SourceOanda,
 		Instrument: a.instNorm,
-		Range:      trader.TimeRange{Start: trader.FromTime(from), End: trader.FromTime(to), TF: tf},
+		Range:      market.TimeRange{Start: market.FromTime(from), End: market.FromTime(to), TF: tf},
 	})
 	if err != nil {
 		return fmt.Errorf("load local candles: %w", err)
@@ -313,30 +318,30 @@ func (a *CandleStrategyAdapter) latestCompleteBar(ctx context.Context) (*oanda.C
 
 // makeBacktest builds a minimal *trader.Backtest so the strategy can inspect
 // the current open lots.
-func (a *CandleStrategyAdapter) makeBacktest() *trader.Backtest {
+func (a *CandleStrategyAdapter) makeBacktest() *backtest.Backtest {
 	lb := a.lots.toLotBook()
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{
 			Instrument: a.instNorm,
 		},
-		State: &trader.BacktestRun{
+		State: &backtest.BacktestRun{
 			Lots: lb,
 		},
 	}
 }
 
 // convertPlan converts a backtest StrategyPlan to a LivePlan.
-func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader.CandleTime, _ trader.LivePrice) *trader.LivePlan {
+func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct market.CandleTime, _ live.LivePrice) *live.LivePlan {
 	if plan == nil {
 		return nil
 	}
 
-	live := &trader.LivePlan{Reason: plan.Reason}
+	lp := &live.LivePlan{Reason: plan.Reason}
 
 	// Collect close IDs — map from internal lot ID (which we set to OANDA trade ID).
 	for _, cl := range plan.Closes {
 		if cl.Lot != nil {
-			live.CloseIDs = append(live.CloseIDs, cl.Lot.ID)
+			lp.CloseIDs = append(lp.CloseIDs, cl.Lot.ID)
 		}
 	}
 
@@ -354,7 +359,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 			a.log.Error("candle adapter: strategy returned open with no stop — exit strategy also provided none; skipping open",
 				"instrument", a.instNorm, "side", req.Side, "reason", plan.Reason)
 		} else {
-			inst := trader.GetInstrument(a.instNorm)
+			inst := market.GetInstrument(a.instNorm)
 			if inst == nil {
 				a.log.Error("candle adapter: unknown instrument — skipping open", "instrument", a.instNorm)
 			} else {
@@ -369,7 +374,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 				}
 
 				side := "long"
-				if req.Side == trader.Short {
+				if req.Side == market.Short {
 					side = "short"
 				}
 				scale := float64(a.scale)
@@ -381,7 +386,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 					"stop_pips", stopPips,
 					"reason", plan.Reason,
 				)
-				live.Open = &trader.LiveOpenRequest{
+				lp.Open = &live.LiveOpenRequest{
 					Side:     side,
 					StopPips: stopPips,
 					Reason:   plan.Reason,
@@ -390,20 +395,20 @@ func (a *CandleStrategyAdapter) convertPlan(plan *trader.StrategyPlan, ct trader
 		}
 	}
 
-	if live.Open == nil && len(live.CloseIDs) == 0 {
+	if lp.Open == nil && len(lp.CloseIDs) == 0 {
 		return nil
 	}
-	return live
+	return lp
 }
 
 // oandaCandleToCandleTime converts an OANDA candle to the internal CandleTime
 // type used by backtest strategies. Uses the mid (bid+ask)/2 for each OHLC.
-func oandaCandleToCandleTime(c oanda.Candle, _ string) trader.CandleTime {
-	scale := float64(trader.PriceScale)
-	toPrice := func(bid, ask float64) trader.Price {
-		return trader.Price(math.Round(((bid + ask) / 2) * scale))
+func oandaCandleToCandleTime(c oanda.Candle, _ string) market.CandleTime {
+	scale := float64(market.PriceScale)
+	toPrice := func(bid, ask float64) market.Price {
+		return market.Price(math.Round(((bid + ask) / 2) * scale))
 	}
-	candle := trader.Candle{
+	candle := market.Candle{
 		Open:  toPrice(c.BidOpen, c.AskOpen),
 		High:  toPrice(c.BidHigh, c.AskHigh),
 		Low:   toPrice(c.BidLow, c.AskLow),
@@ -414,22 +419,22 @@ func oandaCandleToCandleTime(c oanda.Candle, _ string) trader.CandleTime {
 		spread = -spread
 	}
 	candle.AvgSpread = spread
-	return trader.CandleTime{
+	return market.CandleTime{
 		Candle:    candle,
-		Timestamp: trader.FromTime(c.Time),
+		Timestamp: market.FromTime(c.Time),
 	}
 }
 
 // oandaGranToTF converts an OANDA granularity string ("H1", "D", "M1") to the
-// internal trader.Timeframe constant used by the candle store.
-func oandaGranToTF(granularity string) trader.Timeframe {
+// internal market.Timeframe constant used by the candle store.
+func oandaGranToTF(granularity string) market.Timeframe {
 	switch strings.ToUpper(strings.TrimSpace(granularity)) {
 	case "D", "D1":
-		return trader.D1
+		return market.D1
 	case "M1":
-		return trader.M1
+		return market.M1
 	default:
-		return trader.H1
+		return market.H1
 	}
 }
 
@@ -453,7 +458,7 @@ func barsBefore(t time.Time, granularity string, n int) time.Time {
 
 // updateTrailingStops iterates open lots, computes the new chandelier stop,
 // and calls UpdateTradeStop on OANDA if the stop has moved.
-func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct trader.CandleTime) {
+func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct market.CandleTime) {
 	if a.svc == nil {
 		return // no service — trailing stops disabled
 	}
@@ -465,11 +470,11 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct trad
 		}
 		// Advance extreme price watermark.
 		switch lot.Side {
-		case trader.Long:
+		case market.Long:
 			if meta.extremePrice == 0 || ct.High > meta.extremePrice {
 				meta.extremePrice = ct.High
 			}
-		case trader.Short:
+		case market.Short:
 			if meta.extremePrice == 0 || ct.Low < meta.extremePrice {
 				meta.extremePrice = ct.Low
 			}
@@ -498,39 +503,39 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct trad
 
 // lotMeta carries the state the adapter needs beyond what OANDA provides.
 type lotMeta struct {
-	currentStop  trader.Price // last stop we've set (in scaled Price units)
-	extremePrice trader.Price // highest high (long) or lowest low (short) seen since entry
+	currentStop  market.Price // last stop we've set (in scaled Price units)
+	extremePrice market.Price // highest high (long) or lowest low (short) seen since entry
 }
 
 // liveLotsTracker maintains a shadow lot book that mirrors OANDA open trades.
 // Lot IDs are set to the OANDA trade ID so close requests can be routed back.
 type liveLotsTracker struct {
-	byID map[string]*trader.Lot // key = OANDA trade ID
+	byID map[string]*execution.Lot // key = OANDA trade ID
 	meta map[string]*lotMeta
 }
 
-func (lt *liveLotsTracker) sync(trades []trader.LiveTrade) {
+func (lt *liveLotsTracker) sync(trades []live.LiveTrade) {
 	seen := map[string]struct{}{}
 	for _, t := range trades {
 		seen[t.ID] = struct{}{}
 		if lt.byID == nil {
-			lt.byID = map[string]*trader.Lot{}
+			lt.byID = map[string]*execution.Lot{}
 			lt.meta = map[string]*lotMeta{}
 		}
 		if _, ok := lt.byID[t.ID]; !ok {
-			side := trader.Long
+			side := market.Long
 			if t.Units < 0 {
-				side = trader.Short
+				side = market.Short
 			}
-			tc := &trader.TradeCommon{ID: t.ID}
+			tc := &execution.TradeCommon{ID: t.ID}
 			tc.Side = side
-			scale := float64(trader.PriceScale)
-			entryPrice := trader.Price(math.Round(t.EntryPrice * scale))
+			scale := float64(market.PriceScale)
+			entryPrice := market.Price(math.Round(t.EntryPrice * scale))
 			tc.Stop = entryPrice // placeholder; real stop set by adapter
-			lt.byID[t.ID] = &trader.Lot{
+			lt.byID[t.ID] = &execution.Lot{
 				TradeCommon: tc,
 				EntryPrice:  entryPrice,
-				State:       trader.LotOpen,
+				State:       execution.LotOpen,
 			}
 			lt.meta[t.ID] = &lotMeta{}
 		}
@@ -545,7 +550,7 @@ func (lt *liveLotsTracker) sync(trades []trader.LiveTrade) {
 }
 
 // setInitialStop records the initial stop price for a newly opened trade.
-func (lt *liveLotsTracker) setInitialStop(tradeID string, stop trader.Price) {
+func (lt *liveLotsTracker) setInitialStop(tradeID string, stop market.Price) {
 	if lt.meta == nil {
 		return
 	}
@@ -554,8 +559,8 @@ func (lt *liveLotsTracker) setInitialStop(tradeID string, stop trader.Price) {
 	}
 }
 
-func (lt *liveLotsTracker) toLotBook() *trader.LotBook {
-	lb := &trader.LotBook{}
+func (lt *liveLotsTracker) toLotBook() *execution.LotBook {
+	lb := &execution.LotBook{}
 	for _, lot := range lt.byID {
 		_ = lb.Add(lot.Clone())
 	}

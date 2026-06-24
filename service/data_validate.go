@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
 type ValidateCandleDataRequest struct {
@@ -18,7 +18,7 @@ type ValidateCandleDataRequest struct {
 	RawDir      string
 }
 
-func (s *Service) ValidateCandleData(ctx context.Context, req ValidateCandleDataRequest) (*trader.CandleValidationReport, error) {
+func (s *Service) ValidateCandleData(ctx context.Context, req ValidateCandleDataRequest) (*marketdata.CandleValidationReport, error) {
 	if len(req.Instruments) == 0 {
 		return nil, fmt.Errorf("missing instruments")
 	}
@@ -26,7 +26,7 @@ func (s *Service) ValidateCandleData(ctx context.Context, req ValidateCandleData
 	if err != nil {
 		return nil, err
 	}
-	return trader.ValidateCandleData(ctx, trader.CandleValidationRequest{
+	return marketdata.ValidateCandleData(ctx, marketdata.CandleValidationRequest{
 		Instruments: req.Instruments,
 		Source:      req.Source,
 		Timeframe:   tf,

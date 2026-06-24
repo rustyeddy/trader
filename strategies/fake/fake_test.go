@@ -7,23 +7,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 )
 
-func fakeRun(instrument string) *trader.Backtest {
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: instrument},
-		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
+func fakeRun(instrument string) *backtest.Backtest {
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: instrument},
+		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
 	}
 }
 
-func fakeCandle(ts trader.Timestamp, close, high, low float64) *trader.CandleTime {
-	return &trader.CandleTime{
+func fakeCandle(ts market.Timestamp, close, high, low float64) *market.CandleTime {
+	return &market.CandleTime{
 		Timestamp: ts,
-		Candle: trader.Candle{
-			Close: trader.PriceFromFloat(close),
-			High:  trader.PriceFromFloat(high),
-			Low:   trader.PriceFromFloat(low),
+		Candle: market.Candle{
+			Close: market.PriceFromFloat(close),
+			High:  market.PriceFromFloat(high),
+			Low:   market.PriceFromFloat(low),
 		},
 	}
 }
@@ -31,7 +33,7 @@ func fakeCandle(ts trader.Timestamp, close, high, low float64) *trader.CandleTim
 func TestFake_NameResetReady(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{CandleCount: 2, candles: []*trader.CandleTime{{}, {}}, highest: 10, lowest: 5}
+	f := &Fake{CandleCount: 2, candles: []*market.CandleTime{{}, {}}, highest: 10, lowest: 5}
 	assert.Equal(t, "Fake", f.Name())
 	assert.True(t, f.Ready())
 
@@ -39,8 +41,8 @@ func TestFake_NameResetReady(t *testing.T) {
 	assert.Len(t, f.candles, 2)
 	assert.Nil(t, f.candles[0])
 	assert.Nil(t, f.candles[1])
-	assert.Equal(t, trader.Price(0), f.highest)
-	assert.Equal(t, trader.Price(0), f.lowest)
+	assert.Equal(t, market.Price(0), f.highest)
+	assert.Equal(t, market.Price(0), f.lowest)
 }
 
 func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
@@ -56,7 +58,7 @@ func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
 	plan2 := f.Update(context.Background(), fakeCandle(2, 1.1020, 1.1030, 1.1000), run)
 	require.NotNil(t, plan2)
 	require.Len(t, plan2.Opens, 1)
-	assert.Equal(t, trader.Long, plan2.Opens[0].Side)
+	assert.Equal(t, market.Long, plan2.Opens[0].Side)
 	assert.Equal(t, "EURUSD", plan2.Opens[0].Instrument)
 }
 
@@ -73,27 +75,27 @@ func TestFake_Update_MissingInstrumentReturnsNil(t *testing.T) {
 func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{CandleCount: 1, highest: trader.PriceFromFloat(2.0)}
+	f := &Fake{CandleCount: 1, highest: market.PriceFromFloat(2.0)}
 	run := fakeRun("EURUSD")
 
-	lot := &trader.Lot{
-		TradeCommon: &trader.TradeCommon{
-			ID:         trader.NewULID(),
+	lot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{
+			ID:         market.NewULID(),
 			Instrument: "EURUSD",
-			Side:       trader.Long,
+			Side:       market.Long,
 			Units:      1000,
-			Stop:       trader.PriceFromFloat(1.0950),
+			Stop:       market.PriceFromFloat(1.0950),
 		},
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          trader.LotOpen,
+		State:          execution.LotOpen,
 	}
 	run.State.Lots.Add(lot)
 
 	plan := f.Update(context.Background(), fakeCandle(10, 1.0940, 1.0900, 1.0890), run)
 	require.NotNil(t, plan)
 	require.Len(t, plan.Closes, 1)
-	assert.Equal(t, trader.CloseStopLoss, plan.Closes[0].CloseCause)
+	assert.Equal(t, execution.CloseStopLoss, plan.Closes[0].CloseCause)
 	assert.Equal(t, lot.ID, plan.Closes[0].Lot.ID)
 }
 
@@ -122,7 +124,7 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	require.Len(t, openPlan.Opens, 1)
 	assert.Equal(t, "fake-02-open", openPlan.Reason)
 
-	openLot := &trader.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: trader.LotOpen}
+	openLot := &execution.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: execution.LotOpen}
 	run.State.Lots.Add(openLot)
 
 	holdPlan := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
@@ -133,7 +135,7 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	require.NotNil(t, closePlan)
 	require.Len(t, closePlan.Closes, 1)
 	assert.Equal(t, "fake-02-close", closePlan.Reason)
-	assert.Equal(t, trader.CloseManual, closePlan.Closes[0].CloseCause)
+	assert.Equal(t, execution.CloseManual, closePlan.Closes[0].CloseCause)
 }
 
 func TestFake02_Update_MissingInstrument(t *testing.T) {

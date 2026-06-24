@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
 
-func newOandaDownloadCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func newOandaDownloadCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		timeframe  string

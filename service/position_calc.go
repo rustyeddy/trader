@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 // PositionCalcRequest parameterises PositionCalc.
@@ -39,8 +39,8 @@ type PositionCalcResult struct {
 }
 
 func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*PositionCalcResult, error) {
-	inst := trader.NormalizeInstrument(req.Instrument)
-	instMeta := trader.GetInstrument(inst)
+	inst := market.NormalizeInstrument(req.Instrument)
+	instMeta := market.GetInstrument(inst)
 	if instMeta == nil {
 		return nil, fmt.Errorf("unknown instrument: %s", req.Instrument)
 	}
@@ -124,14 +124,14 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 	}, nil
 }
 
-func posNotionalUSD(inst *trader.Instrument, midPrice float64, units int64) float64 {
+func posNotionalUSD(inst *market.Instrument, midPrice float64, units int64) float64 {
 	if inst.BaseCurrency == "USD" {
 		return float64(units)
 	}
 	return float64(units) * midPrice
 }
 
-func posUnitsForNotional(inst *trader.Instrument, midPrice, targetUSD float64) int64 {
+func posUnitsForNotional(inst *market.Instrument, midPrice, targetUSD float64) int64 {
 	if inst.BaseCurrency == "USD" {
 		return int64(math.Round(targetUSD))
 	}

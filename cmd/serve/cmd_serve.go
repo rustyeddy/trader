@@ -20,9 +20,11 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/rustyeddy/trader"
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
 	"github.com/rustyeddy/trader/api/rest"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	traderui "github.com/rustyeddy/trader/ui"
 )
@@ -53,7 +55,7 @@ type DaemonConfig struct {
 }
 
 // New returns the "serve" cobra command.
-func New(rc *trader.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	var (
 		cfgFile        string
 		addr           string
@@ -155,7 +157,7 @@ Example config file (see deploy/trader.yaml.example):
 				cfg.Log.Level = "info"
 			}
 			if cfg.Data.Dir != "" {
-				trader.SetDataDir(cfg.Data.Dir)
+				marketdata.SetDataDir(cfg.Data.Dir)
 			}
 
 			// Resolve token: YAML/flag > global config > env var > token file.
@@ -178,7 +180,7 @@ Example config file (see deploy/trader.yaml.example):
 				cfg.AccountID = os.Getenv("OANDA_ACCOUNT_ID")
 			}
 
-			if err := trader.Setup(trader.LogConfig{
+			if err := log.Setup(log.LogConfig{
 				Level:  cfg.Log.Level,
 				File:   cfg.Log.File,
 				Format: cfg.Log.Format,
@@ -186,7 +188,7 @@ Example config file (see deploy/trader.yaml.example):
 			}); err != nil {
 				return err
 			}
-			log := trader.L
+			log := log.L
 
 			if tok == "" {
 				log.Warn("serve: no OANDA token — live trading and journal disabled")

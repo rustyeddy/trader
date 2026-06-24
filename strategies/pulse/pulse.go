@@ -9,43 +9,44 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterLiveStrategy(func(params map[string]any) (trader.LiveStrategy, error) {
+	live.MustRegisterLiveStrategy(func(params map[string]any) (live.LiveStrategy, error) {
 		cfg := DefaultConfig()
-		if v, ok, err := trader.GetInt32Param(params, "trade_every"); err != nil {
+		if v, ok, err := strategy.GetInt32Param(params, "trade_every"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.TradeEvery = int(v)
 		}
-		if v, ok, err := trader.GetInt32Param(params, "hold_bars"); err != nil {
+		if v, ok, err := strategy.GetInt32Param(params, "hold_bars"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.HoldBars = int(v)
 		}
-		if v, ok, err := trader.GetInt32Param(params, "max_positions"); err != nil {
+		if v, ok, err := strategy.GetInt32Param(params, "max_positions"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.MaxPositions = int(v)
 		}
-		if v, ok, err := trader.GetStringParam(params, "side"); err != nil {
+		if v, ok, err := strategy.GetStringParam(params, "side"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.Side = v
 		}
-		if v, ok, err := trader.GetFloat64Param(params, "stop_pips"); err != nil {
+		if v, ok, err := strategy.GetFloat64Param(params, "stop_pips"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.StopPips = v
 		}
-		if v, ok, err := trader.GetFloat64Param(params, "take_pips"); err != nil {
+		if v, ok, err := strategy.GetFloat64Param(params, "take_pips"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.TakePips = v
 		}
-		if v, ok, err := trader.GetFloat64Param(params, "risk_pct"); err != nil {
+		if v, ok, err := strategy.GetFloat64Param(params, "risk_pct"); err != nil {
 			return nil, err
 		} else if ok {
 			cfg.RiskPct = v
@@ -140,7 +141,7 @@ func (s *Strategy) Name() string { return "pulse" }
 //  1. Closes any positions that have been open >= HoldBars ticks.
 //  2. Opens a new position when tick % TradeEvery == 0 and active positions
 //     (after pending closes) are below MaxPositions.
-func (s *Strategy) Tick(_ context.Context, _ trader.LivePrice, openTrades []trader.LiveTrade) *trader.LivePlan {
+func (s *Strategy) Tick(_ context.Context, _ live.LivePrice, openTrades []live.LiveTrade) *live.LivePlan {
 	s.tick++
 
 	// Phase 1: collect positions to close.
@@ -157,11 +158,11 @@ func (s *Strategy) Tick(_ context.Context, _ trader.LivePrice, openTrades []trad
 
 	// Phase 2: decide whether to open a new position.
 	activeAfterClose := len(openTrades) - len(closing)
-	var open *trader.LiveOpenRequest
+	var open *live.LiveOpenRequest
 
 	if s.tick%s.cfg.TradeEvery == 0 && activeAfterClose < s.cfg.MaxPositions {
 		side := s.nextSide()
-		open = &trader.LiveOpenRequest{
+		open = &live.LiveOpenRequest{
 			Side:     side,
 			StopPips: s.cfg.StopPips,
 			TakePips: s.cfg.TakePips,
@@ -181,7 +182,7 @@ func (s *Strategy) Tick(_ context.Context, _ trader.LivePrice, openTrades []trad
 		reason = strings.Join(parts, " + ")
 	}
 
-	return &trader.LivePlan{
+	return &live.LivePlan{
 		Open:     open,
 		CloseIDs: closeIDs,
 		Reason:   reason,

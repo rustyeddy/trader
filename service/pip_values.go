@@ -5,7 +5,7 @@ import (
 	"maps"
 	"strings"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 // PipValuesRequest parameterises PipValues.
@@ -48,7 +48,7 @@ func (s *Service) PipValues(ctx context.Context, req PipValuesRequest) (*PipValu
 	}
 	instruments := req.Instruments
 	if len(instruments) == 0 {
-		instruments = trader.MajorInstruments()
+		instruments = market.MajorInstruments()
 	}
 
 	rates := make(map[string]float64, len(pipValueDefaults))
@@ -71,17 +71,17 @@ func (s *Service) PipValues(ctx context.Context, req PipValuesRequest) (*PipValu
 		if v <= 0 {
 			continue // non-positive rates produce meaningless pip values; skip
 		}
-		rates[trader.NormalizeInstrument(k)] = v
+		rates[market.NormalizeInstrument(k)] = v
 		live = false
 	}
 
 	rows := make([]PipValueRow, 0, len(instruments))
 	for _, name := range instruments {
-		inst := trader.GetInstrument(name)
+		inst := market.GetInstrument(name)
 		if inst == nil {
 			continue
 		}
-		norm := trader.NormalizeInstrument(name)
+		norm := market.NormalizeInstrument(name)
 		rate := rates[norm]
 		row := PipValueRow{
 			Instrument: name,

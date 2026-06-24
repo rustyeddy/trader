@@ -8,11 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/sim"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/market"
 )
 
-func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
+func newEventsCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		path string
 
@@ -67,21 +70,21 @@ func newEventsCmd(rc *trader.RootConfig) *cobra.Command {
 
 			ctx := context.Background()
 
-			tradesPath, equityPath := trader.JournalRecordPaths(rc.DBPath)
-			j, err := trader.NewJSON(tradesPath, equityPath)
+			tradesPath, equityPath := journal.JournalRecordPaths(rc.DBPath)
+			j, err := journal.NewJSON(tradesPath, equityPath)
 			if err != nil {
 				return err
 			}
 			defer j.Close()
 
-			engine := sim.NewSimBroker(&trader.Account{
+			engine := sim.NewSimBroker(&execution.Account{
 				ID:       accountID,
 				Currency: "USD",
-				Balance:  trader.MoneyFromFloat(startingBalance),
-				Equity:   trader.MoneyFromFloat(startingBalance),
+				Balance:  market.MoneyFromFloat(startingBalance),
+				Equity:   market.MoneyFromFloat(startingBalance),
 			}, j)
 
-			feed, err := NewCSVEventsFeed(path, trader.FromTime(from), trader.FromTime(to))
+			feed, err := NewCSVEventsFeed(path, market.FromTime(from), market.FromTime(to))
 			if err != nil {
 				return err
 			}

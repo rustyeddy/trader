@@ -6,11 +6,13 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	trader.MustRegisterStrategy(build, "lifecycle-test")
+	strategy.MustRegisterStrategy(build, "lifecycle-test")
 }
 
 // Strategy opens long on bar 1 and closes on bar 3. With a canned dataset
@@ -21,9 +23,9 @@ type Strategy struct {
 	opened bool
 	closed bool
 
-	Units      trader.Units
+	Units      market.Units
 	StopPips   float64
-	TakeProfit trader.Price
+	TakeProfit market.Price
 }
 
 func (s *Strategy) Name() string            { return "lifecycle-test" }
@@ -37,10 +39,10 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return true }
 
-func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader.Backtest) *trader.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
-	plan := &trader.StrategyPlan{Reason: "hold"}
+	plan := &strategy.StrategyPlan{Reason: "hold"}
 	if c == nil || run == nil {
 		return plan
 	}
@@ -55,14 +57,14 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader
 	}
 
 	if s.bar == 1 && !s.opened {
-		inst := trader.GetInstrument(run.Request.Instrument)
+		inst := market.GetInstrument(run.Instrument())
 		if inst == nil {
 			plan.Reason = "lifecycle-test-missing-instrument"
 			return plan
 		}
 
-		stop := inst.SubPips(c.Close, trader.PipsFromFloat(s.StopPips))
-		op := trader.NewOpenRequest(run.Request.Instrument, c, trader.Long, stop, 0, "lifecycle-test-open-long")
+		stop := inst.SubPips(c.Close, market.PipsFromFloat(s.StopPips))
+		op := execution.NewOpenRequest(run.Instrument(), c, market.Long, stop, 0, "lifecycle-test-open-long")
 		op.Units = s.Units
 
 		plan.Opens = append(plan.Opens, op)
@@ -73,31 +75,31 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader
 	}
 
 	if s.bar == 3 && s.opened && !s.closed {
-		if run.State == nil || run.State.Lots == nil || run.State.Lots.Len() == 0 {
+		if run == nil || run.OpenLots().Len() == 0 {
 			plan.Reason = "lifecycle-test-no-position-to-close"
 			return plan
 		}
 
 		submitted := false
-		_ = run.State.Lots.Range(func(lot *trader.Lot) error {
+		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
 			if submitted {
 				return nil
 			}
-			if lot == nil || lot.State != trader.LotOpen {
+			if lot == nil || lot.State != execution.LotOpen {
 				return nil
 			}
 
-			cl := &trader.CloseRequest{
-				Request: trader.Request{
+			cl := &execution.CloseRequest{
+				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
-					RequestType: trader.RequestClose,
+					RequestType: execution.RequestClose,
 					Price:       c.Close,
 					Timestamp:   c.Timestamp,
 					Candle:      c.Candle,
 					Reason:      "lifecycle-test-close-long",
 				},
 				Lot:        lot,
-				CloseCause: trader.CloseManual,
+				CloseCause: execution.CloseManual,
 			}
 
 			plan.Closes = append(plan.Closes, cl)
@@ -116,7 +118,7 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run *trader
 	return plan
 }
 
-func build(params map[string]any) (trader.Strategy, error) {
+func build(params map[string]any) (strategy.Strategy, error) {
 	return &Strategy{
 		Units:    1000,
 		StopPips: 20,

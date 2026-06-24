@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -57,7 +59,7 @@ func (s *Server) handleListBacktests(w http.ResponseWriter, r *http.Request) {
 	instrument := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("instrument")))
 	strategy := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("strategy")))
 
-	filtered := make([]trader.BacktestReportSummary, 0, len(summaries))
+	filtered := make([]backtest.BacktestReportSummary, 0, len(summaries))
 	for _, summary := range summaries {
 		if instrument != "" && !strings.Contains(strings.ToUpper(summary.Instrument), instrument) {
 			continue
@@ -296,7 +298,7 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 }
 
 // diffBacktestSummaries returns human-readable diff strings for changed metrics.
-func diffBacktestSummaries(baseline, got trader.BacktestReportSummary) []string {
+func diffBacktestSummaries(baseline, got backtest.BacktestReportSummary) []string {
 	var diffs []string
 	diffInt := func(field string, b, g int) {
 		if b != g {
@@ -354,14 +356,14 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 	}
 
 	cfg := summary.Config.Data
-	tr, err := trader.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
+	tr, err := market.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("parse time range: %v", err))
 		return
 	}
 
-	dm := trader.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
-	iter, err := dm.Candles(r.Context(), trader.CandleRequest{
+	dm := marketdata.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
+	iter, err := dm.Candles(r.Context(), marketdata.CandleRequest{
 		Source:     cfg.Source, // empty → DataManager defaults to SourceOanda
 		Instrument: cfg.Instrument,
 		Range:      tr,

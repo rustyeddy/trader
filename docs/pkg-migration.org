@@ -1,6 +1,10 @@
 #+title: Trader Package Migration Notes
 #+author: Codex
 #+date: 2026-06-23
+#+updated: 2026-06-23 (MIGRATION COMPLETE: engine + backtest split (Option A),
+#  then live + config extracted — the root `trader` package no longer exists.
+#  Next wave: Signal + Planner — strategies emit signals, a planner owns
+#  sizing/risk/regime; needs the live package, which is now in place.)
 
 * Goal
 
@@ -12,237 +16,494 @@ The migration should move from low-level, low-dependency concepts
 outward toward orchestration code. In practice, that means shrinking
 the root package from the leaves inward.
 
+* Status
+
+Done (each landed behind temporary root re-export shims; callers unchanged):
+
+- =market= — fixed-point/domain primitives (Price, Money, Rate, Units, Pips,
+  Tick, Timestamp, Timeframe, Instrument), the pure =Candle= value, the
+  =CandleIterator= contract, and the Source data-source constants. Shims:
+  =market_aliases.go=, =market/migration_exports.go=. (candleSet and the
+  candle aggregation/gap/iter machinery were moved on to =marketdata=.)
+- =indicator= — EMA, ATR, ADX, Bollinger, Choppiness + fixed-point helpers.
+  Shim: =indicator_aliases.go=, =indicator/migration_exports.go=.
+- =journal= — Journal interface, TradeRecord/EquitySnapshot, CSV/JSONL/Org
+  writers, and the live (OANDA) adapter. Shim: =journal_aliases.go=.
+- =log= — logging infrastructure (loggers, stack, syslog). Pure stdlib leaf.
+  Shim: =log_aliases.go=.
+- =review= — ForexReview / ReviewStatus. Callers migrated directly (no shim);
+  this package is expected to grow.
+- =StrategyContext= rework — =Strategy.Update= no longer takes =*Backtest=; it
+  takes a narrow =StrategyContext= (=Instrument()= + =OpenLots() LotView=).
+  =strategies/= no longer references the engine type at all. This is the
+  prerequisite for extracting strategy/regime without the engine.
+- =marketdata= — store + data layer: store/keys/inventory/keymap, DataManager,
+  downloader, validation, iterators, plan/wants/writer/ticks, data_stats
+  analyzers, synthetic candle generators, the candleSet machinery, AND the data
+  Provider registry (=data/= folded in) plus =marketdata/dukascopy=. All callers
+  (service/cmd/api, root engine, dukascopy) migrated to =marketdata.X=; the root
+  shim (=marketdata_aliases.go=) is DELETED. Only =marketdata/migration_exports.go=
+  remains (exports candleSet for the few root tests that build candle sets).
+
+- =execution= — accounting + order execution: Account (+close/sizing), Broker
+  (+events), and the trade/order types (Trade, TradeCommon, Position, Lot,
+  LotBook, OpenRequest, CloseRequest, TradeHistory, FIFO matcher). Clean leaf on
+  =market=. Engine<->execution couplings resolved by widening the Broker API
+  (=EventQueueLen/Cap=, =EnqueueEvent=) and exporting =CloseCause=. External
+  callers migrated to =execution.X=; the root shim (=execution_aliases.go=) is
+  retained for the engine until wave 6 (the engine is execution's main consumer).
+
+- =strategy= — strategy core + exit strategies + regime filters: the =Strategy=
+  interface, =StrategyContext=/=LotView=, =StrategyPlan= + plan helpers, the
+  registry (=Register/MustRegister/Lookup/GetStrategy=), =ExitStrategy= +
+  =ChandelierExit=/=NoopExit= and =GetExitStrategy=, =RegimeFilter= + all concrete
+  filters (ATR-percentile, choppiness, D1 ADX/choppiness, session, weekly-EMA,
+  composite) and =GetRegimeFilter=, plus the config/param parsing helpers and
+  news-day loader. Depends only on =market=, =indicator=, =execution=. External
+  callers migrated to =strategy.X=: all =strategies/*= packages now register via
+  =strategy.MustRegisterStrategy= and =Update= against =strategy.StrategyContext=;
+  =service= (replay, portfolio_config, strategy_factory, candle adapter, sweep)
+  imports =strategy= directly.
+
+* Wave 8 (in progress): de-shim the root engine
+
+The backtest/engine orchestration still lives in the root =trader= package, but
+it no longer rides on the =execution=/=strategy= re-export shims:
+
+- The root engine (=trader.go=, =backtest*.go=, =app_config.go=, =live_strategy_registry.go=,
+  and their tests) now references =execution.X= and =strategy.X= directly. Done
+  with an AST-safe =gofmt -r= qualification pass (string-literal-safe; the
+  field-name / keyed-literal-key damage the doc's Lesson 4 warns about was
+  compiler-caught and reverted), plus =goimports=. Two local vars named
+  =strategy= that shadowed the new package import were renamed to =strat=.
+- =execution_aliases.go= and =strategy_aliases.go= are DELETED. The last external
+  caller still on them (=cmd/bot=, via an aliased =traderpkg= import the earlier
+  =trader.=-grep missed) was repointed to =strategy= directly.
+
+External-caller shim migration (DONE): all external callers of the
+=market=/=indicator=/=journal= re-export shims have been migrated to import those
+packages directly. Worked in three buckets by coupling:
+
+- Bucket A (34 files): referenced ONLY =market= via the shim. Pure import swap +
+  =trader.= -> =market.=; the root import is dropped entirely.
+- Bucket C (20 files): =market= primitives alongside genuine root engine types
+  (=Backtest=, =RootConfig=, =Live*=). Qualified the market selectors with an
+  AST-safe =gofmt -r= pass; the =trader= import is RETAINED for the engine types.
+- Bucket B (7 files): =market= plus the =indicator= and/or =journal= shims.
+  Qualified all three layers, which lets these files drop the =trader= import.
+
+With Bucket B landed, =indicator_aliases.go= and =journal_aliases.go= became dead
+(no external OR root caller) and were DELETED. =roundDivPositive= had already
+moved out with ChandelierExit, so the indicator shim had no root user left.
+
+Log shim removed (DONE): =log_aliases.go= is DELETED. Assessment found the root
+engine's only genuine log usage was the module logger =L= in =trader.go= (14
+call sites; everything else flagged by the raw grep was config struct fields
+=Data/Replay= or org-table string literals). Qualified =L= -> =log.L= with
+=gofmt -r= + =goimports= (which correctly resolved the trader =log= package over
+stdlib =log=, since no file imported stdlib =log=). Five external callers
+migrated to =log.X=: =cmd/main.go=, =cmd/serve/cmd_serve.go=,
+=cmd/mcp/cmd_mcp.go=, =cmd/backtest/cmd_backtest.go=, =service/sweep_test.go=
+(the first two used the =traderpkg=-aliased and bare =trader.= forms
+respectively — Lesson 6 again).
+
+Market shim removed (DONE): =market_aliases.go= is DELETED. This was the last
+remaining transition shim — NO =*_aliases.go= files exist anywhere now. The root
+engine used its 78 market symbols BARE (exported types =Price/Candle/...= plus
+root-internal unexported helpers =mulDivCeil64/bitSet/...=). Qualified all of
+them across every top-level root file (production + tests) with an AST-safe
+=gofmt -r= pass driven by the shim's own LHS->RHS map (17 of 78 differed: the
+two lowercase candle aliases and the unexported helper set map to Exported
+=market.= names), then =goimports=. Per Lesson 4, the only collateral damage was
+keyed composite-literal KEYS (=Instrument:= -> =market.Instrument:=); =gofmt -r=
+leaves struct field declarations, selectors, type decls, and switch =case= values
+correct. The damaged keys were reverted programmatically off the compiler's
+"invalid field name market.X in struct literal" errors (build for production
+files, =go vet= for test files), then =goimports= dropped now-unused =market=
+imports in the few test files whose only market use had been a reverted key.
+
+With this, the root engine no longer rides on ANY re-export shim.
+
+Still remaining for wave 8: the engine/backtest split (see next section). All
+leaf-package qualification (execution/strategy/market/indicator/journal/log) is
+DONE, so this is no longer blocked on import-name cleanup.
+
+Remaining in root: engine + backtest run orchestration, live orchestration,
+config, and a few orphans.
+
+* Wave 8 follow-up (DONE): split engine and backtest into sibling packages
+
+Option A landed. =engine= and =backtest= are now sibling packages with a clean
+one-way edge =backtest -> engine= (verified: engine imports neither itself nor
+backtest's symbols; backtest imports engine). What moved:
+
+- =engine= (=engine/trader.go=, =engine/candle_source.go=): the =Trader= struct
+  + broker/event mechanism (=StartBrokerEventHandler=, =BrokerEventError=,
+  =SnapshotLots=, =WaitForBrokerIdle=, =processEvent=, =eventPositionID=) and the
+  =CandleSource= interface. Imports only execution/log/market/marketdata.
+- =backtest= (the nine =backtest_*=-era files, now de-prefixed: =backtest.go=,
+  =run.go=, =result.go=, =executor.go=, =feed.go=, =summary.go=, =report.go=,
+  =report_org.go=, =config.go=) PLUS the inverted run loop in =execute.go=
+  (=(*Backtest).Execute= / =runWithIterator=, each taking =*engine.Trader=) and
+  =exits.go= (=fillAdjust=/=autoCloseExits=/=checkExit=). Engine references inside
+  backtest are qualified =engine.Trader=/=engine.SnapshotLots=/=engine.CandleSource=.
+- Root =trader= is now ONLY =app_config.go=, =config_global.go=, =version.go=,
+  and =live_strategy*.go= (live + config orphans, unchanged, importing neither
+  new package). No cycle.
+
+The mis-homed root test file =trader_group1_test.go= was split along the same
+seam: engine-internal tests (=processEvent= etc.) -> =engine/trader_test.go=;
+=Backtest.Execute=/=runWithIterator= tests + their helpers (=countingStrategy=,
+=fixedCandleIterator=) -> =backtest/execute_test.go=. The other root test files
+moved wholesale into =backtest=.
+
+External-caller migration (DONE, direct cutover, no shim — buckets A/B/C
+playbook): 21 files in service/cmd/api/strategies re-pointed =trader.X= /
+=traderpkg.X= -> =backtest.X= for the moved symbols (=Backtest=, =Config=,
+=RunConfig=, =CompileBacktests=, =BacktestExecutor=, =CSVTicksFeed=,
+=BacktestReportSummary=, ...) via a per-file =gofmt -r= pass over BOTH alias
+names (Lesson 6), then =goimports= to add the =backtest= import and drop the
+now-unused =trader= import. No engine symbol has any external caller — engine is
+internal to backtest + its own tests. Verified: =go vet ./...=, =make test=,
+=make sweep= all green.
+
+** Historical plan (Option A, as decided before the split)
+
+DECIDED layout — Option A: =engine= and =backtest= become sibling directories.
+Root =trader= stops being the engine; the two new packages sit side by side with
+a one-way edge =backtest -> engine= (engine NEVER imports backtest).
+
+#+begin_src text
+trader/
+  engine/      package engine    — Trader + broker/event loop (mechanism only)
+  backtest/    package backtest  — Backtest* run orchestration; imports engine
+#+end_src
+
+** Four-way classification of the 16 remaining root files
+
+The current root package is NOT one layer; it is four concerns tangled together.
+
+1. ENGINE (mechanism, low-level) — the part of =trader.go= that is the =Trader=
+   type and its broker/loop plumbing:
+   - =Trader= struct (=DataManager= + =execution.Broker= + =marketdata.Store=)
+   - =startBrokerEventHandler=, =brokerEventError=, =waitForBrokerIdle=,
+     =processEvent=, =snapshotLots=, =eventPositionID=
+   Pure mechanism: drive a broker, drain events, track lots. No notion of a run.
+
+2. BACKTEST (higher-level run orchestration) -> new =backtest= package:
+   - all nine =backtest_*.go= files PLUS =backtest_config.go=
+     (=Config=/=RunConfig=/=RunDefaults=/=DataConfig=/=LoadConfig=/=hashBacktestConfig=)
+   - PLUS the two loop methods currently MIS-HOMED on =Trader=:
+     =Backtest()= and =backTestWithIterator()=. These reference =*Backtest=, so
+     they are the inversion point (below).
+
+3. LIVE (higher-level, separate concern) — =live_strategy.go= (=LiveStrategy=,
+   =LivePrice=, =LiveTrade=, =LivePlan=, =LiveOpenRequest=) and
+   =live_strategy_registry.go=. Depends on =strategy=, not on backtest. Its own
+   eventual home (=live= package, or fold into =strategy=/=service=) is a SEPARATE
+   decision from the engine/backtest split — out of scope here.
+
+4. CONFIG / ORPHAN — =app_config.go= (=RootConfig=, =appConfig=, ...),
+   =config_global.go= (=GlobalConfig=, ...), and =version.go=. App/global config,
+   not engine. Stay put for now.
+
+** The gating prerequisite: invert =Trader.Backtest=
+
+The one thing that makes =trader.go= LOOK fused is that the run loop hangs off the
+engine type and references the run value:
+
+#+begin_src go
+func (t *Trader) Backtest(ctx, run *Backtest) error
+func (t *Trader) backTestWithIterator(ctx, run *Backtest, itr market.CandleIterator) error
+#+end_src
+
+If =backtest= becomes the higher package, this edge points the WRONG way
+(engine -> backtest -> engine = cycle). So the split's real work is inverting it:
+move =Backtest()= / =backTestWithIterator()= out of =Trader= and into the
+=backtest= package as functions/methods that take a =*engine.Trader= (or a small
+engine interface) and call its lower-level primitives. =Trader= is then left with
+only the broker/store/loop mechanism, and the dependency is cleanly one-way.
+
+Once inverted, the physical move is just =git mv= + package rename for each side.
+
+** External-caller fallout (same pattern as the rest of wave 8)
+
+- =backtest_config.go= defines =Config=/=RunConfig=, consumed by =service=
+  (=CompileBacktests=, the executor) and =cmd/backtest=. When it moves, those
+  callers re-point to =github.com/rustyeddy/trader/backtest= — one more
+  external-caller migration like buckets A/B/C.
+- Anything constructing or driving =Trader= (notably the service backtest
+  executor) re-points to =github.com/rustyeddy/trader/engine=.
+- A transition shim (=engine_aliases.go= / =backtest_aliases.go=) MAY be used to
+  stage callers, but prefer a direct cutover now that the qualification toolkit
+  (=gofmt -r= + =goimports=, Lessons 4 and 6) is well-worn.
+
+* Lessons Learned (waves 1-3)
+
+These corrections supersede the original plan where they conflict.
+
+1. *Treat the candle family as part of the primitives wave, not split.*
+   The original plan put =candle_types.go= in wave 1 but =candle_agg/gap/iter/set=
+   in wave 4. That split is wrong: they are one cohesive unit and were moved
+   together into =market=. More importantly, indicators depend on =Candle=, and
+   root depends on indicators, so =Candle= MUST be extracted before indicators or
+   the move is an import cycle. Candle is a hard prerequisite, not a wave-4
+   afterthought.
+
+2. *The real work is unexported helpers crossing the new boundary, not the
+   leaf types.* Type aliases handle the public surface trivially. The effort
+   went into the additive export layer each new package needs for the
+   unexported internals the old package still calls: =mulDiv*=, =bitSet/bitIsSet=,
+   =candleSet/candleSetIterator=, =roundDivPositive=, the =Source= constants,
+   =formatScaledPrice=, etc. Budget for a =migration_exports.go= in every package.
+
+3. *=journal_live= did not need to be deferred.* It depends only on
+   =brokers/oanda=, which does not import root, so there is no cycle. It moved in
+   the same PR as the rest of journal. Apply the same test before deferring any
+   "live/OANDA" file: check whether its only non-stdlib dependency imports root.
+
+4. *The mechanical =market.=-qualification pass inside a moved package has three
+   traps.* A naive =s/\bPrice\b/market.Price/= will wrongly rewrite: (a) struct
+   FIELD names that match a type name (=Units Units=), (b) keyed composite-literal
+   keys (=Units:=), and (c) it will MISS helper functions that also need
+   qualifying (=PriceFromFloat=, =FromTime=, =ShortDisplayID=, =PriceScale=,
+   =FormatScaledPrice=). Qualify types AND helpers; then revert field-name and
+   literal-key damage; then build.
+
+5. *One self-inflicted wart to clean up in wave 4.* Moving =candleSet= into
+   =market= separated the candle storage TYPE from the storage LOGIC (=store.go=,
+   =data_manager.go=, ~12 root files) that still drives it through shims. Wave 4
+   is partly "reunite candleSet with its users." Net: store/data has almost no
+   UPWARD coupling (one stray =Trader= reference total), so the difficulty is
+   volume and this reunion, not entanglement with the engine.
+
+6. *Import ALIASES defeat the =trader.=-prefix grep that scopes a caller
+   migration.* Several =cmd/*= files import root as =traderpkg
+   "github.com/rustyeddy/trader"=, so they call =traderpkg.TradeRecord=, not
+   =trader.TradeRecord=. A bucket analysis built on =grep "trader\."= silently
+   omits them, and the gap only surfaces as a compile error when the shim is
+   deleted (=cmd/bot/cmd_bot.go= hid a journal-shim caller this way). Before
+   scoping AND before declaring a shim removable, grep for the package's symbols
+   under EVERY local import name, not just the default =trader.=. Cheapest robust
+   form: grep the bare symbol set across the tree, or enumerate the alias names
+   first (=grep -rE '[a-z]\w* "github.com/rustyeddy/trader"'=) and search each.
+
 * Recommended Dependency Direction
 
-Target shape:
+Target shape (extracted layers in brackets):
 
 #+begin_src text
 cmd, api/rest, api/mcp
         |
      service
         |
- backtest / live orchestration
+ backtest / live orchestration        <- engine + strategy/regime
         |
- execution, marketdata, journal, strategy
+ execution, [marketdata], [journal*]   <- accounting/broker/trade, store/data
         |
- indicators
+ [indicator]
         |
- market/domain primitives
+ [market]  (primitives + candle)
+        |
+ [log]  (pure leaf, no domain deps)
 #+end_src
 
-The important rule is that lower-level packages should not import
-higher-level packages. Domain types should not know about services,
-APIs, CLI commands, OANDA clients, reports, or backtest execution.
+Lower-level packages must not import higher-level packages. Domain types must
+not know about services, APIs, CLI commands, OANDA clients, reports, or backtest
+execution.
 
-* First Candidates
+* Newly Identified Opportunities (not in the original plan)
 
-** 1. Market/domain primitives
+These came out of re-assessing the actual root package after waves 1-3.
 
-This should be the first extraction.
+** Free leaves — extract any time, near-zero risk
 
-Likely files:
+- =log= (=log_logger.go=, =log_stack.go=, =log_syslog_*.go=): imports only
+  stdlib (slog/syslog). Zero domain dependencies. Target package =log= (or
+  =logging=). Trivial; not blocked by anything.
+- =testdata= synthetic candle generators (=testdata_generator.go=,
+  =testdata_helper.go=): depend only on =market=, and are used by PRODUCTION
+  code (=cmd/backtest=, =cmd/gen-testdata=, =cmd/bot=, =api/mcp/resources=), so
+  they deserve a real package rather than living in root. Target =synth= or
+  =markettest=.
+- =types_review.go= (=ForexReview=, =ReviewStatus=): an orphan used only by
+  =service/review.go= and =api/rest/review.go=. Belongs in a small =review=
+  package (or folded into service), not the root package.
 
-- =types_money.go=
-- =types_units.go=
-- =types_tick.go=
-- =types_time.go=
-- =types_math.go=
-- =trade_instrument.go=
-- =candle_types.go=
-- Later: =trade.go=, =trade_position.go=, =trade_lot.go=
+** Resolved: Trade / Position / Lot placement
 
-Possible package names:
+The original plan was ambiguous (listed under both wave 1 "Later" and wave 5).
+Resolved by inspection: =trade.go= couples to =closeCause= and
+=trade_request.go= couples to =OpenRequest=, both accounting/execution concepts.
+=Trade=, =Position=, and =Lot= belong in the *execution* package, NOT =market=.
 
-- =market=
-- =domain=
-- =fx=
-- =core=
+** Reorder: execution is a clean leaf on =market=
 
-Recommendation: prefer =market= or =domain= over a generic =types= package.
+=account.go=, =broker.go=, =trade*.go=, =trade_request.go= form a cohesive
+cluster that references each other plus =Candle= (now in =market=). It has NO
+upward dependency on Backtest, Strategy, Journal, or DataManager. So execution
+can be extracted relatively early, right after marketdata (or even alongside).
+The "delicacy" the original plan warned about is about INVARIANTS (equity,
+margin, P/L), not dependency direction. Test coverage must be the gate.
 
-Rationale:
+** Key rework: break the strategy -> Backtest hard dependency
 
-- These are the core fixed-point and market concepts used everywhere.
-- Everything else should depend on =Price=, =Money=, =Rate=, =Units=, =Pips=, =Candle=,
-  =Tick=, =Timestamp=, and =Instrument=.
-- Extracting this first gives later packages a stable dependency target.
+=Strategy.Update(ctx, *CandleTime, *Backtest)= passes the concrete =*Backtest=,
+which is why the strategy layer is welded to the engine. But the actual usage is
+THIN and specific: strategies only read =run.Request.Instrument= (which
+instrument) and =run.State.Lots= (current open positions). Most strategies
+ignore the argument entirely.
 
-Migration tactic:
-
-Keep root-package aliases temporarily to reduce churn:
+Proposal: introduce a narrow interface, e.g.
 
 #+begin_src go
-type Price = market.Price
-type Money = market.Money
-type Candle = market.Candle
+type StrategyContext interface {
+    Instrument() string
+    OpenLots() LotView   // read-only view of current positions
+}
 #+end_src
 
-Then migrate callers package by package.
+=Backtest= implements it; =Strategy.Update= takes =StrategyContext= instead of
+=*Backtest=. This decouples the entire strategy/regime layer from the engine and
+lets =strategy= be extracted WITHOUT dragging =backtest= along. This is the
+single highest-leverage change for untangling wave 6, and it is small because
+the real surface is two methods. (Nothing is sacred — this is the rework the
+thin dependency invites.)
 
-** 2. Indicators
+* Wave 4: the marketdata arrangement (next)
 
-This is the cleanest early extraction after primitives.
+Detailed design for the store/data extraction, derived from re-assessing the
+actual dependency graph.
 
-Likely files:
+** Findings
 
-- =indicators.go=
-- =indicators_fixed.go=
-- =indicators_ema.go=
-- =indicators_atr.go=
-- =indicators_adx.go=
-- =indicators_bollinger.go=
-- =indicators_choppiness.go=
+- store/data (~4,500 lines core + ~870 lines stats) has ZERO upward
+  dependencies — a clean leaf on =market=.
+- =candleSet= + =candle_agg/gap/iter= (~500 lines, currently in =market=) are
+  used ONLY by the store/loader, the candle files themselves, and
+  =testdata_generator=. The engine/strategy code never touches =candleSet= — it
+  only uses =Candle=, =CandleTime=, and =CandleIterator=.
+- =data/= is already a dependency-free =Provider= interface + registry.
+  =data/dukascopy= registers there and depends UP on root's =Store=/=Key=. Root
+  fetches providers via =data.Get()= and never imports dukascopy (blank-imported
+  in =cmd=). Preserve this inversion.
+- =Store= reads/writes =candleSet= (store.go uses it 5x) and =DataManager= uses
+  =Store= 14x — one cohesive subsystem; do not split =store= out (it would cycle
+  with =candleSet=).
+- =data_stats_*= depend only on =Candle=/=CandleTime=/=CandleIterator=, but they
+  are folded INTO =marketdata= (decision: one package, clearly named).
 
-Target package: =indicators=
+** Two structural decisions
 
-Rationale:
+1. *candleSet reunion*: move =candleSet= + =candle_agg/gap/iter= OUT of =market=
+   and INTO =marketdata=. =candleSet= is storage machinery (monthly files,
+   validity bitmaps, gap reports), not a value primitive. =market= keeps only
+   the pure =Candle= value. Deletes the =market= candleSet shims.
 
-- Indicators are pure domain logic.
-- They should depend only on fixed-point/domain types.
-- They should not know about =Backtest=, =Broker=, =Account=, config, service, files, OANDA,
-  or strategy registration.
+2. *CandleIterator -> market*: lift the =CandleIterator= interface (yields
+   =CandleTime=) into =market=. The engine CONSUMES iterators; =marketdata=
+   PRODUCES them. With the interface in =market=, the engine depends on
+   =market.CandleIterator= and not on =marketdata= just for the contract. Same
+   inversion pattern as =StrategyContext=. Concrete impls stay in =marketdata=.
 
-This is a high-value split because it creates a small, testable package with a clean API.
+** Target shape
 
-** 3. Journal persistence
+#+begin_src text
+market        Candle, CandleTime, CandleIterator (interface), Price/Money/...
+                ^                         ^
+marketdata    candleSet + agg/gap/iter (reunited)
+              Store, StoreKey, StoreKeymap, inventory
+              DataManager, downloader, validation, plan/wants/writer/ticks
+              concrete CandleIterator impls; data_stats (folded in)
+                ^                ^
+data/dukascopy  |                | engine (root) -> marketdata, market
+  -> data, marketdata, market
+marketdata -> data (Provider registry)
+#+end_src
 
-Likely files:
+** Sequencing
 
-- =journal.go=
-- =journal_csv.go=
-- =journal_json.go=
-- =journal_org.go=
-- Maybe keep =journal_live.go= separate initially because it has live/OANDA concerns.
+1. DONE: lift =CandleIterator= interface into =market=.
+2. DONE: created =marketdata=; moved store*.go + data_*.go (incl. stats) AND
+   =candleSet=/=candle_agg/gap/iter= (out of =market=) into it; moved the store
+   global in as =store_globals.go=; deleted the dead =market= candleSet shims;
+   added root shims (=marketdata_aliases.go=) for =Store=/=DataManager=/etc.
+3. TODO (cleanup PR): migrate external callers (service/cmd/api) and
+   =data/dukascopy= off the root shims to =marketdata= directly; drop shims.
 
-Target package: =journal=
+** Lessons from the big move
 
-Rationale:
+- Qualifying a large package against =market.= has more traps than the small
+  ones: besides field names / literal keys / method names, watch (a) =market.X=
+  landing inside STRING LITERALS (corrupted a CSV header and test fixtures —
+  fix with a quote-aware pass), (b) variadic =...Type= skipped by the
+  =(?<!\.)= lookbehind, (c) embedded-field renames (=timemilli= ->
+  =market.TimeMillis= renames the embedded field, so =.timemilli= accessors
+  must become =.TimeMillis=), and (d) accidentally qualifying the package's OWN
+  consts (=KindCandle= etc. belong to marketdata, not market).
+- Several root *_test.go files were really store/data tests; move them with the
+  package. One engine integration test needed reworking to seed its store via
+  exported API rather than unexported test helpers.
 
-- The =Journal= interface is already a package boundary.
-- CSV, JSONL, and Org writers are persistence adapters.
-- This package should depend on domain trade/equity types, not on the backtest engine.
+* Revised Migration Order
 
-Suggested rule:
-
-Keep live journal streaming out of the first pass unless its dependencies are already clean.
-
-** 4. Candle store and market data
-
-Likely files:
-
-- =store.go=
-- =store_inventory.go=
-- =store_key.go=
-- =store_keymap.go=
-- =data_manager.go=
-- =data_plan.go=
-- =data_wants.go=
-- =data_writer.go=
-- =data_validation.go=
-- =candle_iter.go=
-- =candle_agg.go=
-- =candle_gap.go=
-- =candle_set.go=
-
-Possible package names:
-
-- =marketdata=
-- =candles=
-- =store=
-
-Recommendation: =marketdata= is probably the clearest if the package owns loading, planning,
-validation, and candle iteration. =store= is narrower and may fit only the filesystem/cache
-pieces.
-
-Rationale:
-
-- The data manager and store code are a natural subsystem.
-- This split should come after the domain primitive extraction because these files depend heavily
-  on =Candle=, =Instrument=, =Timestamp=, and =Price=.
-
-** 5. Accounting and execution
-
-Likely files:
-
-- =account.go=
-- =account_close.go=
-- =account_sizing.go=
-- =broker.go=
-- =broker_event.go=
-- =trade_request.go=
-- =trade_history.go=
-- Possibly =trade.go=, =trade_position.go=, =trade_lot.go= if not already moved to domain.
-
-Possible package names:
-
-- =accounting=
-- =execution=
-- =broker=
-- =portfolio=
-
-Rationale:
-
-- This area owns critical invariants: equity, margin, P/L, spread semantics, open/close behavior,
-  and order requests.
-- It is an important boundary, but it is more delicate than indicators or journals.
-
-Recommendation:
-
-Do not make this the first split. Move it after fixed-point/domain primitives are stable and
-after the pure packages are out of the root package.
-
-** 6. Backtest engine, strategies, exits, and regimes
-
-Likely files:
-
-- =backtest*.go=
-- =trader.go=
-- =strategy*.go=
-- =regime_filter*.go=
-
-Possible package names:
-
-- =backtest=
-- =engine=
-- =strategy=
-
-Rationale:
-
-- This is the orchestration layer and currently ties together many concepts.
-- Strategy interfaces depend on =Backtest=, =StrategyPlan=, candle timing, exits, regimes, and
-  registration.
-- Splitting this too early risks just moving the current knot into multiple directories.
-
-Recommendation:
-
-Handle this after the lower-level packages exist. The extraction will be much easier once
-market primitives, indicators, journals, data, and execution/accounting already have clear APIs.
-
-* Suggested Migration Order
-
-1. Extract =market= or =domain= primitives.
-2. Extract =indicators=.
-3. Extract =journal=.
-4. Extract =marketdata= / =candles= / =store=.
-5. Extract =accounting= and/or =execution=.
-6. Extract =backtest= / =engine= / =strategy= boundaries.
+1. DONE: =market= (primitives + candle).
+2. DONE: =indicator=.
+3. DONE: =journal=.
+4. DONE: =log= (free leaf), =review=, and the =StrategyContext= rework.
+5. DONE: =marketdata= — store + data layer (incl. stats); candleSet reunited;
+   CandleIterator lifted to =market=. Cleanup (caller migration + dukascopy
+   re-point + shim removal) still pending.
+   =CandleIterator= to =market=. Largest surface; depends only on =market=.
+   See "Wave 4" above.
+6. =execution= — account, broker, trade, position, lot, requests, history.
+   Clean leaf on =market=; gate on accounting-invariant tests.
+7. DONE: =strategy= + =regime= — depend on =market=, =indicator=, =execution=
+   (for Lot view), and =StrategyContext=; no longer on =backtest=. External
+   callers (=strategies/*=, =service=) migrated off the root shim; the in-root
+   engine still uses =strategy_aliases.go= until wave 8.
+8. DONE: =backtest= / =engine= — the orchestration layer, now sitting on clean
+   APIs. Root engine de-shimmed off =execution=/=strategy= and both aliases
+   DELETED. External callers of the =market=/=indicator=/=journal= shims migrated
+   (buckets A/B/C). The root engine's own bare market usage (78 symbols) was then
+   qualified, and ALL transition shims DELETED. =Trader.Backtest= inverted, then
+   split into sibling =engine= and =backtest= packages (Option A); 21 external
+   callers re-pointed to =backtest=. See "Wave 8 follow-up (DONE)" above.
+9. NEXT WAVE: Signal + Planner — strategies emit pure signals; a planner layer
+   (in =backtest= or a shared =planner= pkg) owns sizing/risk/regime/spread/stop
+   business logic currently inlined in the run loop. Decided to do this AFTER the
+   engine/backtest split, on the clean =strategy -> engine= seam.
+10. DONE: dissolve the root package. Deleted the dead =appConfig= simulation/
+    replay machinery (referenced only by its own test), then extracted =live=
+    (=live_strategy*.go=, clean leaf on =strategy=) and =config= (=RootConfig=,
+    =GlobalConfig=, =Version= — clean leaf on stdlib+yaml). 34 callers re-pointed
+    =trader.X=/=traderpkg.X= -> =config.X= (cmd RootConfig, cmd/main GlobalConfig,
+    api Version); ~10 -> =live.X=. The =github.com/rustyeddy/trader= package no
+    longer exists; nothing imports the bare root path.
+11. Opportunistic (remaining): =synth= (testdata generators) — fold in where it
+    reduces clutter.
 
 * Practical Migration Rules
 
 - Keep behavior unchanged during package moves.
-- Use type aliases in the old root package temporarily to keep churn manageable.
-- Move tests with their packages when possible.
+- Use type aliases in the old root package temporarily to keep churn manageable;
+  add a =migration_exports.go= in each new package for unexported helpers the old
+  package still calls. Delete shim entries as callers migrate to the new import.
+- After the =market.=-qualification pass, audit for the three traps in Lesson 4.
+- Move tests with their packages; verify moved =_test.go= files do not import the
+  root package (that is an import cycle once root imports the new package).
 - Prefer one package boundary per PR or commit.
-- Run =gofmt= after each move.
-- Run focused package tests first, then =make test=.
+- Run =gofmt=, =go vet ./...=, =make test=, and =make sweep= after each move.
 - Preserve the no-floats internal calculation rule throughout the migration.
-- Avoid putting APIs, CLI handlers, or OANDA-specific wire concerns into domain packages.
+- Avoid putting APIs, CLI handlers, or OANDA-specific wire concerns into domain
+  packages.
 
 * Notes
 
-Do not start by splitting =service/=. It already acts as an application boundary between the
-transport layers and the core engine. The larger problem is that the root =trader= package
-currently contains domain types, indicators, data storage, accounting, journals, strategy
-registration, and backtest orchestration.
+Do not start by splitting =service/=. It already acts as an application boundary
+between the transport layers and the core engine.
 
-The best path is to reduce the root package gradually from stable low-level concepts outward.
+The remaining hard problem is the engine/strategy knot. The =StrategyContext=
+rework (step 7) is what makes it tractable: once strategies no longer take
+=*Backtest=, the strategy/regime layer and the engine can be separated cleanly
+instead of being moved together into multiple directories.

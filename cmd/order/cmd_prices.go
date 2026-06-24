@@ -8,11 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/market"
 )
 
-func pricesCmd(rc *trader.RootConfig) *cobra.Command {
+func pricesCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		instrumentsCSV string
 		units          int64
@@ -32,14 +33,14 @@ Defaults to all seven major pairs. Supply --instruments to restrict the list.`,
 				return err
 			}
 
-			names := trader.MajorInstruments()
+			names := market.MajorInstruments()
 			if instrumentsCSV != "" {
 				names = splitInstrumentCSV(instrumentsCSV)
 			}
 
 			oandaNames := make([]string, 0, len(names))
 			for _, name := range names {
-				inst := trader.GetInstrument(name)
+				inst := market.GetInstrument(name)
 				if inst == nil {
 					return fmt.Errorf("unknown instrument: %s", name)
 				}
@@ -72,7 +73,7 @@ func printPrices(prices []oanda.Price, units int64, envName string) {
 
 	for _, p := range prices {
 		traderName := strings.ReplaceAll(p.Instrument, "_", "")
-		inst := trader.GetInstrument(traderName)
+		inst := market.GetInstrument(traderName)
 		if inst == nil {
 			fmt.Printf("%-10s  %10.5f  %10.5f  %10.5f\n", traderName, p.Bid, p.Ask, p.Mid)
 			continue
@@ -96,7 +97,7 @@ func printPrices(prices []oanda.Price, units int64, envName string) {
 
 // pipDecimals returns the number of decimal places to display for an instrument:
 // one extra digit beyond the pip location (e.g. EURUSD pip=-4 → 5 digits).
-func pipDecimals(inst *trader.Instrument) int {
+func pipDecimals(inst *market.Instrument) int {
 	return max(-inst.PipLocation+1, 2)
 }
 
@@ -108,7 +109,7 @@ func splitInstrumentCSV(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		p = trader.NormalizeInstrument(p)
+		p = market.NormalizeInstrument(p)
 		if p != "" {
 			out = append(out, p)
 		}

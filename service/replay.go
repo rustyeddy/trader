@@ -6,7 +6,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // ── Signal types ─────────────────────────────────────────────────────────────
@@ -59,25 +63,25 @@ type ReplayResult struct {
 
 // ReplayRequest drives a single-instrument strategy replay against stored candles.
 type ReplayRequest struct {
-	Instrument string                `json:"instrument"`  // internal format, e.g. "EURUSD"
-	Timeframe  string                `json:"timeframe"`   // "H1" or "D"
-	From       string                `json:"from"`        // "YYYY-MM-DD"
-	To         string                `json:"to"`          // "YYYY-MM-DD"
-	WarmupBars int                   `json:"warmup_bars"` // bars to prime before recording; default 100
-	Strategy   trader.StrategyConfig `json:"strategy"`
-	Exit       trader.ExitConfig     `json:"exit"`
-	Regime     trader.RegimeConfig   `json:"regime"`
+	Instrument string                  `json:"instrument"`  // internal format, e.g. "EURUSD"
+	Timeframe  string                  `json:"timeframe"`   // "H1" or "D"
+	From       string                  `json:"from"`        // "YYYY-MM-DD"
+	To         string                  `json:"to"`          // "YYYY-MM-DD"
+	WarmupBars int                     `json:"warmup_bars"` // bars to prime before recording; default 100
+	Strategy   strategy.StrategyConfig `json:"strategy"`
+	Exit       strategy.ExitConfig     `json:"exit"`
+	Regime     strategy.RegimeConfig   `json:"regime"`
 }
 
 // ── replayPosition tracks open simulated positions during replay ──────────────
 
 type replayPosition struct {
 	id           string
-	side         trader.Side
-	entryPrice   trader.Price
-	currentStop  trader.Price
-	extremePrice trader.Price
-	openTime     trader.Timestamp
+	side         market.Side
+	entryPrice   market.Price
+	currentStop  market.Price
+	extremePrice market.Price
+	openTime     market.Timestamp
 }
 
 // ── RunReplay ────────────────────────────────────────────────────────────────
@@ -86,17 +90,17 @@ type replayPosition struct {
 // every signal the strategy emitted. The first WarmupBars bars prime the
 // indicators without recording signals; the remainder are the live window.
 func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResult, error) {
-	inst := trader.NormalizeInstrument(req.Instrument)
+	inst := market.NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("instrument is required")
 	}
 
 	tf := oandaGranToTF(req.Timeframe)
-	if tf == trader.TF0 {
+	if tf == market.TF0 {
 		return nil, fmt.Errorf("unsupported timeframe %q", req.Timeframe)
 	}
 
-	tr, err := trader.ParseTimeRange(req.From, req.To, req.Timeframe)
+	tr, err := market.ParseTimeRange(req.From, req.To, req.Timeframe)
 	if err != nil {
 		return nil, fmt.Errorf("parse time range: %w", err)
 	}
@@ -106,29 +110,29 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		warmup = 100
 	}
 
-	strategy, err := trader.GetStrategy(req.Strategy)
+	strat, err := strategy.GetStrategy(req.Strategy)
 	if err != nil {
 		return nil, fmt.Errorf("build strategy: %w", err)
 	}
 
-	exit, err := trader.GetExitStrategy(req.Exit, trader.PriceScale)
+	exit, err := strategy.GetExitStrategy(req.Exit, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build exit strategy: %w", err)
 	}
 
-	regime, err := trader.GetRegimeFilter(req.Regime, trader.PriceScale)
+	regime, err := strategy.GetRegimeFilter(req.Regime, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build regime filter: %w", err)
 	}
 
 	// Load all bars. We include warmup bars before the requested range.
 	fromWithWarmup := tr.Start.Time().Add(-warmupDuration(req.Timeframe, warmup))
-	dm := trader.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
-	iter, err := dm.Candles(ctx, trader.CandleRequest{
-		Source:     trader.SourceOanda,
+	dm := marketdata.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
+	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
+		Source:     market.SourceOanda,
 		Instrument: inst,
-		Range: trader.TimeRange{
-			Start: trader.FromTime(fromWithWarmup),
+		Range: market.TimeRange{
+			Start: market.FromTime(fromWithWarmup),
 			End:   tr.End,
 			TF:    tf,
 		},
@@ -138,8 +142,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	}
 	defer func() { _ = iter.Close() }()
 
-	scale := float64(trader.PriceScale)
-	inst_ := trader.GetInstrument(inst)
+	scale := float64(market.PriceScale)
+	inst_ := market.GetInstrument(inst)
 
 	var (
 		bars      []ReplayCandleBar
@@ -148,9 +152,9 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		barIdx    int
 	)
 
-	bt := &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: inst},
-		State:   &trader.BacktestRun{Lots: &trader.LotBook{}},
+	bt := &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: inst},
+		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
 	}
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
@@ -183,11 +187,11 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		if inRange && exit.Ready() {
 			for _, pos := range positions {
 				switch pos.side {
-				case trader.Long:
+				case market.Long:
 					if ct.High > pos.extremePrice {
 						pos.extremePrice = ct.High
 					}
-				case trader.Short:
+				case market.Short:
 					if pos.extremePrice == 0 || ct.Low < pos.extremePrice {
 						pos.extremePrice = ct.Low
 					}
@@ -207,7 +211,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		}
 
 		// Run strategy.
-		plan := strategy.Update(ctx, &ct, bt)
+		plan := strat.Update(ctx, &ct, bt)
 		if plan == nil || (!inRange) {
 			continue
 		}
@@ -215,7 +219,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		// Process closes.
 		for _, cl := range plan.Closes {
 			// Determine side from the closed lot if available, else from our tracker.
-			side := trader.Long
+			side := market.Long
 			if cl.Lot != nil {
 				side = cl.Lot.Side
 				bt.State.Lots.Delete(cl.Lot.ID)
@@ -283,7 +287,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			}
 
 			stopPips := pipsFromDist(op.Side, candle.Close, stop, inst_)
-			posID := trader.NewULID()
+			posID := market.NewULID()
 			signals = append(signals, Signal{
 				Time:      int64(ts),
 				Kind:      SignalOpen,
@@ -295,16 +299,16 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			})
 
 			// Add to the synthetic LotBook so the strategy can see open positions.
-			tc := &trader.TradeCommon{ID: posID}
+			tc := &execution.TradeCommon{ID: posID}
 			tc.Side = op.Side
 			tc.Stop = stop
 			tc.Instrument = inst
-			bt.State.Lots.Add(&trader.Lot{
+			bt.State.Lots.Add(&execution.Lot{
 				TradeCommon:    tc,
 				EntryPrice:     candle.Close,
 				OriginalUnits:  1,
 				RemainingUnits: 1,
-				State:          trader.LotOpen,
+				State:          execution.LotOpen,
 			})
 
 			positions = append(positions, &replayPosition{
@@ -324,7 +328,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	return &ReplayResult{
 		Instrument: inst,
 		Timeframe:  req.Timeframe,
-		Strategy:   strategy.Name(),
+		Strategy:   strat.Name(),
 		From:       req.From,
 		To:         req.To,
 		WarmupBars: warmup,
@@ -335,14 +339,14 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-func sideStr(s trader.Side) string {
-	if s == trader.Short {
+func sideStr(s market.Side) string {
+	if s == market.Short {
 		return "short"
 	}
 	return "long"
 }
 
-func pipsFromDist(_ trader.Side, entry, stop trader.Price, inst *trader.Instrument) float64 {
+func pipsFromDist(_ market.Side, entry, stop market.Price, inst *market.Instrument) float64 {
 	if inst == nil {
 		return 0
 	}

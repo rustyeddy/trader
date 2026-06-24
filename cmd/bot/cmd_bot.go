@@ -24,13 +24,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 var serverURL string
 
-func New(rc *traderpkg.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bot",
 		Short: "Manage live strategy bots",
@@ -167,10 +169,10 @@ section.`,
 			out := cmd.OutOrStdout()
 
 			// Read journal trades once; filter per-bot below.
-			var allTrades []traderpkg.TradeRecord
+			var allTrades []journal.TradeRecord
 			if journalPath != "" {
 				var err error
-				allTrades, err = traderpkg.ReadTradesJSONL(journalPath)
+				allTrades, err = journal.ReadTradesJSONL(journalPath)
 				if err != nil {
 					fmt.Fprintf(out, "warning: could not read journal %s: %v\n\n", journalPath, err)
 				}
@@ -209,8 +211,8 @@ section.`,
 	return cmd
 }
 
-func printBotPL(out io.Writer, botID string, trades []traderpkg.TradeRecord) {
-	var botTrades []traderpkg.TradeRecord
+func printBotPL(out io.Writer, botID string, trades []journal.TradeRecord) {
+	var botTrades []journal.TradeRecord
 	for _, t := range trades {
 		if t.BotID == botID {
 			botTrades = append(botTrades, t)
@@ -247,7 +249,7 @@ func printBotPL(out io.Writer, botID string, trades []traderpkg.TradeRecord) {
 
 // ── bot start ─────────────────────────────────────────────────────────────
 
-func botStartCmd(rc *traderpkg.RootConfig) *cobra.Command {
+func botStartCmd(rc *config.RootConfig) *cobra.Command {
 	var (
 		configFile   string
 		instrument   string
@@ -316,7 +318,7 @@ OANDA positions are NOT closed on stop — they remain on the broker.`,
 // startLocal runs a single bot directly in the current process without a
 // trader serve daemon. It blocks until the bot exits or Ctrl-C is received,
 // then stops the bot and waits for it to finish cleanly.
-func startLocal(cmd *cobra.Command, rc *traderpkg.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
+func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
 	if configFile != "" {
 		return fmt.Errorf("--config is not supported with --local; start bots one at a time")
 	}
@@ -405,9 +407,9 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 		if localWarmup <= 0 {
 			localWarmup = cfg.LocalWarmupBars
 		}
-		regimeCfg := traderpkg.RegimeConfig{Kind: inst.Regime.Kind, Params: inst.Regime.Params}
+		regimeCfg := strategy.RegimeConfig{Kind: inst.Regime.Kind, Params: inst.Regime.Params}
 		for _, f := range inst.Regime.Filters {
-			regimeCfg.Filters = append(regimeCfg.Filters, traderpkg.RegimeConfig{Kind: f.Kind, Params: f.Params})
+			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
 		bc := service.BotConfig{
 			Instrument:   inst.Instrument,
@@ -418,7 +420,7 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 				Kind:            inst.Strategy.Kind,
 				Granularity:     inst.Timeframe,
 				Params:          inst.Strategy.Params,
-				Exit:            traderpkg.ExitConfig{Kind: inst.Exit.Kind, Params: inst.Exit.Params},
+				Exit:            strategy.ExitConfig{Kind: inst.Exit.Kind, Params: inst.Exit.Params},
 				Regime:          regimeCfg,
 				WarmupBars:      inst.WarmupBars,
 				LocalWarmupBars: localWarmup,

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 // PriceInfo holds the current bid/ask snapshot for one instrument.
@@ -28,13 +28,13 @@ type GetPricesRequest struct {
 func (a *Account) GetPrices(ctx context.Context, req GetPricesRequest) ([]PriceInfo, error) {
 	names := req.Instruments
 	if len(names) == 0 {
-		names = trader.MajorInstruments()
+		names = market.MajorInstruments()
 	}
 
 	oandaNames := make([]string, 0, len(names))
-	instMap := make(map[string]*trader.Instrument, len(names))
+	instMap := make(map[string]*market.Instrument, len(names))
 	for _, name := range names {
-		inst := trader.GetInstrument(name)
+		inst := market.GetInstrument(name)
 		if inst == nil {
 			continue
 		}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,12 +41,12 @@ func TestResolveTokenFile_EmptyFileReturnsEmpty(t *testing.T) {
 // ── New command structure ─────────────────────────────────────────────────────
 
 func TestNew_UseName(t *testing.T) {
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	assert.Equal(t, "mcp", cmd.Use)
 }
 
 func TestNew_HasExpectedFlags(t *testing.T) {
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	for _, name := range []string{"token", "account-id", "env", "enable-write", "reports-dir"} {
 		assert.NotNil(t, cmd.Flags().Lookup(name), "expected flag --%s", name)
 	}
@@ -55,21 +55,21 @@ func TestNew_HasExpectedFlags(t *testing.T) {
 func TestNew_DefaultEnvIsPractice(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "")
 	t.Setenv("OANDA_ACCOUNT_ID", "")
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	f := cmd.Flags().Lookup("env")
 	require.NotNil(t, f)
 	assert.Equal(t, "practice", f.DefValue)
 }
 
 func TestNew_DefaultEnableWriteIsFalse(t *testing.T) {
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	f := cmd.Flags().Lookup("enable-write")
 	require.NotNil(t, f)
 	assert.Equal(t, "false", f.DefValue)
 }
 
 func TestNew_DefaultReportsDir(t *testing.T) {
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	f := cmd.Flags().Lookup("reports-dir")
 	require.NotNil(t, f)
 	assert.Equal(t, "/srv/trading/backtests/reports", f.DefValue)
@@ -93,7 +93,7 @@ func TestNew_NoToken_StartsMCPWithNoAuth(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately so ServeStdio returns right away
 
-	cmd := New(&trader.RootConfig{})
+	cmd := New(&config.RootConfig{})
 	cmd.SetContext(ctx)
 
 	err := cmd.RunE(cmd, nil)
@@ -113,7 +113,7 @@ func TestNew_RCTokenUsed_FailsAtServiceInit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := New(&trader.RootConfig{OANDAToken: "bad-token"})
+	cmd := New(&config.RootConfig{OANDAToken: "bad-token"})
 	cmd.SetContext(ctx)
 
 	// service.New builds successfully with any non-empty token; it only
@@ -136,7 +136,7 @@ func TestNew_RCAccountIDApplied(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cmd := New(&trader.RootConfig{OANDAAccountID: "ACC-TEST"})
+	cmd := New(&config.RootConfig{OANDAAccountID: "ACC-TEST"})
 	cmd.SetContext(ctx)
 
 	// No OANDA token → bare service → ServeStdio → nil or ctx error.

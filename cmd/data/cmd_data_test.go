@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +29,7 @@ func TestNew_HasExpectedSubcommands(t *testing.T) {
 // ── update --dry-run ──────────────────────────────────────────────────────────
 
 func TestUpdateCmd_DryRun_PrintsInstrumentsAndTimeframes(t *testing.T) {
-	cmd := newUpdateCmd(&traderpkg.RootConfig{})
+	cmd := newUpdateCmd(&config.RootConfig{})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
@@ -45,7 +45,7 @@ func TestUpdateCmd_DryRun_PrintsInstrumentsAndTimeframes(t *testing.T) {
 }
 
 func TestUpdateCmd_DryRun_DefaultInstrumentsWhenNoneSpecified(t *testing.T) {
-	cmd := newUpdateCmd(&traderpkg.RootConfig{})
+	cmd := newUpdateCmd(&config.RootConfig{})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
@@ -60,7 +60,7 @@ func TestUpdateCmd_DryRun_DefaultInstrumentsWhenNoneSpecified(t *testing.T) {
 }
 
 func TestUpdateCmd_DryRun_WithFromDate(t *testing.T) {
-	cmd := newUpdateCmd(&traderpkg.RootConfig{})
+	cmd := newUpdateCmd(&config.RootConfig{})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
@@ -72,7 +72,7 @@ func TestUpdateCmd_DryRun_WithFromDate(t *testing.T) {
 }
 
 func TestUpdateCmd_DryRun_BadFromReturnsError(t *testing.T) {
-	cmd := newUpdateCmd(&traderpkg.RootConfig{})
+	cmd := newUpdateCmd(&config.RootConfig{})
 	_ = cmd.Flags().Set("dry-run", "false")
 	_ = cmd.Flags().Set("instruments", "EURUSD")
 	_ = cmd.Flags().Set("from", "not-a-date")

@@ -5,7 +5,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
 )
@@ -15,7 +16,7 @@ var (
 	all      bool
 )
 
-func New(_ *trader.RootConfig) *cobra.Command {
+func New(_ *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Parse a ChatGPT forex review CSV and print trade candidates and watchlist",
@@ -45,7 +46,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "----\t------\t-----\t----------\t-------\t----------")
 
 	for _, r := range rows {
-		if !all && r.Status == trader.StatusNoTrade {
+		if !all && r.Status == review.StatusNoTrade {
 			continue
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s–%s\t%s–%s\n",

@@ -3,7 +3,7 @@ package account
 import (
 	"testing"
 
-	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -23,13 +23,13 @@ func flagCmd(name, val string, dest *string, changed bool) *cobra.Command {
 
 func TestResolveToken_FlagTakesPrecedence(t *testing.T) {
 	cmd := flagCmd("token", "flag-tok", &token, true)
-	result := resolveToken(cmd, &traderpkg.RootConfig{OANDAToken: "rc-tok"})
+	result := resolveToken(cmd, &config.RootConfig{OANDAToken: "rc-tok"})
 	assert.Equal(t, "flag-tok", result)
 }
 
 func TestResolveToken_RCTokenUsedWhenFlagNotSet(t *testing.T) {
 	cmd := flagCmd("token", "", &token, false)
-	result := resolveToken(cmd, &traderpkg.RootConfig{OANDAToken: "rc-tok"})
+	result := resolveToken(cmd, &config.RootConfig{OANDAToken: "rc-tok"})
 	assert.Equal(t, "rc-tok", result)
 }
 
@@ -51,13 +51,13 @@ func TestResolveToken_NilRCNoEnvReturnsEmpty(t *testing.T) {
 
 func TestResolveEnv_FlagTakesPrecedence(t *testing.T) {
 	cmd := flagCmd("env", "live", &env, true)
-	result := resolveEnv(cmd, &traderpkg.RootConfig{OANDAEnv: "practice"})
+	result := resolveEnv(cmd, &config.RootConfig{OANDAEnv: "practice"})
 	assert.Equal(t, "live", result)
 }
 
 func TestResolveEnv_RCEnvUsedWhenFlagNotSet(t *testing.T) {
 	cmd := flagCmd("env", "practice", &env, false)
-	result := resolveEnv(cmd, &traderpkg.RootConfig{OANDAEnv: "live"})
+	result := resolveEnv(cmd, &config.RootConfig{OANDAEnv: "live"})
 	assert.Equal(t, "live", result)
 }
 

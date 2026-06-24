@@ -9,15 +9,14 @@ import (
 	"os"
 	"time"
 
+	"github.com/rustyeddy/trader/config"
 	"github.com/spf13/cobra"
-
-	traderpkg "github.com/rustyeddy/trader"
 )
 
 var serverURL string
 
 // New returns the top-level "health" cobra command.
-func New(rc *traderpkg.RootConfig) *cobra.Command {
+func New(rc *config.RootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Check the health and version of a running trader serve",

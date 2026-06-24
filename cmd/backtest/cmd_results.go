@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -134,7 +134,7 @@ func runBacktestGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read backtest result: %w", err)
 	}
 
-	trader.PrintSummary(cmd.OutOrStdout(), summary)
+	backtest.PrintSummary(cmd.OutOrStdout(), summary)
 	return nil
 }
 

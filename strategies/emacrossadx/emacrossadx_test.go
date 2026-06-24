@@ -4,20 +4,22 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // mkCandle builds a CandleTime with a symmetric spread around close so that
 // the ADX indicator receives valid OHLC data.
-func mkCandle(close float64) *trader.CandleTime {
-	toP := func(x float64) trader.Price {
-		return trader.Price(x*float64(trader.PriceScale) + 0.5)
+func mkCandle(close float64) *market.CandleTime {
+	toP := func(x float64) market.Price {
+		return market.Price(x*float64(market.PriceScale) + 0.5)
 	}
 	c := toP(close)
-	spread := trader.Price(1000) // ~10 pips
-	return &trader.CandleTime{Candle: trader.Candle{
+	spread := market.Price(1000) // ~10 pips
+	return &market.CandleTime{Candle: market.Candle{
 		Open:  c,
 		High:  c + spread,
 		Low:   c - spread,
@@ -26,8 +28,8 @@ func mkCandle(close float64) *trader.CandleTime {
 }
 
 // feedUpdates drives s with a slice of close prices and returns the plans.
-func feedUpdates(s *Strategy, closes []float64) []*trader.StrategyPlan {
-	plans := make([]*trader.StrategyPlan, 0, len(closes))
+func feedUpdates(s *Strategy, closes []float64) []*strategy.StrategyPlan {
+	plans := make([]*strategy.StrategyPlan, 0, len(closes))
 	for _, c := range closes {
 		plans = append(plans, s.Update(context.Background(), mkCandle(c), nil))
 	}
@@ -42,7 +44,7 @@ func minCfg() Config {
 		FastPeriod:      3,
 		SlowPeriod:      5,
 		ADXPeriod:       100, // won't be ready in our test series
-		Scale:           trader.PriceScale,
+		Scale:           market.PriceScale,
 		RequireADXReady: false,
 	}
 }
@@ -57,9 +59,9 @@ func TestNew_Valid(t *testing.T) {
 
 func TestNew_ZeroPeriods(t *testing.T) {
 	cfgs := []Config{
-		{FastPeriod: 0, SlowPeriod: 5, ADXPeriod: 14, Scale: trader.PriceScale},
-		{FastPeriod: 3, SlowPeriod: 0, ADXPeriod: 14, Scale: trader.PriceScale},
-		{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 0, Scale: trader.PriceScale},
+		{FastPeriod: 0, SlowPeriod: 5, ADXPeriod: 14, Scale: market.PriceScale},
+		{FastPeriod: 3, SlowPeriod: 0, ADXPeriod: 14, Scale: market.PriceScale},
+		{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 0, Scale: market.PriceScale},
 	}
 	for _, cfg := range cfgs {
 		_, err := New(cfg)
@@ -69,7 +71,7 @@ func TestNew_ZeroPeriods(t *testing.T) {
 }
 
 func TestNew_FastMustBeLessThanSlow(t *testing.T) {
-	_, err := New(Config{FastPeriod: 5, SlowPeriod: 3, ADXPeriod: 14, Scale: trader.PriceScale})
+	_, err := New(Config{FastPeriod: 5, SlowPeriod: 3, ADXPeriod: 14, Scale: market.PriceScale})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FastPeriod must be < SlowPeriod")
 }
@@ -127,7 +129,7 @@ func TestBuild_FastGteSlowReturnsError(t *testing.T) {
 func TestStrategy_Name(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 9, SlowPeriod: 21, ADXPeriod: 14,
-		Scale: trader.PriceScale, ADXThreshold: 25.0,
+		Scale: market.PriceScale, ADXThreshold: 25.0,
 	})
 	require.NoError(t, err)
 	assert.Contains(t, s.Name(), "EMA_CROSS_ADX")
@@ -155,7 +157,7 @@ func TestStrategy_Ready_TrueAfterEMAWarmup(t *testing.T) {
 func TestStrategy_RequireADXReady_DelaysReadiness(t *testing.T) {
 	cfg := Config{
 		FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 14,
-		Scale:           trader.PriceScale,
+		Scale:           market.PriceScale,
 		RequireADXReady: true,
 	}
 	s, err := New(cfg)
@@ -222,12 +224,12 @@ func TestStrategy_Update_CrossUpEmitsLongOpen(t *testing.T) {
 	}
 
 	plans := feedUpdates(s, closes)
-	var opens []*trader.OpenRequest
+	var opens []*execution.OpenRequest
 	for _, plan := range plans {
 		opens = append(opens, plan.Opens...)
 	}
 	require.NotEmpty(t, opens, "expected at least one long open after EMA cross up")
-	assert.Equal(t, trader.Long, opens[0].Side)
+	assert.Equal(t, market.Long, opens[0].Side)
 }
 
 func TestStrategy_Update_CrossDownEmitsShortOpen(t *testing.T) {
@@ -251,12 +253,12 @@ func TestStrategy_Update_CrossDownEmitsShortOpen(t *testing.T) {
 	}
 
 	plans := feedUpdates(s, closes)
-	var opens []*trader.OpenRequest
+	var opens []*execution.OpenRequest
 	for _, plan := range plans {
 		opens = append(opens, plan.Opens...)
 	}
 	require.NotEmpty(t, opens, "expected at least one short open after EMA cross down")
-	assert.Equal(t, trader.Short, opens[0].Side)
+	assert.Equal(t, market.Short, opens[0].Side)
 }
 
 func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
@@ -266,7 +268,7 @@ func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
 		FastPeriod:      3,
 		SlowPeriod:      5,
 		ADXPeriod:       5,
-		Scale:           trader.PriceScale,
+		Scale:           market.PriceScale,
 		ADXThreshold:    99.0,
 		RequireADXReady: false,
 	}
@@ -296,13 +298,13 @@ func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
 // ── absPriceSum ───────────────────────────────────────────────────────────────
 
 func TestAbsPriceSum_Positive(t *testing.T) {
-	assert.Equal(t, trader.PriceSum(5), absPriceSum(5))
+	assert.Equal(t, market.PriceSum(5), absPriceSum(5))
 }
 
 func TestAbsPriceSum_Negative(t *testing.T) {
-	assert.Equal(t, trader.PriceSum(5), absPriceSum(-5))
+	assert.Equal(t, market.PriceSum(5), absPriceSum(-5))
 }
 
 func TestAbsPriceSum_Zero(t *testing.T) {
-	assert.Equal(t, trader.PriceSum(0), absPriceSum(0))
+	assert.Equal(t, market.PriceSum(0), absPriceSum(0))
 }

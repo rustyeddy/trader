@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func TestNew_HasJournalSubcommand(t *testing.T) {
 // ── journal command flags ─────────────────────────────────────────────────────
 
 func TestJournalCmd_HasExpectedFlags(t *testing.T) {
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	flags := cmd.Flags()
 	for _, name := range []string{
@@ -42,7 +42,7 @@ func TestJournalCmd_HasExpectedFlags(t *testing.T) {
 func TestJournalCmd_DefaultEnvIsPractice(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "")
 	t.Setenv("OANDA_ACCOUNT_ID", "")
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	envFlag := cmd.Flags().Lookup("env")
 	require.NotNil(t, envFlag)
@@ -50,7 +50,7 @@ func TestJournalCmd_DefaultEnvIsPractice(t *testing.T) {
 }
 
 func TestJournalCmd_DefaultJournalIsJSON(t *testing.T) {
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	f := cmd.Flags().Lookup("journal")
 	require.NotNil(t, f)
@@ -58,7 +58,7 @@ func TestJournalCmd_DefaultJournalIsJSON(t *testing.T) {
 }
 
 func TestJournalCmd_DefaultTradesFile(t *testing.T) {
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	f := cmd.Flags().Lookup("trades-file")
 	require.NotNil(t, f)
@@ -66,7 +66,7 @@ func TestJournalCmd_DefaultTradesFile(t *testing.T) {
 }
 
 func TestJournalCmd_DefaultEquityFile(t *testing.T) {
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	f := cmd.Flags().Lookup("equity-file")
 	require.NotNil(t, f)
@@ -74,7 +74,7 @@ func TestJournalCmd_DefaultEquityFile(t *testing.T) {
 }
 
 func TestJournalCmd_DefaultBackfillFromIsZero(t *testing.T) {
-	rc := &trader.RootConfig{}
+	rc := &config.RootConfig{}
 	cmd := newJournalCmd(rc)
 	f := cmd.Flags().Lookup("backfill-from")
 	require.NotNil(t, f)
@@ -85,7 +85,7 @@ func TestJournalCmd_DefaultBackfillFromIsZero(t *testing.T) {
 
 // runJournalCmd calls cmd.RunE with a background context so notifyContext
 // does not panic on a nil parent.
-func runJournalCmd(rc *trader.RootConfig) error {
+func runJournalCmd(rc *config.RootConfig) error {
 	cmd := newJournalCmd(rc)
 	cmd.SetContext(context.Background())
 	return cmd.RunE(cmd, nil)
@@ -95,7 +95,7 @@ func TestJournalCmd_NoToken_ReturnsError(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "")
 	// Redirect HOME so service.New cannot find ~/.config/oanda/pat.txt.
 	t.Setenv("HOME", t.TempDir())
-	err := runJournalCmd(&trader.RootConfig{})
+	err := runJournalCmd(&config.RootConfig{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "token")
 }
@@ -104,14 +104,14 @@ func TestJournalCmd_RCTokenUsedWhenFlagNotChanged(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "")
 	// rc has a token so service.New passes the token check and fails later
 	// (attempting a real OANDA network call), but NOT with "no OANDA token".
-	err := runJournalCmd(&trader.RootConfig{OANDAToken: "rc-token"})
+	err := runJournalCmd(&config.RootConfig{OANDAToken: "rc-token"})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "no OANDA token")
 }
 
 func TestJournalCmd_EnvTokenUsedWhenFlagAndRCAreEmpty(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "env-token")
-	err := runJournalCmd(&trader.RootConfig{})
+	err := runJournalCmd(&config.RootConfig{})
 	require.Error(t, err)
 	// Got past the token check; fails on the network call.
 	assert.NotContains(t, err.Error(), "no OANDA token")

@@ -9,10 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 )
 
-func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
+func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 	var (
 		instrument string
 		timeframe  string
@@ -34,11 +36,11 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 --from and --to are inclusive dates in YYYY-MM-DD format.
 --units adds a USD column showing the dollar value of each pip measurement.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			inst := trader.NormalizeInstrument(instrument)
+			inst := market.NormalizeInstrument(instrument)
 			if inst == "" {
 				return fmt.Errorf("blank --instrument")
 			}
-			instMeta := trader.GetInstrument(inst)
+			instMeta := market.GetInstrument(inst)
 			if instMeta == nil {
 				return fmt.Errorf("unknown instrument: %s", inst)
 			}
@@ -57,7 +59,7 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 			// End is exclusive in TimeRange; add one day to include the --to date.
 			toExcl := to.AddDate(0, 0, 1)
 
-			tr, err := trader.ParseTimeRange(
+			tr, err := market.ParseTimeRange(
 				from.Format("2006-01-02"),
 				toExcl.Format("2006-01-02"),
 				timeframe,
@@ -66,15 +68,15 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 				return fmt.Errorf("bad range: %w", err)
 			}
 
-			analyzers := []trader.Analyzer{
-				trader.NewSwingAnalyzer(instMeta),
-				trader.NewSpreadAnalyzer(instMeta),
-				trader.NewTrendAnalyzer(),
-				trader.NewSessionAnalyzer(instMeta),
+			analyzers := []marketdata.Analyzer{
+				marketdata.NewSwingAnalyzer(instMeta),
+				marketdata.NewSpreadAnalyzer(instMeta),
+				marketdata.NewTrendAnalyzer(),
+				marketdata.NewSessionAnalyzer(instMeta),
 			}
 
-			dm := trader.NewDataManager([]string{inst}, from, toExcl)
-			req := trader.CandleRequest{
+			dm := marketdata.NewDataManager([]string{inst}, from, toExcl)
+			req := marketdata.CandleRequest{
 				Source:     source,
 				Instrument: inst,
 				Range:      tr,
@@ -86,7 +88,7 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 				return fmt.Errorf("open candles: %w", err)
 			}
 
-			if err := trader.RunAnalysis(ctx, itr, analyzers); err != nil {
+			if err := marketdata.RunAnalysis(ctx, itr, analyzers); err != nil {
 				return fmt.Errorf("analysis: %w", err)
 			}
 
@@ -112,7 +114,7 @@ func newStatsCmd(_ *trader.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func printAnalysis(w io.Writer, instMeta *trader.Instrument, inst, tf string, from, to time.Time, analyzers []trader.Analyzer, units int64, rate float64) {
+func printAnalysis(w io.Writer, instMeta *market.Instrument, inst, tf string, from, to time.Time, analyzers []marketdata.Analyzer, units int64, rate float64) {
 	header := fmt.Sprintf("%s %s   %s → %s",
 		inst, tf,
 		from.Format("2006-01-02"),

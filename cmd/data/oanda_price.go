@@ -9,8 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
-	trader "github.com/rustyeddy/trader"
 )
 
 // oandaAuth holds the optional OANDA credentials shared by data commands that
@@ -33,7 +34,7 @@ func defaultOandaAuth() oandaAuth {
 // applyGlobalOANDA overrides auth fields from the global config (rc) for any
 // flag that was not explicitly set by the user. The priority chain is:
 // explicit flag > global config > env var / default.
-func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *trader.RootConfig) {
+func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *config.RootConfig) {
 	if rc == nil {
 		return
 	}
@@ -69,7 +70,7 @@ func fetchMidPrices(ctx context.Context, auth oandaAuth, instruments []string) (
 
 	oandaNames := make([]string, 0, len(instruments))
 	for _, name := range instruments {
-		inst := trader.GetInstrument(name)
+		inst := market.GetInstrument(name)
 		if inst == nil {
 			continue
 		}

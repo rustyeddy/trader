@@ -1,0 +1,739 @@
+package marketdata
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/rustyeddy/trader/log"
+	"github.com/rustyeddy/trader/market"
+)
+
+var defaultDataManagerInstruments = []string{"EURUSD", "USDJPY", "GBPUSD"}
+
+// DataManager is responsible for identifing data files that are
+// missing accross all instruments. For missing datasets, ensure they
+// are downloaded, for datasets that are downloaded, make sure they
+// are made into candles.
+type DataManager struct {
+	Start       time.Time
+	End         time.Time
+	Instruments []string
+	*downloader
+
+	inventory *Inventory
+	wants     *Wantlist
+	plan      *Plan
+}
+
+func GetDataManager() *DataManager {
+	end := time.Now()
+	start := time.Date(2014, time.January, 1, 1, 0, 0, 0, time.UTC)
+	return NewDataManager(defaultDataManagerInstruments, start, end)
+}
+
+// NewDataManager constructs a DataManager for the given instruments and time range.
+func NewDataManager(instruments []string, start, end time.Time) *DataManager {
+	return &DataManager{
+		Start:       start,
+		End:         end,
+		Instruments: normalizeInstruments(instruments),
+	}
+}
+
+// Init will get DataManager ready to go.
+func (dm *DataManager) Init() {
+	if dm.downloader == nil {
+		dm.downloader = NewDownloader()
+	}
+}
+
+func normalizeInstruments(instruments []string) []string {
+	if len(instruments) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(instruments))
+	seen := make(map[string]struct{}, len(instruments))
+	for _, instrument := range instruments {
+		inst := market.NormalizeInstrument(instrument)
+		if inst == "" {
+			continue
+		}
+		if _, ok := seen[inst]; ok {
+			continue
+		}
+		seen[inst] = struct{}{}
+		out = append(out, inst)
+	}
+	return out
+}
+
+func (dm *DataManager) rebuildPlanState(ctx context.Context) error {
+	var err error
+
+	log.Info("Building inventory")
+	dm.inventory, err = BuildInventory(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Building wantlist")
+	dm.wants, err = dm.BuildWantList(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Planning")
+	dm.plan, err = dm.Plan(ctx)
+	if err != nil {
+		return err
+	}
+	dm.plan.Log()
+	return nil
+}
+
+func (dm *DataManager) Sync(ctx context.Context, download, build bool) error {
+	if err := dm.rebuildPlanState(ctx); err != nil {
+		return err
+	}
+
+	if download {
+		log.Info("Starting downloads")
+		if err := dm.ExecuteDownloads(ctx); err != nil {
+			return err
+		}
+	}
+
+	if build {
+		if err := dm.rebuildPlanState(ctx); err != nil {
+			return err
+		}
+
+		log.Info("Making candles")
+		if err := dm.candleMaker(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func BuildInventory(ctx context.Context) (*Inventory, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	inv := NewInventory()
+	if err := store.scanFiles(inv); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
+	w := NewWantlist()
+	for _, sym := range dm.Instruments {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for year := dm.End.Year(); year >= dm.Start.Year(); year-- {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			startMonth := 1
+			endMonth := 12
+			if year == dm.Start.Year() {
+				startMonth = int(dm.Start.Month())
+			}
+			if year == dm.End.Year() {
+				// End is exclusive: include month M only if dm.End is after the 1st of M
+				endMonth = int(dm.End.Month())
+				monthStart := time.Date(year, dm.End.Month(), 1, 0, 0, 0, 0, time.UTC)
+				if !dm.End.After(monthStart) {
+					endMonth--
+				}
+				if endMonth < 1 {
+					continue
+				}
+			}
+			for month := startMonth; month <= endMonth; month++ {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				for _, tf := range []market.Timeframe{market.M1, market.H1, market.D1} {
+					key := Key{sym, market.SourceCandles, KindCandle, tf, year, month, 0, 0}
+					if reason, needed := dm.inventory.WantReasonFor(key); needed {
+						w.PutKey(key, reason)
+					}
+				}
+
+				keys, err := RequiredTickHoursForMonth(market.SourceDukascopy, sym, year, month)
+				if err != nil {
+					return nil, err
+				}
+				for _, key := range keys {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+					if reason, needed := dm.inventory.WantReasonFor(key); needed {
+						w.PutKey(key, reason)
+					}
+				}
+			}
+		}
+	}
+	return w, nil
+}
+
+func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
+	plan := &Plan{}
+
+	// walk through the want list.  For all ticks on the want list enque on download list
+	// For all candles on want list determine if the provider is complete and ready
+	var walkErr error
+	dm.wants.Range(func(k Key, w Want) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
+		switch k.Kind {
+		case KindTick:
+			// we could fire this off right now to get it started...
+			plan.Download = append(plan.Download, k)
+
+		case KindCandle:
+			switch k.TF {
+			case market.M1:
+				// if it is M1 we need to determine if all the required ticks
+				// are already part of inventory. Otherwise this candle will
+				// have to continue to wait for all ticks to be ready
+				// for the month involved, are all (or enough) tick files present
+				ready, keys, _, err := dm.inventory.TicksComplete(k)
+				if err != nil {
+					walkErr = err
+					return false
+				}
+				if ready {
+					bt := BuildTask{
+						Key:    k,
+						Inputs: keys,
+					}
+					plan.BuildM1 = append(plan.BuildM1, bt)
+				}
+
+			case market.H1:
+				// H1 is only  dependent on M1, if M1 is in inventory we can
+				// build H1 straight away
+				km1 := k
+				km1.TF = market.M1
+				found := dm.inventory.HasComplete(km1)
+				if found {
+					bt := BuildTask{
+						Key:    k,
+						Inputs: []Key{km1},
+					}
+					plan.BuildH1 = append(plan.BuildH1, bt)
+				}
+
+			case market.D1:
+				// D1 is only dependent on H1, if H1 is in inventory we can
+				// build D1 straight away
+				kh1 := k
+				kh1.TF = market.H1
+				found := dm.inventory.HasComplete(kh1)
+				if found {
+					bt := BuildTask{
+						Key:    k,
+						Inputs: []Key{kh1},
+					}
+					plan.BuildD1 = append(plan.BuildD1, bt)
+				}
+
+			default:
+				walkErr = fmt.Errorf("bad timeframe %v for candle key %+v", k.TF, k)
+				return false
+
+			}
+
+		default:
+			walkErr = fmt.Errorf("unknown key kind %v for key %+v", k.Kind, k)
+			return false
+		}
+		return true
+	})
+
+	if walkErr != nil {
+		return plan, walkErr
+	}
+	return plan, nil
+}
+
+func (dm *DataManager) candleMaker(ctx context.Context) error {
+	if dm.plan == nil || dm.plan.Empty() {
+		return nil
+	}
+
+	builders := []struct {
+		tf market.Timeframe
+		fn func(context.Context, Key, []Key, *Wantlist) error
+	}{
+		{tf: market.M1, fn: buildM1},
+		{tf: market.H1, fn: buildH1},
+		{tf: market.D1, fn: buildD1},
+	}
+
+	for _, builder := range builders {
+		for _, bt := range dm.plan.BuildTasks(builder.tf) {
+			if err := builder.fn(ctx, bt.Key, bt.Inputs, dm.wants); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
+	if k.Kind != KindCandle {
+		return fmt.Errorf("buildM1 requires candle key, got kind=%v", k.Kind)
+	}
+	if k.TF != market.M1 {
+		return fmt.Errorf("buildM1 wrong timeframe: %v", k.TF)
+	}
+	if k.Day != 0 || k.Hour != 0 {
+		return fmt.Errorf("buildM1 requires monthly candle key, got day=%d hour=%d", k.Day, k.Hour)
+	}
+	if len(inputs) == 0 {
+		return nil
+	}
+
+	sort.Slice(inputs, func(i, j int) bool {
+		return inputs[i].before(inputs[j])
+	})
+
+	monthStart := time.Date(k.Year, time.Month(k.Month), 1, 0, 0, 0, 0, time.UTC)
+
+	monthSet, err := newMonthlyCandleSet(
+		market.NormalizeInstrument(k.Instrument),
+		market.M1,
+		market.FromTime(monthStart),
+		market.PriceScale,
+		market.SourceCandles,
+	)
+	if err != nil {
+		return fmt.Errorf("new monthly candleset for %v: %w", k, err)
+	}
+
+	for _, tickKey := range inputs {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if tickKey.Kind != KindTick || tickKey.TF != market.Ticks {
+			return fmt.Errorf("buildM1 input must be hourly tick key, got %+v", tickKey)
+		}
+
+		it, err := store.OpenTickIterator(tickKey)
+		if err != nil {
+			tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+			return fmt.Errorf("open tick iterator %s: %w", tickPath, err)
+		}
+
+		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
+		if err != nil {
+			tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+			return fmt.Errorf("build hour M1 %s: %w", tickPath, err)
+		}
+		if hourSet == nil {
+			continue
+		}
+
+		if err := monthSet.Merge(hourSet); err != nil {
+			tickPath, err2 := store.PathForAsset(tickKey)
+			if err2 != nil {
+				tickPath = "<path unavailable>"
+			}
+			kPath, err2 := store.PathForAsset(k)
+			if err2 != nil {
+				kPath = "<path unavailable>"
+			}
+			return fmt.Errorf("merge hour %s into month %s: %w",
+				tickPath, kPath, err)
+		}
+	}
+
+	if err := store.WriteCSV(monthSet); err != nil {
+		kPath, _ := store.PathForAsset(k)
+		return fmt.Errorf("write monthly M1 %s: %w", kPath, err)
+	}
+
+	wants.Delete(k)
+	return nil
+}
+
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTick]) (_ *candleSet, err error) {
+	defer func() {
+		if it != nil {
+			closeErr := it.Close()
+			if err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
+	}()
+
+	if key.Kind != KindTick || key.TF != market.Ticks {
+		return nil, fmt.Errorf("buildHourM1FromTickIterator requires tick key, got %+v", key)
+	}
+
+	hourStartTime := time.Date(
+		key.Year,
+		time.Month(key.Month),
+		key.Day,
+		key.Hour,
+		0, 0, 0, time.UTC,
+	)
+	hourStartMS := market.TimeMilliFromTime(hourStartTime)
+
+	const minutesPerHour = 60
+
+	cs := &candleSet{
+		Instrument: market.NormalizeInstrument(key.Instrument),
+		Start:      market.FromTime(hourStartTime),
+		Timeframe:  market.M1,
+		Scale:      market.PriceScale,
+		Source:     market.SourceCandles,
+		Candles:    make([]market.Candle, minutesPerHour),
+		Valid:      make([]uint64, (minutesPerHour+63)/64),
+	}
+
+	var (
+		curIdx        = -1
+		cur           market.Candle
+		spreadSum     int64
+		havePrevClose bool
+		prevClose     market.Price
+	)
+
+	finalize := func() error {
+		if curIdx < 0 || cur.Ticks <= 0 {
+			return nil
+		}
+
+		ticks := int64(cur.Ticks)
+		cur.AvgSpread = market.Price((spreadSum + ticks/2) / ticks)
+
+		cs.Candles[curIdx] = cur
+		cs.SetValid(curIdx)
+
+		prevClose = cur.Close
+		havePrevClose = true
+		return nil
+	}
+
+	fillFlat := func(idx int, px market.Price) {
+		// Dense placeholder candle. Intentionally NOT marked valid.
+		cs.Candles[idx] = market.Candle{
+			Open:  px,
+			High:  px,
+			Low:   px,
+			Close: px,
+			Ticks: 0,
+		}
+	}
+
+	for it.Next() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		tick := it.Item()
+		ts := tick.TimeMillis
+		if ts <= 0 {
+			return nil, fmt.Errorf("bad tick timestamp: %d", tick.TimeMillis)
+		}
+
+		minuteOpen := ts.FloorToMinute()
+		idx := int((minuteOpen - hourStartMS) / market.MinuteInMS)
+		if idx < 0 || idx >= minutesPerHour {
+			return nil, fmt.Errorf(
+				"tick outside hour window: minute=%d hourStart=%d idx=%d",
+				minuteOpen, hourStartMS, idx,
+			)
+		}
+
+		mid := tick.Mid()
+		spread := tick.Spread()
+
+		if curIdx == -1 {
+			curIdx = idx
+			cur = market.Candle{
+				Open:      mid,
+				High:      mid,
+				Low:       mid,
+				Close:     mid,
+				Ticks:     1,
+				MaxSpread: spread,
+			}
+			spreadSum = int64(spread)
+			continue
+		}
+
+		if idx == curIdx {
+			if mid > cur.High {
+				cur.High = mid
+			}
+			if mid < cur.Low {
+				cur.Low = mid
+			}
+			cur.Close = mid
+			cur.Ticks++
+
+			if spread > cur.MaxSpread {
+				cur.MaxSpread = spread
+			}
+			spreadSum += int64(spread)
+			continue
+		}
+
+		if idx < curIdx {
+			return nil, fmt.Errorf("out-of-order tick minute: idx %d < curIdx %d", idx, curIdx)
+		}
+
+		if err := finalize(); err != nil {
+			return nil, err
+		}
+
+		if havePrevClose {
+			for m := curIdx + 1; m < idx; m++ {
+				if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+					fillFlat(m, prevClose)
+				}
+			}
+		}
+
+		curIdx = idx
+		cur = market.Candle{
+			Open:      mid,
+			High:      mid,
+			Low:       mid,
+			Close:     mid,
+			Ticks:     1,
+			MaxSpread: spread,
+		}
+		spreadSum = int64(spread)
+	}
+
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+
+	if curIdx == -1 {
+		return nil, nil
+	}
+
+	if err := finalize(); err != nil {
+		return nil, err
+	}
+
+	if havePrevClose {
+		for m := curIdx + 1; m < minutesPerHour; m++ {
+			if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+				fillFlat(m, prevClose)
+			}
+		}
+	}
+
+	return cs, nil
+}
+
+func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err error) {
+	if k.TF != market.H1 {
+		return fmt.Errorf("buildH1 wrong timeframe: %v", k.TF)
+	}
+	if len(inputs) != 1 {
+		return fmt.Errorf("buildH1 expected 1 input, got %d", len(inputs))
+	}
+
+	km1 := inputs[0]
+	if km1.TF != market.M1 {
+		return fmt.Errorf("buildH1 expected M1 input, got %v", km1.TF)
+	}
+
+	cs, err := store.ReadCSV(km1)
+	if err != nil {
+		return err
+	}
+
+	h1, err := cs.Aggregate(market.H1) // or cs.Aggregate(k.TF)
+	if err != nil {
+		return err
+	}
+
+	if err := store.WriteCSV(h1); err != nil {
+		return err
+	}
+
+	wants.Delete(k)
+	return nil
+}
+
+func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
+	if k.TF != market.D1 {
+		return fmt.Errorf("buildD1 wrong timeframe: %v", k.TF)
+	}
+	if len(inputs) != 1 {
+		return fmt.Errorf("buildD1 expected 1 input, got %d", len(inputs))
+	}
+
+	kh1 := inputs[0]
+	if kh1.TF != market.H1 {
+		return fmt.Errorf("buildD1 expected H1 input, got %v", kh1.TF)
+	}
+
+	cs, err := store.ReadCSV(kh1)
+	if err != nil {
+		return err
+	}
+
+	d1, err := cs.Aggregate(market.D1) // or cs.Aggregate(k.TF)
+	if err != nil {
+		return err
+	}
+
+	if err := store.WriteCSV(d1); err != nil {
+		return err
+	}
+
+	wants.Delete(k)
+	return nil
+}
+
+func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dm.plan == nil {
+		return fmt.Errorf("nil plan")
+	}
+	if len(dm.plan.Download) == 0 {
+		return nil
+	}
+
+	q := make(chan Key, 1024)
+	wg := dm.downloader.startDownloader(ctx, dm, q)
+	defer wg.Wait()
+	defer close(q)
+
+	// Reverse so the most recent months download first — downloads take weeks
+	// and recent data is immediately useful for backtesting.
+	slices.Reverse(dm.plan.Download)
+	for _, key := range dm.plan.Download {
+
+		if ok := store.IsUsableTickFile(key); ok {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case q <- key:
+		}
+	}
+	return nil
+}
+
+type CandleRequest struct {
+	Source     string
+	Instrument string
+	Range      market.TimeRange
+	Strict     bool
+}
+
+func (cr CandleRequest) timeframe() market.Timeframe {
+	return cr.Range.TF
+}
+func (cr CandleRequest) Key() Key {
+	source := normalizeSource(cr.Source)
+	if source == "" {
+		source = market.SourceOanda
+	}
+	return Key{
+		Instrument: cr.Instrument,
+		Source:     source,
+		Kind:       KindCandle,
+		TF:         cr.timeframe(),
+	}
+}
+
+func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (market.CandleIterator, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	inst := market.NormalizeInstrument(req.Instrument)
+	if inst == "" {
+		return nil, fmt.Errorf("blank instrument")
+	}
+
+	switch req.timeframe() {
+	case market.M1, market.H1, market.D1:
+	default:
+		return nil, fmt.Errorf("unsupported candle timeframe: %v", req.timeframe())
+	}
+	if !req.Range.Valid() {
+		return nil, fmt.Errorf("invalid candle range: %s", req.Range)
+	}
+
+	source := normalizeSource(req.Source)
+	if source == "" {
+		source = market.SourceOanda
+	}
+
+	// months := MonthsInRange(req.Range)
+	months := req.Range.MonthsInRange()
+	iters := make([]market.CandleIterator, 0, len(months))
+
+	for _, ym := range months {
+		if err := ctx.Err(); err != nil {
+			_ = closeCandleIterators(iters)
+			return nil, err
+		}
+
+		key := Key{
+			Instrument: inst,
+			Source:     source,
+			Kind:       KindCandle,
+			TF:         req.Range.TF,
+			Year:       ym.Year,
+			Month:      ym.Month,
+		}
+
+		cs, err := store.ReadCSV(key)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && !req.Strict {
+				continue
+			}
+			_ = closeCandleIterators(iters)
+			return nil, fmt.Errorf("load candles %v: %w", key, err)
+		}
+
+		iters = append(iters, newCandleSetIterator(cs, req.Range))
+	}
+
+	return newChainedCandleIterator(iters...), nil
+}

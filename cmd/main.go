@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/cmd/account"
 	"github.com/rustyeddy/trader/cmd/backtest"
 	"github.com/rustyeddy/trader/cmd/bot"
@@ -17,10 +16,13 @@ import (
 	"github.com/rustyeddy/trader/cmd/replay"
 	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/serve"
+	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/spf13/cobra"
 
 	// Provider registration via init().
-	_ "github.com/rustyeddy/trader/data/dukascopy"
+	_ "github.com/rustyeddy/trader/marketdata/dukascopy"
 
 	// Strategy registration via init().
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
@@ -37,7 +39,7 @@ import (
 )
 
 func NewRootCmd() *cobra.Command {
-	rc := &traderpkg.RootConfig{}
+	rc := &config.RootConfig{}
 
 	cmd := &cobra.Command{
 		Use:           "trader",
@@ -63,7 +65,7 @@ func NewRootCmd() *cobra.Command {
 		if cmd.CommandPath() == "trader backtest run" && cmd.LocalFlags().Changed("config") {
 			globalConfigPath = ""
 		}
-		gcfg, err := traderpkg.LoadGlobalConfig(globalConfigPath)
+		gcfg, err := config.LoadGlobalConfig(globalConfigPath)
 		if err != nil {
 			return fmt.Errorf("global config: %w", err)
 		}
@@ -94,8 +96,8 @@ func NewRootCmd() *cobra.Command {
 			rc.OANDAEnv = gcfg.OANDA.Env
 		}
 
-		traderpkg.SetDataDir(rc.DataDir)
-		return traderpkg.Setup(traderpkg.LogConfig{
+		marketdata.SetDataDir(rc.DataDir)
+		return log.Setup(log.LogConfig{
 			Level:  rc.LogLevel,
 			Format: rc.LogFormat,
 			File:   rc.LogFile,
@@ -123,7 +125,7 @@ func NewRootCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("trader %s\n", traderpkg.Version)
+			fmt.Printf("trader %s\n", config.Version)
 		},
 	})
 

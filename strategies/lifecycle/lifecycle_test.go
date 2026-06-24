@@ -4,18 +4,20 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // minCandle returns a CandleTime with a valid close price for EURUSD.
-func minCandle(close float64) *trader.CandleTime {
-	toP := func(x float64) trader.Price {
-		return trader.Price(x*float64(trader.PriceScale) + 0.5)
+func minCandle(close float64) *market.CandleTime {
+	toP := func(x float64) market.Price {
+		return market.Price(x*float64(market.PriceScale) + 0.5)
 	}
 	c := toP(close)
-	return &trader.CandleTime{Candle: trader.Candle{
+	return &market.CandleTime{Candle: market.Candle{
 		Open:  c,
 		High:  c + 1000,
 		Low:   c - 1000,
@@ -24,31 +26,31 @@ func minCandle(close float64) *trader.CandleTime {
 }
 
 // minRun builds a minimal Backtest sufficient for the lifecycle strategy.
-func minRun(lots *trader.LotBook) *trader.Backtest {
+func minRun(lots *execution.LotBook) *backtest.Backtest {
 	if lots == nil {
-		lots = &trader.LotBook{}
+		lots = &execution.LotBook{}
 	}
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
-		State:   &trader.BacktestRun{Lots: lots},
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},
+		State:   &backtest.BacktestRun{Lots: lots},
 	}
 }
 
 // openLot builds and adds a minimal open lot to a fresh LotBook.
-func openLot() *trader.LotBook {
-	lb := &trader.LotBook{}
-	lot := &trader.Lot{
-		TradeCommon: &trader.TradeCommon{
+func openLot() *execution.LotBook {
+	lb := &execution.LotBook{}
+	lot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{
 			ID:         "lot-1",
 			Instrument: "EURUSD",
-			Side:       trader.Long,
+			Side:       market.Long,
 			Units:      1000,
 		},
-		EntryPrice:     trader.PriceFromFloat(1.1),
+		EntryPrice:     market.PriceFromFloat(1.1),
 		EntryTime:      1000,
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          trader.LotOpen,
+		State:          execution.LotOpen,
 	}
 	_ = lb.Add(lot)
 	return lb
@@ -112,7 +114,7 @@ func TestStrategy_Update_Bar1_OpensLong(t *testing.T) {
 	plan := s.Update(context.Background(), minCandle(1.10), minRun(nil))
 	require.NotNil(t, plan)
 	require.Len(t, plan.Opens, 1, "bar 1 should emit one long open")
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
 	assert.Equal(t, "lifecycle-test-open-long", plan.Reason)
 	assert.True(t, s.opened)
 }
@@ -157,7 +159,7 @@ func TestStrategy_Update_DefaultsUnitsAndStopPips(t *testing.T) {
 	plan := s.Update(context.Background(), minCandle(1.10), minRun(nil))
 	require.NotNil(t, plan)
 	// After bar 1 the strategy should have applied defaults.
-	assert.Equal(t, trader.Units(1000), s.Units)
+	assert.Equal(t, market.Units(1000), s.Units)
 	assert.Equal(t, float64(20), s.StopPips)
 	_ = plan
 }
