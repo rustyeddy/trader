@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/sim"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -69,8 +70,8 @@ func newPricingCmd(rc *trader.RootConfig) *cobra.Command {
 
 			ctx := context.Background()
 
-			tradesPath, equityPath := trader.JournalRecordPaths(rc.DBPath)
-			j, err := trader.NewJSON(tradesPath, equityPath)
+			tradesPath, equityPath := journal.JournalRecordPaths(rc.DBPath)
+			j, err := journal.NewJSON(tradesPath, equityPath)
 			if err != nil {
 				return err
 			}

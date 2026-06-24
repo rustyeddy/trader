@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -168,10 +169,10 @@ section.`,
 			out := cmd.OutOrStdout()
 
 			// Read journal trades once; filter per-bot below.
-			var allTrades []traderpkg.TradeRecord
+			var allTrades []journal.TradeRecord
 			if journalPath != "" {
 				var err error
-				allTrades, err = traderpkg.ReadTradesJSONL(journalPath)
+				allTrades, err = journal.ReadTradesJSONL(journalPath)
 				if err != nil {
 					fmt.Fprintf(out, "warning: could not read journal %s: %v\n\n", journalPath, err)
 				}
@@ -210,8 +211,8 @@ section.`,
 	return cmd
 }
 
-func printBotPL(out io.Writer, botID string, trades []traderpkg.TradeRecord) {
-	var botTrades []traderpkg.TradeRecord
+func printBotPL(out io.Writer, botID string, trades []journal.TradeRecord) {
+	var botTrades []journal.TradeRecord
 	for _, t := range trades {
 		if t.BotID == botID {
 			botTrades = append(botTrades, t)
