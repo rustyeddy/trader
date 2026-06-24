@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 func TestPipDecimals(t *testing.T) {
@@ -21,7 +21,7 @@ func TestPipDecimals(t *testing.T) {
 		{"USDCHF", 5},
 	}
 	for _, tc := range cases {
-		inst := trader.GetInstrument(tc.inst)
+		inst := market.GetInstrument(tc.inst)
 		assert.Equal(t, tc.want, pipDecimals(inst), tc.inst)
 	}
 }

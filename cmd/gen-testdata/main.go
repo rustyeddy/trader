@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -20,14 +20,14 @@ func main() {
 	flag.Parse()
 
 	// Parse timeframe
-	var tf trader.Timeframe
+	var tf market.Timeframe
 	switch *timeframe {
 	case "M1":
-		tf = trader.M1
+		tf = market.M1
 	case "H1":
-		tf = trader.H1
+		tf = market.H1
 	case "D1":
-		tf = trader.D1
+		tf = market.D1
 	default:
 		log.Fatalf("Invalid timeframe: %s", *timeframe)
 	}

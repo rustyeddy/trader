@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -83,9 +83,9 @@ func TestLastNonZeroCandleDate_FindsLastRealRow(t *testing.T) {
 	store := marketdata.GetStore()
 	k := marketdata.Key{
 		Kind:       marketdata.KindCandle,
-		Source:     trader.SourceOanda,
+		Source:     market.SourceOanda,
 		Instrument: "EURUSD",
-		TF:         trader.H1,
+		TF:         market.H1,
 		Year:       2026,
 		Month:      5,
 	}
@@ -117,9 +117,9 @@ func TestLastNonZeroCandleDate_AllZerosError(t *testing.T) {
 	store := marketdata.GetStore()
 	k := marketdata.Key{
 		Kind:       marketdata.KindCandle,
-		Source:     trader.SourceOanda,
+		Source:     market.SourceOanda,
 		Instrument: "EURUSD",
-		TF:         trader.H1,
+		TF:         market.H1,
 		Year:       2026,
 		Month:      5,
 	}
@@ -138,8 +138,8 @@ func TestLastNonZeroCandleDate_PicksNewestMonth(t *testing.T) {
 	store := marketdata.GetStore()
 	makeKey := func(month int) marketdata.Key {
 		return marketdata.Key{
-			Kind: marketdata.KindCandle, Source: trader.SourceOanda,
-			Instrument: "EURUSD", TF: trader.H1, Year: 2026, Month: month,
+			Kind: marketdata.KindCandle, Source: market.SourceOanda,
+			Instrument: "EURUSD", TF: market.H1, Year: 2026, Month: month,
 		}
 	}
 	// Write March (day 10) and May (day 5) — should pick May.

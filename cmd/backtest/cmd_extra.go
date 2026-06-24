@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
@@ -92,7 +92,7 @@ func runBacktestCandles(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := summary.Config.Data
-	tr, err := trader.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
+	tr, err := market.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
 	if err != nil {
 		return fmt.Errorf("parse time range: %w", err)
 	}

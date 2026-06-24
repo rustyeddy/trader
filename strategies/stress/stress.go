@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -72,7 +72,7 @@ func (s *Strategy) Reset() {
 
 // Update is called on every completed candle. Returns an open request every
 // TradeEvery candles when no position is already open.
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	if ct == nil {
 		return strategy.DefaultPlan()
 	}
@@ -103,27 +103,27 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 	}
 }
 
-func (s *Strategy) nextSide() trader.Side {
+func (s *Strategy) nextSide() market.Side {
 	switch s.cfg.Side {
 	case "long":
-		return trader.Long
+		return market.Long
 	case "short":
-		return trader.Short
+		return market.Short
 	default: // "alternate"
 		s.sideTurn++
 		if s.sideTurn%2 == 1 {
-			return trader.Long
+			return market.Long
 		}
-		return trader.Short
+		return market.Short
 	}
 }
 
-func (s *Strategy) calcStop(ct *trader.CandleTime, side trader.Side) trader.Price {
-	dist := trader.Price(int64(ct.Close) * int64(s.cfg.StopBps) / 10000)
+func (s *Strategy) calcStop(ct *market.CandleTime, side market.Side) market.Price {
+	dist := market.Price(int64(ct.Close) * int64(s.cfg.StopBps) / 10000)
 	if dist <= 0 {
 		dist = 1
 	}
-	if side == trader.Long {
+	if side == market.Long {
 		stop := ct.Close - dist
 		if stop <= 0 {
 			stop = 1

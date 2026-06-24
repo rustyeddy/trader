@@ -6,8 +6,8 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -23,9 +23,9 @@ type Strategy struct {
 	opened bool
 	closed bool
 
-	Units      trader.Units
+	Units      market.Units
 	StopPips   float64
-	TakeProfit trader.Price
+	TakeProfit market.Price
 }
 
 func (s *Strategy) Name() string            { return "lifecycle-test" }
@@ -39,7 +39,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return true }
 
-func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
 	plan := &strategy.StrategyPlan{Reason: "hold"}
@@ -57,14 +57,14 @@ func (s *Strategy) Update(ctx context.Context, c *trader.CandleTime, run strateg
 	}
 
 	if s.bar == 1 && !s.opened {
-		inst := trader.GetInstrument(run.Instrument())
+		inst := market.GetInstrument(run.Instrument())
 		if inst == nil {
 			plan.Reason = "lifecycle-test-missing-instrument"
 			return plan
 		}
 
-		stop := inst.SubPips(c.Close, trader.PipsFromFloat(s.StopPips))
-		op := execution.NewOpenRequest(run.Instrument(), c, trader.Long, stop, 0, "lifecycle-test-open-long")
+		stop := inst.SubPips(c.Close, market.PipsFromFloat(s.StopPips))
+		op := execution.NewOpenRequest(run.Instrument(), c, market.Long, stop, 0, "lifecycle-test-open-long")
 		op.Units = s.Units
 
 		plan.Opens = append(plan.Opens, op)

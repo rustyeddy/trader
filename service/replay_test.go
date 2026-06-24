@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	_ "github.com/rustyeddy/trader/strategies/fake"
 	_ "github.com/rustyeddy/trader/strategies/noop"
@@ -21,12 +21,12 @@ func buildReplayStore(t *testing.T) (restore func()) {
 	t.Helper()
 	s := marketdata.NewStoreAt(t.TempDir())
 
-	base := trader.Price(110000) // 1.10000
-	makeMonth := func(_ int, _ time.Month, rows int) []trader.Candle {
-		candles := make([]trader.Candle, rows)
+	base := market.Price(110000) // 1.10000
+	makeMonth := func(_ int, _ time.Month, rows int) []market.Candle {
+		candles := make([]market.Candle, rows)
 		for i := range candles {
-			p := base + trader.Price(i*10)
-			candles[i] = trader.Candle{
+			p := base + market.Price(i*10)
+			candles[i] = market.Candle{
 				Open: p, High: p + 500, Low: p - 500, Close: p + 100,
 			}
 		}
@@ -34,9 +34,9 @@ func buildReplayStore(t *testing.T) (restore func()) {
 	}
 
 	// Write Jan + Feb 2024 (744 + 696 H1 slots).
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1,
+	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 1, 744)))
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", trader.H1,
+	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
 		time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 2, 696)))
 
 	return marketdata.SwapStore(s)

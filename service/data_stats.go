@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -50,11 +50,11 @@ var dataStatsRates = map[string]float64{
 }
 
 func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataStatsResult, error) {
-	inst := trader.NormalizeInstrument(req.Instrument)
+	inst := market.NormalizeInstrument(req.Instrument)
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
-	instMeta := trader.GetInstrument(inst)
+	instMeta := market.GetInstrument(inst)
 	if instMeta == nil {
 		return nil, fmt.Errorf("unknown instrument: %s", inst)
 	}
@@ -77,7 +77,7 @@ func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataSta
 		tf = "H1"
 	}
 
-	tr, err := trader.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), tf)
+	tr, err := market.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), tf)
 	if err != nil {
 		return nil, fmt.Errorf("bad range: %w", err)
 	}

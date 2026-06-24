@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 // Unix day epoch: 1970-01-01 = Thursday.
@@ -18,16 +18,16 @@ import (
 func warm(t *testing.T, s *Breakout, period int) {
 	t.Helper()
 	for i := 0; i < period; i++ {
-		ct := &trader.CandleTime{Candle: trader.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
+		ct := &market.CandleTime{Candle: market.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		plan := s.Update(context.Background(), ct, nil)
 		require.Empty(t, plan.Opens)
 	}
 	require.True(t, s.Ready())
 }
 
-func longBreak(above trader.Price) *trader.CandleTime {
-	return &trader.CandleTime{
-		Candle: trader.Candle{
+func longBreak(above market.Price) *market.CandleTime {
+	return &market.CandleTime{
+		Candle: market.Candle{
 			Open:  above,
 			High:  above + 20,
 			Low:   above - 1,
@@ -36,9 +36,9 @@ func longBreak(above trader.Price) *trader.CandleTime {
 	}
 }
 
-func shortBreak(below trader.Price) *trader.CandleTime {
-	return &trader.CandleTime{
-		Candle: trader.Candle{
+func shortBreak(below market.Price) *market.CandleTime {
+	return &market.CandleTime{
+		Candle: market.Candle{
 			Open:  below,
 			High:  below + 1,
 			Low:   below - 20,
@@ -47,8 +47,8 @@ func shortBreak(below trader.Price) *trader.CandleTime {
 	}
 }
 
-func candleAt(c trader.Candle, ts int64) *trader.CandleTime {
-	return &trader.CandleTime{Candle: c, Timestamp: trader.Timestamp(ts)}
+func candleAt(c market.Candle, ts int64) *market.CandleTime {
+	return &market.CandleTime{Candle: c, Timestamp: market.Timestamp(ts)}
 }
 
 func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
@@ -139,13 +139,13 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 	plan = s.Update(context.Background(), ct2, nil)
 	assert.Equal(t, "monday-block", plan.Reason)
 	assert.Equal(t, 1, s.pendingCount, "streak must survive monday block")
-	assert.Equal(t, trader.Long, s.pendingSide)
+	assert.Equal(t, market.Long, s.pendingSide)
 
 	// Tuesday: block lifted, second confirmation fires entry.
 	ct3 := candleAt(longBreak(110).Candle, tuesday*86400)
 	plan = s.Update(context.Background(), ct3, nil)
 	require.Len(t, plan.Opens, 1, "entry must fire on Tuesday after weekend skip")
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
 }
 
 func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
@@ -227,14 +227,14 @@ func TestV6_Reset_ClearsState(t *testing.T) {
 	})
 	require.NoError(t, err)
 	warm(t, s, 5)
-	s.pendingSide = trader.Long
+	s.pendingSide = market.Long
 	s.pendingCount = 2
 	s.pendingLevel = 110
 
 	s.Reset()
 	assert.Equal(t, 0, s.pendingCount)
-	assert.Equal(t, trader.Side(0), s.pendingSide)
-	assert.Equal(t, trader.Price(0), s.pendingLevel)
+	assert.Equal(t, market.Side(0), s.pendingSide)
+	assert.Equal(t, market.Price(0), s.pendingLevel)
 	assert.False(t, s.adx.Ready())
 	assert.False(t, s.Ready())
 }
@@ -248,7 +248,7 @@ func TestV6_ShortEntry(t *testing.T) {
 	s.Update(context.Background(), shortBreak(90), nil)
 	plan := s.Update(context.Background(), shortBreak(90), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Short, plan.Opens[0].Side)
+	assert.Equal(t, market.Short, plan.Opens[0].Side)
 }
 
 func TestV6_NilCandleTime_ReturnsSafely(t *testing.T) {

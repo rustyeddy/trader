@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
 )
 
@@ -54,10 +54,10 @@ func ParseReviewCSV(r io.Reader) ([]review.ForexReview, error) {
 			Pair:           strings.TrimSpace(rec[1]),
 			Trend:          strings.TrimSpace(rec[4]),
 			Structure:      strings.TrimSpace(rec[2]),
-			SupportLow:     trader.PriceFromFloat(supLo),
-			SupportHigh:    trader.PriceFromFloat(supHi),
-			ResistanceLow:  trader.PriceFromFloat(resLo),
-			ResistanceHigh: trader.PriceFromFloat(resHi),
+			SupportLow:     market.PriceFromFloat(supLo),
+			SupportHigh:    market.PriceFromFloat(supHi),
+			ResistanceLow:  market.PriceFromFloat(resLo),
+			ResistanceHigh: market.PriceFromFloat(resHi),
 			Volatility:     strings.TrimSpace(rec[5]),
 			SetupBias:      strings.TrimSpace(rec[3]),
 			Status:         review.ReviewStatus(strings.TrimSpace(rec[8])),

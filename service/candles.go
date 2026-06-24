@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -36,7 +36,7 @@ type CandlesCSVResult struct {
 // CandlesCSV reads local candles and returns them in the canonical candle CSV
 // format used by the store.
 func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*CandlesCSVResult, error) {
-	instrument := trader.NormalizeInstrument(strings.TrimSpace(req.Instrument))
+	instrument := market.NormalizeInstrument(strings.TrimSpace(req.Instrument))
 	if instrument == "" {
 		return nil, fmt.Errorf("instrument is required")
 	}
@@ -47,7 +47,7 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 	if timeframe == "" {
 		return nil, fmt.Errorf("timeframe is required")
 	}
-	tf, err := trader.ParseTimeframe(timeframe)
+	tf, err := market.ParseTimeframe(timeframe)
 	if err != nil {
 		return nil, err
 	}
@@ -66,16 +66,16 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
-		source = trader.SourceOanda
+		source = market.SourceOanda
 	}
 
 	dm := marketdata.NewDataManager([]string{instrument}, from, to)
 	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
 		Source:     source,
 		Instrument: instrument,
-		Range: trader.TimeRange{
-			Start: trader.FromTime(from),
-			End:   trader.FromTime(to),
+		Range: market.TimeRange{
+			Start: market.FromTime(from),
+			End:   market.FromTime(to),
 			TF:    tf,
 		},
 	})
@@ -89,7 +89,7 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 		Source:     source,
 		Instrument: instrument,
 		Timeframe:  tf.String(),
-		Scale:      trader.PriceScale,
+		Scale:      market.PriceScale,
 	}, iter)
 	if err != nil {
 		return nil, err
@@ -111,17 +111,17 @@ type CandleCSVMetadata struct {
 	Source     string
 	Instrument string
 	Timeframe  string
-	Scale      trader.Scale6
+	Scale      market.Scale6
 }
 
 // WriteCandlesCSV writes the canonical candle CSV format and returns the row
 // count written.
-func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter trader.CandleIterator) (int, error) {
+func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.CandleIterator) (int, error) {
 	if iter == nil {
 		return 0, fmt.Errorf("nil candle iterator")
 	}
 	if meta.Scale == 0 {
-		meta.Scale = trader.PriceScale
+		meta.Scale = market.PriceScale
 	}
 	if _, err := fmt.Fprintf(buf, "# schema=v1 source=%s instrument=%s tf=%s scale=%d\n",
 		meta.Source, meta.Instrument, meta.Timeframe, meta.Scale); err != nil {

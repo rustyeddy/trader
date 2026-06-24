@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -18,7 +18,7 @@ func init() {
 type Config struct {
 	Lookback  int
 	Threshold float64
-	Scale     trader.Scale6
+	Scale     market.Scale6
 }
 
 type Strategy struct {
@@ -56,7 +56,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return s.ready }
 
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	if ct == nil {
 		return strategy.DefaultPlan()
 	}
@@ -91,6 +91,6 @@ func build(params map[string]any) (strategy.Strategy, error) {
 	return New(Config{
 		Lookback:  5,
 		Threshold: 0.0015,
-		Scale:     trader.PriceScale,
+		Scale:     market.PriceScale,
 	})
 }

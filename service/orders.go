@@ -6,8 +6,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/market"
 )
 
 // PlaceMarketOrderRequest is the typed input for risk-sized market orders.
@@ -178,14 +178,14 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 // (1/150). Uses the same static table as the backtest P/L conversion.
 // Accuracy is ±30% over long periods; sufficient for position sizing purposes.
 func quoteToUSDRate(instrument string) float64 {
-	inst := trader.GetInstrument(trader.NormalizeInstrument(instrument))
+	inst := market.GetInstrument(market.NormalizeInstrument(instrument))
 	if inst == nil {
 		return 1.0 // unknown — no adjustment
 	}
 	if inst.QuoteCurrency == "USD" {
 		return 1.0
 	}
-	if r, ok := trader.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
+	if r, ok := market.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
 		return r
 	}
 	return 1.0

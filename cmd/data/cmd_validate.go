@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
@@ -56,7 +56,7 @@ OANDA. All validated timeframes are repaired.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			normSource := strings.TrimSpace(strings.ToLower(source))
 			if normSource == "" {
-				normSource = trader.SourceOanda
+				normSource = market.SourceOanda
 			}
 
 			timeframes := splitCSV(timeframe)
@@ -74,7 +74,7 @@ OANDA. All validated timeframes are repaired.`,
 				tfFrom, tfTo := fromStr, toStr
 
 				if len(tfInstruments) == 0 || tfFrom == "" || tfTo == "" {
-					parsedTF, err := trader.ParseTimeframe(tf)
+					parsedTF, err := market.ParseTimeframe(tf)
 					if err != nil {
 						return fmt.Errorf("bad timeframe %q: %w", tf, err)
 					}
@@ -238,7 +238,7 @@ func repairMissingCandles(
 	for _, k := range toRepair {
 		entry := logEntry{Instrument: k.instrument, Timeframe: k.timeframe, Year: k.year, Month: k.month}
 
-		tf, err := trader.ParseTimeframe(k.timeframe)
+		tf, err := market.ParseTimeframe(k.timeframe)
 		if err != nil {
 			entry.Status = "error"
 			entry.Error = err.Error()
@@ -250,7 +250,7 @@ func repairMissingCandles(
 
 		rawKey := marketdata.Key{
 			Kind:       marketdata.KindCandle,
-			Source:     trader.SourceOanda,
+			Source:     market.SourceOanda,
 			Instrument: k.instrument,
 			TF:         tf,
 			Year:       k.year,
@@ -413,7 +413,7 @@ func resolveValidateDefaults(
 	instruments []string,
 	fromStr, toStr string,
 	source string,
-	tf trader.Timeframe,
+	tf market.Timeframe,
 ) (outInstruments []string, outFrom, outTo string, err error) {
 	inv, err := marketdata.BuildInventory(ctx)
 	if err != nil {

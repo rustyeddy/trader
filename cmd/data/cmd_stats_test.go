@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +33,7 @@ func TestLotLabel_ArbitraryUnits(t *testing.T) {
 
 func TestPrintAnalysis_NoAnalyzers_NoPanic(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -52,7 +52,7 @@ func TestPrintAnalysis_NoAnalyzers_NoPanic(t *testing.T) {
 
 func TestPrintAnalysis_WithAnalyzers_WritesStatNames(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -70,7 +70,7 @@ func TestPrintAnalysis_WithAnalyzers_WritesStatNames(t *testing.T) {
 
 func TestPrintAnalysis_WithUnits_ShowsUSDColumn(t *testing.T) {
 	var buf bytes.Buffer
-	inst := trader.GetInstrument("EURUSD")
+	inst := market.GetInstrument("EURUSD")
 	require.NotNil(t, inst)
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -78,8 +78,8 @@ func TestPrintAnalysis_WithUnits_ShowsUSDColumn(t *testing.T) {
 
 	swing := marketdata.NewSwingAnalyzer(inst)
 	// Feed one valid candle so swing has a stat with Pips > 0.
-	swing.Update(&trader.CandleTime{
-		Candle:    trader.Candle{Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100},
+	swing.Update(&market.CandleTime{
+		Candle:    market.Candle{Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100},
 		Timestamp: 1_000_000,
 	})
 

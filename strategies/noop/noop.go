@@ -5,7 +5,7 @@ package noop
 import (
 	"context"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -19,7 +19,7 @@ func (Strategy) Name() string            { return "NoOp" }
 func (Strategy) Reset()                  {}
 func (Strategy) Ready() bool             { return true }
 func (Strategy) StopDescription() string { return "" }
-func (Strategy) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (Strategy) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	_ = c
 	return strategy.DefaultPlan()

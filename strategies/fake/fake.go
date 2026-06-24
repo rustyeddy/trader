@@ -5,8 +5,8 @@ package fake
 import (
 	"context"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -19,9 +19,9 @@ func init() {
 type Fake struct {
 	CandleCount int
 
-	candles []*trader.CandleTime
-	highest trader.Price
-	lowest  trader.Price
+	candles []*market.CandleTime
+	highest market.Price
+	lowest  market.Price
 }
 
 func (f *Fake) Name() string            { return "Fake" }
@@ -37,7 +37,7 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (f *Fake) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	f.candles = append(f.candles, c)
 	plan := &strategy.StrategyPlan{Reason: "hold"}
 
@@ -51,12 +51,12 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run strategy.St
 		if openTrades > 0 {
 			return plan
 		}
-		inst := trader.GetInstrument(run.Instrument())
+		inst := market.GetInstrument(run.Instrument())
 		if inst == nil {
 			return nil
 		}
-		stop := inst.SubPips(c.Close, trader.PipsFromFloat(10))
-		op := execution.NewOpenRequest(run.Instrument(), c, trader.Long, stop, trader.Price(0), "higher highs")
+		stop := inst.SubPips(c.Close, market.PipsFromFloat(10))
+		op := execution.NewOpenRequest(run.Instrument(), c, market.Long, stop, market.Price(0), "higher highs")
 		plan.Opens = append(plan.Opens, op)
 	}
 
@@ -72,8 +72,8 @@ func (f *Fake) Update(ctx context.Context, c *trader.CandleTime, run strategy.St
 				return nil
 			}
 
-			if (lot.Side == trader.Long && c.Close <= lot.Stop) ||
-				(lot.Side == trader.Short && c.Close >= lot.Stop) {
+			if (lot.Side == market.Long && c.Close <= lot.Stop) ||
+				(lot.Side == market.Short && c.Close >= lot.Stop) {
 				cl := &execution.CloseRequest{
 					Request: execution.Request{
 						TradeCommon: lot.TradeCommon,
@@ -123,7 +123,7 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (f *Fake02) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 
 	plan := &strategy.StrategyPlan{Reason: "hold"}
@@ -186,25 +186,25 @@ func (f *Fake02) Update(ctx context.Context, c *trader.CandleTime, run strategy.
 		return plan
 	}
 
-	side := trader.Long
+	side := market.Long
 	if !f.longNext {
-		side = trader.Short
+		side = market.Short
 	}
 
-	inst := trader.GetInstrument(run.Instrument())
+	inst := market.GetInstrument(run.Instrument())
 	if inst == nil {
 		plan.Reason = "fake-02-missing-instrument"
 		return plan
 	}
 
-	var stop trader.Price
-	if side == trader.Long {
-		stop = inst.SubPips(c.Close, trader.PipsFromFloat(f.StopPips))
+	var stop market.Price
+	if side == market.Long {
+		stop = inst.SubPips(c.Close, market.PipsFromFloat(f.StopPips))
 	} else {
-		stop = inst.AddPips(c.Close, trader.PipsFromFloat(f.StopPips))
+		stop = inst.AddPips(c.Close, market.PipsFromFloat(f.StopPips))
 	}
 
-	op := execution.NewOpenRequest(run.Instrument(), c, side, stop, trader.Price(0), "fake-02-open")
+	op := execution.NewOpenRequest(run.Instrument(), c, side, stop, market.Price(0), "fake-02-open")
 	plan.Opens = append(plan.Opens, op)
 	plan.Reason = "fake-02-open"
 
