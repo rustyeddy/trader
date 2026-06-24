@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/market"
 )
 
 type Sim struct {
 	account *execution.Account
-	journal trader.Journal
-	prices  map[string]trader.Tick
+	journal journal.Journal
+	prices  map[string]market.Tick
 }
 
-func NewSimBroker(acct *execution.Account, j trader.Journal) *Sim {
+func NewSimBroker(acct *execution.Account, j journal.Journal) *Sim {
 	if acct == nil {
 		acct = execution.NewAccount("sim", 0)
 	}
@@ -25,15 +26,15 @@ func NewSimBroker(acct *execution.Account, j trader.Journal) *Sim {
 	return &Sim{
 		account: acct,
 		journal: j,
-		prices:  make(map[string]trader.Tick),
+		prices:  make(map[string]market.Tick),
 	}
 }
 
-func (e *Sim) UpdatePrice(tick trader.Tick) error {
+func (e *Sim) UpdatePrice(tick market.Tick) error {
 	if e == nil || e.account == nil {
 		return fmt.Errorf("sim broker account is nil")
 	}
-	inst := trader.NormalizeInstrument(tick.Instrument)
+	inst := market.NormalizeInstrument(tick.Instrument)
 	if inst == "" {
 		return fmt.Errorf("blank instrument")
 	}
@@ -43,7 +44,7 @@ func (e *Sim) UpdatePrice(tick trader.Tick) error {
 	}
 	e.prices[inst] = tick
 
-	marks := make(map[string]trader.Price, len(e.prices))
+	marks := make(map[string]market.Price, len(e.prices))
 	for instrument, px := range e.prices {
 		marks[instrument] = px.Mid()
 	}
@@ -67,7 +68,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 			return fmt.Errorf("no market price for %s", lot.Instrument)
 		}
 		exitPrice := px.Mid()
-		exitTime := trader.FromTime(time.Now().UTC())
+		exitTime := market.FromTime(time.Now().UTC())
 		trade := &execution.Trade{
 			TradeCommon: lot.TradeCommon.Clone(),
 			EntryPrice:  lot.EntryPrice,
@@ -79,7 +80,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 			return err
 		}
 		if e.journal != nil {
-			_ = e.journal.RecordTrade(trader.TradeRecord{
+			_ = e.journal.RecordTrade(journal.TradeRecord{
 				TradeID:    trade.ID,
 				Instrument: trade.Instrument,
 				Units:      trade.Units,
@@ -94,8 +95,8 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 	}
 
 	if e.journal != nil {
-		_ = e.journal.RecordEquity(trader.EquitySnapshot{
-			Timestamp:   trader.FromTime(time.Now().UTC()),
+		_ = e.journal.RecordEquity(journal.EquitySnapshot{
+			Timestamp:   market.FromTime(time.Now().UTC()),
 			Balance:     e.account.Balance,
 			Equity:      e.account.Equity,
 			MarginUsed:  e.account.MarginUsed,

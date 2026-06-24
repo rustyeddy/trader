@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies/emacross"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -18,7 +19,7 @@ func init() {
 
 type Strategy struct {
 	core emacross.Core
-	adx  *trader.ADX
+	adx  *indicator.ADX
 
 	adxThreshold    float64
 	requireDI       bool
@@ -30,9 +31,9 @@ type Config struct {
 	FastPeriod      int
 	SlowPeriod      int
 	ADXPeriod       int
-	Scale           trader.Scale6
+	Scale           market.Scale6
 	MinSpread       float64
-	StopPips        trader.Pips
+	StopPips        market.Pips
 	ATRPeriod       int
 	ATRMultiplier   float64
 	ADXThreshold    float64
@@ -59,24 +60,24 @@ func New(cfg Config) (*Strategy, error) {
 		mult = 1.5
 	}
 
-	var atr *trader.ATR
+	var atr *indicator.ATR
 	if cfg.ATRPeriod > 0 {
 		var err error
-		atr, err = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		atr, err = indicator.NewATR(cfg.ATRPeriod, cfg.Scale)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	fast, err := trader.NewEMA(cfg.FastPeriod, cfg.Scale)
+	fast, err := indicator.NewEMA(cfg.FastPeriod, cfg.Scale)
 	if err != nil {
 		return nil, err
 	}
-	slow, err := trader.NewEMA(cfg.SlowPeriod, cfg.Scale)
+	slow, err := indicator.NewEMA(cfg.SlowPeriod, cfg.Scale)
 	if err != nil {
 		return nil, err
 	}
-	adx, err := trader.NewADX(cfg.ADXPeriod, cfg.Scale)
+	adx, err := indicator.NewADX(cfg.ADXPeriod, cfg.Scale)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func New(cfg Config) (*Strategy, error) {
 			Fast:          fast,
 			Slow:          slow,
 			ATR:           atr,
-			MinSpread:     trader.Price(math.Round(cfg.MinSpread * float64(cfg.Scale))),
+			MinSpread:     market.Price(math.Round(cfg.MinSpread * float64(cfg.Scale))),
 			Scale:         cfg.Scale,
 			StopPips:      cfg.StopPips,
 			ATRMultiplier: mult,
@@ -123,7 +124,7 @@ func (x *Strategy) Ready() bool {
 	return true
 }
 
-func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (x *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return strategy.DefaultPlan()
@@ -149,7 +150,7 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 	}
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && absPriceSum(diff) < trader.PriceSum(x.core.MinSpread) {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
 		dec.Reason = "min-spread filter"
 		return dec
 	}
@@ -213,14 +214,14 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 
 	if x.pendingRel == +1 {
 		x.pendingRel = 0
-		plan := emacross.EmitOpen(&x.core, ct, run, trader.Long)
+		plan := emacross.EmitOpen(&x.core, ct, run, market.Long)
 		plan.Reason = "EMA cross up + ADX confirmed"
 		return plan
 	}
 
 	if x.pendingRel == -1 {
 		x.pendingRel = 0
-		plan := emacross.EmitOpen(&x.core, ct, run, trader.Short)
+		plan := emacross.EmitOpen(&x.core, ct, run, market.Short)
 		plan.Reason = "EMA cross down + ADX confirmed"
 		return plan
 	}
@@ -229,7 +230,7 @@ func (x *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 	return dec
 }
 
-func absPriceSum(v trader.PriceSum) trader.PriceSum {
+func absPriceSum(v market.PriceSum) market.PriceSum {
 	if v < 0 {
 		return -v
 	}
@@ -299,8 +300,8 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		FastPeriod:      int(fast),
 		SlowPeriod:      int(slow),
 		ADXPeriod:       int(adxPeriod),
-		Scale:           trader.PriceScale,
-		StopPips:        trader.PipsFromFloat(stopPips),
+		Scale:           market.PriceScale,
+		StopPips:        market.PipsFromFloat(stopPips),
 		MinSpread:       minSpread,
 		ATRPeriod:       int(atrPeriod),
 		ATRMultiplier:   atrMult,

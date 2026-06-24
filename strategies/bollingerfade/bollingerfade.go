@@ -18,8 +18,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -29,8 +30,8 @@ func init() {
 
 // Fade is the Bollinger Band fade strategy.
 type Fade struct {
-	bb      *trader.BollingerBands
-	atr     *trader.ATR
+	bb      *indicator.BollingerBands
+	atr     *indicator.ATR
 	atrMult float64
 	scale   float64
 	name    string
@@ -61,11 +62,11 @@ func New(cfg Config) (*Fade, error) {
 	if atrMult <= 0 {
 		atrMult = 1.5
 	}
-	bb, err := trader.NewBollingerBands(period, mult, trader.PriceScale)
+	bb, err := indicator.NewBollingerBands(period, mult, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("bb-fade: Bollinger Bands: %w", err)
 	}
-	atr, err := trader.NewATR(atrPeriod, trader.PriceScale)
+	atr, err := indicator.NewATR(atrPeriod, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("bb-fade: ATR: %w", err)
 	}
@@ -73,7 +74,7 @@ func New(cfg Config) (*Fade, error) {
 		bb:      bb,
 		atr:     atr,
 		atrMult: atrMult,
-		scale:   float64(trader.PriceScale),
+		scale:   float64(market.PriceScale),
 		name:    fmt.Sprintf("BB-FADE(%d,%.1f,atr=%d×%.1f)", period, mult, atrPeriod, atrMult),
 	}, nil
 }
@@ -87,7 +88,7 @@ func (f *Fade) Reset() {
 	f.atr.Reset()
 }
 
-func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (f *Fade) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return strategy.DefaultPlan()
@@ -116,9 +117,9 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run strategy.S
 			hasOpen = true
 			var shouldClose bool
 			switch lot.Side {
-			case trader.Long:
+			case market.Long:
 				shouldClose = ct.Close >= middle
-			case trader.Short:
+			case market.Short:
 				shouldClose = ct.Close <= middle
 			}
 			if shouldClose {
@@ -144,13 +145,13 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run strategy.S
 	}
 
 	// Entry signals — only when no position is open.
-	atrPrice := trader.Price(math.Round(f.atrMult * f.atr.Float64() * f.scale))
+	atrPrice := market.Price(math.Round(f.atrMult * f.atr.Float64() * f.scale))
 
 	switch {
 	case ct.Close < lower:
 		// Price closed below lower band — fade the drop, expect reversion up.
 		stop := ct.Close - atrPrice
-		open := execution.NewOpenRequest(instrumentFrom(run), ct, trader.Long, stop, 0, "bb-fade-long")
+		open := execution.NewOpenRequest(instrumentFrom(run), ct, market.Long, stop, 0, "bb-fade-long")
 		plan.Opens = append(plan.Opens, open)
 		plan.Reason = fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
 			float64(ct.Close)/f.scale, float64(lower)/f.scale)
@@ -158,7 +159,7 @@ func (f *Fade) Update(ctx context.Context, ct *trader.CandleTime, run strategy.S
 	case ct.Close > upper:
 		// Price closed above upper band — fade the rise, expect reversion down.
 		stop := ct.Close + atrPrice
-		open := execution.NewOpenRequest(instrumentFrom(run), ct, trader.Short, stop, 0, "bb-fade-short")
+		open := execution.NewOpenRequest(instrumentFrom(run), ct, market.Short, stop, 0, "bb-fade-short")
 		plan.Opens = append(plan.Opens, open)
 		plan.Reason = fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
 			float64(ct.Close)/f.scale, float64(upper)/f.scale)

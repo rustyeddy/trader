@@ -18,8 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -42,18 +43,18 @@ type Breakout struct {
 	blockFriday   bool
 
 	// Rolling channel buffer (completed bars only).
-	highs []trader.Price
-	lows  []trader.Price
+	highs []market.Price
+	lows  []market.Price
 	pos   int
 	count int
 
 	// Consecutive-close confirmation state (from v2).
-	pendingSide  trader.Side
+	pendingSide  market.Side
 	pendingCount int
-	pendingLevel trader.Price
+	pendingLevel market.Price
 
 	// ADX directional-strength indicator (from v4).
-	adx *trader.ADX
+	adx *indicator.ADX
 
 	// News-day block: set of unix day numbers (from v5).
 	blockedDays map[int64]bool
@@ -96,7 +97,7 @@ func New(cfg Config) (*Breakout, error) {
 	if bd == nil {
 		bd = map[int64]bool{}
 	}
-	adx, err := trader.NewADX(ap, trader.PriceScale)
+	adx, err := indicator.NewADX(ap, market.PriceScale)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +108,8 @@ func New(cfg Config) (*Breakout, error) {
 		adxThreshold:  at,
 		blockMonday:   cfg.BlockMonday,
 		blockFriday:   cfg.BlockFriday,
-		highs:         make([]trader.Price, cfg.Period),
-		lows:          make([]trader.Price, cfg.Period),
+		highs:         make([]market.Price, cfg.Period),
+		lows:          make([]market.Price, cfg.Period),
 		adx:           adx,
 		blockedDays:   bd,
 		name: fmt.Sprintf("DONCHIAN-V6(%d,cs=%.2f,cb=%d,adx=%d/%.1f,nd=%d,mon=%v,fri=%v)",
@@ -135,7 +136,7 @@ func (d *Breakout) Reset() {
 
 func (d *Breakout) Ready() bool { return d.count >= d.period }
 
-func (d *Breakout) channelHighLow() (trader.Price, trader.Price) {
+func (d *Breakout) channelHighLow() (market.Price, market.Price) {
 	hi := d.highs[0]
 	lo := d.lows[0]
 	for i := 1; i < d.period; i++ {
@@ -149,7 +150,7 @@ func (d *Breakout) channelHighLow() (trader.Price, trader.Price) {
 	return hi, lo
 }
 
-func (d *Breakout) advanceBar(c trader.Candle) {
+func (d *Breakout) advanceBar(c market.Candle) {
 	d.highs[d.pos] = c.High
 	d.lows[d.pos] = c.Low
 	d.pos = (d.pos + 1) % d.period
@@ -159,31 +160,31 @@ func (d *Breakout) advanceBar(c trader.Candle) {
 	d.adx.Update(c)
 }
 
-func closeStrengthOK(c trader.Candle, side trader.Side, threshold float64) bool {
+func closeStrengthOK(c market.Candle, side market.Side, threshold float64) bool {
 	rng := float64(c.High - c.Low)
 	if rng <= 0 {
 		return false
 	}
-	if side == trader.Long {
+	if side == market.Long {
 		return float64(c.Close-c.Low)/rng >= threshold
 	}
 	return float64(c.High-c.Close)/rng >= threshold
 }
 
-func (d *Breakout) adxGatePass(side trader.Side) bool {
+func (d *Breakout) adxGatePass(side market.Side) bool {
 	if !d.adx.Ready() {
 		return true
 	}
 	if d.adx.Float64() < d.adxThreshold {
 		return false
 	}
-	if side == trader.Long {
+	if side == market.Long {
 		return d.adx.PlusDI() > d.adx.MinusDI()
 	}
 	return d.adx.MinusDI() > d.adx.PlusDI()
 }
 
-func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return strategy.DefaultPlan()
@@ -217,32 +218,32 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strate
 
 	hi, lo := d.channelHighLow()
 
-	var side trader.Side
+	var side market.Side
 	if d.pendingCount > 0 {
 		switch d.pendingSide {
-		case trader.Long:
+		case market.Long:
 			if ct.Close > d.pendingLevel {
-				side = trader.Long
+				side = market.Long
 			}
-		case trader.Short:
+		case market.Short:
 			if ct.Close < d.pendingLevel {
-				side = trader.Short
+				side = market.Short
 			}
 		}
 		if side == 0 {
 			switch {
 			case ct.Close > hi:
-				side = trader.Long
+				side = market.Long
 			case ct.Close < lo:
-				side = trader.Short
+				side = market.Short
 			}
 		}
 	} else {
 		switch {
 		case ct.Close > hi:
-			side = trader.Long
+			side = market.Long
 		case ct.Close < lo:
-			side = trader.Short
+			side = market.Short
 		}
 	}
 
@@ -264,7 +265,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strate
 		}
 		d.pendingSide = side
 		d.pendingCount = 1
-		if side == trader.Long {
+		if side == market.Long {
 			d.pendingLevel = hi
 		} else {
 			d.pendingLevel = lo
@@ -294,7 +295,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strate
 
 	plan := emitOpen(ct, run, side)
 	d.advanceBar(ct.Candle)
-	if side == trader.Long {
+	if side == market.Long {
 		plan.Reason = "donchian-v6-breakout-up"
 	} else {
 		plan.Reason = "donchian-v6-breakout-down"
@@ -302,7 +303,7 @@ func (d *Breakout) Update(ctx context.Context, ct *trader.CandleTime, run strate
 	return plan
 }
 
-func emitOpen(ct *trader.CandleTime, run strategy.StrategyContext, side trader.Side) *strategy.StrategyPlan {
+func emitOpen(ct *market.CandleTime, run strategy.StrategyContext, side market.Side) *strategy.StrategyPlan {
 	plan := &strategy.StrategyPlan{}
 
 	alreadyOpen := false

@@ -7,8 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -37,9 +38,9 @@ type Config struct {
 type Strategy struct {
 	cfg     Config
 	name    string
-	fastEMA *trader.EMA
-	slowEMA *trader.EMA
-	atr     *trader.ATR
+	fastEMA *indicator.EMA
+	slowEMA *indicator.EMA
+	atr     *indicator.ATR
 	dipSeen bool
 }
 
@@ -61,15 +62,15 @@ func New(cfg Config) (*Strategy, error) {
 	if cfg.StopMultiplier <= 0 {
 		cfg.StopMultiplier = 1.0
 	}
-	fastEMA, err := trader.NewEMA(cfg.FastPeriod, trader.PriceScale)
+	fastEMA, err := indicator.NewEMA(cfg.FastPeriod, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: fast EMA: %w", err)
 	}
-	slowEMA, err := trader.NewEMA(cfg.SlowPeriod, trader.PriceScale)
+	slowEMA, err := indicator.NewEMA(cfg.SlowPeriod, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: slow EMA: %w", err)
 	}
-	atr, err := trader.NewATR(cfg.ATRPeriod, trader.PriceScale)
+	atr, err := indicator.NewATR(cfg.ATRPeriod, market.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: ATR: %w", err)
 	}
@@ -100,7 +101,7 @@ func (s *Strategy) Reset() {
 }
 
 // Update receives each completed M1 candle and returns a StrategyPlan.
-func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	if ct == nil {
 		return strategy.DefaultPlan()
 	}
@@ -119,8 +120,8 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 		return &strategy.StrategyPlan{Reason: "in position"}
 	}
 
-	closePrice := trader.PriceSum(c.Close)
-	openPrice := trader.PriceSum(c.Open)
+	closePrice := market.PriceSum(c.Close)
+	openPrice := market.PriceSum(c.Open)
 	fastVal := s.fastEMA.PriceSum()
 	slowVal := s.slowEMA.PriceSum()
 
@@ -139,7 +140,7 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 			instr = run.Instrument()
 		}
 		return &strategy.StrategyPlan{
-			Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, trader.Long, stop, 0, "buy-the-dip")},
+			Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, market.Long, stop, 0, "buy-the-dip")},
 			Reason: "buy-the-dip",
 		}
 	}
@@ -148,8 +149,8 @@ func (s *Strategy) Update(ctx context.Context, ct *trader.CandleTime, run strate
 }
 
 // calcStop returns the stop price: entry − ATR × multiplier.
-func (s *Strategy) calcStop(ct *trader.CandleTime) trader.Price {
-	atrPrice := trader.Price(s.atr.Float64() * s.cfg.StopMultiplier * float64(trader.PriceScale))
+func (s *Strategy) calcStop(ct *market.CandleTime) market.Price {
+	atrPrice := market.Price(s.atr.Float64() * s.cfg.StopMultiplier * float64(market.PriceScale))
 	stop := ct.Close - atrPrice
 	if stop <= 0 {
 		stop = 1

@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -20,15 +21,15 @@ func init() {
 // ema-cross-adx strategies. Exported so the ADX variant in a sibling
 // package can reuse the open/stop logic.
 type Core struct {
-	Fast *trader.EMA
-	Slow *trader.EMA
-	ATR  *trader.ATR // nil when ATR stop not configured
+	Fast *indicator.EMA
+	Slow *indicator.EMA
+	ATR  *indicator.ATR // nil when ATR stop not configured
 
 	Name          string
 	PrevRel       int
-	MinSpread     trader.Price
-	Scale         trader.Scale6
-	StopPips      trader.Pips
+	MinSpread     market.Price
+	Scale         market.Scale6
+	StopPips      market.Pips
 	ATRMultiplier float64
 }
 
@@ -40,9 +41,9 @@ type Cross struct {
 type Config struct {
 	FastPeriod    int
 	SlowPeriod    int
-	Scale         trader.Scale6
+	Scale         market.Scale6
 	MinSpread     float64
-	StopPips      trader.Pips
+	StopPips      market.Pips
 	ATRPeriod     int
 	ATRMultiplier float64
 }
@@ -63,20 +64,20 @@ func New(cfg Config) (*Cross, error) {
 		mult = 1.5
 	}
 
-	var atr *trader.ATR
+	var atr *indicator.ATR
 	if cfg.ATRPeriod > 0 {
 		var err error
-		atr, err = trader.NewATR(cfg.ATRPeriod, cfg.Scale)
+		atr, err = indicator.NewATR(cfg.ATRPeriod, cfg.Scale)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	fast, err := trader.NewEMA(cfg.FastPeriod, cfg.Scale)
+	fast, err := indicator.NewEMA(cfg.FastPeriod, cfg.Scale)
 	if err != nil {
 		return nil, err
 	}
-	slow, err := trader.NewEMA(cfg.SlowPeriod, cfg.Scale)
+	slow, err := indicator.NewEMA(cfg.SlowPeriod, cfg.Scale)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +112,7 @@ func (x *Cross) Ready() bool {
 	return x.core.Fast.Ready() && x.core.Slow.Ready()
 }
 
-func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (x *Cross) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
 	_ = ctx
 	if ct == nil {
 		return strategy.DefaultPlan()
@@ -129,7 +130,7 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run strategy.
 
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && absPriceSum(diff) < trader.PriceSum(x.core.MinSpread) {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
 		return &strategy.StrategyPlan{Reason: "min-spread filter"}
 	}
 
@@ -150,7 +151,7 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run strategy.
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
 			return &strategy.StrategyPlan{Reason: "warming up ATR"}
 		}
-		plan := EmitOpen(&x.core, ct, run, trader.Long)
+		plan := EmitOpen(&x.core, ct, run, market.Long)
 		plan.Reason = "ema-cross-up"
 		return plan
 	}
@@ -160,7 +161,7 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run strategy.
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
 			return &strategy.StrategyPlan{Reason: "warming up ATR"}
 		}
-		plan := EmitOpen(&x.core, ct, run, trader.Short)
+		plan := EmitOpen(&x.core, ct, run, market.Short)
 		plan.Reason = "ema-cross-down"
 		return plan
 	}
@@ -169,7 +170,7 @@ func (x *Cross) Update(ctx context.Context, ct *trader.CandleTime, run strategy.
 	return &strategy.StrategyPlan{Reason: "no cross"}
 }
 
-func absPriceSum(v trader.PriceSum) trader.PriceSum {
+func absPriceSum(v market.PriceSum) market.PriceSum {
 	if v < 0 {
 		return -v
 	}
@@ -178,7 +179,7 @@ func absPriceSum(v trader.PriceSum) trader.PriceSum {
 
 // EmitOpen closes any opposite open lots, then opens a new position in the
 // given side. Exported so emacrossadx can reuse it.
-func EmitOpen(c *Core, ct *trader.CandleTime, run strategy.StrategyContext, side trader.Side) *strategy.StrategyPlan {
+func EmitOpen(c *Core, ct *market.CandleTime, run strategy.StrategyContext, side market.Side) *strategy.StrategyPlan {
 	plan := &strategy.StrategyPlan{}
 
 	if run != nil {
@@ -224,18 +225,18 @@ func StopDesc(c *Core) string {
 }
 
 // Stop computes the stop price: ATR-based if configured and ready, fixed pips otherwise.
-func Stop(c *Core, ct *trader.CandleTime, inst string, side trader.Side) trader.Price {
+func Stop(c *Core, ct *market.CandleTime, inst string, side market.Side) market.Price {
 	if c.ATR != nil && c.ATR.Ready() {
-		dist := trader.Price(c.ATR.Float64() * c.ATRMultiplier * float64(c.Scale))
-		if side == trader.Long {
+		dist := market.Price(c.ATR.Float64() * c.ATRMultiplier * float64(c.Scale))
+		if side == market.Long {
 			return ct.Close - dist
 		}
 		return ct.Close + dist
 	}
 
 	if c.StopPips > 0 && inst != "" {
-		if instr := trader.GetInstrument(inst); instr != nil {
-			if side == trader.Long {
+		if instr := market.GetInstrument(inst); instr != nil {
+			if side == market.Long {
 				return instr.SubPips(ct.Close, c.StopPips)
 			}
 			return instr.AddPips(ct.Close, c.StopPips)
@@ -245,8 +246,8 @@ func Stop(c *Core, ct *trader.CandleTime, inst string, side trader.Side) trader.
 	return 0
 }
 
-func priceFromFloat(v float64, scale trader.Scale6) trader.Price {
-	return trader.Price(math.Round(v * float64(scale)))
+func priceFromFloat(v float64, scale market.Scale6) market.Price {
+	return market.Price(math.Round(v * float64(scale)))
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
@@ -286,8 +287,8 @@ func build(params map[string]any) (strategy.Strategy, error) {
 	return New(Config{
 		FastPeriod:    int(fast),
 		SlowPeriod:    int(slow),
-		Scale:         trader.PriceScale,
-		StopPips:      trader.PipsFromFloat(stopPips),
+		Scale:         market.PriceScale,
+		StopPips:      market.PipsFromFloat(stopPips),
 		MinSpread:     minSpread,
 		ATRPeriod:     int(atrPeriod),
 		ATRMultiplier: atrMult,
