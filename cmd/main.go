@@ -17,6 +17,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/replay"
 	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/serve"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/spf13/cobra"
 
@@ -96,7 +97,7 @@ func NewRootCmd() *cobra.Command {
 		}
 
 		marketdata.SetDataDir(rc.DataDir)
-		return traderpkg.Setup(traderpkg.LogConfig{
+		return log.Setup(log.LogConfig{
 			Level:  rc.LogLevel,
 			Format: rc.LogFormat,
 			File:   rc.LogFile,

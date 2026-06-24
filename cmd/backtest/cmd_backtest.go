@@ -2,11 +2,12 @@ package backtest
 
 import (
 	traderpkg "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/log"
 	"github.com/spf13/cobra"
 )
 
 var rootCfg *traderpkg.RootConfig
-var l = traderpkg.L
+var l = log.L
 
 func New(rc *traderpkg.RootConfig) *cobra.Command {
 	rootCfg = rc

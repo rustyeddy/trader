@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -29,11 +30,11 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *execu
 				return
 			case evt, ok := <-evtQ:
 				if !ok {
-					L.Info("broker event channel closed")
+					log.L.Info("broker event channel closed")
 					return
 				}
 
-				L.Debug("Broker event received",
+				log.L.Debug("Broker event received",
 					"type", evt.Type.String(),
 					"positionID", eventPositionID(evt),
 				)
@@ -178,7 +179,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 			if pending == 0 {
 				break
 			}
-			L.Debug("backtest drain events", "events", pending)
+			log.L.Debug("backtest drain events", "events", pending)
 			time.Sleep(1 * time.Millisecond)
 		}
 
@@ -226,7 +227,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 				}
 
 				if lag > 30*time.Second {
-					L.Warn("watchdog: backtest appears stalled",
+					log.L.Warn("watchdog: backtest appears stalled",
 						"noProgressFor", lag.String(),
 						"candles", candles,
 						"events", events,
@@ -238,7 +239,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 					continue
 				}
 
-				L.Debug("watchdog: progress",
+				log.L.Debug("watchdog: progress",
 					"candles", candles,
 					"events", events,
 					"opens", opens,
@@ -342,10 +343,10 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		}
 
 		for _, cancelReq := range plan.Cancel {
-			L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
+			log.L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
 		}
 		for _, cl := range plan.Closes {
-			L.Info("submit close request", "ID", cl.Request.ID)
+			log.L.Info("submit close request", "ID", cl.Request.ID)
 
 			// Short closes by buying at ask; long closes by selling at bid.
 			if cl.Lot != nil {
@@ -365,7 +366,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		}
 
 		for _, openReq := range plan.Opens {
-			L.Info("Broker event Open Position", "ID", openReq.ID)
+			log.L.Info("Broker event Open Position", "ID", openReq.ID)
 
 			// Long buys at ask; short sells at bid.
 			isBuy := openReq.Side == Long
@@ -387,7 +388,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 				}
 			}
 
-			L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
+			log.L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
 			_, err = t.Broker.SubmitOpen(runCtx, openReq)
 			if err != nil {
@@ -444,7 +445,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		return err
 	}
 
-	L.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
+	log.L.Info("backtest finished", "candles", atomic.LoadInt64(&processedCandles),
 		"events", atomic.LoadInt64(&processedEvents),
 		"opens", atomic.LoadInt64(&submittedOpens),
 		"closes", atomic.LoadInt64(&submittedCloses),
@@ -459,7 +460,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		return fmt.Errorf("nil backtest run")
 	}
 
-	L.Info("backtest start",
+	log.L.Info("backtest start",
 		"instrument", run.Request.Instrument,
 		"strategy", run.Request.Strategy.Name(),
 		"balance", run.Request.StartingBalance.Float64(),
@@ -484,7 +485,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 		Instrument: run.Request.Instrument,
 		Range:      run.Request.TimeRange,
 	}
-	L.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
+	log.L.Debug("candle request prepared", "source", candlereq.Source, "instrument", candlereq.Instrument, "timeframe", candlereq.Range.TF)
 
 	// Grab the candle iterator for this backtest
 	itr, err := t.DataManager.Candles(ctx, candlereq)
@@ -508,7 +509,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
 		return fmt.Errorf("nil broker event")
 	}
 
-	L.Info("broker event recieved",
+	log.L.Info("broker event recieved",
 		"type", evt.Type.String(),
 		"positionID", eventPositionID(evt))
 
@@ -530,7 +531,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
 		}
 
 	default:
-		L.Warn("unsupported broker event", "eventType", evt.Type)
+		log.L.Warn("unsupported broker event", "eventType", evt.Type)
 	}
 
 	return nil

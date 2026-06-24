@@ -1,8 +1,8 @@
 #+title: Trader Package Migration Notes
 #+author: Codex
 #+date: 2026-06-23
-#+updated: 2026-06-23 (wave 8: market/indicator/journal caller migration done;
-#  indicator_aliases.go and journal_aliases.go deleted)
+#+updated: 2026-06-23 (wave 8: market/indicator/journal/log caller migration done;
+#  indicator_aliases.go, journal_aliases.go, and log_aliases.go deleted)
 
 * Goal
 
@@ -94,14 +94,24 @@ With Bucket B landed, =indicator_aliases.go= and =journal_aliases.go= became dea
 (no external OR root caller) and were DELETED. =roundDivPositive= had already
 moved out with ChandelierExit, so the indicator shim had no root user left.
 
+Log shim removed (DONE): =log_aliases.go= is DELETED. Assessment found the root
+engine's only genuine log usage was the module logger =L= in =trader.go= (14
+call sites; everything else flagged by the raw grep was config struct fields
+=Data/Replay= or org-table string literals). Qualified =L= -> =log.L= with
+=gofmt -r= + =goimports= (which correctly resolved the trader =log= package over
+stdlib =log=, since no file imported stdlib =log=). Five external callers
+migrated to =log.X=: =cmd/main.go=, =cmd/serve/cmd_serve.go=,
+=cmd/mcp/cmd_mcp.go=, =cmd/backtest/cmd_backtest.go=, =service/sweep_test.go=
+(the first two used the =traderpkg=-aliased and bare =trader.= forms
+respectively — Lesson 6 again).
+
 Still remaining for wave 8:
 
-- Two shims still load-bearing, so not yet removable:
+- One shim still load-bearing, so not yet removable:
   =market_aliases.go= — its exported aliases are used BARE by the root engine
   itself (=Price/Candle/CandleTime/...=, same-package), and its unexported
   helpers (=mulDivCeil64=, =bitSet=, ...) are root-internal. Blocked on engine
   qualification (below), NOT on callers — all external callers are already off it.
-  =log_aliases.go= — not yet assessed/migrated.
 - The engine has NOT been physically relocated to its own package directory yet.
   With execution/strategy already qualified, the remaining blocker to a clean
   move is the same market/indicator/journal/log qualification (the engine uses
@@ -339,9 +349,9 @@ marketdata -> data (Provider registry)
 8. IN PROGRESS: =backtest= / =engine= — the orchestration layer, now sitting on
    clean APIs. Root engine de-shimmed off =execution=/=strategy= and both
    aliases DELETED. External callers of the =market=/=indicator=/=journal= shims
-   migrated (buckets A/B/C); =indicator_aliases.go= and =journal_aliases.go=
-   DELETED. Remaining: qualify the root engine's own bare =market.=/=log.= usage
-   so =market_aliases.go= and =log_aliases.go= can go, then decide whether to
+   migrated (buckets A/B/C); =indicator_aliases.go=, =journal_aliases.go=, and
+   =log_aliases.go= DELETED. Remaining: qualify the root engine's own bare
+   =market.= usage so =market_aliases.go= can go, then decide whether to
    relocate the engine to its own directory. See "Wave 8" above.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.

@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/strategy"
 
 	// Register all real strategies via init().
@@ -85,7 +86,7 @@ var sweepDefaults = trader.RunDefaults{
 
 func TestStrategySweep(t *testing.T) {
 	// Quiet logger — sweep output is the summary table, not per-bar logs.
-	trader.Setup(trader.LogConfig{Level: "error", Stdout: true}) //nolint:errcheck
+	log.Setup(log.LogConfig{Level: "error", Stdout: true}) //nolint:errcheck
 	svc := &Service{Log: slog.Default()}
 
 	var (

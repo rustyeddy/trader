@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -65,7 +66,7 @@ Resources:
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			log := trader.L
+			log := log.L
 
 			// Token: explicit flag > global config > env var > token file.
 			tok := token
