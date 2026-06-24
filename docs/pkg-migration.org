@@ -1,7 +1,8 @@
 #+title: Trader Package Migration Notes
 #+author: Codex
 #+date: 2026-06-23
-#+updated: 2026-06-23 (after waves 1-3, with findings folded in)
+#+updated: 2026-06-23 (wave 8: market/indicator/journal caller migration done;
+#  indicator_aliases.go and journal_aliases.go deleted)
 
 * Goal
 
@@ -77,13 +78,30 @@ it no longer rides on the =execution=/=strategy= re-export shims:
   caller still on them (=cmd/bot=, via an aliased =traderpkg= import the earlier
   =trader.=-grep missed) was repointed to =strategy= directly.
 
+External-caller shim migration (DONE): all external callers of the
+=market=/=indicator=/=journal= re-export shims have been migrated to import those
+packages directly. Worked in three buckets by coupling:
+
+- Bucket A (34 files): referenced ONLY =market= via the shim. Pure import swap +
+  =trader.= -> =market.=; the root import is dropped entirely.
+- Bucket C (20 files): =market= primitives alongside genuine root engine types
+  (=Backtest=, =RootConfig=, =Live*=). Qualified the market selectors with an
+  AST-safe =gofmt -r= pass; the =trader= import is RETAINED for the engine types.
+- Bucket B (7 files): =market= plus the =indicator= and/or =journal= shims.
+  Qualified all three layers, which lets these files drop the =trader= import.
+
+With Bucket B landed, =indicator_aliases.go= and =journal_aliases.go= became dead
+(no external OR root caller) and were DELETED. =roundDivPositive= had already
+moved out with ChandelierExit, so the indicator shim had no root user left.
+
 Still remaining for wave 8:
 
-- Four shims still load-bearing for EXTERNAL callers, so not yet removable:
-  =market_aliases.go= (=trader.Price/Candle/CandleTime/Units= — ~22 files),
-  =indicator_aliases.go= (=trader.EMA/ATR= — a few files), =journal_aliases.go=
-  (=trader.Journal/TradeRecord= — a few files), =log_aliases.go=. Dropping these
-  is a caller-migration job across cmd/api/service/strategies, not an engine move.
+- Two shims still load-bearing, so not yet removable:
+  =market_aliases.go= — its exported aliases are used BARE by the root engine
+  itself (=Price/Candle/CandleTime/...=, same-package), and its unexported
+  helpers (=mulDivCeil64=, =bitSet=, ...) are root-internal. Blocked on engine
+  qualification (below), NOT on callers — all external callers are already off it.
+  =log_aliases.go= — not yet assessed/migrated.
 - The engine has NOT been physically relocated to its own package directory yet.
   With execution/strategy already qualified, the remaining blocker to a clean
   move is the same market/indicator/journal/log qualification (the engine uses
@@ -132,6 +150,17 @@ These corrections supersede the original plan where they conflict.
    is partly "reunite candleSet with its users." Net: store/data has almost no
    UPWARD coupling (one stray =Trader= reference total), so the difficulty is
    volume and this reunion, not entanglement with the engine.
+
+6. *Import ALIASES defeat the =trader.=-prefix grep that scopes a caller
+   migration.* Several =cmd/*= files import root as =traderpkg
+   "github.com/rustyeddy/trader"=, so they call =traderpkg.TradeRecord=, not
+   =trader.TradeRecord=. A bucket analysis built on =grep "trader\."= silently
+   omits them, and the gap only surfaces as a compile error when the shim is
+   deleted (=cmd/bot/cmd_bot.go= hid a journal-shim caller this way). Before
+   scoping AND before declaring a shim removable, grep for the package's symbols
+   under EVERY local import name, not just the default =trader.=. Cheapest robust
+   form: grep the bare symbol set across the tree, or enumerate the alias names
+   first (=grep -rE '[a-z]\w* "github.com/rustyeddy/trader"'=) and search each.
 
 * Recommended Dependency Direction
 
@@ -309,9 +338,11 @@ marketdata -> data (Provider registry)
    engine still uses =strategy_aliases.go= until wave 8.
 8. IN PROGRESS: =backtest= / =engine= — the orchestration layer, now sitting on
    clean APIs. Root engine de-shimmed off =execution=/=strategy= and both
-   aliases DELETED. Remaining: drop the market/indicator/journal/log leaf shims
-   (caller-migration), then decide whether to relocate the engine to its own
-   directory. See "Wave 8" above.
+   aliases DELETED. External callers of the =market=/=indicator=/=journal= shims
+   migrated (buckets A/B/C); =indicator_aliases.go= and =journal_aliases.go=
+   DELETED. Remaining: qualify the root engine's own bare =market.=/=log.= usage
+   so =market_aliases.go= and =log_aliases.go= can go, then decide whether to
+   relocate the engine to its own directory. See "Wave 8" above.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.
 
