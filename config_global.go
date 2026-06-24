@@ -20,10 +20,10 @@ import (
 // Within each directory, files are merged alphabetically. Later files
 // override earlier ones for any non-empty field.
 type GlobalConfig struct {
-	Log  GlobalLogConfig   `yaml:"log"`
-	Data GlobalDataConfig  `yaml:"data"`
+	Log   GlobalLogConfig   `yaml:"log"`
+	Data  GlobalDataConfig  `yaml:"data"`
 	OANDA GlobalOANDAConfig `yaml:"oanda"`
-	DB   string            `yaml:"db"`
+	DB    string            `yaml:"db"`
 }
 
 // GlobalLogConfig holds log-related global settings.

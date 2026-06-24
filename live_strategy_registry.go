@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // LiveStrategyConstructor builds a LiveStrategy from a params map.
@@ -66,7 +68,7 @@ func RegisteredLiveStrategies() []string {
 }
 
 // GetLiveStrategy looks up and constructs a LiveStrategy by kind.
-func GetLiveStrategy(scfg StrategyConfig) (LiveStrategy, error) {
+func GetLiveStrategy(scfg strategy.StrategyConfig) (LiveStrategy, error) {
 	name := strings.ToLower(strings.TrimSpace(scfg.Kind))
 	if name == "" {
 		return nil, fmt.Errorf("strategy.kind is required")

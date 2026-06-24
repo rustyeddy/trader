@@ -7,13 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type countingStrategy struct {
-	plan   *StrategyPlan
+	plan   *strategy.StrategyPlan
 	resets int
 	calls  int
 }
@@ -22,7 +24,7 @@ func (s *countingStrategy) Name() string            { return "counting" }
 func (s *countingStrategy) Reset()                  { s.resets++ }
 func (s *countingStrategy) Ready() bool             { return true }
 func (s *countingStrategy) StopDescription() string { return "" }
-func (s *countingStrategy) Update(context.Context, *CandleTime, StrategyContext) *StrategyPlan {
+func (s *countingStrategy) Update(context.Context, *CandleTime, strategy.StrategyContext) *strategy.StrategyPlan {
 	s.calls++
 	return s.plan
 }
@@ -62,48 +64,48 @@ func TestTraderProcessEventValidation(t *testing.T) {
 	require.ErrorContains(t, tr.processEvent(context.Background(), nil), "nil broker event")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled}),
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled}),
 		"no position")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed}),
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed}),
 		"missing position")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &Event{Type: EventPositionClosed, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}),
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}),
 		"missing trade")
 
 	require.NoError(t,
-		tr.processEvent(context.Background(), &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}))
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}))
 
 	require.NoError(t,
-		tr.processEvent(context.Background(), &Event{
-			Type:  EventPositionClosed,
-			Lot:   &Lot{TradeCommon: &TradeCommon{ID: NewULID()}},
-			Trade: &Trade{TradeCommon: &TradeCommon{ID: NewULID()}},
+		tr.processEvent(context.Background(), &execution.Event{
+			Type:  execution.EventPositionClosed,
+			Lot:   &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}},
+			Trade: &execution.Trade{TradeCommon: &execution.TradeCommon{ID: NewULID()}},
 		}))
 
 	// Unsupported event types are intentionally non-fatal.
-	require.NoError(t, tr.processEvent(context.Background(), &Event{Type: EventType(255)}))
+	require.NoError(t, tr.processEvent(context.Background(), &execution.Event{Type: execution.EventType(255)}))
 }
 
 func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T) {
 	t.Parallel()
 
 	tr := &Trader{}
-	evtQ := make(chan *Event, 4)
+	evtQ := make(chan *execution.Event, 4)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var processed int64
 	errCh, done := tr.startBrokerEventHandler(ctx, evtQ, &processed)
 
-	evtQ <- &Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}
+	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&processed) == 1
 	}, 200*time.Millisecond, 5*time.Millisecond)
 
-	evtQ <- &Event{Type: EventOrderFilled} // triggers processEvent error
+	evtQ <- &execution.Event{Type: execution.EventOrderFilled} // triggers processEvent error
 
 	select {
 	case err := <-errCh:
@@ -129,8 +131,8 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	errCh <- errors.New("boom")
 	require.EqualError(t, tr.brokerEventError(errCh), "boom")
 
-	b := NewBroker("idle")
-	b.Account = NewAccount("acct", MoneyFromFloat(10_000))
+	b := execution.NewBroker("idle")
+	b.Account = execution.NewAccount("acct", MoneyFromFloat(10_000))
 	idle := &Trader{Broker: b}
 	require.NoError(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
@@ -138,18 +140,18 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	bad <- errors.New("from broker")
 	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 
-	require.True(t, b.EnqueueEvent(&Event{Type: EventOrderFilled, Lot: &Lot{TradeCommon: &TradeCommon{ID: NewULID()}}}))
+	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}))
 	require.ErrorContains(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 
 func TestSnapshotLots_FiltersByState(t *testing.T) {
 	t.Parallel()
 
-	src := &LotBook{}
-	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "open"}, State: LotOpen})
-	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "open-req"}, State: LotOpenRequested})
-	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "close-req"}, State: LotCloseRequested})
-	src.Add(&Lot{TradeCommon: &TradeCommon{ID: "closed"}, State: LotClosed})
+	src := &execution.LotBook{}
+	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "open"}, State: execution.LotOpen})
+	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "open-req"}, State: execution.LotOpenRequested})
+	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "close-req"}, State: execution.LotCloseRequested})
+	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "closed"}, State: execution.LotClosed})
 
 	got := snapshotLots(src)
 	require.NotNil(t, got)
@@ -164,8 +166,8 @@ func TestSnapshotLots_FiltersByState(t *testing.T) {
 func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	t.Parallel()
 
-	acct := NewAccount("acct", MoneyFromFloat(10_000))
-	broker := NewBroker("broker")
+	acct := execution.NewAccount("acct", MoneyFromFloat(10_000))
+	broker := execution.NewBroker("broker")
 	broker.Account = acct
 
 	tr := &Trader{Broker: broker}
@@ -203,15 +205,15 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	var nilTrader *Trader
 	require.ErrorContains(t, nilTrader.Backtest(ctx, run), "nil trader")
 
-	noAcct := &Trader{Broker: NewBroker("no-account")}
+	noAcct := &Trader{Broker: execution.NewBroker("no-account")}
 	require.ErrorContains(t, noAcct.Backtest(ctx, run), "nil account")
 
-	withAcctBroker := NewBroker("with-account")
-	withAcctBroker.Account = NewAccount("acct", MoneyFromFloat(10_000))
+	withAcctBroker := execution.NewBroker("with-account")
+	withAcctBroker.Account = execution.NewAccount("acct", MoneyFromFloat(10_000))
 	withAcct := &Trader{Broker: withAcctBroker}
 	require.ErrorContains(t, withAcct.Backtest(ctx, run), "nil data manager")
 
-	broker := NewBroker("broker")
+	broker := execution.NewBroker("broker")
 	broker.Account = withAcctBroker.Account
 
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)

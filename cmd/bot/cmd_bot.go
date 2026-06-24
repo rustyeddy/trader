@@ -26,6 +26,7 @@ import (
 
 	traderpkg "github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 var serverURL string
@@ -405,9 +406,9 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 		if localWarmup <= 0 {
 			localWarmup = cfg.LocalWarmupBars
 		}
-		regimeCfg := traderpkg.RegimeConfig{Kind: inst.Regime.Kind, Params: inst.Regime.Params}
+		regimeCfg := strategy.RegimeConfig{Kind: inst.Regime.Kind, Params: inst.Regime.Params}
 		for _, f := range inst.Regime.Filters {
-			regimeCfg.Filters = append(regimeCfg.Filters, traderpkg.RegimeConfig{Kind: f.Kind, Params: f.Params})
+			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
 		bc := service.BotConfig{
 			Instrument:   inst.Instrument,
@@ -418,7 +419,7 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 				Kind:            inst.Strategy.Kind,
 				Granularity:     inst.Timeframe,
 				Params:          inst.Strategy.Params,
-				Exit:            traderpkg.ExitConfig{Kind: inst.Exit.Kind, Params: inst.Exit.Params},
+				Exit:            strategy.ExitConfig{Kind: inst.Exit.Kind, Params: inst.Exit.Params},
 				Regime:          regimeCfg,
 				WarmupBars:      inst.WarmupBars,
 				LocalWarmupBars: localWarmup,

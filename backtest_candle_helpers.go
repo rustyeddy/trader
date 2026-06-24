@@ -3,6 +3,7 @@ package trader
 import (
 	"context"
 
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
@@ -26,31 +27,31 @@ func fillAdjust(isBuy bool, spread, slippage Price) Price {
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *execution.Broker, candle CandleTime, slippage Price) (int, error) {
 	var hits []struct {
-		lot    *Lot
+		lot    *execution.Lot
 		exitPx Price
 		reason string
-		cause  CloseCause
+		cause  execution.CloseCause
 	}
 
-	_ = b.Account.Lots.Range(func(lot *Lot) error {
-		if lot.State != LotOpen {
+	_ = b.Account.Lots.Range(func(lot *execution.Lot) error {
+		if lot.State != execution.LotOpen {
 			return nil
 		}
 		exitPx, reason, hit := checkExit(lot, candle.Candle)
 		if !hit {
 			return nil
 		}
-		cause := CloseStopLoss
+		cause := execution.CloseStopLoss
 		if reason == "TAKE" {
-			cause = CloseTakeProfit
+			cause = execution.CloseTakeProfit
 		}
 		hits = append(hits, struct {
-			lot    *Lot
+			lot    *execution.Lot
 			exitPx Price
 			reason string
-			cause  CloseCause
+			cause  execution.CloseCause
 		}{lot, exitPx, reason, cause})
 		return nil
 	})
@@ -59,10 +60,10 @@ func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage 
 		// Short closes by buying at ask; long closes by selling at bid.
 		isBuy := h.lot.Side == Short
 		adjPx := h.exitPx + fillAdjust(isBuy, candle.AvgSpread, slippage)
-		cl := &CloseRequest{
-			Request: Request{
+		cl := &execution.CloseRequest{
+			Request: execution.Request{
 				TradeCommon: h.lot.TradeCommon,
-				RequestType: RequestClose,
+				RequestType: execution.RequestClose,
 				Price:       adjPx,
 				Timestamp:   candle.Timestamp,
 				Reason:      h.reason,
@@ -79,7 +80,7 @@ func autoCloseExits(ctx context.Context, b *Broker, candle CandleTime, slippage 
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(lot *Lot, c Candle) (exitPx Price, reason string, hit bool) {
+func checkExit(lot *execution.Lot, c Candle) (exitPx Price, reason string, hit bool) {
 	if lot == nil {
 		return 0, "", false
 	}

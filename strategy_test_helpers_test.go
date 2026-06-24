@@ -1,6 +1,10 @@
 package trader
 
-import "context"
+import (
+	"context"
+
+	"github.com/rustyeddy/trader/strategy"
+)
 
 func mkClose(close float64) Candle {
 	toP := func(x float64) Price { return Price(x*float64(PriceScale) + 0.5) }
@@ -17,20 +21,20 @@ func (testFake) Name() string            { return "Fake" }
 func (testFake) Reset()                  {}
 func (testFake) Ready() bool             { return true }
 func (testFake) StopDescription() string { return "" }
-func (testFake) Update(_ context.Context, _ *CandleTime, _ StrategyContext) *StrategyPlan {
-	return DefaultPlan()
+func (testFake) Update(_ context.Context, _ *CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
+	return strategy.DefaultPlan()
 }
 
 func init() {
-	build := func(map[string]any) (Strategy, error) {
+	build := func(map[string]any) (strategy.Strategy, error) {
 		return testFake{}, nil
 	}
-	MustRegisterStrategy(build, "fake")
-	MustRegisterStrategy(build, "noop", "no-op")
-	MustRegisterStrategy(build, "fake-02")
-	MustRegisterStrategy(build, "lifecycle-test")
-	MustRegisterStrategy(build, "template")
-	MustRegisterStrategy(build, "ema-cross")
-	MustRegisterStrategy(build, "ema-cross-adx")
-	MustRegisterStrategy(build, "donchian", "donchian-breakout")
+	strategy.MustRegisterStrategy(build, "fake")
+	strategy.MustRegisterStrategy(build, "noop", "no-op")
+	strategy.MustRegisterStrategy(build, "fake-02")
+	strategy.MustRegisterStrategy(build, "lifecycle-test")
+	strategy.MustRegisterStrategy(build, "template")
+	strategy.MustRegisterStrategy(build, "ema-cross")
+	strategy.MustRegisterStrategy(build, "ema-cross-adx")
+	strategy.MustRegisterStrategy(build, "donchian", "donchian-breakout")
 }

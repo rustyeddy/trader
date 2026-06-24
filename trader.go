@@ -6,16 +6,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 type Trader struct {
 	DataManager CandleSource
-	*Broker
+	*execution.Broker
 	*marketdata.Store
 }
 
-func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *Event, processed *int64) (<-chan error, <-chan struct{}) {
+func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *execution.Event, processed *int64) (<-chan error, <-chan struct{}) {
 	errCh := make(chan error, 1)
 	done := make(chan struct{})
 
@@ -62,13 +64,13 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func snapshotLots(src *LotBook) *LotBook {
-	out := &LotBook{}
+func snapshotLots(src *execution.LotBook) *execution.LotBook {
+	out := &execution.LotBook{}
 	if src == nil {
 		return out
 	}
-	_ = src.Range(func(lot *Lot) error {
-		if lot != nil && (lot.State == LotOpen || lot.State == LotOpenRequested || lot.State == LotCloseRequested) {
+	_ = src.Range(func(lot *execution.Lot) error {
+		if lot != nil && (lot.State == execution.LotOpen || lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested) {
 			_ = out.Add(lot.Clone())
 		}
 		return nil
@@ -90,8 +92,8 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 
 		pendingState := false
 		if t != nil && t.Account != nil {
-			_ = t.Account.Lots.Range(func(lot *Lot) error {
-				if lot.State == LotOpenRequested || lot.State == LotCloseRequested {
+			_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
+				if lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested {
 					pendingState = true
 				}
 				return nil
@@ -113,23 +115,23 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		return fmt.Errorf("nil candle iterator")
 	}
 
-	strategy := run.Request.Strategy
-	if strategy == nil {
+	strat := run.Request.Strategy
+	if strat == nil {
 		return fmt.Errorf("nil strategy")
 	}
 	if run.State == nil {
 		run.State = &BacktestRun{}
 	}
-	strategy.Reset()
+	strat.Reset()
 
 	exit := run.Request.Exit
 	if exit == nil {
-		exit = NoopExit{}
+		exit = strategy.NoopExit{}
 	}
 
 	regime := run.Request.Regime
 	if regime == nil {
-		regime = NoopRegime{}
+		regime = strategy.NoopRegime{}
 	}
 
 	// Convert slippage and max-spread pips to Price units using instrument metadata.
@@ -281,8 +283,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 
 		// Update trailing/chandelier stops on all open lots.
 		if exit.Ready() {
-			_ = t.Account.Lots.Range(func(lot *Lot) error {
-				if lot == nil || lot.State != LotOpen {
+			_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
+				if lot == nil || lot.State != execution.LotOpen {
 					return nil
 				}
 				// Advance extreme price watermark.
@@ -311,9 +313,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 
 		lots := snapshotLots(&t.Account.Lots)
 		run.State.Lots = lots
-		plan := strategy.Update(runCtx, &candle, run)
+		plan := strat.Update(runCtx, &candle, run)
 		if plan == nil {
-			plan = DefaultPlan()
+			plan = strategy.DefaultPlan()
 		}
 
 		// Regime filter: suppress new entries in ranging/consolidating markets.
@@ -357,7 +359,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 				return err
 			}
 			if cl.Lot != nil {
-				cl.Lot.State = LotCloseRequested
+				cl.Lot.State = execution.LotCloseRequested
 			}
 			atomic.AddInt64(&submittedCloses, 1)
 		}
@@ -403,9 +405,9 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		return err
 	}
 	if haveLastCandle {
-		var remaining []*Lot
-		_ = t.Account.Lots.Range(func(lot *Lot) error {
-			if lot != nil && lot.State == LotOpen {
+		var remaining []*execution.Lot
+		_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
+			if lot != nil && lot.State == execution.LotOpen {
 				remaining = append(remaining, lot)
 			}
 			return nil
@@ -414,16 +416,16 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		for _, lot := range remaining {
 			isBuy := lot.Side == Short
 			closePx := lastCandle.Close + fillAdjust(isBuy, lastCandle.AvgSpread, slippage)
-			cl := &CloseRequest{
-				Request: Request{
+			cl := &execution.CloseRequest{
+				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "end-of-backtest",
-					RequestType: RequestClose,
+					RequestType: execution.RequestClose,
 					Price:       closePx,
 					Timestamp:   lastCandle.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: CloseManual,
+				CloseCause: execution.CloseManual,
 			}
 
 			if err := t.Broker.SubmitClose(runCtx, cl); err != nil {
@@ -501,7 +503,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	return nil
 }
 
-func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
+func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
 	if evt == nil {
 		return fmt.Errorf("nil broker event")
 	}
@@ -511,13 +513,13 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 		"positionID", eventPositionID(evt))
 
 	switch evt.Type {
-	case EventOrderFilled:
+	case execution.EventOrderFilled:
 		lot := evt.Lot
 		if lot == nil {
 			return fmt.Errorf("error order filled with no position")
 		}
 
-	case EventPositionClosed:
+	case execution.EventPositionClosed:
 		lot := evt.Lot
 		trade := evt.Trade
 		if lot == nil {
@@ -534,7 +536,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *Event) error {
 	return nil
 }
 
-func eventPositionID(evt *Event) string {
+func eventPositionID(evt *execution.Event) string {
 	if evt == nil || evt.Lot == nil {
 		return ""
 	}

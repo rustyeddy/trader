@@ -3,6 +3,8 @@ package trader
 import (
 	"context"
 	"fmt"
+
+	"github.com/rustyeddy/trader/execution"
 )
 
 // BacktestExecutor runs an executable backtest using whatever runtime
@@ -16,8 +18,8 @@ type BacktestExecutor interface {
 // factory-provided runtime dependencies.
 type TraderBacktestExecutor struct {
 	DataManager    CandleSource
-	BrokerFactory  func() *Broker
-	AccountFactory func(name string, balance Money) *Account
+	BrokerFactory  func() *execution.Broker
+	AccountFactory func(name string, balance Money) *execution.Account
 }
 
 // NewTraderBacktestExecutor returns a BacktestExecutor that uses Trader as the
@@ -25,11 +27,11 @@ type TraderBacktestExecutor struct {
 func NewTraderBacktestExecutor(dm CandleSource) *TraderBacktestExecutor {
 	return &TraderBacktestExecutor{
 		DataManager: dm,
-		BrokerFactory: func() *Broker {
-			return NewBroker("sim")
+		BrokerFactory: func() *execution.Broker {
+			return execution.NewBroker("sim")
 		},
-		AccountFactory: func(name string, balance Money) *Account {
-			return NewAccount(name, balance)
+		AccountFactory: func(name string, balance Money) *execution.Account {
+			return execution.NewAccount(name, balance)
 		},
 	}
 }

@@ -3,6 +3,8 @@ package trader
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +20,7 @@ func TestCompileBacktestComponents_WithExecutionDefaults_Success(t *testing.T) {
 			From:       "2026-01-01",
 			To:         "2026-01-10",
 		},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 
 	defaults := RunDefaults{StartingBalance: 10_000, RiskPct: 1.5}
@@ -41,7 +43,7 @@ func TestCompileBacktestComponents_InvalidInputs(t *testing.T) {
 
 	badDates := RunConfig{
 		Data:     DataConfig{From: "bad-date", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 	_, err := compileBacktestComponents(badDates)
 	require.Error(t, err)
@@ -49,7 +51,7 @@ func TestCompileBacktestComponents_InvalidInputs(t *testing.T) {
 
 	badStrategy := RunConfig{
 		Data:     DataConfig{From: "2026-01-01", To: "2026-01-10", Timeframe: "H1", Instrument: "EURUSD"},
-		Strategy: StrategyConfig{Kind: "not-supported"},
+		Strategy: strategy.StrategyConfig{Kind: "not-supported"},
 	}
 	_, err = compileBacktestComponents(badStrategy)
 	require.Error(t, err)
@@ -67,7 +69,7 @@ func TestCompileBacktestComponents_Success(t *testing.T) {
 			From:       "2026-01-01",
 			To:         "2026-01-10",
 		},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 
 	req, err := compileBacktestComponents(rc)
@@ -89,7 +91,7 @@ func TestApplyBacktestExecutionDefaults(t *testing.T) {
 	rc := RunConfig{
 		Name:     "run-1",
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-01", To: "2026-01-10"},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 	req := &BacktestRequest{Name: rc.Name, Instrument: rc.Data.Instrument}
 	defaults := RunDefaults{
@@ -126,12 +128,12 @@ func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 			{
 				Name:     "a",
 				Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-01", To: "2026-01-10"},
-				Strategy: StrategyConfig{Kind: "fake"},
+				Strategy: strategy.StrategyConfig{Kind: "fake"},
 			},
 			{
 				Name:     "b",
 				Data:     DataConfig{Instrument: "USDJPY", Timeframe: "D1", From: "2026-02-01", To: "2026-02-15"},
-				Strategy: StrategyConfig{Kind: "noop"},
+				Strategy: strategy.StrategyConfig{Kind: "noop"},
 			},
 		},
 	}
@@ -161,7 +163,7 @@ func TestCompileBacktests_ErrorCases(t *testing.T) {
 	cfg := &Config{
 		Runs: []RunConfig{{
 			Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2026-01-01", To: "2026-01-10"},
-			Strategy: StrategyConfig{Kind: "unknown"},
+			Strategy: strategy.StrategyConfig{Kind: "unknown"},
 		}},
 	}
 	_, err = CompileBacktests(cfg)
@@ -173,17 +175,17 @@ func TestBuildBacktestResult(t *testing.T) {
 	t.Parallel()
 
 	var nilRun *Backtest
-	assert.Nil(t, nilRun.BuildBacktestResult(&Account{}))
+	assert.Nil(t, nilRun.BuildBacktestResult(&execution.Account{}))
 
 	run := &Backtest{
 		Request: &BacktestRequest{StartingBalance: MoneyFromFloat(10_000)},
 	}
 	assert.Nil(t, run.BuildBacktestResult(nil))
 
-	acct := &Account{
+	acct := &execution.Account{
 		Balance: MoneyFromFloat(10_150),
 		Equity:  MoneyFromFloat(10_200),
-		Trades: []*Trade{
+		Trades: []*execution.Trade{
 			{PNL: MoneyFromFloat(100)},
 			nil,
 			{PNL: MoneyFromFloat(-25)},
@@ -226,7 +228,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	var nilRun *Backtest
 	assert.Equal(t, BacktestReportSummary{}, nilRun.Summary())
 
-	fake, err := GetStrategy(StrategyConfig{Kind: "fake"})
+	fake, err := strategy.GetStrategy(strategy.StrategyConfig{Kind: "fake"})
 	require.NoError(t, err)
 
 	run := &Backtest{

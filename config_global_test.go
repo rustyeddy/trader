@@ -61,8 +61,8 @@ oanda:
 `)
 	cfg, err := loadGlobalConfig([]string{etcDir, userDir}, "")
 	require.NoError(t, err)
-	assert.Equal(t, "info", cfg.Log.Level)   // user overrode etc
-	assert.Equal(t, "text", cfg.Log.Format)  // etc value kept (user didn't set it)
+	assert.Equal(t, "info", cfg.Log.Level)  // user overrode etc
+	assert.Equal(t, "text", cfg.Log.Format) // etc value kept (user didn't set it)
 	assert.Equal(t, "practice", cfg.OANDA.Env)
 	assert.Equal(t, "mytoken", cfg.OANDA.Token)
 }

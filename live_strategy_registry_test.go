@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,13 +82,13 @@ func TestLookupLiveStrategy_CaseInsensitive(t *testing.T) {
 // ── GetLiveStrategy ───────────────────────────────────────────────────────────
 
 func TestGetLiveStrategy_EmptyKindReturnsError(t *testing.T) {
-	_, err := GetLiveStrategy(StrategyConfig{Kind: ""})
+	_, err := GetLiveStrategy(strategy.StrategyConfig{Kind: ""})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "required")
 }
 
 func TestGetLiveStrategy_UnknownKindReturnsError(t *testing.T) {
-	_, err := GetLiveStrategy(StrategyConfig{Kind: "live-get-nonexistent"})
+	_, err := GetLiveStrategy(strategy.StrategyConfig{Kind: "live-get-nonexistent"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported live strategy")
 }
@@ -96,7 +97,7 @@ func TestGetLiveStrategy_Success(t *testing.T) {
 	name := "live-get-ok-" + NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), name))
 
-	strat, err := GetLiveStrategy(StrategyConfig{Kind: name})
+	strat, err := GetLiveStrategy(strategy.StrategyConfig{Kind: name})
 	require.NoError(t, err)
 	require.NotNil(t, strat)
 	assert.Equal(t, name, strat.Name())
@@ -108,7 +109,7 @@ func TestGetLiveStrategy_CtorErrorPropagated(t *testing.T) {
 		return nil, fmt.Errorf("ctor failed")
 	}
 	require.NoError(t, RegisterLiveStrategy(failCtor, name))
-	_, err := GetLiveStrategy(StrategyConfig{Kind: name})
+	_, err := GetLiveStrategy(strategy.StrategyConfig{Kind: name})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ctor failed")
 }

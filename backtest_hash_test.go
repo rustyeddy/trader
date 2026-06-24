@@ -3,6 +3,7 @@ package trader
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -10,7 +11,7 @@ import (
 func TestHashBacktestConfig_Length(t *testing.T) {
 	cfg := RunConfig{
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2024-01-01", To: "2024-03-31"},
-		Strategy: StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
+		Strategy: strategy.StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
 	}
 	h := hashBacktestConfig(cfg, RunDefaults{})
 	assert.Len(t, h, 8, "hash must be 8 hex chars")
@@ -19,7 +20,7 @@ func TestHashBacktestConfig_Length(t *testing.T) {
 func TestHashBacktestConfig_Stable(t *testing.T) {
 	cfg := RunConfig{
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2024-01-01", To: "2024-03-31"},
-		Strategy: StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
+		Strategy: strategy.StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
 	}
 	assert.Equal(t, hashBacktestConfig(cfg, RunDefaults{}), hashBacktestConfig(cfg, RunDefaults{}), "same config must produce same hash")
 }
@@ -27,11 +28,11 @@ func TestHashBacktestConfig_Stable(t *testing.T) {
 func TestHashBacktestConfig_ParamChange(t *testing.T) {
 	base := RunConfig{
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1"},
-		Strategy: StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
+		Strategy: strategy.StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 21}},
 	}
 	changed := RunConfig{
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1"},
-		Strategy: StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 50}},
+		Strategy: strategy.StrategyConfig{Kind: "ema-cross", Params: map[string]any{"fast": 9, "slow": 50}},
 	}
 	assert.NotEqual(t, hashBacktestConfig(base, RunDefaults{}), hashBacktestConfig(changed, RunDefaults{}), "different params must produce different hash")
 }
@@ -56,7 +57,7 @@ func TestCompileBacktests_SetsConfigHash(t *testing.T) {
 			{
 				Name:     "test-run",
 				Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2024-01-01", To: "2024-03-31"},
-				Strategy: StrategyConfig{Kind: "fake"},
+				Strategy: strategy.StrategyConfig{Kind: "fake"},
 			},
 		},
 	}
@@ -80,7 +81,7 @@ func TestCompileBacktests_StoresResolvedRunConfig(t *testing.T) {
 		Runs: []RunConfig{{
 			Name:     "test-run",
 			Data:     DataConfig{Instrument: "GBPUSD", Timeframe: "D1", From: "2023-01-01", To: "2023-12-31"},
-			Strategy: StrategyConfig{Kind: "fake"},
+			Strategy: strategy.StrategyConfig{Kind: "fake"},
 		}},
 	}
 
@@ -95,7 +96,7 @@ func TestCompileBacktests_StoresRunConfig(t *testing.T) {
 	rc := RunConfig{
 		Name:     "test-run",
 		Data:     DataConfig{Instrument: "GBPUSD", Timeframe: "D1", From: "2023-01-01", To: "2023-12-31"},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 	cfg := &Config{
 		Defaults: RunDefaults{StartingBalance: 5000, RiskPct: 0.5, Source: "oanda"},
@@ -114,7 +115,7 @@ func TestCompileBacktests_StoresRunConfig(t *testing.T) {
 func TestHashBacktestConfig_DefaultsChangeHash(t *testing.T) {
 	cfg := RunConfig{
 		Data:     DataConfig{Instrument: "EURUSD", Timeframe: "H1", From: "2024-01-01", To: "2024-03-31"},
-		Strategy: StrategyConfig{Kind: "fake"},
+		Strategy: strategy.StrategyConfig{Kind: "fake"},
 	}
 	a := RunDefaults{StartingBalance: 10000, RiskPct: 1.0, SlippagePips: 0.5}
 	b := RunDefaults{StartingBalance: 20000, RiskPct: 1.0, SlippagePips: 0.5}

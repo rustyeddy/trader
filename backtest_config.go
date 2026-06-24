@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rustyeddy/trader/strategy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,11 +43,11 @@ type RunDefaults struct {
 // RunConfig describes a single backtest run: what data to load, which
 // strategy to use, and optional exit and regime-filter overrides.
 type RunConfig struct {
-	Name     string         `json:"name"     yaml:"name"`
-	Data     DataConfig     `json:"data"     yaml:"data"`
-	Strategy StrategyConfig `json:"strategy" yaml:"strategy"`
-	Exit     ExitConfig     `json:"exit"     yaml:"exit"`
-	Regime   RegimeConfig   `json:"regime"   yaml:"regime"`
+	Name     string                  `json:"name"     yaml:"name"`
+	Data     DataConfig              `json:"data"     yaml:"data"`
+	Strategy strategy.StrategyConfig `json:"strategy" yaml:"strategy"`
+	Exit     strategy.ExitConfig     `json:"exit"     yaml:"exit"`
+	Regime   strategy.RegimeConfig   `json:"regime"   yaml:"regime"`
 }
 
 // DataConfig specifies the data source, instrument, timeframe, and date range
@@ -102,10 +103,10 @@ func LoadConfig(path string) (*Config, error) {
 // artifacts: same execution inputs -> same hash -> same file on disk.
 func hashBacktestConfig(cfg RunConfig, defaults RunDefaults) string {
 	type hashable struct {
-		Data     DataConfig     `json:"data"`
-		Strategy StrategyConfig `json:"strategy"`
-		Exit     ExitConfig     `json:"exit"`
-		Regime   RegimeConfig   `json:"regime"`
+		Data     DataConfig              `json:"data"`
+		Strategy strategy.StrategyConfig `json:"strategy"`
+		Exit     strategy.ExitConfig     `json:"exit"`
+		Regime   strategy.RegimeConfig   `json:"regime"`
 		Defaults struct {
 			StartingBalance float64 `json:"starting_balance"`
 			RiskPct         float64 `json:"risk_pct"`

@@ -275,12 +275,12 @@ func TestWriteOrgIndex_MultipleRows(t *testing.T) {
 	assert.Contains(t, out, "EURUSD")
 	assert.Contains(t, out, "H1")
 	assert.Contains(t, out, "+200.00")
-	assert.Contains(t, out, "-$150")   // drawdown formatted
-	assert.Contains(t, out, "1.80")    // RR formatted
+	assert.Contains(t, out, "-$150") // drawdown formatted
+	assert.Contains(t, out, "1.80")  // RR formatted
 	assert.Contains(t, out, "run-b")
 	assert.Contains(t, out, "Donchian")
 	assert.Contains(t, out, "GBPUSD")
-	assert.Contains(t, out, "—")       // RR and drawdown both "—" for run-b
+	assert.Contains(t, out, "—") // RR and drawdown both "—" for run-b
 }
 
 // --- internal helpers ---

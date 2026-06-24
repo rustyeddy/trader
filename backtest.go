@@ -2,6 +2,9 @@ package trader
 
 import (
 	"fmt"
+
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/strategy"
 )
 
 // Backtest is the executable form of one backtest run.
@@ -19,7 +22,7 @@ type Backtest struct {
 
 // emptyLotBook is returned by OpenLots when no lot state exists, so callers can
 // always safely call Len/Range without a nil check.
-var emptyLotBook = &LotBook{}
+var emptyLotBook = &execution.LotBook{}
 
 // Instrument implements StrategyContext: the instrument being traded.
 func (b *Backtest) Instrument() string {
@@ -31,7 +34,7 @@ func (b *Backtest) Instrument() string {
 
 // OpenLots implements StrategyContext: a read-only view of the open lots. It
 // never returns nil.
-func (b *Backtest) OpenLots() LotView {
+func (b *Backtest) OpenLots() strategy.LotView {
 	if b == nil || b.State == nil || b.State.Lots == nil {
 		return emptyLotBook
 	}
@@ -106,9 +109,9 @@ type BacktestRequest struct {
 
 	Source     string // data source identifier (e.g. "candles", "dukascopy")
 	Instrument string // FX pair (e.g. "EUR_USD")
-	Strategy   Strategy
-	Exit       ExitStrategy
-	Regime     RegimeFilter
+	Strategy   strategy.Strategy
+	Exit       strategy.ExitStrategy
+	Regime     strategy.RegimeFilter
 	TimeRange  TimeRange
 }
 
@@ -120,18 +123,18 @@ func compileBacktestComponents(cfg RunConfig) (*BacktestRequest, error) {
 		return nil, fmt.Errorf("build backtest time range for %q: %w", cfg.Name, err)
 	}
 
-	strategy, err := GetStrategy(cfg.Strategy)
+	strat, err := strategy.GetStrategy(cfg.Strategy)
 	if err != nil {
 		return nil, fmt.Errorf("build backtest strategy for %q: %w", cfg.Name, err)
 	}
 
 	scale := Scale6(PriceScale)
-	exit, err := GetExitStrategy(cfg.Exit, scale)
+	exit, err := strategy.GetExitStrategy(cfg.Exit, scale)
 	if err != nil {
 		return nil, fmt.Errorf("build exit strategy for %q: %w", cfg.Name, err)
 	}
 
-	regime, err := GetRegimeFilter(cfg.Regime, scale)
+	regime, err := strategy.GetRegimeFilter(cfg.Regime, scale)
 	if err != nil {
 		return nil, fmt.Errorf("build regime filter for %q: %w", cfg.Name, err)
 	}
@@ -141,7 +144,7 @@ func compileBacktestComponents(cfg RunConfig) (*BacktestRequest, error) {
 		Name:       cfg.Name,
 		Source:     source,
 		Instrument: cfg.Data.Instrument,
-		Strategy:   strategy,
+		Strategy:   strat,
 		Exit:       exit,
 		Regime:     regime,
 		TimeRange:  tr,
@@ -168,7 +171,7 @@ func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, default
 // returns, gross P/L, averages, risk/reward, and closed-trade drawdown from
 // the account's closed trades.
 // Returns nil if run or acct is nil.
-func (run *Backtest) BuildBacktestResult(acct *Account) *BacktestResult {
+func (run *Backtest) BuildBacktestResult(acct *execution.Account) *BacktestResult {
 	if run == nil || acct == nil {
 		return nil
 	}

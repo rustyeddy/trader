@@ -60,9 +60,36 @@ Done (each landed behind temporary root re-export shims; callers unchanged):
   callers migrated to =strategy.X=: all =strategies/*= packages now register via
   =strategy.MustRegisterStrategy= and =Update= against =strategy.StrategyContext=;
   =service= (replay, portfolio_config, strategy_factory, candle adapter, sweep)
-  imports =strategy= directly. The root shim (=strategy_aliases.go=) is retained
-  for the in-root engine until wave 8 (engine extraction), mirroring
-  =execution_aliases.go=.
+  imports =strategy= directly.
+
+* Wave 8 (in progress): de-shim the root engine
+
+The backtest/engine orchestration still lives in the root =trader= package, but
+it no longer rides on the =execution=/=strategy= re-export shims:
+
+- The root engine (=trader.go=, =backtest*.go=, =app_config.go=, =live_strategy_registry.go=,
+  and their tests) now references =execution.X= and =strategy.X= directly. Done
+  with an AST-safe =gofmt -r= qualification pass (string-literal-safe; the
+  field-name / keyed-literal-key damage the doc's Lesson 4 warns about was
+  compiler-caught and reverted), plus =goimports=. Two local vars named
+  =strategy= that shadowed the new package import were renamed to =strat=.
+- =execution_aliases.go= and =strategy_aliases.go= are DELETED. The last external
+  caller still on them (=cmd/bot=, via an aliased =traderpkg= import the earlier
+  =trader.=-grep missed) was repointed to =strategy= directly.
+
+Still remaining for wave 8:
+
+- Four shims still load-bearing for EXTERNAL callers, so not yet removable:
+  =market_aliases.go= (=trader.Price/Candle/CandleTime/Units= — ~22 files),
+  =indicator_aliases.go= (=trader.EMA/ATR= — a few files), =journal_aliases.go=
+  (=trader.Journal/TradeRecord= — a few files), =log_aliases.go=. Dropping these
+  is a caller-migration job across cmd/api/service/strategies, not an engine move.
+- The engine has NOT been physically relocated to its own package directory yet.
+  With execution/strategy already qualified, the remaining blocker to a clean
+  move is the same market/indicator/journal/log qualification (the engine uses
+  those names unqualified today). Decision pending: whether the engine needs a
+  distinct =engine=/=backtest= directory at all, or whether root =trader= simply
+  IS the top orchestration layer once the remaining leaf shims are gone.
 
 Remaining in root: backtest engine, strategy/regime/live orchestration, config,
 and a few orphans.
@@ -280,8 +307,11 @@ marketdata -> data (Provider registry)
    (for Lot view), and =StrategyContext=; no longer on =backtest=. External
    callers (=strategies/*=, =service=) migrated off the root shim; the in-root
    engine still uses =strategy_aliases.go= until wave 8.
-8. =backtest= / =engine= — the orchestration layer, now sitting on clean APIs.
-   Drops both =execution_aliases.go= and =strategy_aliases.go= as it moves out.
+8. IN PROGRESS: =backtest= / =engine= — the orchestration layer, now sitting on
+   clean APIs. Root engine de-shimmed off =execution=/=strategy= and both
+   aliases DELETED. Remaining: drop the market/indicator/journal/log leaf shims
+   (caller-migration), then decide whether to relocate the engine to its own
+   directory. See "Wave 8" above.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.
 
