@@ -9,8 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/service"
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/service"
 )
 
 // oandaAuth holds the optional OANDA credentials shared by data commands that
@@ -69,7 +70,7 @@ func fetchMidPrices(ctx context.Context, auth oandaAuth, instruments []string) (
 
 	oandaNames := make([]string, 0, len(instruments))
 	for _, name := range instruments {
-		inst := trader.GetInstrument(name)
+		inst := market.GetInstrument(name)
 		if inst == nil {
 			continue
 		}

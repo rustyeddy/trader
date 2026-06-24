@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -227,7 +228,7 @@ func TestMarketClosedGate(t *testing.T) {
 	runOneTick := func() { tickCalls++ }
 
 	gate := func(now time.Time, marketWasClosed *bool) {
-		if trader.IsForexMarketClosed(now) {
+		if market.IsForexMarketClosed(now) {
 			*marketWasClosed = true
 			return
 		}

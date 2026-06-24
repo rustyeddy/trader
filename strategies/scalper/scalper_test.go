@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 func TestNew_Valid(t *testing.T) {
@@ -72,8 +73,8 @@ func TestUpdate_NilCandleTime(t *testing.T) {
 
 func TestUpdate_ReturnsDefaultPlan(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
-	ct := &trader.CandleTime{
-		Candle: trader.Candle{Close: trader.Price(1.0850 * float64(trader.PriceScale))},
+	ct := &market.CandleTime{
+		Candle: market.Candle{Close: market.Price(1.0850 * float64(market.PriceScale))},
 	}
 	plan := s.Update(context.Background(), ct, nil)
 	require.NotNil(t, plan)
@@ -90,7 +91,7 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 		State:   &trader.BacktestRun{},
 	}
 
-	for _, ct := range []*trader.CandleTime{
+	for _, ct := range []*market.CandleTime{
 		scalperCT(1.0000, 1.0010, 0.9990, 1.0000),
 		scalperCT(1.0100, 1.0110, 1.0090, 1.0100),
 		scalperCT(1.0200, 1.0210, 1.0190, 1.0200),
@@ -105,18 +106,18 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 	require.Len(t, plan.Opens, 1)
 	assert.Equal(t, "buy-the-dip", plan.Reason)
 	assert.Equal(t, "buy-the-dip", plan.Opens[0].Reason)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
 	assert.Equal(t, "EURUSD", plan.Opens[0].Instrument)
 	assert.Less(t, plan.Opens[0].Stop, recovery.Close)
 }
 
-func scalperCT(open, high, low, close float64) *trader.CandleTime {
-	return &trader.CandleTime{
-		Candle: trader.Candle{
-			Open:  trader.PriceFromFloat(open),
-			High:  trader.PriceFromFloat(high),
-			Low:   trader.PriceFromFloat(low),
-			Close: trader.PriceFromFloat(close),
+func scalperCT(open, high, low, close float64) *market.CandleTime {
+	return &market.CandleTime{
+		Candle: market.Candle{
+			Open:  market.PriceFromFloat(open),
+			High:  market.PriceFromFloat(high),
+			Low:   market.PriceFromFloat(low),
+			Close: market.PriceFromFloat(close),
 		},
 	}
 }

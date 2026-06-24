@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	trader "github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 )
 
 // defaultRates are approximate mid-market rates for USD-base pairs used when
@@ -81,7 +82,7 @@ func resolveRates(ctx context.Context, ratesCSV string, auth oandaAuth) (rates m
 		if len(kv) != 2 {
 			continue
 		}
-		inst := trader.NormalizeInstrument(kv[0])
+		inst := market.NormalizeInstrument(kv[0])
 		v, err := strconv.ParseFloat(strings.TrimSpace(kv[1]), 64)
 		if err == nil && v > 0 {
 			rates[inst] = v
@@ -111,8 +112,8 @@ func printPipValues(units int64, rates map[string]float64, live bool) {
 		"──────────", "──────────", "──────────", "──────────", "────────────")
 
 	var notedPairs []string
-	for _, name := range trader.MajorInstruments() {
-		inst := trader.GetInstrument(name)
+	for _, name := range market.MajorInstruments() {
+		inst := market.GetInstrument(name)
 		if inst == nil {
 			continue
 		}

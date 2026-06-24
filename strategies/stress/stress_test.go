@@ -9,12 +9,13 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 )
 
-func ct(close float64) *trader.CandleTime {
-	p := trader.PriceFromFloat(close)
-	return &trader.CandleTime{
-		Candle: trader.Candle{Open: p, High: p, Low: p, Close: p},
+func ct(close float64) *market.CandleTime {
+	p := market.PriceFromFloat(close)
+	return &market.CandleTime{
+		Candle: market.Candle{Open: p, High: p, Low: p, Close: p},
 	}
 }
 
@@ -67,7 +68,7 @@ func TestUpdate_TradeEvery1_OpensOnFirstBar(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 	plan := s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
 }
 
 func TestUpdate_TradeEvery3_WaitsBeforeOpening(t *testing.T) {
@@ -110,16 +111,16 @@ func TestUpdate_SideLong_StopBelowClose(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 	plan := s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side)
-	assert.Less(t, plan.Opens[0].Stop, trader.PriceFromFloat(1.1000))
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
+	assert.Less(t, plan.Opens[0].Stop, market.PriceFromFloat(1.1000))
 }
 
 func TestUpdate_SideShort_StopAboveClose(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "short"})
 	plan := s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Short, plan.Opens[0].Side)
-	assert.Greater(t, plan.Opens[0].Stop, trader.PriceFromFloat(1.1000))
+	assert.Equal(t, market.Short, plan.Opens[0].Side)
+	assert.Greater(t, plan.Opens[0].Stop, market.PriceFromFloat(1.1000))
 }
 
 func TestUpdate_SideAlternate(t *testing.T) {
@@ -127,15 +128,15 @@ func TestUpdate_SideAlternate(t *testing.T) {
 
 	plan := s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side, "first trade should be Long")
+	assert.Equal(t, market.Long, plan.Opens[0].Side, "first trade should be Long")
 
 	plan = s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Short, plan.Opens[0].Side, "second trade should be Short")
+	assert.Equal(t, market.Short, plan.Opens[0].Side, "second trade should be Short")
 
 	plan = s.Update(context.Background(), ct(1.1000), nil)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, trader.Long, plan.Opens[0].Side, "third trade should be Long again")
+	assert.Equal(t, market.Long, plan.Opens[0].Side, "third trade should be Long again")
 }
 
 func TestUpdate_InstrumentFromRun(t *testing.T) {
@@ -155,8 +156,8 @@ func TestUpdate_InstrumentFromRun(t *testing.T) {
 func TestCalcStop_Precision(t *testing.T) {
 	s, _ := New(Config{StopBps: 20, Side: "long"})
 	candle := ct(1.1000)
-	stop := s.calcStop(candle, trader.Long)
-	expected := trader.PriceFromFloat(1.1000) - trader.Price(int64(trader.PriceFromFloat(1.1000))*20/10000)
+	stop := s.calcStop(candle, market.Long)
+	expected := market.PriceFromFloat(1.1000) - market.Price(int64(market.PriceFromFloat(1.1000))*20/10000)
 	assert.Equal(t, expected, stop)
 }
 

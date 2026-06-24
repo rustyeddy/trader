@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies/pulse"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
@@ -126,11 +127,11 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (trad
 		if err != nil {
 			return nil, fmt.Errorf("unknown strategy kind %q: %w", kind, err)
 		}
-		exit, err := strategy.GetExitStrategy(cfg.Exit, trader.PriceScale)
+		exit, err := strategy.GetExitStrategy(cfg.Exit, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("exit strategy for %q: %w", kind, err)
 		}
-		regime, err := strategy.GetRegimeFilter(cfg.Regime, trader.PriceScale)
+		regime, err := strategy.GetRegimeFilter(cfg.Regime, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("regime filter for %q: %w", kind, err)
 		}

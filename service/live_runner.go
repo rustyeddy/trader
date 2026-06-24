@@ -9,6 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/market"
 )
 
 // LiveRunConfig controls a single live strategy run.
@@ -73,7 +74,7 @@ func (a *Account) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	marketWasClosed := false
 
 	tick := func() {
-		if trader.IsForexMarketClosed(time.Now()) {
+		if market.IsForexMarketClosed(time.Now()) {
 			if !marketWasClosed {
 				log.Info("live runner: market closed, pausing", "instrument", cfg.Instrument)
 				marketWasClosed = true

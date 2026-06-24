@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -119,7 +120,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		for _, f := range y.Regime.Filters {
 			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
-		regime, err := strategy.GetRegimeFilter(regimeCfg, trader.PriceScale)
+		regime, err := strategy.GetRegimeFilter(regimeCfg, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s regime: %w", y.Instrument, err)
 		}
@@ -135,7 +136,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		}
 
 		exitCfg := strategy.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
-		exit, err := strategy.GetExitStrategy(exitCfg, trader.PriceScale)
+		exit, err := strategy.GetExitStrategy(exitCfg, market.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
 		}
