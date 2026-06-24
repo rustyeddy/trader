@@ -1,9 +1,10 @@
 #+title: Trader Package Migration Notes
 #+author: Codex
 #+date: 2026-06-23
-#+updated: 2026-06-23 (wave 8 COMPLETE: engine + backtest split into sibling
-#  packages — Option A done; root is now live/config/version only. Next wave:
-#  Signal + Planner — strategies emit signals, a planner owns sizing/risk/regime)
+#+updated: 2026-06-23 (MIGRATION COMPLETE: engine + backtest split (Option A),
+#  then live + config extracted — the root `trader` package no longer exists.
+#  Next wave: Signal + Planner — strategies emit signals, a planner owns
+#  sizing/risk/regime; needs the live package, which is now in place.)
 
 * Goal
 
@@ -472,8 +473,15 @@ marketdata -> data (Provider registry)
    (in =backtest= or a shared =planner= pkg) owns sizing/risk/regime/spread/stop
    business logic currently inlined in the run loop. Decided to do this AFTER the
    engine/backtest split, on the clean =strategy -> engine= seam.
-10. Opportunistic: =synth= (testdata generators), =config= — fold in where they
-    reduce root clutter.
+10. DONE: dissolve the root package. Deleted the dead =appConfig= simulation/
+    replay machinery (referenced only by its own test), then extracted =live=
+    (=live_strategy*.go=, clean leaf on =strategy=) and =config= (=RootConfig=,
+    =GlobalConfig=, =Version= — clean leaf on stdlib+yaml). 34 callers re-pointed
+    =trader.X=/=traderpkg.X= -> =config.X= (cmd RootConfig, cmd/main GlobalConfig,
+    api Version); ~10 -> =live.X=. The =github.com/rustyeddy/trader= package no
+    longer exists; nothing imports the bare root path.
+11. Opportunistic (remaining): =synth= (testdata generators) — fold in where it
+    reduces clutter.
 
 * Practical Migration Rules
 
