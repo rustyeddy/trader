@@ -1,8 +1,8 @@
 #+title: Trader Package Migration Notes
 #+author: Codex
 #+date: 2026-06-23
-#+updated: 2026-06-23 (wave 8: market/indicator/journal/log caller migration done;
-#  indicator_aliases.go, journal_aliases.go, and log_aliases.go deleted)
+#+updated: 2026-06-23 (wave 8: root engine fully de-shimmed; ALL *_aliases.go
+#  deleted incl. market_aliases.go — no transition shims remain anywhere)
 
 * Goal
 
@@ -105,19 +105,31 @@ migrated to =log.X=: =cmd/main.go=, =cmd/serve/cmd_serve.go=,
 (the first two used the =traderpkg=-aliased and bare =trader.= forms
 respectively — Lesson 6 again).
 
+Market shim removed (DONE): =market_aliases.go= is DELETED. This was the last
+remaining transition shim — NO =*_aliases.go= files exist anywhere now. The root
+engine used its 78 market symbols BARE (exported types =Price/Candle/...= plus
+root-internal unexported helpers =mulDivCeil64/bitSet/...=). Qualified all of
+them across every top-level root file (production + tests) with an AST-safe
+=gofmt -r= pass driven by the shim's own LHS->RHS map (17 of 78 differed: the
+two lowercase candle aliases and the unexported helper set map to Exported
+=market.= names), then =goimports=. Per Lesson 4, the only collateral damage was
+keyed composite-literal KEYS (=Instrument:= -> =market.Instrument:=); =gofmt -r=
+leaves struct field declarations, selectors, type decls, and switch =case= values
+correct. The damaged keys were reverted programmatically off the compiler's
+"invalid field name market.X in struct literal" errors (build for production
+files, =go vet= for test files), then =goimports= dropped now-unused =market=
+imports in the few test files whose only market use had been a reverted key.
+
+With this, the root engine no longer rides on ANY re-export shim.
+
 Still remaining for wave 8:
 
-- One shim still load-bearing, so not yet removable:
-  =market_aliases.go= — its exported aliases are used BARE by the root engine
-  itself (=Price/Candle/CandleTime/...=, same-package), and its unexported
-  helpers (=mulDivCeil64=, =bitSet=, ...) are root-internal. Blocked on engine
-  qualification (below), NOT on callers — all external callers are already off it.
 - The engine has NOT been physically relocated to its own package directory yet.
-  With execution/strategy already qualified, the remaining blocker to a clean
-  move is the same market/indicator/journal/log qualification (the engine uses
-  those names unqualified today). Decision pending: whether the engine needs a
-  distinct =engine=/=backtest= directory at all, or whether root =trader= simply
-  IS the top orchestration layer once the remaining leaf shims are gone.
+  All leaf-package qualification (execution/strategy/market/indicator/journal/log)
+  is now DONE, so the relocation is no longer blocked on import-name cleanup.
+  Decision pending: whether the engine needs a distinct =engine=/=backtest=
+  directory at all, or whether root =trader= simply IS the top orchestration
+  layer now that every leaf shim is gone.
 
 Remaining in root: backtest engine, strategy/regime/live orchestration, config,
 and a few orphans.
@@ -349,10 +361,11 @@ marketdata -> data (Provider registry)
 8. IN PROGRESS: =backtest= / =engine= — the orchestration layer, now sitting on
    clean APIs. Root engine de-shimmed off =execution=/=strategy= and both
    aliases DELETED. External callers of the =market=/=indicator=/=journal= shims
-   migrated (buckets A/B/C); =indicator_aliases.go=, =journal_aliases.go=, and
-   =log_aliases.go= DELETED. Remaining: qualify the root engine's own bare
-   =market.= usage so =market_aliases.go= can go, then decide whether to
-   relocate the engine to its own directory. See "Wave 8" above.
+   migrated (buckets A/B/C). The root engine's own bare market usage (78 symbols)
+   was then qualified, and ALL transition shims — =indicator_aliases.go=,
+   =journal_aliases.go=, =log_aliases.go=, and =market_aliases.go= — are DELETED.
+   Remaining: decide whether to relocate the engine to its own directory. See
+   "Wave 8" above.
 9. Opportunistic: =synth= (testdata generators), =config= — fold in where they
    reduce root clutter.
 

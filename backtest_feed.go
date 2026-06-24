@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // CSVTicksFeed reads canonical tick CSV rows:
@@ -22,8 +24,8 @@ import (
 type CSVTicksFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from Timestamp
-	to   Timestamp
+	from market.Timestamp
+	to   market.Timestamp
 
 	sawFirst bool
 }
@@ -31,7 +33,7 @@ type CSVTicksFeed struct {
 // NewCSVTicksFeed opens the CSV file at path and returns a feed that yields
 // only ticks whose timestamp falls within [from, to). Pass zero Timestamps
 // to disable filtering.
-func NewCSVTicksFeed(path string, from, to Timestamp) (*CSVTicksFeed, error) {
+func NewCSVTicksFeed(path string, from, to market.Timestamp) (*CSVTicksFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -53,14 +55,14 @@ func (f *CSVTicksFeed) Close() error {
 
 // Next advances the feed and returns the next in-range Tick.
 // Returns (Tick{}, false, nil) at EOF and (Tick{}, false, err) on parse errors.
-func (f *CSVTicksFeed) Next() (Tick, bool, error) {
+func (f *CSVTicksFeed) Next() (market.Tick, bool, error) {
 	for {
 		row, err := f.r.Read()
 		if err == io.EOF {
-			return Tick{}, false, nil
+			return market.Tick{}, false, nil
 		}
 		if err != nil {
-			return Tick{}, false, err
+			return market.Tick{}, false, err
 		}
 		if len(row) == 0 {
 			continue
@@ -76,7 +78,7 @@ func (f *CSVTicksFeed) Next() (Tick, bool, error) {
 
 		p, ok, err := parseTickRow(row)
 		if err != nil {
-			return Tick{}, false, err
+			return market.Tick{}, false, err
 		}
 		if !ok {
 			continue
@@ -90,58 +92,58 @@ func (f *CSVTicksFeed) Next() (Tick, bool, error) {
 
 // parseTickRow parses one CSV row into a Tick. Returns (Tick{}, false, nil)
 // for rows that are too short or have blank fields (silently skipped).
-func parseTickRow(row []string) (Tick, bool, error) {
+func parseTickRow(row []string) (market.Tick, bool, error) {
 	// Need at least: time,instrument,bid,ask
 	if len(row) < 4 {
-		return Tick{}, false, nil
+		return market.Tick{}, false, nil
 	}
 
 	ts := strings.TrimSpace(row[0])
 	if ts == "" {
-		return Tick{}, false, nil
+		return market.Tick{}, false, nil
 	}
 	// Accept RFC3339 or RFC3339Nano.
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		t2, err2 := time.Parse(time.RFC3339Nano, ts)
 		if err2 != nil {
-			return Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
+			return market.Tick{}, false, fmt.Errorf("bad time %q: %w", ts, err)
 		}
 		t = t2
 	}
 
-	tstamp := Timestamp(t.Unix())
+	tstamp := market.Timestamp(t.Unix())
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
-		return Tick{}, false, nil
+		return market.Tick{}, false, nil
 	}
 
 	bid, err := strconv.ParseFloat(strings.TrimSpace(row[2]), 64)
 	if err != nil {
-		return Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
+		return market.Tick{}, false, fmt.Errorf("bad bid %q: %w", row[2], err)
 	}
 	ask, err := strconv.ParseFloat(strings.TrimSpace(row[3]), 64)
 	if err != nil {
-		return Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
+		return market.Tick{}, false, fmt.Errorf("bad ask %q: %w", row[3], err)
 	}
 
-	tick := Tick{
+	tick := market.Tick{
 		Timestamp:  tstamp,
 		Instrument: inst,
-		BA: BA{
-			Bid: PriceFromFloat(bid),
-			Ask: PriceFromFloat(ask),
+		BA: market.BA{
+			Bid: market.PriceFromFloat(bid),
+			Ask: market.PriceFromFloat(ask),
 		},
 	}
 	if err := tick.Validate(); err != nil {
-		return Tick{}, false, err
+		return market.Tick{}, false, err
 	}
 	return tick, true, nil
 }
 
 // inRange reports whether t falls within [from, to). A zero from or to
 // disables the corresponding bound.
-func inRange(t, from, to Timestamp) bool {
+func inRange(t, from, to market.Timestamp) bool {
 	if !from.IsZero() && t < from {
 		return false
 	}

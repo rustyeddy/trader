@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -81,7 +82,7 @@ func CompileBacktests(cfg *Config) ([]CompiledBacktest, error) {
 		}
 		applyBacktestExecutionDefaults(req, runCfg, cfg.Defaults)
 		compiled = append(compiled, CompiledBacktest{
-			ID:        NewULID(),
+			ID:        market.NewULID(),
 			RunConfig: runCfg,
 			Request:   *req,
 		})
@@ -99,26 +100,26 @@ type BacktestRequest struct {
 	Name       string
 	ConfigHash string // 8-char SHA256 prefix of execution-affecting config inputs
 
-	StartingBalance Money
-	RiskPct         Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
+	StartingBalance market.Money
+	RiskPct         market.Rate // fraction of equity risked per trade (e.g. 0.005 = 0.5 %)
 
-	DefaultStopPips Pips // fallback stop distance when the strategy doesn't supply one
-	DefaultTakePips Pips // fallback take-profit distance
-	SlippagePips    Pips // extra adverse fill adjustment applied on every open/close
-	MaxSpreadPips   Pips // opens are skipped when the candle spread exceeds this
+	DefaultStopPips market.Pips // fallback stop distance when the strategy doesn't supply one
+	DefaultTakePips market.Pips // fallback take-profit distance
+	SlippagePips    market.Pips // extra adverse fill adjustment applied on every open/close
+	MaxSpreadPips   market.Pips // opens are skipped when the candle spread exceeds this
 
 	Source     string // data source identifier (e.g. "candles", "dukascopy")
 	Instrument string // FX pair (e.g. "EUR_USD")
 	Strategy   strategy.Strategy
 	Exit       strategy.ExitStrategy
 	Regime     strategy.RegimeFilter
-	TimeRange  TimeRange
+	TimeRange  market.TimeRange
 }
 
 // compileBacktestComponents resolves the time range and builds the strategy,
 // exit strategy, and regime filter for one backtest run.
 func compileBacktestComponents(cfg RunConfig) (*BacktestRequest, error) {
-	tr, err := timeRangeFromStrings(cfg.Data.From, cfg.Data.To, cfg.Data.Timeframe)
+	tr, err := market.TimeRangeFromStrings(cfg.Data.From, cfg.Data.To, cfg.Data.Timeframe)
 	if err != nil {
 		return nil, fmt.Errorf("build backtest time range for %q: %w", cfg.Name, err)
 	}
@@ -128,7 +129,7 @@ func compileBacktestComponents(cfg RunConfig) (*BacktestRequest, error) {
 		return nil, fmt.Errorf("build backtest strategy for %q: %w", cfg.Name, err)
 	}
 
-	scale := Scale6(PriceScale)
+	scale := market.Scale6(market.PriceScale)
 	exit, err := strategy.GetExitStrategy(cfg.Exit, scale)
 	if err != nil {
 		return nil, fmt.Errorf("build exit strategy for %q: %w", cfg.Name, err)
@@ -158,12 +159,12 @@ func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, default
 		return
 	}
 	req.ConfigHash = hashBacktestConfig(cfg, defaults)
-	req.StartingBalance = MoneyFromFloat(defaults.StartingBalance)
-	req.RiskPct = RateFromFloat(defaults.RiskPct / 100.0)
-	req.DefaultStopPips = PipsFromFloat(float64(defaults.StopPips))
-	req.DefaultTakePips = PipsFromFloat(float64(defaults.TakePips))
-	req.SlippagePips = PipsFromFloat(defaults.SlippagePips)
-	req.MaxSpreadPips = PipsFromFloat(defaults.MaxSpreadPips)
+	req.StartingBalance = market.MoneyFromFloat(defaults.StartingBalance)
+	req.RiskPct = market.RateFromFloat(defaults.RiskPct / 100.0)
+	req.DefaultStopPips = market.PipsFromFloat(float64(defaults.StopPips))
+	req.DefaultTakePips = market.PipsFromFloat(float64(defaults.TakePips))
+	req.SlippagePips = market.PipsFromFloat(defaults.SlippagePips)
+	req.MaxSpreadPips = market.PipsFromFloat(defaults.MaxSpreadPips)
 }
 
 // BuildBacktestResult snapshots the account state into a BacktestResult and
@@ -192,7 +193,7 @@ func (run *Backtest) BuildBacktestResult(acct *execution.Account) *BacktestResul
 		Equity:       acct.Equity,
 	}
 
-	var running, peak Money
+	var running, peak market.Money
 	for _, tr := range acct.Trades {
 		if tr == nil {
 			continue
@@ -220,23 +221,23 @@ func (run *Backtest) BuildBacktestResult(acct *execution.Account) *BacktestResul
 
 	res.NetPL = acct.Balance - res.StartBalance
 	if res.StartBalance != 0 {
-		res.ReturnPct = RateFromFloat(res.NetPL.Float64() / res.StartBalance.Float64())
-		res.MaxDrawdownPct = RateFromFloat(res.MaxDrawdown.Float64() / res.StartBalance.Float64())
+		res.ReturnPct = market.RateFromFloat(res.NetPL.Float64() / res.StartBalance.Float64())
+		res.MaxDrawdownPct = market.RateFromFloat(res.MaxDrawdown.Float64() / res.StartBalance.Float64())
 	}
 	if res.Trades > 0 {
-		res.WinRate = RateFromFloat(float64(res.Wins) / float64(res.Trades))
+		res.WinRate = market.RateFromFloat(float64(res.Wins) / float64(res.Trades))
 	}
 	if res.Wins > 0 {
-		res.AvgWinner = Money(int64(res.GrossProfit) / int64(res.Wins))
+		res.AvgWinner = market.Money(int64(res.GrossProfit) / int64(res.Wins))
 	}
 	if res.Losses > 0 {
-		res.AvgLoser = Money(int64(res.GrossLoss) / int64(res.Losses))
+		res.AvgLoser = market.Money(int64(res.GrossLoss) / int64(res.Losses))
 	}
 	if res.GrossLoss < 0 {
-		res.ProfitFactor = RateFromFloat(res.GrossProfit.Float64() / -res.GrossLoss.Float64())
+		res.ProfitFactor = market.RateFromFloat(res.GrossProfit.Float64() / -res.GrossLoss.Float64())
 	}
 	if res.AvgLoser < 0 {
-		res.RR = RateFromFloat(res.AvgWinner.Float64() / -res.AvgLoser.Float64())
+		res.RR = market.RateFromFloat(res.AvgWinner.Float64() / -res.AvgLoser.Float64())
 	}
 
 	run.Result = res

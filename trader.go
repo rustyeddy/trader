@@ -8,6 +8,7 @@ import (
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/log"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -111,7 +112,7 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr CandleIterator) (err error) {
+func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr market.CandleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -136,8 +137,8 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 	}
 
 	// Convert slippage and max-spread pips to Price units using instrument metadata.
-	var slippage, maxSpread Price
-	if inst := GetInstrument(run.Request.Instrument); inst != nil {
+	var slippage, maxSpread market.Price
+	if inst := market.GetInstrument(run.Request.Instrument); inst != nil {
 		if run.Request.SlippagePips != 0 {
 			slippage = inst.PriceDeltaFromPips(run.Request.SlippagePips)
 		}
@@ -193,7 +194,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 	var processedCandles int64
 	var submittedOpens int64
 	var submittedCloses int64
-	var lastCandle candleTime
+	var lastCandle market.CandleTime
 	haveLastCandle := false
 
 	var lastProgressNanos int64
@@ -271,7 +272,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		atomic.AddInt64(&processedCandles, 1)
 
-		err := t.Account.ResolveWithMarks(map[string]Price{
+		err := t.Account.ResolveWithMarks(map[string]market.Price{
 			run.Request.Instrument: candle.Close,
 		})
 		if err != nil {
@@ -290,11 +291,11 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 				}
 				// Advance extreme price watermark.
 				switch lot.Side {
-				case Long:
+				case market.Long:
 					if lot.ExtremePrice == 0 || candle.High > lot.ExtremePrice {
 						lot.ExtremePrice = candle.High
 					}
-				case Short:
+				case market.Short:
 					if lot.ExtremePrice == 0 || candle.Low < lot.ExtremePrice {
 						lot.ExtremePrice = candle.Low
 					}
@@ -350,7 +351,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 
 			// Short closes by buying at ask; long closes by selling at bid.
 			if cl.Lot != nil {
-				isBuy := cl.Lot.Side == Short
+				isBuy := cl.Lot.Side == market.Short
 				cl.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
 			}
 
@@ -369,7 +370,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 			log.L.Info("Broker event Open Position", "ID", openReq.ID)
 
 			// Long buys at ask; short sells at bid.
-			isBuy := openReq.Side == Long
+			isBuy := openReq.Side == market.Long
 			openReq.Price += fillAdjust(isBuy, candle.AvgSpread, slippage)
 			run.State.SpreadOpened++
 			run.State.SpreadSum += candle.AvgSpread
@@ -415,7 +416,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr Ca
 		})
 
 		for _, lot := range remaining {
-			isBuy := lot.Side == Short
+			isBuy := lot.Side == market.Short
 			closePx := lastCandle.Close + fillAdjust(isBuy, lastCandle.AvgSpread, slippage)
 			cl := &execution.CloseRequest{
 				Request: execution.Request{
@@ -478,7 +479,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	if t.DataManager == nil {
 		return fmt.Errorf("nil data manager")
 	}
-	source := firstNonEmpty(run.Request.Source, SourceOanda)
+	source := firstNonEmpty(run.Request.Source, market.SourceOanda)
 	// Select the Instrument, TimeRange and TimeFrame
 	candlereq := marketdata.CandleRequest{
 		Source:     source,

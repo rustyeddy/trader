@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
@@ -24,24 +25,24 @@ func (s *countingStrategy) Name() string            { return "counting" }
 func (s *countingStrategy) Reset()                  { s.resets++ }
 func (s *countingStrategy) Ready() bool             { return true }
 func (s *countingStrategy) StopDescription() string { return "" }
-func (s *countingStrategy) Update(context.Context, *CandleTime, strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *countingStrategy) Update(context.Context, *market.CandleTime, strategy.StrategyContext) *strategy.StrategyPlan {
 	s.calls++
 	return s.plan
 }
 
 type fixedCandleIterator struct {
-	candles  []candleTime
+	candles  []market.CandleTime
 	idx      int
 	closeErr error
 	err      error
 }
 
-func (it *fixedCandleIterator) Next() (CandleTime, bool) {
+func (it *fixedCandleIterator) Next() (market.CandleTime, bool) {
 	if it.err != nil {
-		return CandleTime{}, false
+		return market.CandleTime{}, false
 	}
 	if it.idx >= len(it.candles) {
-		return CandleTime{}, false
+		return market.CandleTime{}, false
 	}
 	ct := it.candles[it.idx]
 	it.idx++
@@ -72,17 +73,17 @@ func TestTraderProcessEventValidation(t *testing.T) {
 		"missing position")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}),
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}),
 		"missing trade")
 
 	require.NoError(t,
-		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}))
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}))
 
 	require.NoError(t,
 		tr.processEvent(context.Background(), &execution.Event{
 			Type:  execution.EventPositionClosed,
-			Lot:   &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}},
-			Trade: &execution.Trade{TradeCommon: &execution.TradeCommon{ID: NewULID()}},
+			Lot:   &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}},
+			Trade: &execution.Trade{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}},
 		}))
 
 	// Unsupported event types are intentionally non-fatal.
@@ -100,7 +101,7 @@ func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T)
 	var processed int64
 	errCh, done := tr.startBrokerEventHandler(ctx, evtQ, &processed)
 
-	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}
+	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&processed) == 1
 	}, 200*time.Millisecond, 5*time.Millisecond)
@@ -132,7 +133,7 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	require.EqualError(t, tr.brokerEventError(errCh), "boom")
 
 	b := execution.NewBroker("idle")
-	b.Account = execution.NewAccount("acct", MoneyFromFloat(10_000))
+	b.Account = execution.NewAccount("acct", market.MoneyFromFloat(10_000))
 	idle := &Trader{Broker: b}
 	require.NoError(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
@@ -140,7 +141,7 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	bad <- errors.New("from broker")
 	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 
-	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: NewULID()}}}))
+	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}))
 	require.ErrorContains(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 
@@ -166,7 +167,7 @@ func TestSnapshotLots_FiltersByState(t *testing.T) {
 func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	t.Parallel()
 
-	acct := execution.NewAccount("acct", MoneyFromFloat(10_000))
+	acct := execution.NewAccount("acct", market.MoneyFromFloat(10_000))
 	broker := execution.NewBroker("broker")
 	broker.Account = acct
 
@@ -176,14 +177,14 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	run := &Backtest{Request: &BacktestRequest{Instrument: "EURUSD"}}
 	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, nil), "nil candle iterator")
 
-	itr := &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
+	itr := &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: market.Timestamp(1704067200)}}}
 	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, itr), "nil strategy")
 
 	strat := &countingStrategy{}
 	run.Request.Strategy = strat
 	run.State = &BacktestRun{}
 
-	itr = &fixedCandleIterator{candles: []candleTime{{Candle: Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: Timestamp(1704067200)}}}
+	itr = &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: market.Timestamp(1704067200)}}}
 	require.NoError(t, tr.backTestWithIterator(ctx, run, itr))
 	assert.Equal(t, 1, strat.resets)
 	assert.Equal(t, 1, strat.calls)
@@ -197,8 +198,8 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 		Request: &BacktestRequest{
 			Instrument:      "EURUSD",
 			Strategy:        strat,
-			TimeRange:       TimeRange{Start: Timestamp(1704067200), End: Timestamp(1704070800), TF: H1},
-			StartingBalance: MoneyFromFloat(10_000),
+			TimeRange:       market.TimeRange{Start: market.Timestamp(1704067200), End: market.Timestamp(1704070800), TF: market.H1},
+			StartingBalance: market.MoneyFromFloat(10_000),
 		},
 	}
 
@@ -209,7 +210,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	require.ErrorContains(t, noAcct.Backtest(ctx, run), "nil account")
 
 	withAcctBroker := execution.NewBroker("with-account")
-	withAcctBroker.Account = execution.NewAccount("acct", MoneyFromFloat(10_000))
+	withAcctBroker.Account = execution.NewAccount("acct", market.MoneyFromFloat(10_000))
 	withAcct := &Trader{Broker: withAcctBroker}
 	require.ErrorContains(t, withAcct.Backtest(ctx, run), "nil data manager")
 
@@ -219,15 +220,15 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	s := marketdata.NewStoreAt(t.TempDir())
 	t.Cleanup(marketdata.SwapStore(s))
-	cs, err := marketdata.NewMonthlyCandleSet("EURUSD", H1, FromTime(ts), PriceScale, SourceCandles)
+	cs, err := marketdata.NewMonthlyCandleSet("EURUSD", market.H1, market.FromTime(ts), market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
-	require.NoError(t, cs.AddCandle(FromTime(ts), Candle{
-		Open:      Price(1100000),
-		High:      Price(1102000),
-		Low:       Price(1099000),
-		Close:     Price(1101000),
-		AvgSpread: Price(10),
-		MaxSpread: Price(20),
+	require.NoError(t, cs.AddCandle(market.FromTime(ts), market.Candle{
+		Open:      market.Price(1100000),
+		High:      market.Price(1102000),
+		Low:       market.Price(1099000),
+		Close:     market.Price(1101000),
+		AvgSpread: market.Price(10),
+		MaxSpread: market.Price(20),
 		Ticks:     42,
 	}))
 	require.NoError(t, s.WriteCSV(cs))

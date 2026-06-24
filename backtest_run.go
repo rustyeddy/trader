@@ -1,6 +1,9 @@
 package trader
 
-import "github.com/rustyeddy/trader/execution"
+import (
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
+)
 
 // BacktestRun holds mutable state accumulated during a single backtest
 // execution: the current lot book, the list of closed trades, and execution-cost
@@ -10,9 +13,9 @@ type BacktestRun struct {
 	Trades []*execution.Trade
 
 	// Execution cost tracking — populated by the run loop.
-	SpreadFiltered int   // opens suppressed by the max-spread filter
-	SpreadOpened   int   // opens that went through (for avg spread calc)
-	SpreadSum      Price // sum of candle.AvgSpread at each accepted open
+	SpreadFiltered int          // opens suppressed by the max-spread filter
+	SpreadOpened   int          // opens that went through (for avg spread calc)
+	SpreadSum      market.Price // sum of candle.AvgSpread at each accepted open
 }
 
 // GetTrades returns the run's closed trade list, or nil if run is nil.

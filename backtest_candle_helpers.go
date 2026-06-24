@@ -4,19 +4,20 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
 // CandleSource provides candle iterators for backtest and replay execution.
 // DataManager satisfies this interface.
 type CandleSource interface {
-	Candles(context.Context, marketdata.CandleRequest) (CandleIterator, error)
+	Candles(context.Context, marketdata.CandleRequest) (market.CandleIterator, error)
 }
 
 // fillAdjust returns the price adjustment for spread and slippage.
 // Dukascopy OHLC prices are bid-side. When we are buying (long open, short
 // close) we pay the ask: +spread+slippage. When selling we only lose slippage.
-func fillAdjust(isBuy bool, spread, slippage Price) Price {
+func fillAdjust(isBuy bool, spread, slippage market.Price) market.Price {
 	if isBuy {
 		return spread + slippage
 	}
@@ -27,10 +28,10 @@ func fillAdjust(isBuy bool, spread, slippage Price) Price {
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *execution.Broker, candle CandleTime, slippage Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.CandleTime, slippage market.Price) (int, error) {
 	var hits []struct {
 		lot    *execution.Lot
-		exitPx Price
+		exitPx market.Price
 		reason string
 		cause  execution.CloseCause
 	}
@@ -49,7 +50,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle CandleTime,
 		}
 		hits = append(hits, struct {
 			lot    *execution.Lot
-			exitPx Price
+			exitPx market.Price
 			reason string
 			cause  execution.CloseCause
 		}{lot, exitPx, reason, cause})
@@ -58,7 +59,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle CandleTime,
 
 	for _, h := range hits {
 		// Short closes by buying at ask; long closes by selling at bid.
-		isBuy := h.lot.Side == Short
+		isBuy := h.lot.Side == market.Short
 		adjPx := h.exitPx + fillAdjust(isBuy, candle.AvgSpread, slippage)
 		cl := &execution.CloseRequest{
 			Request: execution.Request{
@@ -80,7 +81,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle CandleTime,
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(lot *execution.Lot, c Candle) (exitPx Price, reason string, hit bool) {
+func checkExit(lot *execution.Lot, c market.Candle) (exitPx market.Price, reason string, hit bool) {
 	if lot == nil {
 		return 0, "", false
 	}
@@ -89,7 +90,7 @@ func checkExit(lot *execution.Lot, c Candle) (exitPx Price, reason string, hit b
 	hasTake := lot.Take != 0
 
 	switch lot.Side {
-	case Long:
+	case market.Long:
 		stopHit := hasStop && c.Low <= lot.Stop
 		takeHit := hasTake && c.High >= lot.Take
 		if stopHit && takeHit {
@@ -102,7 +103,7 @@ func checkExit(lot *execution.Lot, c Candle) (exitPx Price, reason string, hit b
 			return lot.Take, "TAKE", true
 		}
 
-	case Short:
+	case market.Short:
 		stopHit := hasStop && c.High >= lot.Stop
 		takeHit := hasTake && c.Low <= lot.Take
 		if stopHit && takeHit {

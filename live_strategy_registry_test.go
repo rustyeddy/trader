@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,7 +47,7 @@ func TestRegisterLiveStrategy_BlankNameReturnsError(t *testing.T) {
 }
 
 func TestRegisterLiveStrategy_DuplicateNameReturnsError(t *testing.T) {
-	name := "live-reg-dup-" + NewULID()
+	name := "live-reg-dup-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor("first"), name))
 	err := RegisterLiveStrategy(dummyCtor("second"), name)
 	require.Error(t, err)
@@ -54,7 +55,7 @@ func TestRegisterLiveStrategy_DuplicateNameReturnsError(t *testing.T) {
 }
 
 func TestRegisterLiveStrategy_Success(t *testing.T) {
-	name := "live-reg-ok-" + NewULID()
+	name := "live-reg-ok-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), name))
 	ctor := LookupLiveStrategy(name)
 	require.NotNil(t, ctor)
@@ -62,7 +63,7 @@ func TestRegisterLiveStrategy_Success(t *testing.T) {
 
 func TestRegisterLiveStrategy_NormalizesName(t *testing.T) {
 	// Registration with mixed case / spaces should be retrievable via lowercase.
-	name := "live-reg-norm-" + NewULID()
+	name := "live-reg-norm-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), "  "+name+"  "))
 	assert.NotNil(t, LookupLiveStrategy(name))
 }
@@ -74,7 +75,7 @@ func TestLookupLiveStrategy_UnknownReturnsNil(t *testing.T) {
 }
 
 func TestLookupLiveStrategy_CaseInsensitive(t *testing.T) {
-	name := "live-lookup-case-" + NewULID()
+	name := "live-lookup-case-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), name))
 	assert.NotNil(t, LookupLiveStrategy(name))
 }
@@ -94,7 +95,7 @@ func TestGetLiveStrategy_UnknownKindReturnsError(t *testing.T) {
 }
 
 func TestGetLiveStrategy_Success(t *testing.T) {
-	name := "live-get-ok-" + NewULID()
+	name := "live-get-ok-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), name))
 
 	strat, err := GetLiveStrategy(strategy.StrategyConfig{Kind: name})
@@ -104,7 +105,7 @@ func TestGetLiveStrategy_Success(t *testing.T) {
 }
 
 func TestGetLiveStrategy_CtorErrorPropagated(t *testing.T) {
-	name := "live-get-err-" + NewULID()
+	name := "live-get-err-" + market.NewULID()
 	failCtor := func(_ map[string]any) (LiveStrategy, error) {
 		return nil, fmt.Errorf("ctor failed")
 	}
@@ -117,7 +118,7 @@ func TestGetLiveStrategy_CtorErrorPropagated(t *testing.T) {
 // ── RegisteredLiveStrategies ──────────────────────────────────────────────────
 
 func TestRegisteredLiveStrategies_IncludesRegistered(t *testing.T) {
-	name := "live-list-" + NewULID()
+	name := "live-list-" + market.NewULID()
 	require.NoError(t, RegisterLiveStrategy(dummyCtor(name), name))
 	names := RegisteredLiveStrategies()
 	// Registry normalizes names to lowercase.
@@ -134,7 +135,7 @@ func TestRegisteredLiveStrategies_IsSorted(t *testing.T) {
 // ── MustRegisterLiveStrategy ─────────────────────────────────────────────────
 
 func TestMustRegisterLiveStrategy_PanicsOnDuplicate(t *testing.T) {
-	name := "live-must-dup-" + NewULID()
+	name := "live-must-dup-" + market.NewULID()
 	MustRegisterLiveStrategy(dummyCtor(name), name)
 	assert.Panics(t, func() {
 		MustRegisterLiveStrategy(dummyCtor(name), name)

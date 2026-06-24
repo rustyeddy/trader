@@ -3,12 +3,13 @@ package trader
 import (
 	"context"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
-func mkClose(close float64) Candle {
-	toP := func(x float64) Price { return Price(x*float64(PriceScale) + 0.5) }
-	return Candle{Close: toP(close)}
+func mkClose(close float64) market.Candle {
+	toP := func(x float64) market.Price { return market.Price(x*float64(market.PriceScale) + 0.5) }
+	return market.Candle{Close: toP(close)}
 }
 
 // testFake is a trivial in-package strategy registered under "fake" so trader
@@ -21,7 +22,7 @@ func (testFake) Name() string            { return "Fake" }
 func (testFake) Reset()                  {}
 func (testFake) Ready() bool             { return true }
 func (testFake) StopDescription() string { return "" }
-func (testFake) Update(_ context.Context, _ *CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
+func (testFake) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
 	return strategy.DefaultPlan()
 }
 

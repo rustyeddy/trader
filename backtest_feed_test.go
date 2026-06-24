@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,17 +19,17 @@ func TestParseTickRow(t *testing.T) {
 		row       []string
 		wantOk    bool
 		wantErr   bool
-		checkFunc func(t *testing.T, p Tick)
+		checkFunc func(t *testing.T, p market.Tick)
 	}{
 		{
 			name:    "valid row",
 			row:     []string{"2026-01-24T09:30:00Z", "EUR_USD", "1.1000", "1.1002"},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p Tick) {
+			checkFunc: func(t *testing.T, p market.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
-				assert.Equal(t, PriceFromFloat(1.1000), p.Bid)
-				assert.Equal(t, PriceFromFloat(1.1002), p.Ask)
+				assert.Equal(t, market.PriceFromFloat(1.1000), p.Bid)
+				assert.Equal(t, market.PriceFromFloat(1.1002), p.Ask)
 			},
 		},
 		{
@@ -36,7 +37,7 @@ func TestParseTickRow(t *testing.T) {
 			row:     []string{"2026-01-24T09:30:00.123456789Z", "GBP_USD", "1.2500", "1.2502"},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p Tick) {
+			checkFunc: func(t *testing.T, p market.Tick) {
 				assert.Equal(t, "GBP_USD", p.Instrument)
 			},
 		},
@@ -45,7 +46,7 @@ func TestParseTickRow(t *testing.T) {
 			row:     []string{" 2026-01-24T09:30:00Z ", " EUR_USD ", " 1.1000 ", " 1.1002 "},
 			wantOk:  true,
 			wantErr: false,
-			checkFunc: func(t *testing.T, p Tick) {
+			checkFunc: func(t *testing.T, p market.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
 			},
 		},
@@ -130,65 +131,65 @@ func TestInRange(t *testing.T) {
 
 	tests := []struct {
 		name string
-		t    Timestamp
-		from Timestamp
-		to   Timestamp
+		t    market.Timestamp
+		from market.Timestamp
+		to   market.Timestamp
 		want bool
 	}{
 		{
 			name: "no range",
-			t:    FromTime(base),
+			t:    market.FromTime(base),
 			from: 0,
 			to:   0,
 			want: true,
 		},
 		{
 			name: "within range",
-			t:    FromTime(base),
-			from: FromTime(before),
-			to:   FromTime(after),
+			t:    market.FromTime(base),
+			from: market.FromTime(before),
+			to:   market.FromTime(after),
 			want: true,
 		},
 		{
 			name: "before range",
-			t:    FromTime(before),
-			from: FromTime(base),
-			to:   FromTime(after),
+			t:    market.FromTime(before),
+			from: market.FromTime(base),
+			to:   market.FromTime(after),
 			want: false,
 		},
 		{
 			name: "after range",
-			t:    FromTime(after),
-			from: FromTime(before),
-			to:   FromTime(base),
+			t:    market.FromTime(after),
+			from: market.FromTime(before),
+			to:   market.FromTime(base),
 			want: false,
 		},
 		{
 			name: "at from boundary",
-			t:    FromTime(base),
-			from: FromTime(base),
-			to:   FromTime(after),
+			t:    market.FromTime(base),
+			from: market.FromTime(base),
+			to:   market.FromTime(after),
 			want: true,
 		},
 		{
 			name: "at to boundary",
-			t:    FromTime(base),
-			from: FromTime(before),
-			to:   FromTime(base),
+			t:    market.FromTime(base),
+			from: market.FromTime(before),
+			to:   market.FromTime(base),
 			want: false,
 		},
 		{
 			name: "only from constraint",
-			t:    FromTime(after),
-			from: FromTime(base),
+			t:    market.FromTime(after),
+			from: market.FromTime(base),
 			to:   0,
 			want: true,
 		},
 		{
 			name: "only to constraint",
-			t:    FromTime(before),
+			t:    market.FromTime(before),
 			from: 0,
-			to:   FromTime(base),
+			to:   market.FromTime(base),
 			want: true,
 		},
 	}
@@ -263,7 +264,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		defer feed.Close()
 
 		// Read all ticks
-		var ticks []Tick
+		var ticks []market.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -275,7 +276,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 
 		assert.Len(t, ticks, 3)
 		if len(ticks) >= 1 {
-			assert.Equal(t, PriceFromFloat(1.1000), ticks[0].Bid)
+			assert.Equal(t, market.PriceFromFloat(1.1000), ticks[0].Bid)
 		}
 	})
 
@@ -315,14 +316,14 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		from := FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC))
-		to := FromTime(time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC))
+		from := market.FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC))
+		to := market.FromTime(time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC))
 
 		feed, err := NewCSVTicksFeed(csvPath, from, to)
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []Tick
+		var ticks []market.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -352,7 +353,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []Tick
+		var ticks []market.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)
@@ -381,7 +382,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 		require.NoError(t, err)
 		defer feed.Close()
 
-		var ticks []Tick
+		var ticks []market.Tick
 		for {
 			p, ok, err := feed.Next()
 			require.NoError(t, err)

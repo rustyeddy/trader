@@ -3,6 +3,8 @@ package trader
 import (
 	"fmt"
 	"time"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // Summary builds a fully-populated BacktestReportSummary from the run's
@@ -102,8 +104,8 @@ func executionCostStats(run *Backtest) (avgSpreadPips float64, spreadFiltered in
 		return 0, 0
 	}
 	spreadFiltered = run.State.SpreadFiltered
-	inst := GetInstrument(run.Request.Instrument)
-	avgSpreadPips = AvgSpreadPips(run.State.SpreadSum, run.State.SpreadOpened, inst)
+	inst := market.GetInstrument(run.Request.Instrument)
+	avgSpreadPips = market.AvgSpreadPips(run.State.SpreadSum, run.State.SpreadOpened, inst)
 	return avgSpreadPips, spreadFiltered
 }
 
@@ -132,7 +134,7 @@ func stopDescription(run *Backtest) string {
 }
 
 // formatBacktestSummaryTime formats a Timestamp as RFC3339 UTC, or "" for zero.
-func formatBacktestSummaryTime(ts Timestamp) string {
+func formatBacktestSummaryTime(ts market.Timestamp) string {
 	if ts == 0 {
 		return ""
 	}
