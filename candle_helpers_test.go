@@ -39,14 +39,14 @@ func testOpenLot(t *testing.T, acct *execution.Account, inst string, side market
 func TestSnapshotLots(t *testing.T) {
 	t.Parallel()
 
-	// snapshotLots is in trader.go — test via indirect usage through BacktestRun.
+	// SnapshotLots is in trader.go — test via indirect usage through BacktestRun.
 	// Directly we can test LotBook copying behavior.
 	src := &execution.LotBook{}
 	lot := &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "p1", Instrument: "EURUSD", Side: market.Long, Units: 10}, EntryPrice: market.PriceFromFloat(1.1), OriginalUnits: 10, RemainingUnits: 10, State: execution.LotOpen}
 	src.Add(lot)
 
-	// Use snapshotLots function from trader.go
-	cp := snapshotLots(src)
+	// Use SnapshotLots function from trader.go
+	cp := SnapshotLots(src)
 	require.NotNil(t, cp)
 	assert.Equal(t, 1, cp.Len())
 

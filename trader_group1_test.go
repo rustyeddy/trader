@@ -99,7 +99,7 @@ func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T)
 	defer cancel()
 
 	var processed int64
-	errCh, done := tr.startBrokerEventHandler(ctx, evtQ, &processed)
+	errCh, done := tr.StartBrokerEventHandler(ctx, evtQ, &processed)
 
 	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}
 	assert.Eventually(t, func() bool {
@@ -127,22 +127,22 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 
 	tr := &Trader{}
 	errCh := make(chan error, 1)
-	require.NoError(t, tr.brokerEventError(errCh))
+	require.NoError(t, tr.BrokerEventError(errCh))
 
 	errCh <- errors.New("boom")
-	require.EqualError(t, tr.brokerEventError(errCh), "boom")
+	require.EqualError(t, tr.BrokerEventError(errCh), "boom")
 
 	b := execution.NewBroker("idle")
 	b.Account = execution.NewAccount("acct", market.MoneyFromFloat(10_000))
 	idle := &Trader{Broker: b}
-	require.NoError(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
+	require.NoError(t, idle.WaitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
 	bad := make(chan error, 1)
 	bad <- errors.New("from broker")
-	require.EqualError(t, idle.waitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
+	require.EqualError(t, idle.WaitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 
 	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}))
-	require.ErrorContains(t, idle.waitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
+	require.ErrorContains(t, idle.WaitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 
 func TestSnapshotLots_FiltersByState(t *testing.T) {
@@ -154,7 +154,7 @@ func TestSnapshotLots_FiltersByState(t *testing.T) {
 	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "close-req"}, State: execution.LotCloseRequested})
 	src.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "closed"}, State: execution.LotClosed})
 
-	got := snapshotLots(src)
+	got := SnapshotLots(src)
 	require.NotNil(t, got)
 	lots := got.All()
 	require.Len(t, lots, 3)
@@ -175,17 +175,17 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	ctx := context.Background()
 
 	run := &Backtest{Request: &BacktestRequest{Instrument: "EURUSD"}}
-	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, nil), "nil candle iterator")
+	require.ErrorContains(t, run.runWithIterator(ctx, tr, nil), "nil candle iterator")
 
 	itr := &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: market.Timestamp(1704067200)}}}
-	require.ErrorContains(t, tr.backTestWithIterator(ctx, run, itr), "nil strategy")
+	require.ErrorContains(t, run.runWithIterator(ctx, tr, itr), "nil strategy")
 
 	strat := &countingStrategy{}
 	run.Request.Strategy = strat
 	run.State = &BacktestRun{}
 
 	itr = &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: market.Timestamp(1704067200)}}}
-	require.NoError(t, tr.backTestWithIterator(ctx, run, itr))
+	require.NoError(t, run.runWithIterator(ctx, tr, itr))
 	assert.Equal(t, 1, strat.resets)
 	assert.Equal(t, 1, strat.calls)
 }
@@ -204,15 +204,15 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	}
 
 	var nilTrader *Trader
-	require.ErrorContains(t, nilTrader.Backtest(ctx, run), "nil trader")
+	require.ErrorContains(t, run.Execute(ctx, nilTrader), "nil trader")
 
 	noAcct := &Trader{Broker: execution.NewBroker("no-account")}
-	require.ErrorContains(t, noAcct.Backtest(ctx, run), "nil account")
+	require.ErrorContains(t, run.Execute(ctx, noAcct), "nil account")
 
 	withAcctBroker := execution.NewBroker("with-account")
 	withAcctBroker.Account = execution.NewAccount("acct", market.MoneyFromFloat(10_000))
 	withAcct := &Trader{Broker: withAcctBroker}
-	require.ErrorContains(t, withAcct.Backtest(ctx, run), "nil data manager")
+	require.ErrorContains(t, run.Execute(ctx, withAcct), "nil data manager")
 
 	broker := execution.NewBroker("broker")
 	broker.Account = withAcctBroker.Account
@@ -235,7 +235,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 
 	dm := marketdata.NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &Trader{Broker: broker, DataManager: dm}
-	require.NoError(t, okTrader.Backtest(ctx, run))
+	require.NoError(t, run.Execute(ctx, okTrader))
 	require.NotNil(t, run.State)
 	require.NotNil(t, run.Result)
 	assert.Equal(t, 0, run.Result.Trades)

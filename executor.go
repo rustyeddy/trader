@@ -69,5 +69,5 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	}
 	t.Broker.Account = acct
 
-	return t.Backtest(ctx, run)
+	return run.Execute(ctx, t)
 }

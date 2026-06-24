@@ -19,7 +19,7 @@ type Trader struct {
 	*marketdata.Store
 }
 
-func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *execution.Event, processed *int64) (<-chan error, <-chan struct{}) {
+func (t *Trader) StartBrokerEventHandler(ctx context.Context, evtQ <-chan *execution.Event, processed *int64) (<-chan error, <-chan struct{}) {
 	errCh := make(chan error, 1)
 	done := make(chan struct{})
 
@@ -57,7 +57,7 @@ func (t *Trader) startBrokerEventHandler(ctx context.Context, evtQ <-chan *execu
 	return errCh, done
 }
 
-func (t *Trader) brokerEventError(errCh <-chan error) error {
+func (t *Trader) BrokerEventError(errCh <-chan error) error {
 	select {
 	case err := <-errCh:
 		return err
@@ -66,7 +66,7 @@ func (t *Trader) brokerEventError(errCh <-chan error) error {
 	}
 }
 
-func snapshotLots(src *execution.LotBook) *execution.LotBook {
+func SnapshotLots(src *execution.LotBook) *execution.LotBook {
 	out := &execution.LotBook{}
 	if src == nil {
 		return out
@@ -80,10 +80,10 @@ func snapshotLots(src *execution.LotBook) *execution.LotBook {
 	return out
 }
 
-func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) error {
+func (t *Trader) WaitForBrokerIdle(errCh <-chan error, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if err := t.brokerEventError(errCh); err != nil {
+		if err := t.BrokerEventError(errCh); err != nil {
 			return err
 		}
 
@@ -112,7 +112,7 @@ func (t *Trader) waitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr market.CandleIterator) (err error) {
+func (run *Backtest) runWithIterator(ctx context.Context, t *Trader, itr market.CandleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -160,14 +160,14 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 	evtQ := t.Broker.Events()
 
 	var processedEvents int64
-	errCh, done := t.startBrokerEventHandler(runCtx, evtQ, &processedEvents)
+	errCh, done := t.StartBrokerEventHandler(runCtx, evtQ, &processedEvents)
 	defer func() {
 		// Give the broker event handler a short chance to drain queued events
 		// before cancellation, otherwise late errors can be dropped.
 		drainUntil := time.Now().Add(2 * time.Second)
 		for time.Now().Before(drainUntil) {
 			if err == nil {
-				if evtErr := t.brokerEventError(errCh); evtErr != nil {
+				if evtErr := t.BrokerEventError(errCh); evtErr != nil {
 					err = evtErr
 					break
 				}
@@ -187,7 +187,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 		cancel()
 		<-done
 		if err == nil {
-			err = t.brokerEventError(errCh)
+			err = t.BrokerEventError(errCh)
 		}
 	}()
 
@@ -263,7 +263,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 		if err := runCtx.Err(); err != nil {
 			return err
 		}
-		if err := t.brokerEventError(errCh); err != nil {
+		if err := t.BrokerEventError(errCh); err != nil {
 			return err
 		}
 
@@ -313,7 +313,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 			atomic.AddInt64(&submittedCloses, int64(autoExits))
 		}
 
-		lots := snapshotLots(&t.Account.Lots)
+		lots := SnapshotLots(&t.Account.Lots)
 		run.State.Lots = lots
 		plan := strat.Update(runCtx, &candle, run)
 		if plan == nil {
@@ -403,7 +403,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 	if err := itr.Err(); err != nil {
 		return err
 	}
-	if err := t.waitForBrokerIdle(errCh, 2*time.Second); err != nil {
+	if err := t.WaitForBrokerIdle(errCh, 2*time.Second); err != nil {
 		return err
 	}
 	if haveLastCandle {
@@ -438,11 +438,11 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 	if err := runCtx.Err(); err != nil {
 		return err
 	}
-	if err := t.brokerEventError(errCh); err != nil {
+	if err := t.BrokerEventError(errCh); err != nil {
 		return err
 	}
 
-	if err := t.waitForBrokerIdle(errCh, 2*time.Second); err != nil {
+	if err := t.WaitForBrokerIdle(errCh, 2*time.Second); err != nil {
 		return err
 	}
 
@@ -456,7 +456,7 @@ func (t *Trader) backTestWithIterator(ctx context.Context, run *Backtest, itr ma
 	return nil
 }
 
-func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
+func (run *Backtest) Execute(ctx context.Context, t *Trader) error {
 	if run == nil || run.Request == nil || run.Request.Strategy == nil {
 		return fmt.Errorf("nil backtest run")
 	}
@@ -495,7 +495,7 @@ func (t *Trader) Backtest(ctx context.Context, run *Backtest) error {
 	}
 
 	run.Result = nil
-	if err := t.backTestWithIterator(ctx, run, itr); err != nil {
+	if err := run.runWithIterator(ctx, t, itr); err != nil {
 		return err
 	}
 	if run.Result == nil {
