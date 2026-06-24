@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
@@ -152,9 +152,9 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		barIdx    int
 	)
 
-	bt := &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: inst},
-		State:   &trader.BacktestRun{Lots: &execution.LotBook{}},
+	bt := &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: inst},
+		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
 	}
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {

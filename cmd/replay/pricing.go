@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/sim"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/journal"
@@ -84,7 +85,7 @@ func newPricingCmd(rc *trader.RootConfig) *cobra.Command {
 				Equity:   market.MoneyFromFloat(startingBalance),
 			}, j)
 
-			feed, err := trader.NewCSVTicksFeed(ticksPath, market.FromTime(from), market.FromTime(to))
+			feed, err := backtest.NewCSVTicksFeed(ticksPath, market.FromTime(from), market.FromTime(to))
 			if err != nil {
 				return err
 			}

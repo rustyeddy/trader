@@ -1,4 +1,4 @@
-package trader
+package backtest
 
 import (
 	"crypto/sha256"

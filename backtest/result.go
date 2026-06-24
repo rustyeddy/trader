@@ -1,4 +1,4 @@
-package trader
+package backtest
 
 import "github.com/rustyeddy/trader/market"
 

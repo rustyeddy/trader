@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
@@ -317,13 +318,13 @@ func (a *CandleStrategyAdapter) latestCompleteBar(ctx context.Context) (*oanda.C
 
 // makeBacktest builds a minimal *trader.Backtest so the strategy can inspect
 // the current open lots.
-func (a *CandleStrategyAdapter) makeBacktest() *trader.Backtest {
+func (a *CandleStrategyAdapter) makeBacktest() *backtest.Backtest {
 	lb := a.lots.toLotBook()
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{
 			Instrument: a.instNorm,
 		},
-		State: &trader.BacktestRun{
+		State: &backtest.BacktestRun{
 			Lots: lb,
 		},
 	}

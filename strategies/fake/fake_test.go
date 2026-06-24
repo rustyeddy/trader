@@ -7,15 +7,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 )
 
-func fakeRun(instrument string) *trader.Backtest {
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: instrument},
-		State:   &trader.BacktestRun{Lots: &execution.LotBook{}},
+func fakeRun(instrument string) *backtest.Backtest {
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: instrument},
+		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
 	}
 }
 

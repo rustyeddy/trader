@@ -1,9 +1,10 @@
-package trader
+package backtest
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 )
@@ -18,14 +19,14 @@ type BacktestExecutor interface {
 // TraderBacktestExecutor executes a Backtest by wiring it through Trader with
 // factory-provided runtime dependencies.
 type TraderBacktestExecutor struct {
-	DataManager    CandleSource
+	DataManager    engine.CandleSource
 	BrokerFactory  func() *execution.Broker
 	AccountFactory func(name string, balance market.Money) *execution.Account
 }
 
 // NewTraderBacktestExecutor returns a BacktestExecutor that uses Trader as the
 // concrete execution engine.
-func NewTraderBacktestExecutor(dm CandleSource) *TraderBacktestExecutor {
+func NewTraderBacktestExecutor(dm engine.CandleSource) *TraderBacktestExecutor {
 	return &TraderBacktestExecutor{
 		DataManager: dm,
 		BrokerFactory: func() *execution.Broker {
@@ -55,7 +56,7 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 		return fmt.Errorf("nil account factory")
 	}
 
-	t := &Trader{DataManager: e.DataManager}
+	t := &engine.Trader{DataManager: e.DataManager}
 	t.Broker = e.BrokerFactory()
 	if t.Broker == nil {
 		return fmt.Errorf("nil broker")

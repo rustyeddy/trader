@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
@@ -26,13 +26,13 @@ func minCandle(close float64) *market.CandleTime {
 }
 
 // minRun builds a minimal Backtest sufficient for the lifecycle strategy.
-func minRun(lots *execution.LotBook) *trader.Backtest {
+func minRun(lots *execution.LotBook) *backtest.Backtest {
 	if lots == nil {
 		lots = &execution.LotBook{}
 	}
-	return &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
-		State:   &trader.BacktestRun{Lots: lots},
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},
+		State:   &backtest.BacktestRun{Lots: lots},
 	}
 }
 

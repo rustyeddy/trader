@@ -1,4 +1,4 @@
-package trader
+package backtest
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
@@ -13,106 +14,7 @@ import (
 	"github.com/rustyeddy/trader/strategy"
 )
 
-type Trader struct {
-	DataManager CandleSource
-	*execution.Broker
-	*marketdata.Store
-}
-
-func (t *Trader) StartBrokerEventHandler(ctx context.Context, evtQ <-chan *execution.Event, processed *int64) (<-chan error, <-chan struct{}) {
-	errCh := make(chan error, 1)
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case evt, ok := <-evtQ:
-				if !ok {
-					log.L.Info("broker event channel closed")
-					return
-				}
-
-				log.L.Debug("Broker event received",
-					"type", evt.Type.String(),
-					"positionID", eventPositionID(evt),
-				)
-
-				if err := t.processEvent(ctx, evt); err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
-					return
-				}
-				if processed != nil {
-					atomic.AddInt64(processed, 1)
-				}
-			}
-		}
-	}()
-
-	return errCh, done
-}
-
-func (t *Trader) BrokerEventError(errCh <-chan error) error {
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
-}
-
-func SnapshotLots(src *execution.LotBook) *execution.LotBook {
-	out := &execution.LotBook{}
-	if src == nil {
-		return out
-	}
-	_ = src.Range(func(lot *execution.Lot) error {
-		if lot != nil && (lot.State == execution.LotOpen || lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested) {
-			_ = out.Add(lot.Clone())
-		}
-		return nil
-	})
-	return out
-}
-
-func (t *Trader) WaitForBrokerIdle(errCh <-chan error, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		if err := t.BrokerEventError(errCh); err != nil {
-			return err
-		}
-
-		queueLen := 0
-		if t != nil {
-			queueLen = t.Broker.EventQueueLen()
-		}
-
-		pendingState := false
-		if t != nil && t.Account != nil {
-			_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
-				if lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested {
-					pendingState = true
-				}
-				return nil
-			})
-		}
-
-		if queueLen == 0 && !pendingState {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("broker did not become idle within %s (evtQueueLen=%d pendingState=%t)", timeout, queueLen, pendingState)
-		}
-		time.Sleep(1 * time.Millisecond)
-	}
-}
-
-func (run *Backtest) runWithIterator(ctx context.Context, t *Trader, itr market.CandleIterator) (err error) {
+func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr market.CandleIterator) (err error) {
 	if itr == nil {
 		return fmt.Errorf("nil candle iterator")
 	}
@@ -313,7 +215,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *Trader, itr market.
 			atomic.AddInt64(&submittedCloses, int64(autoExits))
 		}
 
-		lots := SnapshotLots(&t.Account.Lots)
+		lots := engine.SnapshotLots(&t.Account.Lots)
 		run.State.Lots = lots
 		plan := strat.Update(runCtx, &candle, run)
 		if plan == nil {
@@ -456,7 +358,9 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *Trader, itr market.
 	return nil
 }
 
-func (run *Backtest) Execute(ctx context.Context, t *Trader) error {
+// Execute runs the backtest end-to-end against the trader: it builds the candle
+// iterator from the request, drives the run loop, and snapshots the result.
+func (run *Backtest) Execute(ctx context.Context, t *engine.Trader) error {
 	if run == nil || run.Request == nil || run.Request.Strategy == nil {
 		return fmt.Errorf("nil backtest run")
 	}
@@ -503,44 +407,4 @@ func (run *Backtest) Execute(ctx context.Context, t *Trader) error {
 	}
 
 	return nil
-}
-
-func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
-	if evt == nil {
-		return fmt.Errorf("nil broker event")
-	}
-
-	log.L.Info("broker event recieved",
-		"type", evt.Type.String(),
-		"positionID", eventPositionID(evt))
-
-	switch evt.Type {
-	case execution.EventOrderFilled:
-		lot := evt.Lot
-		if lot == nil {
-			return fmt.Errorf("error order filled with no position")
-		}
-
-	case execution.EventPositionClosed:
-		lot := evt.Lot
-		trade := evt.Trade
-		if lot == nil {
-			return fmt.Errorf("position closed event missing position")
-		}
-		if trade == nil {
-			return fmt.Errorf("position closed event missing trade")
-		}
-
-	default:
-		log.L.Warn("unsupported broker event", "eventType", evt.Type)
-	}
-
-	return nil
-}
-
-func eventPositionID(evt *execution.Event) string {
-	if evt == nil || evt.Lot == nil {
-		return ""
-	}
-	return evt.Lot.ID
 }

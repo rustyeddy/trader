@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -86,9 +86,9 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 	s, err := New(Config{FastPeriod: 2, SlowPeriod: 3, ATRPeriod: 2, StopMultiplier: 1.0})
 	require.NoError(t, err)
 
-	run := &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
-		State:   &trader.BacktestRun{},
+	run := &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},
+		State:   &backtest.BacktestRun{},
 	}
 
 	for _, ct := range []*market.CandleTime{

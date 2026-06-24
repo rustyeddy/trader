@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 )
@@ -105,7 +105,7 @@ func TestFade_NoNewEntryWhenAlreadyOpen(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(market.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 	// Even with a band-crossing price, no new open when a lot is already active.
 	plan := f.Update(context.Background(), flat(0.95), run)
 	assert.Empty(t, plan.Opens, "must not open when position already exists")
@@ -119,7 +119,7 @@ func TestFade_CloseLongAtMiddle(t *testing.T) {
 	warmup(t, f)
 
 	// Simulate an open long position. Middle band ≈ 1.0 after flat warmup.
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(market.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 
 	// Price at 1.0 — at or above middle band → should close the long.
 	plan := f.Update(context.Background(), flat(1.0), run)
@@ -134,7 +134,7 @@ func TestFade_CloseShortAtMiddle(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(market.Short)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Short)}}
 
 	// Price at 1.0 — at or below middle band → should close the short.
 	plan := f.Update(context.Background(), flat(1.0), run)
@@ -149,7 +149,7 @@ func TestFade_LongNotClosedBelowMiddle(t *testing.T) {
 	require.NoError(t, err)
 	warmup(t, f)
 
-	run := &trader.Backtest{State: &trader.BacktestRun{Lots: makeLot(market.Long)}}
+	run := &backtest.Backtest{State: &backtest.BacktestRun{Lots: makeLot(market.Long)}}
 
 	// Price still below middle — long should stay open.
 	plan := f.Update(context.Background(), flat(0.97), run)

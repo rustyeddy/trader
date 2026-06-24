@@ -1,9 +1,10 @@
-package trader
+package backtest
 
 import (
 	"context"
 	"testing"
 
+	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
@@ -45,8 +46,8 @@ func TestSnapshotLots(t *testing.T) {
 	lot := &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "p1", Instrument: "EURUSD", Side: market.Long, Units: 10}, EntryPrice: market.PriceFromFloat(1.1), OriginalUnits: 10, RemainingUnits: 10, State: execution.LotOpen}
 	src.Add(lot)
 
-	// Use SnapshotLots function from trader.go
-	cp := SnapshotLots(src)
+	// Use SnapshotLots function from the engine package.
+	cp := engine.SnapshotLots(src)
 	require.NotNil(t, cp)
 	assert.Equal(t, 1, cp.Len())
 

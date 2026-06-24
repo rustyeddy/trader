@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rustyeddy/trader"
 	"github.com/rustyeddy/trader/api/rest"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +48,7 @@ func decodeJSON(t *testing.T, resp *http.Response, v any) {
 	require.NoError(t, json.Unmarshal(b, v))
 }
 
-func writeReport(t *testing.T, dir string, s trader.BacktestReportSummary) {
+func writeReport(t *testing.T, dir string, s backtest.BacktestReportSummary) {
 	t.Helper()
 	b, err := json.MarshalIndent(s, "", "  ")
 	require.NoError(t, err)
@@ -148,8 +148,8 @@ func TestBlackbox_ListBacktests_Empty(t *testing.T) {
 
 func TestBlackbox_ListBacktests_WithReports(t *testing.T) {
 	ts, dir := newBlackboxServer(t)
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "run-a", Instrument: "EURUSD"})
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "run-b", Instrument: "GBPUSD"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "run-a", Instrument: "EURUSD"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "run-b", Instrument: "GBPUSD"})
 
 	resp := get(t, ts, "/api/v1/backtests")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -163,8 +163,8 @@ func TestBlackbox_ListBacktests_WithReports(t *testing.T) {
 
 func TestBlackbox_ListBacktests_InstrumentFilter(t *testing.T) {
 	ts, dir := newBlackboxServer(t)
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "eur", Instrument: "EURUSD"})
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "gbp", Instrument: "GBPUSD"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "eur", Instrument: "EURUSD"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "gbp", Instrument: "GBPUSD"})
 
 	resp := get(t, ts, "/api/v1/backtests?instrument=EUR")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -178,8 +178,8 @@ func TestBlackbox_ListBacktests_InstrumentFilter(t *testing.T) {
 
 func TestBlackbox_ListBacktests_StrategyFilter(t *testing.T) {
 	ts, dir := newBlackboxServer(t)
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "e1", Strategy: "ema-cross"})
-	writeReport(t, dir, trader.BacktestReportSummary{Name: "r1", Strategy: "rsi-mean"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "e1", Strategy: "ema-cross"})
+	writeReport(t, dir, backtest.BacktestReportSummary{Name: "r1", Strategy: "rsi-mean"})
 
 	resp := get(t, ts, "/api/v1/backtests?strategy=ema")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -193,16 +193,16 @@ func TestBlackbox_ListBacktests_StrategyFilter(t *testing.T) {
 
 func TestBlackbox_ListBacktests_TradeDetailsStripped(t *testing.T) {
 	ts, dir := newBlackboxServer(t)
-	writeReport(t, dir, trader.BacktestReportSummary{
+	writeReport(t, dir, backtest.BacktestReportSummary{
 		Name:         "with-trades",
-		TradeDetails: []trader.BacktestReportTrade{{ID: "t1"}},
+		TradeDetails: []backtest.BacktestReportTrade{{ID: "t1"}},
 	})
 
 	resp := get(t, ts, "/api/v1/backtests")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var body struct {
-		Summaries []trader.BacktestReportSummary `json:"summaries"`
+		Summaries []backtest.BacktestReportSummary `json:"summaries"`
 	}
 	decodeJSON(t, resp, &body)
 	require.Len(t, body.Summaries, 1)
@@ -213,16 +213,16 @@ func TestBlackbox_ListBacktests_TradeDetailsStripped(t *testing.T) {
 
 func TestBlackbox_GetBacktest_Found(t *testing.T) {
 	ts, dir := newBlackboxServer(t)
-	writeReport(t, dir, trader.BacktestReportSummary{
+	writeReport(t, dir, backtest.BacktestReportSummary{
 		Name:         "detail-run",
 		Trades:       12,
-		TradeDetails: []trader.BacktestReportTrade{{ID: "t1", Side: "long"}},
+		TradeDetails: []backtest.BacktestReportTrade{{ID: "t1", Side: "long"}},
 	})
 
 	resp := get(t, ts, "/api/v1/backtests/detail-run")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var got trader.BacktestReportSummary
+	var got backtest.BacktestReportSummary
 	decodeJSON(t, resp, &got)
 	assert.Equal(t, "detail-run", got.Name)
 	assert.Equal(t, 12, got.Trades)

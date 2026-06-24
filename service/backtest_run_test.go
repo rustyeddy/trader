@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	// Register "noop" strategy for compile-phase tests.
+	"github.com/rustyeddy/trader/backtest"
 	_ "github.com/rustyeddy/trader/strategies/noop"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -22,17 +22,17 @@ import (
 // error without touching the run's internals.
 type stubExecutor struct{ err error }
 
-func (s stubExecutor) Execute(_ context.Context, _ *trader.Backtest) error { return s.err }
+func (s stubExecutor) Execute(_ context.Context, _ *backtest.Backtest) error { return s.err }
 
 // minCompiledBacktest returns a CompiledBacktest whose Request is populated
 // enough to satisfy RunBacktest's nil-request guard.
-func minCompiledBacktest(t *testing.T) trader.CompiledBacktest {
+func minCompiledBacktest(t *testing.T) backtest.CompiledBacktest {
 	t.Helper()
-	cfg := &trader.Config{
-		Defaults: trader.RunDefaults{StartingBalance: 1000},
-		Runs: []trader.RunConfig{{
+	cfg := &backtest.Config{
+		Defaults: backtest.RunDefaults{StartingBalance: 1000},
+		Runs: []backtest.RunConfig{{
 			Name: "svc-unit-test",
-			Data: trader.DataConfig{
+			Data: backtest.DataConfig{
 				Instrument: "EURUSD",
 				Timeframe:  "H1",
 				From:       "2026-01-01",
@@ -41,7 +41,7 @@ func minCompiledBacktest(t *testing.T) trader.CompiledBacktest {
 			Strategy: strategy.StrategyConfig{Kind: "noop"},
 		}},
 	}
-	runs, err := trader.CompileBacktests(cfg)
+	runs, err := backtest.CompileBacktests(cfg)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	return runs[0]
@@ -247,7 +247,7 @@ func TestRunBacktestPathSpecsAndWriteReports_WritesFiles(t *testing.T) {
 
 func TestReadBacktestSummaryFile_ParsesJSONAndSetsName(t *testing.T) {
 	dir := t.TempDir()
-	summary := trader.BacktestReportSummary{
+	summary := backtest.BacktestReportSummary{
 		Name:       "original-name",
 		Strategy:   "noop",
 		Instrument: "EURUSD",

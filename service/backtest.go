@@ -9,29 +9,29 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
 // RunBacktest executes one compiled backtest definition end-to-end and returns
 // the rendered summary. The Trader/Broker/Account are wired up fresh per call;
 // service does not retain execution state between runs.
-func (s *Service) RunBacktest(ctx context.Context, compiled trader.CompiledBacktest) (trader.BacktestReportSummary, error) {
+func (s *Service) RunBacktest(ctx context.Context, compiled backtest.CompiledBacktest) (backtest.BacktestReportSummary, error) {
 	run := compiled.NewRun()
 	if run.Request == nil {
-		return trader.BacktestReportSummary{}, fmt.Errorf("nil backtest request")
+		return backtest.BacktestReportSummary{}, fmt.Errorf("nil backtest request")
 	}
 	if err := s.backtestExecutor().Execute(ctx, &run); err != nil {
-		return trader.BacktestReportSummary{}, fmt.Errorf("backtest %q: %w", run.Request.Name, err)
+		return backtest.BacktestReportSummary{}, fmt.Errorf("backtest %q: %w", run.Request.Name, err)
 	}
 	return run.Summary(), nil
 }
 
-func (s *Service) backtestExecutor() trader.BacktestExecutor {
+func (s *Service) backtestExecutor() backtest.BacktestExecutor {
 	if s != nil && s.Backtests != nil {
 		return s.Backtests
 	}
-	return trader.NewTraderBacktestExecutor(marketdata.GetDataManager())
+	return backtest.NewTraderBacktestExecutor(marketdata.GetDataManager())
 }
 
 // RunBacktestConfigs loads a slice of YAML config files, expands each
@@ -41,15 +41,15 @@ func (s *Service) backtestExecutor() trader.BacktestExecutor {
 //
 // This is the typical "regression sweep" entry point used by both the
 // CLI and the future REST endpoint.
-func (s *Service) RunBacktestConfigs(ctx context.Context, configPaths []string) ([]trader.BacktestReportSummary, error) {
-	var summaries []trader.BacktestReportSummary
+func (s *Service) RunBacktestConfigs(ctx context.Context, configPaths []string) ([]backtest.BacktestReportSummary, error) {
+	var summaries []backtest.BacktestReportSummary
 
 	for _, cfgPath := range configPaths {
-		cfg, err := trader.LoadConfig(cfgPath)
+		cfg, err := backtest.LoadConfig(cfgPath)
 		if err != nil {
 			return summaries, fmt.Errorf("load config %q: %w", cfgPath, err)
 		}
-		runs, err := trader.CompileBacktests(cfg)
+		runs, err := backtest.CompileBacktests(cfg)
 		if err != nil {
 			s.Log.Warn("service: skipping config", "path", cfgPath, "err", err)
 			continue
@@ -130,7 +130,7 @@ func ResolveBacktestConfigPaths(pathSpecs []string) ([]string, error) {
 }
 
 // RunBacktestPathSpecs resolves config path specs and executes them.
-func (s *Service) RunBacktestPathSpecs(ctx context.Context, pathSpecs []string) ([]trader.BacktestReportSummary, error) {
+func (s *Service) RunBacktestPathSpecs(ctx context.Context, pathSpecs []string) ([]backtest.BacktestReportSummary, error) {
 	configPaths, err := ResolveBacktestConfigPaths(pathSpecs)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (s *Service) RunBacktestPathSpecs(ctx context.Context, pathSpecs []string) 
 // RunBacktestConfigsAndWriteReports executes the given configs and persists the
 // resulting JSON + org reports into outDir using the repository's canonical
 // hash-based naming scheme.
-func (s *Service) RunBacktestConfigsAndWriteReports(ctx context.Context, configPaths []string, outDir string) ([]trader.BacktestReportSummary, error) {
+func (s *Service) RunBacktestConfigsAndWriteReports(ctx context.Context, configPaths []string, outDir string) ([]backtest.BacktestReportSummary, error) {
 	summaries, err := s.RunBacktestConfigs(ctx, configPaths)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (s *Service) RunBacktestConfigsAndWriteReports(ctx context.Context, configP
 
 // RunBacktestPathSpecsAndWriteReports resolves config path specs, executes the
 // resulting backtests, and persists canonical report artifacts in outDir.
-func (s *Service) RunBacktestPathSpecsAndWriteReports(ctx context.Context, pathSpecs []string, outDir string) ([]trader.BacktestReportSummary, error) {
+func (s *Service) RunBacktestPathSpecsAndWriteReports(ctx context.Context, pathSpecs []string, outDir string) ([]backtest.BacktestReportSummary, error) {
 	configPaths, err := ResolveBacktestConfigPaths(pathSpecs)
 	if err != nil {
 		return nil, err
@@ -167,7 +167,7 @@ func (s *Service) RunBacktestPathSpecsAndWriteReports(ctx context.Context, pathS
 
 // WriteBacktestReports persists each summary as JSON + org and rebuilds
 // index.org in dir.
-func WriteBacktestReports(dir string, summaries []trader.BacktestReportSummary) error {
+func WriteBacktestReports(dir string, summaries []backtest.BacktestReportSummary) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create output dir %q: %w", dir, err)
 	}
@@ -188,7 +188,7 @@ func WriteBacktestReports(dir string, summaries []trader.BacktestReportSummary) 
 
 // WriteBacktestSummaryJSON marshals s as indented JSON to path, creating parent
 // directories as needed.
-func WriteBacktestSummaryJSON(path string, s trader.BacktestReportSummary) error {
+func WriteBacktestSummaryJSON(path string, s backtest.BacktestReportSummary) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func WriteBacktestSummaryJSON(path string, s trader.BacktestReportSummary) error
 
 // WriteBacktestSummaryOrg writes a full org-mode report for one backtest run to
 // path, creating parent directories as needed.
-func WriteBacktestSummaryOrg(path string, s trader.BacktestReportSummary) error {
+func WriteBacktestSummaryOrg(path string, s backtest.BacktestReportSummary) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func WriteBacktestSummaryOrg(path string, s trader.BacktestReportSummary) error 
 		return err
 	}
 	defer f.Close()
-	trader.WriteOrgReport(f, s)
+	backtest.WriteOrgReport(f, s)
 	return nil
 }
 
@@ -230,20 +230,20 @@ func RebuildBacktestIndex(dir string) error {
 		return err
 	}
 	defer f.Close()
-	trader.WriteOrgIndex(f, summaries)
+	backtest.WriteOrgIndex(f, summaries)
 	return nil
 }
 
 // ListBacktestSummaries reads persisted JSON summaries from dir and returns
 // them in reverse lexical filename order.
-func ListBacktestSummaries(dir string) ([]trader.BacktestReportSummary, error) {
+func ListBacktestSummaries(dir string) ([]backtest.BacktestReportSummary, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		return nil, fmt.Errorf("glob summaries in %q: %w", dir, err)
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
 
-	var summaries []trader.BacktestReportSummary
+	var summaries []backtest.BacktestReportSummary
 	for _, path := range matches {
 		if filepath.Base(path) == "index.json" {
 			continue
@@ -259,12 +259,12 @@ func ListBacktestSummaries(dir string) ([]trader.BacktestReportSummary, error) {
 
 // ReadBacktestSummaryFile reads and parses a persisted backtest JSON summary
 // from path.
-func ReadBacktestSummaryFile(path string) (trader.BacktestReportSummary, error) {
+func ReadBacktestSummaryFile(path string) (backtest.BacktestReportSummary, error) {
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return trader.BacktestReportSummary{}, err
+		return backtest.BacktestReportSummary{}, err
 	}
-	var s trader.BacktestReportSummary
+	var s backtest.BacktestReportSummary
 	if err := json.Unmarshal(data, &s); err != nil {
 		return s, err
 	}
@@ -275,7 +275,7 @@ func ReadBacktestSummaryFile(path string) (trader.BacktestReportSummary, error) 
 
 // ReadBacktestSummaryByName reads a persisted backtest JSON summary from dir by
 // logical report name.
-func ReadBacktestSummaryByName(dir, name string) (trader.BacktestReportSummary, error) {
+func ReadBacktestSummaryByName(dir, name string) (backtest.BacktestReportSummary, error) {
 	name = filepath.Base(name)
 	if !strings.HasSuffix(name, ".json") {
 		name += ".json"
@@ -312,7 +312,7 @@ func ReadBacktestOrgReport(dir, name string) ([]byte, string, error) {
 	return data, name, nil
 }
 
-func backtestReportStem(summary trader.BacktestReportSummary) string {
+func backtestReportStem(summary backtest.BacktestReportSummary) string {
 	hash := strings.TrimSpace(summary.ConfigHash)
 	if hash == "" {
 		return summary.Name

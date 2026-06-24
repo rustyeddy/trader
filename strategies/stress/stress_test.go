@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 )
@@ -87,9 +87,9 @@ func TestUpdate_TradeEvery3_WaitsBeforeOpening(t *testing.T) {
 func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 
-	run := &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: "EURUSD"},
-		State:   &trader.BacktestRun{},
+	run := &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},
+		State:   &backtest.BacktestRun{},
 	}
 
 	// First call opens a position.
@@ -141,9 +141,9 @@ func TestUpdate_SideAlternate(t *testing.T) {
 
 func TestUpdate_InstrumentFromRun(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
-	run := &trader.Backtest{
-		Request: &trader.BacktestRequest{Instrument: "USDJPY"},
-		State:   &trader.BacktestRun{},
+	run := &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "USDJPY"},
+		State:   &backtest.BacktestRun{},
 	}
 	plan := s.Update(context.Background(), ct(150.00), run)
 	require.Len(t, plan.Opens, 1)

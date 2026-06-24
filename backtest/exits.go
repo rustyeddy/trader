@@ -1,18 +1,11 @@
-package trader
+package backtest
 
 import (
 	"context"
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 )
-
-// CandleSource provides candle iterators for backtest and replay execution.
-// DataManager satisfies this interface.
-type CandleSource interface {
-	Candles(context.Context, marketdata.CandleRequest) (market.CandleIterator, error)
-}
 
 // fillAdjust returns the price adjustment for spread and slippage.
 // Dukascopy OHLC prices are bid-side. When we are buying (long open, short

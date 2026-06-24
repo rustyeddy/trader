@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +19,7 @@ import (
 
 // newTestServer returns a Server wired to a temporary reports directory
 // pre-populated with the given summaries written as JSON files.
-func newTestServer(t *testing.T, summaries []trader.BacktestReportSummary) (*Server, string) {
+func newTestServer(t *testing.T, summaries []backtest.BacktestReportSummary) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	for _, s := range summaries {
@@ -58,7 +58,7 @@ func TestHandleListBacktests_Empty(t *testing.T) {
 }
 
 func TestHandleListBacktests_ReturnsSummaries(t *testing.T) {
-	summaries := []trader.BacktestReportSummary{
+	summaries := []backtest.BacktestReportSummary{
 		{Name: "run-a", Strategy: "ema", Instrument: "EURUSD", Trades: 10, WinRate: 60},
 		{Name: "run-b", Strategy: "rsi", Instrument: "GBPUSD", Trades: 5, WinRate: 40},
 	}
@@ -67,8 +67,8 @@ func TestHandleListBacktests_ReturnsSummaries(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	var body struct {
-		Count     int                            `json:"count"`
-		Summaries []trader.BacktestReportSummary `json:"summaries"`
+		Count     int                              `json:"count"`
+		Summaries []backtest.BacktestReportSummary `json:"summaries"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	assert.Equal(t, 2, body.Count)
@@ -76,18 +76,18 @@ func TestHandleListBacktests_ReturnsSummaries(t *testing.T) {
 }
 
 func TestHandleListBacktests_TradeDetailsOmitted(t *testing.T) {
-	s := trader.BacktestReportSummary{
+	s := backtest.BacktestReportSummary{
 		Name: "with-trades",
-		TradeDetails: []trader.BacktestReportTrade{
+		TradeDetails: []backtest.BacktestReportTrade{
 			{ID: "t1", Side: "long", PNL: 100},
 		},
 	}
-	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests")
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	var body struct {
-		Summaries []trader.BacktestReportSummary `json:"summaries"`
+		Summaries []backtest.BacktestReportSummary `json:"summaries"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	require.Len(t, body.Summaries, 1)
@@ -95,7 +95,7 @@ func TestHandleListBacktests_TradeDetailsOmitted(t *testing.T) {
 }
 
 func TestHandleListBacktests_FilterByInstrument(t *testing.T) {
-	summaries := []trader.BacktestReportSummary{
+	summaries := []backtest.BacktestReportSummary{
 		{Name: "eur", Instrument: "EURUSD"},
 		{Name: "gbp", Instrument: "GBPUSD"},
 	}
@@ -104,8 +104,8 @@ func TestHandleListBacktests_FilterByInstrument(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	var body struct {
-		Count     int                            `json:"count"`
-		Summaries []trader.BacktestReportSummary `json:"summaries"`
+		Count     int                              `json:"count"`
+		Summaries []backtest.BacktestReportSummary `json:"summaries"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	assert.Equal(t, 1, body.Count)
@@ -113,7 +113,7 @@ func TestHandleListBacktests_FilterByInstrument(t *testing.T) {
 }
 
 func TestHandleListBacktests_FilterByStrategy(t *testing.T) {
-	summaries := []trader.BacktestReportSummary{
+	summaries := []backtest.BacktestReportSummary{
 		{Name: "e1", Strategy: "ema-cross"},
 		{Name: "r1", Strategy: "rsi-mean"},
 	}
@@ -131,19 +131,19 @@ func TestHandleListBacktests_FilterByStrategy(t *testing.T) {
 // ── handleGetBacktest ─────────────────────────────────────────────────────────
 
 func TestHandleGetBacktest_Found(t *testing.T) {
-	s := trader.BacktestReportSummary{
+	s := backtest.BacktestReportSummary{
 		Name:     "run-detail",
 		Strategy: "ema",
 		Trades:   7,
-		TradeDetails: []trader.BacktestReportTrade{
+		TradeDetails: []backtest.BacktestReportTrade{
 			{ID: "t1", Side: "long", PNL: 50},
 		},
 	}
-	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/run-detail")
 
 	require.Equal(t, http.StatusOK, rr.Code)
-	var got trader.BacktestReportSummary
+	var got backtest.BacktestReportSummary
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
 	assert.Equal(t, "run-detail", got.Name)
 	assert.Equal(t, 7, got.Trades)
@@ -152,13 +152,13 @@ func TestHandleGetBacktest_Found(t *testing.T) {
 }
 
 func TestHandleGetBacktest_WithJsonSuffix(t *testing.T) {
-	s := trader.BacktestReportSummary{Name: "run-x", Strategy: "rsi"}
-	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	s := backtest.BacktestReportSummary{Name: "run-x", Strategy: "rsi"}
+	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 
 	// Requesting with explicit .json suffix should also work.
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/run-x.json")
 	require.Equal(t, http.StatusOK, rr.Code)
-	var got trader.BacktestReportSummary
+	var got backtest.BacktestReportSummary
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
 	assert.Equal(t, "run-x", got.Name)
 }
@@ -215,7 +215,7 @@ func TestLoadSummary_AlwaysUsesFilenameAsName(t *testing.T) {
 	// "name" field (e.g. missing the hash suffix).
 	dir := t.TempDir()
 	path := filepath.Join(dir, "run-abc123.json")
-	b, _ := json.Marshal(trader.BacktestReportSummary{Name: "run"})
+	b, _ := json.Marshal(backtest.BacktestReportSummary{Name: "run"})
 	require.NoError(t, os.WriteFile(path, b, 0o644))
 
 	s, err := service.ReadBacktestSummaryFile(path)
@@ -246,10 +246,10 @@ func TestHandleGetBacktestCandles_NotFound(t *testing.T) {
 }
 
 func TestHandleGetBacktestCandles_InvalidTimeRange(t *testing.T) {
-	s := trader.BacktestReportSummary{
+	s := backtest.BacktestReportSummary{
 		Name: "bad-range",
-		Config: trader.RunConfig{
-			Data: trader.DataConfig{
+		Config: backtest.RunConfig{
+			Data: backtest.DataConfig{
 				Instrument: "EURUSD",
 				Timeframe:  "H1",
 				From:       "2024-06-01",
@@ -257,7 +257,7 @@ func TestHandleGetBacktestCandles_InvalidTimeRange(t *testing.T) {
 			},
 		},
 	}
-	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/bad-range/candles")
 	assert.Equal(t, http.StatusUnprocessableEntity, rr.Code)
 }
@@ -265,10 +265,10 @@ func TestHandleGetBacktestCandles_InvalidTimeRange(t *testing.T) {
 func TestHandleGetBacktestCandles_EmptyWhenNoCandleFiles(t *testing.T) {
 	// Report has a valid config but no candle files exist on disk.
 	// strict=false means DataManager skips missing files → empty bars array.
-	s := trader.BacktestReportSummary{
+	s := backtest.BacktestReportSummary{
 		Name: "no-candles",
-		Config: trader.RunConfig{
-			Data: trader.DataConfig{
+		Config: backtest.RunConfig{
+			Data: backtest.DataConfig{
 				Instrument: "EURUSD",
 				Timeframe:  "H1",
 				From:       "2024-01-01",
@@ -281,7 +281,7 @@ func TestHandleGetBacktestCandles_EmptyWhenNoCandleFiles(t *testing.T) {
 	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
 	t.Cleanup(restore)
 
-	srv, _ := newTestServer(t, []trader.BacktestReportSummary{s})
+	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/no-candles/candles")
 
 	require.Equal(t, http.StatusOK, rr.Code)

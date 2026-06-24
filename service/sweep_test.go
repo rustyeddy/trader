@@ -23,7 +23,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/rustyeddy/trader"
+	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/strategy"
 
@@ -75,7 +75,7 @@ var sweepInstruments = []string{
 }
 
 // sweepDefaults are the account settings applied to every run.
-var sweepDefaults = trader.RunDefaults{
+var sweepDefaults = backtest.RunDefaults{
 	StartingBalance: 10_000,
 	AccountCCY:      "USD",
 	RiskPct:         0.5,
@@ -107,11 +107,11 @@ func TestStrategySweep(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 
-					cfg := &trader.Config{
+					cfg := &backtest.Config{
 						Defaults: sweepDefaults,
-						Runs: []trader.RunConfig{{
+						Runs: []backtest.RunConfig{{
 							Name: name,
-							Data: trader.DataConfig{
+							Data: backtest.DataConfig{
 								Source:     "oanda",
 								Instrument: inst,
 								Timeframe:  tf.timeframe,
@@ -131,7 +131,7 @@ func TestStrategySweep(t *testing.T) {
 						}},
 					}
 
-					runs, err := trader.CompileBacktests(cfg)
+					runs, err := backtest.CompileBacktests(cfg)
 					if err != nil {
 						// Strategy or config not compatible — skip, not fail.
 						mu.Lock()
