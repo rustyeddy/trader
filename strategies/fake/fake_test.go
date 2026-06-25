@@ -51,40 +51,37 @@ func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
 	f := &Fake{CandleCount: 2}
 	run := fakeRun("EURUSD")
 
-	plan1 := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	require.NotNil(t, plan1)
-	assert.Empty(t, plan1.Opens)
+	sig1 := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
+	assert.Equal(t, market.Flat, sig1.Side, "warmup bar should hold")
 
-	plan2 := f.Update(context.Background(), fakeCandle(2, 1.1020, 1.1030, 1.1000), run)
-	require.NotNil(t, plan2)
-	require.Len(t, plan2.Opens, 1)
-	assert.Equal(t, market.Long, plan2.Opens[0].Side)
-	assert.Equal(t, "EURUSD", plan2.Opens[0].Instrument)
+	sig2 := f.Update(context.Background(), fakeCandle(2, 1.1020, 1.1030, 1.1000), run)
+	assert.Equal(t, market.Long, sig2.Side)
+	assert.Equal(t, "higher highs", sig2.Reason)
 }
 
-func TestFake_Update_MissingInstrumentReturnsNil(t *testing.T) {
+func TestFake_Update_MissingInstrumentHolds(t *testing.T) {
 	t.Parallel()
 
 	f := &Fake{CandleCount: 1}
 	run := fakeRun("NOPE")
 
-	plan := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	assert.Nil(t, plan)
+	// With signals, unknown instrument just emits a Long (stop handled by planner).
+	sig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
+	assert.Equal(t, market.Long, sig.Side)
 }
 
-func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
+func TestFake_Update_HoldsWhenInPosition(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{CandleCount: 1, highest: market.PriceFromFloat(2.0)}
+	f := &Fake{CandleCount: 1, highest: market.PriceFromFloat(1.0)}
 	run := fakeRun("EURUSD")
 
 	lot := &execution.Lot{
 		TradeCommon: &execution.TradeCommon{
-			ID:         market.NewULID(),
-			Instrument: "EURUSD",
-			Side:       market.Long,
-			Units:      1000,
-			Stop:       market.PriceFromFloat(1.0950),
+			ID:    market.NewULID(),
+			Side:  market.Long,
+			Units: 1000,
+			Stop:  market.PriceFromFloat(1.0950),
 		},
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
@@ -92,11 +89,9 @@ func TestFake_Update_ClosesOpenPositionOnStopBreak(t *testing.T) {
 	}
 	run.State.Lots.Add(lot)
 
-	plan := f.Update(context.Background(), fakeCandle(10, 1.0940, 1.0900, 1.0890), run)
-	require.NotNil(t, plan)
-	require.Len(t, plan.Closes, 1)
-	assert.Equal(t, execution.CloseStopLoss, plan.Closes[0].CloseCause)
-	assert.Equal(t, lot.ID, plan.Closes[0].Lot.ID)
+	// New higher high while in position should hold (not open another).
+	sig := f.Update(context.Background(), fakeCandle(10, 1.1050, 1.1060, 1.1030), run)
+	assert.Equal(t, market.Flat, sig.Side, "should hold when already in position")
 }
 
 func TestFake02_NameResetReady(t *testing.T) {
@@ -119,23 +114,20 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	f := &Fake02{WaitBars: 1, HoldBars: 2, StopPips: 10}
 	run := fakeRun("EURUSD")
 
-	openPlan := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	require.NotNil(t, openPlan)
-	require.Len(t, openPlan.Opens, 1)
-	assert.Equal(t, "fake-02-open", openPlan.Reason)
+	openSig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
+	assert.Equal(t, market.Long, openSig.Side)
+	assert.Equal(t, "fake-02-open", openSig.Reason)
 
-	openLot := &execution.Lot{TradeCommon: openPlan.Opens[0].TradeCommon, OriginalUnits: openPlan.Opens[0].Units, RemainingUnits: openPlan.Opens[0].Units, State: execution.LotOpen}
+	tc := &execution.TradeCommon{ID: market.NewULID(), Side: market.Long, Units: 1000, Instrument: "EURUSD"}
+	openLot := &execution.Lot{TradeCommon: tc, OriginalUnits: 1000, RemainingUnits: 1000, State: execution.LotOpen}
 	run.State.Lots.Add(openLot)
 
-	holdPlan := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
-	require.NotNil(t, holdPlan)
-	assert.Empty(t, holdPlan.Closes)
+	holdSig := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
+	assert.Equal(t, market.Flat, holdSig.Side)
 
-	closePlan := f.Update(context.Background(), fakeCandle(3, 1.1002, 1.1012, 1.0992), run)
-	require.NotNil(t, closePlan)
-	require.Len(t, closePlan.Closes, 1)
-	assert.Equal(t, "fake-02-close", closePlan.Reason)
-	assert.Equal(t, execution.CloseManual, closePlan.Closes[0].CloseCause)
+	closeSig := f.Update(context.Background(), fakeCandle(3, 1.1002, 1.1012, 1.0992), run)
+	require.True(t, closeSig.CloseAll)
+	assert.Equal(t, "fake-02-close", closeSig.Reason)
 }
 
 func TestFake02_Update_MissingInstrument(t *testing.T) {
@@ -144,8 +136,7 @@ func TestFake02_Update_MissingInstrument(t *testing.T) {
 	f := &Fake02{WaitBars: 1, HoldBars: 2, StopPips: 10}
 	run := fakeRun("NOPE")
 
-	plan := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	require.NotNil(t, plan)
-	assert.Equal(t, "fake-02-missing-instrument", plan.Reason)
-	assert.Empty(t, plan.Opens)
+	// With signals, unknown instrument doesn't matter — planner handles stop.
+	sig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
+	assert.Equal(t, market.Long, sig.Side)
 }

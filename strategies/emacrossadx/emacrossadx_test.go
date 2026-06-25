@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
@@ -27,13 +26,13 @@ func mkCandle(close float64) *market.CandleTime {
 	}}
 }
 
-// feedUpdates drives s with a slice of close prices and returns the plans.
-func feedUpdates(s *Strategy, closes []float64) []*strategy.StrategyPlan {
-	plans := make([]*strategy.StrategyPlan, 0, len(closes))
+// feedUpdates drives s with a slice of close prices and returns the signals.
+func feedUpdates(s *Strategy, closes []float64) []strategy.Signal {
+	sigs := make([]strategy.Signal, 0, len(closes))
 	for _, c := range closes {
-		plans = append(plans, s.Update(context.Background(), mkCandle(c), nil))
+		sigs = append(sigs, s.Update(context.Background(), mkCandle(c), nil))
 	}
-	return plans
+	return sigs
 }
 
 // minCfg returns the smallest valid Config for signal tests.
@@ -147,7 +146,6 @@ func TestStrategy_Ready_TrueAfterEMAWarmup(t *testing.T) {
 	cfg := minCfg()
 	s, err := New(cfg)
 	require.NoError(t, err)
-	// Feed slowPeriod bars to warm up both EMAs.
 	for i := 0; i < cfg.SlowPeriod; i++ {
 		s.Update(context.Background(), mkCandle(1.0), nil)
 	}
@@ -162,18 +160,15 @@ func TestStrategy_RequireADXReady_DelaysReadiness(t *testing.T) {
 	}
 	s, err := New(cfg)
 	require.NoError(t, err)
-	// Feed only enough bars to warm EMAs but not ADX.
 	for i := 0; i < cfg.SlowPeriod; i++ {
 		s.Update(context.Background(), mkCandle(1.0), nil)
 	}
-	// EMAs ready but ADX is not → strategy not ready.
 	assert.False(t, s.Ready())
 }
 
 func TestStrategy_Reset_ClearsState(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
-	// Warm up.
 	for i := 0; i < 10; i++ {
 		s.Update(context.Background(), mkCandle(1.0+float64(i)*0.0001), nil)
 	}
@@ -185,54 +180,52 @@ func TestStrategy_Reset_ClearsState(t *testing.T) {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
-func TestStrategy_Update_NilCandleReturnsDefaultPlan(t *testing.T) {
+func TestStrategy_Update_NilCandleReturnsHold(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
-	plan := s.Update(context.Background(), nil, nil)
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
+	sig := s.Update(context.Background(), nil, nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 func TestStrategy_Update_WarmupProducesNoOpens(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
-	plans := feedUpdates(s, []float64{1.0, 1.0, 1.0})
-	for _, p := range plans {
-		assert.Empty(t, p.Opens)
+	sigs := feedUpdates(s, []float64{1.0, 1.0, 1.0})
+	for _, sig := range sigs {
+		assert.Equal(t, market.Flat, sig.Side)
 	}
 }
 
-func TestStrategy_Update_CrossUpEmitsLongOpen(t *testing.T) {
+func TestStrategy_Update_CrossUpEmitsLongSignal(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
 
-	// Flat warmup so both EMAs warm up with equal values (rel=0 → no baseline yet).
 	closes := make([]float64, 0, 120)
 	for i := 0; i < 40; i++ {
 		closes = append(closes, 1.0000)
 	}
-	// Downtrend: establishes fast < slow baseline (rel = -1).
 	p := 1.0000
 	for i := 0; i < 20; i++ {
 		p -= 0.0002
 		closes = append(closes, p)
 	}
-	// Uptrend: causes cross up (fast > slow → pendingRel = +1 → long open).
 	for i := 0; i < 30; i++ {
 		p += 0.0003
 		closes = append(closes, p)
 	}
 
-	plans := feedUpdates(s, closes)
-	var opens []*execution.OpenRequest
-	for _, plan := range plans {
-		opens = append(opens, plan.Opens...)
+	sigs := feedUpdates(s, closes)
+	var longs []strategy.Signal
+	for _, sig := range sigs {
+		if sig.Side == market.Long {
+			longs = append(longs, sig)
+		}
 	}
-	require.NotEmpty(t, opens, "expected at least one long open after EMA cross up")
-	assert.Equal(t, market.Long, opens[0].Side)
+	require.NotEmpty(t, longs, "expected at least one long signal after EMA cross up")
+	assert.Equal(t, market.Long, longs[0].Side)
 }
 
-func TestStrategy_Update_CrossDownEmitsShortOpen(t *testing.T) {
+func TestStrategy_Update_CrossDownEmitsShortSignal(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
 
@@ -240,30 +233,28 @@ func TestStrategy_Update_CrossDownEmitsShortOpen(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		closes = append(closes, 1.0000)
 	}
-	// Uptrend: establishes fast > slow (rel = +1).
 	p := 1.0000
 	for i := 0; i < 20; i++ {
 		p += 0.0002
 		closes = append(closes, p)
 	}
-	// Downtrend: causes cross down (fast < slow → pendingRel = -1 → short open).
 	for i := 0; i < 30; i++ {
 		p -= 0.0003
 		closes = append(closes, p)
 	}
 
-	plans := feedUpdates(s, closes)
-	var opens []*execution.OpenRequest
-	for _, plan := range plans {
-		opens = append(opens, plan.Opens...)
+	sigs := feedUpdates(s, closes)
+	var shorts []strategy.Signal
+	for _, sig := range sigs {
+		if sig.Side == market.Short {
+			shorts = append(shorts, sig)
+		}
 	}
-	require.NotEmpty(t, opens, "expected at least one short open after EMA cross down")
-	assert.Equal(t, market.Short, opens[0].Side)
+	require.NotEmpty(t, shorts, "expected at least one short signal after EMA cross down")
+	assert.Equal(t, market.Short, shorts[0].Side)
 }
 
 func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
-	// Use a short ADX period so it becomes ready quickly, and a very high
-	// threshold (99) that no real ADX value will reach.
 	cfg := Config{
 		FastPeriod:      3,
 		SlowPeriod:      5,
@@ -289,9 +280,9 @@ func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
 		closes = append(closes, p)
 	}
 
-	plans := feedUpdates(s, closes)
-	for _, plan := range plans {
-		assert.Empty(t, plan.Opens, "ADX gate should suppress all opens when ADX < 99")
+	sigs := feedUpdates(s, closes)
+	for _, sig := range sigs {
+		assert.Equal(t, market.Flat, sig.Side, "ADX gate should suppress all opens when ADX < 99")
 	}
 }
 

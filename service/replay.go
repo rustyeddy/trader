@@ -210,115 +210,110 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			}
 		}
 
-		// Run strategy.
-		plan := strat.Update(ctx, &ct, bt)
-		if plan == nil || (!inRange) {
+		// Run strategy — now returns a Signal (pure intent).
+		sig := strat.Update(ctx, &ct, bt)
+		if !inRange {
 			continue
 		}
 
-		// Process closes.
-		for _, cl := range plan.Closes {
-			// Determine side from the closed lot if available, else from our tracker.
-			side := market.Long
-			if cl.Lot != nil {
-				side = cl.Lot.Side
-				bt.State.Lots.Delete(cl.Lot.ID)
-				// Also remove from our position tracker.
-				for i, pos := range positions {
-					if pos.id == cl.Lot.ID {
-						positions = append(positions[:i], positions[i+1:]...)
-						break
-					}
+		// Process closes: CloseAll closes every open position; directional signals
+		// also close the opposing side (reversal).
+		var toClose []*replayPosition
+		if sig.CloseAll {
+			toClose = append(toClose, positions...)
+		} else if sig.Side != market.Flat {
+			for _, pos := range positions {
+				if pos.side != sig.Side {
+					toClose = append(toClose, pos)
 				}
-			} else if len(positions) > 0 {
-				side = positions[0].side
-				bt.State.Lots.Delete(positions[0].id)
-				positions = positions[1:]
 			}
+		}
+		for _, pos := range toClose {
+			bt.State.Lots.Delete(pos.id)
+			remaining := positions[:0]
+			for _, p := range positions {
+				if p.id != pos.id {
+					remaining = append(remaining, p)
+				}
+			}
+			positions = remaining
 			signals = append(signals, Signal{
 				Time:   int64(ts),
 				Kind:   SignalClose,
-				Side:   sideStr(side),
+				Side:   sideStr(pos.side),
 				Price:  candle.Close.Float64(),
-				Reason: plan.Reason,
+				Reason: sig.Reason,
 			})
 		}
 
-		// Process opens.
-		for _, op := range plan.Opens {
-			stop := op.Stop
-
-			// Mirror the backtest loop: ask exit strategy for initial stop if not set.
-			if stop == 0 && exit.Ready() {
-				stop = exit.InitialStop(op.Side, candle.Close, candle)
+		// Process open: emit if the signal is directional.
+		if sig.Side != market.Flat {
+			stop := market.Price(0)
+			if exit.Ready() {
+				stop = exit.InitialStop(sig.Side, candle.Close, candle)
 			}
 
 			if stop == 0 {
 				signals = append(signals, Signal{
 					Time:   int64(ts),
 					Kind:   SignalNoStop,
-					Side:   sideStr(op.Side),
+					Side:   sideStr(sig.Side),
 					Price:  candle.Close.Float64(),
-					Reason: plan.Reason,
+					Reason: sig.Reason,
 				})
-				continue
+			} else {
+				// Apply regime filter.
+				if regime.Ready() && !regime.Trending() {
+					signals = append(signals, Signal{
+						Time:   int64(ts),
+						Kind:   SignalBlocked,
+						Side:   sideStr(sig.Side),
+						Price:  candle.Close.Float64(),
+						Reason: "regime: not trending",
+					})
+				} else if regime.Ready() && !regime.AllowSide(sig.Side) {
+					signals = append(signals, Signal{
+						Time:   int64(ts),
+						Kind:   SignalBlocked,
+						Side:   sideStr(sig.Side),
+						Price:  candle.Close.Float64(),
+						Reason: "regime: side not allowed",
+					})
+				} else {
+					stopPips := pipsFromDist(sig.Side, candle.Close, stop, inst_)
+					posID := market.NewULID()
+					signals = append(signals, Signal{
+						Time:      int64(ts),
+						Kind:      SignalOpen,
+						Side:      sideStr(sig.Side),
+						Price:     candle.Close.Float64(),
+						StopPrice: float64(stop) / scale,
+						StopPips:  stopPips,
+						Reason:    sig.Reason,
+					})
+
+					tc := &execution.TradeCommon{ID: posID}
+					tc.Side = sig.Side
+					tc.Stop = stop
+					tc.Instrument = inst
+					bt.State.Lots.Add(&execution.Lot{
+						TradeCommon:    tc,
+						EntryPrice:     candle.Close,
+						OriginalUnits:  1,
+						RemainingUnits: 1,
+						State:          execution.LotOpen,
+					})
+
+					positions = append(positions, &replayPosition{
+						id:           posID,
+						side:         sig.Side,
+						entryPrice:   candle.Close,
+						currentStop:  stop,
+						extremePrice: candle.Close,
+						openTime:     ts,
+					})
+				}
 			}
-
-			// Apply regime filter (mirrors trader.go and CandleStrategyAdapter).
-			if regime.Ready() && !regime.Trending() {
-				signals = append(signals, Signal{
-					Time:   int64(ts),
-					Kind:   SignalBlocked,
-					Side:   sideStr(op.Side),
-					Price:  candle.Close.Float64(),
-					Reason: "regime: not trending",
-				})
-				continue
-			}
-			if regime.Ready() && !regime.AllowSide(op.Side) {
-				signals = append(signals, Signal{
-					Time:   int64(ts),
-					Kind:   SignalBlocked,
-					Side:   sideStr(op.Side),
-					Price:  candle.Close.Float64(),
-					Reason: "regime: side not allowed",
-				})
-				continue
-			}
-
-			stopPips := pipsFromDist(op.Side, candle.Close, stop, inst_)
-			posID := market.NewULID()
-			signals = append(signals, Signal{
-				Time:      int64(ts),
-				Kind:      SignalOpen,
-				Side:      sideStr(op.Side),
-				Price:     candle.Close.Float64(),
-				StopPrice: float64(stop) / scale,
-				StopPips:  stopPips,
-				Reason:    plan.Reason,
-			})
-
-			// Add to the synthetic LotBook so the strategy can see open positions.
-			tc := &execution.TradeCommon{ID: posID}
-			tc.Side = op.Side
-			tc.Stop = stop
-			tc.Instrument = inst
-			bt.State.Lots.Add(&execution.Lot{
-				TradeCommon:    tc,
-				EntryPrice:     candle.Close,
-				OriginalUnits:  1,
-				RemainingUnits: 1,
-				State:          execution.LotOpen,
-			})
-
-			positions = append(positions, &replayPosition{
-				id:           posID,
-				side:         op.Side,
-				entryPrice:   candle.Close,
-				currentStop:  stop,
-				extremePrice: candle.Close,
-				openTime:     ts,
-			})
 		}
 	}
 	if err := iter.Err(); err != nil {

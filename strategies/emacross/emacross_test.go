@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -17,8 +16,8 @@ func mkClose(close float64) market.Candle {
 	return market.Candle{Close: toP(close)}
 }
 
-func feedPlans(s *Cross, closes []float64) []*strategy.StrategyPlan {
-	out := make([]*strategy.StrategyPlan, 0, len(closes))
+func feedSignals(s *Cross, closes []float64) []strategy.Signal {
+	out := make([]strategy.Signal, 0, len(closes))
 	for _, c := range closes {
 		d := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(c)}, nil)
 		out = append(out, d)
@@ -34,16 +33,14 @@ func TestCross_WarmupNoSignals(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	plans := feedPlans(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
-	require.Len(t, plans, 4)
-	for _, plan := range plans {
-		require.NotNil(t, plan)
-		require.Empty(t, plan.Opens)
-		require.Empty(t, plan.Closes)
+	signals := feedSignals(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
+	require.Len(t, signals, 4)
+	for _, sig := range signals {
+		require.Equal(t, market.Flat, sig.Side)
 	}
 }
 
-func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
+func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenSignals(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
@@ -74,19 +71,19 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenPlans(t *testing.T) {
 		closes = append(closes, p)
 	}
 
-	plans := feedPlans(s, closes)
-	require.NotEmpty(t, plans)
+	signals := feedSignals(s, closes)
+	require.NotEmpty(t, signals)
 
-	var opens []*execution.OpenRequest
-	for _, plan := range plans {
-		require.NotNil(t, plan)
-		require.Empty(t, plan.Closes, "no lots in test so no closes expected")
-		opens = append(opens, plan.Opens...)
+	var directional []strategy.Signal
+	for _, sig := range signals {
+		if sig.Side != market.Flat {
+			directional = append(directional, sig)
+		}
 	}
 
-	require.Len(t, opens, 2, "expect exactly one long open and one short open")
-	require.Equal(t, market.Long, opens[0].Side, "first open should be long (cross up)")
-	require.Equal(t, market.Short, opens[1].Side, "second open should be short (cross down)")
+	require.Len(t, directional, 2, "expect exactly one long and one short signal")
+	require.Equal(t, market.Long, directional[0].Side, "first signal should be long (cross up)")
+	require.Equal(t, market.Short, directional[1].Side, "second signal should be short (cross down)")
 }
 
 func TestCross_MinSpreadFiltersNoise(t *testing.T) {
@@ -107,11 +104,10 @@ func TestCross_MinSpreadFiltersNoise(t *testing.T) {
 		1.0002, 1.0001, 1.0000, 0.9999, 1.0000, 1.0001,
 	)
 
-	plans := feedPlans(s, closes)
-	require.NotEmpty(t, plans)
-	for _, plan := range plans {
-		require.Empty(t, plan.Opens)
-		require.Empty(t, plan.Closes)
+	signals := feedSignals(s, closes)
+	require.NotEmpty(t, signals)
+	for _, sig := range signals {
+		require.Equal(t, market.Flat, sig.Side)
 	}
 }
 
@@ -134,21 +130,21 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 		1.0014, 1.0012, 1.0010, 1.0008, 1.0006, 1.0004, 1.0002, 1.0000,
 	)
 
-	planSignature := func(plans []*strategy.StrategyPlan) []string {
-		var sigs []string
-		for _, p := range plans {
-			sigs = append(sigs, fmt.Sprintf("%s opens=%d closes=%d", p.Reason, len(p.Opens), len(p.Closes)))
+	sigSignature := func(sigs []strategy.Signal) []string {
+		var out []string
+		for _, s := range sigs {
+			out = append(out, fmt.Sprintf("%s side=%v closeAll=%v", s.Reason, s.Side, s.CloseAll))
 		}
-		return sigs
+		return out
 	}
 
-	plans1 := feedPlans(s, closes)
-	require.NotEmpty(t, plans1)
+	signals1 := feedSignals(s, closes)
+	require.NotEmpty(t, signals1)
 
 	s.Reset()
 
-	plans2 := feedPlans(s, closes)
-	require.Equal(t, planSignature(plans1), planSignature(plans2), "after reset, strategy should emit identical signal sequence")
+	signals2 := feedSignals(s, closes)
+	require.Equal(t, sigSignature(signals1), sigSignature(signals2), "after reset, strategy should emit identical signal sequence")
 }
 
 func TestCross_Name(t *testing.T) {
@@ -157,11 +153,11 @@ func TestCross_Name(t *testing.T) {
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
-func TestCrossPlan_Reason(t *testing.T) {
+func TestCross_Reason(t *testing.T) {
 	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: market.PriceScale})
 	require.NoError(t, err)
-	d := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(1.0)}, nil)
-	require.NotEmpty(t, d.Reason)
+	sig := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(1.0)}, nil)
+	require.NotEmpty(t, sig.Reason)
 }
 
 func TestNew_ErrorOnInvalidConfig(t *testing.T) {

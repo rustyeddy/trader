@@ -3,10 +3,8 @@
 // (strategy) and execution (engine/broker): the regime and max-spread gates,
 // fill-price adjustment, initial-stop placement, and position sizing.
 //
-// Today a Planner finalizes a strategy.StrategyPlan in place; the eventual shape
-// is strategy -> Signal -> Planner -> Trader, where strategies emit pure signals
-// and the planner constructs the orders. This package is the seam that makes
-// that flip possible without disturbing the engine.
+// Strategies emit strategy.Signal values; PlanSignal converts them into
+// StrategyPlans that the engine submits to the broker.
 package planner
 
 import (
@@ -14,12 +12,6 @@ import (
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
-
-// PlanSignaler extends Planner with the signal-based entry path.
-type PlanSignaler interface {
-	Planner
-	PlanSignal(sig Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error)
-}
 
 // PlanContext is the read/compute view a Planner needs to finalize a plan
 // against the current bar: the account (for sizing), the active exit strategy
@@ -43,25 +35,16 @@ type Stats struct {
 	SpreadSum      market.Price // sum of candle AvgSpread over accepted opens
 }
 
-// Planner finalizes a raw strategy plan into broker-ready requests.
-type Planner interface {
-	// Plan applies the regime and max-spread gates to the plan's opens, then for
-	// each surviving open resolves the fill price (spread+slippage), the initial
-	// stop, and the position size. Strategy-driven closes get their fill price
-	// resolved too. The returned plan is ready to submit to the broker as-is; the
-	// input plan is mutated in place and also returned for convenience.
-	Plan(raw *strategy.StrategyPlan, pc PlanContext) (*strategy.StrategyPlan, Stats, error)
-}
-
 // DefaultPlanner is the behavior-preserving extraction of the logic that used
 // to live inline in the backtest run loop. It is stateless.
 type DefaultPlanner struct{}
 
-// Plan implements Planner. The order of operations mirrors the historical run
-// loop exactly so backtest results stay byte-identical: regime gate, then
-// max-spread gate, then per-open fill/stop/size, with strategy closes adjusted
-// last. Counters are returned rather than mutated on the caller's state.
-func (DefaultPlanner) Plan(raw *strategy.StrategyPlan, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
+// finalize applies the regime and max-spread gates to the plan's opens, then
+// for each surviving open resolves the fill price (spread+slippage), the
+// initial stop, and the position size. Strategy-driven closes get their fill
+// price resolved too. The returned plan is ready to submit to the broker as-is;
+// the input plan is mutated in place and also returned for convenience.
+func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
 	var stats Stats
 	if raw == nil || pc == nil {
 		return raw, stats, nil
@@ -135,26 +118,46 @@ func (DefaultPlanner) Plan(raw *strategy.StrategyPlan, pc PlanContext) (*strateg
 	return raw, stats, nil
 }
 
-// PlanSignal translates a pure Signal into a finalized StrategyPlan using the
-// same gates and order-construction logic as Plan. A Flat signal returns an
-// empty hold plan immediately. A directional signal:
+// PlanSignal translates a strategy.Signal into a finalized StrategyPlan using
+// the same gates and order-construction logic as Plan.
 //
-//  1. Emits CloseRequests for any open lots on the opposing side (reversal close).
-//  2. Opens a new position at the candle close price with the initial stop
-//     determined by the exit strategy (if ready), then runs the full Plan
-//     pipeline (regime gate, max-spread gate, fill-price adjust, sizing).
-func (p DefaultPlanner) PlanSignal(sig Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
-	plan := strategy.DefaultPlan()
-	plan.Reason = sig.Reason
+//   - Flat + !CloseAll → hold; return empty plan immediately.
+//   - CloseAll=true → close ALL open lots (time-based / band-reversion exits).
+//   - Directional + !CloseAll → reversal-close opposing lots only.
+//   - Directional side → open a new position at candle close; then run the
+//     full Plan pipeline (regime gate, max-spread gate, fill-price, sizing).
+func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
+	plan := &strategy.StrategyPlan{Reason: sig.Reason}
 
-	if sig.Side == market.Flat {
+	if sig.Side == market.Flat && !sig.CloseAll {
 		return plan, Stats{}, nil
 	}
 
 	candle := pc.Candle()
+	acct := pc.Account()
 
-	// Reversal-close: close any open lots on the opposite side.
-	if acct := pc.Account(); acct != nil {
+	if sig.CloseAll && acct != nil {
+		// Close ALL open lots — strategy-controlled exit (not just reversal).
+		_ = acct.Lots.Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
+				return nil
+			}
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
+					TradeCommon: lot.TradeCommon,
+					Reason:      sig.Reason,
+					Candle:      candle.Candle,
+					RequestType: execution.RequestClose,
+					Price:       candle.Close,
+					Timestamp:   candle.Timestamp,
+				},
+				Lot:        lot,
+				CloseCause: execution.CloseManual,
+			})
+			return nil
+		})
+	} else if sig.Side != market.Flat && acct != nil {
+		// Reversal-close: close any open lots on the opposing side only.
 		_ = acct.Lots.Range(func(lot *execution.Lot) error {
 			if lot.State != execution.LotOpen || lot.Side == sig.Side {
 				return nil
@@ -175,9 +178,11 @@ func (p DefaultPlanner) PlanSignal(sig Signal, pc PlanContext) (*strategy.Strate
 		})
 	}
 
-	plan.Opens = append(plan.Opens, execution.NewOpenRequest(
-		pc.Instrument(), &candle, sig.Side, 0, 0, sig.Reason,
-	))
+	if sig.Side != market.Flat {
+		plan.Opens = append(plan.Opens, execution.NewOpenRequest(
+			pc.Instrument(), &candle, sig.Side, 0, 0, sig.Reason,
+		))
+	}
 
-	return p.Plan(plan, pc)
+	return p.finalize(plan, pc)
 }

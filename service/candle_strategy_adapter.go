@@ -145,7 +145,11 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, 
 	// Build a synthetic backtest object so the strategy can inspect open lots.
 	bt := a.makeBacktest()
 
-	plan := a.strategy.Update(ctx, &ct, bt)
+	sig := a.strategy.Update(ctx, &ct, bt)
+
+	// Build a StrategyPlan from the Signal. This is a temporary bridge until
+	// Increment 5 wires the live path through PlanSignal directly.
+	plan := a.signalToPlan(sig, ct)
 	if plan == nil {
 		return nil
 	}
@@ -153,9 +157,8 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, 
 	if len(plan.Opens) > 0 {
 		a.log.Info("live: strategy signal open",
 			"instrument", a.instNorm,
-			"side", plan.Opens[0].Side,
-			"stop", plan.Opens[0].Stop,
-			"reason", plan.Reason,
+			"side", sig.Side,
+			"reason", sig.Reason,
 			"bar_time", bar.Time,
 		)
 	}
@@ -163,12 +166,12 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, 
 		a.log.Info("live: strategy signal close",
 			"instrument", a.instNorm,
 			"count", len(plan.Closes),
-			"reason", plan.Reason,
+			"reason", sig.Reason,
 			"bar_time", bar.Time,
 		)
 	}
 
-	// Apply regime filter to opens (mirrors the backtest loop in trader.go).
+	// Apply regime filter to opens (Increment 5 will move this into PlanSignal).
 	if a.regime.Ready() && len(plan.Opens) > 0 {
 		if !a.regime.Trending() {
 			a.log.Info("live: open blocked by regime filter — not trending",
@@ -314,6 +317,63 @@ func (a *CandleStrategyAdapter) latestCompleteBar(ctx context.Context) (*oanda.C
 		}
 	}
 	return nil, nil
+}
+
+// signalToPlan converts a strategy.Signal to a StrategyPlan for use with
+// the existing convertPlan live path. This is a temporary bridge; Increment 5
+// will replace this with a PlanSignal call against a live PlanContext.
+func (a *CandleStrategyAdapter) signalToPlan(sig strategy.Signal, ct market.CandleTime) *strategy.StrategyPlan {
+	if sig.Side == market.Flat && !sig.CloseAll {
+		return nil
+	}
+
+	plan := &strategy.StrategyPlan{Reason: sig.Reason}
+	lb := a.lots.toLotBook()
+
+	if sig.CloseAll && lb != nil {
+		_ = lb.Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen {
+				return nil
+			}
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
+					TradeCommon: lot.TradeCommon,
+					Reason:      sig.Reason,
+					Candle:      ct.Candle,
+					RequestType: execution.RequestClose,
+					Price:       ct.Close,
+					Timestamp:   ct.Timestamp,
+				},
+				Lot:        lot,
+				CloseCause: execution.CloseManual,
+			})
+			return nil
+		})
+	} else if sig.Side != market.Flat && lb != nil {
+		_ = lb.Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen || lot.Side == sig.Side {
+				return nil
+			}
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
+					TradeCommon: lot.TradeCommon,
+					Reason:      "signal-reverse",
+					Candle:      ct.Candle,
+					RequestType: execution.RequestClose,
+					Price:       ct.Close,
+					Timestamp:   ct.Timestamp,
+				},
+				Lot:        lot,
+				CloseCause: execution.CloseManual,
+			})
+			return nil
+		})
+	}
+
+	if sig.Side != market.Flat {
+		plan.Opens = append(plan.Opens, execution.NewOpenRequest(a.instNorm, &ct, sig.Side, 0, 0, sig.Reason))
+	}
+	return plan
 }
 
 // makeBacktest builds a minimal *trader.Backtest so the strategy can inspect

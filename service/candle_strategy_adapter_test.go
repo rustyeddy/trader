@@ -361,8 +361,8 @@ func (n *noopStrategy) Name() string            { return "noop" }
 func (n *noopStrategy) Reset()                  {}
 func (n *noopStrategy) Ready() bool             { return true }
 func (n *noopStrategy) StopDescription() string { return "" }
-func (n *noopStrategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
-	return nil
+func (n *noopStrategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+	return strategy.Hold("noop")
 }
 
 // ── portfolio config ──────────────────────────────────────────────────────────

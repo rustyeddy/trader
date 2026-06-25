@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -112,10 +111,9 @@ func (x *Cross) Ready() bool {
 	return x.core.Fast.Ready() && x.core.Slow.Ready()
 }
 
-func (x *Cross) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
+func (x *Cross) Update(_ context.Context, ct *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 	c := ct.Candle
 	x.core.Fast.Update(c)
@@ -125,13 +123,13 @@ func (x *Cross) Update(ctx context.Context, ct *market.CandleTime, run strategy.
 	}
 
 	if !x.Ready() {
-		return &strategy.StrategyPlan{Reason: "warming up"}
+		return strategy.Hold("warming up")
 	}
 
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
 	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
-		return &strategy.StrategyPlan{Reason: "min-spread filter"}
+		return strategy.Hold("min-spread filter")
 	}
 
 	rel := 0
@@ -143,31 +141,27 @@ func (x *Cross) Update(ctx context.Context, ct *market.CandleTime, run strategy.
 
 	if x.core.PrevRel == 0 {
 		x.core.PrevRel = rel
-		return &strategy.StrategyPlan{Reason: "baseline set"}
+		return strategy.Hold("baseline set")
 	}
 
 	if x.core.PrevRel == -1 && rel == +1 {
 		x.core.PrevRel = rel
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
-			return &strategy.StrategyPlan{Reason: "warming up ATR"}
+			return strategy.Hold("warming up ATR")
 		}
-		plan := EmitOpen(&x.core, ct, run, market.Long)
-		plan.Reason = "ema-cross-up"
-		return plan
+		return EmitOpen(market.Long, "ema-cross-up")
 	}
 
 	if x.core.PrevRel == +1 && rel == -1 {
 		x.core.PrevRel = rel
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
-			return &strategy.StrategyPlan{Reason: "warming up ATR"}
+			return strategy.Hold("warming up ATR")
 		}
-		plan := EmitOpen(&x.core, ct, run, market.Short)
-		plan.Reason = "ema-cross-down"
-		return plan
+		return EmitOpen(market.Short, "ema-cross-down")
 	}
 
 	x.core.PrevRel = rel
-	return &strategy.StrategyPlan{Reason: "no cross"}
+	return strategy.Hold("no cross")
 }
 
 func absPriceSum(v market.PriceSum) market.PriceSum {
@@ -177,40 +171,10 @@ func absPriceSum(v market.PriceSum) market.PriceSum {
 	return v
 }
 
-// EmitOpen closes any opposite open lots, then opens a new position in the
-// given side. Exported so emacrossadx can reuse it.
-func EmitOpen(c *Core, ct *market.CandleTime, run strategy.StrategyContext, side market.Side) *strategy.StrategyPlan {
-	plan := &strategy.StrategyPlan{}
-
-	if run != nil {
-		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen || lot.Side == side {
-				return nil
-			}
-			plan.Closes = append(plan.Closes, &execution.CloseRequest{
-				Request: execution.Request{
-					TradeCommon: lot.TradeCommon,
-					Reason:      "ema-cross-reverse",
-					Candle:      ct.Candle,
-					RequestType: execution.RequestClose,
-					Price:       ct.Close,
-					Timestamp:   ct.Timestamp,
-				},
-				Lot:        lot,
-				CloseCause: execution.CloseManual,
-			})
-			return nil
-		})
-	}
-
-	inst := ""
-	if run != nil {
-		inst = run.Instrument()
-	}
-
-	stop := Stop(c, ct, inst, side)
-	plan.Opens = append(plan.Opens, execution.NewOpenRequest(inst, ct, side, stop, 0, "ema-cross"))
-	return plan
+// EmitOpen returns a directional Signal. The planner handles reversal-closes
+// and open construction. Exported so emacrossadx can reuse it.
+func EmitOpen(side market.Side, reason string) strategy.Signal {
+	return strategy.Signal{Side: side, Reason: reason}
 }
 
 // StopDesc returns a human-readable description of the stop method.
@@ -224,27 +188,6 @@ func StopDesc(c *Core) string {
 	return ""
 }
 
-// Stop computes the stop price: ATR-based if configured and ready, fixed pips otherwise.
-func Stop(c *Core, ct *market.CandleTime, inst string, side market.Side) market.Price {
-	if c.ATR != nil && c.ATR.Ready() {
-		dist := market.Price(c.ATR.Float64() * c.ATRMultiplier * float64(c.Scale))
-		if side == market.Long {
-			return ct.Close - dist
-		}
-		return ct.Close + dist
-	}
-
-	if c.StopPips > 0 && inst != "" {
-		if instr := market.GetInstrument(inst); instr != nil {
-			if side == market.Long {
-				return instr.SubPips(ct.Close, c.StopPips)
-			}
-			return instr.AddPips(ct.Close, c.StopPips)
-		}
-	}
-
-	return 0
-}
 
 func priceFromFloat(v float64, scale market.Scale6) market.Price {
 	return market.Price(math.Round(v * float64(scale)))

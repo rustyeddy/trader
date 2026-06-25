@@ -65,21 +65,17 @@ func TestStopDescription(t *testing.T) {
 
 func TestUpdate_NilCandleTime(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
-	plan := s.Update(context.Background(), nil, nil)
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
-	assert.Empty(t, plan.Closes)
+	sig := s.Update(context.Background(), nil, nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
-func TestUpdate_ReturnsDefaultPlan(t *testing.T) {
+func TestUpdate_HoldsDuringWarmup(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
 	ct := &market.CandleTime{
 		Candle: market.Candle{Close: market.Price(1.0850 * float64(market.PriceScale))},
 	}
-	plan := s.Update(context.Background(), ct, nil)
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
-	assert.Empty(t, plan.Closes)
+	sig := s.Update(context.Background(), ct, nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
@@ -97,18 +93,14 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 		scalperCT(1.0200, 1.0210, 1.0190, 1.0200),
 		scalperCT(1.0100, 1.0110, 0.9990, 1.0000),
 	} {
-		plan := s.Update(context.Background(), ct, run)
-		require.Empty(t, plan.Opens)
+		sig := s.Update(context.Background(), ct, run)
+		assert.Equal(t, market.Flat, sig.Side)
 	}
 
 	recovery := scalperCT(1.0000, 1.0310, 0.9990, 1.0300)
-	plan := s.Update(context.Background(), recovery, run)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, "buy-the-dip", plan.Reason)
-	assert.Equal(t, "buy-the-dip", plan.Opens[0].Reason)
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
-	assert.Equal(t, "EURUSD", plan.Opens[0].Instrument)
-	assert.Less(t, plan.Opens[0].Stop, recovery.Close)
+	sig := s.Update(context.Background(), recovery, run)
+	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, "buy-the-dip", sig.Reason)
 }
 
 func scalperCT(open, high, low, close float64) *market.CandleTime {

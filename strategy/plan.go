@@ -9,26 +9,6 @@ type StrategyPlan struct {
 	Reason string
 }
 
-var DefaultStrategyPlan = StrategyPlan{
-	Reason: "hold",
-}
-
-// DefaultPlan returns a fresh no-op plan with the default hold reason.
-func DefaultPlan() *StrategyPlan {
-	plan := DefaultStrategyPlan
-	return &plan
-}
-
-// HoldPlan returns a fresh no-op plan with the provided reason.
-// An empty reason falls back to the default hold reason.
-func HoldPlan(reason string) *StrategyPlan {
-	plan := DefaultPlan()
-	if reason != "" {
-		plan.Reason = reason
-	}
-	return plan
-}
-
 // Empty reports whether the plan has no actions to execute.
 func (p *StrategyPlan) Empty() bool {
 	if p == nil {

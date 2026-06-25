@@ -155,7 +155,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		}
 	}()
 
-	var pl planner.Planner = planner.DefaultPlanner{}
+	var pl planner.DefaultPlanner
 
 	for {
 		atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
@@ -220,16 +220,12 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		lots := engine.SnapshotLots(&t.Account.Lots)
 		run.State.Lots = lots
-		plan := strat.Update(runCtx, &candle, run)
-		if plan == nil {
-			plan = strategy.DefaultPlan()
-		}
+		sig := strat.Update(runCtx, &candle, run)
 
-		// Finalize the strategy's intent into broker-ready requests: regime gate,
+		// Finalize the strategy's signal into broker-ready requests: regime gate,
 		// max-spread gate, fill-price adjustment, initial stop, and sizing all
-		// live in the planner now.
-		var stats planner.Stats
-		plan, stats, err = pl.Plan(plan, runPlanContext{
+		// live in the planner.
+		pc := runPlanContext{
 			instrument: run.Request.Instrument,
 			acct:       t.Account,
 			exit:       exit,
@@ -237,7 +233,9 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			candle:     candle,
 			slippage:   slippage,
 			maxSpread:  maxSpread,
-		})
+		}
+		var stats planner.Stats
+		plan, stats, err := pl.PlanSignal(sig, pc)
 		if err != nil {
 			return err
 		}
@@ -245,9 +243,6 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		run.State.SpreadOpened += stats.SpreadOpened
 		run.State.SpreadSum += stats.SpreadSum
 
-		for _, cancelReq := range plan.Cancel {
-			log.L.Warn("TODO - cancel request not implemented", "cancel", cancelReq)
-		}
 		for _, cl := range plan.Closes {
 			log.L.Info("submit close request", "ID", cl.Request.ID)
 

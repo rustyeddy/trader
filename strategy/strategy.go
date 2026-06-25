@@ -30,7 +30,7 @@ type Strategy interface {
 	Name() string
 	Reset()
 	Ready() bool
-	Update(context.Context, *market.CandleTime, StrategyContext) *StrategyPlan
+	Update(context.Context, *market.CandleTime, StrategyContext) Signal
 
 	// StopDescription returns a human-readable description of how this strategy
 	// places stops, e.g. "ATR(14)×1.5", "25 pips", or "" if none.

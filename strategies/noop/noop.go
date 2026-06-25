@@ -19,10 +19,8 @@ func (Strategy) Name() string            { return "NoOp" }
 func (Strategy) Reset()                  {}
 func (Strategy) Ready() bool             { return true }
 func (Strategy) StopDescription() string { return "" }
-func (Strategy) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
-	_ = c
-	return strategy.DefaultPlan()
+func (Strategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+	return strategy.Hold("noop")
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {

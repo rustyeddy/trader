@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -100,10 +99,10 @@ func (s *Strategy) Reset() {
 	s.dipSeen = false
 }
 
-// Update receives each completed M1 candle and returns a StrategyPlan.
-func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+// Update receives each completed M1 candle and returns a Signal.
+func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 
 	c := ct.Candle
@@ -112,12 +111,12 @@ func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 	s.atr.Update(c)
 
 	if !s.Ready() {
-		return &strategy.StrategyPlan{Reason: "warming up"}
+		return strategy.Hold("warming up")
 	}
 
 	// Skip if already in a position (netting account: one at a time).
 	if run != nil && run.OpenLots().Len() > 0 {
-		return &strategy.StrategyPlan{Reason: "in position"}
+		return strategy.Hold("in position")
 	}
 
 	closePrice := market.PriceSum(c.Close)
@@ -128,35 +127,18 @@ func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 	// Track dip: price closed below the fast EMA.
 	if closePrice < fastVal {
 		s.dipSeen = true
-		return &strategy.StrategyPlan{Reason: "in dip"}
+		return strategy.Hold("in dip")
 	}
 
 	// Entry: dip recovery — bullish close back above fast EMA, in uptrend.
 	if s.dipSeen && closePrice > fastVal && closePrice > openPrice && closePrice > slowVal {
 		s.dipSeen = false
-		stop := s.calcStop(ct)
-		instr := ""
-		if run != nil {
-			instr = run.Instrument()
-		}
-		return &strategy.StrategyPlan{
-			Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, market.Long, stop, 0, "buy-the-dip")},
-			Reason: "buy-the-dip",
-		}
+		return strategy.Signal{Side: market.Long, Reason: "buy-the-dip"}
 	}
 
-	return &strategy.StrategyPlan{Reason: "no signal"}
+	return strategy.Hold("no signal")
 }
 
-// calcStop returns the stop price: entry − ATR × multiplier.
-func (s *Strategy) calcStop(ct *market.CandleTime) market.Price {
-	atrPrice := market.Price(s.atr.Float64() * s.cfg.StopMultiplier * float64(market.PriceScale))
-	stop := ct.Close - atrPrice
-	if stop <= 0 {
-		stop = 1
-	}
-	return stop
-}
 
 func build(params map[string]any) (strategy.Strategy, error) {
 	fast, _, err := strategy.GetInt32Param(params, "fast_period")
