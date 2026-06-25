@@ -16,6 +16,7 @@ import (
 	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -135,13 +136,13 @@ func makeTestAdapter() *CandleStrategyAdapter {
 func TestConvertPlan_NilPlanReturnsNil(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
-	assert.Nil(t, a.convertPlan(nil, market.CandleTime{}, live.LivePrice{}))
+	assert.Nil(t, a.convertPlan(nil, live.LivePrice{}))
 }
 
 func TestConvertPlan_EmptyPlanReturnsNil(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
-	assert.Nil(t, a.convertPlan(&strategy.StrategyPlan{}, market.CandleTime{}, live.LivePrice{}))
+	assert.Nil(t, a.convertPlan(&strategy.StrategyPlan{}, live.LivePrice{}))
 }
 
 func TestConvertPlan_OpenLongConverted(t *testing.T) {
@@ -152,21 +153,18 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	close := market.Price(math.Round(1.10000 * scale))
 	stop := market.Price(math.Round(1.09000 * scale)) // 100-pip stop
 
-	tc := &execution.TradeCommon{}
-	tc.Side = market.Long
 	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
 		Candle:    market.Candle{Close: close},
 		Timestamp: market.FromTime(time.Now()),
 	}, market.Long, stop, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
-	ct := market.CandleTime{Candle: market.Candle{Close: close}}
 
-	live := a.convertPlan(plan, ct, live.LivePrice{})
-	require.NotNil(t, live)
-	require.NotNil(t, live.Open)
-	assert.Equal(t, "long", live.Open.Side)
-	assert.Greater(t, live.Open.StopPips, 0.0)
+	lp := a.convertPlan(plan, live.LivePrice{})
+	require.NotNil(t, lp)
+	require.NotNil(t, lp.Open)
+	assert.Equal(t, "long", lp.Open.Side)
+	assert.Greater(t, lp.Open.StopPips, 0.0)
 }
 
 func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
@@ -176,62 +174,18 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 	scale := float64(market.PriceScale)
 	close := market.Price(math.Round(1.10000 * scale))
 
-	// Stop == 0: strategy forgot to set it.
+	// Stop == 0: PlanSignal would normally set it; if it reaches convertPlan
+	// with stop=0 still, the open must be skipped.
 	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
 		Candle:    market.Candle{Close: close},
 		Timestamp: market.FromTime(time.Now()),
 	}, market.Long, 0 /*stop*/, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
-	ct := market.CandleTime{Candle: market.Candle{Close: close}}
 
-	live := a.convertPlan(plan, ct, live.LivePrice{})
-	// Plan has no closes either, so result must be nil (not a live plan with StopPips=0).
-	assert.Nil(t, live)
-}
-
-func TestConvertPlan_ExitStrategyFillsStop(t *testing.T) {
-	t.Parallel()
-
-	// Build a chandelier exit and warm it up so InitialStop returns non-zero.
-	exit, err := strategy.NewChandelierExit(3, 2.0, market.PriceScale)
-	require.NoError(t, err)
-	warmCandles := []market.Candle{
-		{Open: 110000, High: 111000, Low: 109000, Close: 110500},
-		{Open: 110500, High: 112000, Low: 110000, Close: 111000},
-		{Open: 111000, High: 112500, Low: 110500, Close: 112000},
-		{Open: 112000, High: 113000, Low: 111000, Close: 112500},
-	}
-	for _, c := range warmCandles {
-		exit.Tick(c)
-	}
-	require.True(t, exit.Ready())
-
-	a := &CandleStrategyAdapter{
-		instNorm: "EURUSD",
-		scale:    market.PriceScale,
-		regime:   strategy.NoopRegime{},
-		exit:     exit,
-		log:      slog.Default(),
-	}
-
-	scale := float64(market.PriceScale)
-	closePrice := market.Price(math.Round(1.12500 * scale))
-
-	// Strategy returns stop=0; exit strategy should fill it in.
-	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
-		Candle:    market.Candle{Close: closePrice},
-		Timestamp: market.FromTime(time.Now()),
-	}, market.Long, 0 /*stop*/, 0, "test")
-
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
-	ct := market.CandleTime{Candle: market.Candle{Close: closePrice}}
-
-	live := a.convertPlan(plan, ct, live.LivePrice{})
-	require.NotNil(t, live)
-	require.NotNil(t, live.Open)
-	assert.Equal(t, "long", live.Open.Side)
-	assert.Greater(t, live.Open.StopPips, 0.0, "exit strategy should have provided a stop")
+	lp := a.convertPlan(plan, live.LivePrice{})
+	// Plan has no closes either, so result must be nil.
+	assert.Nil(t, lp)
 }
 
 func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
@@ -249,9 +203,15 @@ func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
 	}
 
 	plan := &strategy.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
-	live := a.convertPlan(plan, market.CandleTime{}, live.LivePrice{})
-	require.NotNil(t, live)
-	assert.Equal(t, []string{"oanda-trade-999"}, live.CloseIDs)
+	lp := a.convertPlan(plan, live.LivePrice{})
+	require.NotNil(t, lp)
+	assert.Equal(t, []string{"oanda-trade-999"}, lp.CloseIDs)
+}
+
+func TestLivePlanContext_ImplementsPlanContext(t *testing.T) {
+	t.Parallel()
+	// Compile-time interface check: livePlanContext must satisfy planner.PlanContext.
+	var _ planner.PlanContext = livePlanContext{}
 }
 
 // ── oandaGranToTF ─────────────────────────────────────────────────────────────
@@ -361,8 +321,8 @@ func (n *noopStrategy) Name() string            { return "noop" }
 func (n *noopStrategy) Reset()                  {}
 func (n *noopStrategy) Ready() bool             { return true }
 func (n *noopStrategy) StopDescription() string { return "" }
-func (n *noopStrategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) *strategy.StrategyPlan {
-	return nil
+func (n *noopStrategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+	return strategy.Hold("noop")
 }
 
 // ── portfolio config ──────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ package bollingerfade
 import (
 	"context"
 	"fmt"
-	"math"
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/indicator"
@@ -88,91 +87,69 @@ func (f *Fade) Reset() {
 	f.atr.Reset()
 }
 
-func (f *Fade) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
+func (f *Fade) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 
 	f.bb.Update(ct.Candle)
 	f.atr.Update(ct.Candle)
 
 	if !f.Ready() {
-		return &strategy.StrategyPlan{Reason: "warming up"}
+		return strategy.Hold("warming up")
 	}
 
 	middle := f.bb.MiddlePrice()
 	lower := f.bb.LowerPrice()
 	upper := f.bb.UpperPrice()
 
-	plan := &strategy.StrategyPlan{}
-
 	// Check open lots: close any that have reverted to the middle band.
 	hasOpen := false
+	shouldCloseAll := false
 	if run != nil {
 		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
 			if lot.State != execution.LotOpen {
 				return nil
 			}
 			hasOpen = true
-			var shouldClose bool
 			switch lot.Side {
 			case market.Long:
-				shouldClose = ct.Close >= middle
+				if ct.Close >= middle {
+					shouldCloseAll = true
+				}
 			case market.Short:
-				shouldClose = ct.Close <= middle
-			}
-			if shouldClose {
-				plan.Closes = append(plan.Closes, &execution.CloseRequest{
-					Request: execution.Request{
-						TradeCommon: lot.TradeCommon,
-						Reason:      "bb-revert",
-						Candle:      ct.Candle,
-						RequestType: execution.RequestClose,
-						Price:       ct.Close,
-						Timestamp:   ct.Timestamp,
-					},
-					Lot:        lot,
-					CloseCause: execution.CloseManual,
-				})
+				if ct.Close <= middle {
+					shouldCloseAll = true
+				}
 			}
 			return nil
 		})
 	}
 
 	if hasOpen {
-		return plan
+		if shouldCloseAll {
+			return strategy.Signal{CloseAll: true, Reason: "bb-revert"}
+		}
+		return strategy.Hold("holding position")
 	}
 
 	// Entry signals — only when no position is open.
-	atrPrice := market.Price(math.Round(f.atrMult * f.atr.Float64() * f.scale))
-
 	switch {
 	case ct.Close < lower:
-		// Price closed below lower band — fade the drop, expect reversion up.
-		stop := ct.Close - atrPrice
-		open := execution.NewOpenRequest(instrumentFrom(run), ct, market.Long, stop, 0, "bb-fade-long")
-		plan.Opens = append(plan.Opens, open)
-		plan.Reason = fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
-			float64(ct.Close)/f.scale, float64(lower)/f.scale)
-
+		return strategy.Signal{
+			Side: market.Long,
+			Reason: fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
+				float64(ct.Close)/f.scale, float64(lower)/f.scale),
+		}
 	case ct.Close > upper:
-		// Price closed above upper band — fade the rise, expect reversion down.
-		stop := ct.Close + atrPrice
-		open := execution.NewOpenRequest(instrumentFrom(run), ct, market.Short, stop, 0, "bb-fade-short")
-		plan.Opens = append(plan.Opens, open)
-		plan.Reason = fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
-			float64(ct.Close)/f.scale, float64(upper)/f.scale)
+		return strategy.Signal{
+			Side: market.Short,
+			Reason: fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
+				float64(ct.Close)/f.scale, float64(upper)/f.scale),
+		}
 	}
 
-	return plan
-}
-
-func instrumentFrom(run strategy.StrategyContext) string {
-	if run != nil {
-		return run.Instrument()
-	}
-	return ""
+	return strategy.Hold("no signal")
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {

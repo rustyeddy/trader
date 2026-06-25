@@ -11,8 +11,8 @@ import (
 )
 
 func TestStrategy_Update(t *testing.T) {
-	dec := Strategy{}.Update(context.Background(), nil, nil)
-	assert.NotNil(t, dec)
+	sig := Strategy{}.Update(context.Background(), nil, nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 func TestStrategy_Name(t *testing.T) {
@@ -39,9 +39,7 @@ func TestStrategy_UpdateWithValues(t *testing.T) {
 		Timestamp: market.Timestamp(100),
 	}
 
-	plan := Strategy{}.Update(context.Background(), c, nil)
-	require.NotNil(t, plan)
-	assert.Equal(t, "hold", plan.Reason)
-	assert.Empty(t, plan.Opens)
-	assert.Empty(t, plan.Closes)
+	sig := Strategy{}.Update(context.Background(), c, nil)
+	require.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, "noop", sig.Reason)
 }

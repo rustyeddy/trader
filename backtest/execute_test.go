@@ -15,7 +15,7 @@ import (
 )
 
 type countingStrategy struct {
-	plan   *strategy.StrategyPlan
+	sig    strategy.Signal
 	resets int
 	calls  int
 }
@@ -24,9 +24,9 @@ func (s *countingStrategy) Name() string            { return "counting" }
 func (s *countingStrategy) Reset()                  { s.resets++ }
 func (s *countingStrategy) Ready() bool             { return true }
 func (s *countingStrategy) StopDescription() string { return "" }
-func (s *countingStrategy) Update(context.Context, *market.CandleTime, strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *countingStrategy) Update(context.Context, *market.CandleTime, strategy.StrategyContext) strategy.Signal {
 	s.calls++
-	return s.plan
+	return s.sig
 }
 
 type fixedCandleIterator struct {

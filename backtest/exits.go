@@ -7,16 +7,6 @@ import (
 	"github.com/rustyeddy/trader/market"
 )
 
-// fillAdjust returns the price adjustment for spread and slippage.
-// Dukascopy OHLC prices are bid-side. When we are buying (long open, short
-// close) we pay the ask: +spread+slippage. When selling we only lose slippage.
-func fillAdjust(isBuy bool, spread, slippage market.Price) market.Price {
-	if isBuy {
-		return spread + slippage
-	}
-	return -slippage
-}
-
 // autoCloseExits checks every open lot against the bar's OHLC and
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
@@ -53,7 +43,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 	for _, h := range hits {
 		// Short closes by buying at ask; long closes by selling at bid.
 		isBuy := h.lot.Side == market.Short
-		adjPx := h.exitPx + fillAdjust(isBuy, candle.AvgSpread, slippage)
+		adjPx := h.exitPx + execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		cl := &execution.CloseRequest{
 			Request: execution.Request{
 				TradeCommon: h.lot.TradeCommon,

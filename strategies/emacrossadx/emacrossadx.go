@@ -124,10 +124,9 @@ func (x *Strategy) Ready() bool {
 	return true
 }
 
-func (x *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
+func (x *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 	c := ct.Candle
 	x.core.Fast.Update(c)
@@ -137,22 +136,18 @@ func (x *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 		x.core.ATR.Update(c)
 	}
 
-	dec := strategy.DefaultPlan()
-
 	if !x.core.Fast.Ready() || !x.core.Slow.Ready() {
-		dec.Reason = "warming up EMAs"
-		return dec
+		return strategy.Hold("warming up EMAs")
 	}
 
 	if x.requireADXReady && !x.adx.Ready() {
-		dec.Reason = "warming up ADX"
-		return dec
+		return strategy.Hold("warming up ADX")
 	}
+
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
 	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
-		dec.Reason = "min-spread filter"
-		return dec
+		return strategy.Hold("min-spread filter")
 	}
 
 	rel := 0
@@ -165,11 +160,9 @@ func (x *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 	if x.core.PrevRel == 0 {
 		if rel != 0 {
 			x.core.PrevRel = rel
-			dec.Reason = "baseline set"
-		} else {
-			dec.Reason = "baseline pending"
+			return strategy.Hold("baseline set")
 		}
-		return dec
+		return strategy.Hold("baseline pending")
 	}
 
 	if x.core.PrevRel == -1 && rel == +1 {
@@ -182,52 +175,41 @@ func (x *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 	x.core.PrevRel = rel
 
 	if x.pendingRel == 0 {
-		dec.Reason = "no cross"
-		return dec
+		return strategy.Hold("no cross")
 	}
 
 	if x.requireADXReady && !x.adx.Ready() {
-		dec.Reason = "waiting for ADX readiness"
-		return dec
+		return strategy.Hold("waiting for ADX readiness")
 	}
 
 	if x.adx.Ready() && x.adx.Float64() < x.adxThreshold {
-		dec.Reason = "waiting for ADX threshold"
-		return dec
+		return strategy.Hold("waiting for ADX threshold")
 	}
 
 	if x.requireDI && x.adx.Ready() {
 		if x.pendingRel == +1 && !(x.adx.PlusDI() > x.adx.MinusDI()) {
-			dec.Reason = "waiting for DI confirmation (buy)"
-			return dec
+			return strategy.Hold("waiting for DI confirmation (buy)")
 		}
 		if x.pendingRel == -1 && !(x.adx.MinusDI() > x.adx.PlusDI()) {
-			dec.Reason = "waiting for DI confirmation (sell)"
-			return dec
+			return strategy.Hold("waiting for DI confirmation (sell)")
 		}
 	}
 
 	if x.core.ATR != nil && !x.core.ATR.Ready() {
-		dec.Reason = "warming up ATR"
-		return dec
+		return strategy.Hold("warming up ATR")
 	}
 
 	if x.pendingRel == +1 {
 		x.pendingRel = 0
-		plan := emacross.EmitOpen(&x.core, ct, run, market.Long)
-		plan.Reason = "EMA cross up + ADX confirmed"
-		return plan
+		return emacross.EmitOpen(market.Long, "EMA cross up + ADX confirmed")
 	}
 
 	if x.pendingRel == -1 {
 		x.pendingRel = 0
-		plan := emacross.EmitOpen(&x.core, ct, run, market.Short)
-		plan.Reason = "EMA cross down + ADX confirmed"
-		return plan
+		return emacross.EmitOpen(market.Short, "EMA cross down + ADX confirmed")
 	}
 
-	dec.Reason = "no cross"
-	return dec
+	return strategy.Hold("no cross")
 }
 
 func absPriceSum(v market.PriceSum) market.PriceSum {

@@ -184,15 +184,14 @@ func (d *Breakout) adxGatePass(side market.Side) bool {
 	return d.adx.MinusDI() > d.adx.PlusDI()
 }
 
-func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
+func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 
 	if !d.Ready() {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{Reason: "warming up"}
+		return strategy.Hold("warming up")
 	}
 
 	currentDay := int64(ct.Timestamp) / 86400
@@ -201,19 +200,19 @@ func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strate
 	// Monday block.
 	if d.blockMonday && dow == dowMonday {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{Reason: "monday-block"}
+		return strategy.Hold("monday-block")
 	}
 
 	// Friday block (optional).
 	if d.blockFriday && dow == dowFriday {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{Reason: "friday-block"}
+		return strategy.Hold("friday-block")
 	}
 
 	// News-day block.
 	if d.blockedDays[currentDay] {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{Reason: "news-day-block"}
+		return strategy.Hold("news-day-block")
 	}
 
 	hi, lo := d.channelHighLow()
@@ -252,7 +251,7 @@ func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strate
 		d.pendingCount = 0
 		d.pendingLevel = 0
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{Reason: "no breakout"}
+		return strategy.Hold("no breakout")
 	}
 
 	if side != d.pendingSide {
@@ -261,7 +260,7 @@ func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strate
 			d.pendingCount = 0
 			d.pendingLevel = 0
 			d.advanceBar(ct.Candle)
-			return &strategy.StrategyPlan{Reason: "weak close"}
+			return strategy.Hold("weak close")
 		}
 		d.pendingSide = side
 		d.pendingCount = 1
@@ -276,73 +275,41 @@ func (d *Breakout) Update(ctx context.Context, ct *market.CandleTime, run strate
 
 	if d.pendingCount < d.confirmBars {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{
-			Reason: fmt.Sprintf("confirming break (%d/%d)", d.pendingCount, d.confirmBars),
-		}
+		return strategy.Hold(fmt.Sprintf("confirming break (%d/%d)", d.pendingCount, d.confirmBars))
 	}
 
 	if !d.adxGatePass(side) {
 		d.advanceBar(ct.Candle)
-		return &strategy.StrategyPlan{
-			Reason: fmt.Sprintf("adx-filtered(adx=%.1f,+DI=%.1f,-DI=%.1f)",
-				d.adx.Float64(), d.adx.PlusDI(), d.adx.MinusDI()),
-		}
+		return strategy.Hold(fmt.Sprintf("adx-filtered(adx=%.1f,+DI=%.1f,-DI=%.1f)",
+			d.adx.Float64(), d.adx.PlusDI(), d.adx.MinusDI()))
 	}
 
 	d.pendingSide = 0
 	d.pendingCount = 0
 	d.pendingLevel = 0
 
-	plan := emitOpen(ct, run, side)
-	d.advanceBar(ct.Candle)
-	if side == market.Long {
-		plan.Reason = "donchian-v6-breakout-up"
-	} else {
-		plan.Reason = "donchian-v6-breakout-down"
-	}
-	return plan
-}
-
-func emitOpen(ct *market.CandleTime, run strategy.StrategyContext, side market.Side) *strategy.StrategyPlan {
-	plan := &strategy.StrategyPlan{}
-
-	alreadyOpen := false
+	// Check if already in the same side — planner handles reversal-closes.
+	alreadySameSide := false
 	if run != nil {
 		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen {
-				return nil
+			if lot.State == execution.LotOpen && lot.Side == side {
+				alreadySameSide = true
 			}
-			if lot.Side == side {
-				alreadyOpen = true
-				return nil
-			}
-			plan.Closes = append(plan.Closes, &execution.CloseRequest{
-				Request: execution.Request{
-					TradeCommon: lot.TradeCommon,
-					Reason:      "donchian-v6-reverse",
-					Candle:      ct.Candle,
-					RequestType: execution.RequestClose,
-					Price:       ct.Close,
-					Timestamp:   ct.Timestamp,
-				},
-				Lot:        lot,
-				CloseCause: execution.CloseManual,
-			})
 			return nil
 		})
 	}
 
-	if alreadyOpen {
-		return plan
+	d.advanceBar(ct.Candle)
+
+	if alreadySameSide {
+		return strategy.Hold("already-in-position")
 	}
 
-	inst := ""
-	if run != nil {
-		inst = run.Instrument()
+	reason := "donchian-v6-breakout-up"
+	if side == market.Short {
+		reason = "donchian-v6-breakout-down"
 	}
-	open := execution.NewOpenRequest(inst, ct, side, 0, 0, "donchian-v6-breakout")
-	plan.Opens = append(plan.Opens, open)
-	return plan
+	return strategy.Signal{Side: side, Reason: reason}
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {

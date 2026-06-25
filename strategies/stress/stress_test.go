@@ -59,29 +59,27 @@ func TestReset(t *testing.T) {
 
 func TestUpdate_NilCandleTime(t *testing.T) {
 	s, _ := New(Config{})
-	plan := s.Update(context.Background(), nil, nil)
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
+	sig := s.Update(context.Background(), nil, nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 func TestUpdate_TradeEvery1_OpensOnFirstBar(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
-	plan := s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
+	sig := s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Long, sig.Side)
 }
 
 func TestUpdate_TradeEvery3_WaitsBeforeOpening(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 3, StopBps: 20, Side: "long"})
 
-	plan := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Empty(t, plan.Opens, "candle 1: should wait")
+	sig := s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Flat, sig.Side, "candle 1: should wait")
 
-	plan = s.Update(context.Background(), ct(1.1000), nil)
-	assert.Empty(t, plan.Opens, "candle 2: should wait")
+	sig = s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Flat, sig.Side, "candle 2: should wait")
 
-	plan = s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1, "candle 3: should open")
+	sig = s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Long, sig.Side, "candle 3: should open")
 }
 
 func TestUpdate_SkipsWhenInPosition(t *testing.T) {
@@ -92,9 +90,9 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 		State:   &backtest.BacktestRun{},
 	}
 
-	// First call opens a position.
-	plan := s.Update(context.Background(), ct(1.1000), run)
-	require.Len(t, plan.Opens, 1)
+	// First call should signal long.
+	sig := s.Update(context.Background(), ct(1.1000), run)
+	assert.Equal(t, market.Long, sig.Side)
 
 	// Simulate position open by adding a lot.
 	lb := &execution.LotBook{}
@@ -102,52 +100,34 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	run.State.Lots = lb
 
 	// Subsequent calls skip because a position is open.
-	plan = s.Update(context.Background(), ct(1.1000), run)
-	assert.Empty(t, plan.Opens)
-	assert.Equal(t, "in position", plan.Reason)
+	sig = s.Update(context.Background(), ct(1.1000), run)
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, "in position", sig.Reason)
 }
 
-func TestUpdate_SideLong_StopBelowClose(t *testing.T) {
+func TestUpdate_SideLong(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
-	plan := s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
-	assert.Less(t, plan.Opens[0].Stop, market.PriceFromFloat(1.1000))
+	sig := s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Long, sig.Side)
 }
 
-func TestUpdate_SideShort_StopAboveClose(t *testing.T) {
+func TestUpdate_SideShort(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "short"})
-	plan := s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Short, plan.Opens[0].Side)
-	assert.Greater(t, plan.Opens[0].Stop, market.PriceFromFloat(1.1000))
+	sig := s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Short, sig.Side)
 }
 
 func TestUpdate_SideAlternate(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "alternate"})
 
-	plan := s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Long, plan.Opens[0].Side, "first trade should be Long")
+	sig := s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Long, sig.Side, "first trade should be Long")
 
-	plan = s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Short, plan.Opens[0].Side, "second trade should be Short")
+	sig = s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Short, sig.Side, "second trade should be Short")
 
-	plan = s.Update(context.Background(), ct(1.1000), nil)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Long, plan.Opens[0].Side, "third trade should be Long again")
-}
-
-func TestUpdate_InstrumentFromRun(t *testing.T) {
-	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
-	run := &backtest.Backtest{
-		Request: &backtest.BacktestRequest{Instrument: "USDJPY"},
-		State:   &backtest.BacktestRun{},
-	}
-	plan := s.Update(context.Background(), ct(150.00), run)
-	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, "USDJPY", plan.Opens[0].Instrument)
+	sig = s.Update(context.Background(), ct(1.1000), nil)
+	assert.Equal(t, market.Long, sig.Side, "third trade should be Long again")
 }
 
 // TestCalcStop_Precision verifies integer-only stop math at a known price.

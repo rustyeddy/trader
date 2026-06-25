@@ -94,72 +94,51 @@ func TestBuild_ReturnsStrategy(t *testing.T) {
 
 func TestStrategy_Update_NilCandleReturnsHold(t *testing.T) {
 	s := &Strategy{}
-	plan := s.Update(context.Background(), nil, minRun(nil))
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
-	assert.Empty(t, plan.Closes)
+	sig := s.Update(context.Background(), nil, minRun(nil))
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 func TestStrategy_Update_NilRunReturnsHold(t *testing.T) {
 	s := &Strategy{}
-	plan := s.Update(context.Background(), minCandle(1.1), nil)
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
+	sig := s.Update(context.Background(), minCandle(1.1), nil)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
 // ── Bar-by-bar lifecycle ──────────────────────────────────────────────────────
 
 func TestStrategy_Update_Bar1_OpensLong(t *testing.T) {
 	s := &Strategy{}
-	plan := s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	require.NotNil(t, plan)
-	require.Len(t, plan.Opens, 1, "bar 1 should emit one long open")
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
-	assert.Equal(t, "lifecycle-test-open-long", plan.Reason)
+	sig := s.Update(context.Background(), minCandle(1.10), minRun(nil))
+	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, "lifecycle-test-open-long", sig.Reason)
 	assert.True(t, s.opened)
 }
 
 func TestStrategy_Update_Bar2_Holds(t *testing.T) {
 	s := &Strategy{bar: 1, opened: true}
-	plan := s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Opens)
-	assert.Empty(t, plan.Closes)
-	assert.Equal(t, "hold", plan.Reason)
+	sig := s.Update(context.Background(), minCandle(1.10), minRun(nil))
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, "hold", sig.Reason)
 }
 
-func TestStrategy_Update_Bar3_NoLotsYieldsNoClose(t *testing.T) {
+func TestStrategy_Update_Bar3_EmitsCloseAll(t *testing.T) {
 	s := &Strategy{bar: 2, opened: true}
-	// State has empty LotBook — strategy cannot find lot to close.
-	plan := s.Update(context.Background(), minCandle(1.11), minRun(nil))
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Closes)
-	assert.Equal(t, "lifecycle-test-no-position-to-close", plan.Reason)
-}
-
-func TestStrategy_Update_Bar3_WithOpenLot_EmitsClose(t *testing.T) {
-	s := &Strategy{bar: 2, opened: true}
-	run := minRun(openLot())
-	plan := s.Update(context.Background(), minCandle(1.11), run)
-	require.NotNil(t, plan)
-	require.Len(t, plan.Closes, 1, "bar 3 with open lot should emit one close")
-	assert.Equal(t, "lifecycle-test-close-long", plan.Reason)
+	sig := s.Update(context.Background(), minCandle(1.11), minRun(openLot()))
+	assert.True(t, sig.CloseAll)
+	assert.Equal(t, "lifecycle-test-close-long", sig.Reason)
 	assert.True(t, s.closed)
 }
 
 func TestStrategy_Update_Bar3_AlreadyClosed_Holds(t *testing.T) {
 	s := &Strategy{bar: 2, opened: true, closed: true}
-	plan := s.Update(context.Background(), minCandle(1.11), minRun(openLot()))
-	require.NotNil(t, plan)
-	assert.Empty(t, plan.Closes)
+	sig := s.Update(context.Background(), minCandle(1.11), minRun(openLot()))
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.False(t, sig.CloseAll)
 }
 
 func TestStrategy_Update_DefaultsUnitsAndStopPips(t *testing.T) {
 	s := &Strategy{Units: 0, StopPips: 0}
-	plan := s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	require.NotNil(t, plan)
-	// After bar 1 the strategy should have applied defaults.
+	_ = s.Update(context.Background(), minCandle(1.10), minRun(nil))
 	assert.Equal(t, market.Units(1000), s.Units)
 	assert.Equal(t, float64(20), s.StopPips)
-	_ = plan
 }

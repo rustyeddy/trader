@@ -14,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -145,17 +146,23 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, 
 	// Build a synthetic backtest object so the strategy can inspect open lots.
 	bt := a.makeBacktest()
 
-	plan := a.strategy.Update(ctx, &ct, bt)
-	if plan == nil {
+	sig := a.strategy.Update(ctx, &ct, bt)
+
+	pc := livePlanContext{instrument: a.instNorm, exit: a.exit, regime: a.regime, candle: ct}
+	plan, _, err := planner.DefaultPlanner{}.PlanSignal(sig, pc)
+	if err != nil {
+		a.log.Error("candle adapter: PlanSignal error", "err", err, "instrument", a.instNorm)
+		return nil
+	}
+	if plan.Empty() {
 		return nil
 	}
 
 	if len(plan.Opens) > 0 {
 		a.log.Info("live: strategy signal open",
 			"instrument", a.instNorm,
-			"side", plan.Opens[0].Side,
-			"stop", plan.Opens[0].Stop,
-			"reason", plan.Reason,
+			"side", sig.Side,
+			"reason", sig.Reason,
 			"bar_time", bar.Time,
 		)
 	}
@@ -163,37 +170,12 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price live.LivePrice, 
 		a.log.Info("live: strategy signal close",
 			"instrument", a.instNorm,
 			"count", len(plan.Closes),
-			"reason", plan.Reason,
+			"reason", sig.Reason,
 			"bar_time", bar.Time,
 		)
 	}
 
-	// Apply regime filter to opens (mirrors the backtest loop in trader.go).
-	if a.regime.Ready() && len(plan.Opens) > 0 {
-		if !a.regime.Trending() {
-			a.log.Info("live: open blocked by regime filter — not trending",
-				"instrument", a.instNorm,
-				"bar_time", bar.Time,
-			)
-			plan.Opens = nil
-		} else {
-			filtered := plan.Opens[:0]
-			for _, o := range plan.Opens {
-				if a.regime.AllowSide(o.Side) {
-					filtered = append(filtered, o)
-				} else {
-					a.log.Info("live: open blocked by regime filter — side not allowed",
-						"instrument", a.instNorm,
-						"side", o.Side,
-						"bar_time", bar.Time,
-					)
-				}
-			}
-			plan.Opens = filtered
-		}
-	}
-
-	return a.convertPlan(plan, ct, price)
+	return a.convertPlan(plan, price)
 }
 
 // warmup primes all indicators before the first live signal is emitted.
@@ -330,8 +312,10 @@ func (a *CandleStrategyAdapter) makeBacktest() *backtest.Backtest {
 	}
 }
 
-// convertPlan converts a backtest StrategyPlan to a LivePlan.
-func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct market.CandleTime, _ live.LivePrice) *live.LivePlan {
+// convertPlan converts a finalized StrategyPlan (produced by PlanSignal) to a LivePlan.
+// Stop and regime filtering have already been applied; this method only translates
+// types and computes the stop-pips distance for the OANDA wire format.
+func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ live.LivePrice) *live.LivePlan {
 	if plan == nil {
 		return nil
 	}
@@ -349,21 +333,15 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, ct mark
 	if len(plan.Opens) > 0 {
 		req := plan.Opens[0]
 
-		// Mirror the backtest loop (trader.go): if the strategy did not set a
-		// stop, ask the exit strategy for the initial stop price.
-		if req.Stop == 0 && a.exit.Ready() {
-			req.Stop = a.exit.InitialStop(req.Side, ct.Close, ct.Candle)
-		}
-
 		if req.Stop == 0 {
-			a.log.Error("candle adapter: strategy returned open with no stop — exit strategy also provided none; skipping open",
+			a.log.Error("candle adapter: open has no stop after PlanSignal — skipping open",
 				"instrument", a.instNorm, "side", req.Side, "reason", plan.Reason)
 		} else {
 			inst := market.GetInstrument(a.instNorm)
 			if inst == nil {
 				a.log.Error("candle adapter: unknown instrument — skipping open", "instrument", a.instNorm)
 			} else {
-				entryPrice := ct.Close
+				entryPrice := req.Price
 				dist := entryPrice - req.Stop
 				if dist < 0 {
 					dist = -dist
@@ -499,6 +477,27 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 	}
 }
 
+// ── live PlanContext ─────────────────────────────────────────────────────────
+
+// livePlanContext implements planner.PlanContext for the live trading path.
+// Account returns nil so PlanSignal skips sizing (OANDA handles risk/sizing).
+// MaxSpread and Slippage are zero — live fills are at market; the spread gate
+// and slippage adjustment are backtest-only execution-cost models.
+type livePlanContext struct {
+	instrument string
+	exit       strategy.ExitStrategy
+	regime     strategy.RegimeFilter
+	candle     market.CandleTime
+}
+
+func (c livePlanContext) Instrument() string            { return c.instrument }
+func (c livePlanContext) Account() *execution.Account   { return nil }
+func (c livePlanContext) Exit() strategy.ExitStrategy   { return c.exit }
+func (c livePlanContext) Regime() strategy.RegimeFilter { return c.regime }
+func (c livePlanContext) Candle() market.CandleTime     { return c.candle }
+func (c livePlanContext) Slippage() market.Price        { return 0 }
+func (c livePlanContext) MaxSpread() market.Price       { return 0 }
+
 // ── lot tracker ──────────────────────────────────────────────────────────────
 
 // lotMeta carries the state the adapter needs beyond what OANDA provides.
@@ -549,15 +548,6 @@ func (lt *liveLotsTracker) sync(trades []live.LiveTrade) {
 	}
 }
 
-// setInitialStop records the initial stop price for a newly opened trade.
-func (lt *liveLotsTracker) setInitialStop(tradeID string, stop market.Price) {
-	if lt.meta == nil {
-		return
-	}
-	if m, ok := lt.meta[tradeID]; ok {
-		m.currentStop = stop
-	}
-}
 
 func (lt *liveLotsTracker) toLotBook() *execution.LotBook {
 	lb := &execution.LotBook{}

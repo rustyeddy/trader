@@ -5,7 +5,6 @@ package fake
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -15,7 +14,7 @@ func init() {
 	strategy.MustRegisterStrategy(buildFake02, "fake-02")
 }
 
-// Fake opens long on higher highs, closes on stop loss on lower lows.
+// Fake opens long on higher highs.
 type Fake struct {
 	CandleCount int
 
@@ -37,66 +36,26 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (f *Fake) Update(_ context.Context, c *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	f.candles = append(f.candles, c)
-	plan := &strategy.StrategyPlan{Reason: "hold"}
 
 	if len(f.candles) < f.CandleCount {
-		return plan
-	}
-
-	openTrades := run.OpenLots().Len()
-	if f.highest < c.High {
-		f.highest = c.High
-		if openTrades > 0 {
-			return plan
-		}
-		inst := market.GetInstrument(run.Instrument())
-		if inst == nil {
-			return nil
-		}
-		stop := inst.SubPips(c.Close, market.PipsFromFloat(10))
-		op := execution.NewOpenRequest(run.Instrument(), c, market.Long, stop, market.Price(0), "higher highs")
-		plan.Opens = append(plan.Opens, op)
+		return strategy.Hold("warming up")
 	}
 
 	if f.lowest == 0 || f.lowest > c.Low {
 		f.lowest = c.Low
-		if openTrades == 0 {
-			return plan
-		}
-
-		submittedClose := false
-		run.OpenLots().Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen {
-				return nil
-			}
-
-			if (lot.Side == market.Long && c.Close <= lot.Stop) ||
-				(lot.Side == market.Short && c.Close >= lot.Stop) {
-				cl := &execution.CloseRequest{
-					Request: execution.Request{
-						TradeCommon: lot.TradeCommon,
-						Reason:      "CloseStop",
-						Candle:      c.Candle,
-						RequestType: execution.RequestClose,
-						Price:       c.Close,
-						Timestamp:   c.Timestamp,
-					},
-					CloseCause: execution.CloseStopLoss,
-					Lot:        lot,
-				}
-				plan.Closes = append(plan.Closes, cl)
-				submittedClose = true
-			}
-			return nil
-		})
-		if !submittedClose {
-			return plan
-		}
 	}
 
-	return plan
+	if f.highest < c.High {
+		f.highest = c.High
+		if run.OpenLots().Len() > 0 {
+			return strategy.Hold("in position")
+		}
+		return strategy.Signal{Side: market.Long, Reason: "higher highs"}
+	}
+
+	return strategy.Hold("hold")
 }
 
 // Fake02 is a deterministic lifecycle/accounting test strategy.
@@ -123,12 +82,9 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(ctx context.Context, c *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
-	_ = ctx
-
-	plan := &strategy.StrategyPlan{Reason: "hold"}
+func (f *Fake02) Update(_ context.Context, c *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	if c == nil {
-		return plan
+		return strategy.Hold("hold")
 	}
 
 	if f.WaitBars <= 0 {
@@ -149,41 +105,15 @@ func (f *Fake02) Update(ctx context.Context, c *market.CandleTime, run strategy.
 
 	if run != nil && run.OpenLots().Len() > 0 {
 		if (f.bar - f.openedAt) >= f.HoldBars {
-			submittedClose := false
-			run.OpenLots().Range(func(lot *execution.Lot) error {
-				if lot.State != execution.LotOpen {
-					return nil
-				}
-				cl := &execution.CloseRequest{
-					Request: execution.Request{
-						TradeCommon: lot.TradeCommon,
-						Reason:      "fake-02-close",
-						Candle:      c.Candle,
-						RequestType: execution.RequestClose,
-						Price:       c.Close,
-						Timestamp:   c.Timestamp,
-					},
-					Lot:        lot,
-					CloseCause: execution.CloseManual,
-				}
-				plan.Closes = append(plan.Closes, cl)
-				submittedClose = true
-				return nil
-			})
-			if !submittedClose {
-				return plan
-			}
-
 			f.nextOpenAt = f.bar + f.WaitBars
 			f.longNext = !f.longNext
-			plan.Reason = "fake-02-close"
-			return plan
+			return strategy.Signal{CloseAll: true, Reason: "fake-02-close"}
 		}
-		return plan
+		return strategy.Hold("hold")
 	}
 
 	if f.bar < f.nextOpenAt {
-		return plan
+		return strategy.Hold("hold")
 	}
 
 	side := market.Long
@@ -191,25 +121,8 @@ func (f *Fake02) Update(ctx context.Context, c *market.CandleTime, run strategy.
 		side = market.Short
 	}
 
-	inst := market.GetInstrument(run.Instrument())
-	if inst == nil {
-		plan.Reason = "fake-02-missing-instrument"
-		return plan
-	}
-
-	var stop market.Price
-	if side == market.Long {
-		stop = inst.SubPips(c.Close, market.PipsFromFloat(f.StopPips))
-	} else {
-		stop = inst.AddPips(c.Close, market.PipsFromFloat(f.StopPips))
-	}
-
-	op := execution.NewOpenRequest(run.Instrument(), c, side, stop, market.Price(0), "fake-02-open")
-	plan.Opens = append(plan.Opens, op)
-	plan.Reason = "fake-02-open"
-
 	f.openedAt = f.bar
-	return plan
+	return strategy.Signal{Side: side, Reason: "fake-02-open"}
 }
 
 func buildFake(params map[string]any) (strategy.Strategy, error) {

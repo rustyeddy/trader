@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -72,35 +71,24 @@ func (s *Strategy) Reset() {
 
 // Update is called on every completed candle. Returns an open request every
 // TradeEvery candles when no position is already open.
-func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 
 	// Netting account: one position at a time.
 	if run != nil && run.OpenLots().Len() > 0 {
-		return &strategy.StrategyPlan{Reason: "in position"}
+		return strategy.Hold("in position")
 	}
 
 	s.candleN++
 	if s.candleN < s.cfg.TradeEvery {
-		return &strategy.StrategyPlan{Reason: fmt.Sprintf("waiting (%d/%d)", s.candleN, s.cfg.TradeEvery)}
+		return strategy.Hold(fmt.Sprintf("waiting (%d/%d)", s.candleN, s.cfg.TradeEvery))
 	}
 	s.candleN = 0
 
 	side := s.nextSide()
-	stop := s.calcStop(ct, side)
-
-	instr := ""
-	if run != nil {
-		instr = run.Instrument()
-	}
-
-	reason := fmt.Sprintf("stress-%s", side)
-	return &strategy.StrategyPlan{
-		Opens:  []*execution.OpenRequest{execution.NewOpenRequest(instr, ct, side, stop, 0, reason)},
-		Reason: reason,
-	}
+	return strategy.Signal{Side: side, Reason: fmt.Sprintf("stress-%s", side)}
 }
 
 func (s *Strategy) nextSide() market.Side {

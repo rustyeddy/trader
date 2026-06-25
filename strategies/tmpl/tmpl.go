@@ -56,9 +56,9 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return s.ready }
 
-func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strategy.StrategyContext) *strategy.StrategyPlan {
+func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
-		return strategy.DefaultPlan()
+		return strategy.Hold("no candle")
 	}
 	c := ct.Candle
 	closePx := float64(c.Close) / float64(s.cfg.Scale)
@@ -66,7 +66,7 @@ func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 	s.bars++
 	if s.bars < s.cfg.Lookback {
 		s.lastClose = closePx
-		return strategy.DefaultPlan()
+		return strategy.Hold("warming up")
 	}
 
 	s.ready = true
@@ -75,16 +75,16 @@ func (s *Strategy) Update(ctx context.Context, ct *market.CandleTime, run strate
 		change := closePx - s.lastClose
 		if change > s.cfg.Threshold {
 			s.lastClose = closePx
-			return strategy.DefaultPlan()
+			return strategy.Hold("above threshold")
 		}
 		if change < -s.cfg.Threshold {
 			s.lastClose = closePx
-			return strategy.DefaultPlan()
+			return strategy.Hold("below threshold")
 		}
 	}
 
 	s.lastClose = closePx
-	return strategy.DefaultPlan()
+	return strategy.Hold("hold")
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {

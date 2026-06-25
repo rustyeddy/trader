@@ -1,0 +1,189 @@
+#+title: Planner Layer — Incremental Plan
+#+author: Claude
+#+date: 2026-06-24
+#+startup: overview
+
+* Goal
+
+Move the trading business logic out of the strategy and the run loop into a
+dedicated =planner= layer, so the pipeline becomes:
+
+#+begin_src text
+strategy  →  Signal  →  Planner  →  Trader
+  (pure alpha:        (sizing, risk,    (broker
+   price action,       regime, spread,   submit,
+   indicators)         stop placement)   events)
+#+end_src
+
+Strategies should emit pure *signals* (intent: side / strength / reason).
+A *planner* owns all the order-construction business logic. The engine
+(=Trader=) stays pure mechanism. One planner serves both =backtest= and =live=.
+
+* Why
+
+Today the planner responsibilities are smeared across two places:
+
+- Strategies (e.g. =emacross.EmitOpen=) already decide side, compute the stop,
+  build the =OpenRequest=, AND close opposing lots (reversal logic).
+- The run loop layered on regime gating, spread gating, =exit.InitialStop=, and
+  =account.SizePosition=.
+
+=StrategyPlan.Opens= are =OpenRequest= values (side/price/stop/take/units) —
+orders, not signals. That blur is what this refactor removes.
+
+* Constraint (the safety rail)
+
+Backtest report filenames are =<run-name>-<config-hash>= and regression
+comparisons use *exact integer equality*. Every increment must be a
+behavior-preserving extraction first: identical order sequencing → identical
+results. Verify with =go test ./...= and =make sweep= (and the regression /
+blackbox tests) BEFORE changing any interface.
+
+* Status
+
+- DONE Increment 1 — =planner= package + =DefaultPlanner= (commit dfec65f, branch
+  =planner=). =DefaultPlanner.Plan= finalizes a raw =strategy.StrategyPlan=
+  against a =PlanContext= (account/exit/regime/candle/slippage/maxSpread):
+  regime gate, max-spread gate, fill-price adjust, initial-stop, sizing. Returns
+  execution-cost =Stats= instead of mutating caller state. =backtest/execute.go=
+  calls the planner instead of inlining (~75 lines removed). Shared fill helper
+  lifted to =execution.FillAdjust=. Verified byte-identical. Strategies STILL
+  emit =StrategyPlan=.
+
+* DONE Increment 2 — introduce the =Signal= type (no interface flip yet)
+  :PROPERTIES:
+  :risk: low
+  :END:
+
+Add the target value type and a behavior-preserving bridge, without changing the
+=Strategy= interface yet.
+
+** Tasks
+
+- [x] Define =planner.Signal= (or =strategy.Signal=): =Side market.Side=
+      (Long/Short/Flat = hold), optional =Strength market.Rate= for future
+      conviction-based sizing, =Reason string=. NO price/stop/units/order objects.
+- [x] Add =DefaultPlanner.PlanSignal(sig Signal, pc PlanContext) (*StrategyPlan,
+      Stats, error)= that constructs the =OpenRequest= from the signal + context
+      (instrument, candle close as entry, default stop from defaults / exit
+      strategy), then runs the SAME finalization as =Plan=. This is where
+      =EmitOpen='s order-construction logic lands.
+- [x] Decide the home for the reversal-close logic (close opposing lots on a
+      flip). It currently lives in each strategy's =EmitOpen=. Move it into the
+      planner's signal path so a Long signal while Short auto-closes the short.
+- [x] Unit-test =PlanSignal= against the same scenarios as =Plan=.
+- [x] Do NOT wire it into the loop yet — keep =Plan(StrategyPlan)= as the live
+      path. This increment only adds the parallel signal path + tests.
+
+** Notes
+
+- =market.Flat Side = 0= added as a named constant; =String()= returns ="flat"=,
+  =Valid()= returns false. =TestSideStringAndValid= updated.
+- =PlanContext= extended with =Instrument() string= so =PlanSignal= can build
+  =OpenRequest= without extra parameters. =runPlanContext= and test =testCtx= updated.
+- =PlanSignaler= composite interface defined for callers that need the signal path.
+- Reversal-close logic moved into =PlanSignal=; strategies no longer need to close
+  opposing lots themselves (enforced in Increment 3 when strategies are migrated).
+
+* DONE Increment 3 — flip =Strategy.Update= to return =Signal=
+  :PROPERTIES:
+  :risk: high
+  :END:
+
+The breaking interface change. All 11 strategies migrated in lockstep.
+
+** Tasks
+
+- [x] Change the interface:
+      =Update(ctx, *CandleTime, StrategyContext) *StrategyPlan=  →
+      =Update(ctx, *CandleTime, StrategyContext) Signal=.
+- [x] Migrated all strategies: emacross, emacrossadx, donchian, bollingerfade,
+      scalper, stress, fake, fake-02, noop, lifecycle, tmpl.
+- [x] For each strategy: stripped order construction, stop math, and reversal
+      closes; returns just =Signal{Side, Reason}= (or =Signal{CloseAll: true}= for
+      strategy-controlled exits). Alpha logic (indicator reads, cross detection)
+      intact.
+- [x] =backtest/execute.go= calls =pl.PlanSignal(sig, runPlanContext{...})= instead
+      of =strat.Update= + =pl.Plan=.
+- [x] =service/candle_strategy_adapter.go= bridges Signal via =signalToPlan=
+      (temporary; replaced in Increment 5).
+- [x] =service/replay.go= updated to work with signals directly.
+- [x] All tests updated; =make test= and =make sweep= both pass.
+
+** Notes
+
+- =EmitOpen= in =emacross= simplified to return =strategy.Signal{Side, Reason}=
+  (no more order-construction); used by emacrossadx.
+- =emacross.Stop= removed (dead code after migration).
+- =scalper.calcStop= removed (dead code after migration).
+- =service/candle_strategy_adapter.signalToPlan= added as temporary bridge;
+  will be replaced in Increment 5 by =planner.PlanSignal= call against live context.
+
+* DONE Increment 4 — remove =Plan(StrategyPlan)= bridge; clean up dead helpers
+  :PROPERTIES:
+  :risk: low
+  :END:
+
+The loop already calls =PlanSignal= (done in Increment 3). What remains:
+
+- [x] Delete =DefaultPlanner.Plan= and the =Planner= interface once no callers remain.
+      Renamed to unexported =finalize=; still used internally by =PlanSignal=.
+- [x] Delete =strategy.StrategyPlan= construction helpers that are now dead:
+      =DefaultPlan=, =HoldPlan=, =DefaultStrategyPlan=. Removed from =strategy/plan.go=.
+- [x] Delete unused =PlanSignaler= composite interface.
+- [x] Confirm trailing-stop =UpdateStop= and =autoCloseExits= are unaffected:
+      =make test= and =make sweep= both pass with byte-identical results.
+
+** Notes
+
+- =DefaultPlanner.Plan= renamed to unexported =finalize=; called only by =PlanSignal=.
+- =PlanSignal= now inlines =&strategy.StrategyPlan{Reason: sig.Reason}= directly
+  instead of calling =strategy.DefaultPlan()= — which was then removed from =strategy/plan.go=.
+- Tests updated: all =.Plan(= calls in =planner_test.go= replaced with =.finalize(=.
+  Tests for =DefaultPlan=/=HoldPlan=/=DefaultStrategyPlan= removed from =strategy/strategy_test.go=.
+
+* DONE Increment 5 — share the planner with =live=
+  :PROPERTIES:
+  :risk: medium
+  :END:
+
+- [x] Replace the bespoke plan path in =service/candle_strategy_adapter.go=
+      (=signalToPlan= + inline regime filter) with a =planner.DefaultPlanner{}.PlanSignal=
+      call via =livePlanContext=, so live and backtest run identical regime-gate,
+      spread-gate, and stop-placement logic.
+- [x] =livePlanContext= implements =planner.PlanContext=: returns =nil= account so
+      =PlanSignal= skips sizing (OANDA handles risk/sizing via =StopPips= on the wire).
+      Slippage and MaxSpread are 0 — live fills are at market.
+- [x] Floats remain at the OANDA edge only: =oandaCandleToCandleTime= converts
+      bid/ask floats → =Price=; =convertPlan= converts =Price= → float pips for the wire.
+- [x] =convertPlan= simplified: no longer calls =exit.InitialStop= (planner already
+      set it); uses =req.Price= (fill-adjusted entry from planner) instead of =ct.Close=;
+      =ct= parameter dropped.
+- [x] =signalToPlan= deleted; =liveLotsTracker.setInitialStop= removed (dead code).
+- [x] Tests updated: =TestConvertPlan_ExitStrategyFillsStop= removed (behavior now in
+      =planner_test.go=); =TestLivePlanContext_ImplementsPlanContext= added.
+- [x] =make test= and =make sweep= pass with identical results.
+
+** Notes
+
+- =livePlanContext.Account()= returns =nil=. If future work adds live position sizing
+  (sizing against live NAV), wire in a real =*execution.Account= here.
+- Max-spread gate is disabled in the live path (=MaxSpread=0=). Enable it if a
+  configurable live spread limit is added to =CandleAdapterConfig=.
+
+* Open design questions
+
+- [ ] Planner ownership: currently a local =DefaultPlanner{}= in
+      =execute.go=. Promote to a =Backtest= field (and a live equivalent) so it
+      is swappable / configurable per run?
+- [ ] Does =Signal= need =Strength= now, or add it when conviction-based sizing
+      is actually built? (YAGNI — probably defer.)
+- [ ] Should multi-open-per-bar ever be supported, or is one signal per bar the
+      contract? Today at most one open is the de-facto rule.
+
+* Notes
+
+- Branch: =planner= (off =main= after PR #150).
+- Keep the no-floats-internal rule throughout; floats only at the OANDA edge.
+- One increment per commit; run =gofmt=, =go vet ./...=, =make test=, =make sweep=
+  after each.
