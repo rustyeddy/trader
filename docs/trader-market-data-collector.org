@@ -1,0 +1,516 @@
+#+TITLE: Trader Market Data Collector Architecture
+#+AUTHOR: Rusty Eddy
+#+DATE: 2026-06-24
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+This document summarizes the proposed architecture for adding a dedicated live market-data collector to Trader.
+
+The core idea is to keep broker data ingestion separate from downstream consumers. The OANDA collector connects to the broker stream, normalizes incoming prices, and publishes Trader-native market-data events to MQTT. Recorders, candle builders, strategy runners, dashboards, and execution engines then subscribe to the topics they need.
+
+#+begin_src text
+OANDA / broker feed
+        |
+        v
+Trader data collector
+        |
+        v
+Local MQTT event bus
+        |
+        +--> tick recorder
+        +--> candle builder
+        +--> paper strategy runner
+        +--> demo/live strategy runner
+        +--> dashboard / kiosk
+        +--> alert engine
+#+end_src
+
+* Design Principle
+
+#+begin_quote
+Broker feed in. Normalized Trader events out. Everything else is a subscriber.
+#+end_quote
+
+The collector should do one job well:
+
+#+begin_src text
+collector = connect to broker, normalize feed, publish market data
+#+end_src
+
+It should not also be responsible for storage, candle generation, strategies, alerts, and execution.
+
+* Main Components
+
+** OANDA Collector
+
+Responsibilities:
+
+- Open one persistent OANDA pricing stream.
+- Subscribe to the configured FX instrument basket.
+- Normalize broker-specific messages into Trader-native tick/quote events.
+- Publish normalized ticks and quotes to MQTT.
+- Publish health/status messages.
+- Handle reconnects with exponential backoff.
+
+Publishes:
+
+#+begin_src text
+trader/fx/{PAIR}/tick
+trader/fx/{PAIR}/quote
+trader/fx/{PAIR}/health
+#+end_src
+
+** Tick Recorder
+
+Responsibilities:
+
+- Subscribe to tick topics.
+- Persist raw ticks, if configured.
+- Persist spread statistics.
+- Optionally retain raw ticks only for a bounded time window.
+
+Subscribes:
+
+#+begin_src text
+trader/fx/+/tick
+#+end_src
+
+Writes:
+
+#+begin_src text
+ticks
+spread_stats
+collector_health
+#+end_src
+
+** Candle Builder
+
+Responsibilities:
+
+- Subscribe to ticks.
+- Build M1, M5, M15, H1, and D1 candles.
+- Publish candle updates and/or closed candles.
+- Persist completed candles.
+
+Subscribes:
+
+#+begin_src text
+trader/fx/+/tick
+#+end_src
+
+Publishes:
+
+#+begin_src text
+trader/fx/{PAIR}/candle/M1
+trader/fx/{PAIR}/candle/M5
+trader/fx/{PAIR}/candle/M15
+trader/fx/{PAIR}/candle/H1
+trader/fx/{PAIR}/candle/D1
+#+end_src
+
+** Strategy Runner
+
+Responsibilities:
+
+- Subscribe primarily to closed candles.
+- Use current quote snapshots for execution context.
+- Avoid reacting directly to raw tick noise unless explicitly building an intraday/tick strategy.
+- Publish signals and proposed orders.
+
+Subscribes:
+
+#+begin_src text
+trader/fx/+/candle/H1
+trader/fx/+/candle/D1
+trader/fx/+/quote
+#+end_src
+
+Publishes:
+
+#+begin_src text
+trader/fx/{PAIR}/signal
+trader/fx/{PAIR}/order/request
+#+end_src
+
+** Risk Manager
+
+Responsibilities:
+
+- Validate strategy signals.
+- Check account state, open positions, risk limits, max exposure, and stop distance.
+- Approve, reject, or resize proposed orders.
+
+Input:
+
+#+begin_src text
+Signal + Account + Position + RiskConfig
+#+end_src
+
+Output:
+
+#+begin_src text
+ApprovedOrder / RejectedOrder
+#+end_src
+
+** Execution Engine
+
+Responsibilities:
+
+- Subscribe to approved order requests.
+- Submit orders to broker API.
+- Publish order, fill, and position events.
+- Keep execution separate from strategy generation.
+
+Subscribes:
+
+#+begin_src text
+trader/fx/+/order/request
+#+end_src
+
+Publishes:
+
+#+begin_src text
+trader/fx/{PAIR}/order/event
+trader/fx/{PAIR}/position/event
+#+end_src
+
+** Dashboard / Kiosk
+
+Responsibilities:
+
+- Subscribe to latest quotes, candles, health, signals, positions, and alerts.
+- Display current market and strategy state.
+- Use retained quote/health messages so the UI has an immediate initial state.
+
+* MQTT Topic Layout
+
+Preferred topic style:
+
+#+begin_src text
+trader/fx/EUR_USD/tick
+trader/fx/EUR_USD/quote
+trader/fx/EUR_USD/candle/M1
+trader/fx/EUR_USD/candle/H1
+trader/fx/EUR_USD/signal
+trader/fx/EUR_USD/order/request
+trader/fx/EUR_USD/order/event
+trader/fx/EUR_USD/position/event
+trader/fx/EUR_USD/health
+#+end_src
+
+Useful wildcard subscriptions:
+
+#+begin_src text
+trader/fx/+/tick
+trader/fx/+/quote
+trader/fx/+/candle/H1
+trader/fx/EUR_USD/#
+#+end_src
+
+This topic layout groups all events for a pair together and makes pair-level debugging easy.
+
+* MQTT QoS and Retain Policy
+
+Recommended policy:
+
+| Event Type            | QoS | Retain? | Notes |
+|-----------------------+-----+---------+-------|
+| Raw ticks             |   0 | No      | High frequency; recorder handles persistence. |
+| Live quote snapshots  |   0 | Yes     | Dashboard can immediately see latest quote. |
+| Live candle updates   |   0 | No      | Useful for UI, not necessarily durable. |
+| Closed candle events  |   1 | Maybe   | Important for strategy runners. |
+| Signals               |   1 | Maybe   | Should also be persisted. |
+| Order requests        |   1 | No      | Do not rely on MQTT alone for durable order state. |
+| Order/fill events     |   1 | No      | Persist in database. |
+| Health/status         |   0 | Yes     | Useful for dashboards and monitoring. |
+
+* Message Schemas
+
+Start with JSON for simplicity. Later, switch to protobuf or msgpack only if JSON becomes a bottleneck.
+
+** Tick Message
+
+#+begin_src go
+type Tick struct {
+    Source     string    `json:"source"`      // "oanda"
+    Account    string    `json:"account"`     // "demo", "live", etc.
+    Instrument string    `json:"instrument"`  // "EUR_USD"
+    Time       time.Time `json:"time"`
+
+    Bid        int64     `json:"bid"`         // scaled price, e.g. 1e6
+    Ask        int64     `json:"ask"`
+    Mid        int64     `json:"mid"`
+    Spread     int64     `json:"spread"`
+
+    Liquidity  []Level   `json:"liquidity,omitempty"`
+}
+#+end_src
+
+** Candle Message
+
+#+begin_src go
+type Candle struct {
+    Source     string    `json:"source"`
+    Instrument string    `json:"instrument"`
+    Timeframe  string    `json:"timeframe"` // "M1", "H1", "D1"
+
+    OpenTime   time.Time `json:"open_time"`
+    CloseTime  time.Time `json:"close_time"`
+
+    Open       int64     `json:"open"`
+    High       int64     `json:"high"`
+    Low        int64     `json:"low"`
+    Close      int64     `json:"close"`
+
+    Volume     int64     `json:"volume"`      // tick count for FX
+    AvgSpread  int64     `json:"avg_spread"`
+    MaxSpread  int64     `json:"max_spread"`
+
+    Complete   bool      `json:"complete"`
+}
+#+end_src
+
+* Strategy Input Rule
+
+For the current swing-trading system, strategies should primarily consume closed candles rather than raw ticks.
+
+Recommended strategy inputs:
+
+#+begin_src text
+closed candles
+current quote snapshot
+account state
+position state
+recent spread statistics
+risk configuration
+#+end_src
+
+Recommended strategy outputs:
+
+#+begin_src text
+signal
+proposed order
+risk intent
+#+end_src
+
+Raw ticks are useful for:
+
+- Spread measurement.
+- Slippage analysis.
+- Debugging execution.
+- Building candles.
+- Trade replay.
+
+Raw ticks should not become the default trigger source for swing strategies.
+
+* Storage Plan
+
+Recommended retention:
+
+| Data Type       | Keep Forever? | Notes |
+|----------------+---------------+-------|
+| M1 candles     | Yes           | Useful for backtesting and replay. |
+| H1 candles     | Yes           | Primary strategy timeframe. |
+| D1 candles     | Yes           | Macro/trend regime. |
+| Raw ticks      | Maybe         | Keep 7-30 days unless there is a specific reason to retain longer. |
+| Spread stats   | Yes           | Useful for filters, execution analysis, and broker quality. |
+| Signals        | Yes           | Needed for journal/review. |
+| Orders/fills   | Yes           | Required for trading records. |
+| Positions      | Yes           | Required for trading records. |
+
+Minimum v1 tables:
+
+#+begin_src text
+ticks
+candles
+quotes_latest
+spread_stats
+signals
+orders
+positions
+executions
+collector_health
+#+end_src
+
+* Deployment Modes
+
+** Local-First Deployment
+
+#+begin_src text
+OANDA stream
+   |
+home server / Pi / NUC
+   |
+local MQTT
+   |
+recorder + strategies + dashboard
+#+end_src
+
+Advantages:
+
+- Simple.
+- Private.
+- Fewer moving parts.
+- Full local history.
+- Easy development and debugging.
+
+Disadvantages:
+
+- Depends on home internet and power.
+- Remote access requires more care.
+
+** Cloud Collector Deployment
+
+#+begin_src text
+OANDA stream
+   |
+VPS / cloud broker
+   |
+cloud recorder / candle builder
+   |
+selected events sent home
+#+end_src
+
+Advantages:
+
+- Better uptime.
+- Easier remote access.
+- Can run while home is offline.
+- Potentially closer to broker network.
+
+Disadvantages:
+
+- Broker credentials may live in the cloud.
+- Security matters more.
+- Requires backup/export plan.
+- Adds cloud cost and operational complexity.
+
+** Hybrid Deployment
+
+#+begin_src text
+cloud collector
+    publishes ticks/candles/signals
+
+home trader
+    subscribes to candles/signals
+    stores selected data
+    runs dashboard
+    optionally runs strategy engines
+#+end_src
+
+Possible data sent home:
+
+- All closed M1 candles.
+- All H1/D1 candles.
+- All trade-related ticks.
+- All order/position events.
+- All generated signals.
+- Raw ticks only around trade windows.
+
+* Recommended Version Plan
+
+** TODO V1: Local Market Data Backbone
+
+Build the simplest useful version locally.
+
+- [ ] Create an OANDA streaming collector.
+- [ ] Subscribe to the configured FX watchlist.
+- [ ] Normalize OANDA prices into Trader tick messages.
+- [ ] Publish ticks to MQTT.
+- [ ] Publish latest quote snapshots to MQTT.
+- [ ] Add collector health messages.
+- [ ] Implement reconnect/backoff.
+- [ ] Add tick recorder subscriber.
+- [ ] Add candle builder subscriber.
+- [ ] Persist M1, H1, and D1 candles.
+- [ ] Build spread statistics.
+- [ ] Add dashboard/kiosk subscriptions.
+
+** TODO V2: Strategy Integration
+
+Connect the market-data backbone to strategies.
+
+- [ ] Have paper strategies subscribe to closed H1/D1 candles.
+- [ ] Add current quote snapshot lookup.
+- [ ] Add signal publishing.
+- [ ] Add signal persistence.
+- [ ] Add risk manager boundary.
+- [ ] Add paper order/event flow.
+- [ ] Add demo-account execution flow.
+- [ ] Keep live execution disabled until paper/demo behavior is reviewed.
+
+** TODO V3: Configurable Deployment
+
+Make deployment flexible without changing the core design.
+
+- [ ] Make MQTT broker URL configurable.
+- [ ] Support local Mosquitto or Mochi MQTT.
+- [ ] Support embedded broker mode for development.
+- [ ] Support remote/cloud broker mode.
+- [ ] Add TLS/auth for remote MQTT.
+- [ ] Add configurable tick-retention policy.
+- [ ] Add cloud-to-home selective replication.
+
+* Suggested Instrument Basket
+
+Initial FX basket:
+
+#+begin_src text
+EUR_USD
+GBP_USD
+USD_JPY
+USD_CHF
+AUD_USD
+NZD_USD
+USD_CAD
+
+EUR_JPY
+GBP_JPY
+AUD_JPY
+NZD_JPY
+CAD_JPY
+
+EUR_GBP
+EUR_AUD
+EUR_CAD
+GBP_AUD
+GBP_CAD
+AUD_NZD
+AUD_CAD
+#+end_src
+
+Optional additions:
+
+#+begin_src text
+XAU_USD
+EUR_CHF
+GBP_CHF
+NZD_CAD
+#+end_src
+
+* Open Design Questions
+
+- Should the MQTT broker be embedded in Trader for dev mode?
+- Should production use Mosquitto, Mochi MQTT, or both as options?
+- Should tick recorder and candle builder be one process or separate processes?
+- Should candles be published only when closed, or also while live/incomplete?
+- How long should raw ticks be retained?
+- Should cloud mode store all ticks, or only candles and trade-related ticks?
+- Should the dashboard subscribe to raw ticks or only quote snapshots?
+- Should strategy runners be prohibited from raw tick topics by convention?
+
+* Recommended Starting Decision
+
+Start local-first.
+
+#+begin_src text
+OANDA collector publishes normalized ticks to MQTT.
+Recorder subscribes and persists ticks/spread stats.
+Candle builder subscribes and publishes M1/H1/D1 closed candles.
+Strategies subscribe to candles, not raw ticks.
+Risk/execution are separate from strategy generation.
+Deployment is configurable: local, cloud, or hybrid.
+#+end_src
+
+This keeps the design clean, testable, and flexible while avoiding premature cloud complexity.

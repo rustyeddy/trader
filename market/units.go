@@ -36,6 +36,7 @@ func (u Units) String() string {
 type Side int
 
 const (
+	Flat  Side = 0
 	Short Side = -1
 	Long  Side = 1
 )
@@ -48,6 +49,8 @@ func (s Side) Valid() bool {
 // String is an internal helper for trader type processing.
 func (s Side) String() string {
 	switch s {
+	case Flat:
+		return "flat"
 	case Short:
 		return "short"
 	case Long:

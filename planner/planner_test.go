@@ -45,14 +45,16 @@ func (f fakeExit) UpdateStop(_ market.Side, cur, _, _ market.Price, _ market.Can
 }
 
 type testCtx struct {
-	acct      *execution.Account
-	exit      strategy.ExitStrategy
-	regime    strategy.RegimeFilter
-	candle    market.CandleTime
-	slippage  market.Price
-	maxSpread market.Price
+	instrument string
+	acct       *execution.Account
+	exit       strategy.ExitStrategy
+	regime     strategy.RegimeFilter
+	candle     market.CandleTime
+	slippage   market.Price
+	maxSpread  market.Price
 }
 
+func (c testCtx) Instrument() string            { return c.instrument }
 func (c testCtx) Account() *execution.Account   { return c.acct }
 func (c testCtx) Exit() strategy.ExitStrategy   { return c.exit }
 func (c testCtx) Regime() strategy.RegimeFilter { return c.regime }
@@ -221,6 +223,147 @@ func TestDefaultPlanner_SizingErrorPropagates(t *testing.T) {
 		candle: candleTime(0),
 	})
 	require.Error(t, err)
+}
+
+// --- PlanSignal tests -------------------------------------------------------
+
+func TestPlanSignal_FlatHolds(t *testing.T) {
+	t.Parallel()
+	plan, stats, err := DefaultPlanner{}.PlanSignal(Hold("no signal"), testCtx{
+		regime: strategy.NoopRegime{},
+		exit:   strategy.NoopExit{},
+		candle: candleTime(0),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Stats{}, stats)
+	assert.True(t, plan.Empty(), "flat signal should produce no opens/closes")
+	assert.Equal(t, "no signal", plan.Reason)
+}
+
+func TestPlanSignal_LongOpensPosition(t *testing.T) {
+	t.Parallel()
+	entry := market.PriceFromFloat(1.10)
+	avgSpread := market.Price(10)
+
+	plan, stats, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "test-long"}, testCtx{
+		instrument: "EURUSD",
+		regime:     strategy.NoopRegime{},
+		exit:       strategy.NoopExit{},
+		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: avgSpread}},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Opens, 1)
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
+	assert.Equal(t, "EURUSD", plan.Opens[0].Instrument)
+	// Fill-price adjust: long buys at ask (close + spread).
+	assert.Equal(t, entry+avgSpread, plan.Opens[0].Price)
+	assert.Equal(t, 1, stats.SpreadOpened)
+	assert.Empty(t, plan.Closes)
+}
+
+func TestPlanSignal_ReversalClosesOpposingSide(t *testing.T) {
+	t.Parallel()
+	// Build a small account just to host open lots; RiskFraction left at zero so
+	// the planner skips sizing (stop is also 0 — this test focuses on close logic).
+	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct.Equity = acct.Balance
+
+	// Plant an open short lot.
+	shortLot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{ID: "s1", Instrument: "EURUSD", Side: market.Short, Stop: market.PriceFromFloat(1.12), Units: 1000},
+		State:       execution.LotOpen,
+	}
+	require.NoError(t, acct.Lots.Add(shortLot))
+
+	// Pre-size the open so the planner does not attempt sizing (avoids stop=0 error).
+	entry := market.PriceFromFloat(1.10)
+	plan, _, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "flip"}, testCtx{
+		instrument: "EURUSD",
+		acct:       acct,
+		regime:     strategy.NoopRegime{},
+		exit:       fakeExit{ready: true, stop: market.PriceFromFloat(1.09)},
+		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Closes, 1, "opposing short lot must be closed")
+	assert.Equal(t, "s1", plan.Closes[0].Lot.ID)
+	require.Len(t, plan.Opens, 1, "new long position must be opened")
+	assert.Equal(t, market.Long, plan.Opens[0].Side)
+}
+
+func TestPlanSignal_SameSideNotClosed(t *testing.T) {
+	t.Parallel()
+	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct.Equity = acct.Balance
+
+	// Plant an open long lot — same side as the incoming signal.
+	longLot := &execution.Lot{
+		TradeCommon: &execution.TradeCommon{ID: "l1", Instrument: "EURUSD", Side: market.Long, Stop: market.PriceFromFloat(1.08), Units: 1000},
+		State:       execution.LotOpen,
+	}
+	require.NoError(t, acct.Lots.Add(longLot))
+
+	// Use an exit strategy that provides a stop so sizing can proceed without error.
+	entry := market.PriceFromFloat(1.10)
+	plan, _, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "add-long"}, testCtx{
+		instrument: "EURUSD",
+		acct:       acct,
+		regime:     strategy.NoopRegime{},
+		exit:       fakeExit{ready: true, stop: market.PriceFromFloat(1.09)},
+		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, plan.Closes, "same-side lot must not be closed")
+	require.Len(t, plan.Opens, 1)
+}
+
+func TestPlanSignal_RegimeSuppressesOpen(t *testing.T) {
+	t.Parallel()
+	plan, _, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "long"}, testCtx{
+		instrument: "EURUSD",
+		regime:     fakeRegime{ready: true, trending: false},
+		exit:       strategy.NoopExit{},
+		candle:     candleTime(0),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, plan.Opens, "regime gate must suppress the open")
+}
+
+func TestPlanSignal_ExitStrategyOverridesStop(t *testing.T) {
+	t.Parallel()
+	entry := market.PriceFromFloat(1.10)
+	exitStop := market.PriceFromFloat(1.085)
+
+	plan, _, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "long"}, testCtx{
+		instrument: "EURUSD",
+		regime:     strategy.NoopRegime{},
+		exit:       fakeExit{ready: true, stop: exitStop},
+		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Opens, 1)
+	assert.Equal(t, exitStop, plan.Opens[0].Stop)
+}
+
+func TestPlanSignal_SizesWhenAccountPresent(t *testing.T) {
+	t.Parallel()
+	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct.Equity = acct.Balance
+	acct.RiskFraction = market.RateFromFloat(0.01)
+
+	entry := market.PriceFromFloat(1.10)
+	exitStop := market.PriceFromFloat(1.09)
+
+	plan, _, err := DefaultPlanner{}.PlanSignal(Signal{Side: market.Long, Reason: "long"}, testCtx{
+		instrument: "EURUSD",
+		acct:       acct,
+		regime:     strategy.NoopRegime{},
+		exit:       fakeExit{ready: true, stop: exitStop},
+		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Opens, 1)
+	assert.NotZero(t, plan.Opens[0].Units, "planner must size the position")
 }
 
 func TestDefaultPlanner_CloseFillAdjust(t *testing.T) {

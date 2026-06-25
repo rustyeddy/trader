@@ -49,10 +49,12 @@ func TestSideStringAndValid(t *testing.T) {
 
 	assert.True(t, Long.Valid())
 	assert.True(t, Short.Valid())
-	assert.False(t, Side(0).Valid())
+	assert.False(t, Flat.Valid())
+	assert.False(t, Side(99).Valid())
 	assert.Equal(t, "long", Long.String())
 	assert.Equal(t, "short", Short.String())
-	assert.Equal(t, "unknown", Side(0).String())
+	assert.Equal(t, "flat", Flat.String())
+	assert.Equal(t, "unknown", Side(99).String())
 }
 
 func TestUnitsAndPipsFromFloatPanicsOnInvalid(t *testing.T) {

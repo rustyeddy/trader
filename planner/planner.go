@@ -15,11 +15,18 @@ import (
 	"github.com/rustyeddy/trader/strategy"
 )
 
+// PlanSignaler extends Planner with the signal-based entry path.
+type PlanSignaler interface {
+	Planner
+	PlanSignal(sig Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error)
+}
+
 // PlanContext is the read/compute view a Planner needs to finalize a plan
 // against the current bar: the account (for sizing), the active exit strategy
 // and regime filter, the current candle, and the configured execution-cost
 // parameters.
 type PlanContext interface {
+	Instrument() string
 	Account() *execution.Account
 	Exit() strategy.ExitStrategy
 	Regime() strategy.RegimeFilter
@@ -126,4 +133,51 @@ func (DefaultPlanner) Plan(raw *strategy.StrategyPlan, pc PlanContext) (*strateg
 	}
 
 	return raw, stats, nil
+}
+
+// PlanSignal translates a pure Signal into a finalized StrategyPlan using the
+// same gates and order-construction logic as Plan. A Flat signal returns an
+// empty hold plan immediately. A directional signal:
+//
+//  1. Emits CloseRequests for any open lots on the opposing side (reversal close).
+//  2. Opens a new position at the candle close price with the initial stop
+//     determined by the exit strategy (if ready), then runs the full Plan
+//     pipeline (regime gate, max-spread gate, fill-price adjust, sizing).
+func (p DefaultPlanner) PlanSignal(sig Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
+	plan := strategy.DefaultPlan()
+	plan.Reason = sig.Reason
+
+	if sig.Side == market.Flat {
+		return plan, Stats{}, nil
+	}
+
+	candle := pc.Candle()
+
+	// Reversal-close: close any open lots on the opposite side.
+	if acct := pc.Account(); acct != nil {
+		_ = acct.Lots.Range(func(lot *execution.Lot) error {
+			if lot.State != execution.LotOpen || lot.Side == sig.Side {
+				return nil
+			}
+			plan.Closes = append(plan.Closes, &execution.CloseRequest{
+				Request: execution.Request{
+					TradeCommon: lot.TradeCommon,
+					Reason:      "signal-reverse",
+					Candle:      candle.Candle,
+					RequestType: execution.RequestClose,
+					Price:       candle.Close,
+					Timestamp:   candle.Timestamp,
+				},
+				Lot:        lot,
+				CloseCause: execution.CloseManual,
+			})
+			return nil
+		})
+	}
+
+	plan.Opens = append(plan.Opens, execution.NewOpenRequest(
+		pc.Instrument(), &candle, sig.Side, 0, 0, sig.Reason,
+	))
+
+	return p.Plan(plan, pc)
 }

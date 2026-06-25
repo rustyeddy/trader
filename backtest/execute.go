@@ -230,12 +230,13 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		// live in the planner now.
 		var stats planner.Stats
 		plan, stats, err = pl.Plan(plan, runPlanContext{
-			acct:      t.Account,
-			exit:      exit,
-			regime:    regime,
-			candle:    candle,
-			slippage:  slippage,
-			maxSpread: maxSpread,
+			instrument: run.Request.Instrument,
+			acct:       t.Account,
+			exit:       exit,
+			regime:     regime,
+			candle:     candle,
+			slippage:   slippage,
+			maxSpread:  maxSpread,
 		})
 		if err != nil {
 			return err
