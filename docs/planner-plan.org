@@ -142,19 +142,34 @@ The loop already calls =PlanSignal= (done in Increment 3). What remains:
 - Tests updated: all =.Plan(= calls in =planner_test.go= replaced with =.finalize(=.
   Tests for =DefaultPlan=/=HoldPlan=/=DefaultStrategyPlan= removed from =strategy/strategy_test.go=.
 
-* TODO Increment 5 — share the planner with =live=
+* DONE Increment 5 — share the planner with =live=
   :PROPERTIES:
   :risk: medium
   :END:
 
-- [ ] Replace the bespoke plan path in =service/candle_strategy_adapter.go=
-      (=convertPlan=) with a =planner.PlanSignal= call, so live and backtest run
-      identical sizing/regime/stop logic.
-- [ ] Reconcile units: live works in =float64= at the OANDA boundary while the
-      planner is fixed-point. Keep the float conversion at the adapter edge only
-      (per the no-floats-internal rule).
-- [ ] Live has no =account.SizePosition= the same way (sizing is RiskPct → NAV
-      at OANDA); add a =PlanContext= impl for live that sizes against live NAV.
+- [x] Replace the bespoke plan path in =service/candle_strategy_adapter.go=
+      (=signalToPlan= + inline regime filter) with a =planner.DefaultPlanner{}.PlanSignal=
+      call via =livePlanContext=, so live and backtest run identical regime-gate,
+      spread-gate, and stop-placement logic.
+- [x] =livePlanContext= implements =planner.PlanContext=: returns =nil= account so
+      =PlanSignal= skips sizing (OANDA handles risk/sizing via =StopPips= on the wire).
+      Slippage and MaxSpread are 0 — live fills are at market.
+- [x] Floats remain at the OANDA edge only: =oandaCandleToCandleTime= converts
+      bid/ask floats → =Price=; =convertPlan= converts =Price= → float pips for the wire.
+- [x] =convertPlan= simplified: no longer calls =exit.InitialStop= (planner already
+      set it); uses =req.Price= (fill-adjusted entry from planner) instead of =ct.Close=;
+      =ct= parameter dropped.
+- [x] =signalToPlan= deleted; =liveLotsTracker.setInitialStop= removed (dead code).
+- [x] Tests updated: =TestConvertPlan_ExitStrategyFillsStop= removed (behavior now in
+      =planner_test.go=); =TestLivePlanContext_ImplementsPlanContext= added.
+- [x] =make test= and =make sweep= pass with identical results.
+
+** Notes
+
+- =livePlanContext.Account()= returns =nil=. If future work adds live position sizing
+  (sizing against live NAV), wire in a real =*execution.Account= here.
+- Max-spread gate is disabled in the live path (=MaxSpread=0=). Enable it if a
+  configurable live spread limit is added to =CandleAdapterConfig=.
 
 * Open design questions
 
