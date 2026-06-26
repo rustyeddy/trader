@@ -13,11 +13,11 @@ import (
 // PlaceMarketOrderRequest is the typed input for risk-sized market orders.
 // Either StopPips or StopPrice must be set; if both are set, StopPrice wins.
 type PlaceMarketOrderRequest struct {
-	Instrument string  // OANDA format, e.g. "USD_JPY"
-	Side       string  // "long" or "short"
-	RiskPct    float64 // % of account NAV to risk per trade
-	StopPips   float64 // stop distance in pips (mutually exclusive with StopPrice)
-	StopPrice  float64 // explicit stop price (overrides StopPips)
+	Instrument string      // OANDA format, e.g. "USD_JPY"
+	Side       string      // "long" or "short"
+	RiskPct    market.Rate // fraction of account NAV to risk (0.01×RateScale = 1%)
+	StopPips   float64     // stop distance in pips (mutually exclusive with StopPrice)
+	StopPrice  float64     // explicit stop price (overrides StopPips)
 	// Units may override risk-based sizing. When 0, units are computed
 	// from RiskPct + stop distance.
 	Units int64
@@ -123,7 +123,7 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	stopDistUSD := stopDist * quoteToUSDRate(req.Instrument)
 
 	// Sizing.
-	riskAmount := equity * (req.RiskPct / 100.0)
+	riskAmount := equity * req.RiskPct.Float64()
 	units := req.Units
 	if units == 0 {
 		units = int64(math.Round(riskAmount / stopDistUSD))

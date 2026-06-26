@@ -362,22 +362,22 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LiveP
 				if dist < 0 {
 					dist = -dist
 				}
-				stopPips := 0.0
+				var stopPips market.Pips
 				if perPip := inst.PriceUnitsPerPip(); perPip > 0 {
-					stopPips = math.Round(float64(dist)/float64(perPip)*10) / 10
+					// dist and perPip are both in Price units; result is in deci-pips.
+					stopPips = market.Pips(math.Round(float64(dist) / float64(perPip) * 10))
 				}
 
 				side := "long"
 				if req.Side == market.Short {
 					side = "short"
 				}
-				scale := float64(a.scale)
 				a.log.Info("live: open order queued",
 					"instrument", a.instNorm,
 					"side", side,
-					"entry_price", float64(entryPrice)/scale,
-					"stop_price", float64(req.Stop)/scale,
-					"stop_pips", stopPips,
+					"entry_price", entryPrice.Float64(),
+					"stop_price", req.Stop.Float64(),
+					"stop_pips", stopPips.Float64(),
 					"reason", plan.Reason,
 				)
 				lp.Open = &LiveOpenRequest{
@@ -544,8 +544,7 @@ func (lt *liveLotsTracker) sync(trades []LiveTrade) {
 			}
 			tc := &execution.TradeCommon{ID: t.ID}
 			tc.Side = side
-			scale := float64(market.PriceScale)
-			entryPrice := market.Price(math.Round(t.EntryPrice * scale))
+			entryPrice := t.EntryPrice
 			tc.Stop = entryPrice // placeholder; real stop set by adapter
 			lt.byID[t.ID] = &execution.Lot{
 				TradeCommon: tc,

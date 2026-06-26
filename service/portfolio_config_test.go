@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -84,7 +85,7 @@ func TestBuildPortfolioRunConfig_BacktestStrategy(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rc.Instruments, 1)
 	assert.Equal(t, "EUR_USD", rc.Instruments[0].Instrument)
-	assert.Equal(t, 1.0, rc.Instruments[0].RiskPct)
+	assert.Equal(t, market.RateFromFloat(0.01), rc.Instruments[0].RiskPct)
 }
 
 func TestBuildPortfolioRunConfig_RiskPctFallsBackToPortfolioDefault(t *testing.T) {
@@ -105,7 +106,7 @@ func TestBuildPortfolioRunConfig_RiskPctFallsBackToPortfolioDefault(t *testing.T
 	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
 	require.NoError(t, err)
 	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, 2.0, rc.Instruments[0].RiskPct)
+	assert.Equal(t, market.RateFromFloat(0.02), rc.Instruments[0].RiskPct)
 }
 
 func TestBuildPortfolioRunConfig_PerInstrumentRiskPctOverridesDefault(t *testing.T) {
@@ -126,7 +127,7 @@ func TestBuildPortfolioRunConfig_PerInstrumentRiskPctOverridesDefault(t *testing
 	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
 	require.NoError(t, err)
 	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, 3.0, rc.Instruments[0].RiskPct)
+	assert.Equal(t, market.RateFromFloat(0.03), rc.Instruments[0].RiskPct)
 }
 
 func TestBuildPortfolioRunConfig_UnknownStrategyReturnsError(t *testing.T) {

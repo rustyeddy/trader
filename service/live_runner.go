@@ -25,9 +25,10 @@ type LiveRunConfig struct {
 	// Strategy is the live strategy to run. Required.
 	Strategy LiveStrategy
 
-	// RiskPct is the default risk per trade when the strategy's
-	// LiveOpenRequest carries zero. Defaults to 0.1.
-	RiskPct float64
+	// RiskPct is the default fraction of account NAV to risk per trade
+	// (market.Rate; 0.01×RateScale = 1%). Applied when the strategy's
+	// LiveOpenRequest carries zero. Defaults to RateFromFloat(0.001) = 0.1%.
+	RiskPct market.Rate
 
 	// MaxUnits caps position size in units (absolute). 0 = no cap.
 	MaxUnits int64
@@ -138,7 +139,7 @@ func validateLiveRunConfig(cfg *LiveRunConfig) error {
 		cfg.TickInterval = 60 * time.Second
 	}
 	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = 0.1
+		cfg.RiskPct = market.RateFromFloat(0.001) // 0.1 %
 	}
 	return nil
 }
@@ -173,8 +174,8 @@ func (a *Account) runOneTick(
 		if tick := pxCache.get(); tick != nil {
 			livePrice = LivePrice{
 				Instrument: cfg.Instrument,
-				Bid:        tick.Bid,
-				Ask:        tick.Ask,
+				Bid:        market.PriceFromFloat(tick.Bid),
+				Ask:        market.PriceFromFloat(tick.Ask),
 				Time:       tick.Time,
 			}
 		}
@@ -190,8 +191,8 @@ func (a *Account) runOneTick(
 		px := prices[0]
 		livePrice = LivePrice{
 			Instrument: cfg.Instrument,
-			Bid:        px.Bid,
-			Ask:        px.Ask,
+			Bid:        market.PriceFromFloat(px.Bid),
+			Ask:        market.PriceFromFloat(px.Ask),
 			Time:       time.Now(),
 		}
 	}
@@ -222,8 +223,8 @@ func (a *Account) runOneTick(
 			ID:           t.ID,
 			Instrument:   t.Instrument,
 			Units:        t.Units,
-			EntryPrice:   t.EntryPrice,
-			UnrealizedPL: t.UnrealizedPL,
+			EntryPrice:   market.PriceFromFloat(t.EntryPrice),
+			UnrealizedPL: market.MoneyFromFloat(t.UnrealizedPL),
 			OpenTime:     t.OpenTime,
 			TicksOpen:    tickCounts[t.ID],
 		})
@@ -284,8 +285,8 @@ func (a *Account) runOneTick(
 	log.Info("live runner: submitting order",
 		"instrument", cfg.Instrument,
 		"side", plan.Open.Side,
-		"stop_pips", plan.Open.StopPips,
-		"risk_pct", riskPct,
+		"stop_pips", plan.Open.StopPips.Float64(),
+		"risk_pct_pct", riskPct.Float64()*100,
 		"reason", plan.Open.Reason,
 	)
 
@@ -293,7 +294,7 @@ func (a *Account) runOneTick(
 		Instrument:     cfg.Instrument,
 		Side:           plan.Open.Side,
 		RiskPct:        riskPct,
-		StopPips:       plan.Open.StopPips,
+		StopPips:       plan.Open.StopPips.Float64(),
 		MaxUnits:       cfg.MaxUnits,
 		MaxPositionUSD: cfg.MaxPositionUSD,
 		Confirm:        true,

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -66,7 +67,7 @@ func (s *Server) handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	result, err := acc.PlaceMarketOrder(r.Context(), service.PlaceMarketOrderRequest{
 		Instrument: req.Instrument,
 		Side:       req.Side,
-		RiskPct:    req.RiskPct,
+		RiskPct:    market.RateFromFloat(req.RiskPct / 100.0),
 		StopPips:   req.StopPips,
 		StopPrice:  req.StopPrice,
 		Units:      req.Units,

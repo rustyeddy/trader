@@ -102,9 +102,9 @@ func TestLiveRunConfig_DefaultRiskPct(t *testing.T) {
 		RiskPct:    0,
 	}
 	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = 0.1
+		cfg.RiskPct = market.RateFromFloat(0.001) // 0.1%
 	}
-	assert.Equal(t, 0.1, cfg.RiskPct)
+	assert.Equal(t, market.RateFromFloat(0.001), cfg.RiskPct)
 }
 
 // ── LiveTrade.Side ────────────────────────────────────────────────────────────
@@ -122,8 +122,11 @@ func TestLiveTrade_Side(t *testing.T) {
 // ── LivePrice.Mid ─────────────────────────────────────────────────────────────
 
 func TestLivePrice_Mid(t *testing.T) {
-	p := LivePrice{Bid: 1.0850, Ask: 1.0852}
-	require.InDelta(t, 1.0851, p.Mid(), 0.000001)
+	p := LivePrice{
+		Bid: market.PriceFromFloat(1.0850),
+		Ask: market.PriceFromFloat(1.0852),
+	}
+	require.InDelta(t, 1.0851, p.Mid().Float64(), 0.00001)
 }
 
 // ── estimateTicksOpen ─────────────────────────────────────────────────────────
@@ -320,7 +323,7 @@ func TestRunOneTick_UsesCacheWhenAvailable(t *testing.T) {
 
 	// Strategy should have received the cached price, not the REST server price.
 	require.Len(t, strat.ticks, 1)
-	assert.InDelta(t, 1.099, strat.ticks[0].price.Bid, 1e-9)
+	assert.InDelta(t, 1.099, strat.ticks[0].price.Bid.Float64(), 1e-5)
 
 	// No REST calls should have been made for pricing (only trades fallback).
 	// The trades call returns the full response; pricing endpoint not hit.
@@ -355,7 +358,7 @@ func TestRunOneTick_FallsBackToRESTWhenCacheEmpty(t *testing.T) {
 
 	// Price came from REST; stub server returned 1.0850/1.0852.
 	require.Len(t, strat.ticks, 1)
-	assert.InDelta(t, 1.0850, strat.ticks[0].price.Bid, 1e-9)
+	assert.InDelta(t, 1.0850, strat.ticks[0].price.Bid.Float64(), 1e-5)
 }
 
 func TestRunOneTick_FallsBackToRESTWhenNilCache(t *testing.T) {
@@ -382,7 +385,7 @@ func TestRunOneTick_FallsBackToRESTWhenNilCache(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, strat.ticks, 1)
-	assert.InDelta(t, 1.0850, strat.ticks[0].price.Bid, 1e-9)
+	assert.InDelta(t, 1.0850, strat.ticks[0].price.Bid.Float64(), 1e-5)
 }
 
 // ── stubStrategy records ticks correctly ──────────────────────────────────────
@@ -391,7 +394,7 @@ func TestStubStrategy_RecordsTicks(t *testing.T) {
 	plan := &LivePlan{Reason: "hold"}
 	s := &stubStrategy{name: "test", plan: plan}
 
-	price := LivePrice{Instrument: "EUR_USD", Bid: 1.08, Ask: 1.081}
+	price := LivePrice{Instrument: "EUR_USD", Bid: market.PriceFromFloat(1.08), Ask: market.PriceFromFloat(1.081)}
 	s.Tick(context.Background(), price, nil)
 	s.Tick(context.Background(), price, nil)
 

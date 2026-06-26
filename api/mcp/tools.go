@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -523,7 +524,7 @@ func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, 
 	result, err := acc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
 		Instrument: args.Instrument,
 		Side:       strings.ToLower(args.Side),
-		RiskPct:    riskPct,
+		RiskPct:    market.RateFromFloat(riskPct / 100.0),
 		StopPips:   args.StopPips,
 		StopPrice:  args.StopPrice,
 		Units:      args.Units,

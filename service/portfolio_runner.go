@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rustyeddy/trader/market"
 )
 
 // PortfolioRunConfig controls a multi-instrument live portfolio run.
@@ -26,7 +27,7 @@ type InstrumentRunConfig struct {
 	Granularity  string        // "H1" or "D"
 	TickInterval time.Duration // how often to poll; defaults to half the bar period
 	Strategy     LiveStrategy
-	RiskPct      float64
+	RiskPct      market.Rate // fraction of account NAV to risk (0.01×RateScale = 1%)
 	MaxUnits     int64
 	UseStream    bool // when true, use OANDA pricing stream instead of polling
 }

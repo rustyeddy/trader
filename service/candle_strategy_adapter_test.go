@@ -83,8 +83,8 @@ func TestLiveLotsTracker_SyncAddsLots(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
 	trades := []LiveTrade{
-		{ID: "100", Units: 1000, EntryPrice: 1.10},
-		{ID: "101", Units: -500, EntryPrice: 1.11},
+		{ID: "100", Units: 1000, EntryPrice: market.PriceFromFloat(1.10)},
+		{ID: "101", Units: -500, EntryPrice: market.PriceFromFloat(1.11)},
 	}
 	lt.sync(trades)
 	lb := lt.toLotBook()
@@ -163,7 +163,7 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	require.NotNil(t, lp)
 	require.NotNil(t, lp.Open)
 	assert.Equal(t, "long", lp.Open.Side)
-	assert.Greater(t, lp.Open.StopPips, 0.0)
+	assert.Greater(t, lp.Open.StopPips, market.Pips(0))
 }
 
 func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"github.com/rustyeddy/trader/market"
 )
 
 // LiveStrategy is the internal runner protocol implemented by CandleStrategyAdapter
@@ -17,21 +19,21 @@ type LiveStrategy interface {
 // LivePrice is a bid/ask snapshot from the broker.
 type LivePrice struct {
 	Instrument string
-	Bid        float64
-	Ask        float64
+	Bid        market.Price
+	Ask        market.Price
 	Time       time.Time
 }
 
 // Mid returns the mid-price.
-func (p LivePrice) Mid() float64 { return (p.Bid + p.Ask) / 2 }
+func (p LivePrice) Mid() market.Price { return (p.Bid + p.Ask) / 2 }
 
 // LiveTrade describes an open position as seen by the live runner.
 type LiveTrade struct {
 	ID           string
 	Instrument   string
-	Units        int64 // positive = long, negative = short
-	EntryPrice   float64
-	UnrealizedPL float64
+	Units        int64        // positive = long, negative = short
+	EntryPrice   market.Price
+	UnrealizedPL market.Money
 	OpenTime     time.Time // when OANDA opened the trade
 	TicksOpen    int       // estimated ticks elapsed, seeded from OpenTime on restart
 }
@@ -57,9 +59,11 @@ type LivePlan struct {
 
 // LiveOpenRequest carries the parameters for a new live position.
 type LiveOpenRequest struct {
-	Side     string  // "long" or "short"
-	StopPips float64 // stop-loss distance in pips
-	TakePips float64 // take-profit distance in pips (0 = none)
-	RiskPct  float64 // percent of account NAV to risk
-	Reason   string  // strategy signal reason, e.g. "donchian-v6-breakout-down"
+	Side     string      // "long" or "short"
+	StopPips market.Pips // stop-loss distance in deci-pips (10 per pip)
+	TakePips market.Pips // take-profit distance in deci-pips (0 = none)
+	// RiskPct is the fraction of account NAV to risk (market.Rate; 0.01×RateScale = 1%).
+	// Zero means use the runner's default from LiveRunConfig.RiskPct.
+	RiskPct market.Rate
+	Reason  string // strategy signal reason, e.g. "donchian-v6-breakout-down"
 }

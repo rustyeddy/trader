@@ -152,7 +152,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			TickInterval: tick,
 			UseStream:    y.UseStream,
 			Strategy:     adapter,
-			RiskPct:      riskPct,
+			RiskPct:      market.RateFromFloat(riskPct / 100.0),
 			MaxUnits:     y.MaxUnits,
 		})
 	}
