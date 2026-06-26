@@ -691,7 +691,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (market.C
 	}
 
 	switch req.timeframe() {
-	case market.M1, market.H1, market.D1:
+	case market.M1, market.H1, market.H4, market.D1:
 	default:
 		return nil, fmt.Errorf("unsupported candle timeframe: %v", req.timeframe())
 	}

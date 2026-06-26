@@ -51,6 +51,7 @@ func makeInstrument(name, base, quote string, pipLocation int, marginRate Rate) 
 }
 
 var instrumentRegistry = map[string]Instrument{
+	// USD majors
 	"EURUSD": makeInstrument("EURUSD", "EUR", "USD", -4, Rate(20_000)),
 	"GBPUSD": makeInstrument("GBPUSD", "GBP", "USD", -4, Rate(20_000)),
 	"USDJPY": makeInstrument("USDJPY", "USD", "JPY", -2, Rate(20_000)),
@@ -58,11 +59,29 @@ var instrumentRegistry = map[string]Instrument{
 	"AUDUSD": makeInstrument("AUDUSD", "AUD", "USD", -4, Rate(20_000)),
 	"USDCAD": makeInstrument("USDCAD", "USD", "CAD", -4, Rate(20_000)),
 	"NZDUSD": makeInstrument("NZDUSD", "NZD", "USD", -4, Rate(20_000)),
+	// Precious metals
 	"XAUUSD": makeInstrument("XAUUSD", "XAU", "USD", -2, Rate(50_000)),
-	"EURGBP": makeInstrument("EURGBP", "EUR", "GBP", -4, Rate(20_000)),
-	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, Rate(20_000)),
+	// JPY crosses
 	"EURJPY": makeInstrument("EURJPY", "EUR", "JPY", -2, Rate(20_000)),
+	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, Rate(20_000)),
 	"AUDJPY": makeInstrument("AUDJPY", "AUD", "JPY", -2, Rate(20_000)),
+	"CADJPY": makeInstrument("CADJPY", "CAD", "JPY", -2, Rate(20_000)),
+	"CHFJPY": makeInstrument("CHFJPY", "CHF", "JPY", -2, Rate(20_000)),
+	"NZDJPY": makeInstrument("NZDJPY", "NZD", "JPY", -2, Rate(20_000)),
+	// EUR crosses
+	"EURGBP": makeInstrument("EURGBP", "EUR", "GBP", -4, Rate(20_000)),
+	"EURAUD": makeInstrument("EURAUD", "EUR", "AUD", -4, Rate(20_000)),
+	"EURCAD": makeInstrument("EURCAD", "EUR", "CAD", -4, Rate(20_000)),
+	"EURCHF": makeInstrument("EURCHF", "EUR", "CHF", -4, Rate(20_000)),
+	"EURNZD": makeInstrument("EURNZD", "EUR", "NZD", -4, Rate(20_000)),
+	// GBP crosses
+	"GBPAUD": makeInstrument("GBPAUD", "GBP", "AUD", -4, Rate(20_000)),
+	"GBPCAD": makeInstrument("GBPCAD", "GBP", "CAD", -4, Rate(20_000)),
+	"GBPNZD": makeInstrument("GBPNZD", "GBP", "NZD", -4, Rate(20_000)),
+	// AUD crosses
+	"AUDCAD": makeInstrument("AUDCAD", "AUD", "CAD", -4, Rate(20_000)),
+	"AUDCHF": makeInstrument("AUDCHF", "AUD", "CHF", -4, Rate(20_000)),
+	"AUDNZD": makeInstrument("AUDNZD", "AUD", "NZD", -4, Rate(20_000)),
 }
 
 // approximateUSDPerUnit provides static approximate USD values for non-USD currencies.
