@@ -2,7 +2,6 @@ package oanda
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,8 +20,7 @@ func BaseURL(env string) (string, error) {
 	case "practice", "demo":
 		return "https://api-fxpractice.oanda.com", nil
 	case "live":
-		// return "https://api-fxtrade.oanda.com", nil
-		return "", errors.New("Not Live Trading Allowed")
+		return "https://api-fxtrade.oanda.com", nil
 	default:
 		return "", fmt.Errorf("unknown OANDA env %q (want practice|live)", env)
 	}

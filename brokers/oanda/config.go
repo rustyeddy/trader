@@ -1,6 +1,8 @@
 package oanda
 
-import "os"
+import (
+	"os"
+)
 
 type Config struct {
 	Token   string
