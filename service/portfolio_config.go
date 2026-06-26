@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -90,27 +89,8 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			riskPct = cfg.RiskPct
 		}
 
-		// Native LiveStrategy (e.g. pulse) — bypasses candle adapter entirely.
-		if live.LookupLiveStrategy(scfg.Kind) != nil {
-			liveStrat, err := live.GetLiveStrategy(scfg)
-			if err != nil {
-				return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
-			}
-			rc.Instruments = append(rc.Instruments, InstrumentRunConfig{
-				Instrument:  y.Instrument,
-				Granularity: toOandaGranularity(y.Timeframe),
-				TickInterval: func() time.Duration {
-					d, _ := time.ParseDuration(y.TickInterval)
-					return d
-				}(),
-				Strategy: liveStrat,
-				RiskPct:  riskPct,
-				MaxUnits: y.MaxUnits,
-			})
-			continue
-		}
-
-		// Backtest strategy — wrap in candle adapter for bar-driven live trading.
+		// All strategies go through the candle adapter so the same strategy
+		// implementation can be backtested and run live.
 		strat, err := strategy.GetStrategy(scfg)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)

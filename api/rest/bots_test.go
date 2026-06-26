@@ -10,6 +10,8 @@ import (
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	_ "github.com/rustyeddy/trader/strategies/pulse"
 )
 
 // newBotsTestServer builds a Server backed by a Service with a real (but

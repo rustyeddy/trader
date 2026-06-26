@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	// Register backtest strategies so the default live-strategy fallback can
-	// find them during tests.
+	// Register strategies used in these tests.
 	_ "github.com/rustyeddy/trader/strategies/bollingerfade"
 	_ "github.com/rustyeddy/trader/strategies/donchian"
+	_ "github.com/rustyeddy/trader/strategies/pulse"
 )
 
 func testService() *Service {
@@ -25,6 +25,8 @@ func testService() *Service {
 
 func TestBuildLiveStrategy_Pulse(t *testing.T) {
 	svc := testService()
+	// pulse is now a strategy.Strategy wrapped in CandleStrategyAdapter; its
+	// Name() is "pulse/<instrument>/<granularity>".
 	strat, err := svc.BuildLiveStrategy(StrategyConfig{
 		Kind:   "pulse",
 		Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},

@@ -4,17 +4,22 @@ import "github.com/rustyeddy/trader/market"
 
 // Signal is the pure intent a strategy emits each bar: which direction to
 // trade (or Flat to hold) and why. It carries no order-construction details
-// (no price, stop, take-profit, or units) — those are the planner's job.
+// (no price, take-profit, or units) — those are the planner's job.
 //
 // CloseAll, when true, asks the planner to close all currently open lots
 // before considering a new entry. This expresses time-based or
 // signal-based exits that are not simple reversals.
 //
+// Stop is an optional suggested stop price. The exit strategy takes
+// precedence when configured; this is used as a fallback when no exit
+// strategy is active (e.g. for mechanical test strategies).
+//
 // Strength is reserved for future conviction-based sizing and may be zero.
 type Signal struct {
 	Side     market.Side
-	Strength market.Rate // 0 = unset; planner ignores for now
-	CloseAll bool        // close all open lots before (re-)entering
+	Strength market.Rate  // 0 = unset; planner ignores for now
+	CloseAll bool         // close all open lots before (re-)entering
+	Stop     market.Price // optional suggested stop price; exit strategy overrides
 	Reason   string
 }
 

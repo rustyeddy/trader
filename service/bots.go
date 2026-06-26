@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rustyeddy/trader/live"
 )
 
 // BotConfig is the payload needed to start a live strategy bot via the API.
@@ -252,13 +251,13 @@ func (s *Service) GetBot(id string) (*BotStatus, error) {
 // statsTrackingStrategy wraps a LiveStrategy and updates the bot entry's
 // Ticks, Opens, and Closes counters on every tick.
 type statsTrackingStrategy struct {
-	inner live.LiveStrategy
+	inner LiveStrategy
 	entry *botEntry
 }
 
 func (w *statsTrackingStrategy) Name() string { return w.inner.Name() }
 
-func (w *statsTrackingStrategy) Tick(ctx context.Context, price live.LivePrice, trades []live.LiveTrade) *live.LivePlan {
+func (w *statsTrackingStrategy) Tick(ctx context.Context, price LivePrice, trades []LiveTrade) *LivePlan {
 	plan := w.inner.Tick(ctx, price, trades)
 	w.entry.mu.Lock()
 	w.entry.Ticks++

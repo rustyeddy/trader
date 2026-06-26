@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -22,7 +21,7 @@ type LiveRunConfig struct {
 	TickInterval time.Duration
 
 	// Strategy is the live strategy to run. Required.
-	Strategy live.LiveStrategy
+	Strategy LiveStrategy
 
 	// RiskPct is the default risk per trade when the strategy's
 	// LiveOpenRequest carries zero. Defaults to 0.1.
@@ -153,7 +152,7 @@ func (a *Account) runOneTick(
 		return fmt.Errorf("no price for %s", cfg.Instrument)
 	}
 	px := prices[0]
-	livePrice := live.LivePrice{
+	livePrice := LivePrice{
 		Instrument: cfg.Instrument,
 		Bid:        px.Bid,
 		Ask:        px.Ask,
@@ -166,7 +165,7 @@ func (a *Account) runOneTick(
 		return fmt.Errorf("get open trades: %w", err)
 	}
 	inst := normalizeInstrument(cfg.Instrument)
-	var liveTrades []live.LiveTrade
+	var liveTrades []LiveTrade
 	seenIDs := map[string]struct{}{}
 	for _, t := range allTrades {
 		if normalizeInstrument(t.Instrument) != inst {
@@ -174,7 +173,7 @@ func (a *Account) runOneTick(
 		}
 		seenIDs[t.ID] = struct{}{}
 		tickCounts[t.ID]++
-		liveTrades = append(liveTrades, live.LiveTrade{
+		liveTrades = append(liveTrades, LiveTrade{
 			ID:           t.ID,
 			Instrument:   t.Instrument,
 			Units:        t.Units,

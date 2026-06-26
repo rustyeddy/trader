@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rustyeddy/trader/live"
 )
 
 // PortfolioRunConfig controls a multi-instrument live portfolio run.
@@ -26,7 +25,7 @@ type InstrumentRunConfig struct {
 	Instrument   string        // OANDA format, e.g. "USD_CHF"
 	Granularity  string        // "H1" or "D"
 	TickInterval time.Duration // how often to poll; defaults to half the bar period
-	Strategy     live.LiveStrategy
+	Strategy     LiveStrategy
 	RiskPct      float64
 	MaxUnits     int64
 }
@@ -173,13 +172,13 @@ func (a *Account) accountNAV(ctx context.Context) (float64, error) {
 // circuitBreakerStrategy wraps a LiveStrategy and suppresses opens when the
 // drawdown circuit breaker is tripped.
 type circuitBreakerStrategy struct {
-	inner live.LiveStrategy
+	inner LiveStrategy
 	cb    *drawdownCircuitBreaker
 }
 
 func (s *circuitBreakerStrategy) Name() string { return s.inner.Name() }
 
-func (s *circuitBreakerStrategy) Tick(ctx context.Context, price live.LivePrice, trades []live.LiveTrade) *live.LivePlan {
+func (s *circuitBreakerStrategy) Tick(ctx context.Context, price LivePrice, trades []LiveTrade) *LivePlan {
 	plan := s.inner.Tick(ctx, price, trades)
 	if plan == nil {
 		return nil

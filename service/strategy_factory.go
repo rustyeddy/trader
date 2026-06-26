@@ -5,9 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/strategies/pulse"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
 	"github.com/rustyeddy/trader/strategy"
@@ -31,7 +29,7 @@ type StrategyConfig struct {
 // BuildLiveStrategy constructs a trader.LiveStrategy from a StrategyConfig.
 // Candle-based strategies (scalper, stress) are wrapped in a CandleStrategyAdapter.
 // instrument must be in OANDA format, e.g. "EUR_USD".
-func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (live.LiveStrategy, error) {
+func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (LiveStrategy, error) {
 	kind := strings.ToLower(strings.TrimSpace(cfg.Kind))
 	if kind == "" {
 		kind = "pulse"
@@ -42,33 +40,6 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (live
 	}
 
 	switch kind {
-	case "pulse":
-		pcfg := pulse.DefaultConfig()
-		if v, ok := p["trade_every"]; ok {
-			pcfg.TradeEvery = toInt(v, pcfg.TradeEvery)
-		}
-		if v, ok := p["hold_bars"]; ok {
-			pcfg.HoldBars = toInt(v, pcfg.HoldBars)
-		}
-		if v, ok := p["max_positions"]; ok {
-			pcfg.MaxPositions = toInt(v, pcfg.MaxPositions)
-		}
-		if v, ok := p["side"]; ok {
-			if sv, ok := v.(string); ok {
-				pcfg.Side = sv
-			}
-		}
-		if v, ok := p["stop_pips"]; ok {
-			pcfg.StopPips = toFloat(v, pcfg.StopPips)
-		}
-		if v, ok := p["take_pips"]; ok {
-			pcfg.TakePips = toFloat(v, pcfg.TakePips)
-		}
-		if v, ok := p["risk_pct"]; ok {
-			pcfg.RiskPct = toFloat(v, pcfg.RiskPct)
-		}
-		return pulse.New(pcfg)
-
 	case "scalper":
 		fastPeriod := toInt(p["fast_period"], 3)
 		slowPeriod := toInt(p["slow_period"], 8)

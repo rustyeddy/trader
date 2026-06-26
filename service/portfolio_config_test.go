@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	// Register "noop" backtest strategy and "pulse" live strategy for build tests.
+	// Register strategies used in build tests.
 	_ "github.com/rustyeddy/trader/strategies/noop"
 	_ "github.com/rustyeddy/trader/strategies/pulse"
 )
@@ -166,7 +166,9 @@ func TestBuildPortfolioRunConfig_InvalidTickIntervalReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "tick_interval")
 }
 
-func TestBuildPortfolioRunConfig_LiveStrategy(t *testing.T) {
+func TestBuildPortfolioRunConfig_PulseStrategy(t *testing.T) {
+	// pulse is now a strategy.Strategy (candle-based) so it goes through the
+	// same CandleStrategyAdapter path as any other backtest strategy.
 	cfg := &PortfolioConfig{
 		RiskPct: 1.0,
 		Instruments: []portfolioInstrumentYAML{

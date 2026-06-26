@@ -58,29 +58,29 @@ Open `http://localhost:9999` for the dashboard.
 
 ## CLI Commands
 
-| Command | Description |
-|---|---|
-| `trader analysis` | Parse a ChatGPT forex analysis CSV and print trade candidates and watchlist |
-| `trader backtest` | Run backtests against historical candles |
-| `trader backtest regress` | Batch regression: run all configs, write JSON + org reports |
-| `trader data sync` | Download ticks (Dukascopy) and build OHLC candles |
-| `trader data oanda` | Download candles directly from OANDA into the candle store |
-| `trader data candles` | Print local candles in canonical CSV format |
+| Command                        | Description                                                                  |
+|--------------------------------|------------------------------------------------------------------------------|
+| `trader analysis`              | Parse a ChatGPT forex analysis CSV and print trade candidates and watchlist  |
+| `trader backtest`              | Run backtests against historical candles                                     |
+| `trader backtest regress`      | Batch regression: run all configs, write JSON + org reports                  |
+| `trader data sync`             | Download ticks (Dukascopy) and build OHLC candles                            |
+| `trader data oanda`            | Download candles directly from OANDA into the candle store                   |
+| `trader data candles`          | Print local candles in canonical CSV format                                  |
 | `trader data validate-candles` | Scan local candle months for missing expected bars and raw-source mismatches |
-| `trader data stats` | Print statistics for a historical candle dataset |
-| `trader data pip-value` | Show USD value of 1/10/100/1000 pips for each major pair |
-| `trader data position` | Convert between position size, USD notional value, and pip P&L |
-| `trader order account` | Print OANDA account balance, NAV, margin, and unrealized P/L |
-| `trader order update-stop` | Update stop-loss and/or take-profit on an open trade |
-| `trader live run` | Run a single-instrument live strategy against OANDA |
-| `trader live portfolio` | Run a multi-instrument live portfolio from a YAML config |
-| `trader order prices` | Fetch live bid/ask prices from OANDA for the major pairs |
-| `trader live journal` | Subscribe to OANDA transaction stream and journal closed trades |
-| `trader order` | Place, close, and list orders on a live OANDA account |
-| `trader serve` | Full daemon: REST API + live journal + embedded UI (port :9999) |
-| `trader api serve` | Minimal REST API only, no journal (port :8080) |
-| `trader replay` | Replay a dataset through the sim engine |
-| `trader mcp` | Expose trader as typed Claude tools over stdio (MCP protocol) |
+| `trader data stats`            | Print statistics for a historical candle dataset                             |
+| `trader data pip-value`        | Show USD value of 1/10/100/1000 pips for each major pair                     |
+| `trader data position`         | Convert between position size, USD notional value, and pip P&L               |
+| `trader order account`         | Print OANDA account balance, NAV, margin, and unrealized P/L                 |
+| `trader order update-stop`     | Update stop-loss and/or take-profit on an open trade                         |
+| `trader live run`              | Run a single-instrument live strategy against OANDA                          |
+| `trader live portfolio`        | Run a multi-instrument live portfolio from a YAML config                     |
+| `trader order prices`          | Fetch live bid/ask prices from OANDA for the major pairs                     |
+| `trader live journal`          | Subscribe to OANDA transaction stream and journal closed trades              |
+| `trader order`                 | Place, close, and list orders on a live OANDA account                        |
+| `trader serve`                 | Full daemon: REST API + live journal + embedded UI (port :9999)              |
+| `trader api serve`             | Minimal REST API only, no journal (port :8080)                               |
+| `trader replay`                | Replay a dataset through the sim engine                                      |
+| `trader mcp`                   | Expose trader as typed Claude tools over stdio (MCP protocol)                |
 
 All commands accept `--help`.
 
@@ -208,16 +208,16 @@ Set `local_warmup_bars: 0` to skip local warmup and use OANDA-only.
 
 All three event types — strategy signals, broker fills, and OANDA-initiated closes — flow through the same structured `slog` stream. With `--log-level info` (the default) every trading event is captured in one place.
 
-| Source | Message | Key fields |
-|---|---|---|
-| Strategy | `live: strategy signal open` | `instrument`, `side`, `stop`, `reason` |
-| Strategy | `live: open blocked by regime filter` | `instrument`, `side`, reason (`not trending` / `side not allowed`) |
-| Strategy | `live: open order queued` | `instrument`, `side`, `entry_price`, `stop_price`, `stop_pips` |
-| Strategy | `live: strategy signal close` | `instrument`, `count`, `reason` |
-| Strategy | `candle adapter: strategy returned open with no stop` | `instrument`, `side`, `reason` |
-| Broker fill | `live runner: opened trade` | `trade_id`, `side`, `units`, `price` (OANDA confirmed fill) |
-| Broker fill | `live runner: closed trade` | `trade_id` (strategy-triggered close) |
-| Stop-out / TP | `live-journal trade recorded` | `trade_id`, `instrument`, `entry`, `exit`, `pl`, `reason` |
+| Source        | Message                               | Key fields                                                         |
+|---------------|---------------------------------------|--------------------------------------------------------------------|
+| Strategy      | `live: strategy signal open`          | `instrument`, `side`, `stop`, `reason`                             |
+| Strategy      | `live: open blocked by regime filter` | `instrument`, `side`, reason (`not trending` / `side not allowed`) |
+| Strategy      | `live: open order queued`             | `instrument`, `side`, `entry_price`, `stop_price`, `stop_pips`     |
+| Strategy      | `live: strategy signal close`         | `instrument`, `count`, `reason`                                    |
+| Strategy      | `candle adapter: open with no stop`   | `instrument`, `side`, `reason`                                     |
+| Broker fill   | `live runner: opened trade`           | `trade_id`, `side`, `units`, `price` (OANDA confirmed fill)        |
+| Broker fill   | `live runner: closed trade`           | `trade_id` (strategy-triggered close)                              |
+| Stop-out / TP | `live-journal trade recorded`         | `trade_id`, `instrument`, `entry`, `exit`, `pl`, `reason`          |
 
 The `reason` field on `live-journal trade recorded` contains the OANDA close reason:
 - `STOP_LOSS_ORDER` — stop-loss hit
@@ -266,46 +266,46 @@ tail -f /var/log/trader/trader.log | \
 
 Strategies are referenced by their registered kind string in config files.
 
-| Kind | Description | Live? |
-|---|---|---|
-| `pulse` | Mechanical open/close on fixed tick schedule — useful for pipeline testing | live only |
-| `ema-cross` | EMA crossover (fast/slow periods configurable) | backtest + live |
-| `ema-cross-adx` | EMA crossover filtered by ADX trend strength | backtest + live |
-| `donchian` | Donchian channel breakout (v1) | backtest + live |
-| `donchian-v2` | Donchian v2 with improved exit logic | backtest + live |
-| `donchian-v3` | Donchian v3 | backtest + live |
-| `donchian-v4` | Donchian v4 | backtest + live |
-| `donchian-v5` | Donchian v5 | backtest + live |
-| `donchian-v6` | Donchian v6 — most recent, recommended | backtest + live |
-| `bb-fade` | Bollinger Band fade (mean-reversion) | backtest + live |
-| `noop` | Does nothing — baseline / benchmark | backtest + live |
-| `fake` | Scripted actions for deterministic testing | backtest only |
-| `lifecycle-test` | Exercises the full open → modify-stop → close lifecycle | backtest only |
-| `template` | Starter template for new strategy development | backtest only |
+| Kind             | Description                                                                | Live?           |
+|------------------|----------------------------------------------------------------------------|-----------------|
+| `pulse`          | Mechanical open/close on fixed tick schedule — useful for pipeline testing | live only       |
+| `ema-cross`      | EMA crossover (fast/slow periods configurable)                             | backtest + live |
+| `ema-cross-adx`  | EMA crossover filtered by ADX trend strength                               | backtest + live |
+| `donchian`       | Donchian channel breakout (v1)                                             | backtest + live |
+| `donchian-v2`    | Donchian v2 with improved exit logic                                       | backtest + live |
+| `donchian-v3`    | Donchian v3                                                                | backtest + live |
+| `donchian-v4`    | Donchian v4                                                                | backtest + live |
+| `donchian-v5`    | Donchian v5                                                                | backtest + live |
+| `donchian-v6`    | Donchian v6 — most recent, recommended                                     | backtest + live |
+| `bb-fade`        | Bollinger Band fade (mean-reversion)                                       | backtest + live |
+| `noop`           | Does nothing — baseline / benchmark                                        | backtest + live |
+| `fake`           | Scripted actions for deterministic testing                                 | backtest only   |
+| `lifecycle-test` | Exercises the full open → modify-stop → close lifecycle                    | backtest only   |
+| `template`       | Starter template for new strategy development                              | backtest only   |
 
 ### Exit Strategies
 
 Exit strategies control the trailing stop. Configured via the `exit:` block in portfolio YAML or used implicitly by the backtest engine.
 
-| Kind | Description |
-|---|---|
-| `chandelier` | ATR-based chandelier trailing stop. Params: `atr_period` (default 14), `multiplier` (default 3.0) |
-| `""` / `noop` | No trailing stop — strategy sets its own fixed stop |
+| Kind          | Description                                                                                       |
+|---------------|---------------------------------------------------------------------------------------------------|
+| `chandelier`  | ATR-based chandelier trailing stop. Params: `atr_period` (default 14), `multiplier` (default 3.0) |
+| `""` / `noop` | No trailing stop — strategy sets its own fixed stop                                               |
 
 ### Regime Filters
 
 Regime filters suppress entries when the market is not in a favourable state.
 
-| Kind | Description |
-|---|---|
-| `""` / `noop` | No filtering — all signals pass through |
-| `weekly-ema` | Allow longs only above weekly EMA, shorts only below |
+| Kind             | Description                                                                  |
+|------------------|------------------------------------------------------------------------------|
+| `""` / `noop`    | No filtering — all signals pass through                                      |
+| `weekly-ema`     | Allow longs only above weekly EMA, shorts only below                         |
 | `atr-percentile` | Block entries when ATR is below a percentile threshold (range-bound markets) |
-| `adx-d1` | Block entries when daily ADX is below threshold (no trend) |
-| `choppiness` | Block entries when choppiness index signals sideways price action |
-| `choppiness-d1` | Same as above using daily bars |
-| `session` | Allow entries only during specified trading sessions |
-| `composite` | Combine multiple filters (all must pass); use `filters:` list in config |
+| `adx-d1`         | Block entries when daily ADX is below threshold (no trend)                   |
+| `choppiness`     | Block entries when choppiness index signals sideways price action            |
+| `choppiness-d1`  | Same as above using daily bars                                               |
+| `session`        | Allow entries only during specified trading sessions                         |
+| `composite`      | Combine multiple filters (all must pass); use `filters:` list in config      |
 
 ---
 
@@ -342,7 +342,8 @@ Candle data is stored under `--data-dir` (default `/srv/trading/data/candles`) i
 /srv/trading/data/candles/<source>/<INSTRUMENT>/<YYYY>/<MM>/
 ```
 
-When OANDA candles are downloaded with raw preservation enabled, the bid+ask source rows are also written under the sibling raw tree:
+When OANDA candles are downloaded with raw preservation enabled, the
+bid+ask source rows are also written under the sibling raw tree:
 
 ```
 /srv/trading/data/raw/oanda/<INSTRUMENT>/<YYYY>/<MM>/
@@ -352,9 +353,15 @@ When OANDA candles are downloaded with raw preservation enabled, the bid+ask sou
 
 ### Candle Completeness and Validation
 
-Monthly candle files are no longer treated as complete just because the CSV exists and is non-empty. Inventory scanning reads the candle validity bits and marks a month incomplete if expected open-market slots are missing. Closed-market periods are allowed; missing bars during expected trading windows are not.
+Monthly candle files are no longer treated as complete just because
+the CSV exists and is non-empty. Inventory scanning reads the candle
+validity bits and marks a month incomplete if expected open-market
+slots are missing. Closed-market periods are allowed; missing bars
+during expected trading windows are not.
 
-Use `trader data validate-candles` to scan stored months and optionally compare canonical OANDA candle coverage with preserved raw OANDA monthly files:
+Use `trader data validate-candles` to scan stored months and
+optionally compare canonical OANDA candle coverage with preserved raw
+OANDA monthly files:
 
 ```bash
 trader data validate-candles \
@@ -369,20 +376,26 @@ trader data validate-candles \
 
 What it reports:
 
-| Issue kind | Meaning |
-|---|---|
-| `missing_candle_month` | The canonical monthly candle CSV is missing entirely |
-| `missing_expected_candles` | Expected open-market bars are missing from the month |
-| `invalid_candles` | Present bars have invalid OHLC shape |
-| `missing_raw_source` | Raw OANDA monthly preservation file is missing |
-| `raw_complete_missing_canonical` | Raw OANDA has complete bars that are absent from canonical candles |
+| Issue kind                       | Meaning                                                                    |
+|----------------------------------|----------------------------------------------------------------------------|
+| `missing_candle_month`           | The canonical monthly candle CSV is missing entirely                       |
+| `missing_expected_candles`       | Expected open-market bars are missing from the month                       |
+| `invalid_candles`                | Present bars have invalid OHLC shape                                       |
+| `missing_raw_source`             | Raw OANDA monthly preservation file is missing                             |
+| `raw_complete_missing_canonical` | Raw OANDA has complete bars that are absent from canonical candles         |
 | `canonical_missing_raw_complete` | Canonical candles contain valid bars not backed by raw OANDA complete rows |
 
-The command prints a summary to stdout and, with `--report`, writes a JSON report containing per-month counts, paths, and sample missing timestamps. This is the easiest way to keep an auditable record of gaps that should exist but do not.
+The command prints a summary to stdout and, with `--report`, writes a
+JSON report containing per-month counts, paths, and sample missing
+timestamps. This is the easiest way to keep an auditable record of
+gaps that should exist but do not.
 
 ### Candle Backup
 
-M1 data goes back to 2005 (~1 GB for 24 instruments) and **cannot be fully re-downloaded from OANDA** — their API retains M1 history for only a limited window. H1, H4, and D are small and re-downloadable, but are included for completeness.
+M1 data goes back to 2005 (~1 GB for 24 instruments) and **cannot be
+fully re-downloaded from OANDA** — their API retains M1 history for
+only a limited window. H1, H4, and D are small and re-downloadable,
+but are included for completeness.
 
 Use [`rclone`](https://rclone.org) to back up incrementally to Google Drive:
 
@@ -414,7 +427,10 @@ After a restore, run `trader data update` to fill any gap between the last backu
 
 ### Candle CSV Export
 
-Raw local candle reads go through `Service.CandlesCSV`, which streams candles from the canonical store and returns the same scaled integer CSV format used on disk. The service is shared by CLI, REST, and MCP so callers get consistent output:
+Raw local candle reads go through `Service.CandlesCSV`, which streams
+candles from the canonical store and returns the same scaled integer
+CSV format used on disk. The service is shared by CLI, REST, and MCP
+so callers get consistent output:
 
 ```csv
 # schema=v1 source=oanda instrument=EURUSD tf=h1 scale=100000
@@ -432,18 +448,20 @@ trader data candles \
   --to         2024-01-31
 ```
 
-`--to` is optional and defaults to now/latest available. Dates are inclusive at the caller boundary. Prices and spreads are emitted as fixed-point scaled integers, not floats.
+`--to` is optional and defaults to now/latest available. Dates are
+inclusive at the caller boundary. Prices and spreads are emitted as
+fixed-point scaled integers, not floats.
 
 ### Dataset Statistics
 
 `trader data stats` walks a candle dataset and reports four groups of metrics:
 
-| Group | What it measures |
-|---|---|
-| **Swing** | High-low range per bar: count, mean, min, p25/p50/p75/p90, max (in pips) |
-| **Spread** | Average spread per bar: mean, p90, max (in pips; bars with zero spread are skipped) |
+| Group                      | What it measures                                                                        |
+|----------------------------|-----------------------------------------------------------------------------------------|
+| **Swing**                  | High-low range per bar: count, mean, min, p25/p50/p75/p90, max (in pips)                |
+| **Spread**                 | Average spread per bar: mean, p90, max (in pips; bars with zero spread are skipped)     |
 | **Trend vs Consolidation** | Body/range ratio — `\|Close−Open\| / (High−Low)`. >0.6 = trending, <0.3 = consolidating |
-| **Session** | Average range and bar count by UTC hour — shows which sessions are most active |
+| **Session**                | Average range and bar count by UTC hour — shows which sessions are most active          |
 
 ```bash
 # Pips only
@@ -528,7 +546,9 @@ NZDUSD          $10.00    $100.00     $1,000    $10,000
   Override with --rates USDJPY=152.50,USDCHF=0.88,USDCAD=1.38
 ```
 
-USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. USD-base pairs (USDJPY, USDCHF, USDCAD) are marked `†` and use approximate defaults until you supply `--rates`.
+USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need
+no rate. USD-base pairs (USDJPY, USDCHF, USDCAD) are marked `†` and
+use approximate defaults until you supply `--rates`.
 
 ---
 
@@ -536,30 +556,30 @@ USD-quoted pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD) are exact and need no rate. US
 
 `trader serve` (port :9999) exposes the following endpoints. Most return JSON; the raw candle export returns `text/csv`.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/v1/health` | Health check |
-| `GET` | `/api/v1/account` | OANDA account summary (balance, NAV, margin, unrealized P/L) |
-| `GET` | `/api/v1/prices` | Live bid/ask prices and spread in pips (`?instruments=EURUSD,GBPUSD`, default all majors) |
-| `GET` | `/api/v1/trades` | Open trades |
-| `POST` | `/api/v1/trades` | Place a risk-sized market order |
-| `PATCH` | `/api/v1/trades/{id}/stop` | Update stop / take-profit on an open trade |
-| `DELETE` | `/api/v1/trades/{id}` | Close a trade (full or partial) |
-| `GET` | `/api/v1/transactions` | OANDA transaction history (`?since_id=N`) |
-| `GET` | `/api/v1/candles/{instrument}` | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`) |
-| `GET` | `/api/v1/candles/{instrument}/stats` | Candle dataset statistics — swing, spread, trend, session (`from`, `to`, `timeframe`, `units`) |
-| `GET` | `/api/v1/candles/validate` | Validate local candle store for gaps and raw-source mismatches (`instruments`, `from`, `to`, `timeframe`) |
-| `GET` | `/api/v1/pip-values` | USD pip values for major pairs (`?units=100000`, `?instruments=EURUSD,USDJPY`) |
-| `GET` | `/api/v1/position` | Position sizing table — notional, margin, pip P&L (`?instrument=EURUSD&price=1.08&units=100000&pips=20`) |
-| `POST` | `/api/v1/backtests/run` | Run one or more backtest configs |
-| `GET` | `/api/v1/backtests` | List saved backtest reports |
-| `GET` | `/api/v1/backtests/{name}` | Get a single backtest report |
-| `GET` | `/api/v1/backtests/{name}/candles` | OHLC bars for a saved report |
-| `POST` | `/api/v1/replay` | Run a strategy replay; returns bars + signal log |
-| `POST` | `/api/v1/analysis` | Parse a ChatGPT forex analysis CSV upload; returns rows split by status |
-| `GET` | `/api/v1/stream/account` | SSE: account equity stream |
-| `GET` | `/api/v1/stream/events` | SSE: broker event stream |
-| `GET` | `/api/v1/stream/backtest/{id}` | SSE: live backtest progress |
+| Method   | Path                                 | Description                                                                                               |
+|----------|--------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| `GET`    | `/api/v1/health`                     | Health check                                                                                              |
+| `GET`    | `/api/v1/account`                    | OANDA account summary (balance, NAV, margin, unrealized P/L)                                              |
+| `GET`    | `/api/v1/prices`                     | Live bid/ask prices and spread in pips (`?instruments=EURUSD,GBPUSD`, default all majors)                 |
+| `GET`    | `/api/v1/trades`                     | Open trades                                                                                               |
+| `POST`   | `/api/v1/trades`                     | Place a risk-sized market order                                                                           |
+| `PATCH`  | `/api/v1/trades/{id}/stop`           | Update stop / take-profit on an open trade                                                                |
+| `DELETE` | `/api/v1/trades/{id}`                | Close a trade (full or partial)                                                                           |
+| `GET`    | `/api/v1/transactions`               | OANDA transaction history (`?since_id=N`)                                                                 |
+| `GET`    | `/api/v1/candles/{instrument}`       | Local candles as canonical CSV (`from`, `to`, `timeframe`, optional `source`)                             |
+| `GET`    | `/api/v1/candles/{instrument}/stats` | Candle dataset statistics — swing, spread, trend, session (`from`, `to`, `timeframe`, `units`)            |
+| `GET`    | `/api/v1/candles/validate`           | Validate local candle store for gaps and raw-source mismatches (`instruments`, `from`, `to`, `timeframe`) |
+| `GET`    | `/api/v1/pip-values`                 | USD pip values for major pairs (`?units=100000`, `?instruments=EURUSD,USDJPY`)                            |
+| `GET`    | `/api/v1/position`                   | Position sizing table — notional, margin, pip P&L (`?instrument=EURUSD&price=1.08&units=100000&pips=20`)  |
+| `POST`   | `/api/v1/backtests/run`              | Run one or more backtest configs                                                                          |
+| `GET`    | `/api/v1/backtests`                  | List saved backtest reports                                                                               |
+| `GET`    | `/api/v1/backtests/{name}`           | Get a single backtest report                                                                              |
+| `GET`    | `/api/v1/backtests/{name}/candles`   | OHLC bars for a saved report                                                                              |
+| `POST`   | `/api/v1/replay`                     | Run a strategy replay; returns bars + signal log                                                          |
+| `POST`   | `/api/v1/analysis`                   | Parse a ChatGPT forex analysis CSV upload; returns rows split by status                                   |
+| `GET`    | `/api/v1/stream/account`             | SSE: account equity stream                                                                                |
+| `GET`    | `/api/v1/stream/events`              | SSE: broker event stream                                                                                  |
+| `GET`    | `/api/v1/stream/backtest/{id}`       | SSE: live backtest progress                                                                               |
 
 OANDA endpoints return `503` when the server starts without a token (backtest-only mode).
 
@@ -575,22 +595,22 @@ curl -s 'http://localhost:9999/api/v1/candles/EUR_USD?from=2024-01-01&to=2024-01
 
 `trader mcp serve` exposes typed tools over stdio. Tools that read local data or perform pure calculations work without an OANDA token. Live account and trade tools require `--token`. Write tools (`download_candles`, `place_order`, `close_trade`, `update_stop`) also require `--enable-write`.
 
-| Tool | Needs OANDA | Write? | Description |
-|---|---|---|---|
-| `get_account_summary` | yes | — | Account balance, NAV, margin, unrealized P/L |
-| `get_prices` | yes | — | Live bid/ask and spread in pips for major pairs |
-| `list_open_trades` | yes | — | All open positions |
-| `get_transactions` | yes | — | Transaction history since a given ID |
-| `get_candles_csv` | no | — | Local candles in canonical CSV |
-| `get_candle_stats` | no | — | Swing, spread, trend, session statistics for a candle dataset |
-| `validate_candles` | no | — | Scan stored months for gaps and raw-source mismatches |
-| `get_pip_values` | optional | — | USD pip values for major pairs (live rates when OANDA available) |
-| `get_position` | optional | — | Position sizing — notional, margin, pip P&L (live price when OANDA available) |
-| `run_backtest` | no | — | Run backtest configs and return summaries |
-| `download_candles` | yes | yes | Download and store OANDA candles |
-| `place_order` | yes | yes | Size and submit a risk-based market order |
-| `close_trade` | yes | yes | Close an open trade fully or partially |
-| `update_stop` | yes | yes | Update stop-loss and/or take-profit on an open trade |
+| Tool                  | Needs OANDA | Write? | Description                                                                   |
+|-----------------------|-------------|--------|-------------------------------------------------------------------------------|
+| `get_account_summary` | yes         | —      | Account balance, NAV, margin, unrealized P/L                                  |
+| `get_prices`          | yes         | —      | Live bid/ask and spread in pips for major pairs                               |
+| `list_open_trades`    | yes         | —      | All open positions                                                            |
+| `get_transactions`    | yes         | —      | Transaction history since a given ID                                          |
+| `get_candles_csv`     | no          | —      | Local candles in canonical CSV                                                |
+| `get_candle_stats`    | no          | —      | Swing, spread, trend, session statistics for a candle dataset                 |
+| `validate_candles`    | no          | —      | Scan stored months for gaps and raw-source mismatches                         |
+| `get_pip_values`      | optional    | —      | USD pip values for major pairs (live rates when OANDA available)              |
+| `get_position`        | optional    | —      | Position sizing — notional, margin, pip P&L (live price when OANDA available) |
+| `run_backtest`        | no          | —      | Run backtest configs and return summaries                                     |
+| `download_candles`    | yes         | yes    | Download and store OANDA candles                                              |
+| `place_order`         | yes         | yes    | Size and submit a risk-based market order                                     |
+| `close_trade`         | yes         | yes    | Close an open trade fully or partially                                        |
+| `update_stop`         | yes         | yes    | Update stop-loss and/or take-profit on an open trade                          |
 
 Local config example:
 
@@ -631,13 +651,13 @@ curl -s -X POST http://localhost:9999/api/v1/replay \
 
 Response includes `bars[]` (OHLC) and `signals[]`. Signal kinds:
 
-| Kind | Meaning |
-|---|---|
-| `open` | Strategy signalled an entry; includes `stop_price` and `stop_pips` |
-| `close` | Strategy signalled an exit |
-| `stop_update` | Chandelier trailing stop ratcheted to a new level |
-| `blocked` | Regime filter suppressed an open signal |
-| `no_stop` | Open skipped — strategy produced no stop and exit strategy not ready |
+| Kind          | Meaning                                                              |
+|---------------|----------------------------------------------------------------------|
+| `open`        | Strategy signalled an entry; includes `stop_price` and `stop_pips`   |
+| `close`       | Strategy signalled an exit                                           |
+| `stop_update` | Chandelier trailing stop ratcheted to a new level                    |
+| `blocked`     | Regime filter suppressed an open signal                              |
+| `no_stop`     | Open skipped — strategy produced no stop and exit strategy not ready |
 
 Save the response and slice it with `jq` to analyse signals offline:
 
@@ -696,17 +716,17 @@ The analysis feature reads a ChatGPT-generated forex analysis CSV and classifies
 
 The CSV must have these nine columns (row 1 is a header):
 
-| Column | Example |
-|---|---|
-| Group | `Major Pairs` |
-| Pair | `EUR/USD` |
-| Structure | `Near 1.1590; USD softer after risk-on headline…` |
-| Setup Bias | `Breakout continuation only after clean 4H close…` |
-| Trend | `Bullish EUR / bearish USD` |
-| Volatility | `Medium-High` |
-| Support zone | `1.1570–1.1590` |
-| Resistance Zone | `1.1600–1.1625` |
-| Status | `Tradeable watch list` \| `Watchlist` \| `No Trade` |
+| Column          | Example                                             |
+|-----------------|-----------------------------------------------------|
+| Group           | `Major Pairs`                                       |
+| Pair            | `EUR/USD`                                           |
+| Structure       | `Near 1.1590; USD softer after risk-on headline…`   |
+| Setup Bias      | `Breakout continuation only after clean 4H close…`  |
+| Trend           | `Bullish EUR / bearish USD`                         |
+| Volatility      | `Medium-High`                                       |
+| Support zone    | `1.1570–1.1590`                                     |
+| Resistance Zone | `1.1600–1.1625`                                     |
+| Status          | `Tradeable watch list` \| `Watchlist` \| `No Trade` |
 
 Support and resistance zones are price ranges separated by an en dash (`–`), em dash (`—`), or hyphen.
 
@@ -732,7 +752,9 @@ EUR/CAD  Tradeable watch list  Mild bullish EUR           Medium-High  1.6150–
 
 ### REST API
 
-`POST /api/v1/analysis` accepts a multipart form upload with field name `file` and returns the parsed rows pre-partitioned into three slices.
+`POST /api/v1/analysis` accepts a multipart form upload with field
+name `file` and returns the parsed rows pre-partitioned into three
+slices.
 
 ```bash
 curl -s -X POST http://localhost:9999/api/v1/analysis \
@@ -788,7 +810,9 @@ docker compose -f docker-compose.yml -f deploy/docker-compose.pi.yml up -d live
 
 ### Systemd
 
-A ready-to-use unit file is at `deploy/trader.service`. It runs `trader serve` with the config at `/etc/trader/trader.yaml`. Copy the example config:
+A ready-to-use unit file is at `deploy/trader.service`. It runs
+`trader serve` with the config at `/etc/trader/trader.yaml`. Copy the
+example config:
 
 ```bash
 sudo cp deploy/trader.yaml.example /etc/trader/trader.yaml
@@ -850,7 +874,10 @@ Every code change must ship with tests — see `docs/CLAUDE.md` for conventions.
 
 ### Live Integration Smoke Test
 
-`make smoke-live` runs the pulse strategy against an OANDA practice account to exercise the full broker plumbing at high frequency. Requires an active market session (London/NY overlap: 13:00–17:00 UTC recommended) and `OANDA_TOKEN` set in the environment.
+`make smoke-live` runs the pulse strategy against an OANDA practice
+account to exercise the full broker plumbing at high
+frequency. Requires an active market session (London/NY overlap:
+13:00–17:00 UTC recommended) and `OANDA_TOKEN` set in the environment.
 
 ```bash
 export OANDA_TOKEN=your-practice-token
@@ -864,11 +891,11 @@ tail -f logs/smoke-live.log | jq -c 'select(.msg | test("signal|opened trade|clo
 
 Config: `testdata/configs/smoke-test.yml` — EUR_USD M1 pulse, trades every ~90s, 15-pip stops, session-gated to 13:00–17:00 UTC. Uncomment the `GBP_USD` block to test multi-instrument concurrency (phase 2).
 
-| Target | Needs OANDA? | What it does |
-|---|---|---|
-| `make smoke` | No | Offline CI: build, backtest, replay API |
-| `make smoke-live-dry` | Token only | Resolve config, print plan, exit |
-| `make smoke-live` | Token + open session | Full pulse run, JSON log |
+| Target                | Needs OANDA?         | What it does                            |
+|-----------------------|----------------------|-----------------------------------------|
+| `make smoke`          | No                   | Offline CI: build, backtest, replay API |
+| `make smoke-live-dry` | Token only           | Resolve config, print plan, exit        |
+| `make smoke-live`     | Token + open session | Full pulse run, JSON log                |
 
 ---
 
@@ -894,4 +921,5 @@ docs/           Project notes, roadmap, service docs, and plans
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features including walk-forward testing, external/plugin strategies, and more.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features including
+walk-forward testing, external/plugin strategies, and more.

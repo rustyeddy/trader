@@ -180,7 +180,7 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 
 	if sig.Side != market.Flat {
 		plan.Opens = append(plan.Opens, execution.NewOpenRequest(
-			pc.Instrument(), &candle, sig.Side, 0, 0, sig.Reason,
+			pc.Instrument(), &candle, sig.Side, sig.Stop, 0, sig.Reason,
 		))
 	}
 

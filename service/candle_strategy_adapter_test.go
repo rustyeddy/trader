@@ -13,7 +13,6 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/live"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/planner"
@@ -83,7 +82,7 @@ func TestBarsBefore_H1(t *testing.T) {
 func TestLiveLotsTracker_SyncAddsLots(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
-	trades := []live.LiveTrade{
+	trades := []LiveTrade{
 		{ID: "100", Units: 1000, EntryPrice: 1.10},
 		{ID: "101", Units: -500, EntryPrice: 1.11},
 	}
@@ -95,18 +94,18 @@ func TestLiveLotsTracker_SyncAddsLots(t *testing.T) {
 func TestLiveLotsTracker_SyncRemovesClosedLots(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
-	lt.sync([]live.LiveTrade{{ID: "100", Units: 1000}})
+	lt.sync([]LiveTrade{{ID: "100", Units: 1000}})
 	assert.Equal(t, 1, lt.toLotBook().Len())
 
 	// Trade 100 no longer present — should be pruned.
-	lt.sync([]live.LiveTrade{})
+	lt.sync([]LiveTrade{})
 	assert.Equal(t, 0, lt.toLotBook().Len())
 }
 
 func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
-	lt.sync([]live.LiveTrade{
+	lt.sync([]LiveTrade{
 		{ID: "long", Units: 1000},
 		{ID: "short", Units: -500},
 	})
@@ -136,13 +135,13 @@ func makeTestAdapter() *CandleStrategyAdapter {
 func TestConvertPlan_NilPlanReturnsNil(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
-	assert.Nil(t, a.convertPlan(nil, live.LivePrice{}))
+	assert.Nil(t, a.convertPlan(nil, LivePrice{}))
 }
 
 func TestConvertPlan_EmptyPlanReturnsNil(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
-	assert.Nil(t, a.convertPlan(&strategy.StrategyPlan{}, live.LivePrice{}))
+	assert.Nil(t, a.convertPlan(&strategy.StrategyPlan{}, LivePrice{}))
 }
 
 func TestConvertPlan_OpenLongConverted(t *testing.T) {
@@ -160,7 +159,7 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
-	lp := a.convertPlan(plan, live.LivePrice{})
+	lp := a.convertPlan(plan, LivePrice{})
 	require.NotNil(t, lp)
 	require.NotNil(t, lp.Open)
 	assert.Equal(t, "long", lp.Open.Side)
@@ -183,7 +182,7 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
-	lp := a.convertPlan(plan, live.LivePrice{})
+	lp := a.convertPlan(plan, LivePrice{})
 	// Plan has no closes either, so result must be nil.
 	assert.Nil(t, lp)
 }
@@ -203,7 +202,7 @@ func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
 	}
 
 	plan := &strategy.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
-	lp := a.convertPlan(plan, live.LivePrice{})
+	lp := a.convertPlan(plan, LivePrice{})
 	require.NotNil(t, lp)
 	assert.Equal(t, []string{"oanda-trade-999"}, lp.CloseIDs)
 }

@@ -1,67 +1,31 @@
-// Package pulse provides a mechanical live-trading strategy that opens and
-// closes positions on a fixed schedule. It has no market analysis and is
-// designed to validate the full strategy → live runner → broker pipeline
-// against a demo account with minimal financial risk.
+// Package pulse implements a mechanical candle-based strategy that opens and
+// closes positions on a fixed bar schedule. It has no market analysis and is
+// designed to validate the full strategy → adapter → live runner → broker
+// pipeline against a demo account with minimal financial risk.
+// Registers as "pulse" in the strategy registry.
 package pulse
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 )
 
 func init() {
-	live.MustRegisterLiveStrategy(func(params map[string]any) (live.LiveStrategy, error) {
-		cfg := DefaultConfig()
-		if v, ok, err := strategy.GetInt32Param(params, "trade_every"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.TradeEvery = int(v)
-		}
-		if v, ok, err := strategy.GetInt32Param(params, "hold_bars"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.HoldBars = int(v)
-		}
-		if v, ok, err := strategy.GetInt32Param(params, "max_positions"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.MaxPositions = int(v)
-		}
-		if v, ok, err := strategy.GetStringParam(params, "side"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.Side = v
-		}
-		if v, ok, err := strategy.GetFloat64Param(params, "stop_pips"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.StopPips = v
-		}
-		if v, ok, err := strategy.GetFloat64Param(params, "take_pips"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.TakePips = v
-		}
-		if v, ok, err := strategy.GetFloat64Param(params, "risk_pct"); err != nil {
-			return nil, err
-		} else if ok {
-			cfg.RiskPct = v
-		}
-		return New(cfg)
-	}, "pulse")
+	strategy.MustRegisterStrategy(build, "pulse")
 }
 
-// Config controls the pulse strategy's behaviour. All fields map directly to
-// YAML params so the strategy is fully configurable without recompilation.
+// Config controls the pulse strategy's behaviour.
 type Config struct {
-	// TradeEvery opens a new position every N ticks (1 = every tick).
+	// TradeEvery opens a new position every N bars (1 = every bar).
 	TradeEvery int `yaml:"trade_every"`
 
-	// HoldBars closes a position after it has been open for N ticks.
+	// HoldBars closes all positions after any position has been open N bars.
 	HoldBars int `yaml:"hold_bars"`
 
 	// MaxPositions caps the number of concurrently open positions.
@@ -72,16 +36,9 @@ type Config struct {
 
 	// StopPips is the stop-loss distance in pips. Required (>0).
 	StopPips float64 `yaml:"stop_pips"`
-
-	// TakePips is the take-profit distance in pips. 0 = no take-profit.
-	TakePips float64 `yaml:"take_pips"`
-
-	// RiskPct is the percentage of account NAV to risk per trade.
-	RiskPct float64 `yaml:"risk_pct"`
 }
 
-// DefaultConfig returns a safe, conservative default configuration suitable
-// for a first demo-account test run.
+// DefaultConfig returns a safe, conservative default configuration.
 func DefaultConfig() Config {
 	return Config{
 		TradeEvery:   5,
@@ -89,21 +46,19 @@ func DefaultConfig() Config {
 		MaxPositions: 2,
 		Side:         "alternate",
 		StopPips:     20,
-		TakePips:     0,
-		RiskPct:      0.1,
 	}
 }
 
-// Strategy is a trader.LiveStrategy that opens a position every TradeEvery
-// ticks and closes each position after HoldBars ticks, subject to MaxPositions.
+// Strategy fires a trade every TradeEvery bars and closes all positions
+// after any position has been held for HoldBars bars.
 type Strategy struct {
-	cfg      Config
-	tick     int // total ticks since start
-	sideTurn int // used only when Side == "alternate"
+	cfg         Config
+	barCount    int
+	lotOpenedAt map[string]int // lot ID → barCount when first seen
+	sideTurn    int
 }
 
-// New creates a Strategy from the given Config. Returns an error if the
-// config is invalid (e.g. StopPips <= 0, MaxPositions <= 0).
+// New creates a Strategy from the given Config.
 func New(cfg Config) (*Strategy, error) {
 	if cfg.TradeEvery <= 0 {
 		cfg.TradeEvery = 1
@@ -127,80 +82,160 @@ func New(cfg Config) (*Strategy, error) {
 		return nil, fmt.Errorf("pulse: side must be 'long', 'short', or 'alternate', got %q", cfg.Side)
 	}
 	cfg.Side = side
-
-	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = 0.1
-	}
 	return &Strategy{cfg: cfg}, nil
 }
 
-// Name implements trader.LiveStrategy.
 func (s *Strategy) Name() string { return "pulse" }
 
-// Tick implements trader.LiveStrategy. It:
-//  1. Closes any positions that have been open >= HoldBars ticks.
-//  2. Opens a new position when tick % TradeEvery == 0 and active positions
-//     (after pending closes) are below MaxPositions.
-func (s *Strategy) Tick(_ context.Context, _ live.LivePrice, openTrades []live.LiveTrade) *live.LivePlan {
-	s.tick++
+func (s *Strategy) Ready() bool { return true }
 
-	// Phase 1: collect positions to close.
-	closing := make(map[string]struct{})
-	for _, t := range openTrades {
-		if t.TicksOpen >= s.cfg.HoldBars {
-			closing[t.ID] = struct{}{}
+func (s *Strategy) Reset() {
+	s.barCount = 0
+	s.lotOpenedAt = nil
+	s.sideTurn = 0
+}
+
+func (s *Strategy) StopDescription() string {
+	return fmt.Sprintf("%.1f pips", s.cfg.StopPips)
+}
+
+// Update is called on every completed bar. It:
+//  1. Tracks how many bars each open lot has been held.
+//  2. Signals CloseAll when any lot has been held >= HoldBars bars.
+//  3. Signals a new open every TradeEvery bars when under MaxPositions.
+func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sctx strategy.StrategyContext) strategy.Signal {
+	if ct == nil {
+		return strategy.Hold("no candle")
+	}
+	s.barCount++
+
+	if s.lotOpenedAt == nil {
+		s.lotOpenedAt = map[string]int{}
+	}
+
+	// Sync lot tracking with currently open positions.
+	openCount := 0
+	shouldClose := false
+	if sctx != nil {
+		seen := map[string]bool{}
+		_ = sctx.OpenLots().Range(func(lot *execution.Lot) error {
+			openCount++
+			seen[lot.ID] = true
+			if _, tracked := s.lotOpenedAt[lot.ID]; !tracked {
+				s.lotOpenedAt[lot.ID] = s.barCount
+			}
+			if s.barCount-s.lotOpenedAt[lot.ID] >= s.cfg.HoldBars {
+				shouldClose = true
+			}
+			return nil
+		})
+		// Prune closed lots.
+		for id := range s.lotOpenedAt {
+			if !seen[id] {
+				delete(s.lotOpenedAt, id)
+			}
 		}
 	}
-	closeIDs := make([]string, 0, len(closing))
-	for id := range closing {
-		closeIDs = append(closeIDs, id)
+
+	activeAfterClose := openCount
+	if shouldClose {
+		activeAfterClose = 0
 	}
 
-	// Phase 2: decide whether to open a new position.
-	activeAfterClose := len(openTrades) - len(closing)
-	var open *live.LiveOpenRequest
+	shouldOpen := s.barCount%s.cfg.TradeEvery == 0 && activeAfterClose < s.cfg.MaxPositions
 
-	if s.tick%s.cfg.TradeEvery == 0 && activeAfterClose < s.cfg.MaxPositions {
+	// Resolve instrument for pip-based stop computation.
+	var inst *market.Instrument
+	if sctx != nil {
+		inst = market.GetInstrument(sctx.Instrument())
+	}
+
+	switch {
+	case shouldClose && shouldOpen:
 		side := s.nextSide()
-		open = &live.LiveOpenRequest{
+		return strategy.Signal{
 			Side:     side,
-			StopPips: s.cfg.StopPips,
-			TakePips: s.cfg.TakePips,
-			RiskPct:  s.cfg.RiskPct,
+			CloseAll: true,
+			Stop:     stopFromPips(ct, side, s.cfg.StopPips, inst),
+			Reason:   "pulse-close-reopen",
 		}
-	}
-
-	reason := "hold"
-	if len(closeIDs) > 0 || open != nil {
-		parts := make([]string, 0, 2)
-		if len(closeIDs) > 0 {
-			parts = append(parts, fmt.Sprintf("close %d", len(closeIDs)))
+	case shouldClose:
+		return strategy.Signal{
+			Side:     market.Flat,
+			CloseAll: true,
+			Reason:   "pulse-close",
 		}
-		if open != nil {
-			parts = append(parts, fmt.Sprintf("open %s", open.Side))
+	case shouldOpen:
+		side := s.nextSide()
+		return strategy.Signal{
+			Side:   side,
+			Stop:   stopFromPips(ct, side, s.cfg.StopPips, inst),
+			Reason: "pulse-open",
 		}
-		reason = strings.Join(parts, " + ")
-	}
-
-	return &live.LivePlan{
-		Open:     open,
-		CloseIDs: closeIDs,
-		Reason:   reason,
+	default:
+		return strategy.Hold("hold")
 	}
 }
 
-func (s *Strategy) nextSide() string {
+// stopFromPips computes a stop price from a pip distance and candle close.
+// Returns 0 when the instrument is unknown or stop_pips is not configured.
+func stopFromPips(ct *market.CandleTime, side market.Side, stopPips float64, inst *market.Instrument) market.Price {
+	if inst == nil || stopPips <= 0 || ct == nil {
+		return 0
+	}
+	perPip := inst.PriceUnitsPerPip()
+	if perPip <= 0 {
+		return 0
+	}
+	dist := market.Price(math.Round(stopPips * float64(perPip)))
+	if side == market.Long {
+		return ct.Close - dist
+	}
+	return ct.Close + dist
+}
+
+func (s *Strategy) nextSide() market.Side {
 	switch s.cfg.Side {
 	case "long":
-		return "long"
+		return market.Long
 	case "short":
-		return "short"
-	default: // "alternate"
-		side := "long"
+		return market.Short
+	default:
+		side := market.Long
 		if s.sideTurn%2 != 0 {
-			side = "short"
+			side = market.Short
 		}
 		s.sideTurn++
 		return side
 	}
+}
+
+func build(params map[string]any) (strategy.Strategy, error) {
+	cfg := DefaultConfig()
+	if v, ok, err := strategy.GetInt32Param(params, "trade_every"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.TradeEvery = int(v)
+	}
+	if v, ok, err := strategy.GetInt32Param(params, "hold_bars"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.HoldBars = int(v)
+	}
+	if v, ok, err := strategy.GetInt32Param(params, "max_positions"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.MaxPositions = int(v)
+	}
+	if v, ok, err := strategy.GetStringParam(params, "side"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.Side = v
+	}
+	if v, ok, err := strategy.GetFloat64Param(params, "stop_pips"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.StopPips = v
+	}
+	return New(cfg)
 }

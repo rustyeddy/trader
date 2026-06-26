@@ -1,19 +1,16 @@
-package live
+package service
 
 import (
 	"context"
 	"time"
 )
 
-// LiveStrategy is implemented by strategies that drive live (non-backtest) trading.
-// Tick is called on each price poll; the runner tracks position ages and passes
-// them in so the strategy can decide what to open or close.
+// LiveStrategy is the internal runner protocol implemented by CandleStrategyAdapter
+// and its decorators (statsTrackingStrategy, circuitBreakerStrategy).
+// Tick is called on each price poll; the runner passes the current price
+// and all tracked open positions so the strategy can decide what to do.
 type LiveStrategy interface {
 	Name() string
-
-	// Tick is called once per poll interval. price is the current bid/ask snapshot.
-	// openTrades lists all tracked open positions for this strategy's instrument.
-	// Returns a plan (open one new position and/or close a set of existing ones).
 	Tick(ctx context.Context, price LivePrice, openTrades []LiveTrade) *LivePlan
 }
 

@@ -5,15 +5,38 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/rustyeddy/trader/live"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var price = live.LivePrice{Instrument: "EUR_USD", Bid: 1.0850, Ask: 1.0852}
+// makeCandle creates a minimal CandleTime for testing.
+func makeCandle() *market.CandleTime {
+	return &market.CandleTime{
+		Candle: market.Candle{
+			Open:  market.PriceFromFloat(1.0850),
+			High:  market.PriceFromFloat(1.0860),
+			Low:   market.PriceFromFloat(1.0840),
+			Close: market.PriceFromFloat(1.0855),
+		},
+	}
+}
 
-func makeTrade(id string, ticksOpen int) live.LiveTrade {
-	return live.LiveTrade{ID: id, Instrument: "EUR_USD", Units: 1000, TicksOpen: ticksOpen}
+// makeRun builds a StrategyContext with zero or more open lots.
+func makeRun(lotIDs ...string) *backtest.Backtest {
+	lb := &execution.LotBook{}
+	for _, id := range lotIDs {
+		tc := &execution.TradeCommon{ID: id}
+		tc.Instrument = "EURUSD"
+		tc.Side = market.Long
+		_ = lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
+	}
+	return &backtest.Backtest{
+		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},
+		State:   &backtest.BacktestRun{Lots: lb},
+	}
 }
 
 // ── New validation ─────────────────────────────────────────────────────────────
@@ -26,7 +49,7 @@ func TestNew_ValidConfig(t *testing.T) {
 
 func TestNew_DefaultsTradeEvery(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.TradeEvery = 0 // should be clamped to 1
+	cfg.TradeEvery = 0
 	s, err := New(cfg)
 	require.NoError(t, err)
 	assert.Equal(t, 1, s.cfg.TradeEvery)
@@ -60,128 +83,124 @@ func TestNew_InvalidSide(t *testing.T) {
 	assert.ErrorContains(t, err, "side")
 }
 
-func TestNew_DefaultsRiskPct(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.RiskPct = 0 // should default to 0.1
-	s, err := New(cfg)
-	require.NoError(t, err)
-	assert.Equal(t, 0.1, s.cfg.RiskPct)
-}
+// ── Update — no open positions ─────────────────────────────────────────────────
 
-// ── Tick — no open positions ───────────────────────────────────────────────────
-
-func TestTick_FirstTickNoTrades_HoldWhenNotDue(t *testing.T) {
+func TestUpdate_FirstBarNoPositions_HoldWhenNotDue(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 3
 	s, _ := New(cfg)
 
-	plan := s.Tick(context.Background(), price, nil)
-	// tick=1, 1%3 != 0 → hold
-	assert.Nil(t, plan.Open)
-	assert.Empty(t, plan.CloseIDs)
-	assert.Equal(t, "hold", plan.Reason)
+	sig := s.Update(context.Background(), makeCandle(), makeRun())
+	// bar=1, 1%3 != 0 → hold
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.False(t, sig.CloseAll)
+	assert.Equal(t, "hold", sig.Reason)
 }
 
-func TestTick_OpensWhenDue(t *testing.T) {
+func TestUpdate_OpensWhenDue(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 2
 	cfg.MaxPositions = 3
 	s, _ := New(cfg)
 
-	s.Tick(context.Background(), price, nil)         // tick 1 — hold
-	plan := s.Tick(context.Background(), price, nil) // tick 2 — open
+	s.Update(context.Background(), makeCandle(), makeRun())         // bar 1 — hold
+	sig := s.Update(context.Background(), makeCandle(), makeRun())  // bar 2 — open
 
-	require.NotNil(t, plan.Open)
-	assert.Equal(t, "long", plan.Open.Side) // first alternate = long
-	assert.Equal(t, cfg.StopPips, plan.Open.StopPips)
-	assert.Equal(t, cfg.RiskPct, plan.Open.RiskPct)
+	assert.Equal(t, market.Long, sig.Side) // first alternate = long
+	assert.False(t, sig.CloseAll)
+	assert.Equal(t, "pulse-open", sig.Reason)
 }
 
-// ── Tick — MaxPositions cap ────────────────────────────────────────────────────
+// ── Update — MaxPositions cap ──────────────────────────────────────────────────
 
-func TestTick_RespectsMaxPositions(t *testing.T) {
+func TestUpdate_RespectsMaxPositions(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.TradeEvery = 1 // open every tick
+	cfg.TradeEvery = 1
 	cfg.MaxPositions = 2
-	cfg.HoldBars = 100 // don't close
+	cfg.HoldBars = 100
 	s, _ := New(cfg)
 
-	openTrades := []live.LiveTrade{
-		makeTrade("t1", 5),
-		makeTrade("t2", 3),
-	}
-	plan := s.Tick(context.Background(), price, openTrades)
-	// 2 open, max=2 → no new open
-	assert.Nil(t, plan.Open)
+	run := makeRun("t1", "t2")
+	sig := s.Update(context.Background(), makeCandle(), run)
+	// 2 open == max → no new open, no close
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.False(t, sig.CloseAll)
 }
 
-func TestTick_OpensWhenUnderMaxPositions(t *testing.T) {
+func TestUpdate_OpensWhenUnderMaxPositions(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 3
 	cfg.HoldBars = 100
 	s, _ := New(cfg)
 
-	openTrades := []live.LiveTrade{makeTrade("t1", 2)}
-	plan := s.Tick(context.Background(), price, openTrades)
-	require.NotNil(t, plan.Open)
+	run := makeRun("t1")
+	sig := s.Update(context.Background(), makeCandle(), run)
+	assert.NotEqual(t, market.Flat, sig.Side)
 }
 
-// ── Tick — HoldBars close logic ────────────────────────────────────────────────
+// ── Update — HoldBars close logic ─────────────────────────────────────────────
 
-func TestTick_ClosesTradeAfterHoldBars(t *testing.T) {
+func TestUpdate_ClosesAllWhenOldestExceedsHoldBars(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.HoldBars = 5
+	cfg.HoldBars = 3
 	cfg.TradeEvery = 100 // never open
 	s, _ := New(cfg)
 
-	openTrades := []live.LiveTrade{
-		makeTrade("t1", 5),  // exactly HoldBars → close
-		makeTrade("t2", 4),  // one short → keep
-		makeTrade("t3", 10), // over HoldBars → close
-	}
-	plan := s.Tick(context.Background(), price, openTrades)
-	assert.ElementsMatch(t, []string{"t1", "t3"}, plan.CloseIDs)
+	run := makeRun("t1", "t2")
+
+	// Bar 1 and 2: both lots seen, not yet at HoldBars
+	s.Update(context.Background(), makeCandle(), run)
+	s.Update(context.Background(), makeCandle(), run)
+
+	// Bar 3: barCount - openedAt = 3 - 1 = 2, not yet >= 3
+	sig := s.Update(context.Background(), makeCandle(), run)
+	assert.False(t, sig.CloseAll)
+
+	// Bar 4: age = 4 - 1 = 3 >= HoldBars → close all
+	sig = s.Update(context.Background(), makeCandle(), run)
+	assert.True(t, sig.CloseAll)
+	assert.Equal(t, market.Flat, sig.Side)
 }
 
-func TestTick_ClosesAndOpensInSameTick(t *testing.T) {
+func TestUpdate_ClosesAndOpensInSameBar(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.HoldBars = 3
+	cfg.HoldBars = 2
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 2
 	s, _ := New(cfg)
 
-	// 2 trades open, both at HoldBars → close both → active=0 after close → open allowed
-	openTrades := []live.LiveTrade{
-		makeTrade("t1", 3),
-		makeTrade("t2", 3),
-	}
-	plan := s.Tick(context.Background(), price, openTrades)
-	assert.Len(t, plan.CloseIDs, 2)
-	require.NotNil(t, plan.Open, "should open after closing brings active below max")
+	run := makeRun("t1")
+	s.Update(context.Background(), makeCandle(), run) // bar 1: lot opened at bar 1
+
+	// Bar 3: age = 3 - 1 = 2 >= HoldBars → close + open (bar 3 % 1 == 0)
+	s.Update(context.Background(), makeCandle(), run) // bar 2
+	sig := s.Update(context.Background(), makeCandle(), run) // bar 3
+	assert.True(t, sig.CloseAll)
+	assert.NotEqual(t, market.Flat, sig.Side)
+	assert.Equal(t, "pulse-close-reopen", sig.Reason)
 }
 
-func TestTick_MaxPositionsAccountsForPendingCloses(t *testing.T) {
+func TestUpdate_MaxPositionsAccountsForPendingClose(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.HoldBars = 1
+	cfg.HoldBars = 2
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 2
 	s, _ := New(cfg)
 
-	// 2 trades open: both hit HoldBars (close both), leaving 0 active
-	// → can open (0 < 2)
-	openTrades := []live.LiveTrade{
-		makeTrade("t1", 1),
-		makeTrade("t2", 1),
-	}
-	plan := s.Tick(context.Background(), price, openTrades)
-	assert.Len(t, plan.CloseIDs, 2)
-	require.NotNil(t, plan.Open)
+	run := makeRun("t1", "t2")
+	s.Update(context.Background(), makeCandle(), run) // bar 1: both lots opened
+
+	// Bar 3: both lots age = 3-1=2 >= HoldBars → close all → 0 active → can open
+	s.Update(context.Background(), makeCandle(), run)
+	sig := s.Update(context.Background(), makeCandle(), run)
+	assert.True(t, sig.CloseAll)
+	assert.NotEqual(t, market.Flat, sig.Side)
 }
 
 // ── Side alternation ───────────────────────────────────────────────────────────
 
-func TestTick_AlternateSide(t *testing.T) {
+func TestUpdate_AlternateSide(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 10
@@ -189,21 +208,18 @@ func TestTick_AlternateSide(t *testing.T) {
 	cfg.Side = "alternate"
 	s, _ := New(cfg)
 
-	sides := make([]string, 6)
+	sides := make([]market.Side, 6)
 	for i := range sides {
-		plan := s.Tick(context.Background(), price, nil)
-		if plan.Open != nil {
-			sides[i] = plan.Open.Side
-		}
+		sig := s.Update(context.Background(), makeCandle(), makeRun())
+		sides[i] = sig.Side
 	}
-	// Should alternate long/short/long/short...
-	assert.Equal(t, "long", sides[0])
-	assert.Equal(t, "short", sides[1])
-	assert.Equal(t, "long", sides[2])
-	assert.Equal(t, "short", sides[3])
+	assert.Equal(t, market.Long, sides[0])
+	assert.Equal(t, market.Short, sides[1])
+	assert.Equal(t, market.Long, sides[2])
+	assert.Equal(t, market.Short, sides[3])
 }
 
-func TestTick_FixedLongSide(t *testing.T) {
+func TestUpdate_FixedLongSide(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 10
@@ -212,13 +228,12 @@ func TestTick_FixedLongSide(t *testing.T) {
 	s, _ := New(cfg)
 
 	for i := 0; i < 4; i++ {
-		plan := s.Tick(context.Background(), price, nil)
-		require.NotNil(t, plan.Open)
-		assert.Equal(t, "long", plan.Open.Side, "tick %d", i)
+		sig := s.Update(context.Background(), makeCandle(), makeRun())
+		assert.Equal(t, market.Long, sig.Side, "bar %d", i+1)
 	}
 }
 
-func TestTick_FixedShortSide(t *testing.T) {
+func TestUpdate_FixedShortSide(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 10
@@ -226,88 +241,93 @@ func TestTick_FixedShortSide(t *testing.T) {
 	cfg.Side = "short"
 	s, _ := New(cfg)
 
-	plan := s.Tick(context.Background(), price, nil)
-	require.NotNil(t, plan.Open)
-	assert.Equal(t, "short", plan.Open.Side)
+	sig := s.Update(context.Background(), makeCandle(), makeRun())
+	assert.Equal(t, market.Short, sig.Side)
 }
 
-// ── Name ──────────────────────────────────────────────────────────────────────
+// ── Name / Ready / Reset ───────────────────────────────────────────────────────
 
 func TestStrategy_Name(t *testing.T) {
 	s, _ := New(DefaultConfig())
 	assert.Equal(t, "pulse", s.Name())
 }
 
-// ── Reason field ───────────────────────────────────────────────────────────────
-
-func TestTick_ReasonHold(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.TradeEvery = 100
-	s, _ := New(cfg)
-	plan := s.Tick(context.Background(), price, nil)
-	assert.Equal(t, "hold", plan.Reason)
+func TestStrategy_Ready(t *testing.T) {
+	s, _ := New(DefaultConfig())
+	assert.True(t, s.Ready())
 }
 
-func TestTick_ReasonIncludesActions(t *testing.T) {
+func TestStrategy_Reset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TradeEvery = 1
+	cfg.HoldBars = 100
+	s, _ := New(cfg)
+
+	run := makeRun("t1")
+	s.Update(context.Background(), makeCandle(), run)
+	s.Update(context.Background(), makeCandle(), run)
+	require.Greater(t, s.barCount, 0)
+
+	s.Reset()
+	assert.Equal(t, 0, s.barCount)
+	assert.Nil(t, s.lotOpenedAt)
+}
+
+// ── NilCandle and NilContext ───────────────────────────────────────────────────
+
+func TestUpdate_NilCandle_ReturnsHold(t *testing.T) {
+	s, _ := New(DefaultConfig())
+	sig := s.Update(context.Background(), nil, makeRun())
+	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, "no candle", sig.Reason)
+}
+
+func TestUpdate_NilContext_StillOpens(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TradeEvery = 1
 	cfg.MaxPositions = 5
-	cfg.HoldBars = 1
+	cfg.HoldBars = 100
 	s, _ := New(cfg)
 
-	plan := s.Tick(context.Background(), price, []live.LiveTrade{makeTrade("t1", 1)})
-	assert.Contains(t, plan.Reason, "close")
-	assert.Contains(t, plan.Reason, "open")
+	sig := s.Update(context.Background(), makeCandle(), nil)
+	assert.NotEqual(t, market.Flat, sig.Side)
 }
 
-// ── TakePips propagated ────────────────────────────────────────────────────────
+// ── Table-driven open schedule ─────────────────────────────────────────────────
 
-func TestTick_TakePipsPropagatedToOpen(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.TradeEvery = 1
-	cfg.TakePips = 40
-	s, _ := New(cfg)
-
-	plan := s.Tick(context.Background(), price, nil)
-	require.NotNil(t, plan.Open)
-	assert.Equal(t, 40.0, plan.Open.TakePips)
-}
-
-// ── Table-driven open/close schedule ──────────────────────────────────────────
-
-func TestTick_OpenSchedule(t *testing.T) {
+func TestUpdate_OpenSchedule(t *testing.T) {
 	cases := []struct {
-		tick      int
-		every     int
-		positions int
-		max       int
-		wantOpen  bool
+		bar      int
+		every    int
+		lots     int
+		max      int
+		wantOpen bool
 	}{
-		{1, 3, 0, 2, false}, // not due
-		{3, 3, 0, 2, true},  // due, space
-		{6, 3, 2, 2, false}, // due, but max hit
-		{6, 3, 1, 2, true},  // due, space available
-		{5, 5, 0, 1, true},  // due, space
+		{1, 3, 0, 2, false},
+		{3, 3, 0, 2, true},
+		{6, 3, 2, 2, false}, // at max
+		{6, 3, 1, 2, true},  // space available
+		{5, 5, 0, 1, true},
 	}
 	for _, tc := range cases {
 		tc := tc
-		t.Run(fmt.Sprintf("tick%d_every%d_pos%d_max%d", tc.tick, tc.every, tc.positions, tc.max), func(t *testing.T) {
+		t.Run(fmt.Sprintf("bar%d_every%d_lots%d_max%d", tc.bar, tc.every, tc.lots, tc.max), func(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.TradeEvery = tc.every
 			cfg.MaxPositions = tc.max
 			cfg.HoldBars = 1000
 			s, _ := New(cfg)
-			s.tick = tc.tick - 1 // pre-set so next Tick() is tc.tick
+			s.barCount = tc.bar - 1 // next Update() will be bar tc.bar
 
-			open := make([]live.LiveTrade, tc.positions)
-			for i := range open {
-				open[i] = makeTrade(fmt.Sprintf("t%d", i), 1)
+			ids := make([]string, tc.lots)
+			for i := range ids {
+				ids[i] = fmt.Sprintf("t%d", i)
 			}
-			plan := s.Tick(context.Background(), price, open)
+			sig := s.Update(context.Background(), makeCandle(), makeRun(ids...))
 			if tc.wantOpen {
-				assert.NotNil(t, plan.Open, "expected open at tick %d", tc.tick)
+				assert.NotEqual(t, market.Flat, sig.Side, "expected open at bar %d", tc.bar)
 			} else {
-				assert.Nil(t, plan.Open, "expected no open at tick %d", tc.tick)
+				assert.Equal(t, market.Flat, sig.Side, "expected no open at bar %d", tc.bar)
 			}
 		})
 	}
