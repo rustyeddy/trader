@@ -36,3 +36,12 @@ func parseTimeField(field, raw string) (time.Time, error) {
 	}
 	return v, nil
 }
+
+// trimForErr truncates s to at most 200 characters for use in error messages.
+func trimForErr(s string) string {
+	const n = 200
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}

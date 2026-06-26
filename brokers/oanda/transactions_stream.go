@@ -165,9 +165,14 @@ func (c *Client) StreamTransactions(ctx context.Context, accountID string, opts 
 // streamURLFor turns an OANDA REST base URL into the matching stream base.
 // api-fxpractice.oanda.com → stream-fxpractice.oanda.com
 // api-fxtrade.oanda.com    → stream-fxtrade.oanda.com
+// localhost / 127.0.0.1    → unchanged (test servers serve both)
 func streamURLFor(baseURL string) (string, error) {
 	if baseURL == "" {
 		return "", fmt.Errorf("oanda: missing base url")
+	}
+	// Local test servers handle both REST and stream paths on the same port.
+	if strings.HasPrefix(baseURL, "http://127.0.0.1") || strings.HasPrefix(baseURL, "http://localhost") {
+		return baseURL, nil
 	}
 	if strings.Contains(baseURL, "api-fxpractice.oanda.com") {
 		return strings.Replace(baseURL, "api-fxpractice", "stream-fxpractice", 1), nil
