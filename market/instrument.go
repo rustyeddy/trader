@@ -84,17 +84,17 @@ var instrumentRegistry = map[string]Instrument{
 	"AUDNZD": makeInstrument("AUDNZD", "AUD", "NZD", -4, Rate(20_000)),
 }
 
-// approximateUSDPerUnit provides static approximate USD values for non-USD currencies.
-// Used for cross-pair P/L conversion and position sizing when a live complementary
-// rate is not available. Accuracy ±30% over long periods; correct in order of magnitude.
-var approximateUSDPerUnit = map[string]float64{
-	"EUR": 1.08,
-	"GBP": 1.26,
-	"JPY": 0.0067, // ~1/150
-	"AUD": 0.65,
-	"CAD": 0.74,
-	"NZD": 0.61,
-	"CHF": 1.10,
+// approximateUSDPerUnit provides static approximate USD exchange rates for
+// non-USD currencies. Used for cross-pair P/L conversion and position sizing
+// when a live rate is not available. Accuracy ±30%; correct order of magnitude.
+var approximateUSDPerUnit = map[string]Rate{
+	"EUR": RateFromFloat(1.08),
+	"GBP": RateFromFloat(1.26),
+	"JPY": RateFromFloat(0.0067), // ~1/150
+	"AUD": RateFromFloat(0.65),
+	"CAD": RateFromFloat(0.74),
+	"NZD": RateFromFloat(0.61),
+	"CHF": RateFromFloat(1.10),
 }
 
 func init() {
@@ -135,8 +135,8 @@ func MajorInstruments() []string {
 	return append([]string(nil), majorInstrumentNames...)
 }
 
-// ApproximateUSDPerUnit reports a rough USD conversion for a non-USD currency.
-func ApproximateUSDPerUnit(currency string) (float64, bool) {
+// ApproximateUSDPerUnit reports a rough USD-per-unit Rate for a non-USD currency.
+func ApproximateUSDPerUnit(currency string) (Rate, bool) {
 	rate, ok := approximateUSDPerUnit[strings.ToUpper(strings.TrimSpace(currency))]
 	return rate, ok
 }

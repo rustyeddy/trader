@@ -72,9 +72,10 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return nil, fmt.Errorf("no price returned for %s", req.Instrument)
 	}
 	px := prices[0]
-	entry := px.Ask
+	// Convert wire-format floats to fixed-point at the API boundary.
+	entryPrice := market.PriceFromFloat(px.Ask)
 	if side == "short" {
-		entry = px.Bid
+		entryPrice = market.PriceFromFloat(px.Bid)
 	}
 
 	var equity float64
@@ -91,36 +92,50 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return nil, fmt.Errorf("account equity is zero or unavailable")
 	}
 
-	// Stop price.
-	var stop float64
+	// Stop price as fixed-point.
+	var stopPrice market.Price
 	switch {
 	case req.StopPrice > 0:
-		stop = req.StopPrice
+		stopPrice = market.PriceFromFloat(req.StopPrice)
 	case req.StopPips > 0:
-		pipSize := 0.0001
-		if strings.Contains(req.Instrument, "JPY") {
-			pipSize = 0.01
-		}
-		dist := req.StopPips * pipSize
-		if side == "long" {
-			stop = entry - dist
+		inst := market.GetInstrument(market.NormalizeInstrument(req.Instrument))
+		pips := market.PipsFromFloat(req.StopPips)
+		if inst != nil {
+			if side == "long" {
+				stopPrice = inst.SubPips(entryPrice, pips)
+			} else {
+				stopPrice = inst.AddPips(entryPrice, pips)
+			}
 		} else {
-			stop = entry + dist
+			// Unknown instrument — fall back to price-unit approximation.
+			delta := market.PriceFromFloat(req.StopPips * 0.0001)
+			if strings.Contains(strings.ToUpper(req.Instrument), "JPY") {
+				delta = market.PriceFromFloat(req.StopPips * 0.01)
+			}
+			if side == "long" {
+				stopPrice = entryPrice - delta
+			} else {
+				stopPrice = entryPrice + delta
+			}
 		}
 	default:
 		return nil, fmt.Errorf("either StopPrice or StopPips is required")
 	}
 
-	stopDist := math.Abs(entry - stop)
+	stopDist := entryPrice - stopPrice
+	if stopDist < 0 {
+		stopDist = -stopDist
+	}
 	if stopDist == 0 {
 		return nil, fmt.Errorf("stop distance is zero — check stop price")
 	}
 
-	// Convert stop distance from quote currency to account currency (USD).
-	// stopDist is in quote-currency units (e.g. JPY for USD_JPY, CHF for USD_CHF).
-	// Dividing by the approximate USD-per-quote-unit gives USD risk per unit.
-	// For USD-quoted pairs (GBP_USD) the rate is 1.0 — no adjustment needed.
-	stopDistUSD := stopDist * quoteToUSDRate(req.Instrument)
+	// Convert stop distance (in Price units) to USD per unit.
+	// Dividing by PriceScale gives the distance in quote-currency decimal form;
+	// multiplying by quoteToUSDRate converts to account currency (USD).
+	// This is a terminal float operation at the sizing boundary.
+	quoteRate := quoteToUSDRate(req.Instrument)
+	stopDistUSD := float64(stopDist) / float64(market.PriceScale) * quoteRate.Float64()
 
 	// Sizing.
 	riskAmount := equity * req.RiskPct.Float64()
@@ -136,8 +151,8 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	if req.MaxUnits > 0 && units > req.MaxUnits {
 		units = req.MaxUnits
 	}
-	if req.MaxPositionUSD > 0 && entry > 0 {
-		maxByNotional := int64(math.Floor(req.MaxPositionUSD / entry))
+	if req.MaxPositionUSD > 0 && entryPrice > 0 {
+		maxByNotional := int64(math.Floor(req.MaxPositionUSD / entryPrice.Float64()))
 		if maxByNotional < 1 {
 			maxByNotional = 1
 		}
@@ -154,8 +169,8 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		Instrument: req.Instrument,
 		Side:       side,
 		Units:      units,
-		EntryPrice: entry,
-		StopPrice:  stop,
+		EntryPrice: entryPrice.Float64(),
+		StopPrice:  stopPrice.Float64(),
 		RiskAmount: riskAmount,
 		AccountNAV: equity,
 	}
@@ -165,7 +180,7 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return result, nil
 	}
 
-	fill, err := a.svc.OANDA.SubmitMarketOrder(ctx, a.ID, req.Instrument, units, stop)
+	fill, err := a.svc.OANDA.SubmitMarketOrder(ctx, a.ID, req.Instrument, units, stopPrice.Float64())
 	if err != nil {
 		return result, fmt.Errorf("submit order: %w", err)
 	}
@@ -177,23 +192,21 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	return result, nil
 }
 
-// quoteToUSDRate returns an approximate multiplier to convert a price distance
-// in the instrument's quote currency to USD. For USD-quoted pairs (GBP_USD,
-// EUR_USD) the rate is 1.0. For JPY-quoted pairs (USD_JPY) it is ~0.0067
-// (1/150). Uses the same static table as the backtest P/L conversion.
-// Accuracy is ±30% over long periods; sufficient for position sizing purposes.
-func quoteToUSDRate(instrument string) float64 {
+// quoteToUSDRate returns an approximate Rate to convert a price distance in the
+// instrument's quote currency to USD. 1.0 for USD-quoted pairs; ~0.0067 for JPY.
+// Uses the same static table as the backtest P/L conversion. Accuracy ±30%.
+func quoteToUSDRate(instrument string) market.Rate {
 	inst := market.GetInstrument(market.NormalizeInstrument(instrument))
 	if inst == nil {
-		return 1.0 // unknown — no adjustment
+		return market.RateFromFloat(1.0) // unknown — no adjustment
 	}
 	if inst.QuoteCurrency == "USD" {
-		return 1.0
+		return market.RateFromFloat(1.0)
 	}
 	if r, ok := market.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
 		return r
 	}
-	return 1.0
+	return market.RateFromFloat(1.0)
 }
 
 // CloseTrade closes a trade by ID. Units=0 means full close; >0 is partial.

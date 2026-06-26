@@ -227,15 +227,15 @@ func TestPlaceMarketOrder_NoStop(t *testing.T) {
 func TestQuoteToUSDRate_USDQuoted(t *testing.T) {
 	t.Parallel()
 	// EUR_USD, GBP_USD — quote is USD, rate must be 1.0
-	assert.Equal(t, 1.0, quoteToUSDRate("EUR_USD"))
-	assert.Equal(t, 1.0, quoteToUSDRate("GBP_USD"))
+	assert.InDelta(t, 1.0, quoteToUSDRate("EUR_USD").Float64(), 1e-9)
+	assert.InDelta(t, 1.0, quoteToUSDRate("GBP_USD").Float64(), 1e-9)
 }
 
 func TestQuoteToUSDRate_JPYQuoted(t *testing.T) {
 	t.Parallel()
 	// USD_JPY, AUD_JPY, EUR_JPY — quote is JPY ≈ 0.0067
 	for _, inst := range []string{"USD_JPY", "AUD_JPY", "EUR_JPY"} {
-		r := quoteToUSDRate(inst)
+		r := quoteToUSDRate(inst).Float64()
 		assert.Greater(t, r, 0.0, "%s: rate must be > 0", inst)
 		assert.Less(t, r, 0.1, "%s: JPY rate must be < 0.1", inst)
 	}
@@ -244,7 +244,7 @@ func TestQuoteToUSDRate_JPYQuoted(t *testing.T) {
 func TestQuoteToUSDRate_GBPQuoted(t *testing.T) {
 	t.Parallel()
 	// EUR_GBP — quote is GBP ≈ 1.26
-	r := quoteToUSDRate("EUR_GBP")
+	r := quoteToUSDRate("EUR_GBP").Float64()
 	assert.Greater(t, r, 1.0, "GBP rate must be > 1")
 	assert.Less(t, r, 2.0, "GBP rate must be < 2")
 }

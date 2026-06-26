@@ -77,7 +77,7 @@ func (acct *Account) quoteToAccountRate(inst string, price market.Price) (market
 	// does not affect win/loss decisions or relative return percentages.
 	if acct.Currency == "USD" {
 		if r, ok := market.ApproximateUSDPerUnit(meta.QuoteCurrency); ok {
-			return market.RateFromFloat(r), nil
+			return r, nil
 		}
 	}
 	return 0, fmt.Errorf("unsupported quote-to-account conversion: %s -> %s", meta.QuoteCurrency, acct.Currency)

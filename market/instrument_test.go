@@ -73,7 +73,7 @@ func TestApproximateUSDPerUnit(t *testing.T) {
 
 	rate, ok := ApproximateUSDPerUnit("jpy")
 	require.True(t, ok)
-	assert.InDelta(t, 0.0067, rate, 1e-9)
+	assert.InDelta(t, 0.0067, rate.Float64(), 1e-9)
 
 	_, ok = ApproximateUSDPerUnit("NOPE")
 	assert.False(t, ok)
