@@ -132,11 +132,20 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 	if cb.limitPct <= 0 {
 		return true
 	}
-	nav, err := cb.acct.accountNAV(ctx)
-	if err != nil {
-		cb.log.Warn("circuit breaker: could not fetch NAV", "err", err)
-		return true // fail open — don't block on transient errors
+
+	// Prefer the local snapshot; fall back to a direct OANDA call.
+	var nav float64
+	if snap := cb.acct.getSnapshot(); snap != nil {
+		nav = snap.NAV()
+	} else {
+		summary, err := cb.acct.svc.OANDA.GetAccountSummary(ctx, cb.acct.ID)
+		if err != nil {
+			cb.log.Warn("circuit breaker: could not fetch NAV", "err", err)
+			return true // fail open — don't block on transient errors
+		}
+		nav = summary.NAV
 	}
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	if nav > cb.peakNAV {
@@ -156,15 +165,6 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 		return false
 	}
 	return true
-}
-
-// accountNAV fetches the current account NAV (equity) from OANDA.
-func (a *Account) accountNAV(ctx context.Context) (float64, error) {
-	summary, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
-	if err != nil {
-		return 0, err
-	}
-	return summary.NAV, nil
 }
 
 // ── circuit breaker strategy wrapper ─────────────────────────────────────────

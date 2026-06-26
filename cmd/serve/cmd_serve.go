@@ -248,11 +248,17 @@ Example config file (see deploy/trader.yaml.example):
 				}
 			}()
 
-			// Live journal subscription (only if OANDA is available).
+			// Live journal subscription and account snapshot (only if OANDA is available).
 			if svc.OANDA != nil {
 				if err := svc.ResolveAccount(ctx); err != nil {
 					log.Warn("serve: account resolve failed; journal disabled", "err", err)
 				} else {
+					// Start the account snapshot so REST/MCP/live-runner all read
+					// from a local cache rather than hitting OANDA on every request.
+					if acc, aErr := svc.Account(ctx, svc.AccountID); aErr == nil {
+						acc.EnsureSnapshot(ctx, 5*time.Second)
+						log.Info("serve: account snapshot started", "account", svc.AccountID)
+					}
 					wg.Add(1)
 					go func() {
 						defer wg.Done()

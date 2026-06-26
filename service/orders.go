@@ -77,11 +77,16 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		entry = px.Bid
 	}
 
-	acct, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get account: %w", err)
+	var equity float64
+	if snap := a.getSnapshot(); snap != nil {
+		equity = snap.NAV()
+	} else {
+		acct, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
+		if err != nil {
+			return nil, fmt.Errorf("get account: %w", err)
+		}
+		equity = acct.NAV
 	}
-	equity := acct.NAV
 	if equity <= 0 {
 		return nil, fmt.Errorf("account equity is zero or unavailable")
 	}
@@ -214,7 +219,12 @@ func (a *Account) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, t
 }
 
 // ListOpenTrades returns the open positions on the account.
+// When the account snapshot is running it reads from the local cache;
+// otherwise it falls back to a direct OANDA REST call.
 func (a *Account) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error) {
+	if snap := a.getSnapshot(); snap != nil {
+		return snap.OpenTrades(), nil
+	}
 	trades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get open trades: %w", err)

@@ -7,9 +7,13 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
-// GetAccountSummary returns balance, NAV, margin, and unrealized P/L for
-// this account.
+// GetAccountSummary returns balance, NAV, margin, and unrealized P/L.
+// When the account snapshot is running it reads from the local cache;
+// otherwise it falls back to a direct OANDA REST call.
 func (a *Account) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary, error) {
+	if snap := a.getSnapshot(); snap != nil {
+		return snap.Summary(), nil
+	}
 	summary, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get account summary: %w", err)

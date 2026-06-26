@@ -9,8 +9,6 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
-// ── SSE writer ────────────────────────────────────────────────────────────
-
 // sseWriter wraps a ResponseWriter with Server-Sent Events helpers.
 // The caller must check the ok return from newSSEWriter before using it.
 type sseWriter struct {
@@ -57,11 +55,11 @@ func (s *sseWriter) comment(text string) {
 	s.f.Flush()
 }
 
-// ── GET /api/v1/stream/account ────────────────────────────────────────────
-
-// handleStreamAccount polls the account summary every 5 s and pushes each
-// snapshot as an "account" SSE event. The connection stays open until the
-// client disconnects.
+// handleStreamAccount reads the account summary every 5 s and pushes each
+// snapshot as an "account" SSE event to the connected client. When the
+// account snapshot is running (started by the serve daemon), reads are
+// served from the local cache with no OANDA round-trip. The connection
+// stays open until the client disconnects.
 func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
 	acc, ok := s.resolveAccount(w, r)
 	if !ok {
@@ -99,8 +97,6 @@ func (s *Server) handleStreamAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-// ── GET /api/v1/stream/events ─────────────────────────────────────────────
 
 // handleStreamEvents subscribes to the OANDA transaction stream and forwards
 // each transaction as a "transaction" SSE event. Heartbeats are forwarded as
@@ -141,8 +137,6 @@ func (s *Server) handleStreamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-// ── GET /api/v1/stream/backtest/{id} ─────────────────────────────────────
 
 // handleStreamBacktest is a placeholder for in-flight backtest progress
 // (#113+). Returns a 501 until the backtest runner supports progress hooks.

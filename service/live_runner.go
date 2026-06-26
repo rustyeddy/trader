@@ -63,6 +63,11 @@ func (a *Account) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 		"tick_interval", cfg.TickInterval,
 	)
 
+	// Start the account snapshot if it is not already running (e.g. launched
+	// by the serve daemon). This seeds from the full account details and then
+	// polls incremental changes, eliminating per-tick GetOpenTrades calls.
+	a.EnsureSnapshot(ctx, cfg.TickInterval)
+
 	// tickCounts tracks how many ticks each open trade has been held.
 	// Seeded from OANDA open-time on startup so a restart doesn't reset ages.
 	tickCounts := a.seedTickCounts(ctx, cfg, log)
@@ -160,9 +165,16 @@ func (a *Account) runOneTick(
 	}
 
 	// 2. Open trades on the account, filtered to this instrument.
-	allTrades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
-	if err != nil {
-		return fmt.Errorf("get open trades: %w", err)
+	// Prefer the local snapshot; fall back to a direct OANDA call when the
+	// snapshot is not running (e.g. unit tests without a running serve daemon).
+	var allTrades []oanda.OpenTrade
+	if snap := a.getSnapshot(); snap != nil {
+		allTrades = snap.OpenTrades()
+	} else {
+		allTrades, err = a.svc.OANDA.GetOpenTrades(ctx, a.ID)
+		if err != nil {
+			return fmt.Errorf("get open trades: %w", err)
+		}
 	}
 	inst := normalizeInstrument(cfg.Instrument)
 	var liveTrades []LiveTrade
@@ -281,10 +293,16 @@ func (a *Account) runOneTick(
 // the count to the correct estimated value.
 func (a *Account) seedTickCounts(ctx context.Context, cfg LiveRunConfig, log *slog.Logger) map[string]int {
 	counts := map[string]int{}
-	trades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
-	if err != nil {
-		log.Warn("live runner: could not seed tick counts from open trades", "err", err)
-		return counts
+	var trades []oanda.OpenTrade
+	if snap := a.getSnapshot(); snap != nil {
+		trades = snap.OpenTrades()
+	} else {
+		var err error
+		trades, err = a.svc.OANDA.GetOpenTrades(ctx, a.ID)
+		if err != nil {
+			log.Warn("live runner: could not seed tick counts from open trades", "err", err)
+			return counts
+		}
 	}
 	inst := normalizeInstrument(cfg.Instrument)
 	now := time.Now()

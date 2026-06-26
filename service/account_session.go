@@ -3,20 +3,20 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 )
 
 // Account is a per-account session: every OANDA broker and account operation
 // (summary, transactions, orders, trades, live runner, journal) hangs off an
 // Account so a single Service can manage many accounts concurrently.
-//
-// Account holds no mutable state of its own in this phase; it carries the
-// resolved account ID and a back-pointer to the owning Service for transport
-// (the shared *oanda.Client and logger). Per-account mutable state (bots,
-// trade→bot mapping) currently still lives on Service and is shared across
-// accounts; it moves here when the multi-account serve daemon lands.
 type Account struct {
 	ID  string
 	svc *Service
+
+	// snapMu guards snapshot; only one snapshot per account is ever created.
+	snapMu   sync.RWMutex
+	snapshot *AccountSnapshot
 }
 
 // Account returns the session for the given OANDA account ID, creating and
@@ -118,4 +118,37 @@ func (s *Service) DefaultAccount(ctx context.Context) (*Account, error) {
 		return nil, err
 	}
 	return s.Account(ctx, s.AccountID)
+}
+
+// EnsureSnapshot starts the account's background changes-poll goroutine if it
+// is not already running. The goroutine binds to ctx, so it stops when ctx is
+// cancelled. Safe to call from multiple goroutines; only one goroutine is ever
+// started per Account.
+func (a *Account) EnsureSnapshot(ctx context.Context, interval time.Duration) {
+	a.snapMu.Lock()
+	if a.snapshot == nil {
+		a.snapshot = newAccountSnapshot(a.svc.OANDA, a.ID, a.svc.Log)
+	}
+	snap := a.snapshot
+	a.snapMu.Unlock()
+
+	if !snap.IsRunning() {
+		if err := snap.Start(ctx, interval); err != nil {
+			if a.svc.Log != nil {
+				a.svc.Log.Warn("account snapshot: start failed", "err", err, "account", a.ID)
+			}
+		}
+	}
+}
+
+// getSnapshot returns the running AccountSnapshot for this account, or nil if
+// no snapshot is running. Callers fall back to direct OANDA calls when nil.
+func (a *Account) getSnapshot() *AccountSnapshot {
+	a.snapMu.RLock()
+	s := a.snapshot
+	a.snapMu.RUnlock()
+	if s != nil && s.IsRunning() {
+		return s
+	}
+	return nil
 }
