@@ -30,6 +30,7 @@ type portfolioInstrumentYAML struct {
 	Instrument   string  `yaml:"instrument"`    // OANDA format, e.g. "USD_CHF"
 	Timeframe    string  `yaml:"timeframe"`     // "H1" or "D1"
 	TickInterval string  `yaml:"tick_interval"` // optional poll override, e.g. "5m"
+	UseStream    bool    `yaml:"use_stream"`    // use OANDA pricing stream instead of polling
 	RiskPct      float64 `yaml:"risk_pct"`      // overrides top-level default
 	MaxUnits     int64   `yaml:"max_units"`
 	WarmupBars   int     `yaml:"warmup_bars"`
@@ -149,6 +150,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			Instrument:   y.Instrument,
 			Granularity:  granularity,
 			TickInterval: tick,
+			UseStream:    y.UseStream,
 			Strategy:     adapter,
 			RiskPct:      riskPct,
 			MaxUnits:     y.MaxUnits,

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
@@ -32,6 +34,13 @@ type LiveRunConfig struct {
 
 	// MaxPositionUSD caps position notional value in account currency. 0 = no cap.
 	MaxPositionUSD float64
+
+	// UseStream, when true, connects to the OANDA pricing stream instead of
+	// polling GetPricing on each tick. The stream runs in the background
+	// keeping a latest-price cache; the timer still drives strategy evaluation
+	// at TickInterval. On stream disconnect, the runner reconnects with
+	// exponential backoff and falls back to GetPricing until reconnected.
+	UseStream bool
 
 	// BotID is the managed-bot identifier. When set, trades written to the
 	// live journal are tagged with this ID so reports can filter by bot.
@@ -68,6 +77,15 @@ func (a *Account) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 	// polls incremental changes, eliminating per-tick GetOpenTrades calls.
 	a.EnsureSnapshot(ctx, cfg.TickInterval)
 
+	// Start the pricing stream cache if requested. The cache is nil when
+	// UseStream is false — runOneTick falls back to GetPricing in that case.
+	var pxCache *priceCache
+	if cfg.UseStream {
+		pxCache = &priceCache{}
+		go a.runPricingStream(ctx, cfg.Instrument, log, pxCache)
+		log.Info("live runner: pricing stream started", "instrument", cfg.Instrument)
+	}
+
 	// tickCounts tracks how many ticks each open trade has been held.
 	// Seeded from OANDA open-time on startup so a restart doesn't reset ages.
 	tickCounts := a.seedTickCounts(ctx, cfg, log)
@@ -89,7 +107,7 @@ func (a *Account) RunLiveStrategy(ctx context.Context, cfg LiveRunConfig) error 
 			log.Info("live runner: market open, resuming", "instrument", cfg.Instrument)
 			marketWasClosed = false
 		}
-		if err := a.runOneTick(ctx, cfg, tickCounts, log); err != nil {
+		if err := a.runOneTick(ctx, cfg, tickCounts, pxCache, log); err != nil {
 			log.Warn("live runner: tick error", "err", err)
 		}
 	}
@@ -146,22 +164,36 @@ func (a *Account) runOneTick(
 	ctx context.Context,
 	cfg LiveRunConfig,
 	tickCounts map[string]int,
+	pxCache *priceCache,
 	log *slog.Logger,
 ) error {
-	// 1. Current price.
-	prices, err := a.svc.OANDA.GetPricing(ctx, a.ID, cfg.Instrument)
-	if err != nil {
-		return fmt.Errorf("get pricing: %w", err)
+	// 1. Current price — prefer stream cache when available; fall back to REST.
+	var livePrice LivePrice
+	if pxCache != nil {
+		if tick := pxCache.get(); tick != nil {
+			livePrice = LivePrice{
+				Instrument: cfg.Instrument,
+				Bid:        tick.Bid,
+				Ask:        tick.Ask,
+				Time:       tick.Time,
+			}
+		}
 	}
-	if len(prices) == 0 {
-		return fmt.Errorf("no price for %s", cfg.Instrument)
-	}
-	px := prices[0]
-	livePrice := LivePrice{
-		Instrument: cfg.Instrument,
-		Bid:        px.Bid,
-		Ask:        px.Ask,
-		Time:       time.Now(),
+	if livePrice.Bid == 0 {
+		prices, err := a.svc.OANDA.GetPricing(ctx, a.ID, cfg.Instrument)
+		if err != nil {
+			return fmt.Errorf("get pricing: %w", err)
+		}
+		if len(prices) == 0 {
+			return fmt.Errorf("no price for %s", cfg.Instrument)
+		}
+		px := prices[0]
+		livePrice = LivePrice{
+			Instrument: cfg.Instrument,
+			Bid:        px.Bid,
+			Ask:        px.Ask,
+			Time:       time.Now(),
+		}
 	}
 
 	// 2. Open trades on the account, filtered to this instrument.
@@ -171,9 +203,10 @@ func (a *Account) runOneTick(
 	if snap := a.getSnapshot(); snap != nil {
 		allTrades = snap.OpenTrades()
 	} else {
-		allTrades, err = a.svc.OANDA.GetOpenTrades(ctx, a.ID)
-		if err != nil {
-			return fmt.Errorf("get open trades: %w", err)
+		var tradesErr error
+		allTrades, tradesErr = a.svc.OANDA.GetOpenTrades(ctx, a.ID)
+		if tradesErr != nil {
+			return fmt.Errorf("get open trades: %w", tradesErr)
 		}
 	}
 	inst := normalizeInstrument(cfg.Instrument)
@@ -205,7 +238,7 @@ func (a *Account) runOneTick(
 	log.Info("live runner: tick",
 		"strategy", cfg.Strategy.Name(),
 		"instrument", cfg.Instrument,
-		"bid", px.Bid, "ask", px.Ask,
+		"bid", livePrice.Bid, "ask", livePrice.Ask,
 		"open_trades", len(liveTrades),
 	)
 	for _, t := range liveTrades {
@@ -282,6 +315,77 @@ func (a *Account) runOneTick(
 		}
 	}
 	return nil
+}
+
+// priceCache holds the most recent tick from the OANDA pricing stream.
+// A nil tick means no price has been received yet.
+type priceCache struct {
+	mu   sync.RWMutex
+	tick *oanda.PriceTick
+}
+
+func (c *priceCache) set(t oanda.PriceTick) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tick = &t
+}
+
+func (c *priceCache) get() *oanda.PriceTick {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.tick
+}
+
+// runPricingStream keeps the priceCache fresh by connecting to the OANDA
+// pricing stream and reconnecting with exponential backoff on disconnect.
+// It returns only when ctx is cancelled.
+func (a *Account) runPricingStream(ctx context.Context, instrument string, log *slog.Logger, cache *priceCache) {
+	const (
+		baseDelay = 2 * time.Second
+		maxDelay  = 2 * time.Minute
+	)
+	attempt := 0
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		ch, err := a.svc.OANDA.StreamPricing(ctx, oanda.PricingStreamOptions{
+			AccountID:   a.ID,
+			Instruments: []string{instrument},
+			OnHeartbeat: func(t time.Time) {
+				log.Debug("live runner: pricing stream heartbeat", "t", t)
+			},
+		})
+		if err != nil {
+			log.Warn("live runner: pricing stream connect failed", "err", err, "attempt", attempt+1)
+		} else {
+			attempt = 0 // reset backoff on successful connection
+			for ev := range ch {
+				if ev.Err != nil {
+					log.Warn("live runner: pricing stream error", "err", ev.Err)
+					break
+				}
+				cache.set(ev.Tick)
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			log.Warn("live runner: pricing stream disconnected, reconnecting")
+		}
+
+		attempt++
+		delay := time.Duration(math.Min(
+			float64(baseDelay)*math.Pow(2, float64(attempt-1)),
+			float64(maxDelay),
+		))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
 }
 
 // seedTickCounts fetches the current open trades from OANDA at startup and

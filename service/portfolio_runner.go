@@ -28,6 +28,7 @@ type InstrumentRunConfig struct {
 	Strategy     LiveStrategy
 	RiskPct      float64
 	MaxUnits     int64
+	UseStream    bool // when true, use OANDA pricing stream instead of polling
 }
 
 // RunPortfolio runs all instruments concurrently until ctx is cancelled.
@@ -81,6 +82,7 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 				Strategy:     strategy,
 				RiskPct:      inst.RiskPct,
 				MaxUnits:     inst.MaxUnits,
+				UseStream:    inst.UseStream,
 			})
 			if err != nil && ctx.Err() == nil {
 				errs <- fmt.Errorf("%s: %w", inst.Instrument, err)
