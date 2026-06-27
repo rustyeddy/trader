@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"time"
 
@@ -364,8 +363,8 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LiveP
 				}
 				var stopPips market.Pips
 				if perPip := inst.PriceUnitsPerPip(); perPip > 0 {
-					// dist and perPip are both in Price units; result is in deci-pips.
-					stopPips = market.Pips(math.Round(float64(dist) / float64(perPip) * 10))
+					// Rounding integer division: (dist×10 + perPip/2) / perPip.
+					stopPips = market.Pips((int64(dist)*10 + int64(perPip)/2) / int64(perPip))
 				}
 
 				side := "long"
@@ -398,9 +397,8 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LiveP
 // oandaCandleToCandleTime converts an OANDA candle to the internal CandleTime
 // type used by backtest strategies. Uses the mid (bid+ask)/2 for each OHLC.
 func oandaCandleToCandleTime(c oanda.Candle, _ string) market.CandleTime {
-	scale := float64(market.PriceScale)
 	toPrice := func(bid, ask float64) market.Price {
-		return market.Price(math.Round(((bid + ask) / 2) * scale))
+		return market.PriceFromFloat((bid + ask) / 2)
 	}
 	candle := market.Candle{
 		Open:  toPrice(c.BidOpen, c.AskOpen),

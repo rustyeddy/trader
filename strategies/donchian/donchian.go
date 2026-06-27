@@ -17,6 +17,7 @@ package donchianv6
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/indicator"
@@ -36,7 +37,7 @@ const (
 // Breakout is the v6 Donchian strategy.
 type Breakout struct {
 	period        int
-	closeStrength float64
+	closeStrength int32 // ×1000; e.g. 0.6 → 600
 	confirmBars   int
 	adxThreshold  float64
 	blockMonday   bool
@@ -103,7 +104,7 @@ func New(cfg Config) (*Breakout, error) {
 	}
 	return &Breakout{
 		period:        cfg.Period,
-		closeStrength: cfg.CloseStrength,
+		closeStrength: int32(math.Round(cfg.CloseStrength * 1000)),
 		confirmBars:   cb,
 		adxThreshold:  at,
 		blockMonday:   cfg.BlockMonday,
@@ -160,15 +161,17 @@ func (d *Breakout) advanceBar(c market.Candle) {
 	d.adx.Update(c)
 }
 
-func closeStrengthOK(c market.Candle, side market.Side, threshold float64) bool {
-	rng := float64(c.High - c.Low)
+// closeStrengthOK checks that the bar closed in the strong portion of its range.
+// threshold is ×1000 (e.g. 600 means 60%). Uses integer arithmetic on Price units.
+func closeStrengthOK(c market.Candle, side market.Side, threshold int32) bool {
+	rng := int64(c.High - c.Low)
 	if rng <= 0 {
 		return false
 	}
 	if side == market.Long {
-		return float64(c.Close-c.Low)/rng >= threshold
+		return int64(c.Close-c.Low)*1000 >= int64(threshold)*rng
 	}
-	return float64(c.High-c.Close)/rng >= threshold
+	return int64(c.High-c.Close)*1000 >= int64(threshold)*rng
 }
 
 func (d *Breakout) adxGatePass(side market.Side) bool {

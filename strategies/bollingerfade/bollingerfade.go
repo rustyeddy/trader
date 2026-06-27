@@ -31,8 +31,7 @@ func init() {
 type Fade struct {
 	bb      *indicator.BollingerBands
 	atr     *indicator.ATR
-	atrMult float64
-	scale   float64
+	atrMult float64 // display only: stop description and strategy name
 	name    string
 }
 
@@ -73,7 +72,6 @@ func New(cfg Config) (*Fade, error) {
 		bb:      bb,
 		atr:     atr,
 		atrMult: atrMult,
-		scale:   float64(market.PriceScale),
 		name:    fmt.Sprintf("BB-FADE(%d,%.1f,atr=%d×%.1f)", period, mult, atrPeriod, atrMult),
 	}, nil
 }
@@ -139,13 +137,13 @@ func (f *Fade) Update(_ context.Context, ct *market.CandleTime, run strategy.Str
 		return strategy.Signal{
 			Side: market.Long,
 			Reason: fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
-				float64(ct.Close)/f.scale, float64(lower)/f.scale),
+				ct.Close.Float64(), lower.Float64()),
 		}
 	case ct.Close > upper:
 		return strategy.Signal{
 			Side: market.Short,
 			Reason: fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
-				float64(ct.Close)/f.scale, float64(upper)/f.scale),
+				ct.Close.Float64(), upper.Float64()),
 		}
 	}
 
