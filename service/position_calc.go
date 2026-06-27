@@ -64,8 +64,10 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		return nil, fmt.Errorf("specify units or notional, not both")
 	}
 
-	price := req.Price
-	if price == 0 {
+	var midPrice market.Price
+	if req.Price > 0 {
+		midPrice = market.PriceFromFloat(req.Price)
+	} else {
 		if s.OANDA == nil {
 			return nil, fmt.Errorf("price required when OANDA is not configured")
 		}
@@ -77,7 +79,7 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		if len(prices) == 0 || prices[0].Mid == 0 {
 			return nil, fmt.Errorf("OANDA returned zero price for %s", inst)
 		}
-		price = prices[0].Mid
+		midPrice = market.PriceFromFloat(prices[0].Mid)
 	}
 
 	type lotDef struct {
@@ -89,7 +91,7 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 	case req.Units > 0:
 		lots = []lotDef{{"custom", req.Units}}
 	case req.Notional > 0:
-		lots = []lotDef{{"custom", posUnitsForNotional(instMeta, price, req.Notional)}}
+		lots = []lotDef{{"custom", posUnitsForNotional(instMeta, midPrice, req.Notional)}}
 	default:
 		lots = []lotDef{
 			{"micro (0.01)", 1_000},
@@ -98,9 +100,11 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		}
 	}
 
+	// midFloat is used only for display fields in PositionRow and PositionCalcResult.
+	midFloat := midPrice.Float64()
 	rows := make([]PositionRow, 0, len(lots))
 	for _, l := range lots {
-		n := posNotionalUSD(instMeta, price, l.units)
+		n := posNotionalUSD(instMeta, midFloat, l.units)
 		m := n * instMeta.MarginRate.Float64()
 		row := PositionRow{
 			Label:    l.label,
@@ -110,14 +114,14 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 			Margin:   m,
 		}
 		if req.Pips > 0 {
-			row.PipsPL = instMeta.PipValueUSD(price, l.units, req.Pips)
+			row.PipsPL = instMeta.PipValueUSD(midFloat, l.units, req.Pips)
 		}
 		rows = append(rows, row)
 	}
 
 	return &PositionCalcResult{
 		Instrument: inst,
-		Price:      price,
+		Price:      midFloat,
 		MarginPct:  instMeta.MarginRate.Float64() * 100,
 		Pips:       req.Pips,
 		Rows:       rows,
@@ -131,12 +135,14 @@ func posNotionalUSD(inst *market.Instrument, midPrice float64, units int64) floa
 	return float64(units) * midPrice
 }
 
-func posUnitsForNotional(inst *market.Instrument, midPrice, targetUSD float64) int64 {
+func posUnitsForNotional(inst *market.Instrument, midPrice market.Price, targetUSD float64) int64 {
 	if inst.BaseCurrency == "USD" {
 		return int64(math.Round(targetUSD))
 	}
 	if midPrice <= 0 {
 		return 0
 	}
-	return int64(math.Round(targetUSD / midPrice))
+	// targetUSD is user input (boundary float); midPrice is fixed-point.
+	// Multiply targetUSD by PriceScale so the division uses the integer representation.
+	return int64(math.Round(targetUSD * float64(market.PriceScale) / float64(midPrice)))
 }
