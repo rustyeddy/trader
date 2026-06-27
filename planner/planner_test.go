@@ -61,6 +61,7 @@ func (c testCtx) Regime() strategy.RegimeFilter { return c.regime }
 func (c testCtx) Candle() market.CandleTime     { return c.candle }
 func (c testCtx) Slippage() market.Price        { return c.slippage }
 func (c testCtx) MaxSpread() market.Price       { return c.maxSpread }
+func (c testCtx) DefaultStopPips() market.Pips  { return 0 }
 
 func openReq(id string, side market.Side, price, stop market.Price, units market.Units) *execution.OpenRequest {
 	return &execution.OpenRequest{Request: execution.Request{

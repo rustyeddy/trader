@@ -5,6 +5,7 @@ defaults:
   account-ccy: USD
   scale: 100000
   risk-pct: 1.0
+  stop-pips: 20
   source: oanda
 
 runs:

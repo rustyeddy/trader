@@ -10,19 +10,21 @@ import (
 // carries the account, the active exit/regime components, the current candle,
 // and the configured execution-cost parameters.
 type runPlanContext struct {
-	instrument string
-	acct       *execution.Account
-	exit       strategy.ExitStrategy
-	regime     strategy.RegimeFilter
-	candle     market.CandleTime
-	slippage   market.Price
-	maxSpread  market.Price
+	instrument      string
+	acct            *execution.Account
+	exit            strategy.ExitStrategy
+	regime          strategy.RegimeFilter
+	candle          market.CandleTime
+	slippage        market.Price
+	maxSpread       market.Price
+	defaultStopPips market.Pips
 }
 
-func (c runPlanContext) Instrument() string           { return c.instrument }
-func (c runPlanContext) Account() *execution.Account  { return c.acct }
-func (c runPlanContext) Exit() strategy.ExitStrategy  { return c.exit }
+func (c runPlanContext) Instrument() string            { return c.instrument }
+func (c runPlanContext) Account() *execution.Account   { return c.acct }
+func (c runPlanContext) Exit() strategy.ExitStrategy   { return c.exit }
 func (c runPlanContext) Regime() strategy.RegimeFilter { return c.regime }
-func (c runPlanContext) Candle() market.CandleTime    { return c.candle }
-func (c runPlanContext) Slippage() market.Price       { return c.slippage }
-func (c runPlanContext) MaxSpread() market.Price      { return c.maxSpread }
+func (c runPlanContext) Candle() market.CandleTime     { return c.candle }
+func (c runPlanContext) Slippage() market.Price        { return c.slippage }
+func (c runPlanContext) MaxSpread() market.Price       { return c.maxSpread }
+func (c runPlanContext) DefaultStopPips() market.Pips  { return c.defaultStopPips }

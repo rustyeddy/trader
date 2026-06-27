@@ -511,6 +511,7 @@ func (c livePlanContext) Regime() strategy.RegimeFilter { return c.regime }
 func (c livePlanContext) Candle() market.CandleTime     { return c.candle }
 func (c livePlanContext) Slippage() market.Price        { return 0 }
 func (c livePlanContext) MaxSpread() market.Price       { return 0 }
+func (c livePlanContext) DefaultStopPips() market.Pips  { return 0 }
 
 // ── lot tracker ──────────────────────────────────────────────────────────────
 

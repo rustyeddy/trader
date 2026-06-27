@@ -25,6 +25,10 @@ type PlanContext interface {
 	Candle() market.CandleTime
 	Slippage() market.Price
 	MaxSpread() market.Price
+	// DefaultStopPips returns a fallback stop distance (in deci-pips) applied
+	// when neither the strategy signal nor the exit strategy supplies a stop.
+	// 0 means no fallback is configured.
+	DefaultStopPips() market.Pips
 }
 
 // Stats reports the execution-cost bookkeeping a Planner produces while
@@ -105,6 +109,21 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 		if exit != nil && exit.Ready() {
 			if s := exit.InitialStop(openReq.Side, openReq.Price, candle.Candle); s != 0 {
 				openReq.Stop = s
+			}
+		}
+
+		// Fallback: if no stop was set by the signal or exit strategy, apply
+		// the run-level DefaultStopPips (set in backtest config defaults).
+		if openReq.Stop == 0 {
+			if pips := pc.DefaultStopPips(); pips > 0 {
+				inst := market.GetInstrument(pc.Instrument())
+				if inst != nil {
+					if openReq.Side == market.Long {
+						openReq.Stop = inst.SubPips(openReq.Price, pips)
+					} else {
+						openReq.Stop = inst.AddPips(openReq.Price, pips)
+					}
+				}
 			}
 		}
 

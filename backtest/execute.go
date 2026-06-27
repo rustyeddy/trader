@@ -226,13 +226,14 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		// max-spread gate, fill-price adjustment, initial stop, and sizing all
 		// live in the planner.
 		pc := runPlanContext{
-			instrument: run.Request.Instrument,
-			acct:       t.Account,
-			exit:       exit,
-			regime:     regime,
-			candle:     candle,
-			slippage:   slippage,
-			maxSpread:  maxSpread,
+			instrument:      run.Request.Instrument,
+			acct:            t.Account,
+			exit:            exit,
+			regime:          regime,
+			candle:          candle,
+			slippage:        slippage,
+			maxSpread:       maxSpread,
+			defaultStopPips: run.Request.DefaultStopPips,
 		}
 		var stats planner.Stats
 		plan, stats, err := pl.PlanSignal(sig, pc)

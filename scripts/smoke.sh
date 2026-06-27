@@ -101,7 +101,7 @@ response=$(curl -sf -X POST "http://localhost:$PORT/api/v1/replay" \
         "from": "2024-01-02",
         "to": "2024-01-12",
         "warmup_bars": 20,
-        "strategy": {"kind": "donchian-v6"}
+        "strategy": {"kind": "donchian"}
     }')
 echo "$response" | jq -e '.bars | length > 0' >/dev/null \
     || fail "H1 replay returned no bars: $response"
@@ -117,7 +117,7 @@ response=$(curl -sf -X POST "http://localhost:$PORT/api/v1/replay" \
         "from": "2024-01-01",
         "to": "2024-04-01",
         "warmup_bars": 50,
-        "strategy": {"kind": "donchian-v6"}
+        "strategy": {"kind": "donchian"}
     }')
 echo "$response" | jq -e '.bars | length > 0' >/dev/null \
     || fail "D replay returned no bars: $response"
