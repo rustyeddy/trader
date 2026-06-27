@@ -11,7 +11,7 @@ LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
 
 TULIP_DIR ?= ../tulip
 
-.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
+.PHONY: all build tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
 
 all: vet build
 
@@ -36,7 +36,7 @@ build-tulip:
 	cd $(TULIP_DIR) && npm run build
 	$(MAKE) tulip-sync build
 
-build-full: ui build
+build-full: build-tulip build
 
 vet:
 	go vet ./...
