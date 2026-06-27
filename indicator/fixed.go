@@ -9,6 +9,10 @@ import (
 const (
 	indicatorValueScale int64 = 1_000_000
 	log2TenQ32          int64 = 14_267_572_527
+
+	// ValueScale is the scale factor used for all indicator output values
+	// (ADX, DI, DX, etc.). An ADX of 25.0 is stored as 25_000_000.
+	ValueScale = indicatorValueScale
 )
 
 func roundDivPositive(num, den int64) int64 {

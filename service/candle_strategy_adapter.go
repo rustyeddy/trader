@@ -454,7 +454,6 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 	if a.svc == nil {
 		return // no service — trailing stops disabled
 	}
-	scale := float64(a.scale)
 	for id, meta := range a.lots.meta {
 		lot := a.lots.byID[id]
 		if lot == nil {
@@ -476,7 +475,7 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 			continue
 		}
 		// Stop moved — push to OANDA.
-		stopFloat := float64(newStop) / scale
+		stopFloat := newStop.Float64()
 		if err := a.svc.UpdateTradeStop(ctx, id, stopFloat, 0); err != nil {
 			a.log.Warn("candle adapter: trailing stop update failed",
 				"trade_id", id, "stop", stopFloat, "err", err)
@@ -484,7 +483,7 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 		}
 		a.log.Info("candle adapter: trailing stop updated",
 			"trade_id", id, "instrument", a.instrument,
-			"old_stop", float64(meta.currentStop)/scale,
+			"old_stop", meta.currentStop.Float64(),
 			"new_stop", stopFloat,
 		)
 		meta.currentStop = newStop

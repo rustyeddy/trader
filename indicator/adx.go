@@ -63,6 +63,21 @@ func (a *ADX) Warmup() int      { return 2 * a.n }
 func (a *ADX) Ready() bool      { return a.ready }
 func (a *ADX) Float64() float64 { return fixedScaledToFloat64(a.adx) }
 
+// Value returns the raw scaled ADX (×ValueScale). Use for fixed-point comparisons.
+func (a *ADX) Value() int64 { return a.adx }
+
+// ValueUnits returns ADX as market.Units (×UnitsScale == ×ValueScale).
+// Use when comparing against a threshold stored as market.Units.
+func (a *ADX) ValueUnits() market.Units { return market.Units(a.adx) }
+
+// PlusDIRaw and MinusDIRaw return raw scaled DI values for fixed-point comparisons.
+func (a *ADX) PlusDIRaw() int64  { return a.plusDI }
+func (a *ADX) MinusDIRaw() int64 { return a.minusDI }
+
+// PlusDIUnits and MinusDIUnits return DI values as market.Units.
+func (a *ADX) PlusDIUnits() market.Units  { return market.Units(a.plusDI) }
+func (a *ADX) MinusDIUnits() market.Units { return market.Units(a.minusDI) }
+
 func (a *ADX) Reset() {
 	*a = ADX{
 		n:    a.n,

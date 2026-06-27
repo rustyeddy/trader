@@ -39,7 +39,7 @@ type Breakout struct {
 	period        int
 	closeStrength int32 // ×1000; e.g. 0.6 → 600
 	confirmBars   int
-	adxThreshold  float64
+	adxThreshold  market.Units // ×UnitsScale (==ValueScale); e.g. 25.0 → 25_000_000
 	blockMonday   bool
 	blockFriday   bool
 
@@ -106,7 +106,7 @@ func New(cfg Config) (*Breakout, error) {
 		period:        cfg.Period,
 		closeStrength: int32(math.Round(cfg.CloseStrength * 1000)),
 		confirmBars:   cb,
-		adxThreshold:  at,
+		adxThreshold:  market.Units(math.Round(at * float64(indicator.ValueScale))),
 		blockMonday:   cfg.BlockMonday,
 		blockFriday:   cfg.BlockFriday,
 		highs:         make([]market.Price, cfg.Period),
@@ -178,13 +178,13 @@ func (d *Breakout) adxGatePass(side market.Side) bool {
 	if !d.adx.Ready() {
 		return true
 	}
-	if d.adx.Float64() < d.adxThreshold {
+	if d.adx.ValueUnits() < d.adxThreshold {
 		return false
 	}
 	if side == market.Long {
-		return d.adx.PlusDI() > d.adx.MinusDI()
+		return d.adx.PlusDIUnits() > d.adx.MinusDIUnits()
 	}
-	return d.adx.MinusDI() > d.adx.PlusDI()
+	return d.adx.MinusDIUnits() > d.adx.PlusDIUnits()
 }
 
 func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {

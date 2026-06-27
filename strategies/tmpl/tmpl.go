@@ -6,6 +6,7 @@ package tmpl
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -17,18 +18,18 @@ func init() {
 
 type Config struct {
 	Lookback  int
-	Threshold float64
+	Threshold float64 // price-change threshold in native units (e.g. 0.0015 for 15 pips on a 5-decimal pair)
 	Scale     market.Scale6
 }
 
 type Strategy struct {
-	cfg  Config
-	name string
+	cfg       Config
+	name      string
+	threshold market.Price // Threshold converted to Price units at construction
 
-	ready bool
-	bars  int
-
-	lastClose float64
+	ready     bool
+	bars      int
+	lastClose market.Price
 }
 
 func New(cfg Config) (*Strategy, error) {
@@ -40,8 +41,9 @@ func New(cfg Config) (*Strategy, error) {
 	}
 
 	return &Strategy{
-		cfg:  cfg,
-		name: fmt.Sprintf("TEMPLATE_STRATEGY(lb=%d,th=%.4f)", cfg.Lookback, cfg.Threshold),
+		cfg:       cfg,
+		threshold: market.Price(math.Round(cfg.Threshold * float64(cfg.Scale))),
+		name:      fmt.Sprintf("TEMPLATE_STRATEGY(lb=%d,th=%.4f)", cfg.Lookback, cfg.Threshold),
 	}, nil
 }
 
@@ -60,8 +62,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.S
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
-	c := ct.Candle
-	closePx := float64(c.Close) / float64(s.cfg.Scale)
+	closePx := ct.Close
 
 	s.bars++
 	if s.bars < s.cfg.Lookback {
@@ -73,11 +74,11 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.S
 
 	if s.lastClose > 0 {
 		change := closePx - s.lastClose
-		if change > s.cfg.Threshold {
+		if change > s.threshold {
 			s.lastClose = closePx
 			return strategy.Hold("above threshold")
 		}
-		if change < -s.cfg.Threshold {
+		if change < -s.threshold {
 			s.lastClose = closePx
 			return strategy.Hold("below threshold")
 		}

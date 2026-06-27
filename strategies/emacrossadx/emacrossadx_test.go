@@ -86,7 +86,7 @@ func TestNew_DefaultsADXThresholdTo20(t *testing.T) {
 	cfg.ADXThreshold = 0 // should default to 20.0
 	s, err := New(cfg)
 	require.NoError(t, err)
-	assert.Equal(t, 20.0, s.adxThreshold)
+	assert.Equal(t, market.Units(20_000_000), s.adxThreshold)
 }
 
 func TestNew_WithATRPeriod(t *testing.T) {

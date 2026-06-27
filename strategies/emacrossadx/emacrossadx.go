@@ -21,7 +21,7 @@ type Strategy struct {
 	core emacross.Core
 	adx  *indicator.ADX
 
-	adxThreshold    float64
+	adxThreshold    market.Units // ×UnitsScale (==ValueScale); e.g. 20.0 → 20_000_000
 	requireDI       bool
 	requireADXReady bool
 	pendingRel      int
@@ -94,7 +94,7 @@ func New(cfg Config) (*Strategy, error) {
 			Name:          fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
 		adx:             adx,
-		adxThreshold:    cfg.ADXThreshold,
+		adxThreshold:    market.Units(math.Round(cfg.ADXThreshold * float64(indicator.ValueScale))),
 		requireDI:       cfg.RequireDI,
 		requireADXReady: cfg.RequireADXReady,
 	}, nil
@@ -182,15 +182,15 @@ func (x *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.S
 		return strategy.Hold("waiting for ADX readiness")
 	}
 
-	if x.adx.Ready() && x.adx.Float64() < x.adxThreshold {
+	if x.adx.Ready() && x.adx.ValueUnits() < x.adxThreshold {
 		return strategy.Hold("waiting for ADX threshold")
 	}
 
 	if x.requireDI && x.adx.Ready() {
-		if x.pendingRel == +1 && !(x.adx.PlusDI() > x.adx.MinusDI()) {
+		if x.pendingRel == +1 && !(x.adx.PlusDIUnits() > x.adx.MinusDIUnits()) {
 			return strategy.Hold("waiting for DI confirmation (buy)")
 		}
-		if x.pendingRel == -1 && !(x.adx.MinusDI() > x.adx.PlusDI()) {
+		if x.pendingRel == -1 && !(x.adx.MinusDIUnits() > x.adx.PlusDIUnits()) {
 			return strategy.Hold("waiting for DI confirmation (sell)")
 		}
 	}

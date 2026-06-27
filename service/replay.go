@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/rustyeddy/trader/backtest"
@@ -142,7 +141,6 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	}
 	defer func() { _ = iter.Close() }()
 
-	scale := float64(market.PriceScale)
 	inst_ := market.GetInstrument(inst)
 
 	var (
@@ -202,7 +200,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 						Time:      int64(ts),
 						Kind:      SignalStopUpdate,
 						Side:      sideStr(pos.side),
-						StopPrice: float64(newStop) / scale,
+						StopPrice: newStop.Float64(),
 						StopPips:  pipsFromDist(pos.side, candle.Close, newStop, inst_),
 					})
 					pos.currentStop = newStop
@@ -287,7 +285,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 						Kind:      SignalOpen,
 						Side:      sideStr(sig.Side),
 						Price:     candle.Close.Float64(),
-						StopPrice: float64(stop) / scale,
+						StopPrice: stop.Float64(),
 						StopPips:  stopPips,
 						Reason:    sig.Reason,
 					})
@@ -353,7 +351,8 @@ func pipsFromDist(_ market.Side, entry, stop market.Price, inst *market.Instrume
 	if perPip <= 0 {
 		return 0
 	}
-	return math.Round(float64(dist)/float64(perPip)*10) / 10
+	tenthPips := (int64(dist)*10 + int64(perPip)/2) / int64(perPip)
+	return float64(tenthPips) / 10.0
 }
 
 // warmupDuration converts n bars of the given granularity to a time.Duration
