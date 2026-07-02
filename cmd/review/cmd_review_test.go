@@ -1,105 +1,138 @@
 package review
 
 import (
-	"os"
-	"path/filepath"
+	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/rustyeddy/trader/review"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// csvFile writes content to a temp file and returns its path.
-func csvFile(t *testing.T, content string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "review.csv")
-	require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
-	return p
-}
-
-// validCSV is a minimal two-data-row review CSV (one tradeable, one no-trade).
-const validCSV = `Group,Pair,Structure,Setup Bias,Trend,Volatility,Support zone,Resistance Zone,Status
-Majors,EURUSD,Bullish,Long,Uptrend,Low,1.0800-1.0820,1.0900-1.0920,Tradeable watch list
-Majors,GBPUSD,Neutral,None,Sideways,Medium,1.2500-1.2520,1.2600-1.2620,No Trade
-`
-
-// ── New command structure ─────────────────────────────────────────────────────
 
 func TestNew_UseName(t *testing.T) {
 	cmd := New(nil)
 	assert.Equal(t, "review", cmd.Use)
 }
 
-func TestNew_HasFileFlag(t *testing.T) {
+func TestNew_HasExpectedFlags(t *testing.T) {
 	cmd := New(nil)
-	assert.NotNil(t, cmd.Flags().Lookup("file"))
+	for _, name := range []string{"instruments", "watch", "hotlist", "tradeable", "output", "token", "env"} {
+		assert.NotNil(t, cmd.Flags().Lookup(name), "missing --%s flag", name)
+	}
 }
 
-func TestNew_HasAllFlag(t *testing.T) {
-	cmd := New(nil)
-	f := cmd.Flags().Lookup("all")
-	require.NotNil(t, f)
-	assert.Equal(t, "false", f.DefValue)
+func TestSplitCSV(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "EURUSD", []string{"EURUSD"}},
+		{"multiple", "EURUSD,GBPUSD,USDJPY", []string{"EURUSD", "GBPUSD", "USDJPY"}},
+		{"whitespace and blanks trimmed", " EURUSD , ,GBPUSD ", []string{"EURUSD", "GBPUSD"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, splitCSV(tt.in))
+		})
+	}
 }
 
-func TestNew_FileFlagIsRequired(t *testing.T) {
-	cmd := New(nil)
-	f := cmd.Flags().Lookup("file")
-	require.NotNil(t, f)
-	// cobra stores required-flag annotations in the command.
-	annotations := f.Annotations
-	_, required := annotations["cobra_annotation_bash_completion_one_required_flag"]
-	assert.True(t, required, "flag --file should be marked required")
+func TestSortByBucket_OrdersTradeableThenHotThenWatch(t *testing.T) {
+	results := []review.ReviewResult{
+		{Instrument: "AUDUSD", Bucket: "watch"},
+		{Instrument: "USDJPY", Bucket: "hot"},
+		{Instrument: "EURUSD", Bucket: "tradeable"},
+		{Instrument: "GBPJPY", Bucket: "hot"},
+		{Instrument: "NZDUSD", Bucket: "tradeable"},
+	}
+	sortByBucket(results)
+
+	got := make([]string, len(results))
+	for i, r := range results {
+		got[i] = r.Instrument
+	}
+	// Tradeable pairs first (stable order), then hot, then watch.
+	assert.Equal(t, []string{"EURUSD", "NZDUSD", "USDJPY", "GBPJPY", "AUDUSD"}, got)
 }
 
-// ── RunE error paths ──────────────────────────────────────────────────────────
-
-func TestRunE_MissingFileReturnsError(t *testing.T) {
-	cmd := New(nil)
-	_ = cmd.Flags().Set("file", "/nonexistent/review.csv")
-	err := cmd.RunE(cmd, nil)
+func TestValidateOutputFormat(t *testing.T) {
+	for _, ok := range []string{"table", "json", "org"} {
+		assert.NoError(t, validateOutputFormat(ok))
+	}
+	err := validateOutputFormat("xml")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "review.csv")
+	assert.Contains(t, err.Error(), "invalid --output")
 }
 
-func TestRunE_MalformedZoneReturnsError(t *testing.T) {
-	bad := `Group,Pair,Structure,Setup Bias,Trend,Volatility,Support zone,Resistance Zone,Status
-Majors,EURUSD,Bullish,Long,Uptrend,Low,NOTAZONE,1.0900-1.0920,Tradeable watch list
-`
+func resetCategoryFlags(t *testing.T) {
+	t.Helper()
+	showWatch, showHotlist, showTradeable = false, false, false
+}
+
+func TestSelectedBuckets_DefaultsToAllThree(t *testing.T) {
+	resetCategoryFlags(t)
+	assert.Equal(t, map[string]bool{"watch": true, "hot": true, "tradeable": true}, selectedBuckets())
+}
+
+func TestSelectedBuckets_HonorsExplicitSelection(t *testing.T) {
+	resetCategoryFlags(t)
+	showHotlist = true
+	defer resetCategoryFlags(t)
+	assert.Equal(t, map[string]bool{"watch": false, "hot": true, "tradeable": false}, selectedBuckets())
+}
+
+func TestRunReview_InvalidOutputReturnsError(t *testing.T) {
+	// Output validation happens before buildService/OANDA access, so this
+	// stays offline even though runReview otherwise talks to OANDA.
 	cmd := New(nil)
-	_ = cmd.Flags().Set("file", csvFile(t, bad))
-	err := cmd.RunE(cmd, nil)
+	require.NoError(t, cmd.Flags().Set("output", "bogus"))
+	err := runReview(cmd, nil)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --output")
 }
 
-func TestRunE_ValidCSV_ReturnsNil(t *testing.T) {
-	cmd := New(nil)
-	_ = cmd.Flags().Set("file", csvFile(t, validCSV))
-	require.NoError(t, cmd.RunE(cmd, nil))
+func TestRenderJSON(t *testing.T) {
+	results := []review.ReviewResult{
+		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long"},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, renderJSON(&buf, results))
+
+	var got []review.ReviewResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "EURUSD", got[0].Instrument)
+	assert.Equal(t, "tradeable", got[0].Bucket)
 }
 
-func TestRunE_EmptyCSV_OnlyHeader_ReturnsNil(t *testing.T) {
-	headerOnly := "Group,Pair,Structure,Setup Bias,Trend,Volatility,Support zone,Resistance Zone,Status\n"
-	cmd := New(nil)
-	_ = cmd.Flags().Set("file", csvFile(t, headerOnly))
-	require.NoError(t, cmd.RunE(cmd, nil))
+func TestRenderOrg_EmitsHlineBetweenBucketGroups(t *testing.T) {
+	results := []review.ReviewResult{
+		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long"},
+		{Instrument: "USDJPY", Bucket: "hot", Bias: "short"},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, renderOrg(&buf, results))
+
+	out := buf.String()
+	assert.Contains(t, out, "| PAIR | BUCKET |")
+	assert.Contains(t, out, "| EURUSD | tradeable | long")
+	assert.Contains(t, out, "| USDJPY | hot | short")
+	// One hline after the header, one between the two bucket groups.
+	assert.Equal(t, 2, strings.Count(out, "|-\n"))
 }
 
-// ── --all flag filtering ──────────────────────────────────────────────────────
-
-func TestRunE_AllFlag_DoesNotError(t *testing.T) {
-	cmd := New(nil)
-	_ = cmd.Flags().Set("file", csvFile(t, validCSV))
-	_ = cmd.Flags().Set("all", "true")
-	require.NoError(t, cmd.RunE(cmd, nil))
+func TestRenderOrg_EmptyResults(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, renderOrg(&buf, nil))
+	assert.Equal(t, "No results.\n", buf.String())
 }
 
-func TestRunE_EnDashZone_Parsed(t *testing.T) {
-	// Verify the en-dash separator (–, U+2013) that ParseReviewCSV handles.
-	enDash := `Group,Pair,Structure,Setup Bias,Trend,Volatility,Support zone,Resistance Zone,Status
-Majors,EURUSD,Bullish,Long,Uptrend,Low,1.0800–1.0820,1.0900–1.0920,Tradeable watch list
-`
-	cmd := New(nil)
-	_ = cmd.Flags().Set("file", csvFile(t, enDash))
-	require.NoError(t, cmd.RunE(cmd, nil))
+func TestRenderTable_EmptyResults(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, renderTable(&buf, nil))
+	assert.Equal(t, "No results.\n", buf.String())
 }

@@ -1,76 +1,69 @@
 package review
 
-import (
-	"encoding/json"
+import "time"
 
-	"github.com/rustyeddy/trader/market"
-)
+// ReviewResult is the per-pair output of one watchlist review run.
+// All price-scaled values are converted to float64 for presentation.
+// ATR-normalized values are dimensionless ratios.
+type ReviewResult struct {
+	Instrument string    `json:"instrument"`
+	ScannedAt  time.Time `json:"scanned_at"`
 
-// ReviewStatus is the action classification from a ChatGPT forex review row.
-type ReviewStatus string
+	// Triage bucket.
+	Bucket string `json:"bucket"` // "watch" | "hot" | "tradeable"
 
-const (
-	StatusNoTrade   ReviewStatus = "No Trade"
-	StatusWatchlist ReviewStatus = "Watchlist"
-	StatusTradeable ReviewStatus = "Tradeable watch list"
-)
+	// Directional bias from indicator combination.
+	Bias string `json:"bias"` // "long" | "short" | "neutral"
 
-// ForexReview holds one row from a ChatGPT forex review CSV.
-// market.Price fields are stored as scaled int32 (market.Price) matching the rest of the
-// engine; JSON output converts them back to decimal via Float64().
-type ForexReview struct {
-	Group          string       `json:"-"`
-	Pair           string       `json:"-"`
-	Structure      string       `json:"-"`
-	SetupBias      string       `json:"-"`
-	Trend          string       `json:"-"`
-	Volatility     string       `json:"-"`
-	SupportLow     market.Price `json:"-"`
-	SupportHigh    market.Price `json:"-"`
-	ResistanceLow  market.Price `json:"-"`
-	ResistanceHigh market.Price `json:"-"`
-	Status         ReviewStatus `json:"-"`
+	// Multi-timeframe snapshots.
+	W1    W1Snapshot    `json:"w1"`
+	D1    D1Snapshot    `json:"d1"`
+	H4    H4Snapshot    `json:"h4"`
+	Setup SetupSnapshot `json:"setup"`
+
+	// Human-readable notes for tooltip (e.g. "ADX rising, H4 squeeze").
+	Notes []string `json:"notes,omitempty"`
 }
 
-// forexReviewJSON is the wire representation with prices as decimals.
-type forexReviewJSON struct {
-	Group          string       `json:"group"`
-	Pair           string       `json:"pair"`
-	Structure      string       `json:"structure"`
-	SetupBias      string       `json:"setup_bias"`
-	Trend          string       `json:"trend"`
-	Volatility     string       `json:"volatility"`
-	SupportLow     float64      `json:"support_low"`
-	SupportHigh    float64      `json:"support_high"`
-	ResistanceLow  float64      `json:"resistance_low"`
-	ResistanceHigh float64      `json:"resistance_high"`
-	Status         ReviewStatus `json:"status"`
+type D1Snapshot struct {
+	ADX     float64 `json:"adx"`
+	PlusDI  float64 `json:"plus_di"`
+	MinusDI float64 `json:"minus_di"`
+	CI      float64 `json:"ci"`
+	ATRPips float64 `json:"atr_pips"`
+	EMA20   float64 `json:"ema20"`
+	EMA50   float64 `json:"ema50"`
+	Close   float64 `json:"close"`
+
+	// Derived.
+	EMASepATR     float64 `json:"ema_sep_atr"`     // (EMA20-EMA50)/ATR14
+	PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/ATR14
+	BBPctB        float64 `json:"bb_pct_b"`
+	BBWidthATR    float64 `json:"bb_width_atr"`
+	TrendPct      float64 `json:"trend_pct"` // % of last 20 bars trending
 }
 
-// MarshalJSON emits price fields as decimal floats.
-func (f ForexReview) MarshalJSON() ([]byte, error) {
-	return json.Marshal(forexReviewJSON{
-		Group:          f.Group,
-		Pair:           f.Pair,
-		Structure:      f.Structure,
-		SetupBias:      f.SetupBias,
-		Trend:          f.Trend,
-		Volatility:     f.Volatility,
-		SupportLow:     f.SupportLow.Float64(),
-		SupportHigh:    f.SupportHigh.Float64(),
-		ResistanceLow:  f.ResistanceLow.Float64(),
-		ResistanceHigh: f.ResistanceHigh.Float64(),
-		Status:         f.Status,
-	})
+type H4Snapshot struct {
+	ADX           float64 `json:"adx"`
+	CI            float64 `json:"ci"`
+	ATRPips       float64 `json:"atr_pips"`
+	EMA20         float64 `json:"ema20"`
+	Close         float64 `json:"close"`
+	PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/H4 ATR14
+	Squeeze       bool    `json:"squeeze"`         // BBWidthATR below threshold
 }
 
-// IsTradeable reports whether the row is an active trade candidate.
-func (f ForexReview) IsTradeable() bool {
-	return f.Status == StatusTradeable
+type W1Snapshot struct {
+	EMA20       float64 `json:"ema20"`
+	Close       float64 `json:"close"`
+	ATRPips     float64 `json:"atr_pips"`
+	WeekUsedPct float64 `json:"week_used_pct"` // current range / avg weekly ATR
 }
 
-// IsWatched reports whether the row belongs on any watchlist
-// (both Watchlist and Tradeable rows qualify).
-func (f ForexReview) IsWatched() bool {
-	return f.Status == StatusWatchlist || f.Status == StatusTradeable
+type SetupSnapshot struct {
+	// Nearest-timeframe EMA distance; H4 is preferred when ready.
+	PriceEMAATR float64 `json:"price_ema_atr"`
+	InValueZone bool    `json:"in_value_zone"` // |PriceEMAATR| in [0.5, 1.5]
+	Squeeze     bool    `json:"squeeze"`       // H4 BB squeeze
+	H4Aligned   bool    `json:"h4_aligned"`    // H4 bias matches D1 bias
 }

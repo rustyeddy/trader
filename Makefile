@@ -11,7 +11,7 @@ LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
 
 TULIP_DIR ?= ../tulip
 
-.PHONY: all build tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
+.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
 
 all: vet build
 
@@ -21,8 +21,7 @@ build:
 	go build $(LDFLAGS) -o $(BIN) $(CMD)
 
 # Build the SvelteKit UI, then rebuild the Go binary with fresh assets.
-ui:
-	cd ui && npm run build
+ui: build-tulip
 
 # Copy the pre-built tulip dist into ui/dist/ and rebuild the Go binary.
 # Override the source with: make tulip-sync TULIP_DIR=/path/to/tulip
@@ -122,3 +121,4 @@ backup-candles:
 
 clean:
 	@rm -rf $(BIN_DIR) coverage.out coverage.html ui/dist ui/.svelte-kit
+	cd ui && npm run build

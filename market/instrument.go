@@ -3,6 +3,7 @@ package market
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -133,6 +134,17 @@ func validateInstrumentRegistry() {
 // MajorInstruments returns the ordered list of seven major FX pairs tracked by this engine.
 func MajorInstruments() []string {
 	return append([]string(nil), majorInstrumentNames...)
+}
+
+// AllInstruments returns every instrument name in the registry, sorted
+// alphabetically for deterministic output.
+func AllInstruments() []string {
+	names := make([]string, 0, len(instrumentRegistry))
+	for name := range instrumentRegistry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ApproximateUSDPerUnit reports a rough USD-per-unit Rate for a non-USD currency.

@@ -100,8 +100,8 @@ func (s *Server) Handler() http.Handler {
 	// Strategy replay — runs a strategy against stored candles, returns bars + signals
 	mux.HandleFunc("POST /api/v1/replay", s.handleReplay)
 
-	// Analysis — parse a ChatGPT forex analysis CSV upload
-	mux.HandleFunc("POST /api/v1/review", s.handleReview)
+	// Watchlist review — multi-timeframe triage buckets (Watch/Hot/Tradeable)
+	mux.HandleFunc("GET /api/v1/review", s.handleReview)
 
 	// Bot manager — get/stop by globally-unique bot ID (start/list are
 	// account-scoped above).

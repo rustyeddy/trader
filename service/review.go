@@ -1,95 +1,156 @@
 package service
 
 import (
-	"encoding/csv"
+	"context"
 	"fmt"
-	"io"
-	"strconv"
-	"strings"
+	"log/slog"
+	"sync"
+	"time"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
 )
 
-// ParseReviewCSV reads a ChatGPT-generated forex review CSV and returns
-// all rows as typed ForexReview values, including "No Trade" rows.
-// Callers filter with IsTradeable() / IsWatched() as needed.
-//
-// Expected columns (row 1 is header):
-//
-//	Group, Pair, Structure, Setup Bias, Trend, Volatility,
-//	Support zone, Resistance Zone, Status
-func ParseReviewCSV(r io.Reader) ([]review.ForexReview, error) {
-	cr := csv.NewReader(r)
-	cr.TrimLeadingSpace = true
-
-	// Discard header row.
-	if _, err := cr.Read(); err != nil {
-		return nil, fmt.Errorf("review csv: read header: %w", err)
-	}
-
-	var out []review.ForexReview
-	for {
-		rec, err := cr.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("review csv: %w", err)
-		}
-		if len(rec) < 8 {
-			continue
-		}
-
-		supLo, supHi, err := parseZone(rec[6])
-		if err != nil {
-			return nil, fmt.Errorf("review csv: pair %s support %q: %w", rec[1], rec[6], err)
-		}
-		resLo, resHi, err := parseZone(rec[7])
-		if err != nil {
-			return nil, fmt.Errorf("review csv: pair %s resistance %q: %w", rec[1], rec[7], err)
-		}
-
-		out = append(out, review.ForexReview{
-			Pair:           strings.TrimSpace(rec[1]),
-			Trend:          strings.TrimSpace(rec[4]),
-			Structure:      strings.TrimSpace(rec[2]),
-			SupportLow:     market.PriceFromFloat(supLo),
-			SupportHigh:    market.PriceFromFloat(supHi),
-			ResistanceLow:  market.PriceFromFloat(resLo),
-			ResistanceHigh: market.PriceFromFloat(resHi),
-			Volatility:     strings.TrimSpace(rec[5]),
-			SetupBias:      strings.TrimSpace(rec[3]),
-			Status:         review.ReviewStatus(strings.TrimSpace(rec[8])),
-		})
-	}
-	return out, nil
+// ReviewRequest parameterises a watchlist review run.
+type ReviewRequest struct {
+	// Instruments to review. Defaults to market.AllInstruments() (every pair
+	// in the instrument registry) when empty.
+	Instruments []string
 }
 
-// parseZone parses a price range like "1.1570–1.1590" (en dash) or
-// "1.1570-1.1590" (hyphen) and returns (low, high, nil).
-func parseZone(s string) (float64, float64, error) {
-	s = strings.TrimSpace(s)
+// ReviewResponse is the full review output.
+type ReviewResponse struct {
+	ScannedAt time.Time             `json:"scanned_at"`
+	Results   []review.ReviewResult `json:"results"`
+}
 
-	// Try en dash (–, U+2013) first, then em dash (—, U+2014), then hyphen.
-	var parts []string
-	for _, sep := range []string{"–", "—", "-"} {
-		parts = strings.SplitN(s, sep, 2)
-		if len(parts) == 2 {
-			break
+// reviewWorkers bounds the concurrent OANDA candle fetches per review run.
+const reviewWorkers = 8
+
+// reviewCandleCounts is the per-timeframe candle window from docs/Review.org's
+// "Data requirements" table.
+var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60}
+
+// ReviewWatchlist runs the watchlist review over all instruments in req,
+// fetches D1, H4, and W1 candles from OANDA, computes all indicators, and
+// returns a classified ReviewResponse. Instruments that fail to fetch or
+// don't yet have enough candle history are skipped rather than failing the
+// whole run; check s.Log for skip reasons.
+func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
+	instruments := req.Instruments
+	if len(instruments) == 0 {
+		instruments = market.AllInstruments()
+	}
+
+	results := make([]review.ReviewResult, 0, len(instruments))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, reviewWorkers)
+
+	for _, name := range instruments {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(name string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result, ok := s.reviewOneInstrument(ctx, name)
+			if !ok {
+				return
+			}
+			mu.Lock()
+			results = append(results, result)
+			mu.Unlock()
+		}(name)
+	}
+	wg.Wait()
+
+	return &ReviewResponse{
+		ScannedAt: time.Now(),
+		Results:   results,
+	}, nil
+}
+
+// reviewOneInstrument fetches W1/D1/H4 candles and runs review.ReviewPair for
+// a single instrument. ok is false when the instrument should be skipped
+// (fetch failure or insufficient candle history).
+func (s *Service) reviewOneInstrument(ctx context.Context, name string) (review.ReviewResult, bool) {
+	log := s.Log
+	if log == nil {
+		log = slog.Default()
+	}
+
+	w1, err := s.fetchReviewCandles(ctx, name, "W")
+	if err != nil {
+		log.Warn("review: fetch W1 candles", "instrument", name, "err", err)
+		return review.ReviewResult{}, false
+	}
+	d1, err := s.fetchReviewCandles(ctx, name, "D")
+	if err != nil {
+		log.Warn("review: fetch D1 candles", "instrument", name, "err", err)
+		return review.ReviewResult{}, false
+	}
+	h4, err := s.fetchReviewCandles(ctx, name, "H4")
+	if err != nil {
+		log.Warn("review: fetch H4 candles", "instrument", name, "err", err)
+		return review.ReviewResult{}, false
+	}
+
+	result, err := review.ReviewPair(name, w1, d1, h4)
+	if err != nil {
+		log.Warn("review: compute", "instrument", name, "err", err)
+		return review.ReviewResult{}, false
+	}
+	return result, true
+}
+
+// fetchReviewCandles fetches the most recent candleCount candles for
+// instrument at the given OANDA granularity ("W", "D", "H4") and converts
+// them to the internal fixed-point market.Candle type.
+func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularity string) ([]market.Candle, error) {
+	inst := market.GetInstrument(instrument)
+	if inst == nil {
+		return nil, fmt.Errorf("review: unknown instrument %q", instrument)
+	}
+	oandaName := inst.BaseCurrency + "_" + inst.QuoteCurrency
+	count := reviewCandleCounts[granularity]
+
+	to := time.Now().UTC()
+	from := to.Add(-reviewWindow(granularity, count))
+
+	raw, err := s.OANDA.FetchCandles(ctx, oanda.FetchCandlesOptions{
+		Instrument:  oandaName,
+		Granularity: granularity,
+		From:        from,
+		To:          to,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s %s candles: %w", instrument, granularity, err)
+	}
+
+	candles := make([]market.Candle, 0, len(raw))
+	for _, c := range raw {
+		if !c.Complete {
+			continue
 		}
+		candles = append(candles, oandaCandleToCandleTime(c, instrument).Candle)
 	}
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("expected lo–hi format, got %q", s)
+	if len(candles) > count {
+		candles = candles[len(candles)-count:]
 	}
+	return candles, nil
+}
 
-	lo, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse low %q: %w", parts[0], err)
+// reviewWindow returns the calendar duration needed to cover count candles
+// at the given granularity, with a buffer for weekends/holidays.
+func reviewWindow(granularity string, count int) time.Duration {
+	switch granularity {
+	case "W":
+		return time.Duration(float64(count) * 7 * 24 * float64(time.Hour) * 1.3)
+	case "H4":
+		return time.Duration(float64(count) * 4 * float64(time.Hour) * 1.4)
+	default: // "D"
+		return time.Duration(float64(count) * 24 * float64(time.Hour) * 1.4)
 	}
-	hi, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse high %q: %w", parts[1], err)
-	}
-	return lo, hi, nil
 }

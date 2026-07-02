@@ -8,9 +8,12 @@
 
 ** Purpose
 
-This note defines a deterministic scoring pipeline for generating the FX Research Desk pair analysis table.
+This note defines a deterministic scoring pipeline for generating the
+FX Research Desk pair analysis table.
 
-The model is designed for discretionary market review, journaling, and trading-business monitoring only. It does not produce trade recommendations, position sizing, or execution instructions.
+The model is designed for discretionary market review, journaling, and
+trading-business monitoring only. It does not produce trade
+recommendations, position sizing, or execution instructions.
 
 ** High-Level Model
 
@@ -24,7 +27,9 @@ Each FX pair is evaluated using normalized diagnostics:
 - Review status
 - Watchlist priority
 
-The calculation should be mostly rules-based, with an optional discretionary override layer for event risk, abnormal liquidity, central-bank risk, or major news catalysts.
+The calculation should be mostly rules-based, with an optional
+discretionary override layer for event risk, abnormal liquidity,
+central-bank risk, or major news catalysts.
 
 ** Required Inputs Per Pair
 
@@ -39,6 +44,7 @@ ADX(14)
 EMA(20)
 EMA(50)
 EMA(200)
+EMA Gap/Distance
 Recent swing highs/lows
 Session high/low
 Recent range high/low
@@ -46,7 +52,8 @@ Spread
 Macro/news event risk flag
 #+end_src
 
-D1 and H4 should drive the report classification. H1 should be used only for short-term context.
+D1 and H4 should drive the report classification. H1 should be used
+only for short-term context.
 
 ** Pair Analysis Table Columns
 

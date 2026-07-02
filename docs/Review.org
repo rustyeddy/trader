@@ -1,0 +1,461 @@
+* Forex Pair Scanner Review
+:PROPERTIES:
+:created: 2026-06-30
+:scope: design_plan
+:topic: watchlist_scanner
+:END:
+
+This document is a design plan, not yet-shipped behavior. It describes the
+data model, indicator selection, triage logic, package placement, API shape,
+and CLI and UI surfaces for a multi-timeframe watchlist scanner.
+
+Related documents: [[file:fx-pair-analysis-methodology.org][fx-pair-analysis-methodology.org]],
+[[file:multi-account.md][multi-account.md]], [[file:Services.md][Services.md]], [[file:ROADMAP.md][ROADMAP.md]].
+
+** Purpose and daily workflow
+
+The scanner answers two questions every morning:
+
+1. Which pairs are in a favorable regime? (promote to or retain on hotlist)
+2. Of those, which have pulled back or compressed into a setup zone? (mark
+   tradeable)
+
+The output is a ranked table of all watchlist pairs with enough computed
+context to decide in seconds whether a pair deserves a chart look. It does
+not make trade decisions; it eliminates pairs that clearly do not merit
+attention and surfaces the ones that do, in priority order.
+
+** Timeframe stack: W1 → D1 → H4
+
+The existing methodology in =fx-pair-analysis-methodology.org= specifies
+three timeframes: D1 and H4 as primary classification inputs, H1 for
+confirmation context only. The scanner implements that stack.
+
+| Timeframe | Role                                                         |
+|-----------+--------------------------------------------------------------|
+| W1        | Big-picture trend direction; filters counter-trend D1 setups |
+| D1        | Primary regime signal; ADX, CI, EMA alignment, volatility    |
+| H4        | Setup quality; pullback structure, squeeze, entry proximity  |
+
+H4 earns its place because D1 alone cannot distinguish between two hotlist
+pairs where one has a clear pullback structure and the other is mid-range
+with no setup. H4 CI and H4 EMA proximity answer that question without
+requiring a chart. H1 is available as a future refinement but is excluded
+from v1 to keep the candle fetch surface minimal and the indicator warmup
+requirements tractable.
+
+** Where computation lives
+
+All indicator computation happens in the Go backend. The UI and CLI receive
+a =[]ScanResult= — one struct per pair — and render it.
+
+Reasons:
+
+- Every indicator needed (=ADX=, =ATR=, =ChoppinessIndex=, =BollingerBands=,
+  =EMA=) is already implemented in Go with correct Wilder smoothing,
+  fixed-point arithmetic, and warmup accounting. Reimplementing them in
+  JavaScript or rendering them in the browser from raw candle arrays would be
+  parallel maintenance with guaranteed drift.
+- A scan over 20 pairs × 3 timeframes × ~60 candles each is trivial Go work.
+  Shipping raw candle arrays to the browser would push hundreds of KB for no
+  benefit and no architectural advantage.
+- The backend already owns the OANDA candle fetch path and the instrument
+  registry. Indicators should stay close to the data.
+- The REST and CLI pattern is already established: =service= methods return
+  typed structs; handlers and CLI commands serialize or format them. The
+  scanner fits this pattern exactly.
+
+The one thing the presentation layer computes: color bands, sort order, and
+filter state — pure functions of =ScanResult= fields that belong in the
+presentation layer.
+
+** Package placement
+
+The review is a new top-level package =review/=, alongside =planner/=,
+and =journal/=.  
+
+It is *not* placed under =strategies/=. Strategies are per-instrument,
+bar-driven, stateful execution units registered via =init()= and consumed by
+the live and backtest runners. The scanner is a multi-instrument, on-demand
+analytical tool that classifies pairs for discretionary review — structurally
+identical to =review/= (which also produces Watch/Tradeable buckets from a
+different data source).
+
+#+begin_src text
+trader/
+  review/
+    reviwe.go        -- ScanResult, ScanRequest, ScanResponse types
+    scan.go	     -- per-pair indicator computation (pure function)
+    classify.go      -- bucket classification logic
+  service/
+    review.go        -- Service.ScanWatchlist() -- thin fan-out over pairs
+  api/rest/
+    review.go        -- GET /api/v1/scan handler
+  cmd/scan/
+    cmd_review.go    -- trader scan CLI command
+#+end_src
+
+This mirrors the exact layout of =review/=, =service/review.go=,
+=api/rest/review.go=, and =cmd/review/=.
+
+** Triage buckets
+
+#+begin_src text
+Watch     -- on the watchlist; no favorable regime signal yet
+Hot       -- regime conditions are favorable; monitor closely
+Tradeable -- on the hotlist and price is in a setup zone
+#+end_src
+
+Pairs move between buckets based on indicator thresholds evaluated at scan
+time. There is no persistent state in v1 — each scan re-evaluates the full
+watchlist from scratch.
+
+** Indicator set
+
+*** D1 indicators (regime classification)
+
+*ADX(14) with ±DI* — the canonical trend-strength indicator, already
+implemented as =indicator.ADX= with Wilder smoothing. ADX measures how
+strongly price is trending; ±DI gives direction simultaneously. All three
+values (ADX, +DI, −DI) are surfaced because they drive both regime
+classification and directional bias in one pass.
+
+*Choppiness Index(14)* — =indicator.ChoppinessIndex=, already implemented.
+A direct measure of consolidation: high CI means the pair is oscillating
+within a range, low CI means it is extending directionally. ADX and CI are
+complementary, not redundant: ADX can be elevated while CI is also elevated
+(a whippy trending pair), and the combination catches that case. Threshold:
+< 55 trending, > 65 ranging.
+
+*EMA(20) and EMA(50) on D1* — =indicator.EMA=, already implemented. Used
+for trend alignment (price above both = bullish), EMA separation as a trend
+quality signal, and price-to-EMA distance as an entry proximity measure.
+
+*EMA separation ((EMA20 − EMA50) / ATR14)* — not a standalone indicator
+but a one-line derived value. When the fast EMA is well separated from the
+slow EMA, the trend is established and maturing. When they converge or cross,
+the trend is weakening or reversing. Expressed in ATR multiples so it is
+comparable across pairs with different pip scales (GBPJPY vs EURUSD). The
+sign encodes direction; the magnitude encodes trend maturity.
+
+*ATR(14) on D1* — =indicator.ATR=, already implemented. Serves as the
+denominator for all ATR-normalized distance computations and as a standalone
+volatility reference in pips for position sizing.
+
+*Bollinger Bands(20, 2.0) on D1* — =indicator.BollingerBands=, already
+implemented. Adds two signals the EMA set does not capture cleanly:
+
+- *%B* — where price sits within the bands (0 = lower band, 1 = upper band).
+  Values at the extremes indicate either momentum continuation or pending
+  mean reversion.
+- *Band width / ATR* — when narrow relative to ATR, the pair is in a
+  volatility squeeze. Squeezes often precede explosive directional moves and
+  are a strong setup filter.
+
+*Body/range ratio (20-bar lookback)* — =marketdata.TrendAnalyzer=, already
+implemented. The percentage of recent D1 bars where |Close − Open| / (High
+− Low) > 0.6. A pair where 60% or more of recent daily bars are directional
+is behaving more cleanly than one where bars are indecisive, regardless of
+what ADX says.
+
+*Price-to-EMA20 distance ((Close − EMA20) / ATR14)* — the primary setup
+entry proximity signal. When a hotlist pair pulls back to within 0.5–1.5 ATR
+of the D1 EMA20, it is in a value zone for trend-following entries.
+
+*** H4 indicators (setup confirmation)
+
+*H4 ADX(14)* — confirms the D1 trend is still alive at the shorter
+timeframe. A pair with D1 ADX = 28 but H4 ADX = 14 may have lost momentum
+at the entry timeframe.
+
+*H4 Choppiness Index(14)* — catches consolidation that is not visible on D1.
+A pair can look clean on the daily but be grinding sideways on H4, which
+reduces setup quality significantly.
+
+*H4 EMA(20) and price-to-EMA20 distance* — the H4 EMA distance is the
+sharpest setup-proximity signal because H4 is the entry timeframe. Price
+within 0.5–1.0 ATR of the H4 EMA20 with D1 trend still intact is the
+canonical swing entry location.
+
+*H4 ATR(14)* — used for normalizing H4 distances; also confirms whether H4
+volatility is compressed (squeeze) or expanding.
+
+*** W1 indicators (higher-timeframe filter)
+
+*Weekly EMA(20)* — already wired via =strategy.WeeklyEMAFilter=. Price above
+the W1 EMA = bullish higher-timeframe bias; below = bearish. Filters out
+counter-trend D1 setups.
+
+*Weekly ATR(14)* — the expected range for the full week. If the pair has
+already traveled 80%+ of its average weekly ATR, new entries on the remaining
+week have poor reward-to-risk.
+
+*** Indicators excluded from v1
+
+| Indicator    | Reason excluded                                            |
+|--------------+------------------------------------------------------------|
+| RSI          | Redundant over %B + ADX ±DI; adds threshold-tuning burden  |
+| MACD         | EMA separation gives same information with less lag        |
+| Stochastic   | Mean-reversion tool; wrong fit for trend-following scanner |
+| Volume       | OANDA spot FX tick volume is not meaningful                |
+| Pivot points | Static levels; handled by S&R detection pipeline (v2)      |
+
+** =ScanResult= struct
+
+#+begin_src go
+// ScanResult is the per-pair output of one scanner run.
+// All price-scaled values are converted to float64 for presentation.
+// ATR-normalized values are dimensionless ratios.
+type ScanResult struct {
+    Instrument string    `json:"instrument"`
+    ScannedAt  time.Time `json:"scanned_at"`
+
+    // Triage bucket.
+    Bucket string `json:"bucket"` // "watch" | "hot" | "tradeable"
+
+    // Directional bias from indicator combination.
+    Bias string `json:"bias"` // "long" | "short" | "neutral"
+
+    // Multi-timeframe snapshots.
+    W1    W1Snapshot    `json:"w1"`
+    D1    D1Snapshot    `json:"d1"`
+    H4    H4Snapshot    `json:"h4"`
+    Setup SetupSnapshot `json:"setup"`
+
+    // Human-readable notes for tooltip (e.g. "ADX rising, H4 squeeze").
+    Notes []string `json:"notes,omitempty"`
+}
+
+type D1Snapshot struct {
+    ADX     float64 `json:"adx"`
+    PlusDI  float64 `json:"plus_di"`
+    MinusDI float64 `json:"minus_di"`
+    CI      float64 `json:"ci"`
+    ATRPips float64 `json:"atr_pips"`
+    EMA20   float64 `json:"ema20"`
+    EMA50   float64 `json:"ema50"`
+    Close   float64 `json:"close"`
+
+    // Derived.
+    EMASepATR     float64 `json:"ema_sep_atr"`    // (EMA20-EMA50)/ATR14
+    PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/ATR14
+    BBPctB        float64 `json:"bb_pct_b"`
+    BBWidthATR    float64 `json:"bb_width_atr"`
+    TrendPct      float64 `json:"trend_pct"` // % of last 20 bars trending
+}
+
+type H4Snapshot struct {
+    ADX           float64 `json:"adx"`
+    CI            float64 `json:"ci"`
+    ATRPips       float64 `json:"atr_pips"`
+    EMA20         float64 `json:"ema20"`
+    Close         float64 `json:"close"`
+    PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/H4 ATR14
+    Squeeze       bool    `json:"squeeze"`          // BBWidthATR below threshold
+}
+
+type W1Snapshot struct {
+    EMA20       float64 `json:"ema20"`
+    Close       float64 `json:"close"`
+    ATRPips     float64 `json:"atr_pips"`
+    WeekUsedPct float64 `json:"week_used_pct"` // current range / avg weekly ATR
+}
+
+type SetupSnapshot struct {
+    // Nearest-timeframe EMA distance; H4 is preferred when ready.
+    PriceEMAATR float64 `json:"price_ema_atr"`
+    InValueZone bool    `json:"in_value_zone"` // |PriceEMAATR| in [0.5, 1.5]
+    Squeeze     bool    `json:"squeeze"`        // H4 BB squeeze
+    H4Aligned   bool    `json:"h4_aligned"`     // H4 bias matches D1 bias
+}
+#+end_src
+
+** Bucket classification logic
+
+Evaluated in order; the first matching bucket wins.
+
+#+begin_src text
+Tradeable:
+  bucket qualifies as Hot (passes Hot gate below)
+  AND abs(H4.PriceEMA20ATR) in [0.5, 1.5]   -- near H4 EMA (entry zone)
+  AND H4 bias matches D1 bias                -- short-term aligned with regime
+  AND H4.CI < 60                             -- H4 not actively ranging
+
+Hot:
+  D1.ADX >= 25
+  AND D1.CI < 55
+  AND W1.Close vs W1.EMA20 matches D1 bias  -- weekly not fighting D1
+
+Watch:
+  everything else
+#+end_src
+
+Demotion signals (surfaced as notes in v1, enforced as hard gates in v2):
+
+#+begin_src text
+ADX dropped below 20
+CI crossed above 65
+W1 EMA flipped against D1 bias
+#+end_src
+
+** Data requirements
+
+| Data                        | Candles needed | Warmup driver                             |
+|-----------------------------+----------------+-------------------------------------------|
+| D1 ADX(14), ATR(14), CI(14) | 60 D1          | ADX warmup = 2×14 = 28; buffer for safety |
+| D1 EMA(20), EMA(50), BB(20) | 60 D1          | EMA(50) warmup = 50; covers all           |
+| H4 ADX(14), ATR(14), CI(14) | 60 H4          | Same warmup ratios                        |
+| H4 EMA(20)                  | 30 H4          | EMA(20) warmup = 20; 30 provides buffer   |
+| W1 EMA(20), ATR(14)         | 30 W1          | EMA(20) warmup = 20                       |
+
+For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair). A
+bounded goroutine pool of 8 workers handles the fan-out without rate-limit
+risk. =CandlesOptions= already supports =Count= and =Granularity=.
+
+** Service method
+
+#+begin_src go
+// ScanRequest parameterises a watchlist scan run.
+type ScanRequest struct {
+    // Instruments to scan. Defaults to market.MajorInstruments() when empty.
+    Instruments []string
+    // HotlistIDs are pairs currently on the hotlist; used for demotion notes.
+    HotlistIDs []string
+}
+
+// ScanResponse is the full scan output.
+type ScanResponse struct {
+    ScannedAt time.Time    `json:"scanned_at"`
+    Results   []ScanResult `json:"results"`
+}
+
+// ScanWatchlist runs the scanner over all instruments in req,
+// fetches D1, H4, and W1 candles from OANDA, computes all indicators,
+// and returns a classified ScanResponse.
+func (s *Service) ScanWatchlist(ctx context.Context, req scanner.ScanRequest) (*scanner.ScanResponse, error)
+#+end_src
+
+The service method lives in =service/scanner.go= and is a thin
+fan-out: one goroutine per pair calls =scanner.ScanPair()=, which is a
+pure function that takes candle slices and returns a =ScanResult=. The
+service layer owns concurrency; the =scanner= package owns indicator
+composition.
+
+** REST endpoint
+
+#+begin_src text
+GET /api/v1/scan
+#+end_src
+
+Query parameters:
+
+| Parameter     | Default    | Description                           |
+|---------------+------------+---------------------------------------|
+| =instruments= | all majors | comma-separated list                  |
+| =hotlist=     | (empty)    | comma-separated current hotlist pairs |
+
+Response: =ScanResponse= JSON.
+
+The endpoint is market data, not account-scoped (like =/api/v1/prices=), so
+it carries no ={accountID}= segment and needs no =requireOANDA= account
+resolution path — only a live =*oanda.Client= on the service.
+
+** CLI command
+
+#+begin_src text
+trader scan [--instruments EURUSD,GBPUSD,...] [--hotlist EURUSD,...] [--bucket watch|hot|tradeable]
+#+end_src
+
+Output uses =tabwriter= with the same style as =cmd/review= and =cmd/data stats=:
+
+#+begin_src text
+EURUSD   D1 2026-06-30
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PAIR      BUCKET      BIAS    ADX   CI    EMA SEP  ATR    EMA DIST  H4 ADX  H4 CI  WEEK%
+----      ------      ----    ---   --    -------  ---    --------  ------  -----  -----
+EURUSD    Tradeable   Long    31.4  48.2  +1.2     42.1p  +0.7      27.3    51.4   62%
+GBPJPY    Hot         Long    26.8  52.1  +0.9     85.3p  +2.1      22.1    58.9   44%
+USDJPY    Hot         Short   25.1  54.8  -0.7     68.4p  -1.8      19.8    62.1   71%
+AUDUSD    Watch       Neutral 18.3  67.2  +0.2     31.2p  +3.4      14.2    71.3   38%
+#+end_src
+
+The =--bucket= flag filters output to a single tier (useful for scripting:
+=trader scan --bucket tradeable= prints only actionable pairs).
+
+** UI display
+
+Default sort: Bucket (Tradeable → Hot → Watch), then D1 ADX descending
+within each bucket.
+
+| Column      | Source               | Display notes                                  |
+|-------------+----------------------+------------------------------------------------|
+| Pair        | =instrument=         | plain text                                     |
+| Status      | =bucket=             | chip: Watch=gray, Hot=amber, Tradeable=green   |
+| Bias        | =bias=               | Long ↑ / Short ↓ / Neutral                      |
+| ADX         | =d1.adx=             | color ramp: gray < 20, amber 20–25, green ≥ 25 |
+| CI          | =d1.ci=              | inverse: green < 55, amber 55–65, red > 65     |
+| EMA sep     | =d1.ema_sep_atr=     | signed ATR multiples; sign = direction         |
+| ATR (pips)  | =d1.atr_pips=        | position sizing reference                      |
+| EMA dist    | =d1.price_ema20_atr= | D1 proximity; near zero = at the EMA           |
+| H4 ADX      | =h4.adx=             | same color ramp as D1 ADX                      |
+| H4 CI       | =h4.ci=              | same inverse coloring as D1 CI                 |
+| H4 EMA dist | =h4.price_ema20_atr= | entry proximity signal                         |
+| Squeeze     | =setup.squeeze=      | badge when H4 BB squeeze is active             |
+| W1 bias     | derived from =w1=    | aligned ✓ or fighting ✗ with D1 bias           |
+| Week used   | =w1.week_used_pct=   | progress bar; high = limited weekly range left |
+
+Row interactions: click → chart view for that pair. Hover → tooltip with
+=notes= strings. Filter chips above the table for bucket selection.
+
+** Implementation sequencing
+
+| Step | Scope                                             | Prerequisite |
+|------+---------------------------------------------------+--------------|
+|    1 | =FetchCandles()= service method (already planned) | None         |
+|    2 | =scanner= package: =ScanPair()= pure function     | Step 1       |
+|    3 | =Service.ScanWatchlist()= with goroutine fan-out  | Step 2       |
+|    4 | GET / api / 0 / scan = REST handler               | Step 3       |
+|    5 | =cmd/scan/= CLI command                           | Step 3       |
+|    6 | SvelteKit scanner table component                 | Step 4       |
+|    7 | Watchlist and hotlist config persistence          | Step 6       |
+#+TBLFM: $2=GET /api/@1$22/scan= REST handler
+
+Steps 4 and 5 are parallel after Step 3. Steps 1–5 are pure Go backend work
+with no UI dependency.
+
+** Open questions
+
+1. *Watchlist persistence.* In v1 the watchlist defaults to the 7 majors plus
+   any pairs passed as a query parameter or CLI flag. A persistent watchlist
+   and hotlist implies state that survives restarts. Options: extend the global
+   config YAML with a =[watchlist]= and =[hotlist]= section, or store in a
+   lightweight local file. The hotlist in particular needs to survive a restart
+   since it represents a deliberate daily judgment.
+
+2. *Scan scheduling.* The endpoint is on-demand (pull) in v1. A future step
+   is a scheduled daily push: run at 17:00 NY close, cache the result in an
+   in-memory field on =Service= (or a JSON file in the data directory), and
+   serve the cached response until the next scheduled run. Pairs the REST and
+   CLI endpoints would gain a =?cached=true= flag to serve the last scan
+   without re-fetching candles.
+
+3. *S&R levels as setup signal.* When the S&R detection pipeline
+   (=analysis/=) is wired into the scanner, =SetupSnapshot= gains a
+   =NearSRLevel bool= field and the Tradeable gate can require either EMA
+   proximity *or* S&R proximity. The struct shape is designed to accommodate
+   this without breaking the API.
+
+4. *Integration with =fx-pair-analysis-methodology.org=.* That doc specifies
+   a quality scoring model (trend clarity 25%, structure clarity 25%, level
+   clarity 15%, etc.) and a three-tier watchlist prioritization scheme. The
+   scanner's bucket system maps directly to that model's Tradeable / Watchlist
+   / No Trade labels and the =ScanPair()= function is the natural home for
+   the =AnalyzePair()= logic sketched there. These should be unified rather
+   than maintained separately.
+
+5. *Multi-account.* The scan is market data, not account data, so it does not
+   directly depend on multi-account support. Once multi-account is live, each
+   account may maintain its own watchlist. The =ScanRequest= is parameterised
+   by =Instruments= so this is solved at the call site without changing
+   scanner internals.
