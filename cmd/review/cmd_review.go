@@ -5,7 +5,6 @@
 package review
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -146,17 +144,23 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 // bucketRank orders triage buckets tradeable, then hot, then watch.
 var bucketRank = map[string]int{"tradeable": 0, "hot": 1, "watch": 2}
 
-// sortByBucket stable-sorts results tradeable-first, then hot, then watch,
-// preserving each bucket's original relative order.
+// sortByBucket stable-sorts results tradeable-first, then hot, then watch;
+// within each bucket, pairs are ordered by D1 ADX descending (per
+// docs/Review.org's "Default sort" rule) so the strongest trends surface
+// first.
 func sortByBucket(results []review.ReviewResult) {
 	sort.SliceStable(results, func(i, j int) bool {
-		return bucketRank[results[i].Bucket] < bucketRank[results[j].Bucket]
+		bi, bj := bucketRank[results[i].Bucket], bucketRank[results[j].Bucket]
+		if bi != bj {
+			return bi < bj
+		}
+		return results[i].D1.ADX > results[j].D1.ADX
 	})
 }
 
 // reviewTableHeader/reviewTableRow keep the table and org renderers' column
 // sets in sync.
-var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR", "EMA DIST", "H4 ADX", "H4 CI", "WEEK%"}
+var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "WEEK%"}
 
 func reviewTableRow(r review.ReviewResult) []string {
 	return []string{
@@ -166,51 +170,71 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%.1f", r.D1.ADX),
 		fmt.Sprintf("%.1f", r.D1.CI),
 		fmt.Sprintf("%+.1f", r.D1.EMASepATR),
-		fmt.Sprintf("%.1fp", r.D1.ATRPips),
-		fmt.Sprintf("%+.1f", r.D1.PriceEMA20ATR),
+		fmt.Sprintf("%.1f", r.D1.ATRPips),
+		fmt.Sprintf("%-.1f", r.D1.PriceEMA20ATR),
 		fmt.Sprintf("%.1f", r.H4.ADX),
 		fmt.Sprintf("%.1f", r.H4.CI),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
 	}
 }
 
-// renderTable writes the human-readable aligned table, unchanged from prior
-// behavior: a blank line separates each bucket group.
+// reviewTableNumericCol flags which reviewTableHeader columns hold numeric
+// values; those are right-justified so decimal points and "%" signs line up
+// down the column. PAIR/BUCKET/BIAS are text and stay left-justified.
+var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true}
+
+// renderTable writes the human-readable aligned table: text columns
+// left-justified, numeric columns right-justified so decimals/percents line
+// up, with a blank line separating each bucket group.
 func renderTable(out io.Writer, results []review.ReviewResult) error {
 	if len(results) == 0 {
 		fmt.Fprintln(out, "No results.")
 		return nil
 	}
 
-	// Render the whole table as one aligned tabwriter block first — a blank
-	// line fed directly into the writer would break column alignment across
-	// the gap — then splice in blank lines between bucket groups afterward.
-	var buf bytes.Buffer
-	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, strings.Join(reviewTableHeader, "\t"))
+	rows := make([][]string, len(results))
+	for i, r := range results {
+		rows[i] = reviewTableRow(r)
+	}
+
+	widths := make([]int, len(reviewTableHeader))
+	for i, h := range reviewTableHeader {
+		widths[i] = len(h)
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			if len(cell) > widths[i] {
+				widths[i] = len(cell)
+			}
+		}
+	}
+
+	formatRow := func(cells []string) string {
+		parts := make([]string, len(cells))
+		for i, cell := range cells {
+			if reviewTableNumericCol[i] {
+				parts[i] = fmt.Sprintf("%*s", widths[i], cell)
+			} else {
+				parts[i] = fmt.Sprintf("%-*s", widths[i], cell)
+			}
+		}
+		return strings.Join(parts, "  ")
+	}
+
 	underline := make([]string, len(reviewTableHeader))
 	for i, h := range reviewTableHeader {
 		underline[i] = strings.Repeat("-", len(h))
 	}
-	fmt.Fprintln(w, strings.Join(underline, "\t"))
-	for _, r := range results {
-		fmt.Fprintln(w, strings.Join(reviewTableRow(r), "\t"))
-	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
-
-	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
-	fmt.Fprintln(out, lines[0]) // header
-	fmt.Fprintln(out, lines[1]) // separator
+	fmt.Fprintln(out, strings.TrimRight(formatRow(reviewTableHeader), " "))
+	fmt.Fprintln(out, strings.TrimRight(formatRow(underline), " "))
 
 	prevBucket := results[0].Bucket
-	for i, line := range lines[2:] {
+	for i, row := range rows {
 		if r := results[i]; r.Bucket != prevBucket {
 			fmt.Fprintln(out)
 			prevBucket = r.Bucket
 		}
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, strings.TrimRight(formatRow(row), " "))
 	}
 	return nil
 }

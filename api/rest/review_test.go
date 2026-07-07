@@ -12,13 +12,25 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// swapTempStore points the global candle store at a fresh temp directory for
+// the duration of the test, so review's local-cache reads/writes never touch
+// the live /srv/trading/data store.
+func swapTempStore(t *testing.T) {
+	t.Helper()
+	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
+	t.Cleanup(restore)
+}
+
 // fakeOANDACandlesServer serves a monotonically increasing synthetic candle
-// series large enough to satisfy any review timeframe window.
+// series large enough to satisfy any review timeframe window, spaced at the
+// requested granularity's real duration so the local-store grid the review
+// path writes through lands one candle per day/4h/week slot.
 func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +38,19 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 		from, err := time.Parse(time.RFC3339Nano, q.Get("from"))
 		require.NoError(t, err)
 
-		const n = 200
+		var step time.Duration
+		switch q.Get("granularity") {
+		case "W":
+			step = 7 * 24 * time.Hour
+		case "D":
+			step = 24 * time.Hour
+		case "H4":
+			step = 4 * time.Hour
+		default:
+			step = time.Hour
+		}
+
+		const n = 300
 		type ohlc struct{ O, H, L, C string }
 		candles := make([]map[string]any, 0, n)
 		price := 1.10000
@@ -42,7 +66,7 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 			}
 			candles = append(candles, map[string]any{
 				"complete": true,
-				"time":     from.Add(time.Duration(i) * time.Hour).Format(time.RFC3339Nano),
+				"time":     from.Add(time.Duration(i) * step).Format(time.RFC3339Nano),
 				"volume":   10,
 				"bid":      bid,
 				"ask":      bid,
@@ -60,6 +84,7 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 }
 
 func TestHandleReview_ReturnsResults(t *testing.T) {
+	swapTempStore(t)
 	oandaSrv := fakeOANDACandlesServer(t)
 	defer oandaSrv.Close()
 
@@ -82,6 +107,7 @@ func TestHandleReview_ReturnsResults(t *testing.T) {
 }
 
 func TestHandleReview_DefaultsToAllInstruments(t *testing.T) {
+	swapTempStore(t)
 	oandaSrv := fakeOANDACandlesServer(t)
 	defer oandaSrv.Close()
 
@@ -103,6 +129,7 @@ func TestHandleReview_DefaultsToAllInstruments(t *testing.T) {
 }
 
 func TestHandleReview_OANDAErrorYieldsEmptyResultsNot502(t *testing.T) {
+	swapTempStore(t)
 	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))

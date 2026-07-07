@@ -99,8 +99,17 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 			if oc.BidClose == 0 && oc.AskClose == 0 {
 				continue
 			}
+			if oc.Time.Before(monthSlotStart) {
+				// Guard against Go's integer division truncating toward zero:
+				// a candle timestamped a few hours before the month boundary
+				// (e.g. OANDA's daily candles open at 21:00 UTC the previous
+				// day) has a small negative delta that truncates to index 0
+				// instead of flooring to -1, silently duplicating it into
+				// this month's slot 0 unless excluded here first.
+				continue
+			}
 			idx := int(oc.Time.Unix()-monthSlotStart.Unix()) / int(stepSec)
-			if idx < 0 || idx >= slotCount {
+			if idx >= slotCount {
 				continue
 			}
 			spreads := [4]float64{
