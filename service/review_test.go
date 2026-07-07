@@ -143,7 +143,8 @@ func TestReviewWatchlist_SkipsInstrumentOnFetchFailure(t *testing.T) {
 
 // TestReviewWatchlist_CachesCandlesLocally verifies that D1/H4 candles are
 // served from the local candle store on a second run instead of re-fetching
-// the same history from OANDA every time.
+// the same history from OANDA every time, and that W1 (derived from the D1
+// series) never triggers its own OANDA "W" granularity request at all.
 func TestReviewWatchlist_CachesCandlesLocally(t *testing.T) {
 	swapTempStore(t)
 
@@ -169,11 +170,12 @@ func TestReviewWatchlist_CachesCandlesLocally(t *testing.T) {
 	require.NoError(t, err)
 
 	mu.Lock()
-	firstRunD, firstRunH4 := requestsByGranularity["D"], requestsByGranularity["H4"]
+	firstRunD, firstRunH4, firstRunW := requestsByGranularity["D"], requestsByGranularity["H4"], requestsByGranularity["W"]
 	requestsByGranularity = map[string]int{}
 	mu.Unlock()
 	require.Positive(t, firstRunD, "first run must populate the D1 cache from OANDA")
 	require.Positive(t, firstRunH4, "first run must populate the H4 cache from OANDA")
+	assert.Zero(t, firstRunW, "W1 must be derived from D1, never fetched from OANDA directly")
 
 	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{Instruments: []string{"EURUSD"}})
 	require.NoError(t, err)
