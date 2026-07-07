@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"bytes"
@@ -160,7 +160,7 @@ func TestReadNextBI5Tick_BadMsOffset(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Store.baseScanDir, Store.Delete, Store.IsUsableTickFile
+// store.baseScanDir, store.Delete, store.IsUsableTickFile
 // ---------------------------------------------------------------------------
 
 func TestStoreBaseScanDir(t *testing.T) {
@@ -232,7 +232,7 @@ func TestStoreIsUsableTickFile_NonEmptyFile(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Store.SaveFile
+// store.SaveFile
 // ---------------------------------------------------------------------------
 
 func TestStoreSaveFile(t *testing.T) {

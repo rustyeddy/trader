@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/review"
 )
 
@@ -182,9 +182,13 @@ func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularit
 // month file per call, so a mid-month start would silently zero out the
 // already-cached earlier days of that month.
 func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granularity string, from, to time.Time) error {
-	store := marketdata.GetStore()
+	tf, err := market.ParseTimeframe(granularity)
+	if err != nil {
+		return fmt.Errorf("unknown timeframe %q", granularity)
+	}
+
 	dlFrom := from
-	if last, err := lastNonZeroCandleDate(store, oandaName, granularity); err == nil {
+	if last, err := datamanager.GetDataManager().LastCompleteDate(oandaName, tf, market.SourceOanda); err == nil {
 		if next := last.AddDate(0, 0, 1); next.After(dlFrom) {
 			dlFrom = next
 		}
@@ -193,7 +197,7 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 		return nil // already up to date, nothing to download
 	}
 	dlFrom = time.Date(dlFrom.Year(), dlFrom.Month(), 1, 0, 0, 0, 0, time.UTC)
-	_, err := s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
+	_, err = s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
 		Instrument: oandaName,
 		Timeframe:  granularity,
 		From:       dlFrom,
@@ -206,8 +210,8 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 // candle store via DataManager, trimmed to the most recent count bars.
 func (s *Service) readCachedOandaCandles(ctx context.Context, instrument string, tf market.Timeframe, from, to time.Time, count int) ([]market.Candle, error) {
 	instNorm := market.NormalizeInstrument(instrument)
-	dm := marketdata.NewDataManager([]string{instNorm}, from, to)
-	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
+	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
+	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: instNorm,
 		Range:      market.TimeRange{Start: market.FromTime(from), End: market.FromTime(to), TF: tf},

@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"github.com/rustyeddy/trader/log"

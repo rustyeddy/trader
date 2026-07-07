@@ -10,7 +10,7 @@ import (
 // AccountSummary holds the key financial fields from OANDA's account summary.
 type AccountSummary struct {
 	ID           string
-	Alias        string  // human-readable account name (OANDA "alias")
+	Alias        string // human-readable account name (OANDA "alias")
 	Currency     string
 	Balance      float64
 	NAV          float64 // Net Asset Value (equity)

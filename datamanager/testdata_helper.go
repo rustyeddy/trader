@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"fmt"
@@ -24,6 +24,6 @@ func GenerateSyntheticYearTestData(basedir string, instrument string, year int, 
 		return nil, fmt.Errorf("create testdata dir: %w", err)
 	}
 
-	store := &Store{basedir: basedir}
-	return cfg.GenerateSyntheticYearlyAndWrite(store, year)
+	s := &store{basedir: basedir}
+	return cfg.GenerateSyntheticYearlyAndWrite(s, year)
 }

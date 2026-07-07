@@ -1,4 +1,4 @@
-// Package dukascopy implements the marketdata.Provider interface for Dukascopy
+// Package dukascopy implements the datamanager.Provider interface for Dukascopy
 // historical tick files. Raw data is hourly .bi5 files at:
 //
 //	https://datafeed.dukascopy.com/datafeed/<instrument>/<year>/<month-1>/<day>/<hour>h_ticks.bi5
@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 )
 
 // SourceName is the canonical name under which this provider is registered.
@@ -20,7 +20,7 @@ const SourceName = "dukascopy"
 
 // File represents one hourly tick file at the Dukascopy datafeed.
 type File struct {
-	key marketdata.Key
+	key datamanager.Key
 
 	symbol  string
 	t       time.Time
@@ -37,13 +37,13 @@ func NewFile(sym string, t time.Time) *File {
 	return f
 }
 
-// Key returns the marketdata.Key for this file's hourly tick slot.
-func (f *File) Key() marketdata.Key {
+// Key returns the datamanager.Key for this file's hourly tick slot.
+func (f *File) Key() datamanager.Key {
 	if f.key.Instrument == "" {
-		f.key = marketdata.Key{
+		f.key = datamanager.Key{
 			Instrument: f.symbol,
 			Source:     SourceName,
-			Kind:       marketdata.KindTick,
+			Kind:       datamanager.KindTick,
 			TF:         market.Ticks,
 			Year:       f.t.Year(),
 			Month:      int(f.t.Month()),
@@ -74,7 +74,7 @@ func (f *File) URL() string {
 // IsValid checks that the local file for this hour exists and is either
 // a legitimately empty market-closed file or a non-corrupt .bi5.
 func (f *File) IsValid(ctx context.Context) error {
-	store := marketdata.GetStore()
+	store := datamanager.ForProviders()
 	ok, err := store.Exists(f.Key())
 	if err != nil || !ok {
 		return err
@@ -118,7 +118,7 @@ func (f *File) IsValid(ctx context.Context) error {
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
 func (f *File) baseHourUnixMS() (int64, error) {
-	p, err := marketdata.GetStore().PathForAsset(f.Key())
+	p, err := datamanager.ForProviders().PathForAsset(f.Key())
 	if err != nil {
 		return 0, err
 	}

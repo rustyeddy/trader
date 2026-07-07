@@ -5,27 +5,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// buildStatsStore writes one month of H1 EURUSD candles to a temp store.
-func buildStatsStore(t *testing.T) func() {
+// seedStatsStore writes one month of H1 EURUSD candles to a temp store.
+func seedStatsStore(t *testing.T) {
 	t.Helper()
-	store := marketdata.NewStoreAt(t.TempDir())
 	candles := make([]market.Candle, 744) // January 2024 has 744 hours
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	candles[1] = market.Candle{Open: 110050, High: 110200, Low: 110000, Close: 110150, AvgSpread: 11, MaxSpread: 16, Ticks: 55}
-	require.NoError(t, store.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
-		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles))
-	return marketdata.SwapStore(store)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 }
 
 func TestDataStats_ReturnsAllFourAnalyzers(t *testing.T) {
-	restore := buildStatsStore(t)
-	defer restore()
+	seedStatsStore(t)
 
 	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
@@ -52,8 +48,7 @@ func TestDataStats_ReturnsAllFourAnalyzers(t *testing.T) {
 }
 
 func TestDataStats_DefaultsTimeframeToH1(t *testing.T) {
-	restore := buildStatsStore(t)
-	defer restore()
+	seedStatsStore(t)
 
 	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
@@ -65,8 +60,7 @@ func TestDataStats_DefaultsTimeframeToH1(t *testing.T) {
 }
 
 func TestDataStats_AllowsSingleDayRange(t *testing.T) {
-	restore := buildStatsStore(t)
-	defer restore()
+	seedStatsStore(t)
 
 	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EURUSD",
@@ -80,8 +74,7 @@ func TestDataStats_AllowsSingleDayRange(t *testing.T) {
 }
 
 func TestDataStats_NormalizesInstrument(t *testing.T) {
-	restore := buildStatsStore(t)
-	defer restore()
+	seedStatsStore(t)
 
 	result, err := (&Service{}).DataStats(context.Background(), DataStatsRequest{
 		Instrument: "EUR_USD",

@@ -8,7 +8,7 @@ import "time"
 //
 // As callers are migrated, prefer moving each helper to its proper home (e.g.
 // bit helpers with the candle family, time-range/price-parse helpers with the
-// store/marketdata package) rather than cementing these exports. Remove entries
+// store/datamanager package) rather than cementing these exports. Remove entries
 // here once nothing in root depends on them. See docs/pkg-migration.org.
 
 // TimeMillis is the exported alias for the internal millisecond duration type.

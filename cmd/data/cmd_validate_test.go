@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,7 +100,7 @@ func TestPrintValidationGrid_NoPanic(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
-	report := &marketdata.CandleValidationReport{}
+	report := &datamanager.CandleValidationReport{}
 	require.NotPanics(t, func() {
 		printValidationGrid(cmd,
 			[]string{"EURUSD", "USDJPY"},
@@ -119,8 +119,8 @@ func TestPrintValidationGrid_MarksIssues(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
-	report := &marketdata.CandleValidationReport{
-		Issues: []marketdata.CandleValidationIssue{
+	report := &datamanager.CandleValidationReport{
+		Issues: []datamanager.CandleValidationIssue{
 			{Instrument: "EURUSD", Year: 2024, Month: 6, Severity: "warn", Message: "missing"},
 		},
 	}

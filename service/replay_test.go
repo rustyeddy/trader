@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	_ "github.com/rustyeddy/trader/strategies/fake"
 	_ "github.com/rustyeddy/trader/strategies/noop"
 	"github.com/rustyeddy/trader/strategy"
 )
 
-// buildReplayStore writes two months of synthetic H1 EURUSD candles into a
-// temp store and returns a restore function that reverts the global store.
-func buildReplayStore(t *testing.T) (restore func()) {
+// seedReplayStore writes two months of synthetic H1 EURUSD candles into a
+// temp store.
+func seedReplayStore(t *testing.T) {
 	t.Helper()
-	s := marketdata.NewStoreAt(t.TempDir())
+	datamanager.UseTempDataDir(t)
 
 	base := market.Price(110000) // 1.10000
 	makeMonth := func(_ int, _ time.Month, rows int) []market.Candle {
@@ -34,17 +34,14 @@ func buildReplayStore(t *testing.T) (restore func()) {
 	}
 
 	// Write Jan + Feb 2024 (744 + 696 H1 slots).
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
-		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 1, 744)))
-	require.NoError(t, s.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
-		time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 2, 696)))
-
-	return marketdata.SwapStore(s)
+	datamanager.WriteCandles(t, "oanda", "EURUSD", market.H1,
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 1, 744))
+	datamanager.WriteCandles(t, "oanda", "EURUSD", market.H1,
+		time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 2, 696))
 }
 
 func TestRunReplay_ReturnsBarsAndSignals(t *testing.T) {
-	restore := buildReplayStore(t)
-	defer restore()
+	seedReplayStore(t)
 
 	svc := &Service{}
 	result, err := svc.RunReplay(context.Background(), ReplayRequest{
@@ -84,8 +81,7 @@ func TestRunReplay_BadDateErrors(t *testing.T) {
 }
 
 func TestRunReplay_EmptyStoreReturnsNoBars(t *testing.T) {
-	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
-	defer restore()
+	datamanager.UseTempDataDir(t)
 
 	svc := &Service{}
 	result, err := svc.RunReplay(context.Background(), ReplayRequest{

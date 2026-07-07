@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"context"
@@ -128,7 +128,7 @@ func BuildInventory(ctx context.Context) (*Inventory, error) {
 		return nil, err
 	}
 	inv := NewInventory()
-	if err := store.scanFiles(inv); err != nil {
+	if err := globalStore.scanFiles(inv); err != nil {
 		return nil, err
 	}
 	return inv, nil
@@ -341,9 +341,9 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 			return fmt.Errorf("buildM1 input must be hourly tick key, got %+v", tickKey)
 		}
 
-		it, err := store.OpenTickIterator(tickKey)
+		it, err := globalStore.OpenTickIterator(tickKey)
 		if err != nil {
-			tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -352,7 +352,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-			tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -363,11 +363,11 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
-			tickPath, err2 := store.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.PathForAsset(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
-			kPath, err2 := store.PathForAsset(k)
+			kPath, err2 := globalStore.PathForAsset(k)
 			if err2 != nil {
 				kPath = "<path unavailable>"
 			}
@@ -376,8 +376,8 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		}
 	}
 
-	if err := store.WriteCSV(monthSet); err != nil {
-		kPath, _ := store.PathForAsset(k)
+	if err := globalStore.WriteCSV(monthSet); err != nil {
+		kPath, _ := globalStore.PathForAsset(k)
 		return fmt.Errorf("write monthly M1 %s: %w", kPath, err)
 	}
 
@@ -575,7 +575,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 		return fmt.Errorf("buildH1 expected M1 input, got %v", km1.TF)
 	}
 
-	cs, err := store.ReadCSV(km1)
+	cs, err := globalStore.ReadCSV(km1)
 	if err != nil {
 		return err
 	}
@@ -585,7 +585,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 		return err
 	}
 
-	if err := store.WriteCSV(h1); err != nil {
+	if err := globalStore.WriteCSV(h1); err != nil {
 		return err
 	}
 
@@ -606,7 +606,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		return fmt.Errorf("buildD1 expected H1 input, got %v", kh1.TF)
 	}
 
-	cs, err := store.ReadCSV(kh1)
+	cs, err := globalStore.ReadCSV(kh1)
 	if err != nil {
 		return err
 	}
@@ -616,7 +616,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		return err
 	}
 
-	if err := store.WriteCSV(d1); err != nil {
+	if err := globalStore.WriteCSV(d1); err != nil {
 		return err
 	}
 
@@ -645,7 +645,7 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 	slices.Reverse(dm.plan.Download)
 	for _, key := range dm.plan.Download {
 
-		if ok := store.IsUsableTickFile(key); ok {
+		if ok := globalStore.IsUsableTickFile(key); ok {
 			continue
 		}
 		select {
@@ -723,7 +723,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (market.C
 			Month:      ym.Month,
 		}
 
-		cs, err := store.ReadCSV(key)
+		cs, err := globalStore.ReadCSV(key)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) && !req.Strict {
 				continue

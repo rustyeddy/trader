@@ -22,8 +22,8 @@ import (
 type harness struct {
 	t      *testing.T
 	srv    *mcp.Server
-	stdin  *io.PipeWriter  // test writes here → server reads
-	stdout *bufio.Scanner  // test reads here ← server writes
+	stdin  *io.PipeWriter // test writes here → server reads
+	stdout *bufio.Scanner // test reads here ← server writes
 	cancel context.CancelFunc
 	done   chan error
 }

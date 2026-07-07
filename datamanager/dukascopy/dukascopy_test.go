@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,7 +45,7 @@ func TestFileKey(t *testing.T) {
 	k := f.Key()
 	require.Equal(t, sym, k.Instrument)
 	require.Equal(t, "dukascopy", k.Source)
-	require.Equal(t, marketdata.KindTick, k.Kind)
+	require.Equal(t, datamanager.KindTick, k.Kind)
 	require.Equal(t, market.Ticks, k.TF)
 	require.Equal(t, 2025, k.Year)
 	require.Equal(t, 1, k.Month)

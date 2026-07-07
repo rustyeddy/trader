@@ -13,16 +13,14 @@ import (
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/marketdata"
 )
 
-// Trader couples a candle source with the broker/account it drives and the
-// store it reads from. It owns the broker event loop; backtest and live
-// orchestration call its exported primitives to run a session.
+// Trader couples a candle source with the broker/account it drives. It owns
+// the broker event loop; backtest and live orchestration call its exported
+// primitives to run a session.
 type Trader struct {
 	DataManager CandleSource
 	*execution.Broker
-	*marketdata.Store
 }
 
 // StartBrokerEventHandler launches the goroutine that drains the broker event

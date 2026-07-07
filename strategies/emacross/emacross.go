@@ -188,7 +188,6 @@ func StopDesc(c *Core) string {
 	return ""
 }
 
-
 func priceFromFloat(v float64, scale market.Scale6) market.Price {
 	return market.Price(math.Round(v * float64(scale)))
 }

@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func useTempStore(t *testing.T) *Store {
+func useTempStore(t *testing.T) *store {
 	t.Helper()
 
-	s := NewStoreAt(t.TempDir())
-	restore := SwapStore(s)
+	s := newStoreAt(t.TempDir())
+	restore := swapStore(s)
 	t.Cleanup(restore)
 
 	return s
@@ -23,7 +23,7 @@ func useTempStore(t *testing.T) *Store {
 
 func writeMonthlyCandles(
 	t *testing.T,
-	s *Store,
+	s *store,
 	instrument string,
 	tf market.Timeframe,
 	year int,

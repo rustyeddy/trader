@@ -31,7 +31,7 @@ func (p LivePrice) Mid() market.Price { return (p.Bid + p.Ask) / 2 }
 type LiveTrade struct {
 	ID           string
 	Instrument   string
-	Units        int64        // positive = long, negative = short
+	Units        int64 // positive = long, negative = short
 	EntryPrice   market.Price
 	UnrealizedPL market.Money
 	OpenTime     time.Time // when OANDA opened the trade

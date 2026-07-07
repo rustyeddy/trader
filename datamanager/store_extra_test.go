@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Store.Delete
+// store.Delete
 // ---------------------------------------------------------------------------
 
 func TestStoreDelete(t *testing.T) {
@@ -205,7 +205,7 @@ func testCandle() market.Candle {
 }
 
 func newMonthlyCandleSetFromStart(
-	s *Store,
+	s *store,
 	instrument string,
 	start time.Time,
 	tf market.Timeframe,

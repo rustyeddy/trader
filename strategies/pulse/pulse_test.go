@@ -103,8 +103,8 @@ func TestUpdate_OpensWhenDue(t *testing.T) {
 	cfg.MaxPositions = 3
 	s, _ := New(cfg)
 
-	s.Update(context.Background(), makeCandle(), makeRun())         // bar 1 — hold
-	sig := s.Update(context.Background(), makeCandle(), makeRun())  // bar 2 — open
+	s.Update(context.Background(), makeCandle(), makeRun())        // bar 1 — hold
+	sig := s.Update(context.Background(), makeCandle(), makeRun()) // bar 2 — open
 
 	assert.Equal(t, market.Long, sig.Side) // first alternate = long
 	assert.False(t, sig.CloseAll)
@@ -174,7 +174,7 @@ func TestUpdate_ClosesAndOpensInSameBar(t *testing.T) {
 	s.Update(context.Background(), makeCandle(), run) // bar 1: lot opened at bar 1
 
 	// Bar 3: age = 3 - 1 = 2 >= HoldBars → close + open (bar 3 % 1 == 0)
-	s.Update(context.Background(), makeCandle(), run) // bar 2
+	s.Update(context.Background(), makeCandle(), run)        // bar 2
 	sig := s.Update(context.Background(), makeCandle(), run) // bar 3
 	assert.True(t, sig.CloseAll)
 	assert.NotEqual(t, market.Flat, sig.Side)

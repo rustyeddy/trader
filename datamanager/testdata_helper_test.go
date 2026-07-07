@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"os"
@@ -46,7 +46,7 @@ func CreateTestDataFiles(instrument string, year int, timeframe market.Timeframe
 // GetOrCreateTestData ensures test data exists, creating it if needed.
 func GetOrCreateTestData(instrument string, year int, timeframe market.Timeframe) (string, error) {
 	testdataDir := TestDataDir
-	store := &Store{basedir: testdataDir}
+	store := &store{basedir: testdataDir}
 
 	key := Key{
 		Instrument: market.NormalizeInstrument(instrument),
@@ -74,7 +74,7 @@ func GetOrCreateTestData(instrument string, year int, timeframe market.Timeframe
 // LoadSyntheticCandles loads synthetic candles from testdata, creating them if needed.
 func LoadSyntheticCandles(instrument string, year int, month time.Month, timeframe market.Timeframe) (*candleSet, error) {
 	testdataDir := TestDataDir
-	store := &Store{basedir: testdataDir}
+	store := &store{basedir: testdataDir}
 
 	key := Key{
 		Instrument: market.NormalizeInstrument(instrument),

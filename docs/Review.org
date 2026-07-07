@@ -152,7 +152,7 @@ implemented. Adds two signals the EMA set does not capture cleanly:
   volatility squeeze. Squeezes often precede explosive directional moves and
   are a strong setup filter.
 
-*Body/range ratio (20-bar lookback)* — =marketdata.TrendAnalyzer=, already
+*Body/range ratio (20-bar lookback)* — =datamanager.TrendAnalyzer=, already
 implemented. The percentage of recent D1 bars where |Close − Open| / (High
 − Low) > 0.6. A pair where 60% or more of recent daily bars are directional
 is behaving more cleanly than one where bars are indecisive, regardless of

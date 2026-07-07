@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"fmt"
@@ -151,6 +151,21 @@ func (cs *candleSet) CountValid() int {
 // Time is an internal helper for trader type processing.
 func (cs *candleSet) Time(idx int) time.Time {
 	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
+}
+
+// LastValidTime returns the UTC calendar day of the last valid (non-gap)
+// candle in the set, or false if the set has no valid candles.
+func (cs *candleSet) LastValidTime() (time.Time, bool) {
+	if cs == nil {
+		return time.Time{}, false
+	}
+	for i := len(cs.Candles) - 1; i >= 0; i-- {
+		if cs.IsValid(i) {
+			t := cs.Time(i)
+			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), true
+		}
+	}
+	return time.Time{}, false
 }
 
 // Timestamp is an internal helper for trader type processing.

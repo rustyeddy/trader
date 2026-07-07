@@ -115,11 +115,11 @@ func TestAccountSnapshot_ApplyChanges_TradeLifecycle(t *testing.T) {
 			},
 			{
 				// Trade 7 fully closes; balance updated from fill.
-				TradesClosed:     []string{"7"},
-				TradesReduced:    map[string]int64{},
-				TradeState:       map[string]float64{"11": 15.0},
-				NAV:              10030.0,
-				BalanceAfterFill: 10020.0,
+				TradesClosed:      []string{"7"},
+				TradesReduced:     map[string]int64{},
+				TradeState:        map[string]float64{"11": 15.0},
+				NAV:               10030.0,
+				BalanceAfterFill:  10020.0,
 				LastTransactionID: 30,
 			},
 		},

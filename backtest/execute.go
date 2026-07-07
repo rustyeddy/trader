@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -354,7 +354,7 @@ func (run *Backtest) Execute(ctx context.Context, t *engine.Trader) error {
 	}
 	source := firstNonEmpty(run.Request.Source, market.SourceOanda)
 	// Select the Instrument, TimeRange and TimeFrame
-	candlereq := marketdata.CandleRequest{
+	candlereq := datamanager.CandleRequest{
 		Source:     source,
 		Instrument: run.Request.Instrument,
 		Range:      run.Request.TimeRange,

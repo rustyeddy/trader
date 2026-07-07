@@ -7,30 +7,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// buildMCPCandleStore seeds a temp store with January 2024 H1 EURUSD candles.
-func buildMCPCandleStore(t *testing.T) func() {
+// seedMCPCandleStore seeds a temp store with January 2024 H1 EURUSD candles.
+func seedMCPCandleStore(t *testing.T) {
 	t.Helper()
-	store := marketdata.NewStoreAt(t.TempDir())
 	candles := make([]market.Candle, 744)
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	candles[1] = market.Candle{Open: 110050, High: 110200, Low: 110000, Close: 110150, AvgSpread: 11, MaxSpread: 16, Ticks: 55}
-	require.NoError(t, store.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
-		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles))
-	return marketdata.SwapStore(store)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 }
 
 // ── get_candle_stats ──────────────────────────────────────────────────────
 
 func TestToolGetDataStats_ReturnsAnalyzers(t *testing.T) {
-	restore := buildMCPCandleStore(t)
-	defer restore()
+	seedMCPCandleStore(t)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{
@@ -51,8 +47,7 @@ func TestToolGetDataStats_ReturnsAnalyzers(t *testing.T) {
 }
 
 func TestToolGetDataStats_DefaultsTimeframeToH1(t *testing.T) {
-	restore := buildMCPCandleStore(t)
-	defer restore()
+	seedMCPCandleStore(t)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{
@@ -78,8 +73,7 @@ func TestToolGetDataStats_RequiresInstrumentFromTo(t *testing.T) {
 }
 
 func TestHandleToolsCall_AllowsGetDataStatsWithoutOANDA(t *testing.T) {
-	restore := buildMCPCandleStore(t)
-	defer restore()
+	seedMCPCandleStore(t)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{
@@ -192,8 +186,7 @@ func TestHandleToolsCall_AllowsGetPositionWithoutOANDA(t *testing.T) {
 // ── validate_candles ──────────────────────────────────────────────────────
 
 func TestToolValidateCandles_ReturnsReport(t *testing.T) {
-	restore := buildMCPCandleStore(t)
-	defer restore()
+	seedMCPCandleStore(t)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{
@@ -220,8 +213,7 @@ func TestToolValidateCandles_RequiresInstrumentsFromTo(t *testing.T) {
 }
 
 func TestHandleToolsCall_AllowsValidateCandlesWithoutOANDA(t *testing.T) {
-	restore := buildMCPCandleStore(t)
-	defer restore()
+	seedMCPCandleStore(t)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{

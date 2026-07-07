@@ -6,31 +6,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// buildRestCandleStore seeds a temp store with January 2024 H1 EURUSD candles
-// and returns a restore function.
-func buildRestCandleStore(t *testing.T) func() {
+// seedRestCandleStore seeds a temp store with January 2024 H1 EURUSD candles.
+func seedRestCandleStore(t *testing.T) {
 	t.Helper()
-	store := marketdata.NewStoreAt(t.TempDir())
 	candles := make([]market.Candle, 744)
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	candles[1] = market.Candle{Open: 110050, High: 110200, Low: 110000, Close: 110150, AvgSpread: 11, MaxSpread: 16, Ticks: 55}
-	require.NoError(t, store.WriteMonthlyCandles("oanda", "EURUSD", market.H1,
-		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles))
-	return marketdata.SwapStore(store)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 }
 
 // ── GET /api/v1/candles/{instrument}/stats ────────────────────────────────
 
 func TestHandleDataStats_OK(t *testing.T) {
-	restore := buildRestCandleStore(t)
-	defer restore()
+	seedRestCandleStore(t)
 
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?timeframe=H1&from=2024-01-01&to=2024-01-31")
@@ -46,8 +41,7 @@ func TestHandleDataStats_OK(t *testing.T) {
 }
 
 func TestHandleDataStats_DefaultsTimeframeToH1(t *testing.T) {
-	restore := buildRestCandleStore(t)
-	defer restore()
+	seedRestCandleStore(t)
 
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01&to=2024-01-31")
@@ -173,8 +167,7 @@ func TestHandleValidateCandles_BadFromFormat(t *testing.T) {
 }
 
 func TestHandleValidateCandles_OK(t *testing.T) {
-	restore := buildRestCandleStore(t)
-	defer restore()
+	seedRestCandleStore(t)
 
 	srv := New(&service.Service{}, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/validate?instruments=EURUSD&from=2024-01&to=2024-01")

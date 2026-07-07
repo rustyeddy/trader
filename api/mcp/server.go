@@ -264,7 +264,6 @@ func (s *Server) handleInitialize(raw json.RawMessage) (any, *rpcError) {
 	}, nil
 }
 
-
 // ── MCP content helpers ───────────────────────────────────────────────────
 
 func textContent(text string) map[string]any {

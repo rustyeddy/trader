@@ -9,7 +9,7 @@ import (
 
 // AccountRef is a minimal account descriptor returned by GET /v3/accounts.
 type AccountRef struct {
-	ID   string `json:"id"`
+	ID   string   `json:"id"`
 	Tags []string `json:"tags"`
 }
 

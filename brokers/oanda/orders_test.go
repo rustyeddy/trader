@@ -20,13 +20,13 @@ func orderFillBody(t *testing.T, tradeOpened, tradesClosed, tradeReduced string)
 		TradeID string `json:"tradeID"`
 	}
 	type fillTx struct {
-		ID           string    `json:"id"`
-		TradeOpened  tradeRef  `json:"tradeOpened"`
+		ID           string     `json:"id"`
+		TradeOpened  tradeRef   `json:"tradeOpened"`
 		TradesClosed []tradeRef `json:"tradesClosed,omitempty"`
-		TradeReduced tradeRef  `json:"tradeReduced,omitempty"`
-		Instrument   string    `json:"instrument"`
-		Units        string    `json:"units"`
-		Price        string    `json:"price"`
+		TradeReduced tradeRef   `json:"tradeReduced,omitempty"`
+		Instrument   string     `json:"instrument"`
+		Units        string     `json:"units"`
+		Price        string     `json:"price"`
 	}
 	type resp struct {
 		OrderFillTransaction  fillTx   `json:"orderFillTransaction"`

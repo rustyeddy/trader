@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"math"
@@ -222,7 +222,7 @@ func TestGenerateSyntheticYearlyAndWrite(t *testing.T) {
 	t.Parallel()
 
 	tmpdir := t.TempDir()
-	store := &Store{basedir: tmpdir}
+	store := &store{basedir: tmpdir}
 	cfg := DefaultSyntheticConfig("EURUSD")
 	cfg.Timeframe = market.H1
 
@@ -246,7 +246,7 @@ func TestLoadSyntheticCandles_CreatesIfMissing(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
 	cfg.Timeframe = market.H1
 
-	store := &Store{basedir: tmpdir}
+	store := &store{basedir: tmpdir}
 	paths, err := cfg.GenerateSyntheticYearlyAndWrite(store, 2025)
 	require.NoError(t, err)
 	require.Greater(t, len(paths), 0)

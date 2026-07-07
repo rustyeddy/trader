@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"bufio"
@@ -19,7 +19,7 @@ import (
 	"github.com/ulikunitz/xz/lzma"
 )
 
-// Store manages candle CSVs and raw tick files under a pair of symmetric
+// store manages candle CSVs and raw tick files under a pair of symmetric
 // directory trees that share a common root:
 //
 //	/srv/trading/data/
@@ -40,11 +40,11 @@ import (
 // Raw tick files follow the Dukascopy bi5 naming convention:
 //
 //	/srv/trading/data/raw/dukascopy/EURUSD/2025/01/02/13h_ticks.bi5
-type Store struct {
+type store struct {
 	basedir string // root of the candles tree, e.g. "/srv/trading/data/candles"
 }
 
-func (s *Store) PathForAsset(k Key) (string, error) {
+func (s *store) PathForAsset(k Key) (string, error) {
 	switch {
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		return s.pathForMonthlyCandle(k), nil
@@ -72,18 +72,18 @@ func monthlyCandle(root string, k Key) string {
 		fmt.Sprintf("%04d", k.Year), fmt.Sprintf("%02d", k.Month), filename)
 }
 
-func (s *Store) pathForMonthlyCandle(k Key) string {
+func (s *store) pathForMonthlyCandle(k Key) string {
 	return monthlyCandle(s.basedir, k)
 }
 
 // PathForMonthlyCandle returns the file path for a monthly candle CSV.
-func (s *Store) PathForMonthlyCandle(k Key) string {
+func (s *store) PathForMonthlyCandle(k Key) string {
 	return s.pathForMonthlyCandle(k)
 }
 
 // RawCandlePath returns the path for a monthly candle CSV under the raw tree.
 // It mirrors PathForAsset but roots in rawRoot instead of basedir.
-func (s *Store) RawCandlePath(k Key) (string, error) {
+func (s *store) RawCandlePath(k Key) (string, error) {
 	if k.Kind != KindCandle || k.Day != 0 || k.Hour != 0 {
 		return "", fmt.Errorf("RawCandlePath requires a monthly candle key (Day=0, Hour=0)")
 	}
@@ -92,7 +92,7 @@ func (s *Store) RawCandlePath(k Key) (string, error) {
 
 // RawRoot returns the root directory for raw source data.
 // e.g. basedir=/srv/trading/data/candles → /srv/trading/data/raw
-func (s *Store) RawRoot() string { return s.rawRoot() }
+func (s *store) RawRoot() string { return s.rawRoot() }
 
 // RawCandlePathAt returns the path for a monthly candle CSV under a custom
 // raw root (e.g. when --raw-dir overrides the default).
@@ -167,11 +167,11 @@ func parseCandlePath(path string) (k Key, ok bool) {
 
 // rawRoot returns the sibling "raw" directory next to basedir.
 // e.g. basedir=/srv/trading/data/candles → rawRoot=/srv/trading/data/raw
-func (s *Store) rawRoot() string {
+func (s *store) rawRoot() string {
 	return filepath.Join(filepath.Dir(s.basedir), "raw")
 }
 
-func (s *Store) pathForHourlyTick(k Key) string {
+func (s *store) pathForHourlyTick(k Key) string {
 	source := normalizeSource(k.Source)
 	if source == "" {
 		source = market.SourceDukascopy
@@ -259,7 +259,7 @@ func parseTickPath(path string) (Key, bool) {
 	return k, true
 }
 
-func (s *Store) RelDir(key Key) string {
+func (s *store) RelDir(key Key) string {
 	return filepath.Join(
 		market.NormalizeInstrument(key.Instrument),
 		strings.ToUpper(key.TF.String()),
@@ -267,7 +267,7 @@ func (s *Store) RelDir(key Key) string {
 	)
 }
 
-func (s Store) Exists(key Key) (bool, error) {
+func (s store) Exists(key Key) (bool, error) {
 	p, err := s.PathForAsset(key)
 	if err != nil {
 		return false, err
@@ -282,7 +282,7 @@ func (s Store) Exists(key Key) (bool, error) {
 	return false, err
 }
 
-func (s *Store) scanFiles(inv *Inventory) error {
+func (s *store) scanFiles(inv *Inventory) error {
 	// Candle CSVs live under basedir; raw .bi5 tick files live under the
 	// sibling raw dir. Walk both so the inventory has full coverage.
 	for _, root := range []string{s.basedir, s.rawRoot()} {
@@ -296,7 +296,7 @@ func (s *Store) scanFiles(inv *Inventory) error {
 	return nil
 }
 
-func (s *Store) walkRoot(root string, inv *Inventory) error {
+func (s *store) walkRoot(root string, inv *Inventory) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -353,7 +353,7 @@ func (s *Store) walkRoot(root string, inv *Inventory) error {
 	})
 }
 
-func (s *Store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset {
+func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset {
 	asset := Asset{
 		Key:        key,
 		Path:       path,
@@ -428,7 +428,7 @@ func timeRangeMayHaveForexData(start, end time.Time) bool {
 	return false
 }
 
-func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
+func (s *store) writeMetadata(cs *candleSet, w io.Writer) error {
 	tfstr := market.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -442,7 +442,7 @@ func (store *Store) writeMetadata(cs *candleSet, w io.Writer) error {
 	return err
 }
 
-func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
+func (s *store) ReadCSV(key Key) (cs *candleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -453,7 +453,7 @@ func (store *Store) ReadCSV(key Key) (cs *candleSet, err error) {
 		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
 	}
 
-	path, err := store.PathForAsset(key)
+	path, err := s.PathForAsset(key)
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +589,7 @@ func readCSVSource(source string) string {
 	return source
 }
 
-func (s *Store) WriteCSV(cs *candleSet) error {
+func (s *store) WriteCSV(cs *candleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}
@@ -666,7 +666,7 @@ func (s *Store) WriteCSV(cs *candleSet) error {
 	return bw.Flush()
 }
 
-func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
+func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	if r == nil {
 		return "", errors.New("nil reader")
 	}
@@ -710,7 +710,7 @@ func (s *Store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	return dst, nil
 }
 
-func (s Store) Delete(k Key) error {
+func (s store) Delete(k Key) error {
 	p, err := s.PathForAsset(k)
 	if err != nil {
 		return err
@@ -722,11 +722,11 @@ func (s Store) Delete(k Key) error {
 	return err
 }
 
-func (s Store) baseScanDir() string {
+func (s store) baseScanDir() string {
 	return s.basedir
 }
 
-func (s *Store) IsUsableTickFile(k Key) bool {
+func (s *store) IsUsableTickFile(k Key) bool {
 	p, err := s.PathForAsset(k)
 	if err != nil {
 		return false
@@ -738,7 +738,7 @@ func (s *Store) IsUsableTickFile(k Key) bool {
 	return !info.IsDir() && info.Size() > 0
 }
 
-func (s *Store) OpenTickIterator(key Key) (iterator[RawTick], error) {
+func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}

@@ -7,17 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func useTempStore(t *testing.T) *marketdata.Store {
+func useTempStore(t *testing.T) datamanager.ProviderStore {
 	t.Helper()
-	s := marketdata.NewStoreAt(t.TempDir())
-	restore := marketdata.SwapStore(s)
-	t.Cleanup(restore)
-	return s
+	datamanager.UseTempDataDir(t)
+	return datamanager.ForProviders()
 }
 
 func TestFileIsValid_EmptyFile_MarketClosed(t *testing.T) {

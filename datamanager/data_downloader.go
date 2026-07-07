@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"context"
@@ -86,7 +86,7 @@ func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 		return Asset{}, fmt.Errorf("GET %s: http %d", url, resp.StatusCode)
 	}
 
-	path, err := store.SaveFile(key, resp.Body)
+	path, err := globalStore.SaveFile(key, resp.Body)
 	if err != nil {
 		return Asset{}, fmt.Errorf("save %+v: %w", key, err)
 	}
@@ -110,7 +110,7 @@ func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 }
 
 func downloadFailureAsset(key Key, err error) Asset {
-	path, pathErr := store.PathForAsset(key)
+	path, pathErr := globalStore.PathForAsset(key)
 	if pathErr != nil {
 		path = ""
 	}

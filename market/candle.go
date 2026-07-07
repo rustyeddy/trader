@@ -52,7 +52,7 @@ func (c candleTime) String() string {
 }
 
 // CandleIterator traverses a sequence of timestamped candles. It is the
-// data-access contract: the marketdata layer produces iterators, the engine
+// data-access contract: the datamanager layer produces iterators, the engine
 // consumes them, so both depend only on this interface, not each other.
 type CandleIterator interface {
 	Next() (CandleTime, bool)

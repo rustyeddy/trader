@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -97,8 +97,8 @@ func runBacktestCandles(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse time range: %w", err)
 	}
 
-	dm := marketdata.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
-	iter, err := dm.Candles(cmd.Context(), marketdata.CandleRequest{
+	dm := datamanager.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
+	iter, err := dm.Candles(cmd.Context(), datamanager.CandleRequest{
 		Source:     cfg.Source,
 		Instrument: cfg.Instrument,
 		Range:      tr,

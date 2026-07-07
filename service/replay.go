@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -126,8 +126,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 	// Load all bars. We include warmup bars before the requested range.
 	fromWithWarmup := tr.Start.Time().Add(-warmupDuration(req.Timeframe, warmup))
-	dm := marketdata.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
-	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
+	dm := datamanager.NewDataManager([]string{inst}, fromWithWarmup, tr.End.Time())
+	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: inst,
 		Range: market.TimeRange{

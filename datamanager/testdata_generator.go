@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"fmt"
@@ -174,7 +174,7 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyCandles(year int) ([]*ca
 }
 
 // GenerateSyntheticYearlyAndWrite generates a year of synthetic data and writes it to CSV files.
-func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyAndWrite(store *Store, year int) ([]string, error) {
+func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyAndWrite(store *store, year int) ([]string, error) {
 	candleSets, err := cfg.GenerateSyntheticYearlyCandles(year)
 	if err != nil {
 		return nil, err

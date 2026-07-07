@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,9 +110,8 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	broker.Account = withAcctBroker.Account
 
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
-	s := marketdata.NewStoreAt(t.TempDir())
-	t.Cleanup(marketdata.SwapStore(s))
-	cs, err := marketdata.NewMonthlyCandleSet("EURUSD", market.H1, market.FromTime(ts), market.PriceScale, market.SourceCandles)
+	datamanager.UseTempDataDir(t)
+	cs, err := datamanager.NewMonthlyCandleSet("EURUSD", market.H1, market.FromTime(ts), market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
 	require.NoError(t, cs.AddCandle(market.FromTime(ts), market.Candle{
 		Open:      market.Price(1100000),
@@ -123,9 +122,9 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 		MaxSpread: market.Price(20),
 		Ticks:     42,
 	}))
-	require.NoError(t, s.WriteCSV(cs))
+	datamanager.WriteCandleSet(t, cs)
 
-	dm := marketdata.NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
+	dm := datamanager.NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
 	okTrader := &engine.Trader{Broker: broker, DataManager: dm}
 	require.NoError(t, run.Execute(ctx, okTrader))
 	require.NotNil(t, run.State)

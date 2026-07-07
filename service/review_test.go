@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,8 +24,7 @@ import (
 // the live /srv/trading/data store.
 func swapTempStore(t *testing.T) {
 	t.Helper()
-	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
-	t.Cleanup(restore)
+	datamanager.UseTempDataDir(t)
 }
 
 // fakeOANDACandlesServer serves a monotonically increasing synthetic candle
@@ -220,7 +219,7 @@ func TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort(t *testing.T) {
 		Low:   market.PriceFromFloat(1.1),
 		Close: market.PriceFromFloat(1.1),
 	}
-	require.NoError(t, marketdata.GetStore().WriteMonthlyCandles(market.SourceOanda, "EURUSD", market.D1, monthStart, candles))
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", market.D1, monthStart, candles)
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)

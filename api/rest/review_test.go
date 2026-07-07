@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,8 +23,7 @@ import (
 // the live /srv/trading/data store.
 func swapTempStore(t *testing.T) {
 	t.Helper()
-	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
-	t.Cleanup(restore)
+	datamanager.UseTempDataDir(t)
 }
 
 // fakeOANDACandlesServer serves a monotonically increasing synthetic candle

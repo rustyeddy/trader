@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 import (
 	"fmt"
@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *store {
 	t.Helper()
-	return &Store{basedir: t.TempDir()}
+	return &store{basedir: t.TempDir()}
 }
 
 func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf market.Timeframe) *candleSet {

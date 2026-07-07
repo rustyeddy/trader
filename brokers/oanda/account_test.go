@@ -23,14 +23,14 @@ func accountSummaryServer(t *testing.T, statusCode int, body any) *httptest.Serv
 func TestGetAccountSummary_ParsesAllFields(t *testing.T) {
 	srv := accountSummaryServer(t, 200, map[string]any{
 		"account": map[string]any{
-			"id":               "001-001-123",
-			"alias":            "primary",
-			"currency":         "USD",
-			"balance":          "10000.50",
-			"NAV":              "10250.75",
-			"unrealizedPL":     "250.25",
-			"marginUsed":       "500.00",
-			"marginAvailable":  "9750.75",
+			"id":              "001-001-123",
+			"alias":           "primary",
+			"currency":        "USD",
+			"balance":         "10000.50",
+			"NAV":             "10250.75",
+			"unrealizedPL":    "250.25",
+			"marginUsed":      "500.00",
+			"marginAvailable": "9750.75",
 		},
 	})
 	defer srv.Close()

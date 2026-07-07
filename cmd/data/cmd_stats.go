@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 )
 
 func newStatsCmd(_ *config.RootConfig) *cobra.Command {
@@ -68,15 +68,15 @@ func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 				return fmt.Errorf("bad range: %w", err)
 			}
 
-			analyzers := []marketdata.Analyzer{
-				marketdata.NewSwingAnalyzer(instMeta),
-				marketdata.NewSpreadAnalyzer(instMeta),
-				marketdata.NewTrendAnalyzer(),
-				marketdata.NewSessionAnalyzer(instMeta),
+			analyzers := []datamanager.Analyzer{
+				datamanager.NewSwingAnalyzer(instMeta),
+				datamanager.NewSpreadAnalyzer(instMeta),
+				datamanager.NewTrendAnalyzer(),
+				datamanager.NewSessionAnalyzer(instMeta),
 			}
 
-			dm := marketdata.NewDataManager([]string{inst}, from, toExcl)
-			req := marketdata.CandleRequest{
+			dm := datamanager.NewDataManager([]string{inst}, from, toExcl)
+			req := datamanager.CandleRequest{
 				Source:     source,
 				Instrument: inst,
 				Range:      tr,
@@ -88,7 +88,7 @@ func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 				return fmt.Errorf("open candles: %w", err)
 			}
 
-			if err := marketdata.RunAnalysis(ctx, itr, analyzers); err != nil {
+			if err := datamanager.RunAnalysis(ctx, itr, analyzers); err != nil {
 				return fmt.Errorf("analysis: %w", err)
 			}
 
@@ -114,7 +114,7 @@ func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 	return cmd
 }
 
-func printAnalysis(w io.Writer, instMeta *market.Instrument, inst, tf string, from, to time.Time, analyzers []marketdata.Analyzer, units int64, rate float64) {
+func printAnalysis(w io.Writer, instMeta *market.Instrument, inst, tf string, from, to time.Time, analyzers []datamanager.Analyzer, units int64, rate float64) {
 	header := fmt.Sprintf("%s %s   %s → %s",
 		inst, tf,
 		from.Format("2006-01-02"),

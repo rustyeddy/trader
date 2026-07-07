@@ -1,13 +1,10 @@
-package marketdata
+package datamanager
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/market"
@@ -84,7 +81,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 
 	rawDir := req.RawDir
 	if rawDir == "" {
-		rawDir = store.rawRoot()
+		rawDir = globalStore.rawRoot()
 	}
 
 	months := market.TimeRange{Start: market.FromTime(start), End: market.FromTime(end), TF: req.Timeframe}.MonthsInRange()
@@ -148,12 +145,12 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	// Slots in the future (after the current hour) are not expected to have data.
 	now := time.Now().UTC().Truncate(time.Hour)
 
-	path, err := store.PathForAsset(key)
+	path, err := globalStore.PathForAsset(key)
 	if err != nil {
 		return nil, err
 	}
 
-	cs, err := store.ReadCSV(key)
+	cs, err := globalStore.ReadCSV(key)
 	if err != nil {
 		if os.IsNotExist(err) {
 			expected := expectedOpenSlotCount(key.Year, key.Month, key.TF, now)
@@ -377,68 +374,28 @@ func diffSample(left, right map[int]struct{}, key Key) []string {
 }
 
 func readRawOandaMonth(path string, key Key) (*rawOandaCoverage, error) {
-	f, err := os.Open(path)
+	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+
+	rows, err := readRawMonthRows(path, monthStart, monthEnd)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
+	step := int64(key.TF)
 	cov := &rawOandaCoverage{
 		Path:    path,
 		Present: make(map[int]struct{}),
 	}
-	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	monthEnd := monthStart.AddDate(0, 1, 0)
-	step := int64(key.TF)
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+	for _, r := range rows {
+		if !r.Complete {
 			continue
 		}
-		fields := strings.Split(line, ",")
-		if looksLikeHeader(fields) {
+		if r.BidClose == 0 && r.AskClose == 0 {
 			continue
 		}
-		if len(fields) < 11 {
-			return nil, fmt.Errorf("raw csv %q: expected 11 fields, got %d", path, len(fields))
-		}
-
-		ts, err := time.Parse(time.RFC3339, strings.TrimSpace(fields[0]))
-		if err != nil {
-			return nil, fmt.Errorf("raw csv %q: parse time: %w", path, err)
-		}
-		ts = ts.UTC()
-		if ts.Before(monthStart) || !ts.Before(monthEnd) {
-			continue
-		}
-
-		complete, err := strconv.ParseBool(strings.TrimSpace(fields[10]))
-		if err != nil {
-			return nil, fmt.Errorf("raw csv %q: parse complete: %w", path, err)
-		}
-		if !complete {
-			continue
-		}
-
-		bidClose, err := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
-		if err != nil {
-			return nil, fmt.Errorf("raw csv %q: parse bid_c: %w", path, err)
-		}
-		askClose, err := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
-		if err != nil {
-			return nil, fmt.Errorf("raw csv %q: parse ask_c: %w", path, err)
-		}
-		if bidClose == 0 && askClose == 0 {
-			continue
-		}
-
-		idx := int((ts.Unix() - monthStart.Unix()) / step)
+		idx := int((r.Time.Unix() - monthStart.Unix()) / step)
 		cov.Present[idx] = struct{}{}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan raw csv %q: %w", path, err)
 	}
 	return cov, nil
 }

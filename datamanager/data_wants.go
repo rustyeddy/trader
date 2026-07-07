@@ -1,4 +1,4 @@
-package marketdata
+package datamanager
 
 type Want struct {
 	Key

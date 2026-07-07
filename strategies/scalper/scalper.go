@@ -139,7 +139,6 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy
 	return strategy.Hold("no signal")
 }
 
-
 func build(params map[string]any) (strategy.Strategy, error) {
 	fast, _, err := strategy.GetInt32Param(params, "fast_period")
 	if err != nil {

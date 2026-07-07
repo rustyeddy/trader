@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -362,8 +362,8 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	dm := marketdata.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
-	iter, err := dm.Candles(r.Context(), marketdata.CandleRequest{
+	dm := datamanager.NewDataManager([]string{cfg.Instrument}, tr.Start.Time(), tr.End.Time())
+	iter, err := dm.Candles(r.Context(), datamanager.CandleRequest{
 		Source:     cfg.Source, // empty → DataManager defaults to SourceOanda
 		Instrument: cfg.Instrument,
 		Range:      tr,

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -278,8 +278,7 @@ func TestHandleGetBacktestCandles_EmptyWhenNoCandleFiles(t *testing.T) {
 	}
 	// Point the server at an empty reports dir; swap the store to a temp dir
 	// that has no candle files so DataManager returns an empty iterator.
-	restore := marketdata.SwapStore(marketdata.NewStoreAt(t.TempDir()))
-	t.Cleanup(restore)
+	datamanager.UseTempDataDir(t)
 
 	srv, _ := newTestServer(t, []backtest.BacktestReportSummary{s})
 	rr := do(t, srv.Handler(), "GET", "/api/v1/backtests/no-candles/candles")

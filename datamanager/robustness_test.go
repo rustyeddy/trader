@@ -1,7 +1,7 @@
 // Package data - edge case and boundary tests for robustness and reliability.
 // These tests verify behavior at boundaries and with unusual inputs, even when
 // they don't directly add new code-coverage paths.
-package marketdata
+package datamanager
 
 import (
 	"bytes"
@@ -976,7 +976,7 @@ func TestFuncIterator_ErrThenItem(t *testing.T) {
 }
 
 // =============================================================================
-// Store.Exists – edge cases with permission-denied style errors
+// store.Exists – edge cases with permission-denied style errors
 // =============================================================================
 
 func TestStoreExists_IsDirectory(t *testing.T) {
@@ -1046,34 +1046,34 @@ func TestNewTestStore_IsIsolated(t *testing.T) {
 }
 
 func TestUseTempStore_SetsGlobal(t *testing.T) {
-	before := GetStore().basedir
+	before := getStore().basedir
 
 	s := useTempStore(t)
-	require.NotEqual(t, before, GetStore().basedir)
-	require.Equal(t, s.basedir, GetStore().basedir)
+	require.NotEqual(t, before, getStore().basedir)
+	require.Equal(t, s.basedir, getStore().basedir)
 	// After test cleanup the global store is restored (handled by t.Cleanup in useTempStore)
 }
 
 func TestSwapStore_OutOfOrderRestore(t *testing.T) {
-	before := GetStore().basedir
+	before := getStore().basedir
 	defer SetDataDir(before)
 
 	SetDataDir(t.TempDir())
-	base := GetStore()
+	base := getStore()
 
-	first := NewStoreAt(t.TempDir())
-	restoreFirst := SwapStore(first)
-	require.Same(t, first, GetStore())
+	first := newStoreAt(t.TempDir())
+	restoreFirst := swapStore(first)
+	require.Same(t, first, getStore())
 
-	second := NewStoreAt(t.TempDir())
-	restoreSecond := SwapStore(second)
-	require.Same(t, second, GetStore())
+	second := newStoreAt(t.TempDir())
+	restoreSecond := swapStore(second)
+	require.Same(t, second, getStore())
 
 	restoreFirst()
-	require.Same(t, second, GetStore())
+	require.Same(t, second, getStore())
 
 	restoreSecond()
-	require.Same(t, base, GetStore())
+	require.Same(t, base, getStore())
 }
 
 // =============================================================================
@@ -1140,7 +1140,7 @@ func TestReadCSV_InvalidMonth(t *testing.T) {
 }
 
 // =============================================================================
-// Store.Delete – file-not-found is an error
+// store.Delete – file-not-found is an error
 // =============================================================================
 
 func TestStoreDelete_FileNotFound(t *testing.T) {
@@ -1158,7 +1158,7 @@ func TestStoreDelete_FileNotFound(t *testing.T) {
 }
 
 // =============================================================================
-// Store.IsUsableTickFile – directory vs. file
+// store.IsUsableTickFile – directory vs. file
 // =============================================================================
 
 func TestStoreIsUsableTickFile_Directory(t *testing.T) {
@@ -1233,7 +1233,7 @@ func TestCandleRequestKey_AllTimeframes(t *testing.T) {
 }
 
 // =============================================================================
-// Store.PathForAsset – candle key with all timeframes
+// store.PathForAsset – candle key with all timeframes
 // =============================================================================
 
 func TestPathForAsset_CandleAllTimeframes(t *testing.T) {

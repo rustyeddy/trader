@@ -1,0 +1,70 @@
+#+TITLE: Data Manager
+
+* Data architecture
+
+** Storage model
+
+Internal instrument keys are normalized uppercase symbols without separators,
+for example =EURUSD=.  OANDA wire requests use forms such as =EUR_USD=.
+Normalization happens before registry lookup or path construction.
+
+The operational data root has distinct source and derived areas:
+
+#+begin_example
+/srv/trading/data/
+  raw/
+    dukascopy/<INSTRUMENT>/<YYYY>/<MM>/<DD>/<hourly BI5>
+    oanda/<INSTRUMENT>/<YYYY>/<MM>/<source CSV>
+  candles/
+    <source>/<INSTRUMENT>/<YYYY>/<MM>/<canonical candle CSV>
+  news_days/
+#+end_example
+
+=raw/= preserves provider input.  =candles/= contains canonical derived data
+consumed by backtests.  Tests use temporary stores or committed fixtures and
+must not mutate the operational data root.
+
+** Responsibilities
+
+*** DataManager
+
+=DataManager= is orchestration and policy.  It:
+
+- scans store inventory;
+- builds the wanted dataset for instruments and a half-open date range;
+- plans downloads and M1/H1/D1 build tasks;
+- executes acquisition and candle builds;
+- provides =CandleIterator= values to the engine.
+
+It decides what work is required, not how a provider wire format is decoded.
+
+*** Provider registry
+
+=data.Provider= is the acquisition boundary.  Providers register by source
+name; =data/dukascopy= implements Dukascopy retrieval and decoding.  OANDA
+candle import is coordinated by the service layer and stored in the same
+canonical layout.
+
+*** Store and keys
+
+=Store= and =Key= own canonical paths, inventory scanning, existence checks,
+and candle/tick persistence.  The store does not decide which historical
+datasets should exist or which task should run next.
+
+*** Candle sets and iterators
+
+A candle set represents one normalized instrument, source, timeframe, and
+bounded period with candle data and validity metadata.  Iterators expose
+ordered traversal without leaking storage details into the backtest engine.
+
+** Build dependency order
+
+The planner models derived data dependencies:
+
+#+begin_example
+Dukascopy hourly BI5 ticks -> monthly M1 candles -> monthly H1 candles
+                                             \-> monthly D1 candles
+#+end_example
+
+Inventory completeness gates downstream build tasks.  Derived data is
+rebuildable; raw source data is not overwritten with processed output.

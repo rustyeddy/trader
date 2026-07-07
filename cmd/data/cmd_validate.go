@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/service"
 	"github.com/spf13/cobra"
 )
@@ -66,7 +66,7 @@ OANDA. All validated timeframes are repaired.`,
 
 			baseInstruments := splitCSV(instrumentsCSV)
 
-			var allReports []*marketdata.CandleValidationReport
+			var allReports []*datamanager.CandleValidationReport
 			totalMonths, totalIssues := 0, 0
 
 			for _, tf := range timeframes {
@@ -169,12 +169,12 @@ OANDA. All validated timeframes are repaired.`,
 //  4. Derive canonical candles from the raw file.
 func repairMissingCandles(
 	cmd *cobra.Command,
-	reports []*marketdata.CandleValidationReport,
+	reports []*datamanager.CandleValidationReport,
 	rawDir, token, env string,
 ) error {
 	// Default rawDir to the store's sibling raw tree.
 	if rawDir == "" {
-		rawDir = marketdata.GetStore().RawRoot()
+		rawDir = datamanager.RawRoot()
 	}
 
 	type monthKey struct {
@@ -248,15 +248,15 @@ func repairMissingCandles(
 			continue
 		}
 
-		rawKey := marketdata.Key{
-			Kind:       marketdata.KindCandle,
+		rawKey := datamanager.Key{
+			Kind:       datamanager.KindCandle,
 			Source:     market.SourceOanda,
 			Instrument: k.instrument,
 			TF:         tf,
 			Year:       k.year,
 			Month:      k.month,
 		}
-		rawPath := marketdata.RawCandlePathAt(rawDir, rawKey)
+		rawPath := datamanager.RawCandlePathAt(rawDir, rawKey)
 
 		// Step 2: check if raw already exists on disk.
 		if _, statErr := os.Stat(rawPath); os.IsNotExist(statErr) {
@@ -319,7 +319,7 @@ func repairMissingCandles(
 	log.TotalErrors = repairErrors
 
 	// Write validation log to the data root.
-	dataRoot := filepath.Dir(marketdata.GetStore().RawRoot())
+	dataRoot := filepath.Dir(datamanager.RawRoot())
 	logPath := filepath.Join(dataRoot, "validation-"+time.Now().UTC().Format("2006-01-02")+".json")
 	if err := writeValidationReport(logPath, log); err != nil {
 		cmd.Printf("\n[warn] could not write validation log %s: %v\n", logPath, err)
@@ -340,7 +340,7 @@ func printValidationGrid(
 	instruments []string,
 	startYear, endYear int,
 	startMonth, endMonth time.Month,
-	report *marketdata.CandleValidationReport,
+	report *datamanager.CandleValidationReport,
 ) {
 	// Build an issue index: instrument → year → month → true.
 	hasIssue := make(map[string]map[int]map[int]bool)
@@ -415,7 +415,7 @@ func resolveValidateDefaults(
 	source string,
 	tf market.Timeframe,
 ) (outInstruments []string, outFrom, outTo string, err error) {
-	inv, err := marketdata.BuildInventory(ctx)
+	inv, err := datamanager.BuildInventory(ctx)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("scan store: %w", err)
 	}
@@ -428,7 +428,7 @@ func resolveValidateDefaults(
 	var minYear, minMonth, maxYear, maxMonth int
 
 	for _, key := range inv.Keys() {
-		if key.Kind != marketdata.KindCandle {
+		if key.Kind != datamanager.KindCandle {
 			continue
 		}
 		if key.Source != source {

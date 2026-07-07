@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +15,7 @@ import (
 func generate(t *testing.T, instrument string, year int, tf market.Timeframe) []string {
 	t.Helper()
 	dir := t.TempDir()
-	paths, err := marketdata.GenerateSyntheticYearTestData(dir, instrument, year, tf)
+	paths, err := datamanager.GenerateSyntheticYearTestData(dir, instrument, year, tf)
 	require.NoError(t, err)
 	return paths
 }
@@ -48,7 +48,7 @@ func TestGenTestdata_FilesAreNonEmpty(t *testing.T) {
 
 func TestGenTestdata_FilesExistOnDisk(t *testing.T) {
 	dir := t.TempDir()
-	paths, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	paths, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
 	for _, p := range paths {
 		_, err := os.Stat(p)
@@ -58,7 +58,7 @@ func TestGenTestdata_FilesExistOnDisk(t *testing.T) {
 
 func TestGenTestdata_FilesAreUnderOutputDir(t *testing.T) {
 	dir := t.TempDir()
-	paths, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	paths, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
 	for _, p := range paths {
 		rel, err := filepath.Rel(dir, p)
@@ -71,9 +71,9 @@ func TestGenTestdata_FilesAreUnderOutputDir(t *testing.T) {
 
 func TestGenTestdata_DifferentInstrumentsUseSeparateFiles(t *testing.T) {
 	dir := t.TempDir()
-	eurPaths, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	eurPaths, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
-	gbpPaths, err := marketdata.GenerateSyntheticYearTestData(dir, "GBPUSD", 2024, market.H1)
+	gbpPaths, err := datamanager.GenerateSyntheticYearTestData(dir, "GBPUSD", 2024, market.H1)
 	require.NoError(t, err)
 
 	eurSet := make(map[string]bool, len(eurPaths))
@@ -87,9 +87,9 @@ func TestGenTestdata_DifferentInstrumentsUseSeparateFiles(t *testing.T) {
 
 func TestGenTestdata_DifferentYearsAreDeterministicAndDistinct(t *testing.T) {
 	dir := t.TempDir()
-	paths24, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	paths24, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
-	paths23, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2023, market.H1)
+	paths23, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2023, market.H1)
 	require.NoError(t, err)
 
 	set24 := make(map[string]bool, len(paths24))
@@ -106,7 +106,7 @@ func TestGenTestdata_DifferentYearsAreDeterministicAndDistinct(t *testing.T) {
 func TestGenTestdata_RerunOverwritesWithIdenticalContent(t *testing.T) {
 	dir := t.TempDir()
 
-	paths1, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	paths1, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
 
 	sizes1 := make(map[string]int64, len(paths1))
@@ -115,7 +115,7 @@ func TestGenTestdata_RerunOverwritesWithIdenticalContent(t *testing.T) {
 		sizes1[p] = info.Size()
 	}
 
-	paths2, err := marketdata.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
+	paths2, err := datamanager.GenerateSyntheticYearTestData(dir, "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
 
 	for _, p := range paths2 {
@@ -136,7 +136,7 @@ func TestGenTestdata_EmptyBasedirUsesDefault(t *testing.T) {
 	require.NoError(t, os.Chdir(tmp))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	paths, err := marketdata.GenerateSyntheticYearTestData("", "EURUSD", 2024, market.H1)
+	paths, err := datamanager.GenerateSyntheticYearTestData("", "EURUSD", 2024, market.H1)
 	require.NoError(t, err)
 	assert.Len(t, paths, 12)
 

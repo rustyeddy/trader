@@ -9,9 +9,9 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -56,7 +56,7 @@ type CandleAdapterConfig struct {
 	Granularity string                // "H1" or "D"
 	WarmupBars  int                   // bars to fetch from OANDA for indicator warmup (default 100)
 	// LocalWarmupBars, when > 0, reads this many bars from the local candle
-	// store (set via marketdata.SetDataDir / --data-dir) before the OANDA warmup
+	// store (set via datamanager.SetDataDir / --data-dir) before the OANDA warmup
 	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
 	// indicators are fully primed. Falls back gracefully if local data is absent.
 	LocalWarmupBars int
@@ -216,8 +216,8 @@ func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	from := barsBefore(to, a.granularity, a.localWarmupBars)
 	tf := oandaGranToTF(a.granularity)
 
-	dm := marketdata.NewDataManager([]string{a.instNorm}, from, to)
-	iter, err := dm.Candles(ctx, marketdata.CandleRequest{
+	dm := datamanager.NewDataManager([]string{a.instNorm}, from, to)
+	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: a.instNorm,
 		Range:      market.TimeRange{Start: market.FromTime(from), End: market.FromTime(to), TF: tf},
@@ -560,7 +560,6 @@ func (lt *liveLotsTracker) sync(trades []LiveTrade) {
 		}
 	}
 }
-
 
 func (lt *liveLotsTracker) toLotBook() *execution.LotBook {
 	lb := &execution.LotBook{}

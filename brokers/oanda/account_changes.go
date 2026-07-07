@@ -47,12 +47,12 @@ type AccountChangesResult struct {
 // tradeDetailWire is the on-wire trade shape shared by the full account
 // details response (account.trades) and the changes.tradesOpened array.
 type tradeDetailWire struct {
-	ID           string `json:"id"`
-	Instrument   string `json:"instrument"`
-	Price        string `json:"price"`
-	CurrentUnits string `json:"currentUnits"`
-	UnrealizedPL string `json:"unrealizedPL"`
-	OpenTime     string `json:"openTime"`
+	ID            string `json:"id"`
+	Instrument    string `json:"instrument"`
+	Price         string `json:"price"`
+	CurrentUnits  string `json:"currentUnits"`
+	UnrealizedPL  string `json:"unrealizedPL"`
+	OpenTime      string `json:"openTime"`
 	StopLossOrder *struct {
 		Price string `json:"price"`
 	} `json:"stopLossOrder"`
@@ -79,8 +79,8 @@ type accountDetailsWire struct {
 
 type accountChangesWire struct {
 	Changes struct {
-		TradesOpened  []tradeDetailWire `json:"tradesOpened"`
-		TradesClosed  []struct {
+		TradesOpened []tradeDetailWire `json:"tradesOpened"`
+		TradesClosed []struct {
 			ID string `json:"id"`
 		} `json:"tradesClosed"`
 		TradesReduced []struct {
