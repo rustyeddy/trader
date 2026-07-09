@@ -160,6 +160,16 @@ sharpest setup-proximity signal because H4 is the entry timeframe. Price
 within 0.5–1.0 ATR of the H4 EMA20 with D1 trend still intact is the
 canonical swing entry location.
 
+*H4 EMA(50) and H4 EMA separation ((EMA20 − EMA50) / H4 ATR14)* — mirrors
+the D1 EMA-separation signal, added specifically to distinguish a live H4
+trend from a flattened/merged EMA20-EMA50 pair sitting near each other
+during a consolidation. Before this field existed, H4 CI < 60 and
+H4-EMA-proximity were the only setup-quality checks, and neither reliably
+catches a multi-week range: a mature consolidation can score under 60 on
+CI and land price near a flat, converged EMA20 by construction, not
+because a real pullback happened. See "Known false-positive pattern"
+below.
+
 *H4 ATR(14)* — used for normalizing H4 distances; also confirms whether H4
 volatility is compressed (squeeze) or expanding. Squeeze threshold as
 implemented: =H4 BB width (upper − lower) < 2.0 × H4 ATR(14)=. This is a
@@ -237,9 +247,14 @@ type H4Snapshot struct {
     CI            float64 `json:"ci"`
     ATRPips       float64 `json:"atr_pips"`
     EMA20         float64 `json:"ema20"`
+    EMA50         float64 `json:"ema50"`
     Close         float64 `json:"close"`
     PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/H4 ATR14
     Squeeze       bool    `json:"squeeze"`          // H4 BB width < 2.0x H4 ATR
+
+    // Derived. Mirrors D1.EMASepATR; distinguishes a live H4 trend from a
+    // flattened/merged EMA20-EMA50 pair (consolidation, not a pullback).
+    EMASepATR     float64 `json:"ema_sep_atr"`     // (EMA20-EMA50)/H4 ATR14
 }
 
 type W1Snapshot struct {
@@ -269,6 +284,8 @@ Tradeable:
   AND abs(H4.PriceEMA20ATR) in [0.5, 1.5]   -- near H4 EMA (entry zone)
   AND H4 bias matches D1 bias                -- short-term aligned with regime
   AND H4.CI < 60                             -- H4 not actively ranging
+  AND H4.ADX >= 20                           -- H4 momentum still alive
+  AND abs(H4.EMASepATR) >= 0.3               -- H4 EMA20/50 not merged/flat
 
 Hot:
   D1.ADX >= 25
@@ -281,13 +298,67 @@ Watch:
   everything else
 #+end_src
 
-Demotion signals (surfaced as notes in v1, enforced as hard gates in v2):
+The two new Tradeable-only checks (=H4.ADX >= 20=, =abs(H4.EMASepATR) >=
+0.3=) do *not* apply to the Hot gate — a pair can still be legitimately
+Hot with a consolidating H4. This is intentional: Hot means "the D1/W1
+regime is favorable," not "the H4 entry structure is clean." Only
+Tradeable claims the entry structure itself is valid, so only Tradeable
+enforces it. See "Known false-positive pattern" below for why these two
+checks exist.
+
+Demotion signals (surfaced as notes in v1, enforced as hard gates in v2 —
+except the two Tradeable-only checks above, which are hard gates already):
 
 #+begin_src text
 ADX dropped below 20
 CI crossed above 65
 WeeklyAlignment(W1 bias, D1 bias) == Conflict   -- "W1 EMA flipped against D1 bias"
+H4.ADX < 20                                     -- surfaced as a note even for Hot pairs
+abs(H4.EMASepATR) < 0.3                         -- surfaced as a note even for Hot pairs
+W1.WeekUsedPct >= 0.90                          -- weekly ATR budget consumed
 #+end_src
+
+** Known false-positive pattern: H4 consolidation vs pullback
+
+*Diagnosis (2026-07-09).* Across multiple independent chart-review
+sessions covering NZDUSD, AUDUSD, and USDCAD, every case where the scanner
+called a pair Tradeable or Hot but chart review disagreed showed the same
+signature: H4 ADX below 20 (observed as low as 13.46, consistently in the
+18–21 range) combined with H4 EMA20/EMA50 converged or merged. In each
+case the H4 structure was a multi-week sideways range, not a pullback
+within a live trend — the daily regime was often genuinely strong (D1 ADX
+in the high 30s to low 50s in several cases), but the entry-timeframe
+structure had gone flat underneath it. The pre-existing checks (H4.CI <
+60, H4 EMA proximity) did not catch this: a mature range can score under
+60 on CI, and price sitting near a flattened EMA20 by construction is not
+distinguishable from price sitting near an EMA20 mid-pullback without an
+independent measure of whether the H4 EMAs are still separated.
+
+A second, independent pattern showed up in the same review sessions:
+pairs at or beyond their weekly ATR budget (USDCHF 91%, GBPAUD 138%,
+GBPNZD 139%) were classified Tradeable/Hot without any flag, despite the
+doc's own stated 80% caution threshold never being wired into
+=demotionNotes=.
+
+*Fix (this revision).* =H4.EMA50= and the derived =H4.EMASepATR= were
+added (see H4 indicators, above) and Tradeable now hard-gates on
+=H4.ADX >= 20 AND abs(H4.EMASepATR) >= 0.3=. =W1.WeekUsedPct >= 0.90= now
+surfaces as a demotion note. Both threshold values are first-pass
+estimates reasoned from the observed cases, not fit against a larger
+sample — they should be revisited once more data accumulates.
+
+*Calibration risk to watch.* As of this revision, zero pairs have been
+observed as genuinely Tradeable across the full watchlist during the
+entire period chart review has been running alongside the scanner. That
+is plausibly correct — the methodology is deliberately selective and
+low-frequency by design — but it is also exactly the pattern you'd see if
+a gate were calibrated too tight. There is no way to distinguish those two
+explanations from inside this codebase; it requires accumulating more
+scan-and-chart-review sessions over time. If Tradeable remains at or near
+zero for an extended period even as individual pairs show what look like
+genuinely clean H4 pullbacks on the chart, that is the signal to revisit
+=h4ADXFloor= and =h4MinEMASep= rather than assume the market simply hasn't
+offered a setup yet.
 
 ** Reading the output against the chart
 
@@ -297,13 +368,22 @@ on a chart, since the numbers alone can be misleading without that context.
 
 *** Bucket ≠ setup quality
 
-A pair passing every numeric gate can still be a watch-and-wait. The
-canonical failure mode: Hot or even Tradeable by the numbers, but the H4
+A pair passing every numeric gate can still be a watch-and-wait — this is
+true for Hot even after the fix below, since Hot only checks the D1/W1
+regime, not H4 entry structure. The canonical failure mode: Hot (or,
+before this revision, sometimes Tradeable) by the numbers, but the H4
 chart shows merged/flat EMA20 and EMA50 — a consolidation, not a
 trend-pullback sequence. ADX and CI describe the *daily* regime; they
-cannot see that H4 has gone sideways into a coil. This is exactly what the
-H4 DIST and H4 CI columns are for: use them together with a glance at the
-H4 chart, not as a substitute for it.
+cannot see that H4 has gone sideways into a coil.
+
+As of this revision, Tradeable hard-gates on =H4.ADX >= 20= and
+=abs(H4.EMASepATR) >= 0.3= specifically to catch this (see "Known
+false-positive pattern," above), so a merged-EMA H4 should no longer
+reach Tradeable. Hot is deliberately left unfiltered on this — a Hot pair
+with a consolidating H4 is exactly the state you want to be watching, not
+one you'd want hidden. Use H4 DIST, H4 CI, and now H4 EMA sep together
+with a glance at the H4 chart on Hot pairs; don't treat the absence of
+H4-consolidation filtering on Hot as an oversight.
 
 *** EMA separation sign vs. bias
 
@@ -377,6 +457,19 @@ mean reversion classification below.
 For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair). A
 bounded goroutine pool of 8 workers handles the fan-out without rate-limit
 risk. =CandlesOptions= already supports =Count= and =Granularity=.
+
+*** Candle fetch path
+
+All candle fetching, present and future, goes through the existing
+=DataManager= — never a scattered/ad-hoc fetch call inside a new package.
+=review/= itself already follows this: =ReviewPair()= and its
+=computeD1=/=computeH4=/=computeW1= helpers are pure functions that take
+=[]market.Candle= as input; they do not fetch. Whatever wires
+=Service.ScanWatchlist()= (or its =Review*=-renamed equivalent, see Open
+Questions) to OANDA should call through =DataManager=, not open a
+parallel fetch path. This applies equally to the mean reversion TODO
+below — it reuses the same D1/H4 candles already fetched for trend
+classification, so it introduces no new fetch surface at all.
 
 ** Service method
 
@@ -473,6 +566,7 @@ within each bucket.
 | EMA dist    | =d1.price_ema20_atr= | D1 proximity; near zero = at the EMA           |
 | H4 ADX      | =h4.adx=             | same color ramp as D1 ADX                      |
 | H4 CI       | =h4.ci=              | same inverse coloring as D1 CI                 |
+| H4 EMA sep  | =h4.ema_sep_atr=     | signed ATR multiples; near-zero = merged EMAs; drives Tradeable gate |
 | H4 dist     | =setup.price_ema_atr= | entry proximity signal; drives Tradeable gate |
 | Squeeze     | =setup.squeeze=      | badge when H4 BB width < 2.0 × H4 ATR          |
 | W1          | =setup.w1_alignment= | ✓ Aligned / ~ Neutral / ✗ Conflict (tri-state) |

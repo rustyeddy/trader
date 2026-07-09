@@ -48,9 +48,14 @@ type H4Snapshot struct {
 	CI            float64 `json:"ci"`
 	ATRPips       float64 `json:"atr_pips"`
 	EMA20         float64 `json:"ema20"`
+	EMA50         float64 `json:"ema50"`
 	Close         float64 `json:"close"`
 	PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/H4 ATR14
 	Squeeze       bool    `json:"squeeze"`         // BBWidthATR below threshold
+
+	// Derived. Mirrors D1.EMASepATR: distinguishes a live H4 trend from
+	// merged/flat EMAs, i.e. consolidation masquerading as a pullback.
+	EMASepATR float64 `json:"ema_sep_atr"` // (EMA20-EMA50)/H4 ATR14
 }
 
 type W1Snapshot struct {

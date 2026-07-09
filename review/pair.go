@@ -177,6 +177,10 @@ func computeH4(inst *market.Instrument, candles []market.Candle) (H4Snapshot, st
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
+	ema50, err := indicator.NewEMA(50, market.PriceScale)
+	if err != nil {
+		return H4Snapshot{}, "", err
+	}
 	bb, err := indicator.NewBollingerBands(20, 2.0, market.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
@@ -187,10 +191,11 @@ func computeH4(inst *market.Instrument, candles []market.Candle) (H4Snapshot, st
 		ci.Update(c)
 		atr.Update(c)
 		ema20.Update(c)
+		ema50.Update(c)
 		bb.Update(c)
 	}
-	if !(adx.Ready() && ci.Ready() && atr.Ready() && ema20.Ready() && bb.Ready()) {
-		return H4Snapshot{}, "", fmt.Errorf("insufficient candles: got %d, need warmup for ADX/ATR/CI(14), EMA(20), BB(20)", len(candles))
+	if !(adx.Ready() && ci.Ready() && atr.Ready() && ema20.Ready() && ema50.Ready() && bb.Ready()) {
+		return H4Snapshot{}, "", fmt.Errorf("insufficient candles: got %d, need warmup for ADX/ATR/CI(14), EMA(20), EMA(50), BB(20)", len(candles))
 	}
 
 	last := candles[len(candles)-1]
@@ -202,10 +207,12 @@ func computeH4(inst *market.Instrument, candles []market.Candle) (H4Snapshot, st
 		CI:      ci.Float64(),
 		ATRPips: pricePips(inst, atr.Price()),
 		EMA20:   ema20.Float64(),
+		EMA50:   ema50.Float64(),
 		Close:   closeF,
 	}
 	if atrF != 0 {
 		snap.PriceEMA20ATR = (closeF - ema20.Float64()) / atrF
+		snap.EMASepATR = (ema20.Float64() - ema50.Float64()) / atrF
 		widthATR := (bb.Upper() - bb.Lower()) / atrF
 		snap.Squeeze = widthATR < 2.0 // squeeze threshold: BB width under 2x H4 ATR
 	}
