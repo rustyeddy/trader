@@ -697,6 +697,136 @@ addition.
   (i.e. no strong higher-timeframe trend to fight), given MR is explicitly
   a counter-trend approach at the D1 level?
 
+** TODO Backtestable review via =--asof=
+
+*Motivation.* Directly answers the calibration-risk question raised in
+"Known false-positive pattern," above: as of that revision, zero pairs
+had been observed as genuinely Tradeable, and there is no way from inside
+the codebase to tell whether that reflects correct selectivity or an
+over-tight =h4ADXFloor=/=h4MinEMASep=. Waiting for more real
+scan-and-chart-review sessions is one way to find out; replaying the
+classification logic against months of history is a much faster one.
+
+*** Why this requires no change inside =review/=
+
+=ReviewPair()= and its =computeD1=/=computeH4=/=computeW1= helpers are
+pure functions over =[]market.Candle= — they have no notion of "now."
+The entire feature lives at the fetch boundary: instead of asking
+=DataManager= for the latest N candles, ask for a =CandleSet= bounded by
+=[warmup_start, asOf]= (see "DataManager requirement," below — this needs
+one new method, not a redesign) and materialize it into the same
+=[]market.Candle= shape =review/= already consumes. Everything downstream
+of that fetch is unchanged. This is a direct payoff of the fetch-path
+discipline in "Candle fetch path," above — if candle fetching had been
+scattered through =review/= instead of confined to =DataManager=, this
+feature would require auditing every fetch call instead of changing one
+boundary.
+
+*** Semantics
+
+=--asof= defines a cutoff instant, not a "pretend today is X" flag. Only
+candles that had fully closed by that instant are eligible for the fetch.
+This is a hard no-lookahead constraint: the entire value of backtesting
+the classification logic disappears if a "past" review run can see a
+candle that hadn't closed yet at that point in time.
+
+If =--asof= is given as a bare date (=2026-06-15=) rather than a full
+timestamp, default the time component to 17:00 NY — reusing the daily
+push cadence already sketched under "Scan scheduling" (Open Questions,
+below) rather than inventing a second canonical review time.
+
+*** Two use modes
+
+1. *Single-date spot check* — =trader review --asof 2026-06-15
+   [--instruments ...] [--bucket ...]=. Replays one morning. Useful for
+   post-mortems: what did review actually say the morning before a given
+   trade, without relying on memory or a saved snapshot.
+
+2. *Range replay for calibration* — walks =ReviewPair()= across a date
+   range and tabulates Bucket/Bias/Notes over time per pair. This is the
+   mode that actually answers the calibration question: a historical
+   distribution of Tradeable/Hot/Watch frequency under the current
+   =h4ADXFloor=/=h4MinEMASep= values, and (by re-running with different
+   constants) how sensitive that frequency is to the threshold choice.
+
+*** Efficient implementation for range replay
+
+Don't re-fetch per date. Fetch one long historical candle range from
+=DataManager= once, then slide the warmup window across it entirely
+in-process, calling =ReviewPair()= once per date on the appropriate
+slice. Because =review/= is pure, this needs exactly one bulk fetch
+regardless of how many dates are replayed — no per-date network or DB
+round-trip.
+
+#+begin_src go
+// ReviewRequest gains an optional AsOf; zero value means live/latest.
+type ReviewRequest struct {
+    Instruments []string
+    HotlistIDs  []string
+    AsOf        time.Time // zero = now
+}
+
+// ReviewRangeRequest parameterises a batch replay.
+type ReviewRangeRequest struct {
+    Instruments []string
+    From, To    time.Time
+    Interval    time.Duration // e.g. 24h for daily replay
+}
+#+end_src
+
+*** What this is not
+
+This replays the *classification layer only* — Bucket/Bias/Notes over
+time, not simulated entries, stops, or P&L. Actually trading the
+Tradeable signals historically would mean writing a =Strategy= that
+mirrors =Classify()='s logic and running it through the existing
+bar-by-bar =Backtest= engine — a materially larger, separate effort, not
+assumed here.
+
+*** DataManager requirement (confirmed 2026-07-09)
+
+=DataManager= already exposes a Candle Iterator over a =CandleSet= — a
+time-bounded, timeframed candle collection. It does not currently expose
+a method to return the full =CandleSet= directly; that is a single small
+method addition, not a redesign. Since a =CandleSet= is inherently
+defined by a time range, requesting one bounded by
+=[warmup_start, asOf]= for a given instrument/granularity satisfies the
+no-lookahead constraint by construction — the fetch itself cannot return
+anything past the cutoff, so there's no separate filtering step to get
+wrong.
+
+One adapter step remains: =review/='s pure functions
+(=ReviewPair=/=computeD1=/=computeH4=/=computeW1=) take =[]market.Candle=
+directly, not a =CandleSet= or an Iterator. Materializing a =CandleSet=
+(or draining its Iterator) into a =[]market.Candle= slice is presumably
+already happening somewhere in the current live path, since live review
+works today — the same materialization applies unchanged for the =asOf=
+and range-replay cases, just fed from the new bounded-range =CandleSet=
+method instead of whatever "latest N" path feeds it now.
+
+For range replay specifically: fetch one =CandleSet= covering
+=[From - warmup_window, To]= once, materialize it once, then slice
+per-date windows out of that single in-memory slice for each
+=ReviewPair()= call — no repeated =DataManager= calls per date.
+
+*** Open sub-questions for this TODO
+
+- Output shape for range replay: this doesn't fit the single-scan
+  tabwriter table (one row per pair). Likely a distinct output mode —
+  =--output csv= or an org table with a =Date= column — rather than
+  forcing it into the existing CLI table format.
+- Does =--asof= apply uniformly across all instruments in a batch, or
+  does per-instrument data availability need to be handled individually
+  (e.g. a pair added to the watchlist more recently than the =From=
+  date)?
+- Should warmup-insufficient dates (not enough historical candles before
+  =From= to satisfy ADX/EMA(50)/BB(20) warmup) simply be skipped with a
+  logged gap, or should the range request fail fast if =From= is too
+  close to the start of available history?
+- Naming for the new =DataManager= method (e.g. =GetCandleSet= /
+  =CandlesInRange=) is a placeholder here — not confirmed against actual
+  source.
+
 ** Open questions
 
 1. *Watchlist persistence.* In v1 the watchlist defaults to the 7 majors plus
