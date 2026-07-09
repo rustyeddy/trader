@@ -64,6 +64,33 @@ watchlist from scratch.
 the W1 EMA = bullish higher-timeframe bias; below = bearish. Filters out
 counter-trend D1 setups.
 
+*Weekly bias alignment (tri-state)* — the W1-vs-D1 relationship is not a
+simple match/no-match. A flat W1 EMA (price hugging the weekly average,
+biasFromEMA returning "neutral") is a genuinely different situation from a
+directional W1 that confirms D1, and both are different from a directional
+W1 that opposes D1. Collapsing all three into a single aligned/not-aligned
+bool erases that distinction — a pair sitting in Hot because its W1 is flat
+(not fighting, but not confirming either) looked identical in early
+iterations of this scanner to a pair whose W1 actively confirms the D1
+trend. =review/classify.go= implements this as a three-valued =Alignment=
+type:
+
+#+begin_src go
+type Alignment string
+
+const (
+    Aligned  Alignment = "aligned"  // both directional and matching
+    Neutral  Alignment = "neutral"  // higher timeframe is flat
+    Conflict Alignment = "conflict" // both directional and opposed
+)
+
+func WeeklyAlignment(w1Bias, d1Bias string) Alignment
+#+end_src
+
+This is the single source of truth: the Hot gate's "weekly not fighting
+D1" check, the demotion note, and the CLI's W1 column all derive from this
+one function, so they can never silently disagree with each other.
+
 *Weekly ATR(14)* — the expected range for the full week. If the pair has
 already traveled 80%+ of its average weekly ATR, new entries on the remaining
 week have poor reward-to-risk.
@@ -134,7 +161,12 @@ within 0.5–1.0 ATR of the H4 EMA20 with D1 trend still intact is the
 canonical swing entry location.
 
 *H4 ATR(14)* — used for normalizing H4 distances; also confirms whether H4
-volatility is compressed (squeeze) or expanding.
+volatility is compressed (squeeze) or expanding. Squeeze threshold as
+implemented: =H4 BB width (upper − lower) < 2.0 × H4 ATR(14)=. This is a
+hardcoded constant in =review/pair.go:computeH4= — not yet exposed as
+config. 2.0×ATR is deliberately loose (Bollinger width at 2σ typically
+exceeds 2×ATR in normal-volatility regimes), so the flag catches genuine
+compression rather than triggering on ordinary noise.
 
 *** Indicators excluded from v1
 
@@ -148,13 +180,21 @@ volatility is compressed (squeeze) or expanding.
 
 1: It maybe a decent proxy for volume?
 
-** =ScanResult= struct
+** =ReviewResult= struct
+
+Note: this doc originally specified =ScanResult=/=ScanPair=/package
+=scanner=. The shipped implementation lives in package =review=
+(=review/review.go=, =review/pair.go=, =review/classify.go=) as
+=ReviewResult= / =ReviewPair()=. The struct below reflects the actual
+shipped shape; naming in the Service/REST/CLI sections further down has
+not been cross-checked against source and may still say Scan* — see Open
+Questions.
 
 #+begin_src go
-// ScanResult is the per-pair output of one scanner run.
+// ReviewResult is the per-pair output of one watchlist review run.
 // All price-scaled values are converted to float64 for presentation.
 // ATR-normalized values are dimensionless ratios.
-type ScanResult struct {
+type ReviewResult struct {
     Instrument string    `json:"instrument"`
     ScannedAt  time.Time `json:"scanned_at"`
 
@@ -199,7 +239,7 @@ type H4Snapshot struct {
     EMA20         float64 `json:"ema20"`
     Close         float64 `json:"close"`
     PriceEMA20ATR float64 `json:"price_ema20_atr"` // (Close-EMA20)/H4 ATR14
-    Squeeze       bool    `json:"squeeze"`          // BBWidthATR below threshold
+    Squeeze       bool    `json:"squeeze"`          // H4 BB width < 2.0x H4 ATR
 }
 
 type W1Snapshot struct {
@@ -211,10 +251,11 @@ type W1Snapshot struct {
 
 type SetupSnapshot struct {
     // Nearest-timeframe EMA distance; H4 is preferred when ready.
-    PriceEMAATR float64 `json:"price_ema_atr"`
-    InValueZone bool    `json:"in_value_zone"` // |PriceEMAATR| in [0.5, 1.5]
-    Squeeze     bool    `json:"squeeze"`        // H4 BB squeeze
-    H4Aligned   bool    `json:"h4_aligned"`     // H4 bias matches D1 bias
+    PriceEMAATR float64   `json:"price_ema_atr"`
+    InValueZone bool      `json:"in_value_zone"` // |PriceEMAATR| in [0.5, 1.5]
+    Squeeze     bool      `json:"squeeze"`       // H4 BB squeeze
+    H4Aligned   bool      `json:"h4_aligned"`    // H4 bias matches D1 bias
+    W1Alignment Alignment `json:"w1_alignment"`  // aligned | neutral | conflict
 }
 #+end_src
 
@@ -232,7 +273,9 @@ Tradeable:
 Hot:
   D1.ADX >= 25
   AND D1.CI < 55
-  AND W1.Close vs W1.EMA20 matches D1 bias  -- weekly not fighting D1
+  AND WeeklyAlignment(W1 bias, D1 bias) != Conflict  -- Aligned or Neutral both pass;
+                                                       -- only a directional W1 opposing
+                                                       -- D1 blocks promotion
 
 Watch:
   everything else
@@ -243,8 +286,81 @@ Demotion signals (surfaced as notes in v1, enforced as hard gates in v2):
 #+begin_src text
 ADX dropped below 20
 CI crossed above 65
-W1 EMA flipped against D1 bias
+WeeklyAlignment(W1 bias, D1 bias) == Conflict   -- "W1 EMA flipped against D1 bias"
 #+end_src
+
+** Reading the output against the chart
+
+The scanner narrows the watchlist; it does not replace looking at the
+chart. This section is a guide to what each signal typically *looks like*
+on a chart, since the numbers alone can be misleading without that context.
+
+*** Bucket ≠ setup quality
+
+A pair passing every numeric gate can still be a watch-and-wait. The
+canonical failure mode: Hot or even Tradeable by the numbers, but the H4
+chart shows merged/flat EMA20 and EMA50 — a consolidation, not a
+trend-pullback sequence. ADX and CI describe the *daily* regime; they
+cannot see that H4 has gone sideways into a coil. This is exactly what the
+H4 DIST and H4 CI columns are for: use them together with a glance at the
+H4 chart, not as a substitute for it.
+
+*** EMA separation sign vs. bias
+
+=d1.ema_sep_atr= should normally agree in sign with =bias= (positive +
+long, negative + short). If they disagree — EMA20 above EMA50 but bias
+reads short, for example — the pair is very likely mid-transition: the
+EMA structure hasn't caught up to a fresh ±DI cross yet. This is common and
+not itself alarming, but worth a chart look before trusting either signal
+in isolation, especially near a Hot/Watch promotion boundary. Recall bias
+here is derived from close-vs-EMA20 (=biasFromEMA=), not from ±DI, so a
+transitional pair can show conflicting EMA-sep sign and bias simultaneously
+without anything being "wrong" — it just means the trend is young.
+
+*** Reading Squeeze
+
+A Squeeze flag (H4 BB width < 2.0×H4 ATR) means price has coiled tightly
+on H4. On the chart this looks like flattening, converging bands with
+small-range bars. It's a *coiled-spring* signal, not a directional one —
+it tells you a move is likely, not which way. Pair it with W1 alignment
+before assuming continuation:
+
+- Squeeze + W1 Aligned → coiling in the direction of the higher-timeframe
+  trend; the more constructive read, worth a close look for a breakout
+  continuation.
+- Squeeze + W1 Conflict → ambiguous; could resolve as continuation or as
+  the start of a reversal. Treat as lower conviction until it resolves.
+
+*** Reading W1 alignment (tri-state)
+
+- *Aligned (✓)* — W1 and D1 point the same direction. The strongest
+  regime confirmation; a Hot or Tradeable pair here has multi-timeframe
+  agreement.
+- *Neutral (~)* — W1 is flat (price hugging the weekly EMA20). This is
+  not a red flag, but it is a lower-conviction context than Aligned: the
+  weekly hasn't confirmed the daily trend yet. On the chart, look for
+  whether W1 is flattening because it's about to turn (watch for it
+  flipping to Conflict) or just consolidating before continuing.
+- *Conflict (✗)* — W1 opposes D1. The pair can still be Hot or even
+  Tradeable by the numeric gates (the Hot gate only excludes hard
+  conflict, not neutral), but this is the case worth the most scrutiny on
+  the chart — a D1 pullback fighting the weekly structure is a
+  meaningfully different risk profile than one with a clean W1 tailwind,
+  even inside the same bucket.
+
+*** TrendPct and BBPctB
+
+=d1.trend_pct= (body/range > 0.6 over the last 20 bars) is a cleanliness
+check independent of ADX — a pair can have high ADX from a few large
+directional bars mixed with choppy indecision, and TrendPct exposes that.
+Low TrendPct alongside high ADX is worth a chart look even in a Tradeable
+bucket.
+
+=d1.bb_pct_b= isn't currently surfaced in CLI/UI output but is computed
+and available on every =ReviewResult=. Values near 0 or 1 mean price is at
+a band extreme — useful context when interpreting a Squeeze or an
+extended EMA-distance reading, and directly relevant groundwork for the
+mean reversion classification below.
 
 ** Data requirements
 
@@ -319,16 +435,23 @@ trader review [--instruments EURUSD,GBPUSD,...] [--hotlist EURUSD,...] [--bucket
 Output uses =tabwriter= with the same style as =cmd/review= and =cmd/data stats=:
 
 #+begin_src text
-EURUSD   D1 2026-06-30
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EURUSD   D1 2026-07-08
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-PAIR      BUCKET      BIAS    ADX   CI    EMA SEP  ATR    EMA DIST  H4 ADX  H4 CI  WEEK%
-----      ------      ----    ---   --    -------  ---    --------  ------  -----  -----
-EURUSD    Tradeable   Long    31.4  48.2  +1.2     42.1p  +0.7      27.3    51.4   62%
-GBPJPY    Hot         Long    26.8  52.1  +0.9     85.3p  +2.1      22.1    58.9   44%
-USDJPY    Hot         Short   25.1  54.8  -0.7     68.4p  -1.8      19.8    62.1   71%
-AUDUSD    Watch       Neutral 18.3  67.2  +0.2     31.2p  +3.4      14.2    71.3   38%
+PAIR      BUCKET      BIAS    ADX   CI    EMA SEP  ATR    EMA DIST  H4 ADX  H4 CI  H4 DIST  W1  WEEK%
+----      ------      ----    ---   --    -------  ---    --------  ------  -----  -------  --  -----
+EURUSD    Tradeable   Long    31.4  48.2  +1.2     42.1p  +0.7      27.3    51.4   +0.9     ✓   62%
+GBPJPY    Hot         Long    26.8  52.1  +0.9     85.3p  +2.1      22.1    58.9   +1.6     ✓   44%
+USDJPY    Hot         Short   25.1  54.8  -0.7     68.4p  -1.8      19.8    62.1   -1.2     ✓   71%
+USDCHF    Hot         Short   25.4  53.1  -0.6     35.9p  -2.2      21.0    59.7   +2.1     ✗   67%
+AUDUSD    Watch       Neutral 18.3  67.2  +0.2     31.2p  +3.4      14.2    71.3   +2.8     ~   38%
 #+end_src
+
+W1 column: ✓ = Aligned, ~ = Neutral (W1 flat, not fighting), ✗ = Conflict
+(demoted-eligible; see Bucket classification logic). H4 DIST is
+=setup.price_ema_atr= — the H4 price-to-EMA20 distance in ATR multiples
+that actually drives the Tradeable promotion gate, previously computed
+but not surfaced in output.
 
 The =--bucket= flag filters output to a single tier (useful for scripting:
 =trader scan --bucket tradeable= prints only actionable pairs).
@@ -350,9 +473,9 @@ within each bucket.
 | EMA dist    | =d1.price_ema20_atr= | D1 proximity; near zero = at the EMA           |
 | H4 ADX      | =h4.adx=             | same color ramp as D1 ADX                      |
 | H4 CI       | =h4.ci=              | same inverse coloring as D1 CI                 |
-| H4 EMA dist | =h4.price_ema20_atr= | entry proximity signal                         |
-| Squeeze     | =setup.squeeze=      | badge when H4 BB squeeze is active             |
-| W1 bias     | derived from =w1=    | aligned ✓ or fighting ✗ with D1 bias           |
+| H4 dist     | =setup.price_ema_atr= | entry proximity signal; drives Tradeable gate |
+| Squeeze     | =setup.squeeze=      | badge when H4 BB width < 2.0 × H4 ATR          |
+| W1          | =setup.w1_alignment= | ✓ Aligned / ~ Neutral / ✗ Conflict (tri-state) |
 | Week used   | =w1.week_used_pct=   | progress bar; high = limited weekly range left |
 
 Row interactions: click → chart view for that pair. Hover → tooltip with
@@ -373,6 +496,112 @@ Row interactions: click → chart view for that pair. Hover → tooltip with
 
 Steps 4 and 5 are parallel after Step 3. Steps 1–5 are pure Go backend work
 with no UI dependency.
+
+** TODO Mean reversion classification (strategy map)
+
+Sequencing note: per the trading plan, this comes *after* trend-following
+is comfortable and after the equities expansion — added here as a design
+placeholder so the shape is ready when that time comes, not as a v1
+commitment.
+
+*** Why this doesn't fit into the existing =Bucket= field
+
+Trend-following and mean reversion want opposite regime conditions:
+
+| Signal      | Trend-following (current)      | Mean reversion                    |
+|-------------+---------------------------------+------------------------------------|
+| D1 ADX      | >= 25 (trending)                | typically < 20 (no trend)          |
+| D1 CI       | < 55 (extending)                | > 65 — currently the *exclusion*   |
+| Entry       | pullback toward D1 EMA20        | extension away from mean, at a     |
+|             |                                  | band extreme                       |
+| BB %B       | not gated on                    | near 0 or 1 (band extreme)         |
+| Bias        | trend direction                 | fade direction (opposite of        |
+|             |                                  | extension)                         |
+| Squeeze     | secondary continuation signal   | mostly irrelevant, possibly a      |
+|             |                                  | caution flag (squeezes usually     |
+|             |                                  | resolve into trends, not reverts)  |
+
+A pair can legitimately be Watch for trend and Tradeable for MR at the
+same time — a ranging AUDCAD at D1 ADX 14 is exactly the case
+trend-following ignores that MR would want. This means a single =Bucket
+string= can't represent both classifications; the struct needs to carry
+results per strategy.
+
+*** Struct shape: strategy map
+
+#+begin_src go
+// ReviewResult gains a Strategies map alongside (or replacing) the single
+// Bucket/Bias fields, keyed by strategy name ("trend", "mr", ...).
+type ReviewResult struct {
+    Instrument string    `json:"instrument"`
+    ScannedAt  time.Time `json:"scanned_at"`
+
+    Strategies map[string]StrategyResult `json:"strategies"`
+
+    W1    W1Snapshot    `json:"w1"`
+    D1    D1Snapshot    `json:"d1"`
+    H4    H4Snapshot    `json:"h4"`
+    Setup SetupSnapshot `json:"setup"`
+}
+
+type StrategyResult struct {
+    Bucket string   `json:"bucket"` // "watch" | "hot" | "tradeable"
+    Bias   string   `json:"bias"`   // "long" | "short" | "neutral"
+    Notes  []string `json:"notes,omitempty"`
+}
+#+end_src
+
+This keeps =D1Snapshot=/=H4Snapshot=/=W1Snapshot= as shared raw
+indicator data (computed once per pair regardless of strategy count) and
+makes bucket/bias/notes strategy-scoped. Adding a third sub-strategy later
+is a new map key, not a struct migration.
+
+*** New classification function
+
+#+begin_src go
+// ClassifyMR is the mean-reversion sibling to Classify, using inverted
+// regime thresholds and an extension-based (not proximity-based) setup
+// gate.
+func ClassifyMR(d1 D1Snapshot, h4 H4Snapshot, w1 W1Snapshot) (bucket string, bias string, notes []string)
+#+end_src
+
+Rough gate sketch (thresholds are starting points, not tuned):
+
+#+begin_src text
+MR Hot:
+  D1.ADX < 20                      -- no established trend
+  AND D1.CI > 65                   -- actively ranging
+
+MR Tradeable:
+  qualifies as MR Hot
+  AND abs(D1.BBPctB - 0.5) > 0.4   -- price near a band extreme (BBPctB
+                                     -- near 0 or 1)
+  AND NOT setup.squeeze            -- exclude coiling pairs; a squeeze here
+                                     -- more often precedes a trend than a
+                                     -- reversion
+
+MR bias:
+  BBPctB > 0.9  -> "short" (fade the upper-band extension)
+  BBPctB < 0.1  -> "long"  (fade the lower-band extension)
+  else          -> "neutral"
+#+end_src
+
+Note =D1.BBPctB= and =D1.BBWidthATR= are already computed in
+=computeD1= (pair.go) and already in the =D1Snapshot= struct — no new
+candle fetches or indicators needed. This is purely a classification-layer
+addition.
+
+*** Open sub-questions for this TODO
+
+- Does MR bias want its own =combineMRBias= (fade direction, opposite of
+  trend's directional pass-through), or is a single-timeframe D1 BBPctB
+  read sufficient for v1?
+- CLI/UI: two bucket columns (Trend / MR), or collapse into one column
+  with a strategy indicator when both fire? Two columns is simpler and
+  matches the existing tabwriter layout most directly.
+- Should MR Tradeable additionally require W1 to be Neutral or Conflict
+  (i.e. no strong higher-timeframe trend to fight), given MR is explicitly
+  a counter-trend approach at the D1 level?
 
 ** Open questions
 
@@ -409,3 +638,16 @@ with no UI dependency.
    account may maintain its own watchlist. The =ScanRequest= is parameterised
    by =Instruments= so this is solved at the call site without changing
    scanner internals.
+
+6. *Naming drift between this doc and shipped code.* The struct/function
+   section above has been updated to =ReviewResult=/=ReviewPair()=/package
+   =review= based on the actual source (=review/classify.go=,
+   =review/pair.go=, =review/review.go=). The Service method, REST
+   endpoint, and CLI command sections below this point still use the
+   original =Scan*=/=scanner= naming from the initial design and have
+   *not* been cross-checked against =service/=, =api/rest/=, or =cmd/=
+   source — those files weren't available for this pass. Before treating
+   this doc as current, verify whether those layers were also renamed to
+   =Review*= to match, or whether the package boundary genuinely differs
+   between the =review= indicator/classification package and a separate
+   =scanner= service-facing name.

@@ -176,18 +176,22 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%.1f", r.H4.CI),
 		fmt.Sprintf("%.1f", r.H4.PriceEMA20ATR),
 		fmt.Sprintf("%t", r.H4.Squeeze),
-		alignedGlyph(r.Setup.W1Aligned),
+		alignmentGlyph(r.Setup.W1Alignment),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
 	}
 }
 
-// alignedGlyph renders a glance-able ✓/✗ for a boolean alignment flag rather
-// than spelling out "aligned"/"fighting".
-func alignedGlyph(aligned bool) string {
-	if aligned {
+// alignmentGlyph renders a glance-able glyph for the tristate W1/D1
+// alignment rather than spelling out "aligned"/"neutral"/"conflict".
+func alignmentGlyph(a review.Alignment) string {
+	switch a {
+	case review.Aligned:
 		return "✓"
+	case review.Conflict:
+		return "✗"
+	default:
+		return "·"
 	}
-	return "✗"
 }
 
 // reviewTableNumericCol flags which reviewTableHeader columns hold numeric
