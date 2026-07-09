@@ -36,6 +36,7 @@ func ReviewPair(instrument string, w1, d1, h4 []market.Candle) (ReviewResult, er
 		PriceEMAATR: h4Snap.PriceEMA20ATR,
 		Squeeze:     h4Snap.Squeeze,
 		H4Aligned:   h4Bias == d1Bias && d1Bias != "neutral",
+		W1Aligned:   w1Bias == d1Bias && d1Bias != "neutral",
 	}
 	setup.InValueZone = absF(setup.PriceEMAATR) >= 0.5 && absF(setup.PriceEMAATR) <= 1.5
 

@@ -66,4 +66,5 @@ type SetupSnapshot struct {
 	InValueZone bool    `json:"in_value_zone"` // |PriceEMAATR| in [0.5, 1.5]
 	Squeeze     bool    `json:"squeeze"`       // H4 BB squeeze
 	H4Aligned   bool    `json:"h4_aligned"`    // H4 bias matches D1 bias
+	W1Aligned   bool    `json:"w1_aligned"`    // W1 bias matches D1 bias
 }

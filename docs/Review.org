@@ -44,60 +44,6 @@ requiring a chart. H1 is available as a future refinement but is excluded
 from v1 to keep the candle fetch surface minimal and the indicator warmup
 requirements tractable.
 
-** Where computation lives
-
-All indicator computation happens in the Go backend. The UI and CLI receive
-a =[]ScanResult= — one struct per pair — and render it.
-
-Reasons:
-
-- Every indicator needed (=ADX=, =ATR=, =ChoppinessIndex=, =BollingerBands=,
-  =EMA=) is already implemented in Go with correct Wilder smoothing,
-  fixed-point arithmetic, and warmup accounting. Reimplementing them in
-  JavaScript or rendering them in the browser from raw candle arrays would be
-  parallel maintenance with guaranteed drift.
-- A scan over 20 pairs × 3 timeframes × ~60 candles each is trivial Go work.
-  Shipping raw candle arrays to the browser would push hundreds of KB for no
-  benefit and no architectural advantage.
-- The backend already owns the OANDA candle fetch path and the instrument
-  registry. Indicators should stay close to the data.
-- The REST and CLI pattern is already established: =service= methods return
-  typed structs; handlers and CLI commands serialize or format them. The
-  scanner fits this pattern exactly.
-
-The one thing the presentation layer computes: color bands, sort order, and
-filter state — pure functions of =ScanResult= fields that belong in the
-presentation layer.
-
-** Package placement
-
-The review is a new top-level package =review/=, alongside =planner/=,
-and =journal/=.  
-
-It is *not* placed under =strategies/=. Strategies are per-instrument,
-bar-driven, stateful execution units registered via =init()= and consumed by
-the live and backtest runners. The scanner is a multi-instrument, on-demand
-analytical tool that classifies pairs for discretionary review — structurally
-identical to =review/= (which also produces Watch/Tradeable buckets from a
-different data source).
-
-#+begin_src text
-trader/
-  review/
-    reviwe.go        -- ScanResult, ScanRequest, ScanResponse types
-    scan.go	     -- per-pair indicator computation (pure function)
-    classify.go      -- bucket classification logic
-  service/
-    review.go        -- Service.ScanWatchlist() -- thin fan-out over pairs
-  api/rest/
-    review.go        -- GET /api/v1/scan handler
-  cmd/scan/
-    cmd_review.go    -- trader scan CLI command
-#+end_src
-
-This mirrors the exact layout of =review/=, =service/review.go=,
-=api/rest/review.go=, and =cmd/review/=.
-
 ** Triage buckets
 
 #+begin_src text
@@ -111,6 +57,16 @@ time. There is no persistent state in v1 — each scan re-evaluates the full
 watchlist from scratch.
 
 ** Indicator set
+
+*** W1 indicators (higher-timeframe filter)
+
+*Weekly EMA(20)* — already wired via =strategy.WeeklyEMAFilter=. Price above
+the W1 EMA = bullish higher-timeframe bias; below = bearish. Filters out
+counter-trend D1 setups.
+
+*Weekly ATR(14)* — the expected range for the full week. If the pair has
+already traveled 80%+ of its average weekly ATR, new entries on the remaining
+week have poor reward-to-risk.
 
 *** D1 indicators (regime classification)
 
@@ -180,16 +136,6 @@ canonical swing entry location.
 *H4 ATR(14)* — used for normalizing H4 distances; also confirms whether H4
 volatility is compressed (squeeze) or expanding.
 
-*** W1 indicators (higher-timeframe filter)
-
-*Weekly EMA(20)* — already wired via =strategy.WeeklyEMAFilter=. Price above
-the W1 EMA = bullish higher-timeframe bias; below = bearish. Filters out
-counter-trend D1 setups.
-
-*Weekly ATR(14)* — the expected range for the full week. If the pair has
-already traveled 80%+ of its average weekly ATR, new entries on the remaining
-week have poor reward-to-risk.
-
 *** Indicators excluded from v1
 
 | Indicator    | Reason excluded                                            |
@@ -197,8 +143,10 @@ week have poor reward-to-risk.
 | RSI          | Redundant over %B + ADX ±DI; adds threshold-tuning burden  |
 | MACD         | EMA separation gives same information with less lag        |
 | Stochastic   | Mean-reversion tool; wrong fit for trend-following scanner |
-| Volume       | OANDA spot FX tick volume is not meaningful                |
+| Volume(1)    | OANDA spot FX tick volume is not meaningful                |
 | Pivot points | Static levels; handled by S&R detection pipeline (v2)      |
+
+1: It maybe a decent proxy for volume?
 
 ** =ScanResult= struct
 
@@ -302,11 +250,13 @@ W1 EMA flipped against D1 bias
 
 | Data                        | Candles needed | Warmup driver                             |
 |-----------------------------+----------------+-------------------------------------------|
+| W1 EMA(20), ATR(14)         | 30 W1          | EMA(20) warmup = 20                       |
 | D1 ADX(14), ATR(14), CI(14) | 60 D1          | ADX warmup = 2×14 = 28; buffer for safety |
 | D1 EMA(20), EMA(50), BB(20) | 60 D1          | EMA(50) warmup = 50; covers all           |
 | H4 ADX(14), ATR(14), CI(14) | 60 H4          | Same warmup ratios                        |
 | H4 EMA(20)                  | 30 H4          | EMA(20) warmup = 20; 30 provides buffer   |
-| W1 EMA(20), ATR(14)         | 30 W1          | EMA(20) warmup = 20                       |
+|-----------------------------+----------------+-------------------------------------------|
+
 
 For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair). A
 bounded goroutine pool of 8 workers handles the fan-out without rate-limit
@@ -363,7 +313,7 @@ resolution path — only a live =*oanda.Client= on the service.
 ** CLI command
 
 #+begin_src text
-trader scan [--instruments EURUSD,GBPUSD,...] [--hotlist EURUSD,...] [--bucket watch|hot|tradeable]
+trader review [--instruments EURUSD,GBPUSD,...] [--hotlist EURUSD,...] [--bucket watch|hot|tradeable]
 #+end_src
 
 Output uses =tabwriter= with the same style as =cmd/review= and =cmd/data stats=:

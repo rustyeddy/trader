@@ -160,7 +160,7 @@ func sortByBucket(results []review.ReviewResult) {
 
 // reviewTableHeader/reviewTableRow keep the table and org renderers' column
 // sets in sync.
-var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "WEEK%"}
+var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "H4 EMA DIST", "Squeeze", "W1 Bias", "WEEK%"}
 
 func reviewTableRow(r review.ReviewResult) []string {
 	return []string{
@@ -174,14 +174,26 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%-.1f", r.D1.PriceEMA20ATR),
 		fmt.Sprintf("%.1f", r.H4.ADX),
 		fmt.Sprintf("%.1f", r.H4.CI),
+		fmt.Sprintf("%.1f", r.H4.PriceEMA20ATR),
+		fmt.Sprintf("%t", r.H4.Squeeze),
+		alignedGlyph(r.Setup.W1Aligned),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
 	}
+}
+
+// alignedGlyph renders a glance-able ✓/✗ for a boolean alignment flag rather
+// than spelling out "aligned"/"fighting".
+func alignedGlyph(aligned bool) string {
+	if aligned {
+		return "✓"
+	}
+	return "✗"
 }
 
 // reviewTableNumericCol flags which reviewTableHeader columns hold numeric
 // values; those are right-justified so decimal points and "%" signs line up
 // down the column. PAIR/BUCKET/BIAS are text and stay left-justified.
-var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true}
+var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true}
 
 // renderTable writes the human-readable aligned table: text columns
 // left-justified, numeric columns right-justified so decimals/percents line
