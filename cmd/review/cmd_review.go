@@ -52,7 +52,7 @@ func New(rc *config.RootConfig) *cobra.Command {
 	cmd.Flags().BoolVar(&showWatch, "watch", false, "Print the watch bucket (default: all three buckets)")
 	cmd.Flags().BoolVar(&showHotlist, "hotlist", false, "Print the hot bucket (default: all three buckets)")
 	cmd.Flags().BoolVar(&showTradeable, "tradeable", false, "Print the tradeable bucket (default: all three buckets)")
-	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format: table|json|org (table/org only for a single date; use json or csv for a multi-date sweep)")
+	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format: table|json|org|csv (table/org only for a single date; use json or csv for a multi-date sweep)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (takes precedence over global config)")
 	cmd.Flags().StringVar(&asOfStr, "asof", "", "Classify the watchlist as of this past date (YYYY-MM-DD) instead of now; cannot combine with --from/--to")

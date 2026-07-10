@@ -120,6 +120,42 @@ func TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate(t *testing.T) 
 	assert.True(t, gotDates[2].Equal(to))
 }
 
+// TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate is a
+// regression test: the sweep loop appends in step-major order (date, then
+// instrument) for fetch efficiency, but the documented — and CLI-relied-on
+// — contract is instrument-major (grouped by pair, oldest date first) so a
+// single pair's bucket transitions read as a contiguous time series.
+// TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate above only
+// used one instrument, so step-major and instrument-major order were
+// indistinguishable there; this uses two to actually exercise the ordering
+// contract (per copilot review on PR #155).
+func TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate(t *testing.T) {
+	datamanager.UseTempDataDir(t)
+	to := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
+	from := to.AddDate(0, 0, -1)
+	seedReviewHistory(t, "EURUSD", to, 12, 2)
+	seedReviewHistory(t, "GBPUSD", to, 12, 2)
+
+	svc := &Service{Log: discardLogger()}
+	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+		Instruments: []string{"GBPUSD", "EURUSD"},
+		From:        from,
+		To:          to,
+		Interval:    24 * time.Hour,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 4, "2 daily steps x 2 instruments")
+
+	var got []string
+	for _, r := range resp.Results {
+		got = append(got, r.Instrument+"@"+r.ScannedAt.Format("2006-01-02"))
+	}
+	assert.Equal(t, []string{
+		"EURUSD@2024-06-11", "EURUSD@2024-06-12",
+		"GBPUSD@2024-06-11", "GBPUSD@2024-06-12",
+	}, got, "results must be grouped by instrument, oldest date first within each group")
+}
+
 func TestReviewWatchlistRange_SkipsUnknownInstrument(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)

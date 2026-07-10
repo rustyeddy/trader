@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/rustyeddy/trader/datamanager"
@@ -90,6 +91,19 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 			results = append(results, result)
 		}
 	}
+
+	// The loop above appends in step-major order (date, then instrument)
+	// since it's cheaper to fetch that way (adjacent steps for the same
+	// instrument share monthly candle files). Sort into the documented
+	// instrument-major order before returning, so every caller — not just
+	// the CLI, which happens to re-sort before rendering — sees a single
+	// pair's bucket transitions as a contiguous time series.
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Instrument != results[j].Instrument {
+			return results[i].Instrument < results[j].Instrument
+		}
+		return results[i].ScannedAt.Before(results[j].ScannedAt)
+	})
 
 	return &ReviewSweepResponse{Results: results}, nil
 }
