@@ -9,6 +9,10 @@ import (
 func TestClassify(t *testing.T) {
 	hotD1 := D1Snapshot{ADX: 30, CI: 40}
 	coldD1 := D1Snapshot{ADX: 15, CI: 70}
+	// h4Tradeable satisfies the consolidation guard added in classify.go
+	// (h4ADXFloor=20, h4MinEMASep=0.3) so cases meant to reach "tradeable"
+	// don't fall through on those gates.
+	h4Tradeable := H4Snapshot{CI: 40, ADX: 25, EMASepATR: 0.5}
 
 	tests := []struct {
 		name       string
@@ -58,16 +62,34 @@ func TestClassify(t *testing.T) {
 		{
 			name:       "all gates pass -> tradeable",
 			d1:         hotD1,
-			h4:         H4Snapshot{CI: 40},
+			h4:         h4Tradeable,
 			w1Bias:     "long",
 			d1Bias:     "long",
 			setup:      SetupSnapshot{InValueZone: true, H4Aligned: true},
 			wantBucket: "tradeable",
 		},
 		{
+			name:       "H4 ADX below floor keeps tradeable-eligible pair at hot",
+			d1:         hotD1,
+			h4:         H4Snapshot{CI: 40, ADX: 15, EMASepATR: 0.5},
+			w1Bias:     "long",
+			d1Bias:     "long",
+			setup:      SetupSnapshot{InValueZone: true, H4Aligned: true},
+			wantBucket: "hot",
+		},
+		{
+			name:       "H4 EMA separation below floor (merged EMAs) keeps tradeable-eligible pair at hot",
+			d1:         hotD1,
+			h4:         H4Snapshot{CI: 40, ADX: 25, EMASepATR: 0.1},
+			w1Bias:     "long",
+			d1Bias:     "long",
+			setup:      SetupSnapshot{InValueZone: true, H4Aligned: true},
+			wantBucket: "hot",
+		},
+		{
 			name:       "weekly fighting D1 demotes hot pair to watch",
 			d1:         hotD1,
-			h4:         H4Snapshot{CI: 40},
+			h4:         h4Tradeable,
 			w1Bias:     "short",
 			d1Bias:     "long",
 			setup:      SetupSnapshot{InValueZone: true, H4Aligned: true},
@@ -94,6 +116,7 @@ func TestClassify_DemotionNotes(t *testing.T) {
 
 func TestClassify_NoDemotionNotesWhenHealthy(t *testing.T) {
 	d1 := D1Snapshot{ADX: 30, CI: 40}
-	_, notes := Classify(d1, H4Snapshot{CI: 40}, W1Snapshot{}, SetupSnapshot{}, "long", "long")
+	h4 := H4Snapshot{CI: 40, ADX: 25, EMASepATR: 0.5}
+	_, notes := Classify(d1, h4, W1Snapshot{}, SetupSnapshot{}, "long", "long")
 	assert.Empty(t, notes)
 }
