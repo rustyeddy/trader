@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/log"
@@ -42,6 +43,9 @@ import (
 //	/srv/trading/data/raw/dukascopy/EURUSD/2025/01/02/13h_ticks.bi5
 type store struct {
 	basedir string // root of the candles tree, e.g. "/srv/trading/data/candles"
+
+	cacheMu sync.RWMutex
+	cache   map[Key]*candleSet // process-lifetime cache of ReadCSV results, keyed by Key
 }
 
 func (s *store) PathForAsset(k Key) (string, error) {
@@ -267,7 +271,7 @@ func (s *store) RelDir(key Key) string {
 	)
 }
 
-func (s store) Exists(key Key) (bool, error) {
+func (s *store) Exists(key Key) (bool, error) {
 	p, err := s.PathForAsset(key)
 	if err != nil {
 		return false, err
@@ -442,7 +446,55 @@ func (s *store) writeMetadata(cs *candleSet, w io.Writer) error {
 	return err
 }
 
-func (s *store) ReadCSV(key Key) (cs *candleSet, err error) {
+// ReadCSV returns the candleSet for key, serving from an in-memory cache
+// when possible. The cache is process-lifetime only (no persistence, no
+// TTL) and deliberately excludes the current calendar month, since that
+// month's data is a moving target that can change mid-process as new
+// candles are downloaded and written via WriteCSV.
+func (s *store) ReadCSV(key Key) (*candleSet, error) {
+	if !isCurrentMonth(key) {
+		s.cacheMu.RLock()
+		cached, ok := s.cache[key]
+		s.cacheMu.RUnlock()
+		if ok {
+			return cached, nil
+		}
+	}
+
+	cs, err := s.readCSVUncached(key)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isCurrentMonth(key) {
+		s.cacheMu.Lock()
+		if s.cache == nil {
+			s.cache = make(map[Key]*candleSet)
+		}
+		s.cache[key] = cs
+		s.cacheMu.Unlock()
+	}
+	return cs, nil
+}
+
+// isCurrentMonth reports whether key addresses the calendar month containing
+// the current moment (UTC), which readCSV/WriteCSV treat as a moving target
+// that must never be served from the cache.
+func isCurrentMonth(key Key) bool {
+	now := time.Now().UTC()
+	return key.Year == now.Year() && key.Month == int(now.Month())
+}
+
+// invalidateCache drops any cached entry for key, called after WriteCSV so a
+// subsequent ReadCSV in the same process sees freshly written data instead
+// of a stale cache hit from before the write.
+func (s *store) invalidateCache(key Key) {
+	s.cacheMu.Lock()
+	delete(s.cache, key)
+	s.cacheMu.Unlock()
+}
+
+func (s *store) readCSVUncached(key Key) (cs *candleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -663,7 +715,12 @@ func (s *store) WriteCSV(cs *candleSet) error {
 	}
 
 	log.Data.Debug("writing candle file", "path", path)
-	return bw.Flush()
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+
+	s.invalidateCache(key)
+	return nil
 }
 
 func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
@@ -710,19 +767,20 @@ func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	return dst, nil
 }
 
-func (s store) Delete(k Key) error {
+func (s *store) Delete(k Key) error {
 	p, err := s.PathForAsset(k)
 	if err != nil {
 		return err
 	}
 	err = os.Remove(p)
-	if err != nil && os.IsNotExist(err) {
-		return nil
+	if err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	return err
+	s.invalidateCache(k)
+	return nil
 }
 
-func (s store) baseScanDir() string {
+func (s *store) baseScanDir() string {
 	return s.basedir
 }
 
