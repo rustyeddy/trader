@@ -81,6 +81,16 @@ func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof t
 
 	candles := make([]market.CandleTime, 0, count)
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
+		if ct.Candle.IsZero() {
+			// The Valid bitset only reflects the on-disk flag byte, not the
+			// actual OHLC content — a corrupt or partially-written CSV row
+			// can be flagged valid yet hold a zero-value candle. Skip it so
+			// a short/corrupt cache comes back short of count rather than
+			// silently returning unusable data, matching the callers this
+			// replaced (e.g. service/review.go's short-cache fallback to a
+			// direct OANDA fetch).
+			continue
+		}
 		candles = append(candles, ct)
 	}
 	if err := iter.Err(); err != nil {

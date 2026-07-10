@@ -114,6 +114,42 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 	}, candlesOnly(candles), "a candle opening after asof must not be included")
 }
 
+// TestGetCandles_SkipsFlaggedValidButZeroValueCandle covers a corrupt/
+// partial CSV row: the Valid bitset only reflects the on-disk flag byte
+// (per ReadCSV), not whether the OHLC content is real, so a row can be
+// flagged valid yet hold a zero-value candle. GetCandles must still skip
+// it — per copilot review on PR #154, this was the behavior
+// service/review.go's readCachedOandaCandleTimes had (via ct.Candle.IsZero())
+// before this logic moved into GetCandles, and it must not get lost in the
+// move: a short/corrupt cache needs to come back short of count so
+// review's fallback-to-OANDA path still triggers, rather than silently
+// returning unusable candles.
+func TestGetCandles_SkipsFlaggedValidButZeroValueCandle(t *testing.T) {
+	s := useTempStore(t)
+	dm := &DataManager{}
+
+	day1 := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, time.April, 2, 0, 0, 0, 0, time.UTC) // flagged valid, zero content
+	day3 := time.Date(2026, time.April, 3, 0, 0, 0, 0, time.UTC)
+
+	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.April, map[time.Time]market.Candle{
+		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+		day2: {}, // AddCandle marks this valid regardless of content
+		day3: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
+	})
+
+	candles, err := dm.GetCandles(context.Background(), CandleRequest{
+		Source:     market.SourceCandles,
+		Instrument: "EURUSD",
+		Range:      market.TimeRange{TF: market.D1},
+	}, day3, 5)
+	require.NoError(t, err)
+	require.Equal(t, []market.Candle{
+		{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+		{Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
+	}, candlesOnly(candles), "the flagged-valid zero-value candle must be skipped, not returned as usable data")
+}
+
 func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.GetCandles(context.Background(), CandleRequest{
