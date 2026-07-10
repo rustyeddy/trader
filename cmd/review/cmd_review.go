@@ -215,22 +215,37 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 		}
 	}
 
+	return renderResults(os.Stdout, outputFormat, filtered, multiStep)
+}
+
+// renderResults sorts and writes filtered per format, choosing between the
+// sweep-oriented path (instrument+date sort; json/csv only, since a
+// multi-date sweep needs a Date column the bucket-grouped table/org layout
+// has no room for) and the single-date path (bucket sort; table/json/org/csv
+// all apply, since it's still one row per instrument). Factored out of
+// runReview so the format-to-renderer mapping — every one of table/json/
+// org/csv must actually be reachable for a single date, not just accepted
+// by validateOutputFormat — is directly unit-testable without a live
+// Service.
+func renderResults(out io.Writer, format string, filtered []review.ReviewResult, multiStep bool) error {
 	if multiStep {
 		sortByInstrumentThenDate(filtered)
-		if outputFormat == "json" {
-			return renderJSON(os.Stdout, filtered)
+		if format == "json" {
+			return renderJSON(out, filtered)
 		}
-		return renderCSV(os.Stdout, filtered)
+		return renderCSV(out, filtered)
 	}
 
 	sortByBucket(filtered)
-	switch outputFormat {
+	switch format {
 	case "json":
-		return renderJSON(os.Stdout, filtered)
+		return renderJSON(out, filtered)
 	case "org":
-		return renderOrg(os.Stdout, filtered)
+		return renderOrg(out, filtered)
+	case "csv":
+		return renderCSV(out, filtered)
 	default:
-		return renderTable(os.Stdout, filtered)
+		return renderTable(out, filtered)
 	}
 }
 

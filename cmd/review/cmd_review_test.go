@@ -209,6 +209,36 @@ func TestRunReview_MultiStepRejectsTableOutput(t *testing.T) {
 	assert.Contains(t, err.Error(), "multi-date sweep")
 }
 
+// TestRenderResults_SingleDateReachesEveryFormat is a regression test: a
+// single-date result set (multiStep == false, e.g. a bare --asof run) must
+// reach every renderer named in --output's help text, including csv. Before
+// this fix, renderResults' single-date branch only special-cased "json"
+// and "org" and fell through to renderTable for anything else — so
+// `--asof <date> --output csv` silently produced a table instead of CSV.
+func TestRenderResults_SingleDateReachesEveryFormat(t *testing.T) {
+	scannedAt := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	results := []review.ReviewResult{
+		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long", ScannedAt: scannedAt},
+	}
+
+	for _, format := range []string{"table", "json", "org", "csv"} {
+		t.Run(format, func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, renderResults(&buf, format, append([]review.ReviewResult{}, results...), false))
+
+			out := buf.String()
+			require.NotEmpty(t, out)
+			switch format {
+			case "csv":
+				assert.True(t, strings.HasPrefix(out, "DATE,PAIR,BUCKET"), "csv output must be CSV, not a table: %q", out)
+			case "table":
+				assert.Contains(t, out, "PAIR")
+				assert.NotContains(t, out, "DATE,")
+			}
+		})
+	}
+}
+
 func TestSortByInstrumentThenDate(t *testing.T) {
 	day1 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	day2 := time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)
