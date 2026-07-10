@@ -1,0 +1,103 @@
+package datamanager
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/rustyeddy/trader/market"
+	"github.com/stretchr/testify/require"
+)
+
+// TestGetCandles_CompactsWeekendGapAndTrimsToCount is the spec's acceptance
+// check (docs/asof-review-sweep-spec.md §2): a candleSet spanning a known
+// weekend gap must never surface a zero-value market.Candle from a
+// closed-market slot, and the result must never exceed count entries even
+// though the underlying month has far more (mostly invalid) slots.
+func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
+	s := useTempStore(t)
+	dm := &DataManager{}
+
+	// Friday close, then the weekend gap, then Monday open — D1 candles.
+	fri := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC) // Friday
+	mon := time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC) // Monday
+	tue := time.Date(2026, time.January, 6, 0, 0, 0, 0, time.UTC) // Tuesday
+	wed := time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC) // Wednesday
+
+	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.January, map[time.Time]market.Candle{
+		fri: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+		mon: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
+		tue: {Open: 107, High: 110, Low: 106, Close: 109, Ticks: 1},
+		wed: {Open: 109, High: 112, Low: 108, Close: 111, Ticks: 1},
+	})
+
+	req := CandleRequest{
+		Source:     market.SourceCandles,
+		Instrument: "EURUSD",
+		Range:      market.TimeRange{TF: market.D1}, // overwritten by GetCandles
+	}
+
+	candles, err := dm.GetCandles(context.Background(), req, wed, 2)
+	require.NoError(t, err)
+	require.Len(t, candles, 2, "must never return more than count entries")
+
+	for _, c := range candles {
+		require.False(t, c.IsZero(), "must never return a zero-value candle from a closed-market slot")
+	}
+
+	require.Equal(t, []market.Candle{
+		{Open: 107, High: 110, Low: 106, Close: 109, Ticks: 1},
+		{Open: 109, High: 112, Low: 108, Close: 111, Ticks: 1},
+	}, candles, "expected the 2 most recent valid candles at/before asof, in order")
+}
+
+func TestGetCandles_IncludesCandleAtExactlyAsof(t *testing.T) {
+	s := useTempStore(t)
+	dm := &DataManager{}
+
+	day := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
+
+	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.March, map[time.Time]market.Candle{
+		day: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+	})
+
+	candles, err := dm.GetCandles(context.Background(), CandleRequest{
+		Source:     market.SourceCandles,
+		Instrument: "EURUSD",
+		Range:      market.TimeRange{TF: market.D1},
+	}, day, 5)
+	require.NoError(t, err)
+	require.Len(t, candles, 1, "the candle whose open time equals asof must be included")
+}
+
+func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
+	s := useTempStore(t)
+	dm := &DataManager{}
+
+	day1 := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, time.March, 11, 0, 0, 0, 0, time.UTC)
+
+	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.March, map[time.Time]market.Candle{
+		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+		day2: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
+	})
+
+	candles, err := dm.GetCandles(context.Background(), CandleRequest{
+		Source:     market.SourceCandles,
+		Instrument: "EURUSD",
+		Range:      market.TimeRange{TF: market.D1},
+	}, day1, 5)
+	require.NoError(t, err)
+	require.Equal(t, []market.Candle{
+		{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
+	}, candles, "a candle opening after asof must not be included")
+}
+
+func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
+	dm := &DataManager{}
+	_, err := dm.GetCandles(context.Background(), CandleRequest{
+		Instrument: "EURUSD",
+		Range:      market.TimeRange{TF: market.D1},
+	}, time.Now(), 0)
+	require.Error(t, err)
+}
