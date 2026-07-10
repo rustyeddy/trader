@@ -55,6 +55,10 @@ func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 
+	if n := time.Now().UTC(); n.Year() != now.Year() || n.Month() != now.Month() {
+		t.Skip("UTC month rolled over mid-test; key is no longer the current month")
+	}
+
 	_, err = s.ReadCSV(key)
 	require.Error(t, err, "current-month reads must never be served from cache")
 }
