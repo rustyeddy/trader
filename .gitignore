@@ -43,6 +43,7 @@ main
 
 # Allow example data files
 !examples/data/*.csv
+!examples/replay-pricing.csv
 
 # Claude Code session data
 .claude/
