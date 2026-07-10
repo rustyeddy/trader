@@ -81,3 +81,26 @@ func TestDeriveWeeklyCandles_EmptyInput(t *testing.T) {
 	assert.Nil(t, deriveWeeklyCandles(nil, 10))
 	assert.Nil(t, deriveWeeklyCandles([]market.CandleTime{dailyAt(time.Now().UTC(), market.PriceFromFloat(1.1))}, 0))
 }
+
+// TestDeriveWeeklyCandlesAsOf_DropsPartialTrailingWeekForHistoricalAsOf is a
+// regression test: deriveWeeklyCandles compares its trailing bucket against
+// the real time.Now(), which never matches a past asOf's ISO week, so it
+// would never drop a historical sweep's partial trailing week (asOf
+// falling midweek) — silently reporting 3 days of a 5-day week as if it
+// were the complete week's OHLC. deriveWeeklyCandlesAsOf must use asOf
+// instead, so this partial week is dropped exactly like a live in-progress
+// week would be.
+func TestDeriveWeeklyCandlesAsOf_DropsPartialTrailingWeekForHistoricalAsOf(t *testing.T) {
+	mon := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC) // Mon 2024-01-08 .. Fri 2024-01-12
+	daily := []market.CandleTime{
+		dailyAt(mon.AddDate(0, 0, -21), market.PriceFromFloat(1.10)), // complete week, 3 weeks earlier
+		dailyAt(mon, market.PriceFromFloat(1.20)),                    // Mon: only 1 of 5 days of this week
+		dailyAt(mon.AddDate(0, 0, 1), market.PriceFromFloat(1.21)),   // Tue
+		dailyAt(mon.AddDate(0, 0, 2), market.PriceFromFloat(1.22)),   // Wed: asOf falls here, midweek
+	}
+	asOf := mon.AddDate(0, 0, 2).Add(12 * time.Hour) // Wed midday: Mon-Wed exist, Thu/Fri don't yet
+
+	weeks := deriveWeeklyCandlesAsOf(daily, 10, asOf)
+	require.Len(t, weeks, 1, "the partial Mon-Wed trailing week must be dropped, not reported as a complete week")
+	assert.Equal(t, market.PriceFromFloat(1.10), weeks[0].Close)
+}

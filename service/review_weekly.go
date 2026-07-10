@@ -24,6 +24,18 @@ const dayRollShift = 4 * time.Hour
 // apply so review never scores a still-forming week. Returns at most the
 // most recent count complete weeks, oldest first.
 func deriveWeeklyCandles(daily []market.CandleTime, count int) []market.Candle {
+	return deriveWeeklyCandlesAsOf(daily, count, time.Now())
+}
+
+// deriveWeeklyCandlesAsOf is deriveWeeklyCandles with an explicit reference
+// time for "is the trailing bucket still in progress" instead of always
+// comparing against the real wall-clock time.Now(). The historical sweep
+// (review_sweep.go) must pass its step's asOf here: asOf is always in the
+// past relative to time.Now(), so it would never match the real current
+// ISO week, and the trailing-week check would never fire — silently
+// treating a partial trailing week (asOf falling midweek) as if it were a
+// complete week's OHLC.
+func deriveWeeklyCandlesAsOf(daily []market.CandleTime, count int, asOf time.Time) []market.Candle {
 	if len(daily) == 0 || count <= 0 {
 		return nil
 	}
@@ -60,7 +72,7 @@ func deriveWeeklyCandles(daily []market.CandleTime, count int) []market.Candle {
 		return nil
 	}
 
-	nowYear, nowWeek := time.Now().UTC().Add(dayRollShift).ISOWeek()
+	nowYear, nowWeek := asOf.UTC().Add(dayRollShift).ISOWeek()
 	if last := weeks[len(weeks)-1]; last.year == nowYear && last.week == nowWeek {
 		weeks = weeks[:len(weeks)-1]
 	}
