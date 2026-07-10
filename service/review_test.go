@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -186,6 +190,90 @@ func TestReviewWatchlist_CachesCandlesLocally(t *testing.T) {
 	mu.Unlock()
 	assert.Zero(t, secondRunD, "second run should serve D1 candles from the local cache, not re-fetch from OANDA")
 	assert.Zero(t, secondRunH4, "second run should serve H4 candles from the local cache, not re-fetch from OANDA")
+}
+
+// TestReviewWatchlist_SecondRunServesPastMonthsFromMemoryNotDisk validates
+// that DataManager's in-memory candle cache (datamanager/store.go's
+// ReadCSV cache, docs/asof-review-sweep-spec.md §1) is actually exercised
+// end-to-end through the review path, not just unit-tested against store
+// in isolation: after a first run populates the cache, deleting every
+// on-disk CSV for months other than the current one (which the cache
+// deliberately never serves, since it's a moving target) must not break a
+// second run in the same process — those reads have to come from memory.
+//
+// Deleting the files alone isn't a strong enough check on its own:
+// Candles() is non-strict by default, so a month it can't read is silently
+// skipped rather than erroring, and fetchReviewCandleTimes's short-cache
+// fallback would then quietly re-fetch from OANDA and mask a cache
+// regression as a passing test. Counting OANDA requests on the second run
+// closes that gap — if the cache weren't actually being hit, the deleted
+// months would come back short, and the fallback would show up here as a
+// nonzero request count.
+func TestReviewWatchlist_SecondRunServesPastMonthsFromMemoryNotDisk(t *testing.T) {
+	dir := datamanager.UseTempDataDir(t)
+
+	var mu sync.Mutex
+	requestsByGranularity := map[string]int{}
+	base := fakeOANDACandlesServer(t)
+	defer base.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestsByGranularity[r.URL.Query().Get("granularity")]++
+		mu.Unlock()
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{Instruments: []string{"EURUSD"}})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+
+	mu.Lock()
+	requestsByGranularity = map[string]int{}
+	mu.Unlock()
+
+	removePastMonthCSVs(t, dir)
+
+	resp2, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{Instruments: []string{"EURUSD"}})
+	require.NoError(t, err)
+	require.Len(t, resp2.Results, 1, "second run must still succeed by serving past-month candles from the in-memory cache after their on-disk CSVs are gone")
+	assert.Equal(t, resp.Results[0].Bucket, resp2.Results[0].Bucket)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, requestsByGranularity["D"], "a D1 re-fetch means the deleted past months came back short, i.e. the cache was not actually hit")
+	assert.Zero(t, requestsByGranularity["H4"], "an H4 re-fetch means the deleted past months came back short, i.e. the cache was not actually hit")
+}
+
+// removePastMonthCSVs deletes every .csv file under dir except those in the
+// current calendar month's directory (candles/<source>/<instrument>/<year>/<month>/*.csv),
+// leaving the current month's file(s) alone since store.ReadCSV never
+// caches the current month.
+func removePastMonthCSVs(t *testing.T, dir string) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	currentMonthDir := filepath.Join(fmt.Sprintf("%04d", now.Year()), fmt.Sprintf("%02d", int(now.Month())))
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".csv" {
+			return nil
+		}
+		if strings.Contains(filepath.ToSlash(path), filepath.ToSlash(currentMonthDir)) {
+			return nil
+		}
+		return os.Remove(path)
+	})
+	require.NoError(t, err)
 }
 
 // TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort reproduces the

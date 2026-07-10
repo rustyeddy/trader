@@ -143,10 +143,10 @@ func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularit
 
 // fetchReviewCandleTimes fetches the most recent count timestamped candles
 // for instrument at the given OANDA granularity ("D", "H4"). D1 and H4 are
-// served from the local DataManager-backed candle store, topping it up from
-// OANDA (and caching the result) only when the store is missing recent
-// bars, falling back to a direct OANDA fetch when the cache still can't
-// satisfy count afterwards.
+// served from the local DataManager-backed candle store (via GetCandles),
+// topping it up from OANDA (and caching the result) only when the store is
+// missing recent bars, falling back to a direct OANDA fetch when the cache
+// still can't satisfy count afterwards.
 func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granularity string, count int) ([]market.CandleTime, error) {
 	inst := market.GetInstrument(instrument)
 	if inst == nil {
@@ -154,13 +154,13 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 	}
 	oandaName := inst.BaseCurrency + "_" + inst.QuoteCurrency
 
-	to := time.Now().UTC()
-	from := to.Add(-reviewWindow(granularity, count))
-
-	tf, cacheable := reviewTimeframe(granularity)
-	if !cacheable {
-		return s.fetchReviewCandleTimesFromOANDA(ctx, instrument, oandaName, granularity, from, to, count)
+	tf, ok := reviewTimeframe(granularity)
+	if !ok {
+		return nil, fmt.Errorf("review: unsupported granularity %q", granularity)
 	}
+
+	to := time.Now().UTC()
+	from := to.Add(-datamanager.CandleWindow(tf, count))
 
 	log := s.Log
 	if log == nil {
@@ -170,7 +170,13 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		log.Warn("review: top up local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
 
-	candles, err := s.readCachedOandaCandleTimes(ctx, instrument, tf, from, to, count)
+	instNorm := market.NormalizeInstrument(instrument)
+	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
+	candles, err := dm.GetCandles(ctx, datamanager.CandleRequest{
+		Source:     market.SourceOanda,
+		Instrument: instNorm,
+		Range:      market.TimeRange{TF: tf},
+	}, to, count)
 	if err != nil {
 		log.Warn("review: read local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
@@ -225,38 +231,6 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 	return err
 }
 
-// readCachedOandaCandleTimes loads timestamped candles for instrument/tf
-// from the local candle store via DataManager, trimmed to the most recent
-// count bars.
-func (s *Service) readCachedOandaCandleTimes(ctx context.Context, instrument string, tf market.Timeframe, from, to time.Time, count int) ([]market.CandleTime, error) {
-	instNorm := market.NormalizeInstrument(instrument)
-	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
-	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
-		Source:     market.SourceOanda,
-		Instrument: instNorm,
-		Range:      market.TimeRange{Start: market.FromTime(from), End: market.FromTime(to), TF: tf},
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = iter.Close() }()
-
-	var candles []market.CandleTime
-	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		if ct.Candle.IsZero() {
-			continue
-		}
-		candles = append(candles, ct)
-	}
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
-	if len(candles) > count {
-		candles = candles[len(candles)-count:]
-	}
-	return candles, nil
-}
-
 // fetchReviewCandleTimesFromOANDA fetches timestamped candles directly from
 // OANDA: used as a fallback when the local cache can't serve D1/H4 candles.
 func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
@@ -290,17 +264,4 @@ func candlesOnly(cts []market.CandleTime) []market.Candle {
 		out[i] = ct.Candle
 	}
 	return out
-}
-
-// reviewWindow returns the calendar duration needed to cover count candles
-// at the given granularity, with a buffer for weekends/holidays.
-func reviewWindow(granularity string, count int) time.Duration {
-	switch granularity {
-	case "W":
-		return time.Duration(float64(count) * 7 * 24 * float64(time.Hour) * 1.3)
-	case "H4":
-		return time.Duration(float64(count) * 4 * float64(time.Hour) * 1.4)
-	default: // "D"
-		return time.Duration(float64(count) * 24 * float64(time.Hour) * 1.4)
-	}
 }
