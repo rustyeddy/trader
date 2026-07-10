@@ -1,7 +1,7 @@
 // Package ui exposes the compiled SvelteKit front-end as an embed.FS.
-// Run `npm run build` inside ui/ to populate dist/ before building the
-// Go binary. The placeholder ui/dist/.gitkeep keeps the directory in git
-// so the embed directive compiles even before the first npm build.
+// Run `make build-full` from the repository root to rebuild dist/ from Tulip
+// before tagging a release. The committed dist/ files are embedded into the Go
+// binary by the release workflow.
 package ui
 
 import (
