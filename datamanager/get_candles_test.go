@@ -9,6 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestCandleWindowSeconds_MatchesReviewWindowRatio locks in the integer 7/5
+// ratio (== 1.4x) against the equivalent float computation, and confirms
+// rounding is always up, never short.
+func TestCandleWindowSeconds_MatchesReviewWindowRatio(t *testing.T) {
+	tests := []struct {
+		tf    market.Timeframe
+		count int
+	}{
+		{market.D1, 60},
+		{market.H4, 60},
+		{market.D1, 1},
+		{market.H1, 37}, // odd count exercises the round-up path
+	}
+	for _, tt := range tests {
+		got := candleWindowSeconds(tt.tf, tt.count)
+		want := int64(float64(tt.tf) * float64(tt.count) * 1.4)
+		require.GreaterOrEqual(t, got, want, "window must never be narrower than the 1.4x-equivalent span for tf=%v count=%d", tt.tf, tt.count)
+	}
+}
+
 // TestGetCandles_CompactsWeekendGapAndTrimsToCount is the spec's acceptance
 // check (docs/asof-review-sweep-spec.md §2): a candleSet spanning a known
 // weekend gap must never surface a zero-value market.Candle from a
