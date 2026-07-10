@@ -1,0 +1,176 @@
+package service
+
+import (
+	"context"
+	"log/slog"
+	"sort"
+	"time"
+
+	"github.com/rustyeddy/trader/datamanager"
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/review"
+)
+
+// ReviewRangeRequest parameterizes a historical classification sweep: replay
+// review.ReviewPair's classification (Bucket/Bias/Notes) as of one or more
+// past points in time. See docs/asof-review-sweep-spec.md §4.
+//
+// This replays the classification layer only. It does not simulate trade
+// entries, stops, or P&L — see the spec's §4.1 scope boundary.
+type ReviewRangeRequest struct {
+	// Instruments to review. Defaults to market.AllInstruments() when empty.
+	Instruments []string
+
+	// From, To bound the sweep, inclusive. A single-date review (--asof)
+	// sets From == To.
+	From, To time.Time
+
+	// Interval steps between sweep dates when From != To. Defaults to 24h.
+	Interval time.Duration
+}
+
+// reviewSweepFetchHeadroom pads the count requested from getClosedCandles
+// beyond the strict D1/H4 requirement (reviewWeeklyLookbackDays /
+// reviewCandleCounts["H4"]). GetCandles' fetch window is sized from a flat
+// weekday ratio (candleWindowBufferNum/Den) that doesn't model holidays, so
+// a request for exactly the required count can legitimately come back one
+// or more short on a real historical date — confirmed against live local
+// data, where a request for exactly 220 D1 candles came back 219. The live
+// path never notices this because a short cache falls back to a direct
+// OANDA fetch; the sweep has no such fallback by design (§4's replay must
+// only ever see what's on disk), so it needs enough headroom in the
+// initial request to absorb ordinary holiday variance instead of skipping
+// otherwise-valid dates.
+const reviewSweepFetchHeadroom = 20
+
+// ReviewSweepResponse is the sweep output: one review.ReviewResult per
+// (step time, instrument), each result's ScannedAt set to that step's time
+// rather than time.Now(). Results are ordered by instrument, then by
+// ScannedAt ascending, so a single pair's bucket transitions read as a time
+// series.
+type ReviewSweepResponse struct {
+	Results []review.ReviewResult `json:"results"`
+}
+
+// ReviewWatchlistRange runs review.ReviewPair's classification as of every
+// step time in [From, To] stepped by Interval, for each instrument in
+// req.Instruments.
+//
+// Every candle read is closed-bars-only (spec §4.2): a step at time T only
+// ever sees candles that were fully closed by T, so a sweep never leaks a
+// still-forming bar's data into a historical classification — see
+// getClosedCandles. Unlike the live
+// ReviewWatchlist path, this never tops up the local store from OANDA and
+// never falls back to a direct OANDA fetch: a historical replay only ever
+// sees what's already on disk. An instrument or step with insufficient
+// local history is skipped with a logged gap rather than failing the whole
+// sweep (spec §4.3 items 2 and 3).
+func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeRequest) (*ReviewSweepResponse, error) {
+	instruments := req.Instruments
+	if len(instruments) == 0 {
+		instruments = market.AllInstruments()
+	}
+
+	interval := req.Interval
+	if interval <= 0 {
+		interval = 24 * time.Hour
+	}
+
+	dm := datamanager.GetDataManager()
+
+	var results []review.ReviewResult
+	for step := req.From; !step.After(req.To); step = step.Add(interval) {
+		for _, name := range instruments {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			result, ok := s.reviewOneInstrumentAsOf(ctx, dm, name, step)
+			if !ok {
+				continue
+			}
+			results = append(results, result)
+		}
+	}
+
+	// The loop above appends in step-major order (date, then instrument)
+	// since it's cheaper to fetch that way (adjacent steps for the same
+	// instrument share monthly candle files). Sort into the documented
+	// instrument-major order before returning, so every caller — not just
+	// the CLI, which happens to re-sort before rendering — sees a single
+	// pair's bucket transitions as a contiguous time series.
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Instrument != results[j].Instrument {
+			return results[i].Instrument < results[j].Instrument
+		}
+		return results[i].ScannedAt.Before(results[j].ScannedAt)
+	})
+
+	return &ReviewSweepResponse{Results: results}, nil
+}
+
+// reviewOneInstrumentAsOf mirrors reviewOneInstrument's fetch-and-classify
+// shape, but reads exclusively from the local candle store (via
+// getClosedCandles) instead of service/review.go's live fetchReviewCandleTimes:
+// no OANDA top-up, no OANDA fallback. ok is false when the instrument or
+// asOf should be skipped — unknown instrument, or insufficient local
+// history for D1 or H4 as of asOf.
+func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.DataManager, name string, asOf time.Time) (review.ReviewResult, bool) {
+	log := s.Log
+	if log == nil {
+		log = slog.Default()
+	}
+
+	if market.GetInstrument(name) == nil {
+		log.Warn("review sweep: unknown instrument", "instrument", name)
+		return review.ReviewResult{}, false
+	}
+	instNorm := market.NormalizeInstrument(name)
+
+	dailyWide, err := getClosedCandles(ctx, dm, instNorm, market.D1, asOf, reviewWeeklyLookbackDays+reviewSweepFetchHeadroom)
+	if err != nil || len(dailyWide) < reviewWeeklyLookbackDays {
+		log.Warn("review sweep: insufficient D1 history", "instrument", name, "asof", asOf, "got", len(dailyWide), "want", reviewWeeklyLookbackDays, "err", err)
+		return review.ReviewResult{}, false
+	}
+	d1 := candlesOnly(dailyWide)
+	if len(d1) > reviewCandleCounts["D"] {
+		d1 = d1[len(d1)-reviewCandleCounts["D"]:]
+	}
+	w1 := deriveWeeklyCandlesAsOf(dailyWide, reviewCandleCounts["W"], asOf)
+
+	h4Wide, err := getClosedCandles(ctx, dm, instNorm, market.H4, asOf, reviewCandleCounts["H4"]+reviewSweepFetchHeadroom)
+	if err != nil || len(h4Wide) < reviewCandleCounts["H4"] {
+		log.Warn("review sweep: insufficient H4 history", "instrument", name, "asof", asOf, "got", len(h4Wide), "want", reviewCandleCounts["H4"], "err", err)
+		return review.ReviewResult{}, false
+	}
+	h4 := candlesOnly(h4Wide)
+	if len(h4) > reviewCandleCounts["H4"] {
+		h4 = h4[len(h4)-reviewCandleCounts["H4"]:]
+	}
+
+	result, err := review.ReviewPair(name, w1, d1, h4)
+	if err != nil {
+		log.Warn("review sweep: compute", "instrument", name, "asof", asOf, "err", err)
+		return review.ReviewResult{}, false
+	}
+	result.ScannedAt = asOf
+	return result, true
+}
+
+// getClosedCandles wraps DataManager.GetCandles with the spec §4.2
+// closed-bars-only cutoff. GetCandles's own asof semantics are "candle
+// open time <= asof" — inclusive of a bar that opened at exactly asof but
+// has not closed yet. For a historical replay that bar's data was not
+// actually available at that wall-clock moment, so including it would give
+// every sweep step a one-bar lookahead bias. Shifting the query point back
+// by one full bar period guarantees every returned candle's close time is
+// <= asOf: a candle opening at asOf-tf closes at exactly asOf, so it is
+// correctly included as "just closed", while a candle opening at asOf
+// itself (not yet closed) is correctly excluded.
+func getClosedCandles(ctx context.Context, dm *datamanager.DataManager, instrument string, tf market.Timeframe, asOf time.Time, count int) ([]market.CandleTime, error) {
+	closedAsOf := asOf.Add(-time.Duration(tf) * time.Second)
+	return dm.GetCandles(ctx, datamanager.CandleRequest{
+		Source:     market.SourceOanda,
+		Instrument: instrument,
+		Range:      market.TimeRange{TF: tf},
+	}, closedAsOf, count)
+}

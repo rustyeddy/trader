@@ -6,12 +6,14 @@ package review
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +21,10 @@ import (
 	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 )
+
+// dateFlagLayout is the accepted format for --asof/--from/--to: a plain
+// calendar date, parsed as UTC midnight.
+const dateFlagLayout = "2006-01-02"
 
 var (
 	instrumentsCSV string
@@ -28,6 +34,10 @@ var (
 	outputFormat   string
 	token          string
 	env            string
+	asOfStr        string
+	fromStr        string
+	toStr          string
+	interval       time.Duration
 )
 
 func New(rc *config.RootConfig) *cobra.Command {
@@ -42,9 +52,13 @@ func New(rc *config.RootConfig) *cobra.Command {
 	cmd.Flags().BoolVar(&showWatch, "watch", false, "Print the watch bucket (default: all three buckets)")
 	cmd.Flags().BoolVar(&showHotlist, "hotlist", false, "Print the hot bucket (default: all three buckets)")
 	cmd.Flags().BoolVar(&showTradeable, "tradeable", false, "Print the tradeable bucket (default: all three buckets)")
-	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format: table|json|org")
+	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format: table|json|org|csv (table/org only for a single date; use json or csv for a multi-date sweep)")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (takes precedence over global config, OANDA_TOKEN env var, and ~/.config/oanda/pat.txt)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (takes precedence over global config)")
+	cmd.Flags().StringVar(&asOfStr, "asof", "", "Classify the watchlist as of this past date (YYYY-MM-DD) instead of now; cannot combine with --from/--to")
+	cmd.Flags().StringVar(&fromStr, "from", "", "Historical sweep start date (YYYY-MM-DD, inclusive); requires --to")
+	cmd.Flags().StringVar(&toStr, "to", "", "Historical sweep end date (YYYY-MM-DD, inclusive); requires --from")
+	cmd.Flags().DurationVar(&interval, "interval", 24*time.Hour, "Step interval between sweep dates when --from and --to differ")
 	return cmd
 }
 
@@ -98,10 +112,54 @@ func selectedBuckets() map[string]bool {
 
 func validateOutputFormat(format string) error {
 	switch format {
-	case "table", "json", "org":
+	case "table", "json", "org", "csv":
 		return nil
 	default:
-		return fmt.Errorf("invalid --output %q: must be table, json, or org", format)
+		return fmt.Errorf("invalid --output %q: must be table, json, org, or csv", format)
+	}
+}
+
+// parseHistoricalRange resolves --asof/--from/--to into a [from, to] date
+// range and reports whether either was set at all (historical mode vs the
+// live "now" path). --asof is sugar for from == to (a single-date sweep
+// step); --from/--to must be set together. Dates are parsed as UTC
+// midnight, matching the closed-bars-only convention in
+// service.ReviewWatchlistRange: --asof 2026-06-15 means "as of the start of
+// June 15", i.e. using data through June 14's close.
+func parseHistoricalRange(cmd *cobra.Command) (from, to time.Time, historical bool, err error) {
+	asOfSet := cmd.Flags().Changed("asof")
+	fromSet := cmd.Flags().Changed("from")
+	toSet := cmd.Flags().Changed("to")
+
+	if asOfSet && (fromSet || toSet) {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("--asof cannot be combined with --from/--to")
+	}
+	if fromSet != toSet {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("--from and --to must be set together")
+	}
+
+	switch {
+	case asOfSet:
+		t, err := time.Parse(dateFlagLayout, asOfStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("invalid --asof %q: %w", asOfStr, err)
+		}
+		return t, t, true, nil
+	case fromSet:
+		from, err := time.Parse(dateFlagLayout, fromStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("invalid --from %q: %w", fromStr, err)
+		}
+		to, err := time.Parse(dateFlagLayout, toStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("invalid --to %q: %w", toStr, err)
+		}
+		if to.Before(from) {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("--to (%s) must not be before --from (%s)", toStr, fromStr)
+		}
+		return from, to, true, nil
+	default:
+		return time.Time{}, time.Time{}, false, nil
 	}
 }
 
@@ -109,6 +167,18 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 	if err := validateOutputFormat(outputFormat); err != nil {
 		return err
 	}
+	from, to, historical, err := parseHistoricalRange(cmd)
+	if err != nil {
+		return err
+	}
+	// A multi-date sweep needs a Date column the table/org bucket-grouped
+	// layout doesn't have room for; a single date (live, or --asof with
+	// from == to) reuses the existing bucket-grouped renderers unchanged.
+	multiStep := historical && !from.Equal(to)
+	if multiStep && outputFormat != "json" && outputFormat != "csv" {
+		return fmt.Errorf("--output %q not supported for a multi-date sweep (--from/--to differ): use json or csv", outputFormat)
+	}
+
 	buckets := selectedBuckets()
 
 	svc, err := buildService(cmd, rc)
@@ -116,28 +186,66 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 		return err
 	}
 
-	resp, err := svc.ReviewWatchlist(context.Background(), service.ReviewRequest{
-		Instruments: splitCSV(instrumentsCSV),
-	})
-	if err != nil {
-		return err
+	var results []review.ReviewResult
+	if historical {
+		resp, err := svc.ReviewWatchlistRange(context.Background(), service.ReviewRangeRequest{
+			Instruments: splitCSV(instrumentsCSV),
+			From:        from,
+			To:          to,
+			Interval:    interval,
+		})
+		if err != nil {
+			return err
+		}
+		results = resp.Results
+	} else {
+		resp, err := svc.ReviewWatchlist(context.Background(), service.ReviewRequest{
+			Instruments: splitCSV(instrumentsCSV),
+		})
+		if err != nil {
+			return err
+		}
+		results = resp.Results
 	}
 
-	filtered := make([]review.ReviewResult, 0, len(resp.Results))
-	for _, r := range resp.Results {
+	filtered := make([]review.ReviewResult, 0, len(results))
+	for _, r := range results {
 		if buckets[r.Bucket] {
 			filtered = append(filtered, r)
 		}
 	}
-	sortByBucket(filtered)
 
-	switch outputFormat {
+	return renderResults(os.Stdout, outputFormat, filtered, multiStep)
+}
+
+// renderResults sorts and writes filtered per format, choosing between the
+// sweep-oriented path (instrument+date sort; json/csv only, since a
+// multi-date sweep needs a Date column the bucket-grouped table/org layout
+// has no room for) and the single-date path (bucket sort; table/json/org/csv
+// all apply, since it's still one row per instrument). Factored out of
+// runReview so the format-to-renderer mapping — every one of table/json/
+// org/csv must actually be reachable for a single date, not just accepted
+// by validateOutputFormat — is directly unit-testable without a live
+// Service.
+func renderResults(out io.Writer, format string, filtered []review.ReviewResult, multiStep bool) error {
+	if multiStep {
+		sortByInstrumentThenDate(filtered)
+		if format == "json" {
+			return renderJSON(out, filtered)
+		}
+		return renderCSV(out, filtered)
+	}
+
+	sortByBucket(filtered)
+	switch format {
 	case "json":
-		return renderJSON(os.Stdout, filtered)
+		return renderJSON(out, filtered)
 	case "org":
-		return renderOrg(os.Stdout, filtered)
+		return renderOrg(out, filtered)
+	case "csv":
+		return renderCSV(out, filtered)
 	default:
-		return renderTable(os.Stdout, filtered)
+		return renderTable(out, filtered)
 	}
 }
 
@@ -155,6 +263,18 @@ func sortByBucket(results []review.ReviewResult) {
 			return bi < bj
 		}
 		return results[i].D1.ADX > results[j].D1.ADX
+	})
+}
+
+// sortByInstrumentThenDate orders a multi-date sweep's results so a single
+// pair's bucket transitions read as a time series: grouped by instrument,
+// oldest date first within each group.
+func sortByInstrumentThenDate(results []review.ReviewResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Instrument != results[j].Instrument {
+			return results[i].Instrument < results[j].Instrument
+		}
+		return results[i].ScannedAt.Before(results[j].ScannedAt)
 	})
 }
 
@@ -283,4 +403,25 @@ func renderOrg(out io.Writer, results []review.ReviewResult) error {
 		fmt.Fprintf(out, "| %s |\n", strings.Join(reviewTableRow(r), " | "))
 	}
 	return nil
+}
+
+// renderCSV writes a multi-date sweep's results as CSV with a leading DATE
+// column (RFC3339, since --interval can be sub-daily), one row per
+// (date, instrument) — the output shape docs/asof-review-sweep-spec.md §4.3
+// recommends for the sweep, since it's the easiest to load into external
+// tooling for later threshold-tuning/grading work.
+func renderCSV(out io.Writer, results []review.ReviewResult) error {
+	w := csv.NewWriter(out)
+	defer w.Flush()
+
+	if err := w.Write(append([]string{"DATE"}, reviewTableHeader...)); err != nil {
+		return err
+	}
+	for _, r := range results {
+		row := append([]string{r.ScannedAt.UTC().Format(time.RFC3339)}, reviewTableRow(r)...)
+		if err := w.Write(row); err != nil {
+			return err
+		}
+	}
+	return w.Error()
 }
