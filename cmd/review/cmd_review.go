@@ -174,7 +174,7 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%-.1f", r.D1.PriceEMA20ATR),
 		fmt.Sprintf("%.1f", r.H4.ADX),
 		fmt.Sprintf("%.1f", r.H4.CI),
-		fmt.Sprintf("%.1f", r.H4.PriceEMA20ATR),
+		fmt.Sprintf("%+.3f", r.H4.PriceEMA20ATR),
 		fmt.Sprintf("%t", r.H4.Squeeze),
 		alignmentGlyph(r.Setup.W1Alignment),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
