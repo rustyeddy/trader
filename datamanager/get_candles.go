@@ -31,12 +31,29 @@ func candleWindowSeconds(tf market.Timeframe, count int) int64 {
 	return (span + candleWindowBufferDen - 1) / candleWindowBufferDen
 }
 
+// CandleWindow returns the calendar duration needed to fetch at least count
+// valid candles at the given timeframe, buffered for weekends/holidays.
+// GetCandles computes this internally and callers do not need it just to
+// call GetCandles; it's exported for callers (like service/review.go) that
+// separately need to know how far back to look — e.g. to ensure the local
+// store has enough history before calling GetCandles, or to size a
+// direct-source fallback fetch when the local store falls short.
+func CandleWindow(tf market.Timeframe, count int) time.Duration {
+	return time.Duration(candleWindowSeconds(tf, count)) * time.Second
+}
+
 // GetCandles returns the most recent count valid (market-session-only,
-// gap-compacted) candles for req.Instrument/req.Range.TF at or before asof.
-// Unlike Candles(), which returns a streaming iterator for sequential
-// replay, GetCandles is for callers (like review/) that need random access
-// — the last candle, the last N candles — and are willing to materialize
-// the full result eagerly.
+// gap-compacted), timestamped candles for req.Instrument/req.Range.TF at or
+// before asof. Unlike Candles(), which returns a streaming iterator for
+// sequential replay, GetCandles is for callers (like review/) that need
+// random access — the last candle, the last N candles — and are willing to
+// materialize the full result eagerly.
+//
+// Timestamps are included (market.CandleTime, not bare market.Candle)
+// because callers like review's weekly-candle derivation need to bucket
+// daily candles by calendar week; stripping timestamps here would make
+// that impossible to recover afterwards, since closed-market gaps mean a
+// candle's position in the slice doesn't determine its date.
 //
 // req.Range is ignored on input and overwritten with a range computed from
 // asof and count: a window wide enough to cover count valid candles ending
@@ -46,7 +63,7 @@ func candleWindowSeconds(tf market.Timeframe, count int) int64 {
 // The returned slice is already compacted to valid, market-session candles
 // — closed-market calendar slots (weekends, holidays) are never included —
 // since Candles() already filters them via the underlying candleSetIterator.
-func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof time.Time, count int) ([]market.Candle, error) {
+func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof time.Time, count int) ([]market.CandleTime, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("GetCandles: count must be positive, got %d", count)
 	}
@@ -62,9 +79,9 @@ func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof t
 	}
 	defer func() { _ = iter.Close() }()
 
-	candles := make([]market.Candle, 0, count)
+	candles := make([]market.CandleTime, 0, count)
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		candles = append(candles, ct.Candle)
+		candles = append(candles, ct)
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err

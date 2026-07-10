@@ -61,14 +61,15 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, candles, 2, "must never return more than count entries")
 
-	for _, c := range candles {
-		require.False(t, c.IsZero(), "must never return a zero-value candle from a closed-market slot")
+	for _, ct := range candles {
+		require.False(t, ct.Candle.IsZero(), "must never return a zero-value candle from a closed-market slot")
 	}
 
 	require.Equal(t, []market.Candle{
 		{Open: 107, High: 110, Low: 106, Close: 109, Ticks: 1},
 		{Open: 109, High: 112, Low: 108, Close: 111, Ticks: 1},
-	}, candles, "expected the 2 most recent valid candles at/before asof, in order")
+	}, candlesOnly(candles), "expected the 2 most recent valid candles at/before asof, in order")
+	require.Equal(t, []market.Timestamp{market.FromTime(tue), market.FromTime(wed)}, timestampsOnly(candles))
 }
 
 func TestGetCandles_IncludesCandleAtExactlyAsof(t *testing.T) {
@@ -110,7 +111,7 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []market.Candle{
 		{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
-	}, candles, "a candle opening after asof must not be included")
+	}, candlesOnly(candles), "a candle opening after asof must not be included")
 }
 
 func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
@@ -120,4 +121,20 @@ func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
 		Range:      market.TimeRange{TF: market.D1},
 	}, time.Now(), 0)
 	require.Error(t, err)
+}
+
+func candlesOnly(cts []market.CandleTime) []market.Candle {
+	out := make([]market.Candle, len(cts))
+	for i, ct := range cts {
+		out[i] = ct.Candle
+	}
+	return out
+}
+
+func timestampsOnly(cts []market.CandleTime) []market.Timestamp {
+	out := make([]market.Timestamp, len(cts))
+	for i, ct := range cts {
+		out[i] = ct.Timestamp
+	}
+	return out
 }
