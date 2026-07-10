@@ -28,6 +28,20 @@ type ReviewRangeRequest struct {
 	Interval time.Duration
 }
 
+// reviewSweepFetchHeadroom pads the count requested from getClosedCandles
+// beyond the strict D1/H4 requirement (reviewWeeklyLookbackDays /
+// reviewCandleCounts["H4"]). GetCandles' fetch window is sized from a flat
+// weekday ratio (candleWindowBufferNum/Den) that doesn't model holidays, so
+// a request for exactly the required count can legitimately come back one
+// or more short on a real historical date — confirmed against live local
+// data, where a request for exactly 220 D1 candles came back 219. The live
+// path never notices this because a short cache falls back to a direct
+// OANDA fetch; the sweep has no such fallback by design (§4's replay must
+// only ever see what's on disk), so it needs enough headroom in the
+// initial request to absorb ordinary holiday variance instead of skipping
+// otherwise-valid dates.
+const reviewSweepFetchHeadroom = 20
+
 // ReviewSweepResponse is the sweep output: one review.ReviewResult per
 // (step time, instrument), each result's ScannedAt set to that step's time
 // rather than time.Now(). Results are ordered by instrument, then by
@@ -98,9 +112,9 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 	}
 	instNorm := market.NormalizeInstrument(name)
 
-	dailyWide, err := getClosedCandles(ctx, dm, instNorm, market.D1, asOf, reviewWeeklyLookbackDays)
+	dailyWide, err := getClosedCandles(ctx, dm, instNorm, market.D1, asOf, reviewWeeklyLookbackDays+reviewSweepFetchHeadroom)
 	if err != nil || len(dailyWide) < reviewWeeklyLookbackDays {
-		log.Warn("review sweep: insufficient D1 history", "instrument", name, "asof", asOf, "err", err)
+		log.Warn("review sweep: insufficient D1 history", "instrument", name, "asof", asOf, "got", len(dailyWide), "want", reviewWeeklyLookbackDays, "err", err)
 		return review.ReviewResult{}, false
 	}
 	d1 := candlesOnly(dailyWide)
@@ -109,12 +123,15 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 	}
 	w1 := deriveWeeklyCandlesAsOf(dailyWide, reviewCandleCounts["W"], asOf)
 
-	h4Wide, err := getClosedCandles(ctx, dm, instNorm, market.H4, asOf, reviewCandleCounts["H4"])
+	h4Wide, err := getClosedCandles(ctx, dm, instNorm, market.H4, asOf, reviewCandleCounts["H4"]+reviewSweepFetchHeadroom)
 	if err != nil || len(h4Wide) < reviewCandleCounts["H4"] {
-		log.Warn("review sweep: insufficient H4 history", "instrument", name, "asof", asOf, "err", err)
+		log.Warn("review sweep: insufficient H4 history", "instrument", name, "asof", asOf, "got", len(h4Wide), "want", reviewCandleCounts["H4"], "err", err)
 		return review.ReviewResult{}, false
 	}
 	h4 := candlesOnly(h4Wide)
+	if len(h4) > reviewCandleCounts["H4"] {
+		h4 = h4[len(h4)-reviewCandleCounts["H4"]:]
+	}
 
 	result, err := review.ReviewPair(name, w1, d1, h4)
 	if err != nil {
