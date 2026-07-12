@@ -50,9 +50,13 @@ func (p *PropertyList) Lines() []string {
 	return lines
 }
 
-// Render writes Lines to w, one per line.
-func (p *PropertyList) Render(w io.Writer) {
+// Render writes Lines to w, one per line. It returns the first write error
+// encountered, if any.
+func (p *PropertyList) Render(w io.Writer) error {
 	for _, line := range p.Lines() {
-		fmt.Fprintln(w, line)
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
 	}
+	return nil
 }

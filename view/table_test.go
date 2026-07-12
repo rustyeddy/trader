@@ -108,6 +108,25 @@ func TestTable_LinesAndOrgLinesAreEmbeddable(t *testing.T) {
 	assert.Contains(t, orgGroups[1][0], "USDJPY")
 }
 
+func TestTable_AddGroupAtEndOfTableIsIgnored(t *testing.T) {
+	tbl := NewTable("PAIR", "BUCKET")
+	tbl.AddRow("EURUSD", "tradeable")
+	tbl.AddRow("NZDUSD", "tradeable")
+	tbl.AddGroup() // boundary at len(Rows) — should produce no trailing separator
+
+	var asciiOut bytes.Buffer
+	require.NoError(t, tbl.RenderASCII(&asciiOut))
+	// No trailing blank line after the last row.
+	assert.False(t, strings.Contains(asciiOut.String(), "tradeable\n\n"),
+		"trailing AddGroup must not produce an extra blank line")
+
+	var orgOut bytes.Buffer
+	require.NoError(t, tbl.RenderOrg(&orgOut))
+	// Only one hline: the one after the header, not a second one at the end.
+	assert.Equal(t, 1, strings.Count(orgOut.String(), "\n|-"),
+		"trailing AddGroup must not produce a trailing hline")
+}
+
 func TestTable_SetRightJustifiesOnlyMarkedColumns(t *testing.T) {
 	tbl := NewTable("NAME", "COUNT")
 	tbl.SetRight(1)
