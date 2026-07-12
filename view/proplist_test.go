@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPropertyList_AddAndRender(t *testing.T) {
@@ -13,7 +14,7 @@ func TestPropertyList_AddAndRender(t *testing.T) {
 	p.Add("Strategy", "emacross")
 
 	var buf bytes.Buffer
-	p.Render(&buf)
+	require.NoError(t, p.Render(&buf))
 
 	lines := p.Lines()
 	assert.Equal(t, []string{"Status    running", "Strategy  emacross"}, lines)
@@ -35,6 +36,6 @@ func TestPropertyList_Empty(t *testing.T) {
 	assert.Empty(t, p.Lines())
 
 	var buf bytes.Buffer
-	p.Render(&buf)
+	require.NoError(t, p.Render(&buf))
 	assert.Empty(t, buf.String())
 }

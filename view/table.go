@@ -113,7 +113,9 @@ func orgSeparator(widths []int) string {
 }
 
 // groupedRows splits Rows into segments at the boundaries recorded by
-// AddGroup, defensively ignoring out-of-order or out-of-range boundaries.
+// AddGroup, defensively ignoring out-of-order, out-of-range, or trailing
+// boundaries (a boundary equal to len(Rows) would produce an empty final
+// group).
 func (t *Table) groupedRows() [][][]string {
 	if len(t.Rows) == 0 {
 		return nil
@@ -121,7 +123,7 @@ func (t *Table) groupedRows() [][][]string {
 	var groups [][][]string
 	prev := 0
 	for _, b := range t.Groups {
-		if b <= prev || b > len(t.Rows) {
+		if b <= prev || b >= len(t.Rows) {
 			continue
 		}
 		groups = append(groups, t.Rows[prev:b])
@@ -147,21 +149,27 @@ func (t *Table) Rule() string {
 	return t.formatASCIIRow(underline, widths)
 }
 
-// Lines returns the ASCII-formatted, padded rows, grouped by AddGroup
-// boundaries — one inner slice per group, ready to embed in a larger
-// template or feed to RenderASCII's built-in one.
-func (t *Table) Lines() [][]string {
-	widths := t.widths()
+// linesWithWidths returns ASCII-formatted, padded rows using precomputed
+// column widths. It is shared by Lines and RenderASCII to avoid redundant
+// width scans.
+func (t *Table) linesWithWidths(ws []int) [][]string {
 	groups := t.groupedRows()
 	out := make([][]string, len(groups))
 	for gi, g := range groups {
 		lines := make([]string, len(g))
 		for i, row := range g {
-			lines[i] = t.formatASCIIRow(row, widths)
+			lines[i] = t.formatASCIIRow(row, ws)
 		}
 		out[gi] = lines
 	}
 	return out
+}
+
+// Lines returns the ASCII-formatted, padded rows, grouped by AddGroup
+// boundaries — one inner slice per group, ready to embed in a larger
+// template or feed to RenderASCII's built-in one.
+func (t *Table) Lines() [][]string {
+	return t.linesWithWidths(t.widths())
 }
 
 // OrgHeader returns the org-mode pipe-delimited, padded header line.
@@ -176,20 +184,26 @@ func (t *Table) OrgRule() string {
 	return orgSeparator(t.widths())
 }
 
-// OrgLines returns the org-mode pipe-delimited, padded rows, grouped by
-// AddGroup boundaries — one inner slice per group.
-func (t *Table) OrgLines() [][]string {
-	widths := t.widths()
+// orgLinesWithWidths returns org-mode pipe-delimited, padded rows using
+// precomputed column widths. It is shared by OrgLines and RenderOrg to
+// avoid redundant width scans.
+func (t *Table) orgLinesWithWidths(ws []int) [][]string {
 	groups := t.groupedRows()
 	out := make([][]string, len(groups))
 	for gi, g := range groups {
 		lines := make([]string, len(g))
 		for i, row := range g {
-			lines[i] = t.formatOrgRow(row, widths)
+			lines[i] = t.formatOrgRow(row, ws)
 		}
 		out[gi] = lines
 	}
 	return out
+}
+
+// OrgLines returns the org-mode pipe-delimited, padded rows, grouped by
+// AddGroup boundaries — one inner slice per group.
+func (t *Table) OrgLines() [][]string {
+	return t.orgLinesWithWidths(t.widths())
 }
 
 type tableView struct {
@@ -214,13 +228,28 @@ var orgTableTmpl = template.Must(template.New("view.table.org").Parse(
 
 // RenderASCII writes the table as a human-readable, column-aligned block:
 // header, dash underline, rows, with a blank line between AddGroup groups.
+// Column widths are computed once per call.
 func (t *Table) RenderASCII(w io.Writer) error {
-	return asciiTableTmpl.Execute(w, tableView{Header: t.Header(), Rule: t.Rule(), Groups: t.Lines()})
+	ws := t.widths()
+	underline := make([]string, len(t.Headers))
+	for i, h := range t.Headers {
+		underline[i] = strings.Repeat("-", len(h))
+	}
+	return asciiTableTmpl.Execute(w, tableView{
+		Header: t.formatASCIIRow(t.Headers, ws),
+		Rule:   t.formatASCIIRow(underline, ws),
+		Groups: t.linesWithWidths(ws),
+	})
 }
 
 // RenderOrg writes the table as a valid org-mode table: header, hline,
 // rows, with an hline between AddGroup groups (org tables don't tolerate
-// blank lines mid-table).
+// blank lines mid-table). Column widths are computed once per call.
 func (t *Table) RenderOrg(w io.Writer) error {
-	return orgTableTmpl.Execute(w, tableView{Header: t.OrgHeader(), Rule: t.OrgRule(), Groups: t.OrgLines()})
+	ws := t.widths()
+	return orgTableTmpl.Execute(w, tableView{
+		Header: t.formatOrgRow(t.Headers, ws),
+		Rule:   orgSeparator(ws),
+		Groups: t.orgLinesWithWidths(ws),
+	})
 }
