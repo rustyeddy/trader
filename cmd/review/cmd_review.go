@@ -13,6 +13,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -319,15 +320,43 @@ func alignmentGlyph(a review.Alignment) string {
 // down the column. PAIR/BUCKET/BIAS are text and stay left-justified.
 var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true}
 
-// renderTable writes the human-readable aligned table: text columns
-// left-justified, numeric columns right-justified so decimals/percents line
-// up, with a blank line separating each bucket group.
-func renderTable(out io.Writer, results []review.ReviewResult) error {
-	if len(results) == 0 {
-		fmt.Fprintln(out, "No results.")
-		return nil
-	}
+// tableView and orgView are the data passed to tableTmpl/orgTmpl. All
+// numeric formatting and column-width padding happens in Go (buildTableView/
+// buildOrgView) before the template ever sees the data; text/template only
+// owns the surrounding layout (header/rule, blank-line/hline between bucket
+// groups), since it has no good way to do padding or numeric formatting
+// itself.
+type tableView struct {
+	Header string
+	Rule   string
+	Groups [][]string // pre-padded, joined row lines, one inner slice per bucket group
+}
 
+type orgView struct {
+	Header string
+	Groups [][]string // pre-joined "| ... |" row lines, one inner slice per bucket group
+}
+
+var tableTmpl = template.Must(template.New("reviewTable").Parse(
+	`{{.Header}}
+{{.Rule}}
+{{range $i, $group := .Groups}}{{if $i}}
+{{end}}{{range $group}}{{.}}
+{{end}}{{end}}`))
+
+var orgTmpl = template.Must(template.New("reviewOrg").Parse(
+	`| {{.Header}} |
+|-
+{{range $i, $group := .Groups}}{{if $i}}|-
+{{end}}{{range $group}}| {{.}} |
+{{end}}{{end}}`))
+
+// buildTableView computes column widths across the header and every row,
+// formats each row into a single padded/joined line (text columns
+// left-justified, numeric columns right-justified so decimals/percents line
+// up), and groups rows by bucket so the template can insert a blank line
+// between groups.
+func buildTableView(results []review.ReviewResult) tableView {
 	rows := make([][]string, len(results))
 	for i, r := range results {
 		rows[i] = reviewTableRow(r)
@@ -354,25 +383,45 @@ func renderTable(out io.Writer, results []review.ReviewResult) error {
 				parts[i] = fmt.Sprintf("%-*s", widths[i], cell)
 			}
 		}
-		return strings.Join(parts, "  ")
+		return strings.TrimRight(strings.Join(parts, "  "), " ")
 	}
 
 	underline := make([]string, len(reviewTableHeader))
 	for i, h := range reviewTableHeader {
 		underline[i] = strings.Repeat("-", len(h))
 	}
-	fmt.Fprintln(out, strings.TrimRight(formatRow(reviewTableHeader), " "))
-	fmt.Fprintln(out, strings.TrimRight(formatRow(underline), " "))
+
+	view := tableView{
+		Header: formatRow(reviewTableHeader),
+		Rule:   formatRow(underline),
+	}
+	if len(rows) == 0 {
+		return view
+	}
 
 	prevBucket := results[0].Bucket
+	group := []string{}
 	for i, row := range rows {
 		if r := results[i]; r.Bucket != prevBucket {
-			fmt.Fprintln(out)
+			view.Groups = append(view.Groups, group)
+			group = []string{}
 			prevBucket = r.Bucket
 		}
-		fmt.Fprintln(out, strings.TrimRight(formatRow(row), " "))
+		group = append(group, formatRow(row))
 	}
-	return nil
+	view.Groups = append(view.Groups, group)
+	return view
+}
+
+// renderTable writes the human-readable aligned table: text columns
+// left-justified, numeric columns right-justified so decimals/percents line
+// up, with a blank line separating each bucket group.
+func renderTable(out io.Writer, results []review.ReviewResult) error {
+	if len(results) == 0 {
+		fmt.Fprintln(out, "No results.")
+		return nil
+	}
+	return tableTmpl.Execute(out, buildTableView(results))
 }
 
 // renderJSON writes results as an indented JSON array.
@@ -380,6 +429,29 @@ func renderJSON(out io.Writer, results []review.ReviewResult) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(results)
+}
+
+// buildOrgView groups pre-joined "PAIR | BUCKET | ..." row strings by bucket
+// so the template can insert an hline between groups (org tables don't
+// tolerate blank lines mid-table).
+func buildOrgView(results []review.ReviewResult) orgView {
+	view := orgView{Header: strings.Join(reviewTableHeader, " | ")}
+	if len(results) == 0 {
+		return view
+	}
+
+	prevBucket := results[0].Bucket
+	group := []string{}
+	for _, r := range results {
+		if r.Bucket != prevBucket {
+			view.Groups = append(view.Groups, group)
+			group = []string{}
+			prevBucket = r.Bucket
+		}
+		group = append(group, strings.Join(reviewTableRow(r), " | "))
+	}
+	view.Groups = append(view.Groups, group)
+	return view
 }
 
 // renderOrg writes results as an Emacs org-mode table, with an hline
@@ -390,19 +462,7 @@ func renderOrg(out io.Writer, results []review.ReviewResult) error {
 		fmt.Fprintln(out, "No results.")
 		return nil
 	}
-
-	fmt.Fprintf(out, "| %s |\n", strings.Join(reviewTableHeader, " | "))
-	fmt.Fprintln(out, "|-")
-
-	prevBucket := results[0].Bucket
-	for _, r := range results {
-		if r.Bucket != prevBucket {
-			fmt.Fprintln(out, "|-")
-			prevBucket = r.Bucket
-		}
-		fmt.Fprintf(out, "| %s |\n", strings.Join(reviewTableRow(r), " | "))
-	}
-	return nil
+	return orgTmpl.Execute(out, buildOrgView(results))
 }
 
 // renderCSV writes a multi-date sweep's results as CSV with a leading DATE
