@@ -197,10 +197,10 @@ implementation.
 
 ### Durable journal backend
 
-CSV and JSONL journals are implemented; PostgreSQL is named but not
-implemented. Select and implement a queryable durable backend only after
-retention, migration, concurrency, backup, and operational requirements are
-defined. Do not describe the removed SQLite backend as available.
+CSV and JSONL journals are implemented. A queryable durable backend (such as
+PostgreSQL) may be implemented after retention, migration, concurrency,
+backup, and operational requirements are defined. Do not describe the removed
+SQLite backend as available.
 
 ### Data backup and recovery
 

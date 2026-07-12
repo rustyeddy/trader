@@ -9,14 +9,12 @@ import (
 
 // JournalConfig selects the journal backend and its destinations.
 type JournalConfig struct {
-	// Kind: "csv", "json", or "postgres"
+	// Kind: "csv" or "json"
 	Kind string
 
 	// File-backed journals use one file for trades and one for equity snapshots.
 	TradesPath string
 	EquityPath string
-
-	PostgresURL string
 }
 
 // OpenJournal opens the configured Journal. Caller is responsible for
@@ -35,10 +33,8 @@ func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
 			return nil, fmt.Errorf("open json journal: %w", err)
 		}
 		return j, nil
-	case "postgres":
-		return nil, fmt.Errorf("postgres journal not yet implemented")
 	default:
-		return nil, fmt.Errorf("journal kind must be 'csv', 'json', or 'postgres'; got %q", cfg.Kind)
+		return nil, fmt.Errorf("journal kind must be 'csv' or 'json'; got %q", cfg.Kind)
 	}
 }
 

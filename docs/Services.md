@@ -293,8 +293,7 @@ Resource paths are constrained to their configured roots.
 
 ## Journals and reports
 
-Live journals support CSV and JSONL. PostgreSQL is named in the service
-configuration but is not implemented. SQLite support described by older
+Live journals support CSV and JSONL. SQLite support described by older
 versions of this document was removed.
 
 Backtest reports are JSON and Org files named

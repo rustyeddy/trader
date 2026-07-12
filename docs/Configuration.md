@@ -355,8 +355,7 @@ must use `tradespath` and `equitypath`. The older
 populate those fields. The `--journal-trades` and `--journal-equity` flags
 avoid that ambiguity.
 
-`postgres` is recognized as a journal kind but is not implemented. Use `json`
-or `csv`.
+Supported journal kinds are `json` and `csv`.
 
 The daemon can start its REST API, embedded UI, and read-only MCP endpoint
 without an OANDA token. Live journal and broker-backed capabilities remain
