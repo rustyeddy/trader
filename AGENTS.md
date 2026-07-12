@@ -122,11 +122,11 @@ ones.
 - `Backtest` — executable run holding `BacktestRequest`, mutable `BacktestRun` state, and an explicit final `Result`
 - `Trader` — coordinates DataManager + Broker + Account + Journal
 - `Broker` — executes `OpenRequest`/`closeRequest`, emits events on a channel
-- `Strategy` interface — `Update(ctx, *CandleTime, *Backtest) → *StrategyPlan`
-- `ExitStrategy` interface — optional exit logic layered on top of a strategy; see `strategy_exit.go`
-- `RegimeFilter` interface — optional market-regime gate; see `regime_filter.go`
+- `Strategy` interface — `Update(ctx, *market.CandleTime, StrategyContext) → Signal`
+- `ExitStrategy` interface — optional exit logic layered on top of a strategy; see `strategy/exit.go`
+- `RegimeFilter` interface — optional market-regime gate; see `strategy/regime.go`
 - `DataManager` — candle cache and loader; `CandleIterator` for traversal
-- `Journal` interface — write-only persistence contract with CSV, JSONL, and Org implementations
+- `Journal` interface — write-only persistence contract with CSV and JSONL implementations
 
 ## Accounting Invariants
 
@@ -213,7 +213,7 @@ The default data root is `/srv/trading/data`. Two subtrees exist:
   raw OANDA CSVs. These are what the backtest engine reads. Rebuild with `trader data build`.
 
 **Instrument format in paths:** always the normalized form without underscores — `EURUSD`, not
-`EUR_USD`. The store key (`store_key.go`) enforces this; `NormalizeInstrument()` is applied
+`EUR_USD`. The store key (`datamanager/store_key.go`) enforces this; `NormalizeInstrument()` is applied
 before any path construction.
 
 **Timeframe suffixes in filenames:** `m1`, `h1`, `h4`, `d1`.
@@ -231,7 +231,7 @@ Two formats exist and must never be mixed up:
 Always call it before constructing a store key or looking up the instrument registry.
 Never call it on values going out to the OANDA API — the API requires the underscore form.
 
-The instrument registry (`trade_instrument.go`) panics at init time if a key is not already
+The instrument registry (`market/instrument.go`) panics at init time if a key is not already
 normalized, so mismatches are caught at startup rather than silently producing wrong results.
 
 ## Error Handling Patterns
@@ -265,13 +265,13 @@ startup (e.g., malformed instrument registry entries). Use `log/slog` for struct
 1. **Copy the template** — `strategies/tmpl/` is a minimal working strategy skeleton. Copy it
    to `strategies/<name>/` as your starting point.
 
-2. **Implement the `trader.Strategy` interface:**
+2. **Implement the `strategy.Strategy` interface:**
    ```go
    type Strategy interface {
        Name() string
        Ready() bool
        Reset()
-       Update(ctx context.Context, c trader.Candle, b *trader.Backtest) trader.StrategyPlan
+       Update(ctx context.Context, ct *market.CandleTime, sc StrategyContext) Signal
        StopDescription() string
    }
    ```
@@ -279,10 +279,10 @@ startup (e.g., malformed instrument registry entries). Use `log/slog` for struct
 3. **Register in `init()`:**
    ```go
    func init() {
-       trader.MustRegisterStrategy(build, "my-strategy-name")
+       strategy.MustRegisterStrategy(build, "my-strategy-name")
    }
    ```
-   where `build` is a function with signature `func(params map[string]any) (trader.Strategy, error)`.
+   where `build` is a function with signature `func(params map[string]any) (strategy.Strategy, error)`.
 
 4. **Blank-import from `cmd/main.go`:**
    ```go
@@ -294,8 +294,9 @@ startup (e.g., malformed instrument registry entries). Use `log/slog` for struct
    etc.) all operate on `Price`; do not convert to float for intermediate calculations.
 
 6. **Optional: implement `ExitStrategy` or `RegimeFilter`** if the strategy needs separable
-   exit logic or a market-regime gate. See `strategy_exit.go` and `regime_filter.go` for the
-   interfaces; register them analogously via `RegisterExitStrategy` / `RegisterRegimeFilter`.
+   exit logic or a market-regime gate. See `strategy/exit.go` and `strategy/regime.go` for the
+   interfaces; they are resolved by kind through the `GetExitStrategy` / `GetRegimeFilter`
+   factories in `strategy/exit_factory.go` and `strategy/regime_factory.go`.
 
 7. **Run `make sweep`** after adding the strategy to confirm it passes the broad smoke test
    across all registered strategies (`TestStrategySweep` in `service/`).

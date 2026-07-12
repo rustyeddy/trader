@@ -96,33 +96,12 @@ func TestParseTimeRange_OANDADailyAlias(t *testing.T) {
 func TestTimeRangeBasics(t *testing.T) {
 	t.Parallel()
 
-	r := newTimeRange(100, 200, M1)
+	r := NewTimeRange(100, 200, M1)
 	assert.True(t, r.Valid())
 	assert.True(t, r.Contains(100))
 	assert.False(t, r.Contains(200))
-	assert.True(t, r.Overlaps(newTimeRange(150, 300, M1)))
-	assert.True(t, r.Covers(newTimeRange(120, 180, M1)))
-}
-
-// TestIsFXMarketClosedWrapperMatchesCanonical verifies expected behavior for this component.
-func TestIsFXMarketClosedWrapperMatchesCanonical(t *testing.T) {
-	t.Parallel()
-
-	ny, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
-
-	candles := []time.Time{
-		time.Date(2024, 6, 7, 16, 59, 0, 0, ny),
-		time.Date(2024, 6, 7, 17, 0, 0, 0, ny),
-		time.Date(2024, 6, 9, 16, 59, 0, 0, ny),
-		time.Date(2024, 6, 9, 17, 0, 0, 0, ny),
-		time.Date(2024, 12, 24, 13, 0, 0, 0, ny),
-	}
-	for _, ts := range candles {
-		assert.Equal(t, isForexMarketClosed(ts), isFXMarketClosed(ts))
-	}
+	assert.True(t, r.Overlaps(NewTimeRange(150, 300, M1)))
+	assert.True(t, r.Covers(NewTimeRange(120, 180, M1)))
 }
 
 // TestSundayBeforeHolidayIsClosed verifies that the Sunday evening session is
@@ -189,29 +168,18 @@ func TestTimestampHelpers(t *testing.T) {
 	ts := Timestamp(125)
 	assert.Equal(t, Timestamp(120), ts.FloorToMinute())
 	assert.Equal(t, Timestamp(0), ts.FloorToHour())
-	assert.Equal(t, timemilli(125000), ts.Milli())
-	assert.Equal(t, timemilli(120000), ts.Milli().FloorToMinute())
-	assert.Equal(t, timemilli(0), ts.Milli().FloorToHour())
+	assert.Equal(t, TimeMillis(125000), ts.Milli())
+	assert.Equal(t, TimeMillis(120000), ts.Milli().FloorToMinute())
+	assert.Equal(t, TimeMillis(0), ts.Milli().FloorToHour())
 	assert.Equal(t, Timestamp(125), ts.MS().Sec())
 	assert.True(t, Timestamp(124).Before(Timestamp(125)))
 	assert.True(t, Timestamp(126).After(Timestamp(125)))
 	assert.Equal(t, Timestamp(135), Timestamp(125).Add(10*time.Second))
 }
 
-// TestFromStringAndTimeRangeLocation verifies expected behavior for this component.
-func TestFromStringAndTimeRangeLocation(t *testing.T) {
+// TestTimeRangeLocation verifies expected behavior for this component.
+func TestTimeRangeLocation(t *testing.T) {
 	t.Parallel()
-
-	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), FromString("2024-01-15"))
-	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), FromString(" 2024-01-15 "))
-	assert.Equal(t, Timestamp(0), FromString("not-a-date"))
-
-	ts, err := ParseDateTimestamp("2024-01-15")
-	require.NoError(t, err)
-	assert.Equal(t, Timestamp(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).Unix()), ts)
-
-	_, err = ParseDateTimestamp("bad")
-	require.Error(t, err)
 
 	loc := time.UTC
 	rng, err := timeRangeLocation("2024-01-01", "2024-01-10", "H1", loc)
@@ -238,7 +206,7 @@ func TestTimeRangeMonthsAndMonthRange(t *testing.T) {
 
 	assert.Nil(t, TimeRange{}.MonthsInRange())
 
-	mr := monthRange(2024, 2)
+	mr := MonthRange(2024, 2)
 	assert.Equal(t, Timestamp(time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC).Unix()), mr.Start)
 	assert.Equal(t, Timestamp(time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC).Unix()), mr.End)
 	assert.False(t, TimeRange{}.Valid())

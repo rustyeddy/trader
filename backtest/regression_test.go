@@ -10,20 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIsFXMarketClosed_BackCompatWrapper verifies expected behavior for this component.
-func TestIsFXMarketClosed_BackCompatWrapper(t *testing.T) {
-	t.Parallel()
-
-	berlin, err := time.LoadLocation("Europe/Berlin")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
-
-	// Wrapper should match canonical function behavior.
-	tBerlin := time.Date(2024, 6, 8, 1, 0, 0, 0, berlin)
-	assert.Equal(t, market.IsForexMarketClosed(tBerlin), market.IsFXMarketClosed(tBerlin))
-}
-
 // TestIsForexMarketClosed_NewYorkBoundaries verifies expected behavior for this component.
 func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
 	t.Parallel()

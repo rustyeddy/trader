@@ -9,15 +9,15 @@ import (
 // Timestamp represents a trader domain type.
 type Timestamp int64
 
-// timemilli represents a trader domain type.
-type timemilli int64
+// TimeMillis represents a trader domain type.
+type TimeMillis int64
 
 const (
-	SecondInMS  timemilli = 1_000
-	MinuteInSec Timestamp = 60
-	MinuteInMS  timemilli = 60_000
-	HourInSec   Timestamp = 3_600
-	HourInMS    timemilli = 3_600_000
+	SecondInMS  TimeMillis = 1_000
+	MinuteInSec Timestamp  = 60
+	MinuteInMS  TimeMillis = 60_000
+	HourInSec   Timestamp  = 3_600
+	HourInMS    TimeMillis = 3_600_000
 )
 
 const dateLayout = "2006-01-02"
@@ -25,24 +25,6 @@ const dateLayout = "2006-01-02"
 // FromTime is an internal helper for trader type processing.
 func FromTime(t time.Time) Timestamp {
 	return Timestamp(t.Unix())
-}
-
-// ParseDateTimestamp parses a YYYY-MM-DD date string into a UTC midnight Timestamp.
-func ParseDateTimestamp(s string) (Timestamp, error) {
-	t, err := time.Parse(dateLayout, strings.TrimSpace(s))
-	if err != nil {
-		return 0, err
-	}
-	return FromTime(t.UTC()), nil
-}
-
-// FromString is an internal helper for trader type processing.
-func FromString(s string) Timestamp {
-	t, err := ParseDateTimestamp(s)
-	if err != nil {
-		return 0
-	}
-	return t
 }
 
 // Int64 is an internal helper for trader type processing.
@@ -83,15 +65,15 @@ func (t Timestamp) String() string {
 }
 
 // Milli is an internal helper for trader type processing.
-func (t Timestamp) Milli() timemilli {
-	return timemilli(t * 1000)
+func (t Timestamp) Milli() TimeMillis {
+	return TimeMillis(t * 1000)
 }
 
 // Conversions
-func (ms timemilli) Sec() Timestamp { return Timestamp(int64(ms) / 1_000) }
+func (ms TimeMillis) Sec() Timestamp { return Timestamp(int64(ms) / 1_000) }
 
 // MS is an internal helper for trader type processing.
-func (s Timestamp) MS() timemilli { return timemilli(int64(s) * 1_000) }
+func (s Timestamp) MS() TimeMillis { return TimeMillis(int64(s) * 1_000) }
 
 // Flooring (bar opens)
 func (s Timestamp) FloorToMinute() Timestamp { return (s / 60) * 60 }
@@ -100,25 +82,14 @@ func (s Timestamp) FloorToMinute() Timestamp { return (s / 60) * 60 }
 func (s Timestamp) FloorToHour() Timestamp { return (s / 3_600) * 3_600 }
 
 // FloorToMinute is an internal helper for trader type processing.
-func (ms timemilli) FloorToMinute() timemilli { return (ms / 60_000) * 60_000 }
+func (ms TimeMillis) FloorToMinute() TimeMillis { return (ms / 60_000) * 60_000 }
 
 // FloorToHour is an internal helper for trader type processing.
-func (ms timemilli) FloorToHour() timemilli { return (ms / 3_600_000) * 3_600_000 }
+func (ms TimeMillis) FloorToHour() TimeMillis { return (ms / 3_600_000) * 3_600_000 }
 
-// timeMilliFromTime is an internal helper for trader type processing.
-func timeMilliFromTime(t time.Time) timemilli {
-	return timemilli(t.UnixMilli())
-}
-
-// daysInMonth returns the number of days in a given month.
-// month0 is 0-indexed: 0=Jan, 11=Dec.
-func daysInMonth(year int, month0 int) int {
-	// Convert to Go's 1-indexed month
-	month := time.Month(month0 + 1)
-
-	// Trick: day 0 of next month = last day of this month
-	t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
-	return t.Day()
+// TimeMilliFromTime is an internal helper for trader type processing.
+func TimeMilliFromTime(t time.Time) TimeMillis {
+	return TimeMillis(t.UnixMilli())
 }
 
 // TimeRange represents a trader domain type.
@@ -128,8 +99,8 @@ type TimeRange struct {
 	TF    Timeframe // m1, h1, d1
 }
 
-// newTimeRange is an internal helper for trader type processing.
-func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
+// NewTimeRange is an internal helper for trader type processing.
+func NewTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 	r := TimeRange{
 		Start: Timestamp(start),
 		End:   Timestamp(end),
@@ -141,11 +112,11 @@ func newTimeRange(start Timestamp, end Timestamp, tf Timeframe) TimeRange {
 // ParseTimeRange parses a TimeRange from "YYYY-MM-DD" from/to strings and a
 // timeframe string ("M1", "H1", "D1"). Exported for use by sibling packages.
 func ParseTimeRange(from, to, tf string) (TimeRange, error) {
-	return timeRangeFromStrings(from, to, tf)
+	return TimeRangeFromStrings(from, to, tf)
 }
 
-// timeRangeFromStrings is an internal helper for trader type processing.
-func timeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
+// TimeRangeFromStrings is an internal helper for trader type processing.
+func TimeRangeFromStrings(fromStr, toStr, tfstr string) (tr TimeRange, err error) {
 	return timeRangeLocation(fromStr, toStr, tfstr, time.UTC)
 }
 
@@ -207,8 +178,8 @@ func (r TimeRange) String() string {
 		time.Unix(int64(r.End), 0).UTC().Format(time.RFC3339))
 }
 
-// monthRange will return the first day and last day of month.
-func monthRange(year int, month int) TimeRange {
+// MonthRange will return the first day and last day of month.
+func MonthRange(year int, month int) TimeRange {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(year, time.Month(month)+1, 1, 0, 0, 0, 0, time.UTC)
 	return TimeRange{
@@ -256,12 +227,6 @@ var newYorkLoc = func() *time.Location {
 	}
 	return loc
 }()
-
-// isFXMarketClosed is retained for backward compatibility.
-// Deprecated: use IsForexMarketClosed or isForexMarketClosed instead.
-func isFXMarketClosed(t time.Time) bool {
-	return isForexMarketClosed(t)
-}
 
 // IsForexMarketClosed is the exported form of isForexMarketClosed for
 // use by sibling packages (e.g. data/dukascopy).

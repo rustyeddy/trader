@@ -209,8 +209,8 @@ func newMonthlyCandleSetFromStart(
 	instrument string,
 	start time.Time,
 	tf market.Timeframe,
-) (*candleSet, error) {
-	return newMonthlyCandleSet(
+) (*CandleSet, error) {
+	return NewMonthlyCandleSet(
 		market.NormalizeInstrument(instrument),
 		tf,
 		market.FromTime(start),

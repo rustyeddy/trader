@@ -11,13 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testSizedAccount() *execution.Account {
-	acct := execution.NewAccount("test", market.MoneyFromFloat(10_000))
-	acct.Equity = acct.Balance
-	acct.RiskFraction = market.RateFromFloat(0.01)
-	return acct
-}
-
 func testOpenLot(t *testing.T, acct *execution.Account, inst string, side market.Side, units market.Units, fill market.Price) *execution.Lot {
 	t.Helper()
 	lot := &execution.Lot{

@@ -175,40 +175,6 @@ runs: []
 	assert.Contains(t, err.Error(), "no runs")
 }
 
-func validConfig() *Config {
-	return &Config{
-		Version: 1,
-		Defaults: RunDefaults{
-			StartingBalance: 10000.0,
-			AccountCCY:      "USD",
-			Scale:           100000,
-			Units:           1000,
-		},
-		Runs: []RunConfig{
-			{
-				Name: "run-a",
-				Data: DataConfig{
-					Instrument: "EURUSD",
-					Timeframe:  "H1",
-					From:       "2026-01-01",
-					To:         "2026-01-31",
-				},
-				Strategy: strategy.StrategyConfig{Kind: "buy-first"},
-			},
-			{
-				Name: "run-b",
-				Data: DataConfig{
-					Instrument: "GBPUSD",
-					Timeframe:  "M1",
-					From:       "2026-02-01",
-					To:         "2026-02-28",
-				},
-				Strategy: strategy.StrategyConfig{Kind: "ema-cross"},
-			},
-		},
-	}
-}
-
 func TestParseTimeframe_FromBacktestConfigCoverage(t *testing.T) {
 	tests := []struct {
 		in   string

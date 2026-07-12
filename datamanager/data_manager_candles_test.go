@@ -34,7 +34,7 @@ func writeMonthlyCandles(
 
 	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
 
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		instrument,
 		tf,
 		market.FromTime(start),

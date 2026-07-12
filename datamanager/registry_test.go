@@ -26,9 +26,9 @@ func uniqueName(t *testing.T) string {
 // ── Register ──────────────────────────────────────────────────────────────────
 
 func TestRegister_NilIsNoOp(t *testing.T) {
-	before := len(Names())
 	Register(nil)
-	assert.Equal(t, before, len(Names()), "registering nil should not change provider count")
+	_, err := Get("")
+	assert.Error(t, err, "registering nil should not add an entry")
 }
 
 func TestRegister_AddsProvider(t *testing.T) {
@@ -41,16 +41,13 @@ func TestRegister_AddsProvider(t *testing.T) {
 
 func TestRegister_OverwritesPreviousEntry(t *testing.T) {
 	name := uniqueName(t)
-	Register(&stubProvider{name: name})
-	Register(&stubProvider{name: name}) // re-register same name
-	names := Names()
-	count := 0
-	for _, n := range names {
-		if n == name {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count, "re-registering same name should not duplicate the entry")
+	first := &stubProvider{name: name}
+	second := &stubProvider{name: name}
+	Register(first)
+	Register(second) // re-register same name
+	p, err := Get(name)
+	require.NoError(t, err)
+	assert.Same(t, second, p, "re-registering same name should replace the entry")
 }
 
 // ── Get ───────────────────────────────────────────────────────────────────────
@@ -67,24 +64,6 @@ func TestGet_ReturnsRegisteredProvider(t *testing.T) {
 	p, err := Get(name)
 	require.NoError(t, err)
 	assert.Equal(t, name, p.Name())
-}
-
-// ── Names ─────────────────────────────────────────────────────────────────────
-
-func TestNames_IncludesRegisteredProvider(t *testing.T) {
-	name := uniqueName(t)
-	Register(&stubProvider{name: name})
-	assert.Contains(t, Names(), name)
-}
-
-func TestNames_MultipleProviders(t *testing.T) {
-	a := uniqueName(t) + "-A"
-	b := uniqueName(t) + "-B"
-	Register(&stubProvider{name: a})
-	Register(&stubProvider{name: b})
-	names := Names()
-	assert.Contains(t, names, a)
-	assert.Contains(t, names, b)
 }
 
 // ── SourceURL via Provider interface ─────────────────────────────────────────

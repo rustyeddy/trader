@@ -16,7 +16,7 @@ func newTestStore(t *testing.T) *store {
 	return &store{basedir: t.TempDir()}
 }
 
-func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf market.Timeframe) *candleSet {
+func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf market.Timeframe) *CandleSet {
 	t.Helper()
 
 	instName := market.NormalizeInstrument(instrument)
@@ -26,7 +26,7 @@ func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Mon
 	}
 
 	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		inst.Name,
 		tf,
 		market.FromTime(start),
@@ -37,7 +37,7 @@ func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Mon
 	return cs
 }
 
-func keyForSet(cs *candleSet) Key {
+func keyForSet(cs *CandleSet) Key {
 	start := time.Unix(int64(cs.Start), 0).UTC()
 	return Key{
 		Instrument: cs.Instrument,
@@ -214,7 +214,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 
 	t.Run("nil instrument", func(t *testing.T) {
 		t.Parallel()
-		err := s.WriteCSV(&candleSet{
+		err := s.WriteCSV(&CandleSet{
 			Timeframe: market.M1,
 		})
 		require.Error(t, err)
@@ -223,7 +223,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 
 	t.Run("invalid timeframe", func(t *testing.T) {
 		t.Parallel()
-		err := s.WriteCSV(&candleSet{
+		err := s.WriteCSV(&CandleSet{
 			Instrument: "EURUSD",
 		})
 		require.Error(t, err)

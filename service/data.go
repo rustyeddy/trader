@@ -50,10 +50,10 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 		return nil, fmt.Errorf("missing Timeframe")
 	}
 	if req.From.IsZero() || req.To.IsZero() {
-		return nil, fmt.Errorf("From and To are required")
+		return nil, fmt.Errorf("from and to are required")
 	}
 	if !req.From.Before(req.To) {
-		return nil, fmt.Errorf("From must be before To")
+		return nil, fmt.Errorf("from must be before to")
 	}
 
 	tf, err := parseTraderTimeframe(req.Timeframe)

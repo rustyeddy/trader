@@ -9,8 +9,6 @@ type iterator[T any] interface {
 	Close() error
 }
 
-type rawTickIterator = iterator[RawTick]
-
 type funcIterator[T any] struct {
 	nextFn  func() (T, bool, error)
 	closeFn func() error
@@ -82,7 +80,7 @@ type rangedCandleIterator struct {
 	closed bool
 }
 
-func newCandleSetIterator(cs *candleSet, rng market.TimeRange) market.CandleIterator {
+func newCandleSetIterator(cs *CandleSet, rng market.TimeRange) market.CandleIterator {
 	return &rangedCandleIterator{
 		base:     cs.Iterator(),
 		rng:      rng,

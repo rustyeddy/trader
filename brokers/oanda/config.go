@@ -5,8 +5,7 @@ import (
 )
 
 type Config struct {
-	Token   string
-	baseURL string
+	Token string
 }
 
 var (

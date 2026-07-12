@@ -33,7 +33,7 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 	second, err := s.ReadCSV(key)
 	require.NoError(t, err, "expected cached read to succeed after the CSV file was removed")
 	require.Equal(t, first.Candles, second.Candles)
-	require.Same(t, first, second, "expected the exact cached *candleSet pointer to be returned")
+	require.Same(t, first, second, "expected the exact cached *CandleSet pointer to be returned")
 }
 
 // TestStoreReadCSV_SkipsCacheForCurrentMonth confirms the current calendar
@@ -65,7 +65,7 @@ func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 
 // TestStoreWriteCSV_InvalidatesCache confirms a write for a key that was
 // already cached is visible on the next read, rather than returning the
-// stale cached candleSet.
+// stale cached CandleSet.
 func TestStoreWriteCSV_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 

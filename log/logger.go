@@ -258,12 +258,6 @@ func Fatal(msg string, args ...any) {
 // helpers
 // -------------------------------------------------------------------------
 
-func closeSinksLocked() error {
-	err := closeSinks(sinkClosers)
-	sinkClosers = nil
-	return err
-}
-
 func closeSinks(closers []io.Closer) error {
 	if len(closers) == 0 {
 		return nil

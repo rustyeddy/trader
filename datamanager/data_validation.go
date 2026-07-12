@@ -225,7 +225,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	return issues, nil
 }
 
-func analyzeCandleCoverage(cs *candleSet, now time.Time) candleCoverage {
+func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
 	if cs == nil || cs.Timeframe <= 0 {
 		return candleCoverage{}
 	}
@@ -280,7 +280,7 @@ type rawOandaCoverage struct {
 	SampleMissing []string
 }
 
-func compareRawOandaMonth(key Key, cs *candleSet, rawDir string) ([]CandleValidationIssue, error) {
+func compareRawOandaMonth(key Key, cs *CandleSet, rawDir string) ([]CandleValidationIssue, error) {
 	rawPath := monthlyCandle(rawDir, key)
 	coverage, err := readRawOandaMonth(rawPath, key)
 	if err != nil {

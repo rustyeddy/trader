@@ -1,70 +1,11 @@
 package market
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// TestPriceStore_SetGet verifies expected behavior for this component.
-func TestPriceStore_SetGet(t *testing.T) {
-	t.Parallel()
-
-	ps := newTickStore()
-	p := Tick{
-		Instrument: "EUR_USD",
-		BA: BA{
-			Bid: 11,
-			Ask: 12,
-		},
-	}
-
-	require.NoError(t, ps.Set(p))
-
-	got, err := ps.Get("EUR_USD")
-	assert.NoError(t, err)
-	assert.Equal(t, "EURUSD", got.Instrument)
-	assert.Equal(t, Tick{Instrument: "EURUSD", BA: BA{Bid: 11, Ask: 12}}, got)
-}
-
-// TestPriceStore_GetMissing verifies expected behavior for this component.
-func TestPriceStore_GetMissing(t *testing.T) {
-	t.Parallel()
-
-	ps := newTickStore()
-
-	got, err := ps.Get("NO_SUCH")
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrTickNotFound))
-	assert.Equal(t, Tick{}, got)
-}
-
-func TestPriceStore_NormalizesInstrument(t *testing.T) {
-	t.Parallel()
-
-	ps := newTickStore()
-	require.NoError(t, ps.Set(Tick{
-		Instrument: " eur_usd ",
-		BA: BA{
-			Bid: 100,
-			Ask: 102,
-		},
-	}))
-
-	got, err := ps.Get("EUR/USD")
-	require.NoError(t, err)
-	assert.Equal(t, "EURUSD", got.Instrument)
-}
-
-// TestTickSpread_Phase1 verifies expected behavior for this component.
-func TestTickSpread_Phase1(t *testing.T) {
-	t.Parallel()
-
-	tk := Tick{BA: BA{Bid: 100, Ask: 106}}
-	assert.Equal(t, Price(6), tk.Spread())
-}
 
 // TestTickMid_RoundsHalfUp_Phase1 verifies expected behavior for this component.
 func TestTickMid_RoundsHalfUp_Phase1(t *testing.T) {
@@ -108,16 +49,21 @@ func TestTickValidate(t *testing.T) {
 
 	require.NoError(t, Tick{
 		Instrument: "EUR_USD",
-		BA:         BA{Bid: 100, Ask: 102},
+		BA:         BA{Bid: 11, Ask: 12},
 	}.Validate())
 
-	require.EqualError(t, Tick{
+	require.Error(t, Tick{
 		Instrument: "",
-		BA:         BA{Bid: 100, Ask: 102},
-	}.Validate(), "tick instrument must not be empty")
+		BA:         BA{Bid: 11, Ask: 12},
+	}.Validate())
 
-	require.EqualError(t, Tick{
-		Instrument: "EURUSD",
-		BA:         BA{Bid: 102, Ask: 100},
-	}.Validate(), "ask must be >= bid")
+	require.Error(t, Tick{
+		Instrument: "EUR_USD",
+		BA:         BA{Bid: 0, Ask: 12},
+	}.Validate())
+
+	require.Error(t, Tick{
+		Instrument: "EUR_USD",
+		BA:         BA{Bid: 12, Ask: 11},
+	}.Validate())
 }

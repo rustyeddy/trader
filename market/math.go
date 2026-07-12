@@ -22,54 +22,55 @@ func mulDivNonNegative64(a, b, den int64, fnName string) (q, r int64, err error)
 	return int64(q64), int64(r64), nil
 }
 
-// mulDivFloor64 computes floor((a*b)/den) with 128-bit intermediate precision.
+// MulDivFloor64 computes floor((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
-func mulDivFloor64(a, b, den int64) (int64, error) {
-	q, _, err := mulDivNonNegative64(a, b, den, "mulDivFloor64")
+func MulDivFloor64(a, b, den int64) (int64, error) {
+	q, _, err := mulDivNonNegative64(a, b, den, "MulDivFloor64")
 	return q, err
 }
 
-// mulDivCeil64 computes ceil((a*b)/den) with 128-bit intermediate precision.
+// MulDivCeil64 computes ceil((a*b)/den) with 128-bit intermediate precision.
 // Inputs must be non-negative and den > 0.
-func mulDivCeil64(a, b, den int64) (int64, error) {
-	q, r, err := mulDivNonNegative64(a, b, den, "mulDivCeil64")
+func MulDivCeil64(a, b, den int64) (int64, error) {
+	q, r, err := mulDivNonNegative64(a, b, den, "MulDivCeil64")
 	if err != nil {
 		return 0, err
 	}
 	if r != 0 {
+		if q == math.MaxInt64 {
+			return 0, fmt.Errorf("MulDivCeil64: overflow result")
+		}
 		q++
-	}
-	if q > math.MaxInt64 {
-		return 0, fmt.Errorf("mulDivCeil64: overflow result")
 	}
 	return q, nil
 }
 
-// mulChecked64 multiplies two non-negative int64 values and reports overflow.
-func mulChecked64(a, b int64) (int64, error) {
+// MulChecked64 multiplies two non-negative int64 values and reports overflow.
+func MulChecked64(a, b int64) (int64, error) {
 	if a < 0 || b < 0 {
-		return 0, fmt.Errorf("mulChecked64: invalid args a=%d b=%d", a, b)
+		return 0, fmt.Errorf("MulChecked64: invalid args a=%d b=%d", a, b)
 	}
 
 	hi, lo := bits.Mul64(uint64(a), uint64(b))
 	if hi != 0 || lo > uint64(math.MaxInt64) {
-		return 0, fmt.Errorf("mulChecked64: overflow a=%d b=%d", a, b)
+		return 0, fmt.Errorf("MulChecked64: overflow a=%d b=%d", a, b)
 	}
 
 	return int64(lo), nil
 }
 
-// roundHalfAwayFromZero is an internal helper for trader type processing.
-func roundHalfAwayFromZero(num, den int64) (int64, error) {
+// RoundHalfAwayFromZero divides num by den, rounding halves away from zero.
+// Inputs must be non-negative and den > 0.
+func RoundHalfAwayFromZero(num, den int64) (int64, error) {
 	if num < 0 || den <= 0 {
-		return 0, fmt.Errorf("roundHalfAwayFromZero: invalid args num=%d den=%d", num, den)
+		return 0, fmt.Errorf("RoundHalfAwayFromZero: invalid args num=%d den=%d", num, den)
 	}
 
 	q := num / den
 	r := num % den
 	if r >= (den+1)/2 {
 		if q == math.MaxInt64 {
-			return 0, fmt.Errorf("roundHalfAwayFromZero: overflow")
+			return 0, fmt.Errorf("RoundHalfAwayFromZero: overflow")
 		}
 		q++
 	}
@@ -77,34 +78,24 @@ func roundHalfAwayFromZero(num, den int64) (int64, error) {
 	return q, nil
 }
 
-// absInt64Checked is an internal helper for trader type processing.
-func absInt64Checked(v int64) (int64, error) {
-	if v == math.MinInt64 {
-		return 0, fmt.Errorf("absInt64Checked: overflow")
-	}
-	if v < 0 {
-		return -v, nil
-	}
-	return v, nil
-}
-
-// signedMulDivRound is an internal helper for trader type processing.
-func signedMulDivRound(a, b, den int64) (int64, error) {
+// SignedMulDivRound computes round((a*b)/den) half away from zero, where a
+// may be negative; b must be non-negative and den > 0.
+func SignedMulDivRound(a, b, den int64) (int64, error) {
 	if b < 0 || den <= 0 {
-		return 0, fmt.Errorf("signedMulDivRound: invalid args a=%d b=%d den=%d", a, b, den)
+		return 0, fmt.Errorf("SignedMulDivRound: invalid args a=%d b=%d den=%d", a, b, den)
 	}
 
-	absA, err := absInt64Checked(a)
+	absA, err := AbsInt64Checked(a)
 	if err != nil {
 		return 0, err
 	}
 
-	prod, err := mulChecked64(absA, b)
+	prod, err := MulChecked64(absA, b)
 	if err != nil {
 		return 0, err
 	}
 
-	q, err := roundHalfAwayFromZero(prod, den)
+	q, err := RoundHalfAwayFromZero(prod, den)
 	if err != nil {
 		return 0, err
 	}
@@ -114,4 +105,15 @@ func signedMulDivRound(a, b, den int64) (int64, error) {
 	}
 
 	return q, nil
+}
+
+// AbsInt64Checked returns |v|, reporting overflow for math.MinInt64.
+func AbsInt64Checked(v int64) (int64, error) {
+	if v == math.MinInt64 {
+		return 0, fmt.Errorf("AbsInt64Checked: overflow")
+	}
+	if v < 0 {
+		return -v, nil
+	}
+	return v, nil
 }

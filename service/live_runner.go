@@ -444,7 +444,3 @@ func estimateTicksOpen(openTime, now time.Time, interval time.Duration) int {
 func normalizeInstrument(s string) string {
 	return strings.ToUpper(strings.ReplaceAll(s, "/", "_"))
 }
-
-// oandaOpenTradeAdapter converts oanda.OpenTrade to the fields we need.
-// Defined here to avoid a direct dependency on oanda types in the strategy layer.
-type oandaOpenTradeAdapter = oanda.OpenTrade
