@@ -8,8 +8,8 @@ import (
 	"github.com/rustyeddy/trader/market"
 )
 
-// candleSet contains a dense set of candles.
-type candleSet struct {
+// CandleSet contains a dense set of candles.
+type CandleSet struct {
 	Instrument string
 	Start      market.Timestamp // unix seconds for candle open
 	Timeframe  market.Timeframe
@@ -23,12 +23,11 @@ type candleSet struct {
 
 	duplicates int
 	outOfRange int
-	badLines   int
 }
 
-// newMonthlyCandleSet is an internal helper for trader type processing.
-func newMonthlyCandleSet(inst string, tf market.Timeframe, monthStart market.Timestamp,
-	scale market.Scale6, source string) (*candleSet, error) {
+// NewMonthlyCandleSet is an internal helper for trader type processing.
+func NewMonthlyCandleSet(inst string, tf market.Timeframe, monthStart market.Timestamp,
+	scale market.Scale6, source string) (*CandleSet, error) {
 	if inst == "" {
 		return nil, fmt.Errorf("blank instrument")
 	}
@@ -51,7 +50,7 @@ func newMonthlyCandleSet(inst string, tf market.Timeframe, monthStart market.Tim
 		return nil, fmt.Errorf("computed invalid candle count: %d", n)
 	}
 
-	return &candleSet{
+	return &CandleSet{
 		Instrument: inst,
 		Start:      monthStart,
 		Timeframe:  tf,
@@ -63,7 +62,7 @@ func newMonthlyCandleSet(inst string, tf market.Timeframe, monthStart market.Tim
 }
 
 // AddCandle is an internal helper for trader type processing.
-func (cs *candleSet) AddCandle(ts market.Timestamp, c market.Candle) error {
+func (cs *CandleSet) AddCandle(ts market.Timestamp, c market.Candle) error {
 	if cs == nil {
 		return fmt.Errorf("nil CandleSet")
 	}
@@ -97,7 +96,7 @@ func (cs *candleSet) AddCandle(ts market.Timestamp, c market.Candle) error {
 }
 
 // Merge is an internal helper for trader type processing.
-func (cs *candleSet) Merge(src *candleSet) error {
+func (cs *CandleSet) Merge(src *CandleSet) error {
 	if cs == nil || src == nil {
 		return fmt.Errorf("nil CandleSet in merge")
 	}
@@ -128,17 +127,17 @@ func (cs *candleSet) Merge(src *candleSet) error {
 }
 
 // SetValid is an internal helper for trader type processing.
-func (cs *candleSet) SetValid(idx int) {
+func (cs *CandleSet) SetValid(idx int) {
 	market.BitSet(cs.Valid, idx)
 }
 
 // IsValid is an internal helper for trader type processing.
-func (cs *candleSet) IsValid(idx int) bool {
+func (cs *CandleSet) IsValid(idx int) bool {
 	return market.BitIsSet(cs.Valid, idx)
 }
 
 // CountValid is an internal helper for trader type processing.
-func (cs *candleSet) CountValid() int {
+func (cs *CandleSet) CountValid() int {
 	n := 0
 	for i := range cs.Candles {
 		if cs.IsValid(i) {
@@ -149,13 +148,13 @@ func (cs *candleSet) CountValid() int {
 }
 
 // Time is an internal helper for trader type processing.
-func (cs *candleSet) Time(idx int) time.Time {
+func (cs *CandleSet) Time(idx int) time.Time {
 	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
 }
 
 // LastValidTime returns the UTC calendar day of the last valid (non-gap)
 // candle in the set, or false if the set has no valid candles.
-func (cs *candleSet) LastValidTime() (time.Time, bool) {
+func (cs *CandleSet) LastValidTime() (time.Time, bool) {
 	if cs == nil {
 		return time.Time{}, false
 	}
@@ -169,12 +168,12 @@ func (cs *candleSet) LastValidTime() (time.Time, bool) {
 }
 
 // Timestamp is an internal helper for trader type processing.
-func (cs *candleSet) Timestamp(idx int) market.Timestamp {
+func (cs *CandleSet) Timestamp(idx int) market.Timestamp {
 	return market.Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
 }
 
 // Filename is an internal helper for trader type processing.
-func (cs *candleSet) Filename() string {
+func (cs *CandleSet) Filename() string {
 	inst := strings.ToLower(cs.Instrument)
 
 	tfstr := strings.ToLower(cs.Timeframe.String())

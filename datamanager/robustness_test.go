@@ -739,7 +739,7 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	makeCS := func(val int) *candleSet {
+	makeCS := func(val int) *CandleSet {
 		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
 		cs.Candles[0] = market.Candle{Open: market.Price(val), Ticks: 1}
 		cs.SetValid(0)
@@ -1093,7 +1093,7 @@ func TestWriteCSV_EmptyInstrument(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := &candleSet{Instrument: ""}
+	cs := &CandleSet{Instrument: ""}
 	err := s.WriteCSV(cs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "instrument")
@@ -1103,7 +1103,7 @@ func TestWriteCSV_ZeroTimeframe(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := &candleSet{Instrument: "EURUSD", Timeframe: 0}
+	cs := &CandleSet{Instrument: "EURUSD", Timeframe: 0}
 	err := s.WriteCSV(cs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeframe")

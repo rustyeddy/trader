@@ -28,7 +28,7 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf market.Timefra
 	}
 
 	monthStart = monthStart.UTC()
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		market.NormalizeInstrument(instrument),
 		tf,
 		market.FromTime(monthStart),

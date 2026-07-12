@@ -2,6 +2,7 @@ package execution
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 			Close: market.PriceFromFloat(1.1005),
 			Ticks: 42,
 		},
-		Timestamp: market.FromString("2024-01-15"),
+		Timestamp: market.FromTime(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
 	}
 
 	op := NewOpenRequest(

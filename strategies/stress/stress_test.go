@@ -130,17 +130,6 @@ func TestUpdate_SideAlternate(t *testing.T) {
 	assert.Equal(t, market.Long, sig.Side, "third trade should be Long again")
 }
 
-// TestCalcStop_Precision verifies integer-only stop math at a known price.
-// close=1.1000 (110000 in Price), StopBps=20 → dist=110000*20/10000=220
-// long stop = 110000 - 220 = 109780 = 1.0978
-func TestCalcStop_Precision(t *testing.T) {
-	s, _ := New(Config{StopBps: 20, Side: "long"})
-	candle := ct(1.1000)
-	stop := s.calcStop(candle, market.Long)
-	expected := market.PriceFromFloat(1.1000) - market.Price(int64(market.PriceFromFloat(1.1000))*20/10000)
-	assert.Equal(t, expected, stop)
-}
-
 // TestBuild_ConvertsPctToBps verifies the float→bps boundary conversion.
 // stop_pct: 0.2 → 0.2% → 20 bps
 // stop_pct: 1.5 → 1.5% → 150 bps

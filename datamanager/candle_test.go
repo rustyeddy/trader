@@ -20,13 +20,13 @@ type bufferWriteCloser struct {
 func (b *bufferWriteCloser) Close() error { return nil }
 
 // loadCandleSet loads the shared M1 test dataset, skipping if it is absent.
-func loadCandleSet(t *testing.T) *candleSet {
+func loadCandleSet(t *testing.T) *CandleSet {
 	t.Helper()
 	fname := "./testdata/DAT_ASCII_EURUSD_M1_2025.csv"
 	if _, err := os.Stat(fname); err != nil {
 		t.Skip("candle test dataset missing")
 	}
-	return &candleSet{Filepath: fname}
+	return &CandleSet{Filepath: fname}
 }
 
 // --- file-based tests (skip when testdata is absent) ---
@@ -80,21 +80,21 @@ func TestNewMonthlyCandleSet_Guards(t *testing.T) {
 
 	monthStart := market.Timestamp(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix())
 
-	_, err := newMonthlyCandleSet("", market.M1, monthStart, market.PriceScale, market.SourceCandles)
+	_, err := NewMonthlyCandleSet("", market.M1, monthStart, market.PriceScale, market.SourceCandles)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "blank instrument")
 
-	_, err = newMonthlyCandleSet("EURUSD", market.TF0, monthStart, market.PriceScale, market.SourceCandles)
+	_, err = NewMonthlyCandleSet("EURUSD", market.TF0, monthStart, market.PriceScale, market.SourceCandles)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid timeframe")
 
 	badMinute := market.Timestamp(time.Date(2026, time.January, 1, 0, 0, 30, 0, time.UTC).Unix())
-	_, err = newMonthlyCandleSet("EURUSD", market.M1, badMinute, market.PriceScale, market.SourceCandles)
+	_, err = NewMonthlyCandleSet("EURUSD", market.M1, badMinute, market.PriceScale, market.SourceCandles)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "minute boundary")
 
 	badMonthStart := market.Timestamp(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC).Unix())
-	_, err = newMonthlyCandleSet("EURUSD", market.M1, badMonthStart, market.PriceScale, market.SourceCandles)
+	_, err = NewMonthlyCandleSet("EURUSD", market.M1, badMonthStart, market.PriceScale, market.SourceCandles)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "start of month")
 }
@@ -104,12 +104,12 @@ func TestCandleSetAddCandle_Branches(t *testing.T) {
 
 	c := market.Candle{Open: 1, High: 2, Low: 1, Close: 2, Ticks: 1}
 
-	var nilSet *candleSet
+	var nilSet *CandleSet
 	err := nilSet.AddCandle(1, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil CandleSet")
 
-	cs := &candleSet{Start: 100, Timeframe: market.M1, Candles: make([]market.Candle, 2), Valid: make([]uint64, 1)}
+	cs := &CandleSet{Start: 100, Timeframe: market.M1, Candles: make([]market.Candle, 2), Valid: make([]uint64, 1)}
 
 	err = cs.AddCandle(99, c)
 	require.Error(t, err)
@@ -133,7 +133,7 @@ func TestCandleSetAddCandle_Branches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, cs.duplicates)
 
-	badTF := &candleSet{Start: 100, Timeframe: 0, Candles: make([]market.Candle, 1), Valid: make([]uint64, 1)}
+	badTF := &CandleSet{Start: 100, Timeframe: 0, Candles: make([]market.Candle, 1), Valid: make([]uint64, 1)}
 	err = badTF.AddCandle(100, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid timeframe")
@@ -143,9 +143,9 @@ func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 	t.Parallel()
 
 	monthStart := market.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
-	dst, err := newMonthlyCandleSet("EURUSD", market.M1, monthStart, market.PriceScale, market.SourceCandles)
+	dst, err := NewMonthlyCandleSet("EURUSD", market.M1, monthStart, market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
-	src, err := newMonthlyCandleSet("EURUSD", market.M1, monthStart, market.PriceScale, market.SourceCandles)
+	src, err := NewMonthlyCandleSet("EURUSD", market.M1, monthStart, market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
 
 	t0 := market.Timestamp(monthStart)
@@ -158,11 +158,11 @@ func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 	assert.Equal(t, market.Candle{Open: 100, High: 120, Low: 90, Close: 110, Ticks: 10}, dst.Candles[0])
 	assert.Equal(t, market.Candle{Open: 111, High: 130, Low: 105, Close: 125, Ticks: 8}, dst.Candles[1])
 
-	differentTF, err := newMonthlyCandleSet("EURUSD", market.H1, monthStart, market.PriceScale, market.SourceCandles)
+	differentTF, err := NewMonthlyCandleSet("EURUSD", market.H1, monthStart, market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
 	require.ErrorContains(t, dst.Merge(differentTF), "timeframe mismatch")
 
-	differentInst, err := newMonthlyCandleSet("USDJPY", market.M1, monthStart, market.PriceScale, market.SourceCandles)
+	differentInst, err := NewMonthlyCandleSet("USDJPY", market.M1, monthStart, market.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
 	require.NoError(t, differentInst.AddCandle(t0, market.Candle{Open: 200, High: 220, Low: 180, Close: 210, Ticks: 5}))
 	require.ErrorContains(t, dst.Merge(differentInst), "instrument mismatch")
@@ -172,7 +172,7 @@ func TestCandleSetBuildGapReportAndStats(t *testing.T) {
 	t.Parallel()
 
 	start := market.Timestamp(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC).Unix()) // Friday
-	cs := &candleSet{
+	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  market.M1,
@@ -210,7 +210,7 @@ func TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart(t *testing.T) {
 	t.Parallel()
 
 	start := market.Timestamp(time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC).Unix()) // Monday
-	cs := &candleSet{Start: start, Timeframe: market.M1}
+	cs := &CandleSet{Start: start, Timeframe: market.M1}
 	assert.Equal(t, "suspicious", cs.classifyGap(0, 24*60))
 }
 
@@ -218,7 +218,7 @@ func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 	t.Parallel()
 
 	start := market.Timestamp(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix())
-	cs := &candleSet{
+	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  market.M1,
@@ -252,7 +252,7 @@ func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 func TestCandleSetAggregateH1_ErrorForNonM1(t *testing.T) {
 	t.Parallel()
 
-	cs := &candleSet{Timeframe: market.H1}
+	cs := &CandleSet{Timeframe: market.H1}
 	_, err := cs.AggregateH1(10)
 	assert.Error(t, err)
 }
@@ -273,8 +273,8 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 	t.Parallel()
 
 	start := market.Timestamp(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC).Unix())
-	h1 := &candleSet{Instrument: "EURUSD", Start: start, Timeframe: market.H1}
-	d1 := &candleSet{Instrument: "EURUSD", Start: start, Timeframe: market.D1}
+	h1 := &CandleSet{Instrument: "EURUSD", Start: start, Timeframe: market.H1}
+	d1 := &CandleSet{Instrument: "EURUSD", Start: start, Timeframe: market.D1}
 
 	assert.Equal(t, "eurusd-h1-2026", h1.Filename())
 	assert.Equal(t, "eurusd-d1-all", d1.Filename())
@@ -291,7 +291,7 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 	t.Parallel()
 
-	cs := &candleSet{
+	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      market.Timestamp(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC).Unix()),
 		Timeframe:  market.M1,
@@ -317,7 +317,7 @@ func TestCandleSetIteratorAccessors(t *testing.T) {
 	t.Parallel()
 
 	start := market.Timestamp(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix())
-	cs := &candleSet{
+	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  market.H1,

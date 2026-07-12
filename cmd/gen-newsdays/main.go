@@ -47,10 +47,6 @@ func main() {
 	}
 
 	// Collect dates as a set to deduplicate (NFP can land on an FOMC day).
-	type entry struct {
-		date  time.Time
-		label string
-	}
 	dateMap := map[string]string{} // YYYY-MM-DD → label(s)
 
 	add := func(t time.Time, label string) {

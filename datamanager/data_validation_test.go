@@ -53,7 +53,7 @@ func TestValidateCandleData_MissingExpectedCandles(t *testing.T) {
 func TestValidateCandleData_MissingRawOandaMonth(t *testing.T) {
 	s := useTempStore(t)
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet("EURUSD", market.D1, market.FromTime(start), market.PriceScale, market.SourceOanda)
+	cs, err := NewMonthlyCandleSet("EURUSD", market.D1, market.FromTime(start), market.PriceScale, market.SourceOanda)
 	require.NoError(t, err)
 
 	step := time.Duration(cs.Timeframe) * time.Second

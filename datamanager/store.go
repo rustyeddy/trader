@@ -45,7 +45,7 @@ type store struct {
 	basedir string // root of the candles tree, e.g. "/srv/trading/data/candles"
 
 	cacheMu sync.RWMutex
-	cache   map[Key]*candleSet // process-lifetime cache of ReadCSV results, keyed by Key
+	cache   map[Key]*CandleSet // process-lifetime cache of ReadCSV results, keyed by Key
 }
 
 func (s *store) PathForAsset(k Key) (string, error) {
@@ -390,7 +390,7 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 	return asset
 }
 
-func candleSetMissingExpectedSlots(cs *candleSet) (missing int, expected int) {
+func candleSetMissingExpectedSlots(cs *CandleSet) (missing int, expected int) {
 	if cs == nil || cs.Timeframe <= 0 {
 		return 0, 0
 	}
@@ -432,7 +432,7 @@ func timeRangeMayHaveForexData(start, end time.Time) bool {
 	return false
 }
 
-func (s *store) writeMetadata(cs *candleSet, w io.Writer) error {
+func (s *store) writeMetadata(cs *CandleSet, w io.Writer) error {
 	tfstr := market.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
@@ -446,12 +446,12 @@ func (s *store) writeMetadata(cs *candleSet, w io.Writer) error {
 	return err
 }
 
-// ReadCSV returns the candleSet for key, serving from an in-memory cache
+// ReadCSV returns the CandleSet for key, serving from an in-memory cache
 // when possible. The cache is process-lifetime only (no persistence, no
 // TTL) and deliberately excludes the current calendar month, since that
 // month's data is a moving target that can change mid-process as new
 // candles are downloaded and written via WriteCSV.
-func (s *store) ReadCSV(key Key) (*candleSet, error) {
+func (s *store) ReadCSV(key Key) (*CandleSet, error) {
 	if !isCurrentMonth(key) {
 		s.cacheMu.RLock()
 		cached, ok := s.cache[key]
@@ -469,7 +469,7 @@ func (s *store) ReadCSV(key Key) (*candleSet, error) {
 	if !isCurrentMonth(key) {
 		s.cacheMu.Lock()
 		if s.cache == nil {
-			s.cache = make(map[Key]*candleSet)
+			s.cache = make(map[Key]*CandleSet)
 		}
 		s.cache[key] = cs
 		s.cacheMu.Unlock()
@@ -494,7 +494,7 @@ func (s *store) invalidateCache(key Key) {
 	s.cacheMu.Unlock()
 }
 
-func (s *store) readCSVUncached(key Key) (cs *candleSet, err error) {
+func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	if key.Kind != KindCandle {
 		return nil, fmt.Errorf("ReadCSV only supports candle keys, got %v", key.Kind)
 	}
@@ -527,7 +527,7 @@ func (s *store) readCSVUncached(key Key) (cs *candleSet, err error) {
 	n := int(spanSec / step)
 
 	instName := market.NormalizeInstrument(key.Instrument)
-	cs = &candleSet{
+	cs = &CandleSet{
 		Instrument: instName,
 		Source:     readCSVSource(key.Source),
 		Start:      start,
@@ -641,7 +641,7 @@ func readCSVSource(source string) string {
 	return source
 }
 
-func (s *store) WriteCSV(cs *candleSet) error {
+func (s *store) WriteCSV(cs *CandleSet) error {
 	if cs == nil {
 		return errors.New("nil CandleSet")
 	}

@@ -451,7 +451,7 @@ func TestStoreScanFiles_ClosedOnlyDailyGapsRemainComplete(t *testing.T) {
 	s := useTempStore(t)
 
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet("EURUSD", market.D1, market.FromTime(start), market.PriceScale, market.SourceOanda)
+	cs, err := NewMonthlyCandleSet("EURUSD", market.D1, market.FromTime(start), market.PriceScale, market.SourceOanda)
 	require.NoError(t, err)
 
 	step := time.Duration(cs.Timeframe) * time.Second
@@ -749,7 +749,7 @@ func TestWriteMetadata_Output(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		"EURUSD", market.H1, market.FromTime(start), market.PriceScale, "test",
 	)
 	require.NoError(t, err)
@@ -770,7 +770,7 @@ func TestWriteCSV_ValidFlag(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		"EURUSD", market.H1, market.FromTime(start), market.PriceScale, "test",
 	)
 	require.NoError(t, err)
@@ -792,7 +792,7 @@ func TestWriteCSV_EmptySource(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet(
+	cs, err := NewMonthlyCandleSet(
 		"EURUSD",
 		market.M1,
 		market.FromTime(start),
@@ -809,7 +809,7 @@ func TestWriteCSV_WithInvalidCandle(t *testing.T) {
 
 	s := newTestStore(t)
 	start := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := newMonthlyCandleSet("EURUSD", market.H1, market.FromTime(start), market.PriceScale, "test")
+	cs, err := NewMonthlyCandleSet("EURUSD", market.H1, market.FromTime(start), market.PriceScale, "test")
 	require.NoError(t, err)
 
 	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}

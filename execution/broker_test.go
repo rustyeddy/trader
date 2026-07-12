@@ -350,6 +350,7 @@ func TestBrokerEmitEventNilContextBehavior(t *testing.T) {
 	broker := NewBroker("broker")
 	evt := &Event{Type: EventOrderFilled}
 
+	//lint:ignore SA1012 nil context behavior is exactly what this test verifies
 	err := broker.emitEvent(nil, evt)
 	require.NoError(t, err)
 	require.NotNil(t, broker.evtQ)
@@ -357,6 +358,7 @@ func TestBrokerEmitEventNilContextBehavior(t *testing.T) {
 
 	full := &Broker{evtQ: make(chan *Event, 1)}
 	full.evtQ <- &Event{Type: EventOrderFilled}
+	//lint:ignore SA1012 nil context behavior is exactly what this test verifies
 	err = full.emitEvent(nil, evt)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "queue is full")

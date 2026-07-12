@@ -84,7 +84,7 @@ func (p Price) Float64() float64 {
 //	func PriceToFloat(price int32, scale int32) float64 {
 //		return float64(price) / math.Pow10(int(scale))
 //	}
-func formatScaledPrice(price Price, scale int32) string {
+func FormatScaledPrice(price Price, scale int32) string {
 	decimals := 0
 	for s := scale; s > 1; s /= 10 {
 		decimals++
@@ -92,8 +92,8 @@ func formatScaledPrice(price Price, scale int32) string {
 	return strconv.FormatFloat(float64(price)/float64(scale), 'f', decimals, 64)
 }
 
-// parseRawPrice parses a CSV field as a raw scaled Price (int32) value.
-func parseRawPrice(s string) (Price, error) {
+// ParseRawPrice parses a CSV field as a raw scaled Price (int32) value.
+func ParseRawPrice(s string) (Price, error) {
 	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
 	if err != nil {
 		return 0, err
@@ -103,7 +103,7 @@ func parseRawPrice(s string) (Price, error) {
 
 // String is an internal helper for trader type processing.
 func (p Price) String() string {
-	return formatScaledPrice(p, int32(PriceScale))
+	return FormatScaledPrice(p, int32(PriceScale))
 }
 
 // Rate represents a trader domain type.

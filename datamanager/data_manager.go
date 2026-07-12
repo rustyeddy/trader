@@ -319,7 +319,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 	monthStart := time.Date(k.Year, time.Month(k.Month), 1, 0, 0, 0, 0, time.UTC)
 
-	monthSet, err := newMonthlyCandleSet(
+	monthSet, err := NewMonthlyCandleSet(
 		market.NormalizeInstrument(k.Instrument),
 		market.M1,
 		market.FromTime(monthStart),
@@ -385,7 +385,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	return nil
 }
 
-func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTick]) (_ *candleSet, err error) {
+func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTick]) (_ *CandleSet, err error) {
 	defer func() {
 		if it != nil {
 			closeErr := it.Close()
@@ -410,7 +410,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 	const minutesPerHour = 60
 
-	cs := &candleSet{
+	cs := &CandleSet{
 		Instrument: market.NormalizeInstrument(key.Instrument),
 		Start:      market.FromTime(hourStartTime),
 		Timeframe:  market.M1,

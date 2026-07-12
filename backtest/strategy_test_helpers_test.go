@@ -7,11 +7,6 @@ import (
 	"github.com/rustyeddy/trader/strategy"
 )
 
-func mkClose(close float64) market.Candle {
-	toP := func(x float64) market.Price { return market.Price(x*float64(market.PriceScale) + 0.5) }
-	return market.Candle{Close: toP(close)}
-}
-
 // testFake is a trivial in-package strategy registered under "fake" so trader
 // package tests that exercise the registry (factory dispatch, summary
 // generation) can compile and run without pulling in strategies/fake (which

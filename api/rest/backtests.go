@@ -179,12 +179,6 @@ func (s *Server) effectiveConfigsDir() string {
 	return "/srv/trading/backtests/configs"
 }
 
-// WithConfigsDir sets the directory from which backtest config files are
-// listed. Call before Serve. Defaults to /srv/trading/backtests/configs.
-func (s *Server) WithConfigsDir(dir string) {
-	s.configsDir = dir
-}
-
 // ── POST /api/v1/backtests/regress ────────────────────────────────────────
 
 type regressBacktestRequest struct {

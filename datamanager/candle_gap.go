@@ -28,7 +28,7 @@ type gapStats struct {
 }
 
 // BuildGapReport is an internal helper for trader type processing.
-func (cs *candleSet) BuildGapReport() {
+func (cs *CandleSet) BuildGapReport() {
 	cs.Gaps = cs.Gaps[:0]
 
 	n := len(cs.Candles)
@@ -59,7 +59,7 @@ func (cs *candleSet) BuildGapReport() {
 }
 
 // classifyGap is an internal helper for trader type processing.
-func (cs *candleSet) classifyGap(startIdx, length int) string {
+func (cs *CandleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe)
 
 	startUnix := int64(cs.Start) + int64(startIdx)*tf
@@ -84,7 +84,7 @@ func (cs *candleSet) classifyGap(startIdx, length int) string {
 }
 
 // Stats is an internal helper for trader type processing.
-func (cs *candleSet) Stats() gapStats {
+func (cs *CandleSet) Stats() gapStats {
 	var s gapStats
 
 	if len(cs.Gaps) == 0 {
@@ -120,7 +120,7 @@ func (cs *candleSet) Stats() gapStats {
 }
 
 // PrintStats is an internal helper for trader type processing.
-func (cs *candleSet) PrintStats(w io.Writer) {
+func (cs *CandleSet) PrintStats(w io.Writer) {
 	cs.BuildGapReport()
 	s := cs.Stats()
 

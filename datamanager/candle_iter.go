@@ -8,12 +8,12 @@ import (
 
 // candleSetIterator represents a trader domain type.
 type candleSetIterator struct {
-	cs  *candleSet
+	cs  *CandleSet
 	idx int
 }
 
 // Iterator is an internal helper for trader type processing.
-func (cs *candleSet) Iterator() *candleSetIterator {
+func (cs *CandleSet) Iterator() *candleSetIterator {
 	return &candleSetIterator{
 		cs:  cs,
 		idx: -1,
@@ -69,6 +69,6 @@ func (it *candleSetIterator) StartTime() market.Timestamp {
 }
 
 // CandleSet is an internal helper for trader type processing.
-func (it *candleSetIterator) CandleSet() *candleSet {
+func (it *candleSetIterator) CandleSet() *CandleSet {
 	return it.cs
 }

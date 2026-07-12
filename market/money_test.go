@@ -39,8 +39,8 @@ func TestPriceFromFloatScaling(t *testing.T) {
 func TestFormatNumber(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "1.23450", formatScaledPrice(PriceFromFloat(1.2345), int32(PriceScale)))
-	assert.Equal(t, "1.5", formatScaledPrice(15, 10))
+	assert.Equal(t, "1.23450", FormatScaledPrice(PriceFromFloat(1.2345), int32(PriceScale)))
+	assert.Equal(t, "1.5", FormatScaledPrice(15, 10))
 }
 
 // TestPriceStringScaledValue verifies expected behavior for this component.
@@ -54,11 +54,11 @@ func TestPriceStringScaledValue(t *testing.T) {
 func TestParseRawPrice(t *testing.T) {
 	t.Parallel()
 
-	p, err := parseRawPrice(" 12345 ")
+	p, err := ParseRawPrice(" 12345 ")
 	require.NoError(t, err)
 	assert.Equal(t, Price(12345), p)
 
-	_, err = parseRawPrice("not-a-number")
+	_, err = ParseRawPrice("not-a-number")
 	assert.Error(t, err)
 }
 

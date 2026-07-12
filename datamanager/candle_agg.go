@@ -7,12 +7,12 @@ import (
 )
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
-func (cs *candleSet) Aggregate(outTF market.Timeframe) (*candleSet, error) {
+func (cs *CandleSet) Aggregate(outTF market.Timeframe) (*CandleSet, error) {
 	return cs.aggregate(outTF, 1)
 }
 
 // AggregateH1 is an internal helper for trader type processing.
-func (cs *candleSet) AggregateH1(minValid int) (*candleSet, error) {
+func (cs *CandleSet) AggregateH1(minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -22,7 +22,7 @@ func (cs *candleSet) AggregateH1(minValid int) (*candleSet, error) {
 	return cs.aggregate(market.H1, minValid)
 }
 
-func (cs *candleSet) aggregate(outTF market.Timeframe, minValid int) (*candleSet, error) {
+func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -42,7 +42,7 @@ func (cs *candleSet) aggregate(outTF market.Timeframe, minValid int) (*candleSet
 	}
 
 	if len(cs.Candles) == 0 {
-		return &candleSet{
+		return &CandleSet{
 			Instrument: cs.Instrument,
 			Start:      cs.Start,
 			Timeframe:  outTF,
@@ -57,7 +57,7 @@ func (cs *candleSet) aggregate(outTF market.Timeframe, minValid int) (*candleSet
 	end := cs.Start + market.Timestamp(len(cs.Candles)-1)*inTF
 	outLen := int((end-start)/outStep) + 1
 
-	out := &candleSet{
+	out := &CandleSet{
 		Instrument: cs.Instrument,
 		Start:      start,
 		Timeframe:  outTF,

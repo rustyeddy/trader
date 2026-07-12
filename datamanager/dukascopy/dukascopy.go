@@ -22,10 +22,9 @@ const SourceName = "dukascopy"
 type File struct {
 	key datamanager.Key
 
-	symbol  string
-	t       time.Time
-	bytes   int64
-	modtime time.Time
+	symbol string
+	t      time.Time
+	bytes  int64
 }
 
 // NewFile returns a File describing the hourly tick file for the given

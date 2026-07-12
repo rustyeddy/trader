@@ -106,21 +106,6 @@ func (s *Strategy) nextSide() market.Side {
 	}
 }
 
-func (s *Strategy) calcStop(ct *market.CandleTime, side market.Side) market.Price {
-	dist := market.Price(int64(ct.Close) * int64(s.cfg.StopBps) / 10000)
-	if dist <= 0 {
-		dist = 1
-	}
-	if side == market.Long {
-		stop := ct.Close - dist
-		if stop <= 0 {
-			stop = 1
-		}
-		return stop
-	}
-	return ct.Close + dist
-}
-
 // build is the registry factory. stop_pct is read as a human-friendly
 // percentage (e.g. 0.2 = 0.2%, 1.5 = 1.5%) and converted to basis points
 // once here so the strategy internals stay float-free.
