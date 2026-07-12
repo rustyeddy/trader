@@ -194,7 +194,7 @@ func TestReviewWatchlist_CachesCandlesLocally(t *testing.T) {
 
 // TestReviewWatchlist_SecondRunServesPastMonthsFromMemoryNotDisk validates
 // that DataManager's in-memory candle cache (datamanager/store.go's
-// ReadCSV cache, docs/asof-review-sweep-spec.md §1) is actually exercised
+// ReadCSV cache, docs/archive/asof-review-sweep-spec.md §1) is actually exercised
 // end-to-end through the review path, not just unit-tested against store
 // in isolation: after a first run populates the cache, deleting every
 // on-disk CSV for months other than the current one (which the cache

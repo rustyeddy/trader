@@ -30,7 +30,7 @@ func TestCandleWindowSeconds_MatchesReviewWindowRatio(t *testing.T) {
 }
 
 // TestGetCandles_CompactsWeekendGapAndTrimsToCount is the spec's acceptance
-// check (docs/asof-review-sweep-spec.md §2): a CandleSet spanning a known
+// check (docs/archive/asof-review-sweep-spec.md §2): a CandleSet spanning a known
 // weekend gap must never surface a zero-value market.Candle from a
 // closed-market slot, and the result must never exceed count entries even
 // though the underlying month has far more (mostly invalid) slots.

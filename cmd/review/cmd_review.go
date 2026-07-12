@@ -407,7 +407,7 @@ func renderOrg(out io.Writer, results []review.ReviewResult) error {
 
 // renderCSV writes a multi-date sweep's results as CSV with a leading DATE
 // column (RFC3339, since --interval can be sub-daily), one row per
-// (date, instrument) — the output shape docs/asof-review-sweep-spec.md §4.3
+// (date, instrument) — the output shape docs/archive/asof-review-sweep-spec.md §4.3
 // recommends for the sweep, since it's the easiest to load into external
 // tooling for later threshold-tuning/grading work.
 func renderCSV(out io.Writer, results []review.ReviewResult) error {

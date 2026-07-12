@@ -13,7 +13,7 @@ import (
 
 // ReviewRangeRequest parameterizes a historical classification sweep: replay
 // review.ReviewPair's classification (Bucket/Bias/Notes) as of one or more
-// past points in time. See docs/asof-review-sweep-spec.md §4.
+// past points in time. See docs/archive/asof-review-sweep-spec.md §4.
 //
 // This replays the classification layer only. It does not simulate trade
 // entries, stops, or P&L — see the spec's §4.1 scope boundary.

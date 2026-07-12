@@ -1,6 +1,13 @@
 # DataManager Caching, Bounded Candle API, Review Refactor, and `--asof` Sweep
 
-**Status:** Design spec, not yet implemented
+**Status:** IMPLEMENTED (2026-07-11) — archived for historical reference. All
+four sub-projects below landed via PRs #152 (`review-refactor` DataManager
+cache), #153 (`review-refactor` bounded accessor), #154
+(`service-review-refactor`), and #155 (`asof-sweep`). See
+[[file:../Review.org][Review.org]]'s "Historical (implemented via
+docs/archive/asof-review-sweep-spec.md)" section for where each piece landed
+in shipped code. This document is kept for the reasoning behind the build
+order and the no-lookahead design constraint (§4.2), not as a live spec.
 **Supersedes:** earlier single-item `--asof` spec — this replaces it with four
 ordered sub-projects, discovered by reading the actual `rustyeddy/trader`
 source (`datamanager/`, `service/review.go`, `review/`) rather than assuming.

@@ -1,0 +1,204 @@
+* Indicator & Data Validation Harness
+:PROPERTIES:
+:created: 2026-07-11
+:scope: design_plan
+:topic: validation
+:status: draft_v1
+:END:
+
+Motivating incident: scanner reports EURGBP H4 ADX 45.7 while
+TradingView shows 37.94 on the same pair at roughly the same time
+(D1: 26.6 vs 24.72). D1 divergence is within plausible tolerance; the
+~8-point H4 gap is not obviously so. The question "is the data
+corrupt, are the indicators buggy, or is this a corner case?" needs
+tooling that can answer it in minutes, not a per-incident bug hunt.
+
+Three independently testable layers. Each layer's checks assume the
+layers below it are clean, so run/fix them in order.
+
+** Layer 0: what exists today (audited 2026-07-11)
+
+=trader data validate-candles= → =service.ValidateCandleData= →
+=datamanager/data_validation.go=. Current checks:
+
+| Check                          | Kind                            | Notes                             |
+|--------------------------------+---------------------------------+-----------------------------------|
+| Month file missing             | =missing_candle_month=          | error                             |
+| Expected slots missing         | =missing_expected_candles=      | forex-hours aware, future-aware   |
+| OHLC shape                     | =invalid_candles=               | via =market.Candle.Validate()=    |
+| Raw vs canonical slot diff     | =raw_complete_missing_canonical= etc. | =--include-raw= only        |
+
+This is a solid *coverage* layer. Its gaps:
+
+*** GAP 1 (fix first): zero-price candles pass =Candle.Validate()=
+=market/candle.go=:
+
+#+begin_src go
+func (c Candle) Validate() bool {
+    return c.High >= c.Low &&
+        c.Open >= c.Low && c.Open <= c.High &&
+        c.Close >= c.Low && c.Close <= c.High
+}
+#+end_src
+
+An all-zero candle satisfies all three conditions. Consequence:
+=GetCandles= defends against flagged-valid-but-zero rows at read time
+(the corrupt-CSV-row defense from the sweep work), but
+=validate-candles= reports the same month as *clean* — the read path
+and the auditor disagree about validity. Fix: add =c.Low > 0= (which,
+with the existing ordering checks, forces all four prices positive).
+Then decide whether the =GetCandles= skip-zero defense stays as
+belt-and-suspenders (recommended: yes, but log when it fires — a
+firing defense now indicates a validation escape).
+
+*** GAP 2: no price-continuity / spike check
+A candle of 8.5179 instead of 0.85179 (decimal slip in a CSV) has
+perfectly valid OHLC shape. Add a =price_discontinuity= check:
+close-to-open gap between consecutive valid candles exceeding K × a
+trailing ATR-like measure (or a blunt per-pair % threshold to start;
+K ~ 10 × typical bar range catches decimal slips without flagging
+news gaps). Severity =warn= — gaps are sometimes real; the check
+surfaces candidates for eyeballing, it does not auto-repair.
+
+*** GAP 3: no cross-timeframe consistency check
+H4 and D1 are stored independently. Each D1 candle should be
+reconstructible from its H4 candles: D1.High = max(H4 highs),
+D1.Low = min(lows), open/close from first/last H4 bar of the day.
+Mismatch means the two timeframes disagree about history — and every
+indicator computed from them inherits the disagreement. Same for
+derived W1 vs D1 (directly relevant: =deriveWeeklyCandlesAsOf=).
+Check kind: =timeframe_mismatch=, tolerance = 0 for derived data,
+small epsilon if both were fetched independently from OANDA.
+
+*** GAP 4: bar-boundary/alignment audit
+OANDA D1 candles are anchored to 17:00 New York by default; W1
+candles can start Saturday. If stored data and any comparison source
+(TradingView, a reference implementation) use different anchors,
+every downstream indicator diverges with *correct code on both
+sides*. Add a one-time (or per-fetch) assertion of the expected slot
+anchor per timeframe, and document the canonical anchors in the data
+layer. This is a prime suspect family for the H4 ADX gap.
+
+Duplicates/out-of-order timestamps: structurally impossible in the
+canonical slot-indexed =candleSet=, but the raw-CSV parse path should
+assert monotonic timestamps on ingest (cheap, catches upstream mess
+before it becomes a slot collision).
+
+** Layer 1: indicator correctness
+
+New package =indicator/validate/= (or =testdata=-driven tests inside
+=indicator/=). Three techniques, in increasing strength:
+
+*** 1a. Golden-value tests
+Wilder's /New Concepts in Technical Trading Systems/ contains worked
+numeric examples for ATR, DX, and ADX. Transcribe them into
+=indicator/testdata/wilder_*.csv= and assert exact (or
+tolerance-bounded, per fixed-point representation) agreement. Same
+for CI and BB from any published worked example. These tests are
+free regression insurance forever after.
+
+*** 1b. Property tests
+Bounds and invariants that must hold for ANY input:
+
+- ADX, ±DI, CI ∈ [0, 100]
+- ATR > 0 for any window containing at least one nonzero-range bar
+- EMA(n) always within [min, max] of its input window since seed
+- BB middle == SMA(20); upper ≥ middle ≥ lower
+- Monotonic input (strictly rising closes) → +DI > −DI, CI falling
+- All indicators: output length/warmup accounting matches the
+  documented warmup (off-by-one bar in warmup silently shifts every
+  downstream value)
+
+Go's =testing/quick= or hand-rolled random-walk generators suffice.
+
+*** 1c. Cross-implementation diff
+The decisive tool for "buggy vs corner case":
+
+#+begin_src text
+trader data export --instrument EURGBP --timeframe H4 \
+    --from ... --to ... --output csv > /tmp/eurgbp_h4.csv
+python3 tools/validate/reference.py /tmp/eurgbp_h4.csv
+#+end_src
+
+A small Python script (pandas + a well-tested TA library, or ~50
+lines of hand-written Wilder smoothing — hand-written is better here
+because library defaults hide seeding choices) computes ADX/ATR/CI/
+EMA/BB over the *identical* candles and diffs against
+=trader review --output csv= values within a tolerance. Same input,
+two implementations: any disagreement is a bug with no ambiguity
+about data. Keep the script in-repo under =tools/validate/= so it
+stays in sync with indicator changes.
+
+Known seeding choices to pin down and document while writing it:
+SMA-seed vs first-value-seed for the initial smoothed value in
+Wilder's ATR/ADX; whether ADX smoothing starts at bar 2n or 2n−1;
+CI log base. Divergent-but-both-defensible choices here are the
+most common source of cross-platform gaps.
+
+** Layer 2: corner cases & the H4 ADX gap
+
+*** Primary suspect: warmup depth
+Wilder smoothing is an infinite-impulse-response filter — it never
+fully forgets history — and ADX is *double*-smoothed (DX → ADX). The
+2×14 = 28-bar warmup rule in the scanner design is optimistic for
+convergence; ADX from 60 candles vs 500 candles can differ by
+several points because TradingView computes over its full loaded
+history. An 8-point H4 gap is very consistent with this.
+
+Experiment (30 minutes, decides the question):
+
+#+begin_src text
+For EURGBP H4 as of the same timestamp:
+  compute ADX(14) with 60, 120, 240, 500 input candles
+  plot/tabulate the four values
+#+end_src
+
+If ADX walks from ~45.7 toward ~37.9 as depth grows → not a bug;
+the fix is deeper warmup fetch for ADX-bearing scans (raise
+=reviewSweepFetchHeadroom= or a per-indicator warmup multiplier) or
+a documented tolerance. If it does NOT converge → escalate to the
+Layer 1c cross-diff on the same candles.
+
+Secondary suspects, in order: bar-boundary anchor mismatch (Layer 0
+GAP 4 — TradingView H4 bars may not start at the same UTC offsets as
+OANDA's), closed-bar handling (is one side including the forming
+bar?), and seeding choice (Layer 1c).
+
+*** Other corner cases to encode as tests once seen
+- Weekend-adjacent bars (Friday close / Sunday open) in ATR true-range
+- Holiday-shortened weeks in derived W1 candles and WEEK%
+  (=deriveWeeklyCandlesAsOf= trailing-week logic)
+- Months with a mid-week market holiday (slot expected vs
+  =timeRangeMayHaveForexData=)
+- Flagged-valid-but-zero candle inside an indicator window (should be
+  impossible after GAP 1 fix; keep the test anyway)
+
+** Proposed CLI surface
+
+Extend rather than replace:
+
+#+begin_src text
+trader data validate-candles   -- existing coverage layer + GAP 1-4 checks
+trader data validate-indicators --instrument X --timeframe H4 [--depth-sweep]
+#+end_src
+
+=validate-indicators= runs golden + property suites over stored data
+and, with =--depth-sweep=, the warmup-convergence experiment,
+printing the value-vs-depth table. The Python cross-diff stays a
+=tools/= script (not shipped in the binary) invoked manually or in CI.
+
+** Sequencing
+
+| Step | Item                                             | Size   |
+|------+--------------------------------------------------+--------|
+|    1 | GAP 1: =Candle.Validate()= positive-price fix    | XS     |
+|    2 | Warmup depth-sweep experiment (answers ADX gap)  | S      |
+|    3 | Golden-value tests from Wilder worked examples   | S      |
+|    4 | GAP 2 spike check + GAP 4 anchor audit           | S–M    |
+|    5 | Cross-impl reference script in =tools/validate/= | M      |
+|    6 | Property tests                                   | M      |
+|    7 | GAP 3 cross-timeframe consistency check          | M      |
+
+Steps 1–2 before anything else: step 1 is a one-line fix closing a
+real hole, and step 2 most likely explains the observed divergence
+outright — everything after it is insurance rather than diagnosis.

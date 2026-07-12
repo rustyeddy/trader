@@ -14,7 +14,7 @@ import (
 // of 7 calendar days, so a naive count*timeframe span would come up short.
 // Expressed as an integer ratio rather than a float per this codebase's
 // no-internal-floats rule (see CLAUDE.md). Matches — does not yet replace,
-// see docs/asof-review-sweep-spec.md §3 — the 1.4x factor
+// see docs/archive/asof-review-sweep-spec.md §3 — the 1.4x factor
 // service/review.go's reviewWindow already uses for "D" and "H4"
 // granularities (7/5 == 1.4).
 const (

@@ -5,12 +5,17 @@
 :topic: watchlist_scanner
 :END:
 
-This document is a design plan, not yet-shipped behavior. It describes the
-data model, indicator selection, triage logic, package placement, API shape,
-and CLI and UI surfaces for a multi-timeframe watchlist scanner.
+This document is a design plan; most of it describes shipped behavior as of
+2026-07-11, with two sections still TODO (mean reversion classification;
+config-driven thresholds — see below). It describes the data model, indicator
+selection, triage logic, package placement, API shape, and CLI and UI
+surfaces for a multi-timeframe watchlist scanner.
 
-Related documents: [[file:fx-pair-analysis-methodology.org][fx-pair-analysis-methodology.org]],
-[[file:multi-account.md][multi-account.md]], [[file:Services.md][Services.md]], [[file:ROADMAP.md][ROADMAP.md]].
+Related documents: [[file:FX-pair-analysis.org][FX-pair-analysis.org]],
+[[file:multi-account.md][multi-account.md]], [[file:Services.md][Services.md]], [[file:ROADMAP.md][ROADMAP.md]],
+[[file:archive/asof-review-sweep-spec.md][archive/asof-review-sweep-spec.md]]
+(implemented; archived), =/srv/trading/playbooks/playbook.org=
+(discretionary entry layer downstream of the Tradeable bucket).
 
 ** Purpose and daily workflow
 
@@ -27,7 +32,7 @@ attention and surfaces the ones that do, in priority order.
 
 ** Timeframe stack: W1 → D1 → H4
 
-The existing methodology in =fx-pair-analysis-methodology.org= specifies
+The existing methodology in =FX-pair-analysis.org= specifies
 three timeframes: D1 and H4 as primary classification inputs, H1 for
 confirmation context only. The scanner implements that stack.
 
@@ -473,47 +478,51 @@ classification, so it introduces no new fetch surface at all.
 
 ** Service method
 
+Shipped as =ReviewRequest=/=ReviewResponse=/=Service.ReviewWatchlist= in
+=service/review.go= (confirmed against source 2026-07-11; this section
+previously used speculative =Scan*=/=scanner= naming — see resolved Open
+Question #6, below). =HotlistIDs= from the original sketch was dropped;
+demotion notes are computed from the snapshot data alone.
+
 #+begin_src go
-// ScanRequest parameterises a watchlist scan run.
-type ScanRequest struct {
-    // Instruments to scan. Defaults to market.MajorInstruments() when empty.
+// ReviewRequest parameterises a watchlist review run.
+type ReviewRequest struct {
+    // Instruments to review. Defaults to market.AllInstruments() (every
+    // pair in the instrument registry) when empty.
     Instruments []string
-    // HotlistIDs are pairs currently on the hotlist; used for demotion notes.
-    HotlistIDs []string
 }
 
-// ScanResponse is the full scan output.
-type ScanResponse struct {
-    ScannedAt time.Time    `json:"scanned_at"`
-    Results   []ScanResult `json:"results"`
+// ReviewResponse is the full review output.
+type ReviewResponse struct {
+    ScannedAt time.Time             `json:"scanned_at"`
+    Results   []review.ReviewResult `json:"results"`
 }
 
-// ScanWatchlist runs the scanner over all instruments in req,
-// fetches D1, H4, and W1 candles from OANDA, computes all indicators,
-// and returns a classified ScanResponse.
-func (s *Service) ScanWatchlist(ctx context.Context, req scanner.ScanRequest) (*scanner.ScanResponse, error)
+// ReviewWatchlist runs the scanner over all instruments in req,
+// fetches D1, H4, and W1 candles (via DataManager, OANDA-backed),
+// computes all indicators, and returns a classified ReviewResponse.
+func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*ReviewResponse, error)
 #+end_src
 
-The service method lives in =service/scanner.go= and is a thin
-fan-out: one goroutine per pair calls =scanner.ScanPair()=, which is a
-pure function that takes candle slices and returns a =ScanResult=. The
-service layer owns concurrency; the =scanner= package owns indicator
-composition.
+The service method is a thin fan-out over =reviewWorkers= (8) goroutines
+per pair, each calling =review.ReviewPair()=, a pure function that takes
+candle slices and returns a =ReviewResult=. The service layer owns
+concurrency and fetching; the =review= package owns indicator composition
+and classification.
 
 ** REST endpoint
 
 #+begin_src text
-GET /api/v1/scan
+GET /api/v1/review
 #+end_src
 
 Query parameters:
 
-| Parameter     | Default    | Description                           |
-|---------------+------------+---------------------------------------|
-| =instruments= | all majors | comma-separated list                  |
-| =hotlist=     | (empty)    | comma-separated current hotlist pairs |
+| Parameter     | Default    | Description           |
+|---------------+------------+------------------------|
+| =instruments= | all majors | comma-separated list  |
 
-Response: =ScanResponse= JSON.
+Response: =ReviewResponse= JSON.
 
 The endpoint is market data, not account-scoped (like =/api/v1/prices=), so
 it carries no ={accountID}= segment and needs no =requireOANDA= account
@@ -522,8 +531,14 @@ resolution path — only a live =*oanda.Client= on the service.
 ** CLI command
 
 #+begin_src text
-trader review [--instruments EURUSD,GBPUSD,...] [--hotlist EURUSD,...] [--bucket watch|hot|tradeable]
+trader review [--instruments EURUSD,GBPUSD,...] [--bucket watch|hot|tradeable]
+              [--asof YYYY-MM-DD | --from YYYY-MM-DD --to YYYY-MM-DD [--interval DUR]]
+              [--output table|csv|json]
 #+end_src
+
+=--hotlist= from the original sketch was dropped (see Service method,
+above). =--asof=/=--from=/=--to=/=--interval= are the shipped historical
+sweep flags — see "Historical: backtestable review via =--asof=," above.
 
 Output uses =tabwriter= with the same style as =cmd/review= and =cmd/data stats=:
 
@@ -547,7 +562,7 @@ that actually drives the Tradeable promotion gate, previously computed
 but not surfaced in output.
 
 The =--bucket= flag filters output to a single tier (useful for scripting:
-=trader scan --bucket tradeable= prints only actionable pairs).
+=trader review --bucket tradeable= prints only actionable pairs).
 
 ** UI display
 
@@ -697,135 +712,68 @@ addition.
   (i.e. no strong higher-timeframe trend to fight), given MR is explicitly
   a counter-trend approach at the D1 level?
 
-** TODO Backtestable review via =--asof=
+** Historical: backtestable review via =--asof= (implemented 2026-07-11)
 
-*Motivation.* Directly answers the calibration-risk question raised in
-"Known false-positive pattern," above: as of that revision, zero pairs
-had been observed as genuinely Tradeable, and there is no way from inside
-the codebase to tell whether that reflects correct selectivity or an
-over-tight =h4ADXFloor=/=h4MinEMASep=. Waiting for more real
-scan-and-chart-review sessions is one way to find out; replaying the
-classification logic against months of history is a much faster one.
+*Motivation, as originally written.* Directly answers the calibration-risk
+question raised in "Known false-positive pattern," above: as of that
+revision, zero pairs had been observed as genuinely Tradeable, and there was
+no way from inside the codebase to tell whether that reflected correct
+selectivity or an over-tight =h4ADXFloor=/=h4MinEMASep=. Replaying the
+classification logic against months of history was judged faster than
+waiting for more real scan-and-chart-review sessions to accumulate.
 
-*** Why this requires no change inside =review/=
+*Status.* Fully shipped, in four ordered sub-projects, via PRs #152–#155.
+The full design reasoning (why four sub-projects instead of one, the
+=DataManager= in-memory cache, the bounded/compacted candle accessor, the
+=service/review.go= refactor, and the no-lookahead semantics that were the
+highest-risk item) is preserved in
+[[file:archive/asof-review-sweep-spec.md][docs/archive/asof-review-sweep-spec.md]]
+rather than duplicated here.
 
-=ReviewPair()= and its =computeD1=/=computeH4=/=computeW1= helpers are
-pure functions over =[]market.Candle= — they have no notion of "now."
-The entire feature lives at the fetch boundary: instead of asking
-=DataManager= for the latest N candles, ask for a =CandleSet= bounded by
-=[warmup_start, asOf]= (see "DataManager requirement," below — this needs
-one new method, not a redesign) and materialize it into the same
-=[]market.Candle= shape =review/= already consumes. Everything downstream
-of that fetch is unchanged. This is a direct payoff of the fetch-path
-discipline in "Candle fetch path," above — if candle fetching had been
-scattered through =review/= instead of confined to =DataManager=, this
-feature would require auditing every fetch call instead of changing one
-boundary.
+*Where it landed:*
 
-*** Semantics
+| Spec section                          | Shipped as                                                        |
+|----------------------------------------+---------------------------------------------------------------------|
+| §1 DataManager in-memory candle cache | =datamanager/store.go= — process-lifetime =cache map[Key]*CandleSet= |
+| §2 Bounded, compacted candle accessor | =datamanager/get_candles.go= — =DataManager.GetCandles(ctx, req, asof, count)= |
+| §3 =service/review.go= refactor       | =service/review.go=, =service/review_sweep.go=                     |
+| §4 =--asof= sweep                     | =service.ReviewWatchlistRange= + =ReviewRangeRequest=; CLI flags below |
 
-=--asof= defines a cutoff instant, not a "pretend today is X" flag. Only
-candles that had fully closed by that instant are eligible for the fetch.
-This is a hard no-lookahead constraint: the entire value of backtesting
-the classification logic disappears if a "past" review run can see a
-candle that hadn't closed yet at that point in time.
+*Semantics, as shipped.* =--asof= is a cutoff instant: only candles fully
+closed as of that timestamp are eligible (closed-bars-only, no opt-out —
+the no-lookahead constraint from spec §4.2). Dates parse as UTC midnight:
+=--asof 2026-06-15= means "as of the start of June 15," i.e. using data
+through June 14's close — simpler than the spec's speculative 17:00 NY
+default, and unambiguous since it's always the same cutoff regardless of
+session.
 
-If =--asof= is given as a bare date (=2026-06-15=) rather than a full
-timestamp, default the time component to 17:00 NY — reusing the daily
-push cadence already sketched under "Scan scheduling" (Open Questions,
-below) rather than inventing a second canonical review time.
+*CLI surface, as shipped* (=trader review=):
 
-*** Two use modes
-
-1. *Single-date spot check* — =trader review --asof 2026-06-15
-   [--instruments ...] [--bucket ...]=. Replays one morning. Useful for
-   post-mortems: what did review actually say the morning before a given
-   trade, without relying on memory or a saved snapshot.
-
-2. *Range replay for calibration* — walks =ReviewPair()= across a date
-   range and tabulates Bucket/Bias/Notes over time per pair. This is the
-   mode that actually answers the calibration question: a historical
-   distribution of Tradeable/Hot/Watch frequency under the current
-   =h4ADXFloor=/=h4MinEMASep= values, and (by re-running with different
-   constants) how sensitive that frequency is to the threshold choice.
-
-*** Efficient implementation for range replay
-
-Don't re-fetch per date. Fetch one long historical candle range from
-=DataManager= once, then slide the warmup window across it entirely
-in-process, calling =ReviewPair()= once per date on the appropriate
-slice. Because =review/= is pure, this needs exactly one bulk fetch
-regardless of how many dates are replayed — no per-date network or DB
-round-trip.
-
-#+begin_src go
-// ReviewRequest gains an optional AsOf; zero value means live/latest.
-type ReviewRequest struct {
-    Instruments []string
-    HotlistIDs  []string
-    AsOf        time.Time // zero = now
-}
-
-// ReviewRangeRequest parameterises a batch replay.
-type ReviewRangeRequest struct {
-    Instruments []string
-    From, To    time.Time
-    Interval    time.Duration // e.g. 24h for daily replay
-}
+#+begin_src text
+--asof YYYY-MM-DD              classify as of this past date instead of now;
+                                cannot combine with --from/--to
+--from / --to YYYY-MM-DD       historical sweep range (inclusive); must be
+                                set together
+--interval DURATION            step interval between sweep dates (default 24h)
+--output csv|json|table         required to be csv or json for a multi-date
+                                sweep; a single date may still use table
 #+end_src
 
-*** What this is not
+*What this is not.* Confirmed as originally scoped: this replays the
+*classification layer only* — Bucket/Bias/Notes over time, not simulated
+entries, stops, or P&L. See =/srv/trading/playbooks/playbook.org= for the
+separate discretionary-entry layer that consumes Tradeable-bucket output,
+and its TODO items 3–5 (composite score, config-driven thresholds, entry/
+stop/size command) for what actually trading these signals would still
+require.
 
-This replays the *classification layer only* — Bucket/Bias/Notes over
-time, not simulated entries, stops, or P&L. Actually trading the
-Tradeable signals historically would mean writing a =Strategy= that
-mirrors =Classify()='s logic and running it through the existing
-bar-by-bar =Backtest= engine — a materially larger, separate effort, not
-assumed here.
-
-*** DataManager requirement (confirmed 2026-07-09)
-
-=DataManager= already exposes a Candle Iterator over a =CandleSet= — a
-time-bounded, timeframed candle collection. It does not currently expose
-a method to return the full =CandleSet= directly; that is a single small
-method addition, not a redesign. Since a =CandleSet= is inherently
-defined by a time range, requesting one bounded by
-=[warmup_start, asOf]= for a given instrument/granularity satisfies the
-no-lookahead constraint by construction — the fetch itself cannot return
-anything past the cutoff, so there's no separate filtering step to get
-wrong.
-
-One adapter step remains: =review/='s pure functions
-(=ReviewPair=/=computeD1=/=computeH4=/=computeW1=) take =[]market.Candle=
-directly, not a =CandleSet= or an Iterator. Materializing a =CandleSet=
-(or draining its Iterator) into a =[]market.Candle= slice is presumably
-already happening somewhere in the current live path, since live review
-works today — the same materialization applies unchanged for the =asOf=
-and range-replay cases, just fed from the new bounded-range =CandleSet=
-method instead of whatever "latest N" path feeds it now.
-
-For range replay specifically: fetch one =CandleSet= covering
-=[From - warmup_window, To]= once, materialize it once, then slice
-per-date windows out of that single in-memory slice for each
-=ReviewPair()= call — no repeated =DataManager= calls per date.
-
-*** Open sub-questions for this TODO
-
-- Output shape for range replay: this doesn't fit the single-scan
-  tabwriter table (one row per pair). Likely a distinct output mode —
-  =--output csv= or an org table with a =Date= column — rather than
-  forcing it into the existing CLI table format.
-- Does =--asof= apply uniformly across all instruments in a batch, or
-  does per-instrument data availability need to be handled individually
-  (e.g. a pair added to the watchlist more recently than the =From=
-  date)?
-- Should warmup-insufficient dates (not enough historical candles before
-  =From= to satisfy ADX/EMA(50)/BB(20) warmup) simply be skipped with a
-  logged gap, or should the range request fail fast if =From= is too
-  close to the start of available history?
-- Naming for the new =DataManager= method (e.g. =GetCandleSet= /
-  =CandlesInRange=) is a placeholder here — not confirmed against actual
-  source.
+*Follow-up not yet done:* making the classification gates/thresholds
+(=h4ADXFloor=, =h4MinEMASep=, the D1 25/55 hot gate, H4 60 CI ceiling, etc.
+— see "Bucket classification logic," above) configurable rather than
+hardcoded constants in =review/classify.go=, so the sweep can vary them
+without recompiling. Tracked as a GitHub issue; this is what actually
+answers the calibration-risk question this section originally raised — the
+sweep alone only replays a *fixed* set of gates against history.
 
 ** Open questions
 
@@ -849,29 +797,44 @@ per-date windows out of that single in-memory slice for each
    proximity *or* S&R proximity. The struct shape is designed to accommodate
    this without breaking the API.
 
-4. *Integration with =fx-pair-analysis-methodology.org=.* That doc specifies
-   a quality scoring model (trend clarity 25%, structure clarity 25%, level
-   clarity 15%, etc.) and a three-tier watchlist prioritization scheme. The
-   scanner's bucket system maps directly to that model's Tradeable / Watchlist
-   / No Trade labels and the =ScanPair()= function is the natural home for
-   the =AnalyzePair()= logic sketched there. These should be unified rather
-   than maintained separately.
+4. *Integration with =FX-pair-analysis.org=* (corrected filename; the doc
+   was previously referenced as =fx-pair-analysis-methodology.org=, which
+   does not exist). That doc specifies a weighted quality scoring model
+   (trend clarity 25%, structure clarity 25%, level clarity 15%, volatility
+   fit 15%, macro alignment 10%, execution cleanliness 10%) and a three-tier
+   watchlist prioritization scheme, still unreconciled with this doc's
+   gate-based =Classify()=. Also relevant:
+   =/srv/trading/playbooks/playbook.org= (the discretionary entry layer
+   downstream of Tradeable) independently sketches a similar A+/B/Pass
+   grading rubric and explicitly calls it "the discretionary ancestor" of a
+   planned composite 0–100 score, intended to eventually consume labeled
+   journal data to choose weights — the same unification gap as this item,
+   approached from the entry-execution side rather than the scanner side.
+   These three (this doc's hard gates, =FX-pair-analysis.org='s weighted
+   score, the playbook's grading rubric) should converge rather than stay
+   three independently-maintained models of the same judgment.
 
-5. *Multi-account.* The scan is market data, not account data, so it does not
-   directly depend on multi-account support. Once multi-account is live, each
-   account may maintain its own watchlist. The =ScanRequest= is parameterised
-   by =Instruments= so this is solved at the call site without changing
-   scanner internals.
+5. *Multi-account.* The review is market data, not account data, so it does
+   not directly depend on multi-account support. Once multi-account is live,
+   each account may maintain its own watchlist. =ReviewRequest= is
+   parameterised by =Instruments= so this is solved at the call site without
+   changing =review= internals.
 
-6. *Naming drift between this doc and shipped code.* The struct/function
-   section above has been updated to =ReviewResult=/=ReviewPair()=/package
-   =review= based on the actual source (=review/classify.go=,
-   =review/pair.go=, =review/review.go=). The Service method, REST
-   endpoint, and CLI command sections below this point still use the
-   original =Scan*=/=scanner= naming from the initial design and have
-   *not* been cross-checked against =service/=, =api/rest/=, or =cmd/=
-   source — those files weren't available for this pass. Before treating
-   this doc as current, verify whether those layers were also renamed to
-   =Review*= to match, or whether the package boundary genuinely differs
-   between the =review= indicator/classification package and a separate
-   =scanner= service-facing name.
+6. *Naming drift between this doc and shipped code — RESOLVED (2026-07-11).*
+   Confirmed against source: the service method, REST endpoint, and CLI
+   command sections (above) were cross-checked and updated to
+   =ReviewRequest=/=ReviewResponse=/=Service.ReviewWatchlist=/
+   =GET /api/v1/review=/=trader review=. The original =Scan*=/=scanner=
+   naming from the initial design was not carried into any shipped layer —
+   =review= is the only package name used, end to end.
+
+7. *Configurable gates/thresholds.* =review/classify.go='s =h4ADXFloor=,
+   =h4MinEMASep=, =weekUsedCaution=, and the D1/H4 threshold literals in
+   "Bucket classification logic" (above) are Go constants, not
+   configuration. The =--asof= sweep (now shipped — see "Historical:
+   backtestable review via =--asof=," above) can only replay history
+   against whatever gates are compiled in; it cannot itself answer the
+   calibration-risk question raised there without a rebuild per threshold
+   set tried. =playbook.org='s TODO item 4 independently identifies the
+   same need ("make X and Y config values from day one so the sweep can
+   vary them without recompiling"). Tracked as a GitHub issue.
