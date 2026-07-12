@@ -22,7 +22,7 @@ real source surfaced two things that change the shape of the work:
 
 1. **`DataManager` has no in-memory cache today.** `store.ReadCSV()`
    (`datamanager/store.go`) opens a file and parses it fresh on every call.
-   `service/review.go`'s `ensureCachedOandaCandles` / `readCachedOandaCandleTimes`
+   `service/review.go`'s `ensureLocalCandleStore` / `readCachedOandaCandleTimes`
    are review's own attempt to avoid re-fetching from OANDA, but every read
    still goes through a cold `dm.Candles()` → `store.ReadCSV()` path. This is
    why a live `trader review` run is already slow across ~16-17 instruments,
@@ -116,7 +116,7 @@ shape** — it's the same struct used today to address monthly CSV files
 - The current month's data is a moving target — a cache entry for the
   in-progress month could go stale mid-session if new candles are
   downloaded into it. Decide: skip caching the current month (always read
-  fresh), or add an explicit invalidation path that `ensureCachedOandaCandles`
+  fresh), or add an explicit invalidation path that `ensureLocalCandleStore`
   (or its replacement in §3) calls after a successful download. Skipping
   cache for the current month is the simpler, safer starting point.
 - This is a process-lifetime, in-memory cache only — no persistence, no
@@ -203,7 +203,7 @@ needed, now that it does.
 
 **What gets deleted or drastically shrunk** (`service/review.go`):
 
-- `ensureCachedOandaCandles` — the manual "check `LastCompleteDate`, download
+- `ensureLocalCandleStore` — the manual "check `LastCompleteDate`, download
   the gap, write to store" dance. Whether this responsibility moves into
   `DataManager` itself (arguably where it belongs — "ensure data is
   available" is a `DataManager` job) or stays a thin wrapper in `service/`

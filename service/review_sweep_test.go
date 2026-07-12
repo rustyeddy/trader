@@ -77,7 +77,7 @@ func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testin
 
 // TestReviewWatchlistRange_NeverTouchesOANDA confirms the sweep is a pure
 // local-store replay: leaving Service.OANDA nil means any accidental
-// network call (ensureCachedOandaCandles / fetchReviewCandleTimesFromOANDA,
+// network call (ensureLocalCandleStore / fetchReviewCandleTimesFromOANDA,
 // the live path's behaviors) would nil-pointer panic rather than silently
 // succeed, so a passing test is itself proof no such call happened.
 func TestReviewWatchlistRange_NeverTouchesOANDA(t *testing.T) {

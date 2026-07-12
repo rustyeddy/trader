@@ -26,12 +26,12 @@ type ReviewResponse struct {
 	Results   []review.ReviewResult `json:"results"`
 }
 
-// reviewWorkers bounds the concurrent OANDA candle fetches per review run.
+// reviewWorkers bounds concurrent review instrument processing per review run.
 const reviewWorkers = 8
 
 // reviewCandleCounts is the per-timeframe candle window from docs/Review.org's
 // "Data requirements" table. "W" is the number of weekly bars deriveWeeklyCandles
-// produces from the D1 series, not a separate OANDA fetch (see reviewWeeklyLookbackDays).
+// produces from the D1 series, not a separate fetch (see reviewWeeklyLookbackDays).
 var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60}
 
 // reviewWeeklyLookbackDays sizes the D1 window fetched/cached so there is
@@ -41,11 +41,12 @@ var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60}
 const reviewWeeklyLookbackDays = 220
 
 // ReviewWatchlist runs the watchlist review over all instruments in
-// req, fetches D1, H4, and W1 candles from DataManaager, computes all
-// indicators, and returns a classified ReviewResponse. Instruments
-// that fail to fetch or don't yet have enough candle history are
-// skipped rather than failing the whole run; check s.Log for skip
-// reasons.
+// req, fetches D1 and H4 candles from the DataManager-backed local candle
+// store (topping it up from OANDA when needed), derives W1 candles from
+// the D1 series, computes all indicators, and returns a classified
+// ReviewResponse. Instruments that fail to fetch or don't yet have enough
+// candle history are skipped rather than failing the whole run; check s.Log
+// for skip reasons.
 func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
 	instruments := req.Instruments
 	if len(instruments) == 0 {
@@ -118,10 +119,10 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string) (review.
 	return result, true
 }
 
-// reviewTimeframe maps a review OANDA granularity ("D", "H4") to the
+// reviewTimeframe maps a review timeframe identifier ("D", "H4") to the
 // market.Timeframe the local candle store understands. There is no "W"
 // case: weekly candles are derived from the cached D1 series (see
-// deriveWeeklyCandles) rather than fetched as their own OANDA granularity.
+// deriveWeeklyCandles) rather than fetched separately.
 func reviewTimeframe(granularity string) (market.Timeframe, bool) {
 	switch granularity {
 	case "D":
@@ -134,7 +135,7 @@ func reviewTimeframe(granularity string) (market.Timeframe, bool) {
 }
 
 // fetchReviewCandles fetches the most recent reviewCandleCounts[granularity]
-// candles for instrument at the given OANDA granularity ("D", "H4") and
+// candles for instrument at the given timeframe identifier ("D", "H4") and
 // strips them to the internal fixed-point market.Candle type.
 func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularity string) ([]market.Candle, error) {
 	cts, err := s.fetchReviewCandleTimes(ctx, instrument, granularity, reviewCandleCounts[granularity])
@@ -145,11 +146,11 @@ func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularit
 }
 
 // fetchReviewCandleTimes fetches the most recent count timestamped candles
-// for instrument at the given OANDA granularity ("D", "H4"). D1 and H4 are
+// for instrument at the given timeframe identifier ("D", "H4"). D1 and H4 are
 // served from the local DataManager-backed candle store (via GetCandles),
-// topping it up from OANDA (and caching the result) only when the store is
-// missing recent bars, falling back to a direct OANDA fetch when the cache
-// still can't satisfy count afterwards.
+// topping it up from OANDA (via DataManager's download path) only when the
+// store is missing recent bars, falling back to a direct OANDA fetch when
+// the cache still can't satisfy count afterwards.
 func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granularity string, count int) ([]market.CandleTime, error) {
 	inst := market.GetInstrument(instrument)
 	if inst == nil {
@@ -170,8 +171,9 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		log = slog.Default()
 	}
 
-	// Change the name: while the candles are currently from
-	if err := s.ensureCachedOandaCandles(ctx, oandaName, granularity, from, to); err != nil {
+	// Ensure the local candle store has recent data by downloading any missing
+	// months through DataManager's OANDA provider. A no-op when store is current.
+	if err := s.ensureLocalCandleStore(ctx, oandaName, granularity, from, to); err != nil {
 		log.Warn("review: top up local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
 
@@ -195,25 +197,25 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		// valid row exists at some timestamp; it cannot confirm the cached
 		// series actually has count bars of usable history, so this count
 		// check is the real "is the cache good enough" gate. Fall back to a
-		// direct OANDA fetch so review always gets a full series to work
-		// with, rather than silently running indicators on too little data
-		// (or skipping the instrument outright).
+		// direct OANDA API fetch (bypassing DataManager) so review always
+		// gets a full series to work with, rather than silently running
+		// indicators on too little data (or skipping the instrument outright).
 		return s.fetchReviewCandleTimesFromOANDA(ctx, instrument, oandaName, granularity, from, to, count)
 	}
 	return candles, nil
 }
 
-// ensureCachedOandaCandles downloads and writes into the local candle store
-// (via DownloadOandaCandles/DataManager's canonical layout) any candles
-// between the last cached bar and to, so repeated review runs stop
-// re-downloading the same history from OANDA. A no-op when the store is
+// ensureLocalCandleStore downloads and writes into the local candle store
+// (via DownloadOandaCandles → DataManager's OANDA provider and canonical
+// layout) any candles between the last cached bar and to, so repeated review
+// runs stop re-downloading the same history. A no-op when the store is
 // already current.
 //
 // The download always starts at the beginning of the calendar month
 // containing the gap, never mid-month: DownloadOandaCandles writes a whole
 // month file per call, so a mid-month start would silently zero out the
 // already-cached earlier days of that month.
-func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granularity string, from, to time.Time) error {
+func (s *Service) ensureLocalCandleStore(ctx context.Context, oandaName, granularity string, from, to time.Time) error {
 	tf, err := market.ParseTimeframe(granularity)
 	if err != nil {
 		return fmt.Errorf("unknown timeframe %q", granularity)
@@ -230,7 +232,7 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 	}
 	dlFrom = time.Date(dlFrom.Year(), dlFrom.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	// XXX; we are certainly NOT going to D/L O&A candles here that is DM's job
+	// Download through DataManager's OANDA provider to populate the local store
 	_, err = s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
 		Instrument: oandaName,
 		Timeframe:  granularity,
@@ -241,9 +243,11 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 }
 
 // fetchReviewCandleTimesFromOANDA fetches timestamped candles directly from
-// OANDA: used as a fallback when the local cache can't serve D1/H4 candles.
-// XXX: No this is wrong.  This package should NEVER call oanda directly,
-// always go through datamanager for this
+// OANDA, bypassing the local cache: used as a fallback when the local cache
+// can't serve D1/H4 candles. This is the only place in the review path that
+// makes a direct OANDA API call instead of going through DataManager.
+// XXX: Consider refactoring this fallback to also go through DataManager so
+// there's a single candle-acquisition code path across the entire review flow.
 func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
 	raw, err := s.OANDA.FetchCandles(ctx, oanda.FetchCandlesOptions{
 		Instrument:  oandaName,
@@ -252,7 +256,6 @@ func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrumen
 		To:          to,
 	})
 
-	// XXX: Either fix this or name it correctly.
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s %s candles: %w", instrument, granularity, err)
 	}
