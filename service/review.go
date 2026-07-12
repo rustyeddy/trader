@@ -40,11 +40,12 @@ var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60}
 // holidays and the current partial week that gets dropped.
 const reviewWeeklyLookbackDays = 220
 
-// ReviewWatchlist runs the watchlist review over all instruments in req,
-// fetches D1, H4, and W1 candles from OANDA, computes all indicators, and
-// returns a classified ReviewResponse. Instruments that fail to fetch or
-// don't yet have enough candle history are skipped rather than failing the
-// whole run; check s.Log for skip reasons.
+// ReviewWatchlist runs the watchlist review over all instruments in
+// req, fetches D1, H4, and W1 candles from DataManaager, computes all
+// indicators, and returns a classified ReviewResponse. Instruments
+// that fail to fetch or don't yet have enough candle history are
+// skipped rather than failing the whole run; check s.Log for skip
+// reasons.
 func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
 	instruments := req.Instruments
 	if len(instruments) == 0 {
@@ -99,6 +100,8 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string) (review.
 	if len(d1) > reviewCandleCounts["D"] {
 		d1 = d1[len(d1)-reviewCandleCounts["D"]:]
 	}
+	// TODO: move this to datamanager, even though we may not persist
+	// them still route through data manager
 	w1 := deriveWeeklyCandles(dailyWide, reviewCandleCounts["W"])
 
 	h4, err := s.fetchReviewCandles(ctx, name, "H4")
@@ -166,10 +169,14 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 	if log == nil {
 		log = slog.Default()
 	}
+
+	// Change the name: while the candles are currently from
 	if err := s.ensureCachedOandaCandles(ctx, oandaName, granularity, from, to); err != nil {
 		log.Warn("review: top up local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
 
+	// Q: Does this really need to be normalized?  inst.Instrument or instrument should
+	// already be normalized
 	instNorm := market.NormalizeInstrument(instrument)
 	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
 	candles, err := dm.GetCandles(ctx, datamanager.CandleRequest{
@@ -222,6 +229,8 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 		return nil // already up to date, nothing to download
 	}
 	dlFrom = time.Date(dlFrom.Year(), dlFrom.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	// XXX; we are certainly NOT going to D/L O&A candles here that is DM's job
 	_, err = s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
 		Instrument: oandaName,
 		Timeframe:  granularity,
@@ -233,6 +242,8 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 
 // fetchReviewCandleTimesFromOANDA fetches timestamped candles directly from
 // OANDA: used as a fallback when the local cache can't serve D1/H4 candles.
+// XXX: No this is wrong.  This package should NEVER call oanda directly,
+// always go through datamanager for this
 func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
 	raw, err := s.OANDA.FetchCandles(ctx, oanda.FetchCandlesOptions{
 		Instrument:  oandaName,
@@ -240,6 +251,8 @@ func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrumen
 		From:        from,
 		To:          to,
 	})
+
+	// XXX: Either fix this or name it correctly.
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s %s candles: %w", instrument, granularity, err)
 	}

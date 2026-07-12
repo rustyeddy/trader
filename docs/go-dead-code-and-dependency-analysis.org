@@ -1,0 +1,432 @@
+#+TITLE: Go Dead Code and Dependency Analysis
+#+AUTHOR: Rusty
+#+DATE: 2026-07-12
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+Go provides several useful tools for checking unused or unreachable code and
+for generating dependency or function call graphs.
+
+The three main analysis areas are:
+
+1. Unreachable functions and methods
+2. Package dependency relationships
+3. Function-level call relationships
+
+These are related, but they answer different questions.
+
+* Recommended Toolset
+
+Use the following tools together:
+
+#+begin_src shell
+go vet ./...
+staticcheck ./...
+deadcode ./cmd/trader
+#+end_src
+
+- =go vet= detects suspicious constructs and common mistakes.
+- =staticcheck= provides deeper static analysis and unused-code checks.
+- =deadcode= performs whole-program reachability analysis.
+- =go list= can be used to inspect package dependencies.
+- =callgraph= can generate function-level call graphs.
+
+* Dead Code Analysis
+
+** Install deadcode
+
+#+begin_src shell
+go install golang.org/x/tools/cmd/deadcode@latest
+#+end_src
+
+** Analyze the entire module
+
+#+begin_src shell
+deadcode ./...
+#+end_src
+
+** Analyze one executable
+
+For an application with a specific main package:
+
+#+begin_src shell
+deadcode ./cmd/trader
+#+end_src
+
+This is usually more useful than analyzing every package because dead-code
+reachability depends on the selected application entry point.
+
+** Explain why a function is considered reachable
+
+#+begin_src shell
+deadcode -whylive='example.com/trader/pkg/foo.Bar' ./cmd/trader
+#+end_src
+
+The =-whylive= option shows the call path that keeps a function reachable.
+
+** Important limitations
+
+Static dead-code analysis may be incomplete when code is used through:
+
+- Reflection
+- Plugins
+- Generated registration code
+- Build tags
+- External consumers of exported library APIs
+- Dynamic dependency injection
+
+Go already rejects unused local variables and imports during compilation.
+
+* Static Analysis
+
+** go vet
+
+#+begin_src shell
+go vet ./...
+#+end_src
+
+Use =go vet= for suspicious constructs, formatting mistakes, incorrect API
+usage, and other likely bugs.
+
+** staticcheck
+
+Install:
+
+#+begin_src shell
+go install honnef.co/go/tools/cmd/staticcheck@latest
+#+end_src
+
+Run:
+
+#+begin_src shell
+staticcheck ./...
+#+end_src
+
+Staticcheck is useful for finding:
+
+- Unused declarations
+- Deprecated APIs
+- Ineffective assignments
+- Suspicious conditions
+- Incorrect concurrency patterns
+- Simplification opportunities
+
+* Package Dependency Analysis
+
+** List all dependencies
+
+#+begin_src shell
+go list -deps ./...
+#+end_src
+
+This includes standard-library and third-party dependencies.
+
+** List direct imports for each package
+
+#+begin_src shell
+go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./...
+#+end_src
+
+This gives a readable package-to-import listing.
+
+** Generate a Graphviz package dependency graph
+
+Install Graphviz on Fedora:
+
+#+begin_src shell
+sudo dnf install graphviz
+#+end_src
+
+Generate a DOT file:
+
+#+begin_src shell
+go list -f '{{range .Imports}}{{$.ImportPath}} -> {{printf "%q" .}}{{"\n"}}{{end}}' ./... \
+    | sed '1i digraph dependencies {' \
+    | sed '$a }' \
+    > dependencies.dot
+#+end_src
+
+Render it as SVG:
+
+#+begin_src shell
+dot -Tsvg dependencies.dot -o dependencies.svg
+#+end_src
+
+** Limit the graph to packages in the current module
+
+Large graphs become difficult to read when they include the standard library
+and every third-party package.
+
+#+begin_src shell
+MODULE=$(go list -m)
+
+{
+    echo 'digraph dependencies {'
+    go list -f '{{range .Imports}}{{$.ImportPath}} {{.}}{{"\n"}}{{end}}' ./... |
+        awk -v module="$MODULE" '$1 ~ "^"module && $2 ~ "^"module {
+            printf "\"%s\" -> \"%s\";\n", $1, $2
+        }'
+    echo '}'
+} > dependencies.dot
+
+dot -Tsvg dependencies.dot -o dependencies.svg
+#+end_src
+
+This graph shows package relationships such as:
+
+#+begin_example
+package A -> package B
+#+end_example
+
+It does not show individual function calls.
+
+* Function Call Graphs
+
+** Install callgraph
+
+#+begin_src shell
+go install golang.org/x/tools/cmd/callgraph@latest
+#+end_src
+
+** Generate a call graph
+
+#+begin_src shell
+callgraph -algo=rta ./cmd/trader
+#+end_src
+
+** Common algorithms
+
+*** Static
+
+#+begin_src shell
+callgraph -algo=static ./cmd/trader
+#+end_src
+
+Shows direct and statically resolved calls.
+
+Advantages:
+
+- Fast
+- Simple
+- Easy to understand
+
+Limitations:
+
+- Misses many interface and dynamic dispatch relationships
+
+*** Class Hierarchy Analysis
+
+#+begin_src shell
+callgraph -algo=cha ./cmd/trader
+#+end_src
+
+Approximates interface method calls using the program's type hierarchy.
+
+Advantages:
+
+- Broader than static analysis
+- Handles interface dispatch conservatively
+
+Limitations:
+
+- May include many calls that cannot occur at runtime
+
+*** Rapid Type Analysis
+
+#+begin_src shell
+callgraph -algo=rta ./cmd/trader
+#+end_src
+
+RTA begins at executable entry points and analyzes reachable functions and
+types.
+
+Advantages:
+
+- Good default for applications
+- More focused than CHA
+- Useful for reachability analysis
+
+Recommended default:
+
+#+begin_src shell
+callgraph -algo=rta ./cmd/trader
+#+end_src
+
+** Generate Graphviz output
+
+Check the installed command's supported formats:
+
+#+begin_src shell
+callgraph -help
+#+end_src
+
+A typical DOT workflow is:
+
+#+begin_src shell
+callgraph -algo=rta -format=digraph ./cmd/trader > callgraph.dot
+dot -Tsvg callgraph.dot -o callgraph.svg
+#+end_src
+
+Function call graphs can become extremely large. Prefer analyzing a single
+application, command, or subsystem rather than the entire repository.
+
+* Suggested Makefile Targets
+
+#+begin_src makefile
+MODULE := $(shell go list -m)
+CMD ?= ./cmd/trader
+
+.PHONY: deadcode vet staticcheck callgraph depsgraph analyze
+
+deadcode:
+	deadcode $(CMD)
+
+vet:
+	go vet ./...
+
+staticcheck:
+	staticcheck ./...
+
+callgraph:
+	callgraph -algo=rta -format=digraph $(CMD) > callgraph.dot
+	dot -Tsvg callgraph.dot -o callgraph.svg
+
+depsgraph:
+	@{ \
+		echo 'digraph dependencies {'; \
+		go list -f '{{range .Imports}}{{$.ImportPath}} {{.}}{{"\n"}}{{end}}' ./... | \
+		awk -v module="$(MODULE)" '$$1 ~ "^"module && $$2 ~ "^"module { \
+			printf "\"%s\" -> \"%s\";\n", $$1, $$2 \
+		}'; \
+		echo '}'; \
+	} > dependencies.dot
+	dot -Tsvg dependencies.dot -o dependencies.svg
+
+analyze: vet staticcheck deadcode
+#+end_src
+
+Usage:
+
+#+begin_src shell
+make analyze
+make callgraph CMD=./cmd/trader
+make depsgraph
+#+end_src
+
+* Suggested Project Workflow
+
+A practical sequence for the Trader project is:
+
+** Before committing
+
+#+begin_src shell
+go test ./...
+go vet ./...
+staticcheck ./...
+#+end_src
+
+** Periodically inspect dead code
+
+#+begin_src shell
+deadcode ./cmd/trader
+#+end_src
+
+Repeat for other commands:
+
+#+begin_src shell
+deadcode ./cmd/review
+deadcode ./cmd/collector
+deadcode ./cmd/backtest
+#+end_src
+
+** Review architecture with a package graph
+
+#+begin_src shell
+make depsgraph
+#+end_src
+
+Use the dependency graph to inspect:
+
+- Circular architectural pressure
+- Packages with excessive coupling
+- Infrastructure packages imported by domain packages
+- Large shared utility packages
+- Unexpected dependencies between subsystems
+
+** Trace execution with a call graph
+
+#+begin_src shell
+make callgraph CMD=./cmd/trader
+#+end_src
+
+Use function call graphs for focused questions such as:
+
+- How does an incoming tick reach a strategy?
+- What code path places an order?
+- Which functions participate in candle aggregation?
+- What starts the MQTT publisher?
+- Which functions are reachable from one command?
+
+* Interpretation Guidelines
+
+** Dead code result
+
+A reported function is unreachable from the selected application entry point.
+
+Before deleting it, verify that it is not used through reflection, build tags,
+generated code, plugins, tests, or an external package API.
+
+** Dependency graph
+
+A dependency graph is best for evaluating package-level architecture.
+
+Use it to answer:
+
+- Which packages depend on this package?
+- Is the domain layer importing infrastructure?
+- Are package boundaries becoming tangled?
+- Is one package acting as a dependency hub?
+
+** Call graph
+
+A call graph is best for tracing execution flow.
+
+Use it to answer:
+
+- What calls this function?
+- What can this function eventually call?
+- How does control flow move through a subsystem?
+- Which implementation methods are reachable?
+
+* Recommended Defaults
+
+For normal development:
+
+#+begin_src shell
+go test ./...
+go vet ./...
+staticcheck ./...
+#+end_src
+
+For dead-code review:
+
+#+begin_src shell
+deadcode ./cmd/trader
+#+end_src
+
+For package architecture:
+
+#+begin_src shell
+make depsgraph
+#+end_src
+
+For application execution flow:
+
+#+begin_src shell
+make callgraph CMD=./cmd/trader
+#+end_src
+
+The package dependency graph is usually the better high-level architecture
+tool. Function call graphs should be generated for specific commands or
+subsystems because repository-wide call graphs quickly become unreadable.

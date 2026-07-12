@@ -932,4 +932,7 @@ _ = watchlist
 
 ** Related FX Research Desk TODO Items
 
-The uploaded FX Research Desk action plan includes future support for report persistence, CSV export, Org-mode export, historical storage, Trader integration, chart support, and validation. This methodology is intended to support those planned workflows.
+The uploaded FX Research Desk action plan includes future support for
+report persistence, CSV export, Org-mode export, historical storage,
+Trader integration, chart support, and validation. This methodology is
+intended to support those planned workflows.
