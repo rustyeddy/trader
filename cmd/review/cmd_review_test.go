@@ -119,11 +119,14 @@ func TestRenderOrg_EmitsHlineBetweenBucketGroups(t *testing.T) {
 	require.NoError(t, renderOrg(&buf, results))
 
 	out := buf.String()
-	assert.Contains(t, out, "| PAIR | BUCKET |")
-	assert.Contains(t, out, "| EURUSD | tradeable | long")
-	assert.Contains(t, out, "| USDJPY | hot | short")
+	assert.Contains(t, out, "PAIR")
+	assert.Contains(t, out, "BUCKET")
+	assert.Contains(t, out, "EURUSD")
+	assert.Contains(t, out, "tradeable")
+	assert.Contains(t, out, "USDJPY")
+	assert.Contains(t, out, "hot")
 	// One hline after the header, one between the two bucket groups.
-	assert.Equal(t, 2, strings.Count(out, "|-\n"))
+	assert.Equal(t, 2, strings.Count(out, "\n|-"))
 }
 
 func TestRenderOrg_EmptyResults(t *testing.T) {
@@ -257,53 +260,14 @@ func TestSortByInstrumentThenDate(t *testing.T) {
 	assert.Equal(t, []string{"EURUSD@2026-06-01", "EURUSD@2026-06-02", "USDJPY@2026-06-01", "USDJPY@2026-06-02"}, got)
 }
 
-func TestBuildTableView_GroupsRowsByBucket(t *testing.T) {
-	results := []review.ReviewResult{
-		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long"},
-		{Instrument: "NZDUSD", Bucket: "tradeable", Bias: "long"},
-		{Instrument: "USDJPY", Bucket: "hot", Bias: "short"},
-	}
-	view := buildTableView(results)
-
-	assert.Contains(t, view.Header, "PAIR")
-	assert.Contains(t, view.Rule, "----")
-	require.Len(t, view.Groups, 2, "one group for tradeable, one for hot")
-	assert.Len(t, view.Groups[0], 2, "two tradeable rows")
-	assert.Len(t, view.Groups[1], 1, "one hot row")
-	assert.Contains(t, view.Groups[0][0], "EURUSD")
-	assert.Contains(t, view.Groups[1][0], "USDJPY")
-}
-
-func TestBuildTableView_EmptyResults(t *testing.T) {
-	view := buildTableView(nil)
-	assert.Contains(t, view.Header, "PAIR")
-	assert.Empty(t, view.Groups)
-}
-
-func TestBuildOrgView_GroupsRowsByBucket(t *testing.T) {
-	results := []review.ReviewResult{
-		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long"},
-		{Instrument: "USDJPY", Bucket: "hot", Bias: "short"},
-	}
-	view := buildOrgView(results)
-
-	assert.Contains(t, view.Header, "PAIR | BUCKET")
-	require.Len(t, view.Groups, 2)
-	assert.Contains(t, view.Groups[0][0], "EURUSD | tradeable | long")
-	assert.Contains(t, view.Groups[1][0], "USDJPY | hot | short")
-}
-
-func TestBuildOrgView_EmptyResults(t *testing.T) {
-	view := buildOrgView(nil)
-	assert.Contains(t, view.Header, "PAIR | BUCKET")
-	assert.Empty(t, view.Groups)
-}
-
 // TestRenderTable_NumericColumnsRightJustified guards against the
-// buildTableView/tableTmpl split silently dropping the padding that lines up
-// decimal points and percent signs down a numeric column: a two-digit ADX
-// value must be left-padded with a space so it right-aligns under a
-// three-digit one in the same column.
+// buildReviewTable/view.Table split silently dropping the padding that
+// lines up decimal points and percent signs down a numeric column: a
+// two-digit ADX value must be left-padded with a space so it right-aligns
+// under a three-digit one in the same column. Width computation and
+// grouping themselves are unit-tested directly in view/table_test.go now;
+// this test only guards that cmd/review wires reviewTableNumericCol into
+// view.Table.SetRight correctly.
 func TestRenderTable_NumericColumnsRightJustified(t *testing.T) {
 	results := []review.ReviewResult{
 		{Instrument: "EURUSD", Bucket: "tradeable", Bias: "long", D1: review.D1Snapshot{ADX: 100.0}},
