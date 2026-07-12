@@ -18,6 +18,10 @@ type ReviewRequest struct {
 	// Instruments to review. Defaults to market.AllInstruments() (every pair
 	// in the instrument registry) when empty.
 	Instruments []string
+
+	// Thresholds overrides review.DefaultThresholds() field-by-field; a
+	// zero-valued field falls back to the default (see review.MergeThresholds).
+	Thresholds review.Thresholds
 }
 
 // ReviewResponse is the full review output.
@@ -51,6 +55,7 @@ func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*Revi
 	if len(instruments) == 0 {
 		instruments = market.AllInstruments()
 	}
+	th := review.MergeThresholds(review.DefaultThresholds(), req.Thresholds)
 
 	results := make([]review.ReviewResult, 0, len(instruments))
 	var mu sync.Mutex
@@ -64,7 +69,7 @@ func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*Revi
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			result, ok := s.reviewOneInstrument(ctx, name)
+			result, ok := s.reviewOneInstrument(ctx, name, th)
 			if !ok {
 				return
 			}
@@ -85,7 +90,7 @@ func (s *Service) ReviewWatchlist(ctx context.Context, req ReviewRequest) (*Revi
 // and runs review.ReviewPair for a single instrument. ok is false when the
 // instrument should be skipped (fetch failure or insufficient candle
 // history).
-func (s *Service) reviewOneInstrument(ctx context.Context, name string) (review.ReviewResult, bool) {
+func (s *Service) reviewOneInstrument(ctx context.Context, name string, th review.Thresholds) (review.ReviewResult, bool) {
 	log := s.Log
 	if log == nil {
 		log = slog.Default()
@@ -110,7 +115,7 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string) (review.
 		return review.ReviewResult{}, false
 	}
 
-	result, err := review.ReviewPair(name, w1, d1, h4)
+	result, err := review.ReviewPair(name, w1, d1, h4, th)
 	if err != nil {
 		log.Warn("review: compute", "instrument", name, "err", err)
 		return review.ReviewResult{}, false

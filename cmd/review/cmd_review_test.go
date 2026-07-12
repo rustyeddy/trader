@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/review"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,9 +20,37 @@ func TestNew_UseName(t *testing.T) {
 
 func TestNew_HasExpectedFlags(t *testing.T) {
 	cmd := New(nil)
-	for _, name := range []string{"instruments", "watch", "hotlist", "tradeable", "output", "token", "env", "asof", "from", "to", "interval"} {
+	names := []string{
+		"instruments", "watch", "hotlist", "tradeable", "output", "token", "env", "asof", "from", "to", "interval",
+		"hot-adx-floor", "hot-ci-ceiling", "tradeable-ci-ceiling", "h4-adx-floor", "h4-min-ema-sep",
+		"demotion-adx-floor", "demotion-ci-ceiling", "week-used-caution", "value-zone-min", "value-zone-max", "h4-squeeze-width-atr",
+	}
+	for _, name := range names {
 		assert.NotNil(t, cmd.Flags().Lookup(name), "missing --%s flag", name)
 	}
+}
+
+func TestResolveThresholds_NoOverridesUsesDefaults(t *testing.T) {
+	cmd := New(nil)
+	rc := &config.RootConfig{}
+	assert.Equal(t, review.DefaultThresholds(), resolveThresholds(cmd, rc))
+}
+
+func TestResolveThresholds_FlagOverridesConfigAndDefault(t *testing.T) {
+	cmd := New(nil)
+	// rc.ReviewThresholds mirrors what cmd/main.go's PersistentPreRunE
+	// actually populates: config.GlobalReviewConfig.ToThresholds(), already
+	// fully merged with review.DefaultThresholds() for any field the
+	// config file left unset.
+	configured := review.MergeThresholds(review.DefaultThresholds(), review.Thresholds{H4ADXFloor: 12.0, WeekUsedCaution: 0.5})
+	rc := &config.RootConfig{ReviewThresholds: configured}
+	require.NoError(t, cmd.Flags().Set("h4-adx-floor", "9.0"))
+
+	th := resolveThresholds(cmd, rc)
+
+	assert.Equal(t, 9.0, th.H4ADXFloor, "flag should win over config")
+	assert.Equal(t, 0.5, th.WeekUsedCaution, "unrelated config value should be preserved")
+	assert.Equal(t, review.DefaultThresholds().HotD1ADXFloor, th.HotD1ADXFloor, "untouched field should fall back to default")
 }
 
 func TestSplitCSV(t *testing.T) {

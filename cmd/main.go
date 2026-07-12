@@ -95,6 +95,7 @@ func NewRootCmd() *cobra.Command {
 		if gcfg.OANDA.Env != "" {
 			rc.OANDAEnv = gcfg.OANDA.Env
 		}
+		rc.ReviewThresholds = gcfg.Review.ToThresholds()
 
 		datamanager.SetDataDir(rc.DataDir)
 		return log.Setup(log.LogConfig{

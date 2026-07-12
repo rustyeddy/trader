@@ -1,5 +1,7 @@
 package config
 
+import "github.com/rustyeddy/trader/review"
+
 type RootConfig struct {
 	ConfigPath string
 	GlobalPath string
@@ -17,4 +19,8 @@ type RootConfig struct {
 	OANDAToken     string
 	OANDAAccountID string
 	OANDAEnv       string
+
+	// ReviewThresholds populated from global config's `review:` section;
+	// `trader review`'s own flags override these per-run (see cmd/review).
+	ReviewThresholds review.Thresholds
 }

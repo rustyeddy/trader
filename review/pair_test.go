@@ -62,20 +62,20 @@ func rangingCandles(n int) []market.Candle {
 }
 
 func TestReviewPair_UnknownInstrument(t *testing.T) {
-	_, err := ReviewPair("NOTAPAIR", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	_, err := ReviewPair("NOTAPAIR", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown instrument")
 }
 
 func TestReviewPair_NotReady_InsufficientCandles(t *testing.T) {
 	// Only 10 D1 candles — well short of the ADX/EMA(50) warmup requirement.
-	_, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(10), trendingCandles(80))
+	_, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(10), trendingCandles(80), DefaultThresholds())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient candles")
 }
 
 func TestReviewPair_Trending_ClassifiesHotOrTradeableLong(t *testing.T) {
-	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 
 	assert.Equal(t, "EURUSD", result.Instrument)
@@ -87,7 +87,7 @@ func TestReviewPair_Trending_ClassifiesHotOrTradeableLong(t *testing.T) {
 }
 
 func TestReviewPair_Ranging_ClassifiesWatch(t *testing.T) {
-	result, err := ReviewPair("EURUSD", rangingCandles(40), rangingCandles(80), rangingCandles(80))
+	result, err := ReviewPair("EURUSD", rangingCandles(40), rangingCandles(80), rangingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 
 	assert.Equal(t, "watch", result.Bucket)
@@ -95,7 +95,7 @@ func TestReviewPair_Ranging_ClassifiesWatch(t *testing.T) {
 }
 
 func TestReviewPair_ATRPipsIsPositive(t *testing.T) {
-	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 	assert.Greater(t, result.D1.ATRPips, 0.0)
 	assert.Greater(t, result.H4.ATRPips, 0.0)

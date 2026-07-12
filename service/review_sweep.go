@@ -27,6 +27,10 @@ type ReviewRangeRequest struct {
 
 	// Interval steps between sweep dates when From != To. Defaults to 24h.
 	Interval time.Duration
+
+	// Thresholds overrides review.DefaultThresholds() field-by-field; a
+	// zero-valued field falls back to the default (see review.MergeThresholds).
+	Thresholds review.Thresholds
 }
 
 // reviewSweepFetchHeadroom pads the count requested from getClosedCandles
@@ -75,6 +79,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 	if interval <= 0 {
 		interval = 24 * time.Hour
 	}
+	th := review.MergeThresholds(review.DefaultThresholds(), req.Thresholds)
 
 	dm := datamanager.GetDataManager()
 
@@ -84,7 +89,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			result, ok := s.reviewOneInstrumentAsOf(ctx, dm, name, step)
+			result, ok := s.reviewOneInstrumentAsOf(ctx, dm, name, step, th)
 			if !ok {
 				continue
 			}
@@ -114,7 +119,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 // no OANDA top-up, no OANDA fallback. ok is false when the instrument or
 // asOf should be skipped — unknown instrument, or insufficient local
 // history for D1 or H4 as of asOf.
-func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.DataManager, name string, asOf time.Time) (review.ReviewResult, bool) {
+func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.DataManager, name string, asOf time.Time, th review.Thresholds) (review.ReviewResult, bool) {
 	log := s.Log
 	if log == nil {
 		log = slog.Default()
@@ -147,7 +152,7 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 		h4 = h4[len(h4)-reviewCandleCounts["H4"]:]
 	}
 
-	result, err := review.ReviewPair(name, w1, d1, h4)
+	result, err := review.ReviewPair(name, w1, d1, h4, th)
 	if err != nil {
 		log.Warn("review sweep: compute", "instrument", name, "asof", asOf, "err", err)
 		return review.ReviewResult{}, false

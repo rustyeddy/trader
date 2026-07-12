@@ -19,6 +19,7 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/review"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -110,6 +111,29 @@ func TestReviewWatchlist_SingleInstrument(t *testing.T) {
 	assert.Equal(t, "EURUSD", resp.Results[0].Instrument)
 	assert.NotEmpty(t, resp.Results[0].Bucket)
 	assert.False(t, resp.ScannedAt.IsZero())
+}
+
+// TestReviewWatchlist_CustomThresholdsChangeBucket proves ReviewRequest.Thresholds
+// actually reaches review.ReviewPair's classification: an unreasonably strict
+// Hot-gate ADX floor forces every pair to "watch" regardless of how strongly
+// it's trending. See issue #165.
+func TestReviewWatchlist_CustomThresholdsChangeBucket(t *testing.T) {
+	swapTempStore(t)
+	srv := fakeOANDACandlesServer(t)
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{
+		Instruments: []string{"EURUSD"},
+		Thresholds:  review.Thresholds{HotD1ADXFloor: 1000},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, "watch", resp.Results[0].Bucket)
 }
 
 func TestReviewWatchlist_DefaultsToAllInstruments(t *testing.T) {

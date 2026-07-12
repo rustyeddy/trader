@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/rustyeddy/trader/review"
 )
 
 func writeYAML(t *testing.T, dir, name, content string) {
@@ -132,4 +134,32 @@ func TestMergeGlobalConfig_EmptyDoesNotOverwrite(t *testing.T) {
 	mergeGlobalConfig(dst, &GlobalConfig{}) // all empty src
 	assert.Equal(t, "info", dst.Log.Level)
 	assert.Equal(t, "existing", dst.OANDA.Token)
+}
+
+func TestLoadGlobalConfig_ReviewFields(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "review.yml", `
+review:
+  h4_adx_floor: 15.0
+  h4_min_ema_sep: 0.2
+  week_used_caution: 0.80
+`)
+	cfg, err := loadGlobalConfig([]string{dir}, "")
+	require.NoError(t, err)
+	assert.Equal(t, 15.0, cfg.Review.H4ADXFloor)
+	assert.Equal(t, 0.2, cfg.Review.H4MinEMASep)
+	assert.Equal(t, 0.80, cfg.Review.WeekUsedCaution)
+}
+
+func TestGlobalReviewConfig_ToThresholds_FallsBackToDefaults(t *testing.T) {
+	var cfg GlobalReviewConfig
+	assert.Equal(t, review.DefaultThresholds(), cfg.ToThresholds())
+}
+
+func TestGlobalReviewConfig_ToThresholds_OverridesOnlyConfiguredFields(t *testing.T) {
+	cfg := GlobalReviewConfig{H4ADXFloor: 15.0}
+	th := cfg.ToThresholds()
+
+	assert.Equal(t, 15.0, th.H4ADXFloor)
+	assert.Equal(t, review.DefaultThresholds().HotD1ADXFloor, th.HotD1ADXFloor)
 }

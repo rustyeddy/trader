@@ -767,13 +767,19 @@ and its TODO items 3–5 (composite score, config-driven thresholds, entry/
 stop/size command) for what actually trading these signals would still
 require.
 
-*Follow-up not yet done:* making the classification gates/thresholds
-(=h4ADXFloor=, =h4MinEMASep=, the D1 25/55 hot gate, H4 60 CI ceiling, etc.
-— see "Bucket classification logic," above) configurable rather than
-hardcoded constants in =review/classify.go=, so the sweep can vary them
-without recompiling. Tracked as a GitHub issue; this is what actually
-answers the calibration-risk question this section originally raised — the
-sweep alone only replays a *fixed* set of gates against history.
+*Follow-up — RESOLVED (2026-07-12, GitHub issue #165):* the classification
+gates/thresholds (=H4ADXFloor=, =H4MinEMASep=, the D1 hot gate, H4 CI
+ceiling, etc. — see "Bucket classification logic," above) are now
+=review.Thresholds=, a struct threaded explicitly through =Classify()= and
+=ReviewPair()= instead of hardcoded constants. Callers layer overrides
+three ways, each optional: global config's =review:= section in
+=trader.yml= (see =config.GlobalReviewConfig=), or one =trader review= flag
+per threshold (=--h4-adx-floor=, =--hot-ci-ceiling=, etc.) for ad-hoc sweep
+runs. An unconfigured field falls back to =review.DefaultThresholds()=, so
+behavior is unchanged unless a value is explicitly overridden. This is what
+actually answers the calibration-risk question this section originally
+raised — the =--asof= sweep can now vary gates run-to-run without a
+rebuild.
 
 ** Open questions
 
@@ -828,13 +834,11 @@ sweep alone only replays a *fixed* set of gates against history.
    naming from the initial design was not carried into any shipped layer —
    =review= is the only package name used, end to end.
 
-7. *Configurable gates/thresholds.* =review/classify.go='s =h4ADXFloor=,
-   =h4MinEMASep=, =weekUsedCaution=, and the D1/H4 threshold literals in
-   "Bucket classification logic" (above) are Go constants, not
-   configuration. The =--asof= sweep (now shipped — see "Historical:
-   backtestable review via =--asof=," above) can only replay history
-   against whatever gates are compiled in; it cannot itself answer the
-   calibration-risk question raised there without a rebuild per threshold
-   set tried. =playbook.org='s TODO item 4 independently identifies the
-   same need ("make X and Y config values from day one so the sweep can
-   vary them without recompiling"). Tracked as a GitHub issue.
+7. *Configurable gates/thresholds — RESOLVED (2026-07-12, GitHub issue
+   #165).* =review/classify.go='s and =review/pair.go='s threshold
+   literals now live in =review.Thresholds=, configurable via
+   =trader.yml='s =review:= section and/or per-invocation =trader review=
+   flags (flags win over config, config wins over
+   =review.DefaultThresholds()=). =playbook.org='s TODO item 4 ("make X
+   and Y config values from day one so the sweep can vary them without
+   recompiling") is satisfied by the same change.

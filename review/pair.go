@@ -11,7 +11,7 @@ import (
 // ReviewPair computes a ReviewResult for one instrument from its W1, D1, and
 // H4 candle histories. It is a pure function: all indicator state is local,
 // all input is candles, all output is the returned ReviewResult.
-func ReviewPair(instrument string, w1, d1, h4 []market.Candle) (ReviewResult, error) {
+func ReviewPair(instrument string, w1, d1, h4 []market.Candle, th Thresholds) (ReviewResult, error) {
 	inst := market.GetInstrument(instrument)
 	if inst == nil {
 		return ReviewResult{}, fmt.Errorf("review: unknown instrument %q", instrument)
@@ -21,7 +21,7 @@ func ReviewPair(instrument string, w1, d1, h4 []market.Candle) (ReviewResult, er
 	if err != nil {
 		return ReviewResult{}, fmt.Errorf("review %s: d1: %w", instrument, err)
 	}
-	h4Snap, h4Bias, err := computeH4(inst, h4)
+	h4Snap, h4Bias, err := computeH4(inst, h4, th)
 	if err != nil {
 		return ReviewResult{}, fmt.Errorf("review %s: h4: %w", instrument, err)
 	}
@@ -38,9 +38,9 @@ func ReviewPair(instrument string, w1, d1, h4 []market.Candle) (ReviewResult, er
 		H4Aligned:   h4Bias == d1Bias && d1Bias != "neutral",
 		W1Alignment: WeeklyAlignment(w1Bias, d1Bias),
 	}
-	setup.InValueZone = absF(setup.PriceEMAATR) >= 0.5 && absF(setup.PriceEMAATR) <= 1.5
+	setup.InValueZone = absF(setup.PriceEMAATR) >= th.ValueZoneMin && absF(setup.PriceEMAATR) <= th.ValueZoneMax
 
-	bucket, notes := Classify(d1Snap, h4Snap, w1Snap, setup, d1Bias, w1Bias)
+	bucket, notes := Classify(d1Snap, h4Snap, w1Snap, setup, d1Bias, w1Bias, th)
 
 	return ReviewResult{
 		Instrument: instrument,
@@ -160,7 +160,7 @@ func computeD1(inst *market.Instrument, candles []market.Candle) (D1Snapshot, st
 	return snap, biasFromEMA(last.Close, ema20.Price()), nil
 }
 
-func computeH4(inst *market.Instrument, candles []market.Candle) (H4Snapshot, string, error) {
+func computeH4(inst *market.Instrument, candles []market.Candle, th Thresholds) (H4Snapshot, string, error) {
 	adx, err := indicator.NewADX(14, market.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
@@ -214,7 +214,7 @@ func computeH4(inst *market.Instrument, candles []market.Candle) (H4Snapshot, st
 		snap.PriceEMA20ATR = (closeF - ema20.Float64()) / atrF
 		snap.EMASepATR = (ema20.Float64() - ema50.Float64()) / atrF
 		widthATR := (bb.Upper() - bb.Lower()) / atrF
-		snap.Squeeze = widthATR < 2.0 // squeeze threshold: BB width under 2x H4 ATR
+		snap.Squeeze = widthATR < th.H4SqueezeWidthATR
 	}
 
 	return snap, biasFromEMA(last.Close, ema20.Price()), nil
