@@ -21,7 +21,7 @@ import (
 // and call all exported methods of data, which may expose sensitive values
 // or trigger side effects if the template text is user-controlled.
 //
-// Missing keys use the default text/template behaviour and render as
+// Missing keys use the default text/template behavior and render as
 // "<no value>". To turn missing keys into hard errors, parse the template
 // explicitly with template.New("…").Option("missingkey=error").Parse(…).
 func Render(w io.Writer, tmplText string, data any) error {
