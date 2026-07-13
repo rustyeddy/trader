@@ -30,7 +30,7 @@ context to decide in seconds whether a pair deserves a chart look. It does
 not make trade decisions; it eliminates pairs that clearly do not merit
 attention and surfaces the ones that do, in priority order.
 
-** Timeframe stack: W1 → D1 → H4
+** Timeframe stack: W1 → D1 → H4 (+ H1 for Tradeable entry timing)
 
 The existing methodology in =FX-pair-analysis.org= specifies
 three timeframes: D1 and H4 as primary classification inputs, H1 for
@@ -41,13 +41,26 @@ confirmation context only. The scanner implements that stack.
 | W1        | Big-picture trend direction; filters counter-trend D1 setups |
 | D1        | Primary regime signal; ADX, CI, EMA alignment, volatility    |
 | H4        | Setup quality; pullback structure, squeeze, entry proximity  |
+| H1        | Entry-timing refinement for Tradeable pairs only — never a classification input, never computed for Watch/Hot |
 
 H4 earns its place because D1 alone cannot distinguish between two hotlist
 pairs where one has a clear pullback structure and the other is mid-range
 with no setup. H4 CI and H4 EMA proximity answer that question without
-requiring a chart. H1 is available as a future refinement but is excluded
-from v1 to keep the candle fetch surface minimal and the indicator warmup
-requirements tractable.
+requiring a chart.
+
+*H1 (shipped, GitHub issue #166).* H1 is computed only for pairs D1/H4/W1
+already classified "tradeable" — =Classify()= runs and returns first;
+=review.EnrichWithH1= is called afterward, in the same scan pass, and is a
+structural no-op for any other bucket. It cannot reinforce, challenge, or
+change the bucket a pair already received. The indicator set is
+deliberately lean (EMA20/EMA50/ATR only, no ADX/CI) since H1's only job is
+"where, within an already-confirmed setup, is price relative to the H1
+trend" — =SetupSnapshot.H1Aligned=/=H1EntryDist=. Missing/insufficient H1
+history is best-effort: the pair still returns as tradeable, with a "H1
+unavailable" note, never an error or a skip. Because this only fires for
+the (typically small) tradeable subset of the watchlist, not the full ~20
+pairs, the fetch-count growth this section originally worried about is
+bounded by the tradeable bucket's size, not the watchlist's.
 
 ** Triage buckets
 
@@ -456,12 +469,16 @@ mean reversion classification below.
 | D1 EMA(20), EMA(50), BB(20) | 60 D1          | EMA(50) warmup = 50; covers all           |
 | H4 ADX(14), ATR(14), CI(14) | 60 H4          | Same warmup ratios                        |
 | H4 EMA(20)                  | 30 H4          | EMA(20) warmup = 20; 30 provides buffer   |
+| H1 EMA(20), EMA(50), ATR(14) (tradeable pairs only) | 60 H1 | EMA(50) warmup = 50; same as H4's EMA(50) row |
 |-----------------------------+----------------+-------------------------------------------|
 
 
 For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair). A
 bounded goroutine pool of 8 workers handles the fan-out without rate-limit
-risk. =CandlesOptions= already supports =Count= and =Granularity=.
+risk. =CandlesOptions= already supports =Count= and =Granularity=. The H1
+row adds a 4th request, but only for pairs that end up classified
+tradeable in that scan — the worst case is bounded by the tradeable
+bucket's size, not the full watchlist.
 
 *** Candle fetch path
 

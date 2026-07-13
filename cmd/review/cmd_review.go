@@ -361,9 +361,19 @@ func sortByInstrumentThenDate(results []review.ReviewResult) {
 
 // reviewTableHeader/reviewTableRow keep the table and org renderers' column
 // sets in sync.
-var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "H4 EMA DIST", "Squeeze", "W1 Bias", "WEEK%"}
+var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "H4 EMA DIST", "Squeeze", "W1 Bias", "WEEK%", "H1 Align", "H1 EMA DIST"}
 
 func reviewTableRow(r review.ReviewResult) []string {
+	// H1 is only ever computed for tradeable pairs (see
+	// review.EnrichWithH1); other buckets show "–" rather than a
+	// misleading zero value, distinguishing "never attempted" from a
+	// tradeable pair whose H1 genuinely came back unavailable.
+	h1Align, h1Dist := "–", "–"
+	if r.Bucket == "tradeable" {
+		h1Align = boolGlyph(r.Setup.H1Aligned)
+		h1Dist = fmt.Sprintf("%+.3f", r.Setup.H1EntryDist)
+	}
+
 	return []string{
 		r.Instrument,
 		r.Bucket,
@@ -379,6 +389,8 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%t", r.H4.Squeeze),
 		alignmentGlyph(r.Setup.W1Alignment),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
+		h1Align,
+		h1Dist,
 	}
 }
 
@@ -395,10 +407,20 @@ func alignmentGlyph(a review.Alignment) string {
 	}
 }
 
+// boolGlyph renders a glance-able glyph for a plain two-state bool, as
+// opposed to alignmentGlyph's tristate Alignment — used for H1Aligned,
+// which (like H4Aligned) has no neutral state.
+func boolGlyph(b bool) string {
+	if b {
+		return "✓"
+	}
+	return "✗"
+}
+
 // reviewTableNumericCol flags which reviewTableHeader columns hold numeric
 // values; those are right-justified so decimal points and "%" signs line up
 // down the column. PAIR/BUCKET/BIAS are text and stay left-justified.
-var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true}
+var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true, false, true}
 
 // buildReviewTable turns filtered results into a view.Table: one row per
 // result via reviewTableRow, numeric columns right-justified per

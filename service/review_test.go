@@ -136,6 +136,45 @@ func TestReviewWatchlist_CustomThresholdsChangeBucket(t *testing.T) {
 	assert.Equal(t, "watch", resp.Results[0].Bucket)
 }
 
+// TestReviewWatchlist_NoH1FetchForNonTradeablePair confirms the live path
+// never issues an OANDA "H1" request for a pair that doesn't classify
+// tradeable — fakeOANDACandlesServer's plain monotonic series lands this
+// fixture on "watch" (see TestReviewWatchlist_CustomThresholdsChangeBucket's
+// sibling assertion), so a zero H1 request count here is the same
+// conditional-fetch proof as the sweep-path equivalent in
+// review_sweep_test.go, exercised through the live OANDA fetch path instead
+// of the local-store replay path.
+func TestReviewWatchlist_NoH1FetchForNonTradeablePair(t *testing.T) {
+	swapTempStore(t)
+
+	var mu sync.Mutex
+	requestsByGranularity := map[string]int{}
+	base := fakeOANDACandlesServer(t)
+	defer base.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestsByGranularity[r.URL.Query().Get("granularity")]++
+		mu.Unlock()
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{Instruments: []string{"EURUSD"}})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	require.NotEqual(t, "tradeable", resp.Results[0].Bucket, "fixture must not classify tradeable for this test to prove anything")
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, requestsByGranularity["H1"], "H1 must never be fetched for a non-tradeable pair")
+}
+
 func TestReviewWatchlist_DefaultsToAllInstruments(t *testing.T) {
 	swapTempStore(t)
 	srv := fakeOANDACandlesServer(t)

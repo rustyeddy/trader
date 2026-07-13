@@ -57,6 +57,121 @@ func seedReviewHistory(t *testing.T, instrument string, asOf time.Time, d1Months
 	}
 }
 
+// seedTrendingMonths writes numMonths of continuous weekday candles for
+// instrument/tf, with price carried forward across month boundaries (unlike
+// seedWeekdayCandles, which resets to startPrice every call) so the series
+// is a true multi-month monotonic trend rather than a repeating sawtooth.
+func seedTrendingMonths(t *testing.T, instrument string, tf market.Timeframe, startMonth time.Time, numMonths int, startPrice market.Price) {
+	t.Helper()
+	price := startPrice
+	step := time.Duration(tf) * time.Second
+	for m := range numMonths {
+		monthStart := startMonth.AddDate(0, m, 0)
+		end := monthStart.AddDate(0, 1, 0)
+		n := int(end.Sub(monthStart) / step)
+		candles := make([]market.Candle, n)
+		for i := range n {
+			ts := monthStart.Add(time.Duration(i) * step)
+			if wd := ts.Weekday(); wd == time.Saturday || wd == time.Sunday {
+				continue
+			}
+			price += 10
+			candles[i] = market.Candle{Open: price, High: price + 5, Low: price - 5, Close: price + 2, Ticks: 1}
+		}
+		datamanager.WriteCandles(t, market.SourceOanda, instrument, tf, monthStart, candles)
+	}
+}
+
+// seedH4TradeablePullback writes one month of H4 candles that classify as
+// "tradeable": a strong uptrend for most of the month, then an 8-candle
+// pullback so the close lands within the Tradeable gate's H4 value zone
+// (|price-EMA20| in [0.5, 1.5] ATR multiples) while ADX/CI/EMA-separation
+// stay favorable. Calibrated empirically against the shipped Classify gates.
+func seedH4TradeablePullback(t *testing.T, instrument string, monthStart time.Time) {
+	t.Helper()
+	step := 4 * time.Hour
+	end := monthStart.AddDate(0, 1, 0)
+	n := int(end.Sub(monthStart) / step)
+	candles := make([]market.Candle, n)
+
+	price := market.PriceFromFloat(1.10000)
+	pullbackStart := n - 8
+	for i := range n {
+		ts := monthStart.Add(time.Duration(i) * step)
+		if wd := ts.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue
+		}
+		if i < pullbackStart {
+			price += 15
+		} else {
+			price -= 8
+		}
+		candles[i] = market.Candle{Open: price, High: price + 36, Low: price - 36, Close: price + 2, Ticks: 1}
+	}
+	datamanager.WriteCandles(t, market.SourceOanda, instrument, market.H4, monthStart, candles)
+}
+
+// seedTradeableReviewHistory seeds D1/H4/H1 history that classifies EURUSD
+// as "tradeable" as of asOf: a trending D1/W1 (satisfies the Hot gate) plus
+// an H4 pullback into the value zone (satisfies the Tradeable gate), plus a
+// trending H1 month so EnrichWithH1 has data to consume.
+func seedTradeableReviewHistory(t *testing.T, instrument string, asOf time.Time) {
+	t.Helper()
+	asOfMonth := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	seedTrendingMonths(t, instrument, market.D1, asOfMonth.AddDate(0, -12, 0), 13, market.PriceFromFloat(1.0))
+	seedH4TradeablePullback(t, instrument, asOfMonth.AddDate(0, -1, 0))
+	seedH4TradeablePullback(t, instrument, asOfMonth)
+	seedTrendingMonths(t, instrument, market.H1, asOfMonth, 1, market.PriceFromFloat(1.0))
+}
+
+// TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs is the end-to-end
+// proof for issue #166: a pair that classifies "tradeable" gets an H1
+// enrichment (Setup.H1Aligned/H1EntryDist populated, H1 snapshot non-zero)
+// computed in the very same sweep step — never a follow-up call. A pair
+// left at Watch/Hot (no H4 pullback seeded) gets no H1 data at all.
+func TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs(t *testing.T) {
+	datamanager.UseTempDataDir(t)
+	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
+	seedTradeableReviewHistory(t, "EURUSD", asOf)
+
+	svc := &Service{Log: discardLogger()}
+	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+		Instruments: []string{"EURUSD"},
+		From:        asOf,
+		To:          asOf,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+
+	r := resp.Results[0]
+	require.Equal(t, "tradeable", r.Bucket, "fixture must classify tradeable for this test to prove anything")
+	assert.NotZero(t, r.H1.EMA20, "H1 snapshot must be populated for a tradeable pair")
+	assert.NotContains(t, r.Notes, "H1 unavailable")
+}
+
+func TestReviewWatchlistRange_NonTradeablePairGetsNoH1(t *testing.T) {
+	datamanager.UseTempDataDir(t)
+	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
+	// Plain trending D1/H4 (via seedReviewHistory) lands on Hot or Watch,
+	// never Tradeable — no H4 pullback into the value zone is seeded.
+	seedReviewHistory(t, "EURUSD", asOf, 12, 2)
+
+	svc := &Service{Log: discardLogger()}
+	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+		Instruments: []string{"EURUSD"},
+		From:        asOf,
+		To:          asOf,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+
+	r := resp.Results[0]
+	require.NotEqual(t, "tradeable", r.Bucket, "fixture must not classify tradeable for this test to prove anything")
+	assert.Zero(t, r.H1, "H1 must never be computed for a non-tradeable pair")
+	assert.NotContains(t, r.Notes, "H1 unavailable", `a non-tradeable pair never attempts H1, so it can't be "unavailable"`)
+}
+
 func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC) // a Wednesday, far from any month boundary

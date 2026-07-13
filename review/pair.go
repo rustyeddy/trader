@@ -55,6 +55,100 @@ func ReviewPair(instrument string, w1, d1, h4 []market.Candle, th Thresholds) (R
 	}, nil
 }
 
+// EnrichWithH1 attaches an entry-timing refinement to an already-classified
+// tradeable result. It is a no-op for any other bucket: H1 is only ever
+// computed for pairs D1/H4/W1 already classified "tradeable" — it cannot
+// reinforce, challenge, or change that classification, because ReviewPair
+// has already returned by the time this runs. Best-effort: if h1 is empty
+// or its indicators aren't warmed up, result is returned with H1 fields
+// left zero-valued plus a "H1 unavailable" note, never an error.
+func EnrichWithH1(result ReviewResult, h1 []market.Candle) ReviewResult {
+	if result.Bucket != "tradeable" {
+		return result
+	}
+
+	inst := market.GetInstrument(result.Instrument)
+	if inst == nil {
+		return result
+	}
+
+	h1Snap, h1Bias, ok := computeH1(inst, h1)
+	if !ok {
+		result.Notes = append(result.Notes, "H1 unavailable")
+		return result
+	}
+
+	h4Bias := biasFromFloat(result.H4.Close, result.H4.EMA20)
+	result.H1 = h1Snap
+	result.Setup.H1Aligned = h1Bias == h4Bias && h4Bias != "neutral"
+	result.Setup.H1EntryDist = h1Snap.PriceEMA20ATR
+	return result
+}
+
+// computeH1 computes the lean H1 entry-timing snapshot: EMA20/EMA50/ATR
+// only, no ADX/CI/BB — H1's job is "where is price relative to the H1
+// trend," not a second regime check. ok is false when candles is empty or
+// indicators aren't warmed up; callers treat that as best-effort, not an
+// error (see EnrichWithH1).
+func computeH1(inst *market.Instrument, candles []market.Candle) (H1Snapshot, string, bool) {
+	if len(candles) == 0 {
+		return H1Snapshot{}, "", false
+	}
+
+	ema20, err := indicator.NewEMA(20, market.PriceScale)
+	if err != nil {
+		return H1Snapshot{}, "", false
+	}
+	ema50, err := indicator.NewEMA(50, market.PriceScale)
+	if err != nil {
+		return H1Snapshot{}, "", false
+	}
+	atr, err := indicator.NewATR(14, market.PriceScale)
+	if err != nil {
+		return H1Snapshot{}, "", false
+	}
+
+	for _, c := range candles {
+		ema20.Update(c)
+		ema50.Update(c)
+		atr.Update(c)
+	}
+	if !(ema20.Ready() && ema50.Ready() && atr.Ready()) {
+		return H1Snapshot{}, "", false
+	}
+
+	last := candles[len(candles)-1]
+	closeF := last.Close.Float64()
+	atrF := atr.Float64()
+
+	snap := H1Snapshot{
+		EMA20:   ema20.Float64(),
+		EMA50:   ema50.Float64(),
+		Close:   closeF,
+		ATRPips: pricePips(inst, atr.Price()),
+	}
+	if atrF != 0 {
+		snap.EMASepATR = (ema20.Float64() - ema50.Float64()) / atrF
+		snap.PriceEMA20ATR = (closeF - ema20.Float64()) / atrF
+	}
+
+	return snap, biasFromFloat(closeF, ema20.Float64()), true
+}
+
+// biasFromFloat mirrors biasFromEMA for values already converted to
+// float64 (e.g. from a ReviewResult's presentation fields, where the
+// original market.Price is no longer available).
+func biasFromFloat(close, ema float64) string {
+	switch {
+	case close > ema:
+		return "long"
+	case close < ema:
+		return "short"
+	default:
+		return "neutral"
+	}
+}
+
 // pricePips converts a fixed-point price delta to pips for the given
 // instrument. Boundary conversion only — used for presentation fields.
 func pricePips(inst *market.Instrument, delta market.Price) float64 {

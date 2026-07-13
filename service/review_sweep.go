@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"time"
@@ -157,6 +158,27 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 		log.Warn("review sweep: compute", "instrument", name, "asof", asOf, "err", err)
 		return review.ReviewResult{}, false
 	}
+
+	// H1 is an entry-timing refinement computed only for pairs already
+	// classified tradeable as of this step, in this same call — never a
+	// follow-up sweep pass. Insufficient/missing H1 history is best-effort:
+	// it never drops the step/instrument from the sweep (enrichTradeableWithH1
+	// is a no-op for any other bucket).
+	result = enrichTradeableWithH1(result, log, name, func() ([]market.Candle, error) {
+		h1Wide, fetchErr := getClosedCandles(ctx, dm, instNorm, market.H1, asOf, reviewCandleCounts["H1"]+reviewSweepFetchHeadroom)
+		if fetchErr != nil {
+			return nil, fmt.Errorf("fetch H1 candles: %w", fetchErr)
+		}
+		if len(h1Wide) < reviewCandleCounts["H1"] {
+			return nil, fmt.Errorf("insufficient H1 history: got %d, want %d", len(h1Wide), reviewCandleCounts["H1"])
+		}
+		h1 := candlesOnly(h1Wide)
+		if len(h1) > reviewCandleCounts["H1"] {
+			h1 = h1[len(h1)-reviewCandleCounts["H1"]:]
+		}
+		return h1, nil
+	})
+
 	result.ScannedAt = asOf
 	return result, true
 }

@@ -313,6 +313,27 @@ func TestRenderTable_NumericColumnsRightJustified(t *testing.T) {
 	assert.Contains(t, lines[3], " 9.0")
 }
 
+// TestReviewTableRow_H1ColumnsOnlyPopulatedForTradeable proves the CLI
+// distinguishes "H1 never attempted" (Watch/Hot) from a tradeable pair's
+// actual H1 alignment/distance: non-tradeable rows show "–" placeholders
+// regardless of Setup's zero-valued H1 fields, while tradeable rows render
+// the real glyph/distance.
+func TestReviewTableRow_H1ColumnsOnlyPopulatedForTradeable(t *testing.T) {
+	watch := review.ReviewResult{Instrument: "EURUSD", Bucket: "watch"}
+	row := reviewTableRow(watch)
+	assert.Equal(t, "–", row[len(row)-2], "H1 Align must be a placeholder for a non-tradeable bucket")
+	assert.Equal(t, "–", row[len(row)-1], "H1 EMA DIST must be a placeholder for a non-tradeable bucket")
+
+	tradeable := review.ReviewResult{
+		Instrument: "EURUSD",
+		Bucket:     "tradeable",
+		Setup:      review.SetupSnapshot{H1Aligned: true, H1EntryDist: 0.75},
+	}
+	row = reviewTableRow(tradeable)
+	assert.Equal(t, "✓", row[len(row)-2])
+	assert.Equal(t, "+0.750", row[len(row)-1])
+}
+
 func TestRenderCSV(t *testing.T) {
 	scannedAt := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
 	results := []review.ReviewResult{

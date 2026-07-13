@@ -36,7 +36,9 @@ const reviewWorkers = 8
 // reviewCandleCounts is the per-timeframe candle window from docs/Review.org's
 // "Data requirements" table. "W" is the number of weekly bars deriveWeeklyCandles
 // produces from the D1 series, not a separate OANDA fetch (see reviewWeeklyLookbackDays).
-var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60}
+// "H1" is only ever fetched for pairs already classified "tradeable" (see
+// reviewOneInstrument), not for the full watchlist.
+var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60, "H1": 60}
 
 // reviewWeeklyLookbackDays sizes the D1 window fetched/cached so there is
 // enough daily history to derive reviewCandleCounts["W"] complete weekly
@@ -120,10 +122,33 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string, th revie
 		log.Warn("review: compute", "instrument", name, "err", err)
 		return review.ReviewResult{}, false
 	}
+
+	result = enrichTradeableWithH1(result, log, name, func() ([]market.Candle, error) {
+		return s.fetchReviewCandles(ctx, name, "H1")
+	})
+
 	return result, true
 }
 
-// reviewTimeframe maps a review OANDA granularity ("D", "H4") to the
+// enrichTradeableWithH1 fetches H1 candles and attaches an entry-timing
+// refinement via review.EnrichWithH1, but only when result is already
+// classified tradeable in this same call — fetchH1 is never invoked for
+// watch/hot pairs, since there is nothing to time the entry of yet. A fetch
+// failure is best-effort: it is logged and the pair's classification is
+// returned unchanged, never dropped.
+func enrichTradeableWithH1(result review.ReviewResult, log *slog.Logger, name string, fetchH1 func() ([]market.Candle, error)) review.ReviewResult {
+	if result.Bucket != "tradeable" {
+		return result
+	}
+	h1, err := fetchH1()
+	if err != nil {
+		log.Warn("review: fetch H1 candles", "instrument", name, "err", err)
+		return result
+	}
+	return review.EnrichWithH1(result, h1)
+}
+
+// reviewTimeframe maps a review OANDA granularity ("D", "H4", "H1") to the
 // market.Timeframe the local candle store understands. There is no "W"
 // case: weekly candles are derived from the cached D1 series (see
 // deriveWeeklyCandles) rather than fetched as their own OANDA granularity.
@@ -133,6 +158,8 @@ func reviewTimeframe(granularity string) (market.Timeframe, bool) {
 		return market.D1, true
 	case "H4":
 		return market.H4, true
+	case "H1":
+		return market.H1, true
 	default:
 		return market.TF0, false
 	}
