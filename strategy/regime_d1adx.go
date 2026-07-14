@@ -5,6 +5,7 @@ import (
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 const maxADXThreshold = 100.0
@@ -29,7 +30,7 @@ type D1ADXFilter struct {
 	dailyCandleAccumulator
 }
 
-func NewD1ADXFilter(period int, threshold float64, scale market.Scale6) (*D1ADXFilter, error) {
+func NewD1ADXFilter(period int, threshold float64, scale types.Scale6) (*D1ADXFilter, error) {
 	if err := validateADXThreshold(threshold); err != nil {
 		return nil, err
 	}
@@ -63,7 +64,7 @@ func (f *D1ADXFilter) Trending() bool {
 	return f.adx.Float64() >= f.threshold
 }
 
-func (f *D1ADXFilter) AllowSide(_ market.Side) bool { return true }
+func (f *D1ADXFilter) AllowSide(_ types.Side) bool { return true }
 
 // ADX exposes the raw ADX value for debugging.
 func (f *D1ADXFilter) ADX() float64 { return f.adx.Float64() }

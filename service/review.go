@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ReviewRequest parameterises a watchlist review run.
@@ -158,19 +159,19 @@ func enrichTradeableWithH1(result review.ReviewResult, log *slog.Logger, name st
 }
 
 // reviewTimeframe maps a review OANDA granularity ("D", "H4", "H1") to the
-// market.Timeframe the local candle store understands. There is no "W"
+// types.Timeframe the local candle store understands. There is no "W"
 // case: weekly candles are derived from the cached D1 series (see
 // deriveWeeklyCandles) rather than fetched as their own OANDA granularity.
-func reviewTimeframe(granularity string) (market.Timeframe, bool) {
+func reviewTimeframe(granularity string) (types.Timeframe, bool) {
 	switch granularity {
 	case "D":
-		return market.D1, true
+		return types.D1, true
 	case "H4":
-		return market.H4, true
+		return types.H4, true
 	case "H1":
-		return market.H1, true
+		return types.H1, true
 	default:
-		return market.TF0, false
+		return types.TF0, false
 	}
 }
 
@@ -223,7 +224,7 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 	candles, err := dm.GetCandles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: instNorm,
-		Range:      market.TimeRange{TF: tf},
+		Range:      types.TimeRange{TF: tf},
 	}, to, count)
 	if err != nil {
 		log.Warn("review: read local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
@@ -255,7 +256,7 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 // month file per call, so a mid-month start would silently zero out the
 // already-cached earlier days of that month.
 func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granularity string, from, to time.Time) error {
-	tf, err := market.ParseTimeframe(granularity)
+	tf, err := types.ParseTimeframe(granularity)
 	if err != nil {
 		return fmt.Errorf("unknown timeframe %q", granularity)
 	}

@@ -7,14 +7,15 @@ import (
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // minCandle returns a CandleTime with a valid close price for EURUSD.
 func minCandle(close float64) *market.CandleTime {
-	toP := func(x float64) market.Price {
-		return market.Price(x*float64(market.PriceScale) + 0.5)
+	toP := func(x float64) types.Price {
+		return types.Price(x*float64(types.PriceScale) + 0.5)
 	}
 	c := toP(close)
 	return &market.CandleTime{Candle: market.Candle{
@@ -43,10 +44,10 @@ func openLot() *execution.LotBook {
 		TradeCommon: &execution.TradeCommon{
 			ID:         "lot-1",
 			Instrument: "EURUSD",
-			Side:       market.Long,
+			Side:       types.Long,
 			Units:      1000,
 		},
-		EntryPrice:     market.PriceFromFloat(1.1),
+		EntryPrice:     types.PriceFromFloat(1.1),
 		EntryTime:      1000,
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
@@ -95,13 +96,13 @@ func TestBuild_ReturnsStrategy(t *testing.T) {
 func TestStrategy_Update_NilCandleReturnsHold(t *testing.T) {
 	s := &Strategy{}
 	sig := s.Update(context.Background(), nil, minRun(nil))
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestStrategy_Update_NilRunReturnsHold(t *testing.T) {
 	s := &Strategy{}
 	sig := s.Update(context.Background(), minCandle(1.1), nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 // ── Bar-by-bar lifecycle ──────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ func TestStrategy_Update_NilRunReturnsHold(t *testing.T) {
 func TestStrategy_Update_Bar1_OpensLong(t *testing.T) {
 	s := &Strategy{}
 	sig := s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 	assert.Equal(t, "lifecycle-test-open-long", sig.Reason)
 	assert.True(t, s.opened)
 }
@@ -117,7 +118,7 @@ func TestStrategy_Update_Bar1_OpensLong(t *testing.T) {
 func TestStrategy_Update_Bar2_Holds(t *testing.T) {
 	s := &Strategy{bar: 1, opened: true}
 	sig := s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.Equal(t, "hold", sig.Reason)
 }
 
@@ -132,13 +133,13 @@ func TestStrategy_Update_Bar3_EmitsCloseAll(t *testing.T) {
 func TestStrategy_Update_Bar3_AlreadyClosed_Holds(t *testing.T) {
 	s := &Strategy{bar: 2, opened: true, closed: true}
 	sig := s.Update(context.Background(), minCandle(1.11), minRun(openLot()))
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.False(t, sig.CloseAll)
 }
 
 func TestStrategy_Update_DefaultsUnitsAndStopPips(t *testing.T) {
 	s := &Strategy{Units: 0, StopPips: 0}
 	_ = s.Update(context.Background(), minCandle(1.10), minRun(nil))
-	assert.Equal(t, market.Units(1000), s.Units)
+	assert.Equal(t, types.Units(1000), s.Units)
 	assert.Equal(t, float64(20), s.StopPips)
 }

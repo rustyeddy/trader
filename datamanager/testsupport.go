@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SeedCandles points the package-global store at a fresh temp directory
@@ -16,7 +17,7 @@ import (
 // To seed more than one month in the same test, call UseTempDataDir once
 // followed by WriteCandles for each month, rather than calling SeedCandles
 // more than once (each call points at a brand new, empty temp dir).
-func SeedCandles(tb testing.TB, source, instrument string, tf market.Timeframe, monthStart time.Time, candles []market.Candle) {
+func SeedCandles(tb testing.TB, source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.Candle) {
 	tb.Helper()
 
 	UseTempDataDir(tb)
@@ -25,7 +26,7 @@ func SeedCandles(tb testing.TB, source, instrument string, tf market.Timeframe, 
 
 // WriteCandles writes one month of candles into the currently active
 // global store (established by UseTempDataDir or a prior SeedCandles call).
-func WriteCandles(tb testing.TB, source, instrument string, tf market.Timeframe, monthStart time.Time, candles []market.Candle) {
+func WriteCandles(tb testing.TB, source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.Candle) {
 	tb.Helper()
 
 	if err := getStore().WriteMonthlyCandles(source, instrument, tf, monthStart, candles); err != nil {

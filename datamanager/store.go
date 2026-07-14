@@ -17,6 +17,7 @@ import (
 
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
 )
 
@@ -155,11 +156,11 @@ func parseCandlePath(path string) (k Key, ok bool) {
 
 	switch fileTF {
 	case "m1": // XXX normalize these!!
-		k.TF = market.M1
+		k.TF = types.M1
 	case "h1":
-		k.TF = market.H1
+		k.TF = types.H1
 	case "d1":
-		k.TF = market.D1
+		k.TF = types.D1
 	default:
 		return k, false
 	}
@@ -219,7 +220,7 @@ func parseTickPath(path string) (Key, bool) {
 		Instrument: market.NormalizeInstrument(inst),
 		Source:     normalizeSource(source),
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 	}
 
 	year, err := strconv.Atoi(yearStr)
@@ -310,7 +311,7 @@ func (s *store) walkRoot(root string, inv *Inventory) error {
 		}
 
 		var ok bool
-		var rng market.TimeRange
+		var rng types.TimeRange
 		var descriptor string
 		name := strings.ToLower(info.Name())
 		var key Key
@@ -326,7 +327,7 @@ func (s *store) walkRoot(root string, inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = market.NewTimeRange(market.FromTime(start), market.FromTime(end), market.Ticks)
+			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end), types.Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
@@ -361,7 +362,7 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 	asset := Asset{
 		Key:        key,
 		Path:       path,
-		Range:      market.MonthRange(key.Year, key.Month),
+		Range:      types.MonthRange(key.Year, key.Month),
 		Exists:     true,
 		Complete:   info.Size() > 0,
 		Size:       info.Size(),
@@ -433,7 +434,7 @@ func timeRangeMayHaveForexData(start, end time.Time) bool {
 }
 
 func (s *store) writeMetadata(cs *CandleSet, w io.Writer) error {
-	tfstr := market.Timeframe(cs.Timeframe).String()
+	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
 	_, err := fmt.Fprintf(w, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
@@ -518,7 +519,7 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 
 	// Build CandleSet structure from key parameters.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	start := market.FromTime(monthStart)
+	start := types.FromTime(monthStart)
 	tf := key.TF
 	step := int64(tf)
 
@@ -532,7 +533,7 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 		Source:     readCSVSource(key.Source),
 		Start:      start,
 		Timeframe:  tf,
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 		Candles:    make([]market.Candle, n),
 		Valid:      make([]uint64, (n+63)/64),
 	}
@@ -569,27 +570,27 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := market.ParseRawPrice(fields[1])
+		highv, err := types.ParseRawPrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
-		openv, err := market.ParseRawPrice(fields[2])
+		openv, err := types.ParseRawPrice(fields[2])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := market.ParseRawPrice(fields[3])
+		lowv, err := types.ParseRawPrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := market.ParseRawPrice(fields[4])
+		closev, err := types.ParseRawPrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := market.ParseRawPrice(fields[5])
+		avgSpread, err := types.ParseRawPrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := market.ParseRawPrice(fields[6])
+		maxSpread, err := types.ParseRawPrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
@@ -659,7 +660,7 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 		Instrument: market.NormalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
-		TF:         market.Timeframe(cs.Timeframe),
+		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
@@ -690,7 +691,7 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 
 		c := cs.Candles[i]
 		var flags uint64
-		if len(cs.Valid) > 0 && market.BitIsSet(cs.Valid, i) {
+		if len(cs.Valid) > 0 && types.BitIsSet(cs.Valid, i) {
 			flags = 0x0001
 		}
 
@@ -800,7 +801,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}
-	if key.TF != market.Ticks {
+	if key.TF != types.Ticks {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
@@ -827,7 +828,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
 	}
 
-	baseUnixMS := market.TimeMillis(time.Date(
+	baseUnixMS := types.TimeMillis(time.Date(
 		key.Year,
 		time.Month(key.Month),
 		key.Day,
@@ -851,7 +852,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	return newFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS market.TimeMillis, priceMultiplier uint32) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS types.TimeMillis, priceMultiplier uint32) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -879,9 +880,9 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS market.TimeMillis, pri
 	}
 
 	t := RawTick{
-		TimeMillis: baseUnixMS + market.TimeMillis(msOffset),
-		Ask:        market.Price(askU * priceMultiplier),
-		Bid:        market.Price(bidU * priceMultiplier),
+		TimeMillis: baseUnixMS + types.TimeMillis(msOffset),
+		Ask:        types.Price(askU * priceMultiplier),
+		Bid:        types.Price(bidU * priceMultiplier),
 		AskVol:     askVol,
 		BidVol:     bidVol,
 	}

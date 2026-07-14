@@ -1,4 +1,4 @@
-package market
+package idgen
 
 import (
 	cryptoRand "crypto/rand"
@@ -48,7 +48,7 @@ func (g *ulidGenerator) New() string {
 	return id.String()
 }
 
-// New returns a ULID string (time-sortable identifier).
+// NewULID returns a ULID string (time-sortable identifier).
 //
 // ULIDs are lexicographically sortable by generation time, which makes them
 // ideal for journaling/trading records and database indexes.

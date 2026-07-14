@@ -6,6 +6,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,14 +16,14 @@ import (
 type fakeRegime struct {
 	ready    bool
 	trending bool
-	allow    map[market.Side]bool
+	allow    map[types.Side]bool
 }
 
 func (f fakeRegime) Name() string           { return "fake-regime" }
 func (f fakeRegime) Ready() bool            { return f.ready }
 func (f fakeRegime) Tick(market.CandleTime) {}
 func (f fakeRegime) Trending() bool         { return f.trending }
-func (f fakeRegime) AllowSide(s market.Side) bool {
+func (f fakeRegime) AllowSide(s types.Side) bool {
 	if f.allow == nil {
 		return true
 	}
@@ -31,16 +32,16 @@ func (f fakeRegime) AllowSide(s market.Side) bool {
 
 type fakeExit struct {
 	ready bool
-	stop  market.Price
+	stop  types.Price
 }
 
 func (f fakeExit) Name() string       { return "fake-exit" }
 func (f fakeExit) Ready() bool        { return f.ready }
 func (f fakeExit) Tick(market.Candle) {}
-func (f fakeExit) InitialStop(market.Side, market.Price, market.Candle) market.Price {
+func (f fakeExit) InitialStop(types.Side, types.Price, market.Candle) types.Price {
 	return f.stop
 }
-func (f fakeExit) UpdateStop(_ market.Side, cur, _, _ market.Price, _ market.Candle) market.Price {
+func (f fakeExit) UpdateStop(_ types.Side, cur, _, _ types.Price, _ market.Candle) types.Price {
 	return cur
 }
 
@@ -50,8 +51,8 @@ type testCtx struct {
 	exit       strategy.ExitStrategy
 	regime     strategy.RegimeFilter
 	candle     market.CandleTime
-	slippage   market.Price
-	maxSpread  market.Price
+	slippage   types.Price
+	maxSpread  types.Price
 }
 
 func (c testCtx) Instrument() string            { return c.instrument }
@@ -59,19 +60,19 @@ func (c testCtx) Account() *execution.Account   { return c.acct }
 func (c testCtx) Exit() strategy.ExitStrategy   { return c.exit }
 func (c testCtx) Regime() strategy.RegimeFilter { return c.regime }
 func (c testCtx) Candle() market.CandleTime     { return c.candle }
-func (c testCtx) Slippage() market.Price        { return c.slippage }
-func (c testCtx) MaxSpread() market.Price       { return c.maxSpread }
-func (c testCtx) DefaultStopPips() market.Pips  { return 0 }
+func (c testCtx) Slippage() types.Price         { return c.slippage }
+func (c testCtx) MaxSpread() types.Price        { return c.maxSpread }
+func (c testCtx) DefaultStopPips() types.Pips   { return 0 }
 
-func openReq(id string, side market.Side, price, stop market.Price, units market.Units) *execution.OpenRequest {
+func openReq(id string, side types.Side, price, stop types.Price, units types.Units) *execution.OpenRequest {
 	return &execution.OpenRequest{Request: execution.Request{
 		TradeCommon: &execution.TradeCommon{ID: id, Instrument: "EURUSD", Side: side, Units: units, Stop: stop},
 		Price:       price,
 	}}
 }
 
-func candleTime(avgSpread market.Price) market.CandleTime {
-	return market.CandleTime{Candle: market.Candle{Close: market.PriceFromFloat(1.10), AvgSpread: avgSpread}}
+func candleTime(avgSpread types.Price) market.CandleTime {
+	return market.CandleTime{Candle: market.Candle{Close: types.PriceFromFloat(1.10), AvgSpread: avgSpread}}
 }
 
 // --- tests ------------------------------------------------------------------
@@ -93,7 +94,7 @@ func TestDefaultPlanner_NilInputs(t *testing.T) {
 
 func TestDefaultPlanner_RegimeNotTrendingSuppressesOpens(t *testing.T) {
 	t.Parallel()
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.09), 1)}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.09), 1)}}
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
 		regime: fakeRegime{ready: true, trending: false},
@@ -106,12 +107,12 @@ func TestDefaultPlanner_RegimeNotTrendingSuppressesOpens(t *testing.T) {
 
 func TestDefaultPlanner_RegimeAllowSideFiltersOpens(t *testing.T) {
 	t.Parallel()
-	longOp := openReq("long", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.09), 1)
-	shortOp := openReq("short", market.Short, market.PriceFromFloat(1.10), market.PriceFromFloat(1.11), 1)
+	longOp := openReq("long", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.09), 1)
+	shortOp := openReq("short", types.Short, types.PriceFromFloat(1.10), types.PriceFromFloat(1.11), 1)
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{longOp, shortOp}}
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
-		regime: fakeRegime{ready: true, trending: true, allow: map[market.Side]bool{market.Long: true}},
+		regime: fakeRegime{ready: true, trending: true, allow: map[types.Side]bool{types.Long: true}},
 		exit:   strategy.NoopExit{},
 		candle: candleTime(0),
 	})
@@ -122,7 +123,7 @@ func TestDefaultPlanner_RegimeAllowSideFiltersOpens(t *testing.T) {
 
 func TestDefaultPlanner_RegimeNotReadyLeavesOpens(t *testing.T) {
 	t.Parallel()
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.09), 1)}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.09), 1)}}
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
 		regime: fakeRegime{ready: false},
@@ -135,13 +136,13 @@ func TestDefaultPlanner_RegimeNotReadyLeavesOpens(t *testing.T) {
 
 func TestDefaultPlanner_MaxSpreadGate(t *testing.T) {
 	t.Parallel()
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.09), 1)}}
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{openReq("o1", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.09), 1)}}
 
 	_, stats, err := DefaultPlanner{}.finalize(plan, testCtx{
 		regime:    strategy.NoopRegime{},
 		exit:      strategy.NoopExit{},
-		candle:    candleTime(market.Price(30)),
-		maxSpread: market.Price(20),
+		candle:    candleTime(types.Price(30)),
+		maxSpread: types.Price(20),
 	})
 	require.NoError(t, err)
 	assert.Empty(t, plan.Opens)
@@ -150,14 +151,14 @@ func TestDefaultPlanner_MaxSpreadGate(t *testing.T) {
 
 func TestDefaultPlanner_OpenFillAdjustAndStats(t *testing.T) {
 	t.Parallel()
-	entry := market.PriceFromFloat(1.10)
-	avgSpread := market.Price(10)
-	slippage := market.Price(5)
+	entry := types.PriceFromFloat(1.10)
+	avgSpread := types.Price(10)
+	slippage := types.Price(5)
 
 	// Long buys the ask: +spread+slippage. Units preset so sizing is skipped.
-	longOp := openReq("long", market.Long, entry, market.PriceFromFloat(1.09), 1)
+	longOp := openReq("long", types.Long, entry, types.PriceFromFloat(1.09), 1)
 	// Short sells the bid: only -slippage.
-	shortOp := openReq("short", market.Short, entry, market.PriceFromFloat(1.11), 1)
+	shortOp := openReq("short", types.Short, entry, types.PriceFromFloat(1.11), 1)
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{longOp, shortOp}}
 
 	_, stats, err := DefaultPlanner{}.finalize(plan, testCtx{
@@ -175,9 +176,9 @@ func TestDefaultPlanner_OpenFillAdjustAndStats(t *testing.T) {
 
 func TestDefaultPlanner_InitialStopOverride(t *testing.T) {
 	t.Parallel()
-	op := openReq("o1", market.Long, market.PriceFromFloat(1.10), 0, 1) // no strategy stop
+	op := openReq("o1", types.Long, types.PriceFromFloat(1.10), 0, 1) // no strategy stop
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{op}}
-	exitStop := market.PriceFromFloat(1.085)
+	exitStop := types.PriceFromFloat(1.085)
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
 		regime: strategy.NoopRegime{},
@@ -190,11 +191,11 @@ func TestDefaultPlanner_InitialStopOverride(t *testing.T) {
 
 func TestDefaultPlanner_SizesWhenUnitsZero(t *testing.T) {
 	t.Parallel()
-	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
-	acct.RiskFraction = market.RateFromFloat(0.01)
+	acct.RiskFraction = types.RateFromFloat(0.01)
 
-	op := openReq("o1", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.09), 0)
+	op := openReq("o1", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.09), 0)
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{op}}
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
@@ -209,12 +210,12 @@ func TestDefaultPlanner_SizesWhenUnitsZero(t *testing.T) {
 
 func TestDefaultPlanner_SizingErrorPropagates(t *testing.T) {
 	t.Parallel()
-	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
-	acct.RiskFraction = market.RateFromFloat(0.01)
+	acct.RiskFraction = types.RateFromFloat(0.01)
 
 	// Entry == Stop is an invalid sizing request.
-	op := openReq("o1", market.Long, market.PriceFromFloat(1.10), market.PriceFromFloat(1.10), 0)
+	op := openReq("o1", types.Long, types.PriceFromFloat(1.10), types.PriceFromFloat(1.10), 0)
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{op}}
 
 	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
@@ -243,10 +244,10 @@ func TestPlanSignal_FlatHolds(t *testing.T) {
 
 func TestPlanSignal_LongOpensPosition(t *testing.T) {
 	t.Parallel()
-	entry := market.PriceFromFloat(1.10)
-	avgSpread := market.Price(10)
+	entry := types.PriceFromFloat(1.10)
+	avgSpread := types.Price(10)
 
-	plan, stats, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "test-long"}, testCtx{
+	plan, stats, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "test-long"}, testCtx{
 		instrument: "EURUSD",
 		regime:     strategy.NoopRegime{},
 		exit:       strategy.NoopExit{},
@@ -254,7 +255,7 @@ func TestPlanSignal_LongOpensPosition(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Opens, 1)
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
+	assert.Equal(t, types.Long, plan.Opens[0].Side)
 	assert.Equal(t, "EURUSD", plan.Opens[0].Instrument)
 	// Fill-price adjust: long buys at ask (close + spread).
 	assert.Equal(t, entry+avgSpread, plan.Opens[0].Price)
@@ -266,51 +267,51 @@ func TestPlanSignal_ReversalClosesOpposingSide(t *testing.T) {
 	t.Parallel()
 	// Build a small account just to host open lots; RiskFraction left at zero so
 	// the planner skips sizing (stop is also 0 — this test focuses on close logic).
-	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
 
 	// Plant an open short lot.
 	shortLot := &execution.Lot{
-		TradeCommon: &execution.TradeCommon{ID: "s1", Instrument: "EURUSD", Side: market.Short, Stop: market.PriceFromFloat(1.12), Units: 1000},
+		TradeCommon: &execution.TradeCommon{ID: "s1", Instrument: "EURUSD", Side: types.Short, Stop: types.PriceFromFloat(1.12), Units: 1000},
 		State:       execution.LotOpen,
 	}
 	require.NoError(t, acct.Lots.Add(shortLot))
 
 	// Pre-size the open so the planner does not attempt sizing (avoids stop=0 error).
-	entry := market.PriceFromFloat(1.10)
-	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "flip"}, testCtx{
+	entry := types.PriceFromFloat(1.10)
+	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "flip"}, testCtx{
 		instrument: "EURUSD",
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
-		exit:       fakeExit{ready: true, stop: market.PriceFromFloat(1.09)},
+		exit:       fakeExit{ready: true, stop: types.PriceFromFloat(1.09)},
 		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Closes, 1, "opposing short lot must be closed")
 	assert.Equal(t, "s1", plan.Closes[0].Lot.ID)
 	require.Len(t, plan.Opens, 1, "new long position must be opened")
-	assert.Equal(t, market.Long, plan.Opens[0].Side)
+	assert.Equal(t, types.Long, plan.Opens[0].Side)
 }
 
 func TestPlanSignal_SameSideNotClosed(t *testing.T) {
 	t.Parallel()
-	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
 
 	// Plant an open long lot — same side as the incoming signal.
 	longLot := &execution.Lot{
-		TradeCommon: &execution.TradeCommon{ID: "l1", Instrument: "EURUSD", Side: market.Long, Stop: market.PriceFromFloat(1.08), Units: 1000},
+		TradeCommon: &execution.TradeCommon{ID: "l1", Instrument: "EURUSD", Side: types.Long, Stop: types.PriceFromFloat(1.08), Units: 1000},
 		State:       execution.LotOpen,
 	}
 	require.NoError(t, acct.Lots.Add(longLot))
 
 	// Use an exit strategy that provides a stop so sizing can proceed without error.
-	entry := market.PriceFromFloat(1.10)
-	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "add-long"}, testCtx{
+	entry := types.PriceFromFloat(1.10)
+	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "add-long"}, testCtx{
 		instrument: "EURUSD",
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
-		exit:       fakeExit{ready: true, stop: market.PriceFromFloat(1.09)},
+		exit:       fakeExit{ready: true, stop: types.PriceFromFloat(1.09)},
 		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
 	})
 	require.NoError(t, err)
@@ -320,7 +321,7 @@ func TestPlanSignal_SameSideNotClosed(t *testing.T) {
 
 func TestPlanSignal_RegimeSuppressesOpen(t *testing.T) {
 	t.Parallel()
-	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "long"}, testCtx{
+	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "long"}, testCtx{
 		instrument: "EURUSD",
 		regime:     fakeRegime{ready: true, trending: false},
 		exit:       strategy.NoopExit{},
@@ -332,10 +333,10 @@ func TestPlanSignal_RegimeSuppressesOpen(t *testing.T) {
 
 func TestPlanSignal_ExitStrategyOverridesStop(t *testing.T) {
 	t.Parallel()
-	entry := market.PriceFromFloat(1.10)
-	exitStop := market.PriceFromFloat(1.085)
+	entry := types.PriceFromFloat(1.10)
+	exitStop := types.PriceFromFloat(1.085)
 
-	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "long"}, testCtx{
+	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "long"}, testCtx{
 		instrument: "EURUSD",
 		regime:     strategy.NoopRegime{},
 		exit:       fakeExit{ready: true, stop: exitStop},
@@ -348,14 +349,14 @@ func TestPlanSignal_ExitStrategyOverridesStop(t *testing.T) {
 
 func TestPlanSignal_SizesWhenAccountPresent(t *testing.T) {
 	t.Parallel()
-	acct := execution.NewAccount("t", market.MoneyFromFloat(10_000))
+	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
 	acct.Equity = acct.Balance
-	acct.RiskFraction = market.RateFromFloat(0.01)
+	acct.RiskFraction = types.RateFromFloat(0.01)
 
-	entry := market.PriceFromFloat(1.10)
-	exitStop := market.PriceFromFloat(1.09)
+	entry := types.PriceFromFloat(1.10)
+	exitStop := types.PriceFromFloat(1.09)
 
-	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: market.Long, Reason: "long"}, testCtx{
+	plan, _, err := DefaultPlanner{}.PlanSignal(strategy.Signal{Side: types.Long, Reason: "long"}, testCtx{
 		instrument: "EURUSD",
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
@@ -369,19 +370,19 @@ func TestPlanSignal_SizesWhenAccountPresent(t *testing.T) {
 
 func TestDefaultPlanner_CloseFillAdjust(t *testing.T) {
 	t.Parallel()
-	avgSpread := market.Price(10)
-	slippage := market.Price(5)
-	base := market.PriceFromFloat(1.10)
+	avgSpread := types.Price(10)
+	slippage := types.Price(5)
+	base := types.PriceFromFloat(1.10)
 
 	// Closing a short means buying the ask: +spread+slippage.
 	shortClose := &execution.CloseRequest{
 		Request: execution.Request{TradeCommon: &execution.TradeCommon{ID: "c1"}, Price: base},
-		Lot:     &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "c1", Side: market.Short}},
+		Lot:     &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "c1", Side: types.Short}},
 	}
 	// Closing a long means selling the bid: only -slippage.
 	longClose := &execution.CloseRequest{
 		Request: execution.Request{TradeCommon: &execution.TradeCommon{ID: "c2"}, Price: base},
-		Lot:     &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "c2", Side: market.Long}},
+		Lot:     &execution.Lot{TradeCommon: &execution.TradeCommon{ID: "c2", Side: types.Long}},
 	}
 	plan := &strategy.StrategyPlan{Closes: []*execution.CloseRequest{shortClose, longClose}}
 

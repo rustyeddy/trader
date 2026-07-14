@@ -1,15 +1,19 @@
 package market
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rustyeddy/trader/types"
+)
 
 // Candle represents a trader domain type.
 type Candle struct {
-	Open      Price
-	High      Price
-	Low       Price
-	Close     Price
-	AvgSpread Price
-	MaxSpread Price
+	Open      types.Price
+	High      types.Price
+	Low       types.Price
+	Close     types.Price
+	AvgSpread types.Price
+	MaxSpread types.Price
 	Ticks     int32 // number of ticks per candle
 }
 
@@ -40,7 +44,7 @@ func (c *Candle) FullString() string {
 // candleTime represents a trader domain type.
 type candleTime struct {
 	Candle
-	Timestamp
+	types.Timestamp
 }
 
 // CandleTime represents a trader domain type.

@@ -5,16 +5,17 @@ import (
 
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // autoCloseExits checks every open lot against the bar's OHLC and
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.CandleTime, slippage market.Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.CandleTime, slippage types.Price) (int, error) {
 	var hits []struct {
 		lot    *execution.Lot
-		exitPx market.Price
+		exitPx types.Price
 		reason string
 		cause  execution.CloseCause
 	}
@@ -33,7 +34,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 		}
 		hits = append(hits, struct {
 			lot    *execution.Lot
-			exitPx market.Price
+			exitPx types.Price
 			reason string
 			cause  execution.CloseCause
 		}{lot, exitPx, reason, cause})
@@ -42,7 +43,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 
 	for _, h := range hits {
 		// Short closes by buying at ask; long closes by selling at bid.
-		isBuy := h.lot.Side == market.Short
+		isBuy := h.lot.Side == types.Short
 		adjPx := h.exitPx + execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		cl := &execution.CloseRequest{
 			Request: execution.Request{
@@ -64,7 +65,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(lot *execution.Lot, c market.Candle) (exitPx market.Price, reason string, hit bool) {
+func checkExit(lot *execution.Lot, c market.Candle) (exitPx types.Price, reason string, hit bool) {
 	if lot == nil {
 		return 0, "", false
 	}
@@ -73,7 +74,7 @@ func checkExit(lot *execution.Lot, c market.Candle) (exitPx market.Price, reason
 	hasTake := lot.Take != 0
 
 	switch lot.Side {
-	case market.Long:
+	case types.Long:
 		stopHit := hasStop && c.Low <= lot.Stop
 		takeHit := hasTake && c.High >= lot.Take
 		if stopHit && takeHit {
@@ -86,7 +87,7 @@ func checkExit(lot *execution.Lot, c market.Candle) (exitPx market.Price, reason
 			return lot.Take, "TAKE", true
 		}
 
-	case market.Short:
+	case types.Short:
 		stopHit := hasStop && c.High >= lot.Stop
 		takeHit := hasTake && c.Low <= lot.Take
 		if stopHit && takeHit {

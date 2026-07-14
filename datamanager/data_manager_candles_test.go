@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func writeMonthlyCandles(
 	t *testing.T,
 	s *store,
 	instrument string,
-	tf market.Timeframe,
+	tf types.Timeframe,
 	year int,
 	month time.Month,
 	rows map[time.Time]market.Candle,
@@ -37,14 +38,14 @@ func writeMonthlyCandles(
 	cs, err := NewMonthlyCandleSet(
 		instrument,
 		tf,
-		market.FromTime(start),
-		market.PriceScale,
+		types.FromTime(start),
+		types.PriceScale,
 		market.SourceCandles,
 	)
 	require.NoError(t, err)
 
 	for ts, c := range rows {
-		require.NoError(t, cs.AddCandle(market.FromTime(ts.UTC()), c))
+		require.NoError(t, cs.AddCandle(types.FromTime(ts.UTC()), c))
 	}
 
 	require.NoError(t, s.WriteCSV(cs))
@@ -59,10 +60,10 @@ func writeMonthlyCandles(
 	}
 }
 
-func collectCandles(t *testing.T, it market.CandleIterator) ([]market.Timestamp, []market.Candle) {
+func collectCandles(t *testing.T, it market.CandleIterator) ([]types.Timestamp, []market.Candle) {
 	t.Helper()
 
-	var outTS []market.Timestamp
+	var outTS []types.Timestamp
 	var outCandles []market.Candle
 
 	for ct, ok := it.Next(); ok; ct, ok = it.Next() {
@@ -85,7 +86,7 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 	feb01_01 := time.Date(2026, time.February, 1, 1, 0, 0, 0, time.UTC)
 	feb01_02 := time.Date(2026, time.February, 1, 2, 0, 0, 0, time.UTC)
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.January, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, map[time.Time]market.Candle{
 		jan31_23: {
 			Open:  101,
 			High:  105,
@@ -95,7 +96,7 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 		},
 	})
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.February, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.February, map[time.Time]market.Candle{
 		feb01_00: {
 			Open:  201,
 			High:  205,
@@ -122,10 +123,10 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(jan31_23),
-			End:   market.FromTime(feb01_02), // exclusive
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(jan31_23),
+			End:   types.FromTime(feb01_02), // exclusive
+			TF:    types.H1,
 		},
 		Strict: true,
 	}
@@ -136,10 +137,10 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 
 	gotTS, gotCandles := collectCandles(t, it)
 
-	times := []market.Timestamp{
-		market.FromTime(jan31_23),
-		market.FromTime(feb01_00),
-		market.FromTime(feb01_01),
+	times := []types.Timestamp{
+		types.FromTime(jan31_23),
+		types.FromTime(feb01_00),
+		types.FromTime(feb01_01),
 	}
 	require.Equal(t, times, gotTS)
 	require.Equal(t, []market.Candle{
@@ -173,7 +174,7 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 
 	jan15_00 := time.Date(2026, time.January, 15, 0, 0, 0, 0, time.UTC)
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.January, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, map[time.Time]market.Candle{
 		jan15_00: {
 			Open:  111,
 			High:  112,
@@ -186,10 +187,10 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 		Strict: false,
 	}
@@ -200,8 +201,8 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 
 	gotTS, gotCandles := collectCandles(t, it)
 
-	require.Equal(t, []market.Timestamp{
-		market.FromTime(jan15_00),
+	require.Equal(t, []types.Timestamp{
+		types.FromTime(jan15_00),
 	}, gotTS)
 
 	require.Equal(t, []market.Candle{
@@ -221,7 +222,7 @@ func TestDataManagerCandles_StrictTrueErrorsOnMissingMonth(t *testing.T) {
 
 	jan15_00 := time.Date(2026, time.January, 15, 0, 0, 0, 0, time.UTC)
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.January, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, map[time.Time]market.Candle{
 		jan15_00: {
 			Open:  111,
 			High:  112,
@@ -234,10 +235,10 @@ func TestDataManagerCandles_StrictTrueErrorsOnMissingMonth(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 		Strict: true,
 	}
@@ -258,10 +259,10 @@ func TestCandles_CancelledContext(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(ctx, CandleRequest{
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 	})
 	require.Error(t, err)
@@ -273,10 +274,10 @@ func TestCandles_BlankInstrument(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 	})
 	require.Error(t, err)
@@ -289,10 +290,10 @@ func TestCandles_UnsupportedTimeframe(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.Ticks,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.Ticks,
 		},
 	})
 	require.Error(t, err)
@@ -305,8 +306,8 @@ func TestCandles_InvalidRange(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.Candles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			TF: market.H1,
+		Range: types.TimeRange{
+			TF: types.H1,
 		},
 	})
 	require.Error(t, err)
@@ -319,16 +320,16 @@ func TestCandles_DefaultSourceFallsBackToCandles(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.January, nil)
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, nil)
 
 	dm := &DataManager{}
 	req := CandleRequest{
 		Source:     "",
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(start),
-			End:   market.FromTime(end),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(start),
+			End:   types.FromTime(end),
+			TF:    types.H1,
 		},
 		Strict: false,
 	}
@@ -346,10 +347,10 @@ func TestCandles_StrictMissingFileWrapsError(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 		Strict: true,
 	}
@@ -361,8 +362,8 @@ func TestCandles_StrictMissingFileWrapsError(t *testing.T) {
 func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
 	s := useTempStore(t)
 
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.January, nil)
-	writeMonthlyCandles(t, s, "EURUSD", market.H1, 2026, time.February, nil)
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.January, nil)
+	writeMonthlyCandles(t, s, "EURUSD", types.H1, 2026, time.February, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -371,10 +372,10 @@ func TestCandles_ContextCancelledDuringIteration(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range: market.TimeRange{
-			Start: market.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			End:   market.FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
-			TF:    market.H1,
+		Range: types.TimeRange{
+			Start: types.FromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			End:   types.FromTime(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)),
+			TF:    types.H1,
 		},
 	}
 	_, err := dm.Candles(ctx, req)

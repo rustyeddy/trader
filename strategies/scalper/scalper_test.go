@@ -9,6 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func TestNew_Valid(t *testing.T) {
@@ -66,16 +67,16 @@ func TestStopDescription(t *testing.T) {
 func TestUpdate_NilCandleTime(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
 	sig := s.Update(context.Background(), nil, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestUpdate_HoldsDuringWarmup(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
 	ct := &market.CandleTime{
-		Candle: market.Candle{Close: market.Price(1.0850 * float64(market.PriceScale))},
+		Candle: market.Candle{Close: types.Price(1.0850 * float64(types.PriceScale))},
 	}
 	sig := s.Update(context.Background(), ct, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
@@ -94,22 +95,22 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 		scalperCT(1.0100, 1.0110, 0.9990, 1.0000),
 	} {
 		sig := s.Update(context.Background(), ct, run)
-		assert.Equal(t, market.Flat, sig.Side)
+		assert.Equal(t, types.Flat, sig.Side)
 	}
 
 	recovery := scalperCT(1.0000, 1.0310, 0.9990, 1.0300)
 	sig := s.Update(context.Background(), recovery, run)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 	assert.Equal(t, "buy-the-dip", sig.Reason)
 }
 
 func scalperCT(open, high, low, close float64) *market.CandleTime {
 	return &market.CandleTime{
 		Candle: market.Candle{
-			Open:  market.PriceFromFloat(open),
-			High:  market.PriceFromFloat(high),
-			Low:   market.PriceFromFloat(low),
-			Close: market.PriceFromFloat(close),
+			Open:  types.PriceFromFloat(open),
+			High:  types.PriceFromFloat(high),
+			Low:   types.PriceFromFloat(low),
+			Close: types.PriceFromFloat(close),
 		},
 	}
 }

@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
-func (cs *CandleSet) Aggregate(outTF market.Timeframe) (*CandleSet, error) {
+func (cs *CandleSet) Aggregate(outTF types.Timeframe) (*CandleSet, error) {
 	return cs.aggregate(outTF, 1)
 }
 
@@ -16,13 +17,13 @@ func (cs *CandleSet) AggregateH1(minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
-	if cs.Timeframe != market.M1 {
+	if cs.Timeframe != types.M1 {
 		return nil, fmt.Errorf("AggregateH1 requires M1 source, got timeframe %d", cs.Timeframe)
 	}
-	return cs.aggregate(market.H1, minValid)
+	return cs.aggregate(types.H1, minValid)
 }
 
-func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet, error) {
+func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -51,10 +52,10 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 		}, nil
 	}
 
-	inTF := market.Timestamp(cs.Timeframe)
-	outStep := market.Timestamp(outTF)
+	inTF := types.Timestamp(cs.Timeframe)
+	outStep := types.Timestamp(outTF)
 	start := (cs.Start / outStep) * outStep
-	end := cs.Start + market.Timestamp(len(cs.Candles)-1)*inTF
+	end := cs.Start + types.Timestamp(len(cs.Candles)-1)*inTF
 	outLen := int((end-start)/outStep) + 1
 
 	out := &CandleSet{
@@ -69,7 +70,7 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 
 	hasValidBits := len(cs.Valid) > 0
 	for oi := 0; oi < outLen; oi++ {
-		windowStart := start + market.Timestamp(oi)*outStep
+		windowStart := start + types.Timestamp(oi)*outStep
 		firstIdx := int((windowStart - cs.Start) / inTF)
 
 		var (
@@ -85,7 +86,7 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 			if idx < 0 || idx >= len(cs.Candles) {
 				continue
 			}
-			if hasValidBits && !market.BitIsSet(cs.Valid, idx) {
+			if hasValidBits && !types.BitIsSet(cs.Valid, idx) {
 				continue
 			}
 
@@ -123,11 +124,11 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 
 		outC.Ticks = int32(sumTicks)
 		if sumTicks > 0 {
-			outC.AvgSpread = market.Price((sumSpread + sumTicks/2) / sumTicks)
+			outC.AvgSpread = types.Price((sumSpread + sumTicks/2) / sumTicks)
 		}
 
 		out.Candles[oi] = outC
-		market.BitSet(out.Valid, oi)
+		types.BitSet(out.Valid, oi)
 	}
 
 	return out, nil

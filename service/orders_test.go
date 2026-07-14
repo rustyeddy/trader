@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +73,7 @@ func TestPlaceMarketOrder_MaxUnits_Caps(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
-		RiskPct:    market.RateFromFloat(0.01),
+		RiskPct:    types.RateFromFloat(0.01),
 		StopPips:   20,
 		MaxUnits:   5000,
 		Confirm:    false,
@@ -89,7 +89,7 @@ func TestPlaceMarketOrder_MaxUnits_Short_Caps(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "short",
-		RiskPct:    market.RateFromFloat(0.01),
+		RiskPct:    types.RateFromFloat(0.01),
 		StopPips:   20,
 		MaxUnits:   3000,
 		Confirm:    false,
@@ -106,7 +106,7 @@ func TestPlaceMarketOrder_MaxUnits_NoEffect_WhenBelowCap(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
-		RiskPct:    market.RateFromFloat(0.00001),
+		RiskPct:    types.RateFromFloat(0.00001),
 		StopPips:   20,
 		MaxUnits:   100_000, // very high cap — should not trigger
 		Confirm:    false,
@@ -128,7 +128,7 @@ func TestPlaceMarketOrder_MaxPositionUSD_Caps(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "long",
-		RiskPct:        market.RateFromFloat(0.01),
+		RiskPct:        types.RateFromFloat(0.01),
 		StopPips:       20,
 		MaxPositionUSD: 5000,
 		Confirm:        false,
@@ -147,7 +147,7 @@ func TestPlaceMarketOrder_MaxPositionUSD_Short_Caps(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "short",
-		RiskPct:        market.RateFromFloat(0.01),
+		RiskPct:        types.RateFromFloat(0.01),
 		StopPips:       20,
 		MaxPositionUSD: 2000,
 		Confirm:        false,
@@ -166,7 +166,7 @@ func TestPlaceMarketOrder_BothCaps_TighterWins(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "long",
-		RiskPct:        market.RateFromFloat(0.01),
+		RiskPct:        types.RateFromFloat(0.01),
 		StopPips:       20,
 		MaxUnits:       10_000,
 		MaxPositionUSD: 5000,
@@ -185,7 +185,7 @@ func TestPlaceMarketOrder_NoCaps_UsesRiskBased(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
-		RiskPct:    market.RateFromFloat(0.01),
+		RiskPct:    types.RateFromFloat(0.01),
 		StopPips:   20,
 		Confirm:    false,
 	})
@@ -202,7 +202,7 @@ func TestPlaceMarketOrder_BadSide(t *testing.T) {
 	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "sideways",
-		RiskPct:    market.RateFromFloat(0.001),
+		RiskPct:    types.RateFromFloat(0.001),
 		StopPips:   20,
 	})
 	require.Error(t, err)
@@ -216,7 +216,7 @@ func TestPlaceMarketOrder_NoStop(t *testing.T) {
 	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
-		RiskPct:    market.RateFromFloat(0.001),
+		RiskPct:    types.RateFromFloat(0.001),
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "StopPrice or StopPips")
@@ -288,7 +288,7 @@ func TestPlaceMarketOrder_JPYSizing(t *testing.T) {
 	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "USD_JPY",
 		Side:       "long",
-		RiskPct:    market.RateFromFloat(0.01),
+		RiskPct:    types.RateFromFloat(0.01),
 		StopPips:   600,
 		Confirm:    false,
 	})

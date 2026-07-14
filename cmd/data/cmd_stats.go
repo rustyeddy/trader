@@ -12,6 +12,7 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func newStatsCmd(_ *config.RootConfig) *cobra.Command {
@@ -59,7 +60,7 @@ func newStatsCmd(_ *config.RootConfig) *cobra.Command {
 			// End is exclusive in TimeRange; add one day to include the --to date.
 			toExcl := to.AddDate(0, 0, 1)
 
-			tr, err := market.ParseTimeRange(
+			tr, err := types.ParseTimeRange(
 				from.Format("2006-01-02"),
 				toExcl.Format("2006-01-02"),
 				timeframe,

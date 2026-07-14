@@ -1,6 +1,9 @@
 package strategy
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 // RegimeFilter classifies the current market as trending or ranging.
 // The bar loop calls Tick() every bar and suppresses new position opens
@@ -25,14 +28,14 @@ type RegimeFilter interface {
 	// AllowSide returns true when new entries on the given side are permitted.
 	// Trending() == false already blocks all opens; AllowSide provides
 	// directional filtering when Trending() == true.
-	AllowSide(side market.Side) bool
+	AllowSide(side types.Side) bool
 }
 
 // NoopRegime is a pass-through filter that always allows trading.
 type NoopRegime struct{}
 
-func (NoopRegime) Name() string                 { return "" }
-func (NoopRegime) Ready() bool                  { return true }
-func (NoopRegime) Tick(_ market.CandleTime)     {}
-func (NoopRegime) Trending() bool               { return true }
-func (NoopRegime) AllowSide(_ market.Side) bool { return true }
+func (NoopRegime) Name() string                { return "" }
+func (NoopRegime) Ready() bool                 { return true }
+func (NoopRegime) Tick(_ market.CandleTime)    {}
+func (NoopRegime) Trending() bool              { return true }
+func (NoopRegime) AllowSide(_ types.Side) bool { return true }

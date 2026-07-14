@@ -9,10 +9,11 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func mkClose(close float64) market.Candle {
-	toP := func(x float64) market.Price { return market.Price(x*float64(market.PriceScale) + 0.5) }
+	toP := func(x float64) types.Price { return types.Price(x*float64(types.PriceScale) + 0.5) }
 	return market.Candle{Close: toP(close)}
 }
 
@@ -29,14 +30,14 @@ func TestCross_WarmupNoSignals(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 	})
 	require.NoError(t, err)
 
 	signals := feedSignals(s, []float64{1.0000, 1.0001, 1.0002, 1.0003})
 	require.Len(t, signals, 4)
 	for _, sig := range signals {
-		require.Equal(t, market.Flat, sig.Side)
+		require.Equal(t, types.Flat, sig.Side)
 	}
 }
 
@@ -44,7 +45,7 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenSignals(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 		MinSpread:  0,
 	})
 	require.NoError(t, err)
@@ -76,21 +77,21 @@ func TestCross_BaselineThenCrossUpThenCrossDown_EmitsOpenSignals(t *testing.T) {
 
 	var directional []strategy.Signal
 	for _, sig := range signals {
-		if sig.Side != market.Flat {
+		if sig.Side != types.Flat {
 			directional = append(directional, sig)
 		}
 	}
 
 	require.Len(t, directional, 2, "expect exactly one long and one short signal")
-	require.Equal(t, market.Long, directional[0].Side, "first signal should be long (cross up)")
-	require.Equal(t, market.Short, directional[1].Side, "second signal should be short (cross down)")
+	require.Equal(t, types.Long, directional[0].Side, "first signal should be long (cross up)")
+	require.Equal(t, types.Short, directional[1].Side, "second signal should be short (cross down)")
 }
 
 func TestCross_MinSpreadFiltersNoise(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 		MinSpread:  0.0010,
 	})
 	require.NoError(t, err)
@@ -107,7 +108,7 @@ func TestCross_MinSpreadFiltersNoise(t *testing.T) {
 	signals := feedSignals(s, closes)
 	require.NotEmpty(t, signals)
 	for _, sig := range signals {
-		require.Equal(t, market.Flat, sig.Side)
+		require.Equal(t, types.Flat, sig.Side)
 	}
 }
 
@@ -115,7 +116,7 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 	cfg := Config{
 		FastPeriod: 3,
 		SlowPeriod: 5,
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 		MinSpread:  0,
 	}
 	s, err := New(cfg)
@@ -148,24 +149,24 @@ func TestCross_ResetReplaysSameSignalSequence(t *testing.T) {
 }
 
 func TestCross_Name(t *testing.T) {
-	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: market.PriceScale})
+	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: types.PriceScale})
 	require.NoError(t, err)
 	require.Equal(t, "EMA_CROSS(3,5)", s.Name())
 }
 
 func TestCross_Reason(t *testing.T) {
-	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: market.PriceScale})
+	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: types.PriceScale})
 	require.NoError(t, err)
 	sig := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(1.0)}, nil)
 	require.NotEmpty(t, sig.Reason)
 }
 
 func TestNew_ErrorOnInvalidConfig(t *testing.T) {
-	_, err := New(Config{FastPeriod: 0, SlowPeriod: 5, Scale: market.PriceScale})
+	_, err := New(Config{FastPeriod: 0, SlowPeriod: 5, Scale: types.PriceScale})
 	require.Error(t, err)
-	_, err = New(Config{FastPeriod: 3, SlowPeriod: 0, Scale: market.PriceScale})
+	_, err = New(Config{FastPeriod: 3, SlowPeriod: 0, Scale: types.PriceScale})
 	require.Error(t, err)
-	_, err = New(Config{FastPeriod: 5, SlowPeriod: 3, Scale: market.PriceScale})
+	_, err = New(Config{FastPeriod: 5, SlowPeriod: 3, Scale: types.PriceScale})
 	require.Error(t, err)
 	_, err = New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: 0})
 	require.Error(t, err)

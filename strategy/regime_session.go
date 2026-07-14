@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SessionFilter is a regime filter that restricts entries to a specified
@@ -49,4 +50,4 @@ func (f *SessionFilter) Trending() bool {
 	return f.utcHour >= f.start && f.utcHour < f.end
 }
 
-func (f *SessionFilter) AllowSide(_ market.Side) bool { return true }
+func (f *SessionFilter) AllowSide(_ types.Side) bool { return true }

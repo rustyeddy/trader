@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ import (
 // startPrice is the price at the first weekday slot; price increments by
 // one PriceScale unit per valid slot so the series is monotonic and never
 // flat (real, if arbitrary, variation for ADX/EMA/etc. to compute against).
-func seedWeekdayCandles(t *testing.T, instrument string, tf market.Timeframe, monthStart time.Time, startPrice market.Price) {
+func seedWeekdayCandles(t *testing.T, instrument string, tf types.Timeframe, monthStart time.Time, startPrice types.Price) {
 	t.Helper()
 
 	step := time.Duration(tf) * time.Second
@@ -51,10 +52,10 @@ func seedReviewHistory(t *testing.T, instrument string, asOf time.Time, d1Months
 
 	asOfMonth := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
 	for i := d1Months; i >= 0; i-- {
-		seedWeekdayCandles(t, instrument, market.D1, asOfMonth.AddDate(0, -i, 0), market.PriceFromFloat(1.0))
+		seedWeekdayCandles(t, instrument, types.D1, asOfMonth.AddDate(0, -i, 0), types.PriceFromFloat(1.0))
 	}
 	for i := h4Months; i >= 0; i-- {
-		seedWeekdayCandles(t, instrument, market.H4, asOfMonth.AddDate(0, -i, 0), market.PriceFromFloat(1.0))
+		seedWeekdayCandles(t, instrument, types.H4, asOfMonth.AddDate(0, -i, 0), types.PriceFromFloat(1.0))
 	}
 }
 
@@ -62,7 +63,7 @@ func seedReviewHistory(t *testing.T, instrument string, asOf time.Time, d1Months
 // instrument/tf, with price carried forward across month boundaries (unlike
 // seedWeekdayCandles, which resets to startPrice every call) so the series
 // is a true multi-month monotonic trend rather than a repeating sawtooth.
-func seedTrendingMonths(t *testing.T, instrument string, tf market.Timeframe, startMonth time.Time, numMonths int, startPrice market.Price) {
+func seedTrendingMonths(t *testing.T, instrument string, tf types.Timeframe, startMonth time.Time, numMonths int, startPrice types.Price) {
 	t.Helper()
 	price := startPrice
 	step := time.Duration(tf) * time.Second
@@ -95,7 +96,7 @@ func seedH4TradeablePullback(t *testing.T, instrument string, monthStart time.Ti
 	n := int(end.Sub(monthStart) / step)
 	candles := make([]market.Candle, n)
 
-	price := market.PriceFromFloat(1.10000)
+	price := types.PriceFromFloat(1.10000)
 	pullbackStart := n - 8
 	for i := range n {
 		ts := monthStart.Add(time.Duration(i) * step)
@@ -109,7 +110,7 @@ func seedH4TradeablePullback(t *testing.T, instrument string, monthStart time.Ti
 		}
 		candles[i] = market.Candle{Open: price, High: price + 36, Low: price - 36, Close: price + 2, Ticks: 1}
 	}
-	datamanager.WriteCandles(t, market.SourceOanda, instrument, market.H4, monthStart, candles)
+	datamanager.WriteCandles(t, market.SourceOanda, instrument, types.H4, monthStart, candles)
 }
 
 // seedTradeableReviewHistory seeds D1/H4/H1 history that classifies EURUSD
@@ -120,15 +121,15 @@ func seedTradeableReviewHistory(t *testing.T, instrument string, asOf time.Time)
 	t.Helper()
 	asOfMonth := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	seedTrendingMonths(t, instrument, market.D1, asOfMonth.AddDate(0, -18, 0), 19, market.PriceFromFloat(1.0))
+	seedTrendingMonths(t, instrument, types.D1, asOfMonth.AddDate(0, -18, 0), 19, types.PriceFromFloat(1.0))
 	// H4 needs reviewCandleCounts["H4"]=200 valid candles ending at the
 	// pullback; a leading trending month gives the window enough depth
 	// (~126 H4 candles/month) before the pullback-shaped tail two months
 	// still supplies the value-zone setup right at asOf.
-	seedTrendingMonths(t, instrument, market.H4, asOfMonth.AddDate(0, -2, 0), 1, market.PriceFromFloat(1.0))
+	seedTrendingMonths(t, instrument, types.H4, asOfMonth.AddDate(0, -2, 0), 1, types.PriceFromFloat(1.0))
 	seedH4TradeablePullback(t, instrument, asOfMonth.AddDate(0, -1, 0))
 	seedH4TradeablePullback(t, instrument, asOfMonth)
-	seedTrendingMonths(t, instrument, market.H1, asOfMonth.AddDate(0, -1, 0), 2, market.PriceFromFloat(1.0))
+	seedTrendingMonths(t, instrument, types.H1, asOfMonth.AddDate(0, -1, 0), 2, types.PriceFromFloat(1.0))
 }
 
 // TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs is the end-to-end
@@ -316,17 +317,17 @@ func TestGetClosedCandles_ExcludesBarNotYetClosedAtAsOf(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 
 	monthStart := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	seedWeekdayCandles(t, "EURUSD", market.D1, monthStart, market.PriceFromFloat(1.0))
+	seedWeekdayCandles(t, "EURUSD", types.D1, monthStart, types.PriceFromFloat(1.0))
 
 	// A Wednesday: its own D1 bar (open 00:00, close +24h) has NOT closed
 	// yet at its own open moment, and must therefore be excluded.
 	wed := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	asOf := wed // exactly at the in-progress bar's open time
 
-	candles, err := getClosedCandles(context.Background(), datamanager.GetDataManager(), "EURUSD", market.D1, asOf, 5)
+	candles, err := getClosedCandles(context.Background(), datamanager.GetDataManager(), "EURUSD", types.D1, asOf, 5)
 	require.NoError(t, err)
 	for _, ct := range candles {
-		closeTime := ct.Timestamp.Time().Add(time.Duration(market.D1) * time.Second)
+		closeTime := ct.Timestamp.Time().Add(time.Duration(types.D1) * time.Second)
 		assert.False(t, closeTime.After(asOf), "candle closing at %s must not extend past asOf %s", closeTime, asOf)
 	}
 	// The most recent returned candle must be Tuesday's, not Wednesday's.

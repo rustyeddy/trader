@@ -1,4 +1,4 @@
-package market
+package types
 
 // BitIsSet reports whether bit i is set in the bitset.
 func BitIsSet(bits []uint64, i int) bool {

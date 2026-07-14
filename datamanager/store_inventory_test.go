@@ -3,7 +3,7 @@ package datamanager
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +27,7 @@ func TestInventoryPutGetHasDelete(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	a := Asset{Key: k, Exists: true, Complete: true}
 
 	require.False(t, inv.Has(k))
@@ -110,7 +110,7 @@ func TestInventoryTicksComplete_InvalidMonth(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	base := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 13}
+	base := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 13}
 
 	complete, required, missing, err := inv.TicksComplete(base)
 	require.Error(t, err)

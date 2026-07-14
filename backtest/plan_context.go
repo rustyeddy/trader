@@ -4,6 +4,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // runPlanContext is the per-bar view the run loop hands to the Planner. It
@@ -15,9 +16,9 @@ type runPlanContext struct {
 	exit            strategy.ExitStrategy
 	regime          strategy.RegimeFilter
 	candle          market.CandleTime
-	slippage        market.Price
-	maxSpread       market.Price
-	defaultStopPips market.Pips
+	slippage        types.Price
+	maxSpread       types.Price
+	defaultStopPips types.Pips
 }
 
 func (c runPlanContext) Instrument() string            { return c.instrument }
@@ -25,6 +26,6 @@ func (c runPlanContext) Account() *execution.Account   { return c.acct }
 func (c runPlanContext) Exit() strategy.ExitStrategy   { return c.exit }
 func (c runPlanContext) Regime() strategy.RegimeFilter { return c.regime }
 func (c runPlanContext) Candle() market.CandleTime     { return c.candle }
-func (c runPlanContext) Slippage() market.Price        { return c.slippage }
-func (c runPlanContext) MaxSpread() market.Price       { return c.maxSpread }
-func (c runPlanContext) DefaultStopPips() market.Pips  { return c.defaultStopPips }
+func (c runPlanContext) Slippage() types.Price         { return c.slippage }
+func (c runPlanContext) MaxSpread() types.Price        { return c.maxSpread }
+func (c runPlanContext) DefaultStopPips() types.Pips   { return c.defaultStopPips }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CandleSyncResult summarizes a FetchCandleMonths run.
@@ -17,7 +18,7 @@ type CandleSyncResult struct {
 // CandleSyncProgress is reported once per month during FetchCandleMonths.
 type CandleSyncProgress struct {
 	Instrument     string
-	Timeframe      market.Timeframe
+	Timeframe      types.Timeframe
 	MonthStart     time.Time
 	MonthEnd       time.Time
 	CandlesWritten int
@@ -31,7 +32,7 @@ type CandleSyncProgress struct {
 //
 // instrument is passed through to the provider as-is (OANDA wire format,
 // e.g. "EUR_USD"); it is normalized (underscores stripped) for store keys.
-func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandleProvider, instrument string, tf market.Timeframe, from, to time.Time, rawDir string, onProgress func(CandleSyncProgress)) (*CandleSyncResult, error) {
+func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandleProvider, instrument string, tf types.Timeframe, from, to time.Time, rawDir string, onProgress func(CandleSyncProgress)) (*CandleSyncResult, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("nil candle provider")
 	}
@@ -121,7 +122,7 @@ func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandlePro
 // candle-native sources — callers (e.g. an update/catch-up download) use it
 // instead of each re-implementing their own "what's the last good date"
 // logic.
-func (dm *DataManager) LastCompleteDate(instrument string, tf market.Timeframe, source string) (time.Time, error) {
+func (dm *DataManager) LastCompleteDate(instrument string, tf types.Timeframe, source string) (time.Time, error) {
 	inst := market.NormalizeInstrument(instrument)
 	source = normalizeSource(source)
 	if source == "" {
@@ -227,12 +228,12 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 			}
 		}
 		candles[idx] = market.Candle{
-			Open:      market.PriceFromFloat(r.BidOpen),
-			High:      market.PriceFromFloat(r.BidHigh),
-			Low:       market.PriceFromFloat(r.BidLow),
-			Close:     market.PriceFromFloat(r.BidClose),
-			AvgSpread: market.PriceFromFloat(sumSpread / 4),
-			MaxSpread: market.PriceFromFloat(maxSpread),
+			Open:      types.PriceFromFloat(r.BidOpen),
+			High:      types.PriceFromFloat(r.BidHigh),
+			Low:       types.PriceFromFloat(r.BidLow),
+			Close:     types.PriceFromFloat(r.BidClose),
+			AvgSpread: types.PriceFromFloat(sumSpread / 4),
+			MaxSpread: types.PriceFromFloat(maxSpread),
 			Ticks:     int32(r.Volume),
 		}
 		filled[idx] = true

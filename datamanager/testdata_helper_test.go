@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // HelperGenerateSyntheticCandles is a test helper to generate synthetic candles.
-func HelperGenerateSyntheticCandles(t *testing.T, instrument string, year int, month time.Month, timeframe market.Timeframe) *CandleSet {
+func HelperGenerateSyntheticCandles(t *testing.T, instrument string, year int, month time.Month, timeframe types.Timeframe) *CandleSet {
 	t.Helper()
 	cfg := DefaultSyntheticConfig(instrument)
 	cfg.Timeframe = timeframe
@@ -34,17 +35,17 @@ func HelperGenerateSyntheticCandlesWithConfig(t *testing.T, cfg SyntheticCandleC
 
 // MakeSyntheticCandleSetIterator creates an iterator from a synthetic CandleSet.
 func MakeSyntheticCandleSetIterator(cs *CandleSet) market.CandleIterator {
-	return newCandleSetIterator(cs, market.TimeRange{})
+	return newCandleSetIterator(cs, types.TimeRange{})
 }
 
 // CreateTestDataFiles generates and writes synthetic CSV files to the testdata directory.
-func CreateTestDataFiles(instrument string, year int, timeframe market.Timeframe) ([]string, error) {
+func CreateTestDataFiles(instrument string, year int, timeframe types.Timeframe) ([]string, error) {
 	testdataDir := TestDataDir
 	return GenerateSyntheticYearTestData(testdataDir, instrument, year, timeframe)
 }
 
 // GetOrCreateTestData ensures test data exists, creating it if needed.
-func GetOrCreateTestData(instrument string, year int, timeframe market.Timeframe) (string, error) {
+func GetOrCreateTestData(instrument string, year int, timeframe types.Timeframe) (string, error) {
 	testdataDir := TestDataDir
 	store := &store{basedir: testdataDir}
 
@@ -72,7 +73,7 @@ func GetOrCreateTestData(instrument string, year int, timeframe market.Timeframe
 }
 
 // LoadSyntheticCandles loads synthetic candles from testdata, creating them if needed.
-func LoadSyntheticCandles(instrument string, year int, month time.Month, timeframe market.Timeframe) (*CandleSet, error) {
+func LoadSyntheticCandles(instrument string, year int, month time.Month, timeframe types.Timeframe) (*CandleSet, error) {
 	testdataDir := TestDataDir
 	store := &store{basedir: testdataDir}
 

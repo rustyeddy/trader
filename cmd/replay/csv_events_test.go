@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func TestParseFloat_Invalid(t *testing.T) {
 
 // ── inRange ───────────────────────────────────────────────────────────────────
 
-func ts(sec int64) market.Timestamp { return market.Timestamp(sec) }
+func ts(sec int64) types.Timestamp { return types.Timestamp(sec) }
 
 func TestInRange_ZeroBoundsAlwaysTrue(t *testing.T) {
 	assert.True(t, inRange(ts(1000), ts(0), ts(0)))
@@ -173,8 +173,8 @@ func TestCSVEventsFeed_SkipsRowsOutsideRange(t *testing.T) {
 		rfc3339(t2) + ",EURUSD,1.08,1.09\n" +
 		rfc3339(t3) + ",EURUSD,1.08,1.09\n"
 
-	from := market.FromTime(t2)
-	to := market.FromTime(t3)
+	from := types.FromTime(t2)
+	to := types.FromTime(t3)
 	feed, err := NewCSVEventsFeed(writeCSV(t, csv), from, to)
 	require.NoError(t, err)
 	defer feed.Close()

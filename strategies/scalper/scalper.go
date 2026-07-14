@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -61,15 +62,15 @@ func New(cfg Config) (*Strategy, error) {
 	if cfg.StopMultiplier <= 0 {
 		cfg.StopMultiplier = 1.0
 	}
-	fastEMA, err := indicator.NewEMA(cfg.FastPeriod, market.PriceScale)
+	fastEMA, err := indicator.NewEMA(cfg.FastPeriod, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: fast EMA: %w", err)
 	}
-	slowEMA, err := indicator.NewEMA(cfg.SlowPeriod, market.PriceScale)
+	slowEMA, err := indicator.NewEMA(cfg.SlowPeriod, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: slow EMA: %w", err)
 	}
-	atr, err := indicator.NewATR(cfg.ATRPeriod, market.PriceScale)
+	atr, err := indicator.NewATR(cfg.ATRPeriod, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("scalper: ATR: %w", err)
 	}
@@ -119,8 +120,8 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy
 		return strategy.Hold("in position")
 	}
 
-	closePrice := market.PriceSum(c.Close)
-	openPrice := market.PriceSum(c.Open)
+	closePrice := types.PriceSum(c.Close)
+	openPrice := types.PriceSum(c.Open)
 	fastVal := s.fastEMA.PriceSum()
 	slowVal := s.slowEMA.PriceSum()
 
@@ -133,7 +134,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy
 	// Entry: dip recovery — bullish close back above fast EMA, in uptrend.
 	if s.dipSeen && closePrice > fastVal && closePrice > openPrice && closePrice > slowVal {
 		s.dipSeen = false
-		return strategy.Signal{Side: market.Long, Reason: "buy-the-dip"}
+		return strategy.Signal{Side: types.Long, Reason: "buy-the-dip"}
 	}
 
 	return strategy.Hold("no signal")

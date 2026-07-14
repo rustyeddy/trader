@@ -1,6 +1,9 @@
 package strategy
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 // ExitStrategy manages stop placement after a position is open.
 // It is called every bar regardless of position state (to warm up indicators),
@@ -16,22 +19,22 @@ type ExitStrategy interface {
 	Tick(c market.Candle)
 
 	// InitialStop returns the stop price at the moment a position is opened.
-	InitialStop(side market.Side, entry market.Price, c market.Candle) market.Price
+	InitialStop(side types.Side, entry types.Price, c market.Candle) types.Price
 
 	// UpdateStop returns the new stop price for an open lot each bar.
 	// extreme is the lot's ExtremePrice (highest high for longs, lowest low for shorts).
 	// The implementation must never move the stop against the position.
-	UpdateStop(side market.Side, currentStop market.Price, entry market.Price, extreme market.Price, c market.Candle) market.Price
+	UpdateStop(side types.Side, currentStop types.Price, entry types.Price, extreme types.Price, c market.Candle) types.Price
 }
 
 // NoopExit is a pass-through exit strategy. It never moves stops; the entry
 // strategy is responsible for setting an initial stop via the OpenRequest.
 type NoopExit struct{}
 
-func (NoopExit) Name() string                                                            { return "" }
-func (NoopExit) Ready() bool                                                             { return true }
-func (NoopExit) Tick(_ market.Candle)                                                    {}
-func (NoopExit) InitialStop(_ market.Side, _ market.Price, _ market.Candle) market.Price { return 0 }
-func (NoopExit) UpdateStop(_ market.Side, currentStop market.Price, _ market.Price, _ market.Price, _ market.Candle) market.Price {
+func (NoopExit) Name() string                                                         { return "" }
+func (NoopExit) Ready() bool                                                          { return true }
+func (NoopExit) Tick(_ market.Candle)                                                 {}
+func (NoopExit) InitialStop(_ types.Side, _ types.Price, _ market.Candle) types.Price { return 0 }
+func (NoopExit) UpdateStop(_ types.Side, currentStop types.Price, _ types.Price, _ types.Price, _ market.Candle) types.Price {
 	return currentStop
 }

@@ -3,6 +3,7 @@ package market
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +37,7 @@ func TestGetInstrument_ReturnsCopy(t *testing.T) {
 	second := GetInstrument("EURUSD")
 	require.NotNil(t, second)
 	assert.Equal(t, "EURUSD", second.Name)
-	assert.Equal(t, Rate(20_000), second.MarginRate)
+	assert.Equal(t, types.Rate(20_000), second.MarginRate)
 }
 
 // TestGetInstrument_UnknownReturnsNil_Phase2 verifies expected behavior for this component.
@@ -85,12 +86,12 @@ func TestInstrumentPriceAndPipMath_Phase2(t *testing.T) {
 
 	eurusd := GetInstrument("EURUSD")
 	require.NotNil(t, eurusd)
-	assert.Equal(t, Price(10), eurusd.PriceUnitsPerPip())
-	assert.Equal(t, Price(25), eurusd.PriceDeltaFromPips(Pips(25)))
+	assert.Equal(t, types.Price(10), eurusd.PriceUnitsPerPip())
+	assert.Equal(t, types.Price(25), eurusd.PriceDeltaFromPips(types.Pips(25)))
 
-	px := PriceFromFloat(1.10000)
-	assert.Equal(t, px+Price(25), eurusd.AddPips(px, Pips(25)))
-	assert.Equal(t, px-Price(25), eurusd.SubPips(px, Pips(25)))
+	px := types.PriceFromFloat(1.10000)
+	assert.Equal(t, px+types.Price(25), eurusd.AddPips(px, types.Pips(25)))
+	assert.Equal(t, px-types.Price(25), eurusd.SubPips(px, types.Pips(25)))
 }
 
 // TestInstrumentPipSize_Phase2 verifies expected behavior for this component.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -91,18 +92,18 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy
 	return strategy.Signal{Side: side, Reason: fmt.Sprintf("stress-%s", side)}
 }
 
-func (s *Strategy) nextSide() market.Side {
+func (s *Strategy) nextSide() types.Side {
 	switch s.cfg.Side {
 	case "long":
-		return market.Long
+		return types.Long
 	case "short":
-		return market.Short
+		return types.Short
 	default: // "alternate"
 		s.sideTurn++
 		if s.sideTurn%2 == 1 {
-			return market.Long
+			return types.Long
 		}
-		return market.Short
+		return types.Short
 	}
 }
 

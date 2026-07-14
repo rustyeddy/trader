@@ -9,7 +9,9 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func fakeRun(instrument string) *backtest.Backtest {
@@ -19,13 +21,13 @@ func fakeRun(instrument string) *backtest.Backtest {
 	}
 }
 
-func fakeCandle(ts market.Timestamp, close, high, low float64) *market.CandleTime {
+func fakeCandle(ts types.Timestamp, close, high, low float64) *market.CandleTime {
 	return &market.CandleTime{
 		Timestamp: ts,
 		Candle: market.Candle{
-			Close: market.PriceFromFloat(close),
-			High:  market.PriceFromFloat(high),
-			Low:   market.PriceFromFloat(low),
+			Close: types.PriceFromFloat(close),
+			High:  types.PriceFromFloat(high),
+			Low:   types.PriceFromFloat(low),
 		},
 	}
 }
@@ -41,8 +43,8 @@ func TestFake_NameResetReady(t *testing.T) {
 	assert.Len(t, f.candles, 2)
 	assert.Nil(t, f.candles[0])
 	assert.Nil(t, f.candles[1])
-	assert.Equal(t, market.Price(0), f.highest)
-	assert.Equal(t, market.Price(0), f.lowest)
+	assert.Equal(t, types.Price(0), f.highest)
+	assert.Equal(t, types.Price(0), f.lowest)
 }
 
 func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
@@ -52,10 +54,10 @@ func TestFake_Update_OpensAfterWarmupOnHigherHigh(t *testing.T) {
 	run := fakeRun("EURUSD")
 
 	sig1 := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	assert.Equal(t, market.Flat, sig1.Side, "warmup bar should hold")
+	assert.Equal(t, types.Flat, sig1.Side, "warmup bar should hold")
 
 	sig2 := f.Update(context.Background(), fakeCandle(2, 1.1020, 1.1030, 1.1000), run)
-	assert.Equal(t, market.Long, sig2.Side)
+	assert.Equal(t, types.Long, sig2.Side)
 	assert.Equal(t, "higher highs", sig2.Reason)
 }
 
@@ -67,21 +69,21 @@ func TestFake_Update_MissingInstrumentHolds(t *testing.T) {
 
 	// With signals, unknown instrument just emits a Long (stop handled by planner).
 	sig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 }
 
 func TestFake_Update_HoldsWhenInPosition(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{CandleCount: 1, highest: market.PriceFromFloat(1.0)}
+	f := &Fake{CandleCount: 1, highest: types.PriceFromFloat(1.0)}
 	run := fakeRun("EURUSD")
 
 	lot := &execution.Lot{
 		TradeCommon: &execution.TradeCommon{
-			ID:    market.NewULID(),
-			Side:  market.Long,
+			ID:    idgen.NewULID(),
+			Side:  types.Long,
 			Units: 1000,
-			Stop:  market.PriceFromFloat(1.0950),
+			Stop:  types.PriceFromFloat(1.0950),
 		},
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
@@ -91,7 +93,7 @@ func TestFake_Update_HoldsWhenInPosition(t *testing.T) {
 
 	// New higher high while in position should hold (not open another).
 	sig := f.Update(context.Background(), fakeCandle(10, 1.1050, 1.1060, 1.1030), run)
-	assert.Equal(t, market.Flat, sig.Side, "should hold when already in position")
+	assert.Equal(t, types.Flat, sig.Side, "should hold when already in position")
 }
 
 func TestFake02_NameResetReady(t *testing.T) {
@@ -115,15 +117,15 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	run := fakeRun("EURUSD")
 
 	openSig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	assert.Equal(t, market.Long, openSig.Side)
+	assert.Equal(t, types.Long, openSig.Side)
 	assert.Equal(t, "fake-02-open", openSig.Reason)
 
-	tc := &execution.TradeCommon{ID: market.NewULID(), Side: market.Long, Units: 1000, Instrument: "EURUSD"}
+	tc := &execution.TradeCommon{ID: idgen.NewULID(), Side: types.Long, Units: 1000, Instrument: "EURUSD"}
 	openLot := &execution.Lot{TradeCommon: tc, OriginalUnits: 1000, RemainingUnits: 1000, State: execution.LotOpen}
 	run.State.Lots.Add(openLot)
 
 	holdSig := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)
-	assert.Equal(t, market.Flat, holdSig.Side)
+	assert.Equal(t, types.Flat, holdSig.Side)
 
 	closeSig := f.Update(context.Background(), fakeCandle(3, 1.1002, 1.1012, 1.0992), run)
 	require.True(t, closeSig.CloseAll)
@@ -138,5 +140,5 @@ func TestFake02_Update_MissingInstrument(t *testing.T) {
 
 	// With signals, unknown instrument doesn't matter — planner handles stop.
 	sig := f.Update(context.Background(), fakeCandle(1, 1.1000, 1.1010, 1.0990), run)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 }

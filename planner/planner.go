@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // PlanContext is the read/compute view a Planner needs to finalize a plan
@@ -23,20 +24,20 @@ type PlanContext interface {
 	Exit() strategy.ExitStrategy
 	Regime() strategy.RegimeFilter
 	Candle() market.CandleTime
-	Slippage() market.Price
-	MaxSpread() market.Price
+	Slippage() types.Price
+	MaxSpread() types.Price
 	// DefaultStopPips returns a fallback stop distance (in deci-pips) applied
 	// when neither the strategy signal nor the exit strategy supplies a stop.
 	// 0 means no fallback is configured.
-	DefaultStopPips() market.Pips
+	DefaultStopPips() types.Pips
 }
 
 // Stats reports the execution-cost bookkeeping a Planner produces while
 // finalizing a plan. Callers fold these into their run state.
 type Stats struct {
-	SpreadFiltered int          // opens suppressed by the max-spread gate
-	SpreadOpened   int          // opens accepted (denominator for avg-spread)
-	SpreadSum      market.Price // sum of candle AvgSpread over accepted opens
+	SpreadFiltered int         // opens suppressed by the max-spread gate
+	SpreadOpened   int         // opens accepted (denominator for avg-spread)
+	SpreadSum      types.Price // sum of candle AvgSpread over accepted opens
 }
 
 // DefaultPlanner is the behavior-preserving extraction of the logic that used
@@ -88,7 +89,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 	// selling at bid.
 	for _, cl := range raw.Closes {
 		if cl != nil && cl.Lot != nil {
-			isBuy := cl.Lot.Side == market.Short
+			isBuy := cl.Lot.Side == types.Short
 			cl.Price += execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		}
 	}
@@ -100,7 +101,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 		}
 
 		// Long buys at ask; short sells at bid.
-		isBuy := openReq.Side == market.Long
+		isBuy := openReq.Side == types.Long
 		openReq.Price += execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		stats.SpreadOpened++
 		stats.SpreadSum += candle.AvgSpread
@@ -118,7 +119,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 			if pips := pc.DefaultStopPips(); pips > 0 {
 				inst := market.GetInstrument(pc.Instrument())
 				if inst != nil {
-					if openReq.Side == market.Long {
+					if openReq.Side == types.Long {
 						openReq.Stop = inst.SubPips(openReq.Price, pips)
 					} else {
 						openReq.Stop = inst.AddPips(openReq.Price, pips)
@@ -148,7 +149,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strategy.StrategyPlan, Stats, error) {
 	plan := &strategy.StrategyPlan{Reason: sig.Reason}
 
-	if sig.Side == market.Flat && !sig.CloseAll {
+	if sig.Side == types.Flat && !sig.CloseAll {
 		return plan, Stats{}, nil
 	}
 
@@ -175,7 +176,7 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 			})
 			return nil
 		})
-	} else if sig.Side != market.Flat && acct != nil {
+	} else if sig.Side != types.Flat && acct != nil {
 		// Reversal-close: close any open lots on the opposing side only.
 		_ = acct.Lots.Range(func(lot *execution.Lot) error {
 			if lot.State != execution.LotOpen || lot.Side == sig.Side {
@@ -197,7 +198,7 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 		})
 	}
 
-	if sig.Side != market.Flat {
+	if sig.Side != types.Flat {
 		plan.Opens = append(plan.Opens, execution.NewOpenRequest(
 			pc.Instrument(), &candle, sig.Side, sig.Stop, 0, sig.Reason,
 		))

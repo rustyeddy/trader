@@ -3,20 +3,20 @@ package datamanager
 import (
 	"sort"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type priceDistribution struct {
-	counts map[market.Price]int
+	counts map[types.Price]int
 	count  int
-	sum    market.PriceSum
-	min    market.Price
-	max    market.Price
+	sum    types.PriceSum
+	min    types.Price
+	max    types.Price
 }
 
-func (d *priceDistribution) Add(v market.Price) {
+func (d *priceDistribution) Add(v types.Price) {
 	if d.counts == nil {
-		d.counts = make(map[market.Price]int)
+		d.counts = make(map[types.Price]int)
 		d.min = v
 		d.max = v
 	}
@@ -28,7 +28,7 @@ func (d *priceDistribution) Add(v market.Price) {
 	}
 	d.counts[v]++
 	d.count++
-	d.sum += market.PriceSum(v)
+	d.sum += types.PriceSum(v)
 }
 
 func (d *priceDistribution) Len() int {
@@ -60,7 +60,7 @@ func (d *priceDistribution) PercentilePips(p float64, uPip float64) float64 {
 	return d.percentilePips(p, uPip, d.sortedPrices())
 }
 
-func (d *priceDistribution) percentilePips(p float64, uPip float64, sorted []market.Price) float64 {
+func (d *priceDistribution) percentilePips(p float64, uPip float64, sorted []types.Price) float64 {
 	n := d.count
 	if n == 0 {
 		return 0
@@ -81,7 +81,7 @@ func (d *priceDistribution) percentilePips(p float64, uPip float64, sorted []mar
 	return loVal*(1-frac) + hiVal*frac
 }
 
-func (d *priceDistribution) valueAt(idx int, sorted []market.Price) market.Price {
+func (d *priceDistribution) valueAt(idx int, sorted []types.Price) types.Price {
 	seen := 0
 	for _, v := range sorted {
 		seen += d.counts[v]
@@ -92,8 +92,8 @@ func (d *priceDistribution) valueAt(idx int, sorted []market.Price) market.Price
 	return d.max
 }
 
-func (d *priceDistribution) sortedPrices() []market.Price {
-	vals := make([]market.Price, 0, len(d.counts))
+func (d *priceDistribution) sortedPrices() []types.Price {
+	vals := make([]types.Price, 0, len(d.counts))
 	for v := range d.counts {
 		vals = append(vals, v)
 	}

@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // PortfolioConfig is the YAML schema for `trader live portfolio`.
@@ -101,7 +101,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		for _, f := range y.Regime.Filters {
 			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
-		regime, err := strategy.GetRegimeFilter(regimeCfg, market.PriceScale)
+		regime, err := strategy.GetRegimeFilter(regimeCfg, types.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s regime: %w", y.Instrument, err)
 		}
@@ -117,7 +117,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 		}
 
 		exitCfg := strategy.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
-		exit, err := strategy.GetExitStrategy(exitCfg, market.PriceScale)
+		exit, err := strategy.GetExitStrategy(exitCfg, types.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
 		}
@@ -152,7 +152,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			TickInterval: tick,
 			UseStream:    y.UseStream,
 			Strategy:     adapter,
-			RiskPct:      market.RateFromFloat(riskPct / 100.0),
+			RiskPct:      types.RateFromFloat(riskPct / 100.0),
 			MaxUnits:     y.MaxUnits,
 		})
 	}

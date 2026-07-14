@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ReviewPair computes a ReviewResult for one instrument from its W1, D1, and
@@ -95,15 +96,15 @@ func computeH1(inst *market.Instrument, candles []market.Candle) (H1Snapshot, st
 		return H1Snapshot{}, "", false
 	}
 
-	ema20, err := indicator.NewEMA(20, market.PriceScale)
+	ema20, err := indicator.NewEMA(20, types.PriceScale)
 	if err != nil {
 		return H1Snapshot{}, "", false
 	}
-	ema50, err := indicator.NewEMA(50, market.PriceScale)
+	ema50, err := indicator.NewEMA(50, types.PriceScale)
 	if err != nil {
 		return H1Snapshot{}, "", false
 	}
-	atr, err := indicator.NewATR(14, market.PriceScale)
+	atr, err := indicator.NewATR(14, types.PriceScale)
 	if err != nil {
 		return H1Snapshot{}, "", false
 	}
@@ -137,7 +138,7 @@ func computeH1(inst *market.Instrument, candles []market.Candle) (H1Snapshot, st
 
 // biasFromFloat mirrors biasFromEMA for values already converted to
 // float64 (e.g. from a ReviewResult's presentation fields, where the
-// original market.Price is no longer available).
+// original types.Price is no longer available).
 func biasFromFloat(close, ema float64) string {
 	switch {
 	case close > ema:
@@ -151,7 +152,7 @@ func biasFromFloat(close, ema float64) string {
 
 // pricePips converts a fixed-point price delta to pips for the given
 // instrument. Boundary conversion only — used for presentation fields.
-func pricePips(inst *market.Instrument, delta market.Price) float64 {
+func pricePips(inst *market.Instrument, delta types.Price) float64 {
 	perPip := inst.PriceUnitsPerPip()
 	if perPip == 0 {
 		return 0
@@ -168,7 +169,7 @@ func absF(f float64) float64 {
 
 // biasFromEMA reports "long" when close is above ema, "short" when below,
 // "neutral" when equal.
-func biasFromEMA(close, ema market.Price) string {
+func biasFromEMA(close, ema types.Price) string {
 	switch {
 	case close > ema:
 		return "long"
@@ -192,27 +193,27 @@ func combineBias(d1, h4, w1 string) string {
 }
 
 func computeD1(inst *market.Instrument, candles []market.Candle) (D1Snapshot, string, error) {
-	adx, err := indicator.NewADX(14, market.PriceScale)
+	adx, err := indicator.NewADX(14, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
-	ci, err := indicator.NewChoppinessIndex(14, market.PriceScale)
+	ci, err := indicator.NewChoppinessIndex(14, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
-	atr, err := indicator.NewATR(14, market.PriceScale)
+	atr, err := indicator.NewATR(14, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
-	ema20, err := indicator.NewEMA(20, market.PriceScale)
+	ema20, err := indicator.NewEMA(20, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
-	ema50, err := indicator.NewEMA(50, market.PriceScale)
+	ema50, err := indicator.NewEMA(50, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
-	bb, err := indicator.NewBollingerBands(20, 2.0, market.PriceScale)
+	bb, err := indicator.NewBollingerBands(20, 2.0, types.PriceScale)
 	if err != nil {
 		return D1Snapshot{}, "", err
 	}
@@ -255,27 +256,27 @@ func computeD1(inst *market.Instrument, candles []market.Candle) (D1Snapshot, st
 }
 
 func computeH4(inst *market.Instrument, candles []market.Candle, th Thresholds) (H4Snapshot, string, error) {
-	adx, err := indicator.NewADX(14, market.PriceScale)
+	adx, err := indicator.NewADX(14, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
-	ci, err := indicator.NewChoppinessIndex(14, market.PriceScale)
+	ci, err := indicator.NewChoppinessIndex(14, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
-	atr, err := indicator.NewATR(14, market.PriceScale)
+	atr, err := indicator.NewATR(14, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
-	ema20, err := indicator.NewEMA(20, market.PriceScale)
+	ema20, err := indicator.NewEMA(20, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
-	ema50, err := indicator.NewEMA(50, market.PriceScale)
+	ema50, err := indicator.NewEMA(50, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
-	bb, err := indicator.NewBollingerBands(20, 2.0, market.PriceScale)
+	bb, err := indicator.NewBollingerBands(20, 2.0, types.PriceScale)
 	if err != nil {
 		return H4Snapshot{}, "", err
 	}
@@ -315,11 +316,11 @@ func computeH4(inst *market.Instrument, candles []market.Candle, th Thresholds) 
 }
 
 func computeW1(inst *market.Instrument, candles []market.Candle) (W1Snapshot, string, error) {
-	ema20, err := indicator.NewEMA(20, market.PriceScale)
+	ema20, err := indicator.NewEMA(20, types.PriceScale)
 	if err != nil {
 		return W1Snapshot{}, "", err
 	}
-	atr, err := indicator.NewATR(14, market.PriceScale)
+	atr, err := indicator.NewATR(14, types.PriceScale)
 	if err != nil {
 		return W1Snapshot{}, "", err
 	}

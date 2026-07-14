@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestTraderWithYearOfSyntheticHourly verifies that a full synthetic market.H1 year
+// TestTraderWithYearOfSyntheticHourly verifies that a full synthetic types.H1 year
 // can be traversed with stable bounds. It is an iterator/generator stress test;
 // it does not execute the Trader backtest loop.
 func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
@@ -19,7 +19,7 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 	}
 
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 	cfg.Seed = 2025 // Reproducible seed
 
 	candleSets, err := cfg.GenerateSyntheticYearlyCandles(2025)
@@ -31,7 +31,7 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 
 	// Process all months
 	for monthIdx, cs := range candleSets {
-		iter := newCandleSetIterator(cs, market.TimeRange{})
+		iter := newCandleSetIterator(cs, types.TimeRange{})
 		monthStart := time.Now()
 
 		candlesInMonth := 0
@@ -66,12 +66,12 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 // TestTraderWithYearOfSyntheticDaily tests with daily data (fewer candles).
 func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.D1 // Daily: ~252 candles/year (trading days)
+	cfg.Timeframe = types.D1 // Daily: ~252 candles/year (trading days)
 
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := newCandleSetIterator(cs, market.TimeRange{})
+	iter := newCandleSetIterator(cs, types.TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -88,7 +88,7 @@ func TestTraderWithYearOfSyntheticDaily(t *testing.T) {
 // candle traversal so iterator regressions fail decisively.
 func TestTraderTimeoutDetection(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestTraderTimeoutDetection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	iter := newCandleSetIterator(cs, market.TimeRange{})
+	iter := newCandleSetIterator(cs, types.TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -119,8 +119,8 @@ func TestTraderTimeoutDetection(t *testing.T) {
 func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	cfg := SyntheticCandleConfig{
 		Instrument:  "EURUSD",
-		Timeframe:   market.H1,
-		StartPrice:  market.Price(108000),
+		Timeframe:   types.H1,
+		StartPrice:  types.Price(108000),
 		Volatility:  0.05, // 5% volatility (extreme)
 		Trend:       0.0,  // No trend
 		Seed:        12345,
@@ -130,12 +130,12 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := newCandleSetIterator(cs, market.TimeRange{})
+	iter := newCandleSetIterator(cs, types.TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
-	maxPrice := market.Price(0)
-	minPrice := market.Price(999999999) // Fixed overflow
+	maxPrice := types.Price(0)
+	minPrice := types.Price(999999999) // Fixed overflow
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		candleCount++
@@ -150,20 +150,20 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 
 		// With extreme volatility, prices can swing significantly
 		// Just verify prices are positive and OHLC structure is valid
-		assert.Greater(t, c.High, market.Price(0))
-		assert.Greater(t, c.Low, market.Price(0))
+		assert.Greater(t, c.High, types.Price(0))
+		assert.Greater(t, c.Low, types.Price(0))
 		assert.Less(t, c.Low, c.High)
 	}
 
 	// Calculate price range
-	priceRange := float64(maxPrice-minPrice) / float64(market.Price(108000))
+	priceRange := float64(maxPrice-minPrice) / float64(types.Price(108000))
 	assert.NotZero(t, priceRange)
 }
 
 // TestTraderWithDifferentSeeds verifies reproducibility
 func TestTraderWithDifferentSeeds(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	// Generate with same seed twice
 	cfg.Seed = 42
@@ -198,7 +198,7 @@ func TestTraderWithDifferentSeeds(t *testing.T) {
 // BenchmarkSyntheticCandleGeneration benchmarks how fast we can generate candles
 func BenchmarkSyntheticCandleGeneration(b *testing.B) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -210,12 +210,12 @@ func BenchmarkSyntheticCandleGeneration(b *testing.B) {
 // BenchmarkSyntheticCandleIteration benchmarks iteration speed
 func BenchmarkSyntheticCandleIteration(b *testing.B) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 	cs, _ := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		iter := newCandleSetIterator(cs, market.TimeRange{})
+		iter := newCandleSetIterator(cs, types.TimeRange{})
 		count := 0
 		for _, ok := iter.Next(); ok; _, ok = iter.Next() {
 			count++
@@ -227,7 +227,7 @@ func BenchmarkSyntheticCandleIteration(b *testing.B) {
 // BenchmarkYearGeneration benchmarks full year generation
 func BenchmarkYearGeneration(b *testing.B) {
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

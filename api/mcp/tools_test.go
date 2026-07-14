@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ import (
 func TestToolGetCandlesCSV(t *testing.T) {
 	candles := make([]market.Candle, 744)
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
-	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{
@@ -205,7 +206,7 @@ func TestGetVersionAllowedWithoutOANDA(t *testing.T) {
 func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	candles := make([]market.Candle, 744)
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
-	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 
 	srv := New(&service.Service{Log: slog.Default()}, false)
 	raw, err := json.Marshal(map[string]any{

@@ -8,11 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func TestStrategy_Update(t *testing.T) {
 	sig := Strategy{}.Update(context.Background(), nil, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestStrategy_Name(t *testing.T) {
@@ -35,11 +36,11 @@ func TestStrategy_UpdateWithValues(t *testing.T) {
 	t.Parallel()
 
 	c := &market.CandleTime{
-		Candle:    market.Candle{Close: market.PriceFromFloat(1.1)},
-		Timestamp: market.Timestamp(100),
+		Candle:    market.Candle{Close: types.PriceFromFloat(1.1)},
+		Timestamp: types.Timestamp(100),
 	}
 
 	sig := Strategy{}.Update(context.Background(), c, nil)
-	require.Equal(t, market.Flat, sig.Side)
+	require.Equal(t, types.Flat, sig.Side)
 	assert.Equal(t, "noop", sig.Reason)
 }

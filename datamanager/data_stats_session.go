@@ -4,11 +4,12 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type hourBucket struct {
 	count      int
-	totalRange market.PriceSum
+	totalRange types.PriceSum
 }
 
 // SessionAnalyzer breaks down candle activity and average range by UTC hour.
@@ -35,7 +36,7 @@ func (a *SessionAnalyzer) Update(ct *market.CandleTime) {
 	}
 	h := ct.Timestamp.Time().UTC().Hour()
 	a.hours[h].count++
-	a.hours[h].totalRange += market.PriceSum(rng)
+	a.hours[h].totalRange += types.PriceSum(rng)
 }
 
 func (a *SessionAnalyzer) Stats() []Stat {

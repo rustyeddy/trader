@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +58,7 @@ func TestLotBookAll_ReturnsClonedLots(t *testing.T) {
 
 	got := lb.Get("p1")
 	require.NotNil(t, got)
-	assert.Equal(t, market.Units(10), got.RemainingUnits)
+	assert.Equal(t, types.Units(10), got.RemainingUnits)
 }
 
 // TestLotBookRange_VisitsAllAndStopsOnError_Phase2 verifies expected behavior for this component.

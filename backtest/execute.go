@@ -13,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr market.CandleIterator) (err error) {
@@ -40,7 +41,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 	}
 
 	// Convert slippage and max-spread pips to Price units using instrument metadata.
-	var slippage, maxSpread market.Price
+	var slippage, maxSpread types.Price
 	if inst := market.GetInstrument(run.Request.Instrument); inst != nil {
 		if run.Request.SlippagePips != 0 {
 			slippage = inst.PriceDeltaFromPips(run.Request.SlippagePips)
@@ -177,7 +178,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
 		atomic.AddInt64(&processedCandles, 1)
 
-		err := t.Account.ResolveWithMarks(map[string]market.Price{
+		err := t.Account.ResolveWithMarks(map[string]types.Price{
 			run.Request.Instrument: candle.Close,
 		})
 		if err != nil {
@@ -196,11 +197,11 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 				}
 				// Advance extreme price watermark.
 				switch lot.Side {
-				case market.Long:
+				case types.Long:
 					if lot.ExtremePrice == 0 || candle.High > lot.ExtremePrice {
 						lot.ExtremePrice = candle.High
 					}
-				case market.Short:
+				case types.Short:
 					if lot.ExtremePrice == 0 || candle.Low < lot.ExtremePrice {
 						lot.ExtremePrice = candle.Low
 					}
@@ -287,7 +288,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		})
 
 		for _, lot := range remaining {
-			isBuy := lot.Side == market.Short
+			isBuy := lot.Side == types.Short
 			closePx := lastCandle.Close + execution.FillAdjust(isBuy, lastCandle.AvgSpread, slippage)
 			cl := &execution.CloseRequest{
 				Request: execution.Request{

@@ -2,7 +2,7 @@ package datamanager
 
 import (
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Plan describes the data-preparation work that must be completed before a
@@ -22,28 +22,28 @@ func (p *Plan) downloadCount() int {
 	return len(p.Download)
 }
 
-func (p *Plan) buildCount(tf market.Timeframe) int {
+func (p *Plan) buildCount(tf types.Timeframe) int {
 	return len(p.BuildTasks(tf))
 }
 
 func (p *Plan) TotalBuilds() int {
-	return p.buildCount(market.M1) + p.buildCount(market.H1) + p.buildCount(market.D1)
+	return p.buildCount(types.M1) + p.buildCount(types.H1) + p.buildCount(types.D1)
 }
 
 func (p *Plan) Empty() bool {
 	return p.downloadCount() == 0 && p.TotalBuilds() == 0
 }
 
-func (p *Plan) BuildTasks(tf market.Timeframe) []BuildTask {
+func (p *Plan) BuildTasks(tf types.Timeframe) []BuildTask {
 	if p == nil {
 		return nil
 	}
 	switch tf {
-	case market.M1:
+	case types.M1:
 		return p.BuildM1
-	case market.H1:
+	case types.H1:
 		return p.BuildH1
-	case market.D1:
+	case types.D1:
 		return p.BuildD1
 	default:
 		return nil
@@ -55,9 +55,9 @@ func (p *Plan) BuildTasks(tf market.Timeframe) []BuildTask {
 func (p *Plan) Log() {
 	log.Info("plan summary",
 		"downloads", p.downloadCount(),
-		"build_m1", p.buildCount(market.M1),
-		"build_h1", p.buildCount(market.H1),
-		"build_d1", p.buildCount(market.D1),
+		"build_m1", p.buildCount(types.M1),
+		"build_h1", p.buildCount(types.H1),
+		"build_d1", p.buildCount(types.D1),
 		"build_total", p.TotalBuilds(),
 	)
 }

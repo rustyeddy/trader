@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,8 +29,8 @@ func TestParseTickRow(t *testing.T) {
 			wantErr: false,
 			checkFunc: func(t *testing.T, p market.Tick) {
 				assert.Equal(t, "EUR_USD", p.Instrument)
-				assert.Equal(t, market.PriceFromFloat(1.1000), p.Bid)
-				assert.Equal(t, market.PriceFromFloat(1.1002), p.Ask)
+				assert.Equal(t, types.PriceFromFloat(1.1000), p.Bid)
+				assert.Equal(t, types.PriceFromFloat(1.1002), p.Ask)
 			},
 		},
 		{
@@ -131,65 +132,65 @@ func TestInRange(t *testing.T) {
 
 	tests := []struct {
 		name string
-		t    market.Timestamp
-		from market.Timestamp
-		to   market.Timestamp
+		t    types.Timestamp
+		from types.Timestamp
+		to   types.Timestamp
 		want bool
 	}{
 		{
 			name: "no range",
-			t:    market.FromTime(base),
+			t:    types.FromTime(base),
 			from: 0,
 			to:   0,
 			want: true,
 		},
 		{
 			name: "within range",
-			t:    market.FromTime(base),
-			from: market.FromTime(before),
-			to:   market.FromTime(after),
+			t:    types.FromTime(base),
+			from: types.FromTime(before),
+			to:   types.FromTime(after),
 			want: true,
 		},
 		{
 			name: "before range",
-			t:    market.FromTime(before),
-			from: market.FromTime(base),
-			to:   market.FromTime(after),
+			t:    types.FromTime(before),
+			from: types.FromTime(base),
+			to:   types.FromTime(after),
 			want: false,
 		},
 		{
 			name: "after range",
-			t:    market.FromTime(after),
-			from: market.FromTime(before),
-			to:   market.FromTime(base),
+			t:    types.FromTime(after),
+			from: types.FromTime(before),
+			to:   types.FromTime(base),
 			want: false,
 		},
 		{
 			name: "at from boundary",
-			t:    market.FromTime(base),
-			from: market.FromTime(base),
-			to:   market.FromTime(after),
+			t:    types.FromTime(base),
+			from: types.FromTime(base),
+			to:   types.FromTime(after),
 			want: true,
 		},
 		{
 			name: "at to boundary",
-			t:    market.FromTime(base),
-			from: market.FromTime(before),
-			to:   market.FromTime(base),
+			t:    types.FromTime(base),
+			from: types.FromTime(before),
+			to:   types.FromTime(base),
 			want: false,
 		},
 		{
 			name: "only from constraint",
-			t:    market.FromTime(after),
-			from: market.FromTime(base),
+			t:    types.FromTime(after),
+			from: types.FromTime(base),
 			to:   0,
 			want: true,
 		},
 		{
 			name: "only to constraint",
-			t:    market.FromTime(before),
+			t:    types.FromTime(before),
 			from: 0,
-			to:   market.FromTime(base),
+			to:   types.FromTime(base),
 			want: true,
 		},
 	}
@@ -276,7 +277,7 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 
 		assert.Len(t, ticks, 3)
 		if len(ticks) >= 1 {
-			assert.Equal(t, market.PriceFromFloat(1.1000), ticks[0].Bid)
+			assert.Equal(t, types.PriceFromFloat(1.1000), ticks[0].Bid)
 		}
 	})
 
@@ -316,8 +317,8 @@ func TestCSVTicksFeed_Next(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0o644))
 
-		from := market.FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC))
-		to := market.FromTime(time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC))
+		from := types.FromTime(time.Date(2026, 1, 24, 9, 30, 5, 0, time.UTC))
+		to := types.FromTime(time.Date(2026, 1, 24, 9, 30, 15, 0, time.UTC))
 
 		feed, err := NewCSVTicksFeed(csvPath, from, to)
 		require.NoError(t, err)

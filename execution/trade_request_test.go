@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,21 +16,21 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 
 	ct := &market.CandleTime{
 		Candle: market.Candle{
-			Open:  market.PriceFromFloat(1.1000),
-			High:  market.PriceFromFloat(1.1010),
-			Low:   market.PriceFromFloat(1.0990),
-			Close: market.PriceFromFloat(1.1005),
+			Open:  types.PriceFromFloat(1.1000),
+			High:  types.PriceFromFloat(1.1010),
+			Low:   types.PriceFromFloat(1.0990),
+			Close: types.PriceFromFloat(1.1005),
 			Ticks: 42,
 		},
-		Timestamp: market.FromTime(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
+		Timestamp: types.FromTime(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
 	}
 
 	op := NewOpenRequest(
 		"EURUSD",
 		ct,
-		market.Long,
-		market.PriceFromFloat(1.0950),
-		market.PriceFromFloat(1.1050),
+		types.Long,
+		types.PriceFromFloat(1.0950),
+		types.PriceFromFloat(1.1050),
 		"phase1-open",
 	)
 
@@ -43,9 +44,9 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 	assert.Equal(t, "phase1-open", op.Reason)
 
 	assert.Equal(t, "EURUSD", op.Instrument)
-	assert.Equal(t, market.Long, op.Side)
-	assert.Equal(t, market.PriceFromFloat(1.0950), op.Stop)
-	assert.Equal(t, market.PriceFromFloat(1.1050), op.Take)
+	assert.Equal(t, types.Long, op.Side)
+	assert.Equal(t, types.PriceFromFloat(1.0950), op.Stop)
+	assert.Equal(t, types.PriceFromFloat(1.1050), op.Take)
 	assert.NotEmpty(t, op.ID)
 }
 
@@ -53,7 +54,7 @@ func TestNewOpenRequest_PanicsOnNilCandle(t *testing.T) {
 	t.Parallel()
 
 	assert.PanicsWithValue(t, "NewOpenRequest: candle time is nil", func() {
-		NewOpenRequest("EURUSD", nil, market.Long, 0, 0, "panic")
+		NewOpenRequest("EURUSD", nil, types.Long, 0, 0, "panic")
 	})
 }
 
@@ -75,15 +76,15 @@ func TestOpenRequestValidate(t *testing.T) {
 	req := &OpenRequest{}
 	require.EqualError(t, req.Validate(), "open request missing trade common")
 
-	req.TradeCommon = &TradeCommon{ID: "id", Side: market.Long, Units: 1000}
-	req.Price = market.PriceFromFloat(1.1000)
+	req.TradeCommon = &TradeCommon{ID: "id", Side: types.Long, Units: 1000}
+	req.Price = types.PriceFromFloat(1.1000)
 	require.EqualError(t, req.Validate(), "open request instrument must not be empty")
 
 	req.Instrument = "EURUSD"
-	req.Side = market.Side(0)
+	req.Side = types.Side(0)
 	require.EqualError(t, req.Validate(), "open request side must be long or short")
 
-	req.Side = market.Long
+	req.Side = types.Long
 	req.Units = 0
 	require.EqualError(t, req.Validate(), "open request units must be > 0")
 
@@ -103,8 +104,8 @@ func TestCloseRequestValidate(t *testing.T) {
 	req.Lot = &Lot{}
 	require.EqualError(t, req.Validate(), "close request position missing trade common")
 
-	req.Lot.TradeCommon = &TradeCommon{ID: "lot-1", Instrument: "EURUSD", Side: market.Long, Units: 1000}
-	req.Price = market.PriceFromFloat(1.1000)
+	req.Lot.TradeCommon = &TradeCommon{ID: "lot-1", Instrument: "EURUSD", Side: types.Long, Units: 1000}
+	req.Price = types.PriceFromFloat(1.1000)
 	req.Request.TradeCommon = &TradeCommon{ID: "lot-2", Instrument: "EURUSD"}
 	require.EqualError(t, req.Validate(), `close request id "lot-2" does not match position id "lot-1"`)
 

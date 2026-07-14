@@ -12,8 +12,8 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/types"
 )
 
 // isWithinDir reports whether path is equal to or nested inside base after
@@ -350,7 +350,7 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 	}
 
 	cfg := summary.Config.Data
-	tr, err := market.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
+	tr, err := types.ParseTimeRange(cfg.From, cfg.To, cfg.Timeframe)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("parse time range: %v", err))
 		return

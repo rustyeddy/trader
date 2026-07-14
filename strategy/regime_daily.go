@@ -1,15 +1,18 @@
 package strategy
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 // dailyCandleAccumulator rolls intraday CandleTime values into completed UTC
 // daily candles while keeping the current partial day available for inspection.
 type dailyCandleAccumulator struct {
 	dayNum   int64
-	dayOpen  market.Price
-	dayHigh  market.Price
-	dayLow   market.Price
-	dayClose market.Price
+	dayOpen  types.Price
+	dayHigh  types.Price
+	dayLow   types.Price
+	dayClose types.Price
 	hasDay   bool
 }
 

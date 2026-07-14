@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // PositionCalcRequest parameterises PositionCalc.
@@ -64,9 +65,9 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		return nil, fmt.Errorf("specify units or notional, not both")
 	}
 
-	var midPrice market.Price
+	var midPrice types.Price
 	if req.Price > 0 {
-		midPrice = market.PriceFromFloat(req.Price)
+		midPrice = types.PriceFromFloat(req.Price)
 	} else {
 		if s.OANDA == nil {
 			return nil, fmt.Errorf("price required when OANDA is not configured")
@@ -79,7 +80,7 @@ func (s *Service) PositionCalc(ctx context.Context, req PositionCalcRequest) (*P
 		if len(prices) == 0 || prices[0].Mid == 0 {
 			return nil, fmt.Errorf("OANDA returned zero price for %s", inst)
 		}
-		midPrice = market.PriceFromFloat(prices[0].Mid)
+		midPrice = types.PriceFromFloat(prices[0].Mid)
 	}
 
 	type lotDef struct {
@@ -135,7 +136,7 @@ func posNotionalUSD(inst *market.Instrument, midPrice float64, units int64) floa
 	return float64(units) * midPrice
 }
 
-func posUnitsForNotional(inst *market.Instrument, midPrice market.Price, targetUSD float64) int64 {
+func posUnitsForNotional(inst *market.Instrument, midPrice types.Price, targetUSD float64) int64 {
 	if inst.BaseCurrency == "USD" {
 		return int64(math.Round(targetUSD))
 	}
@@ -144,5 +145,5 @@ func posUnitsForNotional(inst *market.Instrument, midPrice market.Price, targetU
 	}
 	// targetUSD is user input (boundary float); midPrice is fixed-point.
 	// Multiply targetUSD by PriceScale so the division uses the integer representation.
-	return int64(math.Round(targetUSD * float64(market.PriceScale) / float64(midPrice)))
+	return int64(math.Round(targetUSD * float64(types.PriceScale) / float64(midPrice)))
 }

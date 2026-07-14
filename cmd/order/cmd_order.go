@@ -17,8 +17,8 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Shared flag variables across order subcommands.
@@ -137,7 +137,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	preview, err := svc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
-		RiskPct:    market.RateFromFloat(riskPct / 100.0),
+		RiskPct:    types.RateFromFloat(riskPct / 100.0),
 		StopPips:   stopPips,
 		Confirm:    false,
 	})
@@ -160,7 +160,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	final, err := svc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
-		RiskPct:    market.RateFromFloat(riskPct / 100.0),
+		RiskPct:    types.RateFromFloat(riskPct / 100.0),
 		StopPips:   stopPips,
 		Confirm:    true,
 	})

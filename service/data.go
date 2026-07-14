@@ -9,6 +9,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	oandaprovider "github.com/rustyeddy/trader/datamanager/oanda"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // DownloadOandaCandlesRequest parameterizes the candle download.
@@ -82,9 +83,9 @@ func (s *Service) DownloadOandaCandles(ctx context.Context, req DownloadOandaCan
 	return result, err
 }
 
-// parseTraderTimeframe maps an OANDA timeframe string to a market.Timeframe.
-func parseTraderTimeframe(s string) (market.Timeframe, error) {
-	tf, err := market.ParseTimeframe(s)
+// parseTraderTimeframe maps an OANDA timeframe string to a types.Timeframe.
+func parseTraderTimeframe(s string) (types.Timeframe, error) {
+	tf, err := types.ParseTimeframe(s)
 	if err != nil {
 		return 0, fmt.Errorf("unsupported timeframe %q (use M1, H1, D1)", s)
 	}

@@ -1,6 +1,6 @@
 package execution
 
-import "github.com/rustyeddy/trader/market"
+import "github.com/rustyeddy/trader/idgen"
 
 // TradeHistory represents a trader domain type.
 type TradeHistory struct {
@@ -12,7 +12,7 @@ type TradeHistory struct {
 func NewTradeHistory(inst string) *TradeHistory {
 	return &TradeHistory{
 		TradeCommon: &TradeCommon{
-			ID:         market.NewULID(),
+			ID:         idgen.NewULID(),
 			Instrument: inst,
 		},
 	}

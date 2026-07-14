@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -26,9 +27,9 @@ type Core struct {
 
 	Name          string
 	PrevRel       int
-	MinSpread     market.Price
-	Scale         market.Scale6
-	StopPips      market.Pips
+	MinSpread     types.Price
+	Scale         types.Scale6
+	StopPips      types.Pips
 	ATRMultiplier float64
 }
 
@@ -40,9 +41,9 @@ type Cross struct {
 type Config struct {
 	FastPeriod    int
 	SlowPeriod    int
-	Scale         market.Scale6
+	Scale         types.Scale6
 	MinSpread     float64
-	StopPips      market.Pips
+	StopPips      types.Pips
 	ATRPeriod     int
 	ATRMultiplier float64
 }
@@ -128,7 +129,7 @@ func (x *Cross) Update(_ context.Context, ct *market.CandleTime, _ strategy.Stra
 
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < types.PriceSum(x.core.MinSpread) {
 		return strategy.Hold("min-spread filter")
 	}
 
@@ -149,7 +150,7 @@ func (x *Cross) Update(_ context.Context, ct *market.CandleTime, _ strategy.Stra
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
 			return strategy.Hold("warming up ATR")
 		}
-		return EmitOpen(market.Long, "ema-cross-up")
+		return EmitOpen(types.Long, "ema-cross-up")
 	}
 
 	if x.core.PrevRel == +1 && rel == -1 {
@@ -157,14 +158,14 @@ func (x *Cross) Update(_ context.Context, ct *market.CandleTime, _ strategy.Stra
 		if x.core.ATR != nil && !x.core.ATR.Ready() {
 			return strategy.Hold("warming up ATR")
 		}
-		return EmitOpen(market.Short, "ema-cross-down")
+		return EmitOpen(types.Short, "ema-cross-down")
 	}
 
 	x.core.PrevRel = rel
 	return strategy.Hold("no cross")
 }
 
-func absPriceSum(v market.PriceSum) market.PriceSum {
+func absPriceSum(v types.PriceSum) types.PriceSum {
 	if v < 0 {
 		return -v
 	}
@@ -173,7 +174,7 @@ func absPriceSum(v market.PriceSum) market.PriceSum {
 
 // EmitOpen returns a directional Signal. The planner handles reversal-closes
 // and open construction. Exported so emacrossadx can reuse it.
-func EmitOpen(side market.Side, reason string) strategy.Signal {
+func EmitOpen(side types.Side, reason string) strategy.Signal {
 	return strategy.Signal{Side: side, Reason: reason}
 }
 
@@ -188,8 +189,8 @@ func StopDesc(c *Core) string {
 	return ""
 }
 
-func priceFromFloat(v float64, scale market.Scale6) market.Price {
-	return market.Price(math.Round(v * float64(scale)))
+func priceFromFloat(v float64, scale types.Scale6) types.Price {
+	return types.Price(math.Round(v * float64(scale)))
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
@@ -229,8 +230,8 @@ func build(params map[string]any) (strategy.Strategy, error) {
 	return New(Config{
 		FastPeriod:    int(fast),
 		SlowPeriod:    int(slow),
-		Scale:         market.PriceScale,
-		StopPips:      market.PipsFromFloat(stopPips),
+		Scale:         types.PriceScale,
+		StopPips:      types.PipsFromFloat(stopPips),
 		MinSpread:     minSpread,
 		ATRPeriod:     int(atrPeriod),
 		ATRMultiplier: atrMult,

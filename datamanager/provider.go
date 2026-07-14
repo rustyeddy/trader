@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Provider knows how to fetch raw data from a specific market data source.
@@ -48,7 +49,7 @@ type CandleProvider interface {
 	// at the given timeframe, in provider-native units (bid OHLC). The
 	// returned slice is dense: one slot per timeframe step in the month,
 	// with zero-valued candles for slots the provider had no data for.
-	FetchCandleMonth(ctx context.Context, instrument string, tf market.Timeframe, monthStart time.Time) (*CandleMonth, error)
+	FetchCandleMonth(ctx context.Context, instrument string, tf types.Timeframe, monthStart time.Time) (*CandleMonth, error)
 }
 
 // CandleMonth is the result of a CandleProvider month fetch.

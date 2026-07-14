@@ -3,6 +3,7 @@ package market
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,10 +13,10 @@ func TestTickMid_RoundsHalfUp_Phase1(t *testing.T) {
 	t.Parallel()
 
 	even := Tick{BA: BA{Bid: 100, Ask: 104}}
-	assert.Equal(t, Price(102), even.Mid())
+	assert.Equal(t, types.Price(102), even.Mid())
 
 	odd := Tick{BA: BA{Bid: 100, Ask: 103}}
-	assert.Equal(t, Price(102), odd.Mid())
+	assert.Equal(t, types.Price(102), odd.Mid())
 }
 
 func TestPriceMid(t *testing.T) {
@@ -23,9 +24,9 @@ func TestPriceMid(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		bid      Price
-		ask      Price
-		expected Price
+		bid      types.Price
+		ask      types.Price
+		expected types.Price
 	}{
 		{"simple", 10, 30, 20},
 		{"same", 25, 25, 25},

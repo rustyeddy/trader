@@ -17,6 +17,7 @@ import (
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ── oandaCandleToCandleTime ───────────────────────────────────────────────────
@@ -32,12 +33,12 @@ func TestOandaCandleToCandleTime_MidPrice(t *testing.T) {
 		Complete: true,
 	}
 	ct := oandaCandleToCandleTime(c, "EURUSD")
-	scale := float64(market.PriceScale)
+	scale := float64(types.PriceScale)
 	assert.InDelta(t, (1.09000+1.09010)/2*scale, float64(ct.Open), 1)
 	assert.InDelta(t, (1.09200+1.09210)/2*scale, float64(ct.Close), 1)
 	assert.InDelta(t, (1.09500+1.09510)/2*scale, float64(ct.High), 1)
 	assert.InDelta(t, (1.08900+1.08910)/2*scale, float64(ct.Low), 1)
-	assert.Equal(t, market.FromTime(c.Time), ct.Timestamp)
+	assert.Equal(t, types.FromTime(c.Time), ct.Timestamp)
 }
 
 func TestOandaCandleToCandleTime_SpreadRecorded(t *testing.T) {
@@ -83,8 +84,8 @@ func TestLiveLotsTracker_SyncAddsLots(t *testing.T) {
 	t.Parallel()
 	var lt liveLotsTracker
 	trades := []LiveTrade{
-		{ID: "100", Units: 1000, EntryPrice: market.PriceFromFloat(1.10)},
-		{ID: "101", Units: -500, EntryPrice: market.PriceFromFloat(1.11)},
+		{ID: "100", Units: 1000, EntryPrice: types.PriceFromFloat(1.10)},
+		{ID: "101", Units: -500, EntryPrice: types.PriceFromFloat(1.11)},
 	}
 	lt.sync(trades)
 	lb := lt.toLotBook()
@@ -110,14 +111,14 @@ func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 		{ID: "short", Units: -500},
 	})
 	lb := lt.toLotBook()
-	var sides []market.Side
+	var sides []types.Side
 	_ = lb.Range(func(lot *execution.Lot) error {
 		sides = append(sides, lot.Side)
 		return nil
 	})
 	require.Len(t, sides, 2)
-	assert.Contains(t, sides, market.Long)
-	assert.Contains(t, sides, market.Short)
+	assert.Contains(t, sides, types.Long)
+	assert.Contains(t, sides, types.Short)
 }
 
 // ── convertPlan ──────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 func makeTestAdapter() *CandleStrategyAdapter {
 	return &CandleStrategyAdapter{
 		instNorm: "EURUSD",
-		scale:    market.PriceScale,
+		scale:    types.PriceScale,
 		regime:   strategy.NoopRegime{},
 		exit:     strategy.NoopExit{},
 		log:      slog.Default(),
@@ -148,14 +149,14 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
 
-	scale := float64(market.PriceScale)
-	close := market.Price(math.Round(1.10000 * scale))
-	stop := market.Price(math.Round(1.09000 * scale)) // 100-pip stop
+	scale := float64(types.PriceScale)
+	close := types.Price(math.Round(1.10000 * scale))
+	stop := types.Price(math.Round(1.09000 * scale)) // 100-pip stop
 
 	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
 		Candle:    market.Candle{Close: close},
-		Timestamp: market.FromTime(time.Now()),
-	}, market.Long, stop, 0, "test")
+		Timestamp: types.FromTime(time.Now()),
+	}, types.Long, stop, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
@@ -163,22 +164,22 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	require.NotNil(t, lp)
 	require.NotNil(t, lp.Open)
 	assert.Equal(t, "long", lp.Open.Side)
-	assert.Greater(t, lp.Open.StopPips, market.Pips(0))
+	assert.Greater(t, lp.Open.StopPips, types.Pips(0))
 }
 
 func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
 
-	scale := float64(market.PriceScale)
-	close := market.Price(math.Round(1.10000 * scale))
+	scale := float64(types.PriceScale)
+	close := types.Price(math.Round(1.10000 * scale))
 
 	// Stop == 0: PlanSignal would normally set it; if it reaches convertPlan
 	// with stop=0 still, the open must be skipped.
 	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
 		Candle:    market.Candle{Close: close},
-		Timestamp: market.FromTime(time.Now()),
-	}, market.Long, 0 /*stop*/, 0, "test")
+		Timestamp: types.FromTime(time.Now()),
+	}, types.Long, 0 /*stop*/, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
@@ -219,14 +220,14 @@ func TestOandaGranToTF(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		in   string
-		want market.Timeframe
+		want types.Timeframe
 	}{
-		{"H1", market.H1},
-		{"h1", market.H1},
-		{"D", market.D1},
-		{"D1", market.D1},
-		{"M1", market.M1},
-		{"unknown", market.H1},
+		{"H1", types.H1},
+		{"h1", types.H1},
+		{"D", types.D1},
+		{"D1", types.D1},
+		{"M1", types.M1},
+		{"unknown", types.H1},
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, oandaGranToTF(tc.in), "input %q", tc.in)
@@ -239,7 +240,7 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	t.Parallel()
 
 	// Build a chandelier exit that needs 3 bars to be ready.
-	exit, err := strategy.NewChandelierExit(3, 2.0, market.PriceScale)
+	exit, err := strategy.NewChandelierExit(3, 2.0, types.PriceScale)
 	require.NoError(t, err)
 	require.False(t, exit.Ready())
 
@@ -265,13 +266,13 @@ func TestWarmupFromLocalData_PrimesExitStrategy(t *testing.T) {
 	candles := make([]market.Candle, startSlot+len(real))
 	copy(candles[startSlot:], real)
 
-	datamanager.SeedCandles(t, "oanda", "EURUSD", market.H1, monthStart, candles)
+	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, monthStart, candles)
 
 	a := &CandleStrategyAdapter{
 		instNorm:        "EURUSD",
 		granularity:     "H1",
 		localWarmupBars: 200,
-		scale:           market.PriceScale,
+		scale:           types.PriceScale,
 		regime:          strategy.NoopRegime{},
 		exit:            exit,
 		strategy:        &noopStrategy{},
@@ -295,7 +296,7 @@ func TestWarmupFromLocalData_NoDataNoError(t *testing.T) {
 		instNorm:        "EURUSD",
 		granularity:     "H1",
 		localWarmupBars: 100,
-		scale:           market.PriceScale,
+		scale:           types.PriceScale,
 		regime:          strategy.NoopRegime{},
 		exit:            strategy.NoopExit{},
 		strategy:        &noopStrategy{},

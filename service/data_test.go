@@ -15,6 +15,7 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func TestToOandaGranularity(t *testing.T) {
@@ -95,7 +96,7 @@ func TestDownloadOandaCandles_ExcludesCandleBeforeMonthStart(t *testing.T) {
 
 	path := datamanager.PathForMonthlyCandle(datamanager.Key{
 		Kind: datamanager.KindCandle, Source: market.SourceOanda,
-		Instrument: "XAUUSD", TF: market.D1, Year: 2026, Month: 5,
+		Instrument: "XAUUSD", TF: types.D1, Year: 2026, Month: 5,
 	})
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

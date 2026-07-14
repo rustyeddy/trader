@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // BotConfig is the payload needed to start a live strategy bot via the API.
@@ -111,7 +111,7 @@ func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 			Instrument:     cfg.Instrument,
 			TickInterval:   interval,
 			Strategy:       tracked,
-			RiskPct:        market.RateFromFloat(cfg.RiskPct / 100.0),
+			RiskPct:        types.RateFromFloat(cfg.RiskPct / 100.0),
 			MaxUnits:       cfg.MaxUnits,
 			MaxPositionUSD: cfg.MaxPositionUSD,
 			BotID:          id,

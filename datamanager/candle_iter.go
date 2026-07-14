@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // candleSetIterator represents a trader domain type.
@@ -37,7 +38,7 @@ func (it *candleSetIterator) Next() bool {
 		if it.idx >= n {
 			return false
 		}
-		if market.BitIsSet(it.cs.Valid, it.idx) {
+		if types.BitIsSet(it.cs.Valid, it.idx) {
 			return true
 		}
 	}
@@ -54,7 +55,7 @@ func (it *candleSetIterator) Index() int {
 }
 
 // Timestamp is an internal helper for trader type processing.
-func (it *candleSetIterator) Timestamp() market.Timestamp {
+func (it *candleSetIterator) Timestamp() types.Timestamp {
 	return it.cs.Timestamp(it.idx)
 }
 
@@ -64,7 +65,7 @@ func (it *candleSetIterator) Time() time.Time {
 }
 
 // StartTime is an internal helper for trader type processing.
-func (it *candleSetIterator) StartTime() market.Timestamp {
+func (it *candleSetIterator) StartTime() types.Timestamp {
 	return it.cs.Start
 }
 

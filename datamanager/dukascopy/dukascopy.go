@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SourceName is the canonical name under which this provider is registered.
@@ -43,7 +44,7 @@ func (f *File) Key() datamanager.Key {
 			Instrument: f.symbol,
 			Source:     SourceName,
 			Kind:       datamanager.KindTick,
-			TF:         market.Ticks,
+			TF:         types.Ticks,
 			Year:       f.t.Year(),
 			Month:      int(f.t.Month()),
 			Day:        f.t.Day(),

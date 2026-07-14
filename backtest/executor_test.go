@@ -6,7 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,14 +26,14 @@ func TestTraderBacktestExecutor_Guards(t *testing.T) {
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil broker factory")
 
 	exec.BrokerFactory = func() *execution.Broker { return nil }
-	exec.AccountFactory = func(name string, balance market.Money) *execution.Account { return execution.NewAccount(name, balance) }
+	exec.AccountFactory = func(name string, balance types.Money) *execution.Account { return execution.NewAccount(name, balance) }
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil broker")
 
 	exec.BrokerFactory = func() *execution.Broker { return execution.NewBroker("sim") }
 	exec.AccountFactory = nil
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil account factory")
 
-	exec.AccountFactory = func(name string, balance market.Money) *execution.Account { return nil }
+	exec.AccountFactory = func(name string, balance types.Money) *execution.Account { return nil }
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil account")
 }
 
@@ -49,8 +49,8 @@ func TestNewTraderBacktestExecutor_DefaultFactories(t *testing.T) {
 	require.NotNil(t, broker)
 	assert.Equal(t, "sim", broker.Name)
 
-	acct := exec.AccountFactory("backtest", market.MoneyFromFloat(10_000))
+	acct := exec.AccountFactory("backtest", types.MoneyFromFloat(10_000))
 	require.NotNil(t, acct)
 	assert.Equal(t, "backtest", acct.Name)
-	assert.Equal(t, market.MoneyFromFloat(10_000), acct.Balance)
+	assert.Equal(t, types.MoneyFromFloat(10_000), acct.Balance)
 }

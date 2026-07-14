@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ func newTestStore(t *testing.T) *store {
 	return &store{basedir: t.TempDir()}
 }
 
-func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf market.Timeframe) *CandleSet {
+func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Month, tf types.Timeframe) *CandleSet {
 	t.Helper()
 
 	instName := market.NormalizeInstrument(instrument)
@@ -29,7 +30,7 @@ func makeTestCandleSet(t *testing.T, instrument string, year int, month time.Mon
 	cs, err := NewMonthlyCandleSet(
 		inst.Name,
 		tf,
-		market.FromTime(start),
+		types.FromTime(start),
 		1_000_000,
 		"test",
 	)
@@ -43,7 +44,7 @@ func keyForSet(cs *CandleSet) Key {
 		Instrument: cs.Instrument,
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
-		TF:         market.Timeframe(cs.Timeframe),
+		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
@@ -53,26 +54,26 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := makeTestCandleSet(t, "EUR_USD", 2026, time.January, market.H1)
+	cs := makeTestCandleSet(t, "EUR_USD", 2026, time.January, types.H1)
 
 	cs.Candles[0] = market.Candle{
-		High:      market.Price(101),
-		Open:      market.Price(100),
-		Low:       market.Price(99),
-		Close:     market.Price(100),
-		AvgSpread: market.Price(2),
-		MaxSpread: market.Price(5),
+		High:      types.Price(101),
+		Open:      types.Price(100),
+		Low:       types.Price(99),
+		Close:     types.Price(100),
+		AvgSpread: types.Price(2),
+		MaxSpread: types.Price(5),
 		Ticks:     42,
 	}
 	cs.SetValid(0)
 
 	cs.Candles[123] = market.Candle{
-		High:      market.Price(205),
-		Open:      market.Price(201),
-		Low:       market.Price(200),
-		Close:     market.Price(204),
-		AvgSpread: market.Price(3),
-		MaxSpread: market.Price(7),
+		High:      types.Price(205),
+		Open:      types.Price(201),
+		Low:       types.Price(200),
+		Close:     types.Price(204),
+		AvgSpread: types.Price(3),
+		MaxSpread: types.Price(7),
 		Ticks:     11,
 	}
 	cs.SetValid(123)
@@ -96,7 +97,7 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 		Instrument: "EUR_USD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -117,12 +118,12 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 	require.NotNil(t, got)
 
 	require.Equal(t, market.Candle{
-		High:      market.Price(110),
-		Open:      market.Price(100),
-		Low:       market.Price(90),
-		Close:     market.Price(105),
-		AvgSpread: market.Price(2),
-		MaxSpread: market.Price(4),
+		High:      types.Price(110),
+		Open:      types.Price(100),
+		Low:       types.Price(90),
+		Close:     types.Price(105),
+		AvgSpread: types.Price(2),
+		MaxSpread: types.Price(4),
 		Ticks:     9,
 	}, got.Candles[0])
 	require.True(t, got.IsValid(0))
@@ -139,7 +140,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 			Instrument: "EURUSD",
 			Source:     "test",
 			Kind:       KindTick,
-			TF:         market.Ticks,
+			TF:         types.Ticks,
 			Year:       2026,
 			Month:      1,
 			Day:        1,
@@ -156,7 +157,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 			Instrument: "EURUSD",
 			Source:     "test",
 			Kind:       KindCandle,
-			TF:         market.M1,
+			TF:         types.M1,
 			Year:       2026,
 			Month:      13,
 		})
@@ -166,7 +167,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 	t.Run("rejects short row", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t)
-		key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+		key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
 		path, err := s.PathForAsset(key)
 		require.NoError(t, err)
@@ -184,7 +185,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 	t.Run("rejects misaligned timestamp", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t)
-		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
 		path, err := s.PathForAsset(key)
 		require.NoError(t, err)
@@ -215,7 +216,7 @@ func TestStoreWriteCSVValidation(t *testing.T) {
 	t.Run("nil instrument", func(t *testing.T) {
 		t.Parallel()
 		err := s.WriteCSV(&CandleSet{
-			Timeframe: market.M1,
+			Timeframe: types.M1,
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "nil candle set instrument")

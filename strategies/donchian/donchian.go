@@ -23,6 +23,7 @@ import (
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -39,20 +40,20 @@ type Breakout struct {
 	period        int
 	closeStrength int32 // ×1000; e.g. 0.6 → 600
 	confirmBars   int
-	adxThreshold  market.Units // ×UnitsScale (==ValueScale); e.g. 25.0 → 25_000_000
+	adxThreshold  types.Units // ×UnitsScale (==ValueScale); e.g. 25.0 → 25_000_000
 	blockMonday   bool
 	blockFriday   bool
 
 	// Rolling channel buffer (completed bars only).
-	highs []market.Price
-	lows  []market.Price
+	highs []types.Price
+	lows  []types.Price
 	pos   int
 	count int
 
 	// Consecutive-close confirmation state (from v2).
-	pendingSide  market.Side
+	pendingSide  types.Side
 	pendingCount int
-	pendingLevel market.Price
+	pendingLevel types.Price
 
 	// ADX directional-strength indicator (from v4).
 	adx *indicator.ADX
@@ -98,7 +99,7 @@ func New(cfg Config) (*Breakout, error) {
 	if bd == nil {
 		bd = map[int64]bool{}
 	}
-	adx, err := indicator.NewADX(ap, market.PriceScale)
+	adx, err := indicator.NewADX(ap, types.PriceScale)
 	if err != nil {
 		return nil, err
 	}
@@ -106,11 +107,11 @@ func New(cfg Config) (*Breakout, error) {
 		period:        cfg.Period,
 		closeStrength: int32(math.Round(cfg.CloseStrength * 1000)),
 		confirmBars:   cb,
-		adxThreshold:  market.Units(math.Round(at * float64(indicator.ValueScale))),
+		adxThreshold:  types.Units(math.Round(at * float64(indicator.ValueScale))),
 		blockMonday:   cfg.BlockMonday,
 		blockFriday:   cfg.BlockFriday,
-		highs:         make([]market.Price, cfg.Period),
-		lows:          make([]market.Price, cfg.Period),
+		highs:         make([]types.Price, cfg.Period),
+		lows:          make([]types.Price, cfg.Period),
 		adx:           adx,
 		blockedDays:   bd,
 		name: fmt.Sprintf("DONCHIAN-V6(%d,cs=%.2f,cb=%d,adx=%d/%.1f,nd=%d,mon=%v,fri=%v)",
@@ -137,7 +138,7 @@ func (d *Breakout) Reset() {
 
 func (d *Breakout) Ready() bool { return d.count >= d.period }
 
-func (d *Breakout) channelHighLow() (market.Price, market.Price) {
+func (d *Breakout) channelHighLow() (types.Price, types.Price) {
 	hi := d.highs[0]
 	lo := d.lows[0]
 	for i := 1; i < d.period; i++ {
@@ -163,25 +164,25 @@ func (d *Breakout) advanceBar(c market.Candle) {
 
 // closeStrengthOK checks that the bar closed in the strong portion of its range.
 // threshold is ×1000 (e.g. 600 means 60%). Uses integer arithmetic on Price units.
-func closeStrengthOK(c market.Candle, side market.Side, threshold int32) bool {
+func closeStrengthOK(c market.Candle, side types.Side, threshold int32) bool {
 	rng := int64(c.High - c.Low)
 	if rng <= 0 {
 		return false
 	}
-	if side == market.Long {
+	if side == types.Long {
 		return int64(c.Close-c.Low)*1000 >= int64(threshold)*rng
 	}
 	return int64(c.High-c.Close)*1000 >= int64(threshold)*rng
 }
 
-func (d *Breakout) adxGatePass(side market.Side) bool {
+func (d *Breakout) adxGatePass(side types.Side) bool {
 	if !d.adx.Ready() {
 		return true
 	}
 	if d.adx.ValueUnits() < d.adxThreshold {
 		return false
 	}
-	if side == market.Long {
+	if side == types.Long {
 		return d.adx.PlusDIUnits() > d.adx.MinusDIUnits()
 	}
 	return d.adx.MinusDIUnits() > d.adx.PlusDIUnits()
@@ -220,32 +221,32 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 
 	hi, lo := d.channelHighLow()
 
-	var side market.Side
+	var side types.Side
 	if d.pendingCount > 0 {
 		switch d.pendingSide {
-		case market.Long:
+		case types.Long:
 			if ct.Close > d.pendingLevel {
-				side = market.Long
+				side = types.Long
 			}
-		case market.Short:
+		case types.Short:
 			if ct.Close < d.pendingLevel {
-				side = market.Short
+				side = types.Short
 			}
 		}
 		if side == 0 {
 			switch {
 			case ct.Close > hi:
-				side = market.Long
+				side = types.Long
 			case ct.Close < lo:
-				side = market.Short
+				side = types.Short
 			}
 		}
 	} else {
 		switch {
 		case ct.Close > hi:
-			side = market.Long
+			side = types.Long
 		case ct.Close < lo:
-			side = market.Short
+			side = types.Short
 		}
 	}
 
@@ -267,7 +268,7 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 		}
 		d.pendingSide = side
 		d.pendingCount = 1
-		if side == market.Long {
+		if side == types.Long {
 			d.pendingLevel = hi
 		} else {
 			d.pendingLevel = lo
@@ -309,7 +310,7 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 	}
 
 	reason := "donchian-v6-breakout-up"
-	if side == market.Short {
+	if side == types.Short {
 		reason = "donchian-v6-breakout-down"
 	}
 	return strategy.Signal{Side: side, Reason: reason}

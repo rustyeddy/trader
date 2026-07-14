@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // TestDataDir is the testdata directory path relative to workspace root.
 const TestDataDir = "testdata"
 
 // GenerateSyntheticYearTestData generates a full year of synthetic test data.
-func GenerateSyntheticYearTestData(basedir string, instrument string, year int, timeframe market.Timeframe) ([]string, error) {
+func GenerateSyntheticYearTestData(basedir string, instrument string, year int, timeframe types.Timeframe) ([]string, error) {
 	if basedir == "" {
 		basedir = TestDataDir
 	}

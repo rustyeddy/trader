@@ -13,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
 
@@ -74,7 +75,7 @@ OANDA. All validated timeframes are repaired.`,
 				tfFrom, tfTo := fromStr, toStr
 
 				if len(tfInstruments) == 0 || tfFrom == "" || tfTo == "" {
-					parsedTF, err := market.ParseTimeframe(tf)
+					parsedTF, err := types.ParseTimeframe(tf)
 					if err != nil {
 						return fmt.Errorf("bad timeframe %q: %w", tf, err)
 					}
@@ -238,7 +239,7 @@ func repairMissingCandles(
 	for _, k := range toRepair {
 		entry := logEntry{Instrument: k.instrument, Timeframe: k.timeframe, Year: k.year, Month: k.month}
 
-		tf, err := market.ParseTimeframe(k.timeframe)
+		tf, err := types.ParseTimeframe(k.timeframe)
 		if err != nil {
 			entry.Status = "error"
 			entry.Error = err.Error()
@@ -413,7 +414,7 @@ func resolveValidateDefaults(
 	instruments []string,
 	fromStr, toStr string,
 	source string,
-	tf market.Timeframe,
+	tf types.Timeframe,
 ) (outInstruments []string, outFrom, outTo string, err error) {
 	inv, err := datamanager.BuildInventory(ctx)
 	if err != nil {

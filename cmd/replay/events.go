@@ -12,7 +12,7 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/journal"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func newEventsCmd(rc *config.RootConfig) *cobra.Command {
@@ -80,11 +80,11 @@ func newEventsCmd(rc *config.RootConfig) *cobra.Command {
 			engine := sim.NewSimBroker(&execution.Account{
 				ID:       accountID,
 				Currency: "USD",
-				Balance:  market.MoneyFromFloat(startingBalance),
-				Equity:   market.MoneyFromFloat(startingBalance),
+				Balance:  types.MoneyFromFloat(startingBalance),
+				Equity:   types.MoneyFromFloat(startingBalance),
 			}, j)
 
-			feed, err := NewCSVEventsFeed(path, market.FromTime(from), market.FromTime(to))
+			feed, err := NewCSVEventsFeed(path, types.FromTime(from), types.FromTime(to))
 			if err != nil {
 				return err
 			}

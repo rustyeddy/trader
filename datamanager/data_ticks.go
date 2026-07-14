@@ -1,24 +1,27 @@
 package datamanager
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 type RawTick struct {
-	market.TimeMillis
-	Ask    market.Price
-	Bid    market.Price
+	types.TimeMillis
+	Ask    types.Price
+	Bid    types.Price
 	AskVol float32
 	BidVol float32
 }
 
-func (t RawTick) Mid() market.Price {
+func (t RawTick) Mid() types.Price {
 	return market.BA{Bid: t.Bid, Ask: t.Ask}.Mid()
 }
 
-func (t RawTick) Spread() market.Price {
+func (t RawTick) Spread() types.Price {
 	return market.BA{Bid: t.Bid, Ask: t.Ask}.Spread()
 }
 
-func (t RawTick) Minute() market.TimeMillis {
+func (t RawTick) Minute() types.TimeMillis {
 	return t.TimeMillis.FloorToMinute()
 }
 

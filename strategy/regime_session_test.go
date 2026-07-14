@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,7 @@ import (
 func sessionCT(ts time.Time) market.CandleTime {
 	return market.CandleTime{
 		Candle:    market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050},
-		Timestamp: market.FromTime(ts),
+		Timestamp: types.FromTime(ts),
 	}
 }
 
@@ -104,8 +105,8 @@ func TestSessionFilter_AllowSideAlwaysTrue(t *testing.T) {
 	t.Parallel()
 	f, err := NewSessionFilter(7, 17)
 	require.NoError(t, err)
-	assert.True(t, f.AllowSide(market.Long))
-	assert.True(t, f.AllowSide(market.Short))
+	assert.True(t, f.AllowSide(types.Long))
+	assert.True(t, f.AllowSide(types.Short))
 }
 
 func TestSessionFilter_RejectsInvalidWindows(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -20,7 +21,7 @@ type Strategy struct {
 	opened bool
 	closed bool
 
-	Units    market.Units
+	Units    types.Units
 	StopPips float64
 }
 
@@ -51,7 +52,7 @@ func (s *Strategy) Update(_ context.Context, c *market.CandleTime, run strategy.
 
 	if s.bar == 1 && !s.opened {
 		s.opened = true
-		return strategy.Signal{Side: market.Long, Reason: "lifecycle-test-open-long"}
+		return strategy.Signal{Side: types.Long, Reason: "lifecycle-test-open-long"}
 	}
 
 	if s.bar == 3 && s.opened && !s.closed {

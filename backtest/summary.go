@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Summary builds a fully-populated BacktestReportSummary from the run's
@@ -134,7 +135,7 @@ func stopDescription(run *Backtest) string {
 }
 
 // formatBacktestSummaryTime formats a Timestamp as RFC3339 UTC, or "" for zero.
-func formatBacktestSummaryTime(ts market.Timestamp) string {
+func formatBacktestSummaryTime(ts types.Timestamp) string {
 	if ts == 0 {
 		return ""
 	}

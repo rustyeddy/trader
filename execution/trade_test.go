@@ -3,7 +3,7 @@ package execution
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,10 +14,10 @@ func TestTradeCommonClone(t *testing.T) {
 	tc := &TradeCommon{
 		ID:         "t1",
 		Instrument: "EURUSD",
-		Side:       market.Long,
+		Side:       types.Long,
 		Units:      1000,
-		Stop:       market.PriceFromFloat(1.0900),
-		Take:       market.PriceFromFloat(1.1100),
+		Stop:       types.PriceFromFloat(1.0900),
+		Take:       types.PriceFromFloat(1.1100),
 	}
 
 	cp := tc.Clone()
@@ -25,9 +25,9 @@ func TestTradeCommonClone(t *testing.T) {
 	assert.Equal(t, *tc, *cp)
 
 	cp.Instrument = "GBPUSD"
-	cp.Stop = market.PriceFromFloat(1.0800)
+	cp.Stop = types.PriceFromFloat(1.0800)
 	assert.Equal(t, "EURUSD", tc.Instrument)
-	assert.Equal(t, market.PriceFromFloat(1.0900), tc.Stop)
+	assert.Equal(t, types.PriceFromFloat(1.0900), tc.Stop)
 }
 
 func TestTradeCloneDeepCopy(t *testing.T) {
@@ -37,14 +37,14 @@ func TestTradeCloneDeepCopy(t *testing.T) {
 		TradeCommon: &TradeCommon{
 			ID:         "t1",
 			Instrument: "EURUSD",
-			Side:       market.Long,
+			Side:       types.Long,
 			Units:      1000,
 		},
-		EntryPrice: market.PriceFromFloat(1.1000),
+		EntryPrice: types.PriceFromFloat(1.1000),
 		EntryTime:  100,
-		ExitPrice:  market.PriceFromFloat(1.1010),
+		ExitPrice:  types.PriceFromFloat(1.1010),
 		ExitTime:   200,
-		PNL:        market.MoneyFromFloat(10),
+		PNL:        types.MoneyFromFloat(10),
 	}
 
 	cp := tr.Clone()
@@ -53,7 +53,7 @@ func TestTradeCloneDeepCopy(t *testing.T) {
 	assert.Equal(t, *tr, *cp)
 
 	cp.TradeCommon.Instrument = "GBPUSD"
-	cp.PNL = market.MoneyFromFloat(20)
+	cp.PNL = types.MoneyFromFloat(20)
 	assert.Equal(t, "EURUSD", tr.TradeCommon.Instrument)
-	assert.Equal(t, market.MoneyFromFloat(10), tr.PNL)
+	assert.Equal(t, types.MoneyFromFloat(10), tr.PNL)
 }

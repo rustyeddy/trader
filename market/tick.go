@@ -2,12 +2,14 @@ package market
 
 import (
 	"fmt"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 // BA represents a trader domain type.
 type BA struct {
-	Bid Price
-	Ask Price
+	Bid types.Price
+	Ask types.Price
 }
 
 // Validate is an internal helper for trader type processing.
@@ -25,19 +27,19 @@ func (ba BA) Validate() error {
 }
 
 // Mid returns the midpoint rounded half-up to the nearest scaled price unit.
-func (ba BA) Mid() Price {
+func (ba BA) Mid() types.Price {
 	sum := int64(ba.Bid) + int64(ba.Ask)
-	return Price((sum + 1) / 2)
+	return types.Price((sum + 1) / 2)
 }
 
-func (ba BA) Spread() Price {
+func (ba BA) Spread() types.Price {
 	return ba.Ask - ba.Bid
 }
 
 // Tick represents a trader domain type.
 type Tick struct {
 	Instrument string
-	Timestamp  Timestamp
+	Timestamp  types.Timestamp
 	BA
 }
 
@@ -50,6 +52,6 @@ func (t Tick) Validate() error {
 }
 
 // Mid is an internal helper for trader type processing.
-func (t Tick) Mid() Price {
+func (t Tick) Mid() types.Price {
 	return t.BA.Mid()
 }

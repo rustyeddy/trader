@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // WriteMonthlyCandles writes a slice of Candle as a monthly CSV file in the
@@ -13,7 +14,7 @@ import (
 //
 // Source is the data source name (e.g. "oanda", "dukascopy") and ends up in
 // the path: <basedir>/<source>/<instrument>/<year>/<month>/<instr>-<year>-<month>-<tf>.csv
-func (s *store) WriteMonthlyCandles(source, instrument string, tf market.Timeframe, monthStart time.Time, candles []market.Candle) error {
+func (s *store) WriteMonthlyCandles(source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.Candle) error {
 	if s == nil {
 		return fmt.Errorf("nil store")
 	}
@@ -31,8 +32,8 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf market.Timefra
 	cs, err := NewMonthlyCandleSet(
 		market.NormalizeInstrument(instrument),
 		tf,
-		market.FromTime(monthStart),
-		market.PriceScale,
+		types.FromTime(monthStart),
+		types.PriceScale,
 		source,
 	)
 	if err != nil {

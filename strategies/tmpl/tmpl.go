@@ -10,6 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -19,17 +20,17 @@ func init() {
 type Config struct {
 	Lookback  int
 	Threshold float64 // price-change threshold in native units (e.g. 0.0015 for 15 pips on a 5-decimal pair)
-	Scale     market.Scale6
+	Scale     types.Scale6
 }
 
 type Strategy struct {
 	cfg       Config
 	name      string
-	threshold market.Price // Threshold converted to Price units at construction
+	threshold types.Price // Threshold converted to Price units at construction
 
 	ready     bool
 	bars      int
-	lastClose market.Price
+	lastClose types.Price
 }
 
 func New(cfg Config) (*Strategy, error) {
@@ -42,7 +43,7 @@ func New(cfg Config) (*Strategy, error) {
 
 	return &Strategy{
 		cfg:       cfg,
-		threshold: market.Price(math.Round(cfg.Threshold * float64(cfg.Scale))),
+		threshold: types.Price(math.Round(cfg.Threshold * float64(cfg.Scale))),
 		name:      fmt.Sprintf("TEMPLATE_STRATEGY(lb=%d,th=%.4f)", cfg.Lookback, cfg.Threshold),
 	}, nil
 }
@@ -92,6 +93,6 @@ func build(params map[string]any) (strategy.Strategy, error) {
 	return New(Config{
 		Lookback:  5,
 		Threshold: 0.0015,
-		Scale:     market.PriceScale,
+		Scale:     types.PriceScale,
 	})
 }

@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type CandleValidationRequest struct {
 	Instruments []string
 	Source      string
-	Timeframe   market.Timeframe
+	Timeframe   types.Timeframe
 	Start       time.Time
 	End         time.Time
 	IncludeRaw  bool
@@ -68,7 +69,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 	}
 
 	switch req.Timeframe {
-	case market.M1, market.H1, market.H4, market.D1:
+	case types.M1, types.H1, types.H4, types.D1:
 	default:
 		return nil, fmt.Errorf("unsupported timeframe: %v", req.Timeframe)
 	}
@@ -84,7 +85,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 		rawDir = globalStore.rawRoot()
 	}
 
-	months := market.TimeRange{Start: market.FromTime(start), End: market.FromTime(end), TF: req.Timeframe}.MonthsInRange()
+	months := types.TimeRange{Start: types.FromTime(start), End: types.FromTime(end), TF: req.Timeframe}.MonthsInRange()
 	report := &CandleValidationReport{
 		Source:     source,
 		Timeframe:  req.Timeframe.String(),
@@ -258,7 +259,7 @@ func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
 	return cov
 }
 
-func expectedOpenSlotCount(year, month int, tf market.Timeframe, now time.Time) int {
+func expectedOpenSlotCount(year, month int, tf types.Timeframe, now time.Time) int {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	step := time.Duration(tf) * time.Second

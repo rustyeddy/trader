@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,10 +17,10 @@ import (
 func makeCandle() *market.CandleTime {
 	return &market.CandleTime{
 		Candle: market.Candle{
-			Open:  market.PriceFromFloat(1.0850),
-			High:  market.PriceFromFloat(1.0860),
-			Low:   market.PriceFromFloat(1.0840),
-			Close: market.PriceFromFloat(1.0855),
+			Open:  types.PriceFromFloat(1.0850),
+			High:  types.PriceFromFloat(1.0860),
+			Low:   types.PriceFromFloat(1.0840),
+			Close: types.PriceFromFloat(1.0855),
 		},
 	}
 }
@@ -30,7 +31,7 @@ func makeRun(lotIDs ...string) *backtest.Backtest {
 	for _, id := range lotIDs {
 		tc := &execution.TradeCommon{ID: id}
 		tc.Instrument = "EURUSD"
-		tc.Side = market.Long
+		tc.Side = types.Long
 		_ = lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
 	}
 	return &backtest.Backtest{
@@ -92,7 +93,7 @@ func TestUpdate_FirstBarNoPositions_HoldWhenNotDue(t *testing.T) {
 
 	sig := s.Update(context.Background(), makeCandle(), makeRun())
 	// bar=1, 1%3 != 0 → hold
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.False(t, sig.CloseAll)
 	assert.Equal(t, "hold", sig.Reason)
 }
@@ -106,7 +107,7 @@ func TestUpdate_OpensWhenDue(t *testing.T) {
 	s.Update(context.Background(), makeCandle(), makeRun())        // bar 1 — hold
 	sig := s.Update(context.Background(), makeCandle(), makeRun()) // bar 2 — open
 
-	assert.Equal(t, market.Long, sig.Side) // first alternate = long
+	assert.Equal(t, types.Long, sig.Side) // first alternate = long
 	assert.False(t, sig.CloseAll)
 	assert.Equal(t, "pulse-open", sig.Reason)
 }
@@ -123,7 +124,7 @@ func TestUpdate_RespectsMaxPositions(t *testing.T) {
 	run := makeRun("t1", "t2")
 	sig := s.Update(context.Background(), makeCandle(), run)
 	// 2 open == max → no new open, no close
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.False(t, sig.CloseAll)
 }
 
@@ -136,7 +137,7 @@ func TestUpdate_OpensWhenUnderMaxPositions(t *testing.T) {
 
 	run := makeRun("t1")
 	sig := s.Update(context.Background(), makeCandle(), run)
-	assert.NotEqual(t, market.Flat, sig.Side)
+	assert.NotEqual(t, types.Flat, sig.Side)
 }
 
 // ── Update — HoldBars close logic ─────────────────────────────────────────────
@@ -160,7 +161,7 @@ func TestUpdate_ClosesAllWhenOldestExceedsHoldBars(t *testing.T) {
 	// Bar 4: age = 4 - 1 = 3 >= HoldBars → close all
 	sig = s.Update(context.Background(), makeCandle(), run)
 	assert.True(t, sig.CloseAll)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestUpdate_ClosesAndOpensInSameBar(t *testing.T) {
@@ -177,7 +178,7 @@ func TestUpdate_ClosesAndOpensInSameBar(t *testing.T) {
 	s.Update(context.Background(), makeCandle(), run)        // bar 2
 	sig := s.Update(context.Background(), makeCandle(), run) // bar 3
 	assert.True(t, sig.CloseAll)
-	assert.NotEqual(t, market.Flat, sig.Side)
+	assert.NotEqual(t, types.Flat, sig.Side)
 	assert.Equal(t, "pulse-close-reopen", sig.Reason)
 }
 
@@ -195,7 +196,7 @@ func TestUpdate_MaxPositionsAccountsForPendingClose(t *testing.T) {
 	s.Update(context.Background(), makeCandle(), run)
 	sig := s.Update(context.Background(), makeCandle(), run)
 	assert.True(t, sig.CloseAll)
-	assert.NotEqual(t, market.Flat, sig.Side)
+	assert.NotEqual(t, types.Flat, sig.Side)
 }
 
 // ── Side alternation ───────────────────────────────────────────────────────────
@@ -208,15 +209,15 @@ func TestUpdate_AlternateSide(t *testing.T) {
 	cfg.Side = "alternate"
 	s, _ := New(cfg)
 
-	sides := make([]market.Side, 6)
+	sides := make([]types.Side, 6)
 	for i := range sides {
 		sig := s.Update(context.Background(), makeCandle(), makeRun())
 		sides[i] = sig.Side
 	}
-	assert.Equal(t, market.Long, sides[0])
-	assert.Equal(t, market.Short, sides[1])
-	assert.Equal(t, market.Long, sides[2])
-	assert.Equal(t, market.Short, sides[3])
+	assert.Equal(t, types.Long, sides[0])
+	assert.Equal(t, types.Short, sides[1])
+	assert.Equal(t, types.Long, sides[2])
+	assert.Equal(t, types.Short, sides[3])
 }
 
 func TestUpdate_FixedLongSide(t *testing.T) {
@@ -229,7 +230,7 @@ func TestUpdate_FixedLongSide(t *testing.T) {
 
 	for i := 0; i < 4; i++ {
 		sig := s.Update(context.Background(), makeCandle(), makeRun())
-		assert.Equal(t, market.Long, sig.Side, "bar %d", i+1)
+		assert.Equal(t, types.Long, sig.Side, "bar %d", i+1)
 	}
 }
 
@@ -242,7 +243,7 @@ func TestUpdate_FixedShortSide(t *testing.T) {
 	s, _ := New(cfg)
 
 	sig := s.Update(context.Background(), makeCandle(), makeRun())
-	assert.Equal(t, market.Short, sig.Side)
+	assert.Equal(t, types.Short, sig.Side)
 }
 
 // ── Name / Ready / Reset ───────────────────────────────────────────────────────
@@ -278,7 +279,7 @@ func TestStrategy_Reset(t *testing.T) {
 func TestUpdate_NilCandle_ReturnsHold(t *testing.T) {
 	s, _ := New(DefaultConfig())
 	sig := s.Update(context.Background(), nil, makeRun())
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.Equal(t, "no candle", sig.Reason)
 }
 
@@ -290,7 +291,7 @@ func TestUpdate_NilContext_StillOpens(t *testing.T) {
 	s, _ := New(cfg)
 
 	sig := s.Update(context.Background(), makeCandle(), nil)
-	assert.NotEqual(t, market.Flat, sig.Side)
+	assert.NotEqual(t, types.Flat, sig.Side)
 }
 
 // ── Table-driven open schedule ─────────────────────────────────────────────────
@@ -325,9 +326,9 @@ func TestUpdate_OpenSchedule(t *testing.T) {
 			}
 			sig := s.Update(context.Background(), makeCandle(), makeRun(ids...))
 			if tc.wantOpen {
-				assert.NotEqual(t, market.Flat, sig.Side, "expected open at bar %d", tc.bar)
+				assert.NotEqual(t, types.Flat, sig.Side, "expected open at bar %d", tc.bar)
 			} else {
-				assert.Equal(t, market.Flat, sig.Side, "expected no open at bar %d", tc.bar)
+				assert.Equal(t, types.Flat, sig.Side, "expected no open at bar %d", tc.bar)
 			}
 		})
 	}

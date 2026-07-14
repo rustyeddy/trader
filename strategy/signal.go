@@ -1,6 +1,6 @@
 package strategy
 
-import "github.com/rustyeddy/trader/market"
+import "github.com/rustyeddy/trader/types"
 
 // Signal is the pure intent a strategy emits each bar: which direction to
 // trade (or Flat to hold) and why. It carries no order-construction details
@@ -16,14 +16,14 @@ import "github.com/rustyeddy/trader/market"
 //
 // Strength is reserved for future conviction-based sizing and may be zero.
 type Signal struct {
-	Side     market.Side
-	Strength market.Rate  // 0 = unset; planner ignores for now
-	CloseAll bool         // close all open lots before (re-)entering
-	Stop     market.Price // optional suggested stop price; exit strategy overrides
+	Side     types.Side
+	Strength types.Rate  // 0 = unset; planner ignores for now
+	CloseAll bool        // close all open lots before (re-)entering
+	Stop     types.Price // optional suggested stop price; exit strategy overrides
 	Reason   string
 }
 
 // Hold returns a Signal with Side == Flat, used to express "no action this bar".
 func Hold(reason string) Signal {
-	return Signal{Side: market.Flat, Reason: reason}
+	return Signal{Side: types.Flat, Reason: reason}
 }

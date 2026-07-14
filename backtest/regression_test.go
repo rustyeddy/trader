@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,9 +31,9 @@ func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 
 	cs := &datamanager.CandleSet{
 		Instrument: "EURUSD",
-		Start:      market.Timestamp(1704067200),
-		Timeframe:  market.M1,
-		Scale:      market.PriceScale,
+		Start:      types.Timestamp(1704067200),
+		Timeframe:  types.M1,
+		Scale:      types.PriceScale,
 		Candles: []market.Candle{
 			{Open: 100, High: 110, Low: 95, Close: 105, AvgSpread: 2, MaxSpread: 3, Ticks: 4},
 			{},
@@ -41,10 +42,10 @@ func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 		},
 		Valid: make([]uint64, 1),
 	}
-	market.BitSet(cs.Valid, 0)
-	market.BitSet(cs.Valid, 2)
+	types.BitSet(cs.Valid, 0)
+	types.BitSet(cs.Valid, 2)
 
-	out, err := cs.Aggregate(market.Timeframe(300))
+	out, err := cs.Aggregate(types.Timeframe(300))
 	require.NoError(t, err)
 	require.Len(t, out.Candles, 1)
 	assert.True(t, out.IsValid(0))

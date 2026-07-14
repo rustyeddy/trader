@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type DataKind uint8
@@ -28,7 +29,7 @@ const (
 type Asset struct {
 	Key        Key
 	Path       string
-	Range      market.TimeRange
+	Range      types.TimeRange
 	Exists     bool
 	Complete   bool
 	Buildable  bool

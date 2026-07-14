@@ -15,6 +15,7 @@ import (
 	oandaclient "github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SourceName is the canonical name under which this provider identifies
@@ -37,7 +38,7 @@ func (p *Provider) Name() string { return SourceName }
 // (OANDA wire format, e.g. "EUR_USD") at the given timeframe, converting to
 // the trader canonical (bid OHLC + computed spread) representation while
 // also preserving the raw bid+ask rows for optional archival.
-func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf market.Timeframe, monthStart time.Time) (*datamanager.CandleMonth, error) {
+func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf types.Timeframe, monthStart time.Time) (*datamanager.CandleMonth, error) {
 	if p.client == nil {
 		return nil, fmt.Errorf("oanda candle provider: not configured")
 	}
@@ -105,12 +106,12 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf m
 			}
 		}
 		candles[idx] = market.Candle{
-			Open:      market.PriceFromFloat(oc.BidOpen),
-			High:      market.PriceFromFloat(oc.BidHigh),
-			Low:       market.PriceFromFloat(oc.BidLow),
-			Close:     market.PriceFromFloat(oc.BidClose),
-			AvgSpread: market.PriceFromFloat(sum / 4),
-			MaxSpread: market.PriceFromFloat(max),
+			Open:      types.PriceFromFloat(oc.BidOpen),
+			High:      types.PriceFromFloat(oc.BidHigh),
+			Low:       types.PriceFromFloat(oc.BidLow),
+			Close:     types.PriceFromFloat(oc.BidClose),
+			AvgSpread: types.PriceFromFloat(sum / 4),
+			MaxSpread: types.PriceFromFloat(max),
 			Ticks:     int32(oc.Volume),
 		}
 	}
@@ -120,8 +121,8 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf m
 
 // toOandaGranularity converts a trader timeframe to the OANDA API
 // granularity value. OANDA uses "D" not "D1".
-func toOandaGranularity(tf market.Timeframe) string {
-	if tf == market.D1 {
+func toOandaGranularity(tf types.Timeframe) string {
+	if tf == types.D1 {
 		return "D"
 	}
 	return strings.ToUpper(tf.String())

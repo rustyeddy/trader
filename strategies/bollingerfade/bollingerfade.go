@@ -21,6 +21,7 @@ import (
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -60,11 +61,11 @@ func New(cfg Config) (*Fade, error) {
 	if atrMult <= 0 {
 		atrMult = 1.5
 	}
-	bb, err := indicator.NewBollingerBands(period, mult, market.PriceScale)
+	bb, err := indicator.NewBollingerBands(period, mult, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("bb-fade: Bollinger Bands: %w", err)
 	}
-	atr, err := indicator.NewATR(atrPeriod, market.PriceScale)
+	atr, err := indicator.NewATR(atrPeriod, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("bb-fade: ATR: %w", err)
 	}
@@ -111,11 +112,11 @@ func (f *Fade) Update(_ context.Context, ct *market.CandleTime, run strategy.Str
 			}
 			hasOpen = true
 			switch lot.Side {
-			case market.Long:
+			case types.Long:
 				if ct.Close >= middle {
 					shouldCloseAll = true
 				}
-			case market.Short:
+			case types.Short:
 				if ct.Close <= middle {
 					shouldCloseAll = true
 				}
@@ -135,13 +136,13 @@ func (f *Fade) Update(_ context.Context, ct *market.CandleTime, run strategy.Str
 	switch {
 	case ct.Close < lower:
 		return strategy.Signal{
-			Side: market.Long,
+			Side: types.Long,
 			Reason: fmt.Sprintf("bb-fade-long(close=%.5f<lower=%.5f)",
 				ct.Close.Float64(), lower.Float64()),
 		}
 	case ct.Close > upper:
 		return strategy.Signal{
-			Side: market.Short,
+			Side: types.Short,
 			Reason: fmt.Sprintf("bb-fade-short(close=%.5f>upper=%.5f)",
 				ct.Close.Float64(), upper.Float64()),
 		}

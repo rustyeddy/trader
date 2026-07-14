@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ChoppinessIndex measures whether price action is trending or ranging.
@@ -17,7 +18,7 @@ type ChoppinessIndex struct {
 	name      string
 	logPeriod int64
 
-	prevClose market.Price
+	prevClose types.Price
 	hasPrev   bool
 	ready     bool
 	value     int64
@@ -25,16 +26,16 @@ type ChoppinessIndex struct {
 	buf   []ciBar
 	pos   int
 	count int
-	sumTR market.PriceSum
+	sumTR types.PriceSum
 }
 
 type ciBar struct {
-	tr   market.PriceSum
-	high market.Price
-	low  market.Price
+	tr   types.PriceSum
+	high types.Price
+	low  types.Price
 }
 
-func NewChoppinessIndex(period int, scale market.Scale6) (*ChoppinessIndex, error) {
+func NewChoppinessIndex(period int, scale types.Scale6) (*ChoppinessIndex, error) {
 	if period < 2 {
 		return nil, fmt.Errorf("ChoppinessIndex period must be >= 2")
 	}
@@ -83,9 +84,9 @@ func (c *ChoppinessIndex) Update(candle market.Candle) {
 	} else {
 		c.count++
 	}
-	c.buf[c.pos] = ciBar{tr: market.PriceSum(tr), high: h, low: l}
+	c.buf[c.pos] = ciBar{tr: types.PriceSum(tr), high: h, low: l}
 	c.pos = (c.pos + 1) % c.n
-	c.sumTR += market.PriceSum(tr)
+	c.sumTR += types.PriceSum(tr)
 
 	if c.count < c.n {
 		return

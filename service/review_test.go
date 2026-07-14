@@ -20,6 +20,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -367,12 +368,12 @@ func TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort(t *testing.T) {
 	candles := make([]market.Candle, int(daysInMonth))
 	todayIdx := now.Day() - 1
 	candles[todayIdx] = market.Candle{
-		Open:  market.PriceFromFloat(1.1),
-		High:  market.PriceFromFloat(1.1),
-		Low:   market.PriceFromFloat(1.1),
-		Close: market.PriceFromFloat(1.1),
+		Open:  types.PriceFromFloat(1.1),
+		High:  types.PriceFromFloat(1.1),
+		Low:   types.PriceFromFloat(1.1),
+		Close: types.PriceFromFloat(1.1),
 	}
-	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", market.D1, monthStart, candles)
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.D1, monthStart, candles)
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)

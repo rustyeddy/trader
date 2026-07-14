@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // BollingerBands computes Bollinger Bands over candle closes.
@@ -14,21 +15,21 @@ type BollingerBands struct {
 	n       int
 	k       float64
 	kScaled int64
-	scale   market.Scale6
+	scale   types.Scale6
 
-	closes []market.Price
+	closes []types.Price
 	pos    int
 	count  int
 
-	sum        market.PriceSum
+	sum        types.PriceSum
 	sumSquares int64
-	middle     market.Price
-	upper      market.Price
-	lower      market.Price
-	stdDev     market.Price
+	middle     types.Price
+	upper      types.Price
+	lower      types.Price
+	stdDev     types.Price
 }
 
-func NewBollingerBands(period int, multiplier float64, scale market.Scale6) (*BollingerBands, error) {
+func NewBollingerBands(period int, multiplier float64, scale types.Scale6) (*BollingerBands, error) {
 	if period < 2 {
 		return nil, fmt.Errorf("BollingerBands: period must be >= 2")
 	}
@@ -43,7 +44,7 @@ func NewBollingerBands(period int, multiplier float64, scale market.Scale6) (*Bo
 		k:       multiplier,
 		kScaled: int64(math.Round(multiplier * float64(indicatorValueScale))),
 		scale:   scale,
-		closes:  make([]market.Price, period),
+		closes:  make([]types.Price, period),
 	}, nil
 }
 
@@ -57,17 +58,17 @@ func (b *BollingerBands) Upper() float64  { return priceToFloat64(int64(b.upper)
 func (b *BollingerBands) Lower() float64  { return priceToFloat64(int64(b.lower), b.scale) }
 func (b *BollingerBands) StdDev() float64 { return priceToFloat64(int64(b.stdDev), b.scale) }
 
-func (b *BollingerBands) MiddlePrice() market.Price { return b.middle }
-func (b *BollingerBands) UpperPrice() market.Price  { return b.upper }
-func (b *BollingerBands) LowerPrice() market.Price  { return b.lower }
-func (b *BollingerBands) StdDevPrice() market.Price { return b.stdDev }
+func (b *BollingerBands) MiddlePrice() types.Price { return b.middle }
+func (b *BollingerBands) UpperPrice() types.Price  { return b.upper }
+func (b *BollingerBands) LowerPrice() types.Price  { return b.lower }
+func (b *BollingerBands) StdDevPrice() types.Price { return b.stdDev }
 
 // PercentB returns where price sits relative to the bands: 0.0 = lower, 1.0 = upper, 0.5 = middle.
 func (b *BollingerBands) PercentB(price float64) float64 {
-	return b.PercentBPrice(market.Price(math.Round(price * float64(b.scale))))
+	return b.PercentBPrice(types.Price(math.Round(price * float64(b.scale))))
 }
 
-func (b *BollingerBands) PercentBPrice(price market.Price) float64 {
+func (b *BollingerBands) PercentBPrice(price types.Price) float64 {
 	width := int64(b.upper - b.lower)
 	if width == 0 {
 		return 0.5
@@ -86,14 +87,14 @@ func (b *BollingerBands) BandWidth() float64 {
 func (b *BollingerBands) Update(c market.Candle) {
 	if b.count == b.n {
 		evicted := b.closes[b.pos]
-		b.sum -= market.PriceSum(evicted)
+		b.sum -= types.PriceSum(evicted)
 		b.sumSquares -= int64(evicted) * int64(evicted)
 	} else {
 		b.count++
 	}
 
 	b.closes[b.pos] = c.Close
-	b.sum += market.PriceSum(c.Close)
+	b.sum += types.PriceSum(c.Close)
 	b.sumSquares += int64(c.Close) * int64(c.Close)
 	b.pos = (b.pos + 1) % b.n
 	if b.count < b.n {
@@ -102,15 +103,15 @@ func (b *BollingerBands) Update(c market.Candle) {
 
 	n64 := int64(b.n)
 	sum := int64(b.sum)
-	b.middle = market.Price(roundDivPositive(sum, n64))
+	b.middle = types.Price(roundDivPositive(sum, n64))
 
 	varianceNum := n64*b.sumSquares - sum*sum
 	if varianceNum < 0 {
 		varianceNum = 0
 	}
-	b.stdDev = market.Price(sqrtRoundRatio(varianceNum, n64))
+	b.stdDev = types.Price(sqrtRoundRatio(varianceNum, n64))
 
-	offset := market.Price(roundDivPositive(int64(b.stdDev)*b.kScaled, indicatorValueScale))
+	offset := types.Price(roundDivPositive(int64(b.stdDev)*b.kScaled, indicatorValueScale))
 	b.upper = b.middle + offset
 	b.lower = b.middle - offset
 }

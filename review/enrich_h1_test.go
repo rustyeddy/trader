@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,10 +20,10 @@ func decliningCandles(n int) []market.Candle {
 		high := open + 0.00005
 		low := close - 0.00005
 		candles = append(candles, market.Candle{
-			Open:  market.PriceFromFloat(open),
-			High:  market.PriceFromFloat(high),
-			Low:   market.PriceFromFloat(low),
-			Close: market.PriceFromFloat(close),
+			Open:  types.PriceFromFloat(open),
+			High:  types.PriceFromFloat(high),
+			Low:   types.PriceFromFloat(low),
+			Close: types.PriceFromFloat(close),
 		})
 	}
 	return candles
