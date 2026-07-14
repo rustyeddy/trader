@@ -619,6 +619,7 @@ func TestParseCandlePath_TimeframeSuffixes(t *testing.T) {
 	}{
 		{"m1", types.M1, true},
 		{"h1", types.H1, true},
+		{"h4", types.H4, true},
 		{"d1", types.D1, true},
 		{"w1", 0, false},
 		// parseCandlePath lowercases the filename, so these are case-insensitive

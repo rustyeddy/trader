@@ -159,6 +159,8 @@ func parseCandlePath(path string) (k Key, ok bool) {
 		k.TF = types.M1
 	case "h1":
 		k.TF = types.H1
+	case "h4":
+		k.TF = types.H4
 	case "d1":
 		k.TF = types.D1
 	default:
