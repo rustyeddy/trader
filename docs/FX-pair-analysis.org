@@ -207,7 +207,8 @@ zoneWidth = ATR14 * 0.10 to 0.20
 
 ** Volatility Ranking
 
-Volatility should be normalized by price so that JPY pairs and non-JPY pairs can be compared fairly.
+Volatility should be normalized by price so that JPY pairs and non-JPY
+pairs can be compared fairly.
 
 *** Core Inputs
 
@@ -340,7 +341,9 @@ Execution cleanliness: 10%
 
 ** Watchlist Prioritization
 
-The watchlist should not be ranked by volatility alone. High-volatility pairs can be less reviewable when event risk is elevated.
+The watchlist should not be ranked by volatility
+alone. High-volatility pairs can be less reviewable when event risk is
+elevated.
 
 Suggested priority inputs:
 
@@ -922,8 +925,8 @@ _ = watchlist
 
 ** Implementation Notes
 
-- Use D1/H4 as primary classification timeframes.
-- Use H1 for confirmation and context only.
+- Use W1/D1/H4 as primary classification timeframes.
+- Use H1 for entry timing 
 - Normalize volatility by price before comparing pairs.
 - Penalize abnormal spreads and major macro/event risk.
 - Keep the status label as a review-quality indicator, not a trading instruction.

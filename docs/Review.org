@@ -36,11 +36,11 @@ The existing methodology in =FX-pair-analysis.org= specifies
 three timeframes: D1 and H4 as primary classification inputs, H1 for
 confirmation context only. The scanner implements that stack.
 
-| Timeframe | Role                                                         |
-|-----------+--------------------------------------------------------------|
-| W1        | Big-picture trend direction; filters counter-trend D1 setups |
-| D1        | Primary regime signal; ADX, CI, EMA alignment, volatility    |
-| H4        | Setup quality; pullback structure, squeeze, entry proximity  |
+| Timeframe | Role                                                                                                          |
+|-----------+---------------------------------------------------------------------------------------------------------------|
+| W1        | Big-picture trend direction; filters counter-trend D1 setups                                                  |
+| D1        | Primary regime signal; ADX, CI, EMA alignment, volatility                                                     |
+| H4        | Setup quality; pullback structure, squeeze, entry proximity                                                   |
 | H1        | Entry-timing refinement for Tradeable pairs only — never a classification input, never computed for Watch/Hot |
 
 H4 earns its place because D1 alone cannot distinguish between two hotlist
@@ -462,15 +462,15 @@ mean reversion classification below.
 
 ** Data requirements
 
-| Data                        | Candles needed | Warmup driver                             |
-|-----------------------------+----------------+-------------------------------------------|
-| W1 EMA(20), ATR(14)         | 30 W1          | EMA(20) warmup = 20                       |
-| D1 ADX(14), ATR(14), CI(14) | 200 D1         | ADX *convergence* (not just Ready()); see below |
-| D1 EMA(20), EMA(50), BB(20) | 200 D1         | EMA(50) warmup = 50; covers all           |
-| H4 ADX(14), ATR(14), CI(14) | 200 H4         | Same convergence requirement as D1        |
-| H4 EMA(20)                  | 200 H4         | EMA(20) warmup = 20; covered by the ADX-driven count |
-| H1 EMA(20), EMA(50), ATR(14) (tradeable pairs only) | 200 H1 | Same convergence requirement, not just Ready() |
-|-----------------------------+----------------+-------------------------------------------|
+| Data                                                | Candles needed | Warmup driver                                        |
+|-----------------------------------------------------+----------------+------------------------------------------------------|
+| W1 EMA(20), ATR(14)                                 | 30 W1          | EMA(20) warmup = 20                                  |
+| D1 ADX(14), ATR(14), CI(14)                         | 200 D1         | ADX *convergence* (not just Ready()); see below      |
+| D1 EMA(20), EMA(50), BB(20)                         | 200 D1         | EMA(50) warmup = 50; covers all                      |
+| H4 ADX(14), ATR(14), CI(14)                         | 200 H4         | Same convergence requirement as D1                   |
+| H4 EMA(20)                                          | 200 H4         | EMA(20) warmup = 20; covered by the ADX-driven count |
+| H1 EMA(20), EMA(50), ATR(14) (tradeable pairs only) | 200 H1         | Same convergence requirement, not just Ready()       |
+|-----------------------------------------------------+----------------+------------------------------------------------------|
 
 *D1/H4/H1 candle counts (GitHub issue #175).* These were 60 until an
 empirical investigation found that `ADX.Ready()`'s `2*N=28`-period
@@ -598,23 +598,23 @@ The =--bucket= flag filters output to a single tier (useful for scripting:
 Default sort: Bucket (Tradeable → Hot → Watch), then D1 ADX descending
 within each bucket.
 
-| Column      | Source               | Display notes                                  |
-|-------------+----------------------+------------------------------------------------|
-| Pair        | =instrument=         | plain text                                     |
-| Status      | =bucket=             | chip: Watch=gray, Hot=amber, Tradeable=green   |
-| Bias        | =bias=               | Long ↑ / Short ↓ / Neutral                      |
-| ADX         | =d1.adx=             | color ramp: gray < 20, amber 20–25, green ≥ 25 |
-| CI          | =d1.ci=              | inverse: green < 55, amber 55–65, red > 65     |
-| EMA sep     | =d1.ema_sep_atr=     | signed ATR multiples; sign = direction         |
-| ATR (pips)  | =d1.atr_pips=        | position sizing reference                      |
-| EMA dist    | =d1.price_ema20_atr= | D1 proximity; near zero = at the EMA           |
-| H4 ADX      | =h4.adx=             | same color ramp as D1 ADX                      |
-| H4 CI       | =h4.ci=              | same inverse coloring as D1 CI                 |
-| H4 EMA sep  | =h4.ema_sep_atr=     | signed ATR multiples; near-zero = merged EMAs; drives Tradeable gate |
-| H4 dist     | =setup.price_ema_atr= | entry proximity signal; drives Tradeable gate |
-| Squeeze     | =setup.squeeze=      | badge when H4 BB width < 2.0 × H4 ATR          |
-| W1          | =setup.w1_alignment= | ✓ Aligned / ~ Neutral / ✗ Conflict (tri-state) |
-| Week used   | =w1.week_used_pct=   | progress bar; high = limited weekly range left |
+| Column     | Source                | Display notes                                                        |
+|------------+-----------------------+----------------------------------------------------------------------|
+| Pair       | =instrument=          | plain text                                                           |
+| Status     | =bucket=              | chip: Watch=gray, Hot=amber, Tradeable=green                         |
+| Bias       | =bias=                | Long ↑ / Short ↓ / Neutral                                          |
+| ADX        | =d1.adx=              | color ramp: gray < 20, amber 20–25, green ≥ 25                       |
+| CI         | =d1.ci=               | inverse: green < 55, amber 55–65, red > 65                           |
+| EMA sep    | =d1.ema_sep_atr=      | signed ATR multiples; sign = direction                               |
+| ATR (pips) | =d1.atr_pips=         | position sizing reference                                            |
+| EMA dist   | =d1.price_ema20_atr=  | D1 proximity; near zero = at the EMA                                 |
+| H4 ADX     | =h4.adx=              | same color ramp as D1 ADX                                            |
+| H4 CI      | =h4.ci=               | same inverse coloring as D1 CI                                       |
+| H4 EMA sep | =h4.ema_sep_atr=      | signed ATR multiples; near-zero = merged EMAs; drives Tradeable gate |
+| H4 dist    | =setup.price_ema_atr= | entry proximity signal; drives Tradeable gate                        |
+| Squeeze    | =setup.squeeze=       | badge when H4 BB width < 2.0 × H4 ATR                                |
+| W1         | =setup.w1_alignment=  | ✓ Aligned / ~ Neutral / ✗ Conflict (tri-state)                       |
+| Week used  | =w1.week_used_pct=    | progress bar; high = limited weekly range left                       |
 
 Row interactions: click → chart view for that pair. Hover → tooltip with
 =notes= strings. Filter chips above the table for bucket selection.
@@ -646,18 +646,18 @@ commitment.
 
 Trend-following and mean reversion want opposite regime conditions:
 
-| Signal      | Trend-following (current)      | Mean reversion                    |
-|-------------+---------------------------------+------------------------------------|
-| D1 ADX      | >= 25 (trending)                | typically < 20 (no trend)          |
-| D1 CI       | < 55 (extending)                | > 65 — currently the *exclusion*   |
-| Entry       | pullback toward D1 EMA20        | extension away from mean, at a     |
-|             |                                  | band extreme                       |
-| BB %B       | not gated on                    | near 0 or 1 (band extreme)         |
-| Bias        | trend direction                 | fade direction (opposite of        |
-|             |                                  | extension)                         |
-| Squeeze     | secondary continuation signal   | mostly irrelevant, possibly a      |
-|             |                                  | caution flag (squeezes usually     |
-|             |                                  | resolve into trends, not reverts)  |
+| Signal  | Trend-following (current)     | Mean reversion                    |
+|---------+-------------------------------+-----------------------------------|
+| D1 ADX  | >= 25 (trending)              | typically < 20 (no trend)         |
+| D1 CI   | < 55 (extending)              | > 65 — currently the *exclusion*  |
+| Entry   | pullback toward D1 EMA20      | extension away from mean, at a    |
+|         |                               | band extreme                      |
+| BB %B   | not gated on                  | near 0 or 1 (band extreme)        |
+| Bias    | trend direction               | fade direction (opposite of       |
+|         |                               | extension)                        |
+| Squeeze | secondary continuation signal | mostly irrelevant, possibly a     |
+|         |                               | caution flag (squeezes usually    |
+|         |                               | resolve into trends, not reverts) |
 
 A pair can legitimately be Watch for trend and Tradeable for MR at the
 same time — a ranging AUDCAD at D1 ADX 14 is exactly the case
