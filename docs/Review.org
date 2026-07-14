@@ -465,15 +465,27 @@ mean reversion classification below.
 | Data                        | Candles needed | Warmup driver                             |
 |-----------------------------+----------------+-------------------------------------------|
 | W1 EMA(20), ATR(14)         | 30 W1          | EMA(20) warmup = 20                       |
-| D1 ADX(14), ATR(14), CI(14) | 60 D1          | ADX warmup = 2×14 = 28; buffer for safety |
-| D1 EMA(20), EMA(50), BB(20) | 60 D1          | EMA(50) warmup = 50; covers all           |
-| H4 ADX(14), ATR(14), CI(14) | 60 H4          | Same warmup ratios                        |
-| H4 EMA(20)                  | 30 H4          | EMA(20) warmup = 20; 30 provides buffer   |
-| H1 EMA(20), EMA(50), ATR(14) (tradeable pairs only) | 60 H1 | EMA(50) warmup = 50; same as H4's EMA(50) row |
+| D1 ADX(14), ATR(14), CI(14) | 200 D1         | ADX *convergence* (not just Ready()); see below |
+| D1 EMA(20), EMA(50), BB(20) | 200 D1         | EMA(50) warmup = 50; covers all           |
+| H4 ADX(14), ATR(14), CI(14) | 200 H4         | Same convergence requirement as D1        |
+| H4 EMA(20)                  | 200 H4         | EMA(20) warmup = 20; covered by the ADX-driven count |
+| H1 EMA(20), EMA(50), ATR(14) (tradeable pairs only) | 200 H1 | Same convergence requirement, not just Ready() |
 |-----------------------------+----------------+-------------------------------------------|
 
+*D1/H4/H1 candle counts (GitHub issue #175).* These were 60 until an
+empirical investigation found that `ADX.Ready()`'s `2*N=28`-period
+threshold only guarantees the Wilder-smoothed value *has a number*, not
+that it has *converged* to what a continuously-running series (like a
+charting tool's, backed by years of history) would show at the same bar.
+Synthetic testing found ~0.6-4.7 ADX points of drift at a 60-candle cold
+start versus a long-run reference, dropping to <0.1 points by ~100-150
+candles. 200 leaves headroom beyond that empirically-observed convergence
+point. `reviewWeeklyLookbackDays` (340 calendar days) is sized to fetch
+enough D1 history to cover this 200-candle window plus the 30-week W1
+derivation.
 
-For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair). A
+For 20 watchlist pairs that is 60 OANDA candle requests (3 per pair, each
+now a larger candle count than before, but the same request count). A
 bounded goroutine pool of 8 workers handles the fan-out without rate-limit
 risk. =CandlesOptions= already supports =Count= and =Granularity=. The H1
 row adds a 4th request, but only for pairs that end up classified

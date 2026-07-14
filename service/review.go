@@ -38,13 +38,22 @@ const reviewWorkers = 8
 // produces from the D1 series, not a separate OANDA fetch (see reviewWeeklyLookbackDays).
 // "H1" is only ever fetched for pairs already classified "tradeable" (see
 // reviewOneInstrument), not for the full watchlist.
-var reviewCandleCounts = map[string]int{"W": 30, "D": 60, "H4": 60, "H1": 60}
+//
+// D/H4/H1 are 200, not the ADX(14) readiness minimum of 2*14=28 or the old
+// value of 60: GitHub issue #175 found that Wilder's recursive smoothing
+// only reaches Ready() at 2*N periods, not convergence — a cold-started
+// ADX at 60 candles measured 0.6-4.7 points off a long-run reference in
+// synthetic testing, while ~100-150 candles closed that gap to <0.1 points.
+// 200 leaves headroom beyond the empirically-observed convergence point.
+var reviewCandleCounts = map[string]int{"W": 30, "D": 200, "H4": 200, "H1": 200}
 
 // reviewWeeklyLookbackDays sizes the D1 window fetched/cached so there is
-// enough daily history to derive reviewCandleCounts["W"] complete weekly
-// bars via deriveWeeklyCandles: ~30 weeks * 7 days, with headroom for
-// holidays and the current partial week that gets dropped.
-const reviewWeeklyLookbackDays = 220
+// enough daily history to cover both reviewCandleCounts["D"]'s 200-candle
+// ADX-convergence window and reviewCandleCounts["W"]'s 30 complete weekly
+// bars via deriveWeeklyCandles. 200 weekday candles needs roughly 280
+// calendar days at ~5/7 weekdays-per-week; 340 leaves headroom for holidays
+// and the current partial week that gets dropped.
+const reviewWeeklyLookbackDays = 340
 
 // ReviewWatchlist runs the watchlist review over all instruments in
 // req, fetches D1, H4, and W1 candles from DataManaager, computes all

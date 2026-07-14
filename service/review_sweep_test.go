@@ -41,10 +41,11 @@ func seedWeekdayCandles(t *testing.T, instrument string, tf market.Timeframe, mo
 
 // seedReviewHistory seeds enough D1 and H4 weekday candle history ending at
 // or before asOf for reviewOneInstrumentAsOf to succeed: D1 across
-// d1Months calendar months (reviewWeeklyLookbackDays=220 valid weekday
-// candles needs roughly 11 months at ~21 weekdays/month), H4 across
-// h4Months (reviewCandleCounts["H4"]=60 valid candles needs roughly 2
-// weeks, so 1-2 months is ample).
+// d1Months calendar months (reviewWeeklyLookbackDays=340 valid weekday
+// candles needs roughly 17 months at ~21 weekdays/month, per issue #175's
+// ADX-convergence-driven widening), H4 across h4Months
+// (reviewCandleCounts["H4"]=200 valid candles needs roughly 1.75 months at
+// ~6 H4 candles/weekday, so 2-3 months is ample).
 func seedReviewHistory(t *testing.T, instrument string, asOf time.Time, d1Months, h4Months int) {
 	t.Helper()
 
@@ -119,10 +120,15 @@ func seedTradeableReviewHistory(t *testing.T, instrument string, asOf time.Time)
 	t.Helper()
 	asOfMonth := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	seedTrendingMonths(t, instrument, market.D1, asOfMonth.AddDate(0, -12, 0), 13, market.PriceFromFloat(1.0))
+	seedTrendingMonths(t, instrument, market.D1, asOfMonth.AddDate(0, -18, 0), 19, market.PriceFromFloat(1.0))
+	// H4 needs reviewCandleCounts["H4"]=200 valid candles ending at the
+	// pullback; a leading trending month gives the window enough depth
+	// (~126 H4 candles/month) before the pullback-shaped tail two months
+	// still supplies the value-zone setup right at asOf.
+	seedTrendingMonths(t, instrument, market.H4, asOfMonth.AddDate(0, -2, 0), 1, market.PriceFromFloat(1.0))
 	seedH4TradeablePullback(t, instrument, asOfMonth.AddDate(0, -1, 0))
 	seedH4TradeablePullback(t, instrument, asOfMonth)
-	seedTrendingMonths(t, instrument, market.H1, asOfMonth, 1, market.PriceFromFloat(1.0))
+	seedTrendingMonths(t, instrument, market.H1, asOfMonth.AddDate(0, -1, 0), 2, market.PriceFromFloat(1.0))
 }
 
 // TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs is the end-to-end
@@ -155,7 +161,7 @@ func TestReviewWatchlistRange_NonTradeablePairGetsNoH1(t *testing.T) {
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	// Plain trending D1/H4 (via seedReviewHistory) lands on Hot or Watch,
 	// never Tradeable — no H4 pullback into the value zone is seeded.
-	seedReviewHistory(t, "EURUSD", asOf, 12, 2)
+	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
 	svc := &Service{Log: discardLogger()}
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
@@ -175,7 +181,7 @@ func TestReviewWatchlistRange_NonTradeablePairGetsNoH1(t *testing.T) {
 func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC) // a Wednesday, far from any month boundary
-	seedReviewHistory(t, "EURUSD", asOf, 12, 2)
+	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
 	svc := &Service{Log: discardLogger()}
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
@@ -198,7 +204,7 @@ func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testin
 func TestReviewWatchlistRange_NeverTouchesOANDA(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
-	seedReviewHistory(t, "EURUSD", asOf, 12, 2)
+	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
 	svc := &Service{Log: discardLogger()} // OANDA intentionally nil
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
@@ -214,7 +220,7 @@ func TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate(t *testing.T) 
 	datamanager.UseTempDataDir(t)
 	to := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	from := to.AddDate(0, 0, -2)
-	seedReviewHistory(t, "EURUSD", to, 12, 2)
+	seedReviewHistory(t, "EURUSD", to, 18, 2)
 
 	svc := &Service{Log: discardLogger()}
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
@@ -248,8 +254,8 @@ func TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate(t *testi
 	datamanager.UseTempDataDir(t)
 	to := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	from := to.AddDate(0, 0, -1)
-	seedReviewHistory(t, "EURUSD", to, 12, 2)
-	seedReviewHistory(t, "GBPUSD", to, 12, 2)
+	seedReviewHistory(t, "EURUSD", to, 18, 2)
+	seedReviewHistory(t, "GBPUSD", to, 18, 2)
 
 	svc := &Service{Log: discardLogger()}
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
@@ -291,7 +297,7 @@ func TestReviewWatchlistRange_SkipsUnknownInstrument(t *testing.T) {
 func TestReviewWatchlistRange_SkipsInsufficientHistory(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
-	seedReviewHistory(t, "EURUSD", asOf, 1, 2) // far short of the ~11 months D1 needs
+	seedReviewHistory(t, "EURUSD", asOf, 1, 2) // far short of the ~17 months D1 needs
 
 	svc := &Service{Log: discardLogger()}
 	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
