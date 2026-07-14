@@ -226,7 +226,7 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 	if err != nil {
 		log.Warn("review: read local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
-	if len(candles) < count {
+	if len(candles) < count-reviewFetchShortfallTolerance {
 		// The cache doesn't hold enough bars to satisfy the review window —
 		// whether because it's empty (brand-new pair), the top-up download
 		// above failed, or the cached data is short/incomplete for some
@@ -237,10 +237,27 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		// review always gets a full series to work with, rather than
 		// silently running indicators on too little data or skipping the
 		// instrument outright.
+		//
+		// reviewFetchShortfallTolerance absorbs the ordinary case: an
+		// exact-count request can legitimately come back a few candles
+		// short even when the cache is fully populated, since
+		// datamanager.CandleWindow's calendar-to-weekday conversion is an
+		// approximation that doesn't model holidays (same phenomenon
+		// reviewSweepFetchHeadroom works around on the sweep path).
+		// Without this tolerance, that ordinary few-candle shortfall
+		// tripped the retry — a full multi-month re-download — on every
+		// instrument, every run, turning a cache-hit into the slowest path
+		// available.
 		return s.retryReviewCandleTimesDownload(ctx, instrument, oandaName, granularity, from, to, count)
 	}
 	return candles, nil
 }
+
+// reviewFetchShortfallTolerance is how many candles short of an exact-count
+// request fetchReviewCandleTimes tolerates before treating the cache as
+// insufficient and triggering retryReviewCandleTimesDownload's full
+// re-download. See the comment at its use site.
+const reviewFetchShortfallTolerance = 20
 
 // ensureCachedOandaCandles downloads and writes into the local candle store
 // (via DownloadOandaCandles/DataManager's canonical layout) any candles
