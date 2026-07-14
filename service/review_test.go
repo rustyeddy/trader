@@ -377,7 +377,54 @@ func TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort(t *testing.T) {
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)
-	assert.Len(t, got, reviewCandleCounts["D"], "must fall back to OANDA for a full window rather than trust the short cache")
+	assert.Len(t, got, reviewCandleCounts["D"], "must retry a full-window download rather than trust the short cache")
+}
+
+// TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads confirms
+// the retry path (retryReviewCandleTimesDownload) actually repairs the local
+// store — via DataManager's forced full-window re-download — rather than
+// only serving one live read. A second call, against a server that fails
+// every request, must still succeed by reading the now-repaired cache.
+func TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads(t *testing.T) {
+	swapTempStore(t)
+	srv := fakeOANDACandlesServer(t)
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	// Same corrupted-cache setup as TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort.
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	daysInMonth := monthStart.AddDate(0, 1, 0).Sub(monthStart) / (24 * time.Hour)
+	candles := make([]market.Candle, int(daysInMonth))
+	todayIdx := now.Day() - 1
+	candles[todayIdx] = market.Candle{
+		Open:  types.PriceFromFloat(1.1),
+		High:  types.PriceFromFloat(1.1),
+		Low:   types.PriceFromFloat(1.1),
+		Close: types.PriceFromFloat(1.1),
+	}
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.D1, monthStart, candles)
+
+	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
+	require.NoError(t, err)
+	require.Len(t, got, reviewCandleCounts["D"])
+
+	// Close the working server and swap in one that always errors, so any
+	// second network fetch would fail — the retry's downloaded candles must
+	// have actually been written to the local store, not just returned once.
+	srv.Close()
+	failingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failingSrv.Close()
+	svc.OANDA = &oanda.Client{BaseURL: failingSrv.URL, Token: "t"}
+
+	got2, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
+	require.NoError(t, err, "second read must be served from the repaired local cache, not a network call")
+	assert.Len(t, got2, reviewCandleCounts["D"])
 }
 
 func TestReviewWatchlist_UnknownInstrumentSkipped(t *testing.T) {

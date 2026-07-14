@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
@@ -190,8 +189,9 @@ func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularit
 // for instrument at the given OANDA granularity ("D", "H4"). D1 and H4 are
 // served from the local DataManager-backed candle store (via GetCandles),
 // topping it up from OANDA (and caching the result) only when the store is
-// missing recent bars, falling back to a direct OANDA fetch when the cache
-// still can't satisfy count afterwards.
+// missing recent bars, retrying with a forced full-window re-download
+// (still through DataManager) when the cache still can't satisfy count
+// afterwards.
 func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granularity string, count int) ([]market.CandleTime, error) {
 	inst := market.GetInstrument(instrument)
 	if inst == nil {
@@ -212,13 +212,10 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		log = slog.Default()
 	}
 
-	// Change the name: while the candles are currently from
 	if err := s.ensureCachedOandaCandles(ctx, oandaName, granularity, from, to); err != nil {
 		log.Warn("review: top up local candle cache", "instrument", instrument, "granularity", granularity, "err", err)
 	}
 
-	// Q: Does this really need to be normalized?  inst.Instrument or instrument should
-	// already be normalized
 	instNorm := market.NormalizeInstrument(instrument)
 	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
 	candles, err := dm.GetCandles(ctx, datamanager.CandleRequest{
@@ -233,14 +230,14 @@ func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granul
 		// The cache doesn't hold enough bars to satisfy the review window —
 		// whether because it's empty (brand-new pair), the top-up download
 		// above failed, or the cached data is short/incomplete for some
-		// other reason. lastNonZeroCandleDate only checks that a flagged-
-		// valid row exists at some timestamp; it cannot confirm the cached
-		// series actually has count bars of usable history, so this count
-		// check is the real "is the cache good enough" gate. Fall back to a
-		// direct OANDA fetch so review always gets a full series to work
-		// with, rather than silently running indicators on too little data
-		// (or skipping the instrument outright).
-		return s.fetchReviewCandleTimesFromOANDA(ctx, instrument, oandaName, granularity, from, to, count)
+		// other reason (e.g. a corrupted month file with a "flagged valid"
+		// row at today's date but far fewer than count usable bars —
+		// ensureCachedOandaCandles's LastCompleteDate check alone can't
+		// detect that). Retry via a forced full-window re-download so
+		// review always gets a full series to work with, rather than
+		// silently running indicators on too little data or skipping the
+		// instrument outright.
+		return s.retryReviewCandleTimesDownload(ctx, instrument, oandaName, granularity, from, to, count)
 	}
 	return candles, nil
 }
@@ -272,7 +269,6 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 	}
 	dlFrom = time.Date(dlFrom.Year(), dlFrom.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	// XXX; we are certainly NOT going to D/L O&A candles here that is DM's job
 	_, err = s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
 		Instrument: oandaName,
 		Timeframe:  granularity,
@@ -282,33 +278,52 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 	return err
 }
 
-// fetchReviewCandleTimesFromOANDA fetches timestamped candles directly from
-// OANDA: used as a fallback when the local cache can't serve D1/H4 candles.
-// XXX: No this is wrong.  This package should NEVER call oanda directly,
-// always go through datamanager for this
-func (s *Service) fetchReviewCandleTimesFromOANDA(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
-	raw, err := s.OANDA.FetchCandles(ctx, oanda.FetchCandlesOptions{
-		Instrument:  oandaName,
-		Granularity: granularity,
-		From:        from,
-		To:          to,
-	})
+// retryReviewCandleTimesDownload is the fallback when the local candle cache
+// still doesn't hold enough bars after ensureCachedOandaCandles's
+// incremental top-up — e.g. the top-up failed, or LastCompleteDate reports
+// the cache as current even though the underlying month file is short or
+// corrupted (a "flagged valid" row can exist at today's date while holding
+// far fewer than count usable bars). Unlike ensureCachedOandaCandles, this
+// does not consult LastCompleteDate at all: it forces DataManager to
+// re-download and overwrite the whole [from, to] window's month files, so a
+// corrupted cache actually gets repaired rather than re-confirmed as
+// current. Always goes through DataManager's OANDA provider — never a
+// direct OANDA client call — so every candle review ever sees is written
+// through the same canonical store path.
+func (s *Service) retryReviewCandleTimesDownload(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
+	dlFrom := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if _, err := s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
+		Instrument: oandaName,
+		Timeframe:  granularity,
+		From:       dlFrom,
+		To:         to,
+	}); err != nil {
+		return nil, fmt.Errorf("retry download %s %s candles: %w", instrument, granularity, err)
+	}
 
-	// XXX: Either fix this or name it correctly.
+	tf, ok := reviewTimeframe(granularity)
+	if !ok {
+		return nil, fmt.Errorf("review: unsupported granularity %q", granularity)
+	}
+	instNorm := market.NormalizeInstrument(instrument)
+	dm := datamanager.NewDataManager([]string{instNorm}, from, to)
+	candles, err := dm.GetCandles(ctx, datamanager.CandleRequest{
+		Source:     market.SourceOanda,
+		Instrument: instNorm,
+		Range:      types.TimeRange{TF: tf},
+	}, to, count)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s %s candles: %w", instrument, granularity, err)
+		return nil, fmt.Errorf("read local candle cache after retry download %s %s: %w", instrument, granularity, err)
 	}
-
-	candles := make([]market.CandleTime, 0, len(raw))
-	for _, c := range raw {
-		if !c.Complete {
-			continue
-		}
-		candles = append(candles, oandaCandleToCandleTime(c, instrument))
-	}
-	if len(candles) > count {
-		candles = candles[len(candles)-count:]
-	}
+	// Deliberately no minimum-length check here: an exact-count request can
+	// legitimately come back a few short of count even after a full
+	// re-download, since CandleWindow's calendar-to-weekday-count conversion
+	// is an approximation that doesn't model holidays (see
+	// reviewSweepFetchHeadroom's doc comment in review_sweep.go for the same
+	// phenomenon on the sweep path — a request for exactly 220 D1 candles
+	// once came back 219 on real data). ReviewPair's own indicator warmup
+	// checks are the real sufficiency gate for classification; a handful of
+	// bars short of the full W1-derivation window is not a fetch failure.
 	return candles, nil
 }
 
