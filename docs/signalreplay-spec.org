@@ -1,0 +1,222 @@
+#+TITLE: signalreplay — Backtesting Scanner Signals Through the Existing Backtest Runner
+#+DATE: 2026-07-14
+#+PROPERTY: status draft-for-implementation
+#+PROPERTY: audience implementation agent (Claude Code)
+
+* Purpose
+
+Answer, empirically: /does a "tradeable" classification from =trader review=
+have edge?/ Given a review sweep CSV (output of =trader review --from --to
+--output csv=), simulate a deliberately dumb mechanical trade for each signal
+episode and label it with an outcome (R-multiple, close cause). The output is
+the historical dataset that the composite grading system (Review TODO Item 3)
+and config-driven threshold tuning (Item 4) will be fitted against.
+
+Design principle: *the scanner backtest and the strategy backtest share one
+workflow.* A scanner episode is treated as a synthetic strategy and executed
+by the existing =backtest= runner. No parallel simulation engine. The entry
+is intentionally naive (next bar open) because we are testing /selection/,
+not timing; later entry modes (e.g. rejection-candle trigger) become
+additional entry modes on the same strategy, letting us measure exactly what
+the trigger layer adds.
+
+Asset-class neutrality: nothing in this design may hardcode forex-specific
+logic. The signal CSV schema is (date, instrument, bias, features...). Pip
+math, sizing, and spreads stay where they already live (planner/execution).
+This must port to equities (Alpaca/Polygon) with only a data-source change.
+
+* Non-goals (v1)
+
+- No new simulation engine, fill model, or accounting. Reuse =backtest=.
+- No new exit strategies required. =chandelier= and config fallbacks suffice
+  for v1. (Fixed ATR-multiple non-trailing exit is a natural v2 and already
+  on the exit backlog; do not block on it.)
+- No live-trading integration. This is analysis tooling only.
+- No changes to =review/= classification logic.
+- No UI.
+
+* Repo facts the implementation must respect (verified 2026-07-14)
+
+- =strategy.Strategy= interface: =Name() / Reset() / Ready() /
+  Update(ctx, *market.CandleTime, StrategyContext) Signal /
+  StopDescription()= (=strategy/strategy.go=).
+- =strategy.Signal=: =Side=, =CloseAll=, optional =Stop= (fallback only —
+  exit strategy overrides), =Reason= (=strategy/signal.go=).
+- =StrategyContext= exposes =Instrument()= and =OpenLots() LotView=. The
+  strategy does NOT know its instrument at construction time — only at
+  =Update= time. Filter signal rows lazily on first =Update=.
+- Strategies register via =strategy.MustRegisterStrategy(build, names...)=
+  in =init()= (see =strategies/donchian/donchian.go= for the pattern) and
+  are constructed from =StrategyConfig{Kind, Params map[string]any}=.
+- Backtest YAML: =Config{Defaults, Runs []RunConfig}=;
+  =RunConfig{Name, Data{Source,Instrument,Timeframe,From,To}, Strategy,
+  Exit, Regime}= (=backtest/config.go=). Exits resolve via
+  =strategy.GetExitStrategy(ExitConfig, scale)= (=strategy/exit_factory.go=).
+- The runner is per-instrument and bar-driven (=backtest/execute.go=
+  =Execute()= → =DataManager.Candles()= iterator → =runWithIterator=).
+  Sparse signals across many pairs = one run per pair, with the strategy
+  holding that pair's signal calendar. Do NOT build an episode-skipping loop.
+- =execution.Trade= carries =EntryPrice/EntryTime/ExitPrice/ExitTime/PNL/
+  CloseCause/Stop= — enough to derive R-multiples in the report layer.
+- =cmd/replay/= already exists (tick replay). Name everything here
+  =signalreplay= to avoid collision.
+- Candle access must route through =DataManager= (architecture invariant).
+  The strategy itself consumes only the bars the runner feeds it.
+
+* Component 1: =strategies/signalreplay/=
+
+New package. Registered kind: ="signalreplay"=.
+
+** Params (all via =StrategyConfig.Params=)
+
+| param            | type   | default     | meaning                                          |
+|------------------+--------+-------------+--------------------------------------------------|
+| =signals=        | string | (required)  | path to review sweep CSV                         |
+| =entry=          | string | "next-open" | entry mode; v1 supports only "next-open"         |
+| =episode-gap=    | int    | 5           | max calendar-day gap merging rows into 1 episode |
+| =max-hold-days=  | int    | 0           | 0 = unlimited; else time-stop after N bars       |
+| =close-on-flip=  | bool   | true        | emit CloseAll when a new episode has opposite bias |
+| =one-per-episode=| bool   | true        | at most one entry per episode (no re-entry)      |
+
+** Signal CSV contract
+
+Header row required. Columns consumed: =DATE= (RFC3339), =PAIR=, =BUCKET=,
+=BIAS= (long/short). All other columns ignored by the strategy but preserved
+by the report join (see Component 3). Rows with =BUCKET != "tradeable"= are
+skipped (future flag may widen this). Instrument matching must normalize
+"EURUSD" ↔ "EUR_USD" both directions.
+
+** Episode semantics (must match the analysis already done)
+
+Sort rows by date per instrument. Consecutive rows with the same bias and
+gap ≤ =episode-gap= calendar days collapse into one episode:
+(instrument, bias, first-date, last-date). The *first date* is the signal
+date; entry is the open of the first bar strictly after it.
+
+** Behavior
+
+- =build(params)= parses params, stats the CSV (fail fast on missing file),
+  but defers row parsing/filtering until the instrument is known.
+- On first =Update=, lazily load + filter rows for =ctx.Instrument()= and
+  compile episodes. Cache. =Reset()= clears position-state but may keep the
+  parsed episode list.
+- Each bar: if a pending episode's signal date < current bar time and no lot
+  is open (=ctx.OpenLots().Len() == 0=), emit =Signal{Side: bias}= with
+  =Reason= carrying the episode signal date (used by the report join, so the
+  format must be stable: =signalreplay:<RFC3339-date>=). Otherwise =Hold=.
+- If =close-on-flip= and an opposite-bias episode activates while a lot is
+  open: emit =Signal{Side: newBias, CloseAll: true}=.
+- If =max-hold-days= > 0 and the open lot's age exceeds it: =Signal{CloseAll:
+  true, Side: Flat}=.
+- =Ready()= true once episodes compiled. =StopDescription()= returns
+  "delegated to exit strategy".
+- The strategy never sets =Signal.Stop= in v1 — stop management belongs
+  entirely to the configured =ExitStrategy=. Runs with =exit.kind: ""= should
+  be rejected at config-generation time (Component 2), not silently noop.
+
+* Component 2: config generator — =trader signalreplay gen=
+
+New CLI (=cmd/signalreplay/=) with a =gen= subcommand producing a backtest
+YAML from a sweep CSV. Repeatability lives here: the generated YAML is a
+complete, committable, re-runnable artifact.
+
+#+begin_src text
+trader signalreplay gen \
+  --signals tradeables.csv \
+  --exit chandelier --exit-params atr_period=14,multiplier=2.0 \
+  --timeframe D1 --source oanda \
+  --risk-pct 0.5 \
+  --out replay-chandelier.yml
+#+end_src
+
+- Emits one =RunConfig= per distinct instrument in the CSV, each with
+  =Data.From= = (earliest signal date for that pair − warmup buffer, e.g. 90
+  days) and =Data.To= = latest signal date + a runout buffer (e.g. 120 days,
+  flag-tunable) so late entries can resolve.
+- =Defaults= populated from flags (=risk-pct=, starting balance, etc.).
+- Every run's =Strategy= is ={kind: signalreplay, params: {signals: <path>,
+  ...}}= and =Exit= is the flagged config. Refuse =--exit ""=.
+
+* Component 3: outcome report
+
+The deliverable dataset. After the runs execute (via the existing backtest
+command path or a =trader signalreplay run= convenience wrapper that compiles
+and executes the generated config), emit one CSV row per closed trade:
+
+| column          | source                                              |
+|-----------------+-----------------------------------------------------|
+| =signal_date=   | parsed from =Signal.Reason= / episode metadata      |
+| =instrument=    | run                                                 |
+| =bias=          | trade side                                          |
+| =entry_time/price= | =execution.Trade=                                |
+| =initial_stop=  | captured at open (see note)                         |
+| =exit_time/price=  | =execution.Trade=                                |
+| =close_cause=   | =execution.Trade.CloseCause=                        |
+| =pnl=           | =execution.Trade.PNL=                               |
+| =r_multiple=    | signed (exit−entry)/(entry−initial_stop), side-adjusted |
+| =hold_bars=     | derived                                             |
+| sweep features  | joined from the input CSV on (signal_date, pair): ADX, CI, EMA SEP, EMA DIST, H4 ADX, H4 CI, H4 EMA DIST, Squeeze, W1 Bias, WEEK%, H1 Align, H1 EMA DIST |
+
+Note on =initial_stop=: verify whether the runner already records the first
+stop set by the exit strategy per lot; if not, the smallest change wins
+(e.g. record it on the trade at open). Do not refactor stop plumbing for
+this — flag it in the PR description if a follow-up is warranted.
+
+Summary block (stdout + optional org table, matching =report_org.go= style):
+trade count, win rate, avg R, expectancy, R distribution by pair and by
+close cause. Keep it simple — the CSV is the real product; deeper analysis
+(gate-value banding for Item 3) happens downstream.
+
+* Component 4: docs
+
+- Package doc comment on =strategies/signalreplay= stating clearly: this is
+  an *analysis harness for scanner-signal evaluation*, not a live trading
+  strategy — same disclaimer treatment planned for =pulse=/=stress=.
+- Short =docs/signalreplay.md= (or .org): workflow example end-to-end
+  (sweep → gen → run → outcome CSV), param reference, episode semantics.
+
+* Testing requirements
+
+- Unit: episode collapsing (gaps, bias flips, boundary = exactly
+  =episode-gap= days), instrument-name normalization, CSV parsing with the
+  real sweep header (fixture with ~20 rows including a WEEK% >100% row and a
+  =✓/✗= column to confirm non-ASCII columns pass through).
+- Strategy behavior: table-driven test feeding synthetic candles through
+  =Update= — asserts entry on next open after signal date, no re-entry while
+  a lot is open, =CloseAll= on flip, time-stop.
+- Config generator: golden-file test of emitted YAML for a 2-pair fixture.
+- Report: R-multiple math for long and short, including a losing trade
+  (negative R) and a stop-at-entry edge case (guard divide-by-zero).
+- Integration (if a runnable fixture data source exists in =testdata/=): one
+  end-to-end run over synthetic candles + synthetic signal CSV, asserting
+  trade count and at least one exact R value.
+- Follow existing test style (=strategies/donchian/donchian_test.go=,
+  =backtest/regression_test.go= for patterns). Run =go test ./...= locally.
+
+* Acceptance criteria
+
+1. =trader signalreplay gen --signals tradeables.csv --exit chandelier
+   --out replay.yml= produces valid YAML that =backtest.LoadConfig= parses.
+2. Running the generated config over cached candles produces an outcome CSV
+   with one row per closed trade, joinable back to the sweep CSV.
+3. Same inputs → byte-identical outcome CSV (deterministic; no map-order
+   leakage into output).
+4. No candle fetching outside =DataManager=. No changes to =review/=
+   classification. No forex-specific literals in =strategies/signalreplay=.
+5. =go vet= and =go test ./...= clean.
+
+* Suggested phasing (separate PRs)
+
+1. PR A — =strategies/signalreplay= package + unit tests.
+2. PR B — =cmd/signalreplay= gen/run + config golden tests.
+3. PR C — outcome report + join + summary; docs.
+
+* Deferred / follow-ups (do not implement now)
+
+- =entry: "h4-ema-touch"= and =entry: "rejection-candle"= modes (measures
+  the entry-trigger layer's added value over raw selection).
+- Fixed ATR-multiple non-trailing exit kind (exit backlog item 1) for
+  exit-config comparison runs.
+- Widening =BUCKET= filter to score near-miss Hot/Watch rows once the sweep
+  records per-row gate-failure reasons (needed for the "profitable trades
+  filtered out, and why" question — requires a separate sweep change).
