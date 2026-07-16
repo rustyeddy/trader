@@ -189,6 +189,26 @@ func TestDefaultPlanner_InitialStopOverride(t *testing.T) {
 	assert.Equal(t, exitStop, op.Stop)
 }
 
+func TestDefaultPlanner_CapturesInitialStop(t *testing.T) {
+	t.Parallel()
+	op := openReq("o1", types.Long, types.PriceFromFloat(1.10), 0, 1) // no strategy stop
+	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{op}}
+	exitStop := types.PriceFromFloat(1.085)
+
+	_, _, err := DefaultPlanner{}.finalize(plan, testCtx{
+		regime: strategy.NoopRegime{},
+		exit:   fakeExit{ready: true, stop: exitStop},
+		candle: candleTime(0),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, exitStop, op.InitialStop)
+
+	// Simulate a later trailing-stop update overwriting Stop in place;
+	// InitialStop must not follow it.
+	op.Stop = types.PriceFromFloat(1.095)
+	assert.Equal(t, exitStop, op.InitialStop, "InitialStop must survive later Stop mutation")
+}
+
 func TestDefaultPlanner_SizesWhenUnitsZero(t *testing.T) {
 	t.Parallel()
 	acct := execution.NewAccount("t", types.MoneyFromFloat(10_000))
@@ -261,6 +281,8 @@ func TestPlanSignal_LongOpensPosition(t *testing.T) {
 	assert.Equal(t, entry+avgSpread, plan.Opens[0].Price)
 	assert.Equal(t, 1, stats.SpreadOpened)
 	assert.Empty(t, plan.Closes)
+	assert.Equal(t, "test-long", plan.Opens[0].TradeCommon.Reason,
+		"Signal.Reason must reach the open's TradeCommon so it survives to the closed Trade")
 }
 
 func TestPlanSignal_ReversalClosesOpposingSide(t *testing.T) {

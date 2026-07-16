@@ -1,0 +1,67 @@
+version: 1
+defaults:
+    starting-balance: 10000
+    account-ccy: USD
+    scale: 100000
+    strict: false
+    risk-pct: 0.5
+    stop-pips: 0
+    take-pips: 0
+    rr: 0
+    units: 0
+    slippage-pips: 0
+    max-spread-pips: 0
+    source: oanda
+runs:
+    - name: eurusd-signalreplay
+      data:
+        source: ""
+        instrument: EURUSD
+        timeframe: D1
+        from: "2023-10-04"
+        to: "2024-06-29"
+        strict: null
+      strategy:
+        kind: signalreplay
+        params:
+            close-on-flip: true
+            entry: next-open
+            episode-gap: 5
+            max-hold-days: 0
+            one-per-episode: true
+            signals: testdata/gen_fixture.csv
+      exit:
+        kind: chandelier
+        params:
+            atr_period: 14
+            multiplier: 2
+      regime:
+        kind: ""
+        params: {}
+        filters: []
+    - name: gbpusd-signalreplay
+      data:
+        source: ""
+        instrument: GBPUSD
+        timeframe: D1
+        from: "2023-10-17"
+        to: "2024-06-19"
+        strict: null
+      strategy:
+        kind: signalreplay
+        params:
+            close-on-flip: true
+            entry: next-open
+            episode-gap: 5
+            max-hold-days: 0
+            one-per-episode: true
+            signals: testdata/gen_fixture.csv
+      exit:
+        kind: chandelier
+        params:
+            atr_period: 14
+            multiplier: 2
+      regime:
+        kind: ""
+        params: {}
+        filters: []

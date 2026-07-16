@@ -16,6 +16,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/replay"
 	cmdreview "github.com/rustyeddy/trader/cmd/review"
 	"github.com/rustyeddy/trader/cmd/serve"
+	cmdsignalreplay "github.com/rustyeddy/trader/cmd/signalreplay"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/log"
@@ -34,6 +35,7 @@ import (
 	_ "github.com/rustyeddy/trader/strategies/noop"
 	_ "github.com/rustyeddy/trader/strategies/pulse"
 	_ "github.com/rustyeddy/trader/strategies/scalper"
+	_ "github.com/rustyeddy/trader/strategies/signalreplay"
 	_ "github.com/rustyeddy/trader/strategies/stress"
 	_ "github.com/rustyeddy/trader/strategies/tmpl"
 )
@@ -120,6 +122,7 @@ func NewRootCmd() *cobra.Command {
 		live.New(rc),
 		order.New(rc),
 		replay.New(rc),
+		cmdsignalreplay.New(rc),
 	)
 
 	cmd.AddCommand(&cobra.Command{

@@ -24,17 +24,20 @@ func (run *Backtest) Summary() BacktestReportSummary {
 			}
 
 			trades = append(trades, BacktestReportTrade{
-				ID:              tr.ID,
-				Instrument:      tr.Instrument,
-				Side:            tr.Side.String(),
-				Units:           int64(tr.Units),
-				OpenPrice:       tr.EntryPrice.Float64(),
-				ClosePrice:      tr.ExitPrice.Float64(),
-				OpenTime:        formatBacktestSummaryTime(tr.EntryTime),
-				CloseTime:       formatBacktestSummaryTime(tr.ExitTime),
-				PNL:             tr.PNL.Float64(),
-				StopPrice:       tr.Stop.Float64(),
-				TakeProfitPrice: tr.Take.Float64(),
+				ID:               tr.ID,
+				Instrument:       tr.Instrument,
+				Side:             tr.Side.String(),
+				Units:            int64(tr.Units),
+				OpenPrice:        tr.EntryPrice.Float64(),
+				ClosePrice:       tr.ExitPrice.Float64(),
+				OpenTime:         formatBacktestSummaryTime(tr.EntryTime),
+				CloseTime:        formatBacktestSummaryTime(tr.ExitTime),
+				PNL:              tr.PNL.Float64(),
+				StopPrice:        tr.Stop.Float64(),
+				TakeProfitPrice:  tr.Take.Float64(),
+				InitialStopPrice: tr.InitialStop.Float64(),
+				CloseCause:       tr.CloseCause.String(),
+				Reason:           tr.Reason,
 			})
 		}
 	}

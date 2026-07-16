@@ -129,6 +129,7 @@ func NewOpenRequest(
 				Side:       side,
 				Stop:       stop,
 				Take:       take,
+				Reason:     reason,
 			},
 			RequestType: RequestMarketOpen,
 			Price:       c.Close,

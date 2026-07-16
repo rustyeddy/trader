@@ -283,3 +283,48 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	assert.InDelta(t, 1.0, s.RiskPct, 1e-9)
 	assert.Equal(t, "", s.Stop) // Fake strategy returns no stop description
 }
+
+func TestSummary_TradeDetailsIncludesReasonAndInitialStop(t *testing.T) {
+	t.Parallel()
+
+	fake, err := strategy.GetStrategy(strategy.StrategyConfig{Kind: "fake"})
+	require.NoError(t, err)
+
+	trade := &execution.Trade{
+		TradeCommon: &execution.TradeCommon{
+			ID:          "t1",
+			Instrument:  "EURUSD",
+			Side:        types.Long,
+			Units:       1000,
+			Stop:        types.PriceFromFloat(1.093), // trailed by close time
+			InitialStop: types.PriceFromFloat(1.09),
+			Reason:      "signalreplay:2024-01-02T00:00:00Z",
+		},
+		EntryPrice: types.PriceFromFloat(1.10),
+		EntryTime:  types.Timestamp(1),
+		ExitPrice:  types.PriceFromFloat(1.11),
+		ExitTime:   types.Timestamp(3601),
+		PNL:        types.MoneyFromFloat(100),
+		CloseCause: execution.CloseTakeProfit,
+	}
+
+	run := &Backtest{
+		Request: &BacktestRequest{
+			Name:            "trade-details-run",
+			Instrument:      "EURUSD",
+			Strategy:        fake,
+			TimeRange:       types.TimeRange{Start: types.Timestamp(1), End: types.Timestamp(3601), TF: types.H1},
+			StartingBalance: types.MoneyFromFloat(10_000),
+		},
+		State:  &BacktestRun{Trades: []*execution.Trade{trade}},
+		Result: &BacktestResult{},
+	}
+
+	s := run.Summary()
+	require.Len(t, s.TradeDetails, 1)
+	td := s.TradeDetails[0]
+	assert.Equal(t, "signalreplay:2024-01-02T00:00:00Z", td.Reason)
+	assert.Equal(t, "TakeProfit", td.CloseCause)
+	assert.InDelta(t, 1.09, td.InitialStopPrice, 1e-9)
+	assert.InDelta(t, 1.093, td.StopPrice, 1e-9, "StopPrice reflects the trailed stop, distinct from InitialStopPrice")
+}

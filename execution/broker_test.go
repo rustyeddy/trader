@@ -306,6 +306,27 @@ func TestBrokerSubmitCloseSuccessEmitsEvent(t *testing.T) {
 	}
 }
 
+func TestBrokerSubmitClose_PreservesReasonAndInitialStopDespiteTrailing(t *testing.T) {
+	t.Parallel()
+
+	broker, lot, req := makeBrokerCloseFixture()
+	lot.TradeCommon.Reason = "signalreplay:2024-01-02T00:00:00Z"
+	lot.TradeCommon.InitialStop = types.PriceFromFloat(1.09)
+
+	// Simulate trailing-stop updates overwriting Stop after open, as
+	// backtest/execute.go does every bar.
+	lot.TradeCommon.Stop = types.PriceFromFloat(1.093)
+
+	err := broker.SubmitClose(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, broker.Account.Trades, 1)
+	trade := broker.Account.Trades[0]
+	assert.Equal(t, "signalreplay:2024-01-02T00:00:00Z", trade.Reason)
+	assert.Equal(t, types.PriceFromFloat(1.09), trade.InitialStop)
+	assert.Equal(t, types.PriceFromFloat(1.093), trade.Stop, "final trailed Stop is distinct from InitialStop")
+}
+
 func TestBrokerSubmitCloseAllowsCommittedStateWhenContextCanceledAndQueueFull(t *testing.T) {
 	t.Parallel()
 

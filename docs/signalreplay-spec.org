@@ -37,7 +37,7 @@ This must port to equities (Alpaca/Polygon) with only a data-source change.
 
 * Repo facts the implementation must respect (verified 2026-07-14)
 
-- =strategy.Strategy= interface: =Name() / Reset() / Ready() /
+ - =strategy.Strategy= interface: =Name() / Reset() / Ready() /
   Update(ctx, *market.CandleTime, StrategyContext) Signal /
   StopDescription()= (=strategy/strategy.go=).
 - =strategy.Signal=: =Side=, =CloseAll=, optional =Stop= (fallback only —
@@ -62,6 +62,8 @@ This must port to equities (Alpaca/Polygon) with only a data-source change.
   =signalreplay= to avoid collision.
 - Candle access must route through =DataManager= (architecture invariant).
   The strategy itself consumes only the bars the runner feeds it.
+- The strategy also has the ability to access the collapsed candleset
+  should a strategy ever need it.
 
 * Component 1: =strategies/signalreplay/=
 
@@ -69,14 +71,14 @@ New package. Registered kind: ="signalreplay"=.
 
 ** Params (all via =StrategyConfig.Params=)
 
-| param            | type   | default     | meaning                                          |
-|------------------+--------+-------------+--------------------------------------------------|
-| =signals=        | string | (required)  | path to review sweep CSV                         |
-| =entry=          | string | "next-open" | entry mode; v1 supports only "next-open"         |
-| =episode-gap=    | int    | 5           | max calendar-day gap merging rows into 1 episode |
-| =max-hold-days=  | int    | 0           | 0 = unlimited; else time-stop after N bars       |
-| =close-on-flip=  | bool   | true        | emit CloseAll when a new episode has opposite bias |
-| =one-per-episode=| bool   | true        | at most one entry per episode (no re-entry)      |
+| param             | type   | default     | meaning                                            |
+|-------------------+--------+-------------+----------------------------------------------------|
+| =signals=         | string | (required)  | path to review sweep CSV                           |
+| =entry=           | string | "next-open" | entry mode; v1 supports only "next-open"           |
+| =episode-gap=     | int    | 5           | max calendar-day gap merging rows into 1 episode   |
+| =max-hold-days=   | int    | 0           | 0 = unlimited; else time-stop after N bars         |
+| =close-on-flip=   | bool   | true        | emit CloseAll when a new episode has opposite bias |
+| =one-per-episode= | bool   | true        | at most one entry per episode (no re-entry)        |
 
 ** Signal CSV contract
 
@@ -143,19 +145,19 @@ The deliverable dataset. After the runs execute (via the existing backtest
 command path or a =trader signalreplay run= convenience wrapper that compiles
 and executes the generated config), emit one CSV row per closed trade:
 
-| column          | source                                              |
-|-----------------+-----------------------------------------------------|
-| =signal_date=   | parsed from =Signal.Reason= / episode metadata      |
-| =instrument=    | run                                                 |
-| =bias=          | trade side                                          |
-| =entry_time/price= | =execution.Trade=                                |
-| =initial_stop=  | captured at open (see note)                         |
-| =exit_time/price=  | =execution.Trade=                                |
-| =close_cause=   | =execution.Trade.CloseCause=                        |
-| =pnl=           | =execution.Trade.PNL=                               |
-| =r_multiple=    | signed (exit−entry)/(entry−initial_stop), side-adjusted |
-| =hold_bars=     | derived                                             |
-| sweep features  | joined from the input CSV on (signal_date, pair): ADX, CI, EMA SEP, EMA DIST, H4 ADX, H4 CI, H4 EMA DIST, Squeeze, W1 Bias, WEEK%, H1 Align, H1 EMA DIST |
+| column             | source                                                                                                                                                   |
+|--------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| =signal_date=      | parsed from =Signal.Reason= / episode metadata                                                                                                           |
+| =instrument=       | run                                                                                                                                                      |
+| =bias=             | trade side                                                                                                                                               |
+| =entry_time/price= | =execution.Trade=                                                                                                                                        |
+| =initial_stop=     | captured at open (see note)                                                                                                                              |
+| =exit_time/price=  | =execution.Trade=                                                                                                                                        |
+| =close_cause=      | =execution.Trade.CloseCause=                                                                                                                             |
+| =pnl=              | =execution.Trade.PNL=                                                                                                                                    |
+| =r_multiple=       | signed (exit−entry)/(entry−initial_stop), side-adjusted                                                                                                  |
+| =hold_bars=        | derived                                                                                                                                                  |
+| sweep features     | joined from the input CSV on (signal_date, pair): ADX, CI, EMA SEP, EMA DIST, H4 ADX, H4 CI, H4 EMA DIST, Squeeze, W1 Bias, WEEK%, H1 Align, H1 EMA DIST |
 
 Note on =initial_stop=: verify whether the runner already records the first
 stop set by the exit strategy per lot; if not, the smallest change wins

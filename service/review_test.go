@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -425,6 +426,69 @@ func TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads(t *testi
 	got2, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err, "second read must be served from the repaired local cache, not a network call")
 	assert.Len(t, got2, reviewCandleCounts["D"])
+}
+
+// TestEnsureCachedOandaCandles_SubDailyTimeframeStillDownloadsSameDayGap
+// reproduces the bug fixed by advancing the resume cursor by one bar
+// (time.Duration(tf)*time.Second) instead of a flat calendar day
+// (AddDate(0,0,1)).
+//
+// LastCompleteDate truncates to midnight UTC of the day containing the last
+// valid candle — it cannot tell us how much of that day is actually cached.
+// For a sub-daily timeframe (H4 here), only the day's first slot is cached
+// below (00:00 UTC); the remaining slots (04:00..20:00) are gaps, as if a
+// prior download had been interrupted partway through the day.
+//
+// The old `AddDate(0, 0, 1)` cursor jumped straight to the next day,
+// implicitly trusting that the whole of the last-valid day was already
+// downloaded. With `to` set later the same day, that pushed dlFrom past `to`
+// and the function returned early as "already up to date" — silently
+// leaving the day's later H4 gaps undownloaded forever. The fixed cursor
+// only advances by one bar (4h for H4), so it still lands before `to` and a
+// download is correctly triggered.
+func TestEnsureCachedOandaCandles_SubDailyTimeframeStillDownloadsSameDayGap(t *testing.T) {
+	swapTempStore(t)
+
+	var requests int32
+	base := fakeOANDACandlesServer(t)
+	defer base.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	// Seed January 2020 H4 candles for EURUSD with only the 15th's midnight
+	// slot (index 14*6=84) marked valid; every other slot, including the
+	// rest of the 15th (04:00, 08:00, ... 20:00), is a zero-valued gap.
+	monthStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	candles := make([]market.Candle, 85)
+	candles[84] = market.Candle{
+		Open:  types.PriceFromFloat(1.10),
+		High:  types.PriceFromFloat(1.10),
+		Low:   types.PriceFromFloat(1.10),
+		Close: types.PriceFromFloat(1.10),
+	}
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.H4, monthStart, candles)
+
+	last, err := datamanager.GetDataManager().LastCompleteDate("EUR_USD", types.H4, market.SourceOanda)
+	require.NoError(t, err)
+	require.True(t, last.Equal(time.Date(2020, 1, 15, 0, 0, 0, 0, time.UTC)),
+		"sanity: LastCompleteDate must report the 15th, truncated to midnight")
+
+	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2020, 1, 15, 20, 0, 0, 0, time.UTC)
+
+	err = svc.ensureCachedOandaCandles(context.Background(), "EUR_USD", "H4", from, to)
+	require.NoError(t, err)
+
+	assert.Positive(t, atomic.LoadInt32(&requests),
+		"a same-day gap after the last cached H4 slot must still trigger a download, not be treated as already up to date")
 }
 
 func TestReviewWatchlist_UnknownInstrumentSkipped(t *testing.T) {

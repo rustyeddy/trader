@@ -277,7 +277,7 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 
 	dlFrom := from
 	if last, err := datamanager.GetDataManager().LastCompleteDate(oandaName, tf, market.SourceOanda); err == nil {
-		if next := last.AddDate(0, 0, 1); next.After(dlFrom) {
+		if next := last.Add(time.Duration(tf) * time.Second); next.After(dlFrom) {
 			dlFrom = next
 		}
 	}

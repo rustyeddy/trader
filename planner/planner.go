@@ -133,6 +133,10 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 				return raw, stats, err
 			}
 		}
+
+		// Capture the stop actually used to open, before trailing/chandelier
+		// updates start overwriting Stop bar by bar.
+		openReq.InitialStop = openReq.Stop
 	}
 
 	return raw, stats, nil
