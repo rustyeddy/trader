@@ -251,6 +251,15 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 
 	result := &DeriveResult{}
 	for i, slotStart := range boundaries {
+		// A trading day's true daily-alignment window can run a few
+		// hours into the next calendar month, but that data structurally
+		// lives in next month's own raw file (readRawMonthRows only ever
+		// keeps rows within [monthStart, monthEnd)) — so a slot at or
+		// after monthEnd is never fillable from this raw file and must
+		// not be counted as missing here.
+		if !slotStart.Before(monthEnd) {
+			break
+		}
 		slotEnd := slotStart.Add(25 * time.Hour)
 		if i+1 < len(boundaries) {
 			slotEnd = boundaries[i+1]

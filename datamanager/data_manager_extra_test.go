@@ -510,6 +510,46 @@ func TestStoreScanFiles_DSTTransitionMonthNotFalselyIncomplete(t *testing.T) {
 	require.Zero(t, asset.MissingInputs)
 }
 
+// TestStoreScanFiles_NextMonthSpilloverNotFalselyIncomplete is the
+// regression case for a bug found while re-validating the #179 regen: a
+// month's last trading day's true daily-alignment window can run a few
+// hours into the next calendar month (e.g. May's last H4 slots landing on
+// June 1st), but that data structurally lives in June's own raw/canonical
+// file, not May's — writeRawMonth/DeriveCanonicalFromRaw never expect to
+// fill it from May's raw source. candleSetMissingExpectedSlots used to
+// count those trailing slots as "expected," falsely flagging essentially
+// every H4/D1 month in the entire store as incomplete once true
+// timestamps were being read correctly (the previous Start+idx*step bug
+// coincidentally masked this). Only the last H4 slot here (dated the 1st
+// of the next month) is left unfilled; the file must still report
+// complete.
+func TestStoreScanFiles_NextMonthSpilloverNotFalselyIncomplete(t *testing.T) {
+	s := useTempStore(t)
+
+	monthStart := time.Date(2021, time.May, 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	boundaries := SlotBoundaries(monthStart, types.H4, 186)
+	candles := make([]market.CandleTime, len(boundaries))
+	for i, b := range boundaries {
+		candles[i].Timestamp = types.FromTime(b)
+		if b.Before(monthEnd) && timeRangeMayHaveForexData(b, b.Add(4*time.Hour)) {
+			candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+		}
+		// Slots at/after monthEnd (June 1st spillover) are intentionally
+		// left unfilled, matching what a real raw file would look like.
+	}
+	require.NoError(t, s.WriteMonthlyCandleTimes(market.SourceOanda, "EURUSD", types.H4, monthStart, candles))
+
+	inv := NewInventory()
+	require.NoError(t, s.scanFiles(inv))
+
+	key := Key{Instrument: "EURUSD", Source: market.SourceOanda, Kind: KindCandle, TF: types.H4, Year: 2021, Month: 5}
+	asset, ok := inv.Get(key)
+	require.True(t, ok)
+	require.True(t, asset.Complete, "reason: %s", asset.Reason)
+	require.Zero(t, asset.MissingInputs)
+}
+
 func TestParseCandlePath_BadFilenameMonth(t *testing.T) {
 	t.Parallel()
 

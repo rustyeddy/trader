@@ -180,7 +180,8 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	coverage := analyzeCandleCoverage(cs, now)
+	monthEnd := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	coverage := analyzeCandleCoverage(cs, now, monthEnd)
 	issues := make([]CandleValidationIssue, 0, 4)
 	if coverage.Missing > 0 {
 		issues = append(issues, CandleValidationIssue{
@@ -226,7 +227,13 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	return issues, nil
 }
 
-func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
+// analyzeCandleCoverage reports coverage stats for cs. monthEnd is the
+// exclusive UTC calendar-month boundary this file represents: a trading
+// day's true daily-alignment window can run a few hours into the next
+// calendar month, but that data structurally lives in next month's own
+// raw/canonical file, so a slot at or after monthEnd is never fillable
+// from this file and must not count as "expected" here.
+func analyzeCandleCoverage(cs *CandleSet, now, monthEnd time.Time) candleCoverage {
 	if cs == nil || cs.Timeframe <= 0 {
 		return candleCoverage{}
 	}
@@ -241,6 +248,9 @@ func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
 		slotEnd := slotStart.Add(step)
 		if !slotStart.Before(now) {
 			break // don't expect future slots
+		}
+		if !slotStart.Before(monthEnd) {
+			break // this slot's data structurally lives in next month's file
 		}
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue

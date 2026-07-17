@@ -383,7 +383,8 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 		return asset
 	}
 
-	missingExpected, expected := candleSetMissingExpectedSlots(cs)
+	monthEnd := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	missingExpected, expected := candleSetMissingExpectedSlots(cs, monthEnd)
 	asset.Complete = missingExpected == 0
 	asset.Buildable = expected > 0
 	asset.MissingInputs = missingExpected
@@ -393,7 +394,15 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 	return asset
 }
 
-func candleSetMissingExpectedSlots(cs *CandleSet) (missing int, expected int) {
+// candleSetMissingExpectedSlots reports how many of cs's slots fall within
+// forex market hours and lack real data. monthEnd is the exclusive UTC
+// calendar-month boundary this file represents: a trading day's true
+// daily-alignment window (17:00 America/New_York) can run a few hours
+// into the next calendar month, but that data structurally lives in next
+// month's own raw/canonical file (writeRawMonth only ever preserves rows
+// within its own [monthStart, monthEnd)) — so a slot at or after monthEnd
+// is never fillable from this file and must not count as "expected" here.
+func candleSetMissingExpectedSlots(cs *CandleSet, monthEnd time.Time) (missing int, expected int) {
 	if cs == nil || cs.Timeframe <= 0 {
 		return 0, 0
 	}
@@ -405,6 +414,9 @@ func candleSetMissingExpectedSlots(cs *CandleSet) (missing int, expected int) {
 	// every March/November.
 	for i := range cs.Candles {
 		slotStart := cs.Time(i)
+		if !slotStart.Before(monthEnd) {
+			break
+		}
 		slotEnd := slotStart.Add(time.Duration(cs.Timeframe) * time.Second)
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
