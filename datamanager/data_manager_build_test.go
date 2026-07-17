@@ -46,6 +46,50 @@ func TestBuildInventory_WithCSV(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ListCandleKeys
+// ---------------------------------------------------------------------------
+
+func TestListCandleKeys_Empty(t *testing.T) {
+	useTempStore(t)
+	keys, err := ListCandleKeys()
+	require.NoError(t, err)
+	require.Empty(t, keys)
+}
+
+func TestListCandleKeys_FindsWrittenMonths(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	require.NoError(t, s.WriteCSV(cs))
+
+	keys, err := ListCandleKeys()
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.Equal(t, "EURUSD", keys[0].Instrument)
+	require.Equal(t, 2026, keys[0].Year)
+	require.Equal(t, 1, keys[0].Month)
+	require.Equal(t, types.H1, keys[0].TF)
+}
+
+// TestListCandleKeys_DoesNotPopulateReadCache is the regression guard for the
+// memory-exhaustion bug: resolveValidateDefaults used to call BuildInventory,
+// which opens and parses every candle CSV via ReadCSV to determine each
+// file's coverage — permanently caching every file's full CandleSet for the
+// life of the process. ListCandleKeys must only look at filenames.
+func TestListCandleKeys_DoesNotPopulateReadCache(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	require.NoError(t, s.WriteCSV(cs))
+
+	_, err := ListCandleKeys()
+	require.NoError(t, err)
+
+	s.cacheMu.RLock()
+	cacheLen := len(s.cache)
+	s.cacheMu.RUnlock()
+	require.Zero(t, cacheLen, "ListCandleKeys must not populate the ReadCSV cache")
+}
+
+// ---------------------------------------------------------------------------
 // buildM1 validation
 // ---------------------------------------------------------------------------
 

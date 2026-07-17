@@ -1,7 +1,6 @@
 package data
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,6 +27,7 @@ func newValidateCandlesCmd() *cobra.Command {
 		rawDir         string
 		reportPath     string
 		quiet          bool
+		hideExpected   bool
 		repair         bool
 		token          string
 		env            string
@@ -52,6 +52,10 @@ Output shows one row per instrument per year:
 
 Use --quiet to suppress the grid and show only the summary line and issues.
 
+Use --hide-expected-gaps to drop "expected candle slots are missing" issues
+from the grid, printed issue list, and summary counts. This only affects
+display: --repair and --report still see the full, unfiltered issue set.
+
 Use --repair to re-download every month that has missing expected slots from
 OANDA. All validated timeframes are repaired.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,7 +72,7 @@ OANDA. All validated timeframes are repaired.`,
 			baseInstruments := splitCSV(instrumentsCSV)
 
 			var allReports []*datamanager.CandleValidationReport
-			totalMonths, totalIssues := 0, 0
+			totalMonths, totalIssues, totalRepairable := 0, 0, 0
 
 			for _, tf := range timeframes {
 				tfInstruments := baseInstruments
@@ -81,7 +85,7 @@ OANDA. All validated timeframes are repaired.`,
 					}
 					var resErr error
 					tfInstruments, tfFrom, tfTo, resErr = resolveValidateDefaults(
-						cmd.Context(), tfInstruments, tfFrom, tfTo, normSource, parsedTF,
+						tfInstruments, tfFrom, tfTo, normSource, parsedTF,
 					)
 					if resErr != nil {
 						cmd.Printf("── %s: %v (skipping)\n", tf, resErr)
@@ -111,21 +115,27 @@ OANDA. All validated timeframes are repaired.`,
 					return err
 				}
 
+				displayReport := report
+				if hideExpected {
+					displayReport = filterReportIssues(report, "missing_expected_candles")
+				}
+
 				if !quiet {
 					if len(timeframes) > 1 {
 						cmd.Printf("── %s ──\n", tf)
 					}
-					printValidationGrid(cmd, tfInstruments, start.Year(), end.Year(), start.Month(), end.Month(), report)
+					printValidationGrid(cmd, tfInstruments, start.Year(), end.Year(), start.Month(), end.Month(), displayReport)
 				}
 
-				cmd.Printf("%s: scanned %d month(s), found %d issue(s)\n", tf, report.MonthsScanned, report.IssueCount())
-				for _, issue := range report.Issues {
+				cmd.Printf("%s: scanned %d month(s), found %d issue(s)\n", tf, displayReport.MonthsScanned, displayReport.IssueCount())
+				for _, issue := range displayReport.Issues {
 					cmd.Printf("  [%s] %s %s %04d-%02d: %s\n",
 						issue.Severity, issue.Instrument, issue.Timeframe, issue.Year, issue.Month, issue.Message)
 				}
 
-				totalMonths += report.MonthsScanned
-				totalIssues += report.IssueCount()
+				totalMonths += displayReport.MonthsScanned
+				totalIssues += displayReport.IssueCount()
+				totalRepairable += report.IssueCount()
 				allReports = append(allReports, report)
 			}
 
@@ -140,7 +150,7 @@ OANDA. All validated timeframes are repaired.`,
 				cmd.Printf("report written to %s\n", reportPath)
 			}
 
-			if repair && totalIssues > 0 {
+			if repair && totalRepairable > 0 {
 				return repairMissingCandles(cmd, allReports, rawDir, token, env)
 			}
 			return nil
@@ -156,6 +166,7 @@ OANDA. All validated timeframes are repaired.`,
 	cmd.Flags().StringVar(&rawDir, "raw-dir", "", "Optional root dir for raw source validation (defaults to the store sibling raw dir)")
 	cmd.Flags().StringVar(&reportPath, "report", "", "Optional JSON report output path (single-timeframe only)")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the per-instrument month grid; show only summary and issues")
+	cmd.Flags().BoolVar(&hideExpected, "hide-expected-gaps", false, "Hide 'expected candle slots are missing' issues from the grid, issue list, and summary counts (does not affect --repair or --report)")
 	cmd.Flags().BoolVar(&repair, "repair", false, "Re-download from OANDA every month that has missing expected candle slots")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (used with --repair)")
 	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live (used with --repair)")
@@ -410,13 +421,12 @@ func maxInstrumentLen(instruments []string) int {
 // resolveValidateDefaults fills in missing instruments, fromStr, and toStr by
 // scanning the store inventory for candle keys matching source and timeframe.
 func resolveValidateDefaults(
-	ctx context.Context,
 	instruments []string,
 	fromStr, toStr string,
 	source string,
 	tf types.Timeframe,
 ) (outInstruments []string, outFrom, outTo string, err error) {
-	inv, err := datamanager.BuildInventory(ctx)
+	keys, err := datamanager.ListCandleKeys()
 	if err != nil {
 		return nil, "", "", fmt.Errorf("scan store: %w", err)
 	}
@@ -428,10 +438,7 @@ func resolveValidateDefaults(
 
 	var minYear, minMonth, maxYear, maxMonth int
 
-	for _, key := range inv.Keys() {
-		if key.Kind != datamanager.KindCandle {
-			continue
-		}
+	for _, key := range keys {
 		if key.Source != source {
 			continue
 		}
@@ -482,6 +489,25 @@ func resolveValidateDefaults(
 	}
 
 	return outInstruments, outFrom, outTo, nil
+}
+
+// filterReportIssues returns a copy of report with every issue of the given
+// kind removed, for display purposes only. The original report (passed to
+// --repair and --report) is left untouched.
+func filterReportIssues(report *datamanager.CandleValidationReport, kind string) *datamanager.CandleValidationReport {
+	filtered := &datamanager.CandleValidationReport{
+		Source:        report.Source,
+		Timeframe:     report.Timeframe,
+		IncludeRaw:    report.IncludeRaw,
+		MonthsScanned: report.MonthsScanned,
+	}
+	for _, iss := range report.Issues {
+		if iss.Kind == kind {
+			continue
+		}
+		filtered.Issues = append(filtered.Issues, iss)
+	}
+	return filtered
 }
 
 func writeValidationReport(path string, report any) error {

@@ -178,6 +178,42 @@ func (s *store) rawRoot() string {
 	return filepath.Join(filepath.Dir(s.basedir), "raw")
 }
 
+// ListCandleKeys walks the canonical candle tree and returns the Key parsed
+// from every candle CSV's filename. Unlike BuildInventory/scanFiles, it never
+// opens or reads a file's contents, so it does not populate ReadCSV's
+// process-lifetime cache — callers that only need to know which
+// instrument/timeframe/month combinations exist (e.g. resolving a default
+// date range) should use this instead of BuildInventory to avoid loading the
+// entire store into memory.
+func ListCandleKeys() ([]Key, error) {
+	return getStore().listCandleKeys()
+}
+
+func (s *store) listCandleKeys() ([]Key, error) {
+	var keys []Key
+	err := filepath.Walk(s.basedir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(info.Name()), ".csv") {
+			return nil
+		}
+		key, ok := parseCandlePath(path)
+		if !ok {
+			return nil
+		}
+		keys = append(keys, key)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
 func (s *store) pathForHourlyTick(k Key) string {
 	source := normalizeSource(k.Source)
 	if source == "" {
