@@ -71,12 +71,12 @@ func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandlePro
 
 		nonZero := 0
 		for i := range month.Candles {
-			if !month.Candles[i].IsZero() {
+			if !month.Candles[i].Candle.IsZero() {
 				nonZero++
 			}
 		}
 
-		if err := getStore().WriteMonthlyCandles(source, normInst, tf, monthStart, month.Candles); err != nil {
+		if err := getStore().WriteMonthlyCandleTimes(source, normInst, tf, monthStart, month.Candles); err != nil {
 			return result, fmt.Errorf("write %s: %w", monthStart.Format("2006-01"), err)
 		}
 
@@ -198,7 +198,7 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 		return nil, fmt.Errorf("read raw %s: %w", rawPath, err)
 	}
 
-	candles := make([]market.Candle, slotCount)
+	candles := make([]market.CandleTime, slotCount)
 	filled := make([]bool, slotCount)
 
 	for _, r := range rows {
@@ -227,22 +227,38 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 				maxSpread = sp
 			}
 		}
-		candles[idx] = market.Candle{
-			Open:      types.PriceFromFloat(r.BidOpen),
-			High:      types.PriceFromFloat(r.BidHigh),
-			Low:       types.PriceFromFloat(r.BidLow),
-			Close:     types.PriceFromFloat(r.BidClose),
-			AvgSpread: types.PriceFromFloat(sumSpread / 4),
-			MaxSpread: types.PriceFromFloat(maxSpread),
-			Ticks:     int32(r.Volume),
+		candles[idx] = market.CandleTime{
+			Candle: market.Candle{
+				Open:      types.PriceFromFloat(r.BidOpen),
+				High:      types.PriceFromFloat(r.BidHigh),
+				Low:       types.PriceFromFloat(r.BidLow),
+				Close:     types.PriceFromFloat(r.BidClose),
+				AvgSpread: types.PriceFromFloat(sumSpread / 4),
+				MaxSpread: types.PriceFromFloat(maxSpread),
+				Ticks:     int32(r.Volume),
+			},
+			Timestamp: types.FromTime(r.Time.UTC()),
 		}
 		filled[idx] = true
+	}
+
+	// reportStart is the true first-slot time used only for labeling
+	// SampleMissing timestamps below; it comes from the same observed
+	// ground truth as the write path (WriteMonthlyCandleTimes), not from
+	// monthStart, so a reported "missing" timestamp matches what a
+	// present neighbor slot would actually be labeled.
+	reportStart := monthStart
+	for i, c := range candles {
+		if filled[i] {
+			reportStart = time.Unix(int64(c.Timestamp)-int64(i)*stepSec, 0).UTC()
+			break
+		}
 	}
 
 	result := &DeriveResult{}
 	step := time.Duration(stepSec) * time.Second
 	for i := 0; i < slotCount; i++ {
-		slotStart := monthStart.Add(time.Duration(i) * step)
+		slotStart := reportStart.Add(time.Duration(i) * step)
 		if !SlotMayHaveForexData(slotStart, slotStart.Add(step)) {
 			continue
 		}
@@ -256,7 +272,7 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 		}
 	}
 
-	if err := getStore().WriteMonthlyCandles(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
+	if err := getStore().WriteMonthlyCandleTimes(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
 		return nil, fmt.Errorf("write canonical %s: %w", rawPath, err)
 	}
 	return result, nil

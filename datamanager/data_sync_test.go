@@ -1,6 +1,7 @@
 package datamanager
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,6 +87,60 @@ func TestLastCompleteDate_AllZerosError(t *testing.T) {
 	_, err := dm.LastCompleteDate("EUR_USD", types.H1, market.SourceOanda)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no non-zero candles")
+}
+
+// TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps proves the
+// canonical file's timestamps come from the raw rows' own observed times,
+// not a naive assumption that slot 0 begins at UTC midnight. This is the
+// regression case for the H4/D1 timestamp-mislabeling bug: OANDA's real
+// daily-alignment grid (17:00 America/New_York, DST-dependent) does not
+// begin at UTC midnight, so a raw H4 file's first row here opens at
+// 2026-06-01T01:00:00Z (simulating that offset) rather than 00:00:00Z.
+func TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps(t *testing.T) {
+	rawDir := t.TempDir()
+	UseTempDataDir(t)
+
+	key := Key{
+		Kind:       KindCandle,
+		Source:     market.SourceOanda,
+		Instrument: "EURUSD",
+		TF:         types.H4,
+		Year:       2026,
+		Month:      6,
+	}
+
+	monthStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	trueFirstSlot := monthStart.Add(time.Hour) // 2026-06-01T01:00:00Z
+
+	var rows []RawCandleRow
+	for i := 0; i < 6; i++ {
+		rows = append(rows, RawCandleRow{
+			Time:    trueFirstSlot.Add(time.Duration(i) * 4 * time.Hour),
+			BidOpen: 1.1000, BidHigh: 1.1010, BidLow: 1.0990, BidClose: 1.1005,
+			AskOpen: 1.1002, AskHigh: 1.1012, AskLow: 1.0992, AskClose: 1.1007,
+			Volume:   100,
+			Complete: true,
+		})
+	}
+	require.NoError(t, writeRawMonth(rawDir, key, monthStart, rows))
+	rawPath := monthlyCandle(rawDir, key)
+
+	dm := NewDataManager([]string{"EURUSD"}, monthStart, monthStart.AddDate(0, 1, 0))
+	result, err := dm.DeriveCanonicalFromRaw(context.Background(), rawPath, key)
+	require.NoError(t, err)
+	require.Equal(t, 6, result.CandlesWritten)
+
+	cs, err := getStore().ReadCSV(key)
+	require.NoError(t, err)
+
+	assert.Equal(t, types.FromTime(trueFirstSlot), cs.Start,
+		"canonical Start must be the raw data's true observed first-slot time, not UTC midnight")
+
+	for i := 0; i < 6; i++ {
+		require.True(t, cs.IsValid(i), "slot %d should be valid", i)
+		wantTime := trueFirstSlot.Add(time.Duration(i) * 4 * time.Hour)
+		assert.Equal(t, wantTime, cs.Time(i), "slot %d timestamp", i)
+	}
 }
 
 func TestLastCompleteDate_PicksNewestMonth(t *testing.T) {

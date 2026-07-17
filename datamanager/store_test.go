@@ -192,6 +192,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
 			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+				"1767225600,10,9,8,9,1,2,3,0x0001\n"+
 				"1767225601,10,9,8,9,1,2,3,0x0001\n",
 		), 0o644))
 

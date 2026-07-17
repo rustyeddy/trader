@@ -58,7 +58,7 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf t
 
 	stepSec := int64(tf)
 	slotCount := int(monthEnd.Sub(monthStart).Seconds() / float64(stepSec))
-	candles := make([]market.Candle, slotCount)
+	candles := make([]market.CandleTime, slotCount)
 	rows := make([]datamanager.RawCandleRow, 0, len(raw))
 
 	for _, oc := range raw {
@@ -105,14 +105,17 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf t
 				max = sp
 			}
 		}
-		candles[idx] = market.Candle{
-			Open:      types.PriceFromFloat(oc.BidOpen),
-			High:      types.PriceFromFloat(oc.BidHigh),
-			Low:       types.PriceFromFloat(oc.BidLow),
-			Close:     types.PriceFromFloat(oc.BidClose),
-			AvgSpread: types.PriceFromFloat(sum / 4),
-			MaxSpread: types.PriceFromFloat(max),
-			Ticks:     int32(oc.Volume),
+		candles[idx] = market.CandleTime{
+			Candle: market.Candle{
+				Open:      types.PriceFromFloat(oc.BidOpen),
+				High:      types.PriceFromFloat(oc.BidHigh),
+				Low:       types.PriceFromFloat(oc.BidLow),
+				Close:     types.PriceFromFloat(oc.BidClose),
+				AvgSpread: types.PriceFromFloat(sum / 4),
+				MaxSpread: types.PriceFromFloat(max),
+				Ticks:     int32(oc.Volume),
+			},
+			Timestamp: types.FromTime(oc.Time.UTC()),
 		}
 	}
 

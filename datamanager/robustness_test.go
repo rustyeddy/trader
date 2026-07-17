@@ -547,16 +547,21 @@ func TestReadCSV_MisalignedTimestamp(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	// Timestamp is 30 seconds into a minute — not aligned to M1 (60-sec) step
-	ts := time.Date(2026, time.May, 1, 0, 0, 30, 0, time.UTC)
+	// The file's first row always defines the CandleSet's true start (it
+	// no longer has to be UTC midnight — see store.go readCSVUncached), so
+	// misalignment now has to show up on a later row: 30 seconds into the
+	// next M1 (60-sec) step from row 1.
+	row1 := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+	row2 := row1.Add(60*time.Second + 30*time.Second)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
 	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
-		ts.Unix(),
+		row1.Unix(), row2.Unix(),
 	)), 0o644))
 
 	_, err = s.ReadCSV(k)
@@ -568,16 +573,19 @@ func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	// Timestamp before the month start
-	ts := time.Date(2025, time.December, 31, 23, 0, 0, 0, time.UTC)
+	// Row 1 defines start; row 2 ticks backward in time, which must be
+	// rejected regardless of where start itself falls in the calendar.
+	row1 := time.Date(2026, time.May, 1, 0, 1, 0, 0, time.UTC)
+	row2 := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
 	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
 		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
-		ts.Unix(),
+		row1.Unix(), row2.Unix(),
 	)), 0o644))
 
 	_, err = s.ReadCSV(k)

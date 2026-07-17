@@ -54,8 +54,12 @@ type CandleProvider interface {
 
 // CandleMonth is the result of a CandleProvider month fetch.
 type CandleMonth struct {
-	// Candles is dense: one slot per timeframe step in the month.
-	Candles []market.Candle
+	// Candles is dense: one slot per timeframe step in the month. Each
+	// element carries the provider's true observed open timestamp
+	// (Timestamp), not a naive UTC-month-start-relative reconstruction —
+	// the store derives the canonical file's true first-slot time from
+	// this ground truth rather than assuming it.
+	Candles []market.CandleTime
 
 	// Raw optionally preserves the provider's native bid+ask OHLC rows
 	// (before conversion to the canonical bid-only representation), for

@@ -519,9 +519,13 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	}
 	defer f.Close()
 
-	// Build CandleSet structure from key parameters.
+	// The slot count is derived from the calendar month span, but the true
+	// first-slot time (start) is not assumed to be UTC midnight — broker
+	// daily-alignment grids (H4/D1) don't begin there. WriteCSV always
+	// writes every slot densely (gaps included), so the file's first data
+	// row is always slot 0; start is read from that row below instead of
+	// being reconstructed from key.Year/key.Month.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	start := types.FromTime(monthStart)
 	tf := key.TF
 	step := int64(tf)
 
@@ -533,12 +537,14 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	cs = &CandleSet{
 		Instrument: instName,
 		Source:     readCSVSource(key.Source),
-		Start:      start,
 		Timeframe:  tf,
 		Scale:      types.PriceScale,
 		Candles:    make([]market.Candle, n),
 		Valid:      make([]uint64, (n+63)/64),
 	}
+
+	var start int64
+	haveStart := false
 
 	scanner := bufio.NewScanner(f)
 	rowNum := 0
@@ -563,7 +569,13 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, err)
 		}
 
-		offset := ts - int64(start)
+		if !haveStart {
+			start = ts
+			cs.Start = types.Timestamp(start)
+			haveStart = true
+		}
+
+		offset := ts - start
 		if offset < 0 || offset%step != 0 {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d not aligned to timeframe %d", path, rowNum, ts, step)
 		}
