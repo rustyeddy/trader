@@ -94,7 +94,14 @@ func SlotIndexForTime(start time.Time, tf types.Timeframe, t time.Time) int {
 		}
 	}
 
-	// H4: however many whole 4-hour periods fit within each real day.
+	// H4: however many whole 4-hour periods fit within each real day. Must
+	// count days the same way SlotBoundaries' emission loop does (a slot
+	// counts if it starts before the day ends, even if it doesn't finish
+	// before the day ends) — i.e. ceil(width/step), not floor(width/step).
+	// A 23-hour transition day is 5.75 steps of 4h; SlotBoundaries emits 6
+	// slots for it (0,4,8,12,16,20h all start before the 23h mark), so
+	// floor(23h/4h)=5 undercounts by one and permanently shifts every
+	// later index in the file by -1 relative to SlotBoundaries.
 	step := time.Duration(tf) * time.Second
 	idx := 0
 	for {
@@ -102,7 +109,8 @@ func SlotIndexForTime(start time.Time, tf types.Timeframe, t time.Time) int {
 		if t.Before(next) {
 			return idx + int(t.Sub(day)/step)
 		}
-		idx += int(next.Sub(day) / step)
+		width := next.Sub(day)
+		idx += int((width + step - 1) / step)
 		day = next
 	}
 }
