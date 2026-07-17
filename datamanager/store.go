@@ -398,11 +398,14 @@ func candleSetMissingExpectedSlots(cs *CandleSet) (missing int, expected int) {
 		return 0, 0
 	}
 
-	step := time.Duration(cs.Timeframe) * time.Second
-	start := time.Unix(int64(cs.Start), 0).UTC()
+	// Each slot's own Timestamp is authoritative (see CandleSet doc
+	// comment) — reconstructing it from Start+i*step instead drifts an
+	// hour for every D1/H4 slot after a DST transition mid-month, which
+	// used to make this report false "missing" slots for the rest of
+	// every March/November.
 	for i := range cs.Candles {
-		slotStart := start.Add(time.Duration(i) * step)
-		slotEnd := slotStart.Add(step)
+		slotStart := cs.Time(i)
+		slotEnd := slotStart.Add(time.Duration(cs.Timeframe) * time.Second)
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}

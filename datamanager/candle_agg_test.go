@@ -78,6 +78,33 @@ func TestAggregate_D1FromH1_DSTTransition(t *testing.T) {
 	require.Equal(t, time.Date(2026, 3, 9, 21, 0, 0, 0, time.UTC), d1.Time(2))
 }
 
+// TestAggregate_H4FromH1_DSTTransition proves H4 aggregation through the
+// generic Aggregate path also gets the DST-aware day-walk, not just D1 —
+// a latent gap found while validating #179: aggregate() only special-cased
+// outTF==D1, so an H4 aggregation (not currently exercised by
+// buildH1/buildD1, but reachable via the exported Aggregate method) would
+// have silently drifted across a transition the same way D1 used to.
+func TestAggregate_H4FromH1_DSTTransition(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, 3, 7, 22, 0, 0, 0, time.UTC) // true Mar 7 boundary (EST)
+	cs := buildAggTestCandleSet(t, start, types.H1, 72)   // spans Mar 7, 8, 9
+
+	h4, err := cs.Aggregate(types.H4)
+	require.NoError(t, err)
+
+	wantMar7 := SlotBoundaries(start, types.H4, 6)
+	wantMar8 := SlotBoundaries(time.Date(2026, 3, 8, 21, 0, 0, 0, time.UTC), types.H4, 6)
+	for i, want := range wantMar7 {
+		require.Equal(t, want, h4.Time(i), "Mar 7 slot %d", i)
+		require.True(t, h4.IsValid(i))
+	}
+	for i, want := range wantMar8 {
+		require.Equal(t, want, h4.Time(len(wantMar7)+i), "Mar 8 slot %d", i)
+		require.True(t, h4.IsValid(len(wantMar7)+i))
+	}
+}
+
 // TestAggregate_H1FromM1_UnaffectedByDailyAlignmentFix proves buildH1
 // (M1->H1) stays a no-op change from the D1 daily-alignment fix: M1 has no
 // daily-alignment concept, so H1 bucket boundaries are true UTC-epoch-hour

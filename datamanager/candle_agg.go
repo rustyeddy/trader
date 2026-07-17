@@ -48,15 +48,16 @@ func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet,
 		}, nil
 	}
 
-	// D1 buckets aren't evenly spaced by 86400 seconds: OANDA's true day
-	// boundary is 17:00 America/New_York, DST-aware, so the calendar day
-	// containing a DST transition is 23 or 25 wall-clock hours. A fixed
-	// stride from a single anchor (correct for every other timeframe here,
-	// since their grid boundaries don't depend on where the broker's
-	// trading day begins) silently drifts D1 boundaries by an hour after
-	// crossing a transition. Walk real day boundaries instead.
-	if outTF == types.D1 {
-		return cs.aggregateDaily(minValid)
+	// D1/H4 buckets aren't evenly spaced by a fixed stride: OANDA's true
+	// day boundary is 17:00 America/New_York, DST-aware, so the calendar
+	// day containing a DST transition is 23 or 25 wall-clock hours. A
+	// fixed stride from a single anchor (correct for every other
+	// timeframe here, since their grid boundaries don't depend on where
+	// the broker's trading day begins) silently drifts D1/H4 boundaries
+	// by an hour after crossing a transition. Walk real day boundaries
+	// instead.
+	if dailyAligned(outTF) {
+		return cs.aggregateWithinDay(outTF, minValid)
 	}
 
 	ratio := int(outTF / cs.Timeframe)
@@ -97,25 +98,31 @@ func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet,
 	return out, nil
 }
 
-// aggregateDaily builds a D1 CandleSet from cs (must be a sub-day
-// timeframe, typically H1) by walking OANDA's true 17:00
-// America/New_York-anchored day boundaries, DST-aware, rather than
-// assuming every day spans a fixed 86400 seconds.
-func (cs *CandleSet) aggregateDaily(minValid int) (*CandleSet, error) {
+// aggregateWithinDay builds a D1 or H4 CandleSet from cs (must be a
+// sub-day timeframe, typically H1) by walking OANDA's true 17:00
+// America/New_York-anchored day boundaries, DST-aware, and subdividing
+// each real day into outTF-sized windows (one window for D1; however many
+// whole outTF periods fit in that day for H4), rather than assuming every
+// day spans a fixed 86400 seconds.
+func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*CandleSet, error) {
 	inTF := types.Timestamp(cs.Timeframe)
+	outStep := time.Duration(outTF) * time.Second
 
 	csStart := time.Unix(int64(cs.Start), 0).UTC()
 	lastCandleTime := time.Unix(int64(cs.Start)+int64(len(cs.Candles)-1)*int64(inTF), 0).UTC()
 
 	var boundaries []time.Time
-	for b := types.DailyAlignmentBoundary(csStart); !b.After(lastCandleTime); b = nextDailyBoundary(b) {
-		boundaries = append(boundaries, b)
+	for day := types.DailyAlignmentBoundary(csStart); !day.After(lastCandleTime); day = nextDailyBoundary(day) {
+		next := nextDailyBoundary(day)
+		for slot := day; slot.Before(next); slot = slot.Add(outStep) {
+			boundaries = append(boundaries, slot)
+		}
 	}
 
 	out := &CandleSet{
 		Instrument: cs.Instrument,
 		Start:      types.FromTime(boundaries[0]),
-		Timeframe:  types.D1,
+		Timeframe:  outTF,
 		Scale:      cs.Scale,
 		Source:     cs.Source,
 		Candles:    make([]market.CandleTime, len(boundaries)),
@@ -123,16 +130,16 @@ func (cs *CandleSet) aggregateDaily(minValid int) (*CandleSet, error) {
 	}
 
 	hasValidBits := len(cs.Valid) > 0
-	for oi, boundaryStart := range boundaries {
-		out.Candles[oi].Timestamp = types.FromTime(boundaryStart)
+	for oi, windowStart := range boundaries {
+		out.Candles[oi].Timestamp = types.FromTime(windowStart)
 
-		boundaryEnd := nextDailyBoundary(boundaryStart)
+		windowEnd := windowStart.Add(outStep)
 		if oi+1 < len(boundaries) {
-			boundaryEnd = boundaries[oi+1]
+			windowEnd = boundaries[oi+1]
 		}
 
-		firstIdx := int((types.FromTime(boundaryStart) - cs.Start) / inTF)
-		endIdx := int((types.FromTime(boundaryEnd) - cs.Start) / inTF)
+		firstIdx := int((types.FromTime(windowStart) - cs.Start) / inTF)
+		endIdx := int((types.FromTime(windowEnd) - cs.Start) / inTF)
 
 		outC, validCount := aggregateWindow(cs, firstIdx, endIdx, hasValidBits)
 		if validCount < minValid {

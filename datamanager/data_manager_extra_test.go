@@ -479,6 +479,37 @@ func TestStoreScanFiles_ClosedOnlyDailyGapsRemainComplete(t *testing.T) {
 	require.Zero(t, asset.MissingInputs)
 }
 
+// TestStoreScanFiles_DSTTransitionMonthNotFalselyIncomplete is the
+// regression case for a bug found while validating #179's regen: scanFiles
+// (via inspectCandleAsset -> candleSetMissingExpectedSlots) used to
+// reconstruct each slot's time as Start+idx*step instead of reading the
+// slot's own true timestamp, so every D1/H4 month past a DST transition
+// (every March/November) drifted an hour and falsely reported market-hours
+// slots as missing for the rest of the month.
+func TestStoreScanFiles_DSTTransitionMonthNotFalselyIncomplete(t *testing.T) {
+	s := useTempStore(t)
+
+	monthStart := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
+	boundaries := SlotBoundaries(monthStart, types.D1, 31)
+	candles := make([]market.CandleTime, len(boundaries))
+	for i, b := range boundaries {
+		candles[i].Timestamp = types.FromTime(b)
+		if timeRangeMayHaveForexData(b, b.Add(24*time.Hour)) {
+			candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+		}
+	}
+	require.NoError(t, s.WriteMonthlyCandleTimes(market.SourceOanda, "EURUSD", types.D1, monthStart, candles))
+
+	inv := NewInventory()
+	require.NoError(t, s.scanFiles(inv))
+
+	key := Key{Instrument: "EURUSD", Source: market.SourceOanda, Kind: KindCandle, TF: types.D1, Year: 2026, Month: 3}
+	asset, ok := inv.Get(key)
+	require.True(t, ok)
+	require.True(t, asset.Complete, "reason: %s", asset.Reason)
+	require.Zero(t, asset.MissingInputs)
+}
+
 func TestParseCandlePath_BadFilenameMonth(t *testing.T) {
 	t.Parallel()
 

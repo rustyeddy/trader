@@ -216,7 +216,7 @@ func TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart(t *testing.T) {
 	t.Parallel()
 
 	start := types.Timestamp(time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC).Unix()) // Monday
-	cs := &CandleSet{Start: start, Timeframe: types.M1}
+	cs := &CandleSet{Start: start, Timeframe: types.M1, Candles: []market.CandleTime{{Timestamp: start}}}
 	assert.Equal(t, "suspicious", cs.classifyGap(0, 24*60))
 }
 

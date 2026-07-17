@@ -232,10 +232,12 @@ func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
 	}
 
 	step := time.Duration(cs.Timeframe) * time.Second
-	start := time.Unix(int64(cs.Start), 0).UTC()
 	var cov candleCoverage
 	for i := range cs.Candles {
-		slotStart := start.Add(time.Duration(i) * step)
+		// cs.Time reads the slot's own true timestamp rather than
+		// reconstructing it from Start+idx*step, which drifts an hour
+		// for D1/H4 slots after a DST transition mid-month.
+		slotStart := cs.Time(i)
 		slotEnd := slotStart.Add(step)
 		if !slotStart.Before(now) {
 			break // don't expect future slots

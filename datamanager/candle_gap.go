@@ -62,8 +62,10 @@ func (cs *CandleSet) BuildGapReport() {
 func (cs *CandleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe)
 
-	startUnix := int64(cs.Start) + int64(startIdx)*tf
-	t := time.Unix(startUnix, 0).UTC()
+	// cs.Time reads the slot's own true timestamp rather than
+	// reconstructing it from Start+idx*step, which drifts an hour for
+	// D1/H4 slots after a DST transition mid-month.
+	t := cs.Time(startIdx)
 	wd := t.Weekday()
 
 	gapSeconds := int64(length) * tf
