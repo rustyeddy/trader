@@ -62,8 +62,6 @@ var instrumentRegistry = map[string]Instrument{
 	"AUDUSD": makeInstrument("AUDUSD", "AUD", "USD", -4, types.Rate(20_000)),
 	"USDCAD": makeInstrument("USDCAD", "USD", "CAD", -4, types.Rate(20_000)),
 	"NZDUSD": makeInstrument("NZDUSD", "NZD", "USD", -4, types.Rate(20_000)),
-	// Precious metals
-	"XAUUSD": makeInstrument("XAUUSD", "XAU", "USD", -2, types.Rate(50_000)),
 	// JPY crosses
 	"EURJPY": makeInstrument("EURJPY", "EUR", "JPY", -2, types.Rate(20_000)),
 	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, types.Rate(20_000)),

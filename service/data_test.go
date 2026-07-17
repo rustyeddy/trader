@@ -69,16 +69,16 @@ func TestDownloadOandaCandles_ExcludesCandleBeforeMonthStart(t *testing.T) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		if calls > 1 {
-			fmt.Fprint(w, `{"instrument":"XAU_USD","granularity":"D","candles":[]}`)
+			fmt.Fprint(w, `{"instrument":"EUR_USD","granularity":"D","candles":[]}`)
 			return
 		}
 		// A real April-30 daily candle (timestamped 21:00 UTC the day
 		// before, per OANDA's D1 convention) returned in response to a
 		// May 1..31 fetch — must not land in May's canonical file.
-		fmt.Fprint(w, `{"instrument":"XAU_USD","granularity":"D","candles":[
+		fmt.Fprint(w, `{"instrument":"EUR_USD","granularity":"D","candles":[
 			{"complete":true,"time":"2026-04-30T21:00:00.000000000Z","volume":100,
-			 "bid":{"o":"4628.94","h":"4660.34","l":"4560.01","c":"4612.40"},
-			 "ask":{"o":"4630.09","h":"4660.83","l":"4560.58","c":"4615.34"}}
+			 "bid":{"o":"1.08294","h":"1.08334","l":"1.08201","c":"1.08240"},
+			 "ask":{"o":"1.08309","h":"1.08347","l":"1.08216","c":"1.08253"}}
 		]}`)
 	}))
 	defer srv.Close()
@@ -86,7 +86,7 @@ func TestDownloadOandaCandles_ExcludesCandleBeforeMonthStart(t *testing.T) {
 	svc := &Service{OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"}, Log: discardLogger()}
 
 	result, err := svc.DownloadOandaCandles(context.Background(), DownloadOandaCandlesRequest{
-		Instrument: "XAU_USD",
+		Instrument: "EUR_USD",
 		Timeframe:  "D",
 		From:       time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		To:         time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC),
@@ -96,9 +96,9 @@ func TestDownloadOandaCandles_ExcludesCandleBeforeMonthStart(t *testing.T) {
 
 	path := datamanager.PathForMonthlyCandle(datamanager.Key{
 		Kind: datamanager.KindCandle, Source: market.SourceOanda,
-		Instrument: "XAUUSD", TF: types.D1, Year: 2026, Month: 5,
+		Instrument: "EURUSD", TF: types.D1, Year: 2026, Month: 5,
 	})
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.NotContains(t, string(data), "461240000", "May 1 slot must stay zero, not the duplicated April-30 close price")
+	assert.NotContains(t, string(data), "108240", "May 1 slot must stay zero, not the duplicated April-30 close price")
 }
