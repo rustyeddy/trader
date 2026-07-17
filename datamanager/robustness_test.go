@@ -491,7 +491,7 @@ func TestReadCSV_EmptyFile(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte{}, 0o644))
@@ -510,7 +510,7 @@ func TestReadCSV_OnlyCommentAndHeader(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
@@ -529,7 +529,7 @@ func TestReadCSV_TooFewFields(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -550,7 +550,7 @@ func TestReadCSV_MisalignedTimestamp(t *testing.T) {
 	// Timestamp is 30 seconds into a minute — not aligned to M1 (60-sec) step
 	ts := time.Date(2026, time.May, 1, 0, 0, 30, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -571,7 +571,7 @@ func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
 	// Timestamp before the month start
 	ts := time.Date(2025, time.December, 31, 23, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -591,7 +591,7 @@ func TestReadCSV_FlagsZero(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -986,7 +986,7 @@ func TestStoreExists_IsDirectory(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 7}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 
 	// Create the path as a directory instead of a file
@@ -1168,7 +1168,7 @@ func TestStoreIsUsableTickFile_Directory(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "dukascopy", Kind: KindTick, TF: types.Ticks, Year: 2025, Month: 3, Day: 1, Hour: 5}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(path, 0o755)) // create as dir, not file
 	require.False(t, s.IsUsableTickFile(k))      // directories are not usable
@@ -1235,10 +1235,10 @@ func TestCandleRequestKey_AllTimeframes(t *testing.T) {
 }
 
 // =============================================================================
-// store.PathForAsset – candle key with all timeframes
+// store.KeyPath – candle key with all timeframes
 // =============================================================================
 
-func TestPathForAsset_CandleAllTimeframes(t *testing.T) {
+func TestKeyPath_CandleAllTimeframes(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -1262,7 +1262,7 @@ func TestPathForAsset_CandleAllTimeframes(t *testing.T) {
 				Year:       2026,
 				Month:      3,
 			}
-			path, err := s.PathForAsset(k)
+			path, err := s.KeyPath(k)
 			require.NoError(t, err)
 			require.True(t, strings.HasSuffix(path, "-"+tf.suffix+".csv"),
 				"expected path to end with -%s.csv, got %s", tf.suffix, path)

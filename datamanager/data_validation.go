@@ -146,7 +146,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	// Slots in the future (after the current hour) are not expected to have data.
 	now := time.Now().UTC().Truncate(time.Hour)
 
-	path, err := globalStore.PathForAsset(key)
+	path, err := globalStore.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}

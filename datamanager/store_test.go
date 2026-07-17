@@ -81,7 +81,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	require.NoError(t, s.WriteCSV(cs))
 
 	// Verify that WriteCSV created a CSV file at the expected location
-	filename, err := s.PathForAsset(keyForSet(cs))
+	filename, err := s.KeyPath(keyForSet(cs))
 	require.NoError(t, err)
 	info, err := os.Stat(filename)
 	require.NoError(t, err, "expected CSV file to be written at %q", filename)
@@ -102,7 +102,7 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 		Month:      1,
 	}
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 
@@ -169,7 +169,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		s := newTestStore(t)
 		key := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
-		path, err := s.PathForAsset(key)
+		path, err := s.KeyPath(key)
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
@@ -187,7 +187,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		s := newTestStore(t)
 		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
-		path, err := s.PathForAsset(key)
+		path, err := s.KeyPath(key)
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(

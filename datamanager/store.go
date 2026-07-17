@@ -49,7 +49,7 @@ type store struct {
 	cache   map[Key]*CandleSet // process-lifetime cache of ReadCSV results, keyed by Key
 }
 
-func (s *store) PathForAsset(k Key) (string, error) {
+func (s *store) KeyPath(k Key) (string, error) {
 	switch {
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		return s.pathForMonthlyCandle(k), nil
@@ -87,7 +87,7 @@ func (s *store) PathForMonthlyCandle(k Key) string {
 }
 
 // RawCandlePath returns the path for a monthly candle CSV under the raw tree.
-// It mirrors PathForAsset but roots in rawRoot instead of basedir.
+// It mirrors KeyPath but roots in rawRoot instead of basedir.
 func (s *store) RawCandlePath(k Key) (string, error) {
 	if k.Kind != KindCandle || k.Day != 0 || k.Hour != 0 {
 		return "", fmt.Errorf("RawCandlePath requires a monthly candle key (Day=0, Hour=0)")
@@ -275,7 +275,7 @@ func (s *store) RelDir(key Key) string {
 }
 
 func (s *store) Exists(key Key) (bool, error) {
-	p, err := s.PathForAsset(key)
+	p, err := s.KeyPath(key)
 	if err != nil {
 		return false, err
 	}
@@ -508,7 +508,7 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
 	}
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}
@@ -666,7 +666,7 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return err
 	}
@@ -732,7 +732,7 @@ func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	}
 	defer r.Close()
 
-	dst, err := s.PathForAsset(key)
+	dst, err := s.KeyPath(key)
 	if err != nil {
 		return "", err
 	}
@@ -771,7 +771,7 @@ func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 }
 
 func (s *store) Delete(k Key) error {
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	if err != nil {
 		return err
 	}
@@ -788,7 +788,7 @@ func (s *store) baseScanDir() string {
 }
 
 func (s *store) IsUsableTickFile(k Key) bool {
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	if err != nil {
 		return false
 	}
@@ -815,7 +815,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: tick file not usable: %+v", key)
 	}
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}

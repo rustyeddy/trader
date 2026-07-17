@@ -203,7 +203,7 @@ func TestStoreIsUsableTickFile_EmptyFile(t *testing.T) {
 		Hour:       13,
 	}
 
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, makeParentsAndFile(path, nil))
 
@@ -225,7 +225,7 @@ func TestStoreIsUsableTickFile_NonEmptyFile(t *testing.T) {
 		Hour:       13,
 	}
 
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, makeParentsAndFile(path, []byte("data")))
 
@@ -552,7 +552,7 @@ func TestReadCSV_BadTimestamp(t *testing.T) {
 
 	s := newTestStore(t)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
@@ -571,7 +571,7 @@ func TestReadCSV_BadHighValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -591,7 +591,7 @@ func TestReadCSV_BadOpenValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -611,7 +611,7 @@ func TestReadCSV_BadLowValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -631,7 +631,7 @@ func TestReadCSV_BadCloseValue(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -651,7 +651,7 @@ func TestReadCSV_BadAvgSpread(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -671,7 +671,7 @@ func TestReadCSV_BadMaxSpread(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -691,7 +691,7 @@ func TestReadCSV_BadTicks(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -711,7 +711,7 @@ func TestReadCSV_BadFlags(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -731,7 +731,7 @@ func TestReadCSV_TimestampOutOfRange(t *testing.T) {
 	s := newTestStore(t)
 	ts := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
@@ -847,7 +847,7 @@ func TestWriteMonthlyCandles_BadMonthStart(t *testing.T) {
 	require.Contains(t, err.Error(), "start of month")
 }
 
-func TestPathForAsset_EmptySourceDefaults(t *testing.T) {
+func TestKeyPath_EmptySourceDefaults(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -859,7 +859,7 @@ func TestPathForAsset_EmptySourceDefaults(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.Contains(t, path, "unknown")
 }
@@ -874,7 +874,7 @@ func TestStoreExistsTwoPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))

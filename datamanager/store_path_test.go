@@ -164,10 +164,10 @@ func TestParseTickPath_InvalidHour(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// pathForHourlyTick via PathForAsset
+// pathForHourlyTick via KeyPath
 // ---------------------------------------------------------------------------
 
-func TestPathForAsset_TickKey(t *testing.T) {
+func TestKeyPath_TickKey(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -181,14 +181,14 @@ func TestPathForAsset_TickKey(t *testing.T) {
 		Day:        2,
 		Hour:       13,
 	}
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.Contains(t, p, "EURUSD")
 	require.Contains(t, p, "2025")
 	require.Contains(t, p, "13h_ticks.bi5")
 }
 
-func TestPathForAsset_TickKeyUsesSourceDirectory(t *testing.T) {
+func TestKeyPath_TickKeyUsesSourceDirectory(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -203,12 +203,12 @@ func TestPathForAsset_TickKeyUsesSourceDirectory(t *testing.T) {
 		Hour:       13,
 	}
 
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.Contains(t, p, filepath.Join("raw", "other", "EURUSD"))
 }
 
-func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {
+func TestKeyPath_ErrorOnUnsupported(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -219,7 +219,7 @@ func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	_, err := s.PathForAsset(k)
+	_, err := s.KeyPath(k)
 	require.Error(t, err)
 }
 
@@ -273,7 +273,7 @@ func TestStoreExists_Present(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("data"), 0o644))

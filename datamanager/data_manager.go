@@ -344,7 +344,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		it, err := globalStore.OpenTickIterator(tickKey)
 		if err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -353,7 +353,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -364,11 +364,11 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
-			kPath, err2 := globalStore.PathForAsset(k)
+			kPath, err2 := globalStore.KeyPath(k)
 			if err2 != nil {
 				kPath = "<path unavailable>"
 			}
@@ -378,7 +378,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	}
 
 	if err := globalStore.WriteCSV(monthSet); err != nil {
-		kPath, _ := globalStore.PathForAsset(k)
+		kPath, _ := globalStore.KeyPath(k)
 		return fmt.Errorf("write monthly M1 %s: %w", kPath, err)
 	}
 

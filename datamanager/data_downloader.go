@@ -110,7 +110,7 @@ func (dl *downloader) download(ctx context.Context, key Key) (Asset, error) {
 }
 
 func downloadFailureAsset(key Key, err error) Asset {
-	path, pathErr := globalStore.PathForAsset(key)
+	path, pathErr := globalStore.KeyPath(key)
 	if pathErr != nil {
 		path = ""
 	}

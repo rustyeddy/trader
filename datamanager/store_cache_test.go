@@ -27,7 +27,7 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 	first, err := s.ReadCSV(key)
 	require.NoError(t, err)
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 
@@ -52,7 +52,7 @@ func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 	_, err := s.ReadCSV(key)
 	require.NoError(t, err)
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 

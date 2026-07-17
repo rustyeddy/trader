@@ -81,7 +81,7 @@ type RawCandleRow struct {
 // pipeline.
 type ProviderStore interface {
 	Exists(k Key) (bool, error)
-	PathForAsset(k Key) (string, error)
+	KeyPath(k Key) (string, error)
 	OpenTickIterator(key Key) (iterator[RawTick], error)
 }
 

@@ -57,7 +57,7 @@ func GetOrCreateTestData(instrument string, year int, timeframe types.Timeframe)
 		Year:       year,
 		Month:      1,
 	}
-	expectedPath, err := store.PathForAsset(key)
+	expectedPath, err := store.KeyPath(key)
 	if err != nil {
 		return "", err
 	}
