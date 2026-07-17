@@ -108,7 +108,7 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 
 	ts := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	raw := fmt.Sprintf(
-		"# schema=v1 source=test instrument=EURUSD tf=M1 year=2026 scale=1000000\nTimestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n%d,110,100,90,105,2,4,9,0x0001\n",
+		"# schema=candle-v2 source=test instrument=EURUSD tf=M1 year=2026 scale=1000000\nTimestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n%d,100,110,90,105,2,4,9,0x0001\n",
 		ts.Unix(),
 	)
 	require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
@@ -118,8 +118,8 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 	require.NotNil(t, got)
 
 	require.Equal(t, market.Candle{
-		High:      types.Price(110),
 		Open:      types.Price(100),
+		High:      types.Price(110),
 		Low:       types.Price(90),
 		Close:     types.Price(105),
 		AvgSpread: types.Price(2),
@@ -173,7 +173,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
-			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 				"1767225600,1,2\n",
 		), 0o644))
 
@@ -191,7 +191,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
-			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 				"1767225600,10,9,8,9,1,2,3,0x0001\n"+
 				"1767225601,10,9,8,9,1,2,3,0x0001\n",
 		), 0o644))

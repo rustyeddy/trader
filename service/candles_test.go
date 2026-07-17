@@ -36,9 +36,9 @@ func TestCandlesCSV_ReturnsCanonicalCSV(t *testing.T) {
 	assert.Equal(t, "h1", result.Timeframe)
 	assert.Equal(t, "oanda", result.Source)
 	assert.Equal(t, 2, result.Count)
-	assert.Contains(t, result.CSV, "# schema=v1 source=oanda instrument=EURUSD tf=h1 scale=100000\n")
-	assert.Contains(t, result.CSV, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n")
-	assert.Contains(t, result.CSV, "1704067200,110100,110000,109900,110050,10,15,60,0x0001\n")
+	assert.Contains(t, result.CSV, "# schema=candle-v2 source=oanda instrument=EURUSD tf=h1 scale=100000\n")
+	assert.Contains(t, result.CSV, "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n")
+	assert.Contains(t, result.CSV, "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
 	assert.True(t, strings.HasSuffix(result.CSV, "\n"))
 }
 

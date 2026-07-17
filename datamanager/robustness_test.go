@@ -514,8 +514,8 @@ func TestReadCSV_OnlyCommentAndHeader(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
-		"# schema=v1 source=test instrument=EURUSD tf=H1 year=2026 scale=100000\n"+
-			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n",
+		"# schema=candle-v2 source=test instrument=EURUSD tf=H1 year=2026 scale=100000\n"+
+			"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n",
 	), 0o644))
 
 	cs, err := s.ReadCSV(k)
@@ -533,7 +533,7 @@ func TestReadCSV_TooFewFields(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98\n", // only 4 fields
 		ts.Unix(),
 	)), 0o644))
@@ -558,7 +558,7 @@ func TestReadCSV_MisalignedTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
 		row1.Unix(), row2.Unix(),
@@ -582,7 +582,7 @@ func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
 		row1.Unix(), row2.Unix(),
@@ -603,7 +603,7 @@ func TestReadCSV_FlagsZero(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,0x0000\n", // flags=0, not valid
 		ts.Unix(),
 	)), 0o644))

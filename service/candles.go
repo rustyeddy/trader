@@ -124,13 +124,13 @@ func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.Cand
 	if meta.Scale == 0 {
 		meta.Scale = types.PriceScale
 	}
-	if _, err := fmt.Fprintf(buf, "# schema=v1 source=%s instrument=%s tf=%s scale=%d\n",
+	if _, err := fmt.Fprintf(buf, "# schema=candle-v2 source=%s instrument=%s tf=%s scale=%d\n",
 		meta.Source, meta.Instrument, meta.Timeframe, meta.Scale); err != nil {
 		return 0, err
 	}
 
 	w := csv.NewWriter(buf)
-	if err := w.Write([]string{"Timestamp", "High", "Open", "Low", "Close", "avgspread", "maxspread", "ticks", "flags"}); err != nil {
+	if err := w.Write([]string{"Timestamp", "Open", "High", "Low", "Close", "avgspread", "maxspread", "ticks", "flags"}); err != nil {
 		return 0, err
 	}
 
@@ -139,8 +139,8 @@ func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.Cand
 		c := ct.Candle
 		if err := w.Write([]string{
 			strconv.FormatInt(int64(ct.Timestamp), 10),
-			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Low), 10),
 			strconv.FormatInt(int64(c.Close), 10),
 			strconv.FormatInt(int64(c.AvgSpread), 10),

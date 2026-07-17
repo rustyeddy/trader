@@ -556,7 +556,7 @@ func TestReadCSV_BadTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"NOT_A_NUMBER,100,99,98,99,1,2,3,0x0001\n",
 	), 0o644))
 
@@ -575,8 +575,8 @@ func TestReadCSV_BadHighValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
-			"%d,BAD,99,98,99,1,2,3,0x0001\n",
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,99,BAD,98,99,1,2,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
 
@@ -595,8 +595,8 @@ func TestReadCSV_BadOpenValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
-			"%d,100,BAD,98,99,1,2,3,0x0001\n",
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,BAD,100,98,99,1,2,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
 
@@ -615,7 +615,7 @@ func TestReadCSV_BadLowValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,BAD,99,1,2,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
@@ -635,7 +635,7 @@ func TestReadCSV_BadCloseValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,BAD,1,2,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
@@ -655,7 +655,7 @@ func TestReadCSV_BadAvgSpread(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,BAD,2,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
@@ -675,7 +675,7 @@ func TestReadCSV_BadMaxSpread(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,BAD,3,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
@@ -695,7 +695,7 @@ func TestReadCSV_BadTicks(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,BAD,0x0001\n",
 		ts.Unix(),
 	)), 0o644))
@@ -715,7 +715,7 @@ func TestReadCSV_BadFlags(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,NOT_HEX\n",
 		ts.Unix(),
 	)), 0o644))
@@ -738,7 +738,7 @@ func TestReadCSV_TimestampOutOfRange(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
 		row1.Unix(), row2.Unix(),
@@ -764,10 +764,10 @@ func TestWriteMetadata_Output(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	require.Contains(t, out, "schema=v1")
+	require.Contains(t, out, "schema=candle-v2")
 	require.Contains(t, out, "EURUSD")
 	require.Contains(t, out, "2026")
-	require.Contains(t, out, "Timestamp,High,Open,Low,Close")
+	require.Contains(t, out, "Timestamp,Open,High,Low,Close")
 }
 
 func TestWriteCSV_ValidFlag(t *testing.T) {

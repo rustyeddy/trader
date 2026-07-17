@@ -25,6 +25,6 @@ func TestHandleGetCandlesCSV(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.True(t, strings.HasPrefix(rr.Header().Get("Content-Type"), "text/csv"))
 	assert.Equal(t, "1", rr.Header().Get("X-Candle-Count"))
-	assert.Contains(t, rr.Body.String(), "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n")
-	assert.Contains(t, rr.Body.String(), "1704067200,110100,110000,109900,110050,10,15,60,0x0001\n")
+	assert.Contains(t, rr.Body.String(), "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n")
+	assert.Contains(t, rr.Body.String(), "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
 }

@@ -433,9 +433,9 @@ CSV format used on disk. The service is shared by CLI, REST, and MCP
 so callers get consistent output:
 
 ```csv
-# schema=v1 source=oanda instrument=EURUSD tf=h1 scale=100000
-Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags
-1704067200,110100,110000,109900,110050,10,15,60,0x0001
+# schema=candle-v2 source=oanda instrument=EURUSD tf=h1 scale=100000
+Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags
+1704067200,110000,110100,109900,110050,10,15,60,0x0001
 ```
 
 CLI:

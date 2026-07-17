@@ -34,8 +34,8 @@ func TestToolGetCandlesCSV(t *testing.T) {
 	payload := got.(map[string]any)
 	content := payload["content"].([]map[string]any)
 	text := content[0]["text"].(string)
-	assert.Contains(t, text, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n")
-	assert.Contains(t, text, "1704067200,110100,110000,109900,110050,10,15,60,0x0001\n")
+	assert.Contains(t, text, "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n")
+	assert.Contains(t, text, "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
 	metadata := payload["metadata"].(map[string]any)
 	assert.Equal(t, 1, metadata["count"])
 	assert.Equal(t, "text/csv", metadata["mime_type"])
@@ -224,5 +224,5 @@ func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
 	content := payload["content"].([]map[string]any)
-	assert.Contains(t, content[0]["text"].(string), "1704067200,110100,110000,109900,110050,10,15,60,0x0001\n")
+	assert.Contains(t, content[0]["text"].(string), "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
 }

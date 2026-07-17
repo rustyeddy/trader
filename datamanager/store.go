@@ -439,13 +439,13 @@ func (s *store) writeMetadata(cs *CandleSet, w io.Writer) error {
 	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
-	_, err := fmt.Fprintf(w, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+	_, err := fmt.Fprintf(w, "# schema=candle-v2 source=%s instrument=%s tf=%s year=%d scale=%d\n",
 		cs.Source, cs.Instrument, tfstr, year, cs.Scale)
 	if err != nil {
 		return err
 	}
 
-	_, err = fmt.Fprintln(w, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags")
+	_, err = fmt.Fprintln(w, "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags")
 	return err
 }
 
@@ -584,13 +584,13 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
 		}
 
-		highv, err := types.ParseRawPrice(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
-		}
-		openv, err := types.ParseRawPrice(fields[2])
+		openv, err := types.ParseRawPrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
+		}
+		highv, err := types.ParseRawPrice(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
 		}
 		lowv, err := types.ParseRawPrice(fields[3])
 		if err != nil {
@@ -711,8 +711,8 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 
 		rec := []string{
 			strconv.FormatInt(openUnix, 10),
-			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Low), 10),
 			strconv.FormatInt(int64(c.Close), 10),
 			strconv.FormatInt(int64(c.AvgSpread), 10),
