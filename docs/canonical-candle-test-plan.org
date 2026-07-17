@@ -1,0 +1,178 @@
+#+TITLE: Canonical Candle Store — Test & Validation Plan
+#+DATE: 2026-07-17
+#+PROPERTY: status agreed-plan
+#+PROPERTY: audience Rusty + implementation agent (Claude Code)
+#+PROPERTY: companion-docs candle-store-timestamp-fix.org, candle-timestamp-design-addendum.org
+#+PROPERTY: tools validate-candles.py (independent oracle), dump-candles.py (spot-reader)
+
+* Purpose
+
+Prove, with evidence independent of the trader codebase, that the
+regenerated canonical candle store faithfully represents the raw OANDA
+preservation tree under the conventions each file claims (schema=candle-v2,
+align=17:00, align_tz=America/New_York), including across DST seams —
+and establish an ongoing audit so this class of bug can never again go
+undetected for years.
+
+Three-legged oracle model:
+
+| leg              | role                                    | independence                  |
+|------------------+-----------------------------------------+-------------------------------|
+| raw tree         | ground truth (what OANDA actually said) | written at fetch, never derived |
+| canonical store  | the claim under test                    | —                             |
+| TradingView CSVs | external reality check                  | independent of BOTH trees     |
+
+validate-candles.py shares no code, logic, or language with trader; all
+DST math uses Python zoneinfo (an independent IANA tzdata implementation
+from Go's time package). The one irreducible shared assumption between
+trader and the validator is the *agreed convention itself* (NY-17:00
+anchor); the TradingView leg exists precisely to test that assumption
+against the outside world, since TV knows nothing about our headers.
+
+* Validator checks (reference)
+
+| check | name                        | catches                                              |
+|-------+-----------------------------+------------------------------------------------------|
+| A     | row fidelity vs raw         | mislabeled/missing/fabricated rows (today's bug)     |
+| B     | grid conformance, DST-aware | right values on wrong grid; alignment drift          |
+| C     | month membership            | cross-month invariant violations                     |
+| D     | gap hygiene                 | synthesized timestamps sneaking into empty slots     |
+| E     | spacing sanity              | slot collisions/duplication (grid-aware: the 23h/25h |
+|       |                             | DST-transition session's short block is legal)       |
+| F     | TradingView cross-check     | the agreed convention itself being wrong             |
+
+Exit codes: 0 pass / 1 violations / 2 usage error — usable directly in
+scripts, make targets, and cron.
+
+* TradingView download fixtures
+
+Download H4 (primary), D1, and H1 (control — should show NO seam shift)
+for the months below. Prefer unix-timestamp export format; ISO also
+accepted by the validator. Instruments: EURNZD (the diagnosed case),
+EURUSD (most liquid, cleanest data), and one JPY pair (different pip
+scale, e.g. USDJPY) — three instruments is enough; the bug class is
+instrument-independent.
+
+** Priority 1 — modern DST seams (must have)
+
+| month    | seam                        | why                                           |
+|----------+-----------------------------+-----------------------------------------------|
+| 2026-03  | Mar 8, spring-forward (EST→EDT) | most recent spring seam; 23h session Sun    |
+| 2025-11  | Nov 2, fall-back (EDT→EST)  | most recent fall seam; 25h session Sunday     |
+
+Together these cover both seam directions with recent, high-quality TV
+data. Expected observable: H4 session-open blocks shift 22:00→21:00 UTC
+(spring) and 21:00→22:00 UTC (fall) mid-month; the transition Sunday has
+one short (3h) or long (5h) final block respectively.
+
+** Priority 2 — stable-offset controls (should have)
+
+| month    | regime | why                                                    |
+|----------+--------+--------------------------------------------------------|
+| 2026-01  | EST    | whole month at winter offset; session opens 22:00 UTC  |
+| 2026-06  | EDT    | whole month at summer offset; session opens 21:00 UTC; |
+|          |        | already partially verified by hand on 2026-07-16       |
+
+Controls prove the validator and the store agree when nothing tricky is
+happening, and pin the two constant offsets on either side of the seams.
+
+** Priority 3 — pre-2007 old-rule seam (high value if TV history reaches)
+
+| month    | seam                              | why                             |
+|----------+-----------------------------------+---------------------------------|
+| 2006-04  | Apr 2, spring-forward (OLD rule: first Sunday of April) | the US changed DST rules in 2007; 2005–2006 data has seams in DIFFERENT months than everything after. zoneinfo handles historical rules from tzdata; any hardcoded "second Sunday of March" logic would silently corrupt 2005–2006 |
+| 2006-10  | Oct 29, fall-back (OLD rule: last Sunday of October) | same, other direction           |
+
+If TV's plan does not provide 20-year-old intraday H4 data, D1 for these
+months still exercises the old-rule seam; and checks A–E (which need no
+TV data) still fully cover 2006 using the raw tree alone. Do not skip
+validating a pre-2007 month with A–E even if the TV leg is unavailable.
+
+** Priority 4 — spot-audit sample (cheap insurance)
+
+Any 2–3 arbitrary mid-history months (e.g. 2012-05, 2018-09, 2022-02)
+run through checks A–E per instrument. No TV download needed — this is
+raw-vs-canonical only, and it is cheap.
+
+* Procedures
+
+** P0 — baseline: prove the tool detects the known-bad store (BEFORE regen)
+
+Run against the CURRENT canonical tree with =--legacy=:
+
+#+begin_src sh
+./bin/validate-candles.py \
+  --raw       /srv/trading/data/raw/oanda/EURNZD/2026/06/EURNZD-2026-06-h4.csv \
+  --canonical /srv/trading/data/candles/oanda/EURNZD/2026/06/EURNZD-2026-06-h4.csv \
+  --legacy
+#+end_src
+
+Expected: FAIL with A and B violations on every row (timestamps off by
+1h in June/EDT). This is the control experiment: a PASS from the new
+store means nothing unless the tool demonstrably FAILs the old one.
+Keep the output as an artifact (attach to issue #179).
+
+** P1 — post-regen acceptance (per fixture month)
+
+For every Priority 1–3 month × instrument × timeframe:
+
+#+begin_src sh
+./bin/validate-candles.py --raw RAW.csv --canonical CANON.csv [--tv TV.csv]
+#+end_src
+
+Acceptance: RESULT: PASS on every run, including F where a TV file
+exists. Any FAIL blocks the regen sign-off — no exceptions, no
+"explainable" violations; if a violation is genuinely legitimate, the
+validator's model is wrong and must be fixed first (as happened with the
+DST short-block during tool development — that confrontation is the
+tool doing its job).
+
+** P2 — full-tree sweep (after P1 passes)
+
+Loop A–E over EVERY month/instrument/timeframe in the regenerated tree
+(no TV needed). Trivially scriptable from the directory layout; runtime
+is minutes. Record total file count validated + zero violations in the
+issue before closing it.
+
+** P3 — trader-internal cross-check
+
+Independent oracle aside, trader's own read path must agree with the
+files: run the Phase-5 DST-transition regression test (per the design
+addendum: derive real 2026-03 and 2025-11 from raw, assert stored
+timestamps equal raw exactly on both sides of each seam) and the
+slot↔timestamp cross-validation in =trader data validate=. The external
+tool proves the FILES are right; this proves trader READS them right.
+
+** P4 — ongoing audit (after cutover)
+
+Cron validate-candles.py monthly against the most recent completed
+month for all instruments (A–E). Alert on nonzero exit. March and
+November runs are the sentinels — if an ingestion regression of this
+class ever recurs, it surfaces within one month instead of after years
+of silently poisoned backtests.
+
+* Downstream re-verification (after P1–P3 pass)
+
+Re-run the 2026-07-16 signalreplay baseline (chandelier ATR14×2.0,
+next-open, 24 pairs) against the regenerated store and diff against the
+archived results. Expect: identical trade *selection* mostly (indicator
+math is sequence-based), but changed WEEK%, weekly bucketing, and
+episode/entry-date-sensitive outcomes; the H1-alignment finding
+specifically must be re-derived from scratch. Treat pre-regen numbers as
+historical artifacts only.
+
+* Timezone-flexibility note (agreed 2026-07-17)
+
+The validator already adapts per-file: it validates each file against
+its OWN header's align/align_tz claims (a UTC-aligned source would
+declare align=00:00 align_tz=UTC and validate correctly with no code
+change). For trader: under "timestamp is truth," only two code sites
+ever consult the convention — derivation slot assignment and D1-from-H1
+bucketing. The convention is therefore a per-SOURCE constant (oanda →
+17:00 America/New_York), written into the v2 header at derivation and
+looked up from source config at those two sites. This is a config
+lookup, not a branching complexity spread, and it makes the future
+Alpaca/equities source (different session convention) a config entry
+rather than a refactor. Deliberately NOT supported: mixed conventions
+within one source, or runtime behavior driven by arbitrary per-file
+header values beyond validation.
