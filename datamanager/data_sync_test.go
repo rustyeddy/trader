@@ -143,6 +143,58 @@ func TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps(t *testing.T) {
 	}
 }
 
+// TestDeriveCanonicalFromRaw_D1DSTTransition proves a full raw D1 month
+// spanning the US spring-forward transition (2026-03-08) derives cleanly:
+// every real day's row lands in its own slot (no collisions from the 23h
+// transition day), and each slot's canonical timestamp matches the true
+// daily-alignment boundary, not a naive fixed-86400s reconstruction.
+func TestDeriveCanonicalFromRaw_D1DSTTransition(t *testing.T) {
+	rawDir := t.TempDir()
+	UseTempDataDir(t)
+
+	key := Key{
+		Kind:       KindCandle,
+		Source:     market.SourceOanda,
+		Instrument: "EURUSD",
+		TF:         types.D1,
+		Year:       2026,
+		Month:      3,
+	}
+
+	monthStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	boundaries := SlotBoundaries(monthStart, types.D1, 31)
+
+	var rows []RawCandleRow
+	for _, b := range boundaries {
+		rows = append(rows, RawCandleRow{
+			Time:    b,
+			BidOpen: 1.1000, BidHigh: 1.1010, BidLow: 1.0990, BidClose: 1.1005,
+			AskOpen: 1.1002, AskHigh: 1.1012, AskLow: 1.0992, AskClose: 1.1007,
+			Volume:   100,
+			Complete: true,
+		})
+	}
+	require.NoError(t, writeRawMonth(rawDir, key, monthStart, rows))
+	rawPath := monthlyCandle(rawDir, key)
+
+	dm := NewDataManager([]string{"EURUSD"}, monthStart, monthStart.AddDate(0, 1, 0))
+	result, err := dm.DeriveCanonicalFromRaw(context.Background(), rawPath, key)
+	require.NoError(t, err)
+	// CandlesWritten/MissingSlots only tally market-hours slots (weekends
+	// are excluded), so they're not 31 here; the collision-free placement
+	// claim is verified directly against every one of the 31 written
+	// slots below instead.
+	require.Zero(t, result.MissingSlots)
+
+	cs, err := getStore().ReadCSV(key)
+	require.NoError(t, err)
+	require.Equal(t, 31, cs.CountValid())
+	for i, b := range boundaries {
+		require.True(t, cs.IsValid(i), "slot %d should be valid", i)
+		require.Equal(t, b, cs.Time(i), "slot %d timestamp", i)
+	}
+}
+
 func TestLastCompleteDate_PicksNewestMonth(t *testing.T) {
 	UseTempDataDir(t)
 
