@@ -295,3 +295,35 @@ func (tf Timeframe) String() string {
 		return fmt.Sprintf("timeframe(%d)", tf)
 	}
 }
+
+// dailyAlignmentLocation is OANDA's default alignmentTimezone. Daily-aligned
+// granularities (D1, and by subdivision H4) open at 17:00 in this zone, not
+// at UTC midnight — the UTC offset shifts by an hour across DST
+// transitions, so this must never be approximated with a fixed offset.
+var dailyAlignmentLocation = mustLoadLocation("America/New_York")
+
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		// Should never happen with the Go stdlib's embedded tzdata; if it
+		// somehow does, fail loud rather than silently mislabel every
+		// daily-aligned candle from UTC, which is exactly the bug this
+		// helper exists to prevent.
+		panic(fmt.Sprintf("types: load location %q: %v", name, err))
+	}
+	return loc
+}
+
+// DailyAlignmentBoundary returns the most recent broker daily-alignment
+// boundary at or before t: 17:00 in America/New_York, DST-aware. This is
+// OANDA's default dailyAlignment/alignmentTimezone (this repo never
+// overrides either), and it is the true boundary D1 candles — and, by
+// subdivision, H4 candles — are anchored to. It is not UTC midnight.
+func DailyAlignmentBoundary(t time.Time) time.Time {
+	nyT := t.In(dailyAlignmentLocation)
+	boundary := time.Date(nyT.Year(), nyT.Month(), nyT.Day(), 17, 0, 0, 0, dailyAlignmentLocation)
+	if boundary.After(nyT) {
+		boundary = boundary.AddDate(0, 0, -1)
+	}
+	return boundary.UTC()
+}

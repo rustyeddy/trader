@@ -543,16 +543,18 @@ func TestReadCSV_TooFewFields(t *testing.T) {
 	require.Contains(t, err.Error(), "expected 9 fields")
 }
 
-func TestReadCSV_MisalignedTimestamp(t *testing.T) {
+// TestReadCSV_NonUniformSpacingAccepted proves rows no longer have to be
+// evenly spaced by the timeframe step from a single anchor — each row's own
+// timestamp column is authoritative and stored verbatim (see store.go
+// readCSVUncached). This is what lets D1 rows spanning a DST transition
+// (23/25 wall-clock hours apart, not a fixed 86400s) round-trip correctly
+// instead of being rejected as "misaligned."
+func TestReadCSV_NonUniformSpacingAccepted(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	// The file's first row always defines the CandleSet's true start (it
-	// no longer has to be UTC midnight — see store.go readCSVUncached), so
-	// misalignment now has to show up on a later row: 30 seconds into the
-	// next M1 (60-sec) step from row 1.
 	row1 := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
-	row2 := row1.Add(60*time.Second + 30*time.Second)
+	row2 := row1.Add(60*time.Second + 30*time.Second) // not a multiple of the M1 step
 	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
 	path, err := s.KeyPath(k)
 	require.NoError(t, err)
@@ -564,9 +566,12 @@ func TestReadCSV_MisalignedTimestamp(t *testing.T) {
 		row1.Unix(), row2.Unix(),
 	)), 0o644))
 
-	_, err = s.ReadCSV(k)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not aligned")
+	cs, err := s.ReadCSV(k)
+	require.NoError(t, err)
+	require.True(t, cs.IsValid(0))
+	require.True(t, cs.IsValid(1))
+	require.Equal(t, row1, cs.Time(0))
+	require.Equal(t, row2, cs.Time(1))
 }
 
 func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
@@ -590,7 +595,7 @@ func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
 
 	_, err = s.ReadCSV(k)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not aligned")
+	require.Contains(t, err.Error(), "not after previous row")
 }
 
 func TestReadCSV_FlagsZero(t *testing.T) {
@@ -700,9 +705,9 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 
 	// Set valid candles at index 0 and index 5 (hours 0 and 5)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	cs.Candles[0] = market.Candle{Open: 100, Close: 100, Ticks: 1}
+	cs.Candles[0].Candle = market.Candle{Open: 100, Close: 100, Ticks: 1}
 	cs.SetValid(0)
-	cs.Candles[5] = market.Candle{Open: 200, Close: 200, Ticks: 1}
+	cs.Candles[5].Candle = market.Candle{Open: 200, Close: 200, Ticks: 1}
 	cs.SetValid(5)
 
 	_ = s
@@ -730,7 +735,7 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 	_ = s
 
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-	cs.Candles[2] = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
+	cs.Candles[2].Candle = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
 	cs.SetValid(2)
 
 	it := newCandleSetIterator(cs, types.TimeRange{})
@@ -751,7 +756,7 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 
 	makeCS := func(val int) *CandleSet {
 		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-		cs.Candles[0] = market.Candle{Open: types.Price(val), Ticks: 1}
+		cs.Candles[0].Candle = market.Candle{Open: types.Price(val), Ticks: 1}
 		cs.SetValid(0)
 		return cs
 	}

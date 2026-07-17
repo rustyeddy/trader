@@ -140,12 +140,8 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 	rng := NewLCRandom(cfg.Seed + int64(year)*12 + int64(month))
 	currentPrice := cfg.StartPrice
 
-	// Skip weekends and forex market closed times
-	startTime := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-	step := time.Duration(cfg.Timeframe) * time.Second
-
 	for i := 0; i < len(cs.Candles); i++ {
-		ctime := startTime.Add(time.Duration(i) * step)
+		ctime := time.Unix(int64(cs.Candles[i].Timestamp), 0).UTC()
 
 		// Skip if market is closed (weekends and typical forex market hours)
 		if market.IsForexMarketClosed(ctime) {
@@ -153,7 +149,7 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 		}
 
 		candle := cfg.generateCandle(rng, currentPrice)
-		cs.Candles[i] = candle
+		cs.Candles[i].Candle = candle
 		cs.SetValid(i)
 		currentPrice = candle.Close
 	}

@@ -46,7 +46,7 @@ func (it *candleSetIterator) Next() bool {
 
 // Candle is an internal helper for trader type processing.
 func (it *candleSetIterator) Candle() market.Candle {
-	return it.cs.Candles[it.idx]
+	return it.cs.Candles[it.idx].Candle
 }
 
 // Index is an internal helper for trader type processing.

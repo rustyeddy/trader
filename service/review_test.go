@@ -48,19 +48,31 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 		from, err := time.Parse(time.RFC3339Nano, q.Get("from"))
 		require.NoError(t, err)
 
-		var step time.Duration
+		const n = 300
+
+		// D/H4 are daily-alignment grids (17:00 America/New_York,
+		// DST-aware) — OANDA's real candles land there, not on a naive
+		// fixed-duration stride from "from". Use the same boundary walk
+		// production reads/writes through (datamanager.SlotBoundaries) so
+		// this fake server's output matches what a real OANDA response
+		// would place candles at.
+		var times []time.Time
 		switch q.Get("granularity") {
-		case "W":
-			step = 7 * 24 * time.Hour
 		case "D":
-			step = 24 * time.Hour
+			times = datamanager.SlotBoundaries(from, types.D1, n)
 		case "H4":
-			step = 4 * time.Hour
+			times = datamanager.SlotBoundaries(from, types.H4, n)
 		default:
-			step = time.Hour
+			step := time.Hour
+			if q.Get("granularity") == "W" {
+				step = 7 * 24 * time.Hour
+			}
+			times = make([]time.Time, n)
+			for i := range times {
+				times[i] = from.Add(time.Duration(i) * step)
+			}
 		}
 
-		const n = 300
 		type ohlc struct{ O, H, L, C string }
 		candles := make([]map[string]any, 0, n)
 		price := 1.10000
@@ -76,7 +88,7 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 			}
 			candles = append(candles, map[string]any{
 				"complete": true,
-				"time":     from.Add(time.Duration(i) * step).Format(time.RFC3339Nano),
+				"time":     times[i].Format(time.RFC3339Nano),
 				"volume":   10,
 				"bid":      bid,
 				"ask":      bid,

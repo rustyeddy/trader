@@ -56,7 +56,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	cs := makeTestCandleSet(t, "EUR_USD", 2026, time.January, types.H1)
 
-	cs.Candles[0] = market.Candle{
+	cs.Candles[0].Candle = market.Candle{
 		High:      types.Price(101),
 		Open:      types.Price(100),
 		Low:       types.Price(99),
@@ -67,7 +67,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	}
 	cs.SetValid(0)
 
-	cs.Candles[123] = market.Candle{
+	cs.Candles[123].Candle = market.Candle{
 		High:      types.Price(205),
 		Open:      types.Price(201),
 		Low:       types.Price(200),
@@ -125,7 +125,7 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 		AvgSpread: types.Price(2),
 		MaxSpread: types.Price(4),
 		Ticks:     9,
-	}, got.Candles[0])
+	}, got.Candles[0].Candle)
 	require.True(t, got.IsValid(0))
 }
 
@@ -182,7 +182,7 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		require.Contains(t, err.Error(), "expected 9 fields")
 	})
 
-	t.Run("rejects misaligned timestamp", func(t *testing.T) {
+	t.Run("rejects out-of-order timestamp", func(t *testing.T) {
 		t.Parallel()
 		s := newTestStore(t)
 		key := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
@@ -192,13 +192,13 @@ func TestStoreReadCSVValidationAndRowErrors(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(
 			"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
-				"1767225600,10,9,8,9,1,2,3,0x0001\n"+
-				"1767225601,10,9,8,9,1,2,3,0x0001\n",
+				"1767225660,10,9,8,9,1,2,3,0x0001\n"+
+				"1767225600,10,9,8,9,1,2,3,0x0001\n",
 		), 0o644))
 
 		_, err = s.ReadCSV(key)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "not aligned")
+		require.Contains(t, err.Error(), "not after previous row")
 	})
 }
 

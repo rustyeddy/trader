@@ -9,14 +9,23 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-// CandleSet contains a dense set of candles.
+// CandleSet contains a dense set of candles. Each element carries its own
+// authoritative open Timestamp (market.CandleTime) rather than having it
+// reconstructed from Start+idx*Timeframe on every read — that
+// reconstruction assumed every slot is exactly Timeframe seconds apart,
+// which is false for D1 across a DST transition (OANDA's true daily
+// boundary is 17:00 America/New_York, so the transition day is 23 or 25
+// wall-clock hours). Start/Timeframe are still used to place candles into
+// slots (see SlotIndexForTime) and to size the array, but the reported
+// time of any candle — valid or a gap placeholder — always comes from its
+// own Timestamp field.
 type CandleSet struct {
 	Instrument string
-	Start      types.Timestamp // unix seconds for candle open
+	Start      types.Timestamp // unix seconds for slot 0's open
 	Timeframe  types.Timeframe
 	Scale      types.Scale6
 	Source     string
-	Candles    []market.Candle
+	Candles    []market.CandleTime
 	Valid      []uint64
 
 	Filepath string
@@ -51,13 +60,19 @@ func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Times
 		return nil, fmt.Errorf("computed invalid candle count: %d", n)
 	}
 
+	boundaries := SlotBoundaries(startTime, tf, n)
+	candles := make([]market.CandleTime, n)
+	for i, b := range boundaries {
+		candles[i].Timestamp = types.FromTime(b)
+	}
+
 	return &CandleSet{
 		Instrument: inst,
-		Start:      monthStart,
+		Start:      types.FromTime(boundaries[0]),
 		Timeframe:  tf,
 		Scale:      scale,
 		Source:     source,
-		Candles:    make([]market.Candle, n),
+		Candles:    candles,
 		Valid:      make([]uint64, (n+63)/64),
 	}, nil
 }
@@ -75,13 +90,22 @@ func (cs *CandleSet) AddCandle(ts types.Timestamp, c market.Candle) error {
 		return fmt.Errorf("timestamp %d before set start %d", ts, cs.Start)
 	}
 
-	tf := types.Timestamp(cs.Timeframe)
-	off := ts - cs.Start
-	if off%tf != 0 {
-		return fmt.Errorf("timestamp %d not aligned to timeframe %d", ts, cs.Timeframe)
+	var idx int
+	if dailyAligned(cs.Timeframe) {
+		// D1/H4 slots aren't evenly spaced from cs.Start across a DST
+		// transition (see SlotIndexForTime), so a fixed offset%tf check
+		// would reject legitimately-aligned timestamps on the far side of
+		// one.
+		idx = SlotIndexForTime(time.Unix(int64(cs.Start), 0).UTC(), cs.Timeframe, time.Unix(int64(ts), 0).UTC())
+	} else {
+		tf := types.Timestamp(cs.Timeframe)
+		off := ts - cs.Start
+		if off%tf != 0 {
+			return fmt.Errorf("timestamp %d not aligned to timeframe %d", ts, cs.Timeframe)
+		}
+		idx = int(off / tf)
 	}
 
-	idx := int(off / tf)
 	if idx < 0 || idx >= len(cs.Candles) {
 		cs.outOfRange++
 		return fmt.Errorf("timestamp %d out of range for set starting %d", ts, cs.Start)
@@ -91,7 +115,7 @@ func (cs *CandleSet) AddCandle(ts types.Timestamp, c market.Candle) error {
 		cs.duplicates++
 	}
 
-	cs.Candles[idx] = c
+	cs.Candles[idx] = market.CandleTime{Candle: c, Timestamp: ts}
 	cs.SetValid(idx)
 	return nil
 }
@@ -118,8 +142,7 @@ func (cs *CandleSet) Merge(src *CandleSet) error {
 		if !src.IsValid(i) {
 			continue
 		}
-		ts := src.Start + types.Timestamp(i)*types.Timestamp(src.Timeframe)
-		if err := cs.AddCandle(ts, src.Candles[i]); err != nil {
+		if err := cs.AddCandle(src.Candles[i].Timestamp, src.Candles[i].Candle); err != nil {
 			return err
 		}
 	}
@@ -150,7 +173,7 @@ func (cs *CandleSet) CountValid() int {
 
 // Time is an internal helper for trader type processing.
 func (cs *CandleSet) Time(idx int) time.Time {
-	return time.Unix(int64(cs.Start)+int64(idx)*int64(cs.Timeframe), 0).UTC()
+	return time.Unix(int64(cs.Candles[idx].Timestamp), 0).UTC()
 }
 
 // LastValidTime returns the UTC calendar day of the last valid (non-gap)
@@ -170,7 +193,7 @@ func (cs *CandleSet) LastValidTime() (time.Time, bool) {
 
 // Timestamp is an internal helper for trader type processing.
 func (cs *CandleSet) Timestamp(idx int) types.Timestamp {
-	return types.Timestamp(int64(cs.Start) + int64(idx)*int64(cs.Timeframe))
+	return cs.Candles[idx].Timestamp
 }
 
 // Filename is an internal helper for trader type processing.

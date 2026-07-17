@@ -94,8 +94,8 @@ func TestLastCompleteDate_AllZerosError(t *testing.T) {
 // not a naive assumption that slot 0 begins at UTC midnight. This is the
 // regression case for the H4/D1 timestamp-mislabeling bug: OANDA's real
 // daily-alignment grid (17:00 America/New_York, DST-dependent) does not
-// begin at UTC midnight, so a raw H4 file's first row here opens at
-// 2026-06-01T01:00:00Z (simulating that offset) rather than 00:00:00Z.
+// begin at UTC midnight — June is EDT (UTC-4), so the true boundary is
+// 21:00 UTC.
 func TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps(t *testing.T) {
 	rawDir := t.TempDir()
 	UseTempDataDir(t)
@@ -110,7 +110,7 @@ func TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps(t *testing.T) {
 	}
 
 	monthStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	trueFirstSlot := monthStart.Add(time.Hour) // 2026-06-01T01:00:00Z
+	trueFirstSlot := SlotBoundaries(monthStart, types.H4, 1)[0]
 
 	var rows []RawCandleRow
 	for i := 0; i < 6; i++ {

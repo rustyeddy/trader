@@ -519,12 +519,15 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	}
 	defer f.Close()
 
-	// The slot count is derived from the calendar month span, but the true
-	// first-slot time (start) is not assumed to be UTC midnight — broker
-	// daily-alignment grids (H4/D1) don't begin there. WriteCSV always
-	// writes every slot densely (gaps included), so the file's first data
-	// row is always slot 0; start is read from that row below instead of
-	// being reconstructed from key.Year/key.Month.
+	// The slot count is derived from the calendar month span. WriteCSV
+	// always writes every slot densely (gaps included) in slot order, so
+	// row N is always slot N-1 — no arithmetic reconstruction of a slot's
+	// position (or its reported time) from a single anchor + fixed step is
+	// needed, which is what let D1's DST-variable day width silently
+	// mislabel candles. Each row's own timestamp column is authoritative
+	// and stored verbatim; only monotonicity is checked, since real D1
+	// spacing legitimately varies by up to an hour across a DST
+	// transition.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	tf := key.TF
 	step := int64(tf)
@@ -534,17 +537,24 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	n := int(spanSec / step)
 
 	instName := market.NormalizeInstrument(key.Instrument)
+	candles := make([]market.CandleTime, n)
+	for i, b := range SlotBoundaries(monthStart, tf, n) {
+		candles[i].Timestamp = types.FromTime(b)
+	}
 	cs = &CandleSet{
 		Instrument: instName,
 		Source:     readCSVSource(key.Source),
 		Timeframe:  tf,
 		Scale:      types.PriceScale,
-		Candles:    make([]market.Candle, n),
+		Candles:    candles,
 		Valid:      make([]uint64, (n+63)/64),
 	}
+	if n > 0 {
+		cs.Start = cs.Candles[0].Timestamp
+	}
 
-	var start int64
-	haveStart := false
+	var prevTs int64
+	havePrev := false
 
 	scanner := bufio.NewScanner(f)
 	rowNum := 0
@@ -568,20 +578,15 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, err)
 		}
-
-		if !haveStart {
-			start = ts
-			cs.Start = types.Timestamp(start)
-			haveStart = true
+		if havePrev && ts <= prevTs {
+			return nil, fmt.Errorf("csv %q row %d: timestamp %d not after previous row's %d", path, rowNum, ts, prevTs)
 		}
+		prevTs = ts
+		havePrev = true
 
-		offset := ts - start
-		if offset < 0 || offset%step != 0 {
-			return nil, fmt.Errorf("csv %q row %d: timestamp %d not aligned to timeframe %d", path, rowNum, ts, step)
-		}
-		idx := int(offset / step)
+		idx := rowNum - 1
 		if idx >= n {
-			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
+			return nil, fmt.Errorf("csv %q row %d: too many rows for month (max %d)", path, rowNum, n)
 		}
 
 		openv, err := types.ParseRawPrice(fields[1])
@@ -619,14 +624,17 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		cs.Candles[idx] = market.Candle{
-			High:      highv,
-			Open:      openv,
-			Low:       lowv,
-			Close:     closev,
-			AvgSpread: avgSpread,
-			MaxSpread: maxSpread,
-			Ticks:     int32(ticks),
+		cs.Candles[idx] = market.CandleTime{
+			Candle: market.Candle{
+				High:      highv,
+				Open:      openv,
+				Low:       lowv,
+				Close:     closev,
+				AvgSpread: avgSpread,
+				MaxSpread: maxSpread,
+				Ticks:     int32(ticks),
+			},
+			Timestamp: types.Timestamp(ts),
 		}
 		if flags&0x0001 != 0 {
 			cs.SetValid(idx)
@@ -701,9 +709,9 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 	defer w.Flush()
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*int64(step)
+		openUnix := int64(cs.Candles[i].Timestamp)
 
-		c := cs.Candles[i]
+		c := cs.Candles[i].Candle
 		var flags uint64
 		if len(cs.Valid) > 0 && types.BitIsSet(cs.Valid, i) {
 			flags = 0x0001

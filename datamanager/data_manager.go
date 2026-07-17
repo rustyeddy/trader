@@ -411,13 +411,18 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 	const minutesPerHour = 60
 
+	minuteCandles := make([]market.CandleTime, minutesPerHour)
+	for i, b := range SlotBoundaries(hourStartTime, types.M1, minutesPerHour) {
+		minuteCandles[i].Timestamp = types.FromTime(b)
+	}
+
 	cs := &CandleSet{
 		Instrument: market.NormalizeInstrument(key.Instrument),
 		Start:      types.FromTime(hourStartTime),
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
 		Source:     market.SourceCandles,
-		Candles:    make([]market.Candle, minutesPerHour),
+		Candles:    minuteCandles,
 		Valid:      make([]uint64, (minutesPerHour+63)/64),
 	}
 
@@ -437,7 +442,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		ticks := int64(cur.Ticks)
 		cur.AvgSpread = types.Price((spreadSum + ticks/2) / ticks)
 
-		cs.Candles[curIdx] = cur
+		cs.Candles[curIdx].Candle = cur
 		cs.SetValid(curIdx)
 
 		prevClose = cur.Close
@@ -447,7 +452,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 	fillFlat := func(idx int, px types.Price) {
 		// Dense placeholder candle. Intentionally NOT marked valid.
-		cs.Candles[idx] = market.Candle{
+		cs.Candles[idx].Candle = market.Candle{
 			Open:  px,
 			High:  px,
 			Low:   px,
@@ -522,7 +527,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 		if havePrevClose {
 			for m := curIdx + 1; m < idx; m++ {
-				if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+				if !cs.IsValid(m) && cs.Candles[m].Candle.IsZero() {
 					fillFlat(m, prevClose)
 				}
 			}
@@ -554,7 +559,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 	if havePrevClose {
 		for m := curIdx + 1; m < minutesPerHour; m++ {
-			if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+			if !cs.IsValid(m) && cs.Candles[m].Candle.IsZero() {
 				fillFlat(m, prevClose)
 			}
 		}

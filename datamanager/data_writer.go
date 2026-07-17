@@ -11,6 +11,10 @@ import (
 // WriteMonthlyCandles writes a slice of Candle as a monthly CSV file in the
 // canonical trader format. The candles should be dense (one slot per
 // timeframe step within the month); zero-valued candles are treated as gaps.
+// Each candle's timestamp is assigned from monthStart+idx*tf, since callers
+// of this function don't carry their own per-candle ground truth (e.g. test
+// seeding, synthetic fixtures). Producers that do have real per-candle
+// timestamps should use WriteMonthlyCandleTimes instead.
 //
 // Source is the data source name (e.g. "oanda", "dukascopy") and ends up in
 // the path: <basedir>/<source>/<instrument>/<year>/<month>/<instr>-<year>-<month>-<tf>.csv
@@ -44,9 +48,8 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf types.Timefram
 			cs.Instrument, monthStart.Format("2006-01"), tf, len(candles), len(cs.Candles))
 	}
 
-	copy(cs.Candles, candles)
-
 	for i := range candles {
+		cs.Candles[i].Candle = candles[i] // NewMonthlyCandleSet already set Timestamp
 		if !candles[i].IsZero() {
 			cs.Valid[i>>6] |= 1 << uint(i&63)
 		}
@@ -59,18 +62,9 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf types.Timefram
 // each candle's true observed open timestamp (market.CandleTime) rather
 // than a bare market.Candle. monthStart still selects which calendar
 // month's file this is (must be a UTC month boundary, as for
-// WriteMonthlyCandles), but the written file's actual first-slot time is
-// derived from the candles' own timestamps instead of being assumed to be
-// monthStart.
-//
-// This matters because broker daily-alignment grids (e.g. OANDA's H4/D1,
-// anchored to 17:00 America/New_York, DST-dependent) do not begin at UTC
-// midnight — reconstructing slot 0's time from monthStart instead of the
-// data's own timestamps silently mislabels every candle by the DST offset.
-// Every candle's slot index is still assumed evenly spaced by tf from slot
-// 0 (true of every broker grid in practice); if two candles disagree on
-// where slot 0 falls, that indicates corrupt or misaligned input data and
-// is reported as an error rather than silently written.
+// WriteMonthlyCandles); each candle's own Timestamp is stored and written
+// verbatim — this is what lets D1/H4 canonical files stay correct across a
+// DST transition, where slots aren't evenly spaced from a single anchor.
 func (s *store) WriteMonthlyCandleTimes(source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.CandleTime) error {
 	if s == nil {
 		return fmt.Errorf("nil store")
@@ -101,26 +95,8 @@ func (s *store) WriteMonthlyCandleTimes(source, instrument string, tf types.Time
 			cs.Instrument, monthStart.Format("2006-01"), tf, len(candles), len(cs.Candles))
 	}
 
-	step := types.Timestamp(tf)
-	haveStart := false
 	for i := range candles {
-		if candles[i].Candle.IsZero() {
-			continue
-		}
-		trueStart := candles[i].Timestamp - types.Timestamp(i)*step
-		if !haveStart {
-			cs.Start = trueStart
-			haveStart = true
-			continue
-		}
-		if trueStart != cs.Start {
-			return fmt.Errorf("inconsistent candle timestamps for %s %s %s: slot %d implies start %d, expected %d",
-				cs.Instrument, monthStart.Format("2006-01"), tf, i, trueStart, cs.Start)
-		}
-	}
-
-	for i := range candles {
-		cs.Candles[i] = candles[i].Candle
+		cs.Candles[i] = candles[i]
 		if !candles[i].Candle.IsZero() {
 			cs.Valid[i>>6] |= 1 << uint(i&63)
 		}

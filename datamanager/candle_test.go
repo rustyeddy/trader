@@ -110,7 +110,7 @@ func TestCandleSetAddCandle_Branches(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil CandleSet")
 
-	cs := &CandleSet{Start: 100, Timeframe: types.M1, Candles: make([]market.Candle, 2), Valid: make([]uint64, 1)}
+	cs := &CandleSet{Start: 100, Timeframe: types.M1, Candles: make([]market.CandleTime, 2), Valid: make([]uint64, 1)}
 
 	err = cs.AddCandle(99, c)
 	require.Error(t, err)
@@ -134,7 +134,7 @@ func TestCandleSetAddCandle_Branches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, cs.duplicates)
 
-	badTF := &CandleSet{Start: 100, Timeframe: 0, Candles: make([]market.Candle, 1), Valid: make([]uint64, 1)}
+	badTF := &CandleSet{Start: 100, Timeframe: 0, Candles: make([]market.CandleTime, 1), Valid: make([]uint64, 1)}
 	err = badTF.AddCandle(100, c)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid timeframe")
@@ -156,8 +156,8 @@ func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 
 	require.NoError(t, dst.Merge(src))
 	assert.Equal(t, 2, dst.CountValid())
-	assert.Equal(t, market.Candle{Open: 100, High: 120, Low: 90, Close: 110, Ticks: 10}, dst.Candles[0])
-	assert.Equal(t, market.Candle{Open: 111, High: 130, Low: 105, Close: 125, Ticks: 8}, dst.Candles[1])
+	assert.Equal(t, market.Candle{Open: 100, High: 120, Low: 90, Close: 110, Ticks: 10}, dst.Candles[0].Candle)
+	assert.Equal(t, market.Candle{Open: 111, High: 130, Low: 105, Close: 125, Ticks: 8}, dst.Candles[1].Candle)
 
 	differentTF, err := NewMonthlyCandleSet("EURUSD", types.H1, monthStart, types.PriceScale, market.SourceCandles)
 	require.NoError(t, err)
@@ -172,14 +172,19 @@ func TestCandleSetMerge_SuccessAndValidationErrors(t *testing.T) {
 func TestCandleSetBuildGapReportAndStats(t *testing.T) {
 	t.Parallel()
 
-	start := types.Timestamp(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC).Unix()) // Friday
+	startTime := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC) // Friday
+	start := types.FromTime(startTime)
+	candles := make([]market.CandleTime, 1500)
+	for i, b := range SlotBoundaries(startTime, types.M1, 1500) {
+		candles[i].Timestamp = types.FromTime(b)
+	}
 	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
 		Source:     market.SourceCandles,
-		Candles:    make([]market.Candle, 1500),
+		Candles:    candles,
 		Valid:      make([]uint64, (1500+63)/64),
 	}
 	types.BitSet(cs.Valid, 0)
@@ -218,22 +223,27 @@ func TestCandleSetClassifyGap_LongSuspiciousNonWeekendStart(t *testing.T) {
 func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 	t.Parallel()
 
-	start := types.Timestamp(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix())
+	startTime := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	start := types.FromTime(startTime)
+	candles := make([]market.CandleTime, 120)
+	for i, b := range SlotBoundaries(startTime, types.M1, 120) {
+		candles[i].Timestamp = types.FromTime(b)
+	}
 	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
 		Source:     market.SourceCandles,
-		Candles:    make([]market.Candle, 120),
+		Candles:    candles,
 		Valid:      make([]uint64, (120+63)/64),
 	}
 	for i := 0; i < 60; i++ {
-		cs.Candles[i] = market.Candle{Open: types.Price(1000 + i), High: types.Price(1100 + i), Low: types.Price(900 - i), Close: types.Price(1050 + i)}
+		cs.Candles[i].Candle = market.Candle{Open: types.Price(1000 + i), High: types.Price(1100 + i), Low: types.Price(900 - i), Close: types.Price(1050 + i)}
 		types.BitSet(cs.Valid, i)
 	}
 	for i := 60; i < 109; i++ {
-		cs.Candles[i] = market.Candle{Open: 2000, High: 2100, Low: 1900, Close: 2050}
+		cs.Candles[i].Candle = market.Candle{Open: 2000, High: 2100, Low: 1900, Close: 2050}
 		types.BitSet(cs.Valid, i)
 	}
 
@@ -242,7 +252,7 @@ func TestCandleSetAggregateH1_ThresholdAndOHLC(t *testing.T) {
 	require.Len(t, h1.Candles, 2)
 	assert.True(t, h1.IsValid(0))
 	assert.False(t, h1.IsValid(1))
-	assert.Equal(t, market.Candle{Open: 1000, High: 1159, Low: 841, Close: 1109}, h1.Candles[0])
+	assert.Equal(t, market.Candle{Open: 1000, High: 1159, Low: 841, Close: 1109}, h1.Candles[0].Candle)
 
 	withClamp, err := cs.AggregateH1(0)
 	require.NoError(t, err)
@@ -274,7 +284,15 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 	t.Parallel()
 
 	start := types.Timestamp(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC).Unix())
-	h1 := &CandleSet{Instrument: "EURUSD", Start: start, Timeframe: types.H1}
+	h1 := &CandleSet{
+		Instrument: "EURUSD",
+		Start:      start,
+		Timeframe:  types.H1,
+		Candles: []market.CandleTime{
+			{Timestamp: start},
+			{Timestamp: start + types.Timestamp(types.H1)},
+		},
+	}
 	d1 := &CandleSet{Instrument: "EURUSD", Start: start, Timeframe: types.D1}
 
 	assert.Equal(t, "eurusd-h1-2026", h1.Filename())
@@ -292,12 +310,17 @@ func TestCandleSetFilenameTimeAndBitHelpers(t *testing.T) {
 func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 	t.Parallel()
 
+	startTime := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)
+	candles := make([]market.CandleTime, 20)
+	for i, b := range SlotBoundaries(startTime, types.M1, 20) {
+		candles[i].Timestamp = types.FromTime(b)
+	}
 	cs := &CandleSet{
 		Instrument: "EURUSD",
-		Start:      types.Timestamp(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC).Unix()),
+		Start:      types.FromTime(startTime),
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
-		Candles:    make([]market.Candle, 20),
+		Candles:    candles,
 		Valid:      make([]uint64, 1),
 	}
 	types.BitSet(cs.Valid, 0)
@@ -317,15 +340,16 @@ func TestCandleSetPrintStatsAndConversions(t *testing.T) {
 func TestCandleSetIteratorAccessors(t *testing.T) {
 	t.Parallel()
 
-	start := types.Timestamp(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix())
+	startTime := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	start := types.FromTime(startTime)
 	cs := &CandleSet{
 		Instrument: "EURUSD",
 		Start:      start,
 		Timeframe:  types.H1,
 		Scale:      types.PriceScale,
-		Candles: []market.Candle{
-			{Open: 10, High: 20, Low: 5, Close: 15, Ticks: 1},
-			{Open: 30, High: 40, Low: 25, Close: 35, Ticks: 2},
+		Candles: []market.CandleTime{
+			{Candle: market.Candle{Open: 10, High: 20, Low: 5, Close: 15, Ticks: 1}, Timestamp: start},
+			{Candle: market.Candle{Open: 30, High: 40, Low: 25, Close: 35, Ticks: 2}, Timestamp: start + types.Timestamp(types.H1)},
 		},
 		Valid: make([]uint64, 1),
 	}
@@ -335,7 +359,7 @@ func TestCandleSetIteratorAccessors(t *testing.T) {
 	it := cs.Iterator()
 	first, ok := it.NextCandle()
 	require.True(t, ok)
-	assert.Equal(t, cs.Candles[0], first)
+	assert.Equal(t, cs.Candles[0].Candle, first)
 	assert.Equal(t, 0, it.Index())
 	assert.Equal(t, start, it.StartTime())
 	assert.Equal(t, start, it.Timestamp())
@@ -343,7 +367,7 @@ func TestCandleSetIteratorAccessors(t *testing.T) {
 
 	second, ok := it.NextCandle()
 	require.True(t, ok)
-	assert.Equal(t, cs.Candles[1], second)
+	assert.Equal(t, cs.Candles[1].Candle, second)
 	assert.Equal(t, 1, it.Index())
 
 	_, ok = it.NextCandle()

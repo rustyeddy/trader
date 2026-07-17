@@ -39,11 +39,14 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	// Friday close, then the weekend gap, then Monday open — D1 candles.
-	fri := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC) // Friday
-	mon := time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC) // Monday
-	tue := time.Date(2026, time.January, 6, 0, 0, 0, 0, time.UTC) // Tuesday
-	wed := time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC) // Wednesday
+	// Friday close, then the weekend gap, then Monday open — D1 candles,
+	// on OANDA's true 17:00 America/New_York daily-alignment boundary, not
+	// UTC midnight. jan[d] is day d's true boundary (jan[1] = Jan 1).
+	jan := SlotBoundaries(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	fri := jan[1] // Jan 2, Friday
+	mon := jan[4] // Jan 5, Monday
+	tue := jan[5] // Jan 6, Tuesday
+	wed := jan[6] // Jan 7, Wednesday
 
 	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.January, map[time.Time]market.Candle{
 		fri: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
@@ -77,7 +80,8 @@ func TestGetCandles_IncludesCandleAtExactlyAsof(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
+	mar := SlotBoundaries(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	day := mar[9] // March 10
 
 	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.March, map[time.Time]market.Candle{
 		day: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
@@ -96,8 +100,9 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day1 := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, time.March, 11, 0, 0, 0, 0, time.UTC)
+	mar := SlotBoundaries(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	day1 := mar[9]  // March 10
+	day2 := mar[10] // March 11
 
 	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.March, map[time.Time]market.Candle{
 		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
@@ -129,9 +134,10 @@ func TestGetCandles_SkipsFlaggedValidButZeroValueCandle(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day1 := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, time.April, 2, 0, 0, 0, 0, time.UTC) // flagged valid, zero content
-	day3 := time.Date(2026, time.April, 3, 0, 0, 0, 0, time.UTC)
+	apr := SlotBoundaries(time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC), types.D1, 30)
+	day1 := apr[0] // April 1
+	day2 := apr[1] // April 2, flagged valid, zero content
+	day3 := apr[2] // April 3
 
 	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.April, map[time.Time]market.Candle{
 		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
