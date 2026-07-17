@@ -1,0 +1,242 @@
+#+TITLE: DataManager Lockdown — Sole Data Path, Reader/Writer Split, datad Mode
+#+DATE: 2026-07-17
+#+PROPERTY: status agreed-design
+#+PROPERTY: audience implementation agent (Claude Code)
+#+PROPERTY: sequencing AFTER issue #179 (data-regen) lands — do not tangle with that branch
+#+PROPERTY: companion-docs candle-timestamp-design-addendum.org, canonical-candle-test-plan.org
+
+* Intent
+
+DataManager/Store was always intended to be the ONLY download / derive /
+write / read path for market data. That intent was documented but not
+enforced, and over time implementation work subverted it (ad-hoc fetch
+and read paths crept into other packages). This design makes the intent
+*structural*: enforced by the Go compiler, the type system, and the
+filesystem — not by convention, review vigilance, or documentation.
+
+End state:
+
+- Exactly ONE process (=trader datad=) ever writes the canonical tree.
+- Every other part of trader accesses candle data exclusively through
+  DataManager's public =Reader= surface. No other package can touch the
+  files — cannot compile if it tries.
+- The data contract between writer and readers is the filesystem itself
+  (canonical v2 tree + manifest), NOT a network API. No new protocols,
+  no service versioning, no serialization layer.
+- One binary. Mode selected by command (=trader datad= vs. everything
+  else). No second binary to build/distribute/version.
+- The independent oracle (validate-candles.py) is the single sanctioned
+  exception to "all access via DataManager" — its entire value is that
+  it shares nothing with trader. Nothing else gets this exemption.
+
+* Enforcement layer 1: the compiler (=internal/=)
+
+Move every symbol that touches bytes on disk into
+=datamanager/internal/store/=:
+
+- the =store= type, CSV read/write (=ReadCSV=/=WriteCSV=/
+  =readCSVUncached=), raw-tree readers (=readRawMonthRows=), path
+  construction (=KeyPath= et al.), monthly-file layout, inventory scan.
+
+Go's compiler refuses imports of =X/internal/...= from outside =X/...=.
+This is the highest-leverage single change: =review/=, =strategies/=,
+=backtest/=, =service/=, =cmd/*= physically cannot reach the files.
+Not a lint rule an agent can talk past — a build failure.
+
+Mechanically: mostly =git mv= + import rewrites inside =datamanager/=.
+Nothing outside =datamanager/= should need ANY change to compile — if it
+does, that call site is one of the subversions this design exists to
+eliminate; route it through the public surface instead (and note it in
+the PR description as a found-and-fixed leak).
+
+Audit step (do this FIRST, it scopes the work): grep the repo for
+imports of the store-level symbols and for any direct =os.Open= /
+=filepath.Join= against the data directories outside =datamanager/=.
+Every hit is either (a) dead code to delete, (b) a leak to reroute, or
+(c) genuinely needed functionality missing from the public surface —
+category (c) requires explicit sign-off before the surface grows (see
+Guardrail below).
+
+* Enforcement layer 2: the type system (Reader vs Manager)
+
+The public surface of =datamanager= becomes two types, constructed two
+ways:
+
+#+begin_src go
+// Reader is the ONLY data access surface for review, backtest, live,
+// and every analytical consumer. It cannot write, fetch, or derive.
+type Reader interface {
+    GetCandles(...)        // existing compacted read
+    CandleSet(...)         // full dense set access (additive method,
+                           //  per existing invariant note)
+    Inventory(...)         // what months/instruments/timeframes exist
+    Status() (Status, error) // parsed status.json — freshness, last errors
+}
+
+// Manager embeds Reader and adds the write side. Constructed ONLY in
+// datad mode.
+type Manager interface {
+    Reader
+    Fetch(...)             // OANDA download -> raw tree
+    Derive(...)            // raw -> canonical (v2, real timestamps)
+    Validate(...)          // slot<->timestamp cross-check, refuses publish
+}
+
+func NewReader(dataDir string) (Reader, error)
+func NewManager(dataDir string, cfg ManagerConfig) (Manager, error)
+#+end_src
+
+Wiring rule: every non-datad =cmd/*= constructs a =Reader=. A future
+patch to review code cannot call a write path — the method does not
+exist on the type it holds. =NewManager= is called from exactly one
+place: the datad command.
+
+Belt-and-suspenders (cheap, optional, recommended):
+- =NewReader= opens files =O_RDONLY=; never creates directories.
+- On the Pi deployment, the canonical tree is owned by the =datad= user;
+  everything else has Unix read-only access. Three independent layers
+  (compiler, types, filesystem perms), each free.
+
+** Guardrail: the surface must stay small
+
+"Everything goes through DataManager" only works if the public surface
+resists growth. The same erosion force that produced the original leaks
+will reappear as "just one more accessor for convenience." Default
+answer: compose it from =GetCandles= in the consumer. The =Reader=
+interface grows only with explicit maintainer sign-off, recorded in the
+doc comment above the interface (a one-line "added X on DATE because Y"
+ledger). If that ledger grows fast, that is the signal the design is
+being eroded again.
+
+* The contract: filesystem as API
+
+The interface between writer and readers is the canonical tree itself:
+
+- self-describing v2 files (=# schema=candle-v2 ... align=17:00
+  align_tz=America/New_York=),
+- documented row schema (timestamp-is-truth per the design addendum),
+- atomic month-file writes (write temp + rename, never in-place),
+- the manifest journal + status file (below).
+
+Deliberately NOT built: any network candle API (HTTP/gRPC), any
+streaming layer, any service discovery. A backtest against files on
+disk needs nothing running. If datad exposes anything over a network it
+is a tiny read-only health endpoint at most — observability, never data
+transport.
+
+* datad mode
+
+=trader datad= — same binary, new command. A scheduled loop, not a
+streaming service:
+
+1. wake on schedule (e.g. 15min for H1/H4 top-up, post-close for D1;
+   config-driven),
+2. =Fetch= new raw data (append-only into the raw preservation tree),
+3. =Derive= affected canonical months (real timestamps threaded through
+   per the addendum),
+4. =Validate= before publish — a derived month that fails the
+   slot↔timestamp cross-check is NOT written over the previous good
+   file; it is quarantined (write to =<file>.rejected=) and the failure
+   goes to the journal + status,
+5. append journal entries, atomically rewrite =status.json=,
+6. sleep.
+
+Crash-safety: because every publish is temp+rename and the journal is
+append-only, a killed datad leaves either the old good file or the new
+good file — never a torn one.
+
+* Manifest journal (history log, scoped as lineage — not version control)
+
+Append-only JSONL at =<dataDir>/journal.log=, one event per line. NOT
+content diffs, NOT retained old file bodies — the raw tree is already
+the history; canonical files are reproducible derivations, so we keep
+their *lineage*, not their corpses.
+
+#+begin_src js
+{"ts":"2026-07-17T14:32:01Z","event":"derive",
+ "file":"oanda/EURNZD/2026/07/EURNZD-2026-07-h4.csv",
+ "rows":126,"sha256":"ab34…","source_fetch":"2026-07-17T14:31:44Z",
+ "validator":"PASS","datad_version":"16039ee"}
+{"ts":"…","event":"fetch","instrument":"EURNZD","tf":"h4",
+ "from":"…","to":"…","rows":6,"result":"ok"}
+{"ts":"…","event":"validate_fail","file":"…","violations":3,
+ "quarantined":"….rejected"}
+#+end_src
+
+Event kinds: =fetch=, =derive=, =validate_fail=, =regen= (bulk),
+=prune=. Volume: a few lines per touched month-file — hundreds of lines
+a month, trivial forever.
+
+Why the sha256 earns its keep three times:
+1. Diagnosis: "when did this file last change, from what fetch, did
+   validation pass" becomes =grep EURNZD journal.log | tail= — today's
+   multi-hour staleness/timestamp hunt collapses to one command.
+2. Sync integrity: a consumer verifies its synced copy against the
+   manifest hash without re-reading the source.
+3. Silent-corruption detection anywhere in the pipeline, for free.
+
+* status.json (health, kept boring)
+
+Atomically rewritten by datad each cycle:
+
+#+begin_src js
+{"updated":"2026-07-17T14:32:05Z",
+ "instruments":{
+   "EURNZD":{"h4":{"last_ok_fetch":"…","last_derive":"…",
+             "last_validation":"PASS","lag_bars":0},
+             "h1":{…},"d1":{…}},
+   "EURUSD":{…}},
+ "last_error":null,
+ "disk_free_bytes":123456789,
+ "journal_lines":48211}
+#+end_src
+
+Consumer-side requirement (the actual feature): the review CLI reads
+=Status()= at startup and prints ONE warning line when data is stale —
+e.g. =⚠ canonical data last updated 3d ago (EURNZD h4)=. The
+requirement is stated as an outcome: *it must be impossible to run a
+morning review against stale data without being told.* No dashboards,
+no metrics stack — those can come later if ever.
+
+* Sync model (Pi as authoritative source)
+
+- datad + validate-candles.py run on the Pi. Nothing else does.
+- Consumers (workstation backtests/reviews, later a live host) take a
+  ONE-WAY pull of the canonical tree + journal + status (rsync or
+  syncthing; append-mostly monthly files, single writer, so sync is
+  cheap and conflict-free).
+- Consequence, and the point: consumers work on a COPY. A rogue
+  process, buggy branch, or overenthusiastic agent can at worst corrupt
+  its local copy, which the next sync repairs. The authoritative tree
+  is never mounted where experimental code runs. NFS is an acceptable
+  day-one bridge; the pull-copy is the end state.
+
+* Phasing
+
+0. *(prereq)* Issue #179 work (timestamp model, schema v2, regen) lands
+   and passes the test plan. Lockdown does not start before this.
+1. *Leak audit* — grep-driven inventory of every data access outside
+   =datamanager/= (see Enforcement layer 1). Output: a list classified
+   delete / reroute / surface-gap. Small PR, no behavior change.
+2. *=internal/= move + Reader/Manager split* — the compiler lockdown.
+   One PR. Outside =datamanager/=, diffs are import-line and
+   constructor-wiring changes only (plus the reroutes from phase 1).
+3. *datad command* — the loop, journal, status.json, quarantine-on-
+   validate-fail. Runs on the workstation first.
+4. *Consumer staleness warning* — =Status()= in Reader + the one-line
+   CLI warning.
+5. *Pi deployment + sync* — move datad to the Pi, set Unix perms,
+   stand up the one-way pull. Operational change only, no code.
+6. *(later, when live trading exists)* dedicated live process using the
+   same Reader surface over its own synced copy. Not before there is a
+   live loop to protect.
+
+* Non-goals
+
+- No network candle API, ever, under this design.
+- No second binary.
+- No VC-style content history or old-version retention (raw tree is the
+  history; journal is the lineage).
+- No relaxation of the oracle's independence: validate-candles.py stays
+  outside trader, reads files directly, and is the only thing allowed
+  to.
