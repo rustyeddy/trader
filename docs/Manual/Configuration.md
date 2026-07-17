@@ -4,12 +4,12 @@ Trader has several configuration scopes. They are intentionally separate
 because runtime settings, deterministic backtests, managed live portfolios,
 and the long-running daemon have different lifecycles.
 
-| Scope | Primary types | Used by |
-|---|---|---|
-| Global runtime | `GlobalConfig`, `RootConfig` | All CLI commands |
-| Backtest | `Config`, `RunDefaults`, `RunConfig` | `trader backtest run` |
-| Live portfolio | `service.PortfolioConfig` | `trader bot start --config` |
-| Daemon | `cmd/serve.DaemonConfig` | `trader serve --config` |
+| Scope          | Primary types                        | Used by                     |
+|----------------|--------------------------------------|-----------------------------|
+| Global runtime | `GlobalConfig`, `RootConfig`         | All CLI commands            |
+| Backtest       | `Config`, `RunDefaults`, `RunConfig` | `trader backtest run`       |
+| Live portfolio | `service.PortfolioConfig`            | `trader bot start --config` |
+| Daemon         | `cmd/serve.DaemonConfig`             | `trader serve --config`     |
 
 Do not combine these schemas into one YAML file. In particular, a backtest
 file is not a global runtime file.
