@@ -1,4 +1,4 @@
-package service
+package reviewsvc
 
 import (
 	"context"
@@ -117,7 +117,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 
 // reviewOneInstrumentAsOf mirrors reviewOneInstrument's fetch-and-classify
 // shape, but reads exclusively from the local candle store (via
-// getClosedCandles) instead of service/review.go's live fetchReviewCandleTimes:
+// getClosedCandles) instead of review.go's live fetchReviewCandleTimes:
 // no OANDA top-up, no OANDA fallback. ok is false when the instrument or
 // asOf should be skipped — unknown instrument, or insufficient local
 // history for D1 or H4 as of asOf.
