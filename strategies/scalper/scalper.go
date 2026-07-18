@@ -101,15 +101,15 @@ func (s *Strategy) Reset() {
 }
 
 // Update receives each completed M1 candle and returns a Signal.
-func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, ct *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
 
-	c := ct.Candle
-	s.fastEMA.Update(c)
-	s.slowEMA.Update(c)
-	s.atr.Update(c)
+	c := ct
+	s.fastEMA.Update(*c)
+	s.slowEMA.Update(*c)
+	s.atr.Update(*c)
 
 	if !s.Ready() {
 		return strategy.Hold("warming up")

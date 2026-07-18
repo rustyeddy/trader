@@ -38,7 +38,7 @@ func TestTraderWithYearOfSyntheticHourly(t *testing.T) {
 		for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 			totalCandles++
 			candlesInMonth++
-			c := ct.Candle
+			c := ct
 
 			// Verify candle sanity
 			if c.High < c.Low || c.Open > c.High || c.Open < c.Low {
@@ -139,7 +139,7 @@ func TestTraderWithHighVolatilitySynthetic(t *testing.T) {
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		candleCount++
-		c := ct.Candle
+		c := ct
 
 		if c.High > maxPrice {
 			maxPrice = c.High

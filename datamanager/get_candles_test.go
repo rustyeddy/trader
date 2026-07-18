@@ -66,7 +66,7 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 	require.Len(t, candles, 2, "must never return more than count entries")
 
 	for _, ct := range candles {
-		require.False(t, ct.Candle.IsZero(), "must never return a zero-value candle from a closed-market slot")
+		require.False(t, ct.IsZero(), "must never return a zero-value candle from a closed-market slot")
 	}
 
 	require.Equal(t, []market.Candle{
@@ -125,7 +125,7 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 // (per ReadCSV), not whether the OHLC content is real, so a row can be
 // flagged valid yet hold a zero-value candle. GetCandles must still skip
 // it — per copilot review on PR #154, this was the behavior
-// service/review.go's readCachedOandaCandleTimes had (via ct.Candle.IsZero())
+// service/review.go's readCachedOandaCandleTimes had (via ct.IsZero())
 // before this logic moved into GetCandles, and it must not get lost in the
 // move: a short/corrupt cache needs to come back short of count so
 // review's fallback-to-OANDA path still triggers, rather than silently
@@ -166,15 +166,18 @@ func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
 	require.Error(t, err)
 }
 
-func candlesOnly(cts []market.CandleTime) []market.Candle {
+// candlesOnly strips Timestamp so callers can assert OHLC shape independent
+// of timing — timestampsOnly below covers the timing assertion separately.
+func candlesOnly(cts []market.Candle) []market.Candle {
 	out := make([]market.Candle, len(cts))
 	for i, ct := range cts {
-		out[i] = ct.Candle
+		ct.Timestamp = 0
+		out[i] = ct
 	}
 	return out
 }
 
-func timestampsOnly(cts []market.CandleTime) []types.Timestamp {
+func timestampsOnly(cts []market.Candle) []types.Timestamp {
 	out := make([]types.Timestamp, len(cts))
 	for i, ct := range cts {
 		out[i] = ct.Timestamp

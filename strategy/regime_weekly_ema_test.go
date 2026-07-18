@@ -10,12 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// weeklyEMACT builds a CandleTime at a specific UTC timestamp with the given close price.
-func weeklyEMACT(ts time.Time, closePrice types.Price) market.CandleTime {
-	return market.CandleTime{
-		Candle:    market.Candle{Open: closePrice, High: closePrice + 100, Low: closePrice - 100, Close: closePrice},
-		Timestamp: types.FromTime(ts),
-	}
+// weeklyEMACT builds a candle at a specific UTC timestamp with the given close price.
+func weeklyEMACT(ts time.Time, closePrice types.Price) market.Candle {
+	return market.Candle{Open: closePrice, High: closePrice + 100, Low: closePrice - 100, Close: closePrice, Timestamp: types.FromTime(ts)}
 }
 
 // mondays returns n consecutive Monday timestamps starting from a base date.

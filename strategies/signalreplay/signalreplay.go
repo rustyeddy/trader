@@ -156,7 +156,7 @@ func (s *Strategy) ensureLoaded(instrument string) {
 	s.episodes = compileEpisodes(filtered, s.cfg.EpisodeGapDays)
 }
 
-func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sc strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}

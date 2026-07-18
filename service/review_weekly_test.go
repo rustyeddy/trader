@@ -14,12 +14,9 @@ import (
 // 21:00 UTC day-roll for the given UTC calendar date, with the given close
 // price used for open/high/low/close so week-aggregation math is easy to
 // hand-verify.
-func dailyAt(date time.Time, price types.Price) market.CandleTime {
+func dailyAt(date time.Time, price types.Price) market.Candle {
 	open := time.Date(date.Year(), date.Month(), date.Day()-1, 21, 0, 0, 0, time.UTC)
-	return market.CandleTime{
-		Candle:    market.Candle{Open: price, High: price, Low: price, Close: price, Ticks: 1},
-		Timestamp: types.FromTime(open),
-	}
+	return market.Candle{Open: price, High: price, Low: price, Close: price, Ticks: 1, Timestamp: types.FromTime(open)}
 }
 
 // TestDeriveWeeklyCandles_AggregatesOneCompleteWeek verifies the OHLC
@@ -30,7 +27,7 @@ func dailyAt(date time.Time, price types.Price) market.CandleTime {
 func TestDeriveWeeklyCandles_AggregatesOneCompleteWeek(t *testing.T) {
 	// An arbitrary complete week far in the past: Mon 2024-01-08 .. Fri 2024-01-12.
 	mon := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)
-	daily := []market.CandleTime{
+	daily := []market.Candle{
 		dailyAt(mon, types.PriceFromFloat(1.10)),
 		dailyAt(mon.AddDate(0, 0, 1), types.PriceFromFloat(1.12)),
 		dailyAt(mon.AddDate(0, 0, 2), types.PriceFromFloat(1.08)), // week low
@@ -53,7 +50,7 @@ func TestDeriveWeeklyCandles_AggregatesOneCompleteWeek(t *testing.T) {
 // direct OANDA fetches.
 func TestDeriveWeeklyCandles_DropsInProgressWeek(t *testing.T) {
 	now := time.Now().UTC()
-	daily := []market.CandleTime{
+	daily := []market.Candle{
 		dailyAt(now.AddDate(0, 0, -21), types.PriceFromFloat(1.10)), // complete week, 3 weeks ago
 		dailyAt(now, types.PriceFromFloat(1.20)),                    // today: current in-progress week
 	}
@@ -67,7 +64,7 @@ func TestDeriveWeeklyCandles_DropsInProgressWeek(t *testing.T) {
 // complete weeks are returned, oldest first.
 func TestDeriveWeeklyCandles_TrimsToCount(t *testing.T) {
 	mon := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)
-	var daily []market.CandleTime
+	var daily []market.Candle
 	for w := range 5 {
 		daily = append(daily, dailyAt(mon.AddDate(0, 0, 7*w), types.PriceFromFloat(1.10+float64(w)*0.01)))
 	}
@@ -80,7 +77,7 @@ func TestDeriveWeeklyCandles_TrimsToCount(t *testing.T) {
 
 func TestDeriveWeeklyCandles_EmptyInput(t *testing.T) {
 	assert.Nil(t, deriveWeeklyCandles(nil, 10))
-	assert.Nil(t, deriveWeeklyCandles([]market.CandleTime{dailyAt(time.Now().UTC(), types.PriceFromFloat(1.1))}, 0))
+	assert.Nil(t, deriveWeeklyCandles([]market.Candle{dailyAt(time.Now().UTC(), types.PriceFromFloat(1.1))}, 0))
 }
 
 // TestDeriveWeeklyCandlesAsOf_DropsPartialTrailingWeekForHistoricalAsOf is a
@@ -93,7 +90,7 @@ func TestDeriveWeeklyCandles_EmptyInput(t *testing.T) {
 // week would be.
 func TestDeriveWeeklyCandlesAsOf_DropsPartialTrailingWeekForHistoricalAsOf(t *testing.T) {
 	mon := time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC) // Mon 2024-01-08 .. Fri 2024-01-12
-	daily := []market.CandleTime{
+	daily := []market.Candle{
 		dailyAt(mon.AddDate(0, 0, -21), types.PriceFromFloat(1.10)), // complete week, 3 weeks earlier
 		dailyAt(mon, types.PriceFromFloat(1.20)),                    // Mon: only 1 of 5 days of this week
 		dailyAt(mon.AddDate(0, 0, 1), types.PriceFromFloat(1.21)),   // Tue

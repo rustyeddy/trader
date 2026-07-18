@@ -68,7 +68,7 @@ func collectCandles(t *testing.T, it market.CandleIterator) ([]types.Timestamp, 
 
 	for ct, ok := it.Next(); ok; ct, ok = it.Next() {
 		outTS = append(outTS, ct.Timestamp)
-		outCandles = append(outCandles, ct.Candle)
+		outCandles = append(outCandles, ct)
 	}
 
 	require.NoError(t, it.Err())
@@ -145,25 +145,28 @@ func TestDataManagerCandles_ChainsMonthsAndFiltersRange(t *testing.T) {
 	require.Equal(t, times, gotTS)
 	require.Equal(t, []market.Candle{
 		{
-			Open:  101,
-			High:  105,
-			Low:   100,
-			Close: 104,
-			Ticks: 10,
+			Open:      101,
+			High:      105,
+			Low:       100,
+			Close:     104,
+			Ticks:     10,
+			Timestamp: times[0],
 		},
 		{
-			Open:  201,
-			High:  205,
-			Low:   200,
-			Close: 204,
-			Ticks: 20,
+			Open:      201,
+			High:      205,
+			Low:       200,
+			Close:     204,
+			Ticks:     20,
+			Timestamp: times[1],
 		},
 		{
-			Open:  301,
-			High:  305,
-			Low:   300,
-			Close: 304,
-			Ticks: 30,
+			Open:      301,
+			High:      305,
+			Low:       300,
+			Close:     304,
+			Ticks:     30,
+			Timestamp: times[2],
 		},
 	}, gotCandles)
 }
@@ -207,11 +210,12 @@ func TestDataManagerCandles_StrictFalseSkipsMissingMonths(t *testing.T) {
 
 	require.Equal(t, []market.Candle{
 		{
-			Open:  111,
-			High:  112,
-			Low:   110,
-			Close: 111,
-			Ticks: 11,
+			Open:      111,
+			High:      112,
+			Low:       110,
+			Close:     111,
+			Ticks:     11,
+			Timestamp: types.FromTime(jan15_00),
 		},
 	}, gotCandles)
 }

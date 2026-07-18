@@ -10,8 +10,8 @@ import (
 )
 
 // CandleSet contains a dense set of candles. Each element carries its own
-// authoritative open Timestamp (market.CandleTime) rather than having it
-// reconstructed from Start+idx*Timeframe on every read — that
+// authoritative open Timestamp (market.Candle.Timestamp) rather than having
+// it reconstructed from Start+idx*Timeframe on every read — that
 // reconstruction assumed every slot is exactly Timeframe seconds apart,
 // which is false for D1 across a DST transition (OANDA's true daily
 // boundary is 17:00 America/New_York, so the transition day is 23 or 25
@@ -25,7 +25,7 @@ type CandleSet struct {
 	Timeframe  types.Timeframe
 	Scale      types.Scale6
 	Source     string
-	Candles    []market.CandleTime
+	Candles    []market.Candle
 	Valid      []uint64
 
 	Filepath string
@@ -66,7 +66,7 @@ func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Times
 		return nil, fmt.Errorf("computed invalid candle count: %d", n)
 	}
 
-	candles := make([]market.CandleTime, n)
+	candles := make([]market.Candle, n)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 	}
@@ -120,7 +120,8 @@ func (cs *CandleSet) AddCandle(ts types.Timestamp, c market.Candle) error {
 		cs.duplicates++
 	}
 
-	cs.Candles[idx] = market.CandleTime{Candle: c, Timestamp: ts}
+	c.Timestamp = ts
+	cs.Candles[idx] = c
 	cs.SetValid(idx)
 	return nil
 }
@@ -147,7 +148,7 @@ func (cs *CandleSet) Merge(src *CandleSet) error {
 		if !src.IsValid(i) {
 			continue
 		}
-		if err := cs.AddCandle(src.Candles[i].Timestamp, src.Candles[i].Candle); err != nil {
+		if err := cs.AddCandle(src.Candles[i].Timestamp, src.Candles[i]); err != nil {
 			return err
 		}
 	}

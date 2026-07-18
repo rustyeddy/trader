@@ -86,13 +86,13 @@ func (f *Fade) Reset() {
 	f.atr.Reset()
 }
 
-func (f *Fade) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (f *Fade) Update(_ context.Context, ct *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
 
-	f.bb.Update(ct.Candle)
-	f.atr.Update(ct.Candle)
+	f.bb.Update(*ct)
+	f.atr.Update(*ct)
 
 	if !f.Ready() {
 		return strategy.Hold("warming up")

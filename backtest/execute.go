@@ -98,7 +98,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 	var processedCandles int64
 	var submittedOpens int64
 	var submittedCloses int64
-	var lastCandle market.CandleTime
+	var lastCandle market.Candle
 	haveLastCandle := false
 
 	var lastProgressNanos int64
@@ -175,7 +175,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		lastCandle = candle
 		haveLastCandle = true
-		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.Candle.String())
+		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.String())
 		atomic.AddInt64(&processedCandles, 1)
 
 		err := t.Account.ResolveWithMarks(map[string]types.Price{
@@ -187,7 +187,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		// Tick regime filter and exit strategy indicators every bar.
 		regime.Tick(candle)
-		exit.Tick(candle.Candle)
+		exit.Tick(candle)
 
 		// Update trailing/chandelier stops on all open lots.
 		if exit.Ready() {
@@ -206,7 +206,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 						lot.ExtremePrice = candle.Low
 					}
 				}
-				lot.Stop = exit.UpdateStop(lot.Side, lot.Stop, lot.EntryPrice, lot.ExtremePrice, candle.Candle)
+				lot.Stop = exit.UpdateStop(lot.Side, lot.Stop, lot.EntryPrice, lot.ExtremePrice, candle)
 				return nil
 			})
 		}

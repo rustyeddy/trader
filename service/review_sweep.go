@@ -194,7 +194,7 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 // <= asOf: a candle opening at asOf-tf closes at exactly asOf, so it is
 // correctly included as "just closed", while a candle opening at asOf
 // itself (not yet closed) is correctly excluded.
-func getClosedCandles(ctx context.Context, dm *datamanager.DataManager, instrument string, tf types.Timeframe, asOf time.Time, count int) ([]market.CandleTime, error) {
+func getClosedCandles(ctx context.Context, dm *datamanager.DataManager, instrument string, tf types.Timeframe, asOf time.Time, count int) ([]market.Candle, error) {
 	closedAsOf := asOf.Add(-time.Duration(tf) * time.Second)
 	return dm.GetCandles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,

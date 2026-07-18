@@ -806,7 +806,7 @@ func TestChainedCandleIterator_NilSub(t *testing.T) {
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	cs.SetValid(0)
 
 	real := newCandleSetIterator(cs, types.TimeRange{})

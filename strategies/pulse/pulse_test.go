@@ -13,15 +13,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// makeCandle creates a minimal CandleTime for testing.
-func makeCandle() *market.CandleTime {
-	return &market.CandleTime{
-		Candle: market.Candle{
-			Open:  types.PriceFromFloat(1.0850),
-			High:  types.PriceFromFloat(1.0860),
-			Low:   types.PriceFromFloat(1.0840),
-			Close: types.PriceFromFloat(1.0855),
-		},
+// makeCandle creates a minimal candle for testing.
+func makeCandle() *market.Candle {
+	return &market.Candle{
+		Open:  types.PriceFromFloat(1.0850),
+		High:  types.PriceFromFloat(1.0860),
+		Low:   types.PriceFromFloat(1.0840),
+		Close: types.PriceFromFloat(1.0855),
 	}
 }
 

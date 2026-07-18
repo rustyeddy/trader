@@ -41,8 +41,8 @@ func (f *ChoppinessFilter) Name() string {
 	return fmt.Sprintf("Choppiness(%d,%.1f)", f.period, f.threshold)
 }
 
-func (f *ChoppinessFilter) Ready() bool               { return f.ci.Ready() }
-func (f *ChoppinessFilter) Tick(ct market.CandleTime) { f.ci.Update(ct.Candle) }
+func (f *ChoppinessFilter) Ready() bool           { return f.ci.Ready() }
+func (f *ChoppinessFilter) Tick(ct market.Candle) { f.ci.Update(ct) }
 
 func (f *ChoppinessFilter) Trending() bool {
 	if !f.ci.Ready() {

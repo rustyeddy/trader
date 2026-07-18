@@ -149,7 +149,8 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 		}
 
 		candle := cfg.generateCandle(rng, currentPrice)
-		cs.Candles[i].Candle = candle
+		candle.Timestamp = cs.Candles[i].Timestamp
+		cs.Candles[i] = candle
 		cs.SetValid(i)
 		currentPrice = candle.Close
 	}

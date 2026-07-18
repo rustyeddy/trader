@@ -49,7 +49,13 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf types.Timefram
 	}
 
 	for i := range candles {
-		cs.Candles[i].Candle = candles[i] // NewMonthlyCandleSet already set Timestamp
+		// Callers of this function don't carry real per-candle timestamps
+		// (see doc comment) — keep the skeleton's position-derived
+		// Timestamp from NewMonthlyCandleSet rather than trusting
+		// whatever candles[i].Timestamp happens to hold (typically zero).
+		c := candles[i]
+		c.Timestamp = cs.Candles[i].Timestamp
+		cs.Candles[i] = c
 		if !candles[i].IsZero() {
 			cs.Valid[i>>6] |= 1 << uint(i&63)
 		}
@@ -59,13 +65,14 @@ func (s *store) WriteMonthlyCandles(source, instrument string, tf types.Timefram
 }
 
 // WriteMonthlyCandleTimes is WriteMonthlyCandles for producers that carry
-// each candle's true observed open timestamp (market.CandleTime) rather
-// than a bare market.Candle. monthStart still selects which calendar
+// each candle's true observed open timestamp explicitly set on
+// market.Candle.Timestamp, rather than relying on the skeleton's
+// pre-seeded slot timestamp. monthStart still selects which calendar
 // month's file this is (must be a UTC month boundary, as for
 // WriteMonthlyCandles); each candle's own Timestamp is stored and written
 // verbatim — this is what lets D1/H4 canonical files stay correct across a
 // DST transition, where slots aren't evenly spaced from a single anchor.
-func (s *store) WriteMonthlyCandleTimes(source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.CandleTime) error {
+func (s *store) WriteMonthlyCandleTimes(source, instrument string, tf types.Timeframe, monthStart time.Time, candles []market.Candle) error {
 	if s == nil {
 		return fmt.Errorf("nil store")
 	}
@@ -97,7 +104,7 @@ func (s *store) WriteMonthlyCandleTimes(source, instrument string, tf types.Time
 
 	for i := range candles {
 		cs.Candles[i] = candles[i]
-		if !candles[i].Candle.IsZero() {
+		if !candles[i].IsZero() {
 			cs.Valid[i>>6] |= 1 << uint(i&63)
 		}
 	}

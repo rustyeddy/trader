@@ -11,20 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mkCandle builds a CandleTime with a symmetric spread around close so that
+// mkCandle builds a candle with a symmetric spread around close so that
 // the ADX indicator receives valid OHLC data.
-func mkCandle(close float64) *market.CandleTime {
+func mkCandle(close float64) *market.Candle {
 	toP := func(x float64) types.Price {
 		return types.Price(x*float64(types.PriceScale) + 0.5)
 	}
 	c := toP(close)
 	spread := types.Price(1000) // ~10 pips
-	return &market.CandleTime{Candle: market.Candle{
+	return &market.Candle{
 		Open:  c,
 		High:  c + spread,
 		Low:   c - spread,
 		Close: c,
-	}}
+	}
 }
 
 // feedUpdates drives s with a slice of close prices and returns the signals.

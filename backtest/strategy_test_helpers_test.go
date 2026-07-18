@@ -17,7 +17,7 @@ func (testFake) Name() string            { return "Fake" }
 func (testFake) Reset()                  {}
 func (testFake) Ready() bool             { return true }
 func (testFake) StopDescription() string { return "" }
-func (testFake) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+func (testFake) Update(_ context.Context, _ *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	return strategy.Hold("hold")
 }
 

@@ -72,7 +72,7 @@ func (s *Strategy) Reset() {
 
 // Update is called on every completed candle. Returns an open request every
 // TradeEvery candles when no position is already open.
-func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, ct *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}

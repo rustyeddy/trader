@@ -14,33 +14,31 @@ import (
 
 // ---- helpers ----------------------------------------------------------------
 
-func makeCT(open, high, low, close int32, avgSpread int32, unixSec int64) *market.CandleTime {
-	return &market.CandleTime{
-		Candle: market.Candle{
-			Open: types.Price(open), High: types.Price(high),
-			Low: types.Price(low), Close: types.Price(close),
-			AvgSpread: types.Price(avgSpread),
-		},
+func makeCT(open, high, low, close int32, avgSpread int32, unixSec int64) *market.Candle {
+	return &market.Candle{
+		Open: types.Price(open), High: types.Price(high),
+		Low: types.Price(low), Close: types.Price(close),
+		AvgSpread: types.Price(avgSpread),
 		Timestamp: types.Timestamp(unixSec),
 	}
 }
 
-// sliceIter is a minimal CandleIterator backed by a []CandleTime.
+// sliceIter is a minimal CandleIterator backed by a []market.Candle.
 type sliceIter struct {
-	candles  []market.CandleTime
+	candles  []market.Candle
 	idx      int
 	err      error
 	closeErr error
 }
 
-func newSliceIter(candles ...market.CandleTime) market.CandleIterator {
+func newSliceIter(candles ...market.Candle) market.CandleIterator {
 	return &sliceIter{candles: candles, idx: -1}
 }
 
-func (it *sliceIter) Next() (market.CandleTime, bool) {
+func (it *sliceIter) Next() (market.Candle, bool) {
 	it.idx++
 	if it.idx >= len(it.candles) {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 	return it.candles[it.idx], true
 }
@@ -358,7 +356,7 @@ func TestSessionAnalyzer_JPYPipConversion(t *testing.T) {
 
 func TestRunAnalysis_WalksAllCandles(t *testing.T) {
 	swing := NewSwingAnalyzer(market.GetInstrument("EURUSD"))
-	candles := []market.CandleTime{
+	candles := []market.Candle{
 		*makeCT(0, 10, 0, 5, 0, 0),
 		*makeCT(0, 20, 0, 10, 0, 3600),
 		*makeCT(0, 30, 0, 15, 0, 7200),
@@ -375,7 +373,7 @@ func TestRunAnalysis_ContextCancelled(t *testing.T) {
 	cancel() // cancelled immediately
 
 	swing := NewSwingAnalyzer(market.GetInstrument("EURUSD"))
-	itr := &sliceIter{candles: []market.CandleTime{*makeCT(0, 10, 0, 5, 0, 0)}, idx: -1}
+	itr := &sliceIter{candles: []market.Candle{*makeCT(0, 10, 0, 5, 0, 0)}, idx: -1}
 	err := RunAnalysis(ctx, itr, []Analyzer{swing})
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, -1, itr.idx)

@@ -55,7 +55,7 @@ func (f *WeeklyEMAFilter) Name() string {
 
 func (f *WeeklyEMAFilter) Ready() bool { return f.ema.Ready() }
 
-func (f *WeeklyEMAFilter) Tick(ct market.CandleTime) {
+func (f *WeeklyEMAFilter) Tick(ct market.Candle) {
 	t := time.Unix(int64(ct.Timestamp), 0).UTC()
 	year, week := t.ISOWeek()
 

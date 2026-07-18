@@ -113,7 +113,7 @@ func (r *CloseRequest) Validate() error {
 // NewOpenRequest is an internal helper for trader type processing.
 func NewOpenRequest(
 	instr string,
-	c *market.CandleTime,
+	c *market.Candle,
 	side types.Side,
 	stop types.Price,
 	take types.Price,
@@ -135,7 +135,7 @@ func NewOpenRequest(
 			Price:       c.Close,
 			Reason:      reason,
 			Timestamp:   c.Timestamp,
-			Candle:      c.Candle,
+			Candle:      *c,
 		},
 	}
 	return op

@@ -136,7 +136,7 @@ func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.Cand
 
 	count := 0
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		c := ct.Candle
+		c := ct
 		if err := w.Write([]string{
 			strconv.FormatInt(int64(ct.Timestamp), 10),
 			strconv.FormatInt(int64(c.Open), 10),

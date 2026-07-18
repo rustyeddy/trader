@@ -162,7 +162,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 			return nil, err
 		}
 
-		candle := ct.Candle
+		candle := ct
 		ts := ct.Timestamp
 
 		// Tick indicators.

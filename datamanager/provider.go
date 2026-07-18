@@ -59,7 +59,7 @@ type CandleMonth struct {
 	// (Timestamp), not a naive UTC-month-start-relative reconstruction —
 	// the store derives the canonical file's true first-slot time from
 	// this ground truth rather than assuming it.
-	Candles []market.CandleTime
+	Candles []market.Candle
 
 	// Raw optionally preserves the provider's native bid+ask OHLC rows
 	// (before conversion to the canonical bid-only representation), for

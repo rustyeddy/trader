@@ -13,12 +13,9 @@ func buildAggTestCandleSet(t *testing.T, start time.Time, tf types.Timeframe, n 
 	t.Helper()
 
 	boundaries := SlotBoundaries(start, tf, n)
-	candles := make([]market.CandleTime, n)
+	candles := make([]market.Candle, n)
 	for i, b := range boundaries {
-		candles[i] = market.CandleTime{
-			Candle:    market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1},
-			Timestamp: types.FromTime(b),
-		}
+		candles[i] = market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1, Timestamp: types.FromTime(b)}
 	}
 
 	cs := &CandleSet{

@@ -9,11 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// atrPCT builds a CandleTime with the given OHLC values (all prices scaled).
-func atrPCT(open, high, low, close types.Price) market.CandleTime {
-	return market.CandleTime{
-		Candle: market.Candle{Open: open, High: high, Low: low, Close: close},
-	}
+// atrPCT builds a candle with the given OHLC values (all prices scaled).
+func atrPCT(open, high, low, close types.Price) market.Candle {
+	return market.Candle{Open: open, High: high, Low: low, Close: close}
 }
 
 func TestATRPercentileFilter_NotReadyBeforeWarmup(t *testing.T) {
@@ -33,7 +31,7 @@ func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 	f, err := NewATRPercentileFilter(3, 5, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
-	candles := []market.CandleTime{
+	candles := []market.Candle{
 		atrPCT(100000, 101000, 99000, 100500),
 		atrPCT(100500, 101500, 99500, 101000),
 		atrPCT(101000, 102000, 100000, 101500),
@@ -51,7 +49,7 @@ func TestATRPercentileFilter_ReadyBeforeWindowIsFull(t *testing.T) {
 	f, err := NewATRPercentileFilter(3, 50, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
-	candles := []market.CandleTime{
+	candles := []market.Candle{
 		atrPCT(100000, 101000, 99000, 100500),
 		atrPCT(100500, 101500, 99500, 101000),
 		atrPCT(101000, 102000, 100000, 101500),

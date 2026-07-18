@@ -20,8 +20,8 @@ func NewSwingAnalyzer(inst *market.Instrument) *SwingAnalyzer {
 
 func (a *SwingAnalyzer) Name() string { return "Swing Range Distribution" }
 
-func (a *SwingAnalyzer) Update(ct *market.CandleTime) {
-	if !ct.Candle.Validate() {
+func (a *SwingAnalyzer) Update(ct *market.Candle) {
+	if !ct.Validate() {
 		return
 	}
 	delta := ct.High - ct.Low

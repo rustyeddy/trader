@@ -26,8 +26,8 @@ func NewSessionAnalyzer(inst *market.Instrument) *SessionAnalyzer {
 
 func (a *SessionAnalyzer) Name() string { return "Session (by UTC hour)" }
 
-func (a *SessionAnalyzer) Update(ct *market.CandleTime) {
-	if !ct.Candle.Validate() {
+func (a *SessionAnalyzer) Update(ct *market.Candle) {
+	if !ct.Validate() {
 		return
 	}
 	rng := ct.High - ct.Low

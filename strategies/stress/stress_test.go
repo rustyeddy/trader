@@ -13,11 +13,9 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-func ct(close float64) *market.CandleTime {
+func ct(close float64) *market.Candle {
 	p := types.PriceFromFloat(close)
-	return &market.CandleTime{
-		Candle: market.Candle{Open: p, High: p, Low: p, Close: p},
-	}
+	return &market.Candle{Open: p, High: p, Low: p, Close: p}
 }
 
 func TestNew_Defaults(t *testing.T) {

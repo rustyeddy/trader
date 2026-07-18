@@ -65,7 +65,7 @@ func TestValidateCandleData_MissingRawOandaMonth(t *testing.T) {
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
-		cs.Candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+		cs.Candles[i] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1, Timestamp: cs.Candles[i].Timestamp}
 		cs.SetValid(i)
 	}
 	require.NoError(t, s.WriteCSV(cs))

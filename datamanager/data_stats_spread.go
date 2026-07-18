@@ -21,8 +21,8 @@ func NewSpreadAnalyzer(inst *market.Instrument) *SpreadAnalyzer {
 
 func (a *SpreadAnalyzer) Name() string { return "Avg Spread Distribution" }
 
-func (a *SpreadAnalyzer) Update(ct *market.CandleTime) {
-	if !ct.Candle.Validate() {
+func (a *SpreadAnalyzer) Update(ct *market.Candle) {
+	if !ct.Validate() {
 		return
 	}
 	if ct.AvgSpread <= 0 {

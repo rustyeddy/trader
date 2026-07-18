@@ -16,9 +16,10 @@ type RegimeFilter interface {
 	Ready() bool
 
 	// Tick updates internal indicators with the current bar. The full
-	// CandleTime is provided so implementations can use the timestamp
-	// (e.g. to aggregate sub-daily bars into daily bars).
-	Tick(ct market.CandleTime)
+	// candle (including its Timestamp) is provided so implementations
+	// can use the timestamp (e.g. to aggregate sub-daily bars into daily
+	// bars).
+	Tick(ct market.Candle)
 
 	// Trending returns true when the market is in a trending regime and
 	// new entries should be allowed. Returns true while not yet ready so
@@ -36,6 +37,6 @@ type NoopRegime struct{}
 
 func (NoopRegime) Name() string                { return "" }
 func (NoopRegime) Ready() bool                 { return true }
-func (NoopRegime) Tick(_ market.CandleTime)    {}
+func (NoopRegime) Tick(_ market.Candle)        {}
 func (NoopRegime) Trending() bool              { return true }
 func (NoopRegime) AllowSide(_ types.Side) bool { return true }

@@ -56,7 +56,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	cs := makeTestCandleSet(t, "EUR_USD", 2026, time.January, types.H1)
 
-	cs.Candles[0].Candle = market.Candle{
+	cs.Candles[0] = market.Candle{
 		High:      types.Price(101),
 		Open:      types.Price(100),
 		Low:       types.Price(99),
@@ -64,10 +64,11 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 		AvgSpread: types.Price(2),
 		MaxSpread: types.Price(5),
 		Ticks:     42,
+		Timestamp: cs.Candles[0].Timestamp,
 	}
 	cs.SetValid(0)
 
-	cs.Candles[123].Candle = market.Candle{
+	cs.Candles[123] = market.Candle{
 		High:      types.Price(205),
 		Open:      types.Price(201),
 		Low:       types.Price(200),
@@ -75,6 +76,7 @@ func TestStoreWriteCSVReadCSVRoundTrip(t *testing.T) {
 		AvgSpread: types.Price(3),
 		MaxSpread: types.Price(7),
 		Ticks:     11,
+		Timestamp: cs.Candles[123].Timestamp,
 	}
 	cs.SetValid(123)
 
@@ -125,7 +127,8 @@ func TestStoreReadCSVSkipsCommentsHeaderAndParsesFlags(t *testing.T) {
 		AvgSpread: types.Price(2),
 		MaxSpread: types.Price(4),
 		Ticks:     9,
-	}, got.Candles[0].Candle)
+		Timestamp: types.FromTime(ts),
+	}, got.Candles[0])
 	require.True(t, got.IsValid(0))
 }
 

@@ -19,10 +19,10 @@ type fakeRegime struct {
 	allow    map[types.Side]bool
 }
 
-func (f fakeRegime) Name() string           { return "fake-regime" }
-func (f fakeRegime) Ready() bool            { return f.ready }
-func (f fakeRegime) Tick(market.CandleTime) {}
-func (f fakeRegime) Trending() bool         { return f.trending }
+func (f fakeRegime) Name() string       { return "fake-regime" }
+func (f fakeRegime) Ready() bool        { return f.ready }
+func (f fakeRegime) Tick(market.Candle) {}
+func (f fakeRegime) Trending() bool     { return f.trending }
 func (f fakeRegime) AllowSide(s types.Side) bool {
 	if f.allow == nil {
 		return true
@@ -50,7 +50,7 @@ type testCtx struct {
 	acct       *execution.Account
 	exit       strategy.ExitStrategy
 	regime     strategy.RegimeFilter
-	candle     market.CandleTime
+	candle     market.Candle
 	slippage   types.Price
 	maxSpread  types.Price
 }
@@ -59,7 +59,7 @@ func (c testCtx) Instrument() string            { return c.instrument }
 func (c testCtx) Account() *execution.Account   { return c.acct }
 func (c testCtx) Exit() strategy.ExitStrategy   { return c.exit }
 func (c testCtx) Regime() strategy.RegimeFilter { return c.regime }
-func (c testCtx) Candle() market.CandleTime     { return c.candle }
+func (c testCtx) Candle() market.Candle         { return c.candle }
 func (c testCtx) Slippage() types.Price         { return c.slippage }
 func (c testCtx) MaxSpread() types.Price        { return c.maxSpread }
 func (c testCtx) DefaultStopPips() types.Pips   { return 0 }
@@ -71,8 +71,8 @@ func openReq(id string, side types.Side, price, stop types.Price, units types.Un
 	}}
 }
 
-func candleTime(avgSpread types.Price) market.CandleTime {
-	return market.CandleTime{Candle: market.Candle{Close: types.PriceFromFloat(1.10), AvgSpread: avgSpread}}
+func candleTime(avgSpread types.Price) market.Candle {
+	return market.Candle{Close: types.PriceFromFloat(1.10), AvgSpread: avgSpread}
 }
 
 // --- tests ------------------------------------------------------------------
@@ -271,7 +271,7 @@ func TestPlanSignal_LongOpensPosition(t *testing.T) {
 		instrument: "EURUSD",
 		regime:     strategy.NoopRegime{},
 		exit:       strategy.NoopExit{},
-		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: avgSpread}},
+		candle:     market.Candle{Close: entry, AvgSpread: avgSpread},
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Opens, 1)
@@ -306,7 +306,7 @@ func TestPlanSignal_ReversalClosesOpposingSide(t *testing.T) {
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
 		exit:       fakeExit{ready: true, stop: types.PriceFromFloat(1.09)},
-		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+		candle:     market.Candle{Close: entry, AvgSpread: 0},
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Closes, 1, "opposing short lot must be closed")
@@ -334,7 +334,7 @@ func TestPlanSignal_SameSideNotClosed(t *testing.T) {
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
 		exit:       fakeExit{ready: true, stop: types.PriceFromFloat(1.09)},
-		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+		candle:     market.Candle{Close: entry, AvgSpread: 0},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, plan.Closes, "same-side lot must not be closed")
@@ -362,7 +362,7 @@ func TestPlanSignal_ExitStrategyOverridesStop(t *testing.T) {
 		instrument: "EURUSD",
 		regime:     strategy.NoopRegime{},
 		exit:       fakeExit{ready: true, stop: exitStop},
-		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+		candle:     market.Candle{Close: entry, AvgSpread: 0},
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Opens, 1)
@@ -383,7 +383,7 @@ func TestPlanSignal_SizesWhenAccountPresent(t *testing.T) {
 		acct:       acct,
 		regime:     strategy.NoopRegime{},
 		exit:       fakeExit{ready: true, stop: exitStop},
-		candle:     market.CandleTime{Candle: market.Candle{Close: entry, AvgSpread: 0}},
+		candle:     market.Candle{Close: entry, AvgSpread: 0},
 	})
 	require.NoError(t, err)
 	require.Len(t, plan.Opens, 1)

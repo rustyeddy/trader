@@ -10,12 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// h1CT builds a CandleTime for a given UTC time and OHLC (as raw Price ints).
-func h1CT(ts time.Time, o, h, l, c types.Price) market.CandleTime {
-	return market.CandleTime{
-		Candle:    market.Candle{Open: o, High: h, Low: l, Close: c},
-		Timestamp: types.FromTime(ts),
-	}
+// h1CT builds a candle for a given UTC time and OHLC (as raw Price ints).
+func h1CT(ts time.Time, o, h, l, c types.Price) market.Candle {
+	return market.Candle{Open: o, High: h, Low: l, Close: c, Timestamp: types.FromTime(ts)}
 }
 
 // feedDay sends 24 identical hourly bars for the given date.

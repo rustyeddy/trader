@@ -104,7 +104,7 @@ func (s *Strategy) StopDescription() string {
 //  1. Tracks how many bars each open lot has been held.
 //  2. Signals CloseAll when any lot has been held >= HoldBars bars.
 //  3. Signals a new open every TradeEvery bars when under MaxPositions.
-func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sctx strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, ct *market.Candle, sctx strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
@@ -180,7 +180,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sctx strateg
 
 // stopFromPips computes a stop price from a pip distance and candle close.
 // Returns 0 when the instrument is unknown or stop_pips is not configured.
-func stopFromPips(ct *market.CandleTime, side types.Side, stopPips float64, inst *market.Instrument) types.Price {
+func stopFromPips(ct *market.Candle, side types.Side, stopPips float64, inst *market.Instrument) types.Price {
 	if inst == nil || stopPips <= 0 || ct == nil {
 		return 0
 	}

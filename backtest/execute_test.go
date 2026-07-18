@@ -25,24 +25,24 @@ func (s *countingStrategy) Name() string            { return "counting" }
 func (s *countingStrategy) Reset()                  { s.resets++ }
 func (s *countingStrategy) Ready() bool             { return true }
 func (s *countingStrategy) StopDescription() string { return "" }
-func (s *countingStrategy) Update(context.Context, *market.CandleTime, strategy.StrategyContext) strategy.Signal {
+func (s *countingStrategy) Update(context.Context, *market.Candle, strategy.StrategyContext) strategy.Signal {
 	s.calls++
 	return s.sig
 }
 
 type fixedCandleIterator struct {
-	candles  []market.CandleTime
+	candles  []market.Candle
 	idx      int
 	closeErr error
 	err      error
 }
 
-func (it *fixedCandleIterator) Next() (market.CandleTime, bool) {
+func (it *fixedCandleIterator) Next() (market.Candle, bool) {
 	if it.err != nil {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 	if it.idx >= len(it.candles) {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 	ct := it.candles[it.idx]
 	it.idx++
@@ -70,14 +70,14 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	run := &Backtest{Request: &BacktestRequest{Instrument: "EURUSD"}}
 	require.ErrorContains(t, run.runWithIterator(ctx, tr, nil), "nil candle iterator")
 
-	itr := &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: types.Timestamp(1704067200)}}}
+	itr := &fixedCandleIterator{candles: []market.Candle{{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000, Timestamp: types.Timestamp(1704067200)}}}
 	require.ErrorContains(t, run.runWithIterator(ctx, tr, itr), "nil strategy")
 
 	strat := &countingStrategy{}
 	run.Request.Strategy = strat
 	run.State = &BacktestRun{}
 
-	itr = &fixedCandleIterator{candles: []market.CandleTime{{Candle: market.Candle{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000}, Timestamp: types.Timestamp(1704067200)}}}
+	itr = &fixedCandleIterator{candles: []market.Candle{{Open: 1100000, High: 1101000, Low: 1099000, Close: 1100000, Timestamp: types.Timestamp(1704067200)}}}
 	require.NoError(t, run.runWithIterator(ctx, tr, itr))
 	assert.Equal(t, 1, strat.resets)
 	assert.Equal(t, 1, strat.calls)

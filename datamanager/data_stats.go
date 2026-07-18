@@ -19,7 +19,7 @@ type Stat struct {
 // Analyzer accumulates statistics over a candle sequence.
 type Analyzer interface {
 	Name() string
-	Update(*market.CandleTime)
+	Update(*market.Candle)
 	Stats() []Stat
 }
 

@@ -12,7 +12,7 @@ import (
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.CandleTime, slippage types.Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Candle, slippage types.Price) (int, error) {
 	var hits []struct {
 		lot    *execution.Lot
 		exitPx types.Price
@@ -24,7 +24,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 		if lot.State != execution.LotOpen {
 			return nil
 		}
-		exitPx, reason, hit := checkExit(lot, candle.Candle)
+		exitPx, reason, hit := checkExit(lot, candle)
 		if !hit {
 			return nil
 		}

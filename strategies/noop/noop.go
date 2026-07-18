@@ -19,7 +19,7 @@ func (Strategy) Name() string            { return "NoOp" }
 func (Strategy) Reset()                  {}
 func (Strategy) Ready() bool             { return true }
 func (Strategy) StopDescription() string { return "" }
-func (Strategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+func (Strategy) Update(_ context.Context, _ *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	return strategy.Hold("noop")
 }
 

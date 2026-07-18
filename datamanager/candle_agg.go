@@ -77,7 +77,7 @@ func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet,
 		Timeframe:  outTF,
 		Scale:      cs.Scale,
 		Source:     cs.Source,
-		Candles:    make([]market.CandleTime, outLen),
+		Candles:    make([]market.Candle, outLen),
 		Valid:      make([]uint64, (outLen+63)/64),
 	}
 
@@ -91,7 +91,8 @@ func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet,
 		if validCount < minValid {
 			continue
 		}
-		out.Candles[oi].Candle = outC
+		outC.Timestamp = windowStart
+		out.Candles[oi] = outC
 		types.BitSet(out.Valid, oi)
 	}
 
@@ -127,7 +128,7 @@ func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*C
 		Timeframe:  outTF,
 		Scale:      cs.Scale,
 		Source:     cs.Source,
-		Candles:    make([]market.CandleTime, len(boundaries)),
+		Candles:    make([]market.Candle, len(boundaries)),
 		Valid:      make([]uint64, (len(boundaries)+63)/64),
 	}
 
@@ -147,7 +148,8 @@ func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*C
 		if validCount < minValid {
 			continue
 		}
-		out.Candles[oi].Candle = outC
+		outC.Timestamp = types.FromTime(windowStart)
+		out.Candles[oi] = outC
 		types.BitSet(out.Valid, oi)
 	}
 
@@ -174,7 +176,7 @@ func aggregateWindow(cs *CandleSet, fromIdx, toIdx int, hasValidBits bool) (mark
 			continue
 		}
 
-		c := cs.Candles[idx].Candle
+		c := cs.Candles[idx]
 		if !openSet {
 			outC.Open = c.Open
 			outC.High = c.High

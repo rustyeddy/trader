@@ -48,7 +48,7 @@ func (c *CompositeRegimeFilter) Ready() bool {
 	return true
 }
 
-func (c *CompositeRegimeFilter) Tick(ct market.CandleTime) {
+func (c *CompositeRegimeFilter) Tick(ct market.Candle) {
 	for _, f := range c.filters {
 		f.Tick(ct)
 	}

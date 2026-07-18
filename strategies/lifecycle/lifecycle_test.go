@@ -12,18 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// minCandle returns a CandleTime with a valid close price for EURUSD.
-func minCandle(close float64) *market.CandleTime {
+// minCandle returns a candle with a valid close price for EURUSD.
+func minCandle(close float64) *market.Candle {
 	toP := func(x float64) types.Price {
 		return types.Price(x*float64(types.PriceScale) + 0.5)
 	}
 	c := toP(close)
-	return &market.CandleTime{Candle: market.Candle{
+	return &market.Candle{
 		Open:  c,
 		High:  c + 1000,
 		Low:   c - 1000,
 		Close: c,
-	}}
+	}
 }
 
 // minRun builds a minimal Backtest sufficient for the lifecycle strategy.

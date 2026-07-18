@@ -91,9 +91,9 @@ func newCandleSetIterator(cs *CandleSet, rng types.TimeRange) market.CandleItera
 	}
 }
 
-func (it *rangedCandleIterator) Next() (market.CandleTime, bool) {
+func (it *rangedCandleIterator) Next() (market.Candle, bool) {
 	if it.closed || it.done || it.err != nil {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 
 	for it.base.Next() {
@@ -102,11 +102,11 @@ func (it *rangedCandleIterator) Next() (market.CandleTime, bool) {
 			continue
 		}
 
-		return market.CandleTime{Candle: it.base.Candle(), Timestamp: ts}, true
+		return it.base.Candle(), true
 	}
 
 	it.done = true
-	return market.CandleTime{}, false
+	return market.Candle{}, false
 }
 
 func (it *rangedCandleIterator) Err() error {
@@ -134,9 +134,9 @@ func newChainedCandleIterator(iters ...market.CandleIterator) market.CandleItera
 	}
 }
 
-func (it *chainedCandleIterator) Next() (market.CandleTime, bool) {
+func (it *chainedCandleIterator) Next() (market.Candle, bool) {
 	if it.closed || it.err != nil {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 
 	for it.idx < len(it.iters) {
@@ -152,18 +152,18 @@ func (it *chainedCandleIterator) Next() (market.CandleTime, bool) {
 
 		if err := curIt.Err(); err != nil {
 			it.err = err
-			return market.CandleTime{}, false
+			return market.Candle{}, false
 		}
 
 		if err := curIt.Close(); err != nil {
 			it.err = err
-			return market.CandleTime{}, false
+			return market.Candle{}, false
 		}
 
 		it.idx++
 	}
 
-	return market.CandleTime{}, false
+	return market.Candle{}, false
 }
 
 func (it *chainedCandleIterator) Err() error {

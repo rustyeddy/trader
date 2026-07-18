@@ -105,10 +105,7 @@ func TestAutoCloseExits_StopAndTake(t *testing.T) {
 	safeLot.Take = types.PriceFromFloat(1.1200)
 
 	// Bar whose low dips below stopLot's stop but not safeLot's stop.
-	candle := market.CandleTime{
-		Candle:    market.Candle{Open: types.PriceFromFloat(1.1000), High: types.PriceFromFloat(1.1050), Low: types.PriceFromFloat(1.0940), Close: types.PriceFromFloat(1.1010)},
-		Timestamp: types.Timestamp(1000),
-	}
+	candle := market.Candle{Open: types.PriceFromFloat(1.1000), High: types.PriceFromFloat(1.1050), Low: types.PriceFromFloat(1.0940), Close: types.PriceFromFloat(1.1010), Timestamp: types.Timestamp(1000)}
 
 	n, err := autoCloseExits(context.Background(), b, candle, 0)
 	require.NoError(t, err)
@@ -132,10 +129,7 @@ func TestAutoCloseExits_TakeProfit(t *testing.T) {
 	lot.Stop = types.PriceFromFloat(1.0900)
 	lot.Take = types.PriceFromFloat(1.1100)
 
-	candle := market.CandleTime{
-		Candle:    market.Candle{Open: types.PriceFromFloat(1.1050), High: types.PriceFromFloat(1.1120), Low: types.PriceFromFloat(1.1040), Close: types.PriceFromFloat(1.1110)},
-		Timestamp: types.Timestamp(2000),
-	}
+	candle := market.Candle{Open: types.PriceFromFloat(1.1050), High: types.PriceFromFloat(1.1120), Low: types.PriceFromFloat(1.1040), Close: types.PriceFromFloat(1.1110), Timestamp: types.Timestamp(2000)}
 
 	n, err := autoCloseExits(context.Background(), b, candle, 0)
 	require.NoError(t, err)

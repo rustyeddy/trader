@@ -63,8 +63,8 @@ func (f *ATRPercentileFilter) Name() string {
 
 func (f *ATRPercentileFilter) Ready() bool { return f.atr.Ready() && f.count > 0 }
 
-func (f *ATRPercentileFilter) Tick(ct market.CandleTime) {
-	f.atr.Update(ct.Candle)
+func (f *ATRPercentileFilter) Tick(ct market.Candle) {
+	f.atr.Update(ct)
 	if !f.atr.Ready() {
 		return
 	}

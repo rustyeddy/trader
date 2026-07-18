@@ -705,9 +705,9 @@ func TestCandleSetIterator_WithRange(t *testing.T) {
 
 	// Set valid candles at index 0 and index 5 (hours 0 and 5)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	cs.Candles[0].Candle = market.Candle{Open: 100, Close: 100, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, Close: 100, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	cs.SetValid(0)
-	cs.Candles[5].Candle = market.Candle{Open: 200, Close: 200, Ticks: 1}
+	cs.Candles[5] = market.Candle{Open: 200, Close: 200, Ticks: 1, Timestamp: cs.Candles[5].Timestamp}
 	cs.SetValid(5)
 
 	_ = s
@@ -735,13 +735,13 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 	_ = s
 
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-	cs.Candles[2].Candle = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
+	cs.Candles[2] = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5, Timestamp: cs.Candles[2].Timestamp}
 	cs.SetValid(2)
 
 	it := newCandleSetIterator(cs, types.TimeRange{})
 	ct, ok := it.Next()
 	require.True(t, ok)
-	require.Equal(t, int32(5), ct.Candle.Ticks)
+	require.Equal(t, int32(5), ct.Ticks)
 	require.Greater(t, int64(ct.Timestamp), int64(0))
 }
 
@@ -756,7 +756,7 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 
 	makeCS := func(val int) *CandleSet {
 		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-		cs.Candles[0].Candle = market.Candle{Open: types.Price(val), Ticks: 1}
+		cs.Candles[0] = market.Candle{Open: types.Price(val), Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 		cs.SetValid(0)
 		return cs
 	}

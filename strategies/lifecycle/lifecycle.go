@@ -36,7 +36,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return true }
 
-func (s *Strategy) Update(_ context.Context, c *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, c *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if c == nil || run == nil {
 		return strategy.Hold("hold")
 	}

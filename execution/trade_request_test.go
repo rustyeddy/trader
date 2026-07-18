@@ -14,14 +14,12 @@ import (
 func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 	t.Parallel()
 
-	ct := &market.CandleTime{
-		Candle: market.Candle{
-			Open:  types.PriceFromFloat(1.1000),
-			High:  types.PriceFromFloat(1.1010),
-			Low:   types.PriceFromFloat(1.0990),
-			Close: types.PriceFromFloat(1.1005),
-			Ticks: 42,
-		},
+	ct := &market.Candle{
+		Open:      types.PriceFromFloat(1.1000),
+		High:      types.PriceFromFloat(1.1010),
+		Low:       types.PriceFromFloat(1.0990),
+		Close:     types.PriceFromFloat(1.1005),
+		Ticks:     42,
 		Timestamp: types.FromTime(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)),
 	}
 
@@ -40,7 +38,7 @@ func TestNewOpenRequest_PopulatesFieldsFromCandleAndArgs_Phase1(t *testing.T) {
 	assert.Equal(t, RequestMarketOpen, op.RequestType)
 	assert.Equal(t, ct.Close, op.Price)
 	assert.Equal(t, ct.Timestamp, op.Timestamp)
-	assert.Equal(t, ct.Candle, op.Candle)
+	assert.Equal(t, *ct, op.Candle)
 	assert.Equal(t, "phase1-open", op.Reason)
 
 	assert.Equal(t, "EURUSD", op.Instrument)

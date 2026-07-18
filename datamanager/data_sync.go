@@ -71,7 +71,7 @@ func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandlePro
 
 		nonZero := 0
 		for i := range month.Candles {
-			if !month.Candles[i].Candle.IsZero() {
+			if !month.Candles[i].IsZero() {
 				nonZero++
 			}
 		}
@@ -204,7 +204,7 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 	// could drift out of sync with the boundaries actually written.
 	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
 	slotCount := len(boundaries)
-	candles := make([]market.CandleTime, slotCount)
+	candles := make([]market.Candle, slotCount)
 	indexOf := make(map[int64]int, slotCount)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
@@ -238,16 +238,14 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 				maxSpread = sp
 			}
 		}
-		candles[idx] = market.CandleTime{
-			Candle: market.Candle{
-				Open:      types.PriceFromFloat(r.BidOpen),
-				High:      types.PriceFromFloat(r.BidHigh),
-				Low:       types.PriceFromFloat(r.BidLow),
-				Close:     types.PriceFromFloat(r.BidClose),
-				AvgSpread: types.PriceFromFloat(sumSpread / 4),
-				MaxSpread: types.PriceFromFloat(maxSpread),
-				Ticks:     int32(r.Volume),
-			},
+		candles[idx] = market.Candle{
+			Open:      types.PriceFromFloat(r.BidOpen),
+			High:      types.PriceFromFloat(r.BidHigh),
+			Low:       types.PriceFromFloat(r.BidLow),
+			Close:     types.PriceFromFloat(r.BidClose),
+			AvgSpread: types.PriceFromFloat(sumSpread / 4),
+			MaxSpread: types.PriceFromFloat(maxSpread),
+			Ticks:     int32(r.Volume),
 			Timestamp: types.FromTime(r.Time.UTC()),
 		}
 		filled[idx] = true

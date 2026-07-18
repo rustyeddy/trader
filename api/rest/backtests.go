@@ -371,7 +371,7 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 
 	bars := make([]candleBar, 0)
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		c := ct.Candle
+		c := ct
 		bars = append(bars, candleBar{
 			Time:  int64(ct.Timestamp),
 			Open:  c.Open.Float64(),

@@ -51,7 +51,7 @@ func (f *D1ADXFilter) Name() string {
 
 func (f *D1ADXFilter) Ready() bool { return f.adx.Ready() }
 
-func (f *D1ADXFilter) Tick(ct market.CandleTime) {
+func (f *D1ADXFilter) Tick(ct market.Candle) {
 	if daily, rolled := f.dailyCandleAccumulator.Tick(ct); rolled {
 		f.adx.Update(daily)
 	}

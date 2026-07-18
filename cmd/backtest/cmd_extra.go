@@ -112,7 +112,7 @@ func runBacktestCandles(cmd *cobra.Command, args []string) error {
 	w := csv.NewWriter(cmd.OutOrStdout())
 	_ = w.Write([]string{"time", "open", "high", "low", "close"})
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		c := ct.Candle
+		c := ct
 		_ = w.Write([]string{
 			ct.Timestamp.Time().UTC().Format("2006-01-02T15:04:05Z"),
 			fmt.Sprintf("%.5f", c.Open.Float64()),

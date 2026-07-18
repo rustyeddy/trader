@@ -10,11 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func sessionCT(ts time.Time) market.CandleTime {
-	return market.CandleTime{
-		Candle:    market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050},
-		Timestamp: types.FromTime(ts),
-	}
+func sessionCT(ts time.Time) market.Candle {
+	return market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050, Timestamp: types.FromTime(ts)}
 }
 
 func TestSessionFilter_NotReadyBeforeFirstTick(t *testing.T) {

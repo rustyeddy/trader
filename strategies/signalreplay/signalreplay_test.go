@@ -42,11 +42,8 @@ func (f *fakeCtx) closeLot(id string) {
 	f.lots.Delete(id)
 }
 
-func candleAt(ts int64) *market.CandleTime {
-	return &market.CandleTime{
-		Candle:    market.Candle{Open: 100, High: 101, Low: 99, Close: 100},
-		Timestamp: types.Timestamp(ts),
-	}
+func candleAt(ts int64) *market.Candle {
+	return &market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Timestamp: types.Timestamp(ts)}
 }
 
 func day(y int, m time.Month, d int) time.Time {

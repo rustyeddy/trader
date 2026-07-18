@@ -38,7 +38,7 @@ func (f *SessionFilter) Name() string {
 
 func (f *SessionFilter) Ready() bool { return f.ready }
 
-func (f *SessionFilter) Tick(ct market.CandleTime) {
+func (f *SessionFilter) Tick(ct market.Candle) {
 	f.utcHour = int((int64(ct.Timestamp) % 86400) / 3600)
 	f.ready = true
 }

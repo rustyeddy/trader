@@ -135,7 +135,7 @@ func (a *CandleStrategyAdapter) Tick(ctx context.Context, price LivePrice, openT
 
 	// Advance regime filter and exit strategy indicators.
 	a.regime.Tick(ct)
-	a.exit.Tick(ct.Candle)
+	a.exit.Tick(ct)
 
 	// Update trailing stops on open positions and push to OANDA if they moved.
 	if a.exit.Ready() {
@@ -231,7 +231,7 @@ func (a *CandleStrategyAdapter) warmupFromLocalData(ctx context.Context) error {
 	count := 0
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
 		a.regime.Tick(ct)
-		a.exit.Tick(ct.Candle)
+		a.exit.Tick(ct)
 		bt := a.makeBacktest()
 		_ = a.strategy.Update(ctx, &ct, bt)
 		if barTime := ct.Timestamp.Time(); barTime.After(a.lastBarTime) {
@@ -281,7 +281,7 @@ func (a *CandleStrategyAdapter) warmupFromOANDA(ctx context.Context) error {
 		}
 		ct := oandaCandleToCandleTime(c, a.instNorm)
 		a.regime.Tick(ct)
-		a.exit.Tick(ct.Candle)
+		a.exit.Tick(ct)
 		bt := a.makeBacktest()
 		_ = a.strategy.Update(ctx, &ct, bt)
 		a.lastBarTime = c.Time
@@ -395,9 +395,9 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LiveP
 	return lp
 }
 
-// oandaCandleToCandleTime converts an OANDA candle to the internal CandleTime
+// oandaCandleToCandleTime converts an OANDA candle to the internal Candle
 // type used by backtest strategies. Uses the mid (bid+ask)/2 for each OHLC.
-func oandaCandleToCandleTime(c oanda.Candle, _ string) market.CandleTime {
+func oandaCandleToCandleTime(c oanda.Candle, _ string) market.Candle {
 	toPrice := func(bid, ask float64) types.Price {
 		return types.PriceFromFloat((bid + ask) / 2)
 	}
@@ -412,10 +412,8 @@ func oandaCandleToCandleTime(c oanda.Candle, _ string) market.CandleTime {
 		spread = -spread
 	}
 	candle.AvgSpread = spread
-	return market.CandleTime{
-		Candle:    candle,
-		Timestamp: types.FromTime(c.Time),
-	}
+	candle.Timestamp = types.FromTime(c.Time)
+	return candle
 }
 
 // oandaGranToTF converts an OANDA granularity string ("H1", "D", "M1") to the
@@ -451,7 +449,7 @@ func barsBefore(t time.Time, granularity string, n int) time.Time {
 
 // updateTrailingStops iterates open lots, computes the new chandelier stop,
 // and calls UpdateTradeStop on OANDA if the stop has moved.
-func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct market.CandleTime) {
+func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct market.Candle) {
 	if a.svc == nil {
 		return // no service — trailing stops disabled
 	}
@@ -471,7 +469,7 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 				meta.extremePrice = ct.Low
 			}
 		}
-		newStop := a.exit.UpdateStop(lot.Side, meta.currentStop, lot.EntryPrice, meta.extremePrice, ct.Candle)
+		newStop := a.exit.UpdateStop(lot.Side, meta.currentStop, lot.EntryPrice, meta.extremePrice, ct)
 		if newStop == meta.currentStop || newStop == 0 {
 			continue
 		}
@@ -501,14 +499,14 @@ type livePlanContext struct {
 	instrument string
 	exit       strategy.ExitStrategy
 	regime     strategy.RegimeFilter
-	candle     market.CandleTime
+	candle     market.Candle
 }
 
 func (c livePlanContext) Instrument() string            { return c.instrument }
 func (c livePlanContext) Account() *execution.Account   { return nil }
 func (c livePlanContext) Exit() strategy.ExitStrategy   { return c.exit }
 func (c livePlanContext) Regime() strategy.RegimeFilter { return c.regime }
-func (c livePlanContext) Candle() market.CandleTime     { return c.candle }
+func (c livePlanContext) Candle() market.Candle         { return c.candle }
 func (c livePlanContext) Slippage() types.Price         { return 0 }
 func (c livePlanContext) MaxSpread() types.Price        { return 0 }
 func (c livePlanContext) DefaultStopPips() types.Pips   { return 0 }

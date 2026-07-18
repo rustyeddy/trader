@@ -35,10 +35,10 @@ func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 		Start:      start,
 		Timeframe:  types.M1,
 		Scale:      types.PriceScale,
-		Candles: []market.CandleTime{
-			{Candle: market.Candle{Open: 100, High: 110, Low: 95, Close: 105, AvgSpread: 2, MaxSpread: 3, Ticks: 4}, Timestamp: start},
+		Candles: []market.Candle{
+			{Open: 100, High: 110, Low: 95, Close: 105, AvgSpread: 2, MaxSpread: 3, Ticks: 4, Timestamp: start},
 			{Timestamp: start + 60},
-			{Candle: market.Candle{Open: 106, High: 120, Low: 101, Close: 115, AvgSpread: 4, MaxSpread: 5, Ticks: 6}, Timestamp: start + 120},
+			{Open: 106, High: 120, Low: 101, Close: 115, AvgSpread: 4, MaxSpread: 5, Ticks: 6, Timestamp: start + 120},
 			{Timestamp: start + 180},
 		},
 		Valid: make([]uint64, 1),
@@ -58,5 +58,6 @@ func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 		AvgSpread: 3,
 		MaxSpread: 5,
 		Ticks:     10,
-	}, out.Candles[0].Candle)
+		Timestamp: start,
+	}, out.Candles[0])
 }

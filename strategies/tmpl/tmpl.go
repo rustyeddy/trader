@@ -59,7 +59,7 @@ func (s *Strategy) Reset() {
 
 func (s *Strategy) Ready() bool { return s.ready }
 
-func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+func (s *Strategy) Update(_ context.Context, ct *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}

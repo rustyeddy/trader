@@ -192,7 +192,7 @@ func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularit
 // missing recent bars, retrying with a forced full-window re-download
 // (still through DataManager) when the cache still can't satisfy count
 // afterwards.
-func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granularity string, count int) ([]market.CandleTime, error) {
+func (s *Service) fetchReviewCandleTimes(ctx context.Context, instrument, granularity string, count int) ([]market.Candle, error) {
 	inst := market.GetInstrument(instrument)
 	if inst == nil {
 		return nil, fmt.Errorf("review: unknown instrument %q", instrument)
@@ -307,7 +307,7 @@ func (s *Service) ensureCachedOandaCandles(ctx context.Context, oandaName, granu
 // current. Always goes through DataManager's OANDA provider — never a
 // direct OANDA client call — so every candle review ever sees is written
 // through the same canonical store path.
-func (s *Service) retryReviewCandleTimesDownload(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.CandleTime, error) {
+func (s *Service) retryReviewCandleTimesDownload(ctx context.Context, instrument, oandaName, granularity string, from, to time.Time, count int) ([]market.Candle, error) {
 	dlFrom := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
 	if _, err := s.DownloadOandaCandles(ctx, DownloadOandaCandlesRequest{
 		Instrument: oandaName,
@@ -345,10 +345,10 @@ func (s *Service) retryReviewCandleTimesDownload(ctx context.Context, instrument
 }
 
 // candlesOnly strips timestamps, keeping candle order.
-func candlesOnly(cts []market.CandleTime) []market.Candle {
+func candlesOnly(cts []market.Candle) []market.Candle {
 	out := make([]market.Candle, len(cts))
 	for i, ct := range cts {
-		out[i] = ct.Candle
+		out[i] = ct
 	}
 	return out
 }

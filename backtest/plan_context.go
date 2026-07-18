@@ -15,7 +15,7 @@ type runPlanContext struct {
 	acct            *execution.Account
 	exit            strategy.ExitStrategy
 	regime          strategy.RegimeFilter
-	candle          market.CandleTime
+	candle          market.Candle
 	slippage        types.Price
 	maxSpread       types.Price
 	defaultStopPips types.Pips
@@ -25,7 +25,7 @@ func (c runPlanContext) Instrument() string            { return c.instrument }
 func (c runPlanContext) Account() *execution.Account   { return c.acct }
 func (c runPlanContext) Exit() strategy.ExitStrategy   { return c.exit }
 func (c runPlanContext) Regime() strategy.RegimeFilter { return c.regime }
-func (c runPlanContext) Candle() market.CandleTime     { return c.candle }
+func (c runPlanContext) Candle() market.Candle         { return c.candle }
 func (c runPlanContext) Slippage() types.Price         { return c.slippage }
 func (c runPlanContext) MaxSpread() types.Price        { return c.maxSpread }
 func (c runPlanContext) DefaultStopPips() types.Pips   { return c.defaultStopPips }

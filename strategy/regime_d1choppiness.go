@@ -53,7 +53,7 @@ func (f *D1ChoppinessFilter) Name() string {
 
 func (f *D1ChoppinessFilter) Ready() bool { return f.ci.Ready() }
 
-func (f *D1ChoppinessFilter) Tick(ct market.CandleTime) {
+func (f *D1ChoppinessFilter) Tick(ct market.Candle) {
 	if daily, rolled := f.dailyCandleAccumulator.Tick(ct); rolled {
 		f.ci.Update(daily)
 	}

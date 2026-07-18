@@ -153,10 +153,7 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	close := types.Price(math.Round(1.10000 * scale))
 	stop := types.Price(math.Round(1.09000 * scale)) // 100-pip stop
 
-	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
-		Candle:    market.Candle{Close: close},
-		Timestamp: types.FromTime(time.Now()),
-	}, types.Long, stop, 0, "test")
+	open := execution.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, stop, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
@@ -176,10 +173,7 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 
 	// Stop == 0: PlanSignal would normally set it; if it reaches convertPlan
 	// with stop=0 still, the open must be skipped.
-	open := execution.NewOpenRequest("EURUSD", &market.CandleTime{
-		Candle:    market.Candle{Close: close},
-		Timestamp: types.FromTime(time.Now()),
-	}, types.Long, 0 /*stop*/, 0, "test")
+	open := execution.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, 0 /*stop*/, 0, "test")
 
 	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
 
@@ -314,7 +308,7 @@ func (n *noopStrategy) Name() string            { return "noop" }
 func (n *noopStrategy) Reset()                  {}
 func (n *noopStrategy) Ready() bool             { return true }
 func (n *noopStrategy) StopDescription() string { return "" }
-func (n *noopStrategy) Update(_ context.Context, _ *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+func (n *noopStrategy) Update(_ context.Context, _ *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	return strategy.Hold("noop")
 }
 

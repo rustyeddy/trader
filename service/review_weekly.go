@@ -23,7 +23,7 @@ const dayRollShift = 4 * time.Hour
 // in-progress week, mirroring the "!c.Complete" filter OANDA-native fetches
 // apply so review never scores a still-forming week. Returns at most the
 // most recent count complete weeks, oldest first.
-func deriveWeeklyCandles(daily []market.CandleTime, count int) []market.Candle {
+func deriveWeeklyCandles(daily []market.Candle, count int) []market.Candle {
 	return deriveWeeklyCandlesAsOf(daily, count, time.Now())
 }
 
@@ -35,7 +35,7 @@ func deriveWeeklyCandles(daily []market.CandleTime, count int) []market.Candle {
 // ISO week, and the trailing-week check would never fire — silently
 // treating a partial trailing week (asOf falling midweek) as if it were a
 // complete week's OHLC.
-func deriveWeeklyCandlesAsOf(daily []market.CandleTime, count int, asOf time.Time) []market.Candle {
+func deriveWeeklyCandlesAsOf(daily []market.Candle, count int, asOf time.Time) []market.Candle {
 	if len(daily) == 0 || count <= 0 {
 		return nil
 	}
@@ -47,7 +47,7 @@ func deriveWeeklyCandlesAsOf(daily []market.CandleTime, count int, asOf time.Tim
 
 	var weeks []bucket
 	for _, ct := range daily {
-		if ct.Candle.IsZero() {
+		if ct.IsZero() {
 			continue
 		}
 		t := time.Unix(int64(ct.Timestamp), 0).UTC().Add(dayRollShift)
@@ -55,18 +55,18 @@ func deriveWeeklyCandlesAsOf(daily []market.CandleTime, count int, asOf time.Tim
 
 		if n := len(weeks); n > 0 && weeks[n-1].year == year && weeks[n-1].week == week {
 			b := &weeks[n-1]
-			if ct.Candle.High > b.candle.High {
-				b.candle.High = ct.Candle.High
+			if ct.High > b.candle.High {
+				b.candle.High = ct.High
 			}
-			if ct.Candle.Low < b.candle.Low {
-				b.candle.Low = ct.Candle.Low
+			if ct.Low < b.candle.Low {
+				b.candle.Low = ct.Low
 			}
-			b.candle.Close = ct.Candle.Close
-			b.candle.Ticks += ct.Candle.Ticks
+			b.candle.Close = ct.Close
+			b.candle.Ticks += ct.Ticks
 			continue
 		}
 
-		weeks = append(weeks, bucket{year: year, week: week, candle: ct.Candle})
+		weeks = append(weeks, bucket{year: year, week: week, candle: ct})
 	}
 	if len(weeks) == 0 {
 		return nil

@@ -31,8 +31,8 @@ func NewTrendAnalyzer() *TrendAnalyzer {
 
 func (a *TrendAnalyzer) Name() string { return "Trend Distribution" }
 
-func (a *TrendAnalyzer) Update(ct *market.CandleTime) {
-	if !ct.Candle.Validate() {
+func (a *TrendAnalyzer) Update(ct *market.Candle) {
+	if !ct.Validate() {
 		return
 	}
 	rng := int64(ct.High) - int64(ct.Low)

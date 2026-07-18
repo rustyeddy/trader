@@ -112,15 +112,15 @@ func (x *Cross) Ready() bool {
 	return x.core.Fast.Ready() && x.core.Slow.Ready()
 }
 
-func (x *Cross) Update(_ context.Context, ct *market.CandleTime, _ strategy.StrategyContext) strategy.Signal {
+func (x *Cross) Update(_ context.Context, ct *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
-	c := ct.Candle
-	x.core.Fast.Update(c)
-	x.core.Slow.Update(c)
+	c := ct
+	x.core.Fast.Update(*c)
+	x.core.Slow.Update(*c)
 	if x.core.ATR != nil {
-		x.core.ATR.Update(c)
+		x.core.ATR.Update(*c)
 	}
 
 	if !x.Ready() {

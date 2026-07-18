@@ -72,9 +72,7 @@ func TestUpdate_NilCandleTime(t *testing.T) {
 
 func TestUpdate_HoldsDuringWarmup(t *testing.T) {
 	s, _ := New(Config{FastPeriod: 3, SlowPeriod: 8})
-	ct := &market.CandleTime{
-		Candle: market.Candle{Close: types.Price(1.0850 * float64(types.PriceScale))},
-	}
+	ct := &market.Candle{Close: types.Price(1.0850 * float64(types.PriceScale))}
 	sig := s.Update(context.Background(), ct, nil)
 	assert.Equal(t, types.Flat, sig.Side)
 }
@@ -88,7 +86,7 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 		State:   &backtest.BacktestRun{},
 	}
 
-	for _, ct := range []*market.CandleTime{
+	for _, ct := range []*market.Candle{
 		scalperCT(1.0000, 1.0010, 0.9990, 1.0000),
 		scalperCT(1.0100, 1.0110, 1.0090, 1.0100),
 		scalperCT(1.0200, 1.0210, 1.0190, 1.0200),
@@ -104,13 +102,11 @@ func TestUpdate_BuyTheDipRecoveryOpensLong(t *testing.T) {
 	assert.Equal(t, "buy-the-dip", sig.Reason)
 }
 
-func scalperCT(open, high, low, close float64) *market.CandleTime {
-	return &market.CandleTime{
-		Candle: market.Candle{
-			Open:  types.PriceFromFloat(open),
-			High:  types.PriceFromFloat(high),
-			Low:   types.PriceFromFloat(low),
-			Close: types.PriceFromFloat(close),
-		},
+func scalperCT(open, high, low, close float64) *market.Candle {
+	return &market.Candle{
+		Open:  types.PriceFromFloat(open),
+		High:  types.PriceFromFloat(high),
+		Low:   types.PriceFromFloat(low),
+		Close: types.PriceFromFloat(close),
 	}
 }

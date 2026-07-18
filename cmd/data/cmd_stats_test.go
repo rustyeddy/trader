@@ -78,8 +78,8 @@ func TestPrintAnalysis_WithUnits_ShowsUSDColumn(t *testing.T) {
 
 	swing := datamanager.NewSwingAnalyzer(inst)
 	// Feed one valid candle so swing has a stat with Pips > 0.
-	swing.Update(&market.CandleTime{
-		Candle:    market.Candle{Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100},
+	swing.Update(&market.Candle{
+		Open: 108_000, High: 108_200, Low: 107_800, Close: 108_100,
 		Timestamp: 1_000_000,
 	})
 

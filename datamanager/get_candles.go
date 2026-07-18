@@ -50,7 +50,7 @@ func CandleWindow(tf types.Timeframe, count int) time.Duration {
 // random access — the last candle, the last N candles — and are willing to
 // materialize the full result eagerly.
 //
-// Timestamps are included (market.CandleTime, not bare market.Candle)
+// Timestamps are included (market.Candle, not bare market.Candle)
 // because callers like review's weekly-candle derivation need to bucket
 // daily candles by calendar week; stripping timestamps here would make
 // that impossible to recover afterwards, since closed-market gaps mean a
@@ -64,7 +64,7 @@ func CandleWindow(tf types.Timeframe, count int) time.Duration {
 // The returned slice is already compacted to valid, market-session candles
 // — closed-market calendar slots (weekends, holidays) are never included —
 // since Candles() already filters them via the underlying candleSetIterator.
-func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof time.Time, count int) ([]market.CandleTime, error) {
+func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof time.Time, count int) ([]market.Candle, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("GetCandles: count must be positive, got %d", count)
 	}
@@ -80,9 +80,9 @@ func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof t
 	}
 	defer func() { _ = iter.Close() }()
 
-	candles := make([]market.CandleTime, 0, count)
+	candles := make([]market.Candle, 0, count)
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
-		if ct.Candle.IsZero() {
+		if ct.IsZero() {
 			// The Valid bitset only reflects the on-disk flag byte, not the
 			// actual OHLC content — a corrupt or partially-written CSV row
 			// can be flagged valid yet hold a zero-value candle. Skip it so

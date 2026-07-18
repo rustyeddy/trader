@@ -188,13 +188,13 @@ func (d *Breakout) adxGatePass(side types.Side) bool {
 	return d.adx.MinusDIUnits() > d.adx.PlusDIUnits()
 }
 
-func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (d *Breakout) Update(_ context.Context, ct *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if ct == nil {
 		return strategy.Hold("no candle")
 	}
 
 	if !d.Ready() {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold("warming up")
 	}
 
@@ -203,19 +203,19 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 
 	// Monday block.
 	if d.blockMonday && dow == dowMonday {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold("monday-block")
 	}
 
 	// Friday block (optional).
 	if d.blockFriday && dow == dowFriday {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold("friday-block")
 	}
 
 	// News-day block.
 	if d.blockedDays[currentDay] {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold("news-day-block")
 	}
 
@@ -254,16 +254,16 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 		d.pendingSide = 0
 		d.pendingCount = 0
 		d.pendingLevel = 0
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold("no breakout")
 	}
 
 	if side != d.pendingSide {
-		if !closeStrengthOK(ct.Candle, side, d.closeStrength) {
+		if !closeStrengthOK(*ct, side, d.closeStrength) {
 			d.pendingSide = 0
 			d.pendingCount = 0
 			d.pendingLevel = 0
-			d.advanceBar(ct.Candle)
+			d.advanceBar(*ct)
 			return strategy.Hold("weak close")
 		}
 		d.pendingSide = side
@@ -278,12 +278,12 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 	}
 
 	if d.pendingCount < d.confirmBars {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold(fmt.Sprintf("confirming break (%d/%d)", d.pendingCount, d.confirmBars))
 	}
 
 	if !d.adxGatePass(side) {
-		d.advanceBar(ct.Candle)
+		d.advanceBar(*ct)
 		return strategy.Hold(fmt.Sprintf("adx-filtered(adx=%.1f,+DI=%.1f,-DI=%.1f)",
 			d.adx.Float64(), d.adx.PlusDI(), d.adx.MinusDI()))
 	}
@@ -303,7 +303,7 @@ func (d *Breakout) Update(_ context.Context, ct *market.CandleTime, run strategy
 		})
 	}
 
-	d.advanceBar(ct.Candle)
+	d.advanceBar(*ct)
 
 	if alreadySameSide {
 		return strategy.Hold("already-in-position")

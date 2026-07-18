@@ -464,7 +464,7 @@ func TestStoreScanFiles_ClosedOnlyDailyGapsRemainComplete(t *testing.T) {
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
-		cs.Candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+		cs.Candles[i] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1, Timestamp: cs.Candles[i].Timestamp}
 		cs.SetValid(i)
 	}
 	require.NoError(t, s.WriteCSV(cs))
@@ -491,11 +491,11 @@ func TestStoreScanFiles_DSTTransitionMonthNotFalselyIncomplete(t *testing.T) {
 
 	monthStart := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC)
 	boundaries := SlotBoundaries(monthStart, types.D1, 31)
-	candles := make([]market.CandleTime, len(boundaries))
+	candles := make([]market.Candle, len(boundaries))
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 		if timeRangeMayHaveForexData(b, b.Add(24*time.Hour)) {
-			candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+			candles[i] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1, Timestamp: types.FromTime(b)}
 		}
 	}
 	require.NoError(t, s.WriteMonthlyCandleTimes(market.SourceOanda, "EURUSD", types.D1, monthStart, candles))
@@ -529,11 +529,11 @@ func TestStoreScanFiles_NextMonthSpilloverNotFalselyIncomplete(t *testing.T) {
 	monthStart := time.Date(2021, time.May, 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 	boundaries := SlotBoundaries(monthStart, types.H4, 186)
-	candles := make([]market.CandleTime, len(boundaries))
+	candles := make([]market.Candle, len(boundaries))
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 		if b.Before(monthEnd) && timeRangeMayHaveForexData(b, b.Add(4*time.Hour)) {
-			candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+			candles[i] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1, Timestamp: types.FromTime(b)}
 		}
 		// Slots at/after monthEnd (June 1st spillover) are intentionally
 		// left unfilled, matching what a real raw file would look like.
@@ -854,7 +854,7 @@ func TestWriteCSV_ValidFlag(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	cs.Candles[5].Candle = market.Candle{Open: 200, High: 210, Low: 195, Close: 205, Ticks: 3}
+	cs.Candles[5] = market.Candle{Open: 200, High: 210, Low: 195, Close: 205, Ticks: 3, Timestamp: cs.Candles[5].Timestamp}
 	cs.SetValid(5)
 
 	require.NoError(t, s.WriteCSV(cs))
@@ -891,7 +891,7 @@ func TestWriteCSV_WithInvalidCandle(t *testing.T) {
 	cs, err := NewMonthlyCandleSet("EURUSD", types.H1, types.FromTime(start), types.PriceScale, "test")
 	require.NoError(t, err)
 
-	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -936,10 +936,10 @@ func TestWriteMonthlyCandleTimes_PersistsEachCandlesOwnTimestamp(t *testing.T) {
 	// first slot for January is that session's first sub-slot with its own
 	// open >= monthStart, not the next full session's 22:00 UTC open.
 	trueFirstSlot := MonthSlotBoundaries(monthStart, monthEnd, types.H4)[0]
-	candles := make([]market.CandleTime, 6)
+	candles := make([]market.Candle, 6)
 	for i := range candles {
-		candles[i] = market.CandleTime{
-			Candle:    market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1},
+		candles[i] = market.Candle{
+			Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1,
 			Timestamp: types.FromTime(trueFirstSlot.Add(time.Duration(i) * 4 * time.Hour)),
 		}
 	}
@@ -972,14 +972,14 @@ func TestWriteMonthlyCandleTimes_UnevenSpacingSurvivesRoundTrip(t *testing.T) {
 	// dense array with day1/day2's data at their real slot indices —
 	// exactly what DeriveCanonicalFromRaw does.
 	boundaries := SlotBoundaries(monthStart, types.D1, 31)
-	candles := make([]market.CandleTime, len(boundaries))
+	candles := make([]market.Candle, len(boundaries))
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 	}
 	idx1 := SlotIndexForTime(monthStart, types.D1, day1)
 	idx2 := SlotIndexForTime(monthStart, types.D1, day2)
-	candles[idx1].Candle = market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1}
-	candles[idx2].Candle = market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1}
+	candles[idx1] = market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1, Timestamp: types.FromTime(day1)}
+	candles[idx2] = market.Candle{Open: 1, High: 2, Low: 1, Close: 1, Ticks: 1, Timestamp: types.FromTime(day2)}
 
 	require.NoError(t, s.WriteMonthlyCandleTimes(market.SourceOanda, "EURUSD", types.D1, monthStart, candles))
 

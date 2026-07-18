@@ -160,14 +160,16 @@ type errCandleIterator struct {
 	ts       types.Timestamp
 }
 
-func (it *errCandleIterator) Next() (market.CandleTime, bool) {
+func (it *errCandleIterator) Next() (market.Candle, bool) {
 	if it.nextErr != nil || it.count >= it.maxItems {
-		return market.CandleTime{}, false
+		return market.Candle{}, false
 	}
 	it.count++
 	it.cur = market.Candle{Open: 100, Close: 100, Ticks: 1}
 	it.ts = types.Timestamp(it.count)
-	return market.CandleTime{Candle: it.cur, Timestamp: it.ts}, true
+	c := it.cur
+	c.Timestamp = it.ts
+	return c, true
 }
 func (it *errCandleIterator) Err() error   { return it.nextErr }
 func (it *errCandleIterator) Close() error { return it.closeErr }
@@ -181,13 +183,14 @@ type errAfterCandleIterator struct {
 	emitted bool
 }
 
-func (it *errAfterCandleIterator) Next() (market.CandleTime, bool) {
+func (it *errAfterCandleIterator) Next() (market.Candle, bool) {
 	if it.idx < len(it.items) {
-		ct := market.CandleTime{Candle: it.items[it.idx], Timestamp: it.tss[it.idx]}
+		ct := it.items[it.idx]
+		ct.Timestamp = it.tss[it.idx]
 		it.idx++
 		return ct, true
 	}
-	return market.CandleTime{}, false
+	return market.Candle{}, false
 }
 func (it *errAfterCandleIterator) Err() error {
 	if it.idx >= len(it.items) && !it.emitted {
@@ -224,11 +227,11 @@ func TestChainedCandleIterator_NextExhausted(t *testing.T) {
 
 	ct, ok := chained.Next()
 	require.True(t, ok)
-	require.Equal(t, market.Candle{Open: 100, Close: 100, Ticks: 1}, ct.Candle)
+	require.Equal(t, market.Candle{Open: 100, Close: 100, Ticks: 1, Timestamp: 1}, ct)
 
 	ct, ok = chained.Next()
 	require.False(t, ok)
-	require.Equal(t, market.CandleTime{}, ct)
+	require.Equal(t, market.Candle{}, ct)
 }
 
 func TestChainedCandleIterator_SubCloseErr(t *testing.T) {

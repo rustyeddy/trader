@@ -591,7 +591,7 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	instName := market.NormalizeInstrument(key.Instrument)
 	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
 	n := len(boundaries)
-	candles := make([]market.CandleTime, n)
+	candles := make([]market.Candle, n)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 	}
@@ -678,16 +678,14 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		cs.Candles[idx] = market.CandleTime{
-			Candle: market.Candle{
-				High:      highv,
-				Open:      openv,
-				Low:       lowv,
-				Close:     closev,
-				AvgSpread: avgSpread,
-				MaxSpread: maxSpread,
-				Ticks:     int32(ticks),
-			},
+		cs.Candles[idx] = market.Candle{
+			High:      highv,
+			Open:      openv,
+			Low:       lowv,
+			Close:     closev,
+			AvgSpread: avgSpread,
+			MaxSpread: maxSpread,
+			Ticks:     int32(ticks),
 			Timestamp: types.Timestamp(ts),
 		}
 		if flags&0x0001 != 0 {
@@ -765,7 +763,7 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 	for i := 0; i < len(cs.Candles); i++ {
 		openUnix := int64(cs.Candles[i].Timestamp)
 
-		c := cs.Candles[i].Candle
+		c := cs.Candles[i]
 		var flags uint64
 		if len(cs.Valid) > 0 && types.BitIsSet(cs.Valid, i) {
 			flags = 0x0001

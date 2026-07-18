@@ -21,21 +21,19 @@ func fakeRun(instrument string) *backtest.Backtest {
 	}
 }
 
-func fakeCandle(ts types.Timestamp, close, high, low float64) *market.CandleTime {
-	return &market.CandleTime{
+func fakeCandle(ts types.Timestamp, close, high, low float64) *market.Candle {
+	return &market.Candle{
 		Timestamp: ts,
-		Candle: market.Candle{
-			Close: types.PriceFromFloat(close),
-			High:  types.PriceFromFloat(high),
-			Low:   types.PriceFromFloat(low),
-		},
+		Close:     types.PriceFromFloat(close),
+		High:      types.PriceFromFloat(high),
+		Low:       types.PriceFromFloat(low),
 	}
 }
 
 func TestFake_NameResetReady(t *testing.T) {
 	t.Parallel()
 
-	f := &Fake{CandleCount: 2, candles: []*market.CandleTime{{}, {}}, highest: 10, lowest: 5}
+	f := &Fake{CandleCount: 2, candles: []*market.Candle{{}, {}}, highest: 10, lowest: 5}
 	assert.Equal(t, "Fake", f.Name())
 	assert.True(t, f.Ready())
 

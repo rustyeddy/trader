@@ -19,7 +19,7 @@ func init() {
 type Fake struct {
 	CandleCount int
 
-	candles []*market.CandleTime
+	candles []*market.Candle
 	highest types.Price
 	lowest  types.Price
 }
@@ -37,7 +37,7 @@ func (f *Fake) Ready() bool {
 	return f.CandleCount == len(f.candles)
 }
 
-func (f *Fake) Update(_ context.Context, c *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (f *Fake) Update(_ context.Context, c *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	f.candles = append(f.candles, c)
 
 	if len(f.candles) < f.CandleCount {
@@ -83,7 +83,7 @@ func (f *Fake02) Reset() {
 
 func (f *Fake02) Ready() bool { return true }
 
-func (f *Fake02) Update(_ context.Context, c *market.CandleTime, run strategy.StrategyContext) strategy.Signal {
+func (f *Fake02) Update(_ context.Context, c *market.Candle, run strategy.StrategyContext) strategy.Signal {
 	if c == nil {
 		return strategy.Hold("hold")
 	}

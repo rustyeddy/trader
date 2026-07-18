@@ -23,7 +23,7 @@ type PlanContext interface {
 	Account() *execution.Account
 	Exit() strategy.ExitStrategy
 	Regime() strategy.RegimeFilter
-	Candle() market.CandleTime
+	Candle() market.Candle
 	Slippage() types.Price
 	MaxSpread() types.Price
 	// DefaultStopPips returns a fallback stop distance (in deci-pips) applied
@@ -108,7 +108,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 
 		// Let the exit strategy override the initial stop when configured.
 		if exit != nil && exit.Ready() {
-			if s := exit.InitialStop(openReq.Side, openReq.Price, candle.Candle); s != 0 {
+			if s := exit.InitialStop(openReq.Side, openReq.Price, candle); s != 0 {
 				openReq.Stop = s
 			}
 		}
@@ -170,7 +170,7 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      sig.Reason,
-					Candle:      candle.Candle,
+					Candle:      candle,
 					RequestType: execution.RequestClose,
 					Price:       candle.Close,
 					Timestamp:   candle.Timestamp,
@@ -190,7 +190,7 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 				Request: execution.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "signal-reverse",
-					Candle:      candle.Candle,
+					Candle:      candle,
 					RequestType: execution.RequestClose,
 					Price:       candle.Close,
 					Timestamp:   candle.Timestamp,

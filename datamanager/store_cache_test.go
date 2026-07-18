@@ -19,7 +19,7 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 
 	s := newTestStore(t)
 	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.June, types.H1)
-	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -44,7 +44,7 @@ func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Now().UTC()
 	cs := makeTestCandleSet(t, "EUR_USD", now.Year(), now.Month(), types.H1)
-	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -72,7 +72,7 @@ func TestStoreWriteCSV_InvalidatesCache(t *testing.T) {
 
 	s := newTestStore(t)
 	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.July, types.H1)
-	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -81,7 +81,7 @@ func TestStoreWriteCSV_InvalidatesCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.Price(103), first.Candles[0].Close)
 
-	cs.Candles[0].Candle = market.Candle{Open: 200, High: 205, Low: 199, Close: 203, Ticks: 1}
+	cs.Candles[0] = market.Candle{Open: 200, High: 205, Low: 199, Close: 203, Ticks: 1, Timestamp: cs.Candles[0].Timestamp}
 	require.NoError(t, s.WriteCSV(cs))
 
 	second, err := s.ReadCSV(key)

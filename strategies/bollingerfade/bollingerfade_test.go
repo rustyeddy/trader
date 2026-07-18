@@ -16,11 +16,9 @@ import (
 const scale = float64(types.PriceScale) // 100_000
 
 // flat returns a candle where OHLC = close (flat bar at a given price).
-func flat(close float64) *market.CandleTime {
+func flat(close float64) *market.Candle {
 	p := types.Price(close * scale)
-	return &market.CandleTime{
-		Candle: market.Candle{Open: p, High: p, Low: p, Close: p},
-	}
+	return &market.Candle{Open: p, High: p, Low: p, Close: p}
 }
 
 // warmup feeds period flat candles at price 1.0 and asserts the strategy is ready.

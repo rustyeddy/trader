@@ -35,8 +35,8 @@ func TestStrategy_Ready(t *testing.T) {
 func TestStrategy_UpdateWithValues(t *testing.T) {
 	t.Parallel()
 
-	c := &market.CandleTime{
-		Candle:    market.Candle{Close: types.PriceFromFloat(1.1)},
+	c := &market.Candle{
+		Close:     types.PriceFromFloat(1.1),
 		Timestamp: types.Timestamp(100),
 	}
 

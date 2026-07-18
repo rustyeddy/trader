@@ -17,10 +17,15 @@ func mkClose(close float64) market.Candle {
 	return market.Candle{Close: toP(close)}
 }
 
+func mkClosePtr(close float64) *market.Candle {
+	c := mkClose(close)
+	return &c
+}
+
 func feedSignals(s *Cross, closes []float64) []strategy.Signal {
 	out := make([]strategy.Signal, 0, len(closes))
 	for _, c := range closes {
-		d := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(c)}, nil)
+		d := s.Update(context.Background(), mkClosePtr(c), nil)
 		out = append(out, d)
 	}
 	return out
@@ -157,7 +162,7 @@ func TestCross_Name(t *testing.T) {
 func TestCross_Reason(t *testing.T) {
 	s, err := New(Config{FastPeriod: 3, SlowPeriod: 5, Scale: types.PriceScale})
 	require.NoError(t, err)
-	sig := s.Update(context.Background(), &market.CandleTime{Candle: mkClose(1.0)}, nil)
+	sig := s.Update(context.Background(), mkClosePtr(1.0), nil)
 	require.NotEmpty(t, sig.Reason)
 }
 

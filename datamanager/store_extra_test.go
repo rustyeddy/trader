@@ -105,7 +105,7 @@ func TestBuildH1_FullPath(t *testing.T) {
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, types.M1)
 	require.NoError(t, err)
-	cs.Candles[0].Candle = testCandle()
+	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -125,7 +125,7 @@ func TestBuildD1_FullPath(t *testing.T) {
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	cs, err := newMonthlyCandleSetFromStart(s, "EURUSD", start, types.H1)
 	require.NoError(t, err)
-	cs.Candles[0].Candle = testCandle()
+	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -147,7 +147,7 @@ func TestChainedCandleIterator_SubIteratorErr(t *testing.T) {
 
 	s := useTempStore(t)
 	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
-	cs.Candles[0].Candle = testCandle()
+	cs.Candles[0] = testCandle()
 	cs.SetValid(0)
 
 	real := newCandleSetIterator(cs, types.TimeRange{})

@@ -211,11 +211,11 @@ func TestCompositeRegimeFilter_TrendingRequiresAll(t *testing.T) {
 	outside := time.Date(2024, 1, 2, 20, 0, 0, 0, time.UTC) // 20:00 UTC — outside session
 
 	// ADX is in warmup (always trending=true). Session is inside window.
-	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: types.FromTime(inside)})
+	comp.Tick(market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050, Timestamp: types.FromTime(inside)})
 	assert.True(t, comp.Trending(), "inside session + ADX warmup = trending")
 
 	// Move outside the session window.
-	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10050, High: 10150, Low: 9950, Close: 10100}, Timestamp: types.FromTime(outside)})
+	comp.Tick(market.Candle{Open: 10050, High: 10150, Low: 9950, Close: 10100, Timestamp: types.FromTime(outside)})
 	assert.False(t, comp.Trending(), "outside session = not trending regardless of ADX")
 }
 
@@ -254,7 +254,7 @@ func TestCompositeRegimeFilter_ReadyRequiresAll(t *testing.T) {
 	comp := NewCompositeRegimeFilter([]RegimeFilter{sf, af})
 
 	ts := time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC)
-	comp.Tick(market.CandleTime{Candle: market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050}, Timestamp: types.FromTime(ts)})
+	comp.Tick(market.Candle{Open: 10000, High: 10100, Low: 9900, Close: 10050, Timestamp: types.FromTime(ts)})
 
 	// Session is ready but ADX-D1 is not → composite not ready.
 	assert.False(t, comp.Ready(), "composite not ready until all sub-filters are ready")

@@ -79,7 +79,7 @@ func TestFetchCandleMonth_H4_PlacesTrueTimestamps(t *testing.T) {
 	for i, wantTime := range want {
 		idx, ok := indexOf[wantTime.Unix()]
 		require.True(t, ok, "slot %d: %s not found in month.Candles", i, wantTime)
-		require.False(t, month.Candles[idx].Candle.IsZero(), "slot %d should be filled", i)
+		require.False(t, month.Candles[idx].IsZero(), "slot %d should be filled", i)
 		require.Equal(t, types.FromTime(wantTime), month.Candles[idx].Timestamp, "slot %d timestamp", i)
 	}
 }
@@ -106,7 +106,7 @@ func TestFetchCandleMonth_D1_DSTTransition(t *testing.T) {
 		idx := datamanager.SlotIndexForTime(monthStart, types.D1, wantTime)
 		require.False(t, seen[idx], "slot %d must not be reused by two different real candles", idx)
 		seen[idx] = true
-		require.False(t, month.Candles[idx].Candle.IsZero())
+		require.False(t, month.Candles[idx].IsZero())
 		require.Equal(t, types.FromTime(wantTime), month.Candles[idx].Timestamp)
 	}
 }
@@ -127,6 +127,6 @@ func TestFetchCandleMonth_DropsCandleBeforeMonthStart(t *testing.T) {
 	require.NoError(t, err)
 
 	for i, ct := range month.Candles {
-		require.True(t, ct.Candle.IsZero(), "slot %d should be empty, the out-of-range candle must be dropped", i)
+		require.True(t, ct.IsZero(), "slot %d should be empty, the out-of-range candle must be dropped", i)
 	}
 }
