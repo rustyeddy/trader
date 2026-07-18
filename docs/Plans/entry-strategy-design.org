@@ -1,0 +1,226 @@
+#+TITLE: EntryStrategy Interface — Design Sketch
+#+DATE: 2026-07-16
+#+PROPERTY: status draft-for-implementation
+#+PROPERTY: audience implementation agent (Claude Code)
+
+* Part 1 — H4 sweep-path trace findings (prerequisite check, already done)
+
+Traced end-to-end: service/review_sweep.go -> reviewOneInstrumentAsOf ->
+getClosedCandles -> datamanager.GetCandles -> DataManager.Candles ->
+globalStore.ReadCSV.
+
+*Conclusion: the sweep path has no live-fetch staleness bug, structurally.*
+Unlike the live scan path (service/review.go's ensureCachedOandaCandles,
+fixed 2026-07-16), the sweep path has no incremental top-up cursor at all —
+every call reads directly off on-disk monthly CSV files. There is nothing
+here that can go stale the way the live path did.
+
+Checked and confirmed sound:
+- getClosedCandles' closed-bars-only shift (=asOf.Add(-tf)=) against
+  GetCandles' half-open =[Start,End)= range: a bar that just closed at
+  exactly asOf is correctly included; a bar opening at asOf (not yet
+  closed) is correctly excluded. No off-by-one.
+- Commit 87b16d5 (h4 filename-suffix parsing gap) only ever affected the
+  inventory-scan tool (=trader data validate-candles=), never
+  =DataManager.GetCandles= (confirmed via the commit's own diagnosis and by
+  tracing that GetCandles reads via =globalStore.ReadCSV= directly, not the
+  inventory path). Already fixed regardless; not a live risk.
+
+*Remaining risk, narrowed*: not a code bug, but whether the on-disk H4/H1
+candle files themselves are correct — originally downloaded/backfilled
+right, timestamps aligned to true OANDA H4 bar boundaries, no silent gaps
+or duplicate bars. This is a data spot-check (compare a handful of
+historical H4 closes against TradingView), not a code fix. Recommend doing
+this before fully trusting the outcome dataset, but it no longer blocks on
+finding-and-fixing a cursor bug — there isn't one in this path.
+
+* Part 2 — EntryStrategy interface
+
+** Why
+
+signalreplay.Strategy.Update() (strategies/signalreplay/signalreplay.go)
+currently hardcodes the v1 "next-open" entry rule inline, at the point
+where a pending episode becomes =active=:
+
+#+begin_src go
+active := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+...
+if active {
+    // fires immediately — the very first bar after the signal date
+    reason := episodeReason(pending.FirstDate)
+    ...
+    return strategy.Signal{Side: pending.Bias, Reason: reason}
+}
+#+end_src
+
+This is exactly the point the rejection-candle trigger needs to plug into:
+"episode is eligible" and "this bar is the entry bar" are currently the
+same check. Splitting them lets rejection-candle (and any future entry
+mode) decide /which/ bar within an eligible episode actually triggers,
+without touching episode-collapsing, exit handling, or the Strategy
+interface at all.
+
+Mirrors strategy/exit.go's ExitStrategy shape deliberately, since that
+pattern is already proven in this codebase (config-driven Kind/Params,
+factory function, wired into both backtest and live via the same
+interface).
+
+** Interface
+
+#+begin_src go
+package strategy
+
+import (
+    "time"
+
+    "github.com/rustyeddy/trader/market"
+    "github.com/rustyeddy/trader/types"
+)
+
+// EntryTrigger decides, once a scanner episode has become eligible for
+// entry (its signal date has passed and no lot is open), which specific
+// bar is the actual entry bar. It is orthogonal to selection (episode
+// collapsing, already done upstream by signalreplay/review) and to exit
+// (ExitStrategy) — it answers only "has this bar earned an entry",
+// replacing a hardcoded "first eligible bar" rule with a pluggable,
+// config-driven, backtestable choice.
+type EntryTrigger interface {
+    // Name returns a human-readable description for reports.
+    Name() string
+
+    // Ready reports whether the trigger has enough history to evaluate.
+    Ready() bool
+
+    // Tick updates internal indicators/pattern state. Called every bar,
+    // whether or not an episode is currently pending, so indicators can
+    // warm up — mirrors ExitStrategy.Tick's every-bar-regardless contract.
+    Tick(c market.Candle)
+
+    // Triggered reports whether c is the entry bar for a pending episode
+    // of the given bias that became eligible at episodeStart. Called only
+    // once an episode is already eligible (signal date passed, no lot
+    // open); the caller is responsible for episode identity and for
+    // calling Reset when a *different* episode becomes pending (e.g. the
+    // prior one aged out or flipped) so trigger state does not leak
+    // across episodes.
+    Triggered(side types.Side, episodeStart time.Time, c market.Candle) bool
+
+    // Reset clears any per-episode state (e.g. a bar counter or a
+    // candle-pattern lookback window). Called whenever the pending episode
+    // changes identity, and from the owning Strategy's own Reset().
+    Reset()
+}
+
+// EntryConfig mirrors the entry: section of a YAML backtest config —
+// same shape as ExitConfig.
+type EntryConfig struct {
+    Kind   string         `json:"kind"   yaml:"kind"`
+    Params map[string]any `json:"params" yaml:"params"`
+}
+
+// GetEntryTrigger constructs an EntryTrigger from cfg. If cfg.Kind is
+// empty, NextOpenEntry is returned — the current v1 behavior — so existing
+// configs and the existing regression tests keep working unchanged.
+func GetEntryTrigger(cfg EntryConfig) (EntryTrigger, error) {
+    switch cfg.Kind {
+    case "", "next-open":
+        return NextOpenEntry{}, nil
+
+    case "rejection-candle":
+        // period, ok, err := GetIntParam(cfg.Params, "lookback")
+        // ...
+        return nil, fmt.Errorf("entry trigger %q: not yet implemented", cfg.Kind)
+
+    default:
+        return nil, fmt.Errorf("unknown entry trigger %q", cfg.Kind)
+    }
+}
+
+// NextOpenEntry is a pass-through trigger: any bar in an already-eligible
+// episode triggers immediately. This is byte-for-byte the v1 hardcoded
+// rule, expressed as the default implementation of the new interface —
+// swapping signalreplay onto EntryTrigger with Kind:"" or "next-open"
+// must not change a single existing outcome-CSV row.
+type NextOpenEntry struct{}
+
+func (NextOpenEntry) Name() string     { return "next-open" }
+func (NextOpenEntry) Ready() bool      { return true }
+func (NextOpenEntry) Tick(_ market.Candle) {}
+func (NextOpenEntry) Triggered(_ types.Side, _ time.Time, _ market.Candle) bool {
+    return true
+}
+func (NextOpenEntry) Reset() {}
+#+end_src
+
+** Integration point in strategies/signalreplay/signalreplay.go
+
+- =Config= gains =Entry EntryConfig= (replacing the current =Entry string=
+  field that only ever validates to "next-open"). =build(params)= in
+  signalreplay.go and =cmd/signalreplay/cmd_gen.go= both need updating to
+  parse =--entry=/=--entry-params= the same way =--exit=/=--exit-params=
+  are parsed today — same flag-parsing pattern, new EntryConfig target.
+- =Strategy= gains an =entry strategy.EntryTrigger= field, constructed via
+  =strategy.GetEntryTrigger(cfg.Entry)= in =New()=, same place/pattern
+  =ExitStrategy= construction happens for other strategies.
+- =Strategy.Reset()= must also call =s.entry.Reset()=.
+- =Strategy.Update()= must call =s.entry.Tick(ct.Candle)= every bar
+  (mirroring how =ExitStrategy.Tick= is called every bar elsewhere in
+  backtest.go / candle_strategy_adapter.go — check that call site for the
+  exact placement convention before adding this one).
+- The =active= check's immediate-fire branch changes from:
+  #+begin_src go
+  active := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+  ...
+  if active {
+      // fire now
+  }
+  #+end_src
+  to:
+  #+begin_src go
+  eligible := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+  active := eligible && s.entry.Triggered(pending.Bias, pending.FirstDate, ct.Candle)
+  ...
+  if active {
+      // fire now — same as before from this point down
+  }
+  #+end_src
+  =Reset= on the entry trigger needs to be called whenever the pending
+  episode's identity changes out from under it without having triggered
+  (e.g. a same-instrument opposite-bias episode arrives, or the pending
+  episode's own last-date passes without ever triggering) — this case
+  isn't fully speced yet and is worth a design decision before
+  implementation: does an un-triggered episode simply expire and get
+  skipped (=s.idx++= without ever entering), or does it wait indefinitely?
+  Flagging as open rather than guessing.
+
+** Why NextOpenEntry as the default matters
+
+Swapping the abstraction in with =Kind: "next-open"= as default must
+reproduce the existing signalreplay_test.go and outcome-CSV results
+exactly. That regression check is the acceptance gate for this refactor
+step, done *before* rejection-candle is implemented as the second Kind —
+confirms the abstraction introduces no behavior change on its own.
+
+** Success metric for rejection-candle (from 2026-07-16 backtest analysis)
+
+3,340-trade baseline (chandelier ATR14x2.0, next-open, 2005-2026, 24
+pairs): 48% of trades stop out within 1-7 bars (avg -0.46R, -727R total);
+22% survive 15+ bars (avg +0.43 to +1.26R, +414R total). rejection-candle's
+job is to shrink the first cohort without shrinking the second — that's
+the number to report per experiment run, not just aggregate win rate.
+
+* Open questions for implementation
+
+1. Un-triggered episode expiry (see above) — expire silently vs. wait
+   indefinitely vs. expire at the episode's own LastDate.
+2. Should =EntryTrigger.Triggered= receive the full recent candle window
+   (for pattern lookback) rather than just the current bar? Tick-based
+   internal state (matching ExitStrategy's pattern) is the existing
+   convention and should probably be preferred over passing history in —
+   but rejection-candle detection needs a short lookback (a few bars) to
+   identify the rejection wick, so this needs a concrete decision once the
+   detection logic itself is specced, not deferred to Claude Code to guess.
+3. Confirm the exact ExitStrategy.Tick call site/order in backtest.go and
+   candle_strategy_adapter.go before wiring EntryTrigger.Tick alongside
+   it, so both fire in a consistent, documented order relative to
+   Strategy.Update.

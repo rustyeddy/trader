@@ -14,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -161,7 +162,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sctx strateg
 		}
 	case shouldClose:
 		return strategy.Signal{
-			Side:     market.Flat,
+			Side:     types.Flat,
 			CloseAll: true,
 			Reason:   "pulse-close",
 		}
@@ -179,7 +180,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.CandleTime, sctx strateg
 
 // stopFromPips computes a stop price from a pip distance and candle close.
 // Returns 0 when the instrument is unknown or stop_pips is not configured.
-func stopFromPips(ct *market.CandleTime, side market.Side, stopPips float64, inst *market.Instrument) market.Price {
+func stopFromPips(ct *market.CandleTime, side types.Side, stopPips float64, inst *market.Instrument) types.Price {
 	if inst == nil || stopPips <= 0 || ct == nil {
 		return 0
 	}
@@ -187,23 +188,23 @@ func stopFromPips(ct *market.CandleTime, side market.Side, stopPips float64, ins
 	if perPip <= 0 {
 		return 0
 	}
-	dist := market.Price(math.Round(stopPips * float64(perPip)))
-	if side == market.Long {
+	dist := types.Price(math.Round(stopPips * float64(perPip)))
+	if side == types.Long {
 		return ct.Close - dist
 	}
 	return ct.Close + dist
 }
 
-func (s *Strategy) nextSide() market.Side {
+func (s *Strategy) nextSide() types.Side {
 	switch s.cfg.Side {
 	case "long":
-		return market.Long
+		return types.Long
 	case "short":
-		return market.Short
+		return types.Short
 	default:
-		side := market.Long
+		side := types.Long
 		if s.sideTurn%2 != 0 {
-			side = market.Short
+			side = types.Short
 		}
 		s.sideTurn++
 		return side

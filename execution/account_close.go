@@ -4,22 +4,22 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type LotMatch struct {
 	Lot   *Lot
-	Units market.Units
+	Units types.Units
 }
 
 type CloseMatcher interface {
-	Match(lots []*Lot, units market.Units) ([]LotMatch, error)
+	Match(lots []*Lot, units types.Units) ([]LotMatch, error)
 }
 
 // FIFOMatcher closes the oldest open lots first.
 type FIFOMatcher struct{}
 
-func (FIFOMatcher) Match(lots []*Lot, units market.Units) ([]LotMatch, error) {
+func (FIFOMatcher) Match(lots []*Lot, units types.Units) ([]LotMatch, error) {
 	open := make([]*Lot, 0, len(lots))
 	for _, lot := range lots {
 		if lot != nil && lot.State == LotOpen && lot.RemainingUnits > 0 {
@@ -31,7 +31,7 @@ func (FIFOMatcher) Match(lots []*Lot, units market.Units) ([]LotMatch, error) {
 		return open[i].EntryTime < open[j].EntryTime
 	})
 
-	var total market.Units
+	var total types.Units
 	for _, lot := range open {
 		total += lot.RemainingUnits
 	}

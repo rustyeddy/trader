@@ -99,7 +99,7 @@ func TestClassify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bucket, _ := Classify(tt.d1, tt.h4, W1Snapshot{}, tt.setup, tt.d1Bias, tt.w1Bias)
+			bucket, _ := Classify(tt.d1, tt.h4, W1Snapshot{}, tt.setup, tt.d1Bias, tt.w1Bias, DefaultThresholds())
 			assert.Equal(t, tt.wantBucket, bucket)
 		})
 	}
@@ -107,7 +107,7 @@ func TestClassify(t *testing.T) {
 
 func TestClassify_DemotionNotes(t *testing.T) {
 	d1 := D1Snapshot{ADX: 15, CI: 70}
-	_, notes := Classify(d1, H4Snapshot{}, W1Snapshot{}, SetupSnapshot{}, "long", "short")
+	_, notes := Classify(d1, H4Snapshot{}, W1Snapshot{}, SetupSnapshot{}, "long", "short", DefaultThresholds())
 
 	assert.Contains(t, notes, "ADX dropped below 20")
 	assert.Contains(t, notes, "CI crossed above 65")
@@ -117,6 +117,24 @@ func TestClassify_DemotionNotes(t *testing.T) {
 func TestClassify_NoDemotionNotesWhenHealthy(t *testing.T) {
 	d1 := D1Snapshot{ADX: 30, CI: 40}
 	h4 := H4Snapshot{CI: 40, ADX: 25, EMASepATR: 0.5}
-	_, notes := Classify(d1, h4, W1Snapshot{}, SetupSnapshot{}, "long", "long")
+	_, notes := Classify(d1, h4, W1Snapshot{}, SetupSnapshot{}, "long", "long", DefaultThresholds())
 	assert.Empty(t, notes)
+}
+
+// TestClassify_CustomThresholds proves the config/CLI-facing knobs actually
+// change classification outcomes: a pair that stays "watch" under
+// DefaultThresholds (D1 ADX=22 is below the 25.0 default Hot floor) is
+// promoted to "hot" once a caller lowers HotD1ADXFloor. See issue #165.
+func TestClassify_CustomThresholds(t *testing.T) {
+	d1 := D1Snapshot{ADX: 22, CI: 40}
+	h4 := H4Snapshot{CI: 40}
+	setup := SetupSnapshot{InValueZone: true, H4Aligned: true}
+
+	bucket, _ := Classify(d1, h4, W1Snapshot{}, setup, "long", "long", DefaultThresholds())
+	assert.Equal(t, "watch", bucket, "sanity check: default threshold does not classify this pair as hot")
+
+	lenient := DefaultThresholds()
+	lenient.HotD1ADXFloor = 20.0
+	bucket, _ = Classify(d1, h4, W1Snapshot{}, setup, "long", "long", lenient)
+	assert.Equal(t, "hot", bucket, "lowering HotD1ADXFloor should promote the same inputs to hot")
 }

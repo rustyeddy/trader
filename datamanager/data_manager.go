@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 var defaultDataManagerInstruments = []string{"EURUSD", "USDJPY", "GBPUSD"}
@@ -164,7 +165,7 @@ func (dm *DataManager) BuildWantList(ctx context.Context) (*Wantlist, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				for _, tf := range []market.Timeframe{market.M1, market.H1, market.D1} {
+				for _, tf := range []types.Timeframe{types.M1, types.H1, types.D1} {
 					key := Key{sym, market.SourceCandles, KindCandle, tf, year, month, 0, 0}
 					if reason, needed := dm.inventory.WantReasonFor(key); needed {
 						w.PutKey(key, reason)
@@ -209,7 +210,7 @@ func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
 
 		case KindCandle:
 			switch k.TF {
-			case market.M1:
+			case types.M1:
 				// if it is M1 we need to determine if all the required ticks
 				// are already part of inventory. Otherwise this candle will
 				// have to continue to wait for all ticks to be ready
@@ -227,11 +228,11 @@ func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
 					plan.BuildM1 = append(plan.BuildM1, bt)
 				}
 
-			case market.H1:
+			case types.H1:
 				// H1 is only  dependent on M1, if M1 is in inventory we can
 				// build H1 straight away
 				km1 := k
-				km1.TF = market.M1
+				km1.TF = types.M1
 				found := dm.inventory.HasComplete(km1)
 				if found {
 					bt := BuildTask{
@@ -241,11 +242,11 @@ func (dm *DataManager) Plan(ctx context.Context) (*Plan, error) {
 					plan.BuildH1 = append(plan.BuildH1, bt)
 				}
 
-			case market.D1:
+			case types.D1:
 				// D1 is only dependent on H1, if H1 is in inventory we can
 				// build D1 straight away
 				kh1 := k
-				kh1.TF = market.H1
+				kh1.TF = types.H1
 				found := dm.inventory.HasComplete(kh1)
 				if found {
 					bt := BuildTask{
@@ -280,12 +281,12 @@ func (dm *DataManager) candleMaker(ctx context.Context) error {
 	}
 
 	builders := []struct {
-		tf market.Timeframe
+		tf types.Timeframe
 		fn func(context.Context, Key, []Key, *Wantlist) error
 	}{
-		{tf: market.M1, fn: buildM1},
-		{tf: market.H1, fn: buildH1},
-		{tf: market.D1, fn: buildD1},
+		{tf: types.M1, fn: buildM1},
+		{tf: types.H1, fn: buildH1},
+		{tf: types.D1, fn: buildD1},
 	}
 
 	for _, builder := range builders {
@@ -303,7 +304,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	if k.Kind != KindCandle {
 		return fmt.Errorf("buildM1 requires candle key, got kind=%v", k.Kind)
 	}
-	if k.TF != market.M1 {
+	if k.TF != types.M1 {
 		return fmt.Errorf("buildM1 wrong timeframe: %v", k.TF)
 	}
 	if k.Day != 0 || k.Hour != 0 {
@@ -321,9 +322,9 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 	monthSet, err := NewMonthlyCandleSet(
 		market.NormalizeInstrument(k.Instrument),
-		market.M1,
-		market.FromTime(monthStart),
-		market.PriceScale,
+		types.M1,
+		types.FromTime(monthStart),
+		types.PriceScale,
 		market.SourceCandles,
 	)
 	if err != nil {
@@ -337,13 +338,13 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		default:
 		}
 
-		if tickKey.Kind != KindTick || tickKey.TF != market.Ticks {
+		if tickKey.Kind != KindTick || tickKey.TF != types.Ticks {
 			return fmt.Errorf("buildM1 input must be hourly tick key, got %+v", tickKey)
 		}
 
 		it, err := globalStore.OpenTickIterator(tickKey)
 		if err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -352,7 +353,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 
 		hourSet, err := buildHourM1FromTickIterator(ctx, tickKey, it)
 		if err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
@@ -363,11 +364,11 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		}
 
 		if err := monthSet.Merge(hourSet); err != nil {
-			tickPath, err2 := globalStore.PathForAsset(tickKey)
+			tickPath, err2 := globalStore.KeyPath(tickKey)
 			if err2 != nil {
 				tickPath = "<path unavailable>"
 			}
-			kPath, err2 := globalStore.PathForAsset(k)
+			kPath, err2 := globalStore.KeyPath(k)
 			if err2 != nil {
 				kPath = "<path unavailable>"
 			}
@@ -377,7 +378,7 @@ func buildM1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	}
 
 	if err := globalStore.WriteCSV(monthSet); err != nil {
-		kPath, _ := globalStore.PathForAsset(k)
+		kPath, _ := globalStore.KeyPath(k)
 		return fmt.Errorf("write monthly M1 %s: %w", kPath, err)
 	}
 
@@ -395,7 +396,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		}
 	}()
 
-	if key.Kind != KindTick || key.TF != market.Ticks {
+	if key.Kind != KindTick || key.TF != types.Ticks {
 		return nil, fmt.Errorf("buildHourM1FromTickIterator requires tick key, got %+v", key)
 	}
 
@@ -406,17 +407,22 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		key.Hour,
 		0, 0, 0, time.UTC,
 	)
-	hourStartMS := market.TimeMilliFromTime(hourStartTime)
+	hourStartMS := types.TimeMilliFromTime(hourStartTime)
 
 	const minutesPerHour = 60
 
+	minuteCandles := make([]market.CandleTime, minutesPerHour)
+	for i, b := range SlotBoundaries(hourStartTime, types.M1, minutesPerHour) {
+		minuteCandles[i].Timestamp = types.FromTime(b)
+	}
+
 	cs := &CandleSet{
 		Instrument: market.NormalizeInstrument(key.Instrument),
-		Start:      market.FromTime(hourStartTime),
-		Timeframe:  market.M1,
-		Scale:      market.PriceScale,
+		Start:      types.FromTime(hourStartTime),
+		Timeframe:  types.M1,
+		Scale:      types.PriceScale,
 		Source:     market.SourceCandles,
-		Candles:    make([]market.Candle, minutesPerHour),
+		Candles:    minuteCandles,
 		Valid:      make([]uint64, (minutesPerHour+63)/64),
 	}
 
@@ -425,7 +431,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		cur           market.Candle
 		spreadSum     int64
 		havePrevClose bool
-		prevClose     market.Price
+		prevClose     types.Price
 	)
 
 	finalize := func() error {
@@ -434,9 +440,9 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		}
 
 		ticks := int64(cur.Ticks)
-		cur.AvgSpread = market.Price((spreadSum + ticks/2) / ticks)
+		cur.AvgSpread = types.Price((spreadSum + ticks/2) / ticks)
 
-		cs.Candles[curIdx] = cur
+		cs.Candles[curIdx].Candle = cur
 		cs.SetValid(curIdx)
 
 		prevClose = cur.Close
@@ -444,9 +450,9 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		return nil
 	}
 
-	fillFlat := func(idx int, px market.Price) {
+	fillFlat := func(idx int, px types.Price) {
 		// Dense placeholder candle. Intentionally NOT marked valid.
-		cs.Candles[idx] = market.Candle{
+		cs.Candles[idx].Candle = market.Candle{
 			Open:  px,
 			High:  px,
 			Low:   px,
@@ -469,7 +475,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 		}
 
 		minuteOpen := ts.FloorToMinute()
-		idx := int((minuteOpen - hourStartMS) / market.MinuteInMS)
+		idx := int((minuteOpen - hourStartMS) / types.MinuteInMS)
 		if idx < 0 || idx >= minutesPerHour {
 			return nil, fmt.Errorf(
 				"tick outside hour window: minute=%d hourStart=%d idx=%d",
@@ -521,7 +527,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 		if havePrevClose {
 			for m := curIdx + 1; m < idx; m++ {
-				if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+				if !cs.IsValid(m) && cs.Candles[m].Candle.IsZero() {
 					fillFlat(m, prevClose)
 				}
 			}
@@ -553,7 +559,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 
 	if havePrevClose {
 		for m := curIdx + 1; m < minutesPerHour; m++ {
-			if !cs.IsValid(m) && cs.Candles[m].IsZero() {
+			if !cs.IsValid(m) && cs.Candles[m].Candle.IsZero() {
 				fillFlat(m, prevClose)
 			}
 		}
@@ -563,7 +569,7 @@ func buildHourM1FromTickIterator(ctx context.Context, key Key, it iterator[RawTi
 }
 
 func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err error) {
-	if k.TF != market.H1 {
+	if k.TF != types.H1 {
 		return fmt.Errorf("buildH1 wrong timeframe: %v", k.TF)
 	}
 	if len(inputs) != 1 {
@@ -571,7 +577,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 	}
 
 	km1 := inputs[0]
-	if km1.TF != market.M1 {
+	if km1.TF != types.M1 {
 		return fmt.Errorf("buildH1 expected M1 input, got %v", km1.TF)
 	}
 
@@ -580,7 +586,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 		return err
 	}
 
-	h1, err := cs.Aggregate(market.H1) // or cs.Aggregate(k.TF)
+	h1, err := cs.Aggregate(types.H1) // or cs.Aggregate(k.TF)
 	if err != nil {
 		return err
 	}
@@ -594,7 +600,7 @@ func buildH1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) (err err
 }
 
 func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
-	if k.TF != market.D1 {
+	if k.TF != types.D1 {
 		return fmt.Errorf("buildD1 wrong timeframe: %v", k.TF)
 	}
 	if len(inputs) != 1 {
@@ -602,7 +608,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 	}
 
 	kh1 := inputs[0]
-	if kh1.TF != market.H1 {
+	if kh1.TF != types.H1 {
 		return fmt.Errorf("buildD1 expected H1 input, got %v", kh1.TF)
 	}
 
@@ -611,7 +617,7 @@ func buildD1(ctx context.Context, k Key, inputs []Key, wants *Wantlist) error {
 		return err
 	}
 
-	d1, err := cs.Aggregate(market.D1) // or cs.Aggregate(k.TF)
+	d1, err := cs.Aggregate(types.D1) // or cs.Aggregate(k.TF)
 	if err != nil {
 		return err
 	}
@@ -660,11 +666,11 @@ func (dm *DataManager) ExecuteDownloads(ctx context.Context) error {
 type CandleRequest struct {
 	Source     string
 	Instrument string
-	Range      market.TimeRange
+	Range      types.TimeRange
 	Strict     bool
 }
 
-func (cr CandleRequest) timeframe() market.Timeframe {
+func (cr CandleRequest) timeframe() types.Timeframe {
 	return cr.Range.TF
 }
 func (cr CandleRequest) Key() Key {
@@ -691,7 +697,7 @@ func (dm *DataManager) Candles(ctx context.Context, req CandleRequest) (market.C
 	}
 
 	switch req.timeframe() {
-	case market.M1, market.H1, market.H4, market.D1:
+	case types.M1, types.H1, types.H4, types.D1:
 	default:
 		return nil, fmt.Errorf("unsupported candle timeframe: %v", req.timeframe())
 	}

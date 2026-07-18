@@ -3,7 +3,9 @@ package execution
 import (
 	"fmt"
 
+	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // RequestType represents a trader domain type.
@@ -36,8 +38,8 @@ func (t RequestType) String() string {
 type Request struct {
 	*TradeCommon
 	RequestType
-	market.Price
-	market.Timestamp
+	types.Price
+	types.Timestamp
 	Reason string
 	Candle market.Candle
 }
@@ -68,7 +70,7 @@ func (r *OpenRequest) Validate() error {
 	if r.Instrument == "" {
 		return fmt.Errorf("open request instrument must not be empty")
 	}
-	if r.Side != market.Long && r.Side != market.Short {
+	if r.Side != types.Long && r.Side != types.Short {
 		return fmt.Errorf("open request side must be long or short")
 	}
 	if r.Units <= 0 {
@@ -112,9 +114,9 @@ func (r *CloseRequest) Validate() error {
 func NewOpenRequest(
 	instr string,
 	c *market.CandleTime,
-	side market.Side,
-	stop market.Price,
-	take market.Price,
+	side types.Side,
+	stop types.Price,
+	take types.Price,
 	reason string) *OpenRequest {
 	if c == nil {
 		panic("NewOpenRequest: candle time is nil")
@@ -122,11 +124,12 @@ func NewOpenRequest(
 	op := &OpenRequest{
 		Request: Request{
 			TradeCommon: &TradeCommon{
-				ID:         market.NewULID(),
+				ID:         idgen.NewULID(),
 				Instrument: instr,
 				Side:       side,
 				Stop:       stop,
 				Take:       take,
+				Reason:     reason,
 			},
 			RequestType: RequestMarketOpen,
 			Price:       c.Close,

@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/idgen"
+	"github.com/rustyeddy/trader/types"
 )
 
 // FormatTradeOrg renders a TradeRecord as an Org-mode block suitable for pasting into a journal.
 // It purposely includes narrative placeholders (Thesis/Execution/Review) while keeping all
 // structured facts in a PROPERTIES drawer for easy search.
 func FormatTradeOrg(t TradeRecord) string {
-	heading := fmt.Sprintf("** Trade: %s (%s)", t.Instrument, market.ShortDisplayID(t.TradeID))
+	heading := fmt.Sprintf("** Trade: %s (%s)", t.Instrument, idgen.ShortDisplayID(t.TradeID))
 
 	var b strings.Builder
 	b.WriteString(heading)
@@ -20,8 +21,8 @@ func FormatTradeOrg(t TradeRecord) string {
 	writeOrgProperty(&b, "TRADE_ID", t.TradeID)
 	writeOrgProperty(&b, "INSTRUMENT", t.Instrument)
 	writeOrgProperty(&b, "UNITS", t.Units.String())
-	writeOrgProperty(&b, "ENTRY_PRICE", market.FormatScaledPrice(t.EntryPrice, int32(market.PriceScale)))
-	writeOrgProperty(&b, "EXIT_PRICE", market.FormatScaledPrice(t.ExitPrice, int32(market.PriceScale)))
+	writeOrgProperty(&b, "ENTRY_PRICE", types.FormatScaledPrice(t.EntryPrice, int32(types.PriceScale)))
+	writeOrgProperty(&b, "EXIT_PRICE", types.FormatScaledPrice(t.ExitPrice, int32(types.PriceScale)))
 	writeOrgProperty(&b, "OPEN_TIME", t.OpenTime.String())
 	writeOrgProperty(&b, "CLOSE_TIME", t.CloseTime.String())
 	writeOrgProperty(&b, "REALIZED_PL", fmt.Sprintf("%.2f", t.RealizedPL.Float64()))

@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,11 +14,11 @@ import (
 // mkCandle builds a CandleTime with a symmetric spread around close so that
 // the ADX indicator receives valid OHLC data.
 func mkCandle(close float64) *market.CandleTime {
-	toP := func(x float64) market.Price {
-		return market.Price(x*float64(market.PriceScale) + 0.5)
+	toP := func(x float64) types.Price {
+		return types.Price(x*float64(types.PriceScale) + 0.5)
 	}
 	c := toP(close)
-	spread := market.Price(1000) // ~10 pips
+	spread := types.Price(1000) // ~10 pips
 	return &market.CandleTime{Candle: market.Candle{
 		Open:  c,
 		High:  c + spread,
@@ -43,7 +44,7 @@ func minCfg() Config {
 		FastPeriod:      3,
 		SlowPeriod:      5,
 		ADXPeriod:       100, // won't be ready in our test series
-		Scale:           market.PriceScale,
+		Scale:           types.PriceScale,
 		RequireADXReady: false,
 	}
 }
@@ -58,9 +59,9 @@ func TestNew_Valid(t *testing.T) {
 
 func TestNew_ZeroPeriods(t *testing.T) {
 	cfgs := []Config{
-		{FastPeriod: 0, SlowPeriod: 5, ADXPeriod: 14, Scale: market.PriceScale},
-		{FastPeriod: 3, SlowPeriod: 0, ADXPeriod: 14, Scale: market.PriceScale},
-		{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 0, Scale: market.PriceScale},
+		{FastPeriod: 0, SlowPeriod: 5, ADXPeriod: 14, Scale: types.PriceScale},
+		{FastPeriod: 3, SlowPeriod: 0, ADXPeriod: 14, Scale: types.PriceScale},
+		{FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 0, Scale: types.PriceScale},
 	}
 	for _, cfg := range cfgs {
 		_, err := New(cfg)
@@ -70,7 +71,7 @@ func TestNew_ZeroPeriods(t *testing.T) {
 }
 
 func TestNew_FastMustBeLessThanSlow(t *testing.T) {
-	_, err := New(Config{FastPeriod: 5, SlowPeriod: 3, ADXPeriod: 14, Scale: market.PriceScale})
+	_, err := New(Config{FastPeriod: 5, SlowPeriod: 3, ADXPeriod: 14, Scale: types.PriceScale})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FastPeriod must be < SlowPeriod")
 }
@@ -86,7 +87,7 @@ func TestNew_DefaultsADXThresholdTo20(t *testing.T) {
 	cfg.ADXThreshold = 0 // should default to 20.0
 	s, err := New(cfg)
 	require.NoError(t, err)
-	assert.Equal(t, market.Units(20_000_000), s.adxThreshold)
+	assert.Equal(t, types.Units(20_000_000), s.adxThreshold)
 }
 
 func TestNew_WithATRPeriod(t *testing.T) {
@@ -128,7 +129,7 @@ func TestBuild_FastGteSlowReturnsError(t *testing.T) {
 func TestStrategy_Name(t *testing.T) {
 	s, err := New(Config{
 		FastPeriod: 9, SlowPeriod: 21, ADXPeriod: 14,
-		Scale: market.PriceScale, ADXThreshold: 25.0,
+		Scale: types.PriceScale, ADXThreshold: 25.0,
 	})
 	require.NoError(t, err)
 	assert.Contains(t, s.Name(), "EMA_CROSS_ADX")
@@ -155,7 +156,7 @@ func TestStrategy_Ready_TrueAfterEMAWarmup(t *testing.T) {
 func TestStrategy_RequireADXReady_DelaysReadiness(t *testing.T) {
 	cfg := Config{
 		FastPeriod: 3, SlowPeriod: 5, ADXPeriod: 14,
-		Scale:           market.PriceScale,
+		Scale:           types.PriceScale,
 		RequireADXReady: true,
 	}
 	s, err := New(cfg)
@@ -184,7 +185,7 @@ func TestStrategy_Update_NilCandleReturnsHold(t *testing.T) {
 	s, err := New(minCfg())
 	require.NoError(t, err)
 	sig := s.Update(context.Background(), nil, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestStrategy_Update_WarmupProducesNoOpens(t *testing.T) {
@@ -192,7 +193,7 @@ func TestStrategy_Update_WarmupProducesNoOpens(t *testing.T) {
 	require.NoError(t, err)
 	sigs := feedUpdates(s, []float64{1.0, 1.0, 1.0})
 	for _, sig := range sigs {
-		assert.Equal(t, market.Flat, sig.Side)
+		assert.Equal(t, types.Flat, sig.Side)
 	}
 }
 
@@ -217,12 +218,12 @@ func TestStrategy_Update_CrossUpEmitsLongSignal(t *testing.T) {
 	sigs := feedUpdates(s, closes)
 	var longs []strategy.Signal
 	for _, sig := range sigs {
-		if sig.Side == market.Long {
+		if sig.Side == types.Long {
 			longs = append(longs, sig)
 		}
 	}
 	require.NotEmpty(t, longs, "expected at least one long signal after EMA cross up")
-	assert.Equal(t, market.Long, longs[0].Side)
+	assert.Equal(t, types.Long, longs[0].Side)
 }
 
 func TestStrategy_Update_CrossDownEmitsShortSignal(t *testing.T) {
@@ -246,12 +247,12 @@ func TestStrategy_Update_CrossDownEmitsShortSignal(t *testing.T) {
 	sigs := feedUpdates(s, closes)
 	var shorts []strategy.Signal
 	for _, sig := range sigs {
-		if sig.Side == market.Short {
+		if sig.Side == types.Short {
 			shorts = append(shorts, sig)
 		}
 	}
 	require.NotEmpty(t, shorts, "expected at least one short signal after EMA cross down")
-	assert.Equal(t, market.Short, shorts[0].Side)
+	assert.Equal(t, types.Short, shorts[0].Side)
 }
 
 func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
@@ -259,7 +260,7 @@ func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
 		FastPeriod:      3,
 		SlowPeriod:      5,
 		ADXPeriod:       5,
-		Scale:           market.PriceScale,
+		Scale:           types.PriceScale,
 		ADXThreshold:    99.0,
 		RequireADXReady: false,
 	}
@@ -282,20 +283,20 @@ func TestStrategy_Update_ADXGateFiltersWhenBelowThreshold(t *testing.T) {
 
 	sigs := feedUpdates(s, closes)
 	for _, sig := range sigs {
-		assert.Equal(t, market.Flat, sig.Side, "ADX gate should suppress all opens when ADX < 99")
+		assert.Equal(t, types.Flat, sig.Side, "ADX gate should suppress all opens when ADX < 99")
 	}
 }
 
 // ── absPriceSum ───────────────────────────────────────────────────────────────
 
 func TestAbsPriceSum_Positive(t *testing.T) {
-	assert.Equal(t, market.PriceSum(5), absPriceSum(5))
+	assert.Equal(t, types.PriceSum(5), absPriceSum(5))
 }
 
 func TestAbsPriceSum_Negative(t *testing.T) {
-	assert.Equal(t, market.PriceSum(5), absPriceSum(-5))
+	assert.Equal(t, types.PriceSum(5), absPriceSum(-5))
 }
 
 func TestAbsPriceSum_Zero(t *testing.T) {
-	assert.Equal(t, market.PriceSum(0), absPriceSum(0))
+	assert.Equal(t, types.PriceSum(0), absPriceSum(0))
 }

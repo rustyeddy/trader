@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type Key struct {
 	Instrument string
 	Source     string
 	Kind       DataKind
-	TF         market.Timeframe
+	TF         types.Timeframe
 	Year       int
 	Month      int
 	Day        int
@@ -126,13 +127,13 @@ func (ak Key) Time() time.Time {
 func (k Key) Validate() error {
 	switch {
 	case k.IsHourlyTick():
-		if k.TF != market.Ticks {
+		if k.TF != types.Ticks {
 			return fmt.Errorf("tick key must use Ticks timeframe, got %v", k.TF)
 		}
 		return validateKeyDate(k.Year, k.Month, k.Day, k.Hour)
 
 	case k.IsMonthlyCandle():
-		if k.TF <= 0 || k.TF == market.Ticks {
+		if k.TF <= 0 || k.TF == types.Ticks {
 			return fmt.Errorf("monthly candle key must use a candle timeframe, got %v", k.TF)
 		}
 		return validateKeyMonth(k.Year, k.Month)
@@ -150,31 +151,31 @@ func (k Key) IsHourlyTick() bool {
 	return k.Kind == KindTick && k.Day > 0 && k.Hour >= 0
 }
 
-func (k Key) Range() (market.TimeRange, error) {
+func (k Key) Range() (types.TimeRange, error) {
 	if err := k.Validate(); err != nil {
-		return market.TimeRange{}, err
+		return types.TimeRange{}, err
 	}
 	start := k.Time().UTC()
 
 	switch {
 	case k.Kind == KindTick && k.Hour >= 0:
 		end := start.Add(time.Hour)
-		return market.TimeRange{
-			Start: market.Timestamp(start.Unix()),
-			End:   market.Timestamp(end.Unix()),
-			TF:    market.Ticks,
+		return types.TimeRange{
+			Start: types.Timestamp(start.Unix()),
+			End:   types.Timestamp(end.Unix()),
+			TF:    types.Ticks,
 		}, nil
 
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		end := start.AddDate(0, 1, 0)
-		return market.TimeRange{
-			Start: market.Timestamp(start.Unix()),
-			End:   market.Timestamp(end.Unix()),
+		return types.TimeRange{
+			Start: types.Timestamp(start.Unix()),
+			End:   types.Timestamp(end.Unix()),
 			TF:    k.TF,
 		}, nil
 
 	default:
-		return market.TimeRange{}, fmt.Errorf("unsupported key range: %+v", k)
+		return types.TimeRange{}, fmt.Errorf("unsupported key range: %+v", k)
 	}
 }
 
@@ -196,7 +197,7 @@ func RequiredTickHoursForMonth(source, instrument string, year, month int) ([]Ke
 			Source:     source,
 			Instrument: market.NormalizeInstrument(instrument),
 			Kind:       KindTick,
-			TF:         market.Ticks,
+			TF:         types.Ticks,
 			Year:       t.Year(),
 			Month:      int(t.Month()),
 			Day:        t.Day(),

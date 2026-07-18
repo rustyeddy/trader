@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,8 +19,8 @@ func TestDefaultSyntheticConfig(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultSyntheticConfig("EURUSD")
 	assert.Equal(t, "EURUSD", cfg.Instrument)
-	assert.Equal(t, market.H1, cfg.Timeframe)
-	assert.Greater(t, cfg.StartPrice, market.Price(0))
+	assert.Equal(t, types.H1, cfg.Timeframe)
+	assert.Greater(t, cfg.StartPrice, types.Price(0))
 	assert.Greater(t, cfg.Volatility, 0.0)
 }
 
@@ -75,7 +75,7 @@ func TestGenerateSyntheticCandle_ValidRange(t *testing.T) {
 	cfg := DefaultSyntheticConfig("EURUSD")
 	rng := NewLCRandom(42)
 
-	prevClose := market.Price(108000)
+	prevClose := types.Price(108000)
 	candle := cfg.generateCandle(rng, prevClose)
 
 	// High >= max(open, close)
@@ -87,8 +87,8 @@ func TestGenerateSyntheticCandle_ValidRange(t *testing.T) {
 	assert.LessOrEqual(t, candle.Low, candle.Close, "low should be <= close")
 
 	// Spread is positive
-	assert.Greater(t, candle.AvgSpread, market.Price(0))
-	assert.Greater(t, candle.MaxSpread, market.Price(0))
+	assert.Greater(t, candle.AvgSpread, types.Price(0))
+	assert.Greater(t, candle.MaxSpread, types.Price(0))
 	assert.GreaterOrEqual(t, candle.MaxSpread, candle.AvgSpread)
 }
 
@@ -98,7 +98,7 @@ func TestGenerateSyntheticCandle_Deterministic(t *testing.T) {
 
 	rng1 := NewLCRandom(42)
 	rng2 := NewLCRandom(42)
-	prevClose := market.Price(108000)
+	prevClose := types.Price(108000)
 
 	candle1 := cfg.generateCandle(rng1, prevClose)
 	candle2 := cfg.generateCandle(rng2, prevClose)
@@ -116,7 +116,7 @@ func TestGenerateSyntheticCandle_Deterministic(t *testing.T) {
 func TestGenerateSyntheticMonthlyCandles_ValidStructure(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
@@ -124,16 +124,16 @@ func TestGenerateSyntheticMonthlyCandles_ValidStructure(t *testing.T) {
 
 	// Instrument name is normalized to uppercase
 	assert.Equal(t, "EURUSD", cs.Instrument)
-	assert.Equal(t, market.H1, cs.Timeframe)
+	assert.Equal(t, types.H1, cs.Timeframe)
 	assert.Greater(t, len(cs.Candles), 0)
-	expectedLen := int((744 * 3600) / int64(market.H1)) // Jan = 31 days = 744 hours in seconds
+	expectedLen := int((744 * 3600) / int64(types.H1)) // Jan = 31 days = 744 hours in seconds
 	assert.Equal(t, len(cs.Candles), expectedLen)
 }
 
 func TestGenerateSyntheticMonthlyCandles_CandlesAreValid(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestGenerateSyntheticMonthlyCandles_CandlesAreValid(t *testing.T) {
 func TestGenerateSyntheticMonthlyCandles_DifferentMonths(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	cs1, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestGenerateSyntheticMonthlyCandles_DifferentMonths(t *testing.T) {
 func TestGenerateSyntheticYearlyCandles_HasAllMonths(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.M1
+	cfg.Timeframe = types.M1
 
 	candleSets, err := cfg.GenerateSyntheticYearlyCandles(2025)
 	require.NoError(t, err)
@@ -190,18 +190,18 @@ func TestGenerateSyntheticYearlyCandles_HasAllMonths(t *testing.T) {
 
 func TestTestHelperGenerateSyntheticCandles(t *testing.T) {
 	t.Parallel()
-	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, market.H1)
+	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, types.H1)
 	require.NotNil(t, cs)
 	assert.Equal(t, "EURUSD", cs.Instrument)
-	assert.Equal(t, market.H1, cs.Timeframe)
+	assert.Equal(t, types.H1, cs.Timeframe)
 }
 
 func TestTestHelperGenerateSyntheticCandlesWithConfig(t *testing.T) {
 	t.Parallel()
 	cfg := SyntheticCandleConfig{
 		Instrument:  "GBPUSD",
-		Timeframe:   market.M1,
-		StartPrice:  market.Price(1250000),
+		Timeframe:   types.M1,
+		StartPrice:  types.Price(1250000),
 		Volatility:  0.001,
 		Trend:       0.00002,
 		Seed:        123,
@@ -211,7 +211,7 @@ func TestTestHelperGenerateSyntheticCandlesWithConfig(t *testing.T) {
 	cs := HelperGenerateSyntheticCandlesWithConfig(t, cfg, 2025, time.January)
 	require.NotNil(t, cs)
 	assert.Equal(t, "GBPUSD", cs.Instrument)
-	assert.Equal(t, market.M1, cs.Timeframe)
+	assert.Equal(t, types.M1, cs.Timeframe)
 }
 
 // ============================================================================
@@ -224,7 +224,7 @@ func TestGenerateSyntheticYearlyAndWrite(t *testing.T) {
 	tmpdir := t.TempDir()
 	store := &store{basedir: tmpdir}
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	paths, err := cfg.GenerateSyntheticYearlyAndWrite(store, 2025)
 	require.NoError(t, err)
@@ -244,7 +244,7 @@ func TestLoadSyntheticCandles_CreatesIfMissing(t *testing.T) {
 	tmpdir := t.TempDir()
 	// Override TestDataDir for this test by using GetOrCreateTestData with tmpdir
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	store := &store{basedir: tmpdir}
 	paths, err := cfg.GenerateSyntheticYearlyAndWrite(store, 2025)
@@ -262,7 +262,7 @@ func TestLoadSyntheticCandles_CreatesIfMissing(t *testing.T) {
 func TestMakeSyntheticCandleSetIterator(t *testing.T) {
 	t.Parallel()
 
-	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, market.H1)
+	cs := HelperGenerateSyntheticCandles(t, "EURUSD", 2025, time.January, types.H1)
 	iter := MakeSyntheticCandleSetIterator(cs)
 
 	require.NotNil(t, iter)
@@ -270,7 +270,7 @@ func TestMakeSyntheticCandleSetIterator(t *testing.T) {
 	assert.True(t, ok, "should have at least one candle")
 
 	candle := ct.Candle
-	assert.Greater(t, candle.High, market.Price(0))
+	assert.Greater(t, candle.High, types.Price(0))
 }
 
 // ============================================================================
@@ -281,12 +281,12 @@ func TestSyntheticDataFeedsTraderIterator(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 
 	cs, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)
 	require.NoError(t, err)
 
-	iter := newCandleSetIterator(cs, market.TimeRange{})
+	iter := newCandleSetIterator(cs, types.TimeRange{})
 	defer iter.Close()
 
 	candleCount := 0
@@ -295,9 +295,9 @@ func TestSyntheticDataFeedsTraderIterator(t *testing.T) {
 		candle := ct.Candle
 
 		// Verify candle structure
-		assert.Greater(t, candle.High, market.Price(0))
+		assert.Greater(t, candle.High, types.Price(0))
 		assert.Less(t, candle.Low, candle.High)
-		assert.Greater(t, ct.Timestamp, market.Timestamp(0))
+		assert.Greater(t, ct.Timestamp, types.Timestamp(0))
 	}
 
 	assert.Greater(t, candleCount, 0, "should have processed some candles")
@@ -307,7 +307,7 @@ func TestSyntheticDataReproducible(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultSyntheticConfig("EURUSD")
-	cfg.Timeframe = market.H1
+	cfg.Timeframe = types.H1
 	cfg.Seed = 42
 
 	cs1, err := cfg.GenerateSyntheticMonthlyCandles(2025, time.January)

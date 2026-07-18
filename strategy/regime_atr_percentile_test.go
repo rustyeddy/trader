@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // atrPCT builds a CandleTime with the given OHLC values (all prices scaled).
-func atrPCT(open, high, low, close market.Price) market.CandleTime {
+func atrPCT(open, high, low, close types.Price) market.CandleTime {
 	return market.CandleTime{
 		Candle: market.Candle{Open: open, High: high, Low: low, Close: close},
 	}
@@ -17,19 +18,19 @@ func atrPCT(open, high, low, close market.Price) market.CandleTime {
 
 func TestATRPercentileFilter_NotReadyBeforeWarmup(t *testing.T) {
 	t.Parallel()
-	f, err := NewATRPercentileFilter(3, 10, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(3, 10, 20.0, types.PriceScale)
 	require.NoError(t, err)
 	assert.False(t, f.Ready())
 	// During warmup, Trending and AllowSide must not gate entries.
 	assert.True(t, f.Trending())
-	assert.True(t, f.AllowSide(market.Long))
-	assert.True(t, f.AllowSide(market.Short))
+	assert.True(t, f.AllowSide(types.Long))
+	assert.True(t, f.AllowSide(types.Short))
 }
 
 func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 	t.Parallel()
 	// ATR(3) needs 4 candles (3 periods = 4 candles). windowSize=5 needs 1 ATR value.
-	f, err := NewATRPercentileFilter(3, 5, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(3, 5, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
 	candles := []market.CandleTime{
@@ -47,7 +48,7 @@ func TestATRPercentileFilter_ReadyAfterWarmup(t *testing.T) {
 func TestATRPercentileFilter_ReadyBeforeWindowIsFull(t *testing.T) {
 	t.Parallel()
 
-	f, err := NewATRPercentileFilter(3, 50, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(3, 50, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
 	candles := []market.CandleTime{
@@ -66,33 +67,33 @@ func TestATRPercentileFilter_ReadyBeforeWindowIsFull(t *testing.T) {
 
 func TestATRPercentileFilter_AllowSideAlwaysTrue(t *testing.T) {
 	t.Parallel()
-	f, err := NewATRPercentileFilter(3, 10, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(3, 10, 20.0, types.PriceScale)
 	require.NoError(t, err)
 	// Feed enough bars to warm up.
 	for i := 0; i < 20; i++ {
-		p := market.Price(100000 + i*1000)
+		p := types.Price(100000 + i*1000)
 		f.Tick(atrPCT(p, p+500, p-500, p+200))
 	}
 	require.True(t, f.Ready())
-	assert.True(t, f.AllowSide(market.Long), "ATRPercentile.AllowSide must always return true")
-	assert.True(t, f.AllowSide(market.Short), "ATRPercentile.AllowSide must always return true")
+	assert.True(t, f.AllowSide(types.Long), "ATRPercentile.AllowSide must always return true")
+	assert.True(t, f.AllowSide(types.Short), "ATRPercentile.AllowSide must always return true")
 }
 
 func TestATRPercentileFilter_TrendingTrueWhenHighVolatility(t *testing.T) {
 	t.Parallel()
 	// Feed a long sequence of normal-range bars, then a burst of wide bars.
 	// After the burst the current ATR should rank above the 20th percentile.
-	f, err := NewATRPercentileFilter(5, 50, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(5, 50, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
 	// 50 narrow bars to fill the window
 	for i := 0; i < 50; i++ {
-		p := market.Price(100000 + i*100)
+		p := types.Price(100000 + i*100)
 		f.Tick(atrPCT(p, p+100, p-100, p+50))
 	}
 	// 10 wide bars to push ATR up
 	for i := 0; i < 10; i++ {
-		p := market.Price(105000 + i*100)
+		p := types.Price(105000 + i*100)
 		f.Tick(atrPCT(p, p+3000, p-3000, p+1000))
 	}
 	require.True(t, f.Ready())
@@ -103,17 +104,17 @@ func TestATRPercentileFilter_TrendingFalseWhenLowVolatility(t *testing.T) {
 	t.Parallel()
 	// Fill window with wide bars, then switch to very narrow bars.
 	// ATR will drop and rank below the 20th percentile.
-	f, err := NewATRPercentileFilter(5, 50, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(5, 50, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
 	// 50 wide bars
 	for i := 0; i < 50; i++ {
-		p := market.Price(100000 + i*100)
+		p := types.Price(100000 + i*100)
 		f.Tick(atrPCT(p, p+3000, p-3000, p+1000))
 	}
 	// 10 very narrow bars to collapse ATR
 	for i := 0; i < 10; i++ {
-		p := market.Price(105000 + i*10)
+		p := types.Price(105000 + i*10)
 		f.Tick(atrPCT(p, p+5, p-5, p+2))
 	}
 	require.True(t, f.Ready())
@@ -123,7 +124,7 @@ func TestATRPercentileFilter_TrendingFalseWhenLowVolatility(t *testing.T) {
 func TestATRPercentileFilter_FlatWindowUsesTieAwarePercentile(t *testing.T) {
 	t.Parallel()
 
-	f, err := NewATRPercentileFilter(1, 5, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(1, 5, 20.0, types.PriceScale)
 	require.NoError(t, err)
 
 	for i := 0; i < 7; i++ {
@@ -138,10 +139,10 @@ func TestATRPercentileFilter_FlatWindowUsesTieAwarePercentile(t *testing.T) {
 func TestATRPercentileFilter_RejectsInvalidThreshold(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewATRPercentileFilter(5, 50, -0.1, market.PriceScale)
+	_, err := NewATRPercentileFilter(5, 50, -0.1, types.PriceScale)
 	require.Error(t, err)
 
-	_, err = NewATRPercentileFilter(5, 50, 100.1, market.PriceScale)
+	_, err = NewATRPercentileFilter(5, 50, 100.1, types.PriceScale)
 	require.Error(t, err)
 }
 
@@ -154,7 +155,7 @@ func TestATRPercentileFilter_FactoryRoundtrip(t *testing.T) {
 			"window_size": int32(100),
 			"threshold":   30.0,
 		},
-	}, market.PriceScale)
+	}, types.PriceScale)
 	require.NoError(t, err)
 	af, ok := f.(*ATRPercentileFilter)
 	require.True(t, ok)
@@ -165,7 +166,7 @@ func TestATRPercentileFilter_FactoryRoundtrip(t *testing.T) {
 
 func TestATRPercentileFilter_FactoryDefaults(t *testing.T) {
 	t.Parallel()
-	f, err := GetRegimeFilter(RegimeConfig{Kind: "atr-percentile"}, market.PriceScale)
+	f, err := GetRegimeFilter(RegimeConfig{Kind: "atr-percentile"}, types.PriceScale)
 	require.NoError(t, err)
 	af, ok := f.(*ATRPercentileFilter)
 	require.True(t, ok)
@@ -176,7 +177,7 @@ func TestATRPercentileFilter_FactoryDefaults(t *testing.T) {
 
 func TestATRPercentileFilter_Name(t *testing.T) {
 	t.Parallel()
-	f, err := NewATRPercentileFilter(20, 200, 20.0, market.PriceScale)
+	f, err := NewATRPercentileFilter(20, 200, 20.0, types.PriceScale)
 	require.NoError(t, err)
 	assert.Equal(t, "ATRPercentile(20,200,20)", f.Name())
 }

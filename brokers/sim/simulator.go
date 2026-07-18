@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type Sim struct {
@@ -44,7 +45,7 @@ func (e *Sim) UpdatePrice(tick market.Tick) error {
 	}
 	e.prices[inst] = tick
 
-	marks := make(map[string]market.Price, len(e.prices))
+	marks := make(map[string]types.Price, len(e.prices))
 	for instrument, px := range e.prices {
 		marks[instrument] = px.Mid()
 	}
@@ -68,7 +69,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 			return fmt.Errorf("no market price for %s", lot.Instrument)
 		}
 		exitPrice := px.Mid()
-		exitTime := market.FromTime(time.Now().UTC())
+		exitTime := types.FromTime(time.Now().UTC())
 		trade := &execution.Trade{
 			TradeCommon: lot.TradeCommon.Clone(),
 			EntryPrice:  lot.EntryPrice,
@@ -96,7 +97,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 
 	if e.journal != nil {
 		_ = e.journal.RecordEquity(journal.EquitySnapshot{
-			Timestamp:   market.FromTime(time.Now().UTC()),
+			Timestamp:   types.FromTime(time.Now().UTC()),
 			Balance:     e.account.Balance,
 			Equity:      e.account.Equity,
 			MarginUsed:  e.account.MarginUsed,

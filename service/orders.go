@@ -8,16 +8,17 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // PlaceMarketOrderRequest is the typed input for risk-sized market orders.
 // Either StopPips or StopPrice must be set; if both are set, StopPrice wins.
 type PlaceMarketOrderRequest struct {
-	Instrument string      // OANDA format, e.g. "USD_JPY"
-	Side       string      // "long" or "short"
-	RiskPct    market.Rate // fraction of account NAV to risk (0.01×RateScale = 1%)
-	StopPips   float64     // stop distance in pips (mutually exclusive with StopPrice)
-	StopPrice  float64     // explicit stop price (overrides StopPips)
+	Instrument string     // OANDA format, e.g. "USD_JPY"
+	Side       string     // "long" or "short"
+	RiskPct    types.Rate // fraction of account NAV to risk (0.01×RateScale = 1%)
+	StopPips   float64    // stop distance in pips (mutually exclusive with StopPrice)
+	StopPrice  float64    // explicit stop price (overrides StopPips)
 	// Units may override risk-based sizing. When 0, units are computed
 	// from RiskPct + stop distance.
 	Units int64
@@ -73,9 +74,9 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	}
 	px := prices[0]
 	// Convert wire-format floats to fixed-point at the API boundary.
-	entryPrice := market.PriceFromFloat(px.Ask)
+	entryPrice := types.PriceFromFloat(px.Ask)
 	if side == "short" {
-		entryPrice = market.PriceFromFloat(px.Bid)
+		entryPrice = types.PriceFromFloat(px.Bid)
 	}
 
 	var equity float64
@@ -93,13 +94,13 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	}
 
 	// Stop price as fixed-point.
-	var stopPrice market.Price
+	var stopPrice types.Price
 	switch {
 	case req.StopPrice > 0:
-		stopPrice = market.PriceFromFloat(req.StopPrice)
+		stopPrice = types.PriceFromFloat(req.StopPrice)
 	case req.StopPips > 0:
 		inst := market.GetInstrument(market.NormalizeInstrument(req.Instrument))
-		pips := market.PipsFromFloat(req.StopPips)
+		pips := types.PipsFromFloat(req.StopPips)
 		if inst != nil {
 			if side == "long" {
 				stopPrice = inst.SubPips(entryPrice, pips)
@@ -108,9 +109,9 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 			}
 		} else {
 			// Unknown instrument — fall back to price-unit approximation.
-			delta := market.PriceFromFloat(req.StopPips * 0.0001)
+			delta := types.PriceFromFloat(req.StopPips * 0.0001)
 			if strings.Contains(strings.ToUpper(req.Instrument), "JPY") {
-				delta = market.PriceFromFloat(req.StopPips * 0.01)
+				delta = types.PriceFromFloat(req.StopPips * 0.01)
 			}
 			if side == "long" {
 				stopPrice = entryPrice - delta
@@ -135,7 +136,7 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	// multiplying by quoteToUSDRate converts to account currency (USD).
 	// This is a terminal float operation at the sizing boundary.
 	quoteRate := quoteToUSDRate(req.Instrument)
-	stopDistUSD := float64(stopDist) / float64(market.PriceScale) * quoteRate.Float64()
+	stopDistUSD := float64(stopDist) / float64(types.PriceScale) * quoteRate.Float64()
 
 	// Sizing.
 	riskAmount := equity * req.RiskPct.Float64()
@@ -195,18 +196,18 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 // quoteToUSDRate returns an approximate Rate to convert a price distance in the
 // instrument's quote currency to USD. 1.0 for USD-quoted pairs; ~0.0067 for JPY.
 // Uses the same static table as the backtest P/L conversion. Accuracy ±30%.
-func quoteToUSDRate(instrument string) market.Rate {
+func quoteToUSDRate(instrument string) types.Rate {
 	inst := market.GetInstrument(market.NormalizeInstrument(instrument))
 	if inst == nil {
-		return market.RateFromFloat(1.0) // unknown — no adjustment
+		return types.RateFromFloat(1.0) // unknown — no adjustment
 	}
 	if inst.QuoteCurrency == "USD" {
-		return market.RateFromFloat(1.0)
+		return types.RateFromFloat(1.0)
 	}
 	if r, ok := market.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
 		return r
 	}
-	return market.RateFromFloat(1.0)
+	return types.RateFromFloat(1.0)
 }
 
 // CloseTrade closes a trade by ID. Units=0 means full close; >0 is partial.

@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/idgen"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,17 +30,17 @@ func TestTraderProcessEventValidation(t *testing.T) {
 		"missing position")
 
 	require.ErrorContains(t,
-		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}),
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventPositionClosed, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}}}),
 		"missing trade")
 
 	require.NoError(t,
-		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}))
+		tr.processEvent(context.Background(), &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}}}))
 
 	require.NoError(t,
 		tr.processEvent(context.Background(), &execution.Event{
 			Type:  execution.EventPositionClosed,
-			Lot:   &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}},
-			Trade: &execution.Trade{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}},
+			Lot:   &execution.Lot{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}},
+			Trade: &execution.Trade{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}},
 		}))
 
 	// Unsupported event types are intentionally non-fatal.
@@ -57,7 +58,7 @@ func TestTraderStartBrokerEventHandler_ProcessesAndPropagatesError(t *testing.T)
 	var processed int64
 	errCh, done := tr.StartBrokerEventHandler(ctx, evtQ, &processed)
 
-	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}
+	evtQ <- &execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}}}
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt64(&processed) == 1
 	}, 200*time.Millisecond, 5*time.Millisecond)
@@ -89,7 +90,7 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	require.EqualError(t, tr.BrokerEventError(errCh), "boom")
 
 	b := execution.NewBroker("idle")
-	b.Account = execution.NewAccount("acct", market.MoneyFromFloat(10_000))
+	b.Account = execution.NewAccount("acct", types.MoneyFromFloat(10_000))
 	idle := &Trader{Broker: b}
 	require.NoError(t, idle.WaitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
@@ -97,7 +98,7 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	bad <- errors.New("from broker")
 	require.EqualError(t, idle.WaitForBrokerIdle(bad, 5*time.Millisecond), "from broker")
 
-	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: market.NewULID()}}}))
+	require.True(t, b.EnqueueEvent(&execution.Event{Type: execution.EventOrderFilled, Lot: &execution.Lot{TradeCommon: &execution.TradeCommon{ID: idgen.NewULID()}}}))
 	require.ErrorContains(t, idle.WaitForBrokerIdle(make(chan error, 1), 5*time.Millisecond), "broker did not become idle")
 }
 

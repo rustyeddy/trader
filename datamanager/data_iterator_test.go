@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,7 +145,7 @@ func TestFuncIterator_CloseError(t *testing.T) {
 
 func TestCandleSetIterator_CandleSet(t *testing.T) {
 	t.Parallel()
-	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, market.M1)
+	cs := HelperGenerateSyntheticCandles(t, "EUR_USD", 2024, 1, types.M1)
 	it := cs.Iterator()
 	require.Same(t, cs, it.CandleSet())
 }
@@ -156,7 +157,7 @@ type errCandleIterator struct {
 	count    int
 	maxItems int
 	cur      market.Candle
-	ts       market.Timestamp
+	ts       types.Timestamp
 }
 
 func (it *errCandleIterator) Next() (market.CandleTime, bool) {
@@ -165,7 +166,7 @@ func (it *errCandleIterator) Next() (market.CandleTime, bool) {
 	}
 	it.count++
 	it.cur = market.Candle{Open: 100, Close: 100, Ticks: 1}
-	it.ts = market.Timestamp(it.count)
+	it.ts = types.Timestamp(it.count)
 	return market.CandleTime{Candle: it.cur, Timestamp: it.ts}, true
 }
 func (it *errCandleIterator) Err() error   { return it.nextErr }
@@ -174,7 +175,7 @@ func (it *errCandleIterator) Close() error { return it.closeErr }
 // errAfterCandleIterator returns items first then an error.
 type errAfterCandleIterator struct {
 	items   []market.Candle
-	tss     []market.Timestamp
+	tss     []types.Timestamp
 	idx     int
 	errOnce error
 	emitted bool
@@ -203,7 +204,7 @@ func TestChainedCandleIterator_SubErrAfterItems(t *testing.T) {
 	sentinel := errors.New("sub error")
 	sub := &errAfterCandleIterator{
 		items:   []market.Candle{{Ticks: 1}},
-		tss:     []market.Timestamp{1},
+		tss:     []types.Timestamp{1},
 		errOnce: sentinel,
 	}
 	chained := newChainedCandleIterator(sub)
@@ -264,7 +265,7 @@ func TestOpenTickIterator_FileNotFound(t *testing.T) {
 
 	k := Key{
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Year:       2026,
@@ -290,10 +291,10 @@ func TestCloseCandleIterators_CloseError(t *testing.T) {
 
 func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
 	_ = s
 
-	it := newCandleSetIterator(cs, market.TimeRange{})
+	it := newCandleSetIterator(cs, types.TimeRange{})
 	require.NoError(t, it.Close())
 	_, ok := it.Next()
 	require.False(t, ok)
@@ -302,10 +303,10 @@ func TestCandleSetIterator_AlreadyClosed(t *testing.T) {
 
 func TestCandleSetIterator_AfterDone(t *testing.T) {
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
 	_ = s
 
-	it := newCandleSetIterator(cs, market.TimeRange{})
+	it := newCandleSetIterator(cs, types.TimeRange{})
 	for _, ok := it.Next(); ok; _, ok = it.Next() {
 	}
 	_, ok := it.Next()

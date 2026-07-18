@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -19,8 +20,8 @@ type Fake struct {
 	CandleCount int
 
 	candles []*market.CandleTime
-	highest market.Price
-	lowest  market.Price
+	highest types.Price
+	lowest  types.Price
 }
 
 func (f *Fake) Name() string            { return "Fake" }
@@ -52,7 +53,7 @@ func (f *Fake) Update(_ context.Context, c *market.CandleTime, run strategy.Stra
 		if run.OpenLots().Len() > 0 {
 			return strategy.Hold("in position")
 		}
-		return strategy.Signal{Side: market.Long, Reason: "higher highs"}
+		return strategy.Signal{Side: types.Long, Reason: "higher highs"}
 	}
 
 	return strategy.Hold("hold")
@@ -116,9 +117,9 @@ func (f *Fake02) Update(_ context.Context, c *market.CandleTime, run strategy.St
 		return strategy.Hold("hold")
 	}
 
-	side := market.Long
+	side := types.Long
 	if !f.longNext {
-		side = market.Short
+		side = types.Short
 	}
 
 	f.openedAt = f.bar

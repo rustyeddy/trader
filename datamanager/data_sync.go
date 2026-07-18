@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CandleSyncResult summarizes a FetchCandleMonths run.
@@ -17,7 +18,7 @@ type CandleSyncResult struct {
 // CandleSyncProgress is reported once per month during FetchCandleMonths.
 type CandleSyncProgress struct {
 	Instrument     string
-	Timeframe      market.Timeframe
+	Timeframe      types.Timeframe
 	MonthStart     time.Time
 	MonthEnd       time.Time
 	CandlesWritten int
@@ -31,7 +32,7 @@ type CandleSyncProgress struct {
 //
 // instrument is passed through to the provider as-is (OANDA wire format,
 // e.g. "EUR_USD"); it is normalized (underscores stripped) for store keys.
-func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandleProvider, instrument string, tf market.Timeframe, from, to time.Time, rawDir string, onProgress func(CandleSyncProgress)) (*CandleSyncResult, error) {
+func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandleProvider, instrument string, tf types.Timeframe, from, to time.Time, rawDir string, onProgress func(CandleSyncProgress)) (*CandleSyncResult, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("nil candle provider")
 	}
@@ -70,12 +71,12 @@ func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandlePro
 
 		nonZero := 0
 		for i := range month.Candles {
-			if !month.Candles[i].IsZero() {
+			if !month.Candles[i].Candle.IsZero() {
 				nonZero++
 			}
 		}
 
-		if err := getStore().WriteMonthlyCandles(source, normInst, tf, monthStart, month.Candles); err != nil {
+		if err := getStore().WriteMonthlyCandleTimes(source, normInst, tf, monthStart, month.Candles); err != nil {
 			return result, fmt.Errorf("write %s: %w", monthStart.Format("2006-01"), err)
 		}
 
@@ -121,7 +122,7 @@ func (dm *DataManager) FetchCandleMonths(ctx context.Context, provider CandlePro
 // candle-native sources — callers (e.g. an update/catch-up download) use it
 // instead of each re-implementing their own "what's the last good date"
 // logic.
-func (dm *DataManager) LastCompleteDate(instrument string, tf market.Timeframe, source string) (time.Time, error) {
+func (dm *DataManager) LastCompleteDate(instrument string, tf types.Timeframe, source string) (time.Time, error) {
 	inst := market.NormalizeInstrument(instrument)
 	source = normalizeSource(source)
 	if source == "" {
@@ -190,14 +191,25 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 	stepSec := int64(tf)
-	slotCount := int(monthEnd.Sub(monthStart).Seconds() / float64(stepSec))
 
 	rows, err := readRawMonthRows(rawPath, monthStart, monthEnd)
 	if err != nil {
 		return nil, fmt.Errorf("read raw %s: %w", rawPath, err)
 	}
 
-	candles := make([]market.Candle, slotCount)
+	// MonthSlotBoundaries (not SlotBoundaries(monthStart, tf, n)) so H4's
+	// early sub-slots of a session already in progress at monthStart are
+	// included, and the resulting index map is the single source of truth
+	// for placing raw rows — no separate SlotIndexForTime computation that
+	// could drift out of sync with the boundaries actually written.
+	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
+	slotCount := len(boundaries)
+	candles := make([]market.CandleTime, slotCount)
+	indexOf := make(map[int64]int, slotCount)
+	for i, b := range boundaries {
+		candles[i].Timestamp = types.FromTime(b)
+		indexOf[b.Unix()] = i
+	}
 	filled := make([]bool, slotCount)
 
 	for _, r := range rows {
@@ -208,8 +220,8 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 			continue
 		}
 
-		idx := int((r.Time.Unix() - monthStart.Unix()) / stepSec)
-		if idx < 0 || idx >= slotCount {
+		idx, ok := indexOf[r.Time.UTC().Unix()]
+		if !ok {
 			continue
 		}
 
@@ -226,23 +238,33 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 				maxSpread = sp
 			}
 		}
-		candles[idx] = market.Candle{
-			Open:      market.PriceFromFloat(r.BidOpen),
-			High:      market.PriceFromFloat(r.BidHigh),
-			Low:       market.PriceFromFloat(r.BidLow),
-			Close:     market.PriceFromFloat(r.BidClose),
-			AvgSpread: market.PriceFromFloat(sumSpread / 4),
-			MaxSpread: market.PriceFromFloat(maxSpread),
-			Ticks:     int32(r.Volume),
+		candles[idx] = market.CandleTime{
+			Candle: market.Candle{
+				Open:      types.PriceFromFloat(r.BidOpen),
+				High:      types.PriceFromFloat(r.BidHigh),
+				Low:       types.PriceFromFloat(r.BidLow),
+				Close:     types.PriceFromFloat(r.BidClose),
+				AvgSpread: types.PriceFromFloat(sumSpread / 4),
+				MaxSpread: types.PriceFromFloat(maxSpread),
+				Ticks:     int32(r.Volume),
+			},
+			Timestamp: types.FromTime(r.Time.UTC()),
 		}
 		filled[idx] = true
 	}
 
 	result := &DeriveResult{}
-	step := time.Duration(stepSec) * time.Second
-	for i := 0; i < slotCount; i++ {
-		slotStart := monthStart.Add(time.Duration(i) * step)
-		if !SlotMayHaveForexData(slotStart, slotStart.Add(step)) {
+	for i, slotStart := range boundaries {
+		// boundaries is already scoped to [monthStart, monthEnd) by
+		// MonthSlotBoundaries, so every entry here is genuinely this
+		// month's to report on.
+		slotEnd := slotStart.Add(25 * time.Hour)
+		if i+1 < len(boundaries) {
+			slotEnd = boundaries[i+1]
+		} else if tf != types.D1 {
+			slotEnd = slotStart.Add(time.Duration(stepSec) * time.Second)
+		}
+		if !SlotMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
 		if filled[i] {
@@ -255,7 +277,7 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 		}
 	}
 
-	if err := getStore().WriteMonthlyCandles(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
+	if err := getStore().WriteMonthlyCandleTimes(key.Source, key.Instrument, tf, monthStart, candles); err != nil {
 		return nil, fmt.Errorf("write canonical %s: %w", rawPath, err)
 	}
 	return result, nil

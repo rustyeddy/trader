@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CSVTicksFeed reads canonical tick CSV rows:
@@ -24,8 +25,8 @@ import (
 type CSVTicksFeed struct {
 	f    *os.File
 	r    *csv.Reader
-	from market.Timestamp
-	to   market.Timestamp
+	from types.Timestamp
+	to   types.Timestamp
 
 	sawFirst bool
 }
@@ -33,7 +34,7 @@ type CSVTicksFeed struct {
 // NewCSVTicksFeed opens the CSV file at path and returns a feed that yields
 // only ticks whose timestamp falls within [from, to). Pass zero Timestamps
 // to disable filtering.
-func NewCSVTicksFeed(path string, from, to market.Timestamp) (*CSVTicksFeed, error) {
+func NewCSVTicksFeed(path string, from, to types.Timestamp) (*CSVTicksFeed, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -112,7 +113,7 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 		t = t2
 	}
 
-	tstamp := market.Timestamp(t.Unix())
+	tstamp := types.Timestamp(t.Unix())
 	inst := strings.TrimSpace(row[1])
 	if inst == "" {
 		return market.Tick{}, false, nil
@@ -131,8 +132,8 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 		Timestamp:  tstamp,
 		Instrument: inst,
 		BA: market.BA{
-			Bid: market.PriceFromFloat(bid),
-			Ask: market.PriceFromFloat(ask),
+			Bid: types.PriceFromFloat(bid),
+			Ask: types.PriceFromFloat(ask),
 		},
 	}
 	if err := tick.Validate(); err != nil {
@@ -143,7 +144,7 @@ func parseTickRow(row []string) (market.Tick, bool, error) {
 
 // inRange reports whether t falls within [from, to). A zero from or to
 // disables the corresponding bound.
-func inRange(t, from, to market.Timestamp) bool {
+func inRange(t, from, to types.Timestamp) bool {
 	if !from.IsZero() && t < from {
 		return false
 	}

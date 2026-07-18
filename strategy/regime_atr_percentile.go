@@ -5,6 +5,7 @@ import (
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 const (
@@ -30,12 +31,12 @@ type ATRPercentileFilter struct {
 	windowSize int
 	threshold  float64
 
-	window []market.Price // ring buffer of recent ATR readings
-	pos    int            // next write index
-	count  int            // readings accumulated so far (capped at windowSize)
+	window []types.Price // ring buffer of recent ATR readings
+	pos    int           // next write index
+	count  int           // readings accumulated so far (capped at windowSize)
 }
 
-func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale market.Scale6) (*ATRPercentileFilter, error) {
+func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale types.Scale6) (*ATRPercentileFilter, error) {
 	if windowSize <= 0 {
 		return nil, fmt.Errorf("ATR percentile window size must be > 0")
 	}
@@ -52,7 +53,7 @@ func NewATRPercentileFilter(atrPeriod, windowSize int, threshold float64, scale 
 		atrPeriod:  atrPeriod,
 		windowSize: windowSize,
 		threshold:  threshold,
-		window:     make([]market.Price, windowSize),
+		window:     make([]types.Price, windowSize),
 	}, nil
 }
 
@@ -82,7 +83,7 @@ func (f *ATRPercentileFilter) Trending() bool {
 	return f.percentile() >= f.threshold
 }
 
-func (f *ATRPercentileFilter) AllowSide(_ market.Side) bool { return true }
+func (f *ATRPercentileFilter) AllowSide(_ types.Side) bool { return true }
 
 // Percentile exposes the current ATR percentile rank for debugging.
 // Equal ATR values share the middle of their tie bucket, so a completely flat

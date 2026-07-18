@@ -13,6 +13,7 @@ import (
 	_ "github.com/rustyeddy/trader/strategies/fake"
 	_ "github.com/rustyeddy/trader/strategies/noop"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // seedReplayStore writes two months of synthetic H1 EURUSD candles into a
@@ -21,11 +22,11 @@ func seedReplayStore(t *testing.T) {
 	t.Helper()
 	datamanager.UseTempDataDir(t)
 
-	base := market.Price(110000) // 1.10000
+	base := types.Price(110000) // 1.10000
 	makeMonth := func(_ int, _ time.Month, rows int) []market.Candle {
 		candles := make([]market.Candle, rows)
 		for i := range candles {
-			p := base + market.Price(i*10)
+			p := base + types.Price(i*10)
 			candles[i] = market.Candle{
 				Open: p, High: p + 500, Low: p - 500, Close: p + 100,
 			}
@@ -34,9 +35,9 @@ func seedReplayStore(t *testing.T) {
 	}
 
 	// Write Jan + Feb 2024 (744 + 696 H1 slots).
-	datamanager.WriteCandles(t, "oanda", "EURUSD", market.H1,
+	datamanager.WriteCandles(t, "oanda", "EURUSD", types.H1,
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 1, 744))
-	datamanager.WriteCandles(t, "oanda", "EURUSD", market.H1,
+	datamanager.WriteCandles(t, "oanda", "EURUSD", types.H1,
 		time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), makeMonth(2024, 2, 696))
 }
 

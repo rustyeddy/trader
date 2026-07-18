@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/execution"
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,9 +31,9 @@ func TestCompileBacktestComponents_WithExecutionDefaults_Success(t *testing.T) {
 	applyBacktestExecutionDefaults(req, rc, defaults)
 	assert.Equal(t, "run-1", req.Name)
 	assert.Equal(t, "EURUSD", req.Instrument)
-	assert.Equal(t, market.H1, req.TimeRange.TF)
-	assert.Equal(t, market.MoneyFromFloat(10_000), req.StartingBalance)
-	assert.Equal(t, market.RateFromFloat(0.015), req.RiskPct)
+	assert.Equal(t, types.H1, req.TimeRange.TF)
+	assert.Equal(t, types.MoneyFromFloat(10_000), req.StartingBalance)
+	assert.Equal(t, types.RateFromFloat(0.015), req.RiskPct)
 	assert.Equal(t, hashBacktestConfig(rc, defaults), req.ConfigHash)
 	require.NotNil(t, req.Strategy)
 	assert.Equal(t, "Fake", req.Strategy.Name())
@@ -79,7 +79,7 @@ func TestCompileBacktestComponents_Success(t *testing.T) {
 	assert.Equal(t, "run-1", req.Name)
 	assert.Equal(t, "EURUSD", req.Instrument)
 	assert.Equal(t, "candles", req.Source)
-	assert.Equal(t, market.H1, req.TimeRange.TF)
+	assert.Equal(t, types.H1, req.TimeRange.TF)
 	require.NotNil(t, req.Strategy)
 	assert.Equal(t, "Fake", req.Strategy.Name())
 	assert.Zero(t, req.StartingBalance)
@@ -106,12 +106,12 @@ func TestApplyBacktestExecutionDefaults(t *testing.T) {
 
 	applyBacktestExecutionDefaults(req, rc, defaults)
 	assert.Equal(t, hashBacktestConfig(rc, defaults), req.ConfigHash)
-	assert.Equal(t, market.MoneyFromFloat(10_000), req.StartingBalance)
-	assert.Equal(t, market.RateFromFloat(0.015), req.RiskPct)
-	assert.Equal(t, market.PipsFromFloat(20), req.DefaultStopPips)
-	assert.Equal(t, market.PipsFromFloat(40), req.DefaultTakePips)
-	assert.Equal(t, market.PipsFromFloat(0.5), req.SlippagePips)
-	assert.Equal(t, market.PipsFromFloat(2.0), req.MaxSpreadPips)
+	assert.Equal(t, types.MoneyFromFloat(10_000), req.StartingBalance)
+	assert.Equal(t, types.RateFromFloat(0.015), req.RiskPct)
+	assert.Equal(t, types.PipsFromFloat(20), req.DefaultStopPips)
+	assert.Equal(t, types.PipsFromFloat(40), req.DefaultTakePips)
+	assert.Equal(t, types.PipsFromFloat(0.5), req.SlippagePips)
+	assert.Equal(t, types.PipsFromFloat(2.0), req.MaxSpreadPips)
 }
 
 func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
@@ -144,10 +144,10 @@ func TestCompileBacktests_SuccessAndDefaultsApplied(t *testing.T) {
 	require.Len(t, runs, 2)
 
 	for _, run := range runs {
-		assert.Equal(t, market.MoneyFromFloat(12_500), run.Request.StartingBalance)
-		assert.Equal(t, market.RateFromFloat(0.015), run.Request.RiskPct)
-		assert.Equal(t, market.PipsFromFloat(20), run.Request.DefaultStopPips)
-		assert.Equal(t, market.PipsFromFloat(40), run.Request.DefaultTakePips)
+		assert.Equal(t, types.MoneyFromFloat(12_500), run.Request.StartingBalance)
+		assert.Equal(t, types.RateFromFloat(0.015), run.Request.RiskPct)
+		assert.Equal(t, types.PipsFromFloat(20), run.Request.DefaultStopPips)
+		assert.Equal(t, types.PipsFromFloat(40), run.Request.DefaultTakePips)
 		assert.NotEmpty(t, run.ID)
 	}
 
@@ -179,22 +179,22 @@ func TestBuildBacktestResult(t *testing.T) {
 	assert.Nil(t, nilRun.BuildBacktestResult(&execution.Account{}))
 
 	run := &Backtest{
-		Request: &BacktestRequest{StartingBalance: market.MoneyFromFloat(10_000)},
+		Request: &BacktestRequest{StartingBalance: types.MoneyFromFloat(10_000)},
 	}
 	assert.Nil(t, run.BuildBacktestResult(nil))
 
 	acct := &execution.Account{
-		Balance: market.MoneyFromFloat(10_150),
-		Equity:  market.MoneyFromFloat(10_200),
+		Balance: types.MoneyFromFloat(10_150),
+		Equity:  types.MoneyFromFloat(10_200),
 		Trades: []*execution.Trade{
-			{PNL: market.MoneyFromFloat(100)},
+			{PNL: types.MoneyFromFloat(100)},
 			nil,
-			{PNL: market.MoneyFromFloat(-25)},
+			{PNL: types.MoneyFromFloat(-25)},
 			{PNL: 0},
 		},
 	}
 
-	run.Request.TimeRange = market.TimeRange{Start: market.Timestamp(100), End: market.Timestamp(200)}
+	run.Request.TimeRange = types.TimeRange{Start: types.Timestamp(100), End: types.Timestamp(200)}
 	res := run.BuildBacktestResult(acct)
 	require.NotNil(t, res)
 	assert.Equal(t, acct.Balance, res.Balance)
@@ -204,19 +204,19 @@ func TestBuildBacktestResult(t *testing.T) {
 	assert.Equal(t, 1, res.Losses)
 	assert.Equal(t, 1, res.Flat)
 	assert.Equal(t, run.Request.StartingBalance, res.StartBalance)
-	assert.Equal(t, market.MoneyFromFloat(100), res.GrossProfit)
-	assert.Equal(t, market.MoneyFromFloat(-25), res.GrossLoss)
-	assert.Equal(t, market.MoneyFromFloat(100), res.AvgWinner)
-	assert.Equal(t, market.MoneyFromFloat(-25), res.AvgLoser)
-	assert.Equal(t, market.RateFromFloat(4.0), res.ProfitFactor)
-	assert.Equal(t, market.RateFromFloat(4.0), res.RR)
-	assert.Equal(t, market.MoneyFromFloat(-25), res.MaxDrawdown)
-	assert.Equal(t, market.RateFromFloat(-25.0/10_000.0), res.MaxDrawdownPct)
-	assert.Equal(t, market.Timestamp(100), res.Start)
-	assert.Equal(t, market.Timestamp(200), res.End)
+	assert.Equal(t, types.MoneyFromFloat(100), res.GrossProfit)
+	assert.Equal(t, types.MoneyFromFloat(-25), res.GrossLoss)
+	assert.Equal(t, types.MoneyFromFloat(100), res.AvgWinner)
+	assert.Equal(t, types.MoneyFromFloat(-25), res.AvgLoser)
+	assert.Equal(t, types.RateFromFloat(4.0), res.ProfitFactor)
+	assert.Equal(t, types.RateFromFloat(4.0), res.RR)
+	assert.Equal(t, types.MoneyFromFloat(-25), res.MaxDrawdown)
+	assert.Equal(t, types.RateFromFloat(-25.0/10_000.0), res.MaxDrawdownPct)
+	assert.Equal(t, types.Timestamp(100), res.Start)
+	assert.Equal(t, types.Timestamp(200), res.End)
 	assert.Equal(t, acct.Balance-run.Request.StartingBalance, res.NetPL)
-	assert.Equal(t, market.RateFromFloat(1.0/3.0), res.WinRate)
-	assert.Equal(t, market.RateFromFloat(res.NetPL.Float64()/run.Request.StartingBalance.Float64()), res.ReturnPct)
+	assert.Equal(t, types.RateFromFloat(1.0/3.0), res.WinRate)
+	assert.Equal(t, types.RateFromFloat(res.NetPL.Float64()/run.Request.StartingBalance.Float64()), res.ReturnPct)
 	assert.Same(t, res, run.Result)
 }
 
@@ -224,7 +224,7 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "", formatBacktestSummaryTime(0))
-	assert.Equal(t, "1970-01-01T00:00:01Z", formatBacktestSummaryTime(market.Timestamp(1)))
+	assert.Equal(t, "1970-01-01T00:00:01Z", formatBacktestSummaryTime(types.Timestamp(1)))
 
 	var nilRun *Backtest
 	assert.Equal(t, BacktestReportSummary{}, nilRun.Summary())
@@ -237,27 +237,27 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 			Name:            "summary-run",
 			Instrument:      "EURUSD",
 			Strategy:        fake,
-			TimeRange:       market.TimeRange{Start: market.Timestamp(1), End: market.Timestamp(3601), TF: market.H1},
-			StartingBalance: market.MoneyFromFloat(10_000),
-			RiskPct:         market.RateFromFloat(0.01),
-			DefaultStopPips: market.PipsFromFloat(20),
+			TimeRange:       types.TimeRange{Start: types.Timestamp(1), End: types.Timestamp(3601), TF: types.H1},
+			StartingBalance: types.MoneyFromFloat(10_000),
+			RiskPct:         types.RateFromFloat(0.01),
+			DefaultStopPips: types.PipsFromFloat(20),
 		},
 		State: &BacktestRun{},
 		Result: &BacktestResult{
-			Start:        market.Timestamp(1),
-			End:          market.Timestamp(3601),
-			StartBalance: market.MoneyFromFloat(10_000),
+			Start:        types.Timestamp(1),
+			End:          types.Timestamp(3601),
+			StartBalance: types.MoneyFromFloat(10_000),
 			Trades:       10,
 			Wins:         6,
 			Losses:       4,
-			Balance:      market.MoneyFromFloat(10_250),
-			NetPL:        market.MoneyFromFloat(250),
-			ReturnPct:    market.RateFromFloat(0.025),
-			WinRate:      market.RateFromFloat(0.6),
-			AvgWinner:    market.MoneyFromFloat(150),
-			AvgLoser:     market.MoneyFromFloat(-75),
-			RR:           market.RateFromFloat(2.0),
-			MaxDrawdown:  market.MoneyFromFloat(-80),
+			Balance:      types.MoneyFromFloat(10_250),
+			NetPL:        types.MoneyFromFloat(250),
+			ReturnPct:    types.RateFromFloat(0.025),
+			WinRate:      types.RateFromFloat(0.6),
+			AvgWinner:    types.MoneyFromFloat(150),
+			AvgLoser:     types.MoneyFromFloat(-75),
+			RR:           types.RateFromFloat(2.0),
+			MaxDrawdown:  types.MoneyFromFloat(-80),
 		},
 	}
 
@@ -282,4 +282,49 @@ func TestSummary_AndFormatBacktestSummaryTime(t *testing.T) {
 	assert.InDelta(t, 2.0, s.RR, 1e-9)
 	assert.InDelta(t, 1.0, s.RiskPct, 1e-9)
 	assert.Equal(t, "", s.Stop) // Fake strategy returns no stop description
+}
+
+func TestSummary_TradeDetailsIncludesReasonAndInitialStop(t *testing.T) {
+	t.Parallel()
+
+	fake, err := strategy.GetStrategy(strategy.StrategyConfig{Kind: "fake"})
+	require.NoError(t, err)
+
+	trade := &execution.Trade{
+		TradeCommon: &execution.TradeCommon{
+			ID:          "t1",
+			Instrument:  "EURUSD",
+			Side:        types.Long,
+			Units:       1000,
+			Stop:        types.PriceFromFloat(1.093), // trailed by close time
+			InitialStop: types.PriceFromFloat(1.09),
+			Reason:      "signalreplay:2024-01-02T00:00:00Z",
+		},
+		EntryPrice: types.PriceFromFloat(1.10),
+		EntryTime:  types.Timestamp(1),
+		ExitPrice:  types.PriceFromFloat(1.11),
+		ExitTime:   types.Timestamp(3601),
+		PNL:        types.MoneyFromFloat(100),
+		CloseCause: execution.CloseTakeProfit,
+	}
+
+	run := &Backtest{
+		Request: &BacktestRequest{
+			Name:            "trade-details-run",
+			Instrument:      "EURUSD",
+			Strategy:        fake,
+			TimeRange:       types.TimeRange{Start: types.Timestamp(1), End: types.Timestamp(3601), TF: types.H1},
+			StartingBalance: types.MoneyFromFloat(10_000),
+		},
+		State:  &BacktestRun{Trades: []*execution.Trade{trade}},
+		Result: &BacktestResult{},
+	}
+
+	s := run.Summary()
+	require.Len(t, s.TradeDetails, 1)
+	td := s.TradeDetails[0]
+	assert.Equal(t, "signalreplay:2024-01-02T00:00:00Z", td.Reason)
+	assert.Equal(t, "TakeProfit", td.CloseCause)
+	assert.InDelta(t, 1.09, td.InitialStopPrice, 1e-9)
+	assert.InDelta(t, 1.093, td.StopPrice, 1e-9, "StopPrice reflects the trailed stop, distinct from InitialStopPrice")
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,13 +15,13 @@ import (
 // rounding is always up, never short.
 func TestCandleWindowSeconds_MatchesReviewWindowRatio(t *testing.T) {
 	tests := []struct {
-		tf    market.Timeframe
+		tf    types.Timeframe
 		count int
 	}{
-		{market.D1, 60},
-		{market.H4, 60},
-		{market.D1, 1},
-		{market.H1, 37}, // odd count exercises the round-up path
+		{types.D1, 60},
+		{types.H4, 60},
+		{types.D1, 1},
+		{types.H1, 37}, // odd count exercises the round-up path
 	}
 	for _, tt := range tests {
 		got := candleWindowSeconds(tt.tf, tt.count)
@@ -38,13 +39,16 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	// Friday close, then the weekend gap, then Monday open — D1 candles.
-	fri := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC) // Friday
-	mon := time.Date(2026, time.January, 5, 0, 0, 0, 0, time.UTC) // Monday
-	tue := time.Date(2026, time.January, 6, 0, 0, 0, 0, time.UTC) // Tuesday
-	wed := time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC) // Wednesday
+	// Friday close, then the weekend gap, then Monday open — D1 candles,
+	// on OANDA's true 17:00 America/New_York daily-alignment boundary, not
+	// UTC midnight. jan[d] is day d's true boundary (jan[1] = Jan 1).
+	jan := SlotBoundaries(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	fri := jan[1] // Jan 2, Friday
+	mon := jan[4] // Jan 5, Monday
+	tue := jan[5] // Jan 6, Tuesday
+	wed := jan[6] // Jan 7, Wednesday
 
-	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.January, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.January, map[time.Time]market.Candle{
 		fri: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
 		mon: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
 		tue: {Open: 107, High: 110, Low: 106, Close: 109, Ticks: 1},
@@ -54,7 +58,7 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 	req := CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range:      market.TimeRange{TF: market.D1}, // overwritten by GetCandles
+		Range:      types.TimeRange{TF: types.D1}, // overwritten by GetCandles
 	}
 
 	candles, err := dm.GetCandles(context.Background(), req, wed, 2)
@@ -69,23 +73,24 @@ func TestGetCandles_CompactsWeekendGapAndTrimsToCount(t *testing.T) {
 		{Open: 107, High: 110, Low: 106, Close: 109, Ticks: 1},
 		{Open: 109, High: 112, Low: 108, Close: 111, Ticks: 1},
 	}, candlesOnly(candles), "expected the 2 most recent valid candles at/before asof, in order")
-	require.Equal(t, []market.Timestamp{market.FromTime(tue), market.FromTime(wed)}, timestampsOnly(candles))
+	require.Equal(t, []types.Timestamp{types.FromTime(tue), types.FromTime(wed)}, timestampsOnly(candles))
 }
 
 func TestGetCandles_IncludesCandleAtExactlyAsof(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
+	mar := SlotBoundaries(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	day := mar[9] // March 10
 
-	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.March, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.March, map[time.Time]market.Candle{
 		day: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
 	})
 
 	candles, err := dm.GetCandles(context.Background(), CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range:      market.TimeRange{TF: market.D1},
+		Range:      types.TimeRange{TF: types.D1},
 	}, day, 5)
 	require.NoError(t, err)
 	require.Len(t, candles, 1, "the candle whose open time equals asof must be included")
@@ -95,10 +100,11 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day1 := time.Date(2026, time.March, 10, 0, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, time.March, 11, 0, 0, 0, 0, time.UTC)
+	mar := SlotBoundaries(time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), types.D1, 31)
+	day1 := mar[9]  // March 10
+	day2 := mar[10] // March 11
 
-	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.March, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.March, map[time.Time]market.Candle{
 		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
 		day2: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
 	})
@@ -106,7 +112,7 @@ func TestGetCandles_ExcludesCandlesAfterAsof(t *testing.T) {
 	candles, err := dm.GetCandles(context.Background(), CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range:      market.TimeRange{TF: market.D1},
+		Range:      types.TimeRange{TF: types.D1},
 	}, day1, 5)
 	require.NoError(t, err)
 	require.Equal(t, []market.Candle{
@@ -128,11 +134,12 @@ func TestGetCandles_SkipsFlaggedValidButZeroValueCandle(t *testing.T) {
 	s := useTempStore(t)
 	dm := &DataManager{}
 
-	day1 := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	day2 := time.Date(2026, time.April, 2, 0, 0, 0, 0, time.UTC) // flagged valid, zero content
-	day3 := time.Date(2026, time.April, 3, 0, 0, 0, 0, time.UTC)
+	apr := SlotBoundaries(time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC), types.D1, 30)
+	day1 := apr[0] // April 1
+	day2 := apr[1] // April 2, flagged valid, zero content
+	day3 := apr[2] // April 3
 
-	writeMonthlyCandles(t, s, "EURUSD", market.D1, 2026, time.April, map[time.Time]market.Candle{
+	writeMonthlyCandles(t, s, "EURUSD", types.D1, 2026, time.April, map[time.Time]market.Candle{
 		day1: {Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1},
 		day2: {}, // AddCandle marks this valid regardless of content
 		day3: {Open: 103, High: 108, Low: 102, Close: 107, Ticks: 1},
@@ -141,7 +148,7 @@ func TestGetCandles_SkipsFlaggedValidButZeroValueCandle(t *testing.T) {
 	candles, err := dm.GetCandles(context.Background(), CandleRequest{
 		Source:     market.SourceCandles,
 		Instrument: "EURUSD",
-		Range:      market.TimeRange{TF: market.D1},
+		Range:      types.TimeRange{TF: types.D1},
 	}, day3, 5)
 	require.NoError(t, err)
 	require.Equal(t, []market.Candle{
@@ -154,7 +161,7 @@ func TestGetCandles_RejectsNonPositiveCount(t *testing.T) {
 	dm := &DataManager{}
 	_, err := dm.GetCandles(context.Background(), CandleRequest{
 		Instrument: "EURUSD",
-		Range:      market.TimeRange{TF: market.D1},
+		Range:      types.TimeRange{TF: types.D1},
 	}, time.Now(), 0)
 	require.Error(t, err)
 }
@@ -167,8 +174,8 @@ func candlesOnly(cts []market.CandleTime) []market.Candle {
 	return out
 }
 
-func timestampsOnly(cts []market.CandleTime) []market.Timestamp {
-	out := make([]market.Timestamp, len(cts))
+func timestampsOnly(cts []market.CandleTime) []types.Timestamp {
+	out := make([]types.Timestamp, len(cts))
 	for i, ct := range cts {
 		out[i] = ct.Timestamp
 	}

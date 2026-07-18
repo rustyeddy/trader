@@ -5,10 +5,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // StrategyConfig identifies a strategy kind and its parameters.
@@ -98,11 +98,11 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (Live
 		if err != nil {
 			return nil, fmt.Errorf("unknown strategy kind %q: %w", kind, err)
 		}
-		exit, err := strategy.GetExitStrategy(cfg.Exit, market.PriceScale)
+		exit, err := strategy.GetExitStrategy(cfg.Exit, types.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("exit strategy for %q: %w", kind, err)
 		}
-		regime, err := strategy.GetRegimeFilter(cfg.Regime, market.PriceScale)
+		regime, err := strategy.GetRegimeFilter(cfg.Regime, types.PriceScale)
 		if err != nil {
 			return nil, fmt.Errorf("regime filter for %q: %w", kind, err)
 		}

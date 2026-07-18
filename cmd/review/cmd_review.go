@@ -39,6 +39,21 @@ var (
 	fromStr        string
 	toStr          string
 	interval       time.Duration
+
+	// Threshold flags override config-file/default review.Thresholds
+	// fields for ad-hoc sweep tuning (GitHub issue #165). Zero (unset)
+	// means "don't override" — see review.MergeThresholds.
+	hotADXFloor        float64
+	hotCICeiling       float64
+	tradeableCICeiling float64
+	h4ADXFloor         float64
+	h4MinEMASep        float64
+	demotionADXFloor   float64
+	demotionCICeiling  float64
+	weekUsedCaution    float64
+	valueZoneMin       float64
+	valueZoneMax       float64
+	h4SqueezeWidthATR  float64
 )
 
 func New(rc *config.RootConfig) *cobra.Command {
@@ -60,7 +75,69 @@ func New(rc *config.RootConfig) *cobra.Command {
 	cmd.Flags().StringVar(&fromStr, "from", "", "Historical sweep start date (YYYY-MM-DD, inclusive); requires --to")
 	cmd.Flags().StringVar(&toStr, "to", "", "Historical sweep end date (YYYY-MM-DD, inclusive); requires --from")
 	cmd.Flags().DurationVar(&interval, "interval", 24*time.Hour, "Step interval between sweep dates when --from and --to differ")
+
+	cmd.Flags().Float64Var(&hotADXFloor, "hot-adx-floor", 0, "Hot gate: D1 ADX floor (default: config, else 25.0)")
+	cmd.Flags().Float64Var(&hotCICeiling, "hot-ci-ceiling", 0, "Hot gate: D1 CI ceiling (default: config, else 55.0)")
+	cmd.Flags().Float64Var(&tradeableCICeiling, "tradeable-ci-ceiling", 0, "Tradeable gate: H4 CI ceiling (default: config, else 60.0)")
+	cmd.Flags().Float64Var(&h4ADXFloor, "h4-adx-floor", 0, "Tradeable gate: H4 ADX floor (default: config, else 20.0)")
+	cmd.Flags().Float64Var(&h4MinEMASep, "h4-min-ema-sep", 0, "Tradeable gate: H4 EMA20/50 separation floor, in ATR multiples (default: config, else 0.3)")
+	cmd.Flags().Float64Var(&demotionADXFloor, "demotion-adx-floor", 0, "Demotion note: D1 ADX floor (default: config, else 20.0)")
+	cmd.Flags().Float64Var(&demotionCICeiling, "demotion-ci-ceiling", 0, "Demotion note: D1 CI ceiling (default: config, else 65.0)")
+	cmd.Flags().Float64Var(&weekUsedCaution, "week-used-caution", 0, "Demotion note: weekly ATR-budget-used caution threshold (default: config, else 0.90)")
+	cmd.Flags().Float64Var(&valueZoneMin, "value-zone-min", 0, "Setup gate: H4 price-vs-EMA20 value-zone lower bound, in ATR multiples (default: config, else 0.5)")
+	cmd.Flags().Float64Var(&valueZoneMax, "value-zone-max", 0, "Setup gate: H4 price-vs-EMA20 value-zone upper bound, in ATR multiples (default: config, else 1.5)")
+	cmd.Flags().Float64Var(&h4SqueezeWidthATR, "h4-squeeze-width-atr", 0, "H4 Bollinger squeeze threshold, in ATR multiples (default: config, else 2.0)")
 	return cmd
+}
+
+// resolveThresholds layers CLI-flag overrides over rc.ReviewThresholds
+// (itself already resolved from global config, falling back to
+// review.DefaultThresholds() — see cmd/main.go and config.GlobalReviewConfig).
+// Only flags the user actually passed participate in the override, so an
+// unset flag never clobbers a configured value with 0.
+func resolveThresholds(cmd *cobra.Command, rc *config.RootConfig) review.Thresholds {
+	base := rc.ReviewThresholds
+	if base == (review.Thresholds{}) {
+		base = review.DefaultThresholds()
+	}
+
+	var override review.Thresholds
+	flags := cmd.Flags()
+	if flags.Changed("hot-adx-floor") {
+		override.HotD1ADXFloor = hotADXFloor
+	}
+	if flags.Changed("hot-ci-ceiling") {
+		override.HotD1CICeiling = hotCICeiling
+	}
+	if flags.Changed("tradeable-ci-ceiling") {
+		override.TradeableH4CICeiling = tradeableCICeiling
+	}
+	if flags.Changed("h4-adx-floor") {
+		override.H4ADXFloor = h4ADXFloor
+	}
+	if flags.Changed("h4-min-ema-sep") {
+		override.H4MinEMASep = h4MinEMASep
+	}
+	if flags.Changed("demotion-adx-floor") {
+		override.DemotionD1ADXFloor = demotionADXFloor
+	}
+	if flags.Changed("demotion-ci-ceiling") {
+		override.DemotionD1CICeiling = demotionCICeiling
+	}
+	if flags.Changed("week-used-caution") {
+		override.WeekUsedCaution = weekUsedCaution
+	}
+	if flags.Changed("value-zone-min") {
+		override.ValueZoneMin = valueZoneMin
+	}
+	if flags.Changed("value-zone-max") {
+		override.ValueZoneMax = valueZoneMax
+	}
+	if flags.Changed("h4-squeeze-width-atr") {
+		override.H4SqueezeWidthATR = h4SqueezeWidthATR
+	}
+
+	return review.MergeThresholds(base, override)
 }
 
 // buildService wires a market-data-only Service from flag values + global
@@ -186,6 +263,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 	if err != nil {
 		return err
 	}
+	th := resolveThresholds(cmd, rc)
 
 	var results []review.ReviewResult
 	if historical {
@@ -194,6 +272,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 			From:        from,
 			To:          to,
 			Interval:    interval,
+			Thresholds:  th,
 		})
 		if err != nil {
 			return err
@@ -202,6 +281,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 	} else {
 		resp, err := svc.ReviewWatchlist(context.Background(), service.ReviewRequest{
 			Instruments: splitCSV(instrumentsCSV),
+			Thresholds:  th,
 		})
 		if err != nil {
 			return err
@@ -281,9 +361,19 @@ func sortByInstrumentThenDate(results []review.ReviewResult) {
 
 // reviewTableHeader/reviewTableRow keep the table and org renderers' column
 // sets in sync.
-var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "H4 EMA DIST", "Squeeze", "W1 Bias", "WEEK%"}
+var reviewTableHeader = []string{"PAIR", "BUCKET", "BIAS", "ADX", "CI", "EMA SEP", "ATR(p)", "EMA DIST", "H4 ADX", "H4 CI", "H4 EMA DIST", "Squeeze", "W1 Bias", "WEEK%", "H1 Align", "H1 EMA DIST"}
 
 func reviewTableRow(r review.ReviewResult) []string {
+	// H1 is only ever computed for tradeable pairs (see
+	// review.EnrichWithH1); other buckets show "–" rather than a
+	// misleading zero value, distinguishing "never attempted" from a
+	// tradeable pair whose H1 genuinely came back unavailable.
+	h1Align, h1Dist := "–", "–"
+	if r.Bucket == "tradeable" {
+		h1Align = boolGlyph(r.Setup.H1Aligned)
+		h1Dist = fmt.Sprintf("%+.3f", r.Setup.H1EntryDist)
+	}
+
 	return []string{
 		r.Instrument,
 		r.Bucket,
@@ -299,6 +389,8 @@ func reviewTableRow(r review.ReviewResult) []string {
 		fmt.Sprintf("%t", r.H4.Squeeze),
 		alignmentGlyph(r.Setup.W1Alignment),
 		fmt.Sprintf("%.0f%%", r.W1.WeekUsedPct*100),
+		h1Align,
+		h1Dist,
 	}
 }
 
@@ -315,10 +407,20 @@ func alignmentGlyph(a review.Alignment) string {
 	}
 }
 
+// boolGlyph renders a glance-able glyph for a plain two-state bool, as
+// opposed to alignmentGlyph's tristate Alignment — used for H1Aligned,
+// which (like H4Aligned) has no neutral state.
+func boolGlyph(b bool) string {
+	if b {
+		return "✓"
+	}
+	return "✗"
+}
+
 // reviewTableNumericCol flags which reviewTableHeader columns hold numeric
 // values; those are right-justified so decimal points and "%" signs line up
 // down the column. PAIR/BUCKET/BIAS are text and stay left-justified.
-var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true}
+var reviewTableNumericCol = []bool{false, false, false, true, true, true, true, true, true, true, true, false, false, true, false, true}
 
 // buildReviewTable turns filtered results into a view.Table: one row per
 // result via reviewTableRow, numeric columns right-justified per

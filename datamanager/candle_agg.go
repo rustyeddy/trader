@@ -2,12 +2,14 @@ package datamanager
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Aggregate builds a higher timeframe CandleSet from a lower timeframe CandleSet.
-func (cs *CandleSet) Aggregate(outTF market.Timeframe) (*CandleSet, error) {
+func (cs *CandleSet) Aggregate(outTF types.Timeframe) (*CandleSet, error) {
 	return cs.aggregate(outTF, 1)
 }
 
@@ -16,13 +18,13 @@ func (cs *CandleSet) AggregateH1(minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
-	if cs.Timeframe != market.M1 {
+	if cs.Timeframe != types.M1 {
 		return nil, fmt.Errorf("AggregateH1 requires M1 source, got timeframe %d", cs.Timeframe)
 	}
-	return cs.aggregate(market.H1, minValid)
+	return cs.aggregate(types.H1, minValid)
 }
 
-func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet, error) {
+func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet, error) {
 	if cs == nil {
 		return nil, fmt.Errorf("nil input candleset")
 	}
@@ -32,13 +34,8 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 	if outTF%cs.Timeframe != 0 {
 		return nil, fmt.Errorf("outTF %d must be multiple of csTF %d", outTF, cs.Timeframe)
 	}
-
-	ratio := int(outTF / cs.Timeframe)
 	if minValid < 1 {
 		minValid = 1
-	}
-	if minValid > ratio {
-		minValid = ratio
 	}
 
 	if len(cs.Candles) == 0 {
@@ -51,10 +48,27 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 		}, nil
 	}
 
-	inTF := market.Timestamp(cs.Timeframe)
-	outStep := market.Timestamp(outTF)
+	// D1/H4 buckets aren't evenly spaced by a fixed stride: OANDA's true
+	// day boundary is 17:00 America/New_York, DST-aware, so the calendar
+	// day containing a DST transition is 23 or 25 wall-clock hours. A
+	// fixed stride from a single anchor (correct for every other
+	// timeframe here, since their grid boundaries don't depend on where
+	// the broker's trading day begins) silently drifts D1/H4 boundaries
+	// by an hour after crossing a transition. Walk real day boundaries
+	// instead.
+	if dailyAligned(outTF) {
+		return cs.aggregateWithinDay(outTF, minValid)
+	}
+
+	ratio := int(outTF / cs.Timeframe)
+	if minValid > ratio {
+		minValid = ratio
+	}
+
+	inTF := types.Timestamp(cs.Timeframe)
+	outStep := types.Timestamp(outTF)
 	start := (cs.Start / outStep) * outStep
-	end := cs.Start + market.Timestamp(len(cs.Candles)-1)*inTF
+	end := cs.Start + types.Timestamp(len(cs.Candles)-1)*inTF
 	outLen := int((end-start)/outStep) + 1
 
 	out := &CandleSet{
@@ -63,72 +77,138 @@ func (cs *CandleSet) aggregate(outTF market.Timeframe, minValid int) (*CandleSet
 		Timeframe:  outTF,
 		Scale:      cs.Scale,
 		Source:     cs.Source,
-		Candles:    make([]market.Candle, outLen),
+		Candles:    make([]market.CandleTime, outLen),
 		Valid:      make([]uint64, (outLen+63)/64),
 	}
 
 	hasValidBits := len(cs.Valid) > 0
 	for oi := 0; oi < outLen; oi++ {
-		windowStart := start + market.Timestamp(oi)*outStep
+		windowStart := start + types.Timestamp(oi)*outStep
+		out.Candles[oi].Timestamp = windowStart
+
 		firstIdx := int((windowStart - cs.Start) / inTF)
-
-		var (
-			outC       market.Candle
-			validCount int
-			openSet    bool
-			sumTicks   int64
-			sumSpread  int64
-		)
-
-		for ii := 0; ii < ratio; ii++ {
-			idx := firstIdx + ii
-			if idx < 0 || idx >= len(cs.Candles) {
-				continue
-			}
-			if hasValidBits && !market.BitIsSet(cs.Valid, idx) {
-				continue
-			}
-
-			c := cs.Candles[idx]
-			if !openSet {
-				outC.Open = c.Open
-				outC.High = c.High
-				outC.Low = c.Low
-				openSet = true
-			} else {
-				if c.High > outC.High {
-					outC.High = c.High
-				}
-				if c.Low < outC.Low {
-					outC.Low = c.Low
-				}
-			}
-
-			outC.Close = c.Close
-			if c.MaxSpread > outC.MaxSpread {
-				outC.MaxSpread = c.MaxSpread
-			}
-
-			ticks := int64(c.Ticks)
-			sumTicks += ticks
-			if ticks > 0 {
-				sumSpread += int64(c.AvgSpread) * ticks
-			}
-			validCount++
-		}
-
-		if !openSet || validCount < minValid {
+		outC, validCount := aggregateWindow(cs, firstIdx, firstIdx+ratio, hasValidBits)
+		if validCount < minValid {
 			continue
 		}
-
-		outC.Ticks = int32(sumTicks)
-		if sumTicks > 0 {
-			outC.AvgSpread = market.Price((sumSpread + sumTicks/2) / sumTicks)
-		}
-
-		out.Candles[oi] = outC
-		market.BitSet(out.Valid, oi)
+		out.Candles[oi].Candle = outC
+		types.BitSet(out.Valid, oi)
 	}
 
 	return out, nil
+}
+
+// aggregateWithinDay builds a D1 or H4 CandleSet from cs (must be a
+// sub-day timeframe, typically H1) by walking OANDA's true 17:00
+// America/New_York-anchored day boundaries, DST-aware. D1 gets one window
+// per real day; H4 windows open at fixed NY-local wall-clock hours (see
+// h4SlotsInDay), matching the boundaries the download/derive paths write,
+// rather than assuming fixed outTF-second strides from the session open.
+func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*CandleSet, error) {
+	inTF := types.Timestamp(cs.Timeframe)
+	outStep := time.Duration(outTF) * time.Second
+
+	csStart := time.Unix(int64(cs.Start), 0).UTC()
+	lastCandleTime := time.Unix(int64(cs.Start)+int64(len(cs.Candles)-1)*int64(inTF), 0).UTC()
+
+	var boundaries []time.Time
+	for day := types.DailyAlignmentBoundary(csStart); !day.After(lastCandleTime); day = nextDailyBoundary(day) {
+		next := nextDailyBoundary(day)
+		if outTF == types.D1 {
+			boundaries = append(boundaries, day)
+			continue
+		}
+		boundaries = append(boundaries, h4SlotsInDay(day, next)...)
+	}
+
+	out := &CandleSet{
+		Instrument: cs.Instrument,
+		Start:      types.FromTime(boundaries[0]),
+		Timeframe:  outTF,
+		Scale:      cs.Scale,
+		Source:     cs.Source,
+		Candles:    make([]market.CandleTime, len(boundaries)),
+		Valid:      make([]uint64, (len(boundaries)+63)/64),
+	}
+
+	hasValidBits := len(cs.Valid) > 0
+	for oi, windowStart := range boundaries {
+		out.Candles[oi].Timestamp = types.FromTime(windowStart)
+
+		windowEnd := windowStart.Add(outStep)
+		if oi+1 < len(boundaries) {
+			windowEnd = boundaries[oi+1]
+		}
+
+		firstIdx := int((types.FromTime(windowStart) - cs.Start) / inTF)
+		endIdx := int((types.FromTime(windowEnd) - cs.Start) / inTF)
+
+		outC, validCount := aggregateWindow(cs, firstIdx, endIdx, hasValidBits)
+		if validCount < minValid {
+			continue
+		}
+		out.Candles[oi].Candle = outC
+		types.BitSet(out.Valid, oi)
+	}
+
+	return out, nil
+}
+
+// aggregateWindow folds cs.Candles[max(0,fromIdx):min(len,toIdx)] into a
+// single OHLC candle, honoring cs.Valid when present. Returns the zero
+// Candle and validCount==0 if no input candle in range was open-eligible.
+func aggregateWindow(cs *CandleSet, fromIdx, toIdx int, hasValidBits bool) (market.Candle, int) {
+	var (
+		outC       market.Candle
+		validCount int
+		openSet    bool
+		sumTicks   int64
+		sumSpread  int64
+	)
+
+	for idx := fromIdx; idx < toIdx; idx++ {
+		if idx < 0 || idx >= len(cs.Candles) {
+			continue
+		}
+		if hasValidBits && !types.BitIsSet(cs.Valid, idx) {
+			continue
+		}
+
+		c := cs.Candles[idx].Candle
+		if !openSet {
+			outC.Open = c.Open
+			outC.High = c.High
+			outC.Low = c.Low
+			openSet = true
+		} else {
+			if c.High > outC.High {
+				outC.High = c.High
+			}
+			if c.Low < outC.Low {
+				outC.Low = c.Low
+			}
+		}
+
+		outC.Close = c.Close
+		if c.MaxSpread > outC.MaxSpread {
+			outC.MaxSpread = c.MaxSpread
+		}
+
+		ticks := int64(c.Ticks)
+		sumTicks += ticks
+		if ticks > 0 {
+			sumSpread += int64(c.AvgSpread) * ticks
+		}
+		validCount++
+	}
+
+	if !openSet {
+		return market.Candle{}, 0
+	}
+
+	outC.Ticks = int32(sumTicks)
+	if sumTicks > 0 {
+		outC.AvgSpread = types.Price((sumSpread + sumTicks/2) / sumTicks)
+	}
+	return outC, validCount
 }

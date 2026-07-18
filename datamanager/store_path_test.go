@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +24,7 @@ func TestParseCandlePath_Valid(t *testing.T) {
 	require.Equal(t, KindCandle, k.Kind)
 	require.Equal(t, 2026, k.Year)
 	require.Equal(t, 1, k.Month)
-	require.Equal(t, market.H1, k.TF)
+	require.Equal(t, types.H1, k.TF)
 }
 
 func TestParseCandlePath_M1(t *testing.T) {
@@ -35,7 +35,7 @@ func TestParseCandlePath_M1(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "GBPUSD", k.Instrument)
 	require.Equal(t, "candles", k.Source)
-	require.Equal(t, market.M1, k.TF)
+	require.Equal(t, types.M1, k.TF)
 	require.Equal(t, 2025, k.Year)
 	require.Equal(t, 6, k.Month)
 }
@@ -46,7 +46,7 @@ func TestParseCandlePath_D1(t *testing.T) {
 	path := "/basedir/src/USDJPY/2024/12/USDJPY-2024-12-d1.csv"
 	k, ok := parseCandlePath(path)
 	require.True(t, ok)
-	require.Equal(t, market.D1, k.TF)
+	require.Equal(t, types.D1, k.TF)
 }
 
 func TestParseCandlePath_TooFewParts(t *testing.T) {
@@ -164,10 +164,10 @@ func TestParseTickPath_InvalidHour(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// pathForHourlyTick via PathForAsset
+// pathForHourlyTick via KeyPath
 // ---------------------------------------------------------------------------
 
-func TestPathForAsset_TickKey(t *testing.T) {
+func TestKeyPath_TickKey(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -175,20 +175,20 @@ func TestPathForAsset_TickKey(t *testing.T) {
 		Instrument: "EUR_USD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
 		Hour:       13,
 	}
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.Contains(t, p, "EURUSD")
 	require.Contains(t, p, "2025")
 	require.Contains(t, p, "13h_ticks.bi5")
 }
 
-func TestPathForAsset_TickKeyUsesSourceDirectory(t *testing.T) {
+func TestKeyPath_TickKeyUsesSourceDirectory(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -196,19 +196,19 @@ func TestPathForAsset_TickKeyUsesSourceDirectory(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "other",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2025,
 		Month:      1,
 		Day:        2,
 		Hour:       13,
 	}
 
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.Contains(t, p, filepath.Join("raw", "other", "EURUSD"))
 }
 
-func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {
+func TestKeyPath_ErrorOnUnsupported(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
@@ -219,7 +219,7 @@ func TestPathForAsset_ErrorOnUnsupported(t *testing.T) {
 		Year:       2026,
 		Month:      1,
 	}
-	_, err := s.PathForAsset(k)
+	_, err := s.KeyPath(k)
 	require.Error(t, err)
 }
 
@@ -233,7 +233,7 @@ func TestStoreRelDir(t *testing.T) {
 	s := newTestStore(t)
 	k := Key{
 		Instrument: "EUR_USD",
-		TF:         market.H1,
+		TF:         types.H1,
 		Year:       2026,
 	}
 	rel := s.RelDir(k)
@@ -252,7 +252,7 @@ func TestStoreExists_Missing(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -269,11 +269,11 @@ func TestStoreExists_Present(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      1,
 	}
-	path, err := s.PathForAsset(k)
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte("data"), 0o644))

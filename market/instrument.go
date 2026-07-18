@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/rustyeddy/trader/types"
 )
 
 // AssetClass identifies the broad market category of an instrument.
@@ -24,8 +26,8 @@ type Instrument struct {
 	QuoteCurrency       string
 	PipLocation         int
 	TradeUnitsPrecision int
-	MinimumTradeSize    Units
-	MarginRate          Rate
+	MinimumTradeSize    types.Units
+	MarginRate          types.Rate
 }
 
 var majorInstrumentNames = []string{
@@ -38,7 +40,7 @@ var majorInstrumentNames = []string{
 	"NZDUSD",
 }
 
-func makeInstrument(name, base, quote string, pipLocation int, marginRate Rate) Instrument {
+func makeInstrument(name, base, quote string, pipLocation int, marginRate types.Rate) Instrument {
 	return Instrument{
 		Name:                name,
 		AssetClass:          AssetForex,
@@ -53,49 +55,47 @@ func makeInstrument(name, base, quote string, pipLocation int, marginRate Rate) 
 
 var instrumentRegistry = map[string]Instrument{
 	// USD majors
-	"EURUSD": makeInstrument("EURUSD", "EUR", "USD", -4, Rate(20_000)),
-	"GBPUSD": makeInstrument("GBPUSD", "GBP", "USD", -4, Rate(20_000)),
-	"USDJPY": makeInstrument("USDJPY", "USD", "JPY", -2, Rate(20_000)),
-	"USDCHF": makeInstrument("USDCHF", "USD", "CHF", -4, Rate(20_000)),
-	"AUDUSD": makeInstrument("AUDUSD", "AUD", "USD", -4, Rate(20_000)),
-	"USDCAD": makeInstrument("USDCAD", "USD", "CAD", -4, Rate(20_000)),
-	"NZDUSD": makeInstrument("NZDUSD", "NZD", "USD", -4, Rate(20_000)),
-	// Precious metals
-	"XAUUSD": makeInstrument("XAUUSD", "XAU", "USD", -2, Rate(50_000)),
+	"EURUSD": makeInstrument("EURUSD", "EUR", "USD", -4, types.Rate(20_000)),
+	"GBPUSD": makeInstrument("GBPUSD", "GBP", "USD", -4, types.Rate(20_000)),
+	"USDJPY": makeInstrument("USDJPY", "USD", "JPY", -2, types.Rate(20_000)),
+	"USDCHF": makeInstrument("USDCHF", "USD", "CHF", -4, types.Rate(20_000)),
+	"AUDUSD": makeInstrument("AUDUSD", "AUD", "USD", -4, types.Rate(20_000)),
+	"USDCAD": makeInstrument("USDCAD", "USD", "CAD", -4, types.Rate(20_000)),
+	"NZDUSD": makeInstrument("NZDUSD", "NZD", "USD", -4, types.Rate(20_000)),
 	// JPY crosses
-	"EURJPY": makeInstrument("EURJPY", "EUR", "JPY", -2, Rate(20_000)),
-	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, Rate(20_000)),
-	"AUDJPY": makeInstrument("AUDJPY", "AUD", "JPY", -2, Rate(20_000)),
-	"CADJPY": makeInstrument("CADJPY", "CAD", "JPY", -2, Rate(20_000)),
-	"CHFJPY": makeInstrument("CHFJPY", "CHF", "JPY", -2, Rate(20_000)),
-	"NZDJPY": makeInstrument("NZDJPY", "NZD", "JPY", -2, Rate(20_000)),
+	"EURJPY": makeInstrument("EURJPY", "EUR", "JPY", -2, types.Rate(20_000)),
+	"GBPJPY": makeInstrument("GBPJPY", "GBP", "JPY", -2, types.Rate(20_000)),
+	"AUDJPY": makeInstrument("AUDJPY", "AUD", "JPY", -2, types.Rate(20_000)),
+	"CADJPY": makeInstrument("CADJPY", "CAD", "JPY", -2, types.Rate(20_000)),
+	"CHFJPY": makeInstrument("CHFJPY", "CHF", "JPY", -2, types.Rate(20_000)),
+	"NZDJPY": makeInstrument("NZDJPY", "NZD", "JPY", -2, types.Rate(20_000)),
 	// EUR crosses
-	"EURGBP": makeInstrument("EURGBP", "EUR", "GBP", -4, Rate(20_000)),
-	"EURAUD": makeInstrument("EURAUD", "EUR", "AUD", -4, Rate(20_000)),
-	"EURCAD": makeInstrument("EURCAD", "EUR", "CAD", -4, Rate(20_000)),
-	"EURCHF": makeInstrument("EURCHF", "EUR", "CHF", -4, Rate(20_000)),
-	"EURNZD": makeInstrument("EURNZD", "EUR", "NZD", -4, Rate(20_000)),
+	"EURGBP": makeInstrument("EURGBP", "EUR", "GBP", -4, types.Rate(20_000)),
+	"EURAUD": makeInstrument("EURAUD", "EUR", "AUD", -4, types.Rate(20_000)),
+	"EURCAD": makeInstrument("EURCAD", "EUR", "CAD", -4, types.Rate(20_000)),
+	"EURCHF": makeInstrument("EURCHF", "EUR", "CHF", -4, types.Rate(20_000)),
+	"EURNZD": makeInstrument("EURNZD", "EUR", "NZD", -4, types.Rate(20_000)),
 	// GBP crosses
-	"GBPAUD": makeInstrument("GBPAUD", "GBP", "AUD", -4, Rate(20_000)),
-	"GBPCAD": makeInstrument("GBPCAD", "GBP", "CAD", -4, Rate(20_000)),
-	"GBPNZD": makeInstrument("GBPNZD", "GBP", "NZD", -4, Rate(20_000)),
+	"GBPAUD": makeInstrument("GBPAUD", "GBP", "AUD", -4, types.Rate(20_000)),
+	"GBPCAD": makeInstrument("GBPCAD", "GBP", "CAD", -4, types.Rate(20_000)),
+	"GBPNZD": makeInstrument("GBPNZD", "GBP", "NZD", -4, types.Rate(20_000)),
 	// AUD crosses
-	"AUDCAD": makeInstrument("AUDCAD", "AUD", "CAD", -4, Rate(20_000)),
-	"AUDCHF": makeInstrument("AUDCHF", "AUD", "CHF", -4, Rate(20_000)),
-	"AUDNZD": makeInstrument("AUDNZD", "AUD", "NZD", -4, Rate(20_000)),
+	"AUDCAD": makeInstrument("AUDCAD", "AUD", "CAD", -4, types.Rate(20_000)),
+	"AUDCHF": makeInstrument("AUDCHF", "AUD", "CHF", -4, types.Rate(20_000)),
+	"AUDNZD": makeInstrument("AUDNZD", "AUD", "NZD", -4, types.Rate(20_000)),
 }
 
 // approximateUSDPerUnit provides static approximate USD exchange rates for
 // non-USD currencies. Used for cross-pair P/L conversion and position sizing
 // when a live rate is not available. Accuracy ±30%; correct order of magnitude.
-var approximateUSDPerUnit = map[string]Rate{
-	"EUR": RateFromFloat(1.08),
-	"GBP": RateFromFloat(1.26),
-	"JPY": RateFromFloat(0.0067), // ~1/150
-	"AUD": RateFromFloat(0.65),
-	"CAD": RateFromFloat(0.74),
-	"NZD": RateFromFloat(0.61),
-	"CHF": RateFromFloat(1.10),
+var approximateUSDPerUnit = map[string]types.Rate{
+	"EUR": types.RateFromFloat(1.08),
+	"GBP": types.RateFromFloat(1.26),
+	"JPY": types.RateFromFloat(0.0067), // ~1/150
+	"AUD": types.RateFromFloat(0.65),
+	"CAD": types.RateFromFloat(0.74),
+	"NZD": types.RateFromFloat(0.61),
+	"CHF": types.RateFromFloat(1.10),
 }
 
 func init() {
@@ -147,8 +147,8 @@ func AllInstruments() []string {
 	return names
 }
 
-// ApproximateUSDPerUnit reports a rough USD-per-unit Rate for a non-USD currency.
-func ApproximateUSDPerUnit(currency string) (Rate, bool) {
+// ApproximateUSDPerUnit reports a rough USD-per-unit types.Rate for a non-USD currency.
+func ApproximateUSDPerUnit(currency string) (types.Rate, bool) {
 	rate, ok := approximateUSDPerUnit[strings.ToUpper(strings.TrimSpace(currency))]
 	return rate, ok
 }
@@ -169,31 +169,31 @@ func GetInstrument(symbol string) *Instrument {
 }
 
 // PriceUnitsPerPip is an internal helper for trader type processing.
-func (inst *Instrument) PriceUnitsPerPip() Price {
+func (inst *Instrument) PriceUnitsPerPip() types.Price {
 	if inst == nil {
 		return 0
 	}
-	units := int64(PriceScale)
+	units := int64(types.PriceScale)
 	for i := 0; i < -inst.PipLocation; i++ {
 		units /= 10
 	}
-	return Price(units)
+	return types.Price(units)
 }
 
 // PriceDeltaFromPips is an internal helper for trader type processing.
-func (inst *Instrument) PriceDeltaFromPips(pips Pips) Price {
+func (inst *Instrument) PriceDeltaFromPips(pips types.Pips) types.Price {
 	perPip := inst.PriceUnitsPerPip()
-	return Price((int64(perPip) * int64(pips)) / int64(pipScale))
+	return types.Price((int64(perPip) * int64(pips)) / int64(types.PipScale))
 }
 
 // AddPips is an internal helper for trader type processing.
-func (inst *Instrument) AddPips(px Price, pips Pips) Price {
+func (inst *Instrument) AddPips(px types.Price, pips types.Pips) types.Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px + delta
 }
 
 // SubPips is an internal helper for trader type processing.
-func (inst *Instrument) SubPips(px Price, pips Pips) Price {
+func (inst *Instrument) SubPips(px types.Price, pips types.Pips) types.Price {
 	delta := inst.PriceDeltaFromPips(pips)
 	return px - delta
 }
@@ -235,7 +235,7 @@ func (inst *Instrument) PipValueUSD(rate float64, units int64, pips float64) flo
 }
 
 // DukascopyPriceMultiplier returns the factor needed to convert a raw
-// Dukascopy bi5 price integer into a Price value at the current PriceScale.
+// Dukascopy bi5 price integer into a types.Price value at the current types.PriceScale.
 //
 // Dukascopy stores prices with (−PipLocation + 1) decimal places:
 //   - 5-decimal pairs (EURUSD, PipLocation=−4): native scale 100,000  → multiplier = 1
@@ -246,5 +246,18 @@ func (inst *Instrument) DukascopyPriceMultiplier() uint32 {
 	}
 	nativeDecimals := -inst.PipLocation + 1
 	nativeScale := int64(math.Pow10(nativeDecimals))
-	return uint32(int64(PriceScale) / nativeScale)
+	return uint32(int64(types.PriceScale) / nativeScale)
+}
+
+// AvgSpreadPips converts an accumulated types.Price spread into average pips.
+// Lives in market (not types) because it depends on *Instrument.
+func AvgSpreadPips(spreadSum types.Price, spreadOpened int, inst *Instrument) float64 {
+	if spreadOpened <= 0 || inst == nil {
+		return 0
+	}
+	unitsPerPip := inst.PriceUnitsPerPip()
+	if unitsPerPip <= 0 {
+		return 0
+	}
+	return float64(spreadSum) / float64(spreadOpened) / float64(unitsPerPip)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ADX computes the Average Directional Index (Wilder) over candle OHLC.
@@ -30,21 +31,21 @@ type ADX struct {
 	periods int // number of computed periods (needs prev)
 
 	// initial accumulation for first N periods
-	sumTR      market.PriceSum
-	sumPlusDM  market.PriceSum
-	sumMinusDM market.PriceSum
+	sumTR      types.PriceSum
+	sumPlusDM  types.PriceSum
+	sumMinusDM types.PriceSum
 
 	// Wilder smoothed values after initialization
-	smTR      market.PriceSum
-	smPlusDM  market.PriceSum
-	smMinusDM market.PriceSum
+	smTR      types.PriceSum
+	smPlusDM  types.PriceSum
+	smMinusDM types.PriceSum
 
 	// seeding ADX: average of first N DX values
 	dxSum   int64
 	dxCount int
 }
 
-func NewADX(period int, scale market.Scale6) (*ADX, error) {
+func NewADX(period int, scale types.Scale6) (*ADX, error) {
 	if period <= 0 {
 		return nil, fmt.Errorf("ADX period must be > 0")
 	}
@@ -66,17 +67,17 @@ func (a *ADX) Float64() float64 { return fixedScaledToFloat64(a.adx) }
 // Value returns the raw scaled ADX (×ValueScale). Use for fixed-point comparisons.
 func (a *ADX) Value() int64 { return a.adx }
 
-// ValueUnits returns ADX as market.Units (×UnitsScale == ×ValueScale).
-// Use when comparing against a threshold stored as market.Units.
-func (a *ADX) ValueUnits() market.Units { return market.Units(a.adx) }
+// ValueUnits returns ADX as types.Units (×UnitsScale == ×ValueScale).
+// Use when comparing against a threshold stored as types.Units.
+func (a *ADX) ValueUnits() types.Units { return types.Units(a.adx) }
 
 // PlusDIRaw and MinusDIRaw return raw scaled DI values for fixed-point comparisons.
 func (a *ADX) PlusDIRaw() int64  { return a.plusDI }
 func (a *ADX) MinusDIRaw() int64 { return a.minusDI }
 
-// PlusDIUnits and MinusDIUnits return DI values as market.Units.
-func (a *ADX) PlusDIUnits() market.Units  { return market.Units(a.plusDI) }
-func (a *ADX) MinusDIUnits() market.Units { return market.Units(a.minusDI) }
+// PlusDIUnits and MinusDIUnits return DI values as types.Units.
+func (a *ADX) PlusDIUnits() types.Units  { return types.Units(a.plusDI) }
+func (a *ADX) MinusDIUnits() types.Units { return types.Units(a.minusDI) }
 
 func (a *ADX) Reset() {
 	*a = ADX{
@@ -117,9 +118,9 @@ func (a *ADX) Update(c market.Candle) {
 
 	// 1) Accumulate first N periods to initialize Wilder smoothing
 	if a.periods <= a.n {
-		a.sumTR += market.PriceSum(tr)
-		a.sumPlusDM += market.PriceSum(plusDM)
-		a.sumMinusDM += market.PriceSum(minusDM)
+		a.sumTR += types.PriceSum(tr)
+		a.sumPlusDM += types.PriceSum(plusDM)
+		a.sumMinusDM += types.PriceSum(minusDM)
 
 		// When we have N periods accumulated, initialize smoothed values
 		if a.periods == a.n {
@@ -142,9 +143,9 @@ func (a *ADX) Update(c market.Candle) {
 
 	// 2) Wilder smoothing after initialization:
 	// smoothed = prior_smoothed - (prior_smoothed / N) + current
-	a.smTR = market.PriceSum(roundDivPositive(int64(a.smTR)*int64(a.n-1), int64(a.n)) + tr)
-	a.smPlusDM = market.PriceSum(roundDivPositive(int64(a.smPlusDM)*int64(a.n-1), int64(a.n)) + plusDM)
-	a.smMinusDM = market.PriceSum(roundDivPositive(int64(a.smMinusDM)*int64(a.n-1), int64(a.n)) + minusDM)
+	a.smTR = types.PriceSum(roundDivPositive(int64(a.smTR)*int64(a.n-1), int64(a.n)) + tr)
+	a.smPlusDM = types.PriceSum(roundDivPositive(int64(a.smPlusDM)*int64(a.n-1), int64(a.n)) + plusDM)
+	a.smMinusDM = types.PriceSum(roundDivPositive(int64(a.smMinusDM)*int64(a.n-1), int64(a.n)) + minusDM)
 
 	a.plusDI, a.minusDI = diScaled(int64(a.smPlusDM), int64(a.smMinusDM), int64(a.smTR))
 	dxVal := dxScaled(a.plusDI, a.minusDI)

@@ -93,6 +93,64 @@ func TestWriteValidationReport_BadPathReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ── repairNeedsDownload ───────────────────────────────────────────────────────
+
+func TestRepairNeedsDownload(t *testing.T) {
+	// Raw missing entirely: always download.
+	assert.True(t, repairNeedsDownload(false, 0))
+	assert.True(t, repairNeedsDownload(false, 12))
+	// Raw present but derive left expected slots unfilled (partial fetch):
+	// presence of the file is not proof of completeness — download.
+	assert.True(t, repairNeedsDownload(true, 1))
+	assert.True(t, repairNeedsDownload(true, 27000))
+	// Raw present and derive filled every expected slot: no network needed.
+	assert.False(t, repairNeedsDownload(true, 0))
+}
+
+// ── filterReportIssues ────────────────────────────────────────────────────────
+
+func TestFilterReportIssues_DropsMatchingKind(t *testing.T) {
+	report := &datamanager.CandleValidationReport{
+		Source:        "oanda",
+		Timeframe:     "h1",
+		MonthsScanned: 5,
+		Issues: []datamanager.CandleValidationIssue{
+			{Instrument: "EURUSD", Kind: "missing_expected_candles", Message: "gap"},
+			{Instrument: "EURUSD", Kind: "invalid_candles", Message: "bad shape"},
+		},
+	}
+
+	filtered := filterReportIssues(report, "missing_expected_candles")
+	require.Len(t, filtered.Issues, 1)
+	assert.Equal(t, "invalid_candles", filtered.Issues[0].Kind)
+	assert.Equal(t, report.MonthsScanned, filtered.MonthsScanned)
+	assert.Equal(t, report.Source, filtered.Source)
+}
+
+func TestFilterReportIssues_LeavesOriginalUntouched(t *testing.T) {
+	report := &datamanager.CandleValidationReport{
+		Issues: []datamanager.CandleValidationIssue{
+			{Kind: "missing_expected_candles"},
+			{Kind: "missing_expected_candles"},
+		},
+	}
+
+	filtered := filterReportIssues(report, "missing_expected_candles")
+	assert.Empty(t, filtered.Issues)
+	assert.Len(t, report.Issues, 2, "filtering must not mutate the original report used by --repair/--report")
+}
+
+func TestFilterReportIssues_NoMatchesKeepsAll(t *testing.T) {
+	report := &datamanager.CandleValidationReport{
+		Issues: []datamanager.CandleValidationIssue{
+			{Kind: "invalid_candles"},
+		},
+	}
+
+	filtered := filterReportIssues(report, "missing_expected_candles")
+	require.Len(t, filtered.Issues, 1)
+}
+
 // ── printValidationGrid (smoke test) ─────────────────────────────────────────
 
 func TestPrintValidationGrid_NoPanic(t *testing.T) {

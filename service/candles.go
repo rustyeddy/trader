@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // CandlesCSVRequest describes a local candle CSV export request.
@@ -47,7 +48,7 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 	if timeframe == "" {
 		return nil, fmt.Errorf("timeframe is required")
 	}
-	tf, err := market.ParseTimeframe(timeframe)
+	tf, err := types.ParseTimeframe(timeframe)
 	if err != nil {
 		return nil, err
 	}
@@ -73,9 +74,9 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
 		Source:     source,
 		Instrument: instrument,
-		Range: market.TimeRange{
-			Start: market.FromTime(from),
-			End:   market.FromTime(to),
+		Range: types.TimeRange{
+			Start: types.FromTime(from),
+			End:   types.FromTime(to),
 			TF:    tf,
 		},
 	})
@@ -89,7 +90,7 @@ func (s *Service) CandlesCSV(ctx context.Context, req CandlesCSVRequest) (*Candl
 		Source:     source,
 		Instrument: instrument,
 		Timeframe:  tf.String(),
-		Scale:      market.PriceScale,
+		Scale:      types.PriceScale,
 	}, iter)
 	if err != nil {
 		return nil, err
@@ -111,7 +112,7 @@ type CandleCSVMetadata struct {
 	Source     string
 	Instrument string
 	Timeframe  string
-	Scale      market.Scale6
+	Scale      types.Scale6
 }
 
 // WriteCandlesCSV writes the canonical candle CSV format and returns the row
@@ -121,15 +122,15 @@ func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.Cand
 		return 0, fmt.Errorf("nil candle iterator")
 	}
 	if meta.Scale == 0 {
-		meta.Scale = market.PriceScale
+		meta.Scale = types.PriceScale
 	}
-	if _, err := fmt.Fprintf(buf, "# schema=v1 source=%s instrument=%s tf=%s scale=%d\n",
+	if _, err := fmt.Fprintf(buf, "# schema=candle-v2 source=%s instrument=%s tf=%s scale=%d\n",
 		meta.Source, meta.Instrument, meta.Timeframe, meta.Scale); err != nil {
 		return 0, err
 	}
 
 	w := csv.NewWriter(buf)
-	if err := w.Write([]string{"Timestamp", "High", "Open", "Low", "Close", "avgspread", "maxspread", "ticks", "flags"}); err != nil {
+	if err := w.Write([]string{"Timestamp", "Open", "High", "Low", "Close", "avgspread", "maxspread", "ticks", "flags"}); err != nil {
 		return 0, err
 	}
 
@@ -138,8 +139,8 @@ func WriteCandlesCSV(buf *bytes.Buffer, meta CandleCSVMetadata, iter market.Cand
 		c := ct.Candle
 		if err := w.Write([]string{
 			strconv.FormatInt(int64(ct.Timestamp), 10),
-			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Low), 10),
 			strconv.FormatInt(int64(c.Close), 10),
 			strconv.FormatInt(int64(c.AvgSpread), 10),

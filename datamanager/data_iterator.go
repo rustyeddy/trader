@@ -1,6 +1,9 @@
 package datamanager
 
-import "github.com/rustyeddy/trader/market"
+import (
+	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
+)
 
 type iterator[T any] interface {
 	Next() bool
@@ -72,7 +75,7 @@ func (it *funcIterator[T]) Close() error {
 
 type rangedCandleIterator struct {
 	base     *candleSetIterator
-	rng      market.TimeRange
+	rng      types.TimeRange
 	useRange bool
 
 	err    error
@@ -80,7 +83,7 @@ type rangedCandleIterator struct {
 	closed bool
 }
 
-func newCandleSetIterator(cs *CandleSet, rng market.TimeRange) market.CandleIterator {
+func newCandleSetIterator(cs *CandleSet, rng types.TimeRange) market.CandleIterator {
 	return &rangedCandleIterator{
 		base:     cs.Iterator(),
 		rng:      rng,

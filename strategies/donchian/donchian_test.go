@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // Unix day epoch: 1970-01-01 = Thursday.
@@ -20,12 +21,12 @@ func warm(t *testing.T, s *Breakout, period int) {
 	for i := 0; i < period; i++ {
 		ct := &market.CandleTime{Candle: market.Candle{Open: 100, High: 110, Low: 90, Close: 100}}
 		sig := s.Update(context.Background(), ct, nil)
-		require.Equal(t, market.Flat, sig.Side)
+		require.Equal(t, types.Flat, sig.Side)
 	}
 	require.True(t, s.Ready())
 }
 
-func longBreak(above market.Price) *market.CandleTime {
+func longBreak(above types.Price) *market.CandleTime {
 	return &market.CandleTime{
 		Candle: market.Candle{
 			Open:  above,
@@ -36,7 +37,7 @@ func longBreak(above market.Price) *market.CandleTime {
 	}
 }
 
-func shortBreak(below market.Price) *market.CandleTime {
+func shortBreak(below types.Price) *market.CandleTime {
 	return &market.CandleTime{
 		Candle: market.Candle{
 			Open:  below,
@@ -48,7 +49,7 @@ func shortBreak(below market.Price) *market.CandleTime {
 }
 
 func candleAt(c market.Candle, ts int64) *market.CandleTime {
-	return &market.CandleTime{Candle: c, Timestamp: market.Timestamp(ts)}
+	return &market.CandleTime{Candle: c, Timestamp: types.Timestamp(ts)}
 }
 
 func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
@@ -72,7 +73,7 @@ func TestV6_MondayBlock_BlocksEntryOnMonday(t *testing.T) {
 	ct1 := candleAt(longBreak(110).Candle, ts)
 	sig := s.Update(context.Background(), ct1, nil)
 	assert.Equal(t, "monday-block", sig.Reason)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 
 	ct2 := candleAt(longBreak(110).Candle, ts+3600)
 	sig = s.Update(context.Background(), ct2, nil)
@@ -103,7 +104,7 @@ func TestV6_MondayBlock_AllowsEntryOnTuesday(t *testing.T) {
 	sig := s.Update(context.Background(), ct2, nil)
 
 	// ADX not ready → gate bypassed; entry fires on second confirm bar.
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 	assert.Equal(t, "donchian-v6-breakout-up", sig.Reason)
 }
 
@@ -139,12 +140,12 @@ func TestV6_MondayBlock_StreakPreservedAcrossMonday(t *testing.T) {
 	sig = s.Update(context.Background(), ct2, nil)
 	assert.Equal(t, "monday-block", sig.Reason)
 	assert.Equal(t, 1, s.pendingCount, "streak must survive monday block")
-	assert.Equal(t, market.Long, s.pendingSide)
+	assert.Equal(t, types.Long, s.pendingSide)
 
 	// Tuesday: block lifted, second confirmation fires entry.
 	ct3 := candleAt(longBreak(110).Candle, tuesday*86400)
 	sig = s.Update(context.Background(), ct3, nil)
-	assert.Equal(t, market.Long, sig.Side, "entry must fire on Tuesday after weekend skip")
+	assert.Equal(t, types.Long, sig.Side, "entry must fire on Tuesday after weekend skip")
 }
 
 func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
@@ -166,7 +167,7 @@ func TestV6_MondayBlockDisabled_AllowsEntryOnMonday(t *testing.T) {
 	s.Update(context.Background(), ct1, nil)
 	ct2 := candleAt(longBreak(110).Candle, ts+3600)
 	sig := s.Update(context.Background(), ct2, nil)
-	assert.Equal(t, market.Long, sig.Side, "monday block disabled: entry must fire")
+	assert.Equal(t, types.Long, sig.Side, "monday block disabled: entry must fire")
 }
 
 func TestV6_FridayBlock_BlocksEntryOnFriday(t *testing.T) {
@@ -189,7 +190,7 @@ func TestV6_FridayBlock_BlocksEntryOnFriday(t *testing.T) {
 	ct1 := candleAt(longBreak(110).Candle, friday*86400)
 	sig := s.Update(context.Background(), ct1, nil)
 	assert.Equal(t, "friday-block", sig.Reason)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestV6_NewsDayBlock_StillWorksInV6(t *testing.T) {
@@ -226,14 +227,14 @@ func TestV6_Reset_ClearsState(t *testing.T) {
 	})
 	require.NoError(t, err)
 	warm(t, s, 5)
-	s.pendingSide = market.Long
+	s.pendingSide = types.Long
 	s.pendingCount = 2
 	s.pendingLevel = 110
 
 	s.Reset()
 	assert.Equal(t, 0, s.pendingCount)
-	assert.Equal(t, market.Side(0), s.pendingSide)
-	assert.Equal(t, market.Price(0), s.pendingLevel)
+	assert.Equal(t, types.Side(0), s.pendingSide)
+	assert.Equal(t, types.Price(0), s.pendingLevel)
 	assert.False(t, s.adx.Ready())
 	assert.False(t, s.Ready())
 }
@@ -246,7 +247,7 @@ func TestV6_ShortEntry(t *testing.T) {
 
 	s.Update(context.Background(), shortBreak(90), nil)
 	sig := s.Update(context.Background(), shortBreak(90), nil)
-	assert.Equal(t, market.Short, sig.Side)
+	assert.Equal(t, types.Short, sig.Side)
 }
 
 func TestV6_NilCandleTime_ReturnsSafely(t *testing.T) {
@@ -254,5 +255,5 @@ func TestV6_NilCandleTime_ReturnsSafely(t *testing.T) {
 	s, err := New(Config{Period: 5, CloseStrength: 0.6, ConfirmBars: 2, ADXPeriod: 14, ADXThreshold: 25})
 	require.NoError(t, err)
 	sig := s.Update(context.Background(), nil, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }

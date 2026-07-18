@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // candleWindowBufferNum/candleWindowBufferDen pad the calendar span
@@ -26,7 +27,7 @@ const (
 // fetch at least count valid candles at the given timeframe, buffered per
 // candleWindowBufferNum/candleWindowBufferDen and rounded up so the window
 // is never short by a fractional second.
-func candleWindowSeconds(tf market.Timeframe, count int) int64 {
+func candleWindowSeconds(tf types.Timeframe, count int) int64 {
 	span := int64(tf) * int64(count) * candleWindowBufferNum
 	return (span + candleWindowBufferDen - 1) / candleWindowBufferDen
 }
@@ -38,7 +39,7 @@ func candleWindowSeconds(tf market.Timeframe, count int) int64 {
 // separately need to know how far back to look — e.g. to ensure the local
 // store has enough history before calling GetCandles, or to size a
 // direct-source fallback fetch when the local store falls short.
-func CandleWindow(tf market.Timeframe, count int) time.Duration {
+func CandleWindow(tf types.Timeframe, count int) time.Duration {
 	return time.Duration(candleWindowSeconds(tf, count)) * time.Second
 }
 
@@ -69,9 +70,9 @@ func (dm *DataManager) GetCandles(ctx context.Context, req CandleRequest, asof t
 	}
 
 	tf := req.timeframe()
-	end := market.FromTime(asof) + 1 // +1: End is exclusive, and asof itself must be included
-	start := max(end-market.Timestamp(candleWindowSeconds(tf, count)), 1)
-	req.Range = market.TimeRange{Start: start, End: end, TF: tf}
+	end := types.FromTime(asof) + 1 // +1: End is exclusive, and asof itself must be included
+	start := max(end-types.Timestamp(candleWindowSeconds(tf, count)), 1)
+	req.Range = types.TimeRange{Start: start, End: end, TF: tf}
 
 	iter, err := dm.Candles(ctx, req)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SourceName is the canonical name under which this provider is registered.
@@ -43,7 +44,7 @@ func (f *File) Key() datamanager.Key {
 			Instrument: f.symbol,
 			Source:     SourceName,
 			Kind:       datamanager.KindTick,
-			TF:         market.Ticks,
+			TF:         types.Ticks,
 			Year:       f.t.Year(),
 			Month:      int(f.t.Month()),
 			Day:        f.t.Day(),
@@ -79,7 +80,7 @@ func (f *File) IsValid(ctx context.Context) error {
 		return err
 	}
 
-	path, err := store.PathForAsset(f.Key())
+	path, err := store.KeyPath(f.Key())
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func (f *File) IsValid(ctx context.Context) error {
 var rePath = regexp.MustCompile(`[/\\](\d{4})[/\\](\d{2})[/\\](\d{2})[/\\](\d{2})h_ticks\.bi5$`)
 
 func (f *File) baseHourUnixMS() (int64, error) {
-	p, err := datamanager.ForProviders().PathForAsset(f.Key())
+	p, err := datamanager.ForProviders().KeyPath(f.Key())
 	if err != nil {
 		return 0, err
 	}

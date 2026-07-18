@@ -5,6 +5,7 @@ import (
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 const maxChoppinessThreshold = 100.0
@@ -21,7 +22,7 @@ type ChoppinessFilter struct {
 	threshold float64
 }
 
-func NewChoppinessFilter(period int, threshold float64, scale market.Scale6) (*ChoppinessFilter, error) {
+func NewChoppinessFilter(period int, threshold float64, scale types.Scale6) (*ChoppinessFilter, error) {
 	if err := validateChoppinessThreshold(threshold); err != nil {
 		return nil, err
 	}
@@ -50,7 +51,7 @@ func (f *ChoppinessFilter) Trending() bool {
 	return f.ci.Float64() < f.threshold
 }
 
-func (f *ChoppinessFilter) AllowSide(_ market.Side) bool { return true }
+func (f *ChoppinessFilter) AllowSide(_ types.Side) bool { return true }
 
 // Choppiness exposes the raw CI value for logging/debugging.
 func (f *ChoppinessFilter) Choppiness() float64 { return f.ci.Float64() }

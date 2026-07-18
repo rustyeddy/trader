@@ -10,10 +10,11 @@ import (
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 func ct(close float64) *market.CandleTime {
-	p := market.PriceFromFloat(close)
+	p := types.PriceFromFloat(close)
 	return &market.CandleTime{
 		Candle: market.Candle{Open: p, High: p, Low: p, Close: p},
 	}
@@ -60,26 +61,26 @@ func TestReset(t *testing.T) {
 func TestUpdate_NilCandleTime(t *testing.T) {
 	s, _ := New(Config{})
 	sig := s.Update(context.Background(), nil, nil)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 }
 
 func TestUpdate_TradeEvery1_OpensOnFirstBar(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 	sig := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 }
 
 func TestUpdate_TradeEvery3_WaitsBeforeOpening(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 3, StopBps: 20, Side: "long"})
 
 	sig := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Flat, sig.Side, "candle 1: should wait")
+	assert.Equal(t, types.Flat, sig.Side, "candle 1: should wait")
 
 	sig = s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Flat, sig.Side, "candle 2: should wait")
+	assert.Equal(t, types.Flat, sig.Side, "candle 2: should wait")
 
 	sig = s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Long, sig.Side, "candle 3: should open")
+	assert.Equal(t, types.Long, sig.Side, "candle 3: should open")
 }
 
 func TestUpdate_SkipsWhenInPosition(t *testing.T) {
@@ -92,7 +93,7 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 
 	// First call should signal long.
 	sig := s.Update(context.Background(), ct(1.1000), run)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 
 	// Simulate position open by adding a lot.
 	lb := &execution.LotBook{}
@@ -101,33 +102,33 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 
 	// Subsequent calls skip because a position is open.
 	sig = s.Update(context.Background(), ct(1.1000), run)
-	assert.Equal(t, market.Flat, sig.Side)
+	assert.Equal(t, types.Flat, sig.Side)
 	assert.Equal(t, "in position", sig.Reason)
 }
 
 func TestUpdate_SideLong(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "long"})
 	sig := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Long, sig.Side)
+	assert.Equal(t, types.Long, sig.Side)
 }
 
 func TestUpdate_SideShort(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "short"})
 	sig := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Short, sig.Side)
+	assert.Equal(t, types.Short, sig.Side)
 }
 
 func TestUpdate_SideAlternate(t *testing.T) {
 	s, _ := New(Config{TradeEvery: 1, StopBps: 20, Side: "alternate"})
 
 	sig := s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Long, sig.Side, "first trade should be Long")
+	assert.Equal(t, types.Long, sig.Side, "first trade should be Long")
 
 	sig = s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Short, sig.Side, "second trade should be Short")
+	assert.Equal(t, types.Short, sig.Side, "second trade should be Short")
 
 	sig = s.Update(context.Background(), ct(1.1000), nil)
-	assert.Equal(t, market.Long, sig.Side, "third trade should be Long again")
+	assert.Equal(t, types.Long, sig.Side, "third trade should be Long again")
 }
 
 // TestBuild_ConvertsPctToBps verifies the float→bps boundary conversion.

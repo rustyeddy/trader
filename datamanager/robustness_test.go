@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +27,7 @@ import (
 func TestKeyCompare_AllBranches(t *testing.T) {
 	t.Parallel()
 
-	base := Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}
+	base := Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}
 
 	cases := []struct {
 		name  string
@@ -34,22 +35,22 @@ func TestKeyCompare_AllBranches(t *testing.T) {
 		want  int
 	}{
 		{"equal", base, 0},
-		{"source <", Key{Source: "aaa", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
-		{"source >", Key{Source: "zzz", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
-		{"instrument <", Key{Source: "src", Instrument: "AUDUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
-		{"instrument >", Key{Source: "src", Instrument: "USDJPY", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
-		{"kind tick <", Key{Source: "src", Instrument: "EURUSD", Kind: KindTick, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
+		{"source <", Key{Source: "aaa", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
+		{"source >", Key{Source: "zzz", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
+		{"instrument <", Key{Source: "src", Instrument: "AUDUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
+		{"instrument >", Key{Source: "src", Instrument: "USDJPY", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
+		{"kind tick <", Key{Source: "src", Instrument: "EURUSD", Kind: KindTick, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
 		{"kind candle=candle", base, 0},
-		{"TF M1 <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
-		{"TF D1 >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.D1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
-		{"year <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2025, Month: 6, Day: 15, Hour: 12}, 1},
-		{"year >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2027, Month: 6, Day: 15, Hour: 12}, -1},
-		{"month <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1, Day: 15, Hour: 12}, 1},
-		{"month >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 12, Day: 15, Hour: 12}, -1},
-		{"day <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 1, Hour: 12}, 1},
-		{"day >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 30, Hour: 12}, -1},
-		{"hour <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 1}, 1},
-		{"hour >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 6, Day: 15, Hour: 23}, -1},
+		{"TF M1 <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 6, Day: 15, Hour: 12}, 1},
+		{"TF D1 >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 6, Day: 15, Hour: 12}, -1},
+		{"year <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2025, Month: 6, Day: 15, Hour: 12}, 1},
+		{"year >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2027, Month: 6, Day: 15, Hour: 12}, -1},
+		{"month <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1, Day: 15, Hour: 12}, 1},
+		{"month >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 12, Day: 15, Hour: 12}, -1},
+		{"day <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 1, Hour: 12}, 1},
+		{"day >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 30, Hour: 12}, -1},
+		{"hour <", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 1}, 1},
+		{"hour >", Key{Source: "src", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 6, Day: 15, Hour: 23}, -1},
 	}
 
 	for _, tc := range cases {
@@ -113,26 +114,26 @@ func TestKeyRange_AllBranches(t *testing.T) {
 
 	t.Run("tick hour 0 spans one hour", func(t *testing.T) {
 		t.Parallel()
-		k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 3, Day: 16, Hour: 0}
+		k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 3, Day: 16, Hour: 0}
 		rng, err := k.Range()
 		require.NoError(t, err)
-		require.Equal(t, market.Ticks, rng.TF)
-		require.Equal(t, rng.End-rng.Start, market.Timestamp(3600))
+		require.Equal(t, types.Ticks, rng.TF)
+		require.Equal(t, rng.End-rng.Start, types.Timestamp(3600))
 	})
 	t.Run("tick hour 23 spans exactly one hour", func(t *testing.T) {
 		t.Parallel()
-		k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 3, Day: 16, Hour: 23}
+		k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 3, Day: 16, Hour: 23}
 		rng, err := k.Range()
 		require.NoError(t, err)
-		require.Equal(t, market.Timestamp(3600), rng.End-rng.Start)
+		require.Equal(t, types.Timestamp(3600), rng.End-rng.Start)
 	})
 	t.Run("monthly candle year boundary Dec→Jan", func(t *testing.T) {
 		t.Parallel()
-		k := Key{Kind: KindCandle, TF: market.D1, Year: 2026, Month: 12}
+		k := Key{Kind: KindCandle, TF: types.D1, Year: 2026, Month: 12}
 		rng, err := k.Range()
 		require.NoError(t, err)
 		end := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-		require.Equal(t, market.Timestamp(end.Unix()), rng.End)
+		require.Equal(t, types.Timestamp(end.Unix()), rng.End)
 	})
 	t.Run("unsupported key returns zero TimeRange", func(t *testing.T) {
 		t.Parallel()
@@ -149,36 +150,36 @@ func TestKeyRange_AllBranches(t *testing.T) {
 func TestRawTick_ZeroAskBid(t *testing.T) {
 	t.Parallel()
 	tick := RawTick{Ask: 0, Bid: 0}
-	require.Equal(t, market.Price(0), tick.Mid())
-	require.Equal(t, market.Price(0), tick.Spread())
+	require.Equal(t, types.Price(0), tick.Mid())
+	require.Equal(t, types.Price(0), tick.Spread())
 }
 
 func TestRawTick_EqualAskBid(t *testing.T) {
 	t.Parallel()
 	tick := RawTick{Ask: 100, Bid: 100}
-	require.Equal(t, market.Price(100), tick.Mid())
-	require.Equal(t, market.Price(0), tick.Spread())
+	require.Equal(t, types.Price(100), tick.Mid())
+	require.Equal(t, types.Price(0), tick.Spread())
 }
 
 func TestRawTick_LargeValues(t *testing.T) {
 	t.Parallel()
-	tick := RawTick{Ask: market.Price(1_000_000), Bid: market.Price(999_000)}
-	require.Equal(t, market.Price(999_500), tick.Mid())
-	require.Equal(t, market.Price(1_000), tick.Spread())
+	tick := RawTick{Ask: types.Price(1_000_000), Bid: types.Price(999_000)}
+	require.Equal(t, types.Price(999_500), tick.Mid())
+	require.Equal(t, types.Price(1_000), tick.Spread())
 }
 
 func TestRawTick_MinuteAtHourBoundary(t *testing.T) {
 	t.Parallel()
 	// Exactly at the start of an hour
-	tick := RawTick{TimeMillis: market.TimeMillis(3_600_000)}
-	require.Equal(t, market.TimeMillis(3_600_000), tick.Minute())
+	tick := RawTick{TimeMillis: types.TimeMillis(3_600_000)}
+	require.Equal(t, types.TimeMillis(3_600_000), tick.Minute())
 }
 
 func TestRawTick_MinuteJustBeforeNextHour(t *testing.T) {
 	t.Parallel()
 	// 59:59.999 into an hour
-	tick := RawTick{TimeMillis: market.TimeMillis(3_599_999)}
-	require.Equal(t, market.TimeMillis(3_540_000), tick.Minute()) // 59 minutes
+	tick := RawTick{TimeMillis: types.TimeMillis(3_599_999)}
+	require.Equal(t, types.TimeMillis(3_540_000), tick.Minute()) // 59 minutes
 }
 
 // =============================================================================
@@ -418,10 +419,10 @@ func TestReadNextBI5Tick_MinOffset(t *testing.T) {
 	t.Parallel()
 
 	rec := makeBi5Record(0, 100, 99, 1.0, 0.5)
-	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", market.TimeMillis(1_000_000), 1)
+	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", types.TimeMillis(1_000_000), 1)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, market.TimeMillis(1_000_000), tick.TimeMillis)
+	require.Equal(t, types.TimeMillis(1_000_000), tick.TimeMillis)
 }
 
 func TestReadNextBI5Tick_MaxValidOffset(t *testing.T) {
@@ -432,7 +433,7 @@ func TestReadNextBI5Tick_MaxValidOffset(t *testing.T) {
 	tick, ok, err := readNextBI5Tick(bytes.NewReader(rec), "test", 0, 1)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, market.TimeMillis(3_599_999), tick.TimeMillis)
+	require.Equal(t, types.TimeMillis(3_599_999), tick.TimeMillis)
 }
 
 func TestReadNextBI5Tick_ExactlyAtLimit(t *testing.T) {
@@ -489,8 +490,8 @@ func TestReadCSV_EmptyFile(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte{}, 0o644))
@@ -508,13 +509,13 @@ func TestReadCSV_OnlyCommentAndHeader(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(
-		"# schema=v1 source=test instrument=EURUSD tf=H1 year=2026 scale=100000\n"+
-			"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n",
+		"# schema=candle-v2 source=test instrument=EURUSD tf=H1 year=2026 scale=100000\n"+
+			"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n",
 	), 0o644))
 
 	cs, err := s.ReadCSV(k)
@@ -527,12 +528,12 @@ func TestReadCSV_TooFewFields(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98\n", // only 4 fields
 		ts.Unix(),
 	)), 0o644))
@@ -542,46 +543,59 @@ func TestReadCSV_TooFewFields(t *testing.T) {
 	require.Contains(t, err.Error(), "expected 9 fields")
 }
 
-func TestReadCSV_MisalignedTimestamp(t *testing.T) {
+// TestReadCSV_NonUniformSpacingAccepted proves rows no longer have to be
+// evenly spaced by the timeframe step from a single anchor — each row's own
+// timestamp column is authoritative and stored verbatim (see store.go
+// readCSVUncached). This is what lets D1 rows spanning a DST transition
+// (23/25 wall-clock hours apart, not a fixed 86400s) round-trip correctly
+// instead of being rejected as "misaligned."
+func TestReadCSV_NonUniformSpacingAccepted(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	// Timestamp is 30 seconds into a minute — not aligned to M1 (60-sec) step
-	ts := time.Date(2026, time.May, 1, 0, 0, 30, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	row1 := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+	row2 := row1.Add(60*time.Second + 30*time.Second) // not a multiple of the M1 step
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
-		ts.Unix(),
+		row1.Unix(), row2.Unix(),
 	)), 0o644))
 
-	_, err = s.ReadCSV(k)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not aligned")
+	cs, err := s.ReadCSV(k)
+	require.NoError(t, err)
+	require.True(t, cs.IsValid(0))
+	require.True(t, cs.IsValid(1))
+	require.Equal(t, row1, cs.Time(0))
+	require.Equal(t, row2, cs.Time(1))
 }
 
 func TestReadCSV_NegativeTimestampOffset(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	// Timestamp before the month start
-	ts := time.Date(2025, time.December, 31, 23, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	// Row 1 defines start; row 2 ticks backward in time, which must be
+	// rejected regardless of where start itself falls in the calendar.
+	row1 := time.Date(2026, time.May, 1, 0, 1, 0, 0, time.UTC)
+	row2 := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
+			"%d,100,99,98,99,1,2,3,0x0001\n"+
 			"%d,100,99,98,99,1,2,3,0x0001\n",
-		ts.Unix(),
+		row1.Unix(), row2.Unix(),
 	)), 0o644))
 
 	_, err = s.ReadCSV(k)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not aligned")
+	require.Contains(t, err.Error(), "not after previous row")
 }
 
 func TestReadCSV_FlagsZero(t *testing.T) {
@@ -589,12 +603,12 @@ func TestReadCSV_FlagsZero(t *testing.T) {
 
 	s := newTestStore(t)
 	ts := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 5}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(
-		"Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags\n"+
+		"Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n"+
 			"%d,100,99,98,99,1,2,3,0x0000\n", // flags=0, not valid
 		ts.Unix(),
 	)), 0o644))
@@ -613,16 +627,17 @@ func TestParseCandlePath_TimeframeSuffixes(t *testing.T) {
 
 	cases := []struct {
 		suffix string
-		tf     market.Timeframe
+		tf     types.Timeframe
 		ok     bool
 	}{
-		{"m1", market.M1, true},
-		{"h1", market.H1, true},
-		{"d1", market.D1, true},
+		{"m1", types.M1, true},
+		{"h1", types.H1, true},
+		{"h4", types.H4, true},
+		{"d1", types.D1, true},
 		{"w1", 0, false},
 		// parseCandlePath lowercases the filename, so these are case-insensitive
-		{"M1", market.M1, true},
-		{"H1", market.H1, true},
+		{"M1", types.M1, true},
+		{"H1", types.H1, true},
 		{"", 0, false},
 	}
 
@@ -686,23 +701,23 @@ func TestParseTickPath_AllMonths(t *testing.T) {
 func TestCandleSetIterator_WithRange(t *testing.T) {
 
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
 
 	// Set valid candles at index 0 and index 5 (hours 0 and 5)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	cs.Candles[0] = market.Candle{Open: 100, Close: 100, Ticks: 1}
+	cs.Candles[0].Candle = market.Candle{Open: 100, Close: 100, Ticks: 1}
 	cs.SetValid(0)
-	cs.Candles[5] = market.Candle{Open: 200, Close: 200, Ticks: 1}
+	cs.Candles[5].Candle = market.Candle{Open: 200, Close: 200, Ticks: 1}
 	cs.SetValid(5)
 
 	_ = s
 
 	// Range covering only hours 0–4 (should see only index 0)
-	hour3 := market.FromTime(start.Add(3 * time.Hour))
-	rng := market.TimeRange{
-		Start: market.FromTime(start),
+	hour3 := types.FromTime(start.Add(3 * time.Hour))
+	rng := types.TimeRange{
+		Start: types.FromTime(start),
 		End:   hour3,
-		TF:    market.H1,
+		TF:    types.H1,
 	}
 
 	it := newCandleSetIterator(cs, rng)
@@ -719,11 +734,11 @@ func TestCandleSetIterator_Candle_Timestamp_AfterNext(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
-	cs.Candles[2] = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs.Candles[2].Candle = market.Candle{Open: 150, High: 160, Low: 140, Close: 155, Ticks: 5}
 	cs.SetValid(2)
 
-	it := newCandleSetIterator(cs, market.TimeRange{})
+	it := newCandleSetIterator(cs, types.TimeRange{})
 	ct, ok := it.Next()
 	require.True(t, ok)
 	require.Equal(t, int32(5), ct.Candle.Ticks)
@@ -740,15 +755,15 @@ func TestChainedCandleIterator_ThreeSubIterators(t *testing.T) {
 	_ = s
 
 	makeCS := func(val int) *CandleSet {
-		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
-		cs.Candles[0] = market.Candle{Open: market.Price(val), Ticks: 1}
+		cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+		cs.Candles[0].Candle = market.Candle{Open: types.Price(val), Ticks: 1}
 		cs.SetValid(0)
 		return cs
 	}
 
-	it1 := newCandleSetIterator(makeCS(100), market.TimeRange{})
-	it2 := newCandleSetIterator(makeCS(200), market.TimeRange{})
-	it3 := newCandleSetIterator(makeCS(300), market.TimeRange{})
+	it1 := newCandleSetIterator(makeCS(100), types.TimeRange{})
+	it2 := newCandleSetIterator(makeCS(200), types.TimeRange{})
+	it3 := newCandleSetIterator(makeCS(300), types.TimeRange{})
 
 	chained := newChainedCandleIterator(it1, it2, it3)
 	count := 0
@@ -804,15 +819,15 @@ func TestBuildHourM1_SingleTickEachMinute(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 2, 3, 8, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	// One tick per minute for all 60 minutes
 	ticks := make([]RawTick, 60)
 	for m := 0; m < 60; m++ {
 		ticks[m] = RawTick{
-			TimeMillis: baseMS + market.TimeMillis(m)*60_000 + 1,
-			Ask:        market.Price(13000 + m),
-			Bid:        market.Price(12999 + m),
+			TimeMillis: baseMS + types.TimeMillis(m)*60_000 + 1,
+			Ask:        types.Price(13000 + m),
+			Bid:        types.Price(12999 + m),
 		}
 	}
 
@@ -826,7 +841,7 @@ func TestBuildHourM1_SingleTickEachMinute(t *testing.T) {
 		return tk, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 2, Day: 3, Hour: 8}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 2, Day: 3, Hour: 8}
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
 	require.NotNil(t, cs)
@@ -840,7 +855,7 @@ func TestBuildHourM1_MultipleTicksSameMinute(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 2, 3, 8, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	// Three ticks in minute 0, tracking OHLC
 	ticks := []RawTick{
@@ -860,7 +875,7 @@ func TestBuildHourM1_MultipleTicksSameMinute(t *testing.T) {
 		return tk, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 2, Day: 3, Hour: 8}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 2, Day: 3, Hour: 8}
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
 	require.NotNil(t, cs)
@@ -983,8 +998,8 @@ func TestStoreExists_IsDirectory(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 7}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "test", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 7}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 
 	// Create the path as a directory instead of a file
@@ -1012,24 +1027,24 @@ func TestBitIsSet_Boundaries(t *testing.T) {
 	bits := make([]uint64, 4) // 256 bits total
 
 	// Bit 0 in word 0
-	market.BitSet(bits, 0)
-	require.True(t, market.BitIsSet(bits, 0))
-	require.False(t, market.BitIsSet(bits, 1))
+	types.BitSet(bits, 0)
+	require.True(t, types.BitIsSet(bits, 0))
+	require.False(t, types.BitIsSet(bits, 1))
 
 	// Bit 63 (last bit in word 0)
-	market.BitSet(bits, 63)
-	require.True(t, market.BitIsSet(bits, 63))
-	require.False(t, market.BitIsSet(bits, 62))
+	types.BitSet(bits, 63)
+	require.True(t, types.BitIsSet(bits, 63))
+	require.False(t, types.BitIsSet(bits, 62))
 
 	// Bit 64 (first bit in word 1)
-	market.BitSet(bits, 64)
-	require.True(t, market.BitIsSet(bits, 64))
-	require.False(t, market.BitIsSet(bits, 65))
+	types.BitSet(bits, 64)
+	require.True(t, types.BitIsSet(bits, 64))
+	require.False(t, types.BitIsSet(bits, 65))
 
 	// Bit 255 (last bit in word 3)
-	market.BitSet(bits, 255)
-	require.True(t, market.BitIsSet(bits, 255))
-	require.False(t, market.BitIsSet(bits, 254))
+	types.BitSet(bits, 255)
+	require.True(t, types.BitIsSet(bits, 255))
+	require.False(t, types.BitIsSet(bits, 254))
 }
 
 // =============================================================================
@@ -1117,7 +1132,7 @@ func TestReadCSV_NonCandleKind(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1}
 	_, err := s.ReadCSV(k)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "candle")
@@ -1131,7 +1146,7 @@ func TestReadCSV_InvalidMonth(t *testing.T) {
 		m := m
 		t.Run(fmt.Sprintf("month=%d", m), func(t *testing.T) {
 			t.Parallel()
-			k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: m}
+			k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: m}
 			_, err := s.ReadCSV(k)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "month")
@@ -1149,7 +1164,7 @@ func TestStoreDelete_FileNotFound(t *testing.T) {
 		Instrument: "EURUSD",
 		Source:     "test",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      9,
 	}
@@ -1165,8 +1180,8 @@ func TestStoreIsUsableTickFile_Directory(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	k := Key{Instrument: "EURUSD", Source: "dukascopy", Kind: KindTick, TF: market.Ticks, Year: 2025, Month: 3, Day: 1, Hour: 5}
-	path, err := s.PathForAsset(k)
+	k := Key{Instrument: "EURUSD", Source: "dukascopy", Kind: KindTick, TF: types.Ticks, Year: 2025, Month: 3, Day: 1, Hour: 5}
+	path, err := s.KeyPath(k)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(path, 0o755)) // create as dir, not file
 	require.False(t, s.IsUsableTickFile(k))      // directories are not usable
@@ -1213,14 +1228,14 @@ func TestNewDataManager_Fields(t *testing.T) {
 func TestCandleRequestKey_AllTimeframes(t *testing.T) {
 	t.Parallel()
 
-	for _, tf := range []market.Timeframe{market.M1, market.H1, market.D1} {
+	for _, tf := range []types.Timeframe{types.M1, types.H1, types.D1} {
 		tf := tf
 		t.Run(tf.String(), func(t *testing.T) {
 			t.Parallel()
 			cr := CandleRequest{
 				Instrument: "EURUSD",
 				Source:     market.SourceCandles,
-				Range: market.TimeRange{
+				Range: types.TimeRange{
 					TF: tf,
 				},
 			}
@@ -1233,21 +1248,21 @@ func TestCandleRequestKey_AllTimeframes(t *testing.T) {
 }
 
 // =============================================================================
-// store.PathForAsset – candle key with all timeframes
+// store.KeyPath – candle key with all timeframes
 // =============================================================================
 
-func TestPathForAsset_CandleAllTimeframes(t *testing.T) {
+func TestKeyPath_CandleAllTimeframes(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
 
 	for _, tf := range []struct {
-		tf     market.Timeframe
+		tf     types.Timeframe
 		suffix string
 	}{
-		{market.M1, "m1"},
-		{market.H1, "h1"},
-		{market.D1, "d1"},
+		{types.M1, "m1"},
+		{types.H1, "h1"},
+		{types.D1, "d1"},
 	} {
 		tf := tf
 		t.Run(tf.suffix, func(t *testing.T) {
@@ -1260,7 +1275,7 @@ func TestPathForAsset_CandleAllTimeframes(t *testing.T) {
 				Year:       2026,
 				Month:      3,
 			}
-			path, err := s.PathForAsset(k)
+			path, err := s.KeyPath(k)
 			require.NoError(t, err)
 			require.True(t, strings.HasSuffix(path, "-"+tf.suffix+".csv"),
 				"expected path to end with -%s.csv, got %s", tf.suffix, path)
@@ -1295,13 +1310,13 @@ func TestInventoryTicksComplete_Partial(t *testing.T) {
 	inv := NewInventory()
 	// Add only the first few hours of January 2026 (all will be non-market-closed)
 	// This ensures TicksComplete returns false since most hours are missing.
-	base := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+	base := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
 	k := Key{
 		Instrument: "EURUSD",
 		Source:     "dukascopy",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        3, // Monday

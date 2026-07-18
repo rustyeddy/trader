@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,8 +48,8 @@ func TestChoppinessIndex_PerfectTrend(t *testing.T) {
 	require.NoError(t, err)
 	scale := 100000.0
 	for i := 0; i < 5; i++ {
-		lo := market.Price(float64(i) * scale)
-		hi := market.Price(float64(i+1) * scale)
+		lo := types.Price(float64(i) * scale)
+		hi := types.Price(float64(i+1) * scale)
 		ci.Update(market.Candle{Open: lo, High: hi, Low: lo, Close: hi})
 	}
 	require.True(t, ci.Ready())
@@ -82,10 +83,10 @@ func TestChoppinessIndex_ValueInRange(t *testing.T) {
 		hi := math.Max(prices[i-1], prices[i]) + 0.0005
 		mid := (prices[i-1] + prices[i]) / 2
 		ci.Update(market.Candle{
-			Open:  market.Price(mid * 100000),
-			High:  market.Price(hi * 100000),
-			Low:   market.Price(lo * 100000),
-			Close: market.Price(prices[i] * 100000),
+			Open:  types.Price(mid * 100000),
+			High:  types.Price(hi * 100000),
+			Low:   types.Price(lo * 100000),
+			Close: types.Price(prices[i] * 100000),
 		})
 	}
 	require.True(t, ci.Ready())

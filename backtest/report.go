@@ -68,6 +68,18 @@ type BacktestReportTrade struct {
 	PNL             float64 `json:"pnl"`
 	StopPrice       float64 `json:"stop_price,omitempty"`
 	TakeProfitPrice float64 `json:"take_profit_price,omitempty"`
+
+	// InitialStopPrice is the stop actually used to open the trade, before
+	// any trailing/chandelier updates. StopPrice above reflects whatever
+	// the stop had trailed to by close, which is not the same value.
+	InitialStopPrice float64 `json:"initial_stop_price,omitempty"`
+	// CloseCause classifies why the trade closed (Manual, StopLoss,
+	// TakeProfit, BrokerLiquidation).
+	CloseCause string `json:"close_cause,omitempty"`
+	// Reason is the entry signal's Signal.Reason (e.g. a synthetic
+	// strategy's "signalreplay:<date>" marker), used by analysis tooling to
+	// join a trade back to what opened it.
+	Reason string `json:"reason,omitempty"`
 }
 
 // PrintSummary writes a human-readable backtest report to w.

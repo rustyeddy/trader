@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/review"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ReviewRangeRequest parameterizes a historical classification sweep: replay
@@ -27,6 +29,10 @@ type ReviewRangeRequest struct {
 
 	// Interval steps between sweep dates when From != To. Defaults to 24h.
 	Interval time.Duration
+
+	// Thresholds overrides review.DefaultThresholds() field-by-field; a
+	// zero-valued field falls back to the default (see review.MergeThresholds).
+	Thresholds review.Thresholds
 }
 
 // reviewSweepFetchHeadroom pads the count requested from getClosedCandles
@@ -75,6 +81,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 	if interval <= 0 {
 		interval = 24 * time.Hour
 	}
+	th := review.MergeThresholds(review.DefaultThresholds(), req.Thresholds)
 
 	dm := datamanager.GetDataManager()
 
@@ -84,7 +91,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			result, ok := s.reviewOneInstrumentAsOf(ctx, dm, name, step)
+			result, ok := s.reviewOneInstrumentAsOf(ctx, dm, name, step, th)
 			if !ok {
 				continue
 			}
@@ -114,7 +121,7 @@ func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeReque
 // no OANDA top-up, no OANDA fallback. ok is false when the instrument or
 // asOf should be skipped — unknown instrument, or insufficient local
 // history for D1 or H4 as of asOf.
-func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.DataManager, name string, asOf time.Time) (review.ReviewResult, bool) {
+func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.DataManager, name string, asOf time.Time, th review.Thresholds) (review.ReviewResult, bool) {
 	log := s.Log
 	if log == nil {
 		log = slog.Default()
@@ -126,7 +133,7 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 	}
 	instNorm := market.NormalizeInstrument(name)
 
-	dailyWide, err := getClosedCandles(ctx, dm, instNorm, market.D1, asOf, reviewWeeklyLookbackDays+reviewSweepFetchHeadroom)
+	dailyWide, err := getClosedCandles(ctx, dm, instNorm, types.D1, asOf, reviewWeeklyLookbackDays+reviewSweepFetchHeadroom)
 	if err != nil || len(dailyWide) < reviewWeeklyLookbackDays {
 		log.Warn("review sweep: insufficient D1 history", "instrument", name, "asof", asOf, "got", len(dailyWide), "want", reviewWeeklyLookbackDays, "err", err)
 		return review.ReviewResult{}, false
@@ -137,7 +144,7 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 	}
 	w1 := deriveWeeklyCandlesAsOf(dailyWide, reviewCandleCounts["W"], asOf)
 
-	h4Wide, err := getClosedCandles(ctx, dm, instNorm, market.H4, asOf, reviewCandleCounts["H4"]+reviewSweepFetchHeadroom)
+	h4Wide, err := getClosedCandles(ctx, dm, instNorm, types.H4, asOf, reviewCandleCounts["H4"]+reviewSweepFetchHeadroom)
 	if err != nil || len(h4Wide) < reviewCandleCounts["H4"] {
 		log.Warn("review sweep: insufficient H4 history", "instrument", name, "asof", asOf, "got", len(h4Wide), "want", reviewCandleCounts["H4"], "err", err)
 		return review.ReviewResult{}, false
@@ -147,11 +154,32 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 		h4 = h4[len(h4)-reviewCandleCounts["H4"]:]
 	}
 
-	result, err := review.ReviewPair(name, w1, d1, h4)
+	result, err := review.ReviewPair(name, w1, d1, h4, th)
 	if err != nil {
 		log.Warn("review sweep: compute", "instrument", name, "asof", asOf, "err", err)
 		return review.ReviewResult{}, false
 	}
+
+	// H1 is an entry-timing refinement computed only for pairs already
+	// classified tradeable as of this step, in this same call — never a
+	// follow-up sweep pass. Insufficient/missing H1 history is best-effort:
+	// it never drops the step/instrument from the sweep (enrichTradeableWithH1
+	// is a no-op for any other bucket).
+	result = enrichTradeableWithH1(result, log, name, func() ([]market.Candle, error) {
+		h1Wide, fetchErr := getClosedCandles(ctx, dm, instNorm, types.H1, asOf, reviewCandleCounts["H1"]+reviewSweepFetchHeadroom)
+		if fetchErr != nil {
+			return nil, fmt.Errorf("fetch H1 candles: %w", fetchErr)
+		}
+		if len(h1Wide) < reviewCandleCounts["H1"] {
+			return nil, fmt.Errorf("insufficient H1 history: got %d, want %d", len(h1Wide), reviewCandleCounts["H1"])
+		}
+		h1 := candlesOnly(h1Wide)
+		if len(h1) > reviewCandleCounts["H1"] {
+			h1 = h1[len(h1)-reviewCandleCounts["H1"]:]
+		}
+		return h1, nil
+	})
+
 	result.ScannedAt = asOf
 	return result, true
 }
@@ -166,11 +194,11 @@ func (s *Service) reviewOneInstrumentAsOf(ctx context.Context, dm *datamanager.D
 // <= asOf: a candle opening at asOf-tf closes at exactly asOf, so it is
 // correctly included as "just closed", while a candle opening at asOf
 // itself (not yet closed) is correctly excluded.
-func getClosedCandles(ctx context.Context, dm *datamanager.DataManager, instrument string, tf market.Timeframe, asOf time.Time, count int) ([]market.CandleTime, error) {
+func getClosedCandles(ctx context.Context, dm *datamanager.DataManager, instrument string, tf types.Timeframe, asOf time.Time, count int) ([]market.CandleTime, error) {
 	closedAsOf := asOf.Add(-time.Duration(tf) * time.Second)
 	return dm.GetCandles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: instrument,
-		Range:      market.TimeRange{TF: tf},
+		Range:      types.TimeRange{TF: tf},
 	}, closedAsOf, count)
 }

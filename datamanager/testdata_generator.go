@@ -6,27 +6,28 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // SyntheticCandleConfig holds parameters for generating synthetic candle data.
 type SyntheticCandleConfig struct {
-	Instrument  string           // e.g., "EURUSD"
-	Timeframe   market.Timeframe // e.g., H1 (hourly)
-	StartPrice  market.Price     // Starting price in scale units
-	Volatility  float64          // Volatility as percentage (e.g., 0.005 = 0.5%)
-	Trend       float64          // Trend as log return per candle (e.g., 0.0001 = +0.01%)
-	Seed        int64            // Random seed for reproducibility
-	TicksPerBar int32            // Number of ticks per candle
+	Instrument  string          // e.g., "EURUSD"
+	Timeframe   types.Timeframe // e.g., H1 (hourly)
+	StartPrice  types.Price     // Starting price in scale units
+	Volatility  float64         // Volatility as percentage (e.g., 0.005 = 0.5%)
+	Trend       float64         // Trend as log return per candle (e.g., 0.0001 = +0.01%)
+	Seed        int64           // Random seed for reproducibility
+	TicksPerBar int32           // Number of ticks per candle
 }
 
 // DefaultSyntheticConfig returns a sensible default configuration for EUR/USD.
 func DefaultSyntheticConfig(instrument string) SyntheticCandleConfig {
 	return SyntheticCandleConfig{
 		Instrument:  instrument,
-		Timeframe:   market.H1,
-		StartPrice:  market.Price(108000), // 1.08000 at PriceScale=100_000
-		Volatility:  0.002,                // 0.2% volatility
-		Trend:       0.00005,              // +0.005% trend per hour
+		Timeframe:   types.H1,
+		StartPrice:  types.Price(108000), // 1.08000 at PriceScale=100_000
+		Volatility:  0.002,               // 0.2% volatility
+		Trend:       0.00005,             // +0.005% trend per hour
 		TicksPerBar: 50,
 	}
 }
@@ -75,7 +76,7 @@ func (r *LinearCongruentialRandom) NextUniform() float64 {
 
 // GenerateSyntheticCandle generates a single candle using geometric Brownian motion.
 // prevClose is the previous candle's close price.
-func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, prevClose market.Price) market.Candle {
+func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, prevClose types.Price) market.Candle {
 	// Log-normal price changes
 	trend := cfg.Trend
 	volatility := cfg.Volatility
@@ -91,7 +92,7 @@ func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, p
 
 	// Generate high/low around the close
 	// Close is computed from open and log return
-	closePrice := market.Price(open * math.Exp(logReturn))
+	closePrice := types.Price(open * math.Exp(logReturn))
 
 	// High and low are randomly distributed around open/close
 	// High is always >= max(open, close)
@@ -106,11 +107,11 @@ func (cfg SyntheticCandleConfig) generateCandle(rng *LinearCongruentialRandom, p
 	high *= (1.0 + math.Abs(highRandomness))
 	low *= (1.0 - math.Abs(lowRandomness))
 
-	highPrice := market.Price(high)
-	lowPrice := market.Price(low)
+	highPrice := types.Price(high)
+	lowPrice := types.Price(low)
 
 	// Tight synthetic spread: roughly 0.1-0.3 pips at PriceScale=100_000.
-	spread := market.Price(int64(rng.NextUniform()*3 + 1))
+	spread := types.Price(int64(rng.NextUniform()*3 + 1))
 
 	return market.Candle{
 		Open:      openPrice,
@@ -128,8 +129,8 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 	cs, err := NewMonthlyCandleSet(
 		cfg.Instrument,
 		cfg.Timeframe,
-		market.FromTime(time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)),
-		market.PriceScale,
+		types.FromTime(time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)),
+		types.PriceScale,
 		"synthetic",
 	)
 	if err != nil {
@@ -139,12 +140,8 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 	rng := NewLCRandom(cfg.Seed + int64(year)*12 + int64(month))
 	currentPrice := cfg.StartPrice
 
-	// Skip weekends and forex market closed times
-	startTime := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-	step := time.Duration(cfg.Timeframe) * time.Second
-
 	for i := 0; i < len(cs.Candles); i++ {
-		ctime := startTime.Add(time.Duration(i) * step)
+		ctime := time.Unix(int64(cs.Candles[i].Timestamp), 0).UTC()
 
 		// Skip if market is closed (weekends and typical forex market hours)
 		if market.IsForexMarketClosed(ctime) {
@@ -152,7 +149,7 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticMonthlyCandles(year int, month
 		}
 
 		candle := cfg.generateCandle(rng, currentPrice)
-		cs.Candles[i] = candle
+		cs.Candles[i].Candle = candle
 		cs.SetValid(i)
 		currentPrice = candle.Close
 	}
@@ -190,11 +187,11 @@ func (cfg SyntheticCandleConfig) GenerateSyntheticYearlyAndWrite(store *store, y
 			Instrument: cs.Instrument,
 			Source:     normalizeSource(cs.Source),
 			Kind:       KindCandle,
-			TF:         market.Timeframe(cs.Timeframe),
+			TF:         types.Timeframe(cs.Timeframe),
 			Year:       start.Year(),
 			Month:      int(start.Month()),
 		}
-		p, err := store.PathForAsset(key)
+		p, err := store.KeyPath(key)
 		if err != nil {
 			return nil, err
 		}

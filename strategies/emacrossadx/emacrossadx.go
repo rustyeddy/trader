@@ -11,6 +11,7 @@ import (
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategies/emacross"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 func init() {
@@ -21,7 +22,7 @@ type Strategy struct {
 	core emacross.Core
 	adx  *indicator.ADX
 
-	adxThreshold    market.Units // ×UnitsScale (==ValueScale); e.g. 20.0 → 20_000_000
+	adxThreshold    types.Units // ×UnitsScale (==ValueScale); e.g. 20.0 → 20_000_000
 	requireDI       bool
 	requireADXReady bool
 	pendingRel      int
@@ -31,9 +32,9 @@ type Config struct {
 	FastPeriod      int
 	SlowPeriod      int
 	ADXPeriod       int
-	Scale           market.Scale6
+	Scale           types.Scale6
 	MinSpread       float64
-	StopPips        market.Pips
+	StopPips        types.Pips
 	ATRPeriod       int
 	ATRMultiplier   float64
 	ADXThreshold    float64
@@ -87,14 +88,14 @@ func New(cfg Config) (*Strategy, error) {
 			Fast:          fast,
 			Slow:          slow,
 			ATR:           atr,
-			MinSpread:     market.Price(math.Round(cfg.MinSpread * float64(cfg.Scale))),
+			MinSpread:     types.Price(math.Round(cfg.MinSpread * float64(cfg.Scale))),
 			Scale:         cfg.Scale,
 			StopPips:      cfg.StopPips,
 			ATRMultiplier: mult,
 			Name:          fmt.Sprintf("EMA_CROSS_ADX(%d,%d,ADX%d@%.1f)", cfg.FastPeriod, cfg.SlowPeriod, cfg.ADXPeriod, cfg.ADXThreshold),
 		},
 		adx:             adx,
-		adxThreshold:    market.Units(math.Round(cfg.ADXThreshold * float64(indicator.ValueScale))),
+		adxThreshold:    types.Units(math.Round(cfg.ADXThreshold * float64(indicator.ValueScale))),
 		requireDI:       cfg.RequireDI,
 		requireADXReady: cfg.RequireADXReady,
 	}, nil
@@ -146,7 +147,7 @@ func (x *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.S
 
 	diff := x.core.Fast.PriceSum() - x.core.Slow.PriceSum()
 
-	if x.core.MinSpread > 0 && absPriceSum(diff) < market.PriceSum(x.core.MinSpread) {
+	if x.core.MinSpread > 0 && absPriceSum(diff) < types.PriceSum(x.core.MinSpread) {
 		return strategy.Hold("min-spread filter")
 	}
 
@@ -201,18 +202,18 @@ func (x *Strategy) Update(_ context.Context, ct *market.CandleTime, _ strategy.S
 
 	if x.pendingRel == +1 {
 		x.pendingRel = 0
-		return emacross.EmitOpen(market.Long, "EMA cross up + ADX confirmed")
+		return emacross.EmitOpen(types.Long, "EMA cross up + ADX confirmed")
 	}
 
 	if x.pendingRel == -1 {
 		x.pendingRel = 0
-		return emacross.EmitOpen(market.Short, "EMA cross down + ADX confirmed")
+		return emacross.EmitOpen(types.Short, "EMA cross down + ADX confirmed")
 	}
 
 	return strategy.Hold("no cross")
 }
 
-func absPriceSum(v market.PriceSum) market.PriceSum {
+func absPriceSum(v types.PriceSum) types.PriceSum {
 	if v < 0 {
 		return -v
 	}
@@ -282,8 +283,8 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		FastPeriod:      int(fast),
 		SlowPeriod:      int(slow),
 		ADXPeriod:       int(adxPeriod),
-		Scale:           market.PriceScale,
-		StopPips:        market.PipsFromFloat(stopPips),
+		Scale:           types.PriceScale,
+		StopPips:        types.PipsFromFloat(stopPips),
 		MinSpread:       minSpread,
 		ATRPeriod:       int(atrPeriod),
 		ATRMultiplier:   atrMult,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // WeeklyEMAFilter is a directional regime filter that aggregates sub-daily bars
@@ -30,14 +31,14 @@ type WeeklyEMAFilter struct {
 	// Weekly bar accumulation.
 	isoYear int
 	isoWeek int
-	wOpen   market.Price
-	wHigh   market.Price
-	wLow    market.Price
-	wClose  market.Price
+	wOpen   types.Price
+	wHigh   types.Price
+	wLow    types.Price
+	wClose  types.Price
 	hasWeek bool
 }
 
-func NewWeeklyEMAFilter(period int, scale market.Scale6) (*WeeklyEMAFilter, error) {
+func NewWeeklyEMAFilter(period int, scale types.Scale6) (*WeeklyEMAFilter, error) {
 	ema, err := indicator.NewEMA(period, scale)
 	if err != nil {
 		return nil, err
@@ -98,16 +99,16 @@ func (f *WeeklyEMAFilter) Tick(ct market.CandleTime) {
 // Trending always returns true; direction is enforced via AllowSide.
 func (f *WeeklyEMAFilter) Trending() bool { return true }
 
-func (f *WeeklyEMAFilter) AllowSide(side market.Side) bool {
+func (f *WeeklyEMAFilter) AllowSide(side types.Side) bool {
 	if !f.ema.Ready() {
 		return true
 	}
-	closePrice := market.PriceSum(f.wClose)
+	closePrice := types.PriceSum(f.wClose)
 	emaVal := f.ema.PriceSum()
 	switch side {
-	case market.Long:
+	case types.Long:
 		return closePrice > emaVal
-	case market.Short:
+	case types.Short:
 		return closePrice < emaVal
 	default:
 		return true

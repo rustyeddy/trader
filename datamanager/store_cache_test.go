@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,8 +18,8 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.June, market.H1)
-	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.June, types.H1)
+	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -26,7 +27,7 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 	first, err := s.ReadCSV(key)
 	require.NoError(t, err)
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 
@@ -42,8 +43,8 @@ func TestStoreReadCSV_CachesPastMonth(t *testing.T) {
 func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Now().UTC()
-	cs := makeTestCandleSet(t, "EUR_USD", now.Year(), now.Month(), market.H1)
-	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs := makeTestCandleSet(t, "EUR_USD", now.Year(), now.Month(), types.H1)
+	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
@@ -51,7 +52,7 @@ func TestStoreReadCSV_SkipsCacheForCurrentMonth(t *testing.T) {
 	_, err := s.ReadCSV(key)
 	require.NoError(t, err)
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 
@@ -70,20 +71,20 @@ func TestStoreWriteCSV_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.July, market.H1)
-	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs := makeTestCandleSet(t, "EUR_USD", 2020, time.July, types.H1)
+	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 	cs.SetValid(0)
 	require.NoError(t, s.WriteCSV(cs))
 
 	key := keyForSet(cs)
 	first, err := s.ReadCSV(key)
 	require.NoError(t, err)
-	require.Equal(t, market.Price(103), first.Candles[0].Close)
+	require.Equal(t, types.Price(103), first.Candles[0].Close)
 
-	cs.Candles[0] = market.Candle{Open: 200, High: 205, Low: 199, Close: 203, Ticks: 1}
+	cs.Candles[0].Candle = market.Candle{Open: 200, High: 205, Low: 199, Close: 203, Ticks: 1}
 	require.NoError(t, s.WriteCSV(cs))
 
 	second, err := s.ReadCSV(key)
 	require.NoError(t, err)
-	require.Equal(t, market.Price(203), second.Candles[0].Close, "expected the rewritten value, not a stale cache hit")
+	require.Equal(t, types.Price(203), second.Candles[0].Close, "expected the rewritten value, not a stale cache hit")
 }

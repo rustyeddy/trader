@@ -1,0 +1,62 @@
+# trader-review.yml — global config for `trader review`'s triage
+# thresholds (review.Thresholds, GitHub issue #165).
+#
+# Drop this file (or a copy) into one of the standard global config search
+# paths so it's picked up automatically:
+#   /etc/trader/*.yml
+#   ~/.config/trader/*.yml
+# or point at it explicitly with the root --config flag. Files are merged
+# alphabetically within each directory; a later file's non-zero fields win.
+#
+# Every value below is commented out and set to the built-in default
+# (review.DefaultThresholds()) — behavior is unchanged unless you uncomment
+# and change a value. A zero value is treated as "not configured" and falls
+# back to the default, so don't uncomment a field just to set it to 0.
+#
+# Every field here also has a matching `trader review` CLI flag for
+# ad-hoc, per-run overrides (flag > this config > default):
+#   --hot-adx-floor, --hot-ci-ceiling, --tradeable-ci-ceiling,
+#   --h4-adx-floor, --h4-min-ema-sep, --demotion-adx-floor,
+#   --demotion-ci-ceiling, --week-used-caution, --value-zone-min,
+#   --value-zone-max, --h4-squeeze-width-atr
+
+review:
+  # Hot gate: D1 ADX must be at or above this floor.
+  # hot_d1_adx_floor: 25.0
+
+  # Hot gate: D1 CI must be strictly below this ceiling.
+  # hot_d1_ci_ceiling: 55.0
+
+  # Tradeable gate: H4 CI must be strictly below this ceiling.
+  # tradeable_h4_ci_ceiling: 60.0
+
+  # Tradeable gate + demotion note: H4 ADX floor. Below this, H4 momentum
+  # has faded and the entry timeframe isn't trending.
+  # h4_adx_floor: 20.0
+
+  # Tradeable gate + demotion note: H4 EMA20/50 separation floor, in ATR
+  # multiples. Below this, the H4 EMAs are effectively merged
+  # (consolidation, not a live pullback).
+  # h4_min_ema_sep: 0.3
+
+  # Demotion note: D1 ADX floor.
+  # demotion_d1_adx_floor: 20.0
+
+  # Demotion note: D1 CI ceiling.
+  # demotion_d1_ci_ceiling: 65.0
+
+  # Demotion note: weekly ATR-budget-used caution threshold (0.90 == 90%
+  # of the week's average ATR range already consumed).
+  # week_used_caution: 0.90
+
+  # Setup gate: H4 price-vs-EMA20 "value zone" lower bound, in ATR
+  # multiples.
+  # value_zone_min: 0.5
+
+  # Setup gate: H4 price-vs-EMA20 "value zone" upper bound, in ATR
+  # multiples.
+  # value_zone_max: 1.5
+
+  # H4 Bollinger-width squeeze threshold, in ATR multiples. Below this,
+  # H4Snapshot.Squeeze is true.
+  # h4_squeeze_width_atr: 2.0

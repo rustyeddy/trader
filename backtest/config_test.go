@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -178,20 +178,20 @@ runs: []
 func TestParseTimeframe_FromBacktestConfigCoverage(t *testing.T) {
 	tests := []struct {
 		in   string
-		want market.Timeframe
+		want types.Timeframe
 		err  bool
 	}{
-		{"M1", market.M1, false},
-		{"m1", market.M1, false},
-		{"H1", market.H1, false},
-		{"h1", market.H1, false},
-		{"D1", market.D1, false},
-		{"d1", market.D1, false},
+		{"M1", types.M1, false},
+		{"m1", types.M1, false},
+		{"H1", types.H1, false},
+		{"h1", types.H1, false},
+		{"D1", types.D1, false},
+		{"d1", types.D1, false},
 		{"W1", 0, true},
 		{"", 0, true},
 	}
 	for _, tc := range tests {
-		got, err := market.ParseTimeframe(tc.in)
+		got, err := types.ParseTimeframe(tc.in)
 		if tc.err {
 			assert.Error(t, err, "input=%q", tc.in)
 		} else {

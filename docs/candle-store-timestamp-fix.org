@@ -1,0 +1,199 @@
+#+TITLE: Canonical Candle Store — Timestamp-Alignment Bug, Schema Reorder, Full Regen
+#+DATE: 2026-07-16
+#+PROPERTY: status draft-for-implementation
+#+PROPERTY: audience implementation agent (Claude Code)
+
+* Summary
+
+The canonical candle store (=/srv/trading/data/candles/...=) mislabels the
+timestamp of every H4 (and likely D1/H1) candle by a DST-dependent offset
+(1-2 hours). OHLC *values* are correct — this is a pure timestamp bug, not
+data corruption — but every piece of code that reasons about a candle's
+real-world time (closed-bars-only cutoffs, weekly bucketing, WEEK%,
+signalreplay episode/entry-date matching, any live "as of now" read) has
+been working from the wrong clock for the store's entire history.
+
+Two independent root causes, both timestamp-alignment bugs of the same
+*class* (naive UTC-epoch-relative bucketing where OANDA's actual grid is
+NY-session-anchored) but in different code and needing different fixes.
+Bundled with a column-order/schema fix and a full regen, per 2026-07-16
+decision: no backward-compat needed, delete and rebuild the canonical tree
+from the existing raw preservation tree (which is confirmed correct and
+covers the full history back to ~2005).
+
+* Root cause 1 (primary, most impactful): DeriveCanonicalFromRaw / WriteMonthlyCandles
+
+** Evidence
+
+Direct comparison, raw preservation tree vs. canonical store, EURNZD H4,
+2026-06:
+
+| source                    | timestamp            |    open |    high |     low |   close |
+|---------------------------+----------------------+---------+---------+---------+---------|
+| raw (OANDA, ground truth) | 2026-06-29T01:00:00Z | 2.02033 | 2.02086 | 2.01604 | 2.01655 |
+| canonical (store)         | 2026-06-29T00:00:00Z | 2.02033 | 2.02086 | 2.01604 | 2.01655 |
+
+OHLC identical. Timestamp off by exactly 1 hour (at this time of year;
+see DST note below). Confirmed via OANDA's own API docs
+(dailyAlignment=17, alignmentTimezone=America/New_York are the
+documented defaults, and this repo's fetch code — brokers/oanda/candles.go
+— never overrides either), so raw-tree timestamps reflect OANDA's true,
+correctly NY-session-anchored H4/D1 grid. Also independently confirmed
+against a TradingView OHLC export for the same window (values and NY-grid
+timestamps agree with the raw tree).
+
+** Mechanism (datamanager/data_sync.go DeriveCanonicalFromRaw, ~line 185)
+
+#+begin_src go
+monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
+...
+idx := int((r.Time.Unix() - monthStart.Unix()) / stepSec)
+...
+candles[idx] = market.Candle{ Open: ..., High: ..., Low: ..., Close: ... }  // NO timestamp field
+...
+getStore().WriteMonthlyCandles(key.Source, key.Instrument, tf, monthStart, candles)
+#+end_src
+
+=r.Time= (the true, correctly-aligned OANDA timestamp from the raw row) is
+used correctly to pick the array slot =idx= — this part is fine, and
+because true bars are spaced exactly =stepSec= apart, integer division
+here does NOT cause slot collisions or candle loss; sequence order and
+count are preserved.
+
+The bug: =market.Candle= (see market/candle.go) has no timestamp field.
+Only =idx= (a position) survives past this point. Every subsequent read
+(datamanager/store.go ReadCSV, and the CSV row timestamp written by
+WriteMonthlyCandles → store's =WriteCSV=) reconstructs each candle's
+timestamp purely as =monthStart + idx*step= — i.e. it assumes slot 0 of
+every month begins at UTC midnight. That assumption is simply false for
+OANDA's real grid.
+
+** Why this isn't a one-line fix
+
+The true first-slot boundary is NY 17:00, in =alignmentTimezone=,
+observing DST — so the offset from UTC midnight is NOT constant across
+the year (e.g. 1 hour under EDT vs 2 hours under EST-adjacent parts of the
+grid, depending on exactly how the granularity subdivides the day). A
+single hardcoded correction constant would be wrong for roughly half of
+any year. The fix needs to compute the *true* first-bar boundary for each
+month correctly, honoring DST, not apply a fixed shift.
+
+** Suggested fix shape
+
+1. Add a helper (suggest =types= or =datamanager=, e.g.
+   =FirstAlignedSlot(monthStart time.Time, tf types.Timeframe) time.Time=)
+   that computes the correct first candle-open boundary for a given
+   month/timeframe using the NY 17:00 daily-alignment rule, DST-aware
+   (Go's =time.LoadLocation("America/New_York")= + =time.Date= in that
+   location, then =.UTC()=, is the standard way to get this right without
+   hand-rolling DST math). This only matters for granularities with daily
+   alignment (H4, D1, W1 by extension) — M1 has no daily-alignment concept
+   per OANDA's docs and should be left on its existing UTC-relative
+   scheme.
+2. =DeriveCanonicalFromRaw= computes =idx= relative to this *aligned*
+   start, not the naive UTC =monthStart=.
+3. =WriteMonthlyCandles=/=NewMonthlyCandleSet='s stored =Start= (what
+   later reads reconstruct timestamps from) must be this same aligned
+   value, not UTC =monthStart=.
+4. =ReadCSV='s existing alignment-check (=offset%step != 0= rejection,
+   store.go ~line 567) should keep working unmodified once =Start= is
+   correctly anchored — it was never the bug, it just inherited an
+   already-wrong =Start=.
+5. Write a regression test that constructs a month spanning a DST
+   transition (e.g. the raw tree's March or November data for any
+   instrument) and asserts the derived canonical timestamps land on the
+   correct NY-17:00-anchored grid on both sides of the transition — this
+   is exactly the case a fixed-offset fix would get wrong, so it's the
+   right test to prevent regressing back to a constant-shift "fix."
+
+* Root cause 2 (separate, smaller blast radius): candle_agg.go aggregate()
+
+Already identified 2026-07-16, independent of root cause 1. Used only for
+building H1-from-M1 and D1-from-H1 (=buildH1=/=buildD1=,
+datamanager/data_manager.go ~line 566-625) — a *different* code path from
+=DeriveCanonicalFromRaw=, used when the wantlist build pipeline needs to
+construct H1/D1 locally rather than from a direct raw derivation.
+
+#+begin_src go
+// datamanager/candle_agg.go, aggregate()
+start := (cs.Start / outStep) * outStep
+#+end_src
+
+Same class of bug: naive integer-division truncation relative to Unix
+epoch zero, not to the broker's true NY-anchored session boundary. Once
+root cause 1's =FirstAlignedSlot= helper exists, this should very likely
+call the *same* helper rather than get an independent fix — a second,
+differently-shaped alignment bug living right next to the first one is
+exactly how this kind of thing regresses.
+
+* Column-order / schema fix (bundled per 2026-07-16 decision)
+
+Canonical CSV rows are currently =timestamp,high,open,low,close,...=
+(H,O,L,C — confirmed in datamanager/store.go ReadCSV field parsing,
+~line 561-591). Reorder to the natural =timestamp,open,high,low,close,...=
+now, since the full tree is being regenerated anyway for the timestamp
+fix — bundling avoids a second full rewrite pass later.
+
+Also add a schema version marker as the first line of every canonical
+file, mirroring the raw tree's existing convention (=# schema=raw-v1=
+header, confirmed present in the raw files). Suggest =# schema=candle-v2=.
+This is cheap insurance: it lets any future tool (including the
+dump-candles.py spot-check script already in hand) detect field order
+programmatically instead of guessing from field count, which is exactly
+the ambiguity that caused friction during this investigation's manual
+verification step.
+
+Touch points for the reorder:
+- =datamanager/store.go=: =ReadCSV= field parsing order, =WriteCSV=
+  (need to confirm exact function/location — not yet traced this session)
+  row-writing order, and the =looksLikeHeader= detection.
+- Every doc comment referencing "H,O,L,C" column order (at least
+  store.go's own comments, and this session's dump-candles.py docstring
+  — the delivered script already auto-detects layout by header content
+  where possible, but its comments describing "H,O,L,C" should be updated
+  once the format changes, to avoid confusing a future reader).
+- Any test fixtures with hardcoded field order — grep test files for
+  literal CSV row strings before assuming a search-and-replace is
+  complete.
+
+* Regen plan (per 2026-07-16 decision: no back-compat, clean rebuild)
+
+1. Do NOT attempt to preserve or migrate existing canonical files — per
+   explicit instruction, =rm -rf= the canonical tree (or the affected
+   H4/D1/H1 portions — M1 is unaffected by root cause 1's daily-alignment
+   issue, but confirm whether M1 needs regen anyway for the column-reorder
+   change alone) once both fixes above are implemented and tested.
+2. Regenerate canonical files from the raw preservation tree (confirmed
+   complete back to ~2005, per user) via the fixed =DeriveCanonicalFromRaw=
+   path, for every instrument/timeframe currently in use.
+3. Validation before declaring done: spot-check a handful of
+   months/instruments/timeframes with dump-candles.py against both the
+   raw tree and an independent TradingView export (both already used
+   successfully this session) — confirm timestamps now land on the
+   correct NY-anchored grid across at least one DST transition, not just
+   the mid-year case already checked.
+4. Full re-run of every signalreplay experiment from 2026-07-16 is
+   required afterward — the H4/D1 classification, WEEK%, and every
+   H4/H1-gated review output computed before this fix used mislabeled
+   timestamps, so prior signalreplay results (documented in memory: 3340
+   trades, avg R -0.134, hold-length analysis, H1-alignment finding) must
+   be treated as provisional until re-run against corrected data. The
+   indicator *magnitudes* are likely still roughly right (sequence-based
+   math, not timestamp-based — see reasoning in the 2026-07-16
+   conversation), but anything date-boundary-sensitive (WEEK%, weekly
+   bucketing, episode/entry-date matching, the H1-alignment finding
+   specifically) should be treated as unverified until re-run.
+
+* Open questions for implementation
+
+1. Exact location/name of the CSV row-writing function (referenced above
+   as store.go's =WriteCSV= counterpart to =ReadCSV= — not directly
+   viewed this session, confirm exact signature before editing).
+2. Whether M1 data needs full regen too (for the column-reorder alone,
+   since root cause 1 doesn't affect M1's alignment) or can be
+   reordered in place without a raw-tree rederivation.
+3. Whether =FirstAlignedSlot= (or equivalent) needs to be exposed/tested
+   independently of =DeriveCanonicalFromRaw=, given =candle_agg.go=
+   should share it (root cause 2) — suggests it belongs in a shared
+   location (=types= package candidate) rather than living inside
+   =datamanager/data_sync.go= alongside just one of its two call sites.

@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 type CandleValidationRequest struct {
 	Instruments []string
 	Source      string
-	Timeframe   market.Timeframe
+	Timeframe   types.Timeframe
 	Start       time.Time
 	End         time.Time
 	IncludeRaw  bool
@@ -68,7 +69,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 	}
 
 	switch req.Timeframe {
-	case market.M1, market.H1, market.H4, market.D1:
+	case types.M1, types.H1, types.H4, types.D1:
 	default:
 		return nil, fmt.Errorf("unsupported timeframe: %v", req.Timeframe)
 	}
@@ -84,7 +85,7 @@ func ValidateCandleData(ctx context.Context, req CandleValidationRequest) (*Cand
 		rawDir = globalStore.rawRoot()
 	}
 
-	months := market.TimeRange{Start: market.FromTime(start), End: market.FromTime(end), TF: req.Timeframe}.MonthsInRange()
+	months := types.TimeRange{Start: types.FromTime(start), End: types.FromTime(end), TF: req.Timeframe}.MonthsInRange()
 	report := &CandleValidationReport{
 		Source:     source,
 		Timeframe:  req.Timeframe.String(),
@@ -145,7 +146,7 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	// Slots in the future (after the current hour) are not expected to have data.
 	now := time.Now().UTC().Truncate(time.Hour)
 
-	path, err := globalStore.PathForAsset(key)
+	path, err := globalStore.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,8 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	coverage := analyzeCandleCoverage(cs, now)
+	monthEnd := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	coverage := analyzeCandleCoverage(cs, now, monthEnd)
 	issues := make([]CandleValidationIssue, 0, 4)
 	if coverage.Missing > 0 {
 		issues = append(issues, CandleValidationIssue{
@@ -225,19 +227,30 @@ func validateCandleMonth(key Key, includeRaw bool, rawDir string) ([]CandleValid
 	return issues, nil
 }
 
-func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
+// analyzeCandleCoverage reports coverage stats for cs. monthEnd is the
+// exclusive UTC calendar-month boundary this file represents: a trading
+// day's true daily-alignment window can run a few hours into the next
+// calendar month, but that data structurally lives in next month's own
+// raw/canonical file, so a slot at or after monthEnd is never fillable
+// from this file and must not count as "expected" here.
+func analyzeCandleCoverage(cs *CandleSet, now, monthEnd time.Time) candleCoverage {
 	if cs == nil || cs.Timeframe <= 0 {
 		return candleCoverage{}
 	}
 
 	step := time.Duration(cs.Timeframe) * time.Second
-	start := time.Unix(int64(cs.Start), 0).UTC()
 	var cov candleCoverage
 	for i := range cs.Candles {
-		slotStart := start.Add(time.Duration(i) * step)
+		// cs.Time reads the slot's own true timestamp rather than
+		// reconstructing it from Start+idx*step, which drifts an hour
+		// for D1/H4 slots after a DST transition mid-month.
+		slotStart := cs.Time(i)
 		slotEnd := slotStart.Add(step)
 		if !slotStart.Before(now) {
 			break // don't expect future slots
+		}
+		if !slotStart.Before(monthEnd) {
+			break // this slot's data structurally lives in next month's file
 		}
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
@@ -258,7 +271,7 @@ func analyzeCandleCoverage(cs *CandleSet, now time.Time) candleCoverage {
 	return cov
 }
 
-func expectedOpenSlotCount(year, month int, tf market.Timeframe, now time.Time) int {
+func expectedOpenSlotCount(year, month int, tf types.Timeframe, now time.Time) int {
 	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	step := time.Duration(tf) * time.Second

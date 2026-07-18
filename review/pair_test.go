@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,10 +21,10 @@ func trendingCandles(n int) []market.Candle {
 		high := close + 0.00005
 		low := open - 0.00005
 		candles = append(candles, market.Candle{
-			Open:  market.PriceFromFloat(open),
-			High:  market.PriceFromFloat(high),
-			Low:   market.PriceFromFloat(low),
-			Close: market.PriceFromFloat(close),
+			Open:  types.PriceFromFloat(open),
+			High:  types.PriceFromFloat(high),
+			Low:   types.PriceFromFloat(low),
+			Close: types.PriceFromFloat(close),
 		})
 	}
 	return candles
@@ -52,30 +53,30 @@ func rangingCandles(n int) []market.Candle {
 		high += 0.00100
 		low -= 0.00100
 		candles = append(candles, market.Candle{
-			Open:  market.PriceFromFloat(open),
-			High:  market.PriceFromFloat(high),
-			Low:   market.PriceFromFloat(low),
-			Close: market.PriceFromFloat(close),
+			Open:  types.PriceFromFloat(open),
+			High:  types.PriceFromFloat(high),
+			Low:   types.PriceFromFloat(low),
+			Close: types.PriceFromFloat(close),
 		})
 	}
 	return candles
 }
 
 func TestReviewPair_UnknownInstrument(t *testing.T) {
-	_, err := ReviewPair("NOTAPAIR", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	_, err := ReviewPair("NOTAPAIR", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown instrument")
 }
 
 func TestReviewPair_NotReady_InsufficientCandles(t *testing.T) {
 	// Only 10 D1 candles — well short of the ADX/EMA(50) warmup requirement.
-	_, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(10), trendingCandles(80))
+	_, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(10), trendingCandles(80), DefaultThresholds())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient candles")
 }
 
 func TestReviewPair_Trending_ClassifiesHotOrTradeableLong(t *testing.T) {
-	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 
 	assert.Equal(t, "EURUSD", result.Instrument)
@@ -87,7 +88,7 @@ func TestReviewPair_Trending_ClassifiesHotOrTradeableLong(t *testing.T) {
 }
 
 func TestReviewPair_Ranging_ClassifiesWatch(t *testing.T) {
-	result, err := ReviewPair("EURUSD", rangingCandles(40), rangingCandles(80), rangingCandles(80))
+	result, err := ReviewPair("EURUSD", rangingCandles(40), rangingCandles(80), rangingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 
 	assert.Equal(t, "watch", result.Bucket)
@@ -95,7 +96,7 @@ func TestReviewPair_Ranging_ClassifiesWatch(t *testing.T) {
 }
 
 func TestReviewPair_ATRPipsIsPositive(t *testing.T) {
-	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80))
+	result, err := ReviewPair("EURUSD", trendingCandles(40), trendingCandles(80), trendingCandles(80), DefaultThresholds())
 	require.NoError(t, err)
 	assert.Greater(t, result.D1.ATRPips, 0.0)
 	assert.Greater(t, result.H4.ATRPips, 0.0)

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // LiveJournal subscribes to an OANDA transaction stream and writes complete
@@ -37,9 +37,9 @@ type LiveJournal struct {
 
 type pendingOpen struct {
 	Instrument string
-	Units      market.Units
-	EntryPrice market.Price
-	OpenTime   market.Timestamp
+	Units      types.Units
+	EntryPrice types.Price
+	OpenTime   types.Timestamp
 }
 
 // NewLiveJournal creates a journal worker. Call Run to start the subscription.
@@ -148,9 +148,9 @@ func (lj *LiveJournal) handleTransaction(tx oanda.Transaction) {
 func (lj *LiveJournal) recordOpen(tx oanda.Transaction) {
 	po := &pendingOpen{
 		Instrument: tx.Instrument,
-		Units:      market.Units(tx.Units),
-		EntryPrice: market.PriceFromFloat(tx.Price),
-		OpenTime:   market.FromTime(tx.Time),
+		Units:      types.Units(tx.Units),
+		EntryPrice: types.PriceFromFloat(tx.Price),
+		OpenTime:   types.FromTime(tx.Time),
 	}
 	lj.mu.Lock()
 	lj.pendingOpens[tx.TradeID] = po
@@ -179,7 +179,7 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 		)
 		po = &pendingOpen{
 			Instrument: tx.Instrument,
-			Units:      market.Units(-closed.Units), // close units have opposite sign
+			Units:      types.Units(-closed.Units), // close units have opposite sign
 		}
 	}
 
@@ -193,10 +193,10 @@ func (lj *LiveJournal) recordClose(tx oanda.Transaction, closed oanda.ClosedTrad
 		Instrument: po.Instrument,
 		Units:      po.Units,
 		EntryPrice: po.EntryPrice,
-		ExitPrice:  market.PriceFromFloat(closed.Price),
+		ExitPrice:  types.PriceFromFloat(closed.Price),
 		OpenTime:   po.OpenTime,
-		CloseTime:  market.FromTime(tx.Time),
-		RealizedPL: market.MoneyFromFloat(closed.RealizedPL),
+		CloseTime:  types.FromTime(tx.Time),
+		RealizedPL: types.MoneyFromFloat(closed.RealizedPL),
 		Reason:     tx.Reason,
 	}
 	if err := lj.journal.RecordTrade(record); err != nil {

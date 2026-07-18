@@ -17,6 +17,7 @@ import (
 
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/ulikunitz/xz/lzma"
 )
 
@@ -48,7 +49,7 @@ type store struct {
 	cache   map[Key]*CandleSet // process-lifetime cache of ReadCSV results, keyed by Key
 }
 
-func (s *store) PathForAsset(k Key) (string, error) {
+func (s *store) KeyPath(k Key) (string, error) {
 	switch {
 	case k.Kind == KindCandle && k.Day == 0 && k.Hour == 0:
 		return s.pathForMonthlyCandle(k), nil
@@ -86,7 +87,7 @@ func (s *store) PathForMonthlyCandle(k Key) string {
 }
 
 // RawCandlePath returns the path for a monthly candle CSV under the raw tree.
-// It mirrors PathForAsset but roots in rawRoot instead of basedir.
+// It mirrors KeyPath but roots in rawRoot instead of basedir.
 func (s *store) RawCandlePath(k Key) (string, error) {
 	if k.Kind != KindCandle || k.Day != 0 || k.Hour != 0 {
 		return "", fmt.Errorf("RawCandlePath requires a monthly candle key (Day=0, Hour=0)")
@@ -155,11 +156,13 @@ func parseCandlePath(path string) (k Key, ok bool) {
 
 	switch fileTF {
 	case "m1": // XXX normalize these!!
-		k.TF = market.M1
+		k.TF = types.M1
 	case "h1":
-		k.TF = market.H1
+		k.TF = types.H1
+	case "h4":
+		k.TF = types.H4
 	case "d1":
-		k.TF = market.D1
+		k.TF = types.D1
 	default:
 		return k, false
 	}
@@ -173,6 +176,42 @@ func parseCandlePath(path string) (k Key, ok bool) {
 // e.g. basedir=/srv/trading/data/candles → rawRoot=/srv/trading/data/raw
 func (s *store) rawRoot() string {
 	return filepath.Join(filepath.Dir(s.basedir), "raw")
+}
+
+// ListCandleKeys walks the canonical candle tree and returns the Key parsed
+// from every candle CSV's filename. Unlike BuildInventory/scanFiles, it never
+// opens or reads a file's contents, so it does not populate ReadCSV's
+// process-lifetime cache — callers that only need to know which
+// instrument/timeframe/month combinations exist (e.g. resolving a default
+// date range) should use this instead of BuildInventory to avoid loading the
+// entire store into memory.
+func ListCandleKeys() ([]Key, error) {
+	return getStore().listCandleKeys()
+}
+
+func (s *store) listCandleKeys() ([]Key, error) {
+	var keys []Key
+	err := filepath.Walk(s.basedir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(info.Name()), ".csv") {
+			return nil
+		}
+		key, ok := parseCandlePath(path)
+		if !ok {
+			return nil
+		}
+		keys = append(keys, key)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 func (s *store) pathForHourlyTick(k Key) string {
@@ -219,7 +258,7 @@ func parseTickPath(path string) (Key, bool) {
 		Instrument: market.NormalizeInstrument(inst),
 		Source:     normalizeSource(source),
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 	}
 
 	year, err := strconv.Atoi(yearStr)
@@ -272,7 +311,7 @@ func (s *store) RelDir(key Key) string {
 }
 
 func (s *store) Exists(key Key) (bool, error) {
-	p, err := s.PathForAsset(key)
+	p, err := s.KeyPath(key)
 	if err != nil {
 		return false, err
 	}
@@ -310,7 +349,7 @@ func (s *store) walkRoot(root string, inv *Inventory) error {
 		}
 
 		var ok bool
-		var rng market.TimeRange
+		var rng types.TimeRange
 		var descriptor string
 		name := strings.ToLower(info.Name())
 		var key Key
@@ -326,7 +365,7 @@ func (s *store) walkRoot(root string, inv *Inventory) error {
 			descriptor = fmt.Sprintf(
 				"dukascopy raw bi5 tick file %04d-%02d-%02d %02d:00Z",
 				key.Year, key.Month, key.Day, key.Hour)
-			rng = market.NewTimeRange(market.FromTime(start), market.FromTime(end), market.Ticks)
+			rng = types.NewTimeRange(types.FromTime(start), types.FromTime(end), types.Ticks)
 
 		case strings.HasSuffix(name, ".csv"):
 			key, ok = parseCandlePath(path)
@@ -361,7 +400,7 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 	asset := Asset{
 		Key:        key,
 		Path:       path,
-		Range:      market.MonthRange(key.Year, key.Month),
+		Range:      types.MonthRange(key.Year, key.Month),
 		Exists:     true,
 		Complete:   info.Size() > 0,
 		Size:       info.Size(),
@@ -380,7 +419,8 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 		return asset
 	}
 
-	missingExpected, expected := candleSetMissingExpectedSlots(cs)
+	monthEnd := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+	missingExpected, expected := candleSetMissingExpectedSlots(cs, monthEnd)
 	asset.Complete = missingExpected == 0
 	asset.Buildable = expected > 0
 	asset.MissingInputs = missingExpected
@@ -390,16 +430,30 @@ func (s *store) inspectCandleAsset(key Key, path string, info os.FileInfo) Asset
 	return asset
 }
 
-func candleSetMissingExpectedSlots(cs *CandleSet) (missing int, expected int) {
+// candleSetMissingExpectedSlots reports how many of cs's slots fall within
+// forex market hours and lack real data. monthEnd is the exclusive UTC
+// calendar-month boundary this file represents: a trading day's true
+// daily-alignment window (17:00 America/New_York) can run a few hours
+// into the next calendar month, but that data structurally lives in next
+// month's own raw/canonical file (writeRawMonth only ever preserves rows
+// within its own [monthStart, monthEnd)) — so a slot at or after monthEnd
+// is never fillable from this file and must not count as "expected" here.
+func candleSetMissingExpectedSlots(cs *CandleSet, monthEnd time.Time) (missing int, expected int) {
 	if cs == nil || cs.Timeframe <= 0 {
 		return 0, 0
 	}
 
-	step := time.Duration(cs.Timeframe) * time.Second
-	start := time.Unix(int64(cs.Start), 0).UTC()
+	// Each slot's own Timestamp is authoritative (see CandleSet doc
+	// comment) — reconstructing it from Start+i*step instead drifts an
+	// hour for every D1/H4 slot after a DST transition mid-month, which
+	// used to make this report false "missing" slots for the rest of
+	// every March/November.
 	for i := range cs.Candles {
-		slotStart := start.Add(time.Duration(i) * step)
-		slotEnd := slotStart.Add(step)
+		slotStart := cs.Time(i)
+		if !slotStart.Before(monthEnd) {
+			break
+		}
+		slotEnd := slotStart.Add(time.Duration(cs.Timeframe) * time.Second)
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
@@ -433,16 +487,16 @@ func timeRangeMayHaveForexData(start, end time.Time) bool {
 }
 
 func (s *store) writeMetadata(cs *CandleSet, w io.Writer) error {
-	tfstr := market.Timeframe(cs.Timeframe).String()
+	tfstr := types.Timeframe(cs.Timeframe).String()
 	year := time.Unix(int64(cs.Start), 0).UTC().Year()
 
-	_, err := fmt.Fprintf(w, "# schema=v1 source=%s instrument=%s tf=%s year=%d scale=%d\n",
+	_, err := fmt.Fprintf(w, "# schema=candle-v2 source=%s instrument=%s tf=%s year=%d scale=%d\n",
 		cs.Source, cs.Instrument, tfstr, year, cs.Scale)
 	if err != nil {
 		return err
 	}
 
-	_, err = fmt.Fprintln(w, "Timestamp,High,Open,Low,Close,avgspread,maxspread,ticks,flags")
+	_, err = fmt.Fprintln(w, "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags")
 	return err
 }
 
@@ -505,7 +559,7 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 		return nil, fmt.Errorf("ReadCSV only supports monthly candle keys with Day==0 and Hour==0, got Day=%d Hour=%d", key.Day, key.Hour)
 	}
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}
@@ -516,26 +570,45 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	}
 	defer f.Close()
 
-	// Build CandleSet structure from key parameters.
+	// The slot skeleton comes from MonthSlotBoundaries, the same function
+	// DeriveCanonicalFromRaw/FetchCandleMonth use to decide what a
+	// calendar month's file owns (including H4's early sub-slots of a
+	// session already in progress at monthStart) — this read path's slot
+	// count must match what was actually written, or gap rows past the
+	// real row count would be mislabeled with SlotBoundaries' different
+	// (monthStart-at-or-after) anchor. WriteCSV always writes every slot
+	// densely (gaps included) in slot order, so row N is always skeleton
+	// slot N-1 — no arithmetic reconstruction of a slot's position (or its
+	// reported time) from a single anchor + fixed step is needed, which is
+	// what let D1's DST-variable day width silently mislabel candles. Each
+	// row's own timestamp column is authoritative and stored verbatim;
+	// only monotonicity is checked, since real D1 spacing legitimately
+	// varies by up to an hour across a DST transition.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
-	start := market.FromTime(monthStart)
 	tf := key.TF
-	step := int64(tf)
-
-	endTime := monthStart.AddDate(0, 1, 0)
-	spanSec := int64(endTime.Sub(monthStart).Seconds())
-	n := int(spanSec / step)
+	monthEnd := monthStart.AddDate(0, 1, 0)
 
 	instName := market.NormalizeInstrument(key.Instrument)
+	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
+	n := len(boundaries)
+	candles := make([]market.CandleTime, n)
+	for i, b := range boundaries {
+		candles[i].Timestamp = types.FromTime(b)
+	}
 	cs = &CandleSet{
 		Instrument: instName,
 		Source:     readCSVSource(key.Source),
-		Start:      start,
 		Timeframe:  tf,
-		Scale:      market.PriceScale,
-		Candles:    make([]market.Candle, n),
+		Scale:      types.PriceScale,
+		Candles:    candles,
 		Valid:      make([]uint64, (n+63)/64),
 	}
+	if n > 0 {
+		cs.Start = cs.Candles[0].Timestamp
+	}
+
+	var prevTs int64
+	havePrev := false
 
 	scanner := bufio.NewScanner(f)
 	rowNum := 0
@@ -559,37 +632,38 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse timestamp: %w", path, rowNum, err)
 		}
-
-		offset := ts - int64(start)
-		if offset < 0 || offset%step != 0 {
-			return nil, fmt.Errorf("csv %q row %d: timestamp %d not aligned to timeframe %d", path, rowNum, ts, step)
+		if havePrev && ts <= prevTs {
+			return nil, fmt.Errorf("csv %q row %d: timestamp %d not after previous row's %d", path, rowNum, ts, prevTs)
 		}
-		idx := int(offset / step)
+		prevTs = ts
+		havePrev = true
+
+		idx := rowNum - 1
 		if idx >= n {
-			return nil, fmt.Errorf("csv %q row %d: timestamp %d out of range for month", path, rowNum, ts)
+			return nil, fmt.Errorf("csv %q row %d: too many rows for month (max %d)", path, rowNum, n)
 		}
 
-		highv, err := market.ParseRawPrice(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
-		}
-		openv, err := market.ParseRawPrice(fields[2])
+		openv, err := types.ParseRawPrice(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse open: %w", path, rowNum, err)
 		}
-		lowv, err := market.ParseRawPrice(fields[3])
+		highv, err := types.ParseRawPrice(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("csv %q row %d: parse high: %w", path, rowNum, err)
+		}
+		lowv, err := types.ParseRawPrice(fields[3])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse low: %w", path, rowNum, err)
 		}
-		closev, err := market.ParseRawPrice(fields[4])
+		closev, err := types.ParseRawPrice(fields[4])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse close: %w", path, rowNum, err)
 		}
-		avgSpread, err := market.ParseRawPrice(fields[5])
+		avgSpread, err := types.ParseRawPrice(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse avgspread: %w", path, rowNum, err)
 		}
-		maxSpread, err := market.ParseRawPrice(fields[6])
+		maxSpread, err := types.ParseRawPrice(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("csv %q row %d: parse maxspread: %w", path, rowNum, err)
 		}
@@ -604,14 +678,17 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 			return nil, fmt.Errorf("csv %q row %d: parse flags: %w", path, rowNum, err)
 		}
 
-		cs.Candles[idx] = market.Candle{
-			High:      highv,
-			Open:      openv,
-			Low:       lowv,
-			Close:     closev,
-			AvgSpread: avgSpread,
-			MaxSpread: maxSpread,
-			Ticks:     int32(ticks),
+		cs.Candles[idx] = market.CandleTime{
+			Candle: market.Candle{
+				High:      highv,
+				Open:      openv,
+				Low:       lowv,
+				Close:     closev,
+				AvgSpread: avgSpread,
+				MaxSpread: maxSpread,
+				Ticks:     int32(ticks),
+			},
+			Timestamp: types.Timestamp(ts),
 		}
 		if flags&0x0001 != 0 {
 			cs.SetValid(idx)
@@ -659,11 +736,11 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 		Instrument: market.NormalizeInstrument(cs.Instrument),
 		Source:     normalizeSource(cs.Source),
 		Kind:       KindCandle,
-		TF:         market.Timeframe(cs.Timeframe),
+		TF:         types.Timeframe(cs.Timeframe),
 		Year:       start.Year(),
 		Month:      int(start.Month()),
 	}
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return err
 	}
@@ -686,18 +763,18 @@ func (s *store) WriteCSV(cs *CandleSet) error {
 	defer w.Flush()
 
 	for i := 0; i < len(cs.Candles); i++ {
-		openUnix := int64(cs.Start) + int64(i)*int64(step)
+		openUnix := int64(cs.Candles[i].Timestamp)
 
-		c := cs.Candles[i]
+		c := cs.Candles[i].Candle
 		var flags uint64
-		if len(cs.Valid) > 0 && market.BitIsSet(cs.Valid, i) {
+		if len(cs.Valid) > 0 && types.BitIsSet(cs.Valid, i) {
 			flags = 0x0001
 		}
 
 		rec := []string{
 			strconv.FormatInt(openUnix, 10),
-			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Open), 10),
+			strconv.FormatInt(int64(c.High), 10),
 			strconv.FormatInt(int64(c.Low), 10),
 			strconv.FormatInt(int64(c.Close), 10),
 			strconv.FormatInt(int64(c.AvgSpread), 10),
@@ -729,7 +806,7 @@ func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 	}
 	defer r.Close()
 
-	dst, err := s.PathForAsset(key)
+	dst, err := s.KeyPath(key)
 	if err != nil {
 		return "", err
 	}
@@ -768,7 +845,7 @@ func (s *store) SaveFile(key Key, r io.ReadCloser) (path string, err error) {
 }
 
 func (s *store) Delete(k Key) error {
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	if err != nil {
 		return err
 	}
@@ -785,7 +862,7 @@ func (s *store) baseScanDir() string {
 }
 
 func (s *store) IsUsableTickFile(k Key) bool {
-	p, err := s.PathForAsset(k)
+	p, err := s.KeyPath(k)
 	if err != nil {
 		return false
 	}
@@ -800,7 +877,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	if key.Kind != KindTick {
 		return nil, fmt.Errorf("OpenTickIterator: not a tick key: %+v", key)
 	}
-	if key.TF != market.Ticks {
+	if key.TF != types.Ticks {
 		return nil, fmt.Errorf("OpenTickIterator: bad timeframe for tick key: %+v", key)
 	}
 
@@ -812,7 +889,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		return nil, fmt.Errorf("OpenTickIterator: tick file not usable: %+v", key)
 	}
 
-	path, err := s.PathForAsset(key)
+	path, err := s.KeyPath(key)
 	if err != nil {
 		return nil, err
 	}
@@ -827,7 +904,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 		return nil, fmt.Errorf("lzma reader %s: %w", path, err)
 	}
 
-	baseUnixMS := market.TimeMillis(time.Date(
+	baseUnixMS := types.TimeMillis(time.Date(
 		key.Year,
 		time.Month(key.Month),
 		key.Day,
@@ -851,7 +928,7 @@ func (s *store) OpenTickIterator(key Key) (iterator[RawTick], error) {
 	return newFuncIterator(nextFn, closeFn), nil
 }
 
-func readNextBI5Tick(r io.Reader, path string, baseUnixMS market.TimeMillis, priceMultiplier uint32) (RawTick, bool, error) {
+func readNextBI5Tick(r io.Reader, path string, baseUnixMS types.TimeMillis, priceMultiplier uint32) (RawTick, bool, error) {
 	const recSize = 20
 
 	var buf [recSize]byte
@@ -879,9 +956,9 @@ func readNextBI5Tick(r io.Reader, path string, baseUnixMS market.TimeMillis, pri
 	}
 
 	t := RawTick{
-		TimeMillis: baseUnixMS + market.TimeMillis(msOffset),
-		Ask:        market.Price(askU * priceMultiplier),
-		Bid:        market.Price(bidU * priceMultiplier),
+		TimeMillis: baseUnixMS + types.TimeMillis(msOffset),
+		Ask:        types.Price(askU * priceMultiplier),
+		Bid:        types.Price(bidU * priceMultiplier),
 		AskVol:     askVol,
 		BidVol:     bidVol,
 	}

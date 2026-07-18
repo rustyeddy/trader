@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,9 +103,9 @@ func TestLiveRunConfig_DefaultRiskPct(t *testing.T) {
 		RiskPct:    0,
 	}
 	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = market.RateFromFloat(0.001) // 0.1%
+		cfg.RiskPct = types.RateFromFloat(0.001) // 0.1%
 	}
-	assert.Equal(t, market.RateFromFloat(0.001), cfg.RiskPct)
+	assert.Equal(t, types.RateFromFloat(0.001), cfg.RiskPct)
 }
 
 // ── LiveTrade.Side ────────────────────────────────────────────────────────────
@@ -123,8 +124,8 @@ func TestLiveTrade_Side(t *testing.T) {
 
 func TestLivePrice_Mid(t *testing.T) {
 	p := LivePrice{
-		Bid: market.PriceFromFloat(1.0850),
-		Ask: market.PriceFromFloat(1.0852),
+		Bid: types.PriceFromFloat(1.0850),
+		Ask: types.PriceFromFloat(1.0852),
 	}
 	require.InDelta(t, 1.0851, p.Mid().Float64(), 0.00001)
 }
@@ -394,7 +395,7 @@ func TestStubStrategy_RecordsTicks(t *testing.T) {
 	plan := &LivePlan{Reason: "hold"}
 	s := &stubStrategy{name: "test", plan: plan}
 
-	price := LivePrice{Instrument: "EUR_USD", Bid: market.PriceFromFloat(1.08), Ask: market.PriceFromFloat(1.081)}
+	price := LivePrice{Instrument: "EUR_USD", Bid: types.PriceFromFloat(1.08), Ask: types.PriceFromFloat(1.081)}
 	s.Tick(context.Background(), price, nil)
 	s.Tick(context.Background(), price, nil)
 

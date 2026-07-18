@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +37,7 @@ func TestBuildInventory_Empty(t *testing.T) {
 
 func TestBuildInventory_WithCSV(t *testing.T) {
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
 	require.NoError(t, s.WriteCSV(cs))
 
 	inv, err := BuildInventory(context.Background())
@@ -45,12 +46,56 @@ func TestBuildInventory_WithCSV(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ListCandleKeys
+// ---------------------------------------------------------------------------
+
+func TestListCandleKeys_Empty(t *testing.T) {
+	useTempStore(t)
+	keys, err := ListCandleKeys()
+	require.NoError(t, err)
+	require.Empty(t, keys)
+}
+
+func TestListCandleKeys_FindsWrittenMonths(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	require.NoError(t, s.WriteCSV(cs))
+
+	keys, err := ListCandleKeys()
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.Equal(t, "EURUSD", keys[0].Instrument)
+	require.Equal(t, 2026, keys[0].Year)
+	require.Equal(t, 1, keys[0].Month)
+	require.Equal(t, types.H1, keys[0].TF)
+}
+
+// TestListCandleKeys_DoesNotPopulateReadCache is the regression guard for the
+// memory-exhaustion bug: resolveValidateDefaults used to call BuildInventory,
+// which opens and parses every candle CSV via ReadCSV to determine each
+// file's coverage — permanently caching every file's full CandleSet for the
+// life of the process. ListCandleKeys must only look at filenames.
+func TestListCandleKeys_DoesNotPopulateReadCache(t *testing.T) {
+	s := useTempStore(t)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	require.NoError(t, s.WriteCSV(cs))
+
+	_, err := ListCandleKeys()
+	require.NoError(t, err)
+
+	s.cacheMu.RLock()
+	cacheLen := len(s.cache)
+	s.cacheMu.RUnlock()
+	require.Zero(t, cacheLen, "ListCandleKeys must not populate the ReadCSV cache")
+}
+
+// ---------------------------------------------------------------------------
 // buildM1 validation
 // ---------------------------------------------------------------------------
 
 func TestBuildM1_WrongKind(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindTick, TF: market.M1}
+	k := Key{Kind: KindTick, TF: types.M1}
 	err := buildM1(context.Background(), k, nil, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildM1 requires candle key")
@@ -58,7 +103,7 @@ func TestBuildM1_WrongKind(t *testing.T) {
 
 func TestBuildM1_WrongTimeframe(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.H1}
+	k := Key{Kind: KindCandle, TF: types.H1}
 	err := buildM1(context.Background(), k, nil, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildM1 wrong timeframe")
@@ -66,7 +111,7 @@ func TestBuildM1_WrongTimeframe(t *testing.T) {
 
 func TestBuildM1_DayOrHourNonZero(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.M1, Day: 1}
+	k := Key{Kind: KindCandle, TF: types.M1, Day: 1}
 	err := buildM1(context.Background(), k, nil, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildM1 requires monthly candle key")
@@ -74,7 +119,7 @@ func TestBuildM1_DayOrHourNonZero(t *testing.T) {
 
 func TestBuildM1_EmptyInputs(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+	k := Key{Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 	err := buildM1(context.Background(), k, []Key{}, NewWantlist())
 	require.NoError(t, err)
 }
@@ -83,8 +128,8 @@ func TestBuildM1_BadTickKey(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
-	badInput := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
+	badInput := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	err := buildM1(context.Background(), k, []Key{badInput}, NewWantlist())
 	require.Error(t, err)
 }
@@ -95,7 +140,7 @@ func TestBuildM1_BadTickKey(t *testing.T) {
 
 func TestBuildH1_WrongTimeframe(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.M1}
+	k := Key{Kind: KindCandle, TF: types.M1}
 	err := buildH1(context.Background(), k, nil, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildH1 wrong timeframe")
@@ -103,7 +148,7 @@ func TestBuildH1_WrongTimeframe(t *testing.T) {
 
 func TestBuildH1_WrongInputCount(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.H1}
+	k := Key{Kind: KindCandle, TF: types.H1}
 	err := buildH1(context.Background(), k, []Key{}, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildH1 expected 1 input")
@@ -111,8 +156,8 @@ func TestBuildH1_WrongInputCount(t *testing.T) {
 
 func TestBuildH1_WrongInputTF(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.H1}
-	input := Key{TF: market.H1} // should be M1
+	k := Key{Kind: KindCandle, TF: types.H1}
+	input := Key{TF: types.H1} // should be M1
 	err := buildH1(context.Background(), k, []Key{input}, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildH1 expected M1 input")
@@ -124,7 +169,7 @@ func TestBuildH1_WrongInputTF(t *testing.T) {
 
 func TestBuildD1_WrongTimeframe(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.H1}
+	k := Key{Kind: KindCandle, TF: types.H1}
 	err := buildD1(context.Background(), k, nil, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildD1 wrong timeframe")
@@ -132,7 +177,7 @@ func TestBuildD1_WrongTimeframe(t *testing.T) {
 
 func TestBuildD1_WrongInputCount(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.D1}
+	k := Key{Kind: KindCandle, TF: types.D1}
 	err := buildD1(context.Background(), k, []Key{}, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildD1 expected 1 input")
@@ -140,8 +185,8 @@ func TestBuildD1_WrongInputCount(t *testing.T) {
 
 func TestBuildD1_WrongInputTF(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.D1}
-	input := Key{TF: market.D1} // should be H1
+	k := Key{Kind: KindCandle, TF: types.D1}
+	input := Key{TF: types.D1} // should be H1
 	err := buildD1(context.Background(), k, []Key{input}, NewWantlist())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "buildD1 expected H1 input")
@@ -153,7 +198,7 @@ func TestBuildD1_WrongInputTF(t *testing.T) {
 
 func TestBuildHourM1FromTickIterator_WrongKey(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindCandle, TF: market.M1}
+	k := Key{Kind: KindCandle, TF: types.M1}
 	it := newFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.Error(t, err)
@@ -161,7 +206,7 @@ func TestBuildHourM1FromTickIterator_WrongKey(t *testing.T) {
 
 func TestBuildHourM1FromTickIterator_Empty(t *testing.T) {
 	t.Parallel()
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 3, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 3, Hour: 10}
 	it := newFuncIterator(func() (RawTick, bool, error) { return RawTick{}, false, nil }, nil)
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
@@ -173,7 +218,7 @@ func TestBuildHourM1FromTickIterator_WithTicks(t *testing.T) {
 
 	// Build some ticks for 2026-01-05 10:00:00 UTC
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	// Two ticks in minute 0 and minute 1
 	ticks := []RawTick{
@@ -194,7 +239,7 @@ func TestBuildHourM1FromTickIterator_WithTicks(t *testing.T) {
 	k := Key{
 		Instrument: "EURUSD",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        5,
@@ -213,7 +258,7 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	ticks := []RawTick{
 		{TimeMillis: baseMS + 1000, Ask: 13010, Bid: 13000},
@@ -232,7 +277,7 @@ func TestBuildHourM1FromTickIterator_WithGap(t *testing.T) {
 	k := Key{
 		Instrument: "EURUSD",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        5,
@@ -253,7 +298,7 @@ func TestBuildHourM1FromTickIterator_ContextCancel(t *testing.T) {
 	cancel() // already cancelled
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	called := 0
 	it := newFuncIterator(func() (RawTick, bool, error) {
@@ -261,7 +306,7 @@ func TestBuildHourM1FromTickIterator_ContextCancel(t *testing.T) {
 		return RawTick{TimeMillis: baseMS + 1000, Ask: 100, Bid: 99}, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	_, err := buildHourM1FromTickIterator(ctx, k, it)
 	// Either returns context error or no ticks were processed
 	_ = err
@@ -271,7 +316,7 @@ func TestBuildHourM1FromTickIterator_ContextCancel(t *testing.T) {
 func TestBuildHourM1FromTickIterator_IteratorError(t *testing.T) {
 	t.Parallel()
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	sentinel := errors.New("iter error")
 	it := newFuncIterator(func() (RawTick, bool, error) {
 		return RawTick{}, false, sentinel
@@ -285,7 +330,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 	outsideMS := baseMS + 2*3600_000 + 100
 	ticks := []RawTick{
 		{TimeMillis: outsideMS, Ask: 13010, Bid: 13000},
@@ -300,7 +345,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "outside hour window")
@@ -309,7 +354,7 @@ func TestBuildHourM1_TickOutsideHourWindow(t *testing.T) {
 func TestBuildHourM1_BadTimestamp(t *testing.T) {
 	t.Parallel()
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	tick := RawTick{TimeMillis: 0, Ask: 100, Bid: 99}
 	idx := 0
 	it := newFuncIterator(func() (RawTick, bool, error) {
@@ -329,7 +374,7 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	ticks := []RawTick{
 		{TimeMillis: baseMS + 5*60_000 + 100, Ask: 13010, Bid: 13000},
@@ -345,7 +390,7 @@ func TestBuildHourM1_OutOfOrder(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	_, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "out-of-order")
@@ -355,7 +400,7 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 	t.Parallel()
 
 	hourStart := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
-	baseMS := market.TimeMilliFromTime(hourStart)
+	baseMS := types.TimeMilliFromTime(hourStart)
 
 	ticks := []RawTick{
 		{TimeMillis: baseMS + 100, Ask: 13010, Bid: 13000},
@@ -370,7 +415,7 @@ func TestBuildHourM1_TrailingFillFlat(t *testing.T) {
 		return tick, true, nil
 	}, nil)
 
-	k := Key{Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	k := Key{Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	cs, err := buildHourM1FromTickIterator(context.Background(), k, it)
 	require.NoError(t, err)
 	require.NotNil(t, cs)
@@ -399,7 +444,7 @@ func TestExecuteDownloads_EmptyPlan(t *testing.T) {
 func TestExecuteDownloads_ContextCancelled(t *testing.T) {
 	k := Key{
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Instrument: "EURUSD",
 		Source:     market.SourceDukascopy,
 		Year:       2026,
@@ -439,7 +484,7 @@ func TestDownloader_StartDownloaderRecordsFailure(t *testing.T) {
 		Source:     source,
 		Instrument: "EURUSD",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        5,
@@ -477,7 +522,7 @@ func TestDownloader_StartDownloaderStoresSuccess(t *testing.T) {
 		Source:     source,
 		Instrument: "EURUSD",
 		Kind:       KindTick,
-		TF:         market.Ticks,
+		TF:         types.Ticks,
 		Year:       2026,
 		Month:      1,
 		Day:        5,
@@ -523,8 +568,8 @@ func TestCandleMaker_H1TaskFails(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
-	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
+	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 
 	dm := &DataManager{
 		plan: &Plan{
@@ -544,8 +589,8 @@ func TestCandleMaker_D1TaskFails(t *testing.T) {
 	s := useTempStore(t)
 	_ = s
 
-	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.D1, Year: 2026, Month: 1}
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 
 	dm := &DataManager{
 		plan: &Plan{
@@ -604,7 +649,7 @@ func TestBuildWantList_IncompleteCandleUsesWantIncomplete(t *testing.T) {
 	dm := NewDataManager([]string{"EURUSD"}, start, end)
 	dm.inventory = NewInventory()
 
-	k := Key{Instrument: "EURUSD", Source: market.SourceCandles, Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: market.SourceCandles, Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	dm.inventory.Put(Asset{Key: k, Exists: true, Complete: false})
 
 	wl, err := dm.BuildWantList(context.Background())
@@ -627,7 +672,7 @@ func TestPlanFromWantlist_TickGoesToDownload(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: market.Ticks, Year: 2026, Month: 1, Day: 1, Hour: 10}
+	k := Key{Instrument: "EURUSD", Kind: KindTick, TF: types.Ticks, Year: 2026, Month: 1, Day: 1, Hour: 10}
 	dm.wants.Put(Want{Key: k, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -645,7 +690,7 @@ func TestPlanFromWantlist_M1CandleBlockedNoTicks(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 	dm.wants.Put(Want{Key: k, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -662,7 +707,7 @@ func TestPlanFromWantlist_H1CandleBlockedNoM1(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	dm.wants.Put(Want{Key: k, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -678,7 +723,7 @@ func TestPlanFromWantlist_D1CandleBlockedNoH1(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.D1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 1}
 	dm.wants.Put(Want{Key: k, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -690,7 +735,7 @@ func TestPlanFromWantlist_H1ReadyWhenM1Complete(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.M1, Year: 2026, Month: 1}
+	km1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.M1, Year: 2026, Month: 1}
 	inv.Put(Asset{Key: km1, Exists: true, Complete: true})
 
 	dm := &DataManager{
@@ -698,7 +743,7 @@ func TestPlanFromWantlist_H1ReadyWhenM1Complete(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	dm.wants.Put(Want{Key: kh1, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -710,7 +755,7 @@ func TestPlanFromWantlist_D1ReadyWhenH1Complete(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	kh1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	inv.Put(Asset{Key: kh1, Exists: true, Complete: true})
 
 	dm := &DataManager{
@@ -718,7 +763,7 @@ func TestPlanFromWantlist_D1ReadyWhenH1Complete(t *testing.T) {
 		wants:     NewWantlist(),
 	}
 
-	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.D1, Year: 2026, Month: 1}
+	kd1 := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.D1, Year: 2026, Month: 1}
 	dm.wants.Put(Want{Key: kd1, WantReason: WantMissing})
 
 	plan, err := dm.Plan(context.Background())
@@ -733,9 +778,9 @@ func TestPlanFromWantlist_D1ReadyWhenH1Complete(t *testing.T) {
 func TestCloseCandleIterators_NoError(t *testing.T) {
 
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
-	it1 := newCandleSetIterator(cs, market.TimeRange{})
-	it2 := newCandleSetIterator(cs, market.TimeRange{})
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	it1 := newCandleSetIterator(cs, types.TimeRange{})
+	it2 := newCandleSetIterator(cs, types.TimeRange{})
 
 	_ = s
 	err := closeCandleIterators([]market.CandleIterator{it1, it2})
@@ -745,8 +790,8 @@ func TestCloseCandleIterators_NoError(t *testing.T) {
 func TestCloseCandleIterators_WithNil(t *testing.T) {
 
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
-	it1 := newCandleSetIterator(cs, market.TimeRange{})
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	it1 := newCandleSetIterator(cs, types.TimeRange{})
 
 	_ = s
 	err := closeCandleIterators([]market.CandleIterator{nil, it1, nil})
@@ -760,11 +805,11 @@ func TestCloseCandleIterators_WithNil(t *testing.T) {
 func TestChainedCandleIterator_NilSub(t *testing.T) {
 
 	s := useTempStore(t)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.H1)
-	cs.Candles[0] = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.H1)
+	cs.Candles[0].Candle = market.Candle{Open: 100, High: 105, Low: 99, Close: 103, Ticks: 1}
 	cs.SetValid(0)
 
-	real := newCandleSetIterator(cs, market.TimeRange{})
+	real := newCandleSetIterator(cs, types.TimeRange{})
 	chained := newChainedCandleIterator(nil, real, nil)
 
 	_ = s
@@ -800,7 +845,7 @@ func TestInventoryTicksComplete_AllComplete(t *testing.T) {
 	base := Key{
 		Instrument: "EURUSD",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -828,7 +873,7 @@ func TestInventoryTicksComplete_Missing(t *testing.T) {
 	base := Key{
 		Instrument: "EURUSD",
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       2026,
 		Month:      1,
 	}
@@ -878,10 +923,10 @@ func TestPlanHelpers(t *testing.T) {
 
 	require.False(t, p.Empty())
 	require.Equal(t, 3, p.TotalBuilds())
-	require.Len(t, p.BuildTasks(market.M1), 1)
-	require.Len(t, p.BuildTasks(market.H1), 2)
-	require.Len(t, p.BuildTasks(market.D1), 0)
-	require.Nil(t, p.BuildTasks(market.Ticks))
+	require.Len(t, p.BuildTasks(types.M1), 1)
+	require.Len(t, p.BuildTasks(types.H1), 2)
+	require.Len(t, p.BuildTasks(types.D1), 0)
+	require.Nil(t, p.BuildTasks(types.Ticks))
 }
 
 func TestCandleMaker_NilPlan(t *testing.T) {
@@ -895,7 +940,7 @@ func TestWantlistPutGetHasDelete(t *testing.T) {
 	t.Parallel()
 
 	wl := NewWantlist()
-	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Source: "candles", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	w := Want{Key: k, WantReason: WantMissing}
 
 	require.False(t, wl.Has(k))
@@ -991,7 +1036,7 @@ func TestWantlistPutKey(t *testing.T) {
 	t.Parallel()
 
 	wl := NewWantlist()
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	wl.PutKey(k, WantMissing)
 
 	got, ok := wl.Get(k)
@@ -1003,35 +1048,35 @@ func TestWantlistPutKey(t *testing.T) {
 func TestKeyCompare_KindLessThan(t *testing.T) {
 	t.Parallel()
 
-	tickKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindTick, TF: market.H1, Year: 2026, Month: 1}
-	candleKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	tickKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindTick, TF: types.H1, Year: 2026, Month: 1}
+	candleKey := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	require.Equal(t, -1, tickKey.compare(candleKey))
 }
 
 func TestKeyCompare_HourGreaterThan(t *testing.T) {
 	t.Parallel()
 
-	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1, Day: 5, Hour: 13}
-	other := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1, Day: 5, Hour: 10}
+	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1, Day: 5, Hour: 13}
+	other := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1, Day: 5, Hour: 10}
 	require.Equal(t, 1, base.compare(other))
 }
 
 func TestKeyCompareTF(t *testing.T) {
 	t.Parallel()
 
-	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	base := Key{Source: "candles", Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 
 	t.Run("TF smaller returns -1", func(t *testing.T) {
 		t.Parallel()
 		other := base
-		other.TF = market.D1
+		other.TF = types.D1
 		require.Equal(t, -1, base.compare(other))
 	})
 
 	t.Run("TF larger returns 1", func(t *testing.T) {
 		t.Parallel()
 		other := base
-		other.TF = market.M1
+		other.TF = types.M1
 		require.Equal(t, 1, base.compare(other))
 	})
 }
@@ -1041,7 +1086,7 @@ func TestKeyRange_TickHour0(t *testing.T) {
 
 	k := Key{
 		Kind:  KindTick,
-		TF:    market.Ticks,
+		TF:    types.Ticks,
 		Year:  2026,
 		Month: 1,
 		Day:   5,
@@ -1050,8 +1095,8 @@ func TestKeyRange_TickHour0(t *testing.T) {
 	rng, err := k.Range()
 	require.NoError(t, err)
 	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
-	require.Equal(t, market.Timestamp(start.Unix()), rng.Start)
-	require.Equal(t, market.Timestamp(start.Add(time.Hour).Unix()), rng.End)
+	require.Equal(t, types.Timestamp(start.Unix()), rng.Start)
+	require.Equal(t, types.Timestamp(start.Add(time.Hour).Unix()), rng.End)
 }
 
 func TestKeymapKeysSorted(t *testing.T) {
@@ -1146,7 +1191,7 @@ func TestInventoryString(t *testing.T) {
 	t.Parallel()
 
 	inv := NewInventory()
-	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	k := Key{Instrument: "EURUSD", Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	a := Asset{
 		Key:        k,
 		Descriptor: "test descriptor",
@@ -1212,7 +1257,7 @@ func TestSync_BuildWithCompleteM1(t *testing.T) {
 	s := useTempStore(t)
 
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, market.M1)
+	cs := makeTestCandleSet(t, "EURUSD", 2026, time.January, types.M1)
 	require.NoError(t, s.WriteCSV(cs))
 
 	dm := NewDataManager([]string{"EURUSD"},
@@ -1226,7 +1271,7 @@ func TestSync_BuildWithCompleteM1(t *testing.T) {
 		Instrument: cs.Instrument,
 		Source:     cs.Source,
 		Kind:       KindCandle,
-		TF:         market.M1,
+		TF:         types.M1,
 		Year:       int(start.Year()),
 		Month:      int(start.Month()),
 	}
@@ -1236,7 +1281,7 @@ func TestSync_BuildWithCompleteM1(t *testing.T) {
 	// Build wantlist with H1 wanted, and plan so BuildH1 is scheduled
 	dm.wants = NewWantlist()
 	kh1 := km1
-	kh1.TF = market.H1
+	kh1.TF = types.H1
 	dm.wants.PutKey(kh1, WantMissing)
 
 	var planErr error
@@ -1248,7 +1293,7 @@ func TestSync_BuildWithCompleteM1(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify H1 was written
-	kh1check := Key{Instrument: "EURUSD", Source: cs.Source, Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	kh1check := Key{Instrument: "EURUSD", Source: cs.Source, Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	exists, err := s.Exists(kh1check)
 	require.NoError(t, err)
 	require.True(t, exists)

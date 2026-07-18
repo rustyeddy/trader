@@ -13,12 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/review"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,19 +48,31 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 		from, err := time.Parse(time.RFC3339Nano, q.Get("from"))
 		require.NoError(t, err)
 
-		var step time.Duration
+		const n = 300
+
+		// D/H4 are daily-alignment grids (17:00 America/New_York,
+		// DST-aware) — OANDA's real candles land there, not on a naive
+		// fixed-duration stride from "from". Use the same boundary walk
+		// production reads/writes through (datamanager.SlotBoundaries) so
+		// this fake server's output matches what a real OANDA response
+		// would place candles at.
+		var times []time.Time
 		switch q.Get("granularity") {
-		case "W":
-			step = 7 * 24 * time.Hour
 		case "D":
-			step = 24 * time.Hour
+			times = datamanager.SlotBoundaries(from, types.D1, n)
 		case "H4":
-			step = 4 * time.Hour
+			times = datamanager.SlotBoundaries(from, types.H4, n)
 		default:
-			step = time.Hour
+			step := time.Hour
+			if q.Get("granularity") == "W" {
+				step = 7 * 24 * time.Hour
+			}
+			times = make([]time.Time, n)
+			for i := range times {
+				times[i] = from.Add(time.Duration(i) * step)
+			}
 		}
 
-		const n = 300
 		type ohlc struct{ O, H, L, C string }
 		candles := make([]map[string]any, 0, n)
 		price := 1.10000
@@ -73,7 +88,7 @@ func fakeOANDACandlesServer(t *testing.T) *httptest.Server {
 			}
 			candles = append(candles, map[string]any{
 				"complete": true,
-				"time":     from.Add(time.Duration(i) * step).Format(time.RFC3339Nano),
+				"time":     times[i].Format(time.RFC3339Nano),
 				"volume":   10,
 				"bid":      bid,
 				"ask":      bid,
@@ -110,6 +125,68 @@ func TestReviewWatchlist_SingleInstrument(t *testing.T) {
 	assert.Equal(t, "EURUSD", resp.Results[0].Instrument)
 	assert.NotEmpty(t, resp.Results[0].Bucket)
 	assert.False(t, resp.ScannedAt.IsZero())
+}
+
+// TestReviewWatchlist_CustomThresholdsChangeBucket proves ReviewRequest.Thresholds
+// actually reaches review.ReviewPair's classification: an unreasonably strict
+// Hot-gate ADX floor forces every pair to "watch" regardless of how strongly
+// it's trending. See issue #165.
+func TestReviewWatchlist_CustomThresholdsChangeBucket(t *testing.T) {
+	swapTempStore(t)
+	srv := fakeOANDACandlesServer(t)
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{
+		Instruments: []string{"EURUSD"},
+		Thresholds:  review.Thresholds{HotD1ADXFloor: 1000},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, "watch", resp.Results[0].Bucket)
+}
+
+// TestReviewWatchlist_NoH1FetchForNonTradeablePair confirms the live path
+// never issues an OANDA "H1" request for a pair that doesn't classify
+// tradeable — fakeOANDACandlesServer's plain monotonic series lands this
+// fixture on "watch" (see TestReviewWatchlist_CustomThresholdsChangeBucket's
+// sibling assertion), so a zero H1 request count here is the same
+// conditional-fetch proof as the sweep-path equivalent in
+// review_sweep_test.go, exercised through the live OANDA fetch path instead
+// of the local-store replay path.
+func TestReviewWatchlist_NoH1FetchForNonTradeablePair(t *testing.T) {
+	swapTempStore(t)
+
+	var mu sync.Mutex
+	requestsByGranularity := map[string]int{}
+	base := fakeOANDACandlesServer(t)
+	defer base.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestsByGranularity[r.URL.Query().Get("granularity")]++
+		mu.Unlock()
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	resp, err := svc.ReviewWatchlist(context.Background(), ReviewRequest{Instruments: []string{"EURUSD"}})
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 1)
+	require.NotEqual(t, "tradeable", resp.Results[0].Bucket, "fixture must not classify tradeable for this test to prove anything")
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, requestsByGranularity["H1"], "H1 must never be fetched for a non-tradeable pair")
 }
 
 func TestReviewWatchlist_DefaultsToAllInstruments(t *testing.T) {
@@ -304,16 +381,126 @@ func TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort(t *testing.T) {
 	candles := make([]market.Candle, int(daysInMonth))
 	todayIdx := now.Day() - 1
 	candles[todayIdx] = market.Candle{
-		Open:  market.PriceFromFloat(1.1),
-		High:  market.PriceFromFloat(1.1),
-		Low:   market.PriceFromFloat(1.1),
-		Close: market.PriceFromFloat(1.1),
+		Open:  types.PriceFromFloat(1.1),
+		High:  types.PriceFromFloat(1.1),
+		Low:   types.PriceFromFloat(1.1),
+		Close: types.PriceFromFloat(1.1),
 	}
-	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", market.D1, monthStart, candles)
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.D1, monthStart, candles)
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)
-	assert.Len(t, got, reviewCandleCounts["D"], "must fall back to OANDA for a full window rather than trust the short cache")
+	assert.Len(t, got, reviewCandleCounts["D"], "must retry a full-window download rather than trust the short cache")
+}
+
+// TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads confirms
+// the retry path (retryReviewCandleTimesDownload) actually repairs the local
+// store — via DataManager's forced full-window re-download — rather than
+// only serving one live read. A second call, against a server that fails
+// every request, must still succeed by reading the now-repaired cache.
+func TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads(t *testing.T) {
+	swapTempStore(t)
+	srv := fakeOANDACandlesServer(t)
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	// Same corrupted-cache setup as TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort.
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	daysInMonth := monthStart.AddDate(0, 1, 0).Sub(monthStart) / (24 * time.Hour)
+	candles := make([]market.Candle, int(daysInMonth))
+	todayIdx := now.Day() - 1
+	candles[todayIdx] = market.Candle{
+		Open:  types.PriceFromFloat(1.1),
+		High:  types.PriceFromFloat(1.1),
+		Low:   types.PriceFromFloat(1.1),
+		Close: types.PriceFromFloat(1.1),
+	}
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.D1, monthStart, candles)
+
+	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
+	require.NoError(t, err)
+	require.Len(t, got, reviewCandleCounts["D"])
+
+	// Close the working server and swap in one that always errors, so any
+	// second network fetch would fail — the retry's downloaded candles must
+	// have actually been written to the local store, not just returned once.
+	srv.Close()
+	failingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failingSrv.Close()
+	svc.OANDA = &oanda.Client{BaseURL: failingSrv.URL, Token: "t"}
+
+	got2, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
+	require.NoError(t, err, "second read must be served from the repaired local cache, not a network call")
+	assert.Len(t, got2, reviewCandleCounts["D"])
+}
+
+// TestEnsureCachedOandaCandles_SubDailyTimeframeStillDownloadsSameDayGap
+// reproduces the bug fixed by advancing the resume cursor by one bar
+// (time.Duration(tf)*time.Second) instead of a flat calendar day
+// (AddDate(0,0,1)).
+//
+// LastCompleteDate truncates to midnight UTC of the day containing the last
+// valid candle — it cannot tell us how much of that day is actually cached.
+// For a sub-daily timeframe (H4 here), only the day's first slot is cached
+// below (00:00 UTC); the remaining slots (04:00..20:00) are gaps, as if a
+// prior download had been interrupted partway through the day.
+//
+// The old `AddDate(0, 0, 1)` cursor jumped straight to the next day,
+// implicitly trusting that the whole of the last-valid day was already
+// downloaded. With `to` set later the same day, that pushed dlFrom past `to`
+// and the function returned early as "already up to date" — silently
+// leaving the day's later H4 gaps undownloaded forever. The fixed cursor
+// only advances by one bar (4h for H4), so it still lands before `to` and a
+// download is correctly triggered.
+func TestEnsureCachedOandaCandles_SubDailyTimeframeStillDownloadsSameDayGap(t *testing.T) {
+	swapTempStore(t)
+
+	var requests int32
+	base := fakeOANDACandlesServer(t)
+	defer base.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	svc := &Service{
+		OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"},
+		Log:   discardLogger(),
+	}
+
+	// Seed January 2020 H4 candles for EURUSD with only the 15th's midnight
+	// slot (index 14*6=84) marked valid; every other slot, including the
+	// rest of the 15th (04:00, 08:00, ... 20:00), is a zero-valued gap.
+	monthStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	candles := make([]market.Candle, 85)
+	candles[84] = market.Candle{
+		Open:  types.PriceFromFloat(1.10),
+		High:  types.PriceFromFloat(1.10),
+		Low:   types.PriceFromFloat(1.10),
+		Close: types.PriceFromFloat(1.10),
+	}
+	datamanager.WriteCandles(t, market.SourceOanda, "EURUSD", types.H4, monthStart, candles)
+
+	last, err := datamanager.GetDataManager().LastCompleteDate("EUR_USD", types.H4, market.SourceOanda)
+	require.NoError(t, err)
+	require.True(t, last.Equal(time.Date(2020, 1, 15, 0, 0, 0, 0, time.UTC)),
+		"sanity: LastCompleteDate must report the 15th, truncated to midnight")
+
+	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2020, 1, 15, 20, 0, 0, 0, time.UTC)
+
+	err = svc.ensureCachedOandaCandles(context.Background(), "EUR_USD", "H4", from, to)
+	require.NoError(t, err)
+
+	assert.Positive(t, atomic.LoadInt32(&requests),
+		"a same-day gap after the last cached H4 slot must still trigger a download, not be treated as already up to date")
 }
 
 func TestReviewWatchlist_UnknownInstrumentSkipped(t *testing.T) {

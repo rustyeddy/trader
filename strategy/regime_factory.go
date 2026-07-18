@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // RegimeConfig mirrors the regime: section of a YAML backtest config.
@@ -62,7 +63,7 @@ func (c *CompositeRegimeFilter) Trending() bool {
 	return true
 }
 
-func (c *CompositeRegimeFilter) AllowSide(side market.Side) bool {
+func (c *CompositeRegimeFilter) AllowSide(side types.Side) bool {
 	for _, f := range c.filters {
 		if !f.AllowSide(side) {
 			return false
@@ -73,7 +74,7 @@ func (c *CompositeRegimeFilter) AllowSide(side market.Side) bool {
 
 // GetRegimeFilter constructs a RegimeFilter from cfg.
 // If cfg.Kind is empty, NoopRegime is returned (no filtering).
-func GetRegimeFilter(cfg RegimeConfig, scale market.Scale6) (RegimeFilter, error) {
+func GetRegimeFilter(cfg RegimeConfig, scale types.Scale6) (RegimeFilter, error) {
 	switch normalizeRegimeKind(cfg.Kind) {
 	case "", "noop":
 		return NoopRegime{}, nil

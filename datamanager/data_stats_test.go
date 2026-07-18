@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,11 +17,11 @@ import (
 func makeCT(open, high, low, close int32, avgSpread int32, unixSec int64) *market.CandleTime {
 	return &market.CandleTime{
 		Candle: market.Candle{
-			Open: market.Price(open), High: market.Price(high),
-			Low: market.Price(low), Close: market.Price(close),
-			AvgSpread: market.Price(avgSpread),
+			Open: types.Price(open), High: types.Price(high),
+			Low: types.Price(low), Close: types.Price(close),
+			AvgSpread: types.Price(avgSpread),
 		},
-		Timestamp: market.Timestamp(unixSec),
+		Timestamp: types.Timestamp(unixSec),
 	}
 }
 
@@ -55,14 +56,14 @@ func TestPriceDistribution_PercentileEmpty(t *testing.T) {
 
 func TestPriceDistribution_PercentileSingle(t *testing.T) {
 	var d priceDistribution
-	d.Add(market.Price(70))
+	d.Add(types.Price(70))
 	assert.Equal(t, 7.0, d.PercentilePips(50, 10))
 }
 
 func TestPriceDistribution_PercentileOddLength(t *testing.T) {
 	// [1,2,3,4,5] p50 → index 2.0 → 3
 	var d priceDistribution
-	for _, p := range []market.Price{10, 20, 30, 40, 50} {
+	for _, p := range []types.Price{10, 20, 30, 40, 50} {
 		d.Add(p)
 	}
 	assert.InDelta(t, 3.0, d.PercentilePips(50, 10), 1e-9)
@@ -71,16 +72,16 @@ func TestPriceDistribution_PercentileOddLength(t *testing.T) {
 func TestPriceDistribution_PercentileInterpolation(t *testing.T) {
 	// [0,10] p25 → index 0.25 → 0*(0.75) + 10*(0.25) = 2.5
 	var d priceDistribution
-	d.Add(market.Price(0))
-	d.Add(market.Price(100))
+	d.Add(types.Price(0))
+	d.Add(types.Price(100))
 	assert.InDelta(t, 2.5, d.PercentilePips(25, 10), 1e-9)
 }
 
 func TestPriceDistribution_PercentileClampsOutOfRange(t *testing.T) {
 	var d priceDistribution
-	d.Add(market.Price(10))
-	d.Add(market.Price(20))
-	d.Add(market.Price(30))
+	d.Add(types.Price(10))
+	d.Add(types.Price(20))
+	d.Add(types.Price(30))
 
 	assert.Equal(t, 1.0, d.PercentilePips(-10, 10))
 	assert.Equal(t, 3.0, d.PercentilePips(110, 10))

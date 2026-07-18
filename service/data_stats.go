@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // DataStatsRequest parameterises DataStats.
@@ -77,7 +78,7 @@ func (s *Service) DataStats(ctx context.Context, req DataStatsRequest) (*DataSta
 		tf = "H1"
 	}
 
-	tr, err := market.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), tf)
+	tr, err := types.ParseTimeRange(from.Format("2006-01-02"), toExcl.Format("2006-01-02"), tf)
 	if err != nil {
 		return nil, fmt.Errorf("bad range: %w", err)
 	}

@@ -8,8 +8,10 @@ import (
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/types"
 )
 
 // ── Signal types ─────────────────────────────────────────────────────────────
@@ -76,11 +78,11 @@ type ReplayRequest struct {
 
 type replayPosition struct {
 	id           string
-	side         market.Side
-	entryPrice   market.Price
-	currentStop  market.Price
-	extremePrice market.Price
-	openTime     market.Timestamp
+	side         types.Side
+	entryPrice   types.Price
+	currentStop  types.Price
+	extremePrice types.Price
+	openTime     types.Timestamp
 }
 
 // ── RunReplay ────────────────────────────────────────────────────────────────
@@ -95,11 +97,11 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	}
 
 	tf := oandaGranToTF(req.Timeframe)
-	if tf == market.TF0 {
+	if tf == types.TF0 {
 		return nil, fmt.Errorf("unsupported timeframe %q", req.Timeframe)
 	}
 
-	tr, err := market.ParseTimeRange(req.From, req.To, req.Timeframe)
+	tr, err := types.ParseTimeRange(req.From, req.To, req.Timeframe)
 	if err != nil {
 		return nil, fmt.Errorf("parse time range: %w", err)
 	}
@@ -114,12 +116,12 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		return nil, fmt.Errorf("build strategy: %w", err)
 	}
 
-	exit, err := strategy.GetExitStrategy(req.Exit, market.PriceScale)
+	exit, err := strategy.GetExitStrategy(req.Exit, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build exit strategy: %w", err)
 	}
 
-	regime, err := strategy.GetRegimeFilter(req.Regime, market.PriceScale)
+	regime, err := strategy.GetRegimeFilter(req.Regime, types.PriceScale)
 	if err != nil {
 		return nil, fmt.Errorf("build regime filter: %w", err)
 	}
@@ -130,8 +132,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 	iter, err := dm.Candles(ctx, datamanager.CandleRequest{
 		Source:     market.SourceOanda,
 		Instrument: inst,
-		Range: market.TimeRange{
-			Start: market.FromTime(fromWithWarmup),
+		Range: types.TimeRange{
+			Start: types.FromTime(fromWithWarmup),
 			End:   tr.End,
 			TF:    tf,
 		},
@@ -185,11 +187,11 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		if inRange && exit.Ready() {
 			for _, pos := range positions {
 				switch pos.side {
-				case market.Long:
+				case types.Long:
 					if ct.High > pos.extremePrice {
 						pos.extremePrice = ct.High
 					}
-				case market.Short:
+				case types.Short:
 					if pos.extremePrice == 0 || ct.Low < pos.extremePrice {
 						pos.extremePrice = ct.Low
 					}
@@ -219,7 +221,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		var toClose []*replayPosition
 		if sig.CloseAll {
 			toClose = append(toClose, positions...)
-		} else if sig.Side != market.Flat {
+		} else if sig.Side != types.Flat {
 			for _, pos := range positions {
 				if pos.side != sig.Side {
 					toClose = append(toClose, pos)
@@ -245,8 +247,8 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 		}
 
 		// Process open: emit if the signal is directional.
-		if sig.Side != market.Flat {
-			stop := market.Price(0)
+		if sig.Side != types.Flat {
+			stop := types.Price(0)
 			if exit.Ready() {
 				stop = exit.InitialStop(sig.Side, candle.Close, candle)
 			}
@@ -279,7 +281,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 					})
 				} else {
 					stopPips := pipsFromDist(sig.Side, candle.Close, stop, inst_)
-					posID := market.NewULID()
+					posID := idgen.NewULID()
 					signals = append(signals, Signal{
 						Time:      int64(ts),
 						Kind:      SignalOpen,
@@ -332,14 +334,14 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-func sideStr(s market.Side) string {
-	if s == market.Short {
+func sideStr(s types.Side) string {
+	if s == types.Short {
 		return "short"
 	}
 	return "long"
 }
 
-func pipsFromDist(_ market.Side, entry, stop market.Price, inst *market.Instrument) float64 {
+func pipsFromDist(_ types.Side, entry, stop types.Price, inst *market.Instrument) float64 {
 	if inst == nil {
 		return 0
 	}

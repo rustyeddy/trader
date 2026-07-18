@@ -6,6 +6,7 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,23 +29,24 @@ func TestIsForexMarketClosed_NewYorkBoundaries(t *testing.T) {
 func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 	t.Parallel()
 
+	start := types.Timestamp(1704067200)
 	cs := &datamanager.CandleSet{
 		Instrument: "EURUSD",
-		Start:      market.Timestamp(1704067200),
-		Timeframe:  market.M1,
-		Scale:      market.PriceScale,
-		Candles: []market.Candle{
-			{Open: 100, High: 110, Low: 95, Close: 105, AvgSpread: 2, MaxSpread: 3, Ticks: 4},
-			{},
-			{Open: 106, High: 120, Low: 101, Close: 115, AvgSpread: 4, MaxSpread: 5, Ticks: 6},
-			{},
+		Start:      start,
+		Timeframe:  types.M1,
+		Scale:      types.PriceScale,
+		Candles: []market.CandleTime{
+			{Candle: market.Candle{Open: 100, High: 110, Low: 95, Close: 105, AvgSpread: 2, MaxSpread: 3, Ticks: 4}, Timestamp: start},
+			{Timestamp: start + 60},
+			{Candle: market.Candle{Open: 106, High: 120, Low: 101, Close: 115, AvgSpread: 4, MaxSpread: 5, Ticks: 6}, Timestamp: start + 120},
+			{Timestamp: start + 180},
 		},
 		Valid: make([]uint64, 1),
 	}
-	market.BitSet(cs.Valid, 0)
-	market.BitSet(cs.Valid, 2)
+	types.BitSet(cs.Valid, 0)
+	types.BitSet(cs.Valid, 2)
 
-	out, err := cs.Aggregate(market.Timeframe(300))
+	out, err := cs.Aggregate(types.Timeframe(300))
 	require.NoError(t, err)
 	require.Len(t, out.Candles, 1)
 	assert.True(t, out.IsValid(0))
@@ -56,5 +58,5 @@ func TestCandleSetAggregate_UsesCanonicalBitHelpers(t *testing.T) {
 		AvgSpread: 3,
 		MaxSpread: 5,
 		Ticks:     10,
-	}, out.Candles[0])
+	}, out.Candles[0].Candle)
 }

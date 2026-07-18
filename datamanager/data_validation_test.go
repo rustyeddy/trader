@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,14 +33,14 @@ func writeRawOandaMonthFile(t *testing.T, rawDir string, key Key, rows []string)
 func TestValidateCandleData_MissingExpectedCandles(t *testing.T) {
 	s := useTempStore(t)
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	require.NoError(t, s.WriteMonthlyCandles(market.SourceOanda, "EURUSD", market.H1, start, []market.Candle{
+	require.NoError(t, s.WriteMonthlyCandles(market.SourceOanda, "EURUSD", types.H1, start, []market.Candle{
 		{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1},
 	}))
 
 	report, err := ValidateCandleData(context.Background(), CandleValidationRequest{
 		Instruments: []string{"EURUSD"},
 		Source:      market.SourceOanda,
-		Timeframe:   market.H1,
+		Timeframe:   types.H1,
 		Start:       start,
 		End:         start.AddDate(0, 1, 0),
 	})
@@ -53,7 +54,7 @@ func TestValidateCandleData_MissingExpectedCandles(t *testing.T) {
 func TestValidateCandleData_MissingRawOandaMonth(t *testing.T) {
 	s := useTempStore(t)
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cs, err := NewMonthlyCandleSet("EURUSD", market.D1, market.FromTime(start), market.PriceScale, market.SourceOanda)
+	cs, err := NewMonthlyCandleSet("EURUSD", types.D1, types.FromTime(start), types.PriceScale, market.SourceOanda)
 	require.NoError(t, err)
 
 	step := time.Duration(cs.Timeframe) * time.Second
@@ -64,7 +65,7 @@ func TestValidateCandleData_MissingRawOandaMonth(t *testing.T) {
 		if !timeRangeMayHaveForexData(slotStart, slotEnd) {
 			continue
 		}
-		cs.Candles[i] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
+		cs.Candles[i].Candle = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
 		cs.SetValid(i)
 	}
 	require.NoError(t, s.WriteCSV(cs))
@@ -72,7 +73,7 @@ func TestValidateCandleData_MissingRawOandaMonth(t *testing.T) {
 	report, err := ValidateCandleData(context.Background(), CandleValidationRequest{
 		Instruments: []string{"EURUSD"},
 		Source:      market.SourceOanda,
-		Timeframe:   market.D1,
+		Timeframe:   types.D1,
 		Start:       start,
 		End:         start.AddDate(0, 1, 0),
 		IncludeRaw:  true,
@@ -88,9 +89,9 @@ func TestValidateCandleData_RawMismatch(t *testing.T) {
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	candles := make([]market.Candle, 1)
 	candles[0] = market.Candle{Open: 100, High: 101, Low: 99, Close: 100, Ticks: 1}
-	require.NoError(t, s.WriteMonthlyCandles(market.SourceOanda, "EURUSD", market.H1, start, candles))
+	require.NoError(t, s.WriteMonthlyCandles(market.SourceOanda, "EURUSD", types.H1, start, candles))
 
-	key := Key{Instrument: "EURUSD", Source: market.SourceOanda, Kind: KindCandle, TF: market.H1, Year: 2026, Month: 1}
+	key := Key{Instrument: "EURUSD", Source: market.SourceOanda, Kind: KindCandle, TF: types.H1, Year: 2026, Month: 1}
 	writeRawOandaMonthFile(t, rawDir, key, []string{
 		"2026-01-01T01:00:00Z,1.10000,1.10100,1.09900,1.10050,1.10010,1.10110,1.09910,1.10060,100,true",
 	})
@@ -98,7 +99,7 @@ func TestValidateCandleData_RawMismatch(t *testing.T) {
 	report, err := ValidateCandleData(context.Background(), CandleValidationRequest{
 		Instruments: []string{"EURUSD"},
 		Source:      market.SourceOanda,
-		Timeframe:   market.H1,
+		Timeframe:   types.H1,
 		Start:       start,
 		End:         start.AddDate(0, 1, 0),
 		IncludeRaw:  true,

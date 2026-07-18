@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // EMA computes an Exponential Moving Average over candle closes.
@@ -13,16 +14,16 @@ import (
 //   - EMA stores scaled price units internally; Float64 is only for display.
 type EMA struct {
 	n     int
-	scale market.Scale6
+	scale types.Scale6
 
 	seen  int
-	value market.PriceSum
+	value types.PriceSum
 	ready bool
 
 	name string
 }
 
-func NewEMA(period int, scale market.Scale6) (*EMA, error) {
+func NewEMA(period int, scale types.Scale6) (*EMA, error) {
 	if period <= 0 {
 		return nil, fmt.Errorf("EMA period must be > 0")
 	}
@@ -36,13 +37,13 @@ func NewEMA(period int, scale market.Scale6) (*EMA, error) {
 	}, nil
 }
 
-func (e *EMA) Name() string              { return e.name }
-func (e *EMA) Period() int               { return e.n }
-func (e *EMA) Warmup() int               { return e.n }
-func (e *EMA) Ready() bool               { return e.ready }
-func (e *EMA) PriceSum() market.PriceSum { return e.value }
-func (e *EMA) Price() market.Price       { return market.Price(e.value) }
-func (e *EMA) Float64() float64          { return float64(e.value) / float64(e.scale) }
+func (e *EMA) Name() string             { return e.name }
+func (e *EMA) Period() int              { return e.n }
+func (e *EMA) Warmup() int              { return e.n }
+func (e *EMA) Ready() bool              { return e.ready }
+func (e *EMA) PriceSum() types.PriceSum { return e.value }
+func (e *EMA) Price() types.Price       { return types.Price(e.value) }
+func (e *EMA) Float64() float64         { return float64(e.value) / float64(e.scale) }
 
 func (e *EMA) Reset() {
 	e.seen = 0
@@ -54,10 +55,10 @@ func (e *EMA) Update(c market.Candle) {
 	e.seen++
 	if e.seen == 1 {
 		// Seed with the first close (simple, deterministic).
-		e.value = market.PriceSum(c.Close)
+		e.value = types.PriceSum(c.Close)
 	} else {
-		denom := market.PriceSum(e.n + 1)
-		e.value = (market.PriceSum(c.Close)*2 + e.value*market.PriceSum(e.n-1) + denom/2) / denom
+		denom := types.PriceSum(e.n + 1)
+		e.value = (types.PriceSum(c.Close)*2 + e.value*types.PriceSum(e.n-1) + denom/2) / denom
 	}
 
 	if e.seen >= e.n {

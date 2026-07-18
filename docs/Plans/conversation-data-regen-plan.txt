@@ -1,0 +1,153 @@
+Conversation: candle-store-timestamp-fix planning (data-regen branch)
+=======================================================================
+
+User: you are going to have to fix some data generation bugs. And probably
+regen all the data. Please create a branch that you can do the work in.
+Call it data-regen or similar.
+
+Assistant: Created branch `data-regen` off `main`, asked for specifics on
+the bugs since no prior context existed in this conversation.
+
+User: I will have the instructions for you shortly.
+
+Assistant: Acknowledged, waiting on the data-regen branch.
+
+User: have a look at docs/candle-store-timestamp-fix.org; but first can you
+create a github issue, associate it with this branch and upload the doc I
+just told you to read?
+
+Assistant: Read docs/candle-store-timestamp-fix.org. Created GitHub issue
+#179 with the doc's full content as the body. Attempted to link the issue
+to the data-regen branch via `gh issue develop` and the GraphQL
+createLinkedBranch mutation; both attempts failed/were unreliable.
+
+User (mid-turn): Actually the issues can just reference it. no need to
+attach.
+
+Assistant: Stopped the branch-linking attempts and instead posted a
+comment on issue #179 referencing the data-regen branch (already pushed to
+origin).
+
+User: have you read docs/candle-store-timestamp-fix.org?
+
+Assistant: Confirmed yes, and summarized the doc's contents:
+- Root cause 1 (primary): DeriveCanonicalFromRaw / WriteMonthlyCandles in
+  datamanager/data_sync.go mislabels H4 (and likely D1/H1) candle
+  timestamps by a DST-dependent 1-2 hour offset. OHLC values are correct;
+  only the timestamp reconstruction (monthStart + idx*step, assuming UTC
+  midnight) is wrong — OANDA's real grid is NY 17:00-anchored,
+  DST-dependent.
+- Root cause 2 (separate): datamanager/candle_agg.go's aggregate() does
+  naive epoch-relative bucketing (same bug class), used for building
+  H1-from-M1 and D1-from-H1.
+- Bundled schema/column-order fix: canonical CSV is currently
+  timestamp,high,open,low,close (H,O,L,C) — reorder to natural
+  timestamp,open,high,low,close, add a schema=candle-v2 marker.
+- Regen plan: no backward compatibility needed — delete and rebuild the
+  canonical tree from the raw preservation tree (confirmed complete back
+  to ~2005). Re-run all 2026-07-16 signalreplay experiments afterward,
+  since prior results used mislabeled timestamps.
+- Open questions: exact location of the CSV row-writer, whether M1 needs
+  regen for the column-reorder alone, where the alignment helper should
+  live.
+
+User: great, would you please look through the code and provide an
+implementation plan? Phases?
+
+Assistant: Explored the actual code (market/candle.go, datamanager/
+data_sync.go, store.go, candle_set.go, data_writer.go, candle_agg.go,
+data_manager.go's buildH1/buildD1, brokers/oanda/candles.go) and proposed
+an initial 7-phase plan:
+  0. Land a FirstAlignedSlot() DST-aware alignment primitive (types pkg).
+  1. Fix NewMonthlyCandleSet/CandleSet.Start to use the aligned boundary.
+  2. Fix DeriveCanonicalFromRaw to use the aligned window; flagged a new
+     risk found during research: a canonical month's last slots can need
+     raw rows from the *next* calendar month's raw file, since
+     readRawMonthRows only reads one month's raw file at a time.
+  3. Fix reads (readCSVUncached) and the H1->D1 aggregate path.
+  4. Schema/column reorder (store.go WriteCSV/readCSVUncached, header,
+     schema marker, plus 6 test files + README with hardcoded H,O,L,C
+     order).
+  5. Validation harness (DST-transition regression test, make test/vet/
+     sweep/cover).
+  6. Regen (confirm M1 scope, snapshot before rm -rf, rebuild, spot-check).
+  7. Downstream re-verification (re-run signalreplay experiments).
+
+User: not for cause 1: we have market.CandleTime that should be used
+rather than reconstruct timestamps, Fix data_sync.go to use CandleTime.
+2: just checking, we are not deriving H1 from m1 or d1 from h1 are we?
+Add another phase: rename store.PathForAsset() to store.KeyPath(). Your
+question is that regarding the location of WriteCSV and ReadCSV where the
+swapped header read and write live?
+
+Assistant: Investigated further and revised the plan:
+
+- CandleTime insight (root cause 1): readCSVUncached already parses the
+  true per-row timestamp from CSV column 0, but only uses it to compute
+  idx, then discards it (store.go:561-566). WriteCSV synthesizes
+  openUnix := cs.Start + i*step instead of writing a real timestamp
+  (store.go:692); every downstream reader (candleSetIterator.Timestamp(),
+  rangedCandleIterator.Next() in data_iterator.go:98) reconstructs time
+  the same way. Since candle spacing is provably uniform, the fix doesn't
+  need a hand-rolled NY/DST formula at all: DeriveCanonicalFromRaw should
+  carry market.CandleTime (Candle + the real r.Time) through, and set
+  cs.Start from the actual first observed raw timestamp (back-computed to
+  slot 0), not from an assumed or computed alignment rule. This removes
+  the DST-math helper from root cause 1 entirely. The cross-month raw-read
+  boundary issue found earlier still applies regardless of this change and
+  needs to be resolved in the same phase.
+
+- H1/D1 derivation confirmed real (not hypothetical): Plan() in
+  data_manager.go (lines 212-222 for H1<-M1, 232-242 for D1<-H1) creates
+  build tasks whenever the lower timeframe is present in inventory, wired
+  through candleMaker() (lines 288-289) into buildH1/buildD1, both calling
+  cs.Aggregate() -> candle_agg.go's buggy bucketing. Checked the math:
+  H1-from-M1 is provably unaffected (M1's Start is already UTC-hour-
+  aligned; flooring to the hour is a no-op). D1-from-H1 is genuinely
+  broken (flooring UTC-midnight Start to a day boundary collapses to UTC
+  midnight instead of true NY 17:00, and there's no raw ground truth to
+  anchor D1 from, since it's synthesized purely from H1). So root cause 2
+  narrows specifically to buildD1.
+
+- Rename confirmed: store.PathForAsset() -> store.KeyPath(). Used in 14
+  files including the ProviderStore interface (provider.go:84). Added as
+  its own phase, done first to avoid tangling with the timestamp-fix
+  diffs.
+
+- Confirmed the open question: WriteCSV and ReadCSV/readCSVUncached both
+  live in datamanager/store.go — ReadCSV/readCSVUncached at lines 457-628,
+  WriteCSV at lines 647-727.
+
+Revised phase list posted to GitHub issue #179 as a comment
+(https://github.com/rustyeddy/trader/issues/179#issuecomment-4998990390):
+
+  1. Rename PathForAsset -> KeyPath (interface + 14 call sites).
+  2. Root cause 1 — thread market.CandleTime through
+     DeriveCanonicalFromRaw; set cs.Start from the true first observed raw
+     timestamp instead of reconstructing/assuming. Resolve the cross-month
+     raw-read boundary gap.
+  3. Schema/column reorder — timestamp,open,high,low,close order, bump to
+     schema=candle-v2, fix the 6 test files + README with hardcoded
+     H,O,L,C order.
+  4. Root cause 2 — add the DST-aware alignment helper (types package),
+     fix candle_agg.go aggregate()'s day-bucket floor for D1-from-H1 only;
+     regression test proving H1-from-M1 is unchanged.
+  5. Validation harness — DST-transition test, make test/vet/sweep/cover
+     green.
+  6. Regen — confirm M1 scope, snapshot canonical tree before touching it,
+     rebuild from raw, spot-check.
+  7. Downstream re-verification — re-run the 2026-07-16 signalreplay
+     experiments.
+
+User: can you put this conversation in a text file in the current
+directory?
+
+Assistant: Wrote this summary to
+/home/rusty/src/trader/conversation-data-regen-plan.txt
+
+-----------------------------------------------------------------------
+State at time of writing:
+- Branch: data-regen (pushed to origin, tracking origin/data-regen)
+- GitHub issue: #179
+  https://github.com/rustyeddy/trader/issues/179
+- No code changes made yet; plan awaiting go-ahead to start Phase 1.

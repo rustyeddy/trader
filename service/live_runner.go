@@ -11,6 +11,7 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // LiveRunConfig controls a single live strategy run.
@@ -26,9 +27,9 @@ type LiveRunConfig struct {
 	Strategy LiveStrategy
 
 	// RiskPct is the default fraction of account NAV to risk per trade
-	// (market.Rate; 0.01×RateScale = 1%). Applied when the strategy's
+	// (types.Rate; 0.01×RateScale = 1%). Applied when the strategy's
 	// LiveOpenRequest carries zero. Defaults to RateFromFloat(0.001) = 0.1%.
-	RiskPct market.Rate
+	RiskPct types.Rate
 
 	// MaxUnits caps position size in units (absolute). 0 = no cap.
 	MaxUnits int64
@@ -139,7 +140,7 @@ func validateLiveRunConfig(cfg *LiveRunConfig) error {
 		cfg.TickInterval = 60 * time.Second
 	}
 	if cfg.RiskPct <= 0 {
-		cfg.RiskPct = market.RateFromFloat(0.001) // 0.1 %
+		cfg.RiskPct = types.RateFromFloat(0.001) // 0.1 %
 	}
 	return nil
 }
@@ -174,8 +175,8 @@ func (a *Account) runOneTick(
 		if tick := pxCache.get(); tick != nil {
 			livePrice = LivePrice{
 				Instrument: cfg.Instrument,
-				Bid:        market.PriceFromFloat(tick.Bid),
-				Ask:        market.PriceFromFloat(tick.Ask),
+				Bid:        types.PriceFromFloat(tick.Bid),
+				Ask:        types.PriceFromFloat(tick.Ask),
 				Time:       tick.Time,
 			}
 		}
@@ -191,8 +192,8 @@ func (a *Account) runOneTick(
 		px := prices[0]
 		livePrice = LivePrice{
 			Instrument: cfg.Instrument,
-			Bid:        market.PriceFromFloat(px.Bid),
-			Ask:        market.PriceFromFloat(px.Ask),
+			Bid:        types.PriceFromFloat(px.Bid),
+			Ask:        types.PriceFromFloat(px.Ask),
 			Time:       time.Now(),
 		}
 	}
@@ -223,8 +224,8 @@ func (a *Account) runOneTick(
 			ID:           t.ID,
 			Instrument:   t.Instrument,
 			Units:        t.Units,
-			EntryPrice:   market.PriceFromFloat(t.EntryPrice),
-			UnrealizedPL: market.MoneyFromFloat(t.UnrealizedPL),
+			EntryPrice:   types.PriceFromFloat(t.EntryPrice),
+			UnrealizedPL: types.MoneyFromFloat(t.UnrealizedPL),
 			OpenTime:     t.OpenTime,
 			TicksOpen:    tickCounts[t.ID],
 		})

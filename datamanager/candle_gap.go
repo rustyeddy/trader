@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/types"
 )
 
 // gap represents a trader domain type.
@@ -38,13 +38,13 @@ func (cs *CandleSet) BuildGapReport() {
 
 	i := 0
 	for i < n {
-		if market.BitIsSet(cs.Valid, i) {
+		if types.BitIsSet(cs.Valid, i) {
 			i++
 			continue
 		}
 
 		start := i
-		for i < n && !market.BitIsSet(cs.Valid, i) {
+		for i < n && !types.BitIsSet(cs.Valid, i) {
 			i++
 		}
 		length := i - start
@@ -62,8 +62,10 @@ func (cs *CandleSet) BuildGapReport() {
 func (cs *CandleSet) classifyGap(startIdx, length int) string {
 	tf := int64(cs.Timeframe)
 
-	startUnix := int64(cs.Start) + int64(startIdx)*tf
-	t := time.Unix(startUnix, 0).UTC()
+	// cs.Time reads the slot's own true timestamp rather than
+	// reconstructing it from Start+idx*step, which drifts an hour for
+	// D1/H4 slots after a DST transition mid-month.
+	t := cs.Time(startIdx)
 	wd := t.Weekday()
 
 	gapSeconds := int64(length) * tf
@@ -95,7 +97,7 @@ func (cs *CandleSet) Stats() gapStats {
 	s.TotalBars = n
 
 	for i := 0; i < n; i++ {
-		if market.BitIsSet(cs.Valid, i) {
+		if types.BitIsSet(cs.Valid, i) {
 			s.PresentBars++
 		}
 	}

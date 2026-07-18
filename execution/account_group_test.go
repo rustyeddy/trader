@@ -3,19 +3,20 @@ package execution
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/market"
+	"github.com/rustyeddy/trader/idgen"
+	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestPosition(inst string, side market.Side, units market.Units, fill float64) *Lot {
+func newTestPosition(inst string, side types.Side, units types.Units, fill float64) *Lot {
 	th := NewTradeHistory(inst)
 	th.Side = side
 	th.Units = units
 	return &Lot{
 		TradeCommon:    th.TradeCommon,
-		EntryPrice:     market.PriceFromFloat(fill),
-		EntryTime:      market.Timestamp(1000),
+		EntryPrice:     types.PriceFromFloat(fill),
+		EntryTime:      types.Timestamp(1000),
 		OriginalUnits:  units,
 		RemainingUnits: units,
 		State:          LotOpen,
@@ -25,24 +26,24 @@ func newTestPosition(inst string, side market.Side, units market.Units, fill flo
 func TestAccountResolveAndResolveWithMarks(t *testing.T) {
 	t.Parallel()
 
-	acct := NewAccount("acct", market.MoneyFromFloat(10_000))
-	pos := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	acct := NewAccount("acct", types.MoneyFromFloat(10_000))
+	pos := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 
 	require.NoError(t, acct.AddLot(pos))
 	require.Equal(t, 1, acct.Lots.Len())
 
 	require.NoError(t, acct.ResolveWithMarks(nil))
 	assert.Equal(t, acct.Balance, acct.Equity)
-	assert.Greater(t, acct.MarginUsed, market.Money(0))
+	assert.Greater(t, acct.MarginUsed, types.Money(0))
 	assert.Equal(t, acct.Equity-acct.MarginUsed, acct.FreeMargin)
 
-	require.NoError(t, acct.ResolveWithMarks(map[string]market.Price{
-		"EURUSD": market.PriceFromFloat(1.1010),
+	require.NoError(t, acct.ResolveWithMarks(map[string]types.Price{
+		"EURUSD": types.PriceFromFloat(1.1010),
 	}))
 	assert.Greater(t, acct.Equity, acct.Balance)
-	assert.Greater(t, acct.MarginUsed, market.Money(0))
+	assert.Greater(t, acct.MarginUsed, types.Money(0))
 	assert.Equal(t, acct.Equity-acct.MarginUsed, acct.FreeMargin)
-	assert.Greater(t, acct.MarginLevel, market.Money(0))
+	assert.Greater(t, acct.MarginLevel, types.Money(0))
 }
 
 func TestAccountResolveWithMarksValidation(t *testing.T) {
@@ -51,27 +52,27 @@ func TestAccountResolveWithMarksValidation(t *testing.T) {
 	var nilAcct *Account
 	require.Error(t, nilAcct.ResolveWithMarks(nil))
 
-	acct := NewAccount("acct", market.MoneyFromFloat(10_000))
-	pos := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	acct := NewAccount("acct", types.MoneyFromFloat(10_000))
+	pos := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 	acct.Lots.Add(pos)
 
-	err := acct.ResolveWithMarks(map[string]market.Price{"EURUSD": 0})
+	err := acct.ResolveWithMarks(map[string]types.Price{"EURUSD": 0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid mark")
 
 	acct.Lots = LotBook{}
-	badUnits := newTestPosition("EURUSD", market.Long, 0, 1.1000)
+	badUnits := newTestPosition("EURUSD", types.Long, 0, 1.1000)
 	badUnits.RemainingUnits = 0
 	acct.Lots.Add(badUnits)
-	err = acct.ResolveWithMarks(map[string]market.Price{"EURUSD": market.PriceFromFloat(1.1010)})
+	err = acct.ResolveWithMarks(map[string]types.Price{"EURUSD": types.PriceFromFloat(1.1010)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid units")
 
 	acct.Lots = LotBook{}
-	badPrice := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	badPrice := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 	badPrice.EntryPrice = 0
 	acct.Lots.Add(badPrice)
-	err = acct.ResolveWithMarks(map[string]market.Price{"EURUSD": market.PriceFromFloat(1.1010)})
+	err = acct.ResolveWithMarks(map[string]types.Price{"EURUSD": types.PriceFromFloat(1.1010)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid entry price")
 }
@@ -79,32 +80,32 @@ func TestAccountResolveWithMarksValidation(t *testing.T) {
 func TestAccountAddPositionValidation(t *testing.T) {
 	t.Parallel()
 
-	pos := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	pos := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 
 	var nilAcct *Account
 	err := nilAcct.AddLot(pos)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "account is nil")
 
-	acct := NewAccount("acct", market.MoneyFromFloat(10_000))
+	acct := NewAccount("acct", types.MoneyFromFloat(10_000))
 
-	badInstrument := newTestPosition("", market.Long, 100_000, 1.1000)
+	badInstrument := newTestPosition("", types.Long, 100_000, 1.1000)
 	err = acct.AddLot(badInstrument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "instrument")
 
-	badUnits := newTestPosition("EURUSD", market.Long, 0, 1.1000)
+	badUnits := newTestPosition("EURUSD", types.Long, 0, 1.1000)
 	badUnits.Units = 0
 	err = acct.AddLot(badUnits)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "units")
 
-	badPrice := newTestPosition("EURUSD", market.Long, 100_000, 0)
+	badPrice := newTestPosition("EURUSD", types.Long, 100_000, 0)
 	err = acct.AddLot(badPrice)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "price")
 
-	emptyID := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	emptyID := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 	emptyID.ID = ""
 	err = acct.AddLot(emptyID)
 	require.Error(t, err)
@@ -114,40 +115,40 @@ func TestAccountAddPositionValidation(t *testing.T) {
 func TestAccountRealizePNLAndClosePosition(t *testing.T) {
 	t.Parallel()
 
-	acct := NewAccount("acct", market.MoneyFromFloat(10_000))
+	acct := NewAccount("acct", types.MoneyFromFloat(10_000))
 
 	tests := []struct {
 		name     string
 		position *Lot
 		trade    *Trade
-		wantPNL  market.Money
+		wantPNL  types.Money
 	}{
 		{
 			name:     "long gain",
-			position: newTestPosition("EURUSD", market.Long, 100_000, 1.1000),
-			trade:    &Trade{TradeCommon: NewTradeHistory("EURUSD").TradeCommon, ExitPrice: market.PriceFromFloat(1.1010), ExitTime: market.Timestamp(2000)},
-			wantPNL:  market.MoneyFromFloat(100),
+			position: newTestPosition("EURUSD", types.Long, 100_000, 1.1000),
+			trade:    &Trade{TradeCommon: NewTradeHistory("EURUSD").TradeCommon, ExitPrice: types.PriceFromFloat(1.1010), ExitTime: types.Timestamp(2000)},
+			wantPNL:  types.MoneyFromFloat(100),
 		},
 		{
 			name:     "short gain",
-			position: newTestPosition("EURUSD", market.Short, 100_000, 1.1000),
-			trade:    &Trade{TradeCommon: NewTradeHistory("EURUSD").TradeCommon, ExitPrice: market.PriceFromFloat(1.0990), ExitTime: market.Timestamp(2000)},
-			wantPNL:  market.MoneyFromFloat(100),
+			position: newTestPosition("EURUSD", types.Short, 100_000, 1.1000),
+			trade:    &Trade{TradeCommon: NewTradeHistory("EURUSD").TradeCommon, ExitPrice: types.PriceFromFloat(1.0990), ExitTime: types.Timestamp(2000)},
+			wantPNL:  types.MoneyFromFloat(100),
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			acct.Balance = market.MoneyFromFloat(10_000)
-			acct.Equity = market.MoneyFromFloat(10_000)
+			acct.Balance = types.MoneyFromFloat(10_000)
+			acct.Equity = types.MoneyFromFloat(10_000)
 			acct.Trades = nil
 			acct.Lots = LotBook{}
 
 			pnl, err := acct.realizePNL(tt.position, tt.trade)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantPNL, pnl)
-			assert.Equal(t, market.MoneyFromFloat(10_000)+tt.wantPNL, acct.Balance)
+			assert.Equal(t, types.MoneyFromFloat(10_000)+tt.wantPNL, acct.Balance)
 			assert.Equal(t, acct.Balance, acct.Equity)
 		})
 	}
@@ -155,32 +156,32 @@ func TestAccountRealizePNLAndClosePosition(t *testing.T) {
 	_, err := acct.realizePNL(nil, &Trade{})
 	require.Error(t, err)
 
-	_, err = acct.realizePNL(newTestPosition("EURUSD", market.Long, 100_000, 1.1000), nil)
+	_, err = acct.realizePNL(newTestPosition("EURUSD", types.Long, 100_000, 1.1000), nil)
 	require.Error(t, err)
 
-	_, err = acct.realizePNL(newTestPosition("", market.Long, 100_000, 1.1000), &Trade{ExitPrice: market.PriceFromFloat(1.1010)})
+	_, err = acct.realizePNL(newTestPosition("", types.Long, 100_000, 1.1000), &Trade{ExitPrice: types.PriceFromFloat(1.1010)})
 	require.Error(t, err)
 
-	_, err = acct.realizePNL(newTestPosition("EURUSD", market.Long, 0, 1.1000), &Trade{ExitPrice: market.PriceFromFloat(1.1010)})
+	_, err = acct.realizePNL(newTestPosition("EURUSD", types.Long, 0, 1.1000), &Trade{ExitPrice: types.PriceFromFloat(1.1010)})
 	require.Error(t, err)
 
-	_, err = acct.realizePNL(newTestPosition("EURUSD", market.Long, 100_000, 1.1000), &Trade{ExitPrice: 0})
+	_, err = acct.realizePNL(newTestPosition("EURUSD", types.Long, 100_000, 1.1000), &Trade{ExitPrice: 0})
 	require.Error(t, err)
 }
 
 func TestAccountClosePositionAndPlaceholderClosePosition(t *testing.T) {
 	t.Parallel()
 
-	acct := NewAccount("acct", market.MoneyFromFloat(10_000))
-	pos := newTestPosition("EURUSD", market.Long, 100_000, 1.1000)
+	acct := NewAccount("acct", types.MoneyFromFloat(10_000))
+	pos := newTestPosition("EURUSD", types.Long, 100_000, 1.1000)
 	acct.Lots.Add(pos)
-	trade := &Trade{TradeCommon: pos.TradeCommon, ExitPrice: market.PriceFromFloat(1.1010), ExitTime: market.Timestamp(2000)}
+	trade := &Trade{TradeCommon: pos.TradeCommon, ExitPrice: types.PriceFromFloat(1.1010), ExitTime: types.Timestamp(2000)}
 
 	require.NoError(t, acct.CloseLot(pos, trade))
 	assert.Equal(t, 0, acct.Lots.Len())
 	require.Len(t, acct.Trades, 1)
-	assert.Equal(t, market.MoneyFromFloat(100), trade.PNL)
-	assert.Equal(t, market.MoneyFromFloat(10_100), acct.Balance)
+	assert.Equal(t, types.MoneyFromFloat(100), trade.PNL)
+	assert.Equal(t, types.MoneyFromFloat(10_100), acct.Balance)
 	trade.TradeCommon.Instrument = "GBPUSD"
 	assert.Equal(t, "EURUSD", acct.Trades[0].Instrument)
 
@@ -191,7 +192,7 @@ func TestAccountClosePositionAndPlaceholderClosePosition(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	acct2 := NewAccount("acct2", market.MoneyFromFloat(10_000))
-	assert.Error(t, acct2.CloseLot(&Lot{TradeCommon: &TradeCommon{ID: market.NewULID()}}, trade))
-	assert.Error(t, acct2.CloseLot(newTestPosition("EURUSD", market.Long, 100_000, 1.1000), &Trade{}))
+	acct2 := NewAccount("acct2", types.MoneyFromFloat(10_000))
+	assert.Error(t, acct2.CloseLot(&Lot{TradeCommon: &TradeCommon{ID: idgen.NewULID()}}, trade))
+	assert.Error(t, acct2.CloseLot(newTestPosition("EURUSD", types.Long, 100_000, 1.1000), &Trade{}))
 }
