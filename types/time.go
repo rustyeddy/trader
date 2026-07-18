@@ -314,6 +314,15 @@ func mustLoadLocation(name string) *time.Location {
 	return loc
 }
 
+// DailyAlignmentLocation returns the broker alignment timezone
+// (America/New_York). Exposed for callers that need to evaluate local
+// wall-clock rules beyond the 17:00 day boundary itself — e.g. H4 candle
+// opens, which OANDA anchors to fixed local hours (1/5/9/13/17/21:00),
+// so their UTC phase shifts at the DST transition instant.
+func DailyAlignmentLocation() *time.Location {
+	return dailyAlignmentLocation
+}
+
 // DailyAlignmentBoundary returns the most recent broker daily-alignment
 // boundary at or before t: 17:00 in America/New_York, DST-aware. This is
 // OANDA's default dailyAlignment/alignmentTimezone (this repo never

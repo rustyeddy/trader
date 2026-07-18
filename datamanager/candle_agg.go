@@ -100,10 +100,10 @@ func (cs *CandleSet) aggregate(outTF types.Timeframe, minValid int) (*CandleSet,
 
 // aggregateWithinDay builds a D1 or H4 CandleSet from cs (must be a
 // sub-day timeframe, typically H1) by walking OANDA's true 17:00
-// America/New_York-anchored day boundaries, DST-aware, and subdividing
-// each real day into outTF-sized windows (one window for D1; however many
-// whole outTF periods fit in that day for H4), rather than assuming every
-// day spans a fixed 86400 seconds.
+// America/New_York-anchored day boundaries, DST-aware. D1 gets one window
+// per real day; H4 windows open at fixed NY-local wall-clock hours (see
+// h4SlotsInDay), matching the boundaries the download/derive paths write,
+// rather than assuming fixed outTF-second strides from the session open.
 func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*CandleSet, error) {
 	inTF := types.Timestamp(cs.Timeframe)
 	outStep := time.Duration(outTF) * time.Second
@@ -114,9 +114,11 @@ func (cs *CandleSet) aggregateWithinDay(outTF types.Timeframe, minValid int) (*C
 	var boundaries []time.Time
 	for day := types.DailyAlignmentBoundary(csStart); !day.After(lastCandleTime); day = nextDailyBoundary(day) {
 		next := nextDailyBoundary(day)
-		for slot := day; slot.Before(next); slot = slot.Add(outStep) {
-			boundaries = append(boundaries, slot)
+		if outTF == types.D1 {
+			boundaries = append(boundaries, day)
+			continue
 		}
+		boundaries = append(boundaries, h4SlotsInDay(day, next)...)
 	}
 
 	out := &CandleSet{

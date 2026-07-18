@@ -45,6 +45,92 @@ func TestSlotIndexForTime_MatchesSlotBoundaries_AcrossManyDays(t *testing.T) {
 	}
 }
 
+// TestH4Slots_NYLocalWallClockRule_DSTTransitions pins the H4 grid rule
+// discovered while investigating #182: OANDA H4 candles open at fixed
+// America/New_York WALL-CLOCK hours (1/5/9/13/17/21:00 local), so the UTC
+// phase switches at the DST transition instant (2am local) — mid-session —
+// not at the next 17:00 session boundary. The expected times below are
+// transcribed from real raw OANDA archive rows (USDJPY 2011-03,
+// AUDCAD 2007-03, EURGBP 2011-11), not computed from the code under test,
+// so this test fails if the implementation regresses to fixed 4h-UTC
+// strides from the session open (which agreed with these times on normal
+// days but drifted an hour after each transition instant).
+func TestH4Slots_NYLocalWallClockRule_DSTTransitions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		monthStart time.Time
+		want       []time.Time // consecutive run of expected slot opens
+	}{
+		{
+			// US spring-forward 2011-03-13 02:00 EST (07:00 UTC).
+			// Session opened Sat 22:00 UTC (17:00 EST); pre-transition
+			// slots on the EST phase (02:00, 06:00 UTC), post-transition
+			// on the EDT phase (09:00, 13:00, 17:00 UTC) — the 06:00
+			// slot is 3 real hours wide. Matches raw USDJPY 2011-03.
+			name:       "spring-forward 2011",
+			monthStart: time.Date(2011, 3, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2011, 3, 13, 2, 0, 0, 0, time.UTC),
+				time.Date(2011, 3, 13, 6, 0, 0, 0, time.UTC),
+				time.Date(2011, 3, 13, 9, 0, 0, 0, time.UTC),
+				time.Date(2011, 3, 13, 13, 0, 0, 0, time.UTC),
+				time.Date(2011, 3, 13, 17, 0, 0, 0, time.UTC),
+				time.Date(2011, 3, 13, 21, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// US spring-forward 2007-03-11. Post-transition EDT-phase
+			// slots 17:00, 21:00 UTC match raw AUDCAD 2007-03.
+			name:       "spring-forward 2007",
+			monthStart: time.Date(2007, 3, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2007, 3, 11, 17, 0, 0, 0, time.UTC),
+				time.Date(2007, 3, 11, 21, 0, 0, 0, time.UTC),
+				time.Date(2007, 3, 12, 1, 0, 0, 0, time.UTC),
+			},
+		},
+		{
+			// US fall-back 2011-11-06 02:00 EDT (06:00 UTC). Local 1:00
+			// occurs twice (05:00 and 06:00 UTC); only the first opens a
+			// candle and that slot is 5 real hours wide (05:00→10:00 UTC).
+			// Post-transition EST-phase slots 10:00, 14:00, 18:00 UTC —
+			// 14:00 and 18:00 match raw EURGBP 2011-11.
+			name:       "fall-back 2011",
+			monthStart: time.Date(2011, 11, 1, 0, 0, 0, 0, time.UTC),
+			want: []time.Time{
+				time.Date(2011, 11, 6, 1, 0, 0, 0, time.UTC),
+				time.Date(2011, 11, 6, 5, 0, 0, 0, time.UTC),
+				time.Date(2011, 11, 6, 10, 0, 0, 0, time.UTC),
+				time.Date(2011, 11, 6, 14, 0, 0, 0, time.UTC),
+				time.Date(2011, 11, 6, 18, 0, 0, 0, time.UTC),
+				time.Date(2011, 11, 6, 22, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			monthEnd := tc.monthStart.AddDate(0, 1, 0)
+			got := MonthSlotBoundaries(tc.monthStart, monthEnd, types.H4)
+
+			start := -1
+			for i, b := range got {
+				if b.Equal(tc.want[0]) {
+					start = i
+					break
+				}
+			}
+			require.GreaterOrEqual(t, start, 0, "first expected slot %s not found in grid", tc.want[0])
+			require.LessOrEqual(t, start+len(tc.want), len(got))
+			for i, w := range tc.want {
+				require.Equal(t, w, got[start+i], "slot %d after %s", i, tc.want[0])
+			}
+		})
+	}
+}
+
 // TestMonthSlotBoundaries_H4IncludesEarlySessionSlots is the regression
 // case for the H4 month-start data-loss bug found while independently
 // validating #179's regen with a Python oracle that reads the raw tree

@@ -21,11 +21,12 @@ func dailyAligned(tf types.Timeframe) bool {
 // America/New_York, DST-aware, so the day spanning a DST transition is 23
 // or 25 wall-clock hours — this walks real day boundaries instead of
 // assuming a fixed 86400-second stride. D1 always emits exactly one slot
-// per real day, regardless of its length; H4 emits however many whole
-// 4-hour periods fit within that day (5 or 6 on a transition day, 6
-// otherwise). For every other timeframe this is a uniform tf-second
-// stride, which is exactly correct since their grid boundaries don't
-// depend on where the broker's trading day begins.
+// per real day, regardless of its length; H4 always emits six slots per
+// day, opening at fixed NY-local wall-clock hours (see h4SlotsInDay), one
+// of which is 3 or 5 real hours wide on a transition day. For every other
+// timeframe this is a uniform tf-second stride, which is exactly correct
+// since their grid boundaries don't depend on where the broker's trading
+// day begins.
 func SlotBoundaries(start time.Time, tf types.Timeframe, n int) []time.Time {
 	out := make([]time.Time, n)
 	if n == 0 {
@@ -50,12 +51,15 @@ func SlotBoundaries(start time.Time, tf types.Timeframe, n int) []time.Time {
 		return out
 	}
 
-	// H4: however many whole 4-hour periods fit within each real day.
-	step := time.Duration(tf) * time.Second
+	// H4: fixed NY-local wall-clock opens within each real day (see
+	// h4SlotsInDay).
 	i := 0
 	for i < n {
 		next := nextDailyBoundary(day)
-		for slot := day; slot.Before(next) && i < n; slot = slot.Add(step) {
+		for _, slot := range h4SlotsInDay(day, next) {
+			if i >= n {
+				break
+			}
 			out[i] = slot
 			i++
 		}
@@ -94,23 +98,23 @@ func SlotIndexForTime(start time.Time, tf types.Timeframe, t time.Time) int {
 		}
 	}
 
-	// H4: however many whole 4-hour periods fit within each real day. Must
-	// count days the same way SlotBoundaries' emission loop does (a slot
-	// counts if it starts before the day ends, even if it doesn't finish
-	// before the day ends) — i.e. ceil(width/step), not floor(width/step).
-	// A 23-hour transition day is 5.75 steps of 4h; SlotBoundaries emits 6
-	// slots for it (0,4,8,12,16,20h all start before the 23h mark), so
-	// floor(23h/4h)=5 undercounts by one and permanently shifts every
-	// later index in the file by -1 relative to SlotBoundaries.
-	step := time.Duration(tf) * time.Second
+	// H4: walk the same per-day NY-local wall-clock slots SlotBoundaries
+	// emits (h4SlotsInDay), so the two functions stay exact inverses even
+	// across DST transitions, where the slots are not a fixed 4h stride.
 	idx := 0
 	for {
 		next := nextDailyBoundary(day)
+		slots := h4SlotsInDay(day, next)
 		if t.Before(next) {
-			return idx + int(t.Sub(day)/step)
+			pos := 0
+			for i, s := range slots {
+				if !t.Before(s) {
+					pos = i
+				}
+			}
+			return idx + pos
 		}
-		width := next.Sub(day)
-		idx += int((width + step - 1) / step)
+		idx += len(slots)
 		day = next
 	}
 }
@@ -131,6 +135,41 @@ func firstDailyBoundaryAtOrAfter(start time.Time) time.Time {
 // so flooring it gives exactly the next true boundary.
 func nextDailyBoundary(b time.Time) time.Time {
 	return types.DailyAlignmentBoundary(b.Add(25 * time.Hour))
+}
+
+// h4SlotsInDay returns the open times of every H4 candle within one broker
+// day [dayOpen, nextOpen).
+//
+// OANDA's H4 candles open at fixed America/New_York WALL-CLOCK hours —
+// 1:00, 5:00, 9:00, 13:00, 17:00, 21:00 local — NOT at fixed 4-hour UTC
+// strides from the session open. On a normal day the two rules coincide,
+// but on a DST transition day the wall-clock rule's UTC phase shifts at
+// the transition instant (2am local), mid-session: the 1:00-5:00 local
+// slot spans 3 real hours on spring-forward days and 5 on fall-back days,
+// and every later slot that day sits an hour off the fixed-stride grid.
+// Verified against the raw OANDA archive across 2005-2012 transition days
+// (see issue #182 — the apparent "inconsistent compression position" was
+// this rule viewed through the fixed-stride assumption).
+//
+// On fall-back days the 1:00 local hour occurs twice an hour apart in UTC;
+// only the first occurrence opens a candle, so a candidate under 2h after
+// the previous kept slot is skipped (legitimate spacing is never below 3h).
+func h4SlotsInDay(dayOpen, nextOpen time.Time) []time.Time {
+	loc := types.DailyAlignmentLocation()
+	out := make([]time.Time, 0, 7)
+	var prev time.Time
+	// dayOpen is a 17:00-local boundary, so hourly steps stay on the hour.
+	for t := dayOpen; t.Before(nextOpen); t = t.Add(time.Hour) {
+		switch t.In(loc).Hour() {
+		case 1, 5, 9, 13, 17, 21:
+			if !prev.IsZero() && t.Sub(prev) < 2*time.Hour {
+				continue
+			}
+			out = append(out, t)
+			prev = t
+		}
+	}
+	return out
 }
 
 // MonthSlotBoundaries returns every slot open-time in [monthStart, monthEnd)
@@ -182,13 +221,13 @@ func MonthSlotBoundaries(monthStart, monthEnd time.Time, tf types.Timeframe) []t
 		return out
 	}
 
-	// H4: subdivide each real day into 4-hour blocks, keeping only the
-	// ones whose own open falls within [monthStart, monthEnd).
-	step := time.Duration(tf) * time.Second
+	// H4: fixed NY-local wall-clock opens within each real day (see
+	// h4SlotsInDay), keeping only slots whose own open falls within
+	// [monthStart, monthEnd).
 	var out []time.Time
 	for day.Before(monthEnd) {
 		next := nextDailyBoundary(day)
-		for slot := day; slot.Before(next); slot = slot.Add(step) {
+		for _, slot := range h4SlotsInDay(day, next) {
 			if !slot.Before(monthStart) && slot.Before(monthEnd) {
 				out = append(out, slot)
 			}
