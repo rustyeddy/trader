@@ -39,6 +39,7 @@ type GenOptions struct {
 
 	// signalreplay strategy params, embedded verbatim into every run.
 	Entry          string
+	EntryParams    map[string]any
 	EpisodeGapDays int
 	MaxHoldDays    int
 	CloseOnFlip    bool
@@ -120,6 +121,9 @@ func GenerateConfig(opts GenOptions) (*backtest.Config, error) {
 		"max-hold-days":   int64(opts.MaxHoldDays),
 		"close-on-flip":   opts.CloseOnFlip,
 		"one-per-episode": opts.OnePerEpisode,
+	}
+	if len(opts.EntryParams) > 0 {
+		strategyParams["entry-params"] = opts.EntryParams
 	}
 
 	runs := make([]backtest.RunConfig, 0, len(instruments))

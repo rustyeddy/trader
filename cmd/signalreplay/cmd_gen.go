@@ -11,9 +11,10 @@ import (
 // genFlags holds the flag-bound state shared by "gen" and "run" (run
 // generates a config the same way before executing it).
 type genFlags struct {
-	opts       GenOptions
-	exitParams string
-	out        string
+	opts        GenOptions
+	exitParams  string
+	entryParams string
+	out         string
 }
 
 func addGenFlags(cmd *cobra.Command, f *genFlags) {
@@ -33,21 +34,28 @@ func addGenFlags(cmd *cobra.Command, f *genFlags) {
 	flags.Float64Var(&f.opts.MaxSpreadPips, "max-spread-pips", 0, "Max-spread gate in pips (0 = no gate)")
 	flags.IntVar(&f.opts.WarmupDays, "warmup-days", defaults.WarmupDays, "Days of warmup candles before the earliest signal date")
 	flags.IntVar(&f.opts.RunoutDays, "runout-days", defaults.RunoutDays, "Days of runout candles after the latest signal date")
-	flags.StringVar(&f.opts.Entry, "entry", defaults.Entry, "signalreplay strategy entry mode")
+	flags.StringVar(&f.opts.Entry, "entry", defaults.Entry, "signalreplay strategy entry mode, e.g. \"next-open\" or \"rejection-candle\"")
+	flags.StringVar(&f.entryParams, "entry-params", "", "Entry trigger params as key=value[,key=value...]")
 	flags.IntVar(&f.opts.EpisodeGapDays, "episode-gap", defaults.EpisodeGapDays, "signalreplay strategy episode-gap (days)")
 	flags.IntVar(&f.opts.MaxHoldDays, "max-hold-days", defaults.MaxHoldDays, "signalreplay strategy max-hold-days (0 = unlimited)")
 	flags.BoolVar(&f.opts.CloseOnFlip, "close-on-flip", defaults.CloseOnFlip, "signalreplay strategy close-on-flip")
 	flags.BoolVar(&f.opts.OnePerEpisode, "one-per-episode", defaults.OnePerEpisode, "signalreplay strategy one-per-episode")
 }
 
-// resolve finalizes exit-params parsing once flags are bound; must be called
-// after cobra parses flags (RunE, not init time).
+// resolve finalizes exit-params/entry-params parsing once flags are bound;
+// must be called after cobra parses flags (RunE, not init time).
 func (f *genFlags) resolve() error {
-	params, err := ParseExitParams(f.exitParams)
+	exitParams, err := ParseExitParams(f.exitParams)
 	if err != nil {
 		return err
 	}
-	f.opts.ExitParams = params
+	f.opts.ExitParams = exitParams
+
+	entryParams, err := ParseExitParams(f.entryParams)
+	if err != nil {
+		return fmt.Errorf("signalreplay gen: --entry-params: %w", err)
+	}
+	f.opts.EntryParams = entryParams
 	return nil
 }
 

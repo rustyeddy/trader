@@ -34,14 +34,15 @@ func init() {
 const reasonPrefix = "signalreplay:"
 
 // Config controls the signalreplay strategy's behaviour. See the param table
-// in docs/signalreplay-spec.org for defaults and meaning.
+// in docs/Archive/signalreplay-spec.org for defaults and meaning, and
+// docs/Plans/entry-strategy-design.org for Entry's Kind/Params shape.
 type Config struct {
-	SignalsPath    string // path to a review sweep CSV; required
-	Entry          string // entry mode; v1 supports only "next-open"
-	EpisodeGapDays int    // max calendar-day gap merging rows into one episode
-	MaxHoldDays    int    // 0 = unlimited; else time-stop after N bars in position
-	CloseOnFlip    bool   // emit CloseAll when a new episode has opposite bias
-	OnePerEpisode  bool   // at most one entry per episode (no re-entry)
+	SignalsPath    string               // path to a review sweep CSV; required
+	Entry          strategy.EntryConfig // entry mode; Kind:"" or "next-open" is the original v1 rule
+	EpisodeGapDays int                  // max calendar-day gap merging rows into one episode
+	MaxHoldDays    int                  // 0 = unlimited; else time-stop after N bars in position
+	CloseOnFlip    bool                 // emit CloseAll when a new episode has opposite bias
+	OnePerEpisode  bool                 // at most one entry per episode (no re-entry)
 }
 
 // episode is a collapsed run of consecutive same-bias sweep rows for one
@@ -77,8 +78,9 @@ func LoadSignalRows(path string) ([]SignalRow, error) {
 // its instrument at construction time, only at Update time, so signal rows
 // are loaded and filtered lazily on first Update.
 type Strategy struct {
-	cfg  Config
-	name string
+	cfg   Config
+	name  string
+	entry strategy.EntryTrigger
 
 	loaded   bool
 	loadErr  error
@@ -96,23 +98,26 @@ func New(cfg Config) (*Strategy, error) {
 	if cfg.SignalsPath == "" {
 		return nil, fmt.Errorf("signalreplay: signals path is required")
 	}
-	if cfg.Entry == "" {
-		cfg.Entry = "next-open"
-	}
-	if cfg.Entry != "next-open" {
-		return nil, fmt.Errorf("signalreplay: unsupported entry mode %q (v1 supports only \"next-open\")", cfg.Entry)
-	}
 	if cfg.EpisodeGapDays < 0 {
 		return nil, fmt.Errorf("signalreplay: episode-gap must be >= 0")
 	}
 	if cfg.MaxHoldDays < 0 {
 		return nil, fmt.Errorf("signalreplay: max-hold-days must be >= 0")
 	}
+	entry, err := strategy.GetEntryTrigger(cfg.Entry, types.PriceScale)
+	if err != nil {
+		return nil, fmt.Errorf("signalreplay: entry: %w", err)
+	}
 
+	entryKind := cfg.Entry.Kind
+	if entryKind == "" {
+		entryKind = "next-open"
+	}
 	return &Strategy{
-		cfg: cfg,
-		name: fmt.Sprintf("SIGNALREPLAY(%s,gap=%dd,hold=%d,flip=%v,once=%v)",
-			filepath.Base(cfg.SignalsPath), cfg.EpisodeGapDays, cfg.MaxHoldDays,
+		cfg:   cfg,
+		entry: entry,
+		name: fmt.Sprintf("SIGNALREPLAY(%s,entry=%s,gap=%dd,hold=%d,flip=%v,once=%v)",
+			filepath.Base(cfg.SignalsPath), entryKind, cfg.EpisodeGapDays, cfg.MaxHoldDays,
 			cfg.CloseOnFlip, cfg.OnePerEpisode),
 	}, nil
 }
@@ -132,6 +137,7 @@ func (s *Strategy) Ready() bool { return s.loaded && s.loadErr == nil }
 func (s *Strategy) Reset() {
 	s.idx = 0
 	s.barsInPosition = 0
+	s.entry.Reset()
 }
 
 func (s *Strategy) ensureLoaded(instrument string) {
@@ -161,6 +167,12 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 		return strategy.Hold("no candle")
 	}
 
+	// Tick the entry trigger every bar, regardless of episode state, so
+	// its internal indicators/pattern window can warm up — mirrors
+	// ExitStrategy.Tick's every-bar-regardless contract (see
+	// backtest/execute.go, service/candle_strategy_adapter.go).
+	s.entry.Tick(*ct)
+
 	s.ensureLoaded(sc.Instrument())
 	if s.loadErr != nil {
 		return strategy.Hold(fmt.Sprintf("signalreplay: %v", s.loadErr))
@@ -176,16 +188,25 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 	if s.idx < len(s.episodes) {
 		pending = &s.episodes[s.idx]
 	}
-	active := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+	// eligible: the episode's signal date has passed (independent of
+	// whether the entry trigger has fired yet). active: eligible AND the
+	// entry trigger says this bar is the entry bar. CloseOnFlip reacts to
+	// eligible, not active — an opposite-bias signal becoming live should
+	// close the current position regardless of whether the new episode's
+	// own entry pattern has appeared yet; waiting for that would hold a
+	// stale position open longer than intended.
+	eligible := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+	active := eligible && s.entry.Triggered(pending.Bias, pending.FirstDate, *ct)
 
 	if lotOpen {
 		s.barsInPosition++
 
-		if active && s.cfg.CloseOnFlip && pending.Bias != openSide {
+		if eligible && s.cfg.CloseOnFlip && pending.Bias != openSide {
 			reason := episodeReason(pending.FirstDate)
 			if s.cfg.OnePerEpisode {
 				s.idx++
 			}
+			s.entry.Reset()
 			s.barsInPosition = 0
 			return strategy.Signal{Side: pending.Bias, CloseAll: true, Reason: reason}
 		}
@@ -203,8 +224,32 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 		if s.cfg.OnePerEpisode {
 			s.idx++
 		}
+		s.entry.Reset()
 		s.barsInPosition = 0
 		return strategy.Signal{Side: pending.Bias, Reason: reason}
+	}
+
+	// Episode expiry: eligible but the entry trigger never fired by the
+	// time the episode's own signal window closed — the scanner itself
+	// stopped confirming this signal, so stop waiting for it rather than
+	// holding trigger state open indefinitely. Bounded by data already
+	// available (the episode's own LastDate), not a fixed bar count.
+	// Because this branch is only reached when active is false, an entry
+	// that fires on the very same bar its episode would otherwise expire
+	// always takes priority (handled above).
+	//
+	// The cutoff is the end of LastDate's calendar day (LastDate+24h), not
+	// the bare LastDate timestamp: sweep rows are day-granularity signal
+	// dates at midnight, so for a single-row episode FirstDate==LastDate,
+	// and the very first eligible bar (FirstDate+1 tick) would otherwise
+	// already read as "past LastDate" — expiring before any entry trigger
+	// that doesn't fire on the immediate next bar ever got a real window
+	// to evaluate the pattern.
+	expiry := types.Timestamp(pending.LastDate.Add(24 * time.Hour).Unix())
+	if eligible && barTime >= expiry {
+		s.idx++
+		s.entry.Reset()
+		return strategy.Hold("episode expired without entry trigger")
 	}
 
 	return strategy.Hold("no active episode")
@@ -340,13 +385,15 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		return nil, fmt.Errorf("signalreplay: signals file: %w", err)
 	}
 
-	entry, ok, err := strategy.GetStringParam(params, "entry")
+	entryKind, _, err := strategy.GetStringParam(params, "entry")
 	if err != nil {
 		return nil, err
 	}
-	if !ok || entry == "" {
-		entry = "next-open"
+	entryParams, _, err := strategy.GetMapParam(params, "entry-params")
+	if err != nil {
+		return nil, err
 	}
+	entryCfg := strategy.EntryConfig{Kind: entryKind, Params: entryParams}
 
 	episodeGap, ok, err := strategy.GetIntParam(params, "episode-gap")
 	if err != nil {
@@ -382,7 +429,7 @@ func build(params map[string]any) (strategy.Strategy, error) {
 
 	return New(Config{
 		SignalsPath:    signalsPath,
-		Entry:          entry,
+		Entry:          entryCfg,
 		EpisodeGapDays: episodeGap,
 		MaxHoldDays:    maxHoldDays,
 		CloseOnFlip:    closeOnFlip,

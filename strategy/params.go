@@ -134,3 +134,20 @@ func GetStringParam(m map[string]any, key string) (string, bool, error) {
 	}
 	return s, true, nil
 }
+
+// GetMapParam extracts a nested map[string]any param (e.g. an entry-params:
+// value embedded inside a strategy's own flat params map), or returns
+// ok=false if missing. YAML/JSON decoding into map[string]any always
+// produces map[string]any for a nested mapping, so no further coercion is
+// needed.
+func GetMapParam(m map[string]any, key string) (map[string]any, bool, error) {
+	v, ok := m[key]
+	if !ok {
+		return nil, false, nil
+	}
+	x, ok := v.(map[string]any)
+	if !ok {
+		return nil, true, fmt.Errorf("param %q must be a map, got %T", key, v)
+	}
+	return x, true, nil
+}
