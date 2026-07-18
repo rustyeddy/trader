@@ -132,3 +132,68 @@ func firstDailyBoundaryAtOrAfter(start time.Time) time.Time {
 func nextDailyBoundary(b time.Time) time.Time {
 	return types.DailyAlignmentBoundary(b.Add(25 * time.Hour))
 }
+
+// MonthSlotBoundaries returns every slot open-time in [monthStart, monthEnd)
+// for tf — the exact set of timestamps a canonical file for that calendar
+// month owns. This is the single source of truth for month-scoped slot
+// construction (derive-from-raw, direct OANDA candle fetch, and reading a
+// canonical file back) and replaces the SlotBoundaries(monthStart, tf, n)
+// + SlotIndexForTime(monthStart, tf, t) pair for that specific use, closing
+// off the class of bug where two independently-computed index functions can
+// drift out of sync (see TestSlotIndexForTime_MatchesSlotBoundaries).
+//
+// For D1/H4, types.DailyAlignmentBoundary(monthStart) is the open of
+// whichever trading session is already in progress at monthStart — a
+// session almost always straddles UTC midnight on the 1st, since it opens
+// at 17:00 America/New_York. D1 attributes that whole session to whichever
+// calendar month its open falls in (so it's correctly excluded here when
+// its open precedes monthStart — the session's own file already owns it).
+// H4 subdivides that session into six 4-hour sub-slots, and unlike D1's
+// atomic whole-day granularity, an in-progress session's early sub-slots
+// (each with its own open time >= monthStart) are real, independently
+// timestamped data that ONLY this month's own raw file has (OANDA's
+// date-scoped fetch means the prior month's raw fetch never reaches a
+// timestamp in this month) — anchoring to the boundary strictly AFTER
+// monthStart, as SlotBoundaries(monthStart, tf, n) does, skips those
+// sub-slots entirely: not written, not even reported as missing, because
+// the reporting loop iterates the same incomplete boundary set. This walk
+// starts from the in-progress session instead and keeps every sub-slot
+// whose own open is >= monthStart, fixing that silent data loss.
+func MonthSlotBoundaries(monthStart, monthEnd time.Time, tf types.Timeframe) []time.Time {
+	if !dailyAligned(tf) {
+		step := time.Duration(tf) * time.Second
+		var out []time.Time
+		for t := monthStart; t.Before(monthEnd); t = t.Add(step) {
+			out = append(out, t)
+		}
+		return out
+	}
+
+	day := types.DailyAlignmentBoundary(monthStart)
+
+	if tf == types.D1 {
+		var out []time.Time
+		for day.Before(monthEnd) {
+			if !day.Before(monthStart) {
+				out = append(out, day)
+			}
+			day = nextDailyBoundary(day)
+		}
+		return out
+	}
+
+	// H4: subdivide each real day into 4-hour blocks, keeping only the
+	// ones whose own open falls within [monthStart, monthEnd).
+	step := time.Duration(tf) * time.Second
+	var out []time.Time
+	for day.Before(monthEnd) {
+		next := nextDailyBoundary(day)
+		for slot := day; slot.Before(next); slot = slot.Add(step) {
+			if !slot.Before(monthStart) && slot.Before(monthEnd) {
+				out = append(out, slot)
+			}
+		}
+		day = next
+	}
+	return out
+}

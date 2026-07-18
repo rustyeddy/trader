@@ -54,13 +54,18 @@ func NewMonthlyCandleSet(inst string, tf types.Timeframe, monthStart types.Times
 	}
 
 	endTime := startTime.AddDate(0, 1, 0)
-	spanSec := int64(endTime.Sub(startTime).Seconds())
-	n := int(spanSec / int64(tf))
+	// MonthSlotBoundaries (not a fixed spanSec/tf count via SlotBoundaries):
+	// a calendar-only estimate under-sizes H4 months containing the
+	// November fall-back transition, whose 25-hour day legitimately
+	// produces 7 sub-slots instead of 6, and over-sizes/mis-anchors months
+	// where a session is already in progress at monthStart (see
+	// MonthSlotBoundaries' doc comment).
+	boundaries := MonthSlotBoundaries(startTime, endTime, tf)
+	n := len(boundaries)
 	if n <= 0 {
 		return nil, fmt.Errorf("computed invalid candle count: %d", n)
 	}
 
-	boundaries := SlotBoundaries(startTime, tf, n)
 	candles := make([]market.CandleTime, n)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)

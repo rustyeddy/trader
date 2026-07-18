@@ -110,7 +110,8 @@ func TestDeriveCanonicalFromRaw_UsesTrueObservedTimestamps(t *testing.T) {
 	}
 
 	monthStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	trueFirstSlot := SlotBoundaries(monthStart, types.H4, 1)[0]
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	trueFirstSlot := MonthSlotBoundaries(monthStart, monthEnd, types.H4)[0]
 
 	var rows []RawCandleRow
 	for i := 0; i < 6; i++ {

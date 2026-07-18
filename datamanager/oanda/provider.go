@@ -56,11 +56,18 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf t
 		return nil, fmt.Errorf("fetch %s %s: %w", instrument, monthStart.Format("2006-01"), err)
 	}
 
-	slotCount := int(monthEnd.Sub(monthStart).Seconds() / float64(int64(tf)))
-	boundaries := datamanager.SlotBoundaries(monthStart, tf, slotCount)
+	// MonthSlotBoundaries (not SlotBoundaries(monthStart, tf, n)) so H4's
+	// early sub-slots of a session already in progress at monthStart are
+	// included, and the resulting index map is the single source of truth
+	// for placing OANDA rows — no separate SlotIndexForTime computation
+	// that could drift out of sync with the boundaries actually written.
+	boundaries := datamanager.MonthSlotBoundaries(monthStart, monthEnd, tf)
+	slotCount := len(boundaries)
 	candles := make([]market.CandleTime, slotCount)
+	indexOf := make(map[int64]int, slotCount)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
+		indexOf[b.Unix()] = i
 	}
 	rows := make([]datamanager.RawCandleRow, 0, len(raw))
 
@@ -82,14 +89,8 @@ func (p *Provider) FetchCandleMonth(ctx context.Context, instrument string, tf t
 		if oc.BidClose == 0 && oc.AskClose == 0 {
 			continue
 		}
-		// SlotIndexForTime (not a fixed division by stepSec) so D1 rows
-		// land in the right day even across a DST transition, where a
-		// fixed 86400s stride can misplace or collide adjacent rows, and
-		// correctly rejects a candle timestamped before monthStart (e.g.
-		// OANDA's daily candles open at 21:00 UTC the previous day) via a
-		// negative index rather than relying on integer-truncation luck.
-		idx := datamanager.SlotIndexForTime(monthStart, tf, oc.Time.UTC())
-		if idx < 0 || idx >= slotCount {
+		idx, ok := indexOf[oc.Time.UTC().Unix()]
+		if !ok {
 			continue
 		}
 

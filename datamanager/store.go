@@ -570,26 +570,29 @@ func (s *store) readCSVUncached(key Key) (cs *CandleSet, err error) {
 	}
 	defer f.Close()
 
-	// The slot count is derived from the calendar month span. WriteCSV
-	// always writes every slot densely (gaps included) in slot order, so
-	// row N is always slot N-1 — no arithmetic reconstruction of a slot's
-	// position (or its reported time) from a single anchor + fixed step is
-	// needed, which is what let D1's DST-variable day width silently
-	// mislabel candles. Each row's own timestamp column is authoritative
-	// and stored verbatim; only monotonicity is checked, since real D1
-	// spacing legitimately varies by up to an hour across a DST
-	// transition.
+	// The slot skeleton comes from MonthSlotBoundaries, the same function
+	// DeriveCanonicalFromRaw/FetchCandleMonth use to decide what a
+	// calendar month's file owns (including H4's early sub-slots of a
+	// session already in progress at monthStart) — this read path's slot
+	// count must match what was actually written, or gap rows past the
+	// real row count would be mislabeled with SlotBoundaries' different
+	// (monthStart-at-or-after) anchor. WriteCSV always writes every slot
+	// densely (gaps included) in slot order, so row N is always skeleton
+	// slot N-1 — no arithmetic reconstruction of a slot's position (or its
+	// reported time) from a single anchor + fixed step is needed, which is
+	// what let D1's DST-variable day width silently mislabel candles. Each
+	// row's own timestamp column is authoritative and stored verbatim;
+	// only monotonicity is checked, since real D1 spacing legitimately
+	// varies by up to an hour across a DST transition.
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	tf := key.TF
-	step := int64(tf)
-
-	endTime := monthStart.AddDate(0, 1, 0)
-	spanSec := int64(endTime.Sub(monthStart).Seconds())
-	n := int(spanSec / step)
+	monthEnd := monthStart.AddDate(0, 1, 0)
 
 	instName := market.NormalizeInstrument(key.Instrument)
+	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
+	n := len(boundaries)
 	candles := make([]market.CandleTime, n)
-	for i, b := range SlotBoundaries(monthStart, tf, n) {
+	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
 	}
 	cs = &CandleSet{

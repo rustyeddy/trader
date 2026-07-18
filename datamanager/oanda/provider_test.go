@@ -58,7 +58,12 @@ func fakeCandlesServer(t *testing.T, times []time.Time) *httptest.Server {
 // into CandleMonth.Candles verbatim.
 func TestFetchCandleMonth_H4_PlacesTrueTimestamps(t *testing.T) {
 	monthStart := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC) // EDT: true boundary 21:00 UTC
-	want := datamanager.SlotBoundaries(monthStart, types.H4, 6)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	// The first six slots MonthSlotBoundaries produces for June 2026,
+	// including any early sub-slots of a session already in progress at
+	// monthStart (unlike SlotBoundaries(monthStart, tf, n), which skips
+	// straight to the next full session).
+	want := datamanager.MonthSlotBoundaries(monthStart, monthEnd, types.H4)[:6]
 
 	srv := fakeCandlesServer(t, want)
 	defer srv.Close()
@@ -67,10 +72,13 @@ func TestFetchCandleMonth_H4_PlacesTrueTimestamps(t *testing.T) {
 	month, err := p.FetchCandleMonth(context.Background(), "EUR_USD", types.H4, monthStart)
 	require.NoError(t, err)
 
+	indexOf := make(map[int64]int, len(month.Candles))
+	for i, c := range month.Candles {
+		indexOf[c.Timestamp.Time().Unix()] = i
+	}
 	for i, wantTime := range want {
-		idx := datamanager.SlotIndexForTime(monthStart, types.H4, wantTime)
-		require.GreaterOrEqual(t, idx, 0, "slot %d", i)
-		require.Less(t, idx, len(month.Candles), "slot %d", i)
+		idx, ok := indexOf[wantTime.Unix()]
+		require.True(t, ok, "slot %d: %s not found in month.Candles", i, wantTime)
 		require.False(t, month.Candles[idx].Candle.IsZero(), "slot %d should be filled", i)
 		require.Equal(t, types.FromTime(wantTime), month.Candles[idx].Timestamp, "slot %d timestamp", i)
 	}

@@ -191,17 +191,24 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 	monthStart := time.Date(key.Year, time.Month(key.Month), 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 	stepSec := int64(tf)
-	slotCount := int(monthEnd.Sub(monthStart).Seconds() / float64(stepSec))
 
 	rows, err := readRawMonthRows(rawPath, monthStart, monthEnd)
 	if err != nil {
 		return nil, fmt.Errorf("read raw %s: %w", rawPath, err)
 	}
 
-	boundaries := SlotBoundaries(monthStart, tf, slotCount)
+	// MonthSlotBoundaries (not SlotBoundaries(monthStart, tf, n)) so H4's
+	// early sub-slots of a session already in progress at monthStart are
+	// included, and the resulting index map is the single source of truth
+	// for placing raw rows — no separate SlotIndexForTime computation that
+	// could drift out of sync with the boundaries actually written.
+	boundaries := MonthSlotBoundaries(monthStart, monthEnd, tf)
+	slotCount := len(boundaries)
 	candles := make([]market.CandleTime, slotCount)
+	indexOf := make(map[int64]int, slotCount)
 	for i, b := range boundaries {
 		candles[i].Timestamp = types.FromTime(b)
+		indexOf[b.Unix()] = i
 	}
 	filled := make([]bool, slotCount)
 
@@ -213,11 +220,8 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 			continue
 		}
 
-		// SlotIndexForTime (not a fixed division by stepSec) so D1 rows
-		// land in the right day even across a DST transition, where a
-		// fixed 86400s stride can misplace or collide adjacent rows.
-		idx := SlotIndexForTime(monthStart, tf, r.Time.UTC())
-		if idx < 0 || idx >= slotCount {
+		idx, ok := indexOf[r.Time.UTC().Unix()]
+		if !ok {
 			continue
 		}
 
@@ -251,15 +255,9 @@ func (dm *DataManager) DeriveCanonicalFromRaw(ctx context.Context, rawPath strin
 
 	result := &DeriveResult{}
 	for i, slotStart := range boundaries {
-		// A trading day's true daily-alignment window can run a few
-		// hours into the next calendar month, but that data structurally
-		// lives in next month's own raw file (readRawMonthRows only ever
-		// keeps rows within [monthStart, monthEnd)) — so a slot at or
-		// after monthEnd is never fillable from this raw file and must
-		// not be counted as missing here.
-		if !slotStart.Before(monthEnd) {
-			break
-		}
+		// boundaries is already scoped to [monthStart, monthEnd) by
+		// MonthSlotBoundaries, so every entry here is genuinely this
+		// month's to report on.
 		slotEnd := slotStart.Add(25 * time.Hour)
 		if i+1 < len(boundaries) {
 			slotEnd = boundaries[i+1]

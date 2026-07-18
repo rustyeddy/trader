@@ -930,9 +930,12 @@ func TestWriteMonthlyCandleTimes_PersistsEachCandlesOwnTimestamp(t *testing.T) {
 
 	s := newTestStore(t)
 	monthStart := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	// types.DailyAlignmentBoundary's true H4 grid start for January (EST,
-	// UTC-5): 17:00 EST = 22:00 UTC.
-	trueFirstSlot := monthStart.Add(22 * time.Hour)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	// January 1, 2026 is a Thursday, so a session (opened Dec 31 22:00 UTC,
+	// EST) is already in progress at monthStart; MonthSlotBoundaries'
+	// first slot for January is that session's first sub-slot with its own
+	// open >= monthStart, not the next full session's 22:00 UTC open.
+	trueFirstSlot := MonthSlotBoundaries(monthStart, monthEnd, types.H4)[0]
 	candles := make([]market.CandleTime, 6)
 	for i := range candles {
 		candles[i] = market.CandleTime{
