@@ -1,4 +1,4 @@
-package service
+package datasvc
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func (s *Service) ValidateCandleData(ctx context.Context, req ValidateCandleData
 	if len(req.Instruments) == 0 {
 		return nil, fmt.Errorf("missing instruments")
 	}
-	tf, err := parseTraderTimeframe(req.Timeframe)
+	tf, err := ParseTraderTimeframe(req.Timeframe)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package service
+package datasvc
 
 import (
 	"context"
@@ -35,21 +35,21 @@ func TestToOandaGranularity(t *testing.T) {
 		{"m1", "M1"},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, toOandaGranularity(tc.in), "input %q", tc.in)
+		assert.Equal(t, tc.want, ToOandaGranularity(tc.in), "input %q", tc.in)
 	}
 }
 
 func TestParseTraderTimeframe(t *testing.T) {
-	_, err := parseTraderTimeframe("D1")
+	_, err := ParseTraderTimeframe("D1")
 	assert.NoError(t, err)
 
-	_, err = parseTraderTimeframe("D")
+	_, err = ParseTraderTimeframe("D")
 	assert.NoError(t, err)
 
-	_, err = parseTraderTimeframe("H4")
+	_, err = ParseTraderTimeframe("H4")
 	assert.NoError(t, err)
 
-	_, err = parseTraderTimeframe("bogus")
+	_, err = ParseTraderTimeframe("bogus")
 	assert.Error(t, err)
 }
 
@@ -83,7 +83,7 @@ func TestDownloadOandaCandles_ExcludesCandleBeforeMonthStart(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := &Service{OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"}, Log: discardLogger()}
+	svc := &Service{OANDA: &oanda.Client{BaseURL: srv.URL, Token: "t"}}
 
 	result, err := svc.DownloadOandaCandles(context.Background(), DownloadOandaCandlesRequest{
 		Instrument: "EUR_USD",

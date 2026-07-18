@@ -1,4 +1,4 @@
-package service
+package backtestsvc
 
 import (
 	"context"
@@ -78,7 +78,7 @@ func newBacktestService() *Service {
 
 func TestRunBacktest_Success(t *testing.T) {
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{err: nil}
+	svc.Executor = stubExecutor{err: nil}
 
 	compiled := minCompiledBacktest(t)
 	_, err := svc.RunBacktest(context.Background(), compiled)
@@ -87,7 +87,7 @@ func TestRunBacktest_Success(t *testing.T) {
 
 func TestRunBacktest_ExecutorErrorIsWrapped(t *testing.T) {
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{err: errors.New("sim failure")}
+	svc.Executor = stubExecutor{err: errors.New("sim failure")}
 
 	compiled := minCompiledBacktest(t)
 	_, err := svc.RunBacktest(context.Background(), compiled)
@@ -117,7 +117,7 @@ func TestRunBacktestConfigs_Success(t *testing.T) {
 	minYAMLConfig(t, dir, "run-b")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{}
+	svc.Executor = stubExecutor{}
 
 	summaries, err := svc.RunBacktestConfigs(context.Background(), []string{
 		filepath.Join(dir, "run-a.yml"),
@@ -129,7 +129,7 @@ func TestRunBacktestConfigs_Success(t *testing.T) {
 
 func TestRunBacktestConfigs_BadConfigPathReturnsError(t *testing.T) {
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{}
+	svc.Executor = stubExecutor{}
 
 	_, err := svc.RunBacktestConfigs(context.Background(), []string{"/nonexistent/config.yml"})
 	require.Error(t, err)
@@ -142,7 +142,7 @@ func TestRunBacktestConfigs_BadRunIsSkipped(t *testing.T) {
 	minYAMLConfig(t, dir, "run-err")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{err: errors.New("always fails")}
+	svc.Executor = stubExecutor{err: errors.New("always fails")}
 
 	summaries, err := svc.RunBacktestConfigs(context.Background(), []string{
 		filepath.Join(dir, "run-err.yml"),
@@ -160,7 +160,7 @@ func TestRunBacktestPathSpecs_DirectorySpec(t *testing.T) {
 	minYAMLConfig(t, dir, "run-x")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{}
+	svc.Executor = stubExecutor{}
 
 	summaries, err := svc.RunBacktestPathSpecs(context.Background(), []string{dir})
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestRunBacktestConfigsAndWriteReports_WritesFiles(t *testing.T) {
 	minYAMLConfig(t, cfgDir, "rpt-run")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{}
+	svc.Executor = stubExecutor{}
 
 	summaries, err := svc.RunBacktestConfigsAndWriteReports(
 		context.Background(),
@@ -206,7 +206,7 @@ func TestRunBacktestConfigsAndWriteReports_NoResultsReturnsError(t *testing.T) {
 	minYAMLConfig(t, cfgDir, "fail-run")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{err: errors.New("always fails")}
+	svc.Executor = stubExecutor{err: errors.New("always fails")}
 
 	_, err := svc.RunBacktestConfigsAndWriteReports(
 		context.Background(),
@@ -227,7 +227,7 @@ func TestRunBacktestPathSpecsAndWriteReports_WritesFiles(t *testing.T) {
 	minYAMLConfig(t, cfgDir, "ps-run")
 
 	svc := newBacktestService()
-	svc.Backtests = stubExecutor{}
+	svc.Executor = stubExecutor{}
 
 	summaries, err := svc.RunBacktestPathSpecsAndWriteReports(
 		context.Background(),
