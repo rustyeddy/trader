@@ -1,0 +1,410 @@
+#+TITLE: Candle/CandleTime Merge + Rejection-Candle Pattern Package
+#+DATE: 2026-07-18
+#+PROPERTY: status agreed-design, ready for implementation
+#+PROPERTY: audience implementation agent (Claude Code) — NOTE: this agent has
+#+PROPERTY:   no memory of the discussion that produced this doc. Everything
+#+PROPERTY:   needed to act on it is written out below; do not assume prior
+#+PROPERTY:   context beyond what is stated here and in the referenced repo state.
+#+PROPERTY: sequencing Part 1 (Candle/CandleTime merge) BEFORE Part 2 (pattern
+#+PROPERTY:   package). Part 2 is written against the POST-merge Candle type.
+
+* Context and why this doc exists
+
+Part 1 of this doc was ALREADY DECIDED during the 2026-07-16/17
+candle-store-timestamp-fix work (issue #179) but was never implemented —
+it appears the instruction did not make it into that work. This doc
+restates the decision in full (no prior context assumed) and hands it
+off again, now bundled with a second, independent piece of work (Part 2)
+that depends on Part 1 having landed first.
+
+Before doing anything: =git grep -n "CandleTime" -- '*.go'= and =view
+market/candle.go= to confirm current repo state. The line numbers and
+counts below are a snapshot from one clone and may not exactly match
+the branch this work lands on — treat them as scope estimates, not
+literal current truth, and re-derive from the live tree.
+
+* Part 1 — Merge Timestamp into market.Candle; retire market.CandleTime
+
+** Current state (as of this doc's snapshot; re-verify before editing)
+
+#+begin_src go
+// market/candle.go
+type Candle struct {
+    Open      types.Price
+    High      types.Price
+    Low       types.Price
+    Close     types.Price
+    AvgSpread types.Price
+    MaxSpread types.Price
+    Ticks     int32
+}
+// (no timestamp field)
+
+type candleTime struct {
+    Candle
+    types.Timestamp
+}
+type CandleTime = candleTime // type alias
+
+type CandleIterator interface {
+    Next() (CandleTime, bool)
+    Err() error
+    Close() error
+}
+#+end_src
+
+Scope snapshot: 39 non-test files import/use =CandleTime=; 9 files
+construct =market.Candle{}= literals directly. Both numbers are a floor,
+not a ceiling — re-grep on the actual branch.
+
+** Decision
+
+Add =Timestamp types.Timestamp= directly to =market.Candle=. Delete
+=candleTime=/=CandleTime= entirely. Every current use of =CandleTime=
+becomes a use of =Candle= (which is now a strict superset — same fields
+plus =Timestamp=). This is primarily a mechanical rename, not a
+restructuring — see the API-stability constraint below.
+
+** Why (full rationale — this was a considered tradeoff, not a default)
+
+*** The problem this solves
+
+The =candle-store-timestamp-fix= work (issue #179) exists because a
+function had a true OANDA timestamp in hand and had nowhere structurally
+appropriate to keep it attached to its candle all the way to disk — the
+plain =market.Candle= type has no timestamp field, so timestamps were
+being separately reconstructed (and reconstructed WRONG) at read time
+instead of carried as data. The immediate #179 bug is fixed, but the
+underlying gap — two candle types, one timeless and one timestamped,
+with call sites choosing between them by convention rather than by
+compiler-enforced correctness — remains, and is exactly the kind of gap
+that produces this class of bug again later.
+
+*** Alternative considered and rejected: keep Candle timeless, widen CandleTime's use at the store boundary only
+
+This was seriously considered. It has a real advantage: it lets =Candle=
+formally guarantee "no timestamp exists here," which is a stronger
+static guarantee than "the timestamp field happens to be zero." It was
+rejected on an explicit priority call: this is a long-lived,
+single-maintainer codebase where minimizing the number of concepts a
+future reader (including a future implementation agent) has to hold in
+their head matters more than type-level purity. Two candle-shaped types
+whose split exists to enforce one invariant is a second concept to
+maintain, a wrapper type to keep alive, and conversion points at every
+boundary between "the pure math side" and "the timestamped side" — and
+in practice call sites already choose between them by convention (as
+today's =CandleTime= usage shows), so the enforcement the split was
+supposed to buy was already leaking before this decision.
+
+The chosen alternative accepts a weaker guarantee (a zero =Timestamp=
+on a synthetic/test candle just means "this candle is genuinely
+timeless," by convention, not by the type system) in exchange for one
+type, no conversions, no wrapper. Indicator math and other genuinely
+time-agnostic code simply ignores the field — nothing forces it to, but
+nothing needs it to.
+
+*** RAM cost was evaluated and accepted, not ignored
+
++8 bytes/candle. Rough worst case (full ~21-year M1 history × ~24 pairs
+resident in the process-lifetime cache simultaneously — a scenario no
+current workflow triggers): on the order of 1.2–1.5 GB. Real, bounded,
+and not a driving concern relative to the maintainability goal.
+
+*** Governing principle (carries over from the #179 design addendum): timestamp is truth, index is position
+
+The dense-array canonical store keeps its slot-per-timeframe-increment
+model exactly as-is. The array position answers "where does this candle
+live and in what order"; the stored =Candle.Timestamp= answers "when
+did it actually open." These are deliberately separate questions after
+this change — under the OLD (buggy) design the array position WAS the
+timestamp (=Start + idx*step=), which is precisely how #179 happened.
+This merge is what makes "timestamp is truth" hold everywhere, not just
+in the store package.
+
+** Hard constraint: API stability
+
+The public shape of how code interacts with candles must not change,
+beyond a mechanical symbol swap. Concretely:
+
+- Everywhere that currently takes/returns =[]market.Candle= keeps doing
+  so — the element type gains one field, nothing about call shape
+  changes.
+- Everywhere that currently takes/returns =CandleTime= (iterators,
+  =CandleIterator.Next() (CandleTime, bool)=, strategy =Tick=/=Update=
+  signatures, etc.) switches to =Candle=. Since =Candle= is now a strict
+  superset of the old =CandleTime=, this is a symbol rename at call
+  sites, not a logic change: =candleTime.Timestamp= access becomes
+  =candle.Timestamp= access, =candleTime.Candle.Open= access becomes
+  =candle.Open= access directly (one less level of embedding to walk
+  through, if anything simpler).
+- =CandleSet=, slot math, valid-bit handling, monthly-file sizing:
+  unchanged by this part of the work (already correct post-#179).
+
+Acceptance bar: outside =market/= and the small number of packages that
+literally define candle iteration/storage (=datamanager/=), diffs
+across the ~39 affected files should be overwhelmingly =CandleTime= →
+=Candle= symbol substitutions and import cleanup. If implementing this
+requires restructuring logic in =review/=, =strategy/=, or
+=strategies/*= beyond a rename, stop and reassess — that means the
+merge is being done wrong, or a bug is being uncovered along the way
+(report it, don't quietly fix-and-continue inside this PR).
+
+** Migration steps
+
+1. Edit =market/candle.go=: add =Timestamp types.Timestamp= field to
+   =Candle=. Delete the =candleTime= struct and the =CandleTime= alias.
+   Update =CandleIterator= to =Next() (Candle, bool)=.
+2. Fix the resulting compile errors package by package (this is the
+   real work, and it IS mechanical — Go's compiler finds every site).
+   Suggested order, inner-to-outer dependency direction: =market/= →
+   =datamanager/= → =indicator/= (check for any =CandleTime= use) →
+   =strategy/= (regime_*.go files, =strategy.go=) → =strategies/*= →
+   =backtest/= → =service/= → =planner/= → =execution/=.
+3. Where a =market.Candle{}= literal is constructed WITHOUT a real
+   timestamp (synthetic/test candles, indicator-internal scratch
+   candles), leave =Timestamp= as its zero value. Do not synthesize a
+   timestamp for these — a zero timestamp on a genuinely timeless
+   candle is correct and expected, not a bug to silently paper over.
+4. Grep for any remaining string literal =\"CandleTime\"= (doc
+   comments, error messages) and update — leftover prose references to
+   a type that no longer exists are exactly the kind of stale-comment
+   confusion this whole effort is trying to reduce.
+5. =go build ./... && go vet ./... && go test ./...= clean before
+   calling this done. Given the 39-file scope, expect this to surface
+   as a real (if mechanical) PR — do not rush it into the same commit
+   as Part 2 below; land it, confirm green, then start Part 2.
+
+** Interaction with already-landed #179 work
+
+If =datamanager/data_sync.go='s =DeriveCanonicalFromRaw= (or wherever
+the raw→canonical derivation now lives post-#179) is currently
+threading timestamps through some other mechanism (e.g. still
+constructing bare =market.Candle{}= literals and tracking timestamps
+in a parallel slice, or already using the now-to-be-deleted
+=CandleTime=), fold it into this migration: after this change, it
+should construct =market.Candle{..., Timestamp: realTS}= directly, one
+type, no parallel bookkeeping. This is a good place to double check
+that #179's actual landed implementation matches the "timestamp is
+truth" principle it was designed around.
+
+* Part 2 — Rejection-candle detection as a new pattern-recognition package
+
+** Sequencing
+
+Depends on Part 1 being landed and green. Interfaces below are written
+directly against the merged =market.Candle= (with =.Timestamp=), not
+against =CandleTime=.
+
+** What this is, and why it is not an "indicator"
+
+=indicator/= (existing package: =ADX=, =ATR=, =EMA=,
+=ChoppinessIndex=, =BollingerBands=) has a consistent shape: each type
+is an incremental, Wilder-style *accumulator* that consumes candles one
+at a time via =Update(c market.Candle)=, grows smoothed state across the
+full history it has seen, and exposes a continuous numeric read-out
+(=Float64()=, =Value()=) answering "how strong / where / what regime,
+right now, given everything so far." That is a specific, and
+specifically continuous-valued, category.
+
+Rejection-candle detection answers a different KIND of question: "does
+THIS bar's shape (long wick, small body, close position within the
+bar's range) match a known price-action pattern," evaluated from a
+small fixed window (one bar, or a short lookback), not accumulated
+history. This is categorical/pattern-matching, not continuous/regime.
+It is a standard, separately-named category in technical analysis
+generally (e.g. TA-Lib splits "Pattern Recognition Functions" out from
+its momentum/trend/volatility indicator categories) — this is not an
+arbitrary split invented for this codebase, it matches how the domain
+is normally organized.
+
+Consequence: this does NOT belong inside =indicator/=. It gets its own
+package.
+
+** Package: candlepattern/ (sibling to indicator/)
+
+No existing package name collision (checked). =candlepattern/=,
+matching the specificity of =indicator/='s own naming (plain =pattern=
+was considered and rejected as too generic/likely to collide with
+future non-candle pattern work, e.g. chart patterns, order-flow
+patterns).
+
+#+begin_src go
+package candlepattern
+
+// RejectionDetector recognizes rejection-candle price action from a
+// short window of recent candles. Unlike indicator/'s accumulators,
+// implementations hold only a small fixed lookback, not full history.
+type RejectionDetector interface {
+    Name() string
+    Ready() bool                        // true once enough candles seen for lookback
+    Update(window []market.Candle)      // most-recent-last; len <= configured lookback
+    Matched() bool                      // true if the most recent Update matched
+    Side() types.Side                   // direction implied by the match (valid iff Matched())
+}
+
+type DetectorConfig struct {
+    Kind   string         `json:"kind" yaml:"kind"`
+    Params map[string]any `json:"params" yaml:"params"`
+}
+
+func GetRejectionDetector(cfg DetectorConfig) (RejectionDetector, error)
+// factory — mirrors strategy.GetExitStrategy / the planned
+// strategy.GetEntryTrigger shape; registered kinds via a small switch
+// or an init()-based registry, whichever this repo's existing
+// factories (see strategy/regime_factory.go) already use as precedent
+// — match that convention exactly rather than inventing a new one.
+#+end_src
+
+** First concrete implementation: WickRejection
+
+Four tunable parameters (design already established 2026-07-15, carried
+forward unchanged):
+
+| param          | meaning                                                      |
+|----------------+--------------------------------------------------------------|
+| min-wick-ratio | wick length / total bar range, minimum to count as a wick    |
+| max-close-pos  | close position within the bar's range, maximum (close must   |
+|                | sit near the opposite end from the rejected wick)            |
+| min-wick-atr   | minimum wick length, expressed in ATR multiples — filters    |
+|                | out noise-scale wicks on quiet bars                          |
+| lookback       | optional; >1 allows the pattern to be judged against a short |
+|                | recent window rather than a single bar in isolation          |
+
+#+begin_src go
+package candlepattern
+
+type WickRejection struct {
+    minWickRatio float64
+    maxClosePos  float64
+    minWickATR   float64
+    lookback     int
+
+    atr    *indicator.ATR   // dependency: min-wick-atr needs a volatility
+                            // reference; same relationship D1ADXFilter has
+                            // to indicator.ADX
+    window []market.Candle  // ring buffer, len <= lookback
+    matched bool
+    side    types.Side
+}
+
+func NewWickRejection(minWickRatio, maxClosePos, minWickATR float64,
+    lookback int, atrPeriod int, scale types.Scale6) (*WickRejection, error)
+
+func (w *WickRejection) Name() string { return "wick-rejection" }
+func (w *WickRejection) Ready() bool  { return w.atr.Ready() && len(w.window) >= w.lookback }
+func (w *WickRejection) Update(window []market.Candle) {
+    // 1. feed the latest candle to w.atr (needs its own Update call —
+    //    ATR is a full-history accumulator, unlike the pattern window)
+    // 2. maintain the ring buffer at len == w.lookback
+    // 3. evaluate min-wick-ratio / max-close-pos / min-wick-atr against
+    //    the most recent candle(s) in the window
+    // 4. set w.matched, w.side
+}
+func (w *WickRejection) Matched() bool    { return w.matched }
+func (w *WickRejection) Side() types.Side { return w.side }
+#+end_src
+
+Note the ATR dependency's =Update= is called on every bar regardless of
+=lookback= (ATR needs continuous history to stay warm), while the
+pattern-matching window itself only needs the last =lookback= candles —
+these are two different internal cadences inside the same type, worth a
+code comment explaining why so a future reader does not "simplify" the
+ring buffer into feeding ATR too.
+
+** Layer 2: the strategy-facing EntryTrigger adapter
+
+This is a SEPARATE, already-designed piece (see
+=entry-strategy-design.org=, 2026-07-16 — restated here since this
+agent has no memory of it):
+
+#+begin_src go
+package strategy
+
+type EntryTrigger interface {
+    Name() string
+    Ready() bool
+    Tick(c market.Candle)   // now market.Candle directly, post Part-1 merge
+                            // (the original sketch predated the merge and
+                            // used market.CandleTime — that type no longer
+                            // exists after Part 1 lands)
+    Triggered(side types.Side, episodeStart time.Time, c market.Candle) bool
+    Reset()
+}
+
+type EntryConfig struct {
+    Kind   string         `json:"kind" yaml:"kind"`
+    Params map[string]any `json:"params" yaml:"params"`
+}
+func GetEntryTrigger(cfg EntryConfig) (EntryTrigger, error)
+#+end_src
+
+=WickRejectionEntry= implements =EntryTrigger= by wrapping
+=candlepattern.WickRejection=, exactly the way =strategy.D1ADXFilter=
+(existing code, =strategy/regime_d1adx.go=) wraps =indicator.ADX=:
+
+#+begin_src go
+type WickRejectionEntry struct {
+    detector *candlepattern.WickRejection
+    window   []market.Candle // maintains the lookback slice passed to Update
+}
+
+func (e *WickRejectionEntry) Tick(c market.Candle) {
+    // append c to internal buffer, trim to lookback, call
+    // e.detector.Update(buffer)
+}
+func (e *WickRejectionEntry) Triggered(side types.Side, episodeStart time.Time, c market.Candle) bool {
+    return e.detector.Ready() && e.detector.Matched() && e.detector.Side() == side
+}
+#+end_src
+
+=D1ADXFilter='s existing =Tick= signature (=Tick(ct market.CandleTime)=)
+predates Part 1 and will itself become =Tick(c market.Candle)= as a
+side effect of the Part-1 migration — no separate action needed here,
+just confirms the two pieces of work converge on the same signature
+naturally.
+
+** Config flow
+
+=trader.yml= → =EntryConfig.Params= (raw map, four tunables above) →
+=GetEntryTrigger("wick-rejection", params)= parses/validates the typed
+values → constructs =WickRejectionEntry= → constructs
+=candlepattern.WickRejection= (which itself constructs its own
+=indicator.ATR=). Same shape as the existing =regime_factory.go= →
+=D1ADXFilter= → =indicator.ADX= chain — read that factory directly as
+the template for =GetEntryTrigger='s parsing/validation conventions
+(error messages, param-name-to-field mapping style, etc.) rather than
+inventing a new convention.
+
+** Where this fits the existing TODO sequence
+
+Per the review/backtest TODO list (2026-07-16 sequencing, items
+unchanged by this doc):
+
+- TODO #2 (sketch =EntryStrategy=/=EntryTrigger= interface) — DONE, see
+  entry-strategy-design.org. This doc's Layer 2 section restates it
+  post-merge; no new decision there.
+- TODO #4 (build rejection-candle as the first =EntryTrigger=
+  implementation) — THIS is that work: Part 2 above, in full.
+- Success metric (already agreed, restated for this agent's benefit):
+  shrink the 1–7-bar early-death cohort (confirmed present and robust
+  in both the pre- and post-#179 signalreplay runs — ~48% of trades,
+  substantially negative average R) without losing the 15–30+ bar
+  survivor cohort (also confirmed robust, strongly positive average R).
+  Test this by running =WickRejectionEntry= through
+  =strategies/signalreplay= (already supports pluggable entry per the
+  original signalreplay-spec.org's deferred =entry: "rejection-candle"=
+  mode) and comparing hold-length-cohort tables before/after, same
+  methodology as the existing signalreplay report tooling.
+
+** Non-goals for this doc
+
+- No changes to =indicator/= package itself — =candlepattern/= is a new
+  sibling package, not a modification of the existing one.
+- No other pattern types beyond =WickRejection= in this pass (engulfing,
+  pin bar, etc. are natural future =RejectionDetector=-shaped additions
+  but out of scope here — the point of the interface/factory split is
+  that adding one later is additive, not a redesign).
+- Does not touch =review/='s existing D1/H4/W1 indicator-based
+  classification logic at all — rejection-candle detection is purely
+  on the entry-timing side (signalreplay/backtest/live entry
+  decisions), separate from the Watch/Hot/Tradeable bucket gating.
