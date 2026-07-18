@@ -93,6 +93,20 @@ func TestWriteValidationReport_BadPathReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ── repairNeedsDownload ───────────────────────────────────────────────────────
+
+func TestRepairNeedsDownload(t *testing.T) {
+	// Raw missing entirely: always download.
+	assert.True(t, repairNeedsDownload(false, 0))
+	assert.True(t, repairNeedsDownload(false, 12))
+	// Raw present but derive left expected slots unfilled (partial fetch):
+	// presence of the file is not proof of completeness — download.
+	assert.True(t, repairNeedsDownload(true, 1))
+	assert.True(t, repairNeedsDownload(true, 27000))
+	// Raw present and derive filled every expected slot: no network needed.
+	assert.False(t, repairNeedsDownload(true, 0))
+}
+
 // ── filterReportIssues ────────────────────────────────────────────────────────
 
 func TestFilterReportIssues_DropsMatchingKind(t *testing.T) {

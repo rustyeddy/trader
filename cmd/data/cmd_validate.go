@@ -176,9 +176,13 @@ OANDA. All validated timeframes are repaired.`,
 
 // repairMissingCandles implements the repair pipeline:
 //  1. Collect all months with missing_expected_candles or missing_candle_month issues.
-//  2. For each month: check if the raw OANDA file already exists on disk.
-//  3. If raw is missing: download from OANDA and save it (raw is never deleted).
-//  4. Derive canonical candles from the raw file.
+//  2. For each month with an existing raw file: derive canonical from it. If
+//     that fills every expected slot, the month is repaired without touching
+//     the network.
+//  3. Otherwise — raw missing entirely, or present but unable to fill every
+//     expected slot (a file on disk is not proof the month is complete; it
+//     may be a partial fetch) — download the full month from OANDA fresh,
+//     overwriting the raw file, and derive again.
 func repairMissingCandles(
 	cmd *cobra.Command,
 	reports []*datamanager.CandleValidationReport,
@@ -270,40 +274,72 @@ func repairMissingCandles(
 		}
 		rawPath := datamanager.RawCandlePathAt(rawDir, rawKey)
 
-		// Step 2: check if raw already exists on disk.
+		// Step 2: if raw exists, try deriving from it first — repaired
+		// without touching the network iff it fills every expected slot.
+		rawExists := true
 		if _, statErr := os.Stat(rawPath); os.IsNotExist(statErr) {
-			// Step 3: raw missing — download from OANDA and save.
-			oandaInst := k.instrument
-			if len(k.instrument) == 6 {
-				oandaInst = k.instrument[:3] + "_" + k.instrument[3:]
-			}
-			monthStart := time.Date(k.year, time.Month(k.month), 1, 0, 0, 0, 0, time.UTC)
-			monthEnd := monthStart.AddDate(0, 1, 0).Add(-24 * time.Hour)
+			rawExists = false
+		}
 
-			_, dlErr := svc.DownloadOandaCandles(cmd.Context(), service.DownloadOandaCandlesRequest{
-				Instrument: oandaInst,
-				Timeframe:  k.timeframe,
-				From:       monthStart,
-				To:         monthEnd,
-				RawDir:     rawDir,
-				OnProgress: func(line string) { cmd.Printf("    %s\n", line) },
-			})
-			if dlErr != nil {
+		var preResult *service.DeriveResult
+		if rawExists {
+			r, deriveErr := svc.DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
+			if deriveErr != nil {
 				entry.Status = "error"
-				entry.Error = "download: " + dlErr.Error()
+				entry.Error = "derive: " + deriveErr.Error()
 				log.Entries = append(log.Entries, entry)
-				cmd.Printf("  [error] %s %s %04d-%02d: download: %v\n", k.instrument, k.timeframe, k.year, k.month, dlErr)
+				cmd.Printf("  [error] %s %s %04d-%02d: derive: %v\n", k.instrument, k.timeframe, k.year, k.month, deriveErr)
 				repairErrors++
 				continue
 			}
-			cmd.Printf("  [downloaded] %s %s %04d-%02d\n", k.instrument, k.timeframe, k.year, k.month)
-			entry.Status = "downloaded"
-		} else {
-			cmd.Printf("  [raw exists] %s %s %04d-%02d\n", k.instrument, k.timeframe, k.year, k.month)
-			entry.Status = "raw_exists"
+			preResult = r
 		}
 
-		// Step 4: derive canonical from raw, checking for missing market-hours slots.
+		preMissing := 0
+		if preResult != nil {
+			preMissing = preResult.MissingSlots
+		}
+		if !repairNeedsDownload(rawExists, preMissing) {
+			entry.Status = "derived"
+			entry.CandlesWritten = preResult.CandlesWritten
+			log.Entries = append(log.Entries, entry)
+			cmd.Printf("  [ok]    %s %s %04d-%02d: %d candle(s) derived from existing raw\n",
+				k.instrument, k.timeframe, k.year, k.month, preResult.CandlesWritten)
+			continue
+		}
+
+		// Step 3: raw missing, or present but incomplete — download the
+		// full month fresh (overwriting raw) and derive again.
+		if rawExists {
+			cmd.Printf("  [raw partial] %s %s %04d-%02d: %d expected slot(s) unfilled by existing raw — re-downloading\n",
+				k.instrument, k.timeframe, k.year, k.month, preMissing)
+		}
+		oandaInst := k.instrument
+		if len(k.instrument) == 6 {
+			oandaInst = k.instrument[:3] + "_" + k.instrument[3:]
+		}
+		monthStart := time.Date(k.year, time.Month(k.month), 1, 0, 0, 0, 0, time.UTC)
+		monthEnd := monthStart.AddDate(0, 1, 0).Add(-24 * time.Hour)
+
+		_, dlErr := svc.DownloadOandaCandles(cmd.Context(), service.DownloadOandaCandlesRequest{
+			Instrument: oandaInst,
+			Timeframe:  k.timeframe,
+			From:       monthStart,
+			To:         monthEnd,
+			RawDir:     rawDir,
+			OnProgress: func(line string) { cmd.Printf("    %s\n", line) },
+		})
+		if dlErr != nil {
+			entry.Status = "error"
+			entry.Error = "download: " + dlErr.Error()
+			log.Entries = append(log.Entries, entry)
+			cmd.Printf("  [error] %s %s %04d-%02d: download: %v\n", k.instrument, k.timeframe, k.year, k.month, dlErr)
+			repairErrors++
+			continue
+		}
+		cmd.Printf("  [downloaded] %s %s %04d-%02d\n", k.instrument, k.timeframe, k.year, k.month)
+		entry.Status = "downloaded"
+
 		result, deriveErr := svc.DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
 		if deriveErr != nil {
 			entry.Status = "error"
@@ -318,6 +354,12 @@ func repairMissingCandles(
 		entry.SampleMissing = result.SampleMissing
 		log.Entries = append(log.Entries, entry)
 
+		if preResult != nil && result.CandlesWritten < preResult.CandlesWritten {
+			// The fresh fetch has already overwritten the raw file, so
+			// surface loudly that OANDA returned less than the archive had.
+			cmd.Printf("  [warn]  %s %s %04d-%02d: re-download produced FEWER candles than existing raw (%d -> %d)\n",
+				k.instrument, k.timeframe, k.year, k.month, preResult.CandlesWritten, result.CandlesWritten)
+		}
 		if result.MissingSlots > 0 {
 			cmd.Printf("  [warn]  %s %s %04d-%02d: %d candle(s) derived, %d market-hours slot(s) missing from raw (sample: %v)\n",
 				k.instrument, k.timeframe, k.year, k.month,
@@ -343,6 +385,15 @@ func repairMissingCandles(
 		return fmt.Errorf("repair: %d month(s) failed", repairErrors)
 	}
 	return nil
+}
+
+// repairNeedsDownload reports whether a repair month must be re-downloaded
+// from OANDA. A raw file's presence alone is not proof the month is complete
+// or correct — it may be a partial fetch covering only part of the month —
+// so only a derive that fills every expected market-hours slot counts as
+// evidence the existing raw suffices.
+func repairNeedsDownload(rawExists bool, missingAfterDerive int) bool {
+	return !rawExists || missingAfterDerive > 0
 }
 
 // printValidationGrid prints a compact year-per-row grid for each instrument.
