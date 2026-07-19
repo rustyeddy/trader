@@ -3,7 +3,7 @@ package backtest
 import (
 	"testing"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
@@ -176,17 +176,17 @@ func TestBuildBacktestResult(t *testing.T) {
 	t.Parallel()
 
 	var nilRun *Backtest
-	assert.Nil(t, nilRun.BuildBacktestResult(&execution.Account{}))
+	assert.Nil(t, nilRun.BuildBacktestResult(&account.Account{}))
 
 	run := &Backtest{
 		Request: &BacktestRequest{StartingBalance: types.MoneyFromFloat(10_000)},
 	}
 	assert.Nil(t, run.BuildBacktestResult(nil))
 
-	acct := &execution.Account{
+	acct := &account.Account{
 		Balance: types.MoneyFromFloat(10_150),
 		Equity:  types.MoneyFromFloat(10_200),
-		Trades: []*execution.Trade{
+		Trades: []*account.Trade{
 			{PNL: types.MoneyFromFloat(100)},
 			nil,
 			{PNL: types.MoneyFromFloat(-25)},
@@ -290,8 +290,8 @@ func TestSummary_TradeDetailsIncludesReasonAndInitialStop(t *testing.T) {
 	fake, err := strategy.GetStrategy(strategy.StrategyConfig{Kind: "fake"})
 	require.NoError(t, err)
 
-	trade := &execution.Trade{
-		TradeCommon: &execution.TradeCommon{
+	trade := &account.Trade{
+		TradeCommon: &account.TradeCommon{
 			ID:          "t1",
 			Instrument:  "EURUSD",
 			Side:        types.Long,
@@ -305,7 +305,7 @@ func TestSummary_TradeDetailsIncludesReasonAndInitialStop(t *testing.T) {
 		ExitPrice:  types.PriceFromFloat(1.11),
 		ExitTime:   types.Timestamp(3601),
 		PNL:        types.MoneyFromFloat(100),
-		CloseCause: execution.CloseTakeProfit,
+		CloseCause: account.CloseTakeProfit,
 	}
 
 	run := &Backtest{
@@ -316,7 +316,7 @@ func TestSummary_TradeDetailsIncludesReasonAndInitialStop(t *testing.T) {
 			TimeRange:       types.TimeRange{Start: types.Timestamp(1), End: types.Timestamp(3601), TF: types.H1},
 			StartingBalance: types.MoneyFromFloat(10_000),
 		},
-		State:  &BacktestRun{Trades: []*execution.Trade{trade}},
+		State:  &BacktestRun{Trades: []*account.Trade{trade}},
 		Result: &BacktestResult{},
 	}
 

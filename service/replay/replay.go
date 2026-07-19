@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -180,7 +180,7 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 
 	bt := &backtest.Backtest{
 		Request: &backtest.BacktestRequest{Instrument: inst},
-		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
+		State:   &backtest.BacktestRun{Lots: &account.LotBook{}},
 	}
 
 	for ct, ok := iter.Next(); ok; ct, ok = iter.Next() {
@@ -318,16 +318,16 @@ func (s *Service) RunReplay(ctx context.Context, req ReplayRequest) (*ReplayResu
 						Reason:    sig.Reason,
 					})
 
-					tc := &execution.TradeCommon{ID: posID}
+					tc := &account.TradeCommon{ID: posID}
 					tc.Side = sig.Side
 					tc.Stop = stop
 					tc.Instrument = inst
-					bt.State.Lots.Add(&execution.Lot{
+					bt.State.Lots.Add(&account.Lot{
 						TradeCommon:    tc,
 						EntryPrice:     candle.Close,
 						OriginalUnits:  1,
 						RemainingUnits: 1,
-						State:          execution.LotOpen,
+						State:          account.LotOpen,
 					})
 
 					positions = append(positions, &replayPosition{

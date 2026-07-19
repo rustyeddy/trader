@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
@@ -94,8 +94,8 @@ func TestUpdate_SkipsWhenInPosition(t *testing.T) {
 	assert.Equal(t, types.Long, sig.Side)
 
 	// Simulate position open by adding a lot.
-	lb := &execution.LotBook{}
-	lb.Add(&execution.Lot{TradeCommon: &execution.TradeCommon{ID: "test-lot-1"}})
+	lb := &account.LotBook{}
+	lb.Add(&account.Lot{TradeCommon: &account.TradeCommon{ID: "test-lot-1"}})
 	run.State.Lots = lb
 
 	// Subsequent calls skip because a position is open.

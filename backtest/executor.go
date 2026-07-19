@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/engine"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -20,8 +20,8 @@ type BacktestExecutor interface {
 // factory-provided runtime dependencies.
 type TraderBacktestExecutor struct {
 	DataManager    engine.CandleSource
-	BrokerFactory  func() *execution.Broker
-	AccountFactory func(name string, balance types.Money) *execution.Account
+	BrokerFactory  func() *account.Broker
+	AccountFactory func(name string, balance types.Money) *account.Account
 }
 
 // NewTraderBacktestExecutor returns a BacktestExecutor that uses Trader as the
@@ -29,11 +29,11 @@ type TraderBacktestExecutor struct {
 func NewTraderBacktestExecutor(dm engine.CandleSource) *TraderBacktestExecutor {
 	return &TraderBacktestExecutor{
 		DataManager: dm,
-		BrokerFactory: func() *execution.Broker {
-			return execution.NewBroker("sim")
+		BrokerFactory: func() *account.Broker {
+			return account.NewBroker("sim")
 		},
-		AccountFactory: func(name string, balance types.Money) *execution.Account {
-			return execution.NewAccount(name, balance)
+		AccountFactory: func(name string, balance types.Money) *account.Account {
+			return account.NewAccount(name, balance)
 		},
 	}
 }

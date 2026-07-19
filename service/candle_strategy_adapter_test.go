@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/planner"
 	"github.com/rustyeddy/trader/strategy"
@@ -112,7 +112,7 @@ func TestLiveLotsTracker_SideFromUnits(t *testing.T) {
 	})
 	lb := lt.toLotBook()
 	var sides []types.Side
-	_ = lb.Range(func(lot *execution.Lot) error {
+	_ = lb.Range(func(lot *account.Lot) error {
 		sides = append(sides, lot.Side)
 		return nil
 	})
@@ -153,9 +153,9 @@ func TestConvertPlan_OpenLongConverted(t *testing.T) {
 	close := types.Price(math.Round(1.10000 * scale))
 	stop := types.Price(math.Round(1.09000 * scale)) // 100-pip stop
 
-	open := execution.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, stop, 0, "test")
+	open := account.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, stop, 0, "test")
 
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
+	plan := &strategy.StrategyPlan{Opens: []*account.OpenRequest{open}}
 
 	lp := a.convertPlan(plan, LivePrice{})
 	require.NotNil(t, lp)
@@ -173,9 +173,9 @@ func TestConvertPlan_OpenWithNoStopSkipped(t *testing.T) {
 
 	// Stop == 0: PlanSignal would normally set it; if it reaches convertPlan
 	// with stop=0 still, the open must be skipped.
-	open := execution.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, 0 /*stop*/, 0, "test")
+	open := account.NewOpenRequest("EURUSD", &market.Candle{Close: close, Timestamp: types.FromTime(time.Now())}, types.Long, 0 /*stop*/, 0, "test")
 
-	plan := &strategy.StrategyPlan{Opens: []*execution.OpenRequest{open}}
+	plan := &strategy.StrategyPlan{Opens: []*account.OpenRequest{open}}
 
 	lp := a.convertPlan(plan, LivePrice{})
 	// Plan has no closes either, so result must be nil.
@@ -186,17 +186,17 @@ func TestConvertPlan_CloseIDsPopulated(t *testing.T) {
 	t.Parallel()
 	a := makeTestAdapter()
 
-	tc := &execution.TradeCommon{ID: "oanda-trade-999"}
-	lot := &execution.Lot{TradeCommon: tc, State: execution.LotOpen}
-	cr := &execution.CloseRequest{
-		Request: execution.Request{
+	tc := &account.TradeCommon{ID: "oanda-trade-999"}
+	lot := &account.Lot{TradeCommon: tc, State: account.LotOpen}
+	cr := &account.CloseRequest{
+		Request: account.Request{
 			TradeCommon: tc,
-			RequestType: execution.RequestClose,
+			RequestType: account.RequestClose,
 		},
 		Lot: lot,
 	}
 
-	plan := &strategy.StrategyPlan{Closes: []*execution.CloseRequest{cr}}
+	plan := &strategy.StrategyPlan{Closes: []*account.CloseRequest{cr}}
 	lp := a.convertPlan(plan, LivePrice{})
 	require.NotNil(t, lp)
 	assert.Equal(t, []string{"oanda-trade-999"}, lp.CloseIDs)

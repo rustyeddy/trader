@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/engine"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/planner"
@@ -191,8 +191,8 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		// Update trailing/chandelier stops on all open lots.
 		if exit.Ready() {
-			_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
-				if lot == nil || lot.State != execution.LotOpen {
+			_ = t.Account.Lots.Range(func(lot *account.Lot) error {
+				if lot == nil || lot.State != account.LotOpen {
 					return nil
 				}
 				// Advance extreme price watermark.
@@ -254,7 +254,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 				return err
 			}
 			if cl.Lot != nil {
-				cl.Lot.State = execution.LotCloseRequested
+				cl.Lot.State = account.LotCloseRequested
 			}
 			atomic.AddInt64(&submittedCloses, 1)
 		}
@@ -279,9 +279,9 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		return err
 	}
 	if haveLastCandle {
-		var remaining []*execution.Lot
-		_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
-			if lot != nil && lot.State == execution.LotOpen {
+		var remaining []*account.Lot
+		_ = t.Account.Lots.Range(func(lot *account.Lot) error {
+			if lot != nil && lot.State == account.LotOpen {
 				remaining = append(remaining, lot)
 			}
 			return nil
@@ -289,17 +289,17 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 		for _, lot := range remaining {
 			isBuy := lot.Side == types.Short
-			closePx := lastCandle.Close + execution.FillAdjust(isBuy, lastCandle.AvgSpread, slippage)
-			cl := &execution.CloseRequest{
-				Request: execution.Request{
+			closePx := lastCandle.Close + account.FillAdjust(isBuy, lastCandle.AvgSpread, slippage)
+			cl := &account.CloseRequest{
+				Request: account.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "end-of-backtest",
-					RequestType: execution.RequestClose,
+					RequestType: account.RequestClose,
 					Price:       closePx,
 					Timestamp:   lastCandle.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: execution.CloseManual,
+				CloseCause: account.CloseManual,
 			}
 
 			if err := t.Broker.SubmitClose(runCtx, cl); err != nil {

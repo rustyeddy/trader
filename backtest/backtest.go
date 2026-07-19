@@ -3,7 +3,7 @@ package backtest
 import (
 	"fmt"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -24,7 +24,7 @@ type Backtest struct {
 
 // emptyLotBook is returned by OpenLots when no lot state exists, so callers can
 // always safely call Len/Range without a nil check.
-var emptyLotBook = &execution.LotBook{}
+var emptyLotBook = &account.LotBook{}
 
 // Instrument implements StrategyContext: the instrument being traded.
 func (b *Backtest) Instrument() string {
@@ -173,7 +173,7 @@ func applyBacktestExecutionDefaults(req *BacktestRequest, cfg RunConfig, default
 // returns, gross P/L, averages, risk/reward, and closed-trade drawdown from
 // the account's closed trades.
 // Returns nil if run or acct is nil.
-func (run *Backtest) BuildBacktestResult(acct *execution.Account) *BacktestResult {
+func (run *Backtest) BuildBacktestResult(acct *account.Account) *BacktestResult {
 	if run == nil || acct == nil {
 		return nil
 	}

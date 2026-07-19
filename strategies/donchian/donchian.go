@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -295,8 +295,8 @@ func (d *Breakout) Update(_ context.Context, ct *market.Candle, run strategy.Str
 	// Check if already in the same side — planner handles reversal-closes.
 	alreadySameSide := false
 	if run != nil {
-		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
-			if lot.State == execution.LotOpen && lot.Side == side {
+		_ = run.OpenLots().Range(func(lot *account.Lot) error {
+			if lot.State == account.LotOpen && lot.Side == side {
 				alreadySameSide = true
 			}
 			return nil

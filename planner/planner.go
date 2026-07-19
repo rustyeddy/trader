@@ -8,7 +8,7 @@
 package planner
 
 import (
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -20,7 +20,7 @@ import (
 // parameters.
 type PlanContext interface {
 	Instrument() string
-	Account() *execution.Account
+	Account() *account.Account
 	Exit() strategy.ExitStrategy
 	Regime() strategy.RegimeFilter
 	Candle() market.Candle
@@ -90,7 +90,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 	for _, cl := range raw.Closes {
 		if cl != nil && cl.Lot != nil {
 			isBuy := cl.Lot.Side == types.Short
-			cl.Price += execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
+			cl.Price += account.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		}
 	}
 
@@ -102,7 +102,7 @@ func (DefaultPlanner) finalize(raw *strategy.StrategyPlan, pc PlanContext) (*str
 
 		// Long buys at ask; short sells at bid.
 		isBuy := openReq.Side == types.Long
-		openReq.Price += execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
+		openReq.Price += account.FillAdjust(isBuy, candle.AvgSpread, slippage)
 		stats.SpreadOpened++
 		stats.SpreadSum += candle.AvgSpread
 
@@ -162,48 +162,48 @@ func (p DefaultPlanner) PlanSignal(sig strategy.Signal, pc PlanContext) (*strate
 
 	if sig.CloseAll && acct != nil {
 		// Close ALL open lots — strategy-controlled exit (not just reversal).
-		_ = acct.Lots.Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen {
+		_ = acct.Lots.Range(func(lot *account.Lot) error {
+			if lot.State != account.LotOpen {
 				return nil
 			}
-			plan.Closes = append(plan.Closes, &execution.CloseRequest{
-				Request: execution.Request{
+			plan.Closes = append(plan.Closes, &account.CloseRequest{
+				Request: account.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      sig.Reason,
 					Candle:      candle,
-					RequestType: execution.RequestClose,
+					RequestType: account.RequestClose,
 					Price:       candle.Close,
 					Timestamp:   candle.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: execution.CloseManual,
+				CloseCause: account.CloseManual,
 			})
 			return nil
 		})
 	} else if sig.Side != types.Flat && acct != nil {
 		// Reversal-close: close any open lots on the opposing side only.
-		_ = acct.Lots.Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen || lot.Side == sig.Side {
+		_ = acct.Lots.Range(func(lot *account.Lot) error {
+			if lot.State != account.LotOpen || lot.Side == sig.Side {
 				return nil
 			}
-			plan.Closes = append(plan.Closes, &execution.CloseRequest{
-				Request: execution.Request{
+			plan.Closes = append(plan.Closes, &account.CloseRequest{
+				Request: account.Request{
 					TradeCommon: lot.TradeCommon,
 					Reason:      "signal-reverse",
 					Candle:      candle,
-					RequestType: execution.RequestClose,
+					RequestType: account.RequestClose,
 					Price:       candle.Close,
 					Timestamp:   candle.Timestamp,
 				},
 				Lot:        lot,
-				CloseCause: execution.CloseManual,
+				CloseCause: account.CloseManual,
 			})
 			return nil
 		})
 	}
 
 	if sig.Side != types.Flat {
-		plan.Opens = append(plan.Opens, execution.NewOpenRequest(
+		plan.Opens = append(plan.Opens, account.NewOpenRequest(
 			pc.Instrument(), &candle, sig.Side, sig.Stop, 0, sig.Reason,
 		))
 	}

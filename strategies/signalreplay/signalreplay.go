@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -265,8 +265,8 @@ func episodeReason(t time.Time) string {
 func openLotInfo(sc strategy.StrategyContext) (bool, types.Side) {
 	var side types.Side
 	found := false
-	_ = sc.OpenLots().Range(func(lot *execution.Lot) error {
-		if lot != nil && lot.State == execution.LotOpen {
+	_ = sc.OpenLots().Range(func(lot *account.Lot) error {
+		if lot != nil && lot.State == account.LotOpen {
 			side = lot.Side
 			found = true
 		}

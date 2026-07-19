@@ -1,7 +1,7 @@
 package backtest
 
 import (
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -9,8 +9,8 @@ import (
 // execution: the current lot book, the list of closed trades, and execution-cost
 // counters updated by the run loop.
 type BacktestRun struct {
-	Lots   *execution.LotBook
-	Trades []*execution.Trade
+	Lots   *account.LotBook
+	Trades []*account.Trade
 
 	// Execution cost tracking — populated by the run loop.
 	SpreadFiltered int         // opens suppressed by the max-spread filter
@@ -19,7 +19,7 @@ type BacktestRun struct {
 }
 
 // GetTrades returns the run's closed trade list, or nil if run is nil.
-func (run *BacktestRun) GetTrades() []*execution.Trade {
+func (run *BacktestRun) GetTrades() []*account.Trade {
 	if run == nil {
 		return nil
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -40,10 +40,10 @@ func eurusdTick(mid types.Price) market.Tick {
 }
 
 // openLot adds a minimal open lot for EURUSD to acct and returns it.
-func openLot(t *testing.T, acct *execution.Account, entryPrice types.Price) *execution.Lot {
+func openLot(t *testing.T, acct *account.Account, entryPrice types.Price) *account.Lot {
 	t.Helper()
-	lot := &execution.Lot{
-		TradeCommon: &execution.TradeCommon{
+	lot := &account.Lot{
+		TradeCommon: &account.TradeCommon{
 			ID:         "lot-sim-1",
 			Instrument: "EURUSD",
 			Side:       types.Long,
@@ -53,7 +53,7 @@ func openLot(t *testing.T, acct *execution.Account, entryPrice types.Price) *exe
 		EntryTime:      1000,
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          execution.LotOpen,
+		State:          account.LotOpen,
 	}
 	require.NoError(t, acct.AddLot(lot))
 	return lot
@@ -68,7 +68,7 @@ func TestNewSimBroker_NilAccountCreatesDefault(t *testing.T) {
 }
 
 func TestNewSimBroker_ProvidedAccountIsUsed(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(5_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(5_000))
 	s := NewSimBroker(acct, nil)
 	require.NotNil(t, s)
 	assert.Equal(t, acct, s.account)
@@ -88,7 +88,7 @@ func TestNewSimBroker_JournalIsStored(t *testing.T) {
 // ── GetAccount ────────────────────────────────────────────────────────────────
 
 func TestGetAccount_ReturnsAccount(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(10_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
 	s := NewSimBroker(acct, nil)
 	got, err := s.GetAccount(context.Background())
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestGetAccount_NilAccountFieldReturnsError(t *testing.T) {
 // ── UpdatePrice ───────────────────────────────────────────────────────────────
 
 func TestUpdatePrice_ValidTickUpdatesEquity(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(10_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
 	s := NewSimBroker(acct, nil)
 
 	err := s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.08)))
@@ -188,7 +188,7 @@ func TestCloseAll_NoLots_RecordsEquitySnapshot(t *testing.T) {
 }
 
 func TestCloseAll_WithLot_ClosesAndRecordsTrade(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(10_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
 	j := &stubJournal{}
 	s := NewSimBroker(acct, j)
 
@@ -208,7 +208,7 @@ func TestCloseAll_WithLot_ClosesAndRecordsTrade(t *testing.T) {
 }
 
 func TestCloseAll_MissingPriceReturnsError(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(10_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
 	s := NewSimBroker(acct, nil)
 	openLot(t, acct, types.PriceFromFloat(1.08))
 
@@ -226,7 +226,7 @@ func TestCloseAll_NilReceiverReturnsError(t *testing.T) {
 }
 
 func TestCloseAll_NilJournal_DoesNotPanic(t *testing.T) {
-	acct := execution.NewAccount("test", types.MoneyFromFloat(10_000))
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
 	s := NewSimBroker(acct, nil) // no journal
 	openLot(t, acct, types.PriceFromFloat(1.08))
 	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.09))))

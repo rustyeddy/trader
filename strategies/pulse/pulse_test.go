@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
@@ -25,12 +25,12 @@ func makeCandle() *market.Candle {
 
 // makeRun builds a StrategyContext with zero or more open lots.
 func makeRun(lotIDs ...string) *backtest.Backtest {
-	lb := &execution.LotBook{}
+	lb := &account.LotBook{}
 	for _, id := range lotIDs {
-		tc := &execution.TradeCommon{ID: id}
+		tc := &account.TradeCommon{ID: id}
 		tc.Instrument = "EURUSD"
 		tc.Side = types.Long
-		_ = lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
+		_ = lb.Add(&account.Lot{TradeCommon: tc, State: account.LotOpen})
 	}
 	return &backtest.Backtest{
 		Request: &backtest.BacktestRequest{Instrument: "EURUSD"},

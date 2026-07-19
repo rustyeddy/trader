@@ -105,8 +105,6 @@ type accountChangesWire struct {
 	LastTransactionID string `json:"lastTransactionID"`
 }
 
-// ─── parse helpers ────────────────────────────────────────────────────────────
-
 func parseTradeDetailWire(t tradeDetailWire) (OpenTrade, error) {
 	ot := OpenTrade{
 		ID:         t.ID,
@@ -145,8 +143,6 @@ func parseTradeDetailWire(t tradeDetailWire) (OpenTrade, error) {
 	}
 	return ot, nil
 }
-
-// ─── API methods ──────────────────────────────────────────────────────────────
 
 // GetAccountDetails fetches the full account snapshot from OANDA including
 // open trades and lastTransactionID. Use this once at startup to seed the

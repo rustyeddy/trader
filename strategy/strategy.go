@@ -3,7 +3,7 @@ package strategy
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -22,7 +22,7 @@ type StrategyContext interface {
 // LotView is a read-only view over a set of open lots. *LotBook satisfies it.
 type LotView interface {
 	Len() int
-	Range(func(*execution.Lot) error) error
+	Range(func(*account.Lot) error) error
 }
 
 // Strategy is the single backtest strategy interface used across the repo.

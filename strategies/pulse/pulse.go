@@ -11,7 +11,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -119,7 +119,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sctx strategy.St
 	shouldClose := false
 	if sctx != nil {
 		seen := map[string]bool{}
-		_ = sctx.OpenLots().Range(func(lot *execution.Lot) error {
+		_ = sctx.OpenLots().Range(func(lot *account.Lot) error {
 			openCount++
 			seen[lot.ID] = true
 			if _, tracked := s.lotOpenedAt[lot.ID]; !tracked {

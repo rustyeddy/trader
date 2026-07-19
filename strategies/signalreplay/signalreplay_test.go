@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -21,20 +21,20 @@ import (
 // tests can simulate lots opening and closing across bars.
 type fakeCtx struct {
 	instrument string
-	lots       *execution.LotBook
+	lots       *account.LotBook
 }
 
 func newFakeCtx(instrument string) *fakeCtx {
-	return &fakeCtx{instrument: instrument, lots: &execution.LotBook{}}
+	return &fakeCtx{instrument: instrument, lots: &account.LotBook{}}
 }
 
 func (f *fakeCtx) Instrument() string         { return f.instrument }
 func (f *fakeCtx) OpenLots() strategy.LotView { return f.lots }
 
 func (f *fakeCtx) openLot(id string, side types.Side) {
-	_ = f.lots.Add(&execution.Lot{
-		TradeCommon: &execution.TradeCommon{ID: id, Instrument: f.instrument, Side: side},
-		State:       execution.LotOpen,
+	_ = f.lots.Add(&account.Lot{
+		TradeCommon: &account.TradeCommon{ID: id, Instrument: f.instrument, Side: side},
+		State:       account.LotOpen,
 	})
 }
 

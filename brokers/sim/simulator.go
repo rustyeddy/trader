@@ -5,24 +5,24 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
 
 type Sim struct {
-	account *execution.Account
+	account *account.Account
 	journal journal.Journal
 	prices  map[string]market.Tick
 }
 
-func NewSimBroker(acct *execution.Account, j journal.Journal) *Sim {
+func NewSimBroker(acct *account.Account, j journal.Journal) *Sim {
 	if acct == nil {
-		acct = execution.NewAccount("sim", 0)
+		acct = account.NewAccount("sim", 0)
 	}
 	if acct.Lots.All() == nil {
-		acct.Lots = execution.LotBook{}
+		acct.Lots = account.LotBook{}
 	}
 	return &Sim{
 		account: acct,
@@ -57,8 +57,8 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		return fmt.Errorf("sim broker account is nil")
 	}
 
-	var lots []*execution.Lot
-	_ = e.account.Lots.Range(func(lot *execution.Lot) error {
+	var lots []*account.Lot
+	_ = e.account.Lots.Range(func(lot *account.Lot) error {
 		lots = append(lots, lot)
 		return nil
 	})
@@ -70,7 +70,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 		}
 		exitPrice := px.Mid()
 		exitTime := types.FromTime(time.Now().UTC())
-		trade := &execution.Trade{
+		trade := &account.Trade{
 			TradeCommon: lot.TradeCommon.Clone(),
 			EntryPrice:  lot.EntryPrice,
 			EntryTime:   lot.EntryTime,
@@ -109,7 +109,7 @@ func (e *Sim) CloseAll(ctx context.Context, reason string) error {
 	return nil
 }
 
-func (e *Sim) GetAccount(context.Context) (*execution.Account, error) {
+func (e *Sim) GetAccount(context.Context) (*account.Account, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("sim broker account is nil")
 	}

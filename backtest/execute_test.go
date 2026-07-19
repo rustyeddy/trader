@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/engine"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -60,8 +60,8 @@ func (it *fixedCandleIterator) Close() error {
 func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	t.Parallel()
 
-	acct := execution.NewAccount("acct", types.MoneyFromFloat(10_000))
-	broker := execution.NewBroker("broker")
+	acct := account.NewAccount("acct", types.MoneyFromFloat(10_000))
+	broker := account.NewBroker("broker")
 	broker.Account = acct
 
 	tr := &engine.Trader{Broker: broker}
@@ -99,15 +99,15 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	var nilTrader *engine.Trader
 	require.ErrorContains(t, run.Execute(ctx, nilTrader), "nil trader")
 
-	noAcct := &engine.Trader{Broker: execution.NewBroker("no-account")}
+	noAcct := &engine.Trader{Broker: account.NewBroker("no-account")}
 	require.ErrorContains(t, run.Execute(ctx, noAcct), "nil account")
 
-	withAcctBroker := execution.NewBroker("with-account")
-	withAcctBroker.Account = execution.NewAccount("acct", types.MoneyFromFloat(10_000))
+	withAcctBroker := account.NewBroker("with-account")
+	withAcctBroker.Account = account.NewAccount("acct", types.MoneyFromFloat(10_000))
 	withAcct := &engine.Trader{Broker: withAcctBroker}
 	require.ErrorContains(t, run.Execute(ctx, withAcct), "nil data manager")
 
-	broker := execution.NewBroker("broker")
+	broker := account.NewBroker("broker")
 	broker.Account = withAcctBroker.Account
 
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)

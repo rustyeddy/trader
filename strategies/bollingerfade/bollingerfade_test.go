@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
@@ -32,11 +32,11 @@ func warmup(t *testing.T, f *Fade) {
 }
 
 // makeLot builds a minimal open lot snapshot for the given side.
-func makeLot(side types.Side) *execution.LotBook {
-	lb := &execution.LotBook{}
-	tc := &execution.TradeCommon{ID: "test-lot"}
+func makeLot(side types.Side) *account.LotBook {
+	lb := &account.LotBook{}
+	tc := &account.TradeCommon{ID: "test-lot"}
 	tc.Side = side
-	lb.Add(&execution.Lot{TradeCommon: tc, State: execution.LotOpen})
+	lb.Add(&account.Lot{TradeCommon: tc, State: account.LotOpen})
 	return lb
 }
 

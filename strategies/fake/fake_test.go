@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -17,7 +17,7 @@ import (
 func fakeRun(instrument string) *backtest.Backtest {
 	return &backtest.Backtest{
 		Request: &backtest.BacktestRequest{Instrument: instrument},
-		State:   &backtest.BacktestRun{Lots: &execution.LotBook{}},
+		State:   &backtest.BacktestRun{Lots: &account.LotBook{}},
 	}
 }
 
@@ -76,8 +76,8 @@ func TestFake_Update_HoldsWhenInPosition(t *testing.T) {
 	f := &Fake{CandleCount: 1, highest: types.PriceFromFloat(1.0)}
 	run := fakeRun("EURUSD")
 
-	lot := &execution.Lot{
-		TradeCommon: &execution.TradeCommon{
+	lot := &account.Lot{
+		TradeCommon: &account.TradeCommon{
 			ID:    idgen.NewULID(),
 			Side:  types.Long,
 			Units: 1000,
@@ -85,7 +85,7 @@ func TestFake_Update_HoldsWhenInPosition(t *testing.T) {
 		},
 		OriginalUnits:  1000,
 		RemainingUnits: 1000,
-		State:          execution.LotOpen,
+		State:          account.LotOpen,
 	}
 	run.State.Lots.Add(lot)
 
@@ -118,8 +118,8 @@ func TestFake02_Update_OpenThenCloseCycle(t *testing.T) {
 	assert.Equal(t, types.Long, openSig.Side)
 	assert.Equal(t, "fake-02-open", openSig.Reason)
 
-	tc := &execution.TradeCommon{ID: idgen.NewULID(), Side: types.Long, Units: 1000, Instrument: "EURUSD"}
-	openLot := &execution.Lot{TradeCommon: tc, OriginalUnits: 1000, RemainingUnits: 1000, State: execution.LotOpen}
+	tc := &account.TradeCommon{ID: idgen.NewULID(), Side: types.Long, Units: 1000, Instrument: "EURUSD"}
+	openLot := &account.Lot{TradeCommon: tc, OriginalUnits: 1000, RemainingUnits: 1000, State: account.LotOpen}
 	run.State.Lots.Add(openLot)
 
 	holdSig := f.Update(context.Background(), fakeCandle(2, 1.1005, 1.1015, 1.0995), run)

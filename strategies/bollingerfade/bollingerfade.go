@@ -17,7 +17,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
@@ -106,8 +106,8 @@ func (f *Fade) Update(_ context.Context, ct *market.Candle, run strategy.Strateg
 	hasOpen := false
 	shouldCloseAll := false
 	if run != nil {
-		_ = run.OpenLots().Range(func(lot *execution.Lot) error {
-			if lot.State != execution.LotOpen {
+		_ = run.OpenLots().Range(func(lot *account.Lot) error {
+			if lot.State != account.LotOpen {
 				return nil
 			}
 			hasOpen = true

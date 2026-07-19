@@ -1,7 +1,7 @@
 package backtest
 
 import (
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
@@ -12,7 +12,7 @@ import (
 // and the configured execution-cost parameters.
 type runPlanContext struct {
 	instrument      string
-	acct            *execution.Account
+	acct            *account.Account
 	exit            strategy.ExitStrategy
 	regime          strategy.RegimeFilter
 	candle          market.Candle
@@ -22,7 +22,7 @@ type runPlanContext struct {
 }
 
 func (c runPlanContext) Instrument() string            { return c.instrument }
-func (c runPlanContext) Account() *execution.Account   { return c.acct }
+func (c runPlanContext) Account() *account.Account     { return c.acct }
 func (c runPlanContext) Exit() strategy.ExitStrategy   { return c.exit }
 func (c runPlanContext) Regime() strategy.RegimeFilter { return c.regime }
 func (c runPlanContext) Candle() market.Candle         { return c.candle }

@@ -3,7 +3,7 @@ package backtest
 import (
 	"context"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
@@ -12,31 +12,31 @@ import (
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Candle, slippage types.Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *account.Broker, candle market.Candle, slippage types.Price) (int, error) {
 	var hits []struct {
-		lot    *execution.Lot
+		lot    *account.Lot
 		exitPx types.Price
 		reason string
-		cause  execution.CloseCause
+		cause  account.CloseCause
 	}
 
-	_ = b.Account.Lots.Range(func(lot *execution.Lot) error {
-		if lot.State != execution.LotOpen {
+	_ = b.Account.Lots.Range(func(lot *account.Lot) error {
+		if lot.State != account.LotOpen {
 			return nil
 		}
 		exitPx, reason, hit := checkExit(lot, candle)
 		if !hit {
 			return nil
 		}
-		cause := execution.CloseStopLoss
+		cause := account.CloseStopLoss
 		if reason == "TAKE" {
-			cause = execution.CloseTakeProfit
+			cause = account.CloseTakeProfit
 		}
 		hits = append(hits, struct {
-			lot    *execution.Lot
+			lot    *account.Lot
 			exitPx types.Price
 			reason string
-			cause  execution.CloseCause
+			cause  account.CloseCause
 		}{lot, exitPx, reason, cause})
 		return nil
 	})
@@ -44,11 +44,11 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 	for _, h := range hits {
 		// Short closes by buying at ask; long closes by selling at bid.
 		isBuy := h.lot.Side == types.Short
-		adjPx := h.exitPx + execution.FillAdjust(isBuy, candle.AvgSpread, slippage)
-		cl := &execution.CloseRequest{
-			Request: execution.Request{
+		adjPx := h.exitPx + account.FillAdjust(isBuy, candle.AvgSpread, slippage)
+		cl := &account.CloseRequest{
+			Request: account.Request{
 				TradeCommon: h.lot.TradeCommon,
-				RequestType: execution.RequestClose,
+				RequestType: account.RequestClose,
 				Price:       adjPx,
 				Timestamp:   candle.Timestamp,
 				Reason:      h.reason,
@@ -65,7 +65,7 @@ func autoCloseExits(ctx context.Context, b *execution.Broker, candle market.Cand
 
 // checkExit evaluates stop/take on OHLC.
 // If both stop & take hit in same bar, we assume stop-first (pessimistic).
-func checkExit(lot *execution.Lot, c market.Candle) (exitPx types.Price, reason string, hit bool) {
+func checkExit(lot *account.Lot, c market.Candle) (exitPx types.Price, reason string, hit bool) {
 	if lot == nil {
 		return 0, "", false
 	}

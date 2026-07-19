@@ -1,5 +1,5 @@
 // Package engine is the low-level backtest/live execution mechanism: the Trader
-// type, which drives an execution.Broker and drains its event queue while
+// type, which drives an account.Broker and drains its event queue while
 // tracking open lots. It is pure mechanism with no notion of a "run" — the
 // higher-level backtest package orchestrates runs on top of it
 // (backtest -> engine; engine never imports backtest).
@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rustyeddy/trader/execution"
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/log"
 )
 
@@ -20,13 +20,13 @@ import (
 // primitives to run a session.
 type Trader struct {
 	DataManager CandleSource
-	*execution.Broker
+	*account.Broker
 }
 
 // StartBrokerEventHandler launches the goroutine that drains the broker event
 // queue, processing each event and reporting the first error on the returned
 // error channel. The done channel closes when the handler exits.
-func (t *Trader) StartBrokerEventHandler(ctx context.Context, evtQ <-chan *execution.Event, processed *int64) (<-chan error, <-chan struct{}) {
+func (t *Trader) StartBrokerEventHandler(ctx context.Context, evtQ <-chan *account.Event, processed *int64) (<-chan error, <-chan struct{}) {
 	errCh := make(chan error, 1)
 	done := make(chan struct{})
 
@@ -77,13 +77,13 @@ func (t *Trader) BrokerEventError(errCh <-chan error) error {
 
 // SnapshotLots returns a deep copy of the open/pending lots in src so callers
 // can hand a stable view to a strategy without racing the broker.
-func SnapshotLots(src *execution.LotBook) *execution.LotBook {
-	out := &execution.LotBook{}
+func SnapshotLots(src *account.LotBook) *account.LotBook {
+	out := &account.LotBook{}
 	if src == nil {
 		return out
 	}
-	_ = src.Range(func(lot *execution.Lot) error {
-		if lot != nil && (lot.State == execution.LotOpen || lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested) {
+	_ = src.Range(func(lot *account.Lot) error {
+		if lot != nil && (lot.State == account.LotOpen || lot.State == account.LotOpenRequested || lot.State == account.LotCloseRequested) {
 			_ = out.Add(lot.Clone())
 		}
 		return nil
@@ -107,8 +107,8 @@ func (t *Trader) WaitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 
 		pendingState := false
 		if t != nil && t.Account != nil {
-			_ = t.Account.Lots.Range(func(lot *execution.Lot) error {
-				if lot.State == execution.LotOpenRequested || lot.State == execution.LotCloseRequested {
+			_ = t.Account.Lots.Range(func(lot *account.Lot) error {
+				if lot.State == account.LotOpenRequested || lot.State == account.LotCloseRequested {
 					pendingState = true
 				}
 				return nil
@@ -125,7 +125,7 @@ func (t *Trader) WaitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 	}
 }
 
-func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
+func (t *Trader) processEvent(ctx context.Context, evt *account.Event) error {
 	if evt == nil {
 		return fmt.Errorf("nil broker event")
 	}
@@ -135,13 +135,13 @@ func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
 		"positionID", eventPositionID(evt))
 
 	switch evt.Type {
-	case execution.EventOrderFilled:
+	case account.EventOrderFilled:
 		lot := evt.Lot
 		if lot == nil {
 			return fmt.Errorf("error order filled with no position")
 		}
 
-	case execution.EventPositionClosed:
+	case account.EventPositionClosed:
 		lot := evt.Lot
 		trade := evt.Trade
 		if lot == nil {
@@ -158,7 +158,7 @@ func (t *Trader) processEvent(ctx context.Context, evt *execution.Event) error {
 	return nil
 }
 
-func eventPositionID(evt *execution.Event) string {
+func eventPositionID(evt *account.Event) string {
 	if evt == nil || evt.Lot == nil {
 		return ""
 	}
