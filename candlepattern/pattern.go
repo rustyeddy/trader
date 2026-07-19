@@ -41,23 +41,23 @@ type DetectorConfig struct {
 func GetRejectionDetector(cfg DetectorConfig, scale types.Scale6) (RejectionDetector, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Kind)) {
 	case "", "wick-rejection":
-		minWickRatio, _, err := floatParamOrDefault(cfg.Params, "min-wick-ratio", 0.5)
+		minWickRatio, err := floatParamOrDefault(cfg.Params, "min-wick-ratio", 0.5)
 		if err != nil {
 			return nil, err
 		}
-		maxClosePos, _, err := floatParamOrDefault(cfg.Params, "max-close-pos", 0.3)
+		maxClosePos, err := floatParamOrDefault(cfg.Params, "max-close-pos", 0.3)
 		if err != nil {
 			return nil, err
 		}
-		minWickATR, _, err := floatParamOrDefault(cfg.Params, "min-wick-atr", 0.5)
+		minWickATR, err := floatParamOrDefault(cfg.Params, "min-wick-atr", 0.5)
 		if err != nil {
 			return nil, err
 		}
-		lookback, _, err := intParamOrDefault(cfg.Params, "lookback", 1)
+		lookback, err := intParamOrDefault(cfg.Params, "lookback", 1)
 		if err != nil {
 			return nil, err
 		}
-		atrPeriod, _, err := intParamOrDefault(cfg.Params, "atr-period", 14)
+		atrPeriod, err := intParamOrDefault(cfg.Params, "atr-period", 14)
 		if err != nil {
 			return nil, err
 		}
@@ -68,46 +68,27 @@ func GetRejectionDetector(cfg DetectorConfig, scale types.Scale6) (RejectionDete
 	}
 }
 
-// floatParamOrDefault/intParamOrDefault are minimal, self-contained param
-// extractors — deliberately not reusing strategy.GetFloat64Param/GetIntParam
-// (this package must not import strategy: strategy.WickRejectionEntry
-// imports candlepattern, so the reverse import would cycle).
-func floatParamOrDefault(params map[string]any, key string, def float64) (float64, bool, error) {
-	v, ok := params[key]
+// floatParamOrDefault/intParamOrDefault wrap types' general-purpose param
+// readers (also used by strategy and elsewhere) with a default-on-absent
+// value.
+func floatParamOrDefault(params map[string]any, key string, def float64) (float64, error) {
+	v, ok, err := types.GetFloat64Param(params, key)
+	if err != nil {
+		return 0, err
+	}
 	if !ok {
-		return def, false, nil
+		return def, nil
 	}
-	switch x := v.(type) {
-	case float64:
-		return x, true, nil
-	case float32:
-		return float64(x), true, nil
-	case int:
-		return float64(x), true, nil
-	case int32:
-		return float64(x), true, nil
-	case int64:
-		return float64(x), true, nil
-	default:
-		return 0, true, fmt.Errorf("param %q must be numeric, got %T", key, v)
-	}
+	return v, nil
 }
 
-func intParamOrDefault(params map[string]any, key string, def int) (int, bool, error) {
-	v, ok := params[key]
+func intParamOrDefault(params map[string]any, key string, def int) (int, error) {
+	v, ok, err := types.GetIntParam(params, key)
+	if err != nil {
+		return 0, err
+	}
 	if !ok {
-		return def, false, nil
+		return def, nil
 	}
-	switch x := v.(type) {
-	case int:
-		return x, true, nil
-	case int32:
-		return int(x), true, nil
-	case int64:
-		return int(x), true, nil
-	case float64:
-		return int(x), true, nil
-	default:
-		return 0, true, fmt.Errorf("param %q must be numeric, got %T", key, v)
-	}
+	return v, nil
 }

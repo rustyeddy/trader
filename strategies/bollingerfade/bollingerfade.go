@@ -152,19 +152,19 @@ func (f *Fade) Update(_ context.Context, ct *market.Candle, run strategy.Strateg
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
-	period, _, err := strategy.GetInt32Param(params, "period")
+	period, _, err := types.GetInt32Param(params, "period")
 	if err != nil {
 		return nil, err
 	}
-	mult, _, err := strategy.GetFloat64Param(params, "multiplier")
+	mult, _, err := types.GetFloat64Param(params, "multiplier")
 	if err != nil {
 		return nil, err
 	}
-	atrPeriod, _, err := strategy.GetInt32Param(params, "atr_period")
+	atrPeriod, _, err := types.GetInt32Param(params, "atr_period")
 	if err != nil {
 		return nil, err
 	}
-	atrMult, _, err := strategy.GetFloat64Param(params, "atr_mult")
+	atrMult, _, err := types.GetFloat64Param(params, "atr_mult")
 	if err != nil {
 		return nil, err
 	}

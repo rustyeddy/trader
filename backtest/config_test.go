@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,42 +226,42 @@ func TestGetInt32Param(t *testing.T) {
 		"bad":     "string",
 	}
 
-	v, ok, err := strategy.GetInt32Param(m, "missing")
+	v, ok, err := types.GetInt32Param(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), v)
 
-	v, ok, err = strategy.GetInt32Param(m, "int")
+	v, ok, err = types.GetInt32Param(m, "int")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(42), v)
 
-	v, ok, err = strategy.GetInt32Param(m, "int32")
+	v, ok, err = types.GetInt32Param(m, "int32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(10), v)
 
-	v, ok, err = strategy.GetInt32Param(m, "int64")
+	v, ok, err = types.GetInt32Param(m, "int64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(20), v)
 
-	v, ok, err = strategy.GetInt32Param(m, "float64")
+	v, ok, err = types.GetInt32Param(m, "float64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(30), v)
 
-	_, ok, err = strategy.GetInt32Param(m, "frac")
+	_, ok, err = types.GetInt32Param(m, "frac")
 	assert.True(t, ok)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "must be an integer")
 
-	_, ok, err = strategy.GetInt32Param(m, "huge")
+	_, ok, err = types.GetInt32Param(m, "huge")
 	assert.True(t, ok)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "overflows int32")
 
-	_, ok, err = strategy.GetInt32Param(m, "bad")
+	_, ok, err = types.GetInt32Param(m, "bad")
 	assert.True(t, ok)
 	assert.Error(t, err)
 }
@@ -279,37 +278,37 @@ func TestGetFloat64Param(t *testing.T) {
 		"bad":     "string",
 	}
 
-	v, ok, err := strategy.GetFloat64Param(m, "missing")
+	v, ok, err := types.GetFloat64Param(m, "missing")
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 0.0, v)
 
-	v, ok, err = strategy.GetFloat64Param(m, "float64")
+	v, ok, err = types.GetFloat64Param(m, "float64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.InDelta(t, 1.5, v, 1e-9)
 
-	v, ok, err = strategy.GetFloat64Param(m, "float32")
+	v, ok, err = types.GetFloat64Param(m, "float32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.InDelta(t, 2.5, v, 1e-4)
 
-	v, ok, err = strategy.GetFloat64Param(m, "int")
+	v, ok, err = types.GetFloat64Param(m, "int")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 3.0, v)
 
-	v, ok, err = strategy.GetFloat64Param(m, "int32")
+	v, ok, err = types.GetFloat64Param(m, "int32")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 4.0, v)
 
-	v, ok, err = strategy.GetFloat64Param(m, "int64")
+	v, ok, err = types.GetFloat64Param(m, "int64")
 	assert.True(t, ok)
 	assert.NoError(t, err)
 	assert.Equal(t, 5.0, v)
 
-	_, ok, err = strategy.GetFloat64Param(m, "bad")
+	_, ok, err = types.GetFloat64Param(m, "bad")
 	assert.True(t, ok)
 	assert.Error(t, err)
 }

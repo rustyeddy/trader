@@ -111,8 +111,8 @@ func (s *Strategy) nextSide() types.Side {
 // percentage (e.g. 0.2 = 0.2%, 1.5 = 1.5%) and converted to basis points
 // once here so the strategy internals stay float-free.
 func build(params map[string]any) (strategy.Strategy, error) {
-	tradeEvery, _, _ := strategy.GetInt32Param(params, "trade_every")
-	stopPct, _, _ := strategy.GetFloat64Param(params, "stop_pct")
+	tradeEvery, _, _ := types.GetInt32Param(params, "trade_every")
+	stopPct, _, _ := types.GetFloat64Param(params, "stop_pct")
 	side := ""
 	if v, ok := params["side"]; ok {
 		if s, ok := v.(string); ok {

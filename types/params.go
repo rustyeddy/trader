@@ -1,13 +1,8 @@
-package strategy
+package types
 
 import (
 	"fmt"
 	"math"
-)
-
-var (
-	maxInt = int64(^uint(0) >> 1)
-	minInt = -maxInt - 1
 )
 
 func requireIntegralFloatParam(key string, v float64) error {
@@ -18,7 +13,7 @@ func requireIntegralFloatParam(key string, v float64) error {
 }
 
 func requireIntRangeParam(key string, v int64) error {
-	if v < minInt || v > maxInt {
+	if v < math.MinInt || v > math.MaxInt {
 		return fmt.Errorf("param %q=%d overflows int", key, v)
 	}
 	return nil
@@ -61,7 +56,7 @@ func GetIntParam(m map[string]any, key string) (int, bool, error) {
 		if err := requireIntegralFloatParam(key, x); err != nil {
 			return 0, true, err
 		}
-		if err := requireFloatIntRangeParam(key, x, minInt, maxInt, "int"); err != nil {
+		if err := requireFloatIntRangeParam(key, x, math.MinInt, math.MaxInt, "int"); err != nil {
 			return 0, true, err
 		}
 		return int(int64(x)), true, nil

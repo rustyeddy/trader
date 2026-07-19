@@ -26,9 +26,9 @@ import (
 //     recent lookback candles (as if they were one combined bar) rather
 //     than a single bar in isolation
 type WickRejection struct {
-	minWickRatio float64
-	maxClosePos  float64
-	minWickATR   float64
+	minWickRatio types.Rate
+	maxClosePos  types.Rate
+	minWickATR   types.Rate
 	lookback     int
 
 	// atr provides the volatility reference for min-wick-atr. It is fed
@@ -47,7 +47,11 @@ type WickRejection struct {
 }
 
 // NewWickRejection constructs a WickRejection detector. atrPeriod/scale
-// configure its internal ATR (see min-wick-atr above).
+// configure its internal ATR (see min-wick-atr above). minWickRatio,
+// maxClosePos, and minWickATR arrive as float64 because they originate at
+// the YAML-config parsing boundary; they are converted to fixed-point
+// types.Rate immediately and never touched as float64 again — evaluate()
+// below does all pattern-matching in scaled-integer arithmetic.
 func NewWickRejection(minWickRatio, maxClosePos, minWickATR float64, lookback, atrPeriod int, scale types.Scale6) (*WickRejection, error) {
 	if minWickRatio <= 0 || minWickRatio > 1 {
 		return nil, fmt.Errorf("wick-rejection: min-wick-ratio must be in (0,1], got %v", minWickRatio)
@@ -66,9 +70,9 @@ func NewWickRejection(minWickRatio, maxClosePos, minWickATR float64, lookback, a
 		return nil, fmt.Errorf("wick-rejection: %w", err)
 	}
 	return &WickRejection{
-		minWickRatio: minWickRatio,
-		maxClosePos:  maxClosePos,
-		minWickATR:   minWickATR,
+		minWickRatio: types.RateFromFloat(minWickRatio),
+		maxClosePos:  types.RateFromFloat(maxClosePos),
+		minWickATR:   types.RateFromFloat(minWickATR),
 		lookback:     lookback,
 		atr:          atr,
 	}, nil
@@ -114,40 +118,51 @@ func (w *WickRejection) Side() types.Side { return w.side }
 
 // evaluate judges a single (possibly aggregated) candle against the
 // configured thresholds. Ratios and the ATR-multiple comparison are all
-// dimensionless, so raw fixed-point Price differences are compared/divided
-// directly — the fixed-point scale cancels out, no float64 price ever
-// leaves this function's local math.
+// dimensionless, so rather than dividing (which would require a float64 or
+// a rounded fixed-point quotient), each threshold check is rearranged into
+// a cross-multiplication of the two sides — e.g. lowerWick/rangeP >=
+// minWickRatio becomes lowerWick*RateScale >= minWickRatio*rangeP — the
+// same "invert the ratio into a product comparison" technique used by
+// donchian.closeStrengthOK. All operands are Price/Rate scaled integers, so
+// this stays entirely in the fixed-point domain; int64 has ample headroom
+// (Price is int32, Rate's scale is 1e6, so products stay well under 2^63).
 func (w *WickRejection) evaluate(c market.Candle) (bool, types.Side) {
-	rangeP := float64(c.High - c.Low)
+	rangeP := int64(c.High - c.Low)
 	if rangeP <= 0 {
 		return false, types.Flat
 	}
-	atrPx := float64(w.atr.Price())
+	atrPx := int64(w.atr.Price())
 	if atrPx <= 0 {
 		return false, types.Flat
 	}
 
-	bodyHigh, bodyLow := float64(c.Open), float64(c.Close)
+	bodyHigh, bodyLow := c.Open, c.Close
 	if bodyLow > bodyHigh {
 		bodyHigh, bodyLow = bodyLow, bodyHigh
 	}
-	upperWick := float64(c.High) - bodyHigh
-	lowerWick := bodyLow - float64(c.Low)
-	closePos := (float64(c.Close) - float64(c.Low)) / rangeP // 0 at low, 1 at high
+	upperWick := int64(c.High - bodyHigh)
+	lowerWick := int64(bodyLow - c.Low)
+	closeFromLow := int64(c.Close - c.Low)   // closePos numerator (0 at low, rangeP at high)
+	closeFromHigh := int64(c.High - c.Close) // (1-closePos) numerator
+
+	rateScale := int64(types.RateScale)
+	minWickRatio := int64(w.minWickRatio)
+	maxClosePos := int64(w.maxClosePos)
+	minWickATR := int64(w.minWickATR)
 
 	// Bullish rejection: long lower wick (downside rejected), close near
 	// the high.
-	if lowerWick/rangeP >= w.minWickRatio &&
-		(1-closePos) <= w.maxClosePos &&
-		lowerWick/atrPx >= w.minWickATR {
+	if lowerWick*rateScale >= minWickRatio*rangeP &&
+		closeFromHigh*rateScale <= maxClosePos*rangeP &&
+		lowerWick*rateScale >= minWickATR*atrPx {
 		return true, types.Long
 	}
 
 	// Bearish rejection: long upper wick (upside rejected), close near
 	// the low.
-	if upperWick/rangeP >= w.minWickRatio &&
-		closePos <= w.maxClosePos &&
-		upperWick/atrPx >= w.minWickATR {
+	if upperWick*rateScale >= minWickRatio*rangeP &&
+		closeFromLow*rateScale <= maxClosePos*rangeP &&
+		upperWick*rateScale >= minWickATR*atrPx {
 		return true, types.Short
 	}
 

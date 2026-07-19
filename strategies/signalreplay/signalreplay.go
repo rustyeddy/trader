@@ -376,7 +376,7 @@ func loadSignalRows(path string) ([]signalRow, error) {
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
-	signalsPath, ok, err := strategy.GetStringParam(params, "signals")
+	signalsPath, ok, err := types.GetStringParam(params, "signals")
 	if err != nil {
 		return nil, err
 	}
@@ -387,17 +387,17 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		return nil, fmt.Errorf("signalreplay: signals file: %w", err)
 	}
 
-	entryKind, _, err := strategy.GetStringParam(params, "entry")
+	entryKind, _, err := types.GetStringParam(params, "entry")
 	if err != nil {
 		return nil, err
 	}
-	entryParams, _, err := strategy.GetMapParam(params, "entry-params")
+	entryParams, _, err := types.GetMapParam(params, "entry-params")
 	if err != nil {
 		return nil, err
 	}
 	entryCfg := strategy.EntryConfig{Kind: entryKind, Params: entryParams}
 
-	episodeGap, ok, err := strategy.GetIntParam(params, "episode-gap")
+	episodeGap, ok, err := types.GetIntParam(params, "episode-gap")
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +405,7 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		episodeGap = 5
 	}
 
-	maxHoldDays, ok, err := strategy.GetIntParam(params, "max-hold-days")
+	maxHoldDays, ok, err := types.GetIntParam(params, "max-hold-days")
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +413,7 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		maxHoldDays = 0
 	}
 
-	closeOnFlip, ok, err := strategy.GetBoolParam(params, "close-on-flip")
+	closeOnFlip, ok, err := types.GetBoolParam(params, "close-on-flip")
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,7 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		closeOnFlip = true
 	}
 
-	onePerEpisode, ok, err := strategy.GetBoolParam(params, "one-per-episode")
+	onePerEpisode, ok, err := types.GetBoolParam(params, "one-per-episode")
 	if err != nil {
 		return nil, err
 	}

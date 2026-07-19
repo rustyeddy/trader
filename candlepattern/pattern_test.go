@@ -34,9 +34,9 @@ func TestGetRejectionDetector_UsesDefaultsWhenParamsOmitted(t *testing.T) {
 	require.NoError(t, err)
 	wr, ok := d.(*WickRejection)
 	require.True(t, ok)
-	assert.Equal(t, 0.5, wr.minWickRatio)
-	assert.Equal(t, 0.3, wr.maxClosePos)
-	assert.Equal(t, 0.5, wr.minWickATR)
+	assert.Equal(t, types.RateFromFloat(0.5), wr.minWickRatio)
+	assert.Equal(t, types.RateFromFloat(0.3), wr.maxClosePos)
+	assert.Equal(t, types.RateFromFloat(0.5), wr.minWickATR)
 	assert.Equal(t, 1, wr.lookback)
 }
 
@@ -55,9 +55,9 @@ func TestGetRejectionDetector_OverridesFromParams(t *testing.T) {
 	require.NoError(t, err)
 	wr, ok := d.(*WickRejection)
 	require.True(t, ok)
-	assert.Equal(t, 0.6, wr.minWickRatio)
-	assert.Equal(t, 0.2, wr.maxClosePos)
-	assert.Equal(t, 1.0, wr.minWickATR)
+	assert.Equal(t, types.RateFromFloat(0.6), wr.minWickRatio)
+	assert.Equal(t, types.RateFromFloat(0.2), wr.maxClosePos)
+	assert.Equal(t, types.RateFromFloat(1.0), wr.minWickATR)
 	assert.Equal(t, 3, wr.lookback)
 }
 

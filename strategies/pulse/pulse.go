@@ -213,27 +213,27 @@ func (s *Strategy) nextSide() types.Side {
 
 func build(params map[string]any) (strategy.Strategy, error) {
 	cfg := DefaultConfig()
-	if v, ok, err := strategy.GetInt32Param(params, "trade_every"); err != nil {
+	if v, ok, err := types.GetInt32Param(params, "trade_every"); err != nil {
 		return nil, err
 	} else if ok {
 		cfg.TradeEvery = int(v)
 	}
-	if v, ok, err := strategy.GetInt32Param(params, "hold_bars"); err != nil {
+	if v, ok, err := types.GetInt32Param(params, "hold_bars"); err != nil {
 		return nil, err
 	} else if ok {
 		cfg.HoldBars = int(v)
 	}
-	if v, ok, err := strategy.GetInt32Param(params, "max_positions"); err != nil {
+	if v, ok, err := types.GetInt32Param(params, "max_positions"); err != nil {
 		return nil, err
 	} else if ok {
 		cfg.MaxPositions = int(v)
 	}
-	if v, ok, err := strategy.GetStringParam(params, "side"); err != nil {
+	if v, ok, err := types.GetStringParam(params, "side"); err != nil {
 		return nil, err
 	} else if ok {
 		cfg.Side = v
 	}
-	if v, ok, err := strategy.GetFloat64Param(params, "stop_pips"); err != nil {
+	if v, ok, err := types.GetFloat64Param(params, "stop_pips"); err != nil {
 		return nil, err
 	} else if ok {
 		cfg.StopPips = v

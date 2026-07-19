@@ -194,14 +194,14 @@ func priceFromFloat(v float64, scale types.Scale6) types.Price {
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
-	fast, ok, err := strategy.GetInt32Param(params, "fast")
+	fast, ok, err := types.GetInt32Param(params, "fast")
 	if err != nil {
 		return nil, err
 	}
 	if !ok || fast <= 0 {
 		return nil, fmt.Errorf("ema-cross: missing or invalid param %q", "fast")
 	}
-	slow, ok, err := strategy.GetInt32Param(params, "slow")
+	slow, ok, err := types.GetInt32Param(params, "slow")
 	if err != nil {
 		return nil, err
 	}
@@ -211,19 +211,19 @@ func build(params map[string]any) (strategy.Strategy, error) {
 	if fast >= slow {
 		return nil, fmt.Errorf("ema-cross: fast (%d) must be < slow (%d)", fast, slow)
 	}
-	stopPips, _, err := strategy.GetFloat64Param(params, "stop_pips")
+	stopPips, _, err := types.GetFloat64Param(params, "stop_pips")
 	if err != nil {
 		return nil, err
 	}
-	minSpread, _, err := strategy.GetFloat64Param(params, "min_spread")
+	minSpread, _, err := types.GetFloat64Param(params, "min_spread")
 	if err != nil {
 		return nil, err
 	}
-	atrPeriod, _, err := strategy.GetInt32Param(params, "atr_period")
+	atrPeriod, _, err := types.GetInt32Param(params, "atr_period")
 	if err != nil {
 		return nil, err
 	}
-	atrMult, _, err := strategy.GetFloat64Param(params, "atr_multiplier")
+	atrMult, _, err := types.GetFloat64Param(params, "atr_multiplier")
 	if err != nil {
 		return nil, err
 	}

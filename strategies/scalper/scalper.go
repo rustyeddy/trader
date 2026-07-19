@@ -141,28 +141,28 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, run strategy.Str
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
-	fast, _, err := strategy.GetInt32Param(params, "fast_period")
+	fast, _, err := types.GetInt32Param(params, "fast_period")
 	if err != nil {
 		return nil, err
 	}
 	if fast <= 0 {
 		fast = 3
 	}
-	slow, _, err := strategy.GetInt32Param(params, "slow_period")
+	slow, _, err := types.GetInt32Param(params, "slow_period")
 	if err != nil {
 		return nil, err
 	}
 	if slow <= 0 {
 		slow = 8
 	}
-	atrPeriod, _, err := strategy.GetInt32Param(params, "atr_period")
+	atrPeriod, _, err := types.GetInt32Param(params, "atr_period")
 	if err != nil {
 		return nil, err
 	}
 	if atrPeriod <= 0 {
 		atrPeriod = 14
 	}
-	stopMult, _, _ := strategy.GetFloat64Param(params, "stop_multiplier")
+	stopMult, _, _ := types.GetFloat64Param(params, "stop_multiplier")
 	if stopMult <= 0 {
 		stopMult = 1.0
 	}

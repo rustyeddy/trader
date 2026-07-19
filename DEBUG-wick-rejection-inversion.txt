@@ -1,0 +1,84 @@
+RUNNING DEBUG NOTE — rejection-candle min-wick-ratio inversion
+(scratch/working state, 2026-07-19 — not a design doc, just investigation log)
+
+SYMPTOM
+-------
+min-wick-ratio=0.60 -> 407 trades
+min-wick-ratio=0.75 -> 580 trades  (STRICTER threshold, MORE matches — backwards)
+
+Confirmed NOT noise: 406/407 trades from the 0.60 run are a strict subset
+of the 0.75 run's 580 (only 3 mismatches). Clean monotonic superset in the
+wrong direction as the threshold rises. This is a real bug, not variance —
+sample size is plenty large enough that this shape doesn't happen by chance.
+
+RULED OUT (checked directly against pasted source, both clean)
+----------------------------------------------------------------
+1. WickRejection.evaluate(c market.Candle) (bool, types.Side)
+   - lowerWick/rangeP >= w.minWickRatio  -- correct direction (minimum)
+   - (1-closePos) <= w.maxClosePos [bullish] / closePos <= w.maxClosePos
+     [bearish] -- checked against closePos definition (0=low,1=high);
+     both branches require close on the correct side. Correct.
+   - lowerWick/atrPx >= w.minWickATR -- correct direction (minimum)
+   - Comparison logic is NOT the bug.
+
+2. aggregateWindow(window []market.Candle) market.Candle
+   - Open inherited from window[0], High/Low extended across window,
+     Close taken from last element. Correct. For lookback=1 (what both
+     test runs used) this is a no-op anyway (single-element window) --
+     not reachable as the bug for these two specific runs regardless.
+
+3. Update(window []market.Candle)
+   - ATR fed the newest bar (window[len-1]) BEFORE truncation to
+     lookback -- correct order, ATR always sees the true latest bar.
+   - Truncation to w.lookback is a no-op at lookback=1.
+   - Ready()-gate before evaluate() -- fine.
+   - Not the bug for the lookback=1 case tested.
+
+ALSO FLAGGED (separate issue, real, but NOT this bug)
+-------------------------------------------------------
+evaluate() does float64 math on price-derived values (fixed-point Price
+cast to float64 for ratio division). Doc comment argues the scale cancels
+out and is locally safe -- probably true precision-wise, but still a
+violation of the project's fixed-point-only discipline, and that
+discipline usually exists for cross-build/platform determinism, not just
+rounding safety. Should be rewritten as integer cross-multiplication
+(avoid division/float entirely) regardless of the inversion bug's outcome.
+Ruled out as the CAUSE of the inversion: float64 imprecision would produce
+a small number of borderline flips near the threshold, symmetric in both
+directions. What we see is large (173 net) and one-directional. Wrong
+shape for a precision bug.
+
+STILL SUSPECTED / NOT YET SEEN
+---------------------------------
+Whatever parses --entry-params ("min-wick-ratio=0.75,max-close-pos=0.3,
+min-wick-atr=0.5,lookback=1") into WickRejection's constructed fields --
+i.e. NewWickRejection(...) and/or the GetEntryTrigger factory's
+"rejection-candle" case. This code has NOT been pasted/reviewed yet.
+
+Leading hypothesis (unconfirmed): a stray inversion in parsing, e.g.
+minWickRatio ends up stored as (1 - parsedValue) somewhere, which would
+exactly reproduce the observed direction: CLI 0.60 -> stored 0.40 (looser
+than it looks), CLI 0.75 -> stored 0.25 (looser still) -- explains why
+raising the CLI value monotonically loosens the real threshold and adds
+matches. This is a guess pending seeing the actual code, not a conclusion.
+
+Other possibilities not yet ruled out: swapped field assignment between
+minWickRatio and maxClosePos during parsing (less likely given the clean
+superset shape, but not eliminated); a units/scale mismatch if the
+parser treats the value as a percentage (75 vs 0.75) and something
+downstream normalizes it unexpectedly.
+
+NEXT STEP
+---------
+Get and review NewWickRejection's constructor + GetEntryTrigger's
+"rejection-candle" factory case -- specifically how each of the four
+--entry-params keys (min-wick-ratio, max-close-pos, min-wick-atr,
+lookback) maps from the parsed key=value string/map into the struct
+fields consumed by evaluate(). That's the only remaining place the
+inversion can be hiding, since evaluate()/Update()/aggregateWindow() are
+all confirmed correct for the cases tested.
+
+DO NOT trust conclusions drawn from either the 0.60 or 0.75 outcomes.csv
+(early-death share, per-pair R, etc.) until this is fixed and re-run --
+we don't yet know what condition was actually being tested at either
+setting.

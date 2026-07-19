@@ -1,9 +1,10 @@
-package strategy
+package types
 
 import (
 	"math"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,6 +82,16 @@ func TestGetIntParam_WrongType(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, ok)
 	require.Contains(t, err.Error(), "must be numeric")
+}
+
+func TestGetIntParam_NilMap(t *testing.T) {
+	t.Parallel()
+
+	var m map[string]any
+	v, ok, err := GetIntParam(m, "n")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 0, v)
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +202,16 @@ func TestGetFloat64Param_WrongType(t *testing.T) {
 	require.Contains(t, err.Error(), "must be numeric")
 }
 
+func TestGetFloat64Param_NilMap(t *testing.T) {
+	t.Parallel()
+
+	var m map[string]any
+	v, ok, err := GetFloat64Param(m, "x")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, 0.0, v)
+}
+
 // ---------------------------------------------------------------------------
 // GetBoolParam
 // ---------------------------------------------------------------------------
@@ -231,6 +252,16 @@ func TestGetBoolParam_WrongType(t *testing.T) {
 	require.Contains(t, err.Error(), "must be bool")
 }
 
+func TestGetBoolParam_NilMap(t *testing.T) {
+	t.Parallel()
+
+	var m map[string]any
+	v, ok, err := GetBoolParam(m, "flag")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.False(t, v)
+}
+
 // ---------------------------------------------------------------------------
 // GetStringParam
 // ---------------------------------------------------------------------------
@@ -260,4 +291,69 @@ func TestGetStringParam_WrongType(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, ok)
 	require.Contains(t, err.Error(), "must be a string")
+}
+
+func TestGetStringParam_NilMap(t *testing.T) {
+	t.Parallel()
+
+	var m map[string]any
+	v, ok, err := GetStringParam(m, "s")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, "", v)
+}
+
+// ---------------------------------------------------------------------------
+// GetMapParam
+// ---------------------------------------------------------------------------
+
+func TestGetMapParam_Missing(t *testing.T) {
+	t.Parallel()
+
+	v, ok, err := GetMapParam(map[string]any{}, "m")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, v)
+}
+
+func TestGetMapParam_Valid(t *testing.T) {
+	t.Parallel()
+
+	nested := map[string]any{"a": 1}
+	v, ok, err := GetMapParam(map[string]any{"m": nested}, "m")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, nested, v)
+}
+
+func TestGetMapParam_WrongType(t *testing.T) {
+	t.Parallel()
+
+	_, ok, err := GetMapParam(map[string]any{"m": "not-a-map"}, "m")
+	require.Error(t, err)
+	require.True(t, ok)
+	require.Contains(t, err.Error(), "must be a map")
+}
+
+func TestGetMapParam_NilMap(t *testing.T) {
+	t.Parallel()
+
+	var m map[string]any
+	v, ok, err := GetMapParam(m, "m")
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, v)
+}
+
+// ---------------------------------------------------------------------------
+// assert-style usage (mirrors how strategy factories consume these readers)
+// ---------------------------------------------------------------------------
+
+func TestGetParams_Assert(t *testing.T) {
+	t.Parallel()
+
+	v, ok, err := GetIntParam(map[string]any{"n": 1}, "n")
+	assert.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, 1, v)
 }

@@ -317,55 +317,55 @@ func (d *Breakout) Update(_ context.Context, ct *market.Candle, run strategy.Str
 }
 
 func build(params map[string]any) (strategy.Strategy, error) {
-	period, _, err := strategy.GetInt32Param(params, "period")
+	period, _, err := types.GetInt32Param(params, "period")
 	if err != nil {
 		return nil, err
 	}
 	if period <= 1 {
 		period = 20
 	}
-	closeStrength, ok, err := strategy.GetFloat64Param(params, "close_strength")
+	closeStrength, ok, err := types.GetFloat64Param(params, "close_strength")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		closeStrength = 0.6
 	}
-	confirmBars, ok, err := strategy.GetInt32Param(params, "confirm_bars")
+	confirmBars, ok, err := types.GetInt32Param(params, "confirm_bars")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		confirmBars = 2
 	}
-	adxPeriod, ok, err := strategy.GetInt32Param(params, "adx_period")
+	adxPeriod, ok, err := types.GetInt32Param(params, "adx_period")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		adxPeriod = 14
 	}
-	adxThreshold, ok, err := strategy.GetFloat64Param(params, "adx_threshold")
+	adxThreshold, ok, err := types.GetFloat64Param(params, "adx_threshold")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		adxThreshold = 25.0
 	}
-	blockMonday, ok, err := strategy.GetBoolParam(params, "block_monday")
+	blockMonday, ok, err := types.GetBoolParam(params, "block_monday")
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		blockMonday = true // default: block Monday entries
 	}
-	blockFriday, _, err := strategy.GetBoolParam(params, "block_friday")
+	blockFriday, _, err := types.GetBoolParam(params, "block_friday")
 	if err != nil {
 		return nil, err
 	}
 
 	var blockedDays map[int64]bool
-	newsDaysFile, ok, err := strategy.GetStringParam(params, "news_days_file")
+	newsDaysFile, ok, err := types.GetStringParam(params, "news_days_file")
 	if err != nil {
 		return nil, err
 	}
