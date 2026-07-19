@@ -538,6 +538,37 @@ func TestUpdate_ExpiresEpisodeAfterLastDateWithoutTrigger(t *testing.T) {
 	assert.Equal(t, 1, fe.resets, "entry trigger must reset when its episode expires")
 }
 
+func TestUpdate_NoPanicAfterAllEpisodesExhausted(t *testing.T) {
+	t.Parallel()
+	// Single-episode fixture: once that episode expires (idx advances past
+	// the end of s.episodes), pending is nil for every subsequent bar. A
+	// prior bug unconditionally dereferenced pending.LastDate before
+	// checking eligible, panicking on any bar after the last episode was
+	// resolved — a signalreplay backtest running to the end of its date
+	// range always hits this.
+	s, err := New(Config{SignalsPath: "testdata/single_row.csv"})
+	require.NoError(t, err)
+	fe := &fakeEntry{triggerAfter: 1000} // never fires
+	s.entry = fe
+	ctx := newFakeCtx("EURUSD")
+
+	s.ensureLoaded(ctx.Instrument())
+	require.NoError(t, s.loadErr)
+	require.Len(t, s.episodes, 1)
+	lastDate := s.episodes[0].LastDate
+
+	// Expire the only episode: idx advances to 1 == len(s.episodes).
+	sig := s.Update(context.Background(), candleAt(lastDate.Add(48*time.Hour).Unix()), ctx)
+	assert.Equal(t, types.Flat, sig.Side)
+	assert.Equal(t, 1, s.idx)
+
+	// Any further bar has no pending episode at all; must not panic.
+	assert.NotPanics(t, func() {
+		sig = s.Update(context.Background(), candleAt(lastDate.Add(96*time.Hour).Unix()), ctx)
+	})
+	assert.Equal(t, types.Flat, sig.Side)
+}
+
 func TestUpdate_EntryOnExpiryBarStillTakesPriority(t *testing.T) {
 	t.Parallel()
 	s, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv"})

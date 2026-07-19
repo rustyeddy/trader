@@ -137,7 +137,8 @@ func TestRunBacktestConfigs_BadConfigPathReturnsError(t *testing.T) {
 }
 
 func TestRunBacktestConfigs_BadRunIsSkipped(t *testing.T) {
-	// Executor always fails → runs are skipped via Warn, outer error is nil.
+	// Executor always fails and nothing else survives → the underlying
+	// failure is surfaced rather than silently returning an empty result.
 	dir := t.TempDir()
 	minYAMLConfig(t, dir, "run-err")
 
@@ -147,8 +148,39 @@ func TestRunBacktestConfigs_BadRunIsSkipped(t *testing.T) {
 	summaries, err := svc.RunBacktestConfigs(context.Background(), []string{
 		filepath.Join(dir, "run-err.yml"),
 	})
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "always fails")
 	assert.Empty(t, summaries)
+}
+
+func TestRunBacktestConfigs_PartialFailureSucceedsWithoutError(t *testing.T) {
+	// One config compiles and runs successfully, one has an unknown strategy
+	// kind and fails to compile — the sweep as a whole should still report
+	// the good result without an error (a single bad config among many
+	// doesn't abort the rest).
+	dir := t.TempDir()
+	goodPath := minYAMLConfig(t, dir, "run-a")
+	badContent := `defaults:
+  starting-balance: 1000
+runs:
+  - name: run-bad
+    data:
+      instrument: EURUSD
+      timeframe: H1
+      from: "2026-01-01"
+      to: "2026-01-10"
+    strategy:
+      kind: does-not-exist
+`
+	badPath := filepath.Join(dir, "run-bad.yml")
+	require.NoError(t, os.WriteFile(badPath, []byte(badContent), 0o644))
+
+	svc := newBacktestService()
+	svc.Executor = stubExecutor{}
+
+	summaries, err := svc.RunBacktestConfigs(context.Background(), []string{goodPath, badPath})
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +233,8 @@ func TestRunBacktestConfigsAndWriteReports_WritesFiles(t *testing.T) {
 }
 
 func TestRunBacktestConfigsAndWriteReports_NoResultsReturnsError(t *testing.T) {
-	// Executor always fails → no summaries → should return an error.
+	// Executor always fails → no summaries → should return an error that
+	// surfaces the underlying cause, not just a generic "no results" message.
 	cfgDir := t.TempDir()
 	minYAMLConfig(t, cfgDir, "fail-run")
 
@@ -214,7 +247,7 @@ func TestRunBacktestConfigsAndWriteReports_NoResultsReturnsError(t *testing.T) {
 		t.TempDir(),
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no backtest results")
+	assert.Contains(t, err.Error(), "always fails")
 }
 
 // ---------------------------------------------------------------------------

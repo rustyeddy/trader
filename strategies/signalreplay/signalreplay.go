@@ -245,11 +245,13 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 	// already read as "past LastDate" — expiring before any entry trigger
 	// that doesn't fire on the immediate next bar ever got a real window
 	// to evaluate the pattern.
-	expiry := types.Timestamp(pending.LastDate.Add(24 * time.Hour).Unix())
-	if eligible && barTime >= expiry {
-		s.idx++
-		s.entry.Reset()
-		return strategy.Hold("episode expired without entry trigger")
+	if eligible {
+		expiry := types.Timestamp(pending.LastDate.Add(24 * time.Hour).Unix())
+		if barTime >= expiry {
+			s.idx++
+			s.entry.Reset()
+			return strategy.Hold("episode expired without entry trigger")
+		}
 	}
 
 	return strategy.Hold("no active episode")

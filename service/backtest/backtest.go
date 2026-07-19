@@ -14,6 +14,7 @@ package backtestsvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -66,6 +67,7 @@ func (s *Service) backtestExecutor() backtest.BacktestExecutor {
 // CLI and the future REST endpoint.
 func (s *Service) RunBacktestConfigs(ctx context.Context, configPaths []string) ([]backtest.BacktestReportSummary, error) {
 	var summaries []backtest.BacktestReportSummary
+	var errs []error
 
 	for _, cfgPath := range configPaths {
 		cfg, err := backtest.LoadConfig(cfgPath)
@@ -75,18 +77,25 @@ func (s *Service) RunBacktestConfigs(ctx context.Context, configPaths []string) 
 		runs, err := backtest.CompileBacktests(cfg)
 		if err != nil {
 			s.Log.Warn("service: skipping config", "path", cfgPath, "err", err)
+			errs = append(errs, fmt.Errorf("config %q: %w", cfgPath, err))
 			continue
 		}
 		for _, run := range runs {
-			run := run
 			summary, runErr := s.RunBacktest(ctx, run)
 			if runErr != nil {
 				s.Log.Warn("service: backtest run failed",
 					"name", run.Request.Name, "err", runErr)
+				errs = append(errs, runErr)
 				continue
 			}
 			summaries = append(summaries, summary)
 		}
+	}
+	// Individual bad runs/configs don't abort a sweep spanning many of them —
+	// but if nothing survived, silently returning an empty, nil-error result
+	// hides the actual cause (e.g. an unknown strategy/entry/exit kind).
+	if len(summaries) == 0 && len(errs) > 0 {
+		return summaries, errors.Join(errs...)
 	}
 	return summaries, nil
 }
