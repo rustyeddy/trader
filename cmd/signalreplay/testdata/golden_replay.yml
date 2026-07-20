@@ -29,6 +29,7 @@ runs:
             episode-gap: 5
             max-hold-days: 0
             one-per-episode: true
+            pattern-deadline: 0
             signals: testdata/gen_fixture.csv
       exit:
         kind: chandelier
@@ -55,6 +56,7 @@ runs:
             episode-gap: 5
             max-hold-days: 0
             one-per-episode: true
+            pattern-deadline: 0
             signals: testdata/gen_fixture.csv
       exit:
         kind: chandelier

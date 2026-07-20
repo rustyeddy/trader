@@ -2,6 +2,7 @@ package signalreplay
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -221,6 +222,12 @@ func TestNew_RejectsNegativeEpisodeGap(t *testing.T) {
 	t.Parallel()
 	_, err := New(Config{SignalsPath: "x.csv", EpisodeGapDays: -1})
 	assert.ErrorContains(t, err, "episode-gap")
+}
+
+func TestNew_RejectsNegativePatternDeadline(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{SignalsPath: "x.csv", PatternDeadline: -1})
+	assert.ErrorContains(t, err, "pattern-deadline")
 }
 
 // ── Update() behavior ─────────────────────────────────────────────────────
@@ -587,4 +594,151 @@ func TestUpdate_EntryOnExpiryBarStillTakesPriority(t *testing.T) {
 	pastLastDate := firstEpisode.LastDate.Add(48 * time.Hour).Unix()
 	sig := s.Update(context.Background(), candleAt(pastLastDate), ctx)
 	assert.Equal(t, types.Long, sig.Side, "a trigger firing on the same bar the episode would expire must still enter")
+}
+
+// ── Pattern deadline (docs/Plans/pattern-deadline-spec.org) ────────────────
+//
+// eligibleBarUpdate advances one eligible bar (day offset k from signalDate,
+// strictly after it) and returns the resulting Signal. Each call also ticks
+// fakeEntry exactly once, matching the every-bar Tick contract.
+func eligibleBarUpdate(t *testing.T, s *Strategy, ctx *fakeCtx, signalDate int64, k int) strategy.Signal {
+	t.Helper()
+	return s.Update(context.Background(), candleAt(signalDate+int64(k)*86400+3600), ctx)
+}
+
+func TestUpdate_PatternDeadline_EntersWhenPatternFiresWithinDeadline(t *testing.T) {
+	t.Parallel()
+	for _, k := range []int{1, 2} { // k < K and k == K
+		t.Run(fmt.Sprintf("k=%d", k), func(t *testing.T) {
+			t.Parallel()
+			s, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv", EpisodeGapDays: 5, PatternDeadline: 2})
+			require.NoError(t, err)
+			// Triggered() becomes true once ticks reach k+1: the "load" bar
+			// at the signal date itself ticks once (not eligible), so
+			// eligible bar k is tick k+1.
+			fe := &fakeEntry{triggerAfter: k + 1}
+			s.entry = fe
+			ctx := newFakeCtx("EURUSD")
+			signalDate := day(2024, 1, 2).Unix()
+
+			s.Update(context.Background(), candleAt(signalDate), ctx) // load; not eligible
+
+			var sig strategy.Signal
+			for bar := 1; bar <= k; bar++ {
+				sig = eligibleBarUpdate(t, s, ctx, signalDate, bar)
+			}
+			assert.Equal(t, types.Long, sig.Side, "pattern firing at bar k<=K must enter")
+			assert.Equal(t, 0, s.eligibleBars, "eligibleBars must reset once the episode resolves")
+		})
+	}
+}
+
+func TestUpdate_PatternDeadline_AbandonsWhenPatternNeverFires(t *testing.T) {
+	t.Parallel()
+	s, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv", EpisodeGapDays: 5, PatternDeadline: 2})
+	require.NoError(t, err)
+	fe := &fakeEntry{triggerAfter: 1000} // never fires
+	s.entry = fe
+	ctx := newFakeCtx("EURUSD")
+	signalDate := day(2024, 1, 2).Unix()
+
+	s.Update(context.Background(), candleAt(signalDate), ctx) // load
+
+	sig := eligibleBarUpdate(t, s, ctx, signalDate, 1) // bar 1 < K: still waiting
+	assert.Equal(t, types.Flat, sig.Side)
+	assert.Equal(t, 0, s.idx, "episode must still be pending before the deadline")
+
+	sig = eligibleBarUpdate(t, s, ctx, signalDate, 2) // bar 2 == K without a match: abandoned
+	assert.Equal(t, types.Flat, sig.Side)
+	assert.False(t, sig.CloseAll)
+	assert.Contains(t, sig.Reason, "pattern-deadline")
+	assert.Equal(t, 1, s.idx, "abandoned episode must be skipped")
+	assert.Equal(t, 0, s.eligibleBars, "counter must reset on abandonment")
+	assert.Equal(t, 1, fe.resets, "entry trigger must reset when its episode is abandoned")
+
+	// The next episode's own window is unaffected by the previous
+	// abandonment: it gets its own fresh K-bar deadline. A small intraday
+	// offset (not eligibleBarUpdate's day-granularity), since the next
+	// fixture episode is a single-row episode and a full day would already
+	// overshoot its own LastDate+24h expiry window.
+	nextEpisode := s.episodes[s.idx]
+	nextSignalDate := nextEpisode.FirstDate.Unix()
+	sig = s.Update(context.Background(), candleAt(nextSignalDate+3600), ctx)
+	assert.Equal(t, types.Flat, sig.Side, "next episode must not inherit the abandoned episode's exhausted deadline")
+	assert.Equal(t, 1, s.eligibleBars, "next episode's counter must start fresh at 1")
+}
+
+func TestUpdate_PatternDeadline_LastDateExpiryTakesPriority(t *testing.T) {
+	t.Parallel()
+	// Single-row episode (FirstDate == LastDate): construct a bar that is
+	// simultaneously the first eligible bar, past LastDate's expiry cutoff,
+	// AND past a deadline of 1 (eligibleBars becomes 1 >= K on this same
+	// bar) — asserts LastDate wins the race, per spec: "pattern-deadline
+	// never extends an episode's life past its LastDate window."
+	s, err := New(Config{SignalsPath: "testdata/single_row.csv", PatternDeadline: 1})
+	require.NoError(t, err)
+	fe := &fakeEntry{triggerAfter: 1000} // never fires
+	s.entry = fe
+	ctx := newFakeCtx("EURUSD")
+
+	s.ensureLoaded(ctx.Instrument())
+	require.NoError(t, s.loadErr)
+	require.Len(t, s.episodes, 1)
+	lastDate := s.episodes[0].LastDate
+
+	sig := s.Update(context.Background(), candleAt(lastDate.Add(48*time.Hour).Unix()), ctx)
+	assert.Equal(t, types.Flat, sig.Side)
+	assert.Contains(t, sig.Reason, "expired", "LastDate expiry, not pattern-deadline, must be the reported reason")
+	assert.Equal(t, 1, s.idx)
+}
+
+func TestUpdate_PatternDeadlineZero_ByteIdenticalToOmitted(t *testing.T) {
+	t.Parallel()
+	sOmitted, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv"})
+	require.NoError(t, err)
+	sExplicitZero, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv", PatternDeadline: 0})
+	require.NoError(t, err)
+
+	ctxA := newFakeCtx("EURUSD")
+	ctxB := newFakeCtx("EURUSD")
+	signalDate := day(2024, 1, 2).Unix()
+
+	for _, offset := range []int64{0, 3600, 7200, 10800} {
+		sigA := sOmitted.Update(context.Background(), candleAt(signalDate+offset), ctxA)
+		sigB := sExplicitZero.Update(context.Background(), candleAt(signalDate+offset), ctxB)
+		assert.Equal(t, sigA, sigB, "pattern-deadline=0 must be byte-identical to the param being absent")
+	}
+}
+
+func TestUpdate_PatternDeadline_LotOpenKeepsCounterRunning(t *testing.T) {
+	t.Parallel()
+	s, err := New(Config{SignalsPath: "testdata/sweep_fixture.csv", EpisodeGapDays: 5, PatternDeadline: 2})
+	require.NoError(t, err)
+	fe := &fakeEntry{triggerAfter: 1000} // never fires
+	s.entry = fe
+	ctx := newFakeCtx("EURUSD")
+	signalDate := day(2024, 1, 2).Unix()
+
+	s.Update(context.Background(), candleAt(signalDate), ctx) // load
+
+	// A same-bias lot is already open (e.g. from an earlier fill), blocking
+	// any entry for this pending episode. Deadline K=2, but 3 eligible bars
+	// elapse while the lot stays open — deliberately past K.
+	ctx.openLot("lot-1", types.Long)
+	for bar := 1; bar <= 3; bar++ {
+		sig := eligibleBarUpdate(t, s, ctx, signalDate, bar)
+		assert.Equal(t, types.Flat, sig.Side)
+		assert.False(t, sig.CloseAll, "occupied lot blocks entry/close, must just Hold")
+	}
+	assert.Equal(t, 3, s.eligibleBars, "deadline counter must keep incrementing while lotOpen blocks entry")
+	assert.Equal(t, 0, s.idx, "episode must not be abandoned while the counter increments under an open lot")
+
+	// Lot closes; the next eligible bar finds the counter already past K,
+	// so the episode is abandoned immediately rather than getting a fresh
+	// K-bar window now that it's finally free to be evaluated.
+	ctx.closeLot("lot-1")
+	sig := eligibleBarUpdate(t, s, ctx, signalDate, 4)
+	assert.Equal(t, types.Flat, sig.Side)
+	assert.Contains(t, sig.Reason, "pattern-deadline")
+	assert.Equal(t, 1, s.idx, "episode abandoned promptly once free, not given a fresh window")
 }

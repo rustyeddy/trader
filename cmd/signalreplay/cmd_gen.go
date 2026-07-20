@@ -38,6 +38,7 @@ func addGenFlags(cmd *cobra.Command, f *genFlags) {
 	flags.StringVar(&f.entryParams, "entry-params", "", "Entry trigger params as key=value[,key=value...]")
 	flags.IntVar(&f.opts.EpisodeGapDays, "episode-gap", defaults.EpisodeGapDays, "signalreplay strategy episode-gap (days)")
 	flags.IntVar(&f.opts.MaxHoldDays, "max-hold-days", defaults.MaxHoldDays, "signalreplay strategy max-hold-days (0 = unlimited)")
+	flags.IntVar(&f.opts.PatternDeadline, "pattern-deadline", defaults.PatternDeadline, "signalreplay strategy pattern-deadline: entry trigger must fire within K bars of episode eligibility (0 = unlimited)")
 	flags.BoolVar(&f.opts.CloseOnFlip, "close-on-flip", defaults.CloseOnFlip, "signalreplay strategy close-on-flip")
 	flags.BoolVar(&f.opts.OnePerEpisode, "one-per-episode", defaults.OnePerEpisode, "signalreplay strategy one-per-episode")
 }

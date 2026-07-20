@@ -1,0 +1,176 @@
+#+TITLE: rejection-candle pattern-deadline param + matched-twin evaluation protocol
+#+DATE: 2026-07-19
+#+PROPERTY: status agreed-design, ready for implementation
+#+PROPERTY: audience implementation agent (Claude Code) — self-contained; no
+#+PROPERTY:   memory of prior sessions assumed. Verify all repo references
+#+PROPERTY:   against the live tree before editing.
+
+* Empirical motivation (2026-07-19 signalreplay tuning campaign)
+
+All runs below: 24 pairs, 2005–2026, D1, signalreplay over review-sweep
+tradeables, chandelier exit, risk 0.5%/trade. "m3.0" = chandelier
+ATR14×3.0 (established as the stop-geometry optimum in the same campaign:
+multiplier curve flat past 3.0, ATR22 no better than ATR14).
+
+Matched-twin decomposition — the SAME 383 episodes in which a
+wick-rejection pattern (ratio=0.6, close-pos=0.3, wick-atr=0.5,
+lookback=1) appeared somewhere in the episode window, under identical
+m3.0 exits:
+
+| execution                                   |     n | win%  | avg R  | total R |
+|---------------------------------------------+-------+-------+--------+---------|
+| entered next-open (episode start)           |   383 | 41.8  | +0.144 |     +55 |
+| entered AT the pattern bar (current rc code)|   383 | 36.8  | +0.016 |      +6 |
+| (episodes with NO pattern, next-open, ref)  | 2,708 | 33.7  | −0.085 |    −231 |
+
+Interpretation, two separable effects with opposite signs:
+
+1. *Selection value (real, large):* pattern-episodes beat no-pattern
+   episodes by ~0.23R under identical execution. Outlier-robust (+0.103
+   excl top-3). First empirically positive expectancy slice found
+   anywhere in this system — every classic feature band (ADX, CI, WEEK%,
+   H4 gates) previously came up empty.
+2. *Timing cost (real, nearly cancels it):* waiting to enter AT the
+   pattern bar forfeits −0.128R/trade vs next-open on the same episodes.
+   Mechanically sensible: a bullish rejection bar closes near its high —
+   entering there means buying after the pop the wick itself announced.
+
+CRITICAL CAVEAT the implementation must respect: the +0.144 row is NOT a
+tradeable benchmark — it conditions entry on a pattern that has not yet
+occurred at entry time (lookahead). The realizable target is a middle
+ground: observe the pattern EARLY (small timing cost), skip episodes
+that never confirm quickly (where the −231R lives). That middle ground
+is this spec.
+
+* Change: one new param on the rejection-candle entry trigger
+
+** Param
+
+| param              | type | default | meaning                                    |
+|--------------------+------+---------+--------------------------------------------|
+| =pattern-deadline= | int  | 0       | 0 = current behavior (whole episode window |
+|                    |      |         | eligible). K>0 = the pattern must fire     |
+|                    |      |         | within the first K bars after the episode  |
+|                    |      |         | becomes eligible; afterwards the trigger   |
+|                    |      |         | reports the episode dead so the strategy   |
+|                    |      |         | can skip it                                |
+
+Default 0 preserves byte-identical behavior for every existing config —
+same backward-compatibility convention as EntryConfig.Kind=""
+(next-open) established in strategy/entry.go.
+
+** Semantics (bars, not calendar days)
+
+- "Bars after eligibility": counted from the first bar on which the
+  strategy evaluates the episode as eligible (signal date passed), in
+  the run timeframe's bars. Weekend/holiday gaps therefore don't
+  consume deadline budget — consistent with how max-hold-days already
+  counts held BARS (s.barsInPosition) despite its name.
+- Bar 1 = the first eligible bar itself. pattern-deadline=1 means "the
+  pattern must be present on the very first eligible bar".
+- If the pattern fires on bar k <= K: enter on that bar (current
+  Triggered behavior, unchanged).
+- If bar K passes without a match: the episode is abandoned. It must
+  produce NO trade, and the episode cursor must advance exactly the way
+  the existing LastDate-expiry path advances it (idx++, entry.Reset(),
+  no signal emitted) — reuse/extend that path rather than inventing a
+  parallel one; see strategies/signalreplay/signalreplay.go, the
+  expiry branch after the lotOpen block.
+- Interaction with existing LastDate expiry: whichever limit is hit
+  FIRST abandons the episode. pattern-deadline never extends an
+  episode's life past its LastDate window.
+- Interaction with lotOpen: the deadline clock keeps running while a
+  prior position blocks entry (a pattern that fires while a lot is open
+  is an entry opportunity lost, same as today). Do NOT pause the
+  counter during occupancy — pausing would silently reintroduce the
+  late-entry timing cost this param exists to remove. If this turns
+  out to abandon too many episodes behind long-held m3.0 positions,
+  that is a finding to surface, not to design away preemptively.
+
+** Where the counter lives
+
+The bar counter is per-pending-episode state. The natural home is the
+signalreplay Strategy (which already owns episode identity, the cursor,
+and calls entry.Reset() on every episode transition), NOT inside
+WickRejectionEntry — the trigger is deliberately episode-agnostic
+(Triggered receives episodeStart but keeps no episode state; Reset is
+its only episode-boundary hook). Suggested shape: an eligibleBars
+counter on Strategy, incremented each bar an episode is eligible,
+reset alongside the existing s.entry.Reset() call sites; the abandon
+check sits next to the existing LastDate-expiry check. If, during
+implementation, threading it through the EntryTrigger interface turns
+out cleaner than expected, that is acceptable — but do not change the
+EntryTrigger interface signature for this; the param is strategy-level
+behavior, configured via the existing strategy params map
+(=pattern-deadline= alongside =episode-gap=/=max-hold-days=), NOT via
+entry-params (it governs episode lifetime, not pattern geometry).
+
+** CLI / config plumbing
+
+- =cmd/signalreplay=: add =--pattern-deadline= int flag to gen/run,
+  emitted into strategy params exactly like =--episode-gap= /
+  =--max-hold-days= (see cmd/signalreplay/cmd_gen.go, gen.go).
+- signalreplay-report.sh (bin/): add PATTERN_DEADLINE env passthrough,
+  same pattern as EPISODE_GAP.
+- Param parsing in strategies/signalreplay: same
+  types.Get*Param helpers as the existing params.
+
+** Tests
+
+- Table-driven strategy test (existing style,
+  strategies/signalreplay/*_test.go): synthetic candles where the
+  pattern bar occurs at bar k for k < K, k == K, k > K; assert entry,
+  entry, and abandoned-no-trade respectively; assert the cursor
+  advanced and the next episode is unaffected.
+- Deadline-vs-LastDate precedence: episode whose LastDate window ends
+  before K bars elapse — assert LastDate expiry still wins.
+- pattern-deadline=0 regression: an existing fixture run must produce
+  byte-identical signals with the param absent vs explicitly 0.
+- lotOpen interaction: pattern fires within deadline while a lot is
+  open — assert no entry AND that the deadline continues counting
+  (abandonment still occurs at K).
+
+* Evaluation protocol (acceptance for the EXPERIMENT, not just the code)
+
+The matched-twin methodology from 2026-07-19, now as the standard
+harness. For each K in {1, 2, 3, 5}:
+
+1. Run: rc entry (ratio=0.6, close-pos=0.3, wick-atr=0.5, lookback=1,
+   pattern-deadline=K), exit chandelier ATR14×3.0, fresh directory per
+   K (sweeps/rc06-m3-dl<K>), FORCE_RUN=1.
+2. From the K-run's outcomes.csv, take its episode key set
+   (instrument, signal_date).
+3. From the existing m3.0 next-open run (sweeps/exit-m3/outcomes.csv),
+   extract the SAME keys — this is the lookahead-free twin comparison:
+   identical episodes, identical exit, only entry policy differs.
+4. Compare: n, win%, avg R (and excl top-3), total R, and the
+   hold-length cohort table. Also record how many episodes each K
+   abandoned (n vs the deadline-0 run's ~383).
+
+Success criteria, in decreasing order of ambition:
+- Strong: some K yields avg R meaningfully ABOVE the +0.016 of
+  deadline-0 while keeping enough trades to matter (n not collapsed to
+  double digits) — i.e., a real slice of the +0.144 selection value is
+  captured tradeably.
+- Weak-but-useful: avg R vs K is monotone (earlier patterns = better
+  outcomes), even if no K clears a compelling absolute bar — this
+  validates "pattern appeared within K bars" as a scoring FEATURE for
+  the composite grading system (review TODO Item 3) even if it fails
+  as a standalone entry gate.
+- Null: flat in K — the selection value lives in late-appearing
+  patterns too, and the timing cost is unavoidable; retire the entry-
+  trigger framing and carry the finding into Item 3 as a
+  binary/graded feature only.
+
+All three outcomes are informative; report whichever occurs with the
+full table rather than only reporting success.
+
+* Explicit non-goals
+
+- No changes to pattern geometry params or evaluate() (fixed-point
+  version is settled and correct).
+- No changes to episode collapsing, close-on-flip, one-per-episode, or
+  exit strategies.
+- No attempt to "enter next-open retroactively when a pattern appears
+  later" in any form — that is the lookahead trap this design exists
+  to avoid.

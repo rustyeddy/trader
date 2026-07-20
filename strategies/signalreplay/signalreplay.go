@@ -43,6 +43,13 @@ type Config struct {
 	MaxHoldDays    int                  // 0 = unlimited; else time-stop after N bars in position
 	CloseOnFlip    bool                 // emit CloseAll when a new episode has opposite bias
 	OnePerEpisode  bool                 // at most one entry per episode (no re-entry)
+
+	// PatternDeadline: 0 = current behavior (whole episode window eligible
+	// for entry). K>0 = the entry trigger must fire within the first K bars
+	// after the episode becomes eligible; once bar K passes without a match
+	// the episode is abandoned (no trade, cursor advances). See
+	// docs/Plans/pattern-deadline-spec.org.
+	PatternDeadline int
 }
 
 // episode is a collapsed run of consecutive same-bias sweep rows for one
@@ -91,6 +98,12 @@ type Strategy struct {
 	// is cleared by Reset(); the parsed episode list is cached.
 	idx            int
 	barsInPosition int
+
+	// eligibleBars counts bars since the current pending episode (episodes[idx])
+	// became eligible, for PatternDeadline. Incremented once per eligible bar
+	// regardless of lotOpen (see Update); cleared everywhere entry.Reset() is
+	// called, since that always marks an episode-lifetime boundary.
+	eligibleBars int
 }
 
 // New constructs a signalreplay Strategy from a fully-resolved Config.
@@ -103,6 +116,9 @@ func New(cfg Config) (*Strategy, error) {
 	}
 	if cfg.MaxHoldDays < 0 {
 		return nil, fmt.Errorf("signalreplay: max-hold-days must be >= 0")
+	}
+	if cfg.PatternDeadline < 0 {
+		return nil, fmt.Errorf("signalreplay: pattern-deadline must be >= 0")
 	}
 	entry, err := strategy.GetEntryTrigger(cfg.Entry, types.PriceScale)
 	if err != nil {
@@ -137,6 +153,7 @@ func (s *Strategy) Ready() bool { return s.loaded && s.loadErr == nil }
 func (s *Strategy) Reset() {
 	s.idx = 0
 	s.barsInPosition = 0
+	s.eligibleBars = 0
 	s.entry.Reset()
 }
 
@@ -196,6 +213,14 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 	// own entry pattern has appeared yet; waiting for that would hold a
 	// stale position open longer than intended.
 	eligible := pending != nil && types.Timestamp(pending.FirstDate.Unix()) < barTime
+	// eligibleBars counts this bar for PatternDeadline purposes regardless
+	// of lotOpen/active below — the deadline clock must keep running while
+	// a prior position blocks entry (see docs/Plans/pattern-deadline-spec.org,
+	// "Interaction with lotOpen"). The actual abandon decision is deferred to
+	// the same place LastDate expiry is already checked, further down.
+	if eligible {
+		s.eligibleBars++
+	}
 	active := eligible && s.entry.Triggered(pending.Bias, pending.FirstDate, *ct)
 
 	if lotOpen {
@@ -208,6 +233,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 			}
 			s.entry.Reset()
 			s.barsInPosition = 0
+			s.eligibleBars = 0
 			return strategy.Signal{Side: pending.Bias, CloseAll: true, Reason: reason}
 		}
 
@@ -226,6 +252,7 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 		}
 		s.entry.Reset()
 		s.barsInPosition = 0
+		s.eligibleBars = 0
 		return strategy.Signal{Side: pending.Bias, Reason: reason}
 	}
 
@@ -250,7 +277,23 @@ func (s *Strategy) Update(_ context.Context, ct *market.Candle, sc strategy.Stra
 		if barTime >= expiry {
 			s.idx++
 			s.entry.Reset()
+			s.eligibleBars = 0
 			return strategy.Hold("episode expired without entry trigger")
+		}
+
+		// pattern-deadline abandonment: checked after LastDate expiry so
+		// LastDate always wins when both would fire on the same bar — a
+		// deadline never extends an episode past its own LastDate window.
+		// eligibleBars was already incremented for this bar above, so
+		// eligibleBars>=K correctly means "bar K has now passed without a
+		// match" (K itself, not K+1): PatternDeadline=1 means the pattern
+		// must appear on the very first eligible bar, and if it hasn't by
+		// the time this check runs on that same bar, abandon here and now.
+		if s.cfg.PatternDeadline > 0 && s.eligibleBars >= s.cfg.PatternDeadline {
+			s.idx++
+			s.entry.Reset()
+			s.eligibleBars = 0
+			return strategy.Hold("episode abandoned: pattern-deadline exceeded")
 		}
 	}
 
@@ -429,12 +472,21 @@ func build(params map[string]any) (strategy.Strategy, error) {
 		onePerEpisode = true
 	}
 
+	patternDeadline, ok, err := types.GetIntParam(params, "pattern-deadline")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		patternDeadline = 0
+	}
+
 	return New(Config{
-		SignalsPath:    signalsPath,
-		Entry:          entryCfg,
-		EpisodeGapDays: episodeGap,
-		MaxHoldDays:    maxHoldDays,
-		CloseOnFlip:    closeOnFlip,
-		OnePerEpisode:  onePerEpisode,
+		SignalsPath:     signalsPath,
+		Entry:           entryCfg,
+		EpisodeGapDays:  episodeGap,
+		MaxHoldDays:     maxHoldDays,
+		CloseOnFlip:     closeOnFlip,
+		OnePerEpisode:   onePerEpisode,
+		PatternDeadline: patternDeadline,
 	})
 }

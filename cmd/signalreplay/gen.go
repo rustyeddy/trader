@@ -38,12 +38,13 @@ type GenOptions struct {
 	RunoutDays int
 
 	// signalreplay strategy params, embedded verbatim into every run.
-	Entry          string
-	EntryParams    map[string]any
-	EpisodeGapDays int
-	MaxHoldDays    int
-	CloseOnFlip    bool
-	OnePerEpisode  bool
+	Entry           string
+	EntryParams     map[string]any
+	EpisodeGapDays  int
+	MaxHoldDays     int
+	CloseOnFlip     bool
+	OnePerEpisode   bool
+	PatternDeadline int
 }
 
 // DefaultGenOptions returns the flag defaults documented in
@@ -115,12 +116,13 @@ func GenerateConfig(opts GenOptions) (*backtest.Config, error) {
 	runout := time.Duration(opts.RunoutDays) * 24 * time.Hour
 
 	strategyParams := map[string]any{
-		"signals":         opts.SignalsPath,
-		"entry":           opts.Entry,
-		"episode-gap":     int64(opts.EpisodeGapDays),
-		"max-hold-days":   int64(opts.MaxHoldDays),
-		"close-on-flip":   opts.CloseOnFlip,
-		"one-per-episode": opts.OnePerEpisode,
+		"signals":          opts.SignalsPath,
+		"entry":            opts.Entry,
+		"episode-gap":      int64(opts.EpisodeGapDays),
+		"max-hold-days":    int64(opts.MaxHoldDays),
+		"close-on-flip":    opts.CloseOnFlip,
+		"one-per-episode":  opts.OnePerEpisode,
+		"pattern-deadline": int64(opts.PatternDeadline),
 	}
 	if len(opts.EntryParams) > 0 {
 		strategyParams["entry-params"] = opts.EntryParams
