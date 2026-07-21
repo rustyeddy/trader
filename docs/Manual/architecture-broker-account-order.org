@@ -309,7 +309,12 @@ correct:
 
 1. Make =brokers/sim= a real =Broker= (spread/slippage-aware fills from
    candle data). Foundational — nothing else can converge onto it until it
-   exists.
+   exists. *Done, commit =472b398=* — six real methods
+   (=SubmitMarketOrder=, =CloseTrade=, =UpdateTradeStop=, =GetOpenTrades=,
+   =GetAccountSummary=, =GetAccountDetails=), four deliberately minimal
+   ones split into =broker_stub.go=, plus =TickFromCandle= as the
+   not-yet-wired foundation chunk 2 needs. Confirmed via
+   =var _ Broker = (*sim.Sim)(nil)= in =brokers/broker.go=.
 2. Move the broker call *inside* =Ledger.SubmitOpen=/=SubmitClose=, proven
    first against backtest's existing (large, correctness-critical) test
    suite using =brokers/sim= — this is the highest-risk step, since a
