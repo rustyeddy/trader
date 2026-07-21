@@ -11,19 +11,20 @@
   calls the concrete client directly (unaffected, since most of it is
   =GetPricing=/=StreamPricing=-shaped, out of scope until =DataProvider=
   exists).
-- Phase 3 (below) — decided, not yet started: merge =service.Account= into
-  =account.Account=, and move =service.Account/Accounts/FirstAccount/DefaultAccount=
-  into =account/= as the session registry. *Revised 2026-07-22*: also
-  merge =account.Ledger= into =account.Account= (see "Ledger merges into
-  Account too" below) — =Ledger= does not survive as a separate wrapping
-  type, and =Account= does *not* hold a =Broker= field (corrects this
-  doc's earlier wording — ownership points =Broker= → =Account=, not the
-  other way; see Phase 4).
+- Phase 3 (below) — two parts. The =service.Account= merge (moving
+  =service.Account/Accounts/FirstAccount/DefaultAccount= into =account/=
+  as the session registry) is *not yet started*. The =account.Ledger=
+  merge ("Ledger merges into Account too" below — =Ledger= does not
+  survive as a separate wrapping type, and =Account= does *not* hold a
+  =Broker= field, correcting this doc's earlier wording) is *done*,
+  landed as Phase 4's chunk 3 (commit =59e4869=) since exploring chunk 2
+  surfaced it as a prerequisite.
 - Phase 4 (below) — reshaped 2026-07-22 mid-discussion: order fills
   (including stop/take triggers) are events the *Broker* emits
   asynchronously via =StreamTransactions=, not something a synchronous
-  =Ledger.SubmitOpen= call decides on the spot. Chunk 1 is done; chunk 2's
-  concrete plan is being redone against this shape.
+  =Ledger.SubmitOpen= call decides on the spot. Chunks 1–3 done; chunk 4
+  (wiring real =Broker= calls + async fill application into
+  =engine.Trader=/backtest) is next, not yet re-planned in detail.
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -385,17 +386,28 @@ correct:
    triggers it now monitors internally via =UpdatePrice= (moved out of
    =backtest/exits.go='s =autoCloseExits=, which still runs unchanged for
    now — this half was scoped self-contained to =brokers/sim=, touching
-   nothing else). *Done, commit pending* — six methods gained event
+   nothing else). *Done, commit =ebc5625=* — six methods gained event
    emission, =checkStopsAndTakes= added, full long/short × stop/take test
    coverage.
-3. *Not yet re-planned in detail.* Merge =account.Ledger= into
-   =account.Account= (see Phase 3's "Ledger merges into Account too"), and
-   build the =StreamTransactions=-consuming step that applies fills to an
-   account's ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
-   =AddLot=/=CloseLot= calls — the highest-risk step, since a regression
-   here silently corrupts backtest results. This absorbs what was chunk 2's
-   second half *and* most of what was chunk 6 (event convergence) — they
-   turned out to be the same mechanism, not sequential steps.
+3. *Done, commit =59e4869=.* Merge =account.Ledger= into =account.Account=
+   (see Phase 3's "Ledger merges into Account too") — purely structural,
+   zero behavior change. =SubmitOpen=/=SubmitClose= and the event-queue
+   machinery moved to =account/events.go= as =*Account= methods;
+   =account.Ledger=/=NewLedger= deleted; =engine.Trader= embeds
+   =*account.Account= directly and gained a nil-safe =Broker
+   brokers.Broker= field for chunk 4 to populate;
+   =backtest/executor.go='s =BrokerFactory= removed entirely (no separate
+   =Ledger= left to construct). Full test suite green, confirming nothing
+   about *what happens* on open/close changed — only which type the
+   methods live on.
+4. *Not yet re-planned in detail — the highest-risk step.* Build the
+   =StreamTransactions=-consuming step that applies fills to an account's
+   ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
+   =AddLot=/=CloseLot= calls, and wire =engine.Trader=/backtest onto real
+   =Broker= calls via the new =Trader.Broker= field. This absorbs what was
+   chunk 2's second half *and* most of what was chunk 6 (event
+   convergence) — they turned out to be the same mechanism, not
+   sequential steps. A regression here silently corrupts backtest results.
 
    *Baseline caveat (2026-07-22):* "bit-for-bit equivalence with current
    backtest behavior" is the right bar, but "current" must mean a *fresh*
@@ -408,16 +420,16 @@ correct:
    the existing backtest test suite plus a few of the real
    =testdata/configs/*.yml= backtests on =main= first, save that as the
    reference, then diff post-change output against *that*.
-4. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
+5. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
    consume-=StreamTransactions= flow, using =brokers/oanda=.
-5. =AccountSnapshot='s role once fills flow through =StreamTransactions=
+6. =AccountSnapshot='s role once fills flow through =StreamTransactions=
    uniformly — likely narrows to continuously-updating figures (unrealized
    PnL, margin) rather than trade-ledger reconciliation; see "Source-of-truth
    asymmetry" above. Exact scope still open.
-6. Move risk/sizing math onto =Account=, shared by backtest and live.
+7. Move risk/sizing math onto =Account=, shared by backtest and live.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 3 specifically needs a proper plan-mode
-session (=engine.Trader='s exact dependency on =Ledger='s current method
-set, how =account.Event=/=oanda.TxEvent= translation should work, and the
-fresh-baseline caveat above) before implementation.
+pass, not a committed plan. Chunk 4 specifically needs a proper plan-mode
+session (how =account.Event=/=oanda.TxEvent= translation should work,
+exactly where the consuming step lives, and the fresh-baseline caveat
+above) before implementation.
