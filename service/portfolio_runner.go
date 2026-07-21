@@ -136,18 +136,14 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 		return true
 	}
 
-	// Prefer the local snapshot; fall back to a direct OANDA call.
-	var nav float64
-	if snap := cb.acct.getSnapshot(); snap != nil {
-		nav = snap.NAV()
-	} else {
-		summary, err := cb.acct.svc.OANDA.GetAccountSummary(ctx, cb.acct.ID)
-		if err != nil {
-			cb.log.Warn("circuit breaker: could not fetch NAV", "err", err)
-			return true // fail open — don't block on transient errors
-		}
-		nav = summary.NAV
+	// Reuses Account.GetAccountSummary's existing prefer-snapshot-fall-back-
+	// to-broker logic instead of duplicating it here.
+	summary, err := cb.acct.GetAccountSummary(ctx)
+	if err != nil {
+		cb.log.Warn("circuit breaker: could not fetch NAV", "err", err)
+		return true // fail open — don't block on transient errors
 	}
+	nav := summary.NAV
 
 	cb.mu.Lock()
 	defer cb.mu.Unlock()

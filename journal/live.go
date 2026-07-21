@@ -11,6 +11,16 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+// liveJournalClient is the subset of brokers.Broker LiveJournal needs.
+// Defined locally rather than importing brokers: brokers/sim already
+// imports journal (Sim's journal field), so journal importing brokers
+// back would cycle. Any brokers.Broker value (or *oanda.Client directly)
+// satisfies this structurally, no explicit dependency required.
+type liveJournalClient interface {
+	StreamTransactions(ctx context.Context, accountID string, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error)
+	GetTransactions(ctx context.Context, accountID string, sinceID int64) ([]oanda.Transaction, int64, error)
+}
+
 // LiveJournal subscribes to an OANDA transaction stream and writes complete
 // TradeRecord rows to the configured Journal as trades close.
 //
@@ -22,7 +32,7 @@ import (
 // Heartbeats advance an in-memory "lastSeenTxID" cursor so callers can
 // reconnect (or poll for gap recovery) from a known point.
 type LiveJournal struct {
-	client    *oanda.Client
+	client    liveJournalClient
 	accountID string
 	journal   Journal
 	log       *slog.Logger
@@ -43,7 +53,7 @@ type pendingOpen struct {
 }
 
 // NewLiveJournal creates a journal worker. Call Run to start the subscription.
-func NewLiveJournal(client *oanda.Client, accountID string, journal Journal, log *slog.Logger) *LiveJournal {
+func NewLiveJournal(client liveJournalClient, accountID string, journal Journal, log *slog.Logger) *LiveJournal {
 	if log == nil {
 		log = slog.Default()
 	}

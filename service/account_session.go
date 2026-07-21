@@ -129,7 +129,7 @@ func (s *Service) DefaultAccount(ctx context.Context) (*Account, error) {
 func (a *Account) EnsureSnapshot(ctx context.Context, interval time.Duration) {
 	a.snapMu.Lock()
 	if a.snapshot == nil {
-		a.snapshot = newAccountSnapshot(a.svc.OANDA, a.ID, a.svc.Log)
+		a.snapshot = newAccountSnapshot(a.broker(), a.ID, a.svc.Log)
 	}
 	snap := a.snapshot
 	a.snapMu.Unlock()

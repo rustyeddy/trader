@@ -50,7 +50,7 @@ func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
 // replayed into the journal before the stream subscription starts —
 // useful for downtime recovery.
 func (a *Account) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	lj := journal.NewLiveJournal(a.svc.OANDA, a.ID, jrnl, a.svc.Log)
+	lj := journal.NewLiveJournal(a.broker(), a.ID, jrnl, a.svc.Log)
 	lj.SetBotIDLookup(a.svc.LookupTradeBotID)
 
 	if backfillFrom > 0 {

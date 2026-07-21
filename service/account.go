@@ -14,7 +14,7 @@ func (a *Account) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary,
 	if snap := a.getSnapshot(); snap != nil {
 		return snap.Summary(), nil
 	}
-	summary, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
+	summary, err := a.broker().GetAccountSummary(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get account summary: %w", err)
 	}
@@ -27,14 +27,14 @@ func (a *Account) GetAccountSummary(ctx context.Context) (*oanda.AccountSummary,
 // OANDA caps responses at 1000; if you get back exactly 1000, call again
 // with the new lastID.
 func (a *Account) GetTransactions(ctx context.Context, sinceID int64) ([]oanda.Transaction, int64, error) {
-	return a.svc.OANDA.GetTransactions(ctx, a.ID, sinceID)
+	return a.broker().GetTransactions(ctx, a.ID, sinceID)
 }
 
 // StreamTransactions opens a push subscription to the OANDA transaction
 // stream. The returned channel closes when ctx is cancelled or the stream
 // errors out (final event carries non-nil Err in the error case).
 func (a *Account) StreamTransactions(ctx context.Context, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
-	return a.svc.OANDA.StreamTransactions(ctx, a.ID, opts)
+	return a.broker().StreamTransactions(ctx, a.ID, opts)
 }
 
 // GetAccountSummary returns the summary for the first/default account. This
