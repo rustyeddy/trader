@@ -13,7 +13,17 @@
   exists).
 - Phase 3 (below) — decided, not yet started: merge =service.Account= into
   =account.Account=, and move =service.Account/Accounts/FirstAccount/DefaultAccount=
-  into =account/= as the session registry.
+  into =account/= as the session registry. *Revised 2026-07-22*: also
+  merge =account.Ledger= into =account.Account= (see "Ledger merges into
+  Account too" below) — =Ledger= does not survive as a separate wrapping
+  type, and =Account= does *not* hold a =Broker= field (corrects this
+  doc's earlier wording — ownership points =Broker= → =Account=, not the
+  other way; see Phase 4).
+- Phase 4 (below) — reshaped 2026-07-22 mid-discussion: order fills
+  (including stop/take triggers) are events the *Broker* emits
+  asynchronously via =StreamTransactions=, not something a synchronous
+  =Ledger.SubmitOpen= call decides on the spot. Chunk 1 is done; chunk 2's
+  concrete plan is being redone against this shape.
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -170,19 +180,49 @@ nothing reads it in that path.
 Beyond the existing ledger fields (=Balance=, =Equity=, =Lots=, =Trades=,
 =RiskFraction=, ...), the live-session half needs:
 
-- =Broker brokers.Broker= — replaces =a.svc.OANDA= for execution calls
-  (already proven viable by Phase 2's =Account.broker()= accessor; this is
-  that same accessor's target field made real once =Account= no longer
-  needs to reach through =*Service= for it).
+- *No =Broker= field.* Corrected 2026-07-22: ownership points the other
+  way — "a Broker can have more than one Account" (this doc's own opening
+  hierarchy), and every =brokers.Broker= method already takes =accountID=
+  as a parameter, confirming the interface itself is shaped as "one broker
+  addressing many accounts," not "one account holding one broker." What
+  submits an order needs a =Broker= handle to call, but that handle isn't
+  something =Account= owns — see Phase 4 for where it actually lives.
 - =Log *slog.Logger= — replaces =a.svc.Log=.
 - The =AccountSnapshot= cache (=snapMu=/=snapshot=) — moves over unchanged;
   it already has zero back-reference to =*Service= (see
   =docs/Plans/service-refactor.org='s Phase 1 note — this was already
-  identified as the one piece with no cycle risk).
+  identified as the one piece with no cycle risk). Its role narrows once
+  Phase 4's event-driven fills land — see Phase 4's source-of-truth note.
 - Pricing/streaming (=GetPricing=, =StreamPricing=, used by
   =prices.go=/=live_runner.go=/=pip_values.go=) stays on the concrete
   =*oanda.Client= (or a =DataProvider= field, once that interface exists)
   until the =DataProvider= split happens — same deferral as Phase 1/2.
+
+** Ledger merges into Account too
+
+Decided 2026-07-22, prompted by a real-world sanity check: in standard
+bookkeeping, a *ledger is something an account has* — the record of its
+transactions — not a container an account lives inside. =account.Account=
+already keeps most of its own ledger directly: =Trades []*Trade= (closed
+transaction history), =Lots=/=AddLot=/=CloseLot= (position bookkeeping).
+What the separate =account.Ledger= wrapper (=account/ledger.go=, the
+struct Phase 1 renamed from =account.Broker=) adds on top is really just
+the event queue (=evtQ=, =Events()=, =publishEvent=) and =SubmitOpen=/
+=SubmitClose= as entry points wrapping =AddLot=/=CloseLot= with a
+synchronous event fire — implementation plumbing, not a distinct
+real-world concept.
+
+Target: =account.Ledger= as a separate type goes away. Its narrowed,
+correctly-scoped remaining job — a running record of transactions,
+capital, and PnL, possibly order history — becomes something =Account=
+*has* (e.g. a =Ledger= field/sub-struct on =Account=, not a struct that
+wraps =Account=), not an orchestrator. =engine.Trader= (=engine/trader.go=,
+currently =*account.Ledger= embedded) embeds =*account.Account= instead,
+inheriting whatever of =Ledger='s current method set survives the merge.
+=SubmitOpen=/=SubmitClose= as synchronous orchestration entry points do
+*not* survive as-is either — see Phase 4, where order submission and fill
+application become two separate, asynchronously-connected steps once the
+event queue moves to =Broker=.
 
 ** Where the registry goes
 
@@ -232,45 +272,68 @@ something named =Account=. Merging the type (Phase 3) doesn't converge the
 *flow* — =orders.go= would still call =broker()= directly on one side while
 =execute.go= calls =Ledger.SubmitOpen= directly on the other.
 
-** Target flow
+** Target flow: orders are requests, fills are events
 
-=Ledger.SubmitOpen=/=SubmitClose= become the single chokepoint either
-system calls. Internally, =SubmitOpen= calls =Broker.SubmitMarketOrder= to
-get the actual fill, then writes =Account.Lots=/=Trades= from that result —
-instead of trusting a pre-computed price. Backtest and live differ only in
-which =Broker= is plugged in:
+Reshaped 2026-07-22 from the original "=Ledger.SubmitOpen= calls =Broker=
+synchronously" sketch. The trigger: a stop-loss is a *resting* order
+sitting on the broker's book — it doesn't fire when you submit it, it
+fires later, whenever price actually reaches it, and only the =Broker=
+knows when that happens. A market order is the degenerate case of the same
+idea (the "delay" is ~0), not a fundamentally different mechanism. So
+submitting an order and applying its fill to an account's ledger are two
+separate steps, connected asynchronously — not one synchronous call.
 
-- *Live* → =brokers/oanda= (already satisfies =Broker=, Phase 1).
-- *Backtest / paper-trading* → =brokers/sim= becomes a real =Broker=
-  implementation, not a backtest-only stand-in. Its =SubmitMarketOrder=/
-  =CloseTrade= simulate the fill — spread and slippage derived from candle
-  data (=candle.AvgSpread=, the same source =execute.go= already uses by
-  hand today) rather than a real network round-trip. This is what makes
-  =brokers/sim= usable for *live* paper trading too (real-time ticks, no
-  real capital at risk), not only historical backtest replay — that's
-  =sim='s actual purpose, not an incidental side effect.
+- *Submission*: something (chunk 3's live-trading migration, or backtest's
+  per-bar loop) calls =Broker.SubmitMarketOrder(ctx, accountID, ...)= to
+  open, or sets a resting stop/take via =Broker.UpdateTradeStop=. =Broker=
+  addresses accounts by ID (already true of every method in the phase-1
+  interface) — it does not need an =Account= handle to do this, and
+  =Account= does not hold a =Broker= field (see Phase 3's correction).
+- *Fill application*: =Broker.StreamTransactions= (currently one of chunk
+  1's deliberately-minimal =Sim= methods — see chunk 1 below) becomes the
+  *real*, unified fill feed for both implementations: =oanda.Client=
+  already streams real fills; =Sim= needs to actually implement it,
+  emitting when =SubmitMarketOrder= fills immediately *or* when a resting
+  stop/take it's tracking gets hit on a later =UpdatePrice= call. Something
+  subscribes to this stream, translates =oanda.TxEvent= → =account.Event=,
+  and applies it to the account's ledger (=AddLot=/=CloseLot=, now
+  triggered by the event rather than called directly by =SubmitOpen=).
+- *Stop/take triggering moves into =Sim=.* =backtest/exits.go='s
+  =autoCloseExits= currently checks candle OHLC against
+  =lot.Stop=/=lot.Take= and calls =SubmitClose= directly, outside any
+  broker — doing the broker's job in the wrong place. That check belongs
+  inside =Sim=, run against each =UpdatePrice=, mirroring how a real
+  resting stop sits on OANDA's book and triggers on its own.
+
+Backtest and live differ only in which =Broker= is plugged in and how it's
+fed prices (candles via =TickFromCandle=, vs. real ticks) — not in how
+fills get applied to an account, which is now the same event-consumption
+step either way.
 
 Known, explicitly parked difference: backtest replays candles, live
 trading (real or paper) reacts to ticks. Not solved here — acknowledged as
 a separate problem =brokers/sim= will need to handle, not a blocker to
 this shape.
 
-** Source-of-truth asymmetry
+** Source-of-truth asymmetry — narrower than first thought
 
-The flow converges, but *authority* doesn't — and forcing it to would be
-wrong:
+The flow converges, and this turns out to converge *authority* further
+than the original sketch assumed too: if both =Sim= and real =oanda.Client=
+apply fills to an account's ledger through the same
+=StreamTransactions=-consuming step, there's no separate "write locally,
+then reconcile" phase for trade fills at all — the event stream *is* the
+single write path for both. What's left asymmetric is narrower:
 
-- *Sim* (backtest or paper): =Ledger.SubmitOpen=/=SubmitClose= writing to
-  =Account.Lots= *is* truth. Nothing external to reconcile against.
-- *OANDA* (live): a fill is provisional until OANDA's own account-changes
-  feed confirms it. =AccountSnapshot= (=service/account_snapshot.go=)
-  already exists for exactly this (polls =GetAccountChanges=) — but today
-  it maintains its own separate =openTrades map[string]oanda.OpenTrade=,
-  parallel to and disconnected from =Account.Lots=. Under this design,
-  =AccountSnapshot= stops being a separate cache and instead *reconciles*
-  =Account.Lots=/=Trades= against OANDA's feed periodically — same ledger
-  structure both modes use, live side just gets corrected by an external
-  authority instead of trusting its own writes outright.
+- *Sim*: its own =StreamTransactions= emissions are authoritative by
+  construction — nothing external to disagree with.
+- *OANDA*: =StreamTransactions= (or an equivalent poll,
+  =AccountSnapshot='s existing =GetAccountChanges= mechanism) is OANDA's
+  own authoritative feed already — consuming it *is* the reconciliation,
+  not a step bolted on after an eager local write. =AccountSnapshot='s
+  remaining distinct job likely shrinks to continuously-updating figures
+  that aren't tied to a specific fill event (unrealized PnL from price
+  moves, margin) rather than reconciling the trade ledger itself — open
+  detail for chunk 4, not resolved here.
 
 ** Risk management moves onto Account
 
@@ -291,16 +354,18 @@ reference* risk management, not have it float in =service/=: risk
 calculations are inherently dependent on account size and open positions,
 which only =Account= actually has.
 
-** Broker events converge too
+** Broker events converge too — now via =StreamTransactions=, not =Ledger.evtQ=
 
-=Ledger.Events()=/=account.Event= (=EventOrderFilled=, =EventPositionClosed=)
-already exists and drives backtest's =engine.Trader.StartBrokerEventHandler=.
-=service/live_runner.go= doesn't consume it at all today — live has its own
-separate reaction path. Once =SubmitOpen=/=SubmitClose= fire the same
-events regardless of which =Broker= backs them, =live_runner.go='s bot
-logic reacts through the same channel backtest's execution loop already
-does — same data/flowchart on both sides, per the goal, "even broker events
-and handling."
+Original framing: "=Ledger.Events()= already exists, =live_runner.go=
+should consume it too." Revised: the event queue itself moves — it's
+=Broker='s job to know when a resting order triggers (see "Target flow"
+above), so the queue belongs on =Broker= (via =StreamTransactions=), not
+on =Ledger=/=Account=. =engine.Trader.StartBrokerEventHandler=
+(=engine/trader.go=) and =service/live_runner.go= both end up consuming
+the same kind of feed — a =Broker='s =StreamTransactions=, translated to
+=account.Event= — rather than =live_runner.go= gaining a consumer for
+=Ledger.Events()= as originally sketched. Same convergence goal, different
+(now more accurate) mechanism.
 
 ** Sequencing (proposed, not yet agreed chunk-by-chunk)
 
@@ -315,18 +380,33 @@ correct:
    ones split into =broker_stub.go=, plus =TickFromCandle= as the
    not-yet-wired foundation chunk 2 needs. Confirmed via
    =var _ Broker = (*sim.Sim)(nil)= in =brokers/broker.go=.
-2. Move the broker call *inside* =Ledger.SubmitOpen=/=SubmitClose=, proven
-   first against backtest's existing (large, correctness-critical) test
-   suite using =brokers/sim= — this is the highest-risk step, since a
-   regression here silently corrupts backtest results. Bit-for-bit
-   equivalence with current backtest behavior is the bar before moving on.
-3. Migrate live (=orders.go=/=live_runner.go=) onto the same
-   =Ledger.SubmitOpen=/=SubmitClose= path, using =brokers/oanda=.
-4. Add =AccountSnapshot=-based reconciliation for the live/OANDA
-   source-of-truth asymmetry.
+2. *Reshaped 2026-07-22, not yet re-planned in detail.* Merge
+   =account.Ledger= into =account.Account= (see Phase 3's "Ledger merges
+   into Account too"), make =Sim.StreamTransactions= real — emitting on
+   immediate market-order fills *and* on resting stop/take triggers it now
+   monitors internally via =UpdatePrice= (moving that check out of
+   =backtest/exits.go='s =autoCloseExits=) — and build the
+   =StreamTransactions=-consuming step that applies fills to an account's
+   ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
+   =AddLot=/=CloseLot= calls. Proven first against backtest's existing
+   (large, correctness-critical) test suite using =brokers/sim= — still the
+   highest-risk step, since a regression here silently corrupts backtest
+   results. Bit-for-bit equivalence with current backtest behavior is the
+   bar before moving on. This absorbs what was chunk 2 *and* most of what
+   was chunk 6 (event convergence) — they turned out to be the same
+   mechanism, not sequential steps.
+3. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
+   consume-=StreamTransactions= flow, using =brokers/oanda=.
+4. =AccountSnapshot='s role once fills flow through =StreamTransactions=
+   uniformly — likely narrows to continuously-updating figures (unrealized
+   PnL, margin) rather than trade-ledger reconciliation; see "Source-of-truth
+   asymmetry" above. Exact scope still open.
 5. Move risk/sizing math onto =Account=, shared by backtest and live.
-6. Converge broker-event handling — =live_runner.go= consumes
-   =Ledger.Events()= the same way =engine.Trader= does.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan.
+pass, not a committed plan. Chunk 2 specifically needs a proper plan-mode
+session (exploring =Sim='s current =UpdatePrice=/mark-to-market path,
+=engine.Trader='s exact dependency on =Ledger='s current method set, and
+how =account.Event=/=oanda.TxEvent= translation should work) before
+implementation — this doc update only fixes the target shape, not the
+concrete steps.
