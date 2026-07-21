@@ -7,6 +7,7 @@ and others) working in this repository. All agent-specific config files symlink 
 
 ```bash
 make vet                 # go vet ./...
+make lint                # staticcheck ./... (catch dead code, capitalized errors, etc.)
 make test                # full Go test suite
 make build               # build bin/trader (requires existing ui/dist assets)
 make build-full          # rebuild the Svelte UI, then rebuild bin/trader
@@ -321,7 +322,7 @@ Documentation-only, generated-artifact-only, and pure deletion changes do not re
 - Table-driven tests preferred for functions with multiple input/output cases
 
 Choose validation based on the affected area:
-- Go code: `gofmt`, `make vet`, and `make test`
+- Go code: `gofmt`, `make vet`, `make lint`, and `make test`
 - Strategy registration or behavior: Go checks plus `make sweep`
 - UI code: `cd ui && npm run check` and `cd ui && npm run build`
 - REST/MCP handlers: focused handler tests followed by `make test`
