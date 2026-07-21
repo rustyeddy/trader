@@ -20,7 +20,7 @@ type BacktestExecutor interface {
 // factory-provided runtime dependencies.
 type TraderBacktestExecutor struct {
 	DataManager    engine.CandleSource
-	BrokerFactory  func() *account.Broker
+	BrokerFactory  func() *account.Ledger
 	AccountFactory func(name string, balance types.Money) *account.Account
 }
 
@@ -29,8 +29,8 @@ type TraderBacktestExecutor struct {
 func NewTraderBacktestExecutor(dm engine.CandleSource) *TraderBacktestExecutor {
 	return &TraderBacktestExecutor{
 		DataManager: dm,
-		BrokerFactory: func() *account.Broker {
-			return account.NewBroker("sim")
+		BrokerFactory: func() *account.Ledger {
+			return account.NewLedger("sim")
 		},
 		AccountFactory: func(name string, balance types.Money) *account.Account {
 			return account.NewAccount(name, balance)
@@ -57,8 +57,8 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	}
 
 	t := &engine.Trader{DataManager: e.DataManager}
-	t.Broker = e.BrokerFactory()
-	if t.Broker == nil {
+	t.Ledger = e.BrokerFactory()
+	if t.Ledger == nil {
 		return fmt.Errorf("nil broker")
 	}
 	acct := e.AccountFactory("backtest", run.Request.StartingBalance)
@@ -68,7 +68,7 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	if run.Request.RiskPct != 0 {
 		acct.RiskFraction = run.Request.RiskPct
 	}
-	t.Broker.Account = acct
+	t.Ledger.Account = acct
 
 	return run.Execute(ctx, t)
 }

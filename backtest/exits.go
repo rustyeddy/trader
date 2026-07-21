@@ -12,7 +12,7 @@ import (
 // immediately closes any that hit their stop or take-profit.
 // It must be called before the strategy snapshot so the strategy only
 // sees lots that are still open.
-func autoCloseExits(ctx context.Context, b *account.Broker, candle market.Candle, slippage types.Price) (int, error) {
+func autoCloseExits(ctx context.Context, b *account.Ledger, candle market.Candle, slippage types.Price) (int, error) {
 	var hits []struct {
 		lot    *account.Lot
 		exitPx types.Price

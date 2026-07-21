@@ -61,7 +61,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	evtQ := t.Broker.Events()
+	evtQ := t.Ledger.Events()
 
 	var processedEvents int64
 	errCh, done := t.StartBrokerEventHandler(runCtx, evtQ, &processedEvents)
@@ -79,7 +79,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 			pending := 0
 			if t != nil {
-				pending = t.Broker.EventQueueLen()
+				pending = t.Ledger.EventQueueLen()
 			}
 			if pending == 0 {
 				break
@@ -127,8 +127,8 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 				queueLen := 0
 				queueCap := 0
 				if t != nil {
-					queueLen = t.Broker.EventQueueLen()
-					queueCap = t.Broker.EventQueueCap()
+					queueLen = t.Ledger.EventQueueLen()
+					queueCap = t.Ledger.EventQueueCap()
 				}
 
 				if lag > 30*time.Second {
@@ -211,7 +211,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			})
 		}
 
-		autoExits, err := autoCloseExits(runCtx, t.Broker, candle, slippage)
+		autoExits, err := autoCloseExits(runCtx, t.Ledger, candle, slippage)
 		if err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			log.L.Info("submit close request", "ID", cl.Request.ID)
 
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-			err = t.Broker.SubmitClose(runCtx, cl)
+			err = t.Ledger.SubmitClose(runCtx, cl)
 			if err != nil {
 				return err
 			}
@@ -263,7 +263,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			log.L.Info("Broker event Open Position", "ID", openReq.ID)
 			log.L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-			_, err = t.Broker.SubmitOpen(runCtx, openReq)
+			_, err = t.Ledger.SubmitOpen(runCtx, openReq)
 			if err != nil {
 				t.Account.Lots.Delete(openReq.ID)
 				return err
@@ -302,7 +302,7 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 				CloseCause: account.CloseManual,
 			}
 
-			if err := t.Broker.SubmitClose(runCtx, cl); err != nil {
+			if err := t.Ledger.SubmitClose(runCtx, cl); err != nil {
 				return err
 			}
 		}
@@ -347,7 +347,7 @@ func (run *Backtest) Execute(ctx context.Context, t *engine.Trader) error {
 	if t.Account == nil {
 		return fmt.Errorf("nil account")
 	}
-	if t.Broker == nil {
+	if t.Ledger == nil {
 		return fmt.Errorf("nil broker")
 	}
 	if t.DataManager == nil {

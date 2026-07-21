@@ -91,7 +91,7 @@ func TestAutoCloseExits_StopAndTake(t *testing.T) {
 	t.Parallel()
 
 	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
-	b := account.NewBroker("test")
+	b := account.NewLedger("test")
 	b.Account = acct
 
 	// Open a long lot with stop below and take above current price.
@@ -122,7 +122,7 @@ func TestAutoCloseExits_TakeProfit(t *testing.T) {
 	t.Parallel()
 
 	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
-	b := account.NewBroker("test")
+	b := account.NewLedger("test")
 	b.Account = acct
 
 	lot := testOpenLot(t, acct, "EURUSD", types.Long, 10_000, types.PriceFromFloat(1.1000))

@@ -9,20 +9,20 @@ import (
 
 const brokerEventQueueSize = 1024
 
-type Broker struct {
+type Ledger struct {
 	Name    string
 	Account *Account
 
 	evtQ chan *Event
 }
 
-func NewBroker(name string) *Broker {
-	return &Broker{
+func NewLedger(name string) *Ledger {
+	return &Ledger{
 		Name: name,
 	}
 }
 
-func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*Lot, error) {
+func (b *Ledger) SubmitOpen(ctx context.Context, req *OpenRequest) (*Lot, error) {
 	if b == nil {
 		return nil, fmt.Errorf("broker is nil")
 	}
@@ -56,7 +56,7 @@ func (b *Broker) SubmitOpen(ctx context.Context, req *OpenRequest) (*Lot, error)
 	return lot, nil
 }
 
-func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
+func (b *Ledger) SubmitClose(ctx context.Context, req *CloseRequest) error {
 	if b == nil {
 		return fmt.Errorf("broker is nil")
 	}
@@ -90,11 +90,11 @@ func (b *Broker) SubmitClose(ctx context.Context, req *CloseRequest) error {
 	return nil
 }
 
-func (b *Broker) Events() <-chan *Event {
+func (b *Ledger) Events() <-chan *Event {
 	return b.ensureEventQueue()
 }
 
-func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
+func (b *Ledger) emitEvent(ctx context.Context, evt *Event) error {
 	evtQ := b.ensureEventQueue()
 
 	if ctx == nil {
@@ -116,13 +116,13 @@ func (b *Broker) emitEvent(ctx context.Context, evt *Event) error {
 	}
 }
 
-func (b *Broker) publishEvent(ctx context.Context, evt *Event) {
+func (b *Ledger) publishEvent(ctx context.Context, evt *Event) {
 	if err := b.emitEvent(ctx, evt); err != nil {
 		log.L.Warn("dropping broker event", "type", evt.Type.String(), "err", err)
 	}
 }
 
-func (b *Broker) ensureEventQueue() chan *Event {
+func (b *Ledger) ensureEventQueue() chan *Event {
 	if b.evtQ == nil {
 		b.evtQ = make(chan *Event, brokerEventQueueSize)
 	}
@@ -131,7 +131,7 @@ func (b *Broker) ensureEventQueue() chan *Event {
 
 // EventQueueLen returns the number of pending broker events, or 0 if the queue
 // has not been initialized. Used by the engine to detect broker idleness.
-func (b *Broker) EventQueueLen() int {
+func (b *Ledger) EventQueueLen() int {
 	if b == nil || b.evtQ == nil {
 		return 0
 	}
@@ -140,7 +140,7 @@ func (b *Broker) EventQueueLen() int {
 
 // EventQueueCap returns the capacity of the broker event queue, or 0 if it has
 // not been initialized.
-func (b *Broker) EventQueueCap() int {
+func (b *Ledger) EventQueueCap() int {
 	if b == nil || b.evtQ == nil {
 		return 0
 	}
@@ -150,7 +150,7 @@ func (b *Broker) EventQueueCap() int {
 // EnqueueEvent places evt on the broker event queue without blocking, returning
 // true if it was accepted. The queue is initialized on first use. Useful for
 // injecting events from outside the normal Submit path (e.g. tests, replay).
-func (b *Broker) EnqueueEvent(evt *Event) bool {
+func (b *Ledger) EnqueueEvent(evt *Event) bool {
 	q := b.ensureEventQueue()
 	select {
 	case q <- evt:

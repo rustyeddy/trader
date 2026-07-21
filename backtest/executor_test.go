@@ -25,11 +25,11 @@ func TestTraderBacktestExecutor_Guards(t *testing.T) {
 	exec.DataManager = datamanager.GetDataManager()
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil broker factory")
 
-	exec.BrokerFactory = func() *account.Broker { return nil }
+	exec.BrokerFactory = func() *account.Ledger { return nil }
 	exec.AccountFactory = func(name string, balance types.Money) *account.Account { return account.NewAccount(name, balance) }
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil broker")
 
-	exec.BrokerFactory = func() *account.Broker { return account.NewBroker("sim") }
+	exec.BrokerFactory = func() *account.Ledger { return account.NewLedger("sim") }
 	exec.AccountFactory = nil
 	require.ErrorContains(t, exec.Execute(context.Background(), run), "nil account factory")
 

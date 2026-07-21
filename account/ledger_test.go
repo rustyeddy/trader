@@ -16,13 +16,13 @@ func TestBrokerSubmitOpen_Guards(t *testing.T) {
 
 	req := &OpenRequest{Request: Request{TradeCommon: &TradeCommon{ID: idgen.NewULID(), Instrument: "EURUSD", Units: 1000, Side: types.Long}, Price: types.PriceFromFloat(1.1)}}
 
-	var nilBroker *Broker
+	var nilBroker *Ledger
 	lot, err := nilBroker.SubmitOpen(context.Background(), req)
 	require.Error(t, err)
 	assert.Nil(t, lot)
 	assert.Contains(t, err.Error(), "broker is nil")
 
-	b := &Broker{}
+	b := &Ledger{}
 	lot, err = b.SubmitOpen(context.Background(), req)
 	require.Error(t, err)
 	assert.Nil(t, lot)
@@ -56,7 +56,7 @@ func TestBrokerSubmitOpen_Guards(t *testing.T) {
 func TestBrokerSubmitOpen_QueuesFilledLotEvent(t *testing.T) {
 	t.Parallel()
 
-	b := &Broker{Account: NewAccount("test", types.MoneyFromFloat(10000))}
+	b := &Ledger{Account: NewAccount("test", types.MoneyFromFloat(10000))}
 	req := &OpenRequest{
 		Request: Request{
 			TradeCommon: &TradeCommon{ID: idgen.NewULID(), Instrument: "EURUSD", Units: 1000, Side: types.Long},
@@ -83,7 +83,7 @@ func TestBrokerSubmitOpen_QueuesFilledLotEvent(t *testing.T) {
 func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 	t.Parallel()
 
-	b := &Broker{
+	b := &Ledger{
 		Account: NewAccount("test-account", types.MoneyFromFloat(10_000)),
 		evtQ:    make(chan *Event, 1),
 	}
@@ -128,7 +128,7 @@ func TestBrokerOpenRequestReturnsQueueFullWhenEventQueueIsFull(t *testing.T) {
 func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *testing.T) {
 	t.Parallel()
 
-	b := &Broker{
+	b := &Ledger{
 		Account: NewAccount("test-account", types.MoneyFromFloat(10_000)),
 		evtQ:    make(chan *Event, 1),
 	}
@@ -172,7 +172,7 @@ func TestBrokerOpenRequestReturnsContextErrorWhenContextCanceledAndQueueFull(t *
 func TestNewBroker(t *testing.T) {
 	t.Parallel()
 
-	b := NewBroker("test-broker")
+	b := NewLedger("test-broker")
 	require.NotNil(t, b)
 	assert.Equal(t, "test-broker", b.Name)
 	assert.Nil(t, b.Account)
@@ -182,7 +182,7 @@ func TestNewBroker(t *testing.T) {
 func TestBrokerEventsChannelCreation(t *testing.T) {
 	t.Parallel()
 
-	b := NewBroker("ch-test")
+	b := NewLedger("ch-test")
 	assert.Nil(t, b.evtQ)
 
 	ch := b.Events()
@@ -197,7 +197,7 @@ func TestBrokerEventsChannelCreation(t *testing.T) {
 func TestBrokerEventsChannelReceiveEvent(t *testing.T) {
 	t.Parallel()
 
-	b := NewBroker("recv-test")
+	b := NewLedger("recv-test")
 	evtCh := b.Events()
 
 	evt := &Event{Type: EventOrderFilled}
@@ -213,9 +213,9 @@ func TestBrokerEventsChannelReceiveEvent(t *testing.T) {
 	}
 }
 
-func makeBrokerCloseFixture() (*Broker, *Lot, *CloseRequest) {
+func makeBrokerCloseFixture() (*Ledger, *Lot, *CloseRequest) {
 	acct := NewAccount("account", types.MoneyFromFloat(2_000))
-	broker := &Broker{
+	broker := &Ledger{
 		Account: acct,
 		evtQ:    make(chan *Event, 1),
 	}
@@ -251,12 +251,12 @@ func makeBrokerCloseFixture() (*Broker, *Lot, *CloseRequest) {
 func TestBrokerSubmitCloseValidationErrors(t *testing.T) {
 	t.Parallel()
 
-	var nilBroker *Broker
+	var nilBroker *Ledger
 	err := nilBroker.SubmitClose(context.Background(), &CloseRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "broker is nil")
 
-	broker := NewBroker("broker")
+	broker := NewLedger("broker")
 	err = broker.SubmitClose(context.Background(), &CloseRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "broker account is nil")
@@ -369,7 +369,7 @@ func TestBrokerSubmitCloseRejectsMismatchedRequestIdentity(t *testing.T) {
 func TestBrokerEmitEventNilContextBehavior(t *testing.T) {
 	t.Parallel()
 
-	broker := NewBroker("broker")
+	broker := NewLedger("broker")
 	evt := &Event{Type: EventOrderFilled}
 
 	//lint:ignore SA1012 nil context behavior is exactly what this test verifies
@@ -378,7 +378,7 @@ func TestBrokerEmitEventNilContextBehavior(t *testing.T) {
 	require.NotNil(t, broker.evtQ)
 	require.Len(t, broker.evtQ, 1)
 
-	full := &Broker{evtQ: make(chan *Event, 1)}
+	full := &Ledger{evtQ: make(chan *Event, 1)}
 	full.evtQ <- &Event{Type: EventOrderFilled}
 	//lint:ignore SA1012 nil context behavior is exactly what this test verifies
 	err = full.emitEvent(nil, evt)
