@@ -2,11 +2,23 @@
 
 * Status
 
-Design decision, refactor not yet started (as of 2026-07-21). This doc
-describes the target shape so it survives the refactor and can fold
-directly into the manual's Architecture section once implemented — see
-=docs/Plans/service-refactor.org= for the related =service.Service=
-god-object refactor this depends on being done first.
+- Phase 1 (=account.Broker= → =account.Ledger= rename, new =account.Order=,
+  new =brokers.Broker= interface + compile-time proof =*oanda.Client=
+  satisfies it) — done, commit =8c4adaf=.
+- Phase 2, scoped to =service/orders.go= only — done, commit =eaae1a6=.
+  =Account.broker()= narrows =a.svc.OANDA= to =brokers.Broker= for
+  =orders.go='s five execution calls; everything else in =service/= still
+  calls the concrete client directly (unaffected, since most of it is
+  =GetPricing=/=StreamPricing=-shaped, out of scope until =DataProvider=
+  exists).
+- Phase 3 (below) — decided, not yet started: merge =service.Account= into
+  =account.Account=, and move =service.Account/Accounts/FirstAccount/DefaultAccount=
+  into =account/= as the session registry.
+
+This doc describes the target shape so it survives the refactor and can
+fold directly into the manual's Architecture section once implemented —
+see =docs/Plans/service-refactor.org= for the related =service.Service=
+god-object refactor this unblocks.
 
 * Ownership hierarchy
 
@@ -114,8 +126,79 @@ this refactor:
 3. =oanda.AccountSummary= / =oanda.AccountDetails= (=brokers/oanda=) — wire
    DTOs from OANDA's API.
 
-Only (1) is part of the Broker/Account/Order hierarchy described in this
-doc. (2) and (3) are not renamed by this refactor, but resolving (2)'s
-dependency on a raw OANDA client — swapping =a.svc.OANDA= for a
-=brokers.Broker= field — is the direct payoff this refactor unlocks for
-the Service split that follows it.
+(3) stays a wire DTO, untouched. (1) and (2) are **merging** — see Phase 3
+below — resolving the ambiguity by deciding there should only be one
+=Account= type, not by permanently keeping two.
+
+* Phase 3: merge =service.Account= into =account.Account=
+
+Decided 2026-07-21, not yet implemented. Rather than keep the domain ledger
+(=account.Account=) and the live session wrapper (=service.Account=) as two
+separate types that happen to share a name, they become one
+=account.Account=, and the session-registry constructors currently on
+=service.Service= (=Account=, =Accounts=, =FirstAccount=, =DefaultAccount=)
+move into =account/= with it. =service/orders.go=' order-placement logic
+(=PlaceMarketOrder=, =CloseTrade=, =UpdateTradeStop=, =ListOpenTrades=) is
+expected to move along with =Account= at the same time, per the earlier
+discussion — its methods are all on =*Account= already, so leaving them
+behind in =service/= once =Account= moves would split one type's behavior
+across two packages for no reason.
+
+** Known collision to resolve: =Account.ID=
+
+=account.Account= already has an =ID= field
+(=account/account.go=, set via =idgen.NewULID()= in =NewAccount=) — but
+it's an internally-generated ULID, purely a ledger-instance identifier.
+Grepped: it is never read outside =account/= itself, and every non-test
+reference is a hardcoded literal (=ID: "test"=) — it is not load-bearing in
+backtest or engine today.
+
+=service.Account.ID=, meanwhile, *is* load-bearing — it's the real OANDA
+account identifier string (e.g. =101-004-12345-001=) threaded through
+every live broker call (=a.broker().GetOpenTrades(ctx, a.ID)= and
+similar).
+
+These are different concepts sharing a field name. Resolution: repurpose
+=Account.ID= to mean the live/broker account identifier (matching
+=service.Account='s usage, since that's the one anything actually depends
+on); backtest's =NewAccount(name, deposit)= either stops populating =ID=
+with a ULID or keeps doing so harmlessly — confirmed safe either way, since
+nothing reads it in that path.
+
+** What the merged =account.Account= needs
+
+Beyond the existing ledger fields (=Balance=, =Equity=, =Lots=, =Trades=,
+=RiskFraction=, ...), the live-session half needs:
+
+- =Broker brokers.Broker= — replaces =a.svc.OANDA= for execution calls
+  (already proven viable by Phase 2's =Account.broker()= accessor; this is
+  that same accessor's target field made real once =Account= no longer
+  needs to reach through =*Service= for it).
+- =Log *slog.Logger= — replaces =a.svc.Log=.
+- The =AccountSnapshot= cache (=snapMu=/=snapshot=) — moves over unchanged;
+  it already has zero back-reference to =*Service= (see
+  =docs/Plans/service-refactor.org='s Phase 1 note — this was already
+  identified as the one piece with no cycle risk).
+- Pricing/streaming (=GetPricing=, =StreamPricing=, used by
+  =prices.go=/=live_runner.go=/=pip_values.go=) stays on the concrete
+  =*oanda.Client= (or a =DataProvider= field, once that interface exists)
+  until the =DataProvider= split happens — same deferral as Phase 1/2.
+
+** Where the registry goes
+
+=Service.accounts map[string]*Account=/=accountsMu=/=firstID= and the
+=Account()=/=Accounts()=/=FirstAccount()=/=DefaultAccount()= constructor
+methods move into =account/= alongside the merged type — e.g. an
+=account.Registry= (or package-level functions closing over a registry
+struct) that constructs/caches sessions by OANDA account ID. =service.Service=
+keeps only a thin facade delegating to it, the same shape as
+=service/review.go= delegating to =reviewsvc= today.
+
+** Naming: =service/account= vs. =./account=
+
+This phase does *not* introduce a new =service/account= package — the
+session registry and merged =Account= type live directly in the existing
+top-level =account/= package alongside =Ledger=/=Order=/=Trade=. No
+same-package-name-different-import-path situation to manage (unlike
+=review= vs. =service/review='s =reviewsvc= alias) — there is only one
+=account= package once this lands.
