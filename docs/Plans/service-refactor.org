@@ -1,0 +1,166 @@
+#+TITLE: service.Service God Object — Refactor Design
+#+DATE: 2026-07-21
+#+PROPERTY: status design-discussion, not yet implemented
+#+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Problem
+
+=service/service.go='s =Service= struct has become a god object: it holds
+the OANDA client, the logger, =AccountID=, the entire multi-account session
+registry (=accounts map[string]*Account=, =accountsMu=, =firstID=), and a
+=Backtests= executor override, all on one struct. Nearly everything in
+=service/= (orders, bots, journal, live_runner, prices, account_*.go) hangs
+off =*Account=, which itself holds a back-reference =svc *Service= to reach
+all of the above.
+
+This resists the extraction pattern already used successfully for
+=backtest=/=review=/=reviewsweep= (see the review-sweep refactor,
+2026-07-20/21): those sub-services only ever held plain leaves
+(=*oanda.Client=, =*slog.Logger=), constructed fresh per call, with no
+back-reference to a parent struct. =Account= is structurally different — it
+*is* the shared, cached, mutex-guarded session state that much of
+=service/= depends on, not a peripheral feature that can be pushed down
+into a provider package by itself.
+
+* Direction
+
+Three layers, cleanly separated:
+
+- *Transports* (=api/rest=, =cmd/*=, =api/mcp=, maybe =mqtt= later) bring in
+  requests, assemble typed params, call a service, and hand the result back
+  to whoever called the transport.
+- *Services* orchestrate: they call whatever providers are needed to
+  accomplish one task, and return a typed result. No shared mutable state,
+  no back-reference to a god object.
+- *Providers* (=brokers/oanda=, =datamanager=, =backtest=, =review=,
+  =types=, etc.) are the actual I/O/domain leaves — brokers, data sources,
+  pure domain logic.
+
+** No general =Service= interface
+
+First instinct was something like:
+
+#+begin_src go
+type Service interface {
+    Name() string
+    Function() f(ctx context.Context, params map[string]any) (any, error)
+    Error() error
+}
+#+end_src
+
+Rejected. Collapsing every service's typed request/response
+(=ReviewRequest=, =BacktestReportSummary=, ...) into
+=map[string]any -> any= throws away Go's static typing at every call site —
+type assertions and casts replace compile-time checks, and it's reinventing
+dynamic dispatch in a language that doesn't need it for this. There's no
+real gain: nothing today calls services polymorphically by name; each
+transport already imports the specific service package it needs and calls
+a specific typed method (=api/rest/review_sweep.go= calling
+=reviewsweepsvc.RunPathSpecsAndWriteReports= directly is the pattern to
+keep).
+
+The one place a name+untyped-params+=any= shape legitimately earns its
+keep is MCP's own tool registry, since MCP tool calls are genuinely
+untyped at the wire level (JSON in, JSON out) regardless of what this
+codebase does internally. That dispatch shape should stay scoped to MCP's
+transport layer, not become the contract every service implements.
+
+** Services stay plain typed structs — mostly
+
+Stateless orchestration services (review, backtest, reviewsweep, orders,
+prices) don't need a common interface at all: a struct, a typed
+constructor, typed methods, called directly by whichever transport needs
+them. This is already the shape of =reviewsvc=, =backtestsvc=,
+=reviewsweepsvc=.
+
+** =Runnable= — for the services that actually have a lifecycle
+
+A second, narrower category exists: things that run in the background,
+independent of any single call, and need an explicit start/stop the
+process manages (currently wired ad hoc in =cmd/serve/cmd_serve.go= via
+hand-rolled =wg.Add(1); go func(){...}= blocks).
+
+#+begin_src go
+type Runnable interface {
+    Start(ctx context.Context) error
+    Stop() error
+}
+#+end_src
+
+*Would implement =Runnable=:*
+- =AccountSnapshot= (=service/account_snapshot.go=) — already has
+  =Start(ctx, interval) error= and =IsRunning()=; just needs =Stop()= to
+  fully qualify. Closest thing to already being this interface.
+- The live journal subscription (=runJournalWithBackoff= in
+  =cmd/serve=) — a goroutine with its own reconnect/backoff loop.
+- Bots / the live runner — a running bot is inherently background work
+  with a start and an explicit stop, not a request/response call.
+- The REST and MCP servers themselves — long-running listeners, same
+  shape.
+
+*Would not implement it:* review, backtest, reviewsweep, orders, prices —
+all "call in, result out," nothing outlives the call.
+=Account.StreamTransactions= is the interesting edge case: it returns a
+channel, which looks stream-like, but its lifetime is governed entirely by
+the caller's =ctx= (closes on cancel), not by an independent start/stop the
+*process* manages. Stays a plain typed method.
+
+Test for future services: if =cmd/serve= needs to remember to start it at
+boot and stop it at shutdown, it's =Runnable=. If it only exists for the
+duration of one caller's request, it's just a typed method.
+
+* Domain hierarchy: Broker / Account / Order vs. DataProvider
+
+Separately from the =Service= split, the domain model itself has a shape
+worth making explicit:
+
+- *Broker → Account → Order* is a real ownership hierarchy. An =Account=
+  belongs to exactly one =Broker=. An =Order= belongs to exactly one
+  =Account= and executes via that account's broker.
+- *DataProvider* (historical candles, live streaming ticks) is a separate,
+  orthogonal capability that does *not* hang off that hierarchy. Market/tick
+  data is independent of accounts, and not every data provider is a broker
+  (Dukascopy is referenced elsewhere in this codebase as a data-only
+  source).
+- OANDA happens to implement both =Broker= and =DataProvider= — including
+  live streaming: even though live ticks arrive over the OANDA broker
+  connection, they're conceptually =DataProvider='s job, not =Broker='s.
+  That's incidental to this one vendor and should not be baked into the
+  interfaces.
+
+Practical implication: =Account=/=Order= should depend on a =Broker=
+interface (place order, close trade, stream fills), not a concrete
+=*oanda.Client=. =datamanager= should depend on a separate =DataProvider=
+interface (candles + live ticks), with no knowledge of accounts or orders.
+Resist letting the =Broker= interface grow data-fetching methods just
+because one concrete type (OANDA) happens to satisfy both.
+
+=datamanager/oanda= already imports =brokers/oanda= directly for candle
+acquisition — this formalizes a pattern that side already follows.
+=service/account_*.go= currently gets the OANDA client indirectly via
+=a.svc.OANDA= instead; under this design it would import =brokers/oanda=
+(or depend on a =Broker= interface satisfied by it) directly.
+
+Provider-to-provider calls are allowed, but must be one-way (no cycles) —
+e.g. =account= and =datamanager= as two independent providers that may each
+depend on =brokers/oanda=, without depending on each other.
+
+* Status
+
+Design discussion only, not started. Two known-safe, low-risk first steps
+if/when this resumes:
+
+1. Move =AccountSnapshot= out of =service/account_snapshot.go= into
+   =brokers/oanda= (or a new file there) — it already has zero
+   back-reference to =Service= or =Account= (takes a narrow
+   =accountDetailsClient= interface + account ID + logger), so it's a
+   clean, independent move today, no cycle risk.
+2. Give =AccountSnapshot= a =Stop()= method so it fully satisfies
+   =Runnable=, ahead of actually defining/wiring that interface.
+
+The larger =Account=/=Service= split (breaking =Account='s
+=svc *Service= back-reference, deciding what a leaner =Service=
+construction actually hands to =Account=, =orders.go=, =bots.go=,
+=journal.go=, =live_runner.go=, =prices.go=) needs a real design decision
+from the repo owner before implementation — not something to start
+unprompted.
