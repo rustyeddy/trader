@@ -4,23 +4,23 @@
 #   data      — Dukascopy candle sync; run on demand or via cron
 #   backtest  — on-demand backtests (profile: backtest; exits when done)
 #   live      — 24/5 live strategy, always restarted
-#   postgres  — journal database for live trading on a server
+#   postgres  — database for future use (not currently used by trader)
 #
 # Journal backends:
 #   csv       — flat files on the candle NFS volume; works everywhere including Pi
-#   postgres  — DATABASE_URL pointing at the postgres service (or external DB)
+#   json      — JSONL files on the candle NFS volume
 #   sqlite    — local dev only; requires image built with --build-arg SQLITE=1
 #
 # Quick start:
 #   cp deploy/env.example .env
-#   docker compose up -d postgres live
+#   docker compose up -d live
 #   docker compose run --rm backtest
 #   docker compose run --rm data
 
 services:
 
   # ── postgres ───────────────────────────────────────────────────────────────
-  # Journal database. Not needed if you use csv journaling.
+  # Database service for future use. Not currently used by trader.
   postgres:
     image: postgres:16-alpine
     environment:
@@ -83,8 +83,7 @@ services:
 
   # ── live ──────────────────────────────────────────────────────────────────
   # Live trading strategy. Restarts automatically on crash or reboot.
-  # Journal defaults to csv (NFS-friendly); set JOURNAL=postgres and
-  # DATABASE_URL to use the postgres service instead.
+  # Journal defaults to csv (NFS-friendly); set JOURNAL=json to use JSONL format.
   live:
     image: ${TRADER_IMAGE:-ghcr.io/rustyeddy/trader:latest}
     build:
