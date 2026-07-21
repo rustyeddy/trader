@@ -36,8 +36,8 @@
   (=AccountSnapshot='s role) resolved as moot, no code change — its
   premise assumed live would adopt chunk 4's fill-bridge, which chunk 5
   ruled out; see Phase 4's chunk 6 entry below for the trace. Chunk 7
-  (risk/sizing math onto =Account=) done, no commit hash yet (pending) —
-  live's =PlaceMarketOrder= now sizes via the same =account.SizePosition=
+  (risk/sizing math onto =Account=) done, commit =ff37eb4= — live's
+  =PlaceMarketOrder= now sizes via the same =account.SizePosition=
   math backtest already used, instead of a separate hand-rolled float
   implementation; see Phase 4's chunk 7 entry below for the trace and the
   two intentional behavior changes (live now gets a margin check, and
