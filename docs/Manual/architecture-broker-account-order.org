@@ -33,7 +33,10 @@
   authoritative), so it doesn't need chunk 4's fill-bridge; scoped
   instead to routing every remaining execution/account-state call in
   =service/= through =brokers.Broker= consistently. Chunk 6
-  (=AccountSnapshot='s role) is next.
+  (=AccountSnapshot='s role) resolved as moot, no code change — its
+  premise assumed live would adopt chunk 4's fill-bridge, which chunk 5
+  ruled out; see Phase 4's chunk 6 entry below for the trace. Chunk 7
+  (risk/sizing math onto =Account=) is next.
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -461,12 +464,24 @@ correct:
    logic into reuse of existing =Account= methods
    (=ListOpenTrades=/=CloseTrade=/=GetAccountSummary=) instead of a third
    copy of the same fallback pattern.
-6. =AccountSnapshot='s role once fills flow through =StreamTransactions=
-   uniformly — likely narrows to continuously-updating figures (unrealized
-   PnL, margin) rather than trade-ledger reconciliation; see "Source-of-truth
-   asymmetry" above. Exact scope still open.
+6. *Resolved as moot, no code change, 2026-07-21.* Was: "=AccountSnapshot='s
+   role once fills flow through =StreamTransactions= uniformly — likely
+   narrows to continuously-updating figures (unrealized PnL, margin)
+   rather than trade-ledger reconciliation." That premise assumed live
+   would adopt chunk 4's =StreamTransactions=-consuming ledger-application
+   flow (=drainBrokerFills=/=txEventToAccountEvent= writing into
+   =Account.Lots=) the way backtest did. Chunk 5 explicitly decided
+   against that — live has no local ledger by design, OANDA is
+   authoritative. Traced =service/account_snapshot.go= to confirm: it's
+   fed entirely by polling =GetAccountChanges= (=pollLoop=/=applyChanges=),
+   never =StreamTransactions=, and its cache already holds *both* the
+   open-trades map *and* the continuously-updating figures in one struct —
+   because for live, this cache *is* the only ledger there is. There was
+   never a separate trade-ledger reconciliation for =AccountSnapshot= to
+   narrow away from; the scenario this chunk was written to respond to
+   never materializes, by chunk 5's own design. Nothing to implement.
 7. Move risk/sizing math onto =Account=, shared by backtest and live.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 6 specifically needs a proper plan-mode
+pass, not a committed plan. Chunk 7 specifically needs a proper plan-mode
 session before implementation.
