@@ -380,33 +380,44 @@ correct:
    ones split into =broker_stub.go=, plus =TickFromCandle= as the
    not-yet-wired foundation chunk 2 needs. Confirmed via
    =var _ Broker = (*sim.Sim)(nil)= in =brokers/broker.go=.
-2. *Reshaped 2026-07-22, not yet re-planned in detail.* Merge
-   =account.Ledger= into =account.Account= (see Phase 3's "Ledger merges
-   into Account too"), make =Sim.StreamTransactions= real — emitting on
-   immediate market-order fills *and* on resting stop/take triggers it now
-   monitors internally via =UpdatePrice= (moving that check out of
-   =backtest/exits.go='s =autoCloseExits=) — and build the
-   =StreamTransactions=-consuming step that applies fills to an account's
-   ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
-   =AddLot=/=CloseLot= calls. Proven first against backtest's existing
-   (large, correctness-critical) test suite using =brokers/sim= — still the
-   highest-risk step, since a regression here silently corrupts backtest
-   results. Bit-for-bit equivalence with current backtest behavior is the
-   bar before moving on. This absorbs what was chunk 2 *and* most of what
-   was chunk 6 (event convergence) — they turned out to be the same
-   mechanism, not sequential steps.
-3. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
+2. *Split into two, first half done.* =Sim.StreamTransactions= is real —
+   emitting on immediate market-order fills *and* on resting stop/take
+   triggers it now monitors internally via =UpdatePrice= (moved out of
+   =backtest/exits.go='s =autoCloseExits=, which still runs unchanged for
+   now — this half was scoped self-contained to =brokers/sim=, touching
+   nothing else). *Done, commit pending* — six methods gained event
+   emission, =checkStopsAndTakes= added, full long/short × stop/take test
+   coverage.
+3. *Not yet re-planned in detail.* Merge =account.Ledger= into
+   =account.Account= (see Phase 3's "Ledger merges into Account too"), and
+   build the =StreamTransactions=-consuming step that applies fills to an
+   account's ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
+   =AddLot=/=CloseLot= calls — the highest-risk step, since a regression
+   here silently corrupts backtest results. This absorbs what was chunk 2's
+   second half *and* most of what was chunk 6 (event convergence) — they
+   turned out to be the same mechanism, not sequential steps.
+
+   *Baseline caveat (2026-07-22):* "bit-for-bit equivalence with current
+   backtest behavior" is the right bar, but "current" must mean a *fresh*
+   baseline captured on today's =main= immediately before this chunk
+   starts — not a comparison against old saved results. The candle/
+   timestamp cleanup (removing =CandleTime=) landed after the original
+   backtest runs, so historical numbers may have already drifted for
+   reasons unrelated to this refactor; comparing against them would make
+   that pre-existing drift indistinguishable from a real regression. Run
+   the existing backtest test suite plus a few of the real
+   =testdata/configs/*.yml= backtests on =main= first, save that as the
+   reference, then diff post-change output against *that*.
+4. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
    consume-=StreamTransactions= flow, using =brokers/oanda=.
-4. =AccountSnapshot='s role once fills flow through =StreamTransactions=
+5. =AccountSnapshot='s role once fills flow through =StreamTransactions=
    uniformly — likely narrows to continuously-updating figures (unrealized
    PnL, margin) rather than trade-ledger reconciliation; see "Source-of-truth
    asymmetry" above. Exact scope still open.
-5. Move risk/sizing math onto =Account=, shared by backtest and live.
+6. Move risk/sizing math onto =Account=, shared by backtest and live.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 2 specifically needs a proper plan-mode
-session (exploring =Sim='s current =UpdatePrice=/mark-to-market path,
-=engine.Trader='s exact dependency on =Ledger='s current method set, and
-how =account.Event=/=oanda.TxEvent= translation should work) before
-implementation — this doc update only fixes the target shape, not the
-concrete steps.
+pass, not a committed plan. Chunk 3 specifically needs a proper plan-mode
+session (=engine.Trader='s exact dependency on =Ledger='s current method
+set, how =account.Event=/=oanda.TxEvent= translation should work, and the
+fresh-baseline caveat above) before implementation.
