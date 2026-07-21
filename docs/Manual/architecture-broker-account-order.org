@@ -1,0 +1,121 @@
+#+TITLE: Broker / Account / Order Architecture
+
+* Status
+
+Design decision, refactor not yet started (as of 2026-07-21). This doc
+describes the target shape so it survives the refactor and can fold
+directly into the manual's Architecture section once implemented — see
+=docs/Plans/service-refactor.org= for the related =service.Service=
+god-object refactor this depends on being done first.
+
+* Ownership hierarchy
+
+A =Broker= is an execution venue. A =Broker= can have more than one
+=Account=. An =Account= holds =Orders=, =Positions=, and =Trades=. This is
+a strict three-level ownership chain:
+
+#+begin_example
+Broker
+  └─ Account
+       └─ Order / Position / Trade
+#+end_example
+
+Market data is explicitly *not* part of this chain. Historical candle data
+and live price/tick streaming are independent of any account — some data
+providers (Dukascopy) aren't brokers at all, and even for a vendor that is
+both (OANDA), live streaming is conceptually =DataProvider='s
+responsibility, not =Broker='s, even though the bytes happen to arrive over
+the same connection. See =docs/Manual/DataManager.org= for the data side;
+this doc only covers execution.
+
+* Package layout
+
+Flat at repo root — no =providers/= or =internal/= umbrella (considered and
+rejected; see =docs/Plans/service-refactor.org= for why). =brokers/= and
+=account/= already exist at root today and stay there.
+
+#+begin_example
+brokers/
+  broker.go              -- Broker interface: PlaceOrder, CloseTrade,
+                             GetAccountSummary, StreamFills, ...
+  oanda/                  -- concrete Broker implementation (exists today)
+  sim/                    -- concrete Broker implementation (exists today)
+  alpaca/                 -- future
+  interactivebrokers/     -- future
+
+account/
+  account.go               -- Account (domain type: an account at a broker)
+  ledger.go                -- Ledger (renamed from account.Broker — see below)
+  order.go                 -- Order (new: canonical, broker-agnostic)
+  trade.go, trade_position.go, trade_lot.go, fill.go  -- existing, unchanged
+#+end_example
+
+** The =Broker= interface
+
+Doesn't exist yet. Lives in =brokers/broker.go=, satisfied by =oanda.Client=
+and =sim.Simulator= (and, eventually, =alpaca=/=interactivebrokers=
+implementations). Only covers execution — placing/closing orders, reading
+account state, streaming fills/transactions. Deliberately excludes
+candle/price history: a broker that also happens to serve market data
+(OANDA) satisfies =DataProvider= as a *separate* interface, not as part of
+=Broker=. Resist adding data-fetching methods to =Broker= just because one
+concrete implementation happens to support both.
+
+** Renaming =account.Broker= → =account.Ledger=
+
+=account/broker.go= currently defines a =Broker= struct — but it's the
+in-memory bookkeeping ledger (open lots, balance tracking), used by both
+backtest (=account.NewBroker("sim")=) and, implicitly, live position
+tracking. That's a different concept from the =brokers.Broker= interface
+above (an execution venue), and having both named "Broker" one package
+apart (=account.Broker= vs. =brokers.Broker=) is a landmine for anyone
+reading imports. Renaming the ledger to =account.Ledger= frees "Broker" to
+mean only the execution-interface concept, consistently, everywhere.
+
+** New: =account.Order=
+
+No broker-agnostic =Order= type exists today. Live code
+(=service/orders.go=) talks directly in OANDA's vocabulary —
+=oanda.CloseTradeResult=, =oanda.OpenTrade= — which means every additional
+broker would require its own request/result shapes threaded through every
+service method that touches orders. =account.Order= becomes the canonical
+shape; each =brokers/<name>= package is responsible for translating
+=account.Order= to/from its own wire format on the way in, and translating
+fills back into =account.Fill=/=account.Trade= on the way out.
+
+=Order= lives in =account/=, not its own top-level package: an order
+belongs to an account tightly enough that a fourth root package felt like
+more ceremony than the size warrants.
+
+* Why broker/account first, not the Service split
+
+=service/account_*.go='s =Account= (a live per-session cache/wrapper —
+distinct from =account.Account=, the domain type above; see the naming
+note below) currently holds a raw =*oanda.Client= via a back-reference to
+=*Service=. The Service/=Runnable= split (=docs/Plans/service-refactor.org=)
+can't be designed properly without first knowing what a decoupled
+=service.Account= should depend on instead — and that answer is
+"=brokers.Broker=," which doesn't exist until this refactor lands.
+Sequencing broker/account first means the Service split is informed by a
+real interface instead of a guess, and de-risks the larger, messier
+refactor by landing the smaller, self-contained one first.
+
+** Naming note: three things currently called "Account"
+
+Worth being explicit about, since it's a live source of confusion during
+this refactor:
+
+1. =account.Account= (root =account/= package) — the domain bookkeeping
+   type: balance, open lots, PNL. Broker-agnostic.
+2. =service.Account= (=service/account_session.go=) — a live per-request
+   session cache/wrapper: holds an ID, a back-reference to =*Service=, and
+   an =AccountSnapshot=. This is the thing the god-object refactor is
+   about; unrelated to (1) except by name.
+3. =oanda.AccountSummary= / =oanda.AccountDetails= (=brokers/oanda=) — wire
+   DTOs from OANDA's API.
+
+Only (1) is part of the Broker/Account/Order hierarchy described in this
+doc. (2) and (3) are not renamed by this refactor, but resolving (2)'s
+dependency on a raw OANDA client — swapping =a.svc.OANDA= for a
+=brokers.Broker= field — is the direct payoff this refactor unlocks for
+the Service split that follows it.
