@@ -57,15 +57,17 @@ type DaemonConfig struct {
 // New returns the "serve" cobra command.
 func New(rc *config.RootConfig) *cobra.Command {
 	var (
-		cfgFile        string
-		addr           string
-		token          string
-		accountID      string
-		env            string
-		journalTrades  string
-		journalEquity  string
-		reportsDir     string
-		mcpEnableWrite bool
+		cfgFile               string
+		addr                  string
+		token                 string
+		accountID             string
+		env                   string
+		journalTrades         string
+		journalEquity         string
+		reportsDir            string
+		reviewSweepReportsDir string
+		reviewSweepConfigsDir string
+		mcpEnableWrite        bool
 	)
 
 	cmd := &cobra.Command{
@@ -224,6 +226,14 @@ Example config file (see deploy/trader.yaml.example):
 					srv.WithReportsDir(reportsDir)
 					log.Info("serve: reports dir", "path", reportsDir)
 				}
+				if reviewSweepReportsDir != "" {
+					srv.WithReviewSweepReportsDir(reviewSweepReportsDir)
+					log.Info("serve: review-sweep reports dir", "path", reviewSweepReportsDir)
+				}
+				if reviewSweepConfigsDir != "" {
+					srv.WithReviewSweepConfigsDir(reviewSweepConfigsDir)
+					log.Info("serve: review-sweep configs dir", "path", reviewSweepConfigsDir)
+				}
 				// MCP over HTTP at POST /mcp (read-only by default).
 				mcpSrv := mcpserver.New(svc, mcpEnableWrite)
 				if reportsDir != "" {
@@ -295,6 +305,8 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&journalTrades, "journal-trades", "", "Journal trade-record path (default ./live-trades.jsonl)")
 	cmd.Flags().StringVar(&journalEquity, "journal-equity", "", "Journal equity-record path (default ./live-equity.jsonl)")
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
+	cmd.Flags().StringVar(&reviewSweepReportsDir, "review-sweep-reports-dir", "", "Review-sweep reports directory (default /srv/trading/review-sweeps/reports)")
+	cmd.Flags().StringVar(&reviewSweepConfigsDir, "review-sweep-configs-dir", "", "Review-sweep configs directory (default /srv/trading/review-sweeps/configs)")
 	cmd.Flags().BoolVar(&mcpEnableWrite, "mcp-enable-write", false, "Enable MCP write tools (place_order, close_trade, update_stop) over HTTP")
 
 	return cmd

@@ -27,6 +27,9 @@ type Server struct {
 	staticFS   fs.FS        // nil when no UI assets are embedded
 	reportsDir string       // directory for backtest JSON reports
 	configsDir string       // directory for backtest config files
+
+	reviewSweepReportsDir string // directory for review-sweep JSON reports
+	reviewSweepConfigsDir string // directory for review-sweep config files
 	mcpHandler http.Handler // optional MCP handler mounted at POST /mcp
 }
 
@@ -102,6 +105,14 @@ func (s *Server) Handler() http.Handler {
 
 	// Watchlist review — multi-timeframe triage buckets (Watch/Hot/Tradeable)
 	mux.HandleFunc("GET /api/v1/review", s.handleReview)
+
+	// Review sweep — historical classification sweeps, run from persisted
+	// YAML configs and stored as named JSON reports (mirrors the backtest
+	// config/report mechanism above).
+	mux.HandleFunc("GET /api/v1/review-sweeps/configs", s.handleListReviewSweepConfigs)
+	mux.HandleFunc("POST /api/v1/review-sweeps/run", s.handleRunReviewSweep)
+	mux.HandleFunc("GET /api/v1/review-sweeps", s.handleListReviewSweeps)
+	mux.HandleFunc("GET /api/v1/review-sweeps/{name}", s.handleGetReviewSweep)
 
 	// Bot manager — get/stop by globally-unique bot ID (start/list are
 	// account-scoped above).

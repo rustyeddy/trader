@@ -1,7 +1,9 @@
-package reviewsvc
+package review
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,6 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // seedWeekdayCandles writes one calendar month of candles for
 // instrument/tf into the active (test) global store, populated only on
@@ -42,11 +48,11 @@ func seedWeekdayCandles(t *testing.T, instrument string, tf types.Timeframe, mon
 
 // seedReviewHistory seeds enough D1 and H4 weekday candle history ending at
 // or before asOf for reviewOneInstrumentAsOf to succeed: D1 across
-// d1Months calendar months (reviewWeeklyLookbackDays=340 valid weekday
-// candles needs roughly 17 months at ~21 weekdays/month, per issue #175's
-// ADX-convergence-driven widening), H4 across h4Months
-// (reviewCandleCounts["H4"]=200 valid candles needs roughly 1.75 months at
-// ~6 H4 candles/weekday, so 2-3 months is ample).
+// d1Months calendar months (WeeklyLookbackDays=340 valid weekday candles
+// needs roughly 17 months at ~21 weekdays/month, per issue #175's
+// ADX-convergence-driven widening), H4 across h4Months (CandleCounts["H4"]=200
+// valid candles needs roughly 1.75 months at ~6 H4 candles/weekday, so 2-3
+// months is ample).
 func seedReviewHistory(t *testing.T, instrument string, asOf time.Time, d1Months, h4Months int) {
 	t.Helper()
 
@@ -122,28 +128,27 @@ func seedTradeableReviewHistory(t *testing.T, instrument string, asOf time.Time)
 	asOfMonth := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
 
 	seedTrendingMonths(t, instrument, types.D1, asOfMonth.AddDate(0, -18, 0), 19, types.PriceFromFloat(1.0))
-	// H4 needs reviewCandleCounts["H4"]=200 valid candles ending at the
-	// pullback; a leading trending month gives the window enough depth
-	// (~126 H4 candles/month) before the pullback-shaped tail two months
-	// still supplies the value-zone setup right at asOf.
+	// H4 needs CandleCounts["H4"]=200 valid candles ending at the pullback;
+	// a leading trending month gives the window enough depth (~126 H4
+	// candles/month) before the pullback-shaped tail two months still
+	// supplies the value-zone setup right at asOf.
 	seedTrendingMonths(t, instrument, types.H4, asOfMonth.AddDate(0, -2, 0), 1, types.PriceFromFloat(1.0))
 	seedH4TradeablePullback(t, instrument, asOfMonth.AddDate(0, -1, 0))
 	seedH4TradeablePullback(t, instrument, asOfMonth)
 	seedTrendingMonths(t, instrument, types.H1, asOfMonth.AddDate(0, -1, 0), 2, types.PriceFromFloat(1.0))
 }
 
-// TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs is the end-to-end
-// proof for issue #166: a pair that classifies "tradeable" gets an H1
-// enrichment (Setup.H1Aligned/H1EntryDist populated, H1 snapshot non-zero)
-// computed in the very same sweep step — never a follow-up call. A pair
-// left at Watch/Hot (no H4 pullback seeded) gets no H1 data at all.
-func TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs(t *testing.T) {
+// TestRunSweep_H1FetchedOnlyForTradeablePairs is the end-to-end proof for
+// issue #166: a pair that classifies "tradeable" gets an H1 enrichment
+// (Setup.H1Aligned/H1EntryDist populated, H1 snapshot non-zero) computed in
+// the very same sweep step — never a follow-up call. A pair left at
+// Watch/Hot (no H4 pullback seeded) gets no H1 data at all.
+func TestRunSweep_H1FetchedOnlyForTradeablePairs(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	seedTradeableReviewHistory(t, "EURUSD", asOf)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        asOf,
 		To:          asOf,
@@ -157,15 +162,14 @@ func TestReviewWatchlistRange_H1FetchedOnlyForTradeablePairs(t *testing.T) {
 	assert.NotContains(t, r.Notes, "H1 unavailable")
 }
 
-func TestReviewWatchlistRange_NonTradeablePairGetsNoH1(t *testing.T) {
+func TestRunSweep_NonTradeablePairGetsNoH1(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	// Plain trending D1/H4 (via seedReviewHistory) lands on Hot or Watch,
 	// never Tradeable — no H4 pullback into the value zone is seeded.
 	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        asOf,
 		To:          asOf,
@@ -179,13 +183,12 @@ func TestReviewWatchlistRange_NonTradeablePairGetsNoH1(t *testing.T) {
 	assert.NotContains(t, r.Notes, "H1 unavailable", `a non-tradeable pair never attempts H1, so it can't be "unavailable"`)
 }
 
-func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testing.T) {
+func TestRunSweep_SingleDateProducesOneResultPerInstrument(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC) // a Wednesday, far from any month boundary
 	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        asOf,
 		To:          asOf,
@@ -197,18 +200,17 @@ func TestReviewWatchlistRange_SingleDateProducesOneResultPerInstrument(t *testin
 	assert.True(t, resp.Results[0].ScannedAt.Equal(asOf), "ScannedAt must be the historical asOf, not time.Now()")
 }
 
-// TestReviewWatchlistRange_NeverTouchesOANDA confirms the sweep is a pure
-// local-store replay: leaving Service.OANDA nil means any accidental
-// network call (ensureCachedOandaCandles / fetchReviewCandleTimesFromOANDA,
-// the live path's behaviors) would nil-pointer panic rather than silently
-// succeed, so a passing test is itself proof no such call happened.
-func TestReviewWatchlistRange_NeverTouchesOANDA(t *testing.T) {
+// TestRunSweep_NeverTouchesOANDA confirms the sweep is a pure local-store
+// replay: RunSweep has no OANDA dependency at all (no *oanda.Client
+// parameter anywhere in its signature or the types it depends on), so a
+// passing test against local-only fixtures is itself proof no network call
+// is possible, let alone attempted.
+func TestRunSweep_NeverTouchesOANDA(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	seedReviewHistory(t, "EURUSD", asOf, 18, 2)
 
-	svc := &Service{Log: discardLogger()} // OANDA intentionally nil
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        asOf,
 		To:          asOf,
@@ -217,14 +219,13 @@ func TestReviewWatchlistRange_NeverTouchesOANDA(t *testing.T) {
 	require.Len(t, resp.Results, 1)
 }
 
-func TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate(t *testing.T) {
+func TestRunSweep_MultiStepOrdersByInstrumentThenDate(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	to := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	from := to.AddDate(0, 0, -2)
 	seedReviewHistory(t, "EURUSD", to, 18, 2)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        from,
 		To:          to,
@@ -242,24 +243,23 @@ func TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate(t *testing.T) 
 	assert.True(t, gotDates[2].Equal(to))
 }
 
-// TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate is a
-// regression test: the sweep loop appends in step-major order (date, then
-// instrument) for fetch efficiency, but the documented — and CLI-relied-on
-// — contract is instrument-major (grouped by pair, oldest date first) so a
-// single pair's bucket transitions read as a contiguous time series.
-// TestReviewWatchlistRange_MultiStepOrdersByInstrumentThenDate above only
-// used one instrument, so step-major and instrument-major order were
+// TestRunSweep_MultiInstrumentOrdersByInstrumentThenDate is a regression
+// test: the sweep loop appends in step-major order (date, then instrument)
+// for fetch efficiency, but the documented — and CLI-relied-on — contract
+// is instrument-major (grouped by pair, oldest date first) so a single
+// pair's bucket transitions read as a contiguous time series.
+// TestRunSweep_MultiStepOrdersByInstrumentThenDate above only used one
+// instrument, so step-major and instrument-major order were
 // indistinguishable there; this uses two to actually exercise the ordering
 // contract (per copilot review on PR #155).
-func TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate(t *testing.T) {
+func TestRunSweep_MultiInstrumentOrdersByInstrumentThenDate(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	to := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	from := to.AddDate(0, 0, -1)
 	seedReviewHistory(t, "EURUSD", to, 18, 2)
 	seedReviewHistory(t, "GBPUSD", to, 18, 2)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"GBPUSD", "EURUSD"},
 		From:        from,
 		To:          to,
@@ -278,12 +278,11 @@ func TestReviewWatchlistRange_MultiInstrumentOrdersByInstrumentThenDate(t *testi
 	}, got, "results must be grouped by instrument, oldest date first within each group")
 }
 
-func TestReviewWatchlistRange_SkipsUnknownInstrument(t *testing.T) {
+func TestRunSweep_SkipsUnknownInstrument(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"NOTAPAIR"},
 		From:        asOf,
 		To:          asOf,
@@ -292,16 +291,15 @@ func TestReviewWatchlistRange_SkipsUnknownInstrument(t *testing.T) {
 	assert.Empty(t, resp.Results)
 }
 
-// TestReviewWatchlistRange_SkipsInsufficientHistory confirms a step where
-// the local store doesn't yet have enough D1 history (e.g. a date too
-// close to the start of what's been seeded) is skipped, not failed.
-func TestReviewWatchlistRange_SkipsInsufficientHistory(t *testing.T) {
+// TestRunSweep_SkipsInsufficientHistory confirms a step where the local
+// store doesn't yet have enough D1 history (e.g. a date too close to the
+// start of what's been seeded) is skipped, not failed.
+func TestRunSweep_SkipsInsufficientHistory(t *testing.T) {
 	datamanager.UseTempDataDir(t)
 	asOf := time.Date(2024, 6, 12, 0, 0, 0, 0, time.UTC)
 	seedReviewHistory(t, "EURUSD", asOf, 1, 2) // far short of the ~17 months D1 needs
 
-	svc := &Service{Log: discardLogger()}
-	resp, err := svc.ReviewWatchlistRange(context.Background(), ReviewRangeRequest{
+	resp, err := RunSweep(context.Background(), discardLogger(), SweepRequest{
 		Instruments: []string{"EURUSD"},
 		From:        asOf,
 		To:          asOf,

@@ -390,7 +390,7 @@ func TestFetchReviewCandles_FallsBackWhenCachedSeriesIsShort(t *testing.T) {
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)
-	assert.Len(t, got, reviewCandleCounts["D"], "must retry a full-window download rather than trust the short cache")
+	assert.Len(t, got, review.CandleCounts["D"], "must retry a full-window download rather than trust the short cache")
 }
 
 // TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads confirms
@@ -423,7 +423,7 @@ func TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads(t *testi
 
 	got, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err)
-	require.Len(t, got, reviewCandleCounts["D"])
+	require.Len(t, got, review.CandleCounts["D"])
 
 	// Close the working server and swap in one that always errors, so any
 	// second network fetch would fail — the retry's downloaded candles must
@@ -437,7 +437,7 @@ func TestFetchReviewCandles_RetryDownloadRepairsCacheForSubsequentReads(t *testi
 
 	got2, err := svc.fetchReviewCandles(context.Background(), "EURUSD", "D")
 	require.NoError(t, err, "second read must be served from the repaired local cache, not a network call")
-	assert.Len(t, got2, reviewCandleCounts["D"])
+	assert.Len(t, got2, review.CandleCounts["D"])
 }
 
 // TestEnsureCachedOandaCandles_SubDailyTimeframeStillDownloadsSameDayGap

@@ -1,4 +1,4 @@
-package reviewsvc
+package review
 
 import (
 	"time"
@@ -12,7 +12,7 @@ import (
 // weekday candles that follow it rather than the prior ISO week.
 const dayRollShift = 4 * time.Hour
 
-// deriveWeeklyCandles aggregates a series of daily candles into weekly OHLC
+// DeriveWeeklyCandles aggregates a series of daily candles into weekly OHLC
 // bars — open of the week's first daily candle, high/low across the week,
 // close of the week's last daily candle — grouped by ISO week (Monday to
 // Sunday). This is an exact rollup, not an approximation, as long as daily
@@ -23,19 +23,18 @@ const dayRollShift = 4 * time.Hour
 // in-progress week, mirroring the "!c.Complete" filter OANDA-native fetches
 // apply so review never scores a still-forming week. Returns at most the
 // most recent count complete weeks, oldest first.
-func deriveWeeklyCandles(daily []market.Candle, count int) []market.Candle {
-	return deriveWeeklyCandlesAsOf(daily, count, time.Now())
+func DeriveWeeklyCandles(daily []market.Candle, count int) []market.Candle {
+	return DeriveWeeklyCandlesAsOf(daily, count, time.Now())
 }
 
-// deriveWeeklyCandlesAsOf is deriveWeeklyCandles with an explicit reference
+// DeriveWeeklyCandlesAsOf is DeriveWeeklyCandles with an explicit reference
 // time for "is the trailing bucket still in progress" instead of always
-// comparing against the real wall-clock time.Now(). The historical sweep
-// (review_sweep.go) must pass its step's asOf here: asOf is always in the
-// past relative to time.Now(), so it would never match the real current
-// ISO week, and the trailing-week check would never fire — silently
-// treating a partial trailing week (asOf falling midweek) as if it were a
-// complete week's OHLC.
-func deriveWeeklyCandlesAsOf(daily []market.Candle, count int, asOf time.Time) []market.Candle {
+// comparing against the real wall-clock time.Now(). A historical sweep must
+// pass its step's asOf here: asOf is always in the past relative to
+// time.Now(), so it would never match the real current ISO week, and the
+// trailing-week check would never fire — silently treating a partial
+// trailing week (asOf falling midweek) as if it were a complete week's OHLC.
+func DeriveWeeklyCandlesAsOf(daily []market.Candle, count int, asOf time.Time) []market.Candle {
 	if len(daily) == 0 || count <= 0 {
 		return nil
 	}

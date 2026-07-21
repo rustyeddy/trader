@@ -59,30 +59,30 @@ type ReviewResponse struct {
 	Results   []review.ReviewResult `json:"results"`
 }
 
+// ReviewRangeRequest and ReviewSweepResponse are aliases for the
+// review package's sweep types, kept here so existing call sites
+// (service.ReviewRangeRequest{...} etc., via service/review.go's
+// re-exports) keep compiling unchanged.
+type (
+	ReviewRangeRequest  = review.SweepRequest
+	ReviewSweepResponse = review.SweepResponse
+)
+
+// ReviewWatchlistRange runs a historical classification sweep: a thin
+// delegator to review.RunSweep, the provider both this live-review service
+// and service/reviewsweep call directly — neither depends on the other.
+func (s *Service) ReviewWatchlistRange(ctx context.Context, req ReviewRangeRequest) (*ReviewSweepResponse, error) {
+	return review.RunSweep(ctx, s.Log, req)
+}
+
 // reviewWorkers bounds the concurrent OANDA candle fetches per review run.
 const reviewWorkers = 8
 
-// reviewCandleCounts is the per-timeframe candle window from docs/Review.org's
-// "Data requirements" table. "W" is the number of weekly bars deriveWeeklyCandles
-// produces from the D1 series, not a separate OANDA fetch (see reviewWeeklyLookbackDays).
-// "H1" is only ever fetched for pairs already classified "tradeable" (see
-// reviewOneInstrument), not for the full watchlist.
-//
-// D/H4/H1 are 200, not the ADX(14) readiness minimum of 2*14=28 or the old
-// value of 60: GitHub issue #175 found that Wilder's recursive smoothing
-// only reaches Ready() at 2*N periods, not convergence — a cold-started
-// ADX at 60 candles measured 0.6-4.7 points off a long-run reference in
-// synthetic testing, while ~100-150 candles closed that gap to <0.1 points.
-// 200 leaves headroom beyond the empirically-observed convergence point.
-var reviewCandleCounts = map[string]int{"W": 30, "D": 200, "H4": 200, "H1": 200}
-
-// reviewWeeklyLookbackDays sizes the D1 window fetched/cached so there is
-// enough daily history to cover both reviewCandleCounts["D"]'s 200-candle
-// ADX-convergence window and reviewCandleCounts["W"]'s 30 complete weekly
-// bars via deriveWeeklyCandles. 200 weekday candles needs roughly 280
-// calendar days at ~5/7 weekdays-per-week; 340 leaves headroom for holidays
-// and the current partial week that gets dropped.
-const reviewWeeklyLookbackDays = 340
+// Candle-window sizing (review.CandleCounts, review.WeeklyLookbackDays) and
+// the ReviewWatchlistRange/RunSweep historical replay engine live in the
+// top-level review package now — see review/candles.go and review/replay.go
+// — since both this live path and service/reviewsweep need them and
+// neither should call through the other's service package.
 
 // ReviewWatchlist runs the watchlist review over all instruments in
 // req, fetches D1, H4, and W1 candles from DataManaager, computes all
@@ -136,18 +136,18 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string, th revie
 		log = slog.Default()
 	}
 
-	dailyWide, err := s.fetchReviewCandleTimes(ctx, name, "D", reviewWeeklyLookbackDays)
+	dailyWide, err := s.fetchReviewCandleTimes(ctx, name, "D", review.WeeklyLookbackDays)
 	if err != nil {
 		log.Warn("review: fetch D1 candles", "instrument", name, "err", err)
 		return review.ReviewResult{}, false
 	}
-	d1 := candlesOnly(dailyWide)
-	if len(d1) > reviewCandleCounts["D"] {
-		d1 = d1[len(d1)-reviewCandleCounts["D"]:]
+	d1 := review.CandlesOnly(dailyWide)
+	if len(d1) > review.CandleCounts["D"] {
+		d1 = d1[len(d1)-review.CandleCounts["D"]:]
 	}
 	// TODO: move this to datamanager, even though we may not persist
 	// them still route through data manager
-	w1 := deriveWeeklyCandles(dailyWide, reviewCandleCounts["W"])
+	w1 := review.DeriveWeeklyCandles(dailyWide, review.CandleCounts["W"])
 
 	h4, err := s.fetchReviewCandles(ctx, name, "H4")
 	if err != nil {
@@ -161,35 +161,18 @@ func (s *Service) reviewOneInstrument(ctx context.Context, name string, th revie
 		return review.ReviewResult{}, false
 	}
 
-	result = enrichTradeableWithH1(result, log, name, func() ([]market.Candle, error) {
+	result = review.EnrichTradeableWithH1(result, log, name, func() ([]market.Candle, error) {
 		return s.fetchReviewCandles(ctx, name, "H1")
 	})
 
 	return result, true
 }
 
-// enrichTradeableWithH1 fetches H1 candles and attaches an entry-timing
-// refinement via review.EnrichWithH1, but only when result is already
-// classified tradeable in this same call — fetchH1 is never invoked for
-// watch/hot pairs, since there is nothing to time the entry of yet. A fetch
-// failure is best-effort: it is logged and the pair's classification is
-// returned unchanged, never dropped.
-func enrichTradeableWithH1(result review.ReviewResult, log *slog.Logger, name string, fetchH1 func() ([]market.Candle, error)) review.ReviewResult {
-	if result.Bucket != "tradeable" {
-		return result
-	}
-	h1, err := fetchH1()
-	if err != nil {
-		log.Warn("review: fetch H1 candles", "instrument", name, "err", err)
-		return result
-	}
-	return review.EnrichWithH1(result, h1)
-}
-
 // reviewTimeframe maps a review OANDA granularity ("D", "H4", "H1") to the
 // types.Timeframe the local candle store understands. There is no "W"
 // case: weekly candles are derived from the cached D1 series (see
-// deriveWeeklyCandles) rather than fetched as their own OANDA granularity.
+// review.DeriveWeeklyCandles) rather than fetched as their own OANDA
+// granularity.
 func reviewTimeframe(granularity string) (types.Timeframe, bool) {
 	switch granularity {
 	case "D":
@@ -203,15 +186,15 @@ func reviewTimeframe(granularity string) (types.Timeframe, bool) {
 	}
 }
 
-// fetchReviewCandles fetches the most recent reviewCandleCounts[granularity]
+// fetchReviewCandles fetches the most recent review.CandleCounts[granularity]
 // candles for instrument at the given OANDA granularity ("D", "H4") and
 // strips them to the internal fixed-point market.Candle type.
 func (s *Service) fetchReviewCandles(ctx context.Context, instrument, granularity string) ([]market.Candle, error) {
-	cts, err := s.fetchReviewCandleTimes(ctx, instrument, granularity, reviewCandleCounts[granularity])
+	cts, err := s.fetchReviewCandleTimes(ctx, instrument, granularity, review.CandleCounts[granularity])
 	if err != nil {
 		return nil, err
 	}
-	return candlesOnly(cts), nil
+	return review.CandlesOnly(cts), nil
 }
 
 // fetchReviewCandleTimes fetches the most recent count timestamped candles
@@ -364,20 +347,11 @@ func (s *Service) retryReviewCandleTimesDownload(ctx context.Context, instrument
 	// Deliberately no minimum-length check here: an exact-count request can
 	// legitimately come back a few short of count even after a full
 	// re-download, since CandleWindow's calendar-to-weekday-count conversion
-	// is an approximation that doesn't model holidays (see
-	// reviewSweepFetchHeadroom's doc comment in review_sweep.go for the same
+	// is an approximation that doesn't model holidays (see review package's
+	// sweepFetchHeadroom doc comment in review/replay.go for the same
 	// phenomenon on the sweep path — a request for exactly 220 D1 candles
 	// once came back 219 on real data). ReviewPair's own indicator warmup
 	// checks are the real sufficiency gate for classification; a handful of
 	// bars short of the full W1-derivation window is not a fetch failure.
 	return candles, nil
-}
-
-// candlesOnly strips timestamps, keeping candle order.
-func candlesOnly(cts []market.Candle) []market.Candle {
-	out := make([]market.Candle, len(cts))
-	for i, ct := range cts {
-		out[i] = ct
-	}
-	return out
 }
