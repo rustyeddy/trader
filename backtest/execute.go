@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers"
+	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/brokers/sim"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/log"
@@ -63,6 +66,20 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 
 	evtQ := t.Account.Events()
 
+	// brokerFills is Sim's own fill feed — obtained once, like evtQ, not
+	// re-requested every bar (a real Broker's StreamTransactions opens a
+	// long-lived connection; calling it repeatedly would be wrong once
+	// live trading reuses this path). Drained once per bar, after feeding
+	// the broker the bar's price — see the drainBrokerFills call below.
+	var brokerFills <-chan oanda.TxEvent
+	if t.Broker != nil {
+		var streamErr error
+		brokerFills, streamErr = t.Broker.StreamTransactions(runCtx, t.Account.ID, oanda.StreamOptions{})
+		if streamErr != nil {
+			return streamErr
+		}
+	}
+
 	var processedEvents int64
 	errCh, done := t.StartBrokerEventHandler(runCtx, evtQ, &processedEvents)
 	defer func() {
@@ -98,7 +115,6 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 	var processedCandles int64
 	var submittedOpens int64
 	var submittedCloses int64
-	var lastCandle market.Candle
 	haveLastCandle := false
 
 	var lastProgressNanos int64
@@ -173,17 +189,9 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			return err
 		}
 
-		lastCandle = candle
 		haveLastCandle = true
 		// backtest.Debug("candle", "candle", processedCandles, "candle", candle.String())
 		atomic.AddInt64(&processedCandles, 1)
-
-		err := t.Account.ResolveWithMarks(map[string]types.Price{
-			run.Request.Instrument: candle.Close,
-		})
-		if err != nil {
-			return err
-		}
 
 		// Tick regime filter and exit strategy indicators every bar.
 		regime.Tick(candle)
@@ -211,10 +219,20 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			})
 		}
 
-		autoExits, err := autoCloseExits(runCtx, t.Account, candle, slippage)
-		if err != nil {
-			return err
+		// Feed the broker this bar's price (mark-to-market + resting
+		// stop/take triggers, fused — see brokers/sim.Sim.UpdatePrice).
+		// Must run after the trailing-stop update loop above so a
+		// just-trailed stop is what gets checked, matching the relative
+		// ordering autoCloseExits used to have with it. Only Sim (backtest
+		// paper-trading) needs feeding this way; a real venue has its own
+		// market data.
+		if pu, ok := t.Broker.(brokers.PriceUpdater); ok {
+			if err := pu.UpdatePrice(sim.TickFromCandle(run.Request.Instrument, candle)); err != nil {
+				return err
+			}
 		}
+
+		autoExits := drainBrokerFills(t.Account, brokerFills)
 		if autoExits > 0 {
 			atomic.AddInt64(&submittedCloses, int64(autoExits))
 		}
@@ -245,12 +263,15 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 		run.State.SpreadOpened += stats.SpreadOpened
 		run.State.SpreadSum += stats.SpreadSum
 
+		if (len(plan.Closes) > 0 || len(plan.Opens) > 0) && t.Broker == nil {
+			return fmt.Errorf("nil broker: cannot submit orders")
+		}
+
 		for _, cl := range plan.Closes {
 			log.L.Info("submit close request", "ID", cl.Request.ID)
 
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-			err = t.Account.SubmitClose(runCtx, cl)
-			if err != nil {
+			if _, err = t.Broker.CloseTrade(runCtx, t.Account.ID, cl.Lot.ID, 0); err != nil {
 				return err
 			}
 			if cl.Lot != nil {
@@ -263,11 +284,28 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			log.L.Info("Broker event Open Position", "ID", openReq.ID)
 			log.L.Info("Open position size", "ID", openReq.ID, "size", openReq.Units)
 			atomic.StoreInt64(&lastProgressNanos, time.Now().UnixNano())
-			_, err = t.Account.SubmitOpen(runCtx, openReq)
+
+			signedUnits := int64(openReq.Units)
+			if openReq.Side == types.Short {
+				signedUnits = -signedUnits
+			}
+			res, err := t.Broker.SubmitMarketOrder(runCtx, t.Account.ID, openReq.Instrument, signedUnits, openReq.Stop.Float64())
 			if err != nil {
-				t.Account.Lots.Delete(openReq.ID)
 				return err
 			}
+			// SubmitMarketOrder has no room for Reason/InitialStop (a real
+			// broker order request doesn't carry app-specific analysis
+			// metadata) — Account.SubmitOpen used to carry these for free
+			// by cloning the whole OpenRequest.TradeCommon. Patch them
+			// onto the fresh lot directly; Range gives the live pointer
+			// (Lots.Get returns a clone, chunk 2's UpdateTradeStop bug).
+			_ = t.Account.Lots.Range(func(lot *account.Lot) error {
+				if lot.ID == res.TradeID {
+					lot.Reason = openReq.Reason
+					lot.InitialStop = openReq.InitialStop
+				}
+				return nil
+			})
 			atomic.AddInt64(&submittedOpens, 1)
 		}
 	}
@@ -275,6 +313,11 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 	if err := itr.Err(); err != nil {
 		return err
 	}
+	// Pick up this bar-loop's last opens/closes before checking idle —
+	// drainBrokerFills only sees what's already on brokerFills, and the
+	// per-bar drain above only catches fills through the *previous* bar's
+	// submissions (this bar's opens/closes haven't been drained yet).
+	drainBrokerFills(t.Account, brokerFills)
 	if err := t.WaitForBrokerIdle(errCh, 2*time.Second); err != nil {
 		return err
 	}
@@ -287,26 +330,16 @@ func (run *Backtest) runWithIterator(ctx context.Context, t *engine.Trader, itr 
 			return nil
 		})
 
+		if len(remaining) > 0 && t.Broker == nil {
+			return fmt.Errorf("nil broker: cannot submit orders")
+		}
 		for _, lot := range remaining {
-			isBuy := lot.Side == types.Short
-			closePx := lastCandle.Close + account.FillAdjust(isBuy, lastCandle.AvgSpread, slippage)
-			cl := &account.CloseRequest{
-				Request: account.Request{
-					TradeCommon: lot.TradeCommon,
-					Reason:      "end-of-backtest",
-					RequestType: account.RequestClose,
-					Price:       closePx,
-					Timestamp:   lastCandle.Timestamp,
-				},
-				Lot:        lot,
-				CloseCause: account.CloseManual,
-			}
-
-			if err := t.Account.SubmitClose(runCtx, cl); err != nil {
+			if _, err := t.Broker.CloseTrade(runCtx, t.Account.ID, lot.ID, 0); err != nil {
 				return err
 			}
 		}
 	}
+	drainBrokerFills(t.Account, brokerFills)
 	if err := runCtx.Err(); err != nil {
 		return err
 	}
@@ -374,4 +407,65 @@ func (run *Backtest) Execute(ctx context.Context, t *engine.Trader) error {
 	}
 
 	return nil
+}
+
+// drainBrokerFills applies every fill currently queued on ch to acct's own
+// event queue, translating oanda.TxEvent -> account.Event so
+// engine.Trader's existing StartBrokerEventHandler/processEvent machinery
+// sees it exactly as it would a synchronous SubmitOpen/SubmitClose call.
+// Non-blocking — drains only what's already queued, not a blocking read —
+// and safe to call with a nil ch (no Broker configured). Returns the
+// number of close events applied, for the submittedCloses counter (a
+// resting stop/take triggering counts as an auto-close, same accounting
+// autoCloseExits used to report).
+func drainBrokerFills(acct *account.Account, ch <-chan oanda.TxEvent) int {
+	if ch == nil {
+		return 0
+	}
+	closes := 0
+	for {
+		select {
+		case evt, ok := <-ch:
+			if !ok {
+				return closes
+			}
+			if evt.Err != nil {
+				continue // stream error events aren't fills; nothing to apply
+			}
+			acct.EnqueueEvent(txEventToAccountEvent(acct, evt.Tx))
+			if len(evt.Tx.TradesClosed) > 0 {
+				closes++
+			}
+		default:
+			return closes
+		}
+	}
+}
+
+// txEventToAccountEvent translates a Broker fill into the account.Event
+// shape engine.Trader's processEvent expects.
+func txEventToAccountEvent(acct *account.Account, tx oanda.Transaction) *account.Event {
+	// Never look up the Lot via Account.Lots here — by the time a fill
+	// gets drained, an open lot may already have been closed by a later
+	// stop/take trigger (checkStopsAndTakes applies its close to Account
+	// synchronously, well before this bridge ever runs), so Lots.Get would
+	// race and intermittently return nil for a perfectly valid open event
+	// (confirmed live: "error order filled with no position" on a
+	// short-lived position). Always synthesize a minimal placeholder Lot
+	// from the event's own fields instead — processEvent only nil-checks
+	// it, never inspects its contents, for either event type.
+	lot := &account.Lot{TradeCommon: &account.TradeCommon{ID: tx.TradeID, Instrument: tx.Instrument}}
+
+	if len(tx.TradesClosed) == 0 {
+		return &account.Event{Type: account.EventOrderFilled, Lot: lot}
+	}
+
+	var trade *account.Trade
+	for _, tr := range acct.Trades {
+		if tr.ID == tx.TradeID {
+			trade = tr
+			break
+		}
+	}
+	return &account.Event{Type: account.EventPositionClosed, Lot: lot, Trade: trade}
 }

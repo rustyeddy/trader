@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers/sim"
 	"github.com/rustyeddy/trader/engine"
 	"github.com/rustyeddy/trader/types"
 )
@@ -58,6 +59,12 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 		acct.RiskFraction = run.Request.RiskPct
 	}
 	t.Account = acct
+	// Sim wraps the same Account, not a separate one — its
+	// SubmitMarketOrder/CloseTrade write directly into t.Account.Lots via
+	// AddLot/CloseLot, no reconciliation step needed between two account
+	// states (see docs/Manual/architecture-broker-account-order.org,
+	// phase 4 chunk 4).
+	t.Broker = sim.NewSimBroker(acct, nil)
 
 	return run.Execute(ctx, t)
 }

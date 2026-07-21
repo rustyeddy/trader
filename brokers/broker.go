@@ -9,6 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/brokers/sim"
+	"github.com/rustyeddy/trader/market"
 )
 
 // Broker is the execution-venue contract: placing/closing orders, reading
@@ -46,3 +47,14 @@ var (
 	_ Broker = (*oanda.Client)(nil)
 	_ Broker = (*sim.Sim)(nil)
 )
+
+// PriceUpdater is implemented by Broker implementations that need to be
+// told the current price to fill/monitor resting orders against (Sim).
+// Not part of Broker itself — a real venue like oanda.Client doesn't need
+// to be told prices, it has its own market data. Callers that need this
+// (backtest driving Sim bar-by-bar) type-assert Broker against it.
+type PriceUpdater interface {
+	UpdatePrice(tick market.Tick) error
+}
+
+var _ PriceUpdater = (*sim.Sim)(nil)
