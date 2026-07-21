@@ -5,12 +5,14 @@
 - Phase 1 (=account.Broker= → =account.Ledger= rename, new =account.Order=,
   new =brokers.Broker= interface + compile-time proof =*oanda.Client=
   satisfies it) — done, commit =8c4adaf=.
-- Phase 2, scoped to =service/orders.go= only — done, commit =eaae1a6=.
-  =Account.broker()= narrows =a.svc.OANDA= to =brokers.Broker= for
-  =orders.go='s five execution calls; everything else in =service/= still
-  calls the concrete client directly (unaffected, since most of it is
-  =GetPricing=/=StreamPricing=-shaped, out of scope until =DataProvider=
-  exists).
+- Phase 2, originally scoped to =service/orders.go= only — done, commit
+  =eaae1a6=. =Account.broker()= narrows =a.svc.OANDA= to =brokers.Broker=.
+  The rest of =service/='s execution/account-state calls that still
+  reached the concrete client directly were finished as part of Phase 4's
+  chunk 5 (commit =d3e4bb2=) — every non-data-shaped call in =service/=
+  now goes through =a.broker()=; only =GetPricing=/=StreamPricing= remain
+  on the concrete client, correctly deferred to =DataProvider= (not yet
+  defined).
 - Phase 3 (below) — two parts. The =service.Account= merge (moving
   =service.Account/Accounts/FirstAccount/DefaultAccount= into =account/=
   as the session registry) is *not yet started*. The =account.Ledger=
@@ -22,12 +24,16 @@
 - Phase 4 (below) — reshaped 2026-07-22 mid-discussion: order fills
   (including stop/take triggers) are events the *Broker* emits
   asynchronously via =StreamTransactions=, not something a synchronous
-  =Ledger.SubmitOpen= call decides on the spot. Chunks 1–4 done, commit
+  =Ledger.SubmitOpen= call decides on the spot. Chunks 1–5 done, commit
   =c1615d4= for chunk 4 — backtest now runs on real =Broker= fills and
   async stop/take events end-to-end, verified against a fresh baseline
   (trade-by-trade, not old committed baselines — see the baseline caveat
-  under chunk 4 below). Chunk 5 (migrate live trading onto the same path)
-  is next.
+  under chunk 4 below). Chunk 5, commit =d3e4bb2= — narrowed after
+  tracing the code: live trading has no local ledger by design (OANDA is
+  authoritative), so it doesn't need chunk 4's fill-bridge; scoped
+  instead to routing every remaining execution/account-state call in
+  =service/= through =brokers.Broker= consistently. Chunk 6
+  (=AccountSnapshot='s role) is next.
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -433,8 +439,28 @@ correct:
    =Account.Lots.Get()=, which raced against =Sim='s own stop/take-triggered
    closes (a lot could close before its *open* event was ever drained) —
    fixed by never depending on live =Lots= state in the bridge.
-5. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
-   consume-=StreamTransactions= flow, using =brokers/oanda=.
+5. *Done, commit =d3e4bb2=.* Narrowed after tracing the actual code, with
+   sign-off before proceeding: live trading has no local ledger by
+   design — =live_runner.go='s strategy input is built fresh every tick
+   straight from OANDA's own open-trades response, never touches
+   =Account.Lots= — matching the source-of-truth principle below (OANDA
+   is authoritative for live), not a gap to fix. Forcing live onto chunk
+   4's =drainBrokerFills=/=txEventToAccountEvent= bridge would mean
+   inventing chunk 6's reconciliation design for a path touching real
+   capital, before that design exists. Scoped instead to consistency:
+   =journal/live.go= gained a local =liveJournalClient= interface (same
+   pattern =account_snapshot.go= already used, avoiding a
+   =journal=↔=brokers= import cycle since =brokers/sim= already imports
+   =journal=) so =NewLiveJournal= takes an interface instead of
+   =*oanda.Client=; every remaining execution/account-state call in
+   =service/= (=account_session.go=, =journal.go=, =live_runner.go=,
+   =account.go=, =portfolio_runner.go= — the last two found via a broader
+   sweep during this chunk, confirmed in scope before fixing) now goes
+   through =a.broker()= instead of the concrete client. Several of these
+   fixes also collapsed duplicated prefer-snapshot-fall-back-to-broker
+   logic into reuse of existing =Account= methods
+   (=ListOpenTrades=/=CloseTrade=/=GetAccountSummary=) instead of a third
+   copy of the same fallback pattern.
 6. =AccountSnapshot='s role once fills flow through =StreamTransactions=
    uniformly — likely narrows to continuously-updating figures (unrealized
    PnL, margin) rather than trade-ledger reconciliation; see "Source-of-truth
@@ -442,5 +468,5 @@ correct:
 7. Move risk/sizing math onto =Account=, shared by backtest and live.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 5 specifically needs a proper plan-mode
+pass, not a committed plan. Chunk 6 specifically needs a proper plan-mode
 session before implementation.
