@@ -202,3 +202,126 @@ top-level =account/= package alongside =Ledger=/=Order=/=Trade=. No
 same-package-name-different-import-path situation to manage (unlike
 =review= vs. =service/review='s =reviewsvc= alias) — there is only one
 =account= package once this lands.
+
+* Phase 4: converge backtest and live onto one execution flow
+
+Decided 2026-07-22, not yet implemented. Broader than Phase 3's type merge:
+the goal is that backtest and live trading are *the same flow*, differing
+only in which =Broker= is plugged in and where source-of-truth authority
+sits — not two systems that happen to share a struct name. Explicit
+principle from this discussion: *correctness over convenience* — this is a
+real, larger refactor, accepted as such, to be taken one chunk at a time
+rather than deferred for being big.
+
+** The problem: backtest and live don't share a path today
+
+- *Backtest*: =backtest/execute.go= computes the fill price itself (candle
+  close, adjusted for spread/slippage via =account.FillAdjust(isBuy,
+  candle.AvgSpread, slippage)=) and calls =Ledger.SubmitOpen=/=SubmitClose=
+  directly. =SubmitOpen= trusts the caller's price outright and writes a
+  =Lot= straight into =Account.Lots=. No =Broker= is ever consulted — the
+  ledger write *is* the execution.
+- *Live*: =service/orders.go= calls =a.broker().SubmitMarketOrder(...)=
+  directly. OANDA executes and returns a real fill (which can differ from
+  what was quoted). =account.Ledger=/=Account.Lots= is never touched — live
+  has no local ledger today, relying entirely on querying OANDA
+  (=AccountSnapshot=, =GetOpenTrades=) for state.
+
+These are two independent code paths that both happen to end up at
+something named =Account=. Merging the type (Phase 3) doesn't converge the
+*flow* — =orders.go= would still call =broker()= directly on one side while
+=execute.go= calls =Ledger.SubmitOpen= directly on the other.
+
+** Target flow
+
+=Ledger.SubmitOpen=/=SubmitClose= become the single chokepoint either
+system calls. Internally, =SubmitOpen= calls =Broker.SubmitMarketOrder= to
+get the actual fill, then writes =Account.Lots=/=Trades= from that result —
+instead of trusting a pre-computed price. Backtest and live differ only in
+which =Broker= is plugged in:
+
+- *Live* → =brokers/oanda= (already satisfies =Broker=, Phase 1).
+- *Backtest / paper-trading* → =brokers/sim= becomes a real =Broker=
+  implementation, not a backtest-only stand-in. Its =SubmitMarketOrder=/
+  =CloseTrade= simulate the fill — spread and slippage derived from candle
+  data (=candle.AvgSpread=, the same source =execute.go= already uses by
+  hand today) rather than a real network round-trip. This is what makes
+  =brokers/sim= usable for *live* paper trading too (real-time ticks, no
+  real capital at risk), not only historical backtest replay — that's
+  =sim='s actual purpose, not an incidental side effect.
+
+Known, explicitly parked difference: backtest replays candles, live
+trading (real or paper) reacts to ticks. Not solved here — acknowledged as
+a separate problem =brokers/sim= will need to handle, not a blocker to
+this shape.
+
+** Source-of-truth asymmetry
+
+The flow converges, but *authority* doesn't — and forcing it to would be
+wrong:
+
+- *Sim* (backtest or paper): =Ledger.SubmitOpen=/=SubmitClose= writing to
+  =Account.Lots= *is* truth. Nothing external to reconcile against.
+- *OANDA* (live): a fill is provisional until OANDA's own account-changes
+  feed confirms it. =AccountSnapshot= (=service/account_snapshot.go=)
+  already exists for exactly this (polls =GetAccountChanges=) — but today
+  it maintains its own separate =openTrades map[string]oanda.OpenTrade=,
+  parallel to and disconnected from =Account.Lots=. Under this design,
+  =AccountSnapshot= stops being a separate cache and instead *reconciles*
+  =Account.Lots=/=Trades= against OANDA's feed periodically — same ledger
+  structure both modes use, live side just gets corrected by an external
+  authority instead of trusting its own writes outright.
+
+** Risk management moves onto Account
+
+=account.Account= already has an =RiskFraction= field, but only backtest
+uses it (set once at construction, e.g.
+=acct.RiskFraction = run.Request.RiskPct= in =backtest/executor.go=, never
+touched again). Live's sizing math — stop distance, =quoteToUSDRate=, unit
+sizing, =MaxUnits=/=MaxPositionUSD= caps — lives entirely inside
+=service/orders.go='s =PlaceMarketOrder=, blind to the account beyond a
+fetched equity number passed in per-call.
+
+Target: this sizing logic becomes a method *on* =Account=, reading its own
+=Equity=/=RiskFraction=/open =Lots= directly. Backtest and live then size
+positions through the identical function given an identically-shaped
+account, rather than two independent implementations that happen to agree
+by coincidence. This is also the concrete reason =Account= needs to *own or
+reference* risk management, not have it float in =service/=: risk
+calculations are inherently dependent on account size and open positions,
+which only =Account= actually has.
+
+** Broker events converge too
+
+=Ledger.Events()=/=account.Event= (=EventOrderFilled=, =EventPositionClosed=)
+already exists and drives backtest's =engine.Trader.StartBrokerEventHandler=.
+=service/live_runner.go= doesn't consume it at all today — live has its own
+separate reaction path. Once =SubmitOpen=/=SubmitClose= fire the same
+events regardless of which =Broker= backs them, =live_runner.go='s bot
+logic reacts through the same channel backtest's execution loop already
+does — same data/flowchart on both sides, per the goal, "even broker events
+and handling."
+
+** Sequencing (proposed, not yet agreed chunk-by-chunk)
+
+Roughly dependency-ordered — later chunks build on earlier ones being
+correct:
+
+1. Make =brokers/sim= a real =Broker= (spread/slippage-aware fills from
+   candle data). Foundational — nothing else can converge onto it until it
+   exists.
+2. Move the broker call *inside* =Ledger.SubmitOpen=/=SubmitClose=, proven
+   first against backtest's existing (large, correctness-critical) test
+   suite using =brokers/sim= — this is the highest-risk step, since a
+   regression here silently corrupts backtest results. Bit-for-bit
+   equivalence with current backtest behavior is the bar before moving on.
+3. Migrate live (=orders.go=/=live_runner.go=) onto the same
+   =Ledger.SubmitOpen=/=SubmitClose= path, using =brokers/oanda=.
+4. Add =AccountSnapshot=-based reconciliation for the live/OANDA
+   source-of-truth asymmetry.
+5. Move risk/sizing math onto =Account=, shared by backtest and live.
+6. Converge broker-event handling — =live_runner.go= consumes
+   =Ledger.Events()= the same way =engine.Trader= does.
+
+Chunk boundaries and order still open for discussion — this is a first
+pass, not a committed plan.
