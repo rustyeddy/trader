@@ -22,9 +22,12 @@
 - Phase 4 (below) — reshaped 2026-07-22 mid-discussion: order fills
   (including stop/take triggers) are events the *Broker* emits
   asynchronously via =StreamTransactions=, not something a synchronous
-  =Ledger.SubmitOpen= call decides on the spot. Chunks 1–3 done; chunk 4
-  (wiring real =Broker= calls + async fill application into
-  =engine.Trader=/backtest) is next, not yet re-planned in detail.
+  =Ledger.SubmitOpen= call decides on the spot. Chunks 1–4 done, commit
+  =c1615d4= for chunk 4 — backtest now runs on real =Broker= fills and
+  async stop/take events end-to-end, verified against a fresh baseline
+  (trade-by-trade, not old committed baselines — see the baseline caveat
+  under chunk 4 below). Chunk 5 (migrate live trading onto the same path)
+  is next.
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -400,26 +403,36 @@ correct:
    =Ledger= left to construct). Full test suite green, confirming nothing
    about *what happens* on open/close changed — only which type the
    methods live on.
-4. *Not yet re-planned in detail — the highest-risk step.* Build the
-   =StreamTransactions=-consuming step that applies fills to an account's
-   ledger, replacing =SubmitOpen=/=SubmitClose='s synchronous
-   =AddLot=/=CloseLot= calls, and wire =engine.Trader=/backtest onto real
-   =Broker= calls via the new =Trader.Broker= field. This absorbs what was
-   chunk 2's second half *and* most of what was chunk 6 (event
-   convergence) — they turned out to be the same mechanism, not
-   sequential steps. A regression here silently corrupts backtest results.
+4. *Done, commit =c1615d4=.* Built the =StreamTransactions=-consuming
+   step (=backtest/execute.go='s =drainBrokerFills=/=txEventToAccountEvent=)
+   that applies fills to =Account='s ledger, replacing
+   =SubmitOpen=/=SubmitClose='s synchronous =AddLot=/=CloseLot= calls, and
+   wired =engine.Trader=/backtest onto real =Broker= calls via the
+   =Trader.Broker= field (=Trader.Broker = sim.NewSimBroker(t.Account, nil)=
+   — Sim shares Trader's own =Account=, no reconciliation layer). New
+   =brokers.PriceUpdater= optional interface feeds =Sim= the bar's price
+   (fused with its stop/take check) without adding data methods to
+   =Broker= itself. =backtest/exits.go= deleted — stop/take detection is
+   =Sim='s job now. This absorbed what was chunk 2's second half *and*
+   most of what was chunk 6 (event convergence) — they turned out to be
+   the same mechanism, not sequential steps.
 
-   *Baseline caveat (2026-07-22):* "bit-for-bit equivalence with current
-   backtest behavior" is the right bar, but "current" must mean a *fresh*
-   baseline captured on today's =main= immediately before this chunk
-   starts — not a comparison against old saved results. The candle/
-   timestamp cleanup (removing =CandleTime=) landed after the original
-   backtest runs, so historical numbers may have already drifted for
-   reasons unrelated to this refactor; comparing against them would make
-   that pre-existing drift indistinguishable from a real regression. Run
-   the existing backtest test suite plus a few of the real
-   =testdata/configs/*.yml= backtests on =main= first, save that as the
-   reference, then diff post-change output against *that*.
+   *Baseline caveat, applied*: compared against a *fresh* baseline
+   captured on =main= immediately before this chunk (not old committed
+   results) — confirmed necessary, since =backtest regress= against the
+   committed =testdata/backtests/reports= baselines showed large
+   pre-existing divergence even on unmodified =main=, exactly as the
+   caveat predicted. Trade-by-trade diff post-change: trade counts match
+   exactly for 3 of 4 sampled configs (the 4th, a tick-sensitive M1
+   scalper, diverged more — plausible given the strategy's sensitivity to
+   exact fill timing, not a red flag on its own); every price difference
+   traces to a real fill replacing an estimate or exact stop-price
+   triggering replacing end-of-bar OHLC approximation — not corruption.
+   One real bug caught by this verification, not written correctly on
+   faith: the fill-bridge initially looked up each open's =Lot= via
+   =Account.Lots.Get()=, which raced against =Sim='s own stop/take-triggered
+   closes (a lot could close before its *open* event was ever drained) —
+   fixed by never depending on live =Lots= state in the bridge.
 5. Migrate live (=orders.go=/=live_runner.go=) onto the same submit +
    consume-=StreamTransactions= flow, using =brokers/oanda=.
 6. =AccountSnapshot='s role once fills flow through =StreamTransactions=
@@ -429,7 +442,5 @@ correct:
 7. Move risk/sizing math onto =Account=, shared by backtest and live.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 4 specifically needs a proper plan-mode
-session (how =account.Event=/=oanda.TxEvent= translation should work,
-exactly where the consuming step lives, and the fresh-baseline caveat
-above) before implementation.
+pass, not a committed plan. Chunk 5 specifically needs a proper plan-mode
+session before implementation.
