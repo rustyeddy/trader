@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/rustyeddy/trader/brokers"
 )
 
 // Account is a per-account session: every OANDA broker and account operation
@@ -151,4 +153,15 @@ func (a *Account) getSnapshot() *AccountSnapshot {
 		return s
 	}
 	return nil
+}
+
+// broker narrows a.svc.OANDA to the brokers.Broker execution interface.
+// *oanda.Client satisfies Broker unchanged (see brokers/broker.go) — this
+// is the first live call site to depend on the interface instead of the
+// concrete client (docs/Plans/service-refactor.org, phase 2). Only
+// execution methods (order placement, close, stop, account summary) go
+// through here; pricing/candle calls stay on a.svc.OANDA directly, since
+// those are DataProvider-shaped and out of scope for this phase.
+func (a *Account) broker() brokers.Broker {
+	return a.svc.OANDA
 }

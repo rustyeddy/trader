@@ -83,7 +83,7 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 	if snap := a.getSnapshot(); snap != nil {
 		equity = snap.NAV()
 	} else {
-		acct, err := a.svc.OANDA.GetAccountSummary(ctx, a.ID)
+		acct, err := a.broker().GetAccountSummary(ctx, a.ID)
 		if err != nil {
 			return nil, fmt.Errorf("get account: %w", err)
 		}
@@ -181,7 +181,7 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return result, nil
 	}
 
-	fill, err := a.svc.OANDA.SubmitMarketOrder(ctx, a.ID, req.Instrument, units, stopPrice.Float64())
+	fill, err := a.broker().SubmitMarketOrder(ctx, a.ID, req.Instrument, units, stopPrice.Float64())
 	if err != nil {
 		return result, fmt.Errorf("submit order: %w", err)
 	}
@@ -212,7 +212,7 @@ func quoteToUSDRate(instrument string) types.Rate {
 
 // CloseTrade closes a trade by ID. Units=0 means full close; >0 is partial.
 func (a *Account) CloseTrade(ctx context.Context, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
-	res, err := a.svc.OANDA.CloseTrade(ctx, a.ID, tradeID, units)
+	res, err := a.broker().CloseTrade(ctx, a.ID, tradeID, units)
 	if err != nil {
 		return nil, fmt.Errorf("close trade %s: %w", tradeID, err)
 	}
@@ -226,7 +226,7 @@ func (a *Account) CloseTrade(ctx context.Context, tradeID string, units int64) (
 // open trade. stopPx/takePx use the same convention as
 // oanda.Client.UpdateTradeStop: >0 sets, 0 leaves unchanged, <0 cancels.
 func (a *Account) UpdateTradeStop(ctx context.Context, tradeID string, stopPx, takePx float64) error {
-	if err := a.svc.OANDA.UpdateTradeStop(ctx, a.ID, tradeID, stopPx, takePx); err != nil {
+	if err := a.broker().UpdateTradeStop(ctx, a.ID, tradeID, stopPx, takePx); err != nil {
 		return fmt.Errorf("update stop %s: %w", tradeID, err)
 	}
 	return nil
@@ -239,7 +239,7 @@ func (a *Account) ListOpenTrades(ctx context.Context) ([]oanda.OpenTrade, error)
 	if snap := a.getSnapshot(); snap != nil {
 		return snap.OpenTrades(), nil
 	}
-	trades, err := a.svc.OANDA.GetOpenTrades(ctx, a.ID)
+	trades, err := a.broker().GetOpenTrades(ctx, a.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get open trades: %w", err)
 	}
