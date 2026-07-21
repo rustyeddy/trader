@@ -9,9 +9,15 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
+
+// eventQueueSize mirrors account.Ledger's brokerEventQueueSize (same
+// producer/consumer channel pattern, one level down — see
+// StreamTransactions).
+const eventQueueSize = 1024
 
 // Sim is a simulated Broker (brokers.Broker): it fills orders against its
 // own tracked prices (via UpdatePrice, or synthesized from candles via
@@ -29,6 +35,16 @@ type Sim struct {
 	// mirroring backtest/execute.go's slippage parameter. Zero by default
 	// (no extra adverse movement beyond the quoted spread).
 	Slippage types.Price
+
+	// events is StreamTransactions' feed: every fill (SubmitMarketOrder,
+	// CloseTrade, or a stop/take triggered internally by UpdatePrice)
+	// pushes here. A resting stop-loss only "happens" when price actually
+	// reaches it — Sim is the thing that knows that, the same way a real
+	// broker's book does, so it — not a caller — decides when that event
+	// fires. Buffered and non-blocking on send (see emitFill): nothing in
+	// this chunk drains it yet, so a full channel must drop, not block a
+	// fill.
+	events chan oanda.TxEvent
 }
 
 func NewSimBroker(acct *account.Account, j journal.Journal) *Sim {
@@ -42,6 +58,19 @@ func NewSimBroker(acct *account.Account, j journal.Journal) *Sim {
 		account: acct,
 		journal: j,
 		prices:  make(map[string]market.Tick),
+		events:  make(chan oanda.TxEvent, eventQueueSize),
+	}
+}
+
+// emitFill pushes a fill transaction onto the event stream, dropping it
+// (with a log line) rather than blocking if nothing has drained the
+// channel — mirrors account.Ledger.emitEvent's full-queue behavior one
+// level down.
+func (e *Sim) emitFill(tx oanda.Transaction) {
+	select {
+	case e.events <- oanda.TxEvent{Tx: tx}:
+	default:
+		log.L.Warn("sim: dropping fill event, event queue is full", "type", tx.Type, "tradeID", tx.TradeID)
 	}
 }
 
@@ -63,7 +92,69 @@ func (e *Sim) UpdatePrice(tick market.Tick) error {
 	for instrument, px := range e.prices {
 		marks[instrument] = px.Mid()
 	}
-	return e.account.ResolveWithMarks(marks)
+	if err := e.account.ResolveWithMarks(marks); err != nil {
+		return err
+	}
+
+	return e.checkStopsAndTakes(inst, tick)
+}
+
+// checkStopsAndTakes closes any open lot on instrument whose Stop/Take was
+// just crossed by tick — a resting stop/take only "happens" once price
+// actually reaches it, so this runs on every price update rather than
+// being decided synchronously when the stop was set. Mirrors
+// backtest/exits.go's checkExit long/short asymmetry (stop-first on a
+// same-tick double hit), adapted for bid/ask instead of a candle's OHLC:
+// closing a long fills at bid, closing a short fills at ask — the same
+// convention CloseTrade already uses.
+func (e *Sim) checkStopsAndTakes(inst string, tick market.Tick) error {
+	var closeErr error
+	_ = e.account.Lots.Range(func(lot *account.Lot) error {
+		if closeErr != nil || lot.Instrument != inst {
+			return nil
+		}
+		hasStop := lot.Stop != 0
+		hasTake := lot.Take != 0
+		if !hasStop && !hasTake {
+			return nil
+		}
+
+		var exitPrice types.Price
+		var reason string
+		switch lot.Side {
+		case types.Long:
+			stopHit := hasStop && tick.Bid <= lot.Stop
+			takeHit := hasTake && tick.Bid >= lot.Take
+			switch {
+			case stopHit:
+				exitPrice, reason = lot.Stop, "STOP"
+			case takeHit:
+				exitPrice, reason = lot.Take, "TAKE"
+			default:
+				return nil
+			}
+		case types.Short:
+			stopHit := hasStop && tick.Ask >= lot.Stop
+			takeHit := hasTake && tick.Ask <= lot.Take
+			switch {
+			case stopHit:
+				exitPrice, reason = lot.Stop, "STOP"
+			case takeHit:
+				exitPrice, reason = lot.Take, "TAKE"
+			default:
+				return nil
+			}
+		default:
+			return nil
+		}
+
+		exitPrice += account.FillAdjust(lot.Side == types.Short, 0, e.Slippage)
+		if _, err := e.closeLotAndEmit(lot, exitPrice, tick.Timestamp, reason); err != nil {
+			closeErr = err
+		}
+		return nil
+	})
+	return closeErr
 }
 
 func (e *Sim) CloseAll(ctx context.Context, reason string) error {
@@ -182,6 +273,17 @@ func (e *Sim) SubmitMarketOrder(ctx context.Context, accountID, instrument strin
 		return nil, fmt.Errorf("sim: open lot: %w", err)
 	}
 
+	e.emitFill(oanda.Transaction{
+		Type:       "ORDER_FILL",
+		AccountID:  accountID,
+		Time:       px.Timestamp.Time(),
+		Instrument: inst,
+		Units:      units,
+		Price:      fillPrice.Float64(),
+		OrderID:    lot.ID,
+		TradeID:    lot.ID,
+	})
+
 	return &oanda.OrderResult{
 		OrderID:    lot.ID,
 		TradeID:    lot.ID,
@@ -218,12 +320,21 @@ func (e *Sim) CloseTrade(ctx context.Context, accountID, tradeID string, units i
 	}
 	exitPrice += account.FillAdjust(isBuy, 0, e.Slippage)
 
+	return e.closeLotAndEmit(lot, exitPrice, px.Timestamp, "sim close")
+}
+
+// closeLotAndEmit is the single close-and-notify path both CloseTrade and
+// checkStopsAndTakes use: realize P/L via Account.CloseLot, record the
+// journal entry, and emit the fill event — the same three things happen
+// whether the close was caller-requested or a resting stop/take firing on
+// its own.
+func (e *Sim) closeLotAndEmit(lot *account.Lot, exitPrice types.Price, exitTime types.Timestamp, reason string) (*oanda.CloseTradeResult, error) {
 	trade := &account.Trade{
 		TradeCommon: lot.TradeCommon.Clone(),
 		EntryPrice:  lot.EntryPrice,
 		EntryTime:   lot.EntryTime,
 		ExitPrice:   exitPrice,
-		ExitTime:    px.Timestamp,
+		ExitTime:    exitTime,
 	}
 	if err := e.account.CloseLot(lot, trade); err != nil {
 		return nil, fmt.Errorf("sim: close lot: %w", err)
@@ -239,9 +350,30 @@ func (e *Sim) CloseTrade(ctx context.Context, accountID, tradeID string, units i
 			OpenTime:   lot.EntryTime,
 			CloseTime:  trade.ExitTime,
 			RealizedPL: trade.PNL,
-			Reason:     "sim close",
+			Reason:     reason,
 		})
 	}
+
+	closedUnits := int64(trade.Units)
+	if trade.Side == types.Long {
+		closedUnits = -closedUnits
+	}
+	e.emitFill(oanda.Transaction{
+		Type:       "ORDER_FILL",
+		Time:       exitTime.Time(),
+		Reason:     reason,
+		Instrument: trade.Instrument,
+		Units:      closedUnits,
+		Price:      exitPrice.Float64(),
+		PL:         trade.PNL.Float64(),
+		TradeID:    trade.ID,
+		TradesClosed: []oanda.ClosedTrade{{
+			TradeID:    trade.ID,
+			Units:      closedUnits,
+			Price:      exitPrice.Float64(),
+			RealizedPL: trade.PNL.Float64(),
+		}},
+	})
 
 	return &oanda.CloseTradeResult{
 		TradeID: trade.ID,
@@ -346,4 +478,17 @@ func (e *Sim) GetAccountDetails(ctx context.Context, accountID string) (*oanda.A
 		AccountSummary: *summary,
 		OpenTrades:     trades,
 	}, nil
+}
+
+// StreamTransactions returns Sim's own fill feed (see the events field's
+// doc comment) — every SubmitMarketOrder/CloseTrade fill and every
+// stop/take triggered internally by UpdatePrice arrives here, the same
+// role oanda.Client.StreamTransactions plays for a real account. Unlike
+// the real client, this never closes on its own (no reconnect/error case
+// to model) — it lives as long as Sim does.
+func (e *Sim) StreamTransactions(ctx context.Context, accountID string, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
+	if e == nil || e.account == nil {
+		return nil, fmt.Errorf("sim broker account is nil")
+	}
+	return e.events, nil
 }

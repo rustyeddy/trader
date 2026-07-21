@@ -3,8 +3,10 @@ package sim
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -433,4 +435,188 @@ func TestGetAccountDetails_IncludesOpenTrades(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, acct.ID, details.ID)
 	require.Len(t, details.OpenTrades, 1)
+}
+
+// ── StreamTransactions ───────────────────────────────────────────────────────
+
+func TestStreamTransactions_ReceivesEventAfterMarketOrderFill(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	select {
+	case evt := <-ch:
+		require.NoError(t, evt.Err)
+		assert.Equal(t, "ORDER_FILL", evt.Tx.Type)
+		assert.Equal(t, open.TradeID, evt.Tx.TradeID)
+		assert.Equal(t, int64(1000), evt.Tx.Units)
+	case <-time.After(time.Second):
+		t.Fatal("expected a fill event on the stream")
+	}
+}
+
+func TestStreamTransactions_ReceivesEventAfterCloseTrade(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	<-ch // drain the open fill
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1050))))
+	_, err = s.CloseTrade(context.Background(), "acct", open.TradeID, 0)
+	require.NoError(t, err)
+
+	select {
+	case evt := <-ch:
+		require.NoError(t, evt.Err)
+		assert.Equal(t, open.TradeID, evt.Tx.TradeID)
+		require.Len(t, evt.Tx.TradesClosed, 1)
+		assert.Equal(t, open.TradeID, evt.Tx.TradesClosed[0].TradeID)
+		assert.Greater(t, evt.Tx.PL, 0.0, "long closed higher than opened must be profitable")
+	case <-time.After(time.Second):
+		t.Fatal("expected a close event on the stream")
+	}
+}
+
+func TestEmitFill_DropsWhenChannelIsFull(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	s.events = make(chan oanda.TxEvent, 1)
+	s.events <- oanda.TxEvent{Tx: oanda.Transaction{Type: "ORDER_FILL"}} // fill the queue
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err, "a full event queue must not block or fail the fill itself")
+	assert.Equal(t, 1, acct.Lots.Len())
+}
+
+// ── Stop/take triggering (checkStopsAndTakes) ───────────────────────────────
+
+func TestUpdatePrice_TriggersLongStopLoss(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	<-ch // drain the open fill
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 1.0950, 0))
+
+	// Bid falls through the stop.
+	require.NoError(t, s.UpdatePrice(market.Tick{
+		Instrument: "EURUSD",
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0940), Ask: types.PriceFromFloat(1.0942)},
+	}))
+
+	assert.Equal(t, 0, acct.Lots.Len(), "stop-hit lot must be closed")
+	select {
+	case evt := <-ch:
+		assert.Equal(t, "STOP", evt.Tx.Reason)
+	case <-time.After(time.Second):
+		t.Fatal("expected a stop-triggered close event")
+	}
+}
+
+func TestUpdatePrice_TriggersLongTakeProfit(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	<-ch
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 0, 1.1100))
+
+	require.NoError(t, s.UpdatePrice(market.Tick{
+		Instrument: "EURUSD",
+		BA:         market.BA{Bid: types.PriceFromFloat(1.1110), Ask: types.PriceFromFloat(1.1112)},
+	}))
+
+	assert.Equal(t, 0, acct.Lots.Len())
+	select {
+	case evt := <-ch:
+		assert.Equal(t, "TAKE", evt.Tx.Reason)
+	case <-time.After(time.Second):
+		t.Fatal("expected a take-triggered close event")
+	}
+}
+
+func TestUpdatePrice_TriggersShortStopLoss(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", -1000, 0)
+	require.NoError(t, err)
+	<-ch
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 1.1050, 0))
+
+	// Ask rises through the short's stop.
+	require.NoError(t, s.UpdatePrice(market.Tick{
+		Instrument: "EURUSD",
+		BA:         market.BA{Bid: types.PriceFromFloat(1.1058), Ask: types.PriceFromFloat(1.1060)},
+	}))
+
+	assert.Equal(t, 0, acct.Lots.Len())
+	select {
+	case evt := <-ch:
+		assert.Equal(t, "STOP", evt.Tx.Reason)
+	case <-time.After(time.Second):
+		t.Fatal("expected a stop-triggered close event")
+	}
+}
+
+func TestUpdatePrice_TriggersShortTakeProfit(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	ch, err := s.StreamTransactions(context.Background(), "acct", oanda.StreamOptions{})
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", -1000, 0)
+	require.NoError(t, err)
+	<-ch
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 0, 1.0900))
+
+	require.NoError(t, s.UpdatePrice(market.Tick{
+		Instrument: "EURUSD",
+		BA:         market.BA{Bid: types.PriceFromFloat(1.0888), Ask: types.PriceFromFloat(1.0890)},
+	}))
+
+	assert.Equal(t, 0, acct.Lots.Len())
+	select {
+	case evt := <-ch:
+		assert.Equal(t, "TAKE", evt.Tx.Reason)
+	case <-time.After(time.Second):
+		t.Fatal("expected a take-triggered close event")
+	}
+}
+
+func TestUpdatePrice_NoStopOrTakeSet_LeavesLotOpen(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	// A large adverse move — would trigger a stop/take if one were set.
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.0500))))
+
+	assert.Equal(t, 1, acct.Lots.Len(), "lot with no stop/take must never be auto-closed")
 }

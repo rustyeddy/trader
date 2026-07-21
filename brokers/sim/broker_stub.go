@@ -13,7 +13,8 @@ import (
 // a self-authoritative sim — Sim's own state is already the source of
 // truth, nothing to reconcile against. Kept in a separate file so this
 // scope boundary is visible at a glance, not buried among the real
-// implementations in simulator.go.
+// implementations in simulator.go. StreamTransactions used to be here too
+// but is real now (chunk 2) — see simulator.go.
 
 // GetAccountChanges has nothing to report: Sim has no external authority
 // to have "changed" independently of the calls made through it.
@@ -33,12 +34,4 @@ func (e *Sim) GetAccounts(ctx context.Context) ([]oanda.AccountRef, error) {
 // yet (see GetAccountChanges).
 func (e *Sim) GetTransactions(ctx context.Context, accountID string, sinceID int64) ([]oanda.Transaction, int64, error) {
 	return nil, sinceID, nil
-}
-
-// StreamTransactions returns a closed channel — Sim has no push feed;
-// callers that need live updates should poll GetOpenTrades/GetAccountSummary.
-func (e *Sim) StreamTransactions(ctx context.Context, accountID string, opts oanda.StreamOptions) (<-chan oanda.TxEvent, error) {
-	ch := make(chan oanda.TxEvent)
-	close(ch)
-	return ch, nil
 }
