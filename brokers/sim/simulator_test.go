@@ -235,3 +235,202 @@ func TestCloseAll_NilJournal_DoesNotPanic(t *testing.T) {
 		_ = s.CloseAll(context.Background(), "close")
 	})
 }
+
+// ── SubmitMarketOrder ────────────────────────────────────────────────────────
+
+func TestSubmitMarketOrder_LongFillsAtAsk(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+
+	res, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, int64(1000), res.Units)
+	assert.Equal(t, "EURUSD", res.Instrument)
+	assert.InDelta(t, types.PriceFromFloat(1.1000).Float64()+1.0/float64(types.PriceScale), res.Price, 1e-9,
+		"long fills at ask (mid+1 tick), no slippage configured")
+	require.Equal(t, 1, acct.Lots.Len())
+}
+
+func TestSubmitMarketOrder_ShortFillsAtBid(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+
+	res, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", -1000, 0)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, int64(-1000), res.Units)
+	assert.InDelta(t, types.PriceFromFloat(1.1000).Float64()-1.0/float64(types.PriceScale), res.Price, 1e-9,
+		"short fills at bid (mid-1 tick), no slippage configured")
+
+	lot := acct.Lots.Get(res.TradeID)
+	require.NotNil(t, lot)
+	assert.Equal(t, types.Short, lot.Side)
+}
+
+func TestSubmitMarketOrder_SlippageWorsensLongFill(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	s.Slippage = types.PriceFromFloat(0.0002)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+
+	noSlip, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	assert.Greater(t, noSlip.Price, types.PriceFromFloat(1.1000).Float64(),
+		"slippage must worsen (raise) a long fill above the ask")
+}
+
+func TestSubmitMarketOrder_NoPriceReturnsError(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no market price")
+}
+
+func TestSubmitMarketOrder_ZeroUnitsReturnsError(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 0, 0)
+	require.Error(t, err)
+}
+
+// ── CloseTrade ───────────────────────────────────────────────────────────────
+
+func TestCloseTrade_ClosesLongAtBid(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1050))))
+	res, err := s.CloseTrade(context.Background(), "acct", open.TradeID, 0)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, open.TradeID, res.TradeID)
+	assert.Equal(t, 0, acct.Lots.Len(), "lot must be removed after close")
+	require.Len(t, acct.Trades, 1)
+	assert.Greater(t, acct.Trades[0].PNL, types.Money(0), "long closed higher than it opened must be profitable")
+}
+
+func TestCloseTrade_UnknownTradeIDReturnsError(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+
+	_, err := s.CloseTrade(context.Background(), "acct", "no-such-trade", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no open trade")
+}
+
+func TestCloseTrade_RecordsJournalEntry(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	j := &stubJournal{}
+	s := NewSimBroker(acct, j)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1050))))
+	_, err = s.CloseTrade(context.Background(), "acct", open.TradeID, 0)
+	require.NoError(t, err)
+	require.Len(t, j.trades, 1)
+	assert.Equal(t, open.TradeID, j.trades[0].TradeID)
+}
+
+// ── UpdateTradeStop ──────────────────────────────────────────────────────────
+
+func TestUpdateTradeStop_SetsStopAndTake(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 1.0950, 1.1100))
+
+	lot := acct.Lots.Get(open.TradeID)
+	require.NotNil(t, lot)
+	assert.Equal(t, types.PriceFromFloat(1.0950), lot.Stop)
+	assert.Equal(t, types.PriceFromFloat(1.1100), lot.Take)
+}
+
+func TestUpdateTradeStop_NegativeCancels(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	open, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, 1.0950, 0))
+
+	require.NoError(t, s.UpdateTradeStop(context.Background(), "acct", open.TradeID, -1, 0))
+
+	lot := acct.Lots.Get(open.TradeID)
+	require.NotNil(t, lot)
+	assert.Equal(t, types.Price(0), lot.Stop)
+}
+
+func TestUpdateTradeStop_UnknownTradeIDReturnsError(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+
+	err := s.UpdateTradeStop(context.Background(), "acct", "no-such-trade", 1.0950, 0)
+	require.Error(t, err)
+}
+
+// ── GetOpenTrades / GetAccountSummary / GetAccountDetails ───────────────────
+
+func TestGetOpenTrades_ReflectsOpenLots(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+	_, err = s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", -500, 0)
+	require.NoError(t, err)
+
+	trades, err := s.GetOpenTrades(context.Background(), "acct")
+	require.NoError(t, err)
+	require.Len(t, trades, 2)
+
+	var sawLong, sawShort bool
+	for _, tr := range trades {
+		switch {
+		case tr.Units == 1000:
+			sawLong = true
+		case tr.Units == -500:
+			sawShort = true
+		}
+	}
+	assert.True(t, sawLong)
+	assert.True(t, sawShort)
+}
+
+func TestGetAccountSummary_ReflectsLedgerState(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+
+	summary, err := s.GetAccountSummary(context.Background(), "acct")
+	require.NoError(t, err)
+	assert.Equal(t, acct.ID, summary.ID)
+	assert.Equal(t, acct.Balance.Float64(), summary.Balance)
+	assert.Equal(t, acct.Equity.Float64(), summary.NAV)
+}
+
+func TestGetAccountDetails_IncludesOpenTrades(t *testing.T) {
+	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
+	s := NewSimBroker(acct, nil)
+	require.NoError(t, s.UpdatePrice(eurusdTick(types.PriceFromFloat(1.1000))))
+	_, err := s.SubmitMarketOrder(context.Background(), "acct", "EURUSD", 1000, 0)
+	require.NoError(t, err)
+
+	details, err := s.GetAccountDetails(context.Background(), "acct")
+	require.NoError(t, err)
+	assert.Equal(t, acct.ID, details.ID)
+	require.Len(t, details.OpenTrades, 1)
+}

@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
+	"github.com/rustyeddy/trader/brokers/sim"
 )
 
 // Broker is the execution-venue contract: placing/closing orders, reading
@@ -24,10 +25,9 @@ import (
 // oanda-shaped response structs until those DTOs are made broker-agnostic
 // in a later phase.
 //
-// brokers/sim does not implement Broker yet: its current method set
-// (UpdatePrice, CloseAll, GetAccount) doesn't overlap with this interface
-// at all, and it's only used by cmd/replay today, not live service code.
-// Making it conform is a separate, later piece of work.
+// brokers/sim also satisfies Broker — a simulated fill against tracked
+// prices instead of a real network round-trip. See
+// docs/Manual/architecture-broker-account-order.org, phase 4.
 type Broker interface {
 	GetAccountSummary(ctx context.Context, accountID string) (*oanda.AccountSummary, error)
 	GetAccountDetails(ctx context.Context, accountID string) (*oanda.AccountDetails, error)
@@ -41,5 +41,8 @@ type Broker interface {
 	SubmitMarketOrder(ctx context.Context, accountID, instrument string, units int64, stopPrice float64) (*oanda.OrderResult, error)
 }
 
-// compile-time assertion: *oanda.Client satisfies Broker.
-var _ Broker = (*oanda.Client)(nil)
+// compile-time assertions: *oanda.Client and *sim.Sim both satisfy Broker.
+var (
+	_ Broker = (*oanda.Client)(nil)
+	_ Broker = (*sim.Sim)(nil)
+)
