@@ -27,6 +27,11 @@ type Account struct {
 
 	Lots   LotBook
 	Trades []*Trade // closed trades, appended by CloseLot
+
+	// evtQ is the order-filled/position-closed notification queue — see
+	// account/events.go (SubmitOpen, SubmitClose, Events, ...). Lazily
+	// initialized on first use, same as Lots.
+	evtQ chan *Event
 }
 
 // NewAccount creates an Account with the given name and opening deposit.

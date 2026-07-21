@@ -11,7 +11,7 @@ import (
 
 // BacktestExecutor runs an executable backtest using whatever runtime
 // dependencies it needs. Service-layer code depends on this narrow contract
-// instead of constructing Trader/Broker/Account directly.
+// instead of constructing Trader/Account directly.
 type BacktestExecutor interface {
 	Execute(context.Context, *Backtest) error
 }
@@ -20,7 +20,6 @@ type BacktestExecutor interface {
 // factory-provided runtime dependencies.
 type TraderBacktestExecutor struct {
 	DataManager    engine.CandleSource
-	BrokerFactory  func() *account.Ledger
 	AccountFactory func(name string, balance types.Money) *account.Account
 }
 
@@ -29,9 +28,6 @@ type TraderBacktestExecutor struct {
 func NewTraderBacktestExecutor(dm engine.CandleSource) *TraderBacktestExecutor {
 	return &TraderBacktestExecutor{
 		DataManager: dm,
-		BrokerFactory: func() *account.Ledger {
-			return account.NewLedger("sim")
-		},
 		AccountFactory: func(name string, balance types.Money) *account.Account {
 			return account.NewAccount(name, balance)
 		},
@@ -49,18 +45,11 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	if e.DataManager == nil {
 		return fmt.Errorf("nil data manager")
 	}
-	if e.BrokerFactory == nil {
-		return fmt.Errorf("nil broker factory")
-	}
 	if e.AccountFactory == nil {
 		return fmt.Errorf("nil account factory")
 	}
 
 	t := &engine.Trader{DataManager: e.DataManager}
-	t.Ledger = e.BrokerFactory()
-	if t.Ledger == nil {
-		return fmt.Errorf("nil broker")
-	}
 	acct := e.AccountFactory("backtest", run.Request.StartingBalance)
 	if acct == nil {
 		return fmt.Errorf("nil account")
@@ -68,7 +57,7 @@ func (e *TraderBacktestExecutor) Execute(ctx context.Context, run *Backtest) err
 	if run.Request.RiskPct != 0 {
 		acct.RiskFraction = run.Request.RiskPct
 	}
-	t.Ledger.Account = acct
+	t.Account = acct
 
 	return run.Execute(ctx, t)
 }

@@ -61,10 +61,7 @@ func TestBackTestWithIterator_BasicPaths(t *testing.T) {
 	t.Parallel()
 
 	acct := account.NewAccount("acct", types.MoneyFromFloat(10_000))
-	broker := account.NewLedger("broker")
-	broker.Account = acct
-
-	tr := &engine.Trader{Ledger: broker}
+	tr := &engine.Trader{Account: acct}
 	ctx := context.Background()
 
 	run := &Backtest{Request: &BacktestRequest{Instrument: "EURUSD"}}
@@ -99,16 +96,12 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	var nilTrader *engine.Trader
 	require.ErrorContains(t, run.Execute(ctx, nilTrader), "nil trader")
 
-	noAcct := &engine.Trader{Ledger: account.NewLedger("no-account")}
+	noAcct := &engine.Trader{}
 	require.ErrorContains(t, run.Execute(ctx, noAcct), "nil account")
 
-	withAcctBroker := account.NewLedger("with-account")
-	withAcctBroker.Account = account.NewAccount("acct", types.MoneyFromFloat(10_000))
-	withAcct := &engine.Trader{Ledger: withAcctBroker}
+	withAcctAcct := account.NewAccount("acct", types.MoneyFromFloat(10_000))
+	withAcct := &engine.Trader{Account: withAcctAcct}
 	require.ErrorContains(t, run.Execute(ctx, withAcct), "nil data manager")
-
-	broker := account.NewLedger("broker")
-	broker.Account = withAcctBroker.Account
 
 	ts := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	datamanager.UseTempDataDir(t)
@@ -126,7 +119,7 @@ func TestTraderBacktest_GuardsAndSuccess(t *testing.T) {
 	datamanager.WriteCandleSet(t, cs)
 
 	dm := datamanager.NewDataManager([]string{"EURUSD"}, ts, ts.Add(time.Hour))
-	okTrader := &engine.Trader{Ledger: broker, DataManager: dm}
+	okTrader := &engine.Trader{Account: withAcctAcct, DataManager: dm}
 	require.NoError(t, run.Execute(ctx, okTrader))
 	require.NotNil(t, run.State)
 	require.NotNil(t, run.Result)

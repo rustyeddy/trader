@@ -14,7 +14,7 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-// eventQueueSize mirrors account.Ledger's brokerEventQueueSize (same
+// eventQueueSize mirrors account.Account's brokerEventQueueSize (same
 // producer/consumer channel pattern, one level down — see
 // StreamTransactions).
 const eventQueueSize = 1024
@@ -22,7 +22,7 @@ const eventQueueSize = 1024
 // Sim is a simulated Broker (brokers.Broker): it fills orders against its
 // own tracked prices (via UpdatePrice, or synthesized from candles via
 // TickFromCandle) instead of a real network round-trip, using the same
-// account.Ledger-adjacent bookkeeping (Account.AddLot/CloseLot) a real
+// account.Account-adjacent bookkeeping (Account.AddLot/CloseLot) a real
 // broker's fills would eventually feed. Wraps exactly one account — the
 // accountID parameter on Broker methods is accepted for interface
 // compliance but not used to look up among multiple accounts.
@@ -64,7 +64,7 @@ func NewSimBroker(acct *account.Account, j journal.Journal) *Sim {
 
 // emitFill pushes a fill transaction onto the event stream, dropping it
 // (with a log line) rather than blocking if nothing has drained the
-// channel — mirrors account.Ledger.emitEvent's full-queue behavior one
+// channel — mirrors account.Account.emitEvent's full-queue behavior one
 // level down.
 func (e *Sim) emitFill(tx oanda.Transaction) {
 	select {
@@ -226,7 +226,7 @@ func (e *Sim) GetAccount(context.Context) (*account.Account, error) {
 // SubmitMarketOrder fills immediately against the tracked price for
 // instrument (positive units = long, filled at ask; negative = short,
 // filled at bid), plus Slippage, and opens a Lot via Account.AddLot — the
-// same bookkeeping path account.Ledger.SubmitOpen uses.
+// same bookkeeping path account.Account.SubmitOpen uses.
 func (e *Sim) SubmitMarketOrder(ctx context.Context, accountID, instrument string, units int64, stopPrice float64) (*oanda.OrderResult, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("sim broker account is nil")
@@ -297,7 +297,7 @@ func (e *Sim) SubmitMarketOrder(ctx context.Context, accountID, instrument strin
 // price, plus Slippage. units is accepted for Broker interface parity with
 // OANDA's partial-close semantics, but a full close is all this chunk
 // implements — partial closes are a later chunk's concern, once
-// account.Ledger's own partial-close handling (if any) needs mirroring.
+// account.Account's own partial-close handling (if any) needs mirroring.
 func (e *Sim) CloseTrade(ctx context.Context, accountID, tradeID string, units int64) (*oanda.CloseTradeResult, error) {
 	if e == nil || e.account == nil {
 		return nil, fmt.Errorf("sim broker account is nil")

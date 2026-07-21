@@ -89,9 +89,8 @@ func TestTraderBrokerEventErrorAndWaitForBrokerIdle(t *testing.T) {
 	errCh <- errors.New("boom")
 	require.EqualError(t, tr.BrokerEventError(errCh), "boom")
 
-	b := account.NewLedger("idle")
-	b.Account = account.NewAccount("acct", types.MoneyFromFloat(10_000))
-	idle := &Trader{Ledger: b}
+	b := account.NewAccount("idle", types.MoneyFromFloat(10_000))
+	idle := &Trader{Account: b}
 	require.NoError(t, idle.WaitForBrokerIdle(make(chan error, 1), 5*time.Millisecond))
 
 	bad := make(chan error, 1)

@@ -91,8 +91,6 @@ func TestAutoCloseExits_StopAndTake(t *testing.T) {
 	t.Parallel()
 
 	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
-	b := account.NewLedger("test")
-	b.Account = acct
 
 	// Open a long lot with stop below and take above current price.
 	stopLot := testOpenLot(t, acct, "EURUSD", types.Long, 10_000, types.PriceFromFloat(1.1000))
@@ -107,7 +105,7 @@ func TestAutoCloseExits_StopAndTake(t *testing.T) {
 	// Bar whose low dips below stopLot's stop but not safeLot's stop.
 	candle := market.Candle{Open: types.PriceFromFloat(1.1000), High: types.PriceFromFloat(1.1050), Low: types.PriceFromFloat(1.0940), Close: types.PriceFromFloat(1.1010), Timestamp: types.Timestamp(1000)}
 
-	n, err := autoCloseExits(context.Background(), b, candle, 0)
+	n, err := autoCloseExits(context.Background(), acct, candle, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n, "only the stop lot should have been auto-closed")
 
@@ -122,8 +120,6 @@ func TestAutoCloseExits_TakeProfit(t *testing.T) {
 	t.Parallel()
 
 	acct := account.NewAccount("test", types.MoneyFromFloat(10_000))
-	b := account.NewLedger("test")
-	b.Account = acct
 
 	lot := testOpenLot(t, acct, "EURUSD", types.Long, 10_000, types.PriceFromFloat(1.1000))
 	lot.Stop = types.PriceFromFloat(1.0900)
@@ -131,7 +127,7 @@ func TestAutoCloseExits_TakeProfit(t *testing.T) {
 
 	candle := market.Candle{Open: types.PriceFromFloat(1.1050), High: types.PriceFromFloat(1.1120), Low: types.PriceFromFloat(1.1040), Close: types.PriceFromFloat(1.1110), Timestamp: types.Timestamp(2000)}
 
-	n, err := autoCloseExits(context.Background(), b, candle, 0)
+	n, err := autoCloseExits(context.Background(), acct, candle, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	assert.Equal(t, 0, acct.Lots.Len())

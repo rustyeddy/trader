@@ -1,5 +1,5 @@
 // Package engine is the low-level backtest/live execution mechanism: the Trader
-// type, which drives an account.Ledger and drains its event queue while
+// type, which drives an account and drains its event queue while
 // tracking open lots. It is pure mechanism with no notion of a "run" — the
 // higher-level backtest package orchestrates runs on top of it
 // (backtest -> engine; engine never imports backtest).
@@ -12,15 +12,23 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers"
 	"github.com/rustyeddy/trader/log"
 )
 
-// Trader couples a candle source with the ledger/account it drives. It owns
-// the ledger event loop; backtest and live orchestration call its exported
+// Trader couples a candle source with the account it drives. It owns the
+// account's event loop; backtest and live orchestration call its exported
 // primitives to run a session.
 type Trader struct {
 	DataManager CandleSource
-	*account.Ledger
+	*account.Account
+
+	// Broker executes real fills — unused/nil for now (see
+	// docs/Manual/architecture-broker-account-order.org, phase 4 chunk 4,
+	// which wires this in). Account does not hold a Broker field itself:
+	// ownership points Broker -> Account, not the reverse, so Trader (the
+	// session composition root) is where this belongs.
+	Broker brokers.Broker
 }
 
 // StartBrokerEventHandler launches the goroutine that drains the broker event
@@ -102,7 +110,7 @@ func (t *Trader) WaitForBrokerIdle(errCh <-chan error, timeout time.Duration) er
 
 		queueLen := 0
 		if t != nil {
-			queueLen = t.Ledger.EventQueueLen()
+			queueLen = t.Account.EventQueueLen()
 		}
 
 		pendingState := false
