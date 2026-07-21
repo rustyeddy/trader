@@ -62,15 +62,21 @@ func NewAccount(name string, deposit types.Money) *Account {
 //
 // The returned types.Rate is scaled by types.RateScale.
 func (acct *Account) quoteToAccountRate(inst string, price types.Price) (types.Rate, error) {
+	return quoteToAccountRateFor(acct.Currency, inst, price)
+}
+
+// quoteToAccountRateFor is quoteToAccountRate's currency-parameterized core,
+// usable without a full Account (see account_sizing.go's SizingInputs).
+func quoteToAccountRateFor(currency string, inst string, price types.Price) (types.Rate, error) {
 	meta := market.GetInstrument(inst)
 	if meta == nil {
 		return 0, fmt.Errorf("unknown instrument: %s", inst)
 	}
-	if meta.QuoteCurrency == acct.Currency {
+	if meta.QuoteCurrency == currency {
 		return types.Rate(types.RateScale), nil
 	}
 
-	if meta.BaseCurrency == acct.Currency {
+	if meta.BaseCurrency == currency {
 		r, err := types.MulDivCeil64(int64(types.MoneyScale), int64(types.PriceScale), int64(price))
 		if err != nil {
 			return 0, err
@@ -82,12 +88,12 @@ func (acct *Account) quoteToAccountRate(inst string, price types.Price) (types.R
 	// Use a static approximate USD rate per currency. This introduces a
 	// bounded error (~±30% over long backtests) on absolute dollar P/L but
 	// does not affect win/loss decisions or relative return percentages.
-	if acct.Currency == "USD" {
+	if currency == "USD" {
 		if r, ok := market.ApproximateUSDPerUnit(meta.QuoteCurrency); ok {
 			return r, nil
 		}
 	}
-	return 0, fmt.Errorf("unsupported quote-to-account conversion: %s -> %s", meta.QuoteCurrency, acct.Currency)
+	return 0, fmt.Errorf("unsupported quote-to-account conversion: %s -> %s", meta.QuoteCurrency, currency)
 }
 
 // AddLot registers a newly opened lot with the account and immediately

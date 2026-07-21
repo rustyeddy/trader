@@ -7,16 +7,38 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
+// SizingInputs carries the scalars position-sizing math actually needs.
+// It lets sizing run against any equity/margin source (a backtest Account's
+// live fields, or a live account snapshot) without requiring a full ledger.
+type SizingInputs struct {
+	Equity       types.Money
+	MarginUsed   types.Money
+	FreeMargin   types.Money
+	RiskFraction types.Rate
+	Currency     string
+}
+
+// sizingInputs snapshots the five scalars SizePosition needs from acct.
+func (acct *Account) sizingInputs() SizingInputs {
+	return SizingInputs{
+		Equity:       acct.Equity,
+		MarginUsed:   acct.MarginUsed,
+		FreeMargin:   acct.FreeMargin,
+		RiskFraction: acct.RiskFraction,
+		Currency:     acct.Currency,
+	}
+}
+
 // riskBudget returns the max allowed loss in account-money micro-units.
-func (acct *Account) riskBudget() (types.Money, error) {
-	if acct.Equity <= 0 {
+func (in SizingInputs) riskBudget() (types.Money, error) {
+	if in.Equity <= 0 {
 		return 0, fmt.Errorf("account equity must be > 0")
 	}
-	if acct.RiskFraction <= 0 {
+	if in.RiskFraction <= 0 {
 		return 0, fmt.Errorf("account risk fraction must be > 0")
 	}
 
-	v, err := types.MulDivFloor64(int64(acct.Equity), int64(acct.RiskFraction), int64(types.RateScale))
+	v, err := types.MulDivFloor64(int64(in.Equity), int64(in.RiskFraction), int64(types.RateScale))
 	if err != nil {
 		return 0, err
 	}
@@ -28,7 +50,7 @@ func (acct *Account) riskBudget() (types.Money, error) {
 
 // lossPerUnit returns stop-loss exposure for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate loss and accidentally oversize.
-func (acct *Account) lossPerUnit(req *OpenRequest) (types.Money, error) {
+func (in SizingInputs) lossPerUnit(req *OpenRequest) (types.Money, error) {
 	priceDist, err := types.AbsInt64Checked(int64(req.Price) - int64(req.TradeCommon.Stop))
 	if err != nil {
 		return 0, err
@@ -37,7 +59,7 @@ func (acct *Account) lossPerUnit(req *OpenRequest) (types.Money, error) {
 		return 0, fmt.Errorf("entry and stop must differ")
 	}
 
-	quoteToAccountRate, err := acct.quoteToAccountRate(req.TradeCommon.Instrument, req.Price)
+	quoteToAccountRate, err := quoteToAccountRateFor(in.Currency, req.TradeCommon.Instrument, req.Price)
 	if err != nil {
 		return 0, err
 	}
@@ -59,7 +81,7 @@ func (acct *Account) lossPerUnit(req *OpenRequest) (types.Money, error) {
 
 // marginRequiredPerUnit returns margin needed for 1 unit in account-money micro-units.
 // It uses ceil so we never underestimate required margin.
-func (acct *Account) marginRequiredPerUnit(inst *market.Instrument, price types.Price) (types.Money, error) {
+func (in SizingInputs) marginRequiredPerUnit(inst *market.Instrument, price types.Price) (types.Money, error) {
 	if inst == nil {
 		return 0, fmt.Errorf("instrument metadata is nil")
 	}
@@ -70,7 +92,7 @@ func (acct *Account) marginRequiredPerUnit(inst *market.Instrument, price types.
 		return 0, fmt.Errorf("invalid price %d", price)
 	}
 
-	quoteToAccountRate, err := acct.quoteToAccountRate(inst.Name, price)
+	quoteToAccountRate, err := quoteToAccountRateFor(in.Currency, inst.Name, price)
 	if err != nil {
 		return 0, err
 	}
@@ -99,12 +121,12 @@ func (acct *Account) marginRequiredPerUnit(inst *market.Instrument, price types.
 // availableMargin returns the usable margin for new positions.
 // It prefers the cached FreeMargin but falls back to computing Equity − MarginUsed
 // in case the field is stale.
-func (acct *Account) availableMargin() types.Money {
-	if acct.FreeMargin > 0 {
-		return acct.FreeMargin
+func (in SizingInputs) availableMargin() types.Money {
+	if in.FreeMargin > 0 {
+		return in.FreeMargin
 	}
 
-	fm := acct.Equity - acct.MarginUsed
+	fm := in.Equity - in.MarginUsed
 	if fm > 0 {
 		return fm
 	}
@@ -113,13 +135,13 @@ func (acct *Account) availableMargin() types.Money {
 
 // unitsByRisk returns how many units can be opened without exceeding the
 // account's per-trade risk budget (RiskFraction × Equity).
-func (acct *Account) unitsByRisk(req *OpenRequest) (types.Units, error) {
-	riskBudget, err := acct.riskBudget()
+func (in SizingInputs) unitsByRisk(req *OpenRequest) (types.Units, error) {
+	riskBudget, err := in.riskBudget()
 	if err != nil {
 		return 0, err
 	}
 
-	lossPerUnit, err := acct.lossPerUnit(req)
+	lossPerUnit, err := in.lossPerUnit(req)
 	if err != nil {
 		return 0, err
 	}
@@ -133,8 +155,8 @@ func (acct *Account) unitsByRisk(req *OpenRequest) (types.Units, error) {
 
 // unitsByMargin returns how many units can be opened given the account's
 // current free margin.
-func (acct *Account) unitsByMargin(req *OpenRequest) (types.Units, error) {
-	freeMargin := acct.availableMargin()
+func (in SizingInputs) unitsByMargin(req *OpenRequest) (types.Units, error) {
+	freeMargin := in.availableMargin()
 	if freeMargin <= 0 {
 		return 0, fmt.Errorf("free margin must be > 0")
 	}
@@ -143,7 +165,7 @@ func (acct *Account) unitsByMargin(req *OpenRequest) (types.Units, error) {
 	if inst == nil {
 		return 0, fmt.Errorf("unknown instrument: %s", req.TradeCommon.Instrument)
 	}
-	marginPerUnit, err := acct.marginRequiredPerUnit(inst, req.Price)
+	marginPerUnit, err := in.marginRequiredPerUnit(inst, req.Price)
 	if err != nil {
 		return 0, err
 	}
@@ -161,10 +183,7 @@ func (acct *Account) unitsByMargin(req *OpenRequest) (types.Units, error) {
 //
 // Returns an error if the computed size is below the instrument's minimum
 // trade size or if any input is invalid.
-func (acct *Account) SizePosition(req *OpenRequest) error {
-	if acct == nil {
-		return fmt.Errorf("account is nil")
-	}
+func SizePosition(in SizingInputs, req *OpenRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
 	}
@@ -191,12 +210,12 @@ func (acct *Account) SizePosition(req *OpenRequest) error {
 		return fmt.Errorf("invalid side %v", req.TradeCommon.Side)
 	}
 
-	unitsRisk, err := acct.unitsByRisk(req)
+	unitsRisk, err := in.unitsByRisk(req)
 	if err != nil {
 		return err
 	}
 
-	unitsMargin, err := acct.unitsByMargin(req)
+	unitsMargin, err := in.unitsByMargin(req)
 	if err != nil {
 		return err
 	}
@@ -221,4 +240,14 @@ func (acct *Account) SizePosition(req *OpenRequest) error {
 	}
 	req.Units = units
 	return nil
+}
+
+// SizePosition computes and sets req.Units using the account's own
+// Equity/MarginUsed/FreeMargin/RiskFraction/Currency. See the package-level
+// SizePosition for the underlying math.
+func (acct *Account) SizePosition(req *OpenRequest) error {
+	if acct == nil {
+		return fmt.Errorf("account is nil")
+	}
+	return SizePosition(acct.sizingInputs(), req)
 }

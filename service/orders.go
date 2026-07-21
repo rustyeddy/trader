@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -79,18 +80,23 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		entryPrice = types.PriceFromFloat(px.Bid)
 	}
 
-	var equity float64
+	var summary *oanda.AccountSummary
 	if snap := a.getSnapshot(); snap != nil {
-		equity = snap.NAV()
+		summary = snap.Summary()
 	} else {
-		acct, err := a.broker().GetAccountSummary(ctx, a.ID)
+		s, err := a.broker().GetAccountSummary(ctx, a.ID)
 		if err != nil {
 			return nil, fmt.Errorf("get account: %w", err)
 		}
-		equity = acct.NAV
+		summary = s
 	}
+	equity := summary.NAV
 	if equity <= 0 {
 		return nil, fmt.Errorf("account equity is zero or unavailable")
+	}
+	currency := summary.Currency
+	if currency == "" {
+		currency = "USD"
 	}
 
 	// Stop price as fixed-point.
@@ -131,21 +137,39 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		return nil, fmt.Errorf("stop distance is zero — check stop price")
 	}
 
-	// Convert stop distance (in Price units) to USD per unit.
-	// Dividing by PriceScale gives the distance in quote-currency decimal form;
-	// multiplying by quoteToUSDRate converts to account currency (USD).
-	// This is a terminal float operation at the sizing boundary.
-	quoteRate := quoteToUSDRate(req.Instrument)
-	stopDistUSD := float64(stopDist) / float64(types.PriceScale) * quoteRate.Float64()
+	sideEnum := types.Long
+	if side == "short" {
+		sideEnum = types.Short
+	}
+	normInst := market.NormalizeInstrument(req.Instrument)
 
-	// Sizing.
-	riskAmount := equity * req.RiskPct.Float64()
-	units := req.Units
-	if units == 0 {
-		units = int64(math.Round(riskAmount / stopDistUSD))
-		if units < 1 {
-			units = 1
+	var units int64
+	var riskAmount float64
+	if req.Units != 0 {
+		units = req.Units
+	} else {
+		inputs := account.SizingInputs{
+			Equity:       types.MoneyFromFloat(equity),
+			MarginUsed:   types.MoneyFromFloat(summary.MarginUsed),
+			FreeMargin:   types.MoneyFromFloat(summary.MarginAvail),
+			RiskFraction: req.RiskPct,
+			Currency:     currency,
 		}
+		openReq := &account.OpenRequest{
+			Request: account.Request{
+				TradeCommon: &account.TradeCommon{
+					Instrument: normInst,
+					Side:       sideEnum,
+					Stop:       stopPrice,
+				},
+				Price: entryPrice,
+			},
+		}
+		if err := account.SizePosition(inputs, openReq); err != nil {
+			return nil, fmt.Errorf("size position: %w", err)
+		}
+		units = int64(openReq.Units)
+		riskAmount = float64(inputs.RiskFraction.Float64()) * equity
 	}
 
 	// Apply caps before signing the units (caps work on absolute values).
@@ -191,23 +215,6 @@ func (a *Account) PlaceMarketOrder(ctx context.Context, req PlaceMarketOrderRequ
 		"instrument", fill.Instrument, "units", fill.Units, "price", fill.Price,
 	)
 	return result, nil
-}
-
-// quoteToUSDRate returns an approximate Rate to convert a price distance in the
-// instrument's quote currency to USD. 1.0 for USD-quoted pairs; ~0.0067 for JPY.
-// Uses the same static table as the backtest P/L conversion. Accuracy ±30%.
-func quoteToUSDRate(instrument string) types.Rate {
-	inst := market.GetInstrument(market.NormalizeInstrument(instrument))
-	if inst == nil {
-		return types.RateFromFloat(1.0) // unknown — no adjustment
-	}
-	if inst.QuoteCurrency == "USD" {
-		return types.RateFromFloat(1.0)
-	}
-	if r, ok := market.ApproximateUSDPerUnit(inst.QuoteCurrency); ok {
-		return r
-	}
-	return types.RateFromFloat(1.0)
 }
 
 // CloseTrade closes a trade by ID. Units=0 means full close; >0 is partial.

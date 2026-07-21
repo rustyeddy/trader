@@ -36,7 +36,12 @@
   (=AccountSnapshot='s role) resolved as moot, no code change — its
   premise assumed live would adopt chunk 4's fill-bridge, which chunk 5
   ruled out; see Phase 4's chunk 6 entry below for the trace. Chunk 7
-  (risk/sizing math onto =Account=) is next.
+  (risk/sizing math onto =Account=) done, no commit hash yet (pending) —
+  live's =PlaceMarketOrder= now sizes via the same =account.SizePosition=
+  math backtest already used, instead of a separate hand-rolled float
+  implementation; see Phase 4's chunk 7 entry below for the trace and the
+  two intentional behavior changes (live now gets a margin check, and
+  under-minimum sizes are rejected instead of floored to 1 unit).
 
 This doc describes the target shape so it survives the refactor and can
 fold directly into the manual's Architecture section once implemented —
@@ -480,8 +485,59 @@ correct:
    never a separate trade-ledger reconciliation for =AccountSnapshot= to
    narrow away from; the scenario this chunk was written to respond to
    never materializes, by chunk 5's own design. Nothing to implement.
-7. Move risk/sizing math onto =Account=, shared by backtest and live.
+7. *Done, 2026-07-21.* "Move risk/sizing math onto =Account=, shared by
+   backtest and live." Traced the code first: backtest already sized
+   through =account.Account.SizePosition= (=account/account_sizing.go=,
+   called from =planner.Plan= → =finalize=). Live had *two* sizing-adjacent
+   code paths, but only one mattered — the candle-strategy live path
+   (=service/candle_strategy_adapter.go=) goes through the same
+   =planner.Plan=, but =livePlanContext.Account()= returns =nil= by design,
+   so =SizePosition= is skipped and the resulting zero =Units= is silently
+   discarded (=LiveOpenRequest= has no =Units= field at all) — dead weight,
+   not a real second implementation. The value that actually reached OANDA
+   came from =service/orders.go='s =PlaceMarketOrder=: a separate,
+   hand-rolled =float64= reimplementation of the same risk-budget math,
+   plus =MaxUnits=/=MaxPositionUSD= caps =SizePosition= didn't have, and no
+   margin check (relied on OANDA to reject).
+
+   Rather than build a throwaway =Account= for live just to call the
+   method, extracted the math to operate on the five scalars it actually
+   reads (=Equity=, =MarginUsed=, =FreeMargin=, =RiskFraction=,
+   =Currency=) instead of a full ledger: new =account.SizingInputs= struct;
+   =riskBudget=/=lossPerUnit=/=marginRequiredPerUnit=/=availableMargin=/
+   =unitsByRisk=/=unitsByMargin= now take =SizingInputs= (was =*Account=);
+   =SizePosition= is now an exported package-level function
+   (=account.SizePosition(in SizingInputs, req *OpenRequest) error=), and
+   =Account.SizePosition= is a one-line wrapper via a new
+   =(acct *Account) sizingInputs()= helper — every backtest call site
+   (=planner/planner.go=) unchanged. Also extracted
+   =quoteToAccountRateFor(currency, inst, price)= from
+   =(acct *Account) quoteToAccountRate= for the same reason.
+   =service/orders.go='s =PlaceMarketOrder= now builds a =SizingInputs=
+   straight from the OANDA account summary (=NAV=→=Equity=,
+   =MarginUsed=→=MarginUsed=, =MarginAvail=→=FreeMargin=) and calls
+   =account.SizePosition=; =MaxUnits=/=MaxPositionUSD= stay as
+   =service/orders.go=-local post-caps (order-level constraints, not core
+   risk/margin sizing; backtest has no equivalent config today). The dead
+   =livePlanContext.Account() == nil= branch in
+   =candle_strategy_adapter.go= was deliberately left alone — wiring it up
+   would create a second sizing call for the same order.
+
+   Two intentional behavior changes, per "correctness over convenience":
+   live orders are now also capped by a margin check (previously
+   risk-budget only, relying on OANDA to reject on insufficient margin),
+   and a computed size below =inst.MinimumTradeSize= now rejects the order
+   instead of the old silent =units = 1= floor. Covered by new tests
+   =TestPlaceMarketOrder_MarginCap_BindsBelowRiskSizing= and
+   =TestPlaceMarketOrder_MarginCap_InsufficientMargin_Errors= in
+   =service/orders_test.go=. =service/orders_test.go='s old
+   =TestQuoteToUSDRate_*= tests (covering the deleted
+   =service.quoteToUSDRate=) were ported to
+   =account/account_sizing_test.go= as =TestQuoteToAccountRateFor_*=, since
+   that's where the logic now lives. Verified: =go build ./...=,
+   =go vet ./...=, and =go test ./...= (full repo) all clean — backtest
+   suite unaffected, confirming the math itself wasn't changed, only its
+   callers' shape.
 
 Chunk boundaries and order still open for discussion — this is a first
-pass, not a committed plan. Chunk 7 specifically needs a proper plan-mode
-session before implementation.
+pass, not a committed plan.

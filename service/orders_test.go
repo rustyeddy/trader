@@ -62,6 +62,88 @@ func newTestService(t *testing.T, nav, bid, ask float64) (*Service, *httptest.Se
 	return svc, srv
 }
 
+// marginConstrainedTestService returns a Service backed by a fake OANDA
+// server whose account has ample NAV but scarce marginAvailable — used to
+// verify PlaceMarketOrder now applies a margin check (chunk 7: sizing
+// routes through account.SizePosition, which caps by min(risk, margin)
+// where the old float implementation only capped by risk).
+func marginConstrainedTestService(t *testing.T, nav, marginAvailable, bid, ask float64) (*Service, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/summary"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"account": map[string]any{
+					"id":              "ACC1",
+					"balance":         fmt.Sprintf("%.5f", nav),
+					"NAV":             fmt.Sprintf("%.5f", nav),
+					"marginUsed":      "0.00",
+					"marginAvailable": fmt.Sprintf("%.5f", marginAvailable),
+				},
+			})
+		case strings.HasSuffix(r.URL.Path, "/pricing"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"prices": []any{
+					map[string]any{
+						"instrument": "EUR_USD",
+						"bids":       []any{map[string]any{"price": fmt.Sprintf("%.5f", bid)}},
+						"asks":       []any{map[string]any{"price": fmt.Sprintf("%.5f", ask)}},
+						"status":     "tradeable",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	svc := &Service{
+		AccountID: "ACC1",
+		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()},
+	}
+	return svc, srv
+}
+
+// ── margin cap (new in chunk 7 — live previously had no margin check) ───────
+
+func TestPlaceMarketOrder_MarginCap_BindsBelowRiskSizing(t *testing.T) {
+	// Risk-based sizing alone: 100 000 NAV × 1% risk / (5 pip stop × 0.0001)
+	// = 2 000 000 units — far more than $50 of margin can support on a
+	// ~2% margin-rate instrument (EURUSD). SizePosition must return the
+	// margin-capped amount, not the risk-only amount.
+	svc, srv := marginConstrainedTestService(t, 100_000, 50, 1.0850, 1.0852)
+	defer srv.Close()
+
+	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+		Instrument: "EUR_USD",
+		Side:       "long",
+		RiskPct:    types.RateFromFloat(0.01),
+		StopPips:   5,
+		Confirm:    false,
+	})
+	require.NoError(t, err)
+	units := result.Proposal.Units
+	assert.Greater(t, units, int64(0))
+	assert.Less(t, units, int64(10_000), "margin of $50 should cap units well below the risk-only figure of 2,000,000, got %d", units)
+}
+
+func TestPlaceMarketOrder_MarginCap_InsufficientMargin_Errors(t *testing.T) {
+	// marginAvailable is far too small for even the instrument's minimum
+	// trade size — SizePosition should reject the order rather than
+	// silently sizing to 1 unit (the old float behavior).
+	svc, srv := marginConstrainedTestService(t, 100_000, 0.0001, 1.0850, 1.0852)
+	defer srv.Close()
+
+	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+		Instrument: "EUR_USD",
+		Side:       "long",
+		RiskPct:    types.RateFromFloat(0.01),
+		StopPips:   20,
+		Confirm:    false,
+	})
+	require.Error(t, err)
+}
+
 // ── MaxUnits cap ────────────────────────────────────────────────────────────
 
 func TestPlaceMarketOrder_MaxUnits_Caps(t *testing.T) {
@@ -220,33 +302,6 @@ func TestPlaceMarketOrder_NoStop(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "StopPrice or StopPips")
-}
-
-// ── quoteToUSDRate ──────────────────────────────────────────────────────────
-
-func TestQuoteToUSDRate_USDQuoted(t *testing.T) {
-	t.Parallel()
-	// EUR_USD, GBP_USD — quote is USD, rate must be 1.0
-	assert.InDelta(t, 1.0, quoteToUSDRate("EUR_USD").Float64(), 1e-9)
-	assert.InDelta(t, 1.0, quoteToUSDRate("GBP_USD").Float64(), 1e-9)
-}
-
-func TestQuoteToUSDRate_JPYQuoted(t *testing.T) {
-	t.Parallel()
-	// USD_JPY, AUD_JPY, EUR_JPY — quote is JPY ≈ 0.0067
-	for _, inst := range []string{"USD_JPY", "AUD_JPY", "EUR_JPY"} {
-		r := quoteToUSDRate(inst).Float64()
-		assert.Greater(t, r, 0.0, "%s: rate must be > 0", inst)
-		assert.Less(t, r, 0.1, "%s: JPY rate must be < 0.1", inst)
-	}
-}
-
-func TestQuoteToUSDRate_GBPQuoted(t *testing.T) {
-	t.Parallel()
-	// EUR_GBP — quote is GBP ≈ 1.26
-	r := quoteToUSDRate("EUR_GBP").Float64()
-	assert.Greater(t, r, 1.0, "GBP rate must be > 1")
-	assert.Less(t, r, 2.0, "GBP rate must be < 2")
 }
 
 // TestPlaceMarketOrder_JPYSizing verifies that a USD_JPY order with a 600-pip
