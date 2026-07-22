@@ -11,7 +11,7 @@ LDFLAGS := -ldflags="-X github.com/rustyeddy/trader.Version=$(VERSION)"
 
 TULIP_DIR ?= ../tulip
 
-.PHONY: all build ui tulip-sync build-tulip build-full vet tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
+.PHONY: all build ui tulip-sync build-tulip build-full vet lint tidy test cover cover-html test-blackbox run live-portfolio smoke smoke-live smoke-live-dry sweep backtest-scalper install clean backup-candles
 
 all: vet build
 
@@ -39,6 +39,10 @@ build-full: build-tulip build
 
 vet:
 	go vet ./...
+
+lint:
+	@command -v staticcheck >/dev/null 2>&1 || { echo "staticcheck not found — install with: go install honnef.co/go/tools/cmd/staticcheck@latest"; exit 1; }
+	staticcheck ./...
 
 tidy:
 	go mod tidy
