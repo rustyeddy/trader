@@ -21,7 +21,7 @@ import (
 //
 // On each Tick it checks whether a new completed bar has arrived since the last
 // call. If yes, it feeds the bar to the underlying strategy, applies the regime
-// filter, and converts the StrategyPlan to a LivePlan. If no new bar has closed
+// filter, and converts the StrategyPlan to an account.LivePlan. If no new bar has closed
 // it returns nil (hold).
 //
 // On first use the adapter fetches the last WarmupBars completed candles from
@@ -108,7 +108,7 @@ func (a *CandleStrategyAdapter) Name() string {
 
 // Tick implements trader.LiveStrategy. It is called by the live runner on every
 // price poll tick regardless of bar frequency.
-func (a *CandleStrategyAdapter) Tick(ctx context.Context, price LivePrice, openTrades []LiveTrade) *LivePlan {
+func (a *CandleStrategyAdapter) Tick(ctx context.Context, price account.LivePrice, openTrades []account.LiveTrade) *account.LivePlan {
 	// Sync our lot tracker with the current live positions.
 	a.lots.sync(openTrades)
 
@@ -328,15 +328,15 @@ func (a *CandleStrategyAdapter) makeBacktest() *backtest.Backtest {
 	}
 }
 
-// convertPlan converts a finalized StrategyPlan (produced by PlanSignal) to a LivePlan.
+// convertPlan converts a finalized StrategyPlan (produced by PlanSignal) to an account.LivePlan.
 // Stop and regime filtering have already been applied; this method only translates
 // types and computes the stop-pips distance for the OANDA wire format.
-func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LivePrice) *LivePlan {
+func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ account.LivePrice) *account.LivePlan {
 	if plan == nil {
 		return nil
 	}
 
-	lp := &LivePlan{Reason: plan.Reason}
+	lp := &account.LivePlan{Reason: plan.Reason}
 
 	// Collect close IDs — map from internal lot ID (which we set to OANDA trade ID).
 	for _, cl := range plan.Closes {
@@ -380,7 +380,7 @@ func (a *CandleStrategyAdapter) convertPlan(plan *strategy.StrategyPlan, _ LiveP
 					"stop_pips", stopPips.Float64(),
 					"reason", plan.Reason,
 				)
-				lp.Open = &LiveOpenRequest{
+				lp.Open = &account.LiveOpenRequest{
 					Side:     side,
 					StopPips: stopPips,
 					Reason:   plan.Reason,
@@ -526,7 +526,7 @@ type liveLotsTracker struct {
 	meta map[string]*lotMeta
 }
 
-func (lt *liveLotsTracker) sync(trades []LiveTrade) {
+func (lt *liveLotsTracker) sync(trades []account.LiveTrade) {
 	seen := map[string]struct{}{}
 	for _, t := range trades {
 		seen[t.ID] = struct{}{}

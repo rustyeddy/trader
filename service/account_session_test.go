@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func TestAccount_CachesSession(t *testing.T) {
 func TestAccount_CacheIsConcurrencySafe(t *testing.T) {
 	svc := &Service{}
 	const n = 50
-	got := make([]*Account, n)
+	got := make([]*account.Account, n)
 	var wg sync.WaitGroup
 	for i := range got {
 		wg.Add(1)

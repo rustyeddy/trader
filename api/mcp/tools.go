@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
@@ -322,7 +323,7 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 
 // readAccount resolves the account for a read tool: the named account, or the
 // first/default account when id is empty.
-func (s *Server) readAccount(ctx context.Context, id string) (*service.Account, error) {
+func (s *Server) readAccount(ctx context.Context, id string) (*account.Account, error) {
 	if id == "" {
 		return s.svc.FirstAccount(ctx)
 	}
@@ -331,7 +332,7 @@ func (s *Server) readAccount(ctx context.Context, id string) (*service.Account, 
 
 // writeAccount resolves the account for a mutating tool. Mutations must name
 // the account explicitly — an empty account_id is an error, never a default.
-func (s *Server) writeAccount(ctx context.Context, id string) (*service.Account, *rpcError) {
+func (s *Server) writeAccount(ctx context.Context, id string) (*account.Account, *rpcError) {
 	if id == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "account_id is required for write operations"}
 	}
@@ -382,7 +383,7 @@ func (s *Server) toolGetPrices(ctx context.Context, raw json.RawMessage) (any, *
 	if err != nil {
 		return errContent(fmt.Sprintf("get_prices: %v", err)), nil
 	}
-	prices, err := acc.GetPrices(ctx, service.GetPricesRequest{
+	prices, err := acc.GetPrices(ctx, account.GetPricesRequest{
 		Instruments: args.Instruments,
 	})
 	if err != nil {
@@ -521,7 +522,7 @@ func (s *Server) toolPlaceOrder(ctx context.Context, raw json.RawMessage) (any, 
 	if riskPct == 0 {
 		riskPct = 1.0
 	}
-	result, err := acc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
 		Instrument: args.Instrument,
 		Side:       strings.ToLower(args.Side),
 		RiskPct:    types.RateFromFloat(riskPct / 100.0),
@@ -751,7 +752,7 @@ func (s *Server) toolListBots(ctx context.Context, raw json.RawMessage) (any, *r
 		if err != nil {
 			return errContent(fmt.Sprintf("list_bots: %v", err)), nil
 		}
-		bots = acc.ListBots()
+		bots = s.svc.ListBotsForAccount(acc.ID)
 	} else {
 		bots = s.svc.ListBots()
 	}
@@ -798,7 +799,7 @@ func (s *Server) toolStartBot(ctx context.Context, raw json.RawMessage) (any, *r
 	if riskPct == 0 {
 		riskPct = 1.0
 	}
-	status, err := acc.StartBot(ctx, service.BotConfig{
+	status, err := s.svc.StartBotOnAccount(ctx, acc, service.BotConfig{
 		Instrument:   args.Instrument,
 		TickInterval: args.TickInterval,
 		RiskPct:      riskPct,

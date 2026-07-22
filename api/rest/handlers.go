@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
 )
@@ -64,7 +65,7 @@ func (s *Server) handlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	result, err := acc.PlaceMarketOrder(r.Context(), service.PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(r.Context(), account.PlaceMarketOrderRequest{
 		Instrument: req.Instrument,
 		Side:       req.Side,
 		RiskPct:    types.RateFromFloat(req.RiskPct / 100.0),
@@ -184,7 +185,7 @@ func (s *Server) handleGetPrices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	prices, err := acc.GetPrices(r.Context(), service.GetPricesRequest{
+	prices, err := acc.GetPrices(r.Context(), account.GetPricesRequest{
 		Instruments: instruments,
 	})
 	if err != nil {

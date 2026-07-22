@@ -2,8 +2,11 @@ package account
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
+	"sync"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
@@ -14,6 +17,13 @@ import (
 // Invariants that must hold after every operation:
 //   - Equity = Balance + UnrealizedPL
 //   - FreeMargin = Equity − MarginUsed
+//
+// Account also serves as the live-session handle: every OANDA broker and
+// account operation (summary, transactions, orders, trades, live runner,
+// journal) hangs off an Account, populated via NewSession instead of
+// NewAccount. The two constructors populate disjoint subsets of fields —
+// live sessions carry no ledger state, backtest ledgers carry no
+// OANDA/Log/snapshot state.
 type Account struct {
 	ID           string
 	Name         string
@@ -32,6 +42,15 @@ type Account struct {
 	// account/events.go (SubmitOpen, SubmitClose, Events, ...). Lazily
 	// initialized on first use, same as Lots.
 	evtQ chan *Event
+
+	// OANDA, Log, and the snapshot cache below are populated for live
+	// sessions (see NewSession), not backtest ledgers.
+	OANDA *oanda.Client
+	Log   *slog.Logger
+
+	// snapMu guards snapshot; only one snapshot per account is ever created.
+	snapMu   sync.RWMutex
+	snapshot *AccountSnapshot
 }
 
 // NewAccount creates an Account with the given name and opening deposit.
@@ -47,6 +66,18 @@ func NewAccount(name string, deposit types.Money) *Account {
 		RiskFraction: types.RateFromFloat(0.005),
 	}
 	return acct
+}
+
+// NewSession creates a live-session Account bound to a real OANDA account
+// ID. Unlike NewAccount, it carries no ledger state — live trading has no
+// local ledger by design (OANDA is authoritative; see
+// docs/Manual/architecture-broker-account-order.org).
+func NewSession(id string, oandaClient *oanda.Client, log *slog.Logger) *Account {
+	return &Account{
+		ID:    id,
+		OANDA: oandaClient,
+		Log:   log,
+	}
 }
 
 // quoteToAccountRate returns the current conversion rate from an instrument's

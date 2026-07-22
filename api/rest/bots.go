@@ -20,7 +20,7 @@ func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	status, err := acc.StartBot(r.Context(), cfg)
+	status, err := s.svc.StartBotOnAccount(r.Context(), acc, cfg)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("start bot: %v", err))
 		return
@@ -35,7 +35,7 @@ func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, acc.ListBots())
+	writeJSON(w, http.StatusOK, s.svc.ListBotsForAccount(acc.ID))
 }
 
 // ── GET /api/v1/bots/{id} ─────────────────────────────────────────────────────

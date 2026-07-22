@@ -1,4 +1,4 @@
-package service
+package account
 
 import (
 	"encoding/json"
@@ -51,23 +51,20 @@ func oandaTestServer(t *testing.T, nav, bid, ask float64) *httptest.Server {
 	}))
 }
 
-// newTestService returns a Service backed by a fake OANDA server.
-func newTestService(t *testing.T, nav, bid, ask float64) (*Service, *httptest.Server) {
+// newTestAccount returns an Account session backed by a fake OANDA server.
+func newTestAccount(t *testing.T, nav, bid, ask float64) (*Account, *httptest.Server) {
 	t.Helper()
 	srv := oandaTestServer(t, nav, bid, ask)
-	svc := &Service{
-		AccountID: "ACC1",
-		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()},
-	}
-	return svc, srv
+	acc := NewSession("ACC1", &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}, nil)
+	return acc, srv
 }
 
-// marginConstrainedTestService returns a Service backed by a fake OANDA
-// server whose account has ample NAV but scarce marginAvailable — used to
-// verify PlaceMarketOrder now applies a margin check (chunk 7: sizing
+// marginConstrainedTestAccount returns an Account session backed by a fake
+// OANDA server whose account has ample NAV but scarce marginAvailable —
+// used to verify PlaceMarketOrder applies a margin check (chunk 7: sizing
 // routes through account.SizePosition, which caps by min(risk, margin)
 // where the old float implementation only capped by risk).
-func marginConstrainedTestService(t *testing.T, nav, marginAvailable, bid, ask float64) (*Service, *httptest.Server) {
+func marginConstrainedTestAccount(t *testing.T, nav, marginAvailable, bid, ask float64) (*Account, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -97,24 +94,21 @@ func marginConstrainedTestService(t *testing.T, nav, marginAvailable, bid, ask f
 			http.NotFound(w, r)
 		}
 	}))
-	svc := &Service{
-		AccountID: "ACC1",
-		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()},
-	}
-	return svc, srv
+	acc := NewSession("ACC1", &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}, nil)
+	return acc, srv
 }
 
-// ── margin cap (new in chunk 7 — live previously had no margin check) ───────
+// ── margin cap (chunk 7 — live previously had no margin check) ──────────────
 
 func TestPlaceMarketOrder_MarginCap_BindsBelowRiskSizing(t *testing.T) {
 	// Risk-based sizing alone: 100 000 NAV × 1% risk / (5 pip stop × 0.0001)
 	// = 2 000 000 units — far more than $50 of margin can support on a
 	// ~2% margin-rate instrument (EURUSD). SizePosition must return the
 	// margin-capped amount, not the risk-only amount.
-	svc, srv := marginConstrainedTestService(t, 100_000, 50, 1.0850, 1.0852)
+	acc, srv := marginConstrainedTestAccount(t, 100_000, 50, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.01),
@@ -131,10 +125,10 @@ func TestPlaceMarketOrder_MarginCap_InsufficientMargin_Errors(t *testing.T) {
 	// marginAvailable is far too small for even the instrument's minimum
 	// trade size — SizePosition should reject the order rather than
 	// silently sizing to 1 unit (the old float behavior).
-	svc, srv := marginConstrainedTestService(t, 100_000, 0.0001, 1.0850, 1.0852)
+	acc, srv := marginConstrainedTestAccount(t, 100_000, 0.0001, 1.0850, 1.0852)
 	defer srv.Close()
 
-	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	_, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.01),
@@ -149,10 +143,10 @@ func TestPlaceMarketOrder_MarginCap_InsufficientMargin_Errors(t *testing.T) {
 func TestPlaceMarketOrder_MaxUnits_Caps(t *testing.T) {
 	// Risk-based sizing: 100 000 NAV × 1% risk / (20 pip stop × 0.0001) = 500 000 units.
 	// MaxUnits=5000 should reduce that to 5 000.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.01),
@@ -165,10 +159,10 @@ func TestPlaceMarketOrder_MaxUnits_Caps(t *testing.T) {
 }
 
 func TestPlaceMarketOrder_MaxUnits_Short_Caps(t *testing.T) {
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "short",
 		RiskPct:    types.RateFromFloat(0.01),
@@ -182,10 +176,10 @@ func TestPlaceMarketOrder_MaxUnits_Short_Caps(t *testing.T) {
 
 func TestPlaceMarketOrder_MaxUnits_NoEffect_WhenBelowCap(t *testing.T) {
 	// With 0.001% risk and a tight 20-pip stop, risk-based units will be tiny.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.00001),
@@ -204,10 +198,10 @@ func TestPlaceMarketOrder_MaxUnits_NoEffect_WhenBelowCap(t *testing.T) {
 func TestPlaceMarketOrder_MaxPositionUSD_Caps(t *testing.T) {
 	// Entry ≈ 1.0852; MaxPositionUSD=5000 → max units = floor(5000/1.0852) = 4607.
 	// Risk-based units at 1% risk with 20-pip stop = 50 000 → should be capped.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "long",
 		RiskPct:        types.RateFromFloat(0.01),
@@ -223,10 +217,10 @@ func TestPlaceMarketOrder_MaxPositionUSD_Caps(t *testing.T) {
 
 func TestPlaceMarketOrder_MaxPositionUSD_Short_Caps(t *testing.T) {
 	// Short: entry = bid = 1.0850. MaxPositionUSD=2000 → floor(2000/1.085) = 1843 units.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "short",
 		RiskPct:        types.RateFromFloat(0.01),
@@ -242,10 +236,10 @@ func TestPlaceMarketOrder_MaxPositionUSD_Short_Caps(t *testing.T) {
 
 func TestPlaceMarketOrder_BothCaps_TighterWins(t *testing.T) {
 	// MaxUnits=10000, MaxPositionUSD=5000 (→~4607). The USD cap is tighter.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument:     "EUR_USD",
 		Side:           "long",
 		RiskPct:        types.RateFromFloat(0.01),
@@ -261,10 +255,10 @@ func TestPlaceMarketOrder_BothCaps_TighterWins(t *testing.T) {
 func TestPlaceMarketOrder_NoCaps_UsesRiskBased(t *testing.T) {
 	// 100k NAV, 1% risk → $1000 risked. 20-pip stop = 0.002 distance.
 	// Units = round(1000 / 0.002) = 500 000. No cap applies.
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.01),
@@ -278,10 +272,10 @@ func TestPlaceMarketOrder_NoCaps_UsesRiskBased(t *testing.T) {
 // ── Validation guards ───────────────────────────────────────────────────────
 
 func TestPlaceMarketOrder_BadSide(t *testing.T) {
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	_, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "sideways",
 		RiskPct:    types.RateFromFloat(0.001),
@@ -292,10 +286,10 @@ func TestPlaceMarketOrder_BadSide(t *testing.T) {
 }
 
 func TestPlaceMarketOrder_NoStop(t *testing.T) {
-	svc, srv := newTestService(t, 100_000, 1.0850, 1.0852)
+	acc, srv := newTestAccount(t, 100_000, 1.0850, 1.0852)
 	defer srv.Close()
 
-	_, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	_, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "EUR_USD",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.001),
@@ -333,14 +327,11 @@ func TestPlaceMarketOrder_JPYSizing(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	svc := &Service{
-		AccountID: "ACC1",
-		OANDA:     &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()},
-	}
+	acc := NewSession("ACC1", &oanda.Client{BaseURL: srv.URL, Token: "tok", HTTP: srv.Client()}, nil)
 
 	// 1% of $2,000 = $20 risk; 600-pip stop on USDJPY at 150
 	// Expected: ~500 units ($20 / (6 JPY × 0.0067 USD/JPY))
-	result, err := svc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
+	result, err := acc.PlaceMarketOrder(t.Context(), PlaceMarketOrderRequest{
 		Instrument: "USD_JPY",
 		Side:       "long",
 		RiskPct:    types.RateFromFloat(0.01),

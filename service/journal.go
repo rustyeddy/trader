@@ -42,36 +42,12 @@ func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
 	}
 }
 
-// RunLiveJournal subscribes to the OANDA transaction stream and writes a
-// TradeRecord per closed trade to the given Journal. Blocks until ctx is
-// cancelled or the stream ends.
-//
-// If backfillFrom > 0, transactions with ID > backfillFrom are polled and
-// replayed into the journal before the stream subscription starts —
-// useful for downtime recovery.
-func (a *Account) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	lj := journal.NewLiveJournal(a.broker(), a.ID, jrnl, a.svc.Log)
-	lj.SetBotIDLookup(a.svc.LookupTradeBotID)
-
-	if backfillFrom > 0 {
-		if err := lj.Backfill(ctx, backfillFrom); err != nil {
-			return lj.LastSeenTxID(), err
-		}
-	}
-
-	runErr := lj.Run(ctx)
-	if runErr != nil && ctx.Err() == nil {
-		return lj.LastSeenTxID(), runErr
-	}
-	return lj.LastSeenTxID(), nil
-}
-
 // RunLiveJournal subscribes the default account's transaction stream to the
-// given journal. See Account.RunLiveJournal.
+// given journal. See account.Account.RunLiveJournal.
 func (s *Service) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
 	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return acc.RunLiveJournal(ctx, jrnl, backfillFrom)
+	return acc.RunLiveJournal(ctx, jrnl, backfillFrom, s.LookupTradeBotID)
 }

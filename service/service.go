@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
 )
@@ -41,7 +42,7 @@ type Service struct {
 	// firstID caches the first account discovered for the token, used by
 	// FirstAccount as the read/UI default when no AccountID is configured.
 	accountsMu sync.RWMutex
-	accounts   map[string]*Account
+	accounts   map[string]*account.Account
 	firstID    string
 
 	botsMu sync.RWMutex
@@ -98,7 +99,7 @@ func New(cfg Config) (*Service, error) {
 		OANDA:       &oanda.Client{BaseURL: baseURL, Token: token},
 		Log:         log,
 		AccountID:   cfg.AccountID,
-		accounts:    make(map[string]*Account),
+		accounts:    make(map[string]*account.Account),
 		bots:        make(map[string]*botEntry),
 		tradeBotMap: make(map[string]string),
 	}, nil

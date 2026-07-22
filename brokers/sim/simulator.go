@@ -6,12 +6,22 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/idgen"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
+)
+
+// compile-time assertions: *Sim satisfies brokers.Broker and brokers.PriceUpdater.
+// Asserted here rather than in package brokers, to avoid an import cycle
+// (brokers/sim already depends on account, which depends on brokers for the
+// Broker type itself).
+var (
+	_ brokers.Broker       = (*Sim)(nil)
+	_ brokers.PriceUpdater = (*Sim)(nil)
 )
 
 // eventQueueSize mirrors account.Account's brokerEventQueueSize (same

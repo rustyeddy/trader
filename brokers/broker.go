@@ -8,7 +8,6 @@ import (
 	"context"
 
 	"github.com/rustyeddy/trader/brokers/oanda"
-	"github.com/rustyeddy/trader/brokers/sim"
 	"github.com/rustyeddy/trader/market"
 )
 
@@ -42,11 +41,13 @@ type Broker interface {
 	SubmitMarketOrder(ctx context.Context, accountID, instrument string, units int64, stopPrice float64) (*oanda.OrderResult, error)
 }
 
-// compile-time assertions: *oanda.Client and *sim.Sim both satisfy Broker.
-var (
-	_ Broker = (*oanda.Client)(nil)
-	_ Broker = (*sim.Sim)(nil)
-)
+// compile-time assertion: *oanda.Client satisfies Broker. *sim.Sim's
+// assertion lives in brokers/sim instead — sim depends on account, and
+// account depends on this package for the Broker type, so asserting sim
+// against Broker here would create an import cycle (brokers → brokers/sim
+// → account → brokers). The implementer asserting against the interface
+// is the standard direction anyway.
+var _ Broker = (*oanda.Client)(nil)
 
 // PriceUpdater is implemented by Broker implementations that need to be
 // told the current price to fill/monitor resting orders against (Sim).
@@ -56,5 +57,3 @@ var (
 type PriceUpdater interface {
 	UpdatePrice(tick market.Tick) error
 }
-
-var _ PriceUpdater = (*sim.Sim)(nil)

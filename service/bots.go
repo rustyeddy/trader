@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -48,12 +49,14 @@ type botEntry struct {
 	done   <-chan struct{}
 }
 
-// StartBot builds and launches a live strategy bot on this account inside the
-// serve process. Returns the bot's initial status (Status="running"). The bot
-// runs until StopBot is called or the parent context is cancelled. Bots are
-// tracked in the shared Service registry, tagged with this account's ID.
-func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
-	s := a.svc
+// StartBot builds and launches a live strategy bot on the given account
+// inside the serve process. Returns the bot's initial status
+// (Status="running"). The bot runs until StopBot is called or the parent
+// context is cancelled. Bots are tracked in the Service-wide registry,
+// tagged with the account's ID — bot orchestration is a Service concern,
+// not per-account state, even though it acts on an Account via order
+// placement (see docs/Manual/architecture-broker-account-order.org, Phase 3).
+func (s *Service) startBotOn(ctx context.Context, acc *account.Account, cfg BotConfig) (*BotStatus, error) {
 	if cfg.Instrument == "" {
 		return nil, fmt.Errorf("bots: instrument is required")
 	}
@@ -82,7 +85,7 @@ func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	entry := &botEntry{
 		BotStatus: BotStatus{
 			ID:           id,
-			AccountID:    a.ID,
+			AccountID:    acc.ID,
 			Instrument:   cfg.Instrument,
 			StrategyName: strategy.Name(),
 			StrategyKind: cfg.Strategy.Kind,
@@ -107,14 +110,15 @@ func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 
 	go func() {
 		defer close(done)
-		runErr := a.RunLiveStrategy(botCtx, LiveRunConfig{
-			Instrument:     cfg.Instrument,
-			TickInterval:   interval,
-			Strategy:       tracked,
-			RiskPct:        types.RateFromFloat(cfg.RiskPct / 100.0),
-			MaxUnits:       cfg.MaxUnits,
-			MaxPositionUSD: cfg.MaxPositionUSD,
-			BotID:          id,
+		runErr := acc.RunLiveStrategy(botCtx, account.LiveRunConfig{
+			Instrument:         cfg.Instrument,
+			TickInterval:       interval,
+			Strategy:           tracked,
+			RiskPct:            types.RateFromFloat(cfg.RiskPct / 100.0),
+			MaxUnits:           cfg.MaxUnits,
+			MaxPositionUSD:     cfg.MaxPositionUSD,
+			BotID:              id,
+			RegisterTradeBotID: s.RegisterTradeBotID,
 		})
 		now := time.Now().UTC()
 		s.botsMu.Lock()
@@ -136,25 +140,33 @@ func (a *Account) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 	return &status, nil
 }
 
-// StartBot launches a bot on the default account. See Account.StartBot.
+// StartBot launches a bot on the default account. See startBotOn.
 func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
 	acc, err := s.DefaultAccount(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bots: %w", err)
 	}
-	return acc.StartBot(ctx, cfg)
+	return s.startBotOn(ctx, acc, cfg)
 }
 
-// ListBots returns a snapshot of this account's bots (running and stopped).
-func (a *Account) ListBots() []BotStatus {
-	a.svc.botsMu.RLock()
-	defer a.svc.botsMu.RUnlock()
+// StartBotOnAccount launches a bot on the given account (REST/MCP
+// account-scoped routes resolve the account themselves via
+// Service.Account/FirstAccount and call this instead of StartBot).
+func (s *Service) StartBotOnAccount(ctx context.Context, acc *account.Account, cfg BotConfig) (*BotStatus, error) {
+	return s.startBotOn(ctx, acc, cfg)
+}
+
+// ListBotsForAccount returns a snapshot of the given account's bots
+// (running and stopped). See ListBots for the all-accounts view.
+func (s *Service) ListBotsForAccount(accountID string) []BotStatus {
+	s.botsMu.RLock()
+	defer s.botsMu.RUnlock()
 	out := make([]BotStatus, 0)
-	for _, e := range a.svc.bots {
+	for _, e := range s.bots {
 		e.mu.Lock()
 		status := e.BotStatus
 		e.mu.Unlock()
-		if status.AccountID == a.ID {
+		if status.AccountID == accountID {
 			out = append(out, status)
 		}
 	}
@@ -252,13 +264,13 @@ func (s *Service) GetBot(id string) (*BotStatus, error) {
 // statsTrackingStrategy wraps a LiveStrategy and updates the bot entry's
 // Ticks, Opens, and Closes counters on every tick.
 type statsTrackingStrategy struct {
-	inner LiveStrategy
+	inner account.LiveStrategy
 	entry *botEntry
 }
 
 func (w *statsTrackingStrategy) Name() string { return w.inner.Name() }
 
-func (w *statsTrackingStrategy) Tick(ctx context.Context, price LivePrice, trades []LiveTrade) *LivePlan {
+func (w *statsTrackingStrategy) Tick(ctx context.Context, price account.LivePrice, trades []account.LiveTrade) *account.LivePlan {
 	plan := w.inner.Tick(ctx, price, trades)
 	w.entry.mu.Lock()
 	w.entry.Ticks++

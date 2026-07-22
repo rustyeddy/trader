@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -26,7 +27,7 @@ type InstrumentRunConfig struct {
 	Instrument   string        // OANDA format, e.g. "USD_CHF"
 	Granularity  string        // "H1" or "D"
 	TickInterval time.Duration // how often to poll; defaults to half the bar period
-	Strategy     LiveStrategy
+	Strategy     account.LiveStrategy
 	RiskPct      types.Rate // fraction of account NAV to risk (0.01×RateScale = 1%)
 	MaxUnits     int64
 	UseStream    bool // when true, use OANDA pricing stream instead of polling
@@ -77,7 +78,7 @@ func (s *Service) RunPortfolio(ctx context.Context, cfg PortfolioRunConfig) erro
 		go func(inst InstrumentRunConfig) {
 			defer wg.Done()
 			strategy := &circuitBreakerStrategy{inner: inst.Strategy, cb: cb}
-			err := acct.RunLiveStrategy(ctx, LiveRunConfig{
+			err := acct.RunLiveStrategy(ctx, account.LiveRunConfig{
 				Instrument:   inst.Instrument,
 				TickInterval: tick,
 				Strategy:     strategy,
@@ -125,7 +126,7 @@ func defaultTickInterval(granularity string) time.Duration {
 type drawdownCircuitBreaker struct {
 	mu       sync.Mutex
 	peakNAV  float64
-	acct     *Account
+	acct     *account.Account
 	limitPct float64
 	log      *slog.Logger
 }
@@ -171,13 +172,13 @@ func (cb *drawdownCircuitBreaker) allowOpen(ctx context.Context) bool {
 // circuitBreakerStrategy wraps a LiveStrategy and suppresses opens when the
 // drawdown circuit breaker is tripped.
 type circuitBreakerStrategy struct {
-	inner LiveStrategy
+	inner account.LiveStrategy
 	cb    *drawdownCircuitBreaker
 }
 
 func (s *circuitBreakerStrategy) Name() string { return s.inner.Name() }
 
-func (s *circuitBreakerStrategy) Tick(ctx context.Context, price LivePrice, trades []LiveTrade) *LivePlan {
+func (s *circuitBreakerStrategy) Tick(ctx context.Context, price account.LivePrice, trades []account.LiveTrade) *account.LivePlan {
 	plan := s.inner.Tick(ctx, price, trades)
 	if plan == nil {
 		return nil

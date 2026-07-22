@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
 )
@@ -24,13 +25,13 @@ type Server struct {
 	svc        *service.Service
 	addr       string
 	log        *slog.Logger
-	staticFS   fs.FS        // nil when no UI assets are embedded
-	reportsDir string       // directory for backtest JSON reports
-	configsDir string       // directory for backtest config files
+	staticFS   fs.FS  // nil when no UI assets are embedded
+	reportsDir string // directory for backtest JSON reports
+	configsDir string // directory for backtest config files
 
-	reviewSweepReportsDir string // directory for review-sweep JSON reports
-	reviewSweepConfigsDir string // directory for review-sweep config files
-	mcpHandler http.Handler // optional MCP handler mounted at POST /mcp
+	reviewSweepReportsDir string       // directory for review-sweep JSON reports
+	reviewSweepConfigsDir string       // directory for review-sweep config files
+	mcpHandler            http.Handler // optional MCP handler mounted at POST /mcp
 }
 
 // New creates a Server. svc may have a nil OANDA client for backtest-only
@@ -247,12 +248,12 @@ func (s *Server) requireOANDA(w http.ResponseWriter) bool {
 // — appropriate only for reads, never for mutations. Writes the appropriate
 // HTTP error and returns ok=false when OANDA is unconfigured or the account
 // cannot be resolved.
-func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*service.Account, bool) {
+func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*account.Account, bool) {
 	if !s.requireOANDA(w) {
 		return nil, false
 	}
 	var (
-		acc *service.Account
+		acc *account.Account
 		err error
 	)
 	if id := r.PathValue("accountID"); id != "" {

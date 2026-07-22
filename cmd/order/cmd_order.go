@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
@@ -134,7 +135,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	}
 
 	// First pass: get the proposal without submitting.
-	preview, err := svc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
+	preview, err := svc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
 		RiskPct:    types.RateFromFloat(riskPct / 100.0),
@@ -157,7 +158,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	}
 
 	// Second pass: submit for real.
-	final, err := svc.PlaceMarketOrder(ctx, service.PlaceMarketOrderRequest{
+	final, err := svc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
 		RiskPct:    types.RateFromFloat(riskPct / 100.0),
@@ -177,7 +178,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	return nil
 }
 
-func printProposal(env string, p service.OrderProposal, riskPct float64) {
+func printProposal(env string, p account.OrderProposal, riskPct float64) {
 	fmt.Println()
 	fmt.Println("┌─────────────────────────────────────────────────┐")
 	fmt.Printf("│  PROPOSED ORDER — %s %-28s│\n", strings.ToUpper(env), "")

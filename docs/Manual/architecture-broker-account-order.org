@@ -160,21 +160,80 @@ below — resolving the ambiguity by deciding there should only be one
 
 * Phase 3: merge =service.Account= into =account.Account=
 
-Decided 2026-07-21, not yet implemented. Rather than keep the domain ledger
-(=account.Account=) and the live session wrapper (=service.Account=) as two
-separate types that happen to share a name, they become one
-=account.Account=, and the session-registry constructors currently on
-=service.Service= (=Account=, =Accounts=, =FirstAccount=, =DefaultAccount=)
-move into =account/= with it. =service/orders.go=' order-placement logic
-(=PlaceMarketOrder=, =CloseTrade=, =UpdateTradeStop=, =ListOpenTrades=) is
-expected to move along with =Account= at the same time, per the earlier
-discussion — its methods are all on =*Account= already, so leaving them
-behind in =service/= once =Account= moves would split one type's behavior
-across two packages for no reason.
+Decided 2026-07-21. Split into two chunks (chunk A done 2026-07-21; chunk B
+— relocating the registry — not yet started) after exploration showed the
+full merge was larger than any prior chunk and found a real scope
+question: two of =service.Account='s methods, =StartBot=/=ListBots=,
+turned out to be Service-registry-scoped (=Service.bots=/=botsMu=,
+=Service.BuildLiveStrategy=), not per-account state. Per the user: "the
+bots will affect account state through the order mechanism but not
+anything directly related to accounts" — confirmed they should stay on
+=Service=, not move onto =Account=.
 
-** Known collision to resolve: =Account.ID=
+Rather than keep the domain ledger (=account.Account=) and the live
+session wrapper (=service.Account=) as two separate types that happen to
+share a name, they become one =account.Account=.
 
-=account.Account= already has an =ID= field
+** Chunk A — done 2026-07-21: type + per-account methods merged
+
+=account.Account= gained the live-session fields (=OANDA=, =Log=,
+=snapMu=/=snapshot=) and a =NewSession(id, oanda, log)= constructor
+alongside the existing =NewAccount(name, deposit)= ledger constructor —
+the two populate disjoint field subsets (live sessions carry no ledger
+state; backtest ledgers carry no OANDA/Log/snapshot state). =AccountSnapshot=
+moved into =account/= unchanged (confirmed zero back-reference to
+=*Service=). All genuinely per-account methods moved with it:
+=EnsureSnapshot=/=getSnapshot=/=broker= (→ =account/session.go=),
+=GetAccountSummary=/=GetTransactions=/=StreamTransactions= (→
+=account/broker_calls.go=), =PlaceMarketOrder=/=CloseTrade=/
+=UpdateTradeStop=/=ListOpenTrades= (→ =account/orders.go=, including
+chunk 7's sizing types), =RunLiveJournal= (→ =account/journal.go=),
+=RunLiveStrategy=/=runOneTick=/=runPricingStream=/=seedTickCounts= plus
+=LiveRunConfig=/=LiveStrategy=/=LivePrice=/=LiveTrade=/=LivePlan=/
+=LiveOpenRequest= (→ =account/live_runner.go= + =account/live_types.go=),
+=GetPrices= (→ =account/prices.go=).
+
+Two dependencies fell out of the same "not really per-account" principle
+as =StartBot=/=ListBots= and got the same treatment — injected as
+parameters instead of reached via a back-reference to =*Service=:
+=RunLiveJournal= gained a =botIDLookup func(tradeID string) string=
+parameter (=Service.RunLiveJournal= passes =s.LookupTradeBotID=);
+=LiveRunConfig= gained a =RegisterTradeBotID func(tradeID, botID string)=
+field (=Service.startBotOn= passes =s.RegisterTradeBotID=, the only
+caller that sets =BotID=).
+
+=service.Account= is gone; =Service.Account=/=Accounts=/=FirstAccount=/
+=DefaultAccount= (unchanged in this chunk — chunk B moves them) now
+construct/return =*account.Account= via =account.NewSession=.
+=Service.StartBot= folds its old =(a *Account) StartBot= body into an
+unexported =Service.startBotOn(ctx, acc, cfg)=, parameterized by
+=*account.Account= instead of a receiver; a new
+=Service.StartBotOnAccount= covers the account-scoped REST/MCP callers
+that used to call =acc.StartBot= directly. =(a *Account) ListBots=
+became =Service.ListBotsForAccount(accountID)=, same filter logic.
+
+Unplanned but necessary: moving =Account.broker()= (needs =brokers.Broker=)
+into =account/= surfaced a latent import cycle — package =brokers=
+imported =brokers/sim= only for a compile-time =var _ Broker =
+(*sim.Sim)(nil)= assertion, and =brokers/sim= imports =account=, so
+=account= → =brokers= → =brokers/sim= → =account= cycled. Fixed by moving
+that assertion (and =PriceUpdater='s) into =brokers/sim= itself, asserted
+against the interface from the implementing package — the standard
+direction, and =brokers/sim= already depended on =account= regardless.
+
+Verified: =go build ./...=, =go vet ./...=, =go test ./...= all clean
+across the whole repo (this chunk's blast radius reached =cmd/order=,
+=cmd/serve=, =cmd/live=, =api/rest=, =api/mcp= via the moved
+=PlaceMarketOrderRequest=/=OrderProposal=/=GetPricesRequest=/=PriceInfo=
+types). Test files moved alongside their production code
+(=account/orders_test.go=, =account/live_runner_test.go=,
+=account/account_snapshot_test.go=); =service/account_session_test.go=
+stayed in =service/= since it tests the registry, which didn't move this
+chunk.
+
+** Known collision to resolve: =Account.ID= — resolved in chunk A
+
+=account.Account= already had an =ID= field
 (=account/account.go=, set via =idgen.NewULID()= in =NewAccount=) — but
 it's an internally-generated ULID, purely a ledger-instance identifier.
 Grepped: it is never read outside =account/= itself, and every non-test
@@ -186,17 +245,17 @@ account identifier string (e.g. =101-004-12345-001=) threaded through
 every live broker call (=a.broker().GetOpenTrades(ctx, a.ID)= and
 similar).
 
-These are different concepts sharing a field name. Resolution: repurpose
-=Account.ID= to mean the live/broker account identifier (matching
-=service.Account='s usage, since that's the one anything actually depends
-on); backtest's =NewAccount(name, deposit)= either stops populating =ID=
-with a ULID or keeps doing so harmlessly — confirmed safe either way, since
-nothing reads it in that path.
+These are different concepts sharing a field name. Resolution (implemented
+in chunk A): =NewSession(id, oanda, log)= sets =ID= to the live/broker
+account identifier directly; =NewAccount(name, deposit)= keeps assigning
+its ULID unchanged — confirmed harmless since nothing reads it in the
+backtest path. No actual collision at runtime since the two constructors
+are never both used for the same instance.
 
-** What the merged =account.Account= needs
+** What the merged =account.Account= needs — done in chunk A
 
 Beyond the existing ledger fields (=Balance=, =Equity=, =Lots=, =Trades=,
-=RiskFraction=, ...), the live-session half needs:
+=RiskFraction=, ...), the live-session half needed:
 
 - *No =Broker= field.* Corrected 2026-07-22: ownership points the other
   way — "a Broker can have more than one Account" (this doc's own opening
@@ -205,44 +264,40 @@ Beyond the existing ledger fields (=Balance=, =Equity=, =Lots=, =Trades=,
   addressing many accounts," not "one account holding one broker." What
   submits an order needs a =Broker= handle to call, but that handle isn't
   something =Account= owns — see Phase 4 for where it actually lives.
-- =Log *slog.Logger= — replaces =a.svc.Log=.
-- The =AccountSnapshot= cache (=snapMu=/=snapshot=) — moves over unchanged;
-  it already has zero back-reference to =*Service= (see
+- =Log *slog.Logger= — replaces =a.svc.Log=. Added.
+- The =AccountSnapshot= cache (=snapMu=/=snapshot=) — moved over unchanged;
+  it already had zero back-reference to =*Service= (see
   =docs/Plans/service-refactor.org='s Phase 1 note — this was already
   identified as the one piece with no cycle risk). Its role narrows once
   Phase 4's event-driven fills land — see Phase 4's source-of-truth note.
 - Pricing/streaming (=GetPricing=, =StreamPricing=, used by
   =prices.go=/=live_runner.go=/=pip_values.go=) stays on the concrete
-  =*oanda.Client= (or a =DataProvider= field, once that interface exists)
-  until the =DataProvider= split happens — same deferral as Phase 1/2.
+  =*oanda.Client= — added as an =OANDA *oanda.Client= field directly
+  (not yet a =DataProvider= field, that interface still doesn't exist) —
+  same deferral as Phase 1/2.
 
-** Ledger merges into Account too
+** Ledger merges into Account too — done, Phase 4 chunk 3 (commit =59e4869=)
 
 Decided 2026-07-22, prompted by a real-world sanity check: in standard
 bookkeeping, a *ledger is something an account has* — the record of its
 transactions — not a container an account lives inside. =account.Account=
-already keeps most of its own ledger directly: =Trades []*Trade= (closed
+already kept most of its own ledger directly: =Trades []*Trade= (closed
 transaction history), =Lots=/=AddLot=/=CloseLot= (position bookkeeping).
 What the separate =account.Ledger= wrapper (=account/ledger.go=, the
-struct Phase 1 renamed from =account.Broker=) adds on top is really just
+struct Phase 1 renamed from =account.Broker=) added on top was really just
 the event queue (=evtQ=, =Events()=, =publishEvent=) and =SubmitOpen=/
 =SubmitClose= as entry points wrapping =AddLot=/=CloseLot= with a
 synchronous event fire — implementation plumbing, not a distinct
 real-world concept.
 
-Target: =account.Ledger= as a separate type goes away. Its narrowed,
-correctly-scoped remaining job — a running record of transactions,
-capital, and PnL, possibly order history — becomes something =Account=
-*has* (e.g. a =Ledger= field/sub-struct on =Account=, not a struct that
-wraps =Account=), not an orchestrator. =engine.Trader= (=engine/trader.go=,
-currently =*account.Ledger= embedded) embeds =*account.Account= instead,
-inheriting whatever of =Ledger='s current method set survives the merge.
-=SubmitOpen=/=SubmitClose= as synchronous orchestration entry points do
-*not* survive as-is either — see Phase 4, where order submission and fill
-application become two separate, asynchronously-connected steps once the
-event queue moves to =Broker=.
+=account.Ledger= as a separate type is gone — confirmed during chunk A's
+exploration: no =account/ledger.go= file exists; its method set
+(=SubmitOpen=/=SubmitClose=/=Events=/=publishEvent=/etc.) now lives
+directly on =account.Account= via =account/events.go=. =engine.Trader=
+(=engine/trader.go=) embeds =*account.Account= directly, not
+=*account.Ledger=.
 
-** Where the registry goes
+** Where the registry goes — chunk B, not yet started
 
 =Service.accounts map[string]*Account=/=accountsMu=/=firstID= and the
 =Account()=/=Accounts()=/=FirstAccount()=/=DefaultAccount()= constructor

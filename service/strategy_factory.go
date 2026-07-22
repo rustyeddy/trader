@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
 	"github.com/rustyeddy/trader/strategy"
@@ -29,7 +30,7 @@ type StrategyConfig struct {
 // BuildLiveStrategy constructs a trader.LiveStrategy from a StrategyConfig.
 // Candle-based strategies (scalper, stress) are wrapped in a CandleStrategyAdapter.
 // instrument must be in OANDA format, e.g. "EUR_USD".
-func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (LiveStrategy, error) {
+func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (account.LiveStrategy, error) {
 	kind := strings.ToLower(strings.TrimSpace(cfg.Kind))
 	if kind == "" {
 		kind = "pulse"
