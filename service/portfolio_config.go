@@ -2,17 +2,9 @@ package service
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
-	"time"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/brokers/oanda"
-	botsvc "github.com/rustyeddy/trader/service/bots"
-	"github.com/rustyeddy/trader/strategy"
-	"github.com/rustyeddy/trader/types"
 )
 
 // PortfolioConfig is the YAML schema for `trader live portfolio`.
@@ -74,89 +66,4 @@ func LoadPortfolioConfig(path string) (*PortfolioConfig, error) {
 		return nil, fmt.Errorf("parse portfolio config %q: %w", path, err)
 	}
 	return cfg, nil
-}
-
-// BuildPortfolioRunConfig wires up the full PortfolioRunConfig from a parsed
-// PortfolioConfig, building CandleStrategyAdapters for every instrument.
-func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, accountID string, log *slog.Logger) (*PortfolioRunConfig, error) {
-	rc := &PortfolioRunConfig{
-		DrawdownCircuitPct: cfg.DrawdownCircuitPct,
-		Log:                log,
-	}
-
-	for _, y := range cfg.Instruments {
-		scfg := strategy.StrategyConfig{Kind: y.Strategy.Kind, Params: y.Strategy.Params}
-
-		riskPct := y.RiskPct
-		if riskPct <= 0 {
-			riskPct = cfg.RiskPct
-		}
-
-		// All strategies go through the candle adapter so the same strategy
-		// implementation can be backtested and run live.
-		strat, err := strategy.GetStrategy(scfg)
-		if err != nil {
-			return nil, fmt.Errorf("instrument %s strategy: %w", y.Instrument, err)
-		}
-
-		regimeCfg := strategy.RegimeConfig{Kind: y.Regime.Kind, Params: y.Regime.Params}
-		for _, f := range y.Regime.Filters {
-			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
-		}
-		regime, err := strategy.GetRegimeFilter(regimeCfg, types.PriceScale)
-		if err != nil {
-			return nil, fmt.Errorf("instrument %s regime: %w", y.Instrument, err)
-		}
-
-		granularity := toOandaGranularity(y.Timeframe)
-		warmup := y.WarmupBars
-		if warmup <= 0 {
-			warmup = 100
-		}
-		localWarmup := y.LocalWarmupBars
-		if localWarmup <= 0 {
-			localWarmup = cfg.LocalWarmupBars
-		}
-
-		exitCfg := strategy.ExitConfig{Kind: y.Exit.Kind, Params: y.Exit.Params}
-		exit, err := strategy.GetExitStrategy(exitCfg, types.PriceScale)
-		if err != nil {
-			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
-		}
-
-		// A session Account so the adapter can update trailing stops on OANDA.
-		sess := account.NewSession(accountID, oandaClient, log)
-		adapter := botsvc.NewCandleStrategyAdapter(botsvc.CandleAdapterConfig{
-			Strategy:        strat,
-			Exit:            exit,
-			Regime:          regime,
-			Instrument:      y.Instrument,
-			Granularity:     granularity,
-			WarmupBars:      warmup,
-			LocalWarmupBars: localWarmup,
-			OANDA:           oandaClient,
-			AccountID:       accountID,
-			UpdateTradeStop: sess.UpdateTradeStop,
-			Log:             log,
-		})
-
-		var tick time.Duration
-		if y.TickInterval != "" {
-			tick, err = time.ParseDuration(y.TickInterval)
-			if err != nil {
-				return nil, fmt.Errorf("instrument %s tick_interval: %w", y.Instrument, err)
-			}
-		}
-
-		rc.Instruments = append(rc.Instruments, InstrumentRunConfig{
-			Instrument:   y.Instrument,
-			Granularity:  granularity,
-			TickInterval: tick,
-			UseStream:    y.UseStream,
-			Strategy:     adapter,
-			RiskPct:      types.RateFromFloat(riskPct / 100.0),
-			MaxUnits:     y.MaxUnits,
-		})
-	}
-	return rc, nil
 }

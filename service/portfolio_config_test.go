@@ -1,18 +1,12 @@
 package service
 
 import (
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	// Register strategies used in build tests.
-	_ "github.com/rustyeddy/trader/strategies/noop"
-	_ "github.com/rustyeddy/trader/strategies/pulse"
-	"github.com/rustyeddy/trader/types"
 )
 
 // ── LoadPortfolioConfig ──────────────────────────────────────────────────────
@@ -68,141 +62,4 @@ func TestLoadPortfolioConfig_Defaults(t *testing.T) {
 func TestLoadPortfolioConfig_MissingFile(t *testing.T) {
 	_, err := LoadPortfolioConfig("/nonexistent/path.yml")
 	require.Error(t, err)
-}
-
-// ── BuildPortfolioRunConfig ──────────────────────────────────────────────────
-
-func testLogger() *slog.Logger { return slog.Default() }
-
-func TestBuildPortfolioRunConfig_EmptyInstruments(t *testing.T) {
-	cfg := &PortfolioConfig{
-		DrawdownCircuitPct: 5.0,
-		RiskPct:            1.0,
-	}
-	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.NoError(t, err)
-	assert.Empty(t, rc.Instruments)
-	assert.Equal(t, 5.0, rc.DrawdownCircuitPct)
-}
-
-func TestBuildPortfolioRunConfig_BacktestStrategy(t *testing.T) {
-	cfg := &PortfolioConfig{
-		RiskPct: 1.0,
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument: "EUR_USD",
-				Timeframe:  "H1",
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "noop"},
-			},
-		},
-	}
-	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.NoError(t, err)
-	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, "EUR_USD", rc.Instruments[0].Instrument)
-	assert.Equal(t, types.RateFromFloat(0.01), rc.Instruments[0].RiskPct)
-}
-
-func TestBuildPortfolioRunConfig_RiskPctFallsBackToPortfolioDefault(t *testing.T) {
-	cfg := &PortfolioConfig{
-		RiskPct: 2.0,
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument: "EUR_USD",
-				Timeframe:  "H1",
-				RiskPct:    0, // no per-instrument override
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "noop"},
-			},
-		},
-	}
-	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.NoError(t, err)
-	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, types.RateFromFloat(0.02), rc.Instruments[0].RiskPct)
-}
-
-func TestBuildPortfolioRunConfig_PerInstrumentRiskPctOverridesDefault(t *testing.T) {
-	cfg := &PortfolioConfig{
-		RiskPct: 1.0,
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument: "EUR_USD",
-				Timeframe:  "H1",
-				RiskPct:    3.0,
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "noop"},
-			},
-		},
-	}
-	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.NoError(t, err)
-	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, types.RateFromFloat(0.03), rc.Instruments[0].RiskPct)
-}
-
-func TestBuildPortfolioRunConfig_UnknownStrategyReturnsError(t *testing.T) {
-	cfg := &PortfolioConfig{
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument: "EUR_USD",
-				Timeframe:  "H1",
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "no-such-strategy"},
-			},
-		},
-	}
-	_, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "strategy")
-}
-
-func TestBuildPortfolioRunConfig_InvalidTickIntervalReturnsError(t *testing.T) {
-	cfg := &PortfolioConfig{
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument:   "EUR_USD",
-				Timeframe:    "H1",
-				TickInterval: "not-a-duration",
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "noop"},
-			},
-		},
-	}
-	_, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "tick_interval")
-}
-
-func TestBuildPortfolioRunConfig_PulseStrategy(t *testing.T) {
-	// pulse is now a strategy.Strategy (candle-based) so it goes through the
-	// same CandleStrategyAdapter path as any other backtest strategy.
-	cfg := &PortfolioConfig{
-		RiskPct: 1.0,
-		Instruments: []portfolioInstrumentYAML{
-			{
-				Instrument: "EUR_USD",
-				Timeframe:  "H1",
-				Strategy: struct {
-					Kind   string         `yaml:"kind"`
-					Params map[string]any `yaml:"params"`
-				}{Kind: "pulse"},
-			},
-		},
-	}
-	rc, err := BuildPortfolioRunConfig(cfg, nil, "", testLogger())
-	require.NoError(t, err)
-	require.Len(t, rc.Instruments, 1)
-	assert.Equal(t, "EUR_USD", rc.Instruments[0].Instrument)
 }

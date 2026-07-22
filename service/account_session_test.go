@@ -84,9 +84,8 @@ func TestAccounts_NoOANDAErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "OANDA client not configured")
 }
 
-// TestScopedSummary_TargetsAccountID verifies a scoped Account hits OANDA with
-// its own ID, while the Service-level wrapper targets the default account —
-// proving two accounts on one Service address distinct OANDA accounts.
+// TestScopedSummary_TargetsAccountID verifies a scoped Account hits OANDA
+// with its own ID, not some other cached session's.
 func TestScopedSummary_TargetsAccountID(t *testing.T) {
 	var mu sync.Mutex
 	var requested []string
@@ -112,13 +111,9 @@ func TestScopedSummary_TargetsAccountID(t *testing.T) {
 	_, err = other.GetAccountSummary(context.Background())
 	require.NoError(t, err)
 
-	// Service-level wrapper targets the default account.
-	_, err = svc.GetAccountSummary(context.Background())
-	require.NoError(t, err)
-
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, []string{"other-acc", "default-acc"}, requested)
+	assert.Equal(t, []string{"other-acc"}, requested)
 }
 
 // TestDefaultAccount_AutoResolves confirms defaultAccount discovers the sole

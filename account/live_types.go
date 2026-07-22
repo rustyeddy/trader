@@ -8,7 +8,7 @@ import (
 )
 
 // LiveStrategy is the internal runner protocol implemented by CandleStrategyAdapter
-// and its decorators (statsTrackingStrategy, circuitBreakerStrategy).
+// and its decorators (e.g. statsTrackingStrategy).
 // Tick is called on each price poll; the runner passes the current price
 // and all tracked open positions so the strategy can decide what to do.
 type LiveStrategy interface {

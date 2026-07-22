@@ -1,7 +1,58 @@
 #+TITLE: service.Service God Object — Refactor Design
 #+DATE: 2026-07-21
-#+PROPERTY: status in progress — chunks 1-2 done 2026-07-21
+#+PROPERTY: status in progress — chunks 1-3 done 2026-07-22
 #+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Chunk 3 — done, 2026-07-22: delete dead delegators and the unused portfolio-runner subsystem
+
+While scoping the next delegator-retirement chunk, grepped every
+remaining =Service=-level method for real callers outside =service/=
+and its own tests. Several had none — not delegators to redirect, just
+dead code:
+
+- =Service.GetAccountSummary= (=service/account.go=) — deleted.
+  =api/mcp/tools.go='s =get_account_summary= tool already called
+  =acc.GetAccountSummary= (account-scoped) directly, never this.
+- =Service.GetPrices= (=service/prices.go=, the file's only content) —
+  file deleted. Zero callers anywhere, not even a test.
+- =Service.RunLiveStrategy= (=service/live_runner.go=, the file's only
+  content) — file deleted, along with its 3 tests
+  (=service/live_runner_test.go=). Both real live-running paths already
+  called =acc.RunLiveStrategy= directly.
+- =service/portfolio_runner.go= in full — =RunPortfolio=,
+  =PortfolioRunConfig=, =InstrumentRunConfig=, =defaultTickInterval=,
+  =drawdownCircuitBreaker=, =circuitBreakerStrategy= (192 lines) —
+  deleted, along with its one test (=service/portfolio_runner_test.go=).
+  Zero callers outside its own file. Traced =cmd/bot/cmd_bot.go='s
+  portfolio-YAML flow (=startFromConfig=, the only place that reads a
+  portfolio config): it uses =LoadPortfolioConfig= + a plain
+  per-instrument =StartBot= loop and never touches any of this —
+  superseded and forgotten, not actively used.
+- =BuildPortfolioRunConfig= (=service/portfolio_config.go=) — deleted
+  (its only purpose was feeding the now-dead =RunPortfolio=), along with
+  its 7 tests and =testLogger()= helper in
+  =service/portfolio_config_test.go=. =LoadPortfolioConfig=/
+  =PortfolioConfig=/=portfolioInstrumentYAML= kept (still used by
+  =cmd/bot=). =service/portfolio_config.go= shrank from 162 to 69 lines.
+- =service/account_session_test.go='s =TestScopedSummary_TargetsAccountID=
+  trimmed — it previously proved both scoped-account targeting *and* the
+  now-deleted Service-level wrapper's default-account targeting; kept
+  only the still-relevant scoped-account assertion.
+- =account/live_types.go='s =LiveStrategy= doc comment dropped its
+  mention of =circuitBreakerStrategy= (type no longer exists).
+
+Two delegators that are still genuinely used (=GetTransactions=/
+=StreamTransactions=/=PlaceMarketOrder=/=CloseTrade=/=UpdateTradeStop=/
+=ListOpenTrades= via =cmd/order=, =RunLiveJournal= via =cmd/serve=+
+=cmd/live=) were explicitly left alone — deleting them isn't possible,
+their callers would need redirecting to call =*account.Account=
+directly instead, a different and slightly riskier chunk, not yet
+started.
+
+Verified: =go build ./...=, =go vet ./...=, =go test ./...= (full repo)
+clean. Confirmed via =git status= that this chunk touched *zero* files
+in =cmd/=, =api/rest/=, or =api/mcp/= — every deletion here had no
+external caller to update, by construction.
 
 * Chunk 2 — done, 2026-07-21: extract bots into service/bots
 
