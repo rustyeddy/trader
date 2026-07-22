@@ -40,6 +40,7 @@ type AccountSnapshot struct {
 	// startMu guards the started flag and the goroutine lifecycle.
 	startMu sync.Mutex
 	started bool
+	cancel  context.CancelFunc // set by Start, called by Stop
 }
 
 func newAccountSnapshot(client accountDetailsClient, accountID string, log *slog.Logger) *AccountSnapshot {
@@ -83,8 +84,10 @@ func (s *AccountSnapshot) Start(ctx context.Context, interval time.Duration) err
 	s.lastTxID = details.LastTransactionID
 	s.mu.Unlock()
 
+	runCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
 	s.started = true
-	go s.pollLoop(ctx, interval)
+	go s.pollLoop(runCtx, interval)
 	return nil
 }
 
@@ -94,6 +97,21 @@ func (s *AccountSnapshot) IsRunning() bool {
 	r := s.started
 	s.startMu.Unlock()
 	return r
+}
+
+// Stop cancels the poll loop. Non-blocking — it does not wait for
+// pollLoop to observe cancellation and exit; nothing today needs that
+// guarantee (unlike bots' Stop, which callers depend on to know when a
+// bot has fully stopped before e.g. restarting it under new config). A
+// no-op if Start was never called.
+func (s *AccountSnapshot) Stop() error {
+	s.startMu.Lock()
+	cancel := s.cancel
+	s.startMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return nil
 }
 
 func (s *AccountSnapshot) pollLoop(ctx context.Context, interval time.Duration) {

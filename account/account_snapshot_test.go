@@ -170,6 +170,35 @@ func TestAccountSnapshot_StopsWhenContextCancelled(t *testing.T) {
 	}, time.Second, 5*time.Millisecond, "snapshot should stop after context cancel")
 }
 
+func TestAccountSnapshot_StopsWithoutContextCancel(t *testing.T) {
+	mock := &mockAccountPoller{
+		details: &oanda.AccountDetails{
+			AccountSummary: oanda.AccountSummary{NAV: 1000},
+		},
+	}
+
+	snap := newAccountSnapshot(mock, "acc-1", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	require.NoError(t, snap.Start(ctx, 10*time.Millisecond))
+	assert.True(t, snap.IsRunning())
+
+	require.NoError(t, snap.Stop())
+	// Stop() alone, without cancelling the external ctx, must still halt
+	// the poll loop.
+	require.Eventually(t, func() bool {
+		return !snap.IsRunning()
+	}, time.Second, 5*time.Millisecond, "snapshot should stop after Stop()")
+}
+
+func TestAccountSnapshot_StopBeforeStartIsNoop(t *testing.T) {
+	snap := newAccountSnapshot(&mockAccountPoller{}, "acc-1", nil)
+	assert.NotPanics(t, func() {
+		assert.NoError(t, snap.Stop())
+	})
+}
+
 func TestAccountSnapshot_Summary(t *testing.T) {
 	mock := &mockAccountPoller{
 		details: &oanda.AccountDetails{

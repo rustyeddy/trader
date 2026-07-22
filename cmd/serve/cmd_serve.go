@@ -271,7 +271,10 @@ Example config file (see deploy/trader.yaml.example):
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						runJournalWithBackoff(ctx, svc, cfg.Journal, log)
+						runner := &liveJournalRunner{svc: svc, jcfg: cfg.Journal, log: log}
+						if err := runner.Start(ctx); err != nil {
+							log.Error("serve: live journal failed", "err", err)
+						}
 					}()
 				}
 			}
@@ -311,13 +314,22 @@ Example config file (see deploy/trader.yaml.example):
 	return cmd
 }
 
-// runJournalWithBackoff runs RunLiveJournal, restarting after disconnect
-// with exponential backoff (cap 5 min). Stops when ctx is cancelled.
-func runJournalWithBackoff(ctx context.Context, svc *service.Service, jcfg service.JournalConfig, log *slog.Logger) {
-	acc, err := svc.DefaultAccount(ctx)
+// liveJournalRunner runs the live-journal reconnect/backoff subscription
+// loop until ctx is cancelled, retrying on disconnect with exponential
+// backoff (cap 5 min).
+type liveJournalRunner struct {
+	svc  *service.Service
+	jcfg service.JournalConfig
+	log  *slog.Logger
+}
+
+// Start runs the subscription loop and blocks until ctx is cancelled.
+// Returns nil on clean shutdown; non-nil only if the account can't be
+// resolved before the loop starts.
+func (r *liveJournalRunner) Start(ctx context.Context) error {
+	acc, err := r.svc.DefaultAccount(ctx)
 	if err != nil {
-		log.Error("serve: account resolve failed; journal disabled", "err", err)
-		return
+		return fmt.Errorf("account resolve failed: %w", err)
 	}
 
 	const (
@@ -327,17 +339,17 @@ func runJournalWithBackoff(ctx context.Context, svc *service.Service, jcfg servi
 	attempt := 0
 
 	for {
-		journal, err := svc.OpenJournal(jcfg)
+		journal, err := r.svc.OpenJournal(r.jcfg)
 		if err != nil {
-			log.Error("serve: open journal failed", "err", err)
+			r.log.Error("serve: open journal failed", "err", err)
 		} else {
-			log.Info("serve: live journal starting", "kind", jcfg.Kind)
-			lastID, err := acc.RunLiveJournal(ctx, journal, 0, svc.LookupTradeBotID)
+			r.log.Info("serve: live journal starting", "kind", r.jcfg.Kind)
+			lastID, err := acc.RunLiveJournal(ctx, journal, 0, r.svc.LookupTradeBotID)
 			journal.Close()
 			if ctx.Err() != nil {
-				return // clean shutdown
+				return nil // clean shutdown
 			}
-			log.Warn("serve: journal stream ended", "last_tx_id", lastID, "err", err)
+			r.log.Warn("serve: journal stream ended", "last_tx_id", lastID, "err", err)
 		}
 
 		attempt++
@@ -345,11 +357,11 @@ func runJournalWithBackoff(ctx context.Context, svc *service.Service, jcfg servi
 			float64(baseDelay)*math.Pow(2, float64(attempt-1)),
 			float64(maxDelay),
 		))
-		log.Info("serve: reconnecting journal", "attempt", attempt, "in", delay)
+		r.log.Info("serve: reconnecting journal", "attempt", attempt, "in", delay)
 
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-time.After(delay):
 		}
 	}

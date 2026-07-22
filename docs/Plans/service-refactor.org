@@ -1,7 +1,61 @@
 #+TITLE: service.Service God Object — Refactor Design
 #+DATE: 2026-07-21
-#+PROPERTY: status in progress — chunks 1-4 done 2026-07-22
+#+PROPERTY: status in progress — chunks 1-5 done 2026-07-22
 #+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Chunk 5 — done, 2026-07-22: Runnable — resolved small, not built as a formal interface
+
+Re-traced every candidate listed under "=Runnable= — for the services
+that actually have a lifecycle" below, since that note predates chunks
+1-4 and the real shape had changed:
+
+- =AccountSnapshot= already self-manages its own goroutine (=Start=
+  launches =pollLoop= and returns immediately) — there was never a
+  manually-wrapped =wg.Add=/=go func= for it in =cmd_serve.go= to unify
+  away. Its actual gap was exactly what this doc already flagged: no
+  independent =Stop()=, only stoppable via the external =ctx= passed to
+  =Start=.
+- The live journal subscription (=runJournalWithBackoff=) turned out to
+  be the *only* genuinely bare, hand-wrapped goroutine left in
+  =cmd_serve.go=.
+- REST's =Serve(ctx) error= already matches the shape, but is treated as
+  *fatal* (a REST error shuts the daemon down via an error channel),
+  while the journal is *non-fatal* (logged, retried) — folding both into
+  one uniform loop would blur that distinction for no clear benefit.
+- Bots don't fit the boot/shutdown lifecycle at all — they start
+  individually via API calls at arbitrary times, not at daemon boot, and
+  =StopAllBots()= already exists as a dedicated shutdown method.
+- MCP, embedded in =cmd_serve.go=, doesn't run its own loop — it's
+  mounted as an HTTP handler on REST.
+
+So there was exactly one real implementer (the journal subscription)
+and one concrete gap (=AccountSnapshot.Stop()=) — not the four-candidate
+picture this section originally sketched. Defining a formal =Runnable=
+interface for one implementer would repeat the mistake this doc already
+called out for a general =Service= interface ("nothing today calls
+services polymorphically"). Discussed with the user; resolved as the
+small version instead of the interface:
+
+- =account/account_snapshot.go= gained a real =Stop()= —
+  =Start= now derives its own cancellable context (=context.WithCancel=)
+  instead of just watching the caller's =ctx= directly, so =Stop()= can
+  cancel independently of the caller. Non-blocking by design (doesn't
+  wait for =pollLoop= to exit) — nothing today needs that guarantee,
+  unlike bots' =Stop=, which callers depend on to know when a bot has
+  fully stopped. Covered by two new tests
+  (=TestAccountSnapshot_StopsWithoutContextCancel=,
+  =TestAccountSnapshot_StopBeforeStartIsNoop=).
+- =cmd/serve/cmd_serve.go='s =runJournalWithBackoff= became
+  =liveJournalRunner=, a small struct with =Start(ctx) error= — same
+  retry/backoff body, no logic change, just given a name and a
+  conventional shape instead of being a bare function.
+- No =Runnable= interface declared anywhere. If a real caller ever needs
+  to manage a heterogeneous list of these things polymorphically, that's
+  the trigger to revisit — not before.
+
+Verified: =go build ./...=, =go vet ./...=, =go test ./...= (full repo,
+plus =-race= on the new =AccountSnapshot= tests) clean. Only the three
+files above changed.
 
 * Chunk 4 — done, 2026-07-22: redirect cmd/order + cmd/serve/cmd/live off the last order/journal delegators
 
