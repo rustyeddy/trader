@@ -1,8 +1,10 @@
-package service
+package botsvc
 
 import (
+	"log/slog"
 	"testing"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/stretchr/testify/assert"
@@ -14,20 +16,18 @@ import (
 	_ "github.com/rustyeddy/trader/strategies/pulse"
 )
 
-func testService() *Service {
-	return &Service{
-		OANDA:       &oanda.Client{BaseURL: "https://api-fxpractice.oanda.com", Token: "test"},
-		AccountID:   "test-account",
-		bots:        make(map[string]*botEntry),
-		tradeBotMap: make(map[string]string),
-	}
+func testOANDA() *oanda.Client {
+	return &oanda.Client{BaseURL: "https://api-fxpractice.oanda.com", Token: "test"}
+}
+
+func buildLiveStrategy(cfg StrategyConfig, instrument string) (account.LiveStrategy, error) {
+	return BuildLiveStrategy(cfg, instrument, testOANDA(), "test-account", nil, slog.Default())
 }
 
 func TestBuildLiveStrategy_Pulse(t *testing.T) {
-	svc := testService()
 	// pulse is now a strategy.Strategy wrapped in CandleStrategyAdapter; its
 	// Name() is "pulse/<instrument>/<granularity>".
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:   "pulse",
 		Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
 	}, "EUR_USD")
@@ -36,15 +36,13 @@ func TestBuildLiveStrategy_Pulse(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_PulseDefaults(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{}, "EUR_USD")
+	strat, err := buildLiveStrategy(StrategyConfig{}, "EUR_USD")
 	require.NoError(t, err)
 	assert.NotNil(t, strat)
 }
 
 func TestBuildLiveStrategy_Scalper(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:        "scalper",
 		Granularity: "M1",
 		Params:      map[string]any{"fast_period": 3, "slow_period": 8},
@@ -54,8 +52,7 @@ func TestBuildLiveStrategy_Scalper(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_Stress(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:   "stress",
 		Params: map[string]any{"trade_every": 1, "stop_pct": 0.2},
 	}, "EUR_USD")
@@ -64,15 +61,13 @@ func TestBuildLiveStrategy_Stress(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_UnknownKind(t *testing.T) {
-	svc := testService()
-	_, err := svc.BuildLiveStrategy(StrategyConfig{Kind: "bogus"}, "EUR_USD")
+	_, err := buildLiveStrategy(StrategyConfig{Kind: "bogus"}, "EUR_USD")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown strategy kind")
 }
 
 func TestBuildLiveStrategy_ScalperInvalidParams(t *testing.T) {
-	svc := testService()
-	_, err := svc.BuildLiveStrategy(StrategyConfig{
+	_, err := buildLiveStrategy(StrategyConfig{
 		Kind:   "scalper",
 		Params: map[string]any{"fast_period": 8, "slow_period": 3}, // fast >= slow
 	}, "EUR_USD")
@@ -82,8 +77,7 @@ func TestBuildLiveStrategy_ScalperInvalidParams(t *testing.T) {
 // ── generic backtest strategy fallback ───────────────────────────────────────
 
 func TestBuildLiveStrategy_Donchian(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:        "donchian-breakout",
 		Granularity: "D",
 		Params:      map[string]any{"period": 55, "close_strength": 0.6, "confirm_bars": 1},
@@ -94,8 +88,7 @@ func TestBuildLiveStrategy_Donchian(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_DonchianWithRegime(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:        "donchian-breakout",
 		Granularity: "H1",
 		Params:      map[string]any{"period": 20, "close_strength": 0.6, "confirm_bars": 2, "adx_period": 14, "adx_threshold": 25.0},
@@ -107,8 +100,7 @@ func TestBuildLiveStrategy_DonchianWithRegime(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_BBFade(t *testing.T) {
-	svc := testService()
-	strat, err := svc.BuildLiveStrategy(StrategyConfig{
+	strat, err := buildLiveStrategy(StrategyConfig{
 		Kind:        "bb-fade",
 		Granularity: "D",
 		Params:      map[string]any{"period": 20, "multiplier": 2.0, "atr_period": 14, "atr_mult": 2.5},
@@ -118,8 +110,7 @@ func TestBuildLiveStrategy_BBFade(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_BadExit(t *testing.T) {
-	svc := testService()
-	_, err := svc.BuildLiveStrategy(StrategyConfig{
+	_, err := buildLiveStrategy(StrategyConfig{
 		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
 		Exit:   strategy.ExitConfig{Kind: "bad-exit"},
@@ -129,8 +120,7 @@ func TestBuildLiveStrategy_BadExit(t *testing.T) {
 }
 
 func TestBuildLiveStrategy_BadRegime(t *testing.T) {
-	svc := testService()
-	_, err := svc.BuildLiveStrategy(StrategyConfig{
+	_, err := buildLiveStrategy(StrategyConfig{
 		Kind:   "donchian-breakout",
 		Params: map[string]any{"period": 20},
 		Regime: strategy.RegimeConfig{Kind: "bad-regime"},

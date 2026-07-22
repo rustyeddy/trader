@@ -1,4 +1,4 @@
-package service
+package botsvc
 
 import (
 	"context"
@@ -38,10 +38,10 @@ type CandleStrategyAdapter struct {
 	localWarmupBars int
 	scale           types.Scale6
 
-	oanda     *oanda.Client
-	accountID string
-	svc       *Service // for UpdateTradeStop calls
-	log       *slog.Logger
+	oanda           *oanda.Client
+	accountID       string
+	updateTradeStop func(ctx context.Context, tradeID string, stopPx, takePx float64) error // nil disables trailing stops
+	log             *slog.Logger
 
 	lastBarTime time.Time
 	warmedUp    bool
@@ -55,15 +55,17 @@ type CandleAdapterConfig struct {
 	Regime      strategy.RegimeFilter // nil means NoopRegime
 	Instrument  string                // OANDA format
 	Granularity string                // "H1" or "D"
-	WarmupBars  int                   // bars to fetch from OANDA for indicator warmup (default 100)
 	// LocalWarmupBars, when > 0, reads this many bars from the local candle
 	// store (set via datamanager.SetDataDir / --data-dir) before the OANDA warmup
 	// fetch. Use 500+ to ensure long-period regime filters and ATR percentile
 	// indicators are fully primed. Falls back gracefully if local data is absent.
+	WarmupBars      int // bars to fetch from OANDA for indicator warmup (default 100)
 	LocalWarmupBars int
 	OANDA           *oanda.Client
 	AccountID       string
-	Service         *Service // required for UpdateTradeStop; nil disables trailing stops
+	// UpdateTradeStop, if non-nil, is called to push a moved trailing stop to
+	// the broker. nil disables trailing stops.
+	UpdateTradeStop func(ctx context.Context, tradeID string, stopPx, takePx float64) error
 	Log             *slog.Logger
 }
 
@@ -97,7 +99,7 @@ func NewCandleStrategyAdapter(cfg CandleAdapterConfig) *CandleStrategyAdapter {
 		scale:           types.PriceScale,
 		oanda:           cfg.OANDA,
 		accountID:       cfg.AccountID,
-		svc:             cfg.Service,
+		updateTradeStop: cfg.UpdateTradeStop,
 		log:             log,
 	}
 }
@@ -450,8 +452,8 @@ func barsBefore(t time.Time, granularity string, n int) time.Time {
 // updateTrailingStops iterates open lots, computes the new chandelier stop,
 // and calls UpdateTradeStop on OANDA if the stop has moved.
 func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct market.Candle) {
-	if a.svc == nil {
-		return // no service — trailing stops disabled
+	if a.updateTradeStop == nil {
+		return // trailing stops disabled
 	}
 	for id, meta := range a.lots.meta {
 		lot := a.lots.byID[id]
@@ -475,7 +477,7 @@ func (a *CandleStrategyAdapter) updateTrailingStops(ctx context.Context, ct mark
 		}
 		// Stop moved — push to OANDA.
 		stopFloat := newStop.Float64()
-		if err := a.svc.UpdateTradeStop(ctx, id, stopFloat, 0); err != nil {
+		if err := a.updateTradeStop(ctx, id, stopFloat, 0); err != nil {
 			a.log.Warn("candle adapter: trailing stop update failed",
 				"trade_id", id, "stop", stopFloat, "err", err)
 			continue

@@ -1,11 +1,14 @@
-package service
+package botsvc
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/strategies/scalper"
 	"github.com/rustyeddy/trader/strategies/stress"
 	"github.com/rustyeddy/trader/strategy"
@@ -30,7 +33,11 @@ type StrategyConfig struct {
 // BuildLiveStrategy constructs a trader.LiveStrategy from a StrategyConfig.
 // Candle-based strategies (scalper, stress) are wrapped in a CandleStrategyAdapter.
 // instrument must be in OANDA format, e.g. "EUR_USD".
-func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (account.LiveStrategy, error) {
+//
+// updateTradeStop, if non-nil, is passed through to the adapter for
+// trailing-stop updates (see CandleAdapterConfig.UpdateTradeStop) — pass
+// nil to disable trailing stops.
+func BuildLiveStrategy(cfg StrategyConfig, instrument string, oandaClient *oanda.Client, accountID string, updateTradeStop func(ctx context.Context, tradeID string, stopPx, takePx float64) error, log *slog.Logger) (account.LiveStrategy, error) {
 	kind := strings.ToLower(strings.TrimSpace(cfg.Kind))
 	if kind == "" {
 		kind = "pulse"
@@ -54,13 +61,13 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (acco
 			return nil, err
 		}
 		return NewCandleStrategyAdapter(CandleAdapterConfig{
-			Strategy:    st,
-			Instrument:  instrument,
-			Granularity: granularity,
-			WarmupBars:  warmupBars,
-			OANDA:       s.OANDA,
-			AccountID:   s.AccountID,
-			Service:     s,
+			Strategy:        st,
+			Instrument:      instrument,
+			Granularity:     granularity,
+			WarmupBars:      warmupBars,
+			OANDA:           oandaClient,
+			AccountID:       accountID,
+			UpdateTradeStop: updateTradeStop,
 		}), nil
 
 	case "stress":
@@ -82,13 +89,13 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (acco
 			return nil, err
 		}
 		return NewCandleStrategyAdapter(CandleAdapterConfig{
-			Strategy:    st,
-			Instrument:  instrument,
-			Granularity: granularity,
-			WarmupBars:  warmupBars,
-			OANDA:       s.OANDA,
-			AccountID:   s.AccountID,
-			Service:     s,
+			Strategy:        st,
+			Instrument:      instrument,
+			Granularity:     granularity,
+			WarmupBars:      warmupBars,
+			OANDA:           oandaClient,
+			AccountID:       accountID,
+			UpdateTradeStop: updateTradeStop,
 		}), nil
 
 	default:
@@ -123,14 +130,15 @@ func (s *Service) BuildLiveStrategy(cfg StrategyConfig, instrument string) (acco
 			Granularity:     granularity,
 			WarmupBars:      warmup,
 			LocalWarmupBars: cfg.LocalWarmupBars,
-			OANDA:           s.OANDA,
-			AccountID:       s.AccountID,
-			Service:         s,
-			Log:             s.Log,
+			OANDA:           oandaClient,
+			AccountID:       accountID,
+			UpdateTradeStop: updateTradeStop,
+			Log:             log,
 		}), nil
 	}
 }
 
+// Use types conversion
 func toInt(v any, def int) int {
 	switch x := v.(type) {
 	case int:
@@ -145,6 +153,7 @@ func toInt(v any, def int) int {
 	return def
 }
 
+// Use the types conversion
 func toFloat(v any, def float64) float64 {
 	switch x := v.(type) {
 	case float64:

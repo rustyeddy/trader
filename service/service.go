@@ -16,11 +16,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 )
 
 // Service is the protocol-agnostic business-logic surface.
@@ -40,14 +40,10 @@ type Service struct {
 	// value is ready to use — see account.Registry's doc comment.
 	registry account.Registry
 
-	botsMu sync.RWMutex
-	bots   map[string]*botEntry
-
-	// tradeBotMu guards tradeBotMap, which maps OANDA tradeID → bot ID.
-	// Populated by the live runner when a trade opens; read by LiveJournal
-	// when the trade closes to tag the journal record.
-	tradeBotMu  sync.RWMutex
-	tradeBotMap map[string]string
+	// bots tracks running/stopped live-strategy bots and the trade→bot
+	// tagging map. Zero value is ready to use — see botsvc.Registry's doc
+	// comment.
+	bots botsvc.Registry
 }
 
 // Config bundles the inputs needed to construct a Service.
@@ -86,35 +82,10 @@ func New(cfg Config) (*Service, error) {
 	}
 
 	return &Service{
-		OANDA:       client,
-		Log:         cfg.Log,
-		AccountID:   cfg.AccountID,
-		bots:        make(map[string]*botEntry),
-		tradeBotMap: make(map[string]string),
+		OANDA:     client,
+		Log:       cfg.Log,
+		AccountID: cfg.AccountID,
 	}, nil
-}
-
-// RegisterTradeBotID records that the given OANDA trade was opened by botID.
-// Called by the live runner immediately after a successful PlaceMarketOrder.
-func (s *Service) RegisterTradeBotID(tradeID, botID string) {
-	if tradeID == "" || botID == "" {
-		return
-	}
-	s.tradeBotMu.Lock()
-	if s.tradeBotMap == nil {
-		s.tradeBotMap = make(map[string]string)
-	}
-	s.tradeBotMap[tradeID] = botID
-	s.tradeBotMu.Unlock()
-}
-
-// LookupTradeBotID returns the bot ID that opened the given OANDA trade, or
-// empty string if none was registered (e.g. trade opened outside a bot).
-func (s *Service) LookupTradeBotID(tradeID string) string {
-	s.tradeBotMu.RLock()
-	id := s.tradeBotMap[tradeID]
-	s.tradeBotMu.RUnlock()
-	return id
 }
 
 // ResolveAccount fills in s.AccountID by querying OANDA when it wasn't

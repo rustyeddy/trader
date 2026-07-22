@@ -1,7 +1,58 @@
 #+TITLE: service.Service God Object — Refactor Design
 #+DATE: 2026-07-21
-#+PROPERTY: status in progress — chunk 1 done 2026-07-21
+#+PROPERTY: status in progress — chunks 1-2 done 2026-07-21
 #+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Chunk 2 — done, 2026-07-21: extract bots into service/bots
+
+Bot orchestration (=StartBot=/=ListBots=/=StopBot=/etc.), the running-bot
+registry, the trade→bot tagging map, and strategy construction
+(=BuildLiveStrategy=) moved into =service/bots= (package =botsvc=),
+mirroring the existing =service/review=→=reviewsvc= /
+=service/backtest=→=backtestsvc= convention (directory =service/X=,
+package =Xsvc=).
+
+- Bots can't follow =reviewsvc=/=backtestsvc='s "construct fresh every
+  call" shape — the running-bot map must persist across calls. Instead
+  mirrors chunk B's =account.Registry=: a zero-value-usable
+  =botsvc.Registry= stored as a *value field* on =*Service=
+  (=bots botsvc.Registry=, no constructor), with methods taking
+  =OANDA=/=Log= as parameters — same reasoning as =account.Registry=
+  (bare =&Service{OANDA: ..., Log: ...}= literals, used throughout
+  tests/cmd, must keep working with zero extra wiring).
+- Found and fixed a real coupling: =BuildLiveStrategy= passed the
+  *entire* =*Service= into =CandleAdapterConfig.Service=, and
+  =service/portfolio_config.go= independently built a throwaway
+  =&Service{OANDA, AccountID, Log}= for the same purpose — a second,
+  independent instance of the identical workaround. Traced every use of
+  that field in =candle_strategy_adapter.go=: exactly one call,
+  =a.svc.UpdateTradeStop(...)=, already nil-guarded ("nil disables
+  trailing stops"). Same shape as chunks A/1's =*Service= dependencies
+  that turned out to be one narrow method call. Replaced with
+  =CandleAdapterConfig.UpdateTradeStop func(ctx, tradeID string, stopPx,
+  takePx float64) error= — bots' call site passes =acc.UpdateTradeStop=
+  (already has =*account.Account= in scope);
+  =portfolio_config.go= builds one via
+  =account.NewSession(accountID, oandaClient, log).UpdateTradeStop= —
+  both simpler than constructing a throwaway =*Service=.
+- =CandleStrategyAdapter=/=CandleAdapterConfig= is used by two
+  subsystems, not just bots — =portfolio_config.go= builds one directly
+  for =RunPortfolio=, bypassing =BuildLiveStrategy=. So
+  =candle_strategy_adapter.go= moved into =service/bots= too (tightly
+  coupled to =BuildLiveStrategy=), and =portfolio_config.go= (staying in
+  =service=) imports =service/bots= for the type — one-way
+  =service= → =service/bots=, no cycle.
+- External API surface unchanged, via the same technique
+  =service/review.go= already uses: type aliases. =BotConfig=/
+  =BotStatus=/=StrategyConfig= are referenced ~25 times across
+  =cmd/bot=, =api/rest/bots*.go=, =api/mcp/tools.go=. Rather than touch
+  all of them, the real types moved to =botsvc= and =service/bots.go=
+  re-exports them: =type BotConfig = botsvc.BotConfig= etc.
+  =Service.StartBot=/etc. also kept identical signatures. Confirmed via
+  =git status= after the move: *zero changes* in =cmd/bot/=,
+  =api/rest/=, =api/mcp/=, =cmd/serve/=.
+- Verified: =go build ./...=, =go vet ./...=, =go test ./...= (full
+  repo, including the new =service/bots= package) all clean.
 
 * Chunk 1 — done, 2026-07-21: relocate OANDA client + Logger construction
 

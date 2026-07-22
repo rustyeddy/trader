@@ -1,13 +1,24 @@
-package service
+package botsvc
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// newTestAccount builds a session Account backed by a fake (unreachable in
+// these tests — no network call is needed to construct or cache a session)
+// OANDA client, matching the old testService() helper's setup.
+func newTestAccount() *account.Account {
+	client := &oanda.Client{BaseURL: "https://api-fxpractice.oanda.com", Token: "test"}
+	return account.NewSession("test-account", client, slog.Default())
+}
 
 func TestNewBotID_Unique(t *testing.T) {
 	ids := map[string]struct{}{}
@@ -37,56 +48,60 @@ func TestParseBotDuration_Invalid(t *testing.T) {
 }
 
 func TestStartBot_MissingInstrument(t *testing.T) {
-	svc := testService()
-	_, err := svc.StartBot(context.Background(), BotConfig{
+	var reg Registry
+	acc := newTestAccount()
+	_, err := reg.StartBotOnAccount(context.Background(), acc, BotConfig{
 		Strategy: StrategyConfig{Kind: "pulse", Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5}},
-	})
+	}, acc.OANDA, slog.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "instrument")
 }
 
 func TestStartBot_UnknownStrategy(t *testing.T) {
-	svc := testService()
-	_, err := svc.StartBot(context.Background(), BotConfig{
+	var reg Registry
+	acc := newTestAccount()
+	_, err := reg.StartBotOnAccount(context.Background(), acc, BotConfig{
 		Instrument: "EUR_USD",
 		Strategy:   StrategyConfig{Kind: "bogus"},
-	})
+	}, acc.OANDA, slog.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown strategy kind")
 }
 
 func TestStartBot_InvalidDuration(t *testing.T) {
-	svc := testService()
-	_, err := svc.StartBot(context.Background(), BotConfig{
+	var reg Registry
+	acc := newTestAccount()
+	_, err := reg.StartBotOnAccount(context.Background(), acc, BotConfig{
 		Instrument:   "EUR_USD",
 		TickInterval: "notvalid",
 		Strategy:     StrategyConfig{Kind: "pulse", Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5}},
-	})
+	}, acc.OANDA, slog.Default())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tick_interval")
 }
 
 func TestStopBot_NotFound(t *testing.T) {
-	svc := testService()
-	err := svc.StopBot("nonexistent")
+	var reg Registry
+	err := reg.StopBot("nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
 func TestGetBot_NotFound(t *testing.T) {
-	svc := testService()
-	_, err := svc.GetBot("nonexistent")
+	var reg Registry
+	_, err := reg.GetBot("nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
 
 func TestListBots_Empty(t *testing.T) {
-	svc := testService()
-	assert.Empty(t, svc.ListBots())
+	var reg Registry
+	assert.Empty(t, reg.ListBots())
 }
 
 func TestStopAllBots_CancelsAndWaits(t *testing.T) {
-	svc := testService()
+	var reg Registry
+	acc := newTestAccount()
 
 	// Start two bots with long tick intervals so they sit idle in the timer wait.
 	cfg := BotConfig{
@@ -98,19 +113,19 @@ func TestStopAllBots_CancelsAndWaits(t *testing.T) {
 	}
 
 	cfg.Instrument = "EUR_USD"
-	s1, err := svc.StartBot(context.Background(), cfg)
+	s1, err := reg.StartBotOnAccount(context.Background(), acc, cfg, acc.OANDA, slog.Default())
 	require.NoError(t, err)
 	assert.Equal(t, "running", s1.Status)
 
 	cfg.Instrument = "GBP_USD"
-	s2, err := svc.StartBot(context.Background(), cfg)
+	s2, err := reg.StartBotOnAccount(context.Background(), acc, cfg, acc.OANDA, slog.Default())
 	require.NoError(t, err)
 	assert.Equal(t, "running", s2.Status)
 
 	// StopAllBots must return without hanging, and all goroutines must be done.
 	done := make(chan struct{})
 	go func() {
-		svc.StopAllBots()
+		reg.StopAllBots()
 		close(done)
 	}()
 
@@ -122,7 +137,7 @@ func TestStopAllBots_CancelsAndWaits(t *testing.T) {
 
 	// Both bots should now be in a terminal state.
 	for _, id := range []string{s1.ID, s2.ID} {
-		b, err := svc.GetBot(id)
+		b, err := reg.GetBot(id)
 		require.NoError(t, err)
 		assert.NotEqual(t, "running", b.Status, "bot %s should not be running after StopAllBots", id)
 	}
@@ -131,28 +146,29 @@ func TestStopAllBots_CancelsAndWaits(t *testing.T) {
 func TestStopAllBots_AlreadyStoppedBot(t *testing.T) {
 	// StopAllBots must also wait for a bot whose status flipped to "stopped"
 	// before close(done) ran — i.e. it must not skip non-"running" entries.
-	svc := testService()
+	var reg Registry
+	acc := newTestAccount()
 
-	status, err := svc.StartBot(context.Background(), BotConfig{
+	status, err := reg.StartBotOnAccount(context.Background(), acc, BotConfig{
 		Instrument:   "EUR_USD",
 		TickInterval: "24h",
 		Strategy: StrategyConfig{
 			Kind:   "pulse",
 			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
 		},
-	})
+	}, acc.OANDA, slog.Default())
 	require.NoError(t, err)
 
 	// Stop the bot via StopBot first so its status becomes "stopped".
-	require.NoError(t, svc.StopBot(status.ID))
+	require.NoError(t, reg.StopBot(status.ID))
 
-	b, _ := svc.GetBot(status.ID)
+	b, _ := reg.GetBot(status.ID)
 	assert.Equal(t, "stopped", b.Status)
 
 	// StopAllBots should return immediately (done is already closed).
 	done := make(chan struct{})
 	go func() {
-		svc.StopAllBots()
+		reg.StopAllBots()
 		close(done)
 	}()
 
@@ -167,10 +183,11 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := testService()
+	var reg Registry
+	acc := newTestAccount()
 
 	// Use pulse with a very long tick interval so the goroutine just waits.
-	status, err := svc.StartBot(ctx, BotConfig{
+	status, err := reg.StartBotOnAccount(ctx, acc, BotConfig{
 		Instrument:   "EUR_USD",
 		TickInterval: "24h",
 		RiskPct:      0.5,
@@ -178,7 +195,7 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 			Kind:   "pulse",
 			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
 		},
-	})
+	}, acc.OANDA, slog.Default())
 	require.NoError(t, err)
 	assert.Equal(t, "running", status.Status)
 	assert.Equal(t, "EUR_USD", status.Instrument)
@@ -191,52 +208,52 @@ func TestStartBot_RegistersAndStop(t *testing.T) {
 	assert.Nil(t, status.StoppedAt)
 
 	// Listed.
-	bots := svc.ListBots()
+	bots := reg.ListBots()
 	require.Len(t, bots, 1)
 	assert.Equal(t, status.ID, bots[0].ID)
 
 	// Get by ID.
-	got, err := svc.GetBot(status.ID)
+	got, err := reg.GetBot(status.ID)
 	require.NoError(t, err)
 	assert.Equal(t, status.ID, got.ID)
 
 	// Stop it.
-	require.NoError(t, svc.StopBot(status.ID))
+	require.NoError(t, reg.StopBot(status.ID))
 
 	// Status should now be "stopped" with StoppedAt set.
-	final, err := svc.GetBot(status.ID)
+	final, err := reg.GetBot(status.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "stopped", final.Status)
 	assert.NotNil(t, final.StoppedAt)
 }
 
 func TestRegisterAndLookupTradeBotID(t *testing.T) {
-	svc := testService()
+	var reg Registry
 
 	// Unknown trade returns "".
-	assert.Equal(t, "", svc.LookupTradeBotID("999"))
+	assert.Equal(t, "", reg.LookupTradeBotID("999"))
 
-	svc.RegisterTradeBotID("trade-1", "bot-abc")
-	svc.RegisterTradeBotID("trade-2", "bot-xyz")
+	reg.RegisterTradeBotID("trade-1", "bot-abc")
+	reg.RegisterTradeBotID("trade-2", "bot-xyz")
 
-	assert.Equal(t, "bot-abc", svc.LookupTradeBotID("trade-1"))
-	assert.Equal(t, "bot-xyz", svc.LookupTradeBotID("trade-2"))
-	assert.Equal(t, "", svc.LookupTradeBotID("trade-99"))
+	assert.Equal(t, "bot-abc", reg.LookupTradeBotID("trade-1"))
+	assert.Equal(t, "bot-xyz", reg.LookupTradeBotID("trade-2"))
+	assert.Equal(t, "", reg.LookupTradeBotID("trade-99"))
 }
 
 func TestRegisterTradeBotID_EmptyInputsNoOp(t *testing.T) {
-	svc := testService()
+	var reg Registry
 	// Nil/empty inputs must not panic or pollute the map.
-	svc.RegisterTradeBotID("", "bot-abc")
-	svc.RegisterTradeBotID("trade-1", "")
-	assert.Equal(t, "", svc.LookupTradeBotID(""))
-	assert.Equal(t, "", svc.LookupTradeBotID("trade-1"))
+	reg.RegisterTradeBotID("", "bot-abc")
+	reg.RegisterTradeBotID("trade-1", "")
+	assert.Equal(t, "", reg.LookupTradeBotID(""))
+	assert.Equal(t, "", reg.LookupTradeBotID("trade-1"))
 }
 
 func TestRegisterTradeBotID_InitializesNilMap(t *testing.T) {
-	svc := &Service{}
+	reg := &Registry{}
 	assert.NotPanics(t, func() {
-		svc.RegisterTradeBotID("trade-1", "bot-abc")
+		reg.RegisterTradeBotID("trade-1", "bot-abc")
 	})
-	assert.Equal(t, "bot-abc", svc.LookupTradeBotID("trade-1"))
+	assert.Equal(t, "bot-abc", reg.LookupTradeBotID("trade-1"))
 }

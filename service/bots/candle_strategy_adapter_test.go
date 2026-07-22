@@ -1,10 +1,9 @@
-package service
+package botsvc
 
 import (
 	"context"
 	"log/slog"
 	"math"
-	"os"
 	"testing"
 	"time"
 
@@ -310,39 +309,4 @@ func (n *noopStrategy) Ready() bool             { return true }
 func (n *noopStrategy) StopDescription() string { return "" }
 func (n *noopStrategy) Update(_ context.Context, _ *market.Candle, _ strategy.StrategyContext) strategy.Signal {
 	return strategy.Hold("noop")
-}
-
-// ── portfolio config ──────────────────────────────────────────────────────────
-
-func TestLoadPortfolioConfig_Defaults(t *testing.T) {
-	t.Parallel()
-	// Write a minimal config to a temp file.
-	content := []byte(`instruments: []`)
-	f := t.TempDir() + "/p.yml"
-	require.NoError(t, writeFile(f, content))
-
-	cfg, err := LoadPortfolioConfig(f)
-	require.NoError(t, err)
-	assert.Equal(t, "practice", cfg.Env)
-	assert.Equal(t, 1.0, cfg.RiskPct)
-	assert.Equal(t, 10.0, cfg.DrawdownCircuitPct)
-}
-
-func TestLoadPortfolioConfig_MissingFile(t *testing.T) {
-	t.Parallel()
-	_, err := LoadPortfolioConfig("/nonexistent/path.yml")
-	require.Error(t, err)
-}
-
-// ── circuit breaker ───────────────────────────────────────────────────────────
-
-func TestDrawdownCircuitBreaker_ZeroLimitAlwaysAllows(t *testing.T) {
-	t.Parallel()
-	cb := &drawdownCircuitBreaker{limitPct: 0}
-	assert.True(t, cb.allowOpen(context.Background()))
-}
-
-// writeFile is a test helper to write bytes to a path.
-func writeFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
 }

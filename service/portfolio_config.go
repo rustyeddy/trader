@@ -8,7 +8,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 	"github.com/rustyeddy/trader/strategy"
 	"github.com/rustyeddy/trader/types"
 )
@@ -122,9 +124,9 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			return nil, fmt.Errorf("instrument %s exit: %w", y.Instrument, err)
 		}
 
-		// Wrap the service so the adapter can update trailing stops on OANDA.
-		svc := &Service{OANDA: oandaClient, AccountID: accountID, Log: log}
-		adapter := NewCandleStrategyAdapter(CandleAdapterConfig{
+		// A session Account so the adapter can update trailing stops on OANDA.
+		sess := account.NewSession(accountID, oandaClient, log)
+		adapter := botsvc.NewCandleStrategyAdapter(botsvc.CandleAdapterConfig{
 			Strategy:        strat,
 			Exit:            exit,
 			Regime:          regime,
@@ -134,7 +136,7 @@ func BuildPortfolioRunConfig(cfg *PortfolioConfig, oandaClient *oanda.Client, ac
 			LocalWarmupBars: localWarmup,
 			OANDA:           oandaClient,
 			AccountID:       accountID,
-			Service:         svc,
+			UpdateTradeStop: sess.UpdateTradeStop,
 			Log:             log,
 		})
 

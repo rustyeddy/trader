@@ -52,6 +52,24 @@ func TestLoadPortfolioConfig_InvalidYAML(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse portfolio config")
 }
 
+func TestLoadPortfolioConfig_Defaults(t *testing.T) {
+	// Write a minimal config to a temp file.
+	content := []byte(`instruments: []`)
+	f := t.TempDir() + "/p.yml"
+	require.NoError(t, os.WriteFile(f, content, 0o644))
+
+	cfg, err := LoadPortfolioConfig(f)
+	require.NoError(t, err)
+	assert.Equal(t, "practice", cfg.Env)
+	assert.Equal(t, 1.0, cfg.RiskPct)
+	assert.Equal(t, 10.0, cfg.DrawdownCircuitPct)
+}
+
+func TestLoadPortfolioConfig_MissingFile(t *testing.T) {
+	_, err := LoadPortfolioConfig("/nonexistent/path.yml")
+	require.Error(t, err)
+}
+
 // ── BuildPortfolioRunConfig ──────────────────────────────────────────────────
 
 func testLogger() *slog.Logger { return slog.Default() }
