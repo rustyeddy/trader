@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/rustyeddy/trader/account"
 )
@@ -12,51 +11,13 @@ import (
 // invalid IDs surface as errors from the first OANDA call. Use Accounts to
 // enumerate the accounts the token can actually see.
 func (s *Service) Account(ctx context.Context, id string) (*account.Account, error) {
-	if id == "" {
-		return nil, fmt.Errorf("account: empty account ID")
-	}
-
-	s.accountsMu.RLock()
-	a, ok := s.accounts[id]
-	s.accountsMu.RUnlock()
-	if ok {
-		return a, nil
-	}
-
-	s.accountsMu.Lock()
-	defer s.accountsMu.Unlock()
-	// Re-check after acquiring the write lock — another goroutine may have
-	// created it between the RUnlock and Lock above.
-	if a, ok := s.accounts[id]; ok {
-		return a, nil
-	}
-	if s.accounts == nil {
-		s.accounts = make(map[string]*account.Account)
-	}
-	a = account.NewSession(id, s.OANDA, s.Log)
-	s.accounts[id] = a
-	return a, nil
+	return s.registry.Account(ctx, id, s.OANDA, s.Log)
 }
 
 // Accounts returns a session for every account the token can access. The
 // returned sessions are the same cached instances Account would return.
 func (s *Service) Accounts(ctx context.Context) ([]*account.Account, error) {
-	if s.OANDA == nil {
-		return nil, fmt.Errorf("accounts: OANDA client not configured")
-	}
-	refs, err := s.OANDA.GetAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("discover accounts: %w", err)
-	}
-	out := make([]*account.Account, 0, len(refs))
-	for _, r := range refs {
-		a, err := s.Account(ctx, r.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, nil
+	return s.registry.Accounts(ctx, s.OANDA, s.Log)
 }
 
 // FirstAccount returns the account that read-only and UI operations default
@@ -68,32 +29,7 @@ func (s *Service) Accounts(ctx context.Context) ([]*account.Account, error) {
 // Mutating operations must never resolve their account through FirstAccount;
 // they require an explicitly named account.
 func (s *Service) FirstAccount(ctx context.Context) (*account.Account, error) {
-	if s.AccountID != "" {
-		return s.Account(ctx, s.AccountID)
-	}
-
-	s.accountsMu.RLock()
-	id := s.firstID
-	s.accountsMu.RUnlock()
-	if id != "" {
-		return s.Account(ctx, id)
-	}
-
-	if s.OANDA == nil {
-		return nil, fmt.Errorf("account: OANDA client not configured")
-	}
-	refs, err := s.OANDA.GetAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("discover accounts: %w", err)
-	}
-	if len(refs) == 0 {
-		return nil, fmt.Errorf("no accounts found for this token")
-	}
-
-	s.accountsMu.Lock()
-	s.firstID = refs[0].ID
-	s.accountsMu.Unlock()
-	return s.Account(ctx, refs[0].ID)
+	return s.registry.FirstAccount(ctx, s.AccountID, s.OANDA, s.Log)
 }
 
 // DefaultAccount resolves the Service's default account (s.AccountID,
@@ -105,5 +41,5 @@ func (s *Service) DefaultAccount(ctx context.Context) (*account.Account, error) 
 	if err := s.ResolveAccount(ctx); err != nil {
 		return nil, err
 	}
-	return s.Account(ctx, s.AccountID)
+	return s.registry.Account(ctx, s.AccountID, s.OANDA, s.Log)
 }

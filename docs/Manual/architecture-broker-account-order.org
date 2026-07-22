@@ -13,14 +13,15 @@
   now goes through =a.broker()=; only =GetPricing=/=StreamPricing= remain
   on the concrete client, correctly deferred to =DataProvider= (not yet
   defined).
-- Phase 3 (below) — two parts. The =service.Account= merge (moving
-  =service.Account/Accounts/FirstAccount/DefaultAccount= into =account/=
-  as the session registry) is *not yet started*. The =account.Ledger=
-  merge ("Ledger merges into Account too" below — =Ledger= does not
-  survive as a separate wrapping type, and =Account= does *not* hold a
-  =Broker= field, correcting this doc's earlier wording) is *done*,
-  landed as Phase 4's chunk 3 (commit =59e4869=) since exploring chunk 2
-  surfaced it as a prerequisite.
+- Phase 3 (below) — *done*. The =service.Account= merge (chunk A, commit
+  =2f4dc1d= — per-account state/methods; chunk B, 2026-07-21 — the
+  =Account/Accounts/FirstAccount/DefaultAccount= session registry, as
+  =account.Registry=) is complete; =service.Account= no longer exists.
+  The =account.Ledger= merge ("Ledger merges into Account too" below —
+  =Ledger= does not survive as a separate wrapping type, and =Account=
+  does *not* hold a =Broker= field, correcting this doc's earlier
+  wording) landed earlier, as Phase 4's chunk 3 (commit =59e4869=) since
+  exploring chunk 2 surfaced it as a prerequisite.
 - Phase 4 (below) — reshaped 2026-07-22 mid-discussion: order fills
   (including stop/take triggers) are events the *Broker* emits
   asynchronously via =StreamTransactions=, not something a synchronous
@@ -297,15 +298,48 @@ directly on =account.Account= via =account/events.go=. =engine.Trader=
 (=engine/trader.go=) embeds =*account.Account= directly, not
 =*account.Ledger=.
 
-** Where the registry goes — chunk B, not yet started
+** Where the registry goes — done, chunk B, 2026-07-21
 
 =Service.accounts map[string]*Account=/=accountsMu=/=firstID= and the
-=Account()=/=Accounts()=/=FirstAccount()=/=DefaultAccount()= constructor
-methods move into =account/= alongside the merged type — e.g. an
-=account.Registry= (or package-level functions closing over a registry
-struct) that constructs/caches sessions by OANDA account ID. =service.Service=
-keeps only a thin facade delegating to it, the same shape as
-=service/review.go= delegating to =reviewsvc= today.
+=Account()=/=Accounts()=/=FirstAccount()=/=DefaultAccount()= logic moved
+into =account/registry.go= as =account.Registry= — =service.Service= keeps
+only a thin facade (=service/account_session.go=, now four one-line
+delegations) delegating to it, the same shape as =service/review.go=
+delegating to =reviewsvc=.
+
+One deviation from the plan as first written: =Registry= does *not* hold
+an =OANDA=/=Log= field of its own. Its methods (=Account=/=Accounts=/
+=FirstAccount=) take the OANDA client and logger as parameters instead,
+supplied by =Service= on every call. Reasons, found while designing this
+chunk:
+
+- Several existing tests construct =Service= via a bare
+  =&Service{OANDA: ..., AccountID: ...}= struct literal, bypassing
+  =New()=. The old =accounts map= worked in that case because it
+  lazily self-initialized on first use. A =Registry= built via a
+  =NewRegistry(oanda, log)= constructor, stored as a field =Service= must
+  remember to populate, would nil-pointer-panic in every one of those
+  tests. Taking the client/log as parameters keeps =Registry='s zero
+  value fully usable — =service.go='s =registry account.Registry= field
+  needs no constructor call in =New()= at all, exactly like the map it
+  replaced.
+- It's also more faithful to the pre-move behavior than caching
+  client/log once would be: the old =&Account{ID: id, svc: s}= read
+  =a.svc.OANDA=/=a.svc.Log= live through the =svc= pointer on every call,
+  not a value frozen at cache-insert time.
+
+=ResolveAccount= (resolves/validates the *configured default*,
+=Service.AccountID=) stays on =Service=, distinct from the registry (a
+*cache of already-resolved sessions*) — =DefaultAccount= still composes
+the two, unchanged. No external caller (=cmd/order=, =cmd/serve=,
+=api/rest=, =api/mcp=) needed any changes — =Service='s method signatures
+are unchanged, only their implementation moved. Verified:
+=go build ./...=, =go vet ./...=, =go test ./...= (full repo, plus
+=-race= on the concurrency-safety test) all clean.
+
+Phase 3 is now complete — =service.Account= is gone, =account.Account= is
+the one merged type, and =service.Service= holds no account-session state
+of its own.
 
 ** Naming: =service/account= vs. =./account=
 

@@ -38,12 +38,9 @@ type Service struct {
 	// Backtests optionally overrides how compiled backtests are executed.
 	Backtests backtest.BacktestExecutor
 
-	// accounts caches the per-account sessions keyed by OANDA account ID.
-	// firstID caches the first account discovered for the token, used by
-	// FirstAccount as the read/UI default when no AccountID is configured.
-	accountsMu sync.RWMutex
-	accounts   map[string]*account.Account
-	firstID    string
+	// registry caches per-account sessions keyed by OANDA account ID. Zero
+	// value is ready to use — see account.Registry's doc comment.
+	registry account.Registry
 
 	botsMu sync.RWMutex
 	bots   map[string]*botEntry
@@ -99,7 +96,6 @@ func New(cfg Config) (*Service, error) {
 		OANDA:       &oanda.Client{BaseURL: baseURL, Token: token},
 		Log:         log,
 		AccountID:   cfg.AccountID,
-		accounts:    make(map[string]*account.Account),
 		bots:        make(map[string]*botEntry),
 		tradeBotMap: make(map[string]string),
 	}, nil
