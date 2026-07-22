@@ -5,12 +5,16 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 	botsvc "github.com/rustyeddy/trader/service/bots"
 )
 
 // StartBot launches a bot on the default account. See botsvc.Registry.StartBotOnAccount.
 func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, error) {
-	acc, err := s.DefaultAccount(ctx)
+	if err := s.ResolveAccount(ctx); err != nil {
+		return nil, fmt.Errorf("bots: %w", err)
+	}
+	acc, err := accountsvc.Resolve(ctx, s.AccountID, s.OANDA, s.Log)
 	if err != nil {
 		return nil, fmt.Errorf("bots: %w", err)
 	}
@@ -19,7 +23,7 @@ func (s *Service) StartBot(ctx context.Context, cfg BotConfig) (*BotStatus, erro
 
 // StartBotOnAccount launches a bot on the given account (REST/MCP
 // account-scoped routes resolve the account themselves via
-// Service.Account/FirstAccount and call this instead of StartBot).
+// accountsvc.Resolve/ResolveFirst and call this instead of StartBot).
 func (s *Service) StartBotOnAccount(ctx context.Context, acc *account.Account, cfg BotConfig) (*BotStatus, error) {
 	return s.bots.StartBotOnAccount(ctx, acc, cfg, s.OANDA, s.Log)
 }

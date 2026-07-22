@@ -10,6 +10,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -325,9 +326,9 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 // first/default account when id is empty.
 func (s *Server) readAccount(ctx context.Context, id string) (*account.Account, error) {
 	if id == "" {
-		return s.svc.FirstAccount(ctx)
+		return accountsvc.ResolveFirst(ctx, s.svc.AccountID, s.svc.OANDA, s.svc.Log)
 	}
-	return s.svc.Account(ctx, id)
+	return accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
 }
 
 // writeAccount resolves the account for a mutating tool. Mutations must name
@@ -336,7 +337,7 @@ func (s *Server) writeAccount(ctx context.Context, id string) (*account.Account,
 	if id == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "account_id is required for write operations"}
 	}
-	acc, err := s.svc.Account(ctx, id)
+	acc, err := accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
 	if err != nil {
 		return nil, &rpcError{Code: errInvalidParams, Message: fmt.Sprintf("resolve account: %v", err)}
 	}
@@ -344,16 +345,16 @@ func (s *Server) writeAccount(ctx context.Context, id string) (*account.Account,
 }
 
 func (s *Server) toolListAccounts(ctx context.Context) (any, *rpcError) {
-	accts, err := s.svc.Accounts(ctx)
+	refs, err := accountsvc.ListAccounts(ctx, s.svc.OANDA)
 	if err != nil {
 		return errContent(fmt.Sprintf("list_accounts: %v", err)), nil
 	}
-	def, _ := s.svc.FirstAccount(ctx)
-	out := make([]map[string]any, 0, len(accts))
-	for _, a := range accts {
+	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
 		out = append(out, map[string]any{
-			"id":         a.ID,
-			"is_default": def != nil && a.ID == def.ID,
+			"id":         ref.ID,
+			"is_default": ref.ID == defaultID,
 		})
 	}
 	return jsonContent(map[string]any{"accounts": out}), nil
@@ -748,7 +749,7 @@ func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any,
 func (s *Server) toolListBots(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
 	var bots []service.BotStatus
 	if id := parseAccountID(raw); id != "" {
-		acc, err := s.svc.Account(ctx, id)
+		acc, err := accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
 		if err != nil {
 			return errContent(fmt.Sprintf("list_bots: %v", err)), nil
 		}

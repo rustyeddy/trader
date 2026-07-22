@@ -18,6 +18,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
 // Server wraps a Service and exposes its methods over HTTP.
@@ -257,9 +258,9 @@ func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*accoun
 		err error
 	)
 	if id := r.PathValue("accountID"); id != "" {
-		acc, err = s.svc.Account(r.Context(), id)
+		acc, err = accountsvc.Resolve(r.Context(), id, s.svc.OANDA, s.svc.Log)
 	} else {
-		acc, err = s.svc.FirstAccount(r.Context())
+		acc, err = accountsvc.ResolveFirst(r.Context(), s.svc.AccountID, s.svc.OANDA, s.svc.Log)
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("resolve account: %v", err))

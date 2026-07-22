@@ -20,6 +20,7 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -135,7 +136,10 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	if err != nil {
 		return err
 	}
-	acc, err := svc.DefaultAccount(ctx)
+	if err := svc.ResolveAccount(ctx); err != nil {
+		return err
+	}
+	acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
 	if err != nil {
 		return err
 	}
@@ -222,7 +226,7 @@ func runListOrders(cmd *cobra.Command, args []string, rc *config.RootConfig) err
 	if err != nil {
 		return err
 	}
-	acc, err := svc.FirstAccount(ctx)
+	acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
 	if err != nil {
 		return err
 	}
@@ -273,7 +277,10 @@ func runCloseOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) err
 	if err != nil {
 		return err
 	}
-	acc, err := svc.DefaultAccount(ctx)
+	if err := svc.ResolveAccount(ctx); err != nil {
+		return err
+	}
+	acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
 	if err != nil {
 		return err
 	}
@@ -321,7 +328,7 @@ func transactionsCmd(rc *config.RootConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			acc, err := svc.FirstAccount(ctx)
+			acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
 			if err != nil {
 				return err
 			}
@@ -386,7 +393,7 @@ func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			acc, err := svc.FirstAccount(ctx)
+			acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
 			if err != nil {
 				return err
 			}
@@ -458,7 +465,10 @@ Examples:
 			if err != nil {
 				return err
 			}
-			acc, err := svc.DefaultAccount(ctx)
+			if err := svc.ResolveAccount(ctx); err != nil {
+				return err
+			}
+			acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
 			if err != nil {
 				return err
 			}

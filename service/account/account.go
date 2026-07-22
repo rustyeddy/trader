@@ -10,6 +10,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers"
@@ -53,4 +54,29 @@ func ListAccounts(ctx context.Context, broker brokers.Broker) ([]AccountRef, err
 // summarized instead.
 func AccountSummaries(ctx context.Context, broker brokers.Broker, accountIDs []string) ([]SummaryResult, error) {
 	return account.GetAccountSummary(ctx, broker, accountIDs)
+}
+
+// Resolve returns the cached session for the given account ID — see
+// ./account's process-wide session cache — creating it on first use.
+func Resolve(ctx context.Context, id string, client *oanda.Client, log *slog.Logger) (*account.Account, error) {
+	return account.Resolve(ctx, id, client, log)
+}
+
+// ResolveFirst returns defaultID's session if set, otherwise the first
+// account the client's token can see.
+func ResolveFirst(ctx context.Context, defaultID string, client *oanda.Client, log *slog.Logger) (*account.Account, error) {
+	return account.ResolveFirst(ctx, defaultID, client, log)
+}
+
+// DefaultAccountID picks the default account ID out of refs: configured if
+// non-empty (a caller-supplied default, e.g. server config), otherwise the
+// first ref, otherwise "" if refs is empty.
+func DefaultAccountID(refs []AccountRef, configured string) string {
+	if configured != "" {
+		return configured
+	}
+	if len(refs) > 0 {
+		return refs[0].ID
+	}
+	return ""
 }

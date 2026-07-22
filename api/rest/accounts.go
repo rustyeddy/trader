@@ -3,6 +3,8 @@ package rest
 import (
 	"fmt"
 	"net/http"
+
+	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
 // accountInfo is the public view of an account in the listing.
@@ -19,17 +21,17 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOANDA(w) {
 		return
 	}
-	accts, err := s.svc.Accounts(r.Context())
+	refs, err := accountsvc.ListAccounts(r.Context(), s.svc.OANDA)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("list accounts: %v", err))
 		return
 	}
-	def, _ := s.svc.FirstAccount(r.Context())
-	out := make([]accountInfo, 0, len(accts))
-	for _, a := range accts {
+	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	out := make([]accountInfo, 0, len(refs))
+	for _, ref := range refs {
 		out = append(out, accountInfo{
-			ID:        a.ID,
-			IsDefault: def != nil && a.ID == def.ID,
+			ID:        ref.ID,
+			IsDefault: ref.ID == defaultID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
@@ -43,10 +45,15 @@ func (s *Server) handleDefaultAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOANDA(w) {
 		return
 	}
-	acc, err := s.svc.FirstAccount(r.Context())
+	refs, err := accountsvc.ListAccounts(r.Context(), s.svc.OANDA)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("default account: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, accountInfo{ID: acc.ID, IsDefault: true})
+	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	if defaultID == "" {
+		writeErr(w, http.StatusBadGateway, "default account: no accounts found for this token")
+		return
+	}
+	writeJSON(w, http.StatusOK, accountInfo{ID: defaultID, IsDefault: true})
 }

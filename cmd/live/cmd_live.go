@@ -15,6 +15,7 @@ import (
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
 func New(rc *config.RootConfig) *cobra.Command {
@@ -82,7 +83,7 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 				}
 				return err
 			}
-			acc, err := svc.DefaultAccount(ctx)
+			acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
 			if err != nil {
 				return err
 			}

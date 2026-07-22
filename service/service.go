@@ -17,7 +17,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	botsvc "github.com/rustyeddy/trader/service/bots"
@@ -35,10 +34,6 @@ type Service struct {
 
 	// Backtests optionally overrides how compiled backtests are executed.
 	Backtests backtest.BacktestExecutor
-
-	// registry caches per-account sessions keyed by OANDA account ID. Zero
-	// value is ready to use — see account.Registry's doc comment.
-	registry account.Registry
 
 	// bots tracks running/stopped live-strategy bots and the trade→bot
 	// tagging map. Zero value is ready to use — see botsvc.Registry's doc

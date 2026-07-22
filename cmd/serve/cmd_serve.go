@@ -27,6 +27,7 @@ import (
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 	traderui "github.com/rustyeddy/trader/ui"
 )
 
@@ -264,7 +265,7 @@ Example config file (see deploy/trader.yaml.example):
 				} else {
 					// Start the account snapshot so REST/MCP/live-runner all read
 					// from a local cache rather than hitting OANDA on every request.
-					if acc, aErr := svc.Account(ctx, svc.AccountID); aErr == nil {
+					if acc, aErr := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log); aErr == nil {
 						acc.EnsureSnapshot(ctx, 5*time.Second)
 						log.Info("serve: account snapshot started", "account", svc.AccountID)
 					}
@@ -327,7 +328,10 @@ type liveJournalRunner struct {
 // Returns nil on clean shutdown; non-nil only if the account can't be
 // resolved before the loop starts.
 func (r *liveJournalRunner) Start(ctx context.Context) error {
-	acc, err := r.svc.DefaultAccount(ctx)
+	if err := r.svc.ResolveAccount(ctx); err != nil {
+		return fmt.Errorf("account resolve failed: %w", err)
+	}
+	acc, err := accountsvc.Resolve(ctx, r.svc.AccountID, r.svc.OANDA, r.svc.Log)
 	if err != nil {
 		return fmt.Errorf("account resolve failed: %w", err)
 	}
