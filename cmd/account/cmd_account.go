@@ -9,10 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/brokers"
-	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/config/active"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
 var (
@@ -46,7 +44,7 @@ func New(rc *config.RootConfig) *cobra.Command {
 // package), then unset. accountID may be returned empty — a valid state
 // meaning nothing resolved a target.
 func resolveTarget(cmd *cobra.Command, rc *config.RootConfig) (resolvedBroker, resolvedAccountID string, err error) {
-	sel, _ := active.Load() // best-effort; missing/unreadable file just means no fallback
+	sel, _ := accountsvc.DefaultSelection() // best-effort; missing/unreadable file just means no fallback
 
 	resolvedBroker = "oanda"
 	if sel.Broker != "" {
@@ -55,8 +53,8 @@ func resolveTarget(cmd *cobra.Command, rc *config.RootConfig) (resolvedBroker, r
 	if cmd.Flags().Changed("broker") {
 		resolvedBroker = broker
 	}
-	if !brokers.IsKnownBroker(resolvedBroker) {
-		return "", "", fmt.Errorf("unknown broker %q (supported: %s)", resolvedBroker, strings.Join(brokers.KnownBrokers, ", "))
+	if !accountsvc.IsKnownBroker(resolvedBroker) {
+		return "", "", fmt.Errorf("unknown broker %q (supported: %s)", resolvedBroker, strings.Join(accountsvc.KnownBrokers, ", "))
 	}
 
 	switch {
@@ -75,19 +73,19 @@ func resolveTarget(cmd *cobra.Command, rc *config.RootConfig) (resolvedBroker, r
 func listCmd(rc *config.RootConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List all OANDA account IDs for the configured token",
+		Short: "List all account IDs for the given broker",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tok := resolveToken(cmd, rc)
-			client, err := oanda.NewClient(resolveEnv(cmd, rc), tok)
+			targetBroker, defaultAccountID, err := resolveTarget(cmd, rc)
 			if err != nil {
 				return err
 			}
-			_, defaultAccountID, err := resolveTarget(cmd, rc)
+			b, err := accountsvc.NewBroker(targetBroker, resolveEnv(cmd, rc), tok)
 			if err != nil {
 				return err
 			}
 
-			accounts, err := client.GetAccounts(context.Background())
+			accounts, err := accountsvc.ListAccounts(context.Background(), b)
 			if err != nil {
 				return fmt.Errorf("list accounts: %w", err)
 			}
@@ -115,19 +113,22 @@ func summaryCmd(rc *config.RootConfig) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			tok := resolveToken(cmd, rc)
-			client, err := oanda.NewClient(resolveEnv(cmd, rc), tok)
+			targetBroker, _, err := resolveTarget(cmd, rc)
+			if err != nil {
+				return err
+			}
+			b, err := accountsvc.NewBroker(targetBroker, resolveEnv(cmd, rc), tok)
 			if err != nil {
 				return err
 			}
 
-			var refs []oanda.AccountRef
+			var ids []string
 			if cmd.Flags().Changed("account-id") {
-				refs = []oanda.AccountRef{{ID: accountID}}
-			} else {
-				refs, err = client.GetAccounts(ctx)
-				if err != nil {
-					return fmt.Errorf("list accounts: %w", err)
-				}
+				ids = []string{accountID}
+			}
+			results, err := accountsvc.AccountSummaries(ctx, b, ids)
+			if err != nil {
+				return fmt.Errorf("list accounts: %w", err)
 			}
 
 			w := cmd.OutOrStdout()
@@ -135,12 +136,12 @@ func summaryCmd(rc *config.RootConfig) *cobra.Command {
 				"Account ID", "Name", "CCY", "Balance", "NAV", "Unreal P/L", "Margin Used", "Margin Free")
 			fmt.Fprintf(w, "%s\n", strings.Repeat("─", 106))
 
-			for _, ref := range refs {
-				s, err := client.GetAccountSummary(ctx, ref.ID)
-				if err != nil {
-					fmt.Fprintf(w, "%-26s  error: %v\n", ref.ID, err)
+			for _, result := range results {
+				if result.Err != nil {
+					fmt.Fprintf(w, "%-26s  error: %v\n", result.ID, result.Err)
 					continue
 				}
+				s := result.Summary
 				name := s.Alias
 				if name == "" {
 					name = "-"
@@ -169,7 +170,7 @@ With --broker and --account-id given together, sets the active selection.`,
 			accountChanged := cmd.Flags().Changed("account-id")
 
 			if !brokerChanged && !accountChanged {
-				sel, err := active.Load()
+				sel, err := accountsvc.DefaultSelection()
 				if err != nil {
 					return err
 				}
@@ -184,15 +185,14 @@ With --broker and --account-id given together, sets the active selection.`,
 			if brokerChanged != accountChanged {
 				return fmt.Errorf("--broker and --account-id must be set together")
 			}
-			if !brokers.IsKnownBroker(broker) {
-				return fmt.Errorf("unknown broker %q (supported: %s)", broker, strings.Join(brokers.KnownBrokers, ", "))
+			if !accountsvc.IsKnownBroker(broker) {
+				return fmt.Errorf("unknown broker %q (supported: %s)", broker, strings.Join(accountsvc.KnownBrokers, ", "))
 			}
 
-			sel := active.Selection{Broker: broker, AccountID: accountID}
-			if err := active.Save(sel); err != nil {
+			if err := accountsvc.SetDefault(broker, accountID); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Default set to %s/%s\n", sel.Broker, sel.AccountID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Default set to %s/%s\n", broker, accountID)
 			return nil
 		},
 	}

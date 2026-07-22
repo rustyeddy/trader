@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/config/active"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -184,7 +184,7 @@ func TestResolveTarget_RCFallback(t *testing.T) {
 func TestResolveTarget_ActiveFileFallback(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OANDA_ACCOUNT_ID", "")
-	require.NoError(t, active.Save(active.Selection{Broker: "oanda", AccountID: "active-acc"}))
+	require.NoError(t, accountsvc.SetDefault("oanda", "active-acc"))
 
 	cmd := targetCmd("", "", false, false)
 	b, a, err := resolveTarget(cmd, nil)
@@ -237,9 +237,9 @@ func TestDefaultCmd_SetBothPersistsSelection(t *testing.T) {
 	require.NoError(t, cmd.RunE(cmd, nil))
 	assert.Contains(t, buf.String(), "Default set to oanda/acc-1")
 
-	sel, err := active.Load()
+	sel, err := accountsvc.DefaultSelection()
 	require.NoError(t, err)
-	assert.Equal(t, active.Selection{Broker: "oanda", AccountID: "acc-1"}, sel)
+	assert.Equal(t, accountsvc.Selection{Broker: "oanda", AccountID: "acc-1"}, sel)
 }
 
 func TestDefaultCmd_OnlyOneFlagErrors(t *testing.T) {
@@ -304,7 +304,7 @@ func TestListCmd_MarksDefaultAccount(t *testing.T) {
 	srv := fakeAccountServer(t)
 	defer srv.Close()
 	t.Setenv("HOME", t.TempDir())
-	require.NoError(t, active.Save(active.Selection{Broker: "oanda", AccountID: "acc-2"}))
+	require.NoError(t, accountsvc.SetDefault("oanda", "acc-2"))
 
 	cmd := listCmd(nil)
 	cmd.Flags().StringVar(&token, "token", "test-token", "")
