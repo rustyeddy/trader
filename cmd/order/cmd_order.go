@@ -135,9 +135,13 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	if err != nil {
 		return err
 	}
+	acc, err := svc.DefaultAccount(ctx)
+	if err != nil {
+		return err
+	}
 
 	// First pass: get the proposal without submitting.
-	preview, err := svc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
+	preview, err := acc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
 		RiskPct:    types.RateFromFloat(riskPct / 100.0),
@@ -160,7 +164,7 @@ func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error
 	}
 
 	// Second pass: submit for real.
-	final, err := svc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
+	final, err := acc.PlaceMarketOrder(ctx, account.PlaceMarketOrderRequest{
 		Instrument: instrument,
 		Side:       side,
 		RiskPct:    types.RateFromFloat(riskPct / 100.0),
@@ -218,7 +222,11 @@ func runListOrders(cmd *cobra.Command, args []string, rc *config.RootConfig) err
 	if err != nil {
 		return err
 	}
-	trades, err := svc.ListOpenTrades(ctx)
+	acc, err := svc.FirstAccount(ctx)
+	if err != nil {
+		return err
+	}
+	trades, err := acc.ListOpenTrades(ctx)
 	if err != nil {
 		return err
 	}
@@ -265,6 +273,10 @@ func runCloseOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) err
 	if err != nil {
 		return err
 	}
+	acc, err := svc.DefaultAccount(ctx)
+	if err != nil {
+		return err
+	}
 
 	closeDesc := "full"
 	if closeUnits > 0 {
@@ -279,7 +291,7 @@ func runCloseOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) err
 		return nil
 	}
 
-	result, err := svc.CloseTrade(ctx, tradeID, closeUnits)
+	result, err := acc.CloseTrade(ctx, tradeID, closeUnits)
 	if err != nil {
 		return err
 	}
@@ -309,8 +321,12 @@ func transactionsCmd(rc *config.RootConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			acc, err := svc.FirstAccount(ctx)
+			if err != nil {
+				return err
+			}
 
-			txns, lastID, err := svc.GetTransactions(ctx, sinceID)
+			txns, lastID, err := acc.GetTransactions(ctx, sinceID)
 			if err != nil {
 				return err
 			}
@@ -370,6 +386,10 @@ func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			acc, err := svc.FirstAccount(ctx)
+			if err != nil {
+				return err
+			}
 
 			opts := oanda.StreamOptions{}
 			if showHeartbeats {
@@ -379,7 +399,7 @@ func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 			}
 
 			fmt.Printf("Subscribing to %s transaction stream (Ctrl-C to exit)...\n", svc.AccountID)
-			ch, err := svc.StreamTransactions(ctx, opts)
+			ch, err := acc.StreamTransactions(ctx, opts)
 			if err != nil {
 				return fmt.Errorf("subscribe: %w", err)
 			}
@@ -438,7 +458,11 @@ Examples:
 			if err != nil {
 				return err
 			}
-			if err := svc.UpdateTradeStop(ctx, tradeID, stopPrice, takePrice); err != nil {
+			acc, err := svc.DefaultAccount(ctx)
+			if err != nil {
+				return err
+			}
+			if err := acc.UpdateTradeStop(ctx, tradeID, stopPrice, takePrice); err != nil {
 				return err
 			}
 			fmt.Printf("Updated trade %s", tradeID)

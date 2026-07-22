@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/rustyeddy/trader/journal"
@@ -36,14 +35,4 @@ func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
 	default:
 		return nil, fmt.Errorf("journal kind must be 'csv' or 'json'; got %q", cfg.Kind)
 	}
-}
-
-// RunLiveJournal subscribes the default account's transaction stream to the
-// given journal. See account.Account.RunLiveJournal.
-func (s *Service) RunLiveJournal(ctx context.Context, jrnl journal.Journal, backfillFrom int64) (lastSeenTxID int64, err error) {
-	acc, err := s.DefaultAccount(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return acc.RunLiveJournal(ctx, jrnl, backfillFrom, s.LookupTradeBotID)
 }

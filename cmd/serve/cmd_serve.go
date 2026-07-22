@@ -314,6 +314,12 @@ Example config file (see deploy/trader.yaml.example):
 // runJournalWithBackoff runs RunLiveJournal, restarting after disconnect
 // with exponential backoff (cap 5 min). Stops when ctx is cancelled.
 func runJournalWithBackoff(ctx context.Context, svc *service.Service, jcfg service.JournalConfig, log *slog.Logger) {
+	acc, err := svc.DefaultAccount(ctx)
+	if err != nil {
+		log.Error("serve: account resolve failed; journal disabled", "err", err)
+		return
+	}
+
 	const (
 		baseDelay = 5 * time.Second
 		maxDelay  = 5 * time.Minute
@@ -326,7 +332,7 @@ func runJournalWithBackoff(ctx context.Context, svc *service.Service, jcfg servi
 			log.Error("serve: open journal failed", "err", err)
 		} else {
 			log.Info("serve: live journal starting", "kind", jcfg.Kind)
-			lastID, err := svc.RunLiveJournal(ctx, journal, 0)
+			lastID, err := acc.RunLiveJournal(ctx, journal, 0, svc.LookupTradeBotID)
 			journal.Close()
 			if ctx.Err() != nil {
 				return // clean shutdown

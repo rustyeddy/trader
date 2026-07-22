@@ -82,6 +82,10 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 				}
 				return err
 			}
+			acc, err := svc.DefaultAccount(ctx)
+			if err != nil {
+				return err
+			}
 
 			journal, err := svc.OpenJournal(service.JournalConfig{
 				Kind:       journalKind,
@@ -98,7 +102,7 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 			}
 			fmt.Printf("Live journal subscribed to %s (journal=%s). Ctrl-C to exit.\n", svc.AccountID, journalKind)
 
-			lastID, err := svc.RunLiveJournal(ctx, journal, backfillFrom)
+			lastID, err := acc.RunLiveJournal(ctx, journal, backfillFrom, svc.LookupTradeBotID)
 			fmt.Printf("Stopped. lastSeenTxID=%d\n", lastID)
 			if err != nil {
 				return fmt.Errorf("live journal: %w", err)

@@ -1,7 +1,52 @@
 #+TITLE: service.Service God Object — Refactor Design
 #+DATE: 2026-07-21
-#+PROPERTY: status in progress — chunks 1-3 done 2026-07-22
+#+PROPERTY: status in progress — chunks 1-4 done 2026-07-22
 #+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Chunk 4 — done, 2026-07-22: redirect cmd/order + cmd/serve/cmd/live off the last order/journal delegators
+
+The six remaining =Service=-level methods with real callers —
+=PlaceMarketOrder=/=CloseTrade=/=UpdateTradeStop=/=ListOpenTrades=
+(=service/orders.go=), =GetTransactions=/=StreamTransactions=
+(=service/account.go=), =RunLiveJournal= (=service/journal.go=) — were
+all concentrated in three CLI files. Redirected each call site to
+resolve =*account.Account= itself and call the method directly, then
+deleted the now-caller-less =Service= wrappers.
+
+- =cmd/order/cmd_order.go=: 6 call sites, each a one-line swap once
+  =acc, err := svc.DefaultAccount(ctx)= or =svc.FirstAccount(ctx)= is
+  inserted — matched to each deleted wrapper's own resolution method
+  exactly (=PlaceMarketOrder=/=CloseTrade=/=UpdateTradeStop= used
+  =DefaultAccount=; =ListOpenTrades=/=GetTransactions=/
+  =StreamTransactions= used =FirstAccount=), so this preserves each
+  subcommand's existing resolution strictness rather than changing it.
+- =cmd/serve/cmd_serve.go='s =runJournalWithBackoff= resolved
+  =DefaultAccount= once before its retry loop instead of once per
+  reconnect attempt (the account registry is a cached lookup, so this is
+  strictly fewer redundant calls, not a behavior change), then calls
+  =acc.RunLiveJournal(ctx, journal, 0, svc.LookupTradeBotID)=.
+- =cmd/live/cmd_live.go=: single call site, resolved =acc= right after
+  the existing =svc.ResolveAccount(ctx)= check.
+- Deleted =service/orders.go= and =service/account.go= in full (all
+  six methods now caller-less). Trimmed =service/journal.go= to just
+  =JournalConfig=/=OpenJournal= (real logic, kept) —
+  =RunLiveJournal= removed.
+
+Verified: =go build ./...=, =go vet ./...=, =go test ./...= (full repo)
+clean, plus a manual check that all 6 =cmd_order.go= resolution-method
+swaps matched their original wrapper exactly (the one real risk in this
+chunk — swapping =DefaultAccount=↔=FirstAccount= would compile fine but
+subtly change ambiguous-account error-strictness for that subcommand).
+=git status= confirms only the six files above changed.
+
+`service/account*.go` is now fully gone — the account-registry
+delegators (`Account`/`Accounts`/`FirstAccount`/`DefaultAccount` in
+`service/account_session.go`) are the only account-related `Service`
+methods left, and they're the irreducible minimum described when this
+question was last raised: real logic already lives in
+`account.Registry`, and these are pure delegation, unavoidable while
+`Service` itself still exists as the composition point transports call
+into.
 
 * Chunk 3 — done, 2026-07-22: delete dead delegators and the unused portfolio-runner subsystem
 
