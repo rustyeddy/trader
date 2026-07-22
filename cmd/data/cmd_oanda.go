@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -38,7 +39,7 @@ func newOandaDownloadCmd(rc *config.RootConfig) *cobra.Command {
 			}
 
 			ctx := context.Background()
-			svc, err := service.New(service.Config{Env: env, Token: token})
+			svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
 			if err != nil {
 				var amb service.AmbiguousAccountError
 				if errors.As(err, &amb) {

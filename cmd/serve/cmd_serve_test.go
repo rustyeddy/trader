@@ -80,12 +80,3 @@ func TestLoadConfig_EmptyYAMLReturnsZeroValue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DaemonConfig{}, cfg)
 }
-
-// ── readTokenFile ─────────────────────────────────────────────────────────────
-
-func TestReadTokenFile_MissingFileReturnsEmpty(t *testing.T) {
-	// The token file (~/.config/oanda/pat.txt) almost certainly does not exist
-	// in the test environment. Verify the function returns "" without panicking.
-	result := readTokenFile()
-	assert.IsType(t, "", result)
-}

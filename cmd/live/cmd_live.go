@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -67,7 +68,7 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 				}
 			}
 
-			svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount})
+			svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount, Log: log.L})
 			if err != nil {
 				return err
 			}

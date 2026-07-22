@@ -15,8 +15,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -58,43 +56,38 @@ type Config struct {
 	Env string
 
 	// Token: OANDA API token. If empty, falls back to reading
-	// ~/.config/oanda/pat.txt.
+	// ~/.config/oanda/pat.txt (see brokers/oanda.ResolveToken).
 	Token string
 
 	// AccountID: optional OANDA account. If empty, ResolveAccount picks one
 	// (errors if the token has multiple accounts; caller must pick).
 	AccountID string
 
-	// Log: optional structured logger; defaults to slog.Default().
+	// Log is required — construct it once at program startup (e.g. via
+	// the top-level log package's Setup + L/Module) and pass it in
+	// explicitly. New does not default to slog.Default(): a business-logic
+	// constructor silently depending on a process global is exactly the
+	// kind of implicit wiring this package is trying to avoid.
 	Log *slog.Logger
 }
 
-// New builds a Service from the given Config. It resolves the OANDA base
-// URL, falls back to ~/.config/oanda/pat.txt for the token when needed,
-// and creates the OANDA client. AccountID is NOT auto-discovered here;
-// call ResolveAccount(ctx) after New() if you want that.
+// New builds a Service from the given Config. OANDA client construction
+// (token/base-URL resolution) lives in brokers/oanda, not here — see
+// oanda.NewClient. AccountID is NOT auto-discovered here; call
+// ResolveAccount(ctx) after New() if you want that.
 func New(cfg Config) (*Service, error) {
-	token := cfg.Token
-	if token == "" {
-		token = readTokenFile()
-	}
-	if token == "" {
-		return nil, fmt.Errorf("service: no OANDA token (set OANDA_TOKEN, pass Token, or save to ~/.config/oanda/pat.txt)")
+	if cfg.Log == nil {
+		return nil, fmt.Errorf("service: Log is required")
 	}
 
-	baseURL, err := oanda.BaseURL(cfg.Env)
+	client, err := oanda.NewClient(cfg.Env, cfg.Token)
 	if err != nil {
-		return nil, err
-	}
-
-	log := cfg.Log
-	if log == nil {
-		log = slog.Default()
+		return nil, fmt.Errorf("service: %w", err)
 	}
 
 	return &Service{
-		OANDA:       &oanda.Client{BaseURL: baseURL, Token: token},
-		Log:         log,
+		OANDA:       client,
+		Log:         cfg.Log,
 		AccountID:   cfg.AccountID,
 		bots:        make(map[string]*botEntry),
 		tradeBotMap: make(map[string]string),
@@ -158,19 +151,4 @@ type AmbiguousAccountError struct {
 
 func (e AmbiguousAccountError) Error() string {
 	return fmt.Sprintf("ambiguous account: multiple accounts available, specify one (%s)", strings.Join(e.Accounts, ", "))
-}
-
-// readTokenFile is the fallback used when no token is passed in Config.
-// Lives in service so all consumers (CLI, REST, MCP) get the same
-// resolution behavior.
-func readTokenFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "oanda", "pat.txt"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }

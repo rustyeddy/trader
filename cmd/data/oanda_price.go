@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
 )
@@ -56,6 +57,7 @@ func fetchMidPrices(ctx context.Context, auth oandaAuth, instruments []string) (
 		Env:       auth.env,
 		Token:     auth.token,
 		AccountID: auth.accountID,
+		Log:       log.L,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("oanda: %w", err)

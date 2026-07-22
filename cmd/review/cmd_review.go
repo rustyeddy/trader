@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/review"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/view"
@@ -160,6 +161,7 @@ func buildService(cmd *cobra.Command, rc *config.RootConfig) (*service.Service, 
 	return service.New(service.Config{
 		Env:   resolvedEnv,
 		Token: tok,
+		Log:   log.L,
 	})
 }
 

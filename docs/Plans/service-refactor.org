@@ -1,7 +1,56 @@
 #+TITLE: service.Service God Object — Refactor Design
 #+DATE: 2026-07-21
-#+PROPERTY: status design-discussion, not yet implemented
+#+PROPERTY: status in progress — chunk 1 done 2026-07-21
 #+PROPERTY: audience implementation agent (Claude Code) / future self
+
+* Chunk 1 — done, 2026-07-21: relocate OANDA client + Logger construction
+
+First concrete step of the design below, prompted by the repo owner
+directly: "OANDA client construction needs to happen in
+=./broker/oanda= and possible =./dataprovider/oanda= if we split out
+oanda data service into it's own client. Logger needs to happen in main
+closer to start up where a cli command or before server starts." (Using
+the existing =brokers/oanda= package, confirmed — no rename; a future
+=dataprovider/oanda= split is separate, larger work, not started.)
+
+- =brokers/oanda= gained =NewClient(env, token) (*Client, error)= and
+  =ResolveToken(explicit string) string= (=brokers/oanda/construct.go=).
+  This *deleted two duplicate implementations* of the
+  =~/.config/oanda/pat.txt= fallback that had accumulated independently
+  in =service.readTokenFile=, =cmd/serve/cmd_serve.go=, and
+  =cmd/mcp/cmd_mcp.go= — all three did the identical file read.
+- =service.New()= no longer implements token/base-URL resolution — it
+  delegates to =oanda.NewClient=. =service.Config.Log= is now *required*
+  (errors if nil) instead of silently defaulting to =slog.Default()=.
+  That fallback wasn't broken (=cmd/main.go='s =PersistentPreRunE= already
+  calls =log.Setup()= once at startup, which wires =slog.Default()= to
+  the same handler =log.L= points at — confirmed by reading
+  =log/logger.go='s =init()=/=Setup()=), but it was an implicit
+  dependency on a process global baked into a business-logic constructor.
+  Every real caller now passes =log.L= explicitly.
+- Updated all 10 =service.New(...)= call sites (=cmd/order=, =cmd/bot=,
+  =cmd/live=, =cmd/review=, four =cmd/data= files, =cmd/serve=,
+  =cmd/mcp=) plus 2 test call sites (=api/rest/bots_test.go=,
+  =api/rest/accounts_test.go=, using =slog.Default()=) to set =Log=.
+  =cmd/serve=/=cmd/mcp='s own duplicate token-file-read functions were
+  deleted in favor of =oanda.ResolveToken=.
+- Test coverage for the token-file/resolve/construct behavior moved from
+  =cmd/serve=/=cmd/mcp= (which no longer have the functions) to
+  =brokers/oanda/construct_test.go=, plus new coverage for
+  =NewClient=/explicit-token-wins that didn't exist before.
+- Verified: =go build ./...=, =go vet ./...=, =go test ./...= (full
+  repo) clean; spot-checked =go run ./cmd order list --help= end-to-end.
+
+Deliberately *not* done in this chunk (see "Scope note" — kept for a
+later chunk): =service.Config= still takes =Env=/=Token= strings rather
+than a pre-built =*oanda.Client=, so =service.New= still *calls*
+=oanda.NewClient= (construction logic moved, but =service.go= still
+orchestrates the call); =api/rest.New=/=api/mcp.New= keep their own
+identical =slog.Default()= fallback, untouched for consistency's sake in
+a future pass. The rest of the god-object split (bots as its own
+sub-service package, eliminating the remaining ~20 pure-delegation
+wrapper methods, transports calling services directly) is unstarted —
+see "Status" below, still accurate for everything past chunk 1.
 
 * Problem
 

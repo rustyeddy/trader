@@ -6,12 +6,11 @@ package mcp
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
@@ -74,7 +73,7 @@ Resources:
 				if rc.OANDAToken != "" {
 					tok = rc.OANDAToken
 				} else {
-					tok = resolveTokenFile()
+					tok = oanda.ResolveToken(tok)
 				}
 			}
 			// Account: explicit flag > global config > env var.
@@ -114,17 +113,4 @@ Resources:
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "/srv/trading/backtests/reports", "Backtest reports directory")
 
 	return cmd
-}
-
-// resolveTokenFile reads the OANDA token from ~/.config/oanda/pat.txt.
-func resolveTokenFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "oanda", "pat.txt"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }

@@ -2,41 +2,12 @@ package mcp
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/rustyeddy/trader/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// ── resolveTokenFile ──────────────────────────────────────────────────────────
-
-func TestResolveTokenFile_MissingFileReturnsEmpty(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	assert.Equal(t, "", resolveTokenFile())
-}
-
-func TestResolveTokenFile_ReadsAndTrimsWhitespace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HOME", dir)
-	tokenDir := filepath.Join(dir, ".config", "oanda")
-	require.NoError(t, os.MkdirAll(tokenDir, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "pat.txt"), []byte("  mytoken\n"), 0o600))
-
-	assert.Equal(t, "mytoken", resolveTokenFile())
-}
-
-func TestResolveTokenFile_EmptyFileReturnsEmpty(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HOME", dir)
-	tokenDir := filepath.Join(dir, ".config", "oanda")
-	require.NoError(t, os.MkdirAll(tokenDir, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "pat.txt"), []byte("   \n"), 0o600))
-
-	assert.Equal(t, "", resolveTokenFile())
-}
 
 // ── New command structure ─────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/datamanager"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
@@ -220,7 +221,7 @@ func repairMissingCandles(
 		return nil
 	}
 
-	svc, err := service.New(service.Config{Env: env, Token: token})
+	svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
 	if err != nil {
 		return fmt.Errorf("repair: connect to OANDA: %w", err)
 	}

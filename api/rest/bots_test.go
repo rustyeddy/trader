@@ -3,6 +3,7 @@ package rest
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,6 +29,7 @@ func newBotsTestServer(t *testing.T) *Server {
 		Env:       "practice",
 		Token:     "test-token",
 		AccountID: "test-account",
+		Log:       slog.Default(),
 	})
 	// Override the base URL so any accidental call hits the stub.
 	if err == nil {

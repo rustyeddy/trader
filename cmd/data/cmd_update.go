@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 )
 
@@ -86,7 +87,7 @@ Examples:
 				return nil
 			}
 
-			svc, err := service.New(service.Config{Env: env, Token: token})
+			svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
 			if err != nil {
 				return err
 			}

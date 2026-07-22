@@ -2,6 +2,7 @@ package rest
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,7 @@ func newAccountsTestServer(t *testing.T, accountIDs ...string) (*Server, *[]stri
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	svc, err := service.New(service.Config{Env: "practice", Token: "test-token"})
+	svc, err := service.New(service.Config{Env: "practice", Token: "test-token", Log: slog.Default()})
 	require.NoError(t, err)
 	svc.OANDA.BaseURL = srv.URL
 	return New(svc, ":0"), &summaryHits

@@ -18,6 +18,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
 )
@@ -83,6 +84,7 @@ func buildService(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig
 		Env:       resolvedEnv,
 		Token:     tok,
 		AccountID: resolvedAccount,
+		Log:       log.L,
 	})
 	if err != nil {
 		return nil, err

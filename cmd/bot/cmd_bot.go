@@ -26,6 +26,7 @@ import (
 
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
+	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -343,7 +344,7 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount})
+	svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount, Log: log.L})
 	if err != nil {
 		return err
 	}

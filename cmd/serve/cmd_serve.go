@@ -22,6 +22,7 @@ import (
 
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
 	"github.com/rustyeddy/trader/api/rest"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/log"
@@ -170,9 +171,7 @@ Example config file (see deploy/trader.yaml.example):
 			if tok == "" {
 				tok = os.Getenv("OANDA_TOKEN")
 			}
-			if tok == "" {
-				tok = readTokenFile()
-			}
+			tok = oanda.ResolveToken(tok)
 
 			// Resolve account: YAML/flag > global config > env var.
 			if cfg.AccountID == "" {
@@ -365,16 +364,4 @@ func loadConfig(path string) (DaemonConfig, error) {
 		return cfg, err
 	}
 	return cfg, nil
-}
-
-func readTokenFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "oanda", "pat.txt"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }
