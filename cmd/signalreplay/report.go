@@ -13,7 +13,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 // signalReasonPrefix must match strategies/signalreplay's reasonPrefix: the
@@ -62,7 +62,7 @@ func BuildOutcomeRows(reportsDir, signalsPath string) ([]OutcomeRow, error) {
 		return nil, err
 	}
 
-	summaries, err := service.ListBacktestSummaries(reportsDir)
+	summaries, err := backtestsvc.ListBacktestSummaries(reportsDir)
 	if err != nil {
 		return nil, fmt.Errorf("signalreplay report: list reports in %q: %w", reportsDir, err)
 	}

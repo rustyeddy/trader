@@ -13,7 +13,7 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
+	reviewsvc "github.com/rustyeddy/trader/service/review"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,11 +100,9 @@ func TestHandleReview_ReturnsResults(t *testing.T) {
 	oandaSrv := fakeOANDACandlesServer(t)
 	defer oandaSrv.Close()
 
-	svc := &service.Service{
-		OANDA: &oanda.Client{BaseURL: oandaSrv.URL, Token: "t"},
-		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-	srv := New(svc, "")
+	client := &oanda.Client{BaseURL: oandaSrv.URL, Token: "t"}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(client, log, "", nil, "")
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/review?instruments=EURUSD", nil)
@@ -112,7 +110,7 @@ func TestHandleReview_ReturnsResults(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var got service.ReviewResponse
+	var got reviewsvc.ReviewResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Len(t, got.Results, 1)
 	assert.Equal(t, "EURUSD", got.Results[0].Instrument)
@@ -123,11 +121,9 @@ func TestHandleReview_DefaultsToAllInstruments(t *testing.T) {
 	oandaSrv := fakeOANDACandlesServer(t)
 	defer oandaSrv.Close()
 
-	svc := &service.Service{
-		OANDA: &oanda.Client{BaseURL: oandaSrv.URL, Token: "t"},
-		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-	srv := New(svc, "")
+	client := &oanda.Client{BaseURL: oandaSrv.URL, Token: "t"}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(client, log, "", nil, "")
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/review", nil)
@@ -135,7 +131,7 @@ func TestHandleReview_DefaultsToAllInstruments(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var got service.ReviewResponse
+	var got reviewsvc.ReviewResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Len(t, got.Results, len(market.AllInstruments()))
 }
@@ -149,11 +145,9 @@ func TestHandleReview_OANDAErrorYieldsEmptyResultsNot502(t *testing.T) {
 
 	// Per-instrument fetch failures are skipped inside ReviewWatchlist, so a
 	// bad OANDA client still yields 200 with an empty result set, not 502.
-	svc := &service.Service{
-		OANDA: &oanda.Client{BaseURL: badSrv.URL, Token: "bad"},
-		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-	srv := New(svc, "")
+	client := &oanda.Client{BaseURL: badSrv.URL, Token: "bad"}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(client, log, "", nil, "")
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/review?instruments=EURUSD", nil)
@@ -161,7 +155,7 @@ func TestHandleReview_OANDAErrorYieldsEmptyResultsNot502(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var got service.ReviewResponse
+	var got reviewsvc.ReviewResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Empty(t, got.Results)
 }

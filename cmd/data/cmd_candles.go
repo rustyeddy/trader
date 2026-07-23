@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/rustyeddy/trader/service"
+	datasvc "github.com/rustyeddy/trader/service/data"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +21,8 @@ func newCandlesCmd() *cobra.Command {
 		Use:   "candles",
 		Short: "Print local candles in canonical CSV format",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			svc := &service.Service{}
-			result, err := svc.CandlesCSV(cmd.Context(), service.CandlesCSVRequest{
+			svc := &datasvc.Service{}
+			result, err := svc.CandlesCSV(cmd.Context(), datasvc.CandlesCSVRequest{
 				Instrument: instrument,
 				Timeframe:  timeframe,
 				From:       from,

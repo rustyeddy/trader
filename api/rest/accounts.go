@@ -21,12 +21,12 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOANDA(w) {
 		return
 	}
-	refs, err := accountsvc.ListAccounts(r.Context(), s.svc.OANDA)
+	refs, err := accountsvc.ListAccounts(r.Context(), s.oanda)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("list accounts: %v", err))
 		return
 	}
-	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	defaultID := accountsvc.DefaultAccountID(refs, s.accountID)
 	out := make([]accountInfo, 0, len(refs))
 	for _, ref := range refs {
 		out = append(out, accountInfo{
@@ -45,12 +45,12 @@ func (s *Server) handleDefaultAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOANDA(w) {
 		return
 	}
-	refs, err := accountsvc.ListAccounts(r.Context(), s.svc.OANDA)
+	refs, err := accountsvc.ListAccounts(r.Context(), s.oanda)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("default account: %v", err))
 		return
 	}
-	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	defaultID := accountsvc.DefaultAccountID(refs, s.accountID)
 	if defaultID == "" {
 		writeErr(w, http.StatusBadGateway, "default account: no accounts found for this token")
 		return

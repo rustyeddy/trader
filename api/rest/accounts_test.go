@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,10 +45,10 @@ func newAccountsTestServer(t *testing.T, accountIDs ...string) (*Server, *[]stri
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	svc, err := service.New(service.Config{Env: "practice", Token: "test-token", Log: slog.Default()})
+	client, err := oanda.NewClient("practice", "test-token")
 	require.NoError(t, err)
-	svc.OANDA.BaseURL = srv.URL
-	return New(svc, ":0"), &summaryHits
+	client.BaseURL = srv.URL
+	return New(client, slog.Default(), "", nil, ":0"), &summaryHits
 }
 
 func TestListAccounts(t *testing.T) {

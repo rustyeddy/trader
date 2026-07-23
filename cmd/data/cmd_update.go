@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
+	datasvc "github.com/rustyeddy/trader/service/data"
 )
 
 // defaultInstruments is the full set tracked in the candle store.
@@ -87,7 +87,7 @@ Examples:
 				return nil
 			}
 
-			svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
+			client, err := oanda.NewClient(env, token)
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ Examples:
 			fmt.Fprintf(out, "Updating %d instruments × %d timeframes through yesterday...\n\n",
 				len(instruments), len(timeframes))
 
-			result, err := svc.UpdateOandaCandles(context.Background(), service.UpdateOandaCandlesRequest{
+			result, err := (&datasvc.Service{OANDA: client}).UpdateOandaCandles(context.Background(), datasvc.UpdateOandaCandlesRequest{
 				Instruments: instruments,
 				Timeframes:  timeframes,
 				SeedFrom:    seedFrom,

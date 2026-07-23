@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestWriteJSON_CreatesFile(t *testing.T) {
 	path := filepath.Join(dir, "report.json")
 	s := backtest.BacktestReportSummary{Name: "test-run", Strategy: "ema", Trades: 3}
 
-	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
+	require.NoError(t, backtestsvc.WriteBacktestSummaryJSON(path, s))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -35,7 +35,7 @@ func TestWriteJSON_CreatesParentDir(t *testing.T) {
 	path := filepath.Join(dir, "nested", "deep", "report.json")
 	s := backtest.BacktestReportSummary{Name: "nested"}
 
-	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
+	require.NoError(t, backtestsvc.WriteBacktestSummaryJSON(path, s))
 	assert.FileExists(t, path)
 }
 
@@ -44,7 +44,7 @@ func TestWriteOrg_CreatesFile(t *testing.T) {
 	path := filepath.Join(dir, "report.org")
 	s := backtest.BacktestReportSummary{Name: "org-run", Strategy: "rsi"}
 
-	require.NoError(t, service.WriteBacktestSummaryOrg(path, s))
+	require.NoError(t, backtestsvc.WriteBacktestSummaryOrg(path, s))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestLoadBaseline_ValidFile(t *testing.T) {
 	dir := t.TempDir()
 	s := backtest.BacktestReportSummary{Name: "myrun", Trades: 10, NetPL: 123.45}
 	path := filepath.Join(dir, "myrun.json")
-	require.NoError(t, service.WriteBacktestSummaryJSON(path, s))
+	require.NoError(t, backtestsvc.WriteBacktestSummaryJSON(path, s))
 
 	got, err := loadBaseline(path)
 	require.NoError(t, err)

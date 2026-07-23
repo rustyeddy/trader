@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/api/mcp"
-	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,8 +29,7 @@ type harness struct {
 
 func newHarness(t *testing.T, writeEnable bool) *harness {
 	t.Helper()
-	svc := &service.Service{Log: slog.Default()}
-	srv := mcp.New(svc, writeEnable)
+	srv := mcp.New(nil, slog.Default(), "", nil, writeEnable)
 
 	clientR, clientW := io.Pipe() // server reads from clientR
 	serverR, serverW := io.Pipe() // server writes to serverW, test reads from serverR

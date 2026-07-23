@@ -9,9 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
+	datasvc "github.com/rustyeddy/trader/service/data"
 )
 
 func newOandaDownloadCmd(rc *config.RootConfig) *cobra.Command {
@@ -39,9 +40,9 @@ func newOandaDownloadCmd(rc *config.RootConfig) *cobra.Command {
 			}
 
 			ctx := context.Background()
-			svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
+			client, err := oanda.NewClient(env, token)
 			if err != nil {
-				var amb service.AmbiguousAccountError
+				var amb accountsvc.AmbiguousAccountError
 				if errors.As(err, &amb) {
 					fmt.Println("Multiple accounts found — specify one with --account-id:")
 					for _, id := range amb.Accounts {
@@ -51,7 +52,7 @@ func newOandaDownloadCmd(rc *config.RootConfig) *cobra.Command {
 				return err
 			}
 
-			result, err := svc.DownloadOandaCandles(ctx, service.DownloadOandaCandlesRequest{
+			result, err := (&datasvc.Service{OANDA: client}).DownloadOandaCandles(ctx, datasvc.DownloadOandaCandlesRequest{
 				Instrument: instrument,
 				Timeframe:  timeframe,
 				From:       from,

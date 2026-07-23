@@ -1,13 +1,25 @@
-package service
+// Package positioncalc sizes FX positions (units/lots/notional/margin) for
+// a given instrument and price, or fetches the live mid price from OANDA
+// when none is given.
+package positioncalc
 
 import (
 	"context"
 	"fmt"
 	"math"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
 	"github.com/rustyeddy/trader/types"
 )
+
+// Service sizes positions. The zero value works when Price is always
+// supplied; set OANDA (and AccountID, required by OANDA's pricing
+// endpoint) to also support Price: 0 (fetch live mid).
+type Service struct {
+	OANDA     *oanda.Client
+	AccountID string
+}
 
 // PositionCalcRequest parameterises PositionCalc.
 // Supply Units or Notional to get a single row; omit both for a micro/mini/standard table.

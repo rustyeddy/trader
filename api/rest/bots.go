@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/rustyeddy/trader/service"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 )
 
 // ── POST /api/v1/bots ─────────────────────────────────────────────────────────
@@ -15,12 +15,12 @@ func (s *Server) handleStartBot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var cfg service.BotConfig
+	var cfg botsvc.BotConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
 	}
-	status, err := s.svc.StartBotOnAccount(r.Context(), acc, cfg)
+	status, err := botsvc.StartBotOnAccount(r.Context(), acc, cfg, s.oanda, s.log)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("start bot: %v", err))
 		return
@@ -35,14 +35,14 @@ func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.svc.ListBotsForAccount(acc.ID))
+	writeJSON(w, http.StatusOK, botsvc.ListBotsForAccount(acc.ID))
 }
 
 // ── GET /api/v1/bots/{id} ─────────────────────────────────────────────────────
 
 func (s *Server) handleGetBot(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	status, err := s.svc.GetBot(id)
+	status, err := botsvc.GetBot(id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
@@ -54,7 +54,7 @@ func (s *Server) handleGetBot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStopBot(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.svc.StopBot(id); err != nil {
+	if err := botsvc.StopBot(id); err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}

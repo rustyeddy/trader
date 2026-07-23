@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/rustyeddy/trader/service"
+	replaysvc "github.com/rustyeddy/trader/service/replay"
 )
 
 // ── POST /api/v1/replay ───────────────────────────────────────────────────────
@@ -14,8 +14,8 @@ import (
 // plus every signal emitted by the strategy. Signals include opens, closes,
 // regime-blocked events, no-stop drops, and trailing stop updates.
 //
-// Request body: service.ReplayRequest JSON
-// Response:     service.ReplayResult JSON
+// Request body: replaysvc.ReplayRequest JSON
+// Response:     replaysvc.ReplayResult JSON
 //
 // Example:
 //
@@ -32,7 +32,7 @@ import (
 //	}
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
-	var req service.ReplayRequest
+	var req replaysvc.ReplayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
 		return
@@ -49,7 +49,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		req.Timeframe = "H1"
 	}
 
-	result, err := s.svc.RunReplay(r.Context(), req)
+	result, err := (&replaysvc.Service{}).RunReplay(r.Context(), req)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("replay: %v", err))
 		return

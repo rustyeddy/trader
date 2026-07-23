@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 // ── rMultiple / holdBars ──────────────────────────────────────────────────
@@ -144,7 +144,7 @@ func writeSampleReport(t *testing.T, dir, name string, trades []backtest.Backtes
 		Timeframe:    "d1",
 		TradeDetails: trades,
 	}
-	require.NoError(t, service.WriteBacktestSummaryJSON(filepath.Join(dir, name+".json"), summary))
+	require.NoError(t, backtestsvc.WriteBacktestSummaryJSON(filepath.Join(dir, name+".json"), summary))
 }
 
 func TestBuildOutcomeRows_EndToEnd(t *testing.T) {

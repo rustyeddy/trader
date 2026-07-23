@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
+	datasvc "github.com/rustyeddy/trader/service/data"
 	"github.com/rustyeddy/trader/types"
 	"github.com/spf13/cobra"
 )
@@ -103,7 +103,7 @@ OANDA. All validated timeframes are repaired.`,
 					return fmt.Errorf("bad --to for %s: %w", tf, err)
 				}
 
-				report, err := (&service.Service{}).ValidateCandleData(cmd.Context(), service.ValidateCandleDataRequest{
+				report, err := (&datasvc.Service{}).ValidateCandleData(cmd.Context(), datasvc.ValidateCandleDataRequest{
 					Instruments: tfInstruments,
 					Source:      normSource,
 					Timeframe:   tf,
@@ -221,7 +221,7 @@ func repairMissingCandles(
 		return nil
 	}
 
-	svc, err := service.New(service.Config{Env: env, Token: token, Log: log.L})
+	client, err := oanda.NewClient(env, token)
 	if err != nil {
 		return fmt.Errorf("repair: connect to OANDA: %w", err)
 	}
@@ -282,9 +282,9 @@ func repairMissingCandles(
 			rawExists = false
 		}
 
-		var preResult *service.DeriveResult
+		var preResult *datasvc.DeriveResult
 		if rawExists {
-			r, deriveErr := svc.DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
+			r, deriveErr := (&datasvc.Service{OANDA: client}).DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
 			if deriveErr != nil {
 				entry.Status = "error"
 				entry.Error = "derive: " + deriveErr.Error()
@@ -322,7 +322,7 @@ func repairMissingCandles(
 		monthStart := time.Date(k.year, time.Month(k.month), 1, 0, 0, 0, 0, time.UTC)
 		monthEnd := monthStart.AddDate(0, 1, 0).Add(-24 * time.Hour)
 
-		_, dlErr := svc.DownloadOandaCandles(cmd.Context(), service.DownloadOandaCandlesRequest{
+		_, dlErr := (&datasvc.Service{OANDA: client}).DownloadOandaCandles(cmd.Context(), datasvc.DownloadOandaCandlesRequest{
 			Instrument: oandaInst,
 			Timeframe:  k.timeframe,
 			From:       monthStart,
@@ -341,7 +341,7 @@ func repairMissingCandles(
 		cmd.Printf("  [downloaded] %s %s %04d-%02d\n", k.instrument, k.timeframe, k.year, k.month)
 		entry.Status = "downloaded"
 
-		result, deriveErr := svc.DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
+		result, deriveErr := (&datasvc.Service{OANDA: client}).DeriveCanonicalFromRaw(cmd.Context(), rawPath, rawKey)
 		if deriveErr != nil {
 			entry.Status = "error"
 			entry.Error = "derive: " + deriveErr.Error()

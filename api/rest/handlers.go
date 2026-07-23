@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
+	datasvc "github.com/rustyeddy/trader/service/data"
+	pipvaluessvc "github.com/rustyeddy/trader/service/pipvalues"
+	positioncalcsvc "github.com/rustyeddy/trader/service/positioncalc"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -213,7 +216,7 @@ func (s *Server) handleRunBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summaries, err := s.svc.RunBacktestPathSpecsAndWriteReports(r.Context(), req.ConfigPaths, s.effectiveReportsDir())
+	summaries, err := (&backtestsvc.Service{Executor: s.backtests, Log: s.log}).RunBacktestPathSpecsAndWriteReports(r.Context(), req.ConfigPaths, s.effectiveReportsDir())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("run backtest: %v", err))
 		return
@@ -254,7 +257,7 @@ func (s *Server) handleDataStats(w http.ResponseWriter, r *http.Request) {
 		}
 		units = parsed
 	}
-	result, err := s.svc.DataStats(r.Context(), service.DataStatsRequest{
+	result, err := (&datasvc.Service{OANDA: s.oanda}).DataStats(r.Context(), datasvc.DataStatsRequest{
 		Instrument: instrument,
 		Timeframe:  tf,
 		From:       from,
@@ -314,7 +317,7 @@ func (s *Server) handleValidateCandles(w http.ResponseWriter, r *http.Request) {
 		src = "oanda"
 	}
 
-	report, err := s.svc.ValidateCandleData(r.Context(), service.ValidateCandleDataRequest{
+	report, err := (&datasvc.Service{OANDA: s.oanda}).ValidateCandleData(r.Context(), datasvc.ValidateCandleDataRequest{
 		Instruments: instruments,
 		Source:      src,
 		Timeframe:   tf,
@@ -350,7 +353,7 @@ func (s *Server) handlePipValues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	result, err := s.svc.PipValues(r.Context(), service.PipValuesRequest{
+	result, err := (&pipvaluessvc.Service{OANDA: s.oanda, AccountID: s.accountID}).PipValues(r.Context(), pipvaluessvc.PipValuesRequest{
 		Units:       units,
 		Instruments: instruments,
 	})
@@ -409,7 +412,7 @@ func (s *Server) handlePosition(w http.ResponseWriter, r *http.Request) {
 		pips = f
 	}
 
-	result, err := s.svc.PositionCalc(r.Context(), service.PositionCalcRequest{
+	result, err := (&positioncalcsvc.Service{OANDA: s.oanda, AccountID: s.accountID}).PositionCalc(r.Context(), positioncalcsvc.PositionCalcRequest{
 		Instrument: instrument,
 		Price:      price,
 		Units:      units,

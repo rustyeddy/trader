@@ -1,6 +1,6 @@
 //go:build sweep
 
-package service
+package backtestsvc
 
 // Strategy sweep — runs every real strategy over every instrument and
 // timeframe combination that has local candle data.

@@ -9,7 +9,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 func cmdRun() *cobra.Command {
@@ -35,7 +35,7 @@ optional and defaults to a temp file) and executes the result.`,
 				return fmt.Errorf("signalreplay run: --report-dir is required")
 			}
 
-			svc := &service.Service{Log: log.L}
+			svc := &backtestsvc.Service{Log: log.L}
 			summaries, err := svc.RunBacktestPathSpecsAndWriteReports(cmd.Context(), []string{configPath}, reportDir)
 			if err != nil {
 				return err

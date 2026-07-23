@@ -12,7 +12,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +29,7 @@ func newTestServer(t *testing.T, summaries []backtest.BacktestReportSummary) (*S
 		require.NoError(t, os.WriteFile(path, append(b, '\n'), 0o644))
 	}
 	srv := &Server{
-		svc:        &service.Service{Log: slog.Default()},
+		log:        slog.Default(),
 		reportsDir: dir,
 		configsDir: dir,
 	}
@@ -205,7 +205,7 @@ func TestLoadSummary_BackfillsNameFromFilename(t *testing.T) {
 	path := filepath.Join(dir, "inferred-name.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"strategy":"ema"}`), 0o644))
 
-	s, err := service.ReadBacktestSummaryFile(path)
+	s, err := backtestsvc.ReadBacktestSummaryFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "inferred-name", s.Name)
 }
@@ -218,7 +218,7 @@ func TestLoadSummary_AlwaysUsesFilenameAsName(t *testing.T) {
 	b, _ := json.Marshal(backtest.BacktestReportSummary{Name: "run"})
 	require.NoError(t, os.WriteFile(path, b, 0o644))
 
-	s, err := service.ReadBacktestSummaryFile(path)
+	s, err := backtestsvc.ReadBacktestSummaryFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "run-abc123", s.Name)
 }
@@ -228,12 +228,12 @@ func TestLoadSummary_InvalidJSON(t *testing.T) {
 	path := filepath.Join(dir, "bad.json")
 	require.NoError(t, os.WriteFile(path, []byte(`not json`), 0o644))
 
-	_, err := service.ReadBacktestSummaryFile(path)
+	_, err := backtestsvc.ReadBacktestSummaryFile(path)
 	assert.Error(t, err)
 }
 
 func TestLoadSummary_MissingFile(t *testing.T) {
-	_, err := service.ReadBacktestSummaryFile("/nonexistent/path/file.json")
+	_, err := backtestsvc.ReadBacktestSummaryFile("/nonexistent/path/file.json")
 	assert.Error(t, err)
 }
 

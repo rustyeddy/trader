@@ -9,7 +9,6 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +19,7 @@ func TestToolGetCandlesCSV(t *testing.T) {
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instrument": "EUR_USD",
 		"timeframe":  "H1",
@@ -44,7 +43,7 @@ func TestToolGetCandlesCSV(t *testing.T) {
 // ── bot tools ─────────────────────────────────────────────────────────────
 
 func newBotSrv() *Server {
-	return New(&service.Service{Log: slog.Default()}, true)
+	return New(nil, slog.Default(), "", nil, true)
 }
 
 func TestToolListBots_Empty(t *testing.T) {
@@ -141,7 +140,7 @@ func TestToolStopBot_NotFound(t *testing.T) {
 }
 
 func TestListBotsAllowedWithoutOANDA(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false) // no OANDA, no write
+	srv := New(nil, slog.Default(), "", nil, false) // no OANDA, no write
 	raw, _ := json.Marshal(map[string]any{"name": "list_bots", "arguments": map[string]any{}})
 	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
 	require.Nil(t, rpcErr)
@@ -149,7 +148,7 @@ func TestListBotsAllowedWithoutOANDA(t *testing.T) {
 }
 
 func TestStartBotRequiresWriteEnable(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false) // write disabled
+	srv := New(nil, slog.Default(), "", nil, false) // write disabled
 	raw, _ := json.Marshal(map[string]any{
 		"name":      "start_bot",
 		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
@@ -161,7 +160,7 @@ func TestStartBotRequiresWriteEnable(t *testing.T) {
 }
 
 func TestStartBotRequiresOANDA(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, true) // write enabled, no OANDA
+	srv := New(nil, slog.Default(), "", nil, true) // write enabled, no OANDA
 	raw, _ := json.Marshal(map[string]any{
 		"name":      "start_bot",
 		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
@@ -177,7 +176,7 @@ func TestStartBotRequiresOANDA(t *testing.T) {
 // ── infra tools ───────────────────────────────────────────────────────────
 
 func TestToolGetVersion(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	got, rpcErr := srv.toolGetVersion()
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
@@ -186,7 +185,7 @@ func TestToolGetVersion(t *testing.T) {
 }
 
 func TestToolGetHealth(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	got, rpcErr := srv.toolGetHealth()
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
@@ -195,7 +194,7 @@ func TestToolGetHealth(t *testing.T) {
 }
 
 func TestGetVersionAllowedWithoutOANDA(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, _ := json.Marshal(map[string]any{"name": "get_version", "arguments": map[string]any{}})
 	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
 	require.Nil(t, rpcErr)
@@ -208,7 +207,7 @@ func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
 	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
 	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"name": "get_candles_csv",
 		"arguments": map[string]any{

@@ -27,8 +27,8 @@ import (
 )
 
 // Service holds the small, self-contained dependency set backtest
-// orchestration needs — no relation to the core service.Service beyond
-// being embedded into it (see service/backtest.go).
+// orchestration needs. Callers construct it directly with the fields
+// they have on hand — see e.g. api/rest/backtests.go.
 type Service struct {
 	// Executor optionally overrides how compiled backtests are executed
 	// (tests / callers needing a fake). Nil uses the real

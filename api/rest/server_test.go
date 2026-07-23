@@ -7,13 +7,12 @@ import (
 	"testing"
 
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func newMinimalServer() *Server {
-	return &Server{svc: &service.Service{Log: slog.Default()}}
+	return &Server{log: slog.Default()}
 }
 
 func TestGetHealth(t *testing.T) {

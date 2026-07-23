@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rustyeddy/trader/service"
+	reviewsvc "github.com/rustyeddy/trader/service/review"
 )
 
 // GET /api/v1/review
@@ -25,7 +25,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := s.svc.ReviewWatchlist(r.Context(), service.ReviewRequest{
+	resp, err := (&reviewsvc.Service{OANDA: s.oanda, Log: s.log}).ReviewWatchlist(r.Context(), reviewsvc.ReviewRequest{
 		Instruments: instruments,
 	})
 	if err != nil {

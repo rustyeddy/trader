@@ -16,16 +16,19 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
 const protocolVersion = "2024-11-05"
 
-// Server is the MCP server. It holds the service reference, the tool and
-// resource registries, and the write-enable flag for dangerous tools.
+// Server is the MCP server. It holds the tool and resource registries and
+// the write-enable flag for dangerous tools.
 type Server struct {
-	svc         *service.Service
+	oanda       *oanda.Client // nil for backtest-only use
 	log         *slog.Logger
+	accountID   string
+	backtests   backtest.BacktestExecutor
 	writeEnable bool // gates place_order, close_trade, update_stop
 	reportsDir  string
 
@@ -35,15 +38,17 @@ type Server struct {
 
 const defaultReportsDir = "/srv/trading/backtests/reports"
 
-// New creates a Server.
-func New(svc *service.Service, writeEnable bool) *Server {
-	log := svc.Log
+// New creates a Server. oandaClient may be nil for backtest-only use. log
+// may be nil, in which case slog.Default() is used.
+func New(oandaClient *oanda.Client, log *slog.Logger, accountID string, backtests backtest.BacktestExecutor, writeEnable bool) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		svc:         svc,
+		oanda:       oandaClient,
 		log:         log,
+		accountID:   accountID,
+		backtests:   backtests,
 		writeEnable: writeEnable,
 		reportsDir:  defaultReportsDir,
 	}

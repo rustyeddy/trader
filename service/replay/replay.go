@@ -86,10 +86,9 @@ type replayPosition struct {
 	openTime     types.Timestamp
 }
 
-// Service holds replay's (empty) dependency set — no relation to the core
-// service.Service beyond being called through it (see service/replay.go).
-// RunReplay reads entirely through datamanager and has no OANDA/Log/account
-// dependency, unlike backtestsvc/datasvc/reviewsvc.
+// Service holds replay's (empty) dependency set. RunReplay reads entirely
+// through datamanager and has no OANDA/Log/account dependency, unlike
+// backtestsvc/datasvc/reviewsvc.
 type Service struct{}
 
 // oandaGranToTF converts an OANDA granularity string ("H1", "D", "M1") to

@@ -15,11 +15,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"log/slog"
+
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
 	accountsvc "github.com/rustyeddy/trader/service/account"
 	"github.com/rustyeddy/trader/types"
 )
@@ -52,9 +53,10 @@ func New(rc *config.RootConfig) *cobra.Command {
 	return cmd
 }
 
-// buildService wires a Service from current flag values + global config + env
-// fallbacks. cmd is used to detect which flags were explicitly set by the user.
-func buildService(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (*service.Service, error) {
+// buildDeps resolves the OANDA client, logger, and default account ID from
+// current flag values + global config + env fallbacks. cmd is used to
+// detect which flags were explicitly set by the user.
+func buildDeps(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (client *oanda.Client, logger *slog.Logger, resolvedAccountID string, err error) {
 	// Token: explicit flag > global config > env var.
 	tok := token
 	if !cmd.Flags().Changed("token") {
@@ -81,26 +83,22 @@ func buildService(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig
 		resolvedEnv = rc.OANDAEnv
 	}
 
-	svc, err := service.New(service.Config{
-		Env:       resolvedEnv,
-		Token:     tok,
-		AccountID: resolvedAccount,
-		Log:       log.L,
-	})
+	client, err = oanda.NewClient(resolvedEnv, tok)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	if err := svc.ResolveAccount(ctx); err != nil {
-		var amb service.AmbiguousAccountError
+	resolvedID, err := accountsvc.ResolveAccountID(ctx, client, resolvedAccount)
+	if err != nil {
+		var amb accountsvc.AmbiguousAccountError
 		if errors.As(err, &amb) {
 			fmt.Println("Multiple accounts found — specify one with --account-id:")
 			for _, id := range amb.Accounts {
 				fmt.Printf("  %s\n", id)
 			}
 		}
-		return nil, err
+		return nil, nil, "", err
 	}
-	return svc, nil
+	return client, log.L, resolvedID, nil
 }
 
 // addCommonFlags adds the OANDA auth/account flags every order subcommand needs.
@@ -132,14 +130,11 @@ func newOrderCmd(rc *config.RootConfig) *cobra.Command {
 
 func runNewOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx, cmd, rc)
+	client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
-	if err := svc.ResolveAccount(ctx); err != nil {
-		return err
-	}
-	acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
+	acc, err := accountsvc.Resolve(ctx, resolvedAccountID, client, logger)
 	if err != nil {
 		return err
 	}
@@ -222,11 +217,11 @@ func listOrdersCmd(rc *config.RootConfig) *cobra.Command {
 
 func runListOrders(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx, cmd, rc)
+	client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
-	acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
+	acc, err := accountsvc.ResolveFirst(ctx, resolvedAccountID, client, logger)
 	if err != nil {
 		return err
 	}
@@ -273,14 +268,11 @@ func closeOrderCmd(rc *config.RootConfig) *cobra.Command {
 
 func runCloseOrder(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
 	ctx := context.Background()
-	svc, err := buildService(ctx, cmd, rc)
+	client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 	if err != nil {
 		return err
 	}
-	if err := svc.ResolveAccount(ctx); err != nil {
-		return err
-	}
-	acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
+	acc, err := accountsvc.Resolve(ctx, resolvedAccountID, client, logger)
 	if err != nil {
 		return err
 	}
@@ -324,11 +316,11 @@ func transactionsCmd(rc *config.RootConfig) *cobra.Command {
 		Short: "List OANDA account transactions since a given ID",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			svc, err := buildService(ctx, cmd, rc)
+			client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}
-			acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
+			acc, err := accountsvc.ResolveFirst(ctx, resolvedAccountID, client, logger)
 			if err != nil {
 				return err
 			}
@@ -389,11 +381,11 @@ func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
-			svc, err := buildService(ctx, cmd, rc)
+			client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}
-			acc, err := accountsvc.ResolveFirst(ctx, svc.AccountID, svc.OANDA, svc.Log)
+			acc, err := accountsvc.ResolveFirst(ctx, resolvedAccountID, client, logger)
 			if err != nil {
 				return err
 			}
@@ -405,7 +397,7 @@ func transactionsStreamCmd(rc *config.RootConfig) *cobra.Command {
 				}
 			}
 
-			fmt.Printf("Subscribing to %s transaction stream (Ctrl-C to exit)...\n", svc.AccountID)
+			fmt.Printf("Subscribing to %s transaction stream (Ctrl-C to exit)...\n", resolvedAccountID)
 			ch, err := acc.StreamTransactions(ctx, opts)
 			if err != nil {
 				return fmt.Errorf("subscribe: %w", err)
@@ -461,14 +453,11 @@ Examples:
 				return fmt.Errorf("at least one of --stop or --take must be non-zero")
 			}
 			ctx := context.Background()
-			svc, err := buildService(ctx, cmd, rc)
+			client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}
-			if err := svc.ResolveAccount(ctx); err != nil {
-				return err
-			}
-			acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
+			acc, err := accountsvc.Resolve(ctx, resolvedAccountID, client, logger)
 			if err != nil {
 				return err
 			}

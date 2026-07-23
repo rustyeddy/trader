@@ -12,7 +12,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -49,7 +49,7 @@ func (s *Server) effectiveReportsDir() string {
 // returns their summaries as an array, sorted in reverse filename order.
 func (s *Server) handleListBacktests(w http.ResponseWriter, r *http.Request) {
 	dir := s.effectiveReportsDir()
-	summaries, err := service.ListBacktestSummaries(dir)
+	summaries, err := backtestsvc.ListBacktestSummaries(dir)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("list backtests: %v", err))
 		return
@@ -94,7 +94,7 @@ func (s *Server) handleGetBacktest(w http.ResponseWriter, r *http.Request) {
 		name += ".json"
 	}
 
-	summary, err := service.ReadBacktestSummaryByName(s.effectiveReportsDir(), name)
+	summary, err := backtestsvc.ReadBacktestSummaryByName(s.effectiveReportsDir(), name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, fmt.Sprintf("report %q not found", name))
@@ -111,7 +111,7 @@ func (s *Server) handleGetBacktest(w http.ResponseWriter, r *http.Request) {
 // handleGetBacktestOrg serves the raw org-mode report for download.
 func (s *Server) handleGetBacktestOrg(w http.ResponseWriter, r *http.Request) {
 	name := filepath.Base(r.PathValue("name"))
-	data, filename, err := service.ReadBacktestOrgReport(s.effectiveReportsDir(), name)
+	data, filename, err := backtestsvc.ReadBacktestOrgReport(s.effectiveReportsDir(), name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, "org report not found")
@@ -202,10 +202,6 @@ type regressResult struct {
 // handleRegressBacktest runs backtest configs and compares results against
 // committed JSON baselines, returning per-run pass/fail details.
 func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
-	if s.svc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "service not configured")
-		return
-	}
 	var req regressBacktestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -228,7 +224,7 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	summaries, err := s.svc.RunBacktestPathSpecs(r.Context(), configPaths)
+	summaries, err := (&backtestsvc.Service{Executor: s.backtests, Log: s.log}).RunBacktestPathSpecs(r.Context(), configPaths)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("run backtests: %v", err))
 		return
@@ -246,7 +242,7 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 		for _, s2 := range summaries {
 			safeName := filepath.Base(s2.Name)
 			path := filepath.Join(baselineDir, safeName+".json")
-			if err := service.WriteBacktestSummaryJSON(path, s2); err != nil {
+			if err := backtestsvc.WriteBacktestSummaryJSON(path, s2); err != nil {
 				writeErr(w, http.StatusInternalServerError, fmt.Sprintf("write baseline for %q: %v", s2.Name, err))
 				return
 			}
@@ -263,7 +259,7 @@ func (s *Server) handleRegressBacktest(w http.ResponseWriter, r *http.Request) {
 	for _, got := range summaries {
 		safeName := filepath.Base(got.Name)
 		path := filepath.Join(baselineDir, safeName+".json")
-		baseline, err := service.ReadBacktestSummaryFile(path)
+		baseline, err := backtestsvc.ReadBacktestSummaryFile(path)
 		if err != nil {
 			results = append(results, regressResult{
 				Name:   got.Name,
@@ -339,7 +335,7 @@ func (s *Server) handleGetBacktestCandles(w http.ResponseWriter, r *http.Request
 	if !strings.HasSuffix(name, ".json") {
 		name += ".json"
 	}
-	summary, err := service.ReadBacktestSummaryByName(s.effectiveReportsDir(), name)
+	summary, err := backtestsvc.ReadBacktestSummaryByName(s.effectiveReportsDir(), name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, fmt.Sprintf("report %q not found", name))

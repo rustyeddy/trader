@@ -15,12 +15,10 @@ import (
 )
 
 // reviewSweepSvc constructs a fresh reviewsweepsvc.Service from the
-// server's underlying service.Service dependencies on every call — not
-// cached, matching the no-caching rationale documented on
-// backtestSvc/reviewSvc in the service package (a bare &service.Service{}
-// struct literal must be picked up too).
+// server's inline dependency fields on every call — not cached, so it
+// always reflects s.log at call time.
 func (s *Server) reviewSweepSvc() *reviewsweepsvc.Service {
-	return &reviewsweepsvc.Service{Log: s.svc.Log}
+	return &reviewsweepsvc.Service{Log: s.log}
 }
 
 // WithReviewSweepReportsDir sets the directory from which review-sweep
@@ -101,10 +99,6 @@ type runReviewSweepRequest struct {
 // handleRunReviewSweep runs review-sweep configs and persists each
 // resulting summary as a named JSON report, then returns the summaries.
 func (s *Server) handleRunReviewSweep(w http.ResponseWriter, r *http.Request) {
-	if s.svc == nil {
-		writeErr(w, http.StatusServiceUnavailable, "service not configured")
-		return
-	}
 	var req runReviewSweepRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))

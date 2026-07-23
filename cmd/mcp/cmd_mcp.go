@@ -13,7 +13,6 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
 )
 
 // New returns the "mcp" cobra command. It runs the MCP server directly
@@ -82,23 +81,16 @@ Resources:
 				resolvedAccount = rc.OANDAAccountID
 			}
 
-			var svc *service.Service
+			var client *oanda.Client
 			if tok != "" {
 				var err error
-				svc, err = service.New(service.Config{
-					Env:       env,
-					Token:     tok,
-					AccountID: resolvedAccount,
-					Log:       log,
-				})
+				client, err = oanda.NewClient(env, tok)
 				if err != nil {
-					return fmt.Errorf("init service: %w", err)
+					return fmt.Errorf("init oanda client: %w", err)
 				}
-			} else {
-				svc = &service.Service{Log: log}
 			}
 
-			srv := mcpserver.New(svc, writeEnable)
+			srv := mcpserver.New(client, log, resolvedAccount, nil, writeEnable)
 			if reportsDir != "" {
 				srv.WithReportsDir(reportsDir)
 			}

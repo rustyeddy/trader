@@ -17,10 +17,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/review"
-	"github.com/rustyeddy/trader/service"
+	reviewsvc "github.com/rustyeddy/trader/service/review"
 	"github.com/rustyeddy/trader/view"
 )
 
@@ -141,9 +142,10 @@ func resolveThresholds(cmd *cobra.Command, rc *config.RootConfig) review.Thresho
 	return review.MergeThresholds(base, override)
 }
 
-// buildService wires a market-data-only Service from flag values + global
-// config + env fallbacks. The review endpoint needs no account resolution.
-func buildService(cmd *cobra.Command, rc *config.RootConfig) (*service.Service, error) {
+// buildOandaClient wires a market-data-only OANDA client from flag values +
+// global config + env fallbacks. The review endpoint needs no account
+// resolution.
+func buildOandaClient(cmd *cobra.Command, rc *config.RootConfig) (*oanda.Client, error) {
 	tok := token
 	if !cmd.Flags().Changed("token") {
 		if rc != nil && rc.OANDAToken != "" {
@@ -158,11 +160,7 @@ func buildService(cmd *cobra.Command, rc *config.RootConfig) (*service.Service, 
 		resolvedEnv = rc.OANDAEnv
 	}
 
-	return service.New(service.Config{
-		Env:   resolvedEnv,
-		Token: tok,
-		Log:   log.L,
-	})
+	return oanda.NewClient(resolvedEnv, tok)
 }
 
 func splitCSV(s string) []string {
@@ -204,7 +202,7 @@ func validateOutputFormat(format string) error {
 // live "now" path). --asof is sugar for from == to (a single-date sweep
 // step); --from/--to must be set together. Dates are parsed as UTC
 // midnight, matching the closed-bars-only convention in
-// service.ReviewWatchlistRange: --asof 2026-06-15 means "as of the start of
+// reviewsvc.Service.ReviewWatchlistRange: --asof 2026-06-15 means "as of the start of
 // June 15", i.e. using data through June 14's close.
 func parseHistoricalRange(cmd *cobra.Command) (from, to time.Time, historical bool, err error) {
 	asOfSet := cmd.Flags().Changed("asof")
@@ -261,7 +259,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 
 	buckets := selectedBuckets()
 
-	svc, err := buildService(cmd, rc)
+	client, err := buildOandaClient(cmd, rc)
 	if err != nil {
 		return err
 	}
@@ -269,7 +267,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 
 	var results []review.ReviewResult
 	if historical {
-		resp, err := svc.ReviewWatchlistRange(context.Background(), service.ReviewRangeRequest{
+		resp, err := (&reviewsvc.Service{OANDA: client, Log: log.L}).ReviewWatchlistRange(context.Background(), reviewsvc.ReviewRangeRequest{
 			Instruments: splitCSV(instrumentsCSV),
 			From:        from,
 			To:          to,
@@ -281,7 +279,7 @@ func runReview(cmd *cobra.Command, rc *config.RootConfig) error {
 		}
 		results = resp.Results
 	} else {
-		resp, err := svc.ReviewWatchlist(context.Background(), service.ReviewRequest{
+		resp, err := (&reviewsvc.Service{OANDA: client, Log: log.L}).ReviewWatchlist(context.Background(), reviewsvc.ReviewRequest{
 			Instruments: splitCSV(instrumentsCSV),
 			Thresholds:  th,
 		})

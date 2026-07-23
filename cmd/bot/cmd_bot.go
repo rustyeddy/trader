@@ -24,10 +24,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 	"github.com/rustyeddy/trader/strategy"
 )
 
@@ -63,7 +65,7 @@ func botListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all bots (running and stopped) on the server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var statuses []service.BotStatus
+			var statuses []botsvc.BotStatus
 			if err := apiGet(serverURL+"/api/v1/bots", &statuses); err != nil {
 				return err
 			}
@@ -99,7 +101,7 @@ func botGetCmd() *cobra.Command {
 		Short: "Show status of a single bot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var s service.BotStatus
+			var s botsvc.BotStatus
 			if err := apiGet(serverURL+"/api/v1/bots/"+args[0], &s); err != nil {
 				return err
 			}
@@ -109,7 +111,7 @@ func botGetCmd() *cobra.Command {
 	}
 }
 
-func printBotDetail(out io.Writer, s service.BotStatus) {
+func printBotDetail(out io.Writer, s botsvc.BotStatus) {
 	bar := strings.Repeat("─", 40)
 	fmt.Fprintln(out, bar)
 	fmt.Fprintf(out, "  %-20s %s\n", "ID", s.ID)
@@ -179,14 +181,14 @@ section.`,
 				}
 			}
 
-			printReport := func(s service.BotStatus) {
+			printReport := func(s botsvc.BotStatus) {
 				printBotDetail(out, s)
 				printBotPL(out, s.ID, allTrades)
 				fmt.Fprintln(out)
 			}
 
 			if all {
-				var statuses []service.BotStatus
+				var statuses []botsvc.BotStatus
 				if err := apiGet(serverURL+"/api/v1/bots", &statuses); err != nil {
 					return err
 				}
@@ -199,7 +201,7 @@ section.`,
 				}
 				return nil
 			}
-			var s service.BotStatus
+			var s botsvc.BotStatus
 			if err := apiGet(serverURL+"/api/v1/bots/"+args[0], &s); err != nil {
 				return err
 			}
@@ -280,12 +282,12 @@ Local mode (--local): runs directly in this process, no server required.
 In local mode the process blocks until Ctrl-C, then stops the bot cleanly.
 OANDA positions are NOT closed on stop — they remain on the broker.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := service.BotConfig{
+			cfg := botsvc.BotConfig{
 				Instrument:   instrument,
 				TickInterval: tickInterval,
 				RiskPct:      riskPct,
 				MaxUnits:     maxUnits,
-				Strategy:     service.StrategyConfig{Kind: stratName},
+				Strategy:     botsvc.StrategyConfig{Kind: stratName},
 			}
 
 			if local {
@@ -319,7 +321,7 @@ OANDA positions are NOT closed on stop — they remain on the broker.`,
 // startLocal runs a single bot directly in the current process without a
 // trader serve daemon. It blocks until the bot exits or Ctrl-C is received,
 // then stops the bot and waits for it to finish cleanly.
-func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig, configFile, token, accountID, env string) error {
+func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg botsvc.BotConfig, configFile, token, accountID, env string) error {
 	if configFile != "" {
 		return fmt.Errorf("--config is not supported with --local; start bots one at a time")
 	}
@@ -344,12 +346,13 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount, Log: log.L})
+	client, err := oanda.NewClient(env, tok)
 	if err != nil {
 		return err
 	}
-	if err := svc.ResolveAccount(ctx); err != nil {
-		var amb service.AmbiguousAccountError
+	resolvedID, err := accountsvc.ResolveAccountID(ctx, client, resolvedAccount)
+	if err != nil {
+		var amb accountsvc.AmbiguousAccountError
 		if errors.As(err, &amb) {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Multiple accounts — specify one with --account-id:")
 			for _, id := range amb.Accounts {
@@ -360,13 +363,17 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig
 	}
 
 	// Prevent two local bots from trading the same account simultaneously.
-	_, release, err := acquireAccountLock(svc.AccountID)
+	_, release, err := acquireAccountLock(resolvedID)
 	if err != nil {
 		return err
 	}
 	defer release()
 
-	status, err := svc.StartBot(ctx, cfg)
+	acc, err := accountsvc.Resolve(ctx, resolvedID, client, log.L)
+	if err != nil {
+		return fmt.Errorf("start bot: %w", err)
+	}
+	status, err := botsvc.StartBotOnAccount(ctx, acc, cfg, client, log.L)
 	if err != nil {
 		return fmt.Errorf("start bot: %w", err)
 	}
@@ -377,9 +384,9 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig
 	// Block until Ctrl-C cancels the context, then stop the bot and wait.
 	<-ctx.Done()
 	fmt.Fprintf(cmd.OutOrStdout(), "\nStopping bot %s...\n", status.ID)
-	_ = svc.StopBot(status.ID)
+	_ = botsvc.StopBot(status.ID)
 
-	if err := svc.WaitBot(status.ID); err != nil {
+	if err := botsvc.WaitBot(status.ID); err != nil {
 		return fmt.Errorf("bot exited with error: %w", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Bot %s stopped.\n", status.ID)
@@ -389,7 +396,7 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg service.BotConfig
 // startFromConfig reads a portfolio YAML and starts one bot per instrument.
 // It attempts every instrument and returns an error if any of them failed.
 func startFromConfig(cmd *cobra.Command, configFile string) error {
-	cfg, err := service.LoadPortfolioConfig(configFile)
+	cfg, err := botsvc.LoadPortfolioConfig(configFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -412,12 +419,12 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 		for _, f := range inst.Regime.Filters {
 			regimeCfg.Filters = append(regimeCfg.Filters, strategy.RegimeConfig{Kind: f.Kind, Params: f.Params})
 		}
-		bc := service.BotConfig{
+		bc := botsvc.BotConfig{
 			Instrument:   inst.Instrument,
 			TickInterval: tick,
 			RiskPct:      riskPct,
 			MaxUnits:     inst.MaxUnits,
-			Strategy: service.StrategyConfig{
+			Strategy: botsvc.StrategyConfig{
 				Kind:            inst.Strategy.Kind,
 				Granularity:     inst.Timeframe,
 				Params:          inst.Strategy.Params,
@@ -438,8 +445,8 @@ func startFromConfig(cmd *cobra.Command, configFile string) error {
 	return nil
 }
 
-func startOne(cmd *cobra.Command, cfg service.BotConfig) error {
-	var status service.BotStatus
+func startOne(cmd *cobra.Command, cfg botsvc.BotConfig) error {
+	var status botsvc.BotStatus
 	if err := apiPost(serverURL+"/api/v1/bots", cfg, &status); err != nil {
 		return err
 	}

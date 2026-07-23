@@ -7,18 +7,17 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestServerEffectiveReportsDir_Default(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	assert.Equal(t, defaultReportsDir, srv.effectiveReportsDir())
 }
 
 func TestServerWithReportsDir_OverridesDefault(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	srv.WithReportsDir("/tmp/custom-reports")
 	assert.Equal(t, "/tmp/custom-reports", srv.effectiveReportsDir())
 }
@@ -28,7 +27,7 @@ func TestReadBacktestResource_ListUsesConfiguredReportsDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "run-a.org"), []byte("* run a\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "run-b.org"), []byte("* run b\n"), 0o644))
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	srv.WithReportsDir(dir)
 
 	got, rpcErr := srv.readBacktestResource("backtest://results")
@@ -47,7 +46,7 @@ func TestReadBacktestResource_ReadSpecificOrgFromConfiguredReportsDir(t *testing
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "run-a.org"), []byte("* run a\n"), 0o644))
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	srv.WithReportsDir(dir)
 
 	got, rpcErr := srv.readBacktestResource("backtest://results/run-a")
@@ -63,7 +62,7 @@ func TestHandleResourcesRead_BacktestResultsUsesConfiguredReportsDir(t *testing.
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "run-a.org"), []byte("* run a\n"), 0o644))
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	srv.WithReportsDir(dir)
 
 	raw, err := json.Marshal(map[string]any{"uri": "backtest://results"})

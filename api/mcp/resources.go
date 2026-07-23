@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 // handleResourcesList returns available MCP resources.
@@ -54,7 +54,7 @@ func (s *Server) readBacktestResource(uri string) (any, *rpcError) {
 
 	// backtest://results → list all .org files
 	if uri == "backtest://results" {
-		names, err := service.ListBacktestOrgReports(outDir)
+		names, err := backtestsvc.ListBacktestOrgReports(outDir)
 		if err != nil {
 			return errContent(fmt.Sprintf("list backtest reports: %v", err)), nil
 		}
@@ -67,7 +67,7 @@ func (s *Server) readBacktestResource(uri string) (any, *rpcError) {
 
 	// backtest://results/<name> → read the specific .org file
 	name := strings.TrimPrefix(uri, "backtest://results/")
-	data, filename, err := service.ReadBacktestOrgReport(outDir, name)
+	data, filename, err := backtestsvc.ReadBacktestOrgReport(outDir, name)
 	if err != nil {
 		return errContent(fmt.Sprintf("read %s: %v", filename, err)), nil
 	}

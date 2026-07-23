@@ -15,7 +15,6 @@ import (
 
 	"github.com/rustyeddy/trader/api/rest"
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,8 +23,7 @@ import (
 // no OANDA client (backtest-only mode) and a temp reports directory.
 func newBlackboxServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	svc := &service.Service{Log: slog.Default()}
-	srv := rest.New(svc, ":0")
+	srv := rest.New(nil, slog.Default(), "", nil, ":0")
 	dir := t.TempDir()
 	srv.WithReportsDir(dir)
 	ts := httptest.NewServer(srv.Handler())

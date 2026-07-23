@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/service"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 )
 
 // fakeServer starts a minimal httptest server that serves canned bot responses.
-func fakeServer(t *testing.T, statuses []service.BotStatus) *httptest.Server {
+func fakeServer(t *testing.T, statuses []botsvc.BotStatus) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -40,9 +40,9 @@ func fakeServer(t *testing.T, statuses []service.BotStatus) *httptest.Server {
 	})
 
 	mux.HandleFunc("POST /api/v1/bots", func(w http.ResponseWriter, r *http.Request) {
-		var cfg service.BotConfig
+		var cfg botsvc.BotConfig
 		json.NewDecoder(r.Body).Decode(&cfg)
-		status := service.BotStatus{
+		status := botsvc.BotStatus{
 			ID:           "bot-test01",
 			Instrument:   cfg.Instrument,
 			StrategyName: cfg.Strategy.Kind,
@@ -84,7 +84,7 @@ func TestBotList_Empty(t *testing.T) {
 }
 
 func TestBotList_ShowsBots(t *testing.T) {
-	statuses := []service.BotStatus{
+	statuses := []botsvc.BotStatus{
 		{ID: "bot-aabb", Instrument: "EUR_USD", StrategyName: "donchian-v6", Status: "running", StartedAt: time.Now()},
 		{ID: "bot-ccdd", Instrument: "GBP_USD", StrategyName: "ema-cross", Status: "stopped", StartedAt: time.Now()},
 	}
@@ -105,7 +105,7 @@ func TestBotList_ShowsBots(t *testing.T) {
 }
 
 func TestBotGet_Found(t *testing.T) {
-	statuses := []service.BotStatus{
+	statuses := []botsvc.BotStatus{
 		{ID: "bot-1234", Instrument: "USD_JPY", StrategyName: "scalper", Status: "running", StartedAt: time.Now()},
 	}
 	srv := fakeServer(t, statuses)
@@ -153,7 +153,7 @@ func TestBotStart(t *testing.T) {
 }
 
 func TestBotStop_Found(t *testing.T) {
-	statuses := []service.BotStatus{
+	statuses := []botsvc.BotStatus{
 		{ID: "bot-5678", Status: "running"},
 	}
 	srv := fakeServer(t, statuses)

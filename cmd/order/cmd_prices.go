@@ -28,7 +28,7 @@ bid, ask, mid, spread in pips, and USD pip value per lot.
 Defaults to all seven major pairs. Supply --instruments to restrict the list.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			svc, err := buildService(ctx, cmd, rc)
+			client, _, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
 			if err != nil {
 				return err
 			}
@@ -47,7 +47,7 @@ Defaults to all seven major pairs. Supply --instruments to restrict the list.`,
 				oandaNames = append(oandaNames, inst.BaseCurrency+"_"+inst.QuoteCurrency)
 			}
 
-			prices, err := svc.OANDA.GetPricing(ctx, svc.AccountID, oandaNames...)
+			prices, err := client.GetPricing(ctx, resolvedAccountID, oandaNames...)
 			if err != nil {
 				return fmt.Errorf("fetch prices: %w", err)
 			}

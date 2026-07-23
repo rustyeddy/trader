@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/log"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
+	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
 // oandaAuth holds the optional OANDA credentials shared by data commands that
@@ -53,17 +53,13 @@ func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *config.RootConfig
 // fetchMidPrices queries OANDA for the current mid price of each instrument
 // (trader format, e.g. "EURUSD").  Returns a map of instrument → mid price.
 func fetchMidPrices(ctx context.Context, auth oandaAuth, instruments []string) (map[string]float64, error) {
-	svc, err := service.New(service.Config{
-		Env:       auth.env,
-		Token:     auth.token,
-		AccountID: auth.accountID,
-		Log:       log.L,
-	})
+	client, err := oanda.NewClient(auth.env, auth.token)
 	if err != nil {
 		return nil, fmt.Errorf("oanda: %w", err)
 	}
-	if err := svc.ResolveAccount(ctx); err != nil {
-		var amb service.AmbiguousAccountError
+	resolvedID, err := accountsvc.ResolveAccountID(ctx, client, auth.accountID)
+	if err != nil {
+		var amb accountsvc.AmbiguousAccountError
 		if errors.As(err, &amb) {
 			return nil, fmt.Errorf("multiple OANDA accounts — specify one with --account-id")
 		}
@@ -79,7 +75,7 @@ func fetchMidPrices(ctx context.Context, auth oandaAuth, instruments []string) (
 		oandaNames = append(oandaNames, inst.BaseCurrency+"_"+inst.QuoteCurrency)
 	}
 
-	prices, err := svc.OANDA.GetPricing(ctx, svc.AccountID, oandaNames...)
+	prices, err := client.GetPricing(ctx, resolvedID, oandaNames...)
 	if err != nil {
 		return nil, fmt.Errorf("oanda: get pricing: %w", err)
 	}

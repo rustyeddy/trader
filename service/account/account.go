@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/brokers"
@@ -66,6 +67,43 @@ func Resolve(ctx context.Context, id string, client *oanda.Client, log *slog.Log
 // account the client's token can see.
 func ResolveFirst(ctx context.Context, defaultID string, client *oanda.Client, log *slog.Logger) (*account.Account, error) {
 	return account.ResolveFirst(ctx, defaultID, client, log)
+}
+
+// ResolveAccountID returns accountID if non-empty, otherwise queries the
+// broker's token for its accounts: exactly one -> use it; none -> error;
+// more than one -> AmbiguousAccountError listing the candidate IDs.
+// CLI-only — REST/MCP must always supply an explicit account ID, never
+// resolve a default this way.
+func ResolveAccountID(ctx context.Context, broker brokers.Broker, accountID string) (string, error) {
+	if accountID != "" {
+		return accountID, nil
+	}
+	refs, err := broker.GetAccounts(ctx)
+	if err != nil {
+		return "", fmt.Errorf("discover accounts: %w", err)
+	}
+	if len(refs) == 0 {
+		return "", fmt.Errorf("no accounts found for this token")
+	}
+	if len(refs) > 1 {
+		ids := make([]string, len(refs))
+		for i, r := range refs {
+			ids[i] = r.ID
+		}
+		return "", AmbiguousAccountError{Accounts: ids}
+	}
+	return refs[0].ID, nil
+}
+
+// AmbiguousAccountError is returned by ResolveAccountID when the token has
+// access to multiple accounts and none was specified. Callers should
+// display the candidate IDs and ask the user to pick one.
+type AmbiguousAccountError struct {
+	Accounts []string
+}
+
+func (e AmbiguousAccountError) Error() string {
+	return fmt.Sprintf("ambiguous account: multiple accounts available, specify one (%s)", strings.Join(e.Accounts, ", "))
 }
 
 // DefaultAccountID picks the default account ID out of refs: configured if

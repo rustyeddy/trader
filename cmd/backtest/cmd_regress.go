@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 const defaultRegressConfigDir = "testdata/backtests/configs"
@@ -56,7 +56,7 @@ func runBacktestRegress(cmd *cobra.Command, args []string) error {
 		configPath = strings.TrimSpace(rootCfg.ConfigPath)
 	}
 
-	svc := &service.Service{Log: l}
+	svc := &backtestsvc.Service{Log: l}
 	summaries, err := svc.RunBacktestPathSpecs(cmd.Context(), []string{configPath})
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func updateBaselines(dir string, summaries []backtest.BacktestReportSummary) err
 	}
 	for _, s := range summaries {
 		path := baselinePath(dir, s.Name)
-		if err := service.WriteBacktestSummaryJSON(path, s); err != nil {
+		if err := backtestsvc.WriteBacktestSummaryJSON(path, s); err != nil {
 			return fmt.Errorf("write baseline for %q: %w", s.Name, err)
 		}
 		fmt.Printf("  updated  %s\n", path)

@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 // ── backtest list ─────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ func runBacktestList(cmd *cobra.Command, args []string) error {
 	out := cmd.OutOrStdout()
 	dir := resolveReportsDir(listReportsDir)
 
-	summaries, err := service.ListBacktestSummaries(dir)
+	summaries, err := backtestsvc.ListBacktestSummaries(dir)
 	if err != nil {
 		return fmt.Errorf("list backtest results: %w", err)
 	}
@@ -126,7 +126,7 @@ func runBacktestGet(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	dir := resolveReportsDir(getReportsDir)
 
-	summary, err := service.ReadBacktestSummaryByName(dir, name)
+	summary, err := backtestsvc.ReadBacktestSummaryByName(dir, name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("report %q not found in %s", name, dir)

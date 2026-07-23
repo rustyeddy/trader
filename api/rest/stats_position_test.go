@@ -8,7 +8,6 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +27,7 @@ func seedRestCandleStore(t *testing.T) {
 func TestHandleDataStats_OK(t *testing.T) {
 	seedRestCandleStore(t)
 
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?timeframe=H1&from=2024-01-01&to=2024-01-31")
 
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -44,7 +43,7 @@ func TestHandleDataStats_OK(t *testing.T) {
 func TestHandleDataStats_DefaultsTimeframeToH1(t *testing.T) {
 	seedRestCandleStore(t)
 
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01&to=2024-01-31")
 
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -54,19 +53,19 @@ func TestHandleDataStats_DefaultsTimeframeToH1(t *testing.T) {
 }
 
 func TestHandleDataStats_MissingFrom(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?to=2024-01-31")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleDataStats_MissingTo(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleDataStats_BadUnits(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/EURUSD/stats?from=2024-01-01&to=2024-01-31&units=notanumber")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
@@ -74,7 +73,7 @@ func TestHandleDataStats_BadUnits(t *testing.T) {
 // ── GET /api/v1/pip-values ────────────────────────────────────────────────
 
 func TestHandlePipValues_DefaultsMajorPairs(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/pip-values")
 
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -86,7 +85,7 @@ func TestHandlePipValues_DefaultsMajorPairs(t *testing.T) {
 }
 
 func TestHandlePipValues_ScopesToRequestedInstruments(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/pip-values?instruments=EURUSD,USDJPY")
 
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -98,7 +97,7 @@ func TestHandlePipValues_ScopesToRequestedInstruments(t *testing.T) {
 }
 
 func TestHandlePipValues_BadUnits(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/pip-values?units=abc")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
@@ -106,7 +105,7 @@ func TestHandlePipValues_BadUnits(t *testing.T) {
 // ── GET /api/v1/position ──────────────────────────────────────────────────
 
 func TestHandlePosition_ReturnsTable(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?instrument=EURUSD&price=1.08")
 
 	require.Equal(t, http.StatusOK, rr.Code)
@@ -118,31 +117,31 @@ func TestHandlePosition_ReturnsTable(t *testing.T) {
 }
 
 func TestHandlePosition_MissingInstrument(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?price=1.08")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandlePosition_BadPrice(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?instrument=EURUSD&price=abc")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandlePosition_BadUnits(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?instrument=EURUSD&price=1.08&units=notanumber")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandlePosition_BadNotional(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?instrument=EURUSD&price=1.08&notional=abc")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandlePosition_BadPips(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/position?instrument=EURUSD&price=1.08&pips=abc")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
@@ -150,19 +149,19 @@ func TestHandlePosition_BadPips(t *testing.T) {
 // ── GET /api/v1/candles/validate ─────────────────────────────────────────
 
 func TestHandleValidateCandles_MissingInstruments(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/validate?from=2024-01&to=2024-01")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleValidateCandles_MissingFrom(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/validate?instruments=EURUSD&to=2024-01")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleValidateCandles_BadFromFormat(t *testing.T) {
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/validate?instruments=EURUSD&from=notadate&to=2024-01")
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
@@ -170,7 +169,7 @@ func TestHandleValidateCandles_BadFromFormat(t *testing.T) {
 func TestHandleValidateCandles_OK(t *testing.T) {
 	seedRestCandleStore(t)
 
-	srv := New(&service.Service{}, "")
+	srv := New(nil, nil, "", nil, "")
 	rr := do(t, srv.Handler(), "GET", "/api/v1/candles/validate?instruments=EURUSD&from=2024-01&to=2024-01")
 	require.Equal(t, http.StatusOK, rr.Code)
 

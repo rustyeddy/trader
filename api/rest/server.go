@@ -16,16 +16,21 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/service"
 	accountsvc "github.com/rustyeddy/trader/service/account"
 )
 
-// Server wraps a Service and exposes its methods over HTTP.
+// Server exposes account/backtest/review/etc. functionality over HTTP. It
+// holds no business logic itself — each handler calls into the relevant
+// service/<domain> package and maps the result to JSON or an HTTP error.
 type Server struct {
-	svc        *service.Service
-	addr       string
+	oanda      *oanda.Client // nil for backtest-only use; OANDA-requiring endpoints respond 503
 	log        *slog.Logger
+	accountID  string
+	backtests  backtest.BacktestExecutor
+	addr       string
 	staticFS   fs.FS  // nil when no UI assets are embedded
 	reportsDir string // directory for backtest JSON reports
 	configsDir string // directory for backtest config files
@@ -35,14 +40,14 @@ type Server struct {
 	mcpHandler            http.Handler // optional MCP handler mounted at POST /mcp
 }
 
-// New creates a Server. svc may have a nil OANDA client for backtest-only
-// use; endpoints that require OANDA will respond 503 in that case.
-func New(svc *service.Service, addr string) *Server {
-	log := svc.Log
+// New creates a Server. oandaClient may be nil for backtest-only use;
+// endpoints that require OANDA will respond 503 in that case. log may be
+// nil, in which case slog.Default() is used.
+func New(oandaClient *oanda.Client, log *slog.Logger, accountID string, backtests backtest.BacktestExecutor, addr string) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{svc: svc, addr: addr, log: log}
+	return &Server{oanda: oandaClient, log: log, accountID: accountID, backtests: backtests, addr: addr}
 }
 
 // WithMCPHandler mounts an MCP HTTP handler at POST /mcp so that the MCP
@@ -235,7 +240,7 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 
 // requireOANDA returns false and writes 503 if the OANDA client is absent.
 func (s *Server) requireOANDA(w http.ResponseWriter) bool {
-	if s.svc.OANDA == nil {
+	if s.oanda == nil {
 		writeErr(w, http.StatusServiceUnavailable,
 			"OANDA integration not configured (no token); backtest-only mode")
 		return false
@@ -258,9 +263,9 @@ func (s *Server) resolveAccount(w http.ResponseWriter, r *http.Request) (*accoun
 		err error
 	)
 	if id := r.PathValue("accountID"); id != "" {
-		acc, err = accountsvc.Resolve(r.Context(), id, s.svc.OANDA, s.svc.Log)
+		acc, err = accountsvc.Resolve(r.Context(), id, s.oanda, s.log)
 	} else {
-		acc, err = accountsvc.ResolveFirst(r.Context(), s.svc.AccountID, s.svc.OANDA, s.svc.Log)
+		acc, err = accountsvc.ResolveFirst(r.Context(), s.accountID, s.oanda, s.log)
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, fmt.Sprintf("resolve account: %v", err))

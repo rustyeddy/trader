@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/rustyeddy/trader/service"
+	datasvc "github.com/rustyeddy/trader/service/data"
 )
 
 // ── GET /api/v1/candles/{instrument} ───────────────────────────────────────
 
 func (s *Server) handleGetCandlesCSV(w http.ResponseWriter, r *http.Request) {
 	instrument := r.PathValue("instrument")
-	result, err := s.svc.CandlesCSV(r.Context(), service.CandlesCSVRequest{
+	result, err := (&datasvc.Service{OANDA: s.oanda}).CandlesCSV(r.Context(), datasvc.CandlesCSVRequest{
 		Instrument: instrument,
 		Timeframe:  r.URL.Query().Get("timeframe"),
 		From:       r.URL.Query().Get("from"),

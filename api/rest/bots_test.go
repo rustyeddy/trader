@@ -8,7 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/rustyeddy/trader/service"
+	"github.com/rustyeddy/trader/brokers/oanda"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -25,20 +26,13 @@ func newBotsTestServer(t *testing.T) *Server {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(stub.Close)
-	svc, err := service.New(service.Config{
-		Env:       "practice",
-		Token:     "test-token",
-		AccountID: "test-account",
-		Log:       slog.Default(),
-	})
-	// Override the base URL so any accidental call hits the stub.
-	if err == nil {
-		svc.OANDA.BaseURL = stub.URL
-	}
+	client, err := oanda.NewClient("practice", "test-token")
 	if err != nil {
-		t.Fatalf("service.New: %v", err)
+		t.Fatalf("oanda.NewClient: %v", err)
 	}
-	return New(svc, ":0")
+	// Override the base URL so any accidental call hits the stub.
+	client.BaseURL = stub.URL
+	return New(client, slog.Default(), "test-account", nil, ":0")
 }
 
 func TestHandleListBots_Empty(t *testing.T) {
@@ -70,11 +64,10 @@ func TestHandleStopBot_NotFound(t *testing.T) {
 }
 
 func TestHandleStartBot_NoOANDA(t *testing.T) {
-	svc := &service.Service{}
-	srv := New(svc, ":0")
-	body, _ := json.Marshal(service.BotConfig{
+	srv := New(nil, slog.Default(), "", nil, ":0")
+	body, _ := json.Marshal(botsvc.BotConfig{
 		Instrument: "EUR_USD",
-		Strategy:   service.StrategyConfig{Kind: "pulse"},
+		Strategy:   botsvc.StrategyConfig{Kind: "pulse"},
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -92,8 +85,8 @@ func TestHandleStartBot_BadJSON(t *testing.T) {
 
 func TestHandleStartBot_MissingInstrument(t *testing.T) {
 	srv := newBotsTestServer(t)
-	body, _ := json.Marshal(service.BotConfig{
-		Strategy: service.StrategyConfig{Kind: "pulse"},
+	body, _ := json.Marshal(botsvc.BotConfig{
+		Strategy: botsvc.StrategyConfig{Kind: "pulse"},
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -107,9 +100,9 @@ func TestHandleStartBot_MissingInstrument(t *testing.T) {
 
 func TestHandleStartBot_UnknownStrategy(t *testing.T) {
 	srv := newBotsTestServer(t)
-	body, _ := json.Marshal(service.BotConfig{
+	body, _ := json.Marshal(botsvc.BotConfig{
 		Instrument: "EUR_USD",
-		Strategy:   service.StrategyConfig{Kind: "bogus"},
+		Strategy:   botsvc.StrategyConfig{Kind: "bogus"},
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/test-account/bots", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -119,10 +112,10 @@ func TestHandleStartBot_UnknownStrategy(t *testing.T) {
 
 func TestHandleStartBot_CreatesBot(t *testing.T) {
 	srv := newBotsTestServer(t)
-	body, _ := json.Marshal(service.BotConfig{
+	body, _ := json.Marshal(botsvc.BotConfig{
 		Instrument:   "EUR_USD",
 		TickInterval: "24h", // long interval — won't actually tick during test
-		Strategy: service.StrategyConfig{
+		Strategy: botsvc.StrategyConfig{
 			Kind:   "pulse",
 			Params: map[string]any{"stop_pips": 20.0, "hold_bars": 5},
 		},
@@ -132,7 +125,7 @@ func TestHandleStartBot_CreatesBot(t *testing.T) {
 	srv.Handler().ServeHTTP(w, r)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	var status service.BotStatus
+	var status botsvc.BotStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
 	assert.Equal(t, "running", status.Status)
 	assert.Equal(t, "EUR_USD", status.Instrument)
@@ -143,7 +136,7 @@ func TestHandleStartBot_CreatesBot(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w2, r2)
 	require.Equal(t, http.StatusOK, w2.Code)
-	var bots []service.BotStatus
+	var bots []botsvc.BotStatus
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &bots))
 	require.Len(t, bots, 1)
 	assert.Equal(t, status.ID, bots[0].ID)

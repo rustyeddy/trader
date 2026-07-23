@@ -30,10 +30,9 @@ import (
 const dateLayout = "2006-01-02"
 
 // Service holds the small, self-contained dependency set review-sweep
-// orchestration needs — no relation to the core service.Service beyond
-// being embedded into it (see api/rest/review_sweep.go). No OANDA client:
-// a review sweep only ever replays classification against the local
-// candle store (review.RunSweep), by design — see review/replay.go.
+// orchestration needs. No OANDA client: a review sweep only ever replays
+// classification against the local candle store (review.RunSweep), by
+// design — see review/replay.go.
 type Service struct {
 	Log *slog.Logger
 }

@@ -9,8 +9,12 @@ import (
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/service"
 	accountsvc "github.com/rustyeddy/trader/service/account"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
+	botsvc "github.com/rustyeddy/trader/service/bots"
+	datasvc "github.com/rustyeddy/trader/service/data"
+	pipvaluessvc "github.com/rustyeddy/trader/service/pipvalues"
+	positioncalcsvc "github.com/rustyeddy/trader/service/positioncalc"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -243,7 +247,7 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 		return nil, &rpcError{Code: errInvalidParams, Message: "invalid tools/call params"}
 	}
 
-	if s.svc.OANDA == nil {
+	if s.oanda == nil {
 		switch p.Name {
 		case "run_backtest", "get_candles_csv", "get_candle_stats", "validate_candles",
 			"get_pip_values", "get_position", "list_bots", "get_bot", "stop_bot",
@@ -326,9 +330,9 @@ func (s *Server) handleToolsCall(ctx context.Context, raw json.RawMessage) (any,
 // first/default account when id is empty.
 func (s *Server) readAccount(ctx context.Context, id string) (*account.Account, error) {
 	if id == "" {
-		return accountsvc.ResolveFirst(ctx, s.svc.AccountID, s.svc.OANDA, s.svc.Log)
+		return accountsvc.ResolveFirst(ctx, s.accountID, s.oanda, s.log)
 	}
-	return accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
+	return accountsvc.Resolve(ctx, id, s.oanda, s.log)
 }
 
 // writeAccount resolves the account for a mutating tool. Mutations must name
@@ -337,7 +341,7 @@ func (s *Server) writeAccount(ctx context.Context, id string) (*account.Account,
 	if id == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "account_id is required for write operations"}
 	}
-	acc, err := accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
+	acc, err := accountsvc.Resolve(ctx, id, s.oanda, s.log)
 	if err != nil {
 		return nil, &rpcError{Code: errInvalidParams, Message: fmt.Sprintf("resolve account: %v", err)}
 	}
@@ -345,11 +349,11 @@ func (s *Server) writeAccount(ctx context.Context, id string) (*account.Account,
 }
 
 func (s *Server) toolListAccounts(ctx context.Context) (any, *rpcError) {
-	refs, err := accountsvc.ListAccounts(ctx, s.svc.OANDA)
+	refs, err := accountsvc.ListAccounts(ctx, s.oanda)
 	if err != nil {
 		return errContent(fmt.Sprintf("list_accounts: %v", err)), nil
 	}
-	defaultID := accountsvc.DefaultAccountID(refs, s.svc.AccountID)
+	defaultID := accountsvc.DefaultAccountID(refs, s.accountID)
 	out := make([]map[string]any, 0, len(refs))
 	for _, ref := range refs {
 		out = append(out, map[string]any{
@@ -446,7 +450,7 @@ func (s *Server) toolRunBacktest(ctx context.Context, raw json.RawMessage) (any,
 		return nil, &rpcError{Code: errInvalidParams, Message: "config_paths (array of strings) is required"}
 	}
 
-	summaries, err := s.svc.RunBacktestPathSpecsAndWriteReports(ctx, args.ConfigPaths, s.effectiveReportsDir())
+	summaries, err := (&backtestsvc.Service{Executor: s.backtests, Log: s.log}).RunBacktestPathSpecsAndWriteReports(ctx, args.ConfigPaths, s.effectiveReportsDir())
 	if err != nil {
 		return errContent(fmt.Sprintf("run_backtest: %v", err)), nil
 	}
@@ -471,7 +475,7 @@ func (s *Server) toolGetCandlesCSV(ctx context.Context, raw json.RawMessage) (an
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, timeframe, and from are required"}
 	}
 
-	result, err := s.svc.CandlesCSV(ctx, service.CandlesCSVRequest{
+	result, err := (&datasvc.Service{OANDA: s.oanda}).CandlesCSV(ctx, datasvc.CandlesCSVRequest{
 		Instrument: args.Instrument,
 		Timeframe:  args.Timeframe,
 		From:       args.From,
@@ -606,7 +610,7 @@ func (s *Server) toolDownloadCandles(ctx context.Context, raw json.RawMessage) (
 	}
 
 	var progress []string
-	result, err := s.svc.DownloadOandaCandles(ctx, service.DownloadOandaCandlesRequest{
+	result, err := (&datasvc.Service{OANDA: s.oanda}).DownloadOandaCandles(ctx, datasvc.DownloadOandaCandlesRequest{
 		Instrument: args.Instrument,
 		Timeframe:  args.Timeframe,
 		From:       from,
@@ -639,7 +643,7 @@ func (s *Server) toolGetDataStats(ctx context.Context, raw json.RawMessage) (any
 	if args.Instrument == "" || args.From == "" || args.To == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument, from, and to are required"}
 	}
-	result, err := s.svc.DataStats(ctx, service.DataStatsRequest{
+	result, err := (&datasvc.Service{OANDA: s.oanda}).DataStats(ctx, datasvc.DataStatsRequest{
 		Instrument: args.Instrument,
 		Timeframe:  args.Timeframe,
 		From:       args.From,
@@ -683,7 +687,7 @@ func (s *Server) toolValidateCandles(ctx context.Context, raw json.RawMessage) (
 	if src == "" {
 		src = "oanda"
 	}
-	report, err := s.svc.ValidateCandleData(ctx, service.ValidateCandleDataRequest{
+	report, err := (&datasvc.Service{OANDA: s.oanda}).ValidateCandleData(ctx, datasvc.ValidateCandleDataRequest{
 		Instruments: args.Instruments,
 		Source:      src,
 		Timeframe:   tf,
@@ -704,7 +708,7 @@ func (s *Server) toolGetPipValues(ctx context.Context, raw json.RawMessage) (any
 	if raw != nil {
 		_ = json.Unmarshal(raw, &args)
 	}
-	result, err := s.svc.PipValues(ctx, service.PipValuesRequest{
+	result, err := (&pipvaluessvc.Service{OANDA: s.oanda, AccountID: s.accountID}).PipValues(ctx, pipvaluessvc.PipValuesRequest{
 		Units:       args.Units,
 		Instruments: args.Instruments,
 	})
@@ -728,7 +732,7 @@ func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any,
 	if args.Instrument == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "instrument is required"}
 	}
-	result, err := s.svc.PositionCalc(ctx, service.PositionCalcRequest{
+	result, err := (&positioncalcsvc.Service{OANDA: s.oanda, AccountID: s.accountID}).PositionCalc(ctx, positioncalcsvc.PositionCalcRequest{
 		Instrument: args.Instrument,
 		Price:      args.Price,
 		Units:      args.Units,
@@ -747,15 +751,15 @@ func (s *Server) toolGetPosition(ctx context.Context, raw json.RawMessage) (any,
 // otherwise every bot the server manages across all accounts. The all-accounts
 // view reads in-process state and needs no OANDA connection.
 func (s *Server) toolListBots(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
-	var bots []service.BotStatus
+	var bots []botsvc.BotStatus
 	if id := parseAccountID(raw); id != "" {
-		acc, err := accountsvc.Resolve(ctx, id, s.svc.OANDA, s.svc.Log)
+		acc, err := accountsvc.Resolve(ctx, id, s.oanda, s.log)
 		if err != nil {
 			return errContent(fmt.Sprintf("list_bots: %v", err)), nil
 		}
-		bots = s.svc.ListBotsForAccount(acc.ID)
+		bots = botsvc.ListBotsForAccount(acc.ID)
 	} else {
-		bots = s.svc.ListBots()
+		bots = botsvc.ListBots()
 	}
 	return jsonContent(map[string]any{
 		"count": len(bots),
@@ -770,7 +774,7 @@ func (s *Server) toolGetBot(raw json.RawMessage) (any, *rpcError) {
 	if err := json.Unmarshal(raw, &args); err != nil || args.ID == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "id is required"}
 	}
-	status, err := s.svc.GetBot(args.ID)
+	status, err := botsvc.GetBot(args.ID)
 	if err != nil {
 		return errContent(fmt.Sprintf("get_bot: %v", err)), nil
 	}
@@ -800,13 +804,13 @@ func (s *Server) toolStartBot(ctx context.Context, raw json.RawMessage) (any, *r
 	if riskPct == 0 {
 		riskPct = 1.0
 	}
-	status, err := s.svc.StartBotOnAccount(ctx, acc, service.BotConfig{
+	status, err := botsvc.StartBotOnAccount(ctx, acc, botsvc.BotConfig{
 		Instrument:   args.Instrument,
 		TickInterval: args.TickInterval,
 		RiskPct:      riskPct,
 		MaxUnits:     args.MaxUnits,
-		Strategy:     service.StrategyConfig{Kind: args.Strategy},
-	})
+		Strategy:     botsvc.StrategyConfig{Kind: args.Strategy},
+	}, s.oanda, s.log)
 	if err != nil {
 		return errContent(fmt.Sprintf("start_bot: %v", err)), nil
 	}
@@ -820,7 +824,7 @@ func (s *Server) toolStopBot(raw json.RawMessage) (any, *rpcError) {
 	if err := json.Unmarshal(raw, &args); err != nil || args.ID == "" {
 		return nil, &rpcError{Code: errInvalidParams, Message: "id is required"}
 	}
-	if err := s.svc.StopBot(args.ID); err != nil {
+	if err := botsvc.StopBot(args.ID); err != nil {
 		return errContent(fmt.Sprintf("stop_bot: %v", err)), nil
 	}
 	return textContent(fmt.Sprintf("bot %s stopped", args.ID)), nil

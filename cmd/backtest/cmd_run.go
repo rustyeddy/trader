@@ -10,7 +10,7 @@ import (
 
 	"github.com/rustyeddy/trader/backtest"
 	"github.com/rustyeddy/trader/config"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 )
 
 // backtestBaseDir returns the root directory for production backtest configs
@@ -77,7 +77,7 @@ func runBacktestRun(cmd *cobra.Command, args []string) error {
 		outDir = filepath.Join(base, "reports")
 	}
 
-	svc := &service.Service{Log: l}
+	svc := &backtestsvc.Service{Log: l}
 	summaries, err := svc.RunBacktestPathSpecsAndWriteReports(cmd.Context(), []string{configPath}, outDir)
 	if err != nil {
 		return err

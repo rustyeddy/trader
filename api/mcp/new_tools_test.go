@@ -9,7 +9,6 @@ import (
 
 	"github.com/rustyeddy/trader/datamanager"
 	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/service"
 	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +28,7 @@ func seedMCPCandleStore(t *testing.T) {
 func TestToolGetDataStats_ReturnsAnalyzers(t *testing.T) {
 	seedMCPCandleStore(t)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instrument": "EURUSD",
 		"timeframe":  "H1",
@@ -50,7 +49,7 @@ func TestToolGetDataStats_ReturnsAnalyzers(t *testing.T) {
 func TestToolGetDataStats_DefaultsTimeframeToH1(t *testing.T) {
 	seedMCPCandleStore(t)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instrument": "EURUSD",
 		"from":       "2024-01-01",
@@ -66,7 +65,7 @@ func TestToolGetDataStats_DefaultsTimeframeToH1(t *testing.T) {
 }
 
 func TestToolGetDataStats_RequiresInstrumentFromTo(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, _ := json.Marshal(map[string]any{"instrument": "EURUSD"})
 
 	_, rpcErr := srv.toolGetDataStats(context.Background(), raw)
@@ -76,7 +75,7 @@ func TestToolGetDataStats_RequiresInstrumentFromTo(t *testing.T) {
 func TestHandleToolsCall_AllowsGetDataStatsWithoutOANDA(t *testing.T) {
 	seedMCPCandleStore(t)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"name": "get_candle_stats",
 		"arguments": map[string]any{
@@ -97,7 +96,7 @@ func TestHandleToolsCall_AllowsGetDataStatsWithoutOANDA(t *testing.T) {
 // ── get_pip_values ────────────────────────────────────────────────────────
 
 func TestToolGetPipValues_ReturnsMajorPairs(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{})
 	require.NoError(t, err)
 
@@ -115,7 +114,7 @@ func TestToolGetPipValues_ReturnsMajorPairs(t *testing.T) {
 }
 
 func TestToolGetPipValues_ScopesToInstruments(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instruments": []string{"EURUSD", "USDJPY"},
 	})
@@ -132,7 +131,7 @@ func TestToolGetPipValues_ScopesToInstruments(t *testing.T) {
 }
 
 func TestHandleToolsCall_AllowsGetPipValuesWithoutOANDA(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"name":      "get_pip_values",
 		"arguments": map[string]any{},
@@ -149,7 +148,7 @@ func TestHandleToolsCall_AllowsGetPipValuesWithoutOANDA(t *testing.T) {
 // ── get_position ──────────────────────────────────────────────────────────
 
 func TestToolGetPosition_ReturnsTable(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instrument": "EURUSD",
 		"price":      1.08,
@@ -167,7 +166,7 @@ func TestToolGetPosition_ReturnsTable(t *testing.T) {
 }
 
 func TestHandleToolsCall_AllowsGetPositionWithoutOANDA(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"name": "get_position",
 		"arguments": map[string]any{
@@ -189,7 +188,7 @@ func TestHandleToolsCall_AllowsGetPositionWithoutOANDA(t *testing.T) {
 func TestToolValidateCandles_ReturnsReport(t *testing.T) {
 	seedMCPCandleStore(t)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"instruments": []string{"EURUSD"},
 		"from":        "2024-01",
@@ -206,7 +205,7 @@ func TestToolValidateCandles_ReturnsReport(t *testing.T) {
 }
 
 func TestToolValidateCandles_RequiresInstrumentsFromTo(t *testing.T) {
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, _ := json.Marshal(map[string]any{"instruments": []string{"EURUSD"}})
 
 	_, rpcErr := srv.toolValidateCandles(context.Background(), raw)
@@ -216,7 +215,7 @@ func TestToolValidateCandles_RequiresInstrumentsFromTo(t *testing.T) {
 func TestHandleToolsCall_AllowsValidateCandlesWithoutOANDA(t *testing.T) {
 	seedMCPCandleStore(t)
 
-	srv := New(&service.Service{Log: slog.Default()}, false)
+	srv := New(nil, slog.Default(), "", nil, false)
 	raw, err := json.Marshal(map[string]any{
 		"name": "validate_candles",
 		"arguments": map[string]any{

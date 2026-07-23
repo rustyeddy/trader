@@ -25,9 +25,10 @@ import (
 	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/datamanager"
+	journalpkg "github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
 	accountsvc "github.com/rustyeddy/trader/service/account"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 	traderui "github.com/rustyeddy/trader/ui"
 )
 
@@ -43,7 +44,7 @@ type DaemonConfig struct {
 		Addr string `yaml:"addr"`
 	} `yaml:"rest"`
 
-	Journal service.JournalConfig `yaml:"journal"`
+	Journal journalpkg.Config `yaml:"journal"`
 
 	Data struct {
 		Dir string `yaml:"dir"`
@@ -196,22 +197,16 @@ Example config file (see deploy/trader.yaml.example):
 				log.Warn("serve: no OANDA token — live trading and journal disabled")
 			}
 
-			// Build service.
-			var svc *service.Service
+			// Build the OANDA client (nil for backtest-only mode).
+			var client *oanda.Client
 			if tok != "" {
-				svc, err = service.New(service.Config{
-					Env:       cfg.Env,
-					Token:     tok,
-					AccountID: cfg.AccountID,
-					Log:       log,
-				})
+				client, err = oanda.NewClient(cfg.Env, tok)
 				if err != nil {
-					return fmt.Errorf("init service: %w", err)
+					return fmt.Errorf("init oanda client: %w", err)
 				}
-				log.Info("serve: OANDA service ready", "env", cfg.Env)
-			} else {
-				svc = &service.Service{Log: log}
+				log.Info("serve: OANDA client ready", "env", cfg.Env)
 			}
+			accountID := cfg.AccountID
 
 			var wg sync.WaitGroup
 			errs := make(chan error, 2)
@@ -221,7 +216,7 @@ Example config file (see deploy/trader.yaml.example):
 			go func() {
 				defer wg.Done()
 				log.Info("serve: REST API starting", "addr", cfg.REST.Addr)
-				srv := rest.New(svc, cfg.REST.Addr)
+				srv := rest.New(client, log, accountID, nil, cfg.REST.Addr)
 				if reportsDir != "" {
 					srv.WithReportsDir(reportsDir)
 					log.Info("serve: reports dir", "path", reportsDir)
@@ -235,7 +230,7 @@ Example config file (see deploy/trader.yaml.example):
 					log.Info("serve: review-sweep configs dir", "path", reviewSweepConfigsDir)
 				}
 				// MCP over HTTP at POST /mcp (read-only by default).
-				mcpSrv := mcpserver.New(svc, mcpEnableWrite)
+				mcpSrv := mcpserver.New(client, log, accountID, nil, mcpEnableWrite)
 				if reportsDir != "" {
 					mcpSrv.WithReportsDir(reportsDir)
 				}
@@ -259,20 +254,21 @@ Example config file (see deploy/trader.yaml.example):
 			}()
 
 			// Live journal subscription and account snapshot (only if OANDA is available).
-			if svc.OANDA != nil {
-				if err := svc.ResolveAccount(ctx); err != nil {
+			if client != nil {
+				if resolvedID, err := accountsvc.ResolveAccountID(ctx, client, accountID); err != nil {
 					log.Warn("serve: account resolve failed; journal disabled", "err", err)
 				} else {
+					accountID = resolvedID
 					// Start the account snapshot so REST/MCP/live-runner all read
 					// from a local cache rather than hitting OANDA on every request.
-					if acc, aErr := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log); aErr == nil {
+					if acc, aErr := accountsvc.Resolve(ctx, accountID, client, log); aErr == nil {
 						acc.EnsureSnapshot(ctx, 5*time.Second)
-						log.Info("serve: account snapshot started", "account", svc.AccountID)
+						log.Info("serve: account snapshot started", "account", accountID)
 					}
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						runner := &liveJournalRunner{svc: svc, jcfg: cfg.Journal, log: log}
+						runner := &liveJournalRunner{oanda: client, accountID: accountID, jcfg: cfg.Journal, log: log}
 						if err := runner.Start(ctx); err != nil {
 							log.Error("serve: live journal failed", "err", err)
 						}
@@ -292,7 +288,7 @@ Example config file (see deploy/trader.yaml.example):
 				log.Info("serve: shutting down...")
 				// Stop all bot goroutines cleanly. OANDA positions are left open
 				// so they survive restarts; seedTickCounts picks them back up.
-				svc.StopAllBots()
+				botsvc.StopAllBots()
 				wg.Wait()
 				log.Info("serve: stopped")
 				return nil
@@ -319,19 +315,22 @@ Example config file (see deploy/trader.yaml.example):
 // loop until ctx is cancelled, retrying on disconnect with exponential
 // backoff (cap 5 min).
 type liveJournalRunner struct {
-	svc  *service.Service
-	jcfg service.JournalConfig
-	log  *slog.Logger
+	oanda     *oanda.Client
+	accountID string
+	jcfg      journalpkg.Config
+	log       *slog.Logger
 }
 
 // Start runs the subscription loop and blocks until ctx is cancelled.
 // Returns nil on clean shutdown; non-nil only if the account can't be
 // resolved before the loop starts.
 func (r *liveJournalRunner) Start(ctx context.Context) error {
-	if err := r.svc.ResolveAccount(ctx); err != nil {
+	resolvedID, err := accountsvc.ResolveAccountID(ctx, r.oanda, r.accountID)
+	if err != nil {
 		return fmt.Errorf("account resolve failed: %w", err)
 	}
-	acc, err := accountsvc.Resolve(ctx, r.svc.AccountID, r.svc.OANDA, r.svc.Log)
+	r.accountID = resolvedID
+	acc, err := accountsvc.Resolve(ctx, r.accountID, r.oanda, r.log)
 	if err != nil {
 		return fmt.Errorf("account resolve failed: %w", err)
 	}
@@ -343,12 +342,12 @@ func (r *liveJournalRunner) Start(ctx context.Context) error {
 	attempt := 0
 
 	for {
-		journal, err := r.svc.OpenJournal(r.jcfg)
+		journal, err := journalpkg.Open(r.jcfg)
 		if err != nil {
 			r.log.Error("serve: open journal failed", "err", err)
 		} else {
 			r.log.Info("serve: live journal starting", "kind", r.jcfg.Kind)
-			lastID, err := acc.RunLiveJournal(ctx, journal, 0, r.svc.LookupTradeBotID)
+			lastID, err := acc.RunLiveJournal(ctx, journal, 0, botsvc.LookupTradeBotID)
 			journal.Close()
 			if ctx.Err() != nil {
 				return nil // clean shutdown

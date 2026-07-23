@@ -12,10 +12,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
+	journalpkg "github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/log"
-	"github.com/rustyeddy/trader/service"
 	accountsvc "github.com/rustyeddy/trader/service/account"
+	botsvc "github.com/rustyeddy/trader/service/bots"
 )
 
 func New(rc *config.RootConfig) *cobra.Command {
@@ -69,12 +71,13 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 				}
 			}
 
-			svc, err := service.New(service.Config{Env: env, Token: tok, AccountID: resolvedAccount, Log: log.L})
+			client, err := oanda.NewClient(env, tok)
 			if err != nil {
 				return err
 			}
-			if err := svc.ResolveAccount(ctx); err != nil {
-				var amb service.AmbiguousAccountError
+			resolvedID, err := accountsvc.ResolveAccountID(ctx, client, resolvedAccount)
+			if err != nil {
+				var amb accountsvc.AmbiguousAccountError
 				if errors.As(err, &amb) {
 					fmt.Println("Multiple accounts found — specify one with --account-id:")
 					for _, id := range amb.Accounts {
@@ -83,12 +86,12 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 				}
 				return err
 			}
-			acc, err := accountsvc.Resolve(ctx, svc.AccountID, svc.OANDA, svc.Log)
+			acc, err := accountsvc.Resolve(ctx, resolvedID, client, log.L)
 			if err != nil {
 				return err
 			}
 
-			journal, err := svc.OpenJournal(service.JournalConfig{
+			journal, err := journalpkg.Open(journalpkg.Config{
 				Kind:       journalKind,
 				TradesPath: tradesPath,
 				EquityPath: equityPath,
@@ -101,9 +104,9 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 			if backfillFrom > 0 {
 				fmt.Printf("Backfilling transactions from ID %d...\n", backfillFrom)
 			}
-			fmt.Printf("Live journal subscribed to %s (journal=%s). Ctrl-C to exit.\n", svc.AccountID, journalKind)
+			fmt.Printf("Live journal subscribed to %s (journal=%s). Ctrl-C to exit.\n", resolvedID, journalKind)
 
-			lastID, err := acc.RunLiveJournal(ctx, journal, backfillFrom, svc.LookupTradeBotID)
+			lastID, err := acc.RunLiveJournal(ctx, journal, backfillFrom, botsvc.LookupTradeBotID)
 			fmt.Printf("Stopped. lastSeenTxID=%d\n", lastID)
 			if err != nil {
 				return fmt.Errorf("live journal: %w", err)

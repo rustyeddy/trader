@@ -1,12 +1,22 @@
-package service
+// Package pipvalues computes pip-value tables for FX instruments.
+package pipvalues
 
 import (
 	"context"
 	"maps"
 	"strings"
 
+	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/market"
 )
+
+// Service computes pip-value tables. The zero value works for currency-pair
+// math using built-in default rates; set OANDA (and AccountID, required by
+// OANDA's pricing endpoint) to also fetch live USD-base pair rates.
+type Service struct {
+	OANDA     *oanda.Client
+	AccountID string
+}
 
 // PipValuesRequest parameterises PipValues.
 type PipValuesRequest struct {

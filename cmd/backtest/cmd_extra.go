@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/service"
+	backtestsvc "github.com/rustyeddy/trader/service/backtest"
 	"github.com/rustyeddy/trader/types"
 )
 
@@ -43,7 +43,7 @@ func runBacktestOrg(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	dir := resolveReportsDir(orgReportsDir)
 
-	data, _, err := service.ReadBacktestOrgReport(dir, name)
+	data, _, err := backtestsvc.ReadBacktestOrgReport(dir, name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("org report %q not found in %s", name, dir)
@@ -83,7 +83,7 @@ func runBacktestCandles(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	dir := resolveReportsDir(candlesReportsDir)
 
-	summary, err := service.ReadBacktestSummaryByName(dir, name)
+	summary, err := backtestsvc.ReadBacktestSummaryByName(dir, name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("report %q not found in %s", name, dir)

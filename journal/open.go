@@ -1,13 +1,9 @@
-package service
+package journal
 
-import (
-	"fmt"
+import "fmt"
 
-	"github.com/rustyeddy/trader/journal"
-)
-
-// JournalConfig selects the journal backend and its destinations.
-type JournalConfig struct {
+// Config selects a journal backend and its destinations.
+type Config struct {
 	// Kind: "csv" or "json"
 	Kind string
 
@@ -16,18 +12,18 @@ type JournalConfig struct {
 	EquityPath string
 }
 
-// OpenJournal opens the configured Journal. Caller is responsible for
+// Open opens the Journal configured by cfg. Caller is responsible for
 // calling .Close() on the returned journal.
-func (s *Service) OpenJournal(cfg JournalConfig) (journal.Journal, error) {
+func Open(cfg Config) (Journal, error) {
 	switch cfg.Kind {
 	case "csv":
-		j, err := journal.NewCSV(cfg.TradesPath, cfg.EquityPath)
+		j, err := NewCSV(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
 			return nil, fmt.Errorf("open csv journal: %w", err)
 		}
 		return j, nil
 	case "json":
-		j, err := journal.NewJSON(cfg.TradesPath, cfg.EquityPath)
+		j, err := NewJSON(cfg.TradesPath, cfg.EquityPath)
 		if err != nil {
 			return nil, fmt.Errorf("open json journal: %w", err)
 		}

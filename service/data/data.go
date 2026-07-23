@@ -24,9 +24,8 @@ import (
 	"github.com/rustyeddy/trader/types"
 )
 
-// Service holds the small dependency set candle acquisition needs — no
-// relation to the core service.Service beyond being called through it (see
-// service/data.go).
+// Service holds the small dependency set candle acquisition needs.
+// Callers construct it directly with the fields they have on hand.
 type Service struct {
 	OANDA *oanda.Client
 }
