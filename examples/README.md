@@ -293,7 +293,7 @@ export OANDA_ACCOUNT_ID='101-001-00000000-001'
   --account-id "$OANDA_ACCOUNT_ID" \
   --instruments EUR_USD,USD_JPY \
   --units 10000
-./bin/trader order list \
+./bin/trader account orders \
   --env practice \
   --account-id "$OANDA_ACCOUNT_ID"
 ./bin/trader order transactions \

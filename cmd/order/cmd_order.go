@@ -44,7 +44,6 @@ func New(rc *config.RootConfig) *cobra.Command {
 		Short: "Live order management (OANDA demo)",
 	}
 	cmd.AddCommand(newOrderCmd(rc))
-	cmd.AddCommand(listOrdersCmd(rc))
 	cmd.AddCommand(closeOrderCmd(rc))
 	cmd.AddCommand(updateStopCmd(rc))
 	cmd.AddCommand(transactionsCmd(rc))
@@ -199,54 +198,6 @@ func printProposal(env string, p account.OrderProposal, riskPct float64) {
 	fmt.Printf("│  Risk amount  : $%-31.2f│\n", p.RiskAmount)
 	fmt.Println("└─────────────────────────────────────────────────┘")
 	fmt.Println()
-}
-
-// ── order list ────────────────────────────────────────────────────────────
-
-func listOrdersCmd(rc *config.RootConfig) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List open trades from OANDA",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListOrders(cmd, args, rc)
-		},
-	}
-	addCommonFlags(cmd)
-	return cmd
-}
-
-func runListOrders(cmd *cobra.Command, args []string, rc *config.RootConfig) error {
-	ctx := context.Background()
-	client, logger, resolvedAccountID, err := buildDeps(ctx, cmd, rc)
-	if err != nil {
-		return err
-	}
-	acc, err := accountsvc.ResolveFirst(ctx, resolvedAccountID, client, logger)
-	if err != nil {
-		return err
-	}
-	trades, err := acc.ListOpenTrades(ctx)
-	if err != nil {
-		return err
-	}
-	if len(trades) == 0 {
-		fmt.Println("No open trades.")
-		return nil
-	}
-	bar := strings.Repeat("─", 52)
-	fmt.Println(bar)
-	fmt.Printf("  %-10s %-10s %8s %12s %10s %10s\n", "Trade ID", "Instrument", "Units", "Entry", "Stop", "Unreal P/L")
-	fmt.Println(bar)
-	for _, t := range trades {
-		stopStr := "—"
-		if t.StopLoss > 0 {
-			stopStr = fmt.Sprintf("%.5f", t.StopLoss)
-		}
-		fmt.Printf("  %-10s %-10s %8d %12.5f %10s %+10.2f\n",
-			t.ID, t.Instrument, t.Units, t.EntryPrice, stopStr, t.UnrealizedPL)
-	}
-	fmt.Println(bar)
-	return nil
 }
 
 // ── order close ───────────────────────────────────────────────────────────

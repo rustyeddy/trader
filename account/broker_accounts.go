@@ -56,3 +56,17 @@ func GetAccountSummary(ctx context.Context, broker brokers.Broker, accountIDs []
 	}
 	return out, nil
 }
+
+// GetOpenTrades returns the open trades on accountID via the broker
+// interface directly (no session/snapshot cache — see (*Account).ListOpenTrades
+// for the cached variant used by the live runner).
+func GetOpenTrades(ctx context.Context, broker brokers.Broker, accountID string) ([]oanda.OpenTrade, error) {
+	if broker == nil {
+		return nil, fmt.Errorf("account: broker not configured")
+	}
+	trades, err := broker.GetOpenTrades(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("get open trades: %w", err)
+	}
+	return trades, nil
+}

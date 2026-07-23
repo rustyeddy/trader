@@ -43,6 +43,7 @@ func NewBroker(name, env, token string) (brokers.Broker, error) {
 type (
 	AccountRef    = oanda.AccountRef
 	SummaryResult = account.AccountSummaryResult
+	OpenTrade     = oanda.OpenTrade
 )
 
 // ListAccounts returns every account ID the broker's token can see.
@@ -57,6 +58,12 @@ func AccountSummaries(ctx context.Context, broker brokers.Broker, accountIDs []s
 	return account.GetAccountSummary(ctx, broker, accountIDs)
 }
 
+// OpenTrades returns the open trades on accountID, fetched directly through
+// the broker interface (no session/snapshot cache).
+func OpenTrades(ctx context.Context, broker brokers.Broker, accountID string) ([]OpenTrade, error) {
+	return account.GetOpenTrades(ctx, broker, accountID)
+}
+
 // Resolve returns the cached session for the given account ID — see
 // ./account's process-wide session cache — creating it on first use.
 func Resolve(ctx context.Context, id string, client *oanda.Client, log *slog.Logger) (*account.Account, error) {
@@ -67,6 +74,14 @@ func Resolve(ctx context.Context, id string, client *oanda.Client, log *slog.Log
 // account the client's token can see.
 func ResolveFirst(ctx context.Context, defaultID string, client *oanda.Client, log *slog.Logger) (*account.Account, error) {
 	return account.ResolveFirst(ctx, defaultID, client, log)
+}
+
+// ResolveTarget resolves the broker and account ID a command should operate
+// on from flag values, the OANDA_ACCOUNT_ID env var, a caller-supplied
+// config default, and the CLI's locally persisted "active" selection. See
+// account.ResolveTarget for the full priority order.
+func ResolveTarget(brokerFlag string, brokerChanged bool, accountIDFlag string, accountIDChanged bool, configAccountID string) (resolvedBroker, resolvedAccountID string, err error) {
+	return account.ResolveTarget(brokerFlag, brokerChanged, accountIDFlag, accountIDChanged, configAccountID)
 }
 
 // ResolveAccountID returns accountID if non-empty, otherwise queries the

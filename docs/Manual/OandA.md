@@ -43,7 +43,7 @@ it. Multiple accounts require an explicit account ID.
 trader account list
 trader account summary
 trader order prices
-trader order list
+trader account orders
 trader order transactions --since 0 --limit 25
 ```
 
@@ -86,7 +86,7 @@ trader order new \
   --risk-pct 1 \
   --stop-pips 20
 
-trader order list
+trader account orders
 trader order update-stop --help
 trader order close --help
 ```

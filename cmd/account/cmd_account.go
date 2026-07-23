@@ -33,41 +33,20 @@ func New(rc *config.RootConfig) *cobra.Command {
 	cmd.AddCommand(listCmd(rc))
 	cmd.AddCommand(summaryCmd(rc))
 	cmd.AddCommand(defaultCmd(rc))
+	cmd.AddCommand(ordersCmd(rc))
 	return cmd
 }
 
-// resolveTarget resolves the broker and account ID a command should
-// operate on, in priority order: explicit --broker/--account-id flags,
-// then OANDA_ACCOUNT_ID env var / global config (account only — broker
-// has no env/config-file precedent since only one exists today), then
-// the CLI's locally persisted "active" selection (see the active
-// package), then unset. accountID may be returned empty — a valid state
-// meaning nothing resolved a target.
+// resolveTarget binds this command's flags to accountsvc.ResolveTarget: the
+// core broker/account-ID resolution logic lives in the account package
+// (see account.ResolveTarget), this just supplies the cobra-specific flag
+// state and global-config default.
 func resolveTarget(cmd *cobra.Command, rc *config.RootConfig) (resolvedBroker, resolvedAccountID string, err error) {
-	sel, _ := accountsvc.DefaultSelection() // best-effort; missing/unreadable file just means no fallback
-
-	resolvedBroker = "oanda"
-	if sel.Broker != "" {
-		resolvedBroker = sel.Broker
+	configAccountID := ""
+	if rc != nil {
+		configAccountID = rc.OANDAAccountID
 	}
-	if cmd.Flags().Changed("broker") {
-		resolvedBroker = broker
-	}
-	if !accountsvc.IsKnownBroker(resolvedBroker) {
-		return "", "", fmt.Errorf("unknown broker %q (supported: %s)", resolvedBroker, strings.Join(accountsvc.KnownBrokers, ", "))
-	}
-
-	switch {
-	case cmd.Flags().Changed("account-id"):
-		resolvedAccountID = accountID
-	case os.Getenv("OANDA_ACCOUNT_ID") != "":
-		resolvedAccountID = os.Getenv("OANDA_ACCOUNT_ID")
-	case rc != nil && rc.OANDAAccountID != "":
-		resolvedAccountID = rc.OANDAAccountID
-	case sel.AccountID != "":
-		resolvedAccountID = sel.AccountID
-	}
-	return resolvedBroker, resolvedAccountID, nil
+	return accountsvc.ResolveTarget(broker, cmd.Flags().Changed("broker"), accountID, cmd.Flags().Changed("account-id"), configAccountID)
 }
 
 func listCmd(rc *config.RootConfig) *cobra.Command {
@@ -193,6 +172,54 @@ With --broker and --account-id given together, sets the active selection.`,
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Default set to %s/%s\n", broker, accountID)
+			return nil
+		},
+	}
+}
+
+// ordersCmd lists open trades for the resolved account. It only parses
+// flags and formats output; account/broker selection and the broker call
+// itself live in service/account (accountsvc.OpenTrades), same as
+// listCmd/summaryCmd above.
+func ordersCmd(rc *config.RootConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "orders",
+		Short: "List open trades from OANDA",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			tok := resolveToken(cmd, rc)
+			targetBroker, resolvedAccountID, err := resolveTarget(cmd, rc)
+			if err != nil {
+				return err
+			}
+			b, err := accountsvc.NewBroker(targetBroker, resolveEnv(cmd, rc), tok)
+			if err != nil {
+				return err
+			}
+
+			trades, err := accountsvc.OpenTrades(ctx, b, resolvedAccountID)
+			if err != nil {
+				return fmt.Errorf("list open trades: %w", err)
+			}
+
+			w := cmd.OutOrStdout()
+			if len(trades) == 0 {
+				fmt.Fprintln(w, "No open trades.")
+				return nil
+			}
+			bar := strings.Repeat("─", 52)
+			fmt.Fprintln(w, bar)
+			fmt.Fprintf(w, "  %-10s %-10s %8s %12s %10s %10s\n", "Trade ID", "Instrument", "Units", "Entry", "Stop", "Unreal P/L")
+			fmt.Fprintln(w, bar)
+			for _, t := range trades {
+				stopStr := "—"
+				if t.StopLoss > 0 {
+					stopStr = fmt.Sprintf("%.5f", t.StopLoss)
+				}
+				fmt.Fprintf(w, "  %-10s %-10s %8d %12.5f %10s %+10.2f\n",
+					t.ID, t.Instrument, t.Units, t.EntryPrice, stopStr, t.UnrealizedPL)
+			}
+			fmt.Fprintln(w, bar)
 			return nil
 		},
 	}
