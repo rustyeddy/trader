@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -51,44 +50,47 @@ func newAccountsTestServer(t *testing.T, accountIDs ...string) (*Server, *[]stri
 	return New(client, slog.Default(), "", nil, ":0"), &summaryHits
 }
 
-func TestListAccounts(t *testing.T) {
-	srv, _ := newAccountsTestServer(t, "acc-1", "acc-2")
-	rr := do(t, srv.Handler(), "GET", "/api/v1/accounts")
-	require.Equal(t, http.StatusOK, rr.Code)
+// handleListAccounts/handleDefaultAccount now call accountsvc.List, which
+// builds its own broker from OANDA_TOKEN/~/.config/oanda/pat.txt — there is
+// no seam left to point it at a fake server (see newAccountsTestServer's
+// remaining uses below for routes that still resolve through s.oanda). So
+// these two only exercise the deterministic auth-failure path; success-path
+// coverage for a real token is opt-in/manual.
 
-	var body struct {
-		Accounts []struct {
-			ID        string `json:"id"`
-			IsDefault bool   `json:"is_default"`
-		} `json:"accounts"`
-	}
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
-	require.Len(t, body.Accounts, 2)
-	assert.Equal(t, "acc-1", body.Accounts[0].ID)
-	assert.Equal(t, "acc-2", body.Accounts[1].ID)
-	// With no preset default, the first account is the read/UI default.
-	assert.True(t, body.Accounts[0].IsDefault)
-	assert.False(t, body.Accounts[1].IsDefault)
-}
-
-func TestListAccounts_NoOANDA(t *testing.T) {
+func TestListAccounts_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir()) // block the ~/.config/oanda/pat.txt fallback
 	srv := newMinimalServer()
 	rr := do(t, srv.Handler(), "GET", "/api/v1/accounts")
-	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	assert.Equal(t, http.StatusBadGateway, rr.Code)
+	assert.Contains(t, rr.Body.String(), "no token")
 }
 
-func TestDefaultAccount_SingleAccount(t *testing.T) {
-	srv, _ := newAccountsTestServer(t, "only-acc")
+func TestDefaultAccount_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	srv := newMinimalServer()
 	rr := do(t, srv.Handler(), "GET", "/api/v1/accounts/default")
-	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, http.StatusBadGateway, rr.Code)
+	assert.Contains(t, rr.Body.String(), "no token")
+}
 
-	var body struct {
-		ID        string `json:"id"`
-		IsDefault bool   `json:"is_default"`
-	}
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
-	assert.Equal(t, "only-acc", body.ID)
-	assert.True(t, body.IsDefault)
+func TestAccountSummary_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	srv := newMinimalServer()
+	rr := do(t, srv.Handler(), "GET", "/api/v1/accounts/summary")
+	assert.Equal(t, http.StatusBadGateway, rr.Code)
+	assert.Contains(t, rr.Body.String(), "no token")
+}
+
+func TestAccountOrders_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	srv := newMinimalServer()
+	rr := do(t, srv.Handler(), "GET", "/api/v1/accounts/orders")
+	assert.Equal(t, http.StatusBadGateway, rr.Code)
+	assert.Contains(t, rr.Body.String(), "no token")
 }
 
 // TestScopedAccountSummary_TargetsPathAccount verifies the scoped route hits

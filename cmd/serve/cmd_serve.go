@@ -70,7 +70,6 @@ func New(rc *config.RootConfig) *cobra.Command {
 		reportsDir            string
 		reviewSweepReportsDir string
 		reviewSweepConfigsDir string
-		mcpEnableWrite        bool
 	)
 
 	cmd := &cobra.Command{
@@ -168,7 +167,7 @@ Example config file (see deploy/trader.yaml.example):
 			// Resolve token: YAML/flag > global config > env var > token file.
 			tok := cfg.Token
 			if tok == "" {
-				tok = rc.OANDAToken
+				tok = rc.OANDA.Token
 			}
 			if tok == "" {
 				tok = os.Getenv("OANDA_TOKEN")
@@ -177,7 +176,7 @@ Example config file (see deploy/trader.yaml.example):
 
 			// Resolve account: YAML/flag > global config > env var.
 			if cfg.AccountID == "" {
-				cfg.AccountID = rc.OANDAAccountID
+				cfg.AccountID = rc.OANDA.AccountID
 			}
 			if cfg.AccountID == "" {
 				cfg.AccountID = os.Getenv("OANDA_ACCOUNT_ID")
@@ -229,17 +228,14 @@ Example config file (see deploy/trader.yaml.example):
 					srv.WithReviewSweepConfigsDir(reviewSweepConfigsDir)
 					log.Info("serve: review-sweep configs dir", "path", reviewSweepConfigsDir)
 				}
-				// MCP over HTTP at POST /mcp (read-only by default).
-				mcpSrv := mcpserver.New(client, log, accountID, nil, mcpEnableWrite)
+				// MCP over HTTP at POST /mcp — account tools resolve their own
+				// broker from OANDA_TOKEN/~/.config/oanda/pat.txt, not client.
+				mcpSrv := mcpserver.New(log, accountID)
 				if reportsDir != "" {
 					mcpSrv.WithReportsDir(reportsDir)
 				}
 				srv.WithMCPHandler(mcpSrv.HTTPHandler())
-				log.Info("serve: MCP available", "endpoint", "POST /mcp", "write", mcpEnableWrite)
-				if mcpEnableWrite {
-					log.Warn("serve: MCP write tools enabled over HTTP — POST /mcp has no authentication; " +
-						"restrict network access or add a reverse-proxy auth layer before exposing to untrusted origins")
-				}
+				log.Info("serve: MCP available", "endpoint", "POST /mcp")
 				// Serve the SvelteKit UI from the embedded dist/ directory.
 				uiFS, fsErr := traderui.SubFS()
 				if fsErr == nil {
@@ -306,7 +302,6 @@ Example config file (see deploy/trader.yaml.example):
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "", "Backtest reports directory (default /srv/trading/backtests/reports)")
 	cmd.Flags().StringVar(&reviewSweepReportsDir, "review-sweep-reports-dir", "", "Review-sweep reports directory (default /srv/trading/review-sweeps/reports)")
 	cmd.Flags().StringVar(&reviewSweepConfigsDir, "review-sweep-configs-dir", "", "Review-sweep configs directory (default /srv/trading/review-sweeps/configs)")
-	cmd.Flags().BoolVar(&mcpEnableWrite, "mcp-enable-write", false, "Enable MCP write tools (place_order, close_trade, update_stop) over HTTP")
 
 	return cmd
 }

@@ -332,14 +332,14 @@ func startLocal(cmd *cobra.Command, rc *config.RootConfig, cfg botsvc.BotConfig,
 	// Token/account: explicit flag > global config > env var (same precedence as live run).
 	tok := token
 	if !cmd.Flags().Changed("token") {
-		if rc.OANDAToken != "" {
-			tok = rc.OANDAToken
+		if rc.OANDA.Token != "" {
+			tok = rc.OANDA.Token
 		}
 	}
 	resolvedAccount := accountID
 	if !cmd.Flags().Changed("account-id") {
-		if rc.OANDAAccountID != "" {
-			resolvedAccount = rc.OANDAAccountID
+		if rc.OANDA.AccountID != "" {
+			resolvedAccount = rc.OANDA.AccountID
 		}
 	}
 

@@ -104,7 +104,7 @@ func TestJournalCmd_RCTokenUsedWhenFlagNotChanged(t *testing.T) {
 	t.Setenv("OANDA_TOKEN", "")
 	// rc has a token so service.New passes the token check and fails later
 	// (attempting a real OANDA network call), but NOT with "no OANDA token".
-	err := runJournalCmd(&config.RootConfig{OANDAToken: "rc-token"})
+	err := runJournalCmd(&config.RootConfig{OANDA: config.GlobalOANDAConfig{Token: "rc-token"}})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "no OANDA token")
 }

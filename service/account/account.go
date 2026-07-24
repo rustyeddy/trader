@@ -44,12 +44,8 @@ type (
 	AccountRef    = oanda.AccountRef
 	SummaryResult = account.AccountSummaryResult
 	OpenTrade     = oanda.OpenTrade
+	AccountCfg    = account.AccountCfg
 )
-
-// ListAccounts returns every account ID the broker's token can see.
-func ListAccounts(ctx context.Context, broker brokers.Broker) ([]AccountRef, error) {
-	return account.GetAccounts(ctx, broker)
-}
 
 // AccountSummaries returns a summary result for each ID in accountIDs. If
 // accountIDs is empty, every account the broker's token can see is

@@ -39,14 +39,14 @@ func applyGlobalOANDA(cmd *cobra.Command, auth *oandaAuth, rc *config.RootConfig
 	if rc == nil {
 		return
 	}
-	if !cmd.Flags().Changed("account-id") && rc.OANDAAccountID != "" {
-		auth.accountID = rc.OANDAAccountID
+	if !cmd.Flags().Changed("account-id") && rc.OANDA.AccountID != "" {
+		auth.accountID = rc.OANDA.AccountID
 	}
-	if !cmd.Flags().Changed("token") && rc.OANDAToken != "" {
-		auth.token = rc.OANDAToken
+	if !cmd.Flags().Changed("token") && rc.OANDA.Token != "" {
+		auth.token = rc.OANDA.Token
 	}
-	if !cmd.Flags().Changed("env") && rc.OANDAEnv != "" {
-		auth.env = rc.OANDAEnv
+	if !cmd.Flags().Changed("env") && rc.OANDA.Env != "" {
+		auth.env = rc.OANDA.Env
 	}
 }
 

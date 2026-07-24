@@ -70,8 +70,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Accounts — list the accounts the token can see and the default one.
+	// summary/orders mirror `trader account summary`/`trader account orders`:
+	// un-scoped reads with an optional ?account_id= query param.
 	mux.HandleFunc("GET /api/v1/accounts", s.handleListAccounts)
 	mux.HandleFunc("GET /api/v1/accounts/default", s.handleDefaultAccount)
+	mux.HandleFunc("GET /api/v1/accounts/summary", s.handleAccountSummary)
+	mux.HandleFunc("GET /api/v1/accounts/orders", s.handleAccountOrders)
 
 	// Account & trades (OANDA required). All account-specific operations are
 	// scoped to an explicit account: /api/v1/accounts/{accountID}/…. There are

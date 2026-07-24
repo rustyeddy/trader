@@ -59,8 +59,8 @@ func buildDeps(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (
 	// Token: explicit flag > global config > env var.
 	tok := token
 	if !cmd.Flags().Changed("token") {
-		if rc != nil && rc.OANDAToken != "" {
-			tok = rc.OANDAToken
+		if rc != nil && rc.OANDA.Token != "" {
+			tok = rc.OANDA.Token
 		} else {
 			tok = os.Getenv("OANDA_TOKEN")
 		}
@@ -69,8 +69,8 @@ func buildDeps(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (
 	// Account: explicit flag > global config > env var.
 	resolvedAccount := accountID
 	if !cmd.Flags().Changed("account-id") {
-		if rc != nil && rc.OANDAAccountID != "" {
-			resolvedAccount = rc.OANDAAccountID
+		if rc != nil && rc.OANDA.AccountID != "" {
+			resolvedAccount = rc.OANDA.AccountID
 		} else {
 			resolvedAccount = os.Getenv("OANDA_ACCOUNT_ID")
 		}
@@ -78,8 +78,8 @@ func buildDeps(ctx context.Context, cmd *cobra.Command, rc *config.RootConfig) (
 
 	// Env: explicit flag > global config > default "practice".
 	resolvedEnv := env
-	if !cmd.Flags().Changed("env") && rc != nil && rc.OANDAEnv != "" {
-		resolvedEnv = rc.OANDAEnv
+	if !cmd.Flags().Changed("env") && rc != nil && rc.OANDA.Env != "" {
+		resolvedEnv = rc.OANDA.Env
 	}
 
 	client, err = oanda.NewClient(resolvedEnv, tok)

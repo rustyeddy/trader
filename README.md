@@ -593,24 +593,20 @@ curl -s 'http://localhost:9999/api/v1/candles/EUR_USD?from=2024-01-01&to=2024-01
 
 ## MCP Tools
 
-`trader mcp serve` exposes typed tools over stdio. Tools that read local data or perform pure calculations work without an OANDA token. Live account and trade tools require `--token`. Write tools (`download_candles`, `place_order`, `close_trade`, `update_stop`) also require `--enable-write`.
+`trader mcp` exposes typed tools over stdio. The tool set is deliberately
+minimal — account tools mirroring `trader account`, plus baseline infra
+checks — added on a concrete use-case basis rather than for parity with the
+CLI/REST surface. Account tools resolve their own OANDA broker from
+`OANDA_TOKEN`/`~/.config/oanda/pat.txt`, same as the CLI; there's no
+`--token`/`--env` flag and no write-capable tools.
 
-| Tool                  | Needs OANDA | Write? | Description                                                                   |
-|-----------------------|-------------|--------|-------------------------------------------------------------------------------|
-| `get_account_summary` | yes         | —      | Account balance, NAV, margin, unrealized P/L                                  |
-| `get_prices`          | yes         | —      | Live bid/ask and spread in pips for major pairs                               |
-| `list_open_trades`    | yes         | —      | All open positions                                                            |
-| `get_transactions`    | yes         | —      | Transaction history since a given ID                                          |
-| `get_candles_csv`     | no          | —      | Local candles in canonical CSV                                                |
-| `get_candle_stats`    | no          | —      | Swing, spread, trend, session statistics for a candle dataset                 |
-| `validate_candles`    | no          | —      | Scan stored months for gaps and raw-source mismatches                         |
-| `get_pip_values`      | optional    | —      | USD pip values for major pairs (live rates when OANDA available)              |
-| `get_position`        | optional    | —      | Position sizing — notional, margin, pip P&L (live price when OANDA available) |
-| `run_backtest`        | no          | —      | Run backtest configs and return summaries                                     |
-| `download_candles`    | yes         | yes    | Download and store OANDA candles                                              |
-| `place_order`         | yes         | yes    | Size and submit a risk-based market order                                     |
-| `close_trade`         | yes         | yes    | Close an open trade fully or partially                                        |
-| `update_stop`         | yes         | yes    | Update stop-loss and/or take-profit on an open trade                          |
+| Tool              | Description                                                                |
+|-------------------|-----------------------------------------------------------------------------|
+| `list_accounts`   | List OANDA accounts the configured token can access                        |
+| `account_summary` | Mirrors `trader account summary` — one account or every account            |
+| `account_orders`  | Mirrors `trader account orders`                                            |
+| `get_version`     | Build version                                                              |
+| `get_health`      | Process health                                                             |
 
 Local config example:
 

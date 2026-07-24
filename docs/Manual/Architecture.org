@@ -246,10 +246,12 @@ The current live DTOs contain =float64= broker values.  Moving calculations
 behind immediate fixed-point boundary conversion is part of
 [[https://github.com/rustyeddy/trader/issues/148][issue #148]].
 
-Live operations are external side effects.  The CLI, REST API, and MCP server
-must keep read and write capabilities explicit.  MCP write tools require
-=--enable-write=.  Enabling MCP writes over HTTP without authentication and
-restricted CORS is unsafe and is not a production deployment architecture.
+Live operations are external side effects.  The CLI and REST API must keep
+read and write capabilities explicit.  MCP currently exposes no write-capable
+tools at all (its tool set is deliberately minimal — see "Transport
+convergence (target)" below); if write tools return, enabling them over HTTP
+without authentication and restricted CORS is unsafe and is not a production
+deployment architecture.
 
 * Service and transport architecture
 
@@ -279,8 +281,35 @@ tests use =httptest= and do not require a listening socket.
 ** MCP
 
 =api/mcp= implements line-delimited JSON-RPC over stdio and an HTTP handler for
-=/mcp=.  Tools and resources call the same service layer as CLI and REST.
-Write-capable tools are registered only when explicitly enabled.
+=/mcp=.  Its tool set is deliberately minimal and use-case driven, not a
+mirror of the CLI/REST surface: today it exposes only the account tools
+(=list_accounts=/=account_summary=/=account_orders=, matching =trader
+account=) plus baseline infra checks (=get_version=/=get_health=).  Add a new
+MCP tool only when a concrete agent workflow needs it — CLI/REST parity is
+not itself a reason to add one.  No write-capable tools exist currently.
+
+** Transport convergence (target)
+
+CLI, REST, and MCP are converging on one call pattern per service area: a
+transport builds a small config/request struct from its own input (cobra
+flags, HTTP params, JSON-RPC params), calls the same =service/*= function,
+and maps the typed result back to its own output shape.  No transport-only
+resolution or branching logic accumulates inside =cmd/=, =api/rest/=, or
+=api/mcp/= beyond that translation.
+
+Under this pattern, REST and MCP must not construct or hold their own broker
+clients (for example an =*oanda.Client=) the way the CLI's provider
+construction does today.  Broker construction and any OANDA-specific
+behavior stay inside =service/*= and the provider packages; REST and MCP
+handlers should not need to import =brokers/oanda= at all.  =service/account=
+is the first area being migrated to this shape (see =AccountCfg= and its
+=List=/=Summary=/=Orders=/=Default= functions); the same pattern is intended
+to extend across the rest of the service surface.
+
+This convergence is about the *shape* of a call once a transport exposes an
+operation — it does not mean MCP must expose every operation CLI/REST do.
+See "MCP" above: MCP's tool surface grows on a use-case basis, deliberately
+lagging CLI/REST.
 
 ** Embedded UI
 
@@ -370,5 +399,11 @@ checker and static build.
   to the order submitter.
 - The root =trader= package contains several subsystems; future package splits
   must preserve the service and domain dependency direction described here.
+- REST still constructs and holds its own =*oanda.Client= in places (the
+  =Resolve=/=ResolveFirst=-based handlers) instead of routing exclusively
+  through =service/*= like the CLI does; see "Transport convergence
+  (target)" above.  MCP no longer holds an =*oanda.Client= at all — its
+  remaining tools (=list_accounts=/=account_summary=/=account_orders=)
+  build their own broker from =OANDA_TOKEN=/token-file, same as the CLI.
 
 Feature proposals and longer-term plans are maintained in =docs/ROADMAP.md=.

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/rustyeddy/trader/api/mcp"
@@ -27,9 +26,9 @@ type harness struct {
 	done   chan error
 }
 
-func newHarness(t *testing.T, writeEnable bool) *harness {
+func newHarness(t *testing.T) *harness {
 	t.Helper()
-	srv := mcp.New(nil, slog.Default(), "", nil, writeEnable)
+	srv := mcp.New(slog.Default(), "")
 
 	clientR, clientW := io.Pipe() // server reads from clientR
 	serverR, serverW := io.Pipe() // server writes to serverW, test reads from serverR
@@ -97,7 +96,7 @@ func (h *harness) recv() map[string]any {
 // ── JSON-RPC protocol correctness ────────────────────────────────────────────
 
 func TestMCPBlackbox_InvalidJSON_ReturnsParseError(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	fmt.Fprintf(h.stdin, "this is not json\n")
 	resp := h.recv()
 
@@ -107,7 +106,7 @@ func TestMCPBlackbox_InvalidJSON_ReturnsParseError(t *testing.T) {
 }
 
 func TestMCPBlackbox_WrongJSONRPCVersion_ReturnsInvalidRequest(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	fmt.Fprintf(h.stdin, `{"jsonrpc":"1.0","id":1,"method":"tools/list"}`+"\n")
 	resp := h.recv()
 
@@ -117,7 +116,7 @@ func TestMCPBlackbox_WrongJSONRPCVersion_ReturnsInvalidRequest(t *testing.T) {
 }
 
 func TestMCPBlackbox_UnknownMethod_ReturnsMethodNotFound(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(1, "no/such/method", nil)
 	resp := h.recv()
 
@@ -127,7 +126,7 @@ func TestMCPBlackbox_UnknownMethod_ReturnsMethodNotFound(t *testing.T) {
 }
 
 func TestMCPBlackbox_Notification_ProducesNoResponse(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 
 	// Notifications have no id → server must not send a response.
 	// Send a notification then a regular request; only one response should arrive.
@@ -142,7 +141,7 @@ func TestMCPBlackbox_Notification_ProducesNoResponse(t *testing.T) {
 // ── initialize ───────────────────────────────────────────────────────────────
 
 func TestMCPBlackbox_Initialize(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(1, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"clientInfo":      map[string]any{"name": "test", "version": "0.1"},
@@ -163,8 +162,8 @@ func TestMCPBlackbox_Initialize(t *testing.T) {
 
 // ── tools/list ───────────────────────────────────────────────────────────────
 
-func TestMCPBlackbox_ToolsList_ReadOnly(t *testing.T) {
-	h := newHarness(t, false)
+func TestMCPBlackbox_ToolsList_AccountAndInfraOnly(t *testing.T) {
+	h := newHarness(t)
 	h.send(2, "tools/list", nil)
 	resp := h.recv()
 
@@ -173,110 +172,29 @@ func TestMCPBlackbox_ToolsList_ReadOnly(t *testing.T) {
 	tools := result["tools"].([]any)
 
 	names := toolNames(tools)
-	assert.Contains(t, names, "get_account_summary")
-	assert.Contains(t, names, "list_open_trades")
-	assert.Contains(t, names, "get_transactions")
-	assert.Contains(t, names, "run_backtest")
-	assert.NotContains(t, names, "place_order", "write tools must be absent without writeEnable")
-	assert.NotContains(t, names, "close_trade")
-	assert.NotContains(t, names, "update_stop")
-}
-
-func TestMCPBlackbox_ToolsList_WriteEnabled(t *testing.T) {
-	h := newHarness(t, true)
-	h.send(3, "tools/list", nil)
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	tools := result["tools"].([]any)
-
-	names := toolNames(tools)
-	assert.Contains(t, names, "place_order")
-	assert.Contains(t, names, "close_trade")
-	assert.Contains(t, names, "update_stop")
+	assert.Contains(t, names, "list_accounts")
+	assert.Contains(t, names, "account_summary")
+	assert.Contains(t, names, "account_orders")
+	assert.Contains(t, names, "get_version")
+	assert.Contains(t, names, "get_health")
 }
 
 // ── tools/call ───────────────────────────────────────────────────────────────
 
 func TestMCPBlackbox_ToolsCall_UnknownTool(t *testing.T) {
-	// Without an OANDA client every non-run_backtest tool is intercepted by the
-	// OANDA-nil guard before the unknown-tool RPC error is reached. The result
-	// is an application-level errContent, not an RPC error.
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(10, "tools/call", map[string]any{"name": "no_such_tool", "arguments": map[string]any{}})
 	resp := h.recv()
 
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
-	assert.Contains(t, strings.ToLower(text), "oanda")
-}
-
-func TestMCPBlackbox_ToolsCall_WriteToolBlockedWithoutFlag(t *testing.T) {
-	// Without an OANDA client the OANDA-nil guard fires before the writeEnable
-	// check, so the response carries the OANDA-not-configured message rather
-	// than the --enable-write message. Both are application-level errors (isError=true).
-	h := newHarness(t, false)
-	h.send(11, "tools/call", map[string]any{
-		"name":      "place_order",
-		"arguments": map[string]any{"instrument": "EUR_USD", "side": "long", "stop_pips": 20},
-	})
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-}
-
-func TestMCPBlackbox_ToolsCall_RunBacktest_MissingParams(t *testing.T) {
-	h := newHarness(t, false)
-	h.send(12, "tools/call", map[string]any{
-		"name":      "run_backtest",
-		"arguments": map[string]any{},
-	})
-	resp := h.recv()
-
-	// Missing config_paths → invalid params RPC error.
 	require.NotNil(t, resp["error"])
 	errObj := resp["error"].(map[string]any)
-	assert.Equal(t, float64(-32602), errObj["code"])
-}
-
-func TestMCPBlackbox_ToolsCall_RunBacktest_NonExistentConfig(t *testing.T) {
-	h := newHarness(t, false)
-	h.send(13, "tools/call", map[string]any{
-		"name":      "run_backtest",
-		"arguments": map[string]any{"config_paths": []string{"/no/such/config.yml"}},
-	})
-	resp := h.recv()
-
-	// Config load fails → errContent with isError=true, no RPC error.
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-}
-
-func TestMCPBlackbox_ToolsCall_NoOANDA_ReturnsErrContent(t *testing.T) {
-	h := newHarness(t, false)
-	h.send(14, "tools/call", map[string]any{
-		"name":      "get_account_summary",
-		"arguments": map[string]any{},
-	})
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
-	assert.Contains(t, strings.ToLower(text), "oanda")
+	assert.Equal(t, float64(-32601), errObj["code"])
 }
 
 // ── resources/list ────────────────────────────────────────────────────────────
 
 func TestMCPBlackbox_ResourcesList(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(20, "resources/list", nil)
 	resp := h.recv()
 
@@ -297,7 +215,7 @@ func TestMCPBlackbox_ResourcesList(t *testing.T) {
 // ── resources/read ────────────────────────────────────────────────────────────
 
 func TestMCPBlackbox_ResourcesRead_UnknownURI(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(21, "resources/read", map[string]any{"uri": "unknown://foo"})
 	resp := h.recv()
 
@@ -307,7 +225,7 @@ func TestMCPBlackbox_ResourcesRead_UnknownURI(t *testing.T) {
 }
 
 func TestMCPBlackbox_ResourcesRead_MissingURI(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(22, "resources/read", map[string]any{})
 	resp := h.recv()
 
@@ -317,7 +235,7 @@ func TestMCPBlackbox_ResourcesRead_MissingURI(t *testing.T) {
 }
 
 func TestMCPBlackbox_ResourcesRead_BacktestResults(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(23, "resources/read", map[string]any{"uri": "backtest://results"})
 	resp := h.recv()
 
@@ -328,7 +246,7 @@ func TestMCPBlackbox_ResourcesRead_BacktestResults(t *testing.T) {
 }
 
 func TestMCPBlackbox_ResourcesRead_ConfigList(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(24, "resources/read", map[string]any{"uri": "config://configs"})
 	resp := h.recv()
 
@@ -344,7 +262,7 @@ func TestMCPBlackbox_ResourcesRead_ConfigList(t *testing.T) {
 // ── prompts/list (empty stub) ─────────────────────────────────────────────────
 
 func TestMCPBlackbox_PromptsList_Empty(t *testing.T) {
-	h := newHarness(t, false)
+	h := newHarness(t)
 	h.send(30, "prompts/list", nil)
 	resp := h.recv()
 
@@ -352,77 +270,6 @@ func TestMCPBlackbox_PromptsList_Empty(t *testing.T) {
 	result := resp["result"].(map[string]any)
 	prompts := result["prompts"].([]any)
 	assert.Empty(t, prompts)
-}
-
-func TestMCPBlackbox_ToolsList_WriteEnabled_IncludesDownloadCandles(t *testing.T) {
-	h := newHarness(t, true)
-	h.send(40, "tools/list", nil)
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	tools := result["tools"].([]any)
-	assert.Contains(t, toolNames(tools), "download_candles")
-}
-
-func TestMCPBlackbox_ToolsList_ReadOnly_ExcludesDownloadCandles(t *testing.T) {
-	h := newHarness(t, false)
-	h.send(41, "tools/list", nil)
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	tools := result["tools"].([]any)
-	assert.NotContains(t, toolNames(tools), "download_candles")
-}
-
-func TestMCPBlackbox_DownloadCandles_BlockedWithoutWriteFlag(t *testing.T) {
-	// writeEnable=false: OANDA-nil guard fires before writeEnable check, both produce isError=true.
-	h := newHarness(t, false)
-	h.send(42, "tools/call", map[string]any{
-		"name": "download_candles",
-		"arguments": map[string]any{
-			"instrument": "EUR_USD", "timeframe": "H1",
-			"from": "2024-01-01", "to": "2024-01-31",
-		},
-	})
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-}
-
-func TestMCPBlackbox_DownloadCandles_NoOANDA_ReturnsErrContent(t *testing.T) {
-	// writeEnable=true but no OANDA client configured.
-	h := newHarness(t, true)
-	h.send(43, "tools/call", map[string]any{
-		"name": "download_candles",
-		"arguments": map[string]any{
-			"instrument": "EUR_USD", "timeframe": "H1",
-			"from": "2024-01-01", "to": "2024-01-31",
-		},
-	})
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
-	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
-	assert.Contains(t, strings.ToLower(text), "oanda")
-}
-
-func TestMCPBlackbox_DownloadCandles_MissingParams_ReturnsInvalidParams(t *testing.T) {
-	h := newHarness(t, true)
-	h.send(44, "tools/call", map[string]any{
-		"name":      "download_candles",
-		"arguments": map[string]any{"instrument": "EUR_USD"}, // missing timeframe, from, to
-	})
-	resp := h.recv()
-
-	require.Nil(t, resp["error"])
-	result := resp["result"].(map[string]any)
-	assert.Equal(t, true, result["isError"])
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

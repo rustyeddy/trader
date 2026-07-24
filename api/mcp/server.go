@@ -15,22 +15,18 @@ import (
 	"os"
 	"strings"
 	"sync"
-
-	"github.com/rustyeddy/trader/backtest"
-	"github.com/rustyeddy/trader/brokers/oanda"
 )
 
 const protocolVersion = "2024-11-05"
 
-// Server is the MCP server. It holds the tool and resource registries and
-// the write-enable flag for dangerous tools.
+// Server is the MCP server. It holds the tool and resource registries.
+// It knows nothing about OANDA — account tools (list_accounts,
+// account_summary, account_orders) resolve their own broker through
+// service/account, the same way the CLI does.
 type Server struct {
-	oanda       *oanda.Client // nil for backtest-only use
-	log         *slog.Logger
-	accountID   string
-	backtests   backtest.BacktestExecutor
-	writeEnable bool // gates place_order, close_trade, update_stop
-	reportsDir  string
+	log        *slog.Logger
+	accountID  string
+	reportsDir string
 
 	mu  sync.Mutex
 	out io.Writer
@@ -38,19 +34,16 @@ type Server struct {
 
 const defaultReportsDir = "/srv/trading/backtests/reports"
 
-// New creates a Server. oandaClient may be nil for backtest-only use. log
-// may be nil, in which case slog.Default() is used.
-func New(oandaClient *oanda.Client, log *slog.Logger, accountID string, backtests backtest.BacktestExecutor, writeEnable bool) *Server {
+// New creates a Server. log may be nil, in which case slog.Default() is
+// used. accountID marks the default account in list_accounts' output.
+func New(log *slog.Logger, accountID string) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		oanda:       oandaClient,
-		log:         log,
-		accountID:   accountID,
-		backtests:   backtests,
-		writeEnable: writeEnable,
-		reportsDir:  defaultReportsDir,
+		log:        log,
+		accountID:  accountID,
+		reportsDir: defaultReportsDir,
 	}
 }
 
@@ -180,10 +173,8 @@ func (s *Server) handleLine(ctx context.Context, line []byte) {
 //	POST /mcp   Content-Type: application/json
 //
 // Note: POST /mcp is covered by the REST server's CORS middleware, which
-// allows all origins. If --mcp-enable-write is set, any browser origin can
-// invoke write tools (place_order, close_trade, update_stop). Restrict the
-// CORS origin or add bearer-token authentication before enabling writes in
-// a production environment.
+// allows all origins. Restrict the CORS origin or add bearer-token
+// authentication before exposing this in a production environment.
 func (s *Server) HTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get("Content-Type")

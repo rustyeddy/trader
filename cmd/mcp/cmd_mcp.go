@@ -4,13 +4,11 @@
 package mcp
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	mcpserver "github.com/rustyeddy/trader/api/mcp"
-	"github.com/rustyeddy/trader/brokers/oanda"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/log"
 )
@@ -19,11 +17,8 @@ import (
 // on stdio — there is no subcommand layer.
 func New(rc *config.RootConfig) *cobra.Command {
 	var (
-		token       string
-		accountID   string
-		env         string
-		writeEnable bool
-		reportsDir  string
+		accountID  string
+		reportsDir string
 	)
 
 	cmd := &cobra.Command{
@@ -39,58 +34,31 @@ Add to ~/.claude/mcp_servers.json or your Claude Desktop config:
     }
   }
 
-Without --token, only backtest tools are available.
-With --token, live account/trade tools are enabled.
-Write tools (place_order, close_trade, update_stop) require --enable-write.
-
-Available tools (read-only by default):
-  get_account_summary   Current balance, NAV, margin, P/L
-  list_open_trades      All open OANDA positions
-  get_transactions      Account transaction history
-  run_backtest          Run YAML config(s) and return summaries
-  list_bots             List all live strategy bots (running and stopped)
-  get_bot               Get status of a single bot by ID
-
-Additional tools when --enable-write:
-  place_order           Size and submit a market order
-  close_trade           Close a position fully or partially
-  update_stop           Move stop-loss or take-profit
-  start_bot             Start a new live strategy bot
-  stop_bot              Stop a running bot by ID
+Available tools:
+  list_accounts      List OANDA accounts the configured token can access
+  account_summary    Mirrors 'trader account summary'
+  account_orders     Mirrors 'trader account orders'
+  get_version        Server version
+  get_health         Server health
 
 Resources:
   backtest://results    List or read backtest .org reports
   config://configs      List or read YAML backtest configs
+
+This is deliberately minimal — tools are added on a use-case basis, not for
+parity with the CLI/REST surface. Account tools resolve their own OANDA
+broker from OANDA_TOKEN/~/.config/oanda/pat.txt, same as the CLI.
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			log := log.L
 
-			// Token: explicit flag > global config > env var > token file.
-			tok := token
-			if !cmd.Flags().Changed("token") {
-				if rc.OANDAToken != "" {
-					tok = rc.OANDAToken
-				} else {
-					tok = oanda.ResolveToken(tok)
-				}
-			}
 			// Account: explicit flag > global config > env var.
 			resolvedAccount := accountID
-			if !cmd.Flags().Changed("account-id") && rc.OANDAAccountID != "" {
-				resolvedAccount = rc.OANDAAccountID
+			if !cmd.Flags().Changed("account-id") && rc.OANDA.AccountID != "" {
+				resolvedAccount = rc.OANDA.AccountID
 			}
 
-			var client *oanda.Client
-			if tok != "" {
-				var err error
-				client, err = oanda.NewClient(env, tok)
-				if err != nil {
-					return fmt.Errorf("init oanda client: %w", err)
-				}
-			}
-
-			srv := mcpserver.New(client, log, resolvedAccount, nil, writeEnable)
+			srv := mcpserver.New(log.L, resolvedAccount)
 			if reportsDir != "" {
 				srv.WithReportsDir(reportsDir)
 			}
@@ -98,10 +66,7 @@ Resources:
 		},
 	}
 
-	cmd.Flags().StringVar(&token, "token", os.Getenv("OANDA_TOKEN"), "OANDA API token (enables live endpoints)")
 	cmd.Flags().StringVar(&accountID, "account-id", os.Getenv("OANDA_ACCOUNT_ID"), "OANDA account ID")
-	cmd.Flags().StringVar(&env, "env", "practice", "OANDA environment: practice|live")
-	cmd.Flags().BoolVar(&writeEnable, "enable-write", false, "Enable write tools: place_order, close_trade, update_stop, start_bot, stop_bot")
 	cmd.Flags().StringVar(&reportsDir, "reports-dir", "/srv/trading/backtests/reports", "Backtest reports directory")
 
 	return cmd

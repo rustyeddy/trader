@@ -54,8 +54,8 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 			// Token: explicit flag > global config > env var.
 			tok := token
 			if !cmd.Flags().Changed("token") {
-				if rc.OANDAToken != "" {
-					tok = rc.OANDAToken
+				if rc.OANDA.Token != "" {
+					tok = rc.OANDA.Token
 				} else {
 					tok = os.Getenv("OANDA_TOKEN")
 				}
@@ -64,8 +64,8 @@ func newJournalCmd(rc *config.RootConfig) *cobra.Command {
 			// Account: explicit flag > global config > env var.
 			resolvedAccount := accountID
 			if !cmd.Flags().Changed("account-id") {
-				if rc.OANDAAccountID != "" {
-					resolvedAccount = rc.OANDAAccountID
+				if rc.OANDA.AccountID != "" {
+					resolvedAccount = rc.OANDA.AccountID
 				} else {
 					resolvedAccount = os.Getenv("OANDA_ACCOUNT_ID")
 				}

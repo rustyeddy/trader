@@ -88,15 +88,7 @@ func NewRootCmd() *cobra.Command {
 			rc.DBPath = gcfg.DB
 		}
 		// OANDA creds have no root-level CLI flags; always take from global config.
-		if gcfg.OANDA.Token != "" {
-			rc.OANDAToken = gcfg.OANDA.Token
-		}
-		if gcfg.OANDA.AccountID != "" {
-			rc.OANDAAccountID = gcfg.OANDA.AccountID
-		}
-		if gcfg.OANDA.Env != "" {
-			rc.OANDAEnv = gcfg.OANDA.Env
-		}
+		rc.OANDA = gcfg.OANDA
 		rc.ReviewThresholds = gcfg.Review.ToThresholds()
 
 		datamanager.SetDataDir(rc.DataDir)

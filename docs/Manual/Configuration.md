@@ -357,10 +357,10 @@ avoid that ambiguity.
 
 Supported journal kinds are `json` and `csv`.
 
-The daemon can start its REST API, embedded UI, and read-only MCP endpoint
-without an OANDA token. Live journal and broker-backed capabilities remain
-disabled. `--mcp-enable-write` enables unauthenticated write tools on the
-HTTP MCP endpoint; do not expose that mode to an untrusted network.
+The daemon can start its REST API, embedded UI, and MCP endpoint without an
+OANDA token. Live journal and broker-backed capabilities remain disabled.
+MCP over HTTP has no write-capable tools and no built-in authentication;
+restrict network access before exposing `POST /mcp` to an untrusted network.
 
 ## Legacy private app configuration
 

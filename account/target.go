@@ -9,6 +9,15 @@ import (
 	"github.com/rustyeddy/trader/config/active"
 )
 
+// AccountCfg carries the broker/account-id flag state a caller wants
+// resolved via ResolveTarget.
+type AccountCfg struct {
+	Broker           string
+	BrokerChanged    bool
+	AccountID        string
+	AccountIDChanged bool
+}
+
 // ResolveTarget resolves the broker and account ID a command should operate
 // on.
 //

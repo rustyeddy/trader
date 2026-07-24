@@ -5,58 +5,17 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
-	"time"
 
-	"github.com/rustyeddy/trader/datamanager"
-	"github.com/rustyeddy/trader/market"
-	"github.com/rustyeddy/trader/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestToolGetCandlesCSV(t *testing.T) {
-	candles := make([]market.Candle, 744)
-	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
-	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
-
-	srv := New(nil, slog.Default(), "", nil, false)
-	raw, err := json.Marshal(map[string]any{
-		"instrument": "EUR_USD",
-		"timeframe":  "H1",
-		"from":       "2024-01-01",
-		"to":         "2024-01-01",
-	})
-	require.NoError(t, err)
-
-	got, rpcErr := srv.toolGetCandlesCSV(context.Background(), raw)
-	require.Nil(t, rpcErr)
-	payload := got.(map[string]any)
-	content := payload["content"].([]map[string]any)
-	text := content[0]["text"].(string)
-	assert.Contains(t, text, "Timestamp,Open,High,Low,Close,avgspread,maxspread,ticks,flags\n")
-	assert.Contains(t, text, "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
-	metadata := payload["metadata"].(map[string]any)
-	assert.Equal(t, 1, metadata["count"])
-	assert.Equal(t, "text/csv", metadata["mime_type"])
-}
-
-// ── bot tools ─────────────────────────────────────────────────────────────
-
-func newBotSrv() *Server {
-	return New(nil, slog.Default(), "", nil, true)
-}
-
-func TestToolListBots_Empty(t *testing.T) {
-	srv := newBotSrv()
-	got, rpcErr := srv.toolListBots(context.Background(), nil)
-	require.Nil(t, rpcErr)
-	payload := got.(map[string]any)
-	content := payload["content"].([]map[string]any)
-	assert.Contains(t, content[0]["text"].(string), `"count": 0`)
+func newTestSrv() *Server {
+	return New(slog.Default(), "")
 }
 
 func TestListAccountsToolRegistered(t *testing.T) {
-	srv := newBotSrv()
+	srv := newTestSrv()
 	names := map[string]bool{}
 	for _, td := range srv.tools() {
 		names[td.Name] = true
@@ -64,119 +23,45 @@ func TestListAccountsToolRegistered(t *testing.T) {
 	assert.True(t, names["list_accounts"], "list_accounts tool must be advertised")
 }
 
-// TestWriteToolsRequireAccountID verifies mutating tools reject a missing
-// account_id rather than silently defaulting to the first account.
-func TestWriteToolsRequireAccountID(t *testing.T) {
-	srv := newBotSrv() // write enabled, no OANDA — writeAccount fires before any network
-
-	_, rpcErr := srv.toolPlaceOrder(context.Background(), mustJSON(t, map[string]any{
-		"instrument": "EUR_USD", "side": "long", "stop_pips": 20.0,
-	}))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "account_id is required")
-
-	_, rpcErr = srv.toolCloseTrade(context.Background(), mustJSON(t, map[string]any{"trade_id": "123"}))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "account_id is required")
-
-	_, rpcErr = srv.toolUpdateStop(context.Background(), mustJSON(t, map[string]any{"trade_id": "123", "stop_price": 1.1}))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "account_id is required")
-
-	_, rpcErr = srv.toolStartBot(context.Background(), mustJSON(t, map[string]any{
-		"instrument": "EUR_USD", "strategy": "noop",
-	}))
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "account_id is required")
+func TestAccountSummaryAndOrdersToolsRegistered(t *testing.T) {
+	srv := newTestSrv()
+	names := map[string]bool{}
+	for _, td := range srv.tools() {
+		names[td.Name] = true
+	}
+	assert.True(t, names["account_summary"], "account_summary tool must be advertised")
+	assert.True(t, names["account_orders"], "account_orders tool must be advertised")
 }
 
-func mustJSON(t *testing.T, v any) json.RawMessage {
-	t.Helper()
-	b, err := json.Marshal(v)
-	require.NoError(t, err)
-	return b
-}
-
-func TestToolGetBot_MissingID(t *testing.T) {
-	srv := newBotSrv()
-	raw, _ := json.Marshal(map[string]any{})
-	_, rpcErr := srv.toolGetBot(raw)
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "id is required")
-}
-
-func TestToolGetBot_NotFound(t *testing.T) {
-	srv := newBotSrv()
-	raw, _ := json.Marshal(map[string]any{"id": "bot-missing"})
-	got, rpcErr := srv.toolGetBot(raw)
+// account_summary/account_orders build their own broker from
+// OANDA_TOKEN/~/.config/oanda/pat.txt (same as list_accounts), so only the
+// deterministic auth-failure path is testable without a real token.
+func TestToolAccountSummary_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	srv := newTestSrv()
+	got, rpcErr := srv.toolAccountSummary(context.Background(), nil)
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
-	assert.Equal(t, true, payload["isError"])
+	content := payload["content"].([]map[string]any)
+	assert.Contains(t, content[0]["text"].(string), "no token")
 }
 
-func TestToolStartBot_MissingFields(t *testing.T) {
-	srv := newBotSrv()
-	raw, _ := json.Marshal(map[string]any{"instrument": "EUR_USD"}) // missing strategy
-	_, rpcErr := srv.toolStartBot(context.Background(), raw)
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "strategy")
-}
-
-func TestToolStopBot_MissingID(t *testing.T) {
-	srv := newBotSrv()
-	raw, _ := json.Marshal(map[string]any{})
-	_, rpcErr := srv.toolStopBot(raw)
-	require.NotNil(t, rpcErr)
-	assert.Contains(t, rpcErr.Message, "id is required")
-}
-
-func TestToolStopBot_NotFound(t *testing.T) {
-	srv := newBotSrv()
-	raw, _ := json.Marshal(map[string]any{"id": "bot-missing"})
-	got, rpcErr := srv.toolStopBot(raw)
+func TestToolAccountOrders_MissingToken(t *testing.T) {
+	t.Setenv("OANDA_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	srv := newTestSrv()
+	got, rpcErr := srv.toolAccountOrders(context.Background(), nil)
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
-	assert.Equal(t, true, payload["isError"])
-}
-
-func TestListBotsAllowedWithoutOANDA(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, false) // no OANDA, no write
-	raw, _ := json.Marshal(map[string]any{"name": "list_bots", "arguments": map[string]any{}})
-	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
-	require.Nil(t, rpcErr)
-	assert.NotNil(t, got)
-}
-
-func TestStartBotRequiresWriteEnable(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, false) // write disabled
-	raw, _ := json.Marshal(map[string]any{
-		"name":      "start_bot",
-		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
-	})
-	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
-	require.Nil(t, rpcErr)
-	payload := got.(map[string]any)
-	assert.Equal(t, true, payload["isError"])
-}
-
-func TestStartBotRequiresOANDA(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, true) // write enabled, no OANDA
-	raw, _ := json.Marshal(map[string]any{
-		"name":      "start_bot",
-		"arguments": map[string]any{"instrument": "EUR_USD", "strategy": "noop"},
-	})
-	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
-	require.Nil(t, rpcErr)
-	payload := got.(map[string]any)
-	assert.Equal(t, true, payload["isError"])
-	text := payload["content"].([]map[string]any)[0]["text"].(string)
-	assert.Contains(t, text, "OANDA not configured")
+	content := payload["content"].([]map[string]any)
+	assert.Contains(t, content[0]["text"].(string), "no token")
 }
 
 // ── infra tools ───────────────────────────────────────────────────────────
 
 func TestToolGetVersion(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, false)
+	srv := newTestSrv()
 	got, rpcErr := srv.toolGetVersion()
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
@@ -185,7 +70,7 @@ func TestToolGetVersion(t *testing.T) {
 }
 
 func TestToolGetHealth(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, false)
+	srv := newTestSrv()
 	got, rpcErr := srv.toolGetHealth()
 	require.Nil(t, rpcErr)
 	payload := got.(map[string]any)
@@ -194,7 +79,7 @@ func TestToolGetHealth(t *testing.T) {
 }
 
 func TestGetVersionAllowedWithoutOANDA(t *testing.T) {
-	srv := New(nil, slog.Default(), "", nil, false)
+	srv := newTestSrv()
 	raw, _ := json.Marshal(map[string]any{"name": "get_version", "arguments": map[string]any{}})
 	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
 	require.Nil(t, rpcErr)
@@ -202,26 +87,10 @@ func TestGetVersionAllowedWithoutOANDA(t *testing.T) {
 	assert.NotEqual(t, true, payload["isError"])
 }
 
-func TestHandleToolsCall_AllowsGetCandlesCSVWithoutOANDA(t *testing.T) {
-	candles := make([]market.Candle, 744)
-	candles[0] = market.Candle{Open: 110000, High: 110100, Low: 109900, Close: 110050, AvgSpread: 10, MaxSpread: 15, Ticks: 60}
-	datamanager.SeedCandles(t, "oanda", "EURUSD", types.H1, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), candles)
-
-	srv := New(nil, slog.Default(), "", nil, false)
-	raw, err := json.Marshal(map[string]any{
-		"name": "get_candles_csv",
-		"arguments": map[string]any{
-			"instrument": "EUR_USD",
-			"timeframe":  "H1",
-			"from":       "2024-01-01",
-			"to":         "2024-01-01",
-		},
-	})
-	require.NoError(t, err)
-
-	got, rpcErr := srv.handleToolsCall(context.Background(), raw)
-	require.Nil(t, rpcErr)
-	payload := got.(map[string]any)
-	content := payload["content"].([]map[string]any)
-	assert.Contains(t, content[0]["text"].(string), "1704067200,110000,110100,109900,110050,10,15,60,0x0001\n")
+func TestHandleToolsCall_UnknownTool(t *testing.T) {
+	srv := newTestSrv()
+	raw, _ := json.Marshal(map[string]any{"name": "bogus_tool", "arguments": map[string]any{}})
+	_, rpcErr := srv.handleToolsCall(context.Background(), raw)
+	require.NotNil(t, rpcErr)
+	assert.Contains(t, rpcErr.Message, "unknown tool")
 }

@@ -14,13 +14,12 @@ type RootConfig struct {
 	LogFormat string
 	NoColor   bool
 
-	// OANDA credentials populated from global config; individual commands
-	// may override via their own --token / --account-id / --env flags.
-	OANDAToken     string
-	OANDAAccountID string
-	OANDAEnv       string
-
 	// ReviewThresholds populated from global config's `review:` section;
 	// `trader review`'s own flags override these per-run (see cmd/review).
 	ReviewThresholds review.Thresholds
+
+	// OANDA holds broker credentials from global config's `oanda:` section.
+	// Commands have no root-level CLI flags for these; each command's own
+	// --token/--account-id/--env flags take precedence when set.
+	OANDA GlobalOANDAConfig
 }

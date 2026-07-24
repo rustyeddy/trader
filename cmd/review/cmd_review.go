@@ -148,16 +148,16 @@ func resolveThresholds(cmd *cobra.Command, rc *config.RootConfig) review.Thresho
 func buildOandaClient(cmd *cobra.Command, rc *config.RootConfig) (*oanda.Client, error) {
 	tok := token
 	if !cmd.Flags().Changed("token") {
-		if rc != nil && rc.OANDAToken != "" {
-			tok = rc.OANDAToken
+		if rc != nil && rc.OANDA.Token != "" {
+			tok = rc.OANDA.Token
 		} else {
 			tok = os.Getenv("OANDA_TOKEN")
 		}
 	}
 
 	resolvedEnv := env
-	if !cmd.Flags().Changed("env") && rc != nil && rc.OANDAEnv != "" {
-		resolvedEnv = rc.OANDAEnv
+	if !cmd.Flags().Changed("env") && rc != nil && rc.OANDA.Env != "" {
+		resolvedEnv = rc.OANDA.Env
 	}
 
 	return oanda.NewClient(resolvedEnv, tok)

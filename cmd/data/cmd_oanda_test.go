@@ -49,7 +49,7 @@ func TestApplyGlobalOANDA_NilRCIsNoOp(t *testing.T) {
 func TestApplyGlobalOANDA_AppliesRCTokenWhenFlagNotChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	auth := oandaAuth{}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAToken: "rc-tok"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{Token: "rc-tok"}})
 	assert.Equal(t, "rc-tok", auth.token)
 }
 
@@ -57,14 +57,14 @@ func TestApplyGlobalOANDA_SkipsTokenWhenFlagChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	_ = cmd.Flags().Set("token", "flag-tok") // marks as Changed
 	auth := oandaAuth{token: "flag-tok"}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAToken: "rc-tok"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{Token: "rc-tok"}})
 	assert.Equal(t, "flag-tok", auth.token) // rc value not applied
 }
 
 func TestApplyGlobalOANDA_AppliesRCAccountIDWhenFlagNotChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	auth := oandaAuth{}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAAccountID: "rc-acct"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{AccountID: "rc-acct"}})
 	assert.Equal(t, "rc-acct", auth.accountID)
 }
 
@@ -72,14 +72,14 @@ func TestApplyGlobalOANDA_SkipsAccountIDWhenFlagChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	_ = cmd.Flags().Set("account-id", "flag-acct")
 	auth := oandaAuth{accountID: "flag-acct"}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAAccountID: "rc-acct"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{AccountID: "rc-acct"}})
 	assert.Equal(t, "flag-acct", auth.accountID)
 }
 
 func TestApplyGlobalOANDA_AppliesRCEnvWhenFlagNotChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	auth := oandaAuth{env: "practice"}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAEnv: "live"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{Env: "live"}})
 	assert.Equal(t, "live", auth.env)
 }
 
@@ -87,7 +87,7 @@ func TestApplyGlobalOANDA_SkipsEnvWhenFlagChanged(t *testing.T) {
 	cmd := cmdWithOANDAFlags()
 	_ = cmd.Flags().Set("env", "live")
 	auth := oandaAuth{env: "live"}
-	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDAEnv: "practice"})
+	applyGlobalOANDA(cmd, &auth, &config.RootConfig{OANDA: config.GlobalOANDAConfig{Env: "practice"}})
 	assert.Equal(t, "live", auth.env)
 }
 

@@ -240,47 +240,34 @@ SSE clients must handle disconnect/reconnect. Broker streams require OANDA.
 
 When configured by `trader serve`, `POST /mcp` exposes MCP JSON-RPC and `/`
 serves the embedded Svelte UI. The HTTP MCP endpoint and REST server currently
-allow broad CORS and have no built-in authentication. Do not enable MCP writes
-or expose broker routes to an untrusted network without a protected reverse
-proxy or equivalent control.
+allow broad CORS and have no built-in authentication. Do not expose broker
+routes to an untrusted network without a protected reverse proxy or
+equivalent control.
 
 ## MCP
 
 `trader mcp` serves line-delimited JSON-RPC over stdin/stdout. `trader serve`
 can mount the same protocol at `POST /mcp`.
 
+The MCP tool set is deliberately minimal — account tools mirroring the CLI's
+`trader account` commands, plus baseline infra checks. Tools are added on a
+concrete use-case basis, not for parity with the CLI/REST surface; backtests,
+candles, bots, live orders, and pip/position calculation are not exposed over
+MCP today.
+
 ### Tools
 
-| Read/local or broker tool | Purpose |
+| Tool | Purpose |
 |---|---|
-| `get_account_summary` | OANDA account summary |
-| `list_open_trades` | OANDA positions |
-| `get_transactions` | OANDA transactions |
-| `get_prices` | Current OANDA bid/ask |
-| `run_backtest` | Run config path specs and write reports |
-| `get_candles_csv` | Local scaled candle CSV |
-| `get_candle_stats` | Local dataset statistics |
-| `validate_candles` | Local store validation |
-| `get_pip_values` | Pip-value calculation |
-| `get_position` | Position/notional calculation |
+| `list_accounts` | List OANDA accounts the configured token can access |
+| `account_summary` | Mirrors `trader account summary` (one account or all) |
+| `account_orders` | Mirrors `trader account orders` |
 | `get_version` | Build version |
 | `get_health` | Process health |
-| `list_bots` | Managed bot snapshots |
-| `get_bot` | One managed bot |
 
-Write-capable tools are registered only with `--enable-write`:
-
-| Tool | Side effect |
-|---|---|
-| `start_bot` | Starts a managed live runner |
-| `stop_bot` | Stops a managed runner |
-| `download_candles` | Downloads and writes OANDA candles |
-| `place_order` | Places a broker order |
-| `close_trade` | Closes broker exposure |
-| `update_stop` | Changes broker stop/take orders |
-
-Some read tools still require OANDA; local backtest/candle/calculation tools do
-not. A token does not imply write permission.
+Account tools resolve their own OANDA broker from
+`OANDA_TOKEN`/`~/.config/oanda/pat.txt`, the same as the CLI — there is no
+`--token`/`--env` flag on `trader mcp`, and no write-capable tools exist.
 
 ### Resources
 
