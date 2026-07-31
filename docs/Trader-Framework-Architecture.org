@@ -1,0 +1,2501 @@
+#+TITLE: Trader Framework Architecture
+#+SUBTITLE: An API-First Trading Framework for Backtesting, Research, and Live Trading
+#+AUTHOR: Architecture proposal prepared for Rusty Eddy
+#+DATE: [2026-07-31 Fri]
+#+REVISION: 2 — consolidated architecture and development plan
+#+OPTIONS: toc:3 num:nil ^:nil
+#+STARTUP: overview indent
+#+PROPERTY: header-args:go :results none :exports code
+
+* Revision Notes
+
+This revision incorporates the strongest supporting ideas from the independent
+Opus and Fable proposals while preserving the original architecture as the
+source of truth.  The principal additions are:
+
+- Explicit architectural invariants.
+- A controlled greenfield repository strategy.
+- Historical source, live feed, persistence, coverage, adjustment, and fetch
+  policies as distinct market-data concerns.
+- Strategy descriptors and optional capability interfaces.
+- Explicit concurrency ownership and backpressure rules.
+- Live operational guards separated from trade-risk rules.
+- Selectable handling of ambiguous bar-based fills.
+- Paper trading as the safe default.
+- A public =tradertest= package and mechanically enforced architecture rules.
+- A concrete milestone and GitHub issue plan.
+- Synthetic and multi-leg instruments documented as a deferred extension.
+
+* Executive Summary
+
+This document proposes a fresh architecture for Trader without using the
+existing repository as a design constraint.
+
+The central recommendation is:
+
+#+BEGIN_QUOTE
+Build Trader first as a modular, API-first Go library using ports and adapters.
+Keep the domain and application APIs independent of storage, brokers,
+transports, and deployment shape.  Begin as a modular monolith, while making
+important boundaries explicit enough that selected modules can later run in
+separate processes without redesigning the trading model.
+#+END_QUOTE
+
+Trader should support three equally important uses:
+
+1. A user imports Trader packages and builds a custom Go application.
+2. Trader's own applications compose those same public packages into complete
+   backtesting, scanning, data, and live-trading programs.
+3. A strategy or adapter can run outside the Trader process through a versioned
+   protocol without being compiled into the Trader binary.
+
+The most important architectural separation is not between executables.  It is
+between these responsibilities:
+
+#+BEGIN_EXAMPLE
+Market observations
+       |
+       v
+Analysis and indicators
+       |
+       v
+Strategy decisions / trading intents
+       |
+       v
+Execution planning
+       |
+       v
+Risk evaluation
+       |
+       v
+Broker order submission
+       |
+       v
+Broker events, reconciliation, and account state
+#+END_EXAMPLE
+
+A strategy should not place broker orders directly.  It should state what it
+wants to accomplish.  An execution layer translates that intent into concrete
+orders, risk approves or rejects those orders, and a broker adapter submits
+them.  This separation is the key to using the same strategy in research,
+backtests, paper trading, and live trading.
+
+The proposal also makes several domain distinctions that will prevent future
+problems:
+
+- An instrument is not the same thing as a symbol or venue listing.
+- A broker account is not the same thing as a cross-account portfolio.
+- Indicators calculate values; strategies interpret those values.
+- Historical data queries and real-time streams share canonical event types,
+  but use different access patterns.
+- Broker state is authoritative, while Trader maintains reconciled local read
+  models for speed, reporting, and recovery.
+- Exact trading values use decimal/fixed-point representations; analytical
+  calculations may use floating point internally.
+- Backtesting and live trading share contracts and orchestration concepts, but
+  should not be forced into one giant engine with conditionals everywhere.
+
+* Goals
+
+** Primary Goals
+
+- Provide a stable, intuitive public Go API.
+- Hide implementation details behind clear package and =internal/= boundaries.
+- Allow users to compose their own applications from Trader packages.
+- Support historical research, scanning, backtesting, paper trading, and live
+  trading.
+- Support multiple data vendors, brokers, storage engines, and transports.
+- Permit both in-process and out-of-process strategies.
+- Preserve deterministic behavior in simulations and backtests.
+- Make live trading recoverable, reconcilable, observable, and safe.
+- Avoid coupling domain objects to a particular CLI, database, message broker,
+  or network protocol.
+
+** Non-Goals for the First Architecture
+
+- Designing every possible order type supported by every broker.
+- Building a distributed microservice platform before it is necessary.
+- Making every internal component replaceable through an interface.
+- Hiding all domain concepts behind generic maps or untyped JSON.
+- Guaranteeing one public API will never evolve.
+- Solving strategy profitability or market alpha.
+
+* Greenfield Repository Strategy
+
+Trader should begin in a new repository.  Rename the existing repository and
+retain it beside the new one as a working reference, behavior oracle, source of
+test fixtures, and selective code donor.
+
+Recommended local arrangement:
+
+#+BEGIN_EXAMPLE
+~/src/
+  trader/                 new framework
+  trader-legacy/          existing implementation
+#+END_EXAMPLE
+
+This is a *controlled greenfield transplant*, not a blind rewrite.  For each new
+capability:
+
+1. Define the new package boundary and public contract.
+2. Write contract tests or behavior tests against that contract.
+3. Inspect the legacy implementation for proven algorithms, fixtures, or edge
+   cases.
+4. Copy only the smallest useful portion.
+5. Adapt or rewrite it so it obeys the new dependency direction and vocabulary.
+6. Never import =trader-legacy= from the new module.
+
+Code should be transplanted only when it is easier to prove correct than a new
+implementation.  Legacy package layout, global state, configuration access,
+transport assumptions, and broker coupling should not be carried forward merely
+because the underlying algorithm is reusable.
+
+The two repositories should not be developed indefinitely in parallel.  The new
+Trader should replace complete workflows rather than chase abstract feature
+parity.  Suggested replacement gates are:
+
+- Reproduce one trusted historical-data fixture.
+- Run one strategy through the full intent-to-fill pipeline.
+- Produce one deterministic backtest and Org report.
+- Run one strategy against an OANDA paper account.
+- Move the scanner and routine reporting workflow.
+- Freeze the legacy repository except for critical fixes.
+- Archive it after its remaining useful fixtures and behavior have been captured.
+
+Trader will remain one repository.  Nested modules or separate adapter
+repositories should be considered only if third-party dependency weight or
+independent release cadence becomes a demonstrated problem.
+
+* Architectural Principles
+
+** Architectural Invariants
+
+These rules should be treated as design tests.  A proposed API or package change
+that violates one requires an explicit architecture decision record.
+
+1. Strategies never receive or call a broker.
+2. Strategies execute identically in backtest and live modes; composition roots
+   provide different clocks, data sources, and broker adapters.
+3. Broker state is authoritative; local account and portfolio state are
+   reconciled projections.
+4. Prices, quantities, money, balances, fees, and authoritative PnL are exact;
+   analytical calculations may use floating point.
+5. Interfaces live at seams where implementations vary; concrete value structs
+   live in the domain center.
+6. Long-running work is context-owned.  Trader starts no unmanaged goroutine and
+   silently abandons no critical event.
+7. Deployment shape is chosen at the composition root, not encoded into the
+   domain model.
+8. Public interfaces remain small.  Growth normally occurs through new optional
+   capability interfaces and concrete result types.
+9. Commands crossing a process or broker boundary are idempotent, correlated,
+   journaled, and recoverable.
+10. Paper trading is the default.  Real-money trading requires an explicit,
+    independently visible enablement decision.
+11. Typed direct calls are preferred for synchronous in-process flow.  A generic
+    event bus is not Trader's internal dependency-injection mechanism.
+12. Examples and contract tests are part of the public API and must run in CI.
+
+** API First, Implementation Second
+
+Public packages define domain concepts, application services, extension points,
+and stable results.  Implementation packages may change more quickly and
+should normally live under =internal/=.
+
+A public interface should exist only when at least one of the following is true:
+
+- Users are expected to implement it.
+- Trader needs multiple implementations.
+- It represents an external dependency or process boundary.
+- It materially improves testing of a stable boundary.
+
+Do not create an interface merely because a concrete type exists.
+
+** Modular Monolith First
+
+Start with one Go module and multiple well-defined packages.  Trader's default
+applications can initially compile into one or a few binaries.
+
+Process boundaries should be introduced for operational reasons such as:
+
+- Separate failure domains.
+- Different scaling requirements.
+- Security isolation around broker credentials.
+- Independent deployment or upgrade cadence.
+- Language-independent strategies.
+- A data service shared by many consumers.
+
+The code should not require network calls merely to preserve a conceptual
+boundary inside one process.
+
+** Ports and Adapters
+
+Trader's public interfaces are ports.  Brokers, data vendors, databases,
+message buses, and network protocols are adapters.
+
+#+BEGIN_EXAMPLE
+                +-----------------------------+
+                |     Trader applications     |
+                +--------------+--------------+
+                               |
+                +--------------v--------------+
+                | Application orchestration   |
+                | scanner, backtest, live     |
+                +--------------+--------------+
+                               |
+                +--------------v--------------+
+                | Public domain/API packages  |
+                | strategy, risk, execution   |
+                +--------------+--------------+
+                               |
+                +--------------v--------------+
+                | Ports / extension contracts |
+                | broker, marketdata, journal |
+                +--------------+--------------+
+                               |
+          +--------------------+---------------------+
+          |                    |                     |
+   +------v------+      +------v------+       +------v------+
+   | OANDA       |      | Parquet     |       | gRPC/MQTT   |
+   | Alpaca      |      | CSV         |       | HTTP/SSE    |
+   | Sim broker  |      | live feed   |       | CLI         |
+   +-------------+      +-------------+       +-------------+
+#+END_EXAMPLE
+
+** Explicit Dependencies
+
+Dependencies should point inward toward stable domain concepts.
+
+- Domain types do not import brokers, databases, transports, or applications.
+- Strategies do not import concrete broker adapters.
+- Risk policies do not perform network calls.
+- Reports consume recorded results and events; trading logic does not import
+  report renderers.
+- Transports wrap application services; application services do not import
+  HTTP, MQTT, GraphQL, or Cobra.
+
+** Determinism Is a Feature
+
+Backtests must be repeatable.  Time, identifiers, data order, randomness,
+latency, slippage, and fee models must be controllable.
+
+Avoid hidden calls to:
+
+- =time.Now()=
+- global random sources
+- global loggers
+- global configuration
+- environment variables deep inside domain code
+
+These are supplied at composition time when deterministic behavior matters.
+
+** Capabilities Over Lowest-Common-Denominator APIs
+
+Broker and data providers differ.  Do not create one enormous interface that
+pretends all providers support identical features.
+
+Use a small required core plus capability discovery or optional narrow
+interfaces.
+
+Examples:
+
+- Bracket orders
+- Order replacement
+- Fractional quantities
+- Short selling
+- Level II order books
+- Historical tick data
+- Native trailing stops
+- Server-side OCO orders
+- Streaming account updates
+
+* Recommended Domain Model
+
+** Instrument, Listing, and Contract
+
+The requirements currently use =Instrument= as a broad abstraction.  That is
+correct, but Trader should distinguish an economic instrument from a venue's
+tradable listing.
+
+Examples:
+
+- Apple common stock is an instrument.
+- =AAPL= on NASDAQ is a listing.
+- EUR/USD is a currency pair instrument.
+- An OANDA EUR_USD product is a broker-specific listing.
+- A December E-mini S&P 500 future is a specific expiring contract.
+- A continuous ES research series is synthetic data, not an orderable contract.
+
+Suggested concepts:
+
+- =instrument.ID=: Stable Trader identity.
+- =instrument.Kind=: Equity, ETF, FX pair, future, option, crypto, index, etc.
+- =instrument.Listing=: Venue-specific tradable representation.
+- =instrument.Symbol=: Display or provider symbol, never the primary identity.
+- =instrument.Spec=: Tick size, quantity increment, multiplier, currencies,
+  expiration, settlement type, and trading calendar.
+- =instrument.Resolver=: Maps Trader IDs to provider or broker IDs.
+
+This prevents symbol collisions and makes multi-broker operation practical.
+
+*** Deferred: Synthetic and Multi-Leg Instruments
+
+A *leg* is one ordinary instrument that participates in a combined position.
+Examples include:
+
+- Long one stock and short another in a pairs trade.
+- A futures calendar spread with one long contract and one short contract.
+- An options spread made from several option contracts.
+- A weighted statistical basket.
+
+A future synthetic definition might identify each leg, its side or signed
+weight, and its quantity relationship.  The synthetic price may be derived from
+the component prices, while execution must submit and coordinate several real
+broker orders.
+
+That concept is valid, but it combines several difficult concerns:
+
+- Derived-series pricing and normalization.
+- Atomicity or partial execution across legs.
+- Per-leg slippage and liquidity.
+- Cross-leg risk and margin.
+- Broker-native combo orders versus client-side coordination.
+- Recovery when only some legs fill.
+
+Therefore version zero should *not* place =Legs []Leg= on every instrument and
+should not assume that a derived series is directly orderable.  Preserve stable
+instrument identity and extensible metadata, then introduce explicit
+=synthetic= and multi-leg execution packages when the first real strategy needs
+them.
+
+** Canonical Market Data Events
+
+Avoid treating all real-time market data as an ambiguous =Tick=.  A tick could
+mean a quote update, trade, broker price, or order-book update.
+
+Canonical public types should include at least:
+
+- =marketdata.Quote=: Bid, ask, sizes, event time, source.
+- =marketdata.Trade=: Last trade price, size, event time, source.
+- =marketdata.Bar=: Open, high, low, close, volume, interval, time range.
+- =marketdata.BookUpdate=: Optional order-book change or snapshot.
+- =marketdata.Status=: Trading halt, market open/closed, feed status.
+
+A convenience union may be named =marketdata.Event=, but the concrete event
+kind should remain explicit.
+
+Every canonical record should retain provenance:
+
+- Instrument/listing identity
+- Source provider
+- Event time
+- Time received or observed
+- Sequence number when available
+- Raw/adjusted/synthetic status
+- Data quality flags
+- Revision/version when data may be corrected
+
+Canonical storage should preserve raw observations whenever practical.
+Adjustments and derived series should be selected at query time and recorded in
+the run manifest rather than destructively replacing source data.  Examples are
+split-adjusted equity bars, total-return series, and back-adjusted continuous
+futures.
+
+** Time Intervals and Trading Calendars
+
+A bar interval is more than a =time.Duration=.  Daily, weekly, and monthly bars
+must align to a market session or calendar, not simply to elapsed seconds.
+
+Represent an interval with concepts such as:
+
+- Unit: second, minute, hour, session, day, week, month.
+- Count: 1, 5, 15, etc.
+- Alignment/calendar: UTC, exchange session, or named calendar.
+
+Trader will eventually need:
+
+- Exchange and broker trading sessions.
+- Holidays and early closes.
+- Time-zone and daylight-saving handling.
+- Futures session boundaries.
+- FX week boundaries.
+
+** Exact Values Versus Analytical Values
+
+Order prices, quantities, account balances, fees, and realized PnL should not
+use raw =float64= as their authoritative representation.
+
+Recommended approach:
+
+- Public exact domain types: =Price=, =Quantity=, =Money=, =Rate=, and
+  =Currency=.
+- Back them with a decimal or scaled-integer representation.
+- Validate against listing tick size and quantity increment.
+- Permit indicator and statistical calculations to use =float64= internally.
+- Convert analytical values to validated exact values only at the order or
+  accounting boundary.
+
+Do not put all numeric values into one generic decimal type.  Separate types
+prevent accidental use of a price as a quantity or a percentage as money.
+
+** Orders, Fills, Positions, and Trades
+
+These terms should remain distinct:
+
+- =OrderIntent=: What a strategy or operator wants to accomplish.
+- =OrderProposal=: A concrete order candidate before risk approval.
+- =OrderRequest=: A validated broker submission.
+- =Order=: Broker-recognized order and lifecycle state.
+- =Fill=: One execution against an order.
+- =Position=: Current net or hedged exposure.
+- =Trade=: A reporting/journaling concept that groups entry and exit activity.
+
+A broker does not necessarily understand Trader's concept of a completed
+"trade."  The broker is authoritative for orders, fills, balances, and
+positions.  Trader may derive trades for reports and strategy accounting.
+
+** Account and Portfolio
+
+A broker account and a portfolio are related but different.
+
+=account.Account= should describe one broker account and its authoritative or
+reconciled state:
+
+- Cash balances by currency
+- Equity and net liquidation value
+- Buying power and available margin
+- Open orders
+- Positions
+- Realized and unrealized PnL
+- Fees, financing, interest, and cash ledger entries
+
+=portfolio.Portfolio= should be a Trader-level view that may span:
+
+- One account
+- Multiple accounts at one broker
+- Accounts at multiple brokers
+- Paper and live accounts kept intentionally separate
+
+This distinction allows portfolio-level concentration and exposure risk without
+pretending one broker owns the entire portfolio.
+
+Deposits and withdrawals should be modeled as cash ledger activity.  Not every
+broker API allows Trader to initiate them.  The public API should therefore
+separate observing cash movements from requesting transfers.
+
+* Major Public Packages
+
+The exact names can evolve, but the responsibilities should remain stable.
+
+** =instrument=
+
+Owns instrument identity, listing metadata, contract specifications, and symbol
+resolution.
+
+Public concepts:
+
+- =ID=
+- =Kind=
+- =Listing=
+- =Spec=
+- =Catalog=
+- =Resolver=
+
+It should not fetch prices or place orders.
+
+** =marketdata=
+
+Owns canonical market observations and the contracts used to query, stream,
+validate, persist, and describe them.
+
+The public vocabulary should distinguish these roles:
+
+- =HistoricalSource=: bounded historical queries.
+- =LiveFeed=: unbounded subscriptions.
+- =Store= or =Sink=: persistence of canonical records; this may remain an
+  internal extension point until users genuinely need to implement it.
+- =CoverageCatalog=: what data exists, where gaps occur, and how it was derived.
+- Provider adapter: obtains provider-native records.
+- Normalizer/validator: converts and checks provider records.
+- Resampler: derives aligned intervals from finer-grained canonical data.
+
+Public concepts:
+
+- =Bar=, =Quote=, =Trade=, =BookUpdate=
+- =Interval=
+- =BarQuery=, =QuoteQuery=
+- =Reader[T]= or another typed cursor abstraction
+- =HistoricalSource=
+- =LiveFeed=
+- =Coverage= and =Gap=
+- =AdjustmentMode=
+- =FetchPolicy=
+- Data provenance and quality flags
+
+Suggested API sketch:
+
+#+BEGIN_SRC go
+package marketdata
+
+import (
+    "context"
+    "io"
+    "time"
+
+    "github.com/rustyeddy/trader/instrument"
+)
+
+type Reader[T any] interface {
+    Next(ctx context.Context) (T, error) // io.EOF when complete
+    Close() error
+}
+
+type AdjustmentMode uint8
+
+const (
+    Raw AdjustmentMode = iota
+    SplitAdjusted
+    TotalReturnAdjusted
+    BackAdjusted
+)
+
+type FetchPolicy uint8
+
+const (
+    LocalOnly FetchPolicy = iota
+    FetchMissing
+    ExactManifest
+)
+
+type BarQuery struct {
+    Instruments []instrument.ID
+    Interval    Interval
+    Start       time.Time
+    End         time.Time       // half-open range [Start, End)
+    Adjustment  AdjustmentMode
+    Fetch       FetchPolicy
+}
+
+type Coverage struct {
+    Instrument instrument.ID
+    Interval   Interval
+    First      time.Time
+    Last       time.Time
+    Gaps       []Gap
+    Sources    []string
+    Revision   string
+    Warnings   []QualityWarning
+}
+
+type HistoricalSource interface {
+    Bars(ctx context.Context, query BarQuery) (Reader[Bar], error)
+    Quotes(ctx context.Context, query QuoteQuery) (Reader[Quote], error)
+    Coverage(ctx context.Context, query CoverageQuery) (Coverage, error)
+}
+
+type LiveFeed interface {
+    Subscribe(ctx context.Context, request Subscription)
+        (Reader[Event], error)
+}
+
+type Sink interface {
+    WriteBars(ctx context.Context, bars []Bar) error
+    WriteQuotes(ctx context.Context, quotes []Quote) error
+}
+
+var _ = io.EOF
+#+END_SRC
+
+The storage engine is hidden behind a narrow persistence port.  CSV, Parquet, a
+remote data service, and in-memory tests may satisfy the same contracts without
+changing callers.
+
+Automatic read-through download is convenient for exploratory work, but it must
+be explicit.  A reproducible backtest should be able to require =LocalOnly= or
+=ExactManifest= so missing data fails the run instead of silently changing its
+input set.
+
+Normalization should be split into two stages:
+
+1. *Adaptation*: provider-native records to canonical records.
+2. *Validation*: gaps, duplicates, ordering, session alignment, impossible
+   prices, suspicious spikes, malformed volume, and revisions.
+
+A validator should support explicit policies such as reject, drop, repair with a
+quality flag, or pass while recording an anomaly.  Repairs must never be hidden.
+
+Use one canonical resampler for interval derivation.  Validate it by comparing a
+derived interval against a provider's native bars for the same session calendar.
+Disagreement usually exposes a boundary, holiday, or daylight-saving error.
+
+A top-level =marketdata.Service= may compose sources, feeds, stores, cache,
+normalization, and resampling for convenience.  The underlying extension
+contracts should remain narrow.
+
+** =indicator=
+
+Owns mathematical transforms over data series or streams.
+
+Indicators should:
+
+- Consume canonical numerical inputs.
+- Support batch and incremental use where practical.
+- Describe warm-up requirements.
+- Return one or more named values.
+- Avoid broker, account, and order dependencies.
+- Avoid deciding whether to buy or sell.
+
+An EMA computes an EMA.  An EMA-cross condition may be represented by a small
+analysis or strategy helper, but the final buy/sell meaning belongs to a
+strategy.
+
+Suggested concepts:
+
+- =Batch[T, R]=
+- =Stream[T, R]=
+- =Descriptor=
+- =Warmup=
+- Typed common indicators such as =EMA= and =ADX=
+- A generic =Frame= only where dynamic indicator composition is required
+
+Prefer typed APIs for core indicators.  A generic map of string-to-float values
+is useful at report or scripting boundaries, but weak as the primary Go API.
+
+** =analysis=
+
+Owns observations derived from prices and indicators that are not themselves
+orders or broker actions.
+
+Examples:
+
+- Trend/range regime classification
+- Volatility estimates
+- Support and resistance zones
+- Candle pattern recognition
+- Breakout and liquidity observations
+- Statistical features
+- Market quality or spread analysis
+
+Analysis outputs should include confidence, parameters, evidence, and the time
+range used.  This makes research and reports reproducible.
+
+** =strategy=
+
+Owns strategy lifecycle and trading decisions.
+
+A strategy receives a controlled view of market and portfolio state, then
+returns intents.  It never submits broker orders.  It also declares its data and
+warm-up requirements before execution so the runner can validate the
+environment before the first decision event.
+
+Suggested API shape:
+
+#+BEGIN_SRC go
+package strategy
+
+import (
+    "context"
+
+    "github.com/rustyeddy/trader/instrument"
+    "github.com/rustyeddy/trader/marketdata"
+)
+
+type Descriptor struct {
+    Name         string
+    Version      string
+    Parameters   ParameterSchema
+    Requirements []DataRequirement
+    StateVersion string
+}
+
+type DataRequirement struct {
+    Instrument instrument.ID
+    Interval   marketdata.Interval
+    WarmupBars int
+    NeedTicks  bool
+}
+
+type Strategy interface {
+    Describe() Descriptor
+    Start(ctx context.Context, env Environment) error
+    OnBar(ctx context.Context, event BarEvent, view View) ([]Intent, error)
+}
+
+// Optional capabilities: implement only what the strategy requires.
+type TickHandler interface {
+    OnTick(context.Context, TickEvent, View) ([]Intent, error)
+}
+
+type FillHandler interface {
+    OnFill(context.Context, FillEvent, View) ([]Intent, error)
+}
+
+type AccountEventHandler interface {
+    OnAccountEvent(context.Context, AccountEvent, View) ([]Intent, error)
+}
+
+type StateManager interface {
+    Snapshot(context.Context) (State, error)
+    Restore(context.Context, State) error
+}
+
+type Closer interface {
+    Close(context.Context) error
+}
+#+END_SRC
+
+Optional capability interfaces keep the primary contract small.  A daily-bar
+strategy should not implement empty tick, fill, and account-event methods.  New
+optional interfaces can be added without breaking every existing strategy.
+
+Parameters should be strongly typed inside a strategy.  Research tooling may
+use a serializable descriptor or schema to enumerate and validate parameter
+sets, but =map[string]any= should not be the strategy's authoritative
+configuration model.
+
+A strategy may produce intents such as:
+
+- Enter long or short.
+- Exit or reduce a position.
+- Move a protective stop.
+- Cancel an entry.
+- Target a desired quantity or exposure.
+- Take no action, optionally recording a reason.
+
+Trader should support two complementary intent styles:
+
+1. *Action intents*: enter, exit, adjust stop.
+2. *Target intents*: reach a target position or exposure.
+
+Target-position strategies are often easier to reconcile after restarts and
+partial fills.  Action intents are natural for discretionary-style systems.
+The execution layer can support both while keeping the broker API concrete.
+
+Strategy state must be explicit.  Any strategy expected to survive a live
+restart should implement snapshot/restore through a versioned state contract.
+Do not rely only on in-memory fields.
+
+** =execution=
+
+Owns the translation from strategy intent to executable order proposals and
+manages order lifecycle toward a desired result.
+
+Responsibilities:
+
+- Convert target exposure or trade plans into order proposals.
+- Apply instrument tick/quantity rules.
+- Choose market, limit, stop, bracket, or staged execution behavior.
+- Track working orders and partial fills.
+- Replace or cancel orders when plans change.
+- Correlate strategy intent, risk decision, broker order, and fills.
+- Avoid duplicate submissions after retries or restarts.
+- Reconcile desired state with actual broker state.
+
+Execution is where broker-neutral strategy meaning becomes broker-compatible
+orders.  It is separate from risk because "how to execute" and "whether the
+risk is allowed" are different decisions.
+
+Suggested pipeline:
+
+#+BEGIN_EXAMPLE
+strategy.Intent
+      |
+      v
+execution.Planner
+      |
+      v
+[]order.Proposal
+      |
+      v
+risk.Engine
+      |
+      +------ rejected ------> journal / strategy feedback
+      |
+      v
+[]order.ApprovedRequest
+      |
+      v
+execution.Manager
+      |
+      v
+broker.Account.Submit
+#+END_EXAMPLE
+
+** =risk=
+
+Owns position sizing, pre-trade admission, and exposure limits.
+
+Split risk into two primary concerns:
+
+1. *Sizing*: What quantity is appropriate?
+2. *Admission*: Is this proposed order allowed?
+
+Operational supervision is intentionally separate.  The =live= package decides
+whether the system is healthy enough to trade at all; =risk= decides whether a
+specific proposed exposure is acceptable.
+
+Suggested API sketch:
+
+#+BEGIN_SRC go
+package risk
+
+import (
+    "context"
+
+    "github.com/rustyeddy/trader/order"
+    "github.com/rustyeddy/trader/portfolio"
+)
+
+type Decision struct {
+    Allowed     bool
+    Request     order.Request
+    Violations  []Violation
+    Warnings    []Warning
+    RuleResults []RuleResult
+}
+
+type Rule interface {
+    Name() string
+    Evaluate(ctx context.Context, input Input) RuleResult
+}
+
+type Engine interface {
+    Evaluate(ctx context.Context, input Input) (Decision, error)
+}
+
+type Input struct {
+    Proposal  order.Proposal
+    Portfolio portfolio.Snapshot
+    Market    MarketSnapshot
+}
+#+END_SRC
+
+Risk rules should be composable, deterministic, and auditable.  Every rejection
+or modification should record the rule, inputs, and reason.
+
+Rules to anticipate beyond the current list:
+
+- Maximum notional exposure
+- Maximum leverage
+- Per-instrument and per-asset-class concentration
+- Currency exposure
+- Correlated-position exposure
+- Maximum open orders
+- Maximum order rate
+- Excessive spread or expected slippage
+- Trading-session restrictions
+- Drawdown from high-water mark
+
+A position sizer should not silently approve a trade.  It returns a proposed
+quantity; the complete risk engine still evaluates the resulting order.
+
+** =order=
+
+Owns broker-neutral order vocabulary and lifecycle types.
+
+Likely public concepts:
+
+- =Side=: buy, sell
+- =Type=: market, limit, stop, stop-limit
+- =TimeInForce=
+- =Intent= or =Proposal=
+- =Request=
+- =Order=
+- =Status=
+- =Fill=
+- =CancelRequest=
+- =ReplaceRequest=
+- =ClientOrderID=
+
+Important fields include:
+
+- Account and listing
+- Quantity
+- Limit and stop prices
+- Reduce-only intent
+- Parent/child relationship
+- OCO or bracket grouping
+- Strategy/run/correlation IDs
+- Idempotency key
+- Broker-native ID after acceptance
+
+Advanced order behavior should be capability-driven rather than assumed.
+
+** =broker=
+
+Owns the public extension contracts for brokers and the account-scoped handles
+used by applications.
+
+The broker package should not expose provider tokens or provider-native request
+objects in its stable API.
+
+Recommended shape:
+
+- =Broker=: Authenticated connection/session and account discovery.
+- =Account=: Account-scoped command and query port.
+- =EventStream=: Orders, fills, positions, balances, and connection events.
+- =Capabilities=: Features supported by the adapter/account.
+- =Reconciler=: Optional explicit reconciliation support.
+
+Suggested API sketch:
+
+#+BEGIN_SRC go
+package broker
+
+import (
+    "context"
+
+    "github.com/rustyeddy/trader/account"
+    "github.com/rustyeddy/trader/order"
+)
+
+type Broker interface {
+    Name() string
+    Accounts(ctx context.Context) ([]account.Reference, error)
+    OpenAccount(ctx context.Context, id account.ID) (Account, error)
+    Close() error
+}
+
+type Account interface {
+    Reference() account.Reference
+    Snapshot(ctx context.Context) (account.Snapshot, error)
+    Submit(ctx context.Context, request order.Request) (order.Acknowledgement, error)
+    Cancel(ctx context.Context, request order.CancelRequest) error
+    Replace(ctx context.Context, request order.ReplaceRequest) error
+    Events(ctx context.Context, cursor EventCursor) (EventReader, error)
+    Capabilities(ctx context.Context) (Capabilities, error)
+}
+#+END_SRC
+
+The account-scoped handle gives the user the convenient interaction model
+requested in the requirements while preserving the distinction between the
+broker connection and one account.
+
+Broker events should include:
+
+- Order accepted/rejected
+- Order working, partially filled, filled, canceled, expired
+- Fill or execution report
+- Position changed
+- Balance or margin changed
+- Cash transaction observed
+- Account status changed
+- Connection degraded/recovered
+- Reconciliation discrepancy
+
+Trader must assume asynchronous, duplicated, delayed, and out-of-order events
+are possible.  Every adapter should have contract tests for idempotency,
+ordering assumptions, reconnect behavior, and snapshot/event reconciliation.
+
+** =account=
+
+Owns account value objects and reconciled account state, not broker transport.
+
+Public concepts:
+
+- =ID= and =Reference=
+- =Snapshot=
+- =Balance=
+- =Margin=
+- =CashLedgerEntry=
+- =Position=
+- =PnL=
+- =Status=
+
+The broker package returns account data.  The account package defines what that
+data means.
+
+Avoid a mutable domain object whose methods hide network calls.  A method such
+as =account.PlaceOrder()= appears convenient but makes it unclear whether the
+object is local state, a remote handle, or both.  Prefer:
+
+- =broker.Account= for actions and queries.
+- =account.Snapshot= for state.
+
+A higher-level application facade may combine them for convenience.
+
+** =portfolio=
+
+Owns one or more account snapshots combined into a risk and strategy view.
+
+Responsibilities:
+
+- Aggregate cash and positions.
+- Convert values into a reporting/base currency.
+- Calculate gross/net exposure.
+- Expose allocation and concentration.
+- Preserve source-account identity.
+- Support account-specific restrictions.
+
+Currency conversion must use time-consistent market data and record the rates
+used.  Do not add balances from different currencies without explicit
+conversion.
+
+** =scanner=
+
+Owns universe scanning and candidate ranking.
+
+A scanner should be independent of broker accounts unless a specific scan uses
+account constraints.  It consumes:
+
+- Instrument universe
+- Market data
+- Indicator/analysis features
+- Scan rules or scoring model
+
+It emits =scanner.Candidate= records with:
+
+- Instrument/listing
+- Category: watch, hot, tradeable, excluded
+- Score and component scores
+- Reasons/evidence
+- Validity window
+- Triggering observation time
+
+Alerts are downstream actions based on scanner results or explicit alert rules.
+Avoid embedding email, MQTT, or mobile notification logic inside scanners.
+
+** =backtest=
+
+Owns historical simulation orchestration and results.
+
+A backtest run should explicitly record:
+
+- Strategy identity and version
+- Strategy parameters
+- Data set identity and revision
+- Instrument universe
+- Time range and calendar
+- Starting account state
+- Fee, spread, slippage, financing, and latency models
+- Fill model
+- Random seed if randomness exists
+- Trader library version
+- Run ID
+
+Core components:
+
+- Historical market event source
+- Simulation clock
+- Strategy runner
+- Simulated broker
+- Execution and risk pipeline
+- Account/portfolio state
+- Journal/event recorder
+- Metrics and report builders
+
+The simulated broker should be a real broker adapter against the same broker
+port used by live execution.  It should not be a set of special cases hidden
+inside the strategy runner.
+
+Backtest realism should be selectable.  At minimum, define clear models for:
+
+- Bar-close fills
+- Next-bar fills
+- Bid/ask spread
+- Limit and stop triggering
+- Gaps
+- Partial fills when volume data exists
+- Slippage
+- Commissions and fees
+- FX financing or futures/equity carrying costs
+
+Bar-based simulation must explicitly address ambiguous intrabar order.  If one
+OHLC bar crosses both a protective stop and a profit target, the bar alone cannot
+show which occurred first.  Supported policies should include:
+
+- Pessimistic: adverse fill first.
+- Optimistic: favorable fill first.
+- Lower-timeframe validation.
+- Tick-accurate validation.
+
+The selected policy is part of the fill-model version and run manifest.  If a
+strategy's result changes materially between reasonable policies, the report
+should surface that sensitivity rather than presenting one result as precise.
+
+Results should distinguish a deterministic accounting result from an optimistic
+research shortcut.
+
+** =live=
+
+Owns live-trading orchestration, recovery, and safety state.
+
+Live trading is not merely "backtest with a real broker."  It requires:
+
+The zero or minimally configured live mode must be paper trading.  Real-money
+submission requires an explicit mode, an allowed account identity, and an
+operator-visible startup acknowledgement.
+
+- Startup reconciliation
+- Broker and market-data connection supervision
+- Durable checkpoints
+- Duplicate-order prevention
+- Graceful shutdown
+- Restart recovery
+- Stale-data detection
+- Clock-skew awareness
+- Manual pause/resume
+- Kill switch
+- Health and readiness status
+- Operator-visible discrepancies
+
+Live *guards* are operational interlocks, distinct from risk rules.  Examples:
+
+- Stale or gapped market data.
+- Broker or feed disconnection.
+- Reconciliation drift.
+- Excessive clock skew.
+- Strategy callback timeout or repeated failure.
+- Excessive order or rejection rate.
+- Durable journal or checkpoint failure.
+- Operator pause.
+- Emergency halt or flatten.
+
+A guard changes session state or blocks all submissions.  It does not merely
+reject one proposal.  Guard transitions and operator actions must be journaled.
+
+A live session should have an explicit state machine, for example:
+
+#+BEGIN_EXAMPLE
+Created -> Connecting -> Reconciling -> Ready -> Trading
+                  |            |          |
+                  v            v          v
+               Degraded      Blocked     Paused
+                                             |
+                                             v
+                                          Stopped
+#+END_EXAMPLE
+
+No live order should be submitted before account, orders, positions, strategy
+state, and execution state have been reconciled.
+
+** =journal=
+
+Owns durable records of what happened and why.
+
+The journal is more fundamental than formatted reports.  It should record:
+
+- Run/session metadata
+- Market events used for decisions when configured
+- Strategy decisions and rationale
+- Execution plans
+- Risk decisions
+- Order requests and acknowledgements
+- Broker events and fills
+- Position/account changes
+- Operator actions
+- Errors and state transitions
+
+A structured event journal enables later reports, debugging, replay, and audit.
+
+The journal is not necessarily a full event-sourced system.  Trader can use
+snapshots plus append-only records without requiring every domain object to be
+rebuilt from events.
+
+** =report=
+
+Owns report models and renderers.
+
+Separate report computation from presentation:
+
+#+BEGIN_SRC go
+package report
+
+import "io"
+
+type Renderer[T any] interface {
+    Render(w io.Writer, report T) error
+}
+#+END_SRC
+
+- =report.Model= or specific report result types
+- Metrics calculators
+- Renderers for Org, JSON, CSV, HTML, terminal, etc.
+
+Report packages consume stable run results, journal records, and account data.
+They should not reach directly into strategy implementation fields.
+
+Reports to support:
+
+- Backtest performance and diagnostics
+- Cross-run comparison
+- Walk-forward and parameter sweep summaries
+- Market/scanner reports
+- Account and portfolio reports
+- Live session and execution-quality reports
+- Risk limit and violation reports
+- Trade journal exports
+
+Org mode should be a first-class renderer because it is part of the intended
+workflow, but Org formatting should not leak into core report calculations.
+
+** =event=
+
+A small shared event envelope may be useful, but avoid turning every function
+call into a global event bus.
+
+Suggested envelope metadata:
+
+- Event ID
+- Event type and schema version
+- Occurred-at time
+- Observed-at time
+- Source
+- Run/session ID
+- Correlation ID
+- Causation ID
+- Sequence number when meaningful
+
+Use direct calls for synchronous application flow.  Publish events for audit,
+observers, asynchronous integration, and process boundaries.
+
+** =clock= and =id=
+
+Small abstractions may support deterministic runs:
+
+#+BEGIN_SRC go
+package clock
+
+import "time"
+
+type Clock interface {
+    Now() time.Time
+}
+#+END_SRC
+
+Keep these packages very small.  Do not create a large miscellaneous
+=support= package.  Prefer standard library types unless Trader needs a stable
+semantic wrapper.
+
+For public IDs, expose Trader-owned types and string encodings.  Do not require
+users to import a particular ULID library merely to interact with the API.
+
+* Application Services
+
+Public domain packages should be complemented by application services that
+perform complete use cases.
+
+Possible public service packages:
+
+- =backtest.Runner=
+- =scanner.Service=
+- =live.Manager=
+- =marketdata.Ingestor=
+- =marketdata.QueryService=
+- =report.Service=
+
+An application service:
+
+- Coordinates domain components.
+- Defines transaction and retry boundaries.
+- Produces stable request/result types.
+- Accepts dependencies through constructors.
+- Does not import CLI or network frameworks.
+
+Example:
+
+#+BEGIN_SRC go
+runner, err := backtest.NewRunner(backtest.Dependencies{
+    Data:       dataSource,
+    Broker:     simulatedBrokerFactory,
+    Journal:    journalWriter,
+    Clock:      simulationClock,
+    IDSource:   idSource,
+})
+if err != nil {
+    return err
+}
+
+result, err := runner.Run(ctx, backtest.Request{
+    Strategy: strategyFactory,
+    Universe: universe,
+    Start:    start,
+    End:      end,
+})
+#+END_SRC
+
+The request should hold configuration for one run.  Long-lived infrastructure
+belongs in dependencies.
+
+* Strategies In Process and Out of Process
+
+** In-Process Go Strategies
+
+Users should be able to import Trader and implement =strategy.Strategy= in
+their own private repository.
+
+Their application can compose:
+
+- Trader public packages
+- Their private strategy package
+- Trader or custom adapters
+
+No Go plugin is required.  The private strategy is compiled into the user's own
+binary, not committed to Trader.
+
+This is the simplest and most type-safe extension path.
+
+** Out-of-Process Strategies
+
+For independent deployment or non-Go strategies, define a versioned strategy
+protocol.
+
+Recommended default protocol:
+
+- gRPC with Protobuf for strongly typed request/response and streaming.
+- A small protocol adapter maps wire messages to Trader domain types.
+- Protocol version and capability negotiation occur during startup.
+- Strategy process receives a controlled event stream and portfolio view.
+- Strategy process returns intents, not broker credentials or direct broker
+  commands.
+
+MQTT can be supported as an integration transport, especially for observation,
+telemetry, alerts, and loosely coupled services.  It is less suitable as the
+only command protocol for execution-critical strategy interaction unless Trader
+adds explicit request IDs, acknowledgements, ordering, deduplication,
+expiration, and replay semantics.
+
+A practical division is:
+
+- gRPC: strategy control plane and ordered request/response streams.
+- MQTT: market/event fan-out, dashboards, alerts, and non-critical consumers.
+- HTTP/SSE/WebSocket: operator and browser interfaces.
+
+The wire protocol should live in a separately versioned module or directory,
+for example:
+
+#+BEGIN_EXAMPLE
+trader/                 Go public library and applications
+trader-protocol/        Protobuf schemas and generated clients
+trader-strategy-sdk/    Optional language-specific helper SDKs
+#+END_EXAMPLE
+
+Do not expose internal Go structs directly as the long-term wire format.
+
+** Strategy Process Contract
+
+The out-of-process contract should cover:
+
+- Handshake and capabilities
+- Strategy identity/version
+- Configuration schema
+- Instrument subscriptions
+- Warm-up requirements
+- Market/clock events
+- Portfolio and position snapshots
+- Order/execution feedback relevant to the strategy
+- Strategy intents
+- State snapshot and restore
+- Health checks
+- Graceful shutdown
+
+The engine should impose timeouts and a clear policy when a strategy is slow,
+unavailable, or returns an invalid intent.
+
+* Transport Boundaries
+
+Transports wrap application services.  They are not imported by core packages.
+
+Suggested transport packages or adapters:
+
+- =transport/http=
+- =transport/grpc=
+- =transport/mqtt=
+- =transport/sse=
+- =transport/websocket=
+- =transport/mcp=
+- =cli= or command-specific Cobra adapters
+
+GraphQL may be valuable for interactive querying, but should not be required for
+core operations.  REST/gRPC commands and event streams are usually clearer for
+trading workflows.
+
+MCP is an application-facing integration and should expose safe tools over
+existing application services.  It should never become the domain API.
+
+* Proposed Repository Layout
+
+One possible layout follows.  Package names are illustrative; the dependency
+rules matter more than the exact directory names.
+
+#+BEGIN_EXAMPLE
+trader/
+  go.mod
+  README.md
+  LICENSE
+
+  instrument/             public instrument/listing model
+  marketdata/             public canonical data and source/sink ports
+  indicator/              public indicator APIs and common indicators
+  analysis/               public analysis observations
+  strategy/               public strategy and intent contracts
+  order/                  public order/fill model
+  account/                public account state model
+  portfolio/              public multi-account view
+  risk/                   public risk policies and engine contracts
+  broker/                 public broker adapter contracts
+  execution/              public execution planning/management contracts
+  scanner/                public scanner APIs
+  backtest/               public backtest service and result model
+  live/                   public live-session service and state model
+  journal/                public journal contracts
+  report/                 public report models and renderers
+  event/                  small shared event envelope
+  clock/                  deterministic time abstraction
+
+  protocol/
+    strategy/v1/          wire-facing adapters or generated protocol facade
+
+  adapters/
+    broker/
+      oanda/              public optional adapter package if supported API
+      alpaca/
+      ibkr/
+      sim/
+    marketdata/
+      csv/
+      parquet/
+      dukascopy/
+      oanda/
+    journal/
+      sqlite/
+      jsonl/
+    transport/
+      grpc/
+      http/
+      mqtt/
+
+  internal/
+    engine/               orchestration details not promised as public API
+    reconcile/            shared recovery/reconciliation implementation
+    runtime/              process lifecycle helpers
+    testkit/              non-public test infrastructure
+    ...
+
+  cmd/
+    trader/               all-in-one operator CLI
+    trader-data/          data acquisition/normalization service
+    trader-backtest/      batch backtest runner
+    trader-live/          live bot manager
+    trader-api/           HTTP/gRPC/MCP gateway
+    trader-strategy-host/ out-of-process strategy host/client
+
+  examples/
+    minimal-backtest/
+    private-strategy-app/
+    scanner/
+    paper-trading/
+
+  tradertest/              public fakes, builders, clocks, and assertions
+
+  contracttest/
+    broker/
+    marketdata/
+    strategy/
+
+  docs/
+    architecture/
+    api/
+    protocols/
+#+END_EXAMPLE
+
+** Public Testing Support
+
+A public =tradertest= package should make strategies and adapters easy to test
+without requiring users to reinvent framework scaffolding.  It may include:
+
+- Deterministic clocks and ID generators.
+- Candle, quote, order, fill, account, and portfolio builders.
+- In-memory historical sources and live feeds.
+- Simulated broker presets.
+- Strategy harnesses.
+- No-lookahead assertions.
+- Golden journal and report helpers.
+- Contract-test entry points for third-party adapters.
+
+Testing utilities are part of framework usability.  Runnable examples should use
+them and execute in CI so public documentation cannot silently rot.
+
+** Public Adapter Packages Versus =internal/=
+
+An adapter intended for direct user import may be public, for example:
+
+#+BEGIN_SRC go
+import "github.com/rustyeddy/trader/adapters/broker/oanda"
+#+END_SRC
+
+An adapter used only by Trader's applications can remain under =internal/=.
+
+Do not put all adapters under =internal/= if external users are expected to
+construct them.  Conversely, do not promise every experimental adapter as a
+stable public API.
+
+Keep one repository and begin with one Go module.  Adapter dependencies should be
+kept at the edge and imported only by applications that use them.  If a broker
+SDK eventually creates unacceptable dependency weight, a nested module inside
+the same repository is the first escalation.  Separate repositories are not
+planned.
+
+* Dependency Direction
+
+A simplified dependency graph:
+
+#+BEGIN_EXAMPLE
+clock, event, instrument, exact numeric types
+                    |
+       +------------+-------------+
+       |            |             |
+  marketdata      order        account
+       |            |             |
+ indicator      execution      portfolio
+       |            |             |
+ analysis        risk <-----------+
+       |            |
+       +------> strategy
+                    |
+          application orchestration
+         /          |             \
+    scanner      backtest         live
+         \          |             /
+          journal and report consumers
+                    |
+              adapters/transports
+#+END_EXAMPLE
+
+This graph is conceptual, not a requirement to create dozens of tiny modules.
+The Go compiler should enforce package acyclicity.
+
+Pay special attention to avoiding these cycles:
+
+- Strategy imports execution while execution imports strategy.
+- Broker imports account services while account imports broker.
+- Report imports backtest internals while backtest imports report renderers.
+- Market data imports indicators while indicators import market data services.
+
+Resolve cycles by moving stable value types to the package that owns their
+meaning and using orchestration packages to connect behaviors.
+
+Enforce dependency direction mechanically in CI.  Suitable mechanisms include:
+
+- =go list= or a small custom dependency check.
+- =depguard= rules for forbidden imports.
+- =go vet= analyzers for architectural invariants.
+- =apidiff= against a committed public API baseline.
+- Runnable examples compiled and executed in CI.
+- ADR review for any new top-level public package.
+
+* API Design Conventions
+
+** Constructors and Valid States
+
+Use constructors when validation or dependencies matter.
+
+- =NewPrice(...)= validates scale or exact representation.
+- =NewListing(...)= validates required metadata.
+- =NewRunner(deps)= rejects missing dependencies.
+
+Plain data transfer structs may remain literals when zero values are valid and
+validation occurs at a service boundary.
+
+** =context.Context=
+
+Use =context.Context= on operations that may block, perform I/O, or span a use
+case.  Do not store contexts in structs.
+
+** Errors
+
+Return typed or classifiable errors for important conditions:
+
+- Invalid request
+- Unsupported capability
+- Not found
+- Conflict/idempotency collision
+- Authentication/authorization failure
+- Rate limited
+- Temporary unavailable
+- Reconciliation required
+- Risk rejected
+
+Risk rejection is normally a successful decision result, not an infrastructure
+error.
+
+Preserve provider-native diagnostic detail without requiring callers to parse
+provider error strings.
+
+** Iteration and Streaming
+
+A typed reader with =Next(ctx)= and =Close()= works for:
+
+- Historical database results
+- Files
+- Broker event streams
+- gRPC streams
+- In-memory simulation
+
+It gives explicit backpressure and error ordering.  Channel-based helpers may be
+provided, but channels should not be the only public streaming abstraction.
+
+** Concurrency Ownership and Backpressure
+
+Every streaming or long-running API must document:
+
+- Whether it starts goroutines.
+- Which context owns their lifetime.
+- Who closes readers or channels.
+- Whether the implementation is safe for concurrent use.
+- Buffering and backpressure behavior.
+- What happens when a consumer is slow.
+- Which event classes may be coalesced or dropped.
+
+Completed bars, fills, order transitions, account events, risk decisions,
+journal writes, and guard transitions must never be silently discarded.
+High-frequency quote updates may use a documented bounded, coalescing, or
+latest-value policy when the consumer explicitly chooses it.
+
+Trader starts no unmanaged goroutines.  A call that owns background work returns
+a closer, a reader tied to the supplied context, or a service with an explicit
+=Run(ctx)= lifecycle.
+
+** Options
+
+Avoid constructors with many positional parameters.  Prefer a dependency struct
+for required infrastructure and request/config structs for per-operation data.
+Functional options are useful for a small number of truly optional behaviors,
+but should not hide required dependencies.
+
+** Logging and Observability
+
+Accept or derive a standard =slog.Logger= at application composition.  Domain
+results should not depend on log parsing.
+
+Expose metrics and tracing through adapter-neutral hooks.  Important metrics:
+
+- Data lag and gaps
+- Strategy evaluation latency
+- Order acknowledgement latency
+- Fill/slippage quality
+- Reconnect counts
+- Reconciliation discrepancies
+- Risk rejections
+- Open exposure
+- Backtest throughput
+
+** Configuration
+
+Configuration is an application concern.  Public libraries should accept typed
+configuration values rather than reading YAML, environment variables, or home
+directories internally.
+
+Trader applications may load YAML/TOML/JSON and environment overrides, then
+construct typed dependencies.
+
+Secrets should be represented by credential-provider interfaces or injected
+adapter configuration.  Never serialize broker secrets into run reports,
+journals, or strategy protocol messages.
+
+* Events and Consistency
+
+** Domain Events Versus Transport Messages
+
+A domain event communicates something that happened in Trader's model.  A
+transport message is an encoded envelope used over MQTT, gRPC, or another
+boundary.
+
+Keep them separate so transport versioning does not dictate all in-process
+package design.
+
+** Delivery Semantics
+
+Assume at-least-once delivery at process boundaries unless a stronger guarantee
+is proven.  Therefore:
+
+- Commands need idempotency keys.
+- Consumers need deduplication.
+- Events need stable IDs.
+- Stateful consumers need checkpoints/cursors.
+- Reconnect logic needs snapshot plus event catch-up.
+
+"Exactly once" should not be a casual API promise.
+
+** Reconciliation
+
+For live trading, broker snapshots are authoritative.  Trader should reconcile:
+
+- Open orders
+- Recent fills
+- Positions
+- Cash/balances
+- Strategy and execution state
+
+Reconciliation produces explicit differences and corrective actions.  It should
+not silently overwrite local state without a journal record.
+
+* Backtest and Live Parity
+
+Trader should maximize shared logic while recognizing different operational
+needs.
+
+Shared:
+
+- Canonical market events
+- Strategy contract
+- Indicator and analysis code
+- Intent model
+- Execution planner
+- Risk rules
+- Order model
+- Account/portfolio model
+- Journal record types
+- Report metrics where meaningful
+
+Different adapters or orchestration:
+
+- Historical source versus live feed
+- Simulation clock versus wall clock
+- Simulated broker versus remote broker
+- Deterministic scheduler versus concurrent network supervision
+- Simulation fill model versus real execution reports
+- In-memory checkpoint versus durable recovery store
+
+Do not add =if live= and =if backtest= branches throughout domain code.  Select
+different implementations at the composition root.
+
+* Scanner Architecture
+
+A scanner can be modeled as a repeatable dataflow:
+
+#+BEGIN_EXAMPLE
+Universe
+   |
+   v
+Data requirements and warm-up
+   |
+   v
+Feature calculation
+   |
+   v
+Rules / scoring
+   |
+   v
+Candidate classification
+   |
+   +--> journal/report
+   +--> alert service
+   +--> operator watchlist
+   +--> optional strategy deployment request
+#+END_EXAMPLE
+
+A scanner result should not automatically become an order.  Promotion from
+candidate to active strategy or live trade should be an explicit policy or
+operator action.
+
+This keeps market discovery separate from account risk and order execution.
+
+A scanner may maintain explicit lifecycle states such as:
+
+#+BEGIN_EXAMPLE
+Idle -> Watch -> Hot -> Tradeable -> Triggered
+#+END_EXAMPLE
+
+Transitions should be typed records with the prior state, new state, evidence,
+score, observation time, and validity window.  This supports your watchlist and
+hotlist workflow and allows expensive analysis to run only after a candidate is
+close enough to matter.
+
+A scanner may ask a strategy-compatible eligibility evaluator whether the
+current state would produce an intent, but the scanner should remain broader than
+a strategy: ranking, proximity, state transitions, and operator workflow are
+first-class scanner concerns.
+
+* Reporting and Experiment Management
+
+Backtest comparison requires more than final PnL.  Trader should treat a run as
+an immutable experiment record.
+
+Recommended run identity fields:
+
+- Run ID
+- Parent run or experiment ID
+- Created time
+- Code/build version
+- Strategy name/version
+- Parameter set hash
+- Data-set manifest hash
+- Simulation model versions
+- Seed
+- Host/environment metadata when relevant
+
+Metrics should include:
+
+- Return and annualized return
+- Maximum drawdown and drawdown duration
+- Volatility and downside deviation
+- Sharpe/Sortino where assumptions are recorded
+- Profit factor
+- Expectancy in currency and R
+- Win/loss distribution
+- Exposure and time in market
+- Turnover
+- Fees, spread, slippage, and financing
+- Per-instrument and regime breakdown
+- Tail loss and consecutive-loss statistics
+- Execution assumptions and warnings
+
+A comparison service should reject or clearly flag invalid comparisons, such as
+runs using different data revisions or fill models.
+
+* Important Missing Requirements
+
+The supplied requirements are strong at the use-case level.  The following
+areas should be added before public APIs are considered mature.
+
+** Instrument and Venue Metadata
+
+- Symbol mapping
+- Tick size and quantity increments
+- Contract multiplier
+- Quote, base, settlement, and account currencies
+- Expiration and rollover
+- Trading calendar and session
+- Shortability and fractional trading
+
+** Data Semantics and Quality
+
+- Quote versus trade ticks
+- Raw versus adjusted equity data
+- Corporate actions
+- Futures contract chains and continuous series
+- Missing/duplicate/out-of-order data
+- Source provenance and revisions
+- Time-zone/session alignment
+- Historical/live consistency
+
+** Execution and Broker Behavior
+
+- Order idempotency
+- Partial fills
+- Cancel/replace races
+- Native versus synthetic brackets
+- Broker capability discovery
+- Rate limits
+- Reconnect/replay
+- Reconciliation
+- Fees, financing, borrow, interest, and commissions
+
+** Strategy Lifecycle
+
+- Warm-up
+- State persistence and migration
+- Restart behavior
+- Parameter schemas
+- Strategy versioning
+- Multi-instrument synchronization
+- Slow or failed strategy policy
+- Feedback from rejected risk or failed execution
+
+** Live Safety
+
+- Startup block until reconciliation
+- Stale-feed protection
+- Maximum order rate
+- Manual pause and kill switch
+- Health/readiness
+- Durable checkpoints
+- Operator authentication and authorization
+
+** Portfolio and Currency Conversion
+
+- Multi-account aggregation
+- Cross-broker exposure
+- Base-currency valuation
+- FX conversion rates and timing
+- Correlation/concentration risk
+
+** Experiment Reproducibility
+
+- Data manifests
+- Model versions
+- Seeds
+- Build/version metadata
+- Run immutability
+- Comparable-run rules
+
+** Operations
+
+- Structured logs
+- Metrics and traces
+- Audit/journal retention
+- Configuration validation
+- Secrets lifecycle
+- Database/schema migrations
+- API/protocol versioning
+
+* Requirements Traceability
+
+| Requirement                         | Proposed owner                                      |
+|-------------------------------------+-----------------------------------------------------|
+| Acquire OHLCV/tick data             | provider adapter + =marketdata= ingestor            |
+| Normalize canonical data            | =marketdata= normalizer                              |
+| Hide CSV/Parquet storage            | =marketdata.Source/Sink= adapters                    |
+| Historical retrieval                | =marketdata.Source=                                  |
+| Real-time data                       | =marketdata= typed readers/feeds                     |
+| Multiple brokers                    | =broker= ports + adapter packages                    |
+| Place/manage orders                 | =execution= + =broker.Account=                       |
+| Broker asynchronous events          | =broker.EventReader=                                 |
+| Multiple broker accounts            | =broker.Broker= and =account.Reference=              |
+| Broker account source of truth      | reconciliation + =account.Snapshot=                  |
+| Deposit/withdraw history            | =account.CashLedgerEntry=                            |
+| Cross-account view                  | =portfolio=                                          |
+| Risk per trade/account              | =risk.Engine= and composable rules                   |
+| Position sizing                     | =risk.Sizer=                                         |
+| Max daily/weekly/monthly loss        | stateful risk supervision                            |
+| Instruments                         | =instrument= and venue listings                      |
+| Indicators                          | =indicator=                                          |
+| Price/pattern analysis              | =analysis=                                           |
+| Scanners/watch/hot/tradeable         | =scanner=                                            |
+| Alerts                              | application alert service + transport adapters       |
+| Strategies                          | =strategy= intents                                   |
+| Entry/stop management               | strategy intent + =execution.Manager=                |
+| Backtests                           | =backtest.Runner= + simulated broker                 |
+| Live trading                        | =live.Manager=                                       |
+| Reports                             | =report= over journal/results                        |
+| Org output                          | =report/org= renderer                                |
+| Fixed-point math                    | exact domain numeric types                           |
+| Timestamps                          | =time.Time= UTC + session/calendar semantics         |
+| ULIDs                               | Trader-owned ID types + injected generator           |
+| Logging                             | injected =slog.Logger=                               |
+| Configuration                       | typed app config at composition root                 |
+| CLI/Cobra                           | command adapters under =cmd/=                        |
+| REST/gRPC/MQTT/WebSocket/SSE/MCP    | transport adapters over application services        |
+| User-built custom applications      | stable public packages and examples                  |
+| Private strategies                  | user-owned binary or out-of-process strategy protocol|
+
+* Recommended Development Sequence
+
+The phase sequence below maps directly to the GitHub milestones in Appendix D.
+Each milestone should end with a runnable, testable capability rather than only
+internal scaffolding.
+
+** Phase 0: Architecture Rules and Vocabulary
+
+Deliverables:
+
+- Glossary for instrument, listing, order, fill, position, trade, account,
+  portfolio, strategy intent, proposal, and request.
+- Package dependency rules.
+- Public API compatibility policy.
+- Minimal architecture decision records.
+
+Do this before moving large amounts of existing code.
+
+** Phase 1: Foundational Domain Types
+
+Implement and test:
+
+- Instrument/listing identity and specifications
+- Exact values: price, quantity, money, currency
+- Canonical bar, quote, and trade events
+- Order/request/fill types
+- Account and position snapshots
+- Event envelope and IDs
+
+Avoid brokers and storage implementation details in these packages.
+
+** Phase 2: Market Data Vertical Slice
+
+Build one complete flow:
+
+#+BEGIN_EXAMPLE
+Provider native data -> normalization -> canonical store -> historical query
+#+END_EXAMPLE
+
+Use CSV initially if useful, but test the public API with an in-memory store and
+one provider adapter.  The application should not know which storage adapter is
+used.
+
+Add coverage manifests and data-quality reporting early.
+
+** Phase 3: Broker and Simulated Account Slice
+
+Define broker contract tests, then implement:
+
+- Simulated broker
+- One real broker adapter
+- Account snapshots and event stream
+- Submit/cancel/replace
+- Reconciliation behavior
+- Capability discovery
+
+The simulated broker is essential because it validates whether the public
+broker API is suitable for both backtest and paper/live workflows.
+
+** Phase 4: Strategy, Execution, and Risk Pipeline
+
+Implement:
+
+- Strategy events and intents
+- Execution planner
+- Risk sizing and admission rules
+- Execution manager
+- Journal correlation across intent -> proposal -> decision -> order -> fill
+
+Use a deliberately small example strategy.  The goal is API validation, not
+profitability.
+
+** Phase 5: Backtest Runner
+
+Compose the historical source, simulation clock, simulated broker, strategy,
+execution, risk, journal, and reports.
+
+Require deterministic repeat runs and record complete run manifests.
+
+** Phase 6: Live Session Manager
+
+Add:
+
+- Connection supervision
+- Startup reconciliation
+- State checkpoints
+- Pause/resume/kill switch
+- Health/readiness
+- Operator-visible discrepancies
+
+Paper trading should be the first live deployment mode.
+
+** Phase 7: Scanner and Reports
+
+Build scanner candidate models, watch/hot/tradeable classification, alert
+adapters, and Org reports.
+
+** Phase 8: Out-of-Process Strategy Protocol
+
+Only after the in-process strategy contract is useful and stable, freeze a
+versioned wire contract and build:
+
+- Strategy host/client
+- gRPC stream
+- State snapshot/restore
+- Capability negotiation
+- One private external strategy example
+- Fault and timeout tests
+
+* Public API Stability Policy
+
+A pleasant public API is partly a technical design and partly a release
+practice.
+
+Recommended rules:
+
+- Use semantic versioning.
+- Remain at =v0= while central contracts are still being discovered.
+- Clearly mark experimental packages.
+- Add rather than rename/remove where reasonable.
+- Deprecate before removal.
+- Do not expose internal storage schemas as public structs.
+- Do not expose vendor SDK types from Trader's core APIs.
+- Maintain compile tests for documented examples.
+- Maintain contract tests for user-implemented interfaces.
+- Record public API changes in a changelog.
+- Consider an automated API-diff check in CI.
+
+The most stable public surface should be value types, request/result models,
+and narrow extension interfaces.  High-level convenience facades may evolve
+more quickly during =v0=.
+
+* Contract Testing
+
+Legacy code copied into the new repository is not exempt from these tests.  A
+transplanted implementation should first be captured by a fixture or behavior
+test, then adapted behind the new contract.
+
+Any interface intended for third-party implementation should ship with a
+contract-test suite.
+
+Examples:
+
+- =broker/contracttest=
+- =marketdata/contracttest=
+- =strategy/contracttest=
+
+A broker adapter contract suite should test:
+
+- Unique/idempotent client order IDs
+- Unsupported capability reporting
+- Order status transitions
+- Partial fills
+- Duplicate events
+- Disconnect/reconnect
+- Snapshot consistency
+- Cancel/replace races
+- Error classification
+
+A market-data adapter suite should test:
+
+- Ordering
+- Inclusive/exclusive time boundaries
+- Duplicate handling
+- Interval alignment
+- UTC/session semantics
+- Cancellation and resource cleanup
+- Data provenance
+
+This is more valuable to extension authors than interface comments alone.
+
+* Design Decisions I Recommend Making Now
+
+** Use a Modular Monolith as the Default
+
+Yes.  Preserve the ability to split the data service, live manager, strategy
+host, and API gateway later.  Do not begin with mandatory service-to-service
+networking.
+
+** Make Account Interaction Account-Scoped
+
+Yes, expose a =broker.Account= handle for actions.  Keep =account.Snapshot= as a
+state value.  This provides the convenient account-centric API without mixing
+remote operations into mutable domain state.
+
+** Keep Indicators Free of Buy/Sell Signals
+
+Yes.  Indicators calculate values.  Analysis detects conditions.  Strategies
+assign trading meaning and emit intents.
+
+** Put Position Sizing in Risk, Execution Mechanics in Execution
+
+Yes.  A sizer calculates quantity from risk assumptions.  Execution decides
+how to realize the desired position.  Risk still approves the final proposal.
+
+** Treat the Simulated Broker as a First-Class Adapter
+
+Yes.  It is the bridge that allows backtests and paper simulations to exercise
+the same order/account interfaces used by live trading.
+
+** Prefer gRPC for External Strategies, MQTT for Fan-Out
+
+Yes.  MQTT remains useful and should be supported, but a request/response and
+ordered streaming protocol is safer as the primary execution-facing strategy
+contract.
+
+** Add Portfolio as a Separate Concept
+
+Yes.  It is needed for multi-account and cross-broker risk and should not be
+forced into the broker account abstraction.
+
+** Separate Historical Sources, Live Feeds, and Persistence
+
+Yes.  Bounded historical queries, unbounded subscriptions, and storage have
+different lifecycle and failure semantics.  A convenience service may compose
+them, but the extension contracts remain distinct.
+
+** Make Paper Trading the Default
+
+Yes.  The zero or minimally configured live runtime must never submit real-money
+orders.  Live-money enablement is explicit and account-scoped.
+
+** Keep Operational Guards Separate from Trade Risk
+
+Yes.  Risk evaluates a proposed exposure.  Live guards evaluate whether the
+system is healthy enough to trade at all.
+
+** Keep One Repository
+
+Yes.  Use one repository and initially one Go module.  Reconsider nested modules
+only when dependency isolation becomes a measured problem.
+
+** Defer Synthetic and Multi-Leg Execution
+
+Yes.  Document the concept, preserve extensibility, and introduce it when a real
+strategy requires it.  Do not widen every instrument and execution API now.
+
+* Open Design Questions
+
+These questions do not block the initial architecture, but answers will shape
+specific APIs.
+
+** Highest Priority
+
+1. Should a strategy primarily emit action intents, target positions, or both?
+2. Must Trader support brokers with hedged positions, or may the first account
+   model assume one net position per listing?
+3. Which asset classes must the first stable instrument and order model support:
+   FX only, FX plus equities/ETFs, or FX/equities/futures together?
+4. Is one Trader process allowed to manage multiple live broker accounts at the
+   same time in the first live release?
+5. How realistic must the first simulated broker be: bar-close research,
+   bid/ask event simulation, or full tick replay?
+6. Should strategy state be owned by the strategy implementation, by Trader, or
+   through a standard snapshot/restore contract?  This proposal recommends the
+   standard contract.
+7. Is a durable journal required for every live session, or may paper sessions
+   initially use an in-memory journal?  This proposal recommends durability for
+   all live-like sessions.
+
+** Market Data
+
+- Will canonical storage contain raw quotes/trades plus derived bars, or bars
+  only for the first release?
+- How will adjusted equity data and corporate actions be represented?
+- How will continuous futures series be built and identified?
+- Is Parquet a local implementation detail or will a data lake become a shared
+  external contract?
+- What are the required timeframes and session-alignment rules?
+
+** Broker and Execution
+
+- Are bracket/OCO orders required in the first broker contract?
+- Must Trader support broker-native trailing stops?
+- How should manual orders placed outside Trader be treated?
+- Can strategies share one account, and if so how are positions attributed?
+- Is the execution manager allowed to net intents from multiple strategies?
+
+** Risk
+
+- Is risk configured per strategy, account, portfolio, or all three?
+- Should risk rules modify proposals, only approve/reject them, or support both?
+- What constitutes the daily boundary for loss limits in FX and futures?
+- Is there one global kill switch across all accounts?
+
+** Deployment and Protocol
+
+- Which component is most likely to become a separate service first: data,
+  backtesting, or live strategy hosting?
+- Should an external strategy receive every market event or only subscribed,
+  pre-aggregated events?
+- Is language-independent strategy development a near-term goal or a later
+  capability?
+- Should the protocol permit external analysis services that cannot emit trade
+  intents?
+
+* Suggested First API Review Exercise
+
+Before refactoring the existing repository, write three small programs against
+only the proposed public API.
+
+** Example A: Minimal Backtest
+
+- Resolve EUR/USD.
+- Query H1 bars for a date range.
+- Construct an EMA strategy.
+- Use a simulated broker and fixed risk rule.
+- Run a backtest.
+- Render an Org report.
+
+** Example B: Paper Trading Bot
+
+- Open one paper broker account.
+- Subscribe to live quotes/bars.
+- Warm up the strategy.
+- Reconcile account state.
+- Start the live session.
+- Pause and resume it.
+- Record every decision and order event.
+
+** Example C: Private External Strategy
+
+- Trader hosts market/account streams.
+- A private process implements the strategy protocol.
+- It emits a target-position intent.
+- Trader plans, risk-checks, and submits the order.
+- Restart the private strategy and restore its state.
+
+If these programs are awkward, the public API is not ready.  Refine the API
+before moving implementation code behind it.
+
+* A Concrete Minimal API Surface for Version Zero
+
+The first useful =v0= does not need every package in its final form.  A coherent
+minimum is:
+
+#+BEGIN_EXAMPLE
+instrument
+marketdata
+strategy
+order
+account
+portfolio
+risk
+broker
+execution
+backtest
+journal
+report
+#+END_EXAMPLE
+
+Minimal end-to-end capabilities:
+
+- One canonical bar type and one quote type
+- One historical source adapter
+- One real-time source adapter
+- One simulated broker
+- One real broker adapter
+- Market, limit, and stop orders
+- One net position model
+- Strategy action intents
+- Fixed-fraction risk sizing
+- Per-trade, total-open-risk, margin, and daily-loss rules
+- Deterministic backtest runner
+- Durable JSONL or SQLite journal
+- Org backtest report
+
+Scanner, advanced analysis, MCP, GraphQL, multiple service binaries, and
+language-independent strategies can build on that foundation.
+
+* Architecture Review Checklist
+
+Before accepting a new public package or interface, ask:
+
+- Does this concept have one clear owner?
+- Is it domain vocabulary or an implementation detail?
+- Is the interface intended for users to implement?
+- Can the API work in both local and remote adapters without exposing transport
+  concerns?
+- Does it preserve exact values and time semantics?
+- Does it support cancellation and cleanup?
+- Are errors classifiable?
+- Can it be deterministic in a backtest?
+- Can live state be reconciled after restart?
+- Does it leak vendor SDK or storage types?
+- Can a contract test validate implementations?
+- Is the zero value valid, invalid, or ambiguous?
+- Is concurrency owned and documented?
+- Is the event ordering guarantee explicit?
+- Can the API evolve additively?
+
+* Final Recommendation
+
+Design Trader as a trading framework with a stable domain center and replaceable
+edges.
+
+The initial implementation should be a modular monolith.  The public library
+must not know whether it is called from a CLI, a web service, an MCP server, a
+single all-in-one binary, or several processes.  Applications and transport
+adapters decide the deployment shape.
+
+The architecture should center on this chain:
+
+#+BEGIN_EXAMPLE
+canonical market data
+  -> indicators and analysis
+  -> strategy intents
+  -> execution proposals
+  -> risk decisions
+  -> broker requests
+  -> fills and account reconciliation
+  -> journal and reports
+#+END_EXAMPLE
+
+The sharpest public boundaries to establish first are:
+
+1. Canonical instrument and market-data types.
+2. Strategy intents rather than direct broker calls.
+3. Account-scoped broker ports plus account snapshots.
+4. Separate execution and risk responsibilities.
+5. A first-class simulated broker.
+6. Durable event correlation and reconciliation.
+7. Typed application services that can be wrapped by any transport.
+
+Once those boundaries are proven with a minimal backtest, a paper-trading bot,
+and a private external strategy example, the existing Trader implementation can
+be migrated package by package without allowing old structure to define the new
+architecture.
+
+* Appendix A: Proposed Vocabulary
+
+| Term              | Meaning                                                        |
+|-------------------+----------------------------------------------------------------|
+| Instrument        | Economic thing being observed or traded                        |
+| Listing           | Venue/provider-specific tradable representation                |
+| Symbol            | Human/provider label, not stable identity                       |
+| Quote             | Bid/ask observation                                            |
+| Trade event       | Executed market trade observation                              |
+| Bar               | Aggregated OHLC-style market record                            |
+| Indicator         | Mathematical transform                                         |
+| Analysis          | Derived market observation or classification                   |
+| Strategy          | Policy that interprets state and emits intents                 |
+| Intent            | Desired trading action or target                               |
+| Proposal          | Concrete candidate order before risk approval                  |
+| Request           | Validated broker command                                       |
+| Order             | Broker-recognized order with lifecycle                         |
+| Fill              | One execution against an order                                 |
+| Position          | Current exposure                                                |
+| Trade             | Derived journaling/reporting grouping of entry/exit activity   |
+| Account           | One broker account and its state                               |
+| Portfolio         | Trader-level aggregate of one or more accounts                 |
+| Risk decision     | Auditable approval, rejection, or modification                 |
+| Reconciliation    | Comparison and repair of local state against broker truth      |
+| Journal           | Structured durable record of events, commands, and reasons     |
+| Report            | Computed and rendered view over runs, journals, or account data |
+
+* Appendix B: Likely Architecture Decision Records
+
+Create short ADRs for at least these decisions:
+
+- ADR-001: Modular monolith before service decomposition
+- ADR-002: Ports and adapters dependency direction
+- ADR-003: Instrument versus listing identity
+- ADR-004: Exact numeric representation
+- ADR-005: Strategy emits intents, not broker orders
+- ADR-006: Execution and risk are separate stages
+- ADR-007: Broker account handle versus account snapshot
+- ADR-008: Simulated broker implements the public broker port
+- ADR-009: Journal and reconciliation model
+- ADR-010: gRPC primary external strategy protocol; MQTT integration transport
+- ADR-011: Public API and semantic-versioning policy
+- ADR-012: Trading calendar and bar-alignment semantics
+
+* Appendix C: Notes on Naming
+
+The following names are worth avoiding or using carefully:
+
+- =Manager=: Acceptable at application level, vague in domain packages.
+- =Service=: Useful for a use-case facade, not as a name for every type.
+- =Provider=: Clarify whether it provides native data, canonical data, broker
+  access, or credentials.
+- =Producer/Consumer=: Describes data movement but not domain responsibility.
+- =Tick=: Ambiguous; prefer quote, trade, or book update.
+- =Trade=: Ambiguous between market print, broker execution, and completed
+  strategy trade.  Use qualified names.
+- =Engine=: Reserve for substantial policy/orchestration components such as
+  risk or backtest execution; avoid naming every struct Engine.
+- =Core= and =Common=: Often become dependency dumping grounds.  Prefer named
+  domain packages.
+- =Utils= or =Support=: Avoid.  Put each concept with its owner or use the
+  standard library.
+
+* Appendix D: GitHub Project Milestones
+
+The implementation project should use these milestones.  Detailed issues and
+acceptance criteria are maintained in the companion document
+=Trader-GitHub-Project-Plan.org=.
+
+| ID | Milestone                                 | Usable outcome                                                                                             |
+|----+-------------------------------------------+------------------------------------------------------------------------------------------------------------|
+| M0 | Repository Foundation and Guardrails      | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                             |
+| M1 | Domain Foundation and Test Kit            | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers                   |
+| M2 | Market Data Vertical Slice                | Acquire, normalize, validate, store, query, resample, and report coverage for one data path                |
+| M3 | Broker Simulation and Account State       | Broker port, simulated execution, account projection, portfolio aggregation, and reconciliation            |
+| M4 | Strategy-to-Execution Pipeline            | Descriptor-driven strategy, intents, planner, risk, execution management, and correlated journal records   |
+| M5 | Deterministic Backtesting and Org Reports | Repeatable end-to-end backtest, run manifest, metrics, journal, CLI, and Org output                        |
+| M6 | OANDA Paper Trading and Live Safety       | Real adapter, reconciliation, guards, recovery, paper-default live runner, and soak testing                |
+| M7 | Scanner and Operator Workflow             | Watch/hot/tradeable state machine, ranking, alerts, reports, and operator CLI/API                          |
+| M8 | Research and External Strategy Extensions | Sweeps, walk-forward, comparison validation, versioned external strategy protocol, and optional transports |
+
+Real-money trading is deliberately not a milestone.  It is a release gate after
+M6 has operated safely in paper mode for a sustained period and reconciliation,
+recovery, and guard behavior have been reviewed.
+
+* Appendix E: Deferred Capabilities
+
+The following are intentionally outside the initial milestones unless an actual
+use case changes priority:
+
+- Synthetic and multi-leg instruments and atomic execution.
+- Options and complex derivatives.
+- Broker-native combo orders.
+- Full order-book simulation.
+- Interactive Brokers integration.
+- Mandatory microservices or a universal internal event bus.
+- GraphQL as a core operational API.
+- Automatic real-money trading enablement.
+- General-purpose visual strategy scripting.
+- A separate repository for every adapter.
