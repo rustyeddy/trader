@@ -1,0 +1,15 @@
+#+title: Trader Architecture Decision Records
+#+startup: overview
+
+* ADR-001: Modular monolith before service decomposition
+* ADR-002: Ports and adapters dependency direction
+* ADR-003: Instrument versus listing identity
+* ADR-004: Exact numeric representation
+* ADR-005: Strategy emits intents, not broker orders
+* ADR-006: Execution and risk are separate stages
+* ADR-007: Broker account handle versus account snapshot
+* ADR-008: Simulated broker implements the public broker port
+* ADR-009: Journal and reconciliation model
+* ADR-010: gRPC primary external strategy protocol; MQTT integration transport
+* ADR-011: Public API and semantic-versioning policy
+* ADR-012: Trading calendar and bar-alignment semantics
