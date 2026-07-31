@@ -1,0 +1,195 @@
+#+TITLE: Trader Public API Requirements
+#+AUTHOR: Rusty Eddy
+#+DATE: [2026-07-30 Thu]
+
+* Overview
+
+The objective for this excersive is to make a =fresh= pass at
+re-designing trader.  First as a public module with well defined
+packages/API's.
+
+Think of it as a *Trading Framework*
+
+** Fresh Start
+
+DO NOT take traders current repository and code into account.  While
+much/most of traders code will be re-used I do NOT want what is
+currently in trader to influence a pure, well planned design.
+
+I will be taking most of trader and refactor into the ultimate design. 
+
+** API First Application Next
+
+I want this design to be designed as a well defined library with a
+sharp, intuitive external facing API that is pleasant to work with.
+Leaving most of the implementation details behind interal walls.
+
+** One monolith or micro services
+
+The ultimate trader application will be built from this public API.
+It maybe one all inclusive monolith as it is now.  Or it maybe a
+series of individual executables each serving a specific purpose, for
+example a =backtesting engine=, =live trade bot manager=, =data
+manager= that acquires, normalizes and provides data for backtest
+engines and live trading.
+
+** Welcome a User Development  
+
+Welcome users to build their own customized applications from
+trader. Any user that wants to build something a little different, new
+or specialized will be welcomed to use the pieces of trader that
+suites their needs.
+
+* API Requirements
+
+Here are some of the high level requirements (kinda use cases) that
+trader must support.
+
+These are the ones I can think of, let me know if you have additional
+thoughts. 
+
+** Pricing Data                                                      :market:
+
+The data package must be able to acquire either OHLCV or Tick based
+data from different providers (free or paid), then normalize that data
+into a conanical candle / bar format.
+
+The data backend, storage and retrieval must be hidden from the user.
+It will be CSV to start but we'll most likely switch to Parquet
+(spelling?) in the future.   But the user does not need to know where
+the data came from or how it is stored.
+
+The data manager will also support RealTime Tick data, most likely use
+will be live trading.
+
+The public API, while change is expected should focus on stability
+first.  A solid, intuitive API that hopefully will be slow to change. 
+
+We will most likely define a =DataProvider= and =DataProducer=
+interfaces. 
+
+*** Retrieve Data
+*** Normalize Data
+*** Supply data to backtests, live trading, etc.
+
+** Broker Interface                                                 :account:
+
+Trader will need to front different broker APIs for example: OandA,
+Alpaca, Interactive Brokers, Ninja Trader, etc.  Trader will also
+provide an interal simulated broker.
+
+The broker interface will need to support at least this functionality:
+
+*** Place orders
+Buy, Sell, market, limit, stop, etc.
+
+*** Emit Events
+Anything asynchronous that might originate from a broker, for example
+when orders are filled, stops are hit.
+
+Anything else?
+
+*** Account Management
+- Brokers can have one or more accounts
+- Broker accounts are the source of truth  
+  - Account financials
+  - Orders, positions and history
+- Account deposits and withdrawels.
+*** Hide broker access tokens and API particulars from users and apps
+
+** Account                                                          :account:
+
+While account management is owned by the broker, the Account is kind
+of it's own beast.  The account will most likely be the avenue that
+all broker interactions happen through.  In otherwords the
+applications will most likely not directly interact with the broker at
+all, rather through the account for the following functionality
+
+*** Deposit/Withdraw
+*** Place and Manage Orders
+*** Track open and closed positions (trades)
+*** Maintain account balances, PnL
+*** Interface with a Risk Manager
+** Risk Manager                                                     :account:
+
+This module while mostly associated with an account will be
+responsible for gating trades based on defined rules for example:
+
+*** Max risk / trade
+*** Max risk / account (all trades)
+*** Max margin allowed to be used
+*** Calculate position sizing (or used to calculate sizign)
+*** Max allowable loss per day, or week or month.
+** Instruments                                                       :market:
+This is an general abstraction for concrete market mediums like
+Currency Paris, Equities, ETFs, Futures, Cryptos
+** Indicators                                                        :market:
+Indicators will be consume data and provide other data.
+
+*** Consume candles or ticks
+*** Used in historical or live data feeds
+*** Possibly emit signals (ADX threshold, ema cross?)
+Or maybe this belongs else where?
+*** Provide one or more data points as output
+ema, adx => one value. Bollinger bands, stocastics, RSI will produce
+more than one output value.
+** Price Analysis                                                    :market:
+*** Technical Patterns
+Support, resistance, head and shoulders, etc.
+*** Candle Patterns
+Engulfing Candle, doji, etc.
+*** Price Analysis
+True Average, Volatility, Trending, ranging, historic price
+characteristics 
+
+** Scanners                                                          :market:
+- Scan / review a series of instruments
+- Categorize: tradeable, hot, watch
+- Alerts: price, volume, indicator crossing
+** Reports                                                       :journaling:
+*** Backtest reports
+*** Market analysis reports
+*** Account reports
+*** Live trading reports
+
+** Strategies                                                        :market:
+*** Take in candles or ticks
+*** Emit signals (buy, sell, hold)
+*** Entry identification
+*** Stop management
+** Backtests                                                         :market:
+- Run strategies through historical data
+- Generate reports
+- Compare backtests
+** Live Trading                                              :account:market:
+- Identify Instrument(s) to observe
+- Apply strategy to instrument(s)
+- Manage account orders based on strategy signals
+** Support Libraries                                                    :lib:
+- Fixed point math
+- Unix Timestamps
+- Ulids
+- Logging
+- Configuration files.
+
+* Applications
+Applications put the libraries together to perform some use-case.  A
+useful feature or service.
+
+Applications should be restricted to only accessing external public
+API's and never dip into the implementation details of the API it is
+using. 
+
+*** Interact with services
+*** CLI / Cobra
+*** REST APIs
+*** MQTT / Pub/sub
+*** Websocket/SSE
+*** MCP
+*** GraphQL
+* Excersize
+
+** TODO What have I missed?
+** TODO What do the APIs look like?
+
+** TODO How is the code structured/layed out?
