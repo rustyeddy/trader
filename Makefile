@@ -1,3 +1,5 @@
+all: check
+
 fmt:
 	go fmt ./...
 
