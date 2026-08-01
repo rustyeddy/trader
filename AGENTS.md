@@ -14,6 +14,6 @@ Read before making changes:
 
 Detailed workflows:
 
-- `docs/agents/workflows.org`
-- `docs/agents/testing.org`
+- `docs/workflows/workflows.org`
+- `docs/workflows/testing.org`
 
