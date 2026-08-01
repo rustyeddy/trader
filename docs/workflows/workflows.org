@@ -1,0 +1,32 @@
+* Coding Workflow
+
+All new code should be created in a branch, unless explicitly told
+otherwise.
+
+All new or modified code must adhere to the =Architectural Decistion
+Rules= in ./docs/arch/adr-decisions.org
+
+** Testing
+
+All new code must be provided with tests achieving as close to 100%
+code coverage as possible.  
+
+All tests will be written using the Go package testify.
+
+** Documentation
+
+All new code should have adequate comments above functions types and
+structures.  Terse and complete but not verbose and wordy.
+
+** README.md
+
+Any significant impact to the way users interact or use trader should
+be reflected in README.md.  This includes new commands, command
+changes, configuration files.
+
+Any code additions or changes that impact the Architecture including
+new architectural decisions must be documented in an ADR.
+
+** Commits to be tested and vetted
+
+All code must pass =make check= before it can be committed and pushed.
