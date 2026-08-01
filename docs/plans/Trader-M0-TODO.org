@@ -1,0 +1,719 @@
+#+title: Trader Milestone M0 TODO Plan
+#+subtitle: Repository Foundation, Governance, CI, and Documentation
+#+author: Rusty Eddy
+#+startup: overview
+#+todo: TODO NEXT IN-PROGRESS BLOCKED REVIEW | DONE CANCELLED
+#+options: toc:2 num:nil
+
+* Purpose
+
+This document defines the remaining work for Trader milestone M0.
+
+M0 establishes the repository foundation, architectural governance, contribution
+workflow, CI quality gates, and documentation rules before substantive trading
+framework implementation begins.
+
+All tasks in this document are intended to become GitHub issues associated with
+milestone =M0=.
+
+Implementation will commonly be performed by an agent. Each task therefore
+includes explicit scope, constraints, acceptance criteria, labels, and dependency
+notes.
+
+* Current Repository State
+
+The following foundation work is already present:
+
+- The Go module is =github.com/rustyeddy/trader=.
+- A Makefile exists with formatting, vet, test, race, and check targets.
+- The canonical framework architecture document exists under =docs/arch/=.
+- The original framework requirements document exists under =docs/arch/=.
+- A single Org ADR document exists at =docs/arch/adr-decisions.org=.
+- A minimal root =trader= package exists.
+- The repository uses the BSD 2-Clause license.
+
+* Milestone M0 Definition of Done
+
+M0 is complete when:
+
+- The repository clearly explains Trader's purpose and current status.
+- Canonical architecture, requirements, ADRs, and package-boundary documents are
+  present and internally linked.
+- Contribution rules and the project-wide Definition of Done are documented.
+- GitHub issue and pull-request templates are installed.
+- CI verifies formatting, module tidiness, vetting, tests, and race tests.
+- Architecture and dependency rules are clear enough for implementation agents
+  to follow without inventing major design decisions.
+- No real-money trading behavior is enabled or implied.
+- All M0 issues are complete and CI passes on =main=.
+
+* Suggested Labels
+
+** Type labels
+
+- =type: architecture=
+- =type: documentation=
+- =type: infrastructure=
+- =type: feature=
+- =type: defect=
+- =type: testing=
+
+** Area labels
+
+- =area: repository=
+- =area: github=
+- =area: ci=
+- =area: process=
+- =area: packages=
+- =area: docs=
+
+** Priority labels
+
+- =priority: critical=
+- =priority: high=
+- =priority: normal=
+- =priority: low=
+
+** Workflow labels
+
+- =agent-ready=
+- =needs-design=
+- =blocked=
+
+** Labeling rule
+
+Every issue in this document should include:
+
+- milestone: =M0=
+- label: =agent-ready=
+
+Use =needs-design= only when the issue contains an unresolved
+architectural decision. An implementation agent must not invent
+architecture merely to close an issue.
+
+* Recommended Execution Order
+
+#+begin_example
+README
+  |-- ADR records
+  |-- CONTRIBUTING
+  `-- package boundaries
+
+CONTRIBUTING
+  `-- GitHub templates
+
+Makefile
+  `-- CI
+#+end_example
+
+Some work may proceed in parallel, but:
+
+- CI should be merged after Makefile behavior is finalized.
+- GitHub templates should reflect the completed Definition of Done.
+- README links should be updated after final documentation paths are confirmed.
+
+* TODO M0-01 Expand the project README
+:PROPERTIES:
+:LABELS: type:documentation area:repository priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Expand =README.md= so it accurately establishes Trader's identity, status,
+principles, documentation entry points, and development workflow.
+
+** Agent instructions
+
+Update =README.md= to include:
+
+- Trader's purpose as a Go framework for:
+  - market research
+  - backtesting
+  - broker simulation
+  - paper trading
+  - eventual live execution
+- The current project status:
+  - greenfield architectural foundation
+  - active development
+  - not ready for real-money trading
+- Core design principles:
+  - deterministic by design
+  - paper trading by default
+  - strategies emit intents rather than broker orders
+  - risk and execution are separate stages
+  - broker truth is reconciled into local state
+- Links to:
+  - framework requirements
+  - framework architecture
+  - ADR document
+  - package-boundary document
+  - contribution guide
+- Basic development commands defined by the Makefile.
+- The BSD 2-Clause license.
+- A statement that the legacy Trader repository may be consulted as a selective
+  code donor and behavior reference, but is not a dependency of the new Trader.
+
+Do not advertise functionality that is not implemented.
+
+** Constraints
+
+- Preserve accuracy over promotional language.
+- Do not imply that live trading is safe or available.
+- Keep documentation links repository-relative.
+- Keep commands synchronized with the actual Makefile.
+
+** Acceptance criteria
+
+- [ ] README accurately reflects the canonical architecture.
+- [ ] All documentation links resolve.
+- [ ] Current project status is explicit.
+- [ ] Real-money trading is not presented as available.
+- [ ] BSD 2-Clause licensing is stated.
+- [ ] Legacy Trader is described as a reference/code donor, not a dependency.
+- [ ] =make check= succeeds.
+
+** Dependencies
+
+- Final links may depend on completion of:
+  - M0-03
+  - M0-06
+
+* TODO M0-02 Complete the initial ADR records
+:PROPERTIES:
+:LABELS: type:architecture type:documentation priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Turn =docs/arch/adr-decisions.org= from a list of headings into a usable,
+single-file architecture decision registry.
+
+** Agent instructions
+
+Add the following document-level sections:
+
+- Purpose and usage instructions.
+- A decision index table.
+- ADR status definitions:
+  - Proposed
+  - Accepted
+  - Superseded
+  - Rejected
+- Rules for superseding an accepted ADR.
+- A reusable ADR template marked =:noexport:=.
+
+Use this structure for each completed ADR:
+
+#+begin_src org
+* ADR-NNN: Decision title
+
+** Status
+
+Accepted
+
+** Context
+
+Describe the forces, constraints, and problem that require a decision.
+
+** Decision
+
+State the architectural decision clearly.
+
+** Consequences
+
+Describe benefits, tradeoffs, restrictions, and follow-on responsibilities.
+
+** Alternatives Considered
+
+Describe credible alternatives and why they were rejected.
+#+end_src
+
+Fully document only the architectural decisions already established:
+
+1. Modular monolith before service decomposition.
+2. Ports-and-adapters dependency direction.
+3. Fresh greenfield repository with controlled legacy code transplant.
+4. Strategies emit intents, not broker orders.
+5. Execution planning and risk admission are separate stages.
+6. Broker account handle is separate from account snapshot.
+7. Simulated broker implements the public broker port.
+8. Paper trading is the safe default.
+
+Keep less-settled decisions marked =Proposed=, especially:
+
+- detailed external strategy protocol choices
+- detailed storage technology choices
+- future service decomposition
+- synthetic or multi-leg instruments
+
+** Constraints
+
+- Do not silently finalize unsettled architecture.
+- Accepted decisions must match the canonical architecture document.
+- Do not rewrite the historical meaning of an accepted ADR.
+- When a decision changes, mark the old ADR =Superseded= and add a new ADR.
+
+** Acceptance criteria
+
+- [ ] ADR document includes purpose and usage guidance.
+- [ ] ADR index table exists.
+- [ ] Status meanings are defined.
+- [ ] Supersession rules are defined.
+- [ ] Reusable =:noexport:= template exists.
+- [ ] Eight established decisions are fully documented.
+- [ ] Unsettled decisions remain =Proposed=.
+- [ ] Accepted ADRs align with the architecture document.
+
+** Dependencies
+
+None.
+
+* TODO M0-03 Add contribution and Definition-of-Done documentation
+:PROPERTIES:
+:LABELS: type:documentation area:process priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Create =CONTRIBUTING.org= with an explicit workflow and a project-wide
+Definition of Done suitable for both human and agent contributors.
+
+** Agent instructions
+
+Create =CONTRIBUTING.org=.
+
+Document this expected workflow:
+
+#+begin_example
+issue
+  -> branch
+  -> implementation
+  -> tests
+  -> documentation
+  -> pull request
+  -> review
+  -> CI
+  -> merge
+#+end_example
+
+Document branch naming examples:
+
+#+begin_example
+feature/12-instrument-identity
+docs/8-complete-adrs
+infra/5-add-ci
+fix/31-simulator-order-state
+#+end_example
+
+Define the project-wide Definition of Done.
+
+A change is complete only when:
+
+- The linked issue's acceptance criteria are satisfied.
+- New behavior has deterministic tests.
+- Error cases and boundary conditions are covered.
+- Concurrency changes are exercised under the race detector.
+- Public APIs have useful Go documentation.
+- Architecture documentation is updated when package boundaries or behavior
+  change.
+- An ADR is added or updated for durable architectural decisions.
+- Examples and README instructions remain accurate.
+- No unrelated refactoring is included.
+- CI passes.
+- Real-money trading remains disabled by default.
+
+Also document:
+
+- Keep branches short-lived.
+- Prefer small, reviewable pull requests.
+- One issue should represent one coherent result.
+- Agents must not widen scope without documenting the reason.
+- Agents must stop and mark =needs-design= when architecture is genuinely
+  unresolved.
+- Every PR must explain what changed, why, how it was tested, and which
+  documentation changed.
+
+** Acceptance criteria
+
+- [ ] =CONTRIBUTING.org= exists.
+- [ ] Workflow is explicit.
+- [ ] Definition of Done requires testing and documentation.
+- [ ] Concurrency and race-test requirements are included.
+- [ ] ADR expectations are included.
+- [ ] Agent scope and escalation rules are included.
+- [ ] README links to =CONTRIBUTING.org=.
+
+** Dependencies
+
+- Should be completed before M0-04.
+
+* TODO M0-04 Add pull-request and issue templates
+:PROPERTIES:
+:LABELS: type:infrastructure area:github priority:normal agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Install GitHub templates that require contributors and agents to address scope,
+architecture, testing, documentation, and safety.
+
+** Agent instructions
+
+Create:
+
+#+begin_example
+.github/
+  pull_request_template.md
+  ISSUE_TEMPLATE/
+    feature.yml
+    architecture.yml
+    defect.yml
+#+end_example
+
+The pull-request template must include:
+
+- Purpose
+- Linked issue
+- Architectural impact
+- Implementation summary
+- Testing performed
+- Documentation updated
+- ADR impact
+- Risk and safety considerations
+- Acceptance-criteria checklist
+
+Suggested pull-request checklist:
+
+#+begin_example
+- [ ] Linked issue acceptance criteria are satisfied
+- [ ] Unit tests were added or updated
+- [ ] Integration or contract tests were added where required
+- [ ] Race tests were run where concurrency is involved
+- [ ] Public Go documentation was updated
+- [ ] Architecture documentation was updated where required
+- [ ] ADR impact was evaluated
+- [ ] README and examples remain accurate
+- [ ] No unrelated refactoring is included
+- [ ] CI passes
+#+end_example
+
+Issue templates should request enough detail for an implementation agent to act
+without guessing.
+
+The feature template should include:
+
+- Problem or desired outcome
+- Scope
+- Non-goals
+- Acceptance criteria
+- Testing expectations
+- Documentation expectations
+- Architecture considerations
+
+The architecture template should include:
+
+- Context
+- Decision required
+- Constraints
+- Alternatives
+- Consequences
+- ADR requirement
+
+The defect template should include:
+
+- Observed behavior
+- Expected behavior
+- Reproduction steps
+- Impact
+- Relevant logs or data
+- Regression-test requirement
+
+** Constraints
+
+- Avoid irrelevant enterprise boilerplate.
+- Do not treat passing tests as proof that documentation is complete.
+- Keep templates concise enough to remain usable.
+- Ensure YAML issue forms are valid GitHub issue-form syntax.
+
+** Acceptance criteria
+
+- [ ] GitHub recognizes all issue templates.
+- [ ] PR template appears for new pull requests.
+- [ ] Testing and documentation are mandatory sections.
+- [ ] Architecture and ADR impact are explicit.
+- [ ] Issue forms contain agent-usable acceptance criteria.
+- [ ] Templates align with =CONTRIBUTING.org=.
+
+** Dependencies
+
+- Depends on M0-03.
+
+* TODO M0-05 Add baseline GitHub Actions CI
+:PROPERTIES:
+:LABELS: type:infrastructure area:ci priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Create deterministic baseline CI that verifies formatting, module hygiene,
+vetting, tests, and race tests.
+
+** Agent instructions
+
+Create:
+
+#+begin_example
+.github/workflows/ci.yml
+#+end_example
+
+Run CI on:
+
+- pushes to =main=
+- pull requests targeting =main=
+
+Required checks:
+
+#+begin_src shell
+go mod tidy
+git diff --exit-code go.mod go.sum
+test -z "$(gofmt -l .)"
+go vet ./...
+go test ./...
+go test -race ./...
+#+end_src
+
+Review and update the Makefile so that:
+
+- =fmt= modifies files using =go fmt ./...=.
+- =fmt-check= detects unformatted files without modifying them.
+- =vet= runs =go vet ./...=.
+- =test= runs =go test ./...=.
+- =race= runs =go test -race ./...=.
+- =check= runs =fmt-check=, =vet=, =test=, and =race=.
+
+CI must detect problems rather than repair the checkout.
+
+** Constraints
+
+- Do not use =go fmt ./...= as the CI formatting check.
+- Do not introduce a large third-party lint suite in M0.
+- Keep CI aligned with Makefile commands.
+- Use a supported Go version matching =go.mod= or intentionally revise
+  =go.mod= if the current version is not available in GitHub Actions.
+- Do not commit an unnecessary empty =go.sum=.
+
+** Acceptance criteria
+
+- [ ] CI runs on pushes and pull requests.
+- [ ] CI passes on the current repository.
+- [ ] Incorrect formatting causes CI failure.
+- [ ] An untidy module causes CI failure.
+- [ ] =go vet ./...= runs.
+- [ ] =go test ./...= runs.
+- [ ] =go test -race ./...= runs.
+- [ ] Makefile and CI behavior remain aligned.
+- [ ] =make check= performs all local quality checks.
+
+** Dependencies
+
+- Complete after current Makefile behavior is reviewed.
+- May proceed in parallel with documentation tasks.
+
+* TODO M0-06 Document package boundaries and repository rules
+:PROPERTIES:
+:LABELS: type:architecture type:documentation area:packages priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Create a clear package-boundary and dependency-rule document before domain
+packages begin to proliferate.
+
+** Agent instructions
+
+Create:
+
+#+begin_example
+docs/arch/package-boundaries.org
+#+end_example
+
+Document intended dependency direction without creating empty package trees.
+
+Include these rules:
+
+- Domain packages must not import adapters.
+- Strategies must not import broker implementations.
+- Strategies emit intents and cannot submit orders.
+- Risk evaluates proposed exposure and cannot call brokers.
+- Execution coordinates approved actions.
+- Broker adapters translate external APIs and do not contain trading policy.
+- Transport DTOs must not become public domain types.
+- Domain behavior must not call =time.Now()= directly.
+- Packages must not launch hidden goroutines from =init()=.
+- Live trading requires deliberate configuration and cannot be the default.
+- New public packages require:
+  - a real consumer
+  - a documented responsibility
+  - a stable reason to be public
+- Implementation details should prefer =internal/=.
+- Public interfaces should exist at seams where implementations genuinely vary.
+- Concrete structs should be preferred for domain values.
+- Empty placeholder directories should not be created merely to match a future
+  package map.
+
+Include a preliminary directional package map, clearly labeled as non-final.
+
+For example:
+
+#+begin_example
+instrument
+    ^
+marketdata    order    account
+    ^          ^         ^
+strategy    broker    portfolio
+    \          |         /
+       application services
+               ^
+       adapters and commands
+#+end_example
+
+Also define a simple package-placement test:
+
+1. Is this type or behavior intended for external framework consumers?
+2. Does it have a stable contract?
+3. Are multiple implementations expected?
+4. Would exposing it constrain internal evolution?
+
+If the answers do not support a public API, prefer =internal/=.
+
+** Constraints
+
+- The package map is directional, not a requirement to create every package now.
+- Do not generate empty package directories.
+- Do not finalize detailed APIs in this task.
+- Keep this document consistent with the canonical architecture and ADRs.
+
+** Acceptance criteria
+
+- [ ] =docs/arch/package-boundaries.org= exists.
+- [ ] Dependency-direction rules are explicit.
+- [ ] Public versus =internal/= guidance is included.
+- [ ] Hidden goroutines and direct =time.Now()= usage are prohibited in domain code.
+- [ ] Live trading default-safety rule is documented.
+- [ ] Empty placeholder package trees are discouraged.
+- [ ] Preliminary package map is labeled non-final.
+- [ ] README or canonical architecture links to this document.
+
+** Dependencies
+
+- Should be consistent with M0-02.
+- README final links depend on this document.
+
+* TODO M0-07 Perform M0 architecture and repository review
+:PROPERTIES:
+:LABELS: type:architecture type:testing area:repository priority:high agent-ready
+:MILESTONE: M0
+:END:
+
+** Objective
+
+Perform a final M0 review before beginning substantive framework implementation.
+
+** Agent instructions
+
+Review the repository as a whole after M0-01 through M0-06 are complete.
+
+Verify:
+
+- README accurately reflects the repository.
+- Architecture, requirements, ADRs, package boundaries, and contribution guide
+  do not contradict one another.
+- Documentation links resolve.
+- ADR statuses correctly distinguish accepted and proposed decisions.
+- Issue and PR templates align with the Definition of Done.
+- Makefile and CI checks match.
+- CI passes from a clean checkout.
+- No empty speculative package tree has been introduced.
+- No implementation exists that prematurely fixes unsettled architecture.
+- No live-trading behavior is enabled.
+- The root package documentation is accurate.
+- License and module path are correct.
+
+Produce a short review report in the pull request description or as:
+
+#+begin_example
+docs/reviews/m0-foundation-review.org
+#+end_example
+
+The report should include:
+
+- Items reviewed
+- Problems found
+- Corrections made
+- Deferred questions
+- Recommendation to close or keep M0 open
+
+** Acceptance criteria
+
+- [ ] All M0 documentation is mutually consistent.
+- [ ] All repository-relative links resolve.
+- [ ] =make check= passes from a clean checkout.
+- [ ] GitHub Actions CI passes.
+- [ ] No unresolved high-priority M0 defect remains.
+- [ ] Deferred design questions are documented rather than silently decided.
+- [ ] Review recommends whether M0 is ready to close.
+
+** Dependencies
+
+- Depends on M0-01 through M0-06.
+
+* Deferred Until After M0
+
+The following work should not be included in M0 unless required to repair the
+foundation:
+
+- Money and exact numeric implementation.
+- Instrument and listing domain types.
+- Market-data interfaces.
+- Strategy interfaces.
+- Risk engine.
+- Execution planner.
+- Broker interfaces.
+- Simulated broker.
+- Account and portfolio projections.
+- Backtest engine.
+- OANDA integration.
+- Scanner workflow.
+- MQTT or gRPC implementation.
+- External strategy processes.
+- Live trading.
+
+These belong to later milestones and should begin only after M0 review is
+complete.
+
+* Agent Execution Guidance
+
+For every issue generated from this document:
+
+- Work on a dedicated branch.
+- Keep scope limited to the issue.
+- Read the canonical architecture and relevant ADRs before editing.
+- Do not invent unsettled architecture.
+- Add or update tests where executable behavior changes.
+- Update documentation in the same pull request.
+- Run =make check= before opening the pull request.
+- Open a draft pull request while work is in progress.
+- In the pull request, state:
+  - what changed
+  - why it changed
+  - how it was tested
+  - which documentation changed
+  - whether an ADR was affected
+- Stop and label the issue =needs-design= when requirements conflict or a durable
+  architectural decision is missing.
