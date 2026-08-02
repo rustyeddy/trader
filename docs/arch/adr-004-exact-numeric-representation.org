@@ -1,0 +1,191 @@
+#+title: ADR-004 Exact Numeric Representation
+#+startup: overview
+
+* Status
+
+Proposed
+
+Parent decision: [[https://github.com/rustyeddy/trader/issues/19][#19 — M1-01 Decide exact numeric representation]]
+
+This working ADR records decisions as the numeric-design sub-issues are resolved.
+It remains =Proposed= until [[https://github.com/rustyeddy/trader/issues/44][#44]] consolidates the evidence, completes the alternatives and consequences,
+and marks the decision =Accepted=.
+
+* Context
+
+Trader must represent authoritative prices, money, quantities, rates, balances,
+fees, margin, order values, fill values, and PnL without relying on binary
+floating-point approximation.  These values must round-trip through broker,
+configuration, storage, journal, and reporting boundaries while preserving
+clear domain semantics.
+
+Trader is intended to support more than FX.  The representation must be
+validated against equities, ETFs, futures, high-priced assets, large FX
+positions, fractional quantities, and small fees or financing values.
+
+The legacy Trader repository already contains scaled-integer =Price=, =Money=,
+=Rate=, accumulators, and fixed-point indicator implementations.  Under
+ADR-013, that repository is a selective code donor and behavior reference,
+not a dependency of the new Trader.
+
+* Decisions Reached
+
+** Authoritative backing representation
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/19][#19]]
+
+The authoritative foundational numeric types use scaled signed =int64= values.
+
+The initial semantic types are:
+
+- =Price=
+- =Money=
+- =Quantity=
+- =Rate=
+
+=Currency= remains a separate domain concept used with =Money=; the precise
+ownership relationship is still open in [[https://github.com/rustyeddy/trader/issues/35][#35]].
+
+The public API must not expose one generic decimal type in place of these
+semantic types.  Distinct types prevent accidental substitution of price,
+quantity, money, and rate values.
+
+** Price representation versus instrument rules
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/33][#33]]
+
+=Price= will use a fixed internal representation scale.  Instrument-specific
+market rules remain separate:
+
+- tick size
+- permitted price increment
+- display precision
+- provider quotation format
+
+The internal representation scale is not itself the instrument tick size.
+The final scale and supported range remain to be validated in #33 against FX,
+equities, futures, high-priced assets, and small-priced assets.
+
+** Exact input and output boundaries
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/39][#39]]
+
+Decimal text and raw scaled integers are the preferred exact construction and
+serialization boundaries.  Parsing and formatting should avoid conversion
+through binary =float64= whenever practical.
+
+Any =float64= constructor retained for adapter interoperability must be
+explicitly named as a rounded or lossy boundary conversion.  It must not be the
+preferred path for configuration, broker decimal strings, persistence, or
+journal records.
+
+** Indicator arithmetic is not yet globally fixed
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/41][#41]]
+
+The authoritative domain types remain scaled integers regardless of how an
+indicator performs internal analytical arithmetic.
+
+The fixed-point versus =float64= choice will be made per indicator
+implementation, not per invocation.  Public callers should pass and receive
+semantic Trader types where appropriate; callers should not manually perform
+representation conversions at every indicator call site.
+
+Alternative fixed-point and floating-point implementations may coexist
+internally while evidence is gathered.  Numeric representation should not be
+used as the permanent public package boundary unless a later decision finds a
+compelling reason.
+
+* Open Decision Work
+
+The following issues must be resolved before this ADR can be accepted:
+
+- [[https://github.com/rustyeddy/trader/issues/33][#33 — Validate Price scale across supported asset classes]]
+- [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
+- [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]]
+- [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
+- [[https://github.com/rustyeddy/trader/issues/38][#38 — Define rounding, overflow, and intermediate arithmetic policy]]
+- [[https://github.com/rustyeddy/trader/issues/39][#39 — Define exact parsing and formatting policy]]
+- [[https://github.com/rustyeddy/trader/issues/40][#40 — Define numeric serialization and persistence representation]]
+- [[https://github.com/rustyeddy/trader/issues/41][#41 — Define indicator fixed-point versus float64 policy]]
+- [[https://github.com/rustyeddy/trader/issues/42][#42 — Define numeric determinism guarantees]]
+- [[https://github.com/rustyeddy/trader/issues/43][#43 — Review reusable legacy Trader numeric code]]
+- [[https://github.com/rustyeddy/trader/issues/44][#44 — Draft and accept exact numeric representation ADR]]
+
+* Provisional Decision Matrix
+
+The unresolved cells must be completed by #33 and #35–#42.
+
+| Type     | Backing | Scale                  | Related metadata              | Current arithmetic direction |
+|----------+---------+------------------------+-------------------------------+------------------------------|
+| Price    | int64   | Fixed; value TBD       | Tick size belongs to listing  | Exact typed operations       |
+| Money    | int64   | TBD                    | Currency ownership TBD        | Cross-currency math forbidden|
+| Quantity | int64   | Fixed strategy TBD      | Increment belongs to listing  | Exact typed operations       |
+| Rate     | int64   | TBD                    | Semantic unit documented      | Explicit multiply/divide     |
+
+For every type, the final matrix must specify:
+
+- representation scale
+- signedness and zero-value policy
+- supported range
+- valid and intentionally absent operations
+- rounding rules
+- overflow behavior
+- parsing and formatting
+- JSON, text, CSV, configuration, and persistence representation
+
+* Consequences Identified So Far
+
+- Authoritative financial values do not depend on binary floating-point
+  representation.
+- Public APIs distinguish price, money, quantity, and rate at compile time.
+- Instrument tick size and quantity increment must be validated separately
+  from internal numeric scale.
+- Multiplication and division require explicit scale restoration, rounding,
+  and overflow handling.
+- Indicator implementations may choose different internal arithmetic while
+  retaining semantic public contracts.
+- Legacy fixed-point code and tests can be reused only after multi-asset and
+  package-boundary review.
+
+* Alternatives Under Consideration
+
+** Arbitrary-precision or third-party decimal throughout
+
+Not selected as the current direction.  It may simplify some decimal
+operations but risks exposing a third-party representation in public APIs and
+may add allocation and performance costs.  #43 must record whether any legacy
+or third-party helpers are still useful internally.
+
+** Raw float64 throughout
+
+Rejected for authoritative values because it cannot provide exact decimal
+broker and accounting semantics.
+
+** One generic decimal domain type
+
+Rejected as the primary public API because it permits accidental interchange
+of price, money, quantity, and rate values.
+
+** Fixed-point arithmetic for every indicator
+
+Not yet accepted or rejected.  #41 will determine when fixed-point behavior
+provides enough determinism or decision-boundary value to justify its added
+complexity.
+
+* Acceptance Gate
+
+ADR-004 may move from =Proposed= to =Accepted= only when:
+
+- #33 and #35–#43 are resolved or explicitly deferred with rationale.
+- Final scales and supported ranges are documented.
+- Money currency ownership and quantity semantics are decided.
+- The numeric decision matrix is complete.
+- Rounding, overflow, and intermediate arithmetic rules are explicit.
+- Exact parsing, formatting, serialization, and persistence formats are set.
+- Indicator arithmetic and determinism policies are set.
+- Legacy code has a documented transplant/adapt/reference/reject disposition.
+- Representative multi-asset evidence supports the decision.
+- #22 can implement the foundational types without reopening these decisions.
+- #44 reviews this record, integrates it into the canonical ADR registry, and
+  marks the ADR =Accepted=.
