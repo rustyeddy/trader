@@ -255,6 +255,25 @@ gap is exactly one representable value wide
 full =int64= range, or the domain range is deliberately symmetric and the most
 negative value is not a valid =Price=.
 
+*** Review disposition for #33
+
+Final review of [[https://github.com/rustyeddy/trader/pull/45][PR #45]] confirmed that the executable evidence supports a fixed =Price=
+scale of =1e8=.  The original review concerns were addressed, CI passed, and
+[[https://github.com/rustyeddy/trader/issues/33][#33]] is complete for purposes of ADR-004.
+
+Three non-blocking cleanup items remain in the study harness and must not be
+mistaken for changes to the selected scale:
+
+- Documentation should say that exact parsing and formatting paths avoid
+  =float64=; the study uses =float64= in a reporting-only margin comparison.
+- =FormatFixed= can emit negative zero after truncation and should suppress the
+  sign when the rendered magnitude is zero.
+- The =Scale= documentation must describe exact scaling and rejection of excess
+  precision, not rounding.
+
+These items do not weaken the =1e8= decision.  They are follow-up concerns for
+[[https://github.com/rustyeddy/trader/issues/38][#38]] and [[https://github.com/rustyeddy/trader/issues/39][#39]], especially if the study helpers are reused as implementation references.
+
 ** Exact input and output boundaries
 
 Decision source: [[https://github.com/rustyeddy/trader/issues/39][#39]]
@@ -290,7 +309,8 @@ compelling reason.
 The following issues must be resolved before this ADR can be accepted:
 
 - [X] [[https://github.com/rustyeddy/trader/issues/33][#33 — Validate Price scale across supported asset classes]] — resolved:
-  =Price= scale is 1e8.  Evidence in =test/internal/numericstudy=.
+  =Price= scale is 1e8.  Evidence in =test/internal/numericstudy= and final
+  review disposition recorded above.
 - [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
 - [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]]
 - [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
