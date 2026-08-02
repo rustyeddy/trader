@@ -1,0 +1,115 @@
+#+TITLE: Contributing to Trader
+#+STARTUP: overview indent
+
+* Purpose
+
+This document defines the expected contribution workflow and the
+project-wide Definition of Done for Trader.  It applies equally to human
+contributors and to agent contributors (for example, Claude Code or GitHub
+Copilot agents) working on issues in this repository.
+
+Read this document together with:
+
+- =AGENTS.md=
+- =docs/arch/trader-framework-architecture.org=
+- =docs/arch/adr-decisions.org=
+
+* Workflow
+
+Every change follows this sequence:
+
+#+BEGIN_EXAMPLE
+issue
+  -> branch
+  -> implementation
+  -> tests
+  -> documentation
+  -> pull request
+  -> review
+  -> CI
+  -> merge
+#+END_EXAMPLE
+
+1. *Issue*: Every change is associated with a corresponding GitHub issue.
+   There is no code or documentation change without an issue to justify it.
+2. *Branch*: Create a short-lived branch from the default branch, named
+   according to the conventions below.
+3. *Implementation*: Make the minimal, focused change required to satisfy
+   the issue's acceptance criteria.
+4. *Tests*: Add or update tests that cover the new or changed behavior,
+   including error and boundary cases.
+5. *Documentation*: Update architecture documentation, ADRs, Go doc
+   comments, examples, and README instructions as required by the
+   Definition of Done below.
+6. *Pull request*: Push the branch and open a pull request against the
+   default branch.
+7. *Review*: All new code is reviewed before merge.
+8. *CI*: Continuous integration must pass before merge.
+9. *Merge*: Once approved and green, the pull request is merged.
+
+* Branch Naming
+
+Branches are named =<type>/<issue-number>-<short-description>=.
+
+Common types:
+
+- =feature/=: new functionality
+- =docs/=: documentation-only changes
+- =infra/=: tooling, CI, build, or repository infrastructure
+- =fix/=: bug fixes
+
+Examples:
+
+#+BEGIN_EXAMPLE
+feature/12-instrument-identity
+docs/8-complete-adrs
+infra/5-add-ci
+fix/31-simulator-order-state
+#+END_EXAMPLE
+
+* Definition of Done
+
+A change is complete only when all of the following are true:
+
+- The linked issue's acceptance criteria are satisfied.
+- New behavior has deterministic tests.
+- Error cases and boundary conditions are covered.
+- Concurrency changes are exercised under the race detector (=go test
+  -race=).
+- Public APIs have useful Go documentation.
+- Architecture documentation is updated when package boundaries or
+  behavior change.
+- An ADR is added or updated for durable architectural decisions.
+- Examples and README instructions remain accurate.
+- No unrelated refactoring is included.
+- CI passes.
+- Real-money trading remains disabled by default.
+
+* Scope and Pull Request Practices
+
+- Keep branches short-lived.
+- Prefer small, reviewable pull requests over large, sweeping ones.
+- One issue should represent one coherent result.  Split work into
+  multiple issues rather than combining unrelated concerns.
+- Agents must not widen scope without documenting the reason in the pull
+  request description.
+- Agents must stop and mark the issue or pull request =needs-design= when
+  architecture is genuinely unresolved, rather than guessing at a
+  resolution.
+- Every pull request must explain:
+  - What changed.
+  - Why it changed.
+  - How it was tested.
+  - Which documentation changed.
+
+* Agent-Specific Notes
+
+Agent contributors follow the same workflow and Definition of Done as
+human contributors, with these additional expectations:
+
+- Read =AGENTS.md= and the architecture/ADR documents before making
+  changes.
+- Do not fix pre-existing issues unrelated to the current task.
+- Do not introduce security vulnerabilities or secrets.
+- When architecture is unresolved, stop and escalate with =needs-design=
+  rather than inventing an undocumented resolution.

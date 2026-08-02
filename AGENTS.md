@@ -9,11 +9,11 @@ Read before making changes:
 - `docs/arch/trader-framework-architecture.org`
 - `docs/arch/trader-framework-requirements.org`
 - `docs/arch/adr-decisions.org`
+- `CONTRIBUTING.org`
 
 Planned (not yet in repo):
 
 - docs/arch/package-boundaries.org
-- CONTRIBUTING.org
 
 Detailed workflows (not yet populated):
 

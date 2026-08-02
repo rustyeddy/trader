@@ -7,5 +7,5 @@ Read and follow:
 @AGENTS.md
 @docs/arch/trader-framework-architecture.org
 @docs/arch/adr-decisions.org
-- CONTRIBUTING.org (add to repo, then include here with @)
+@CONTRIBUTING.org
 
