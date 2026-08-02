@@ -15,35 +15,35 @@ const (
 	FormatMarkdown
 )
 
-// column is one rendered column: a header, an alignment, and its cells.
-type column struct {
-	header string
-	right  bool
-	cells  []string
+// Column is one rendered column: a header, an alignment, and its cells.
+type Column struct {
+	Header string
+	Right  bool
+	Cells  []string
 }
 
-// renderTable lays out columns as an aligned org or markdown table.  Alignment
+// RenderTable lays out columns as an aligned org or markdown table.  Alignment
 // is cosmetic in both formats, but keeps the checked-in docs readable and
 // makes regeneration diffs small.
-func renderTable(f Format, cols []column) string {
+func RenderTable(f Format, cols []Column) string {
 	rows := 0
 	for _, c := range cols {
-		rows = max(rows, len(c.cells))
+		rows = max(rows, len(c.Cells))
 	}
 
 	// Column widths are counted in runes, not bytes: the "—" used for
 	// unrepresentable values is three bytes wide but one column wide.
 	width := make([]int, len(cols))
 	for i, c := range cols {
-		width[i] = utf8.RuneCountInString(c.header)
-		for _, v := range c.cells {
+		width[i] = utf8.RuneCountInString(c.Header)
+		for _, v := range c.Cells {
 			width[i] = max(width[i], utf8.RuneCountInString(v))
 		}
 	}
 
 	pad := func(i int, s string) string {
 		gap := strings.Repeat(" ", width[i]-utf8.RuneCountInString(s))
-		if cols[i].right {
+		if cols[i].Right {
 			return gap + s
 		}
 		return s + gap
@@ -53,7 +53,7 @@ func renderTable(f Format, cols []column) string {
 
 	b.WriteString("|")
 	for i, c := range cols {
-		b.WriteString(" " + pad(i, c.header) + " |")
+		b.WriteString(" " + pad(i, c.Header) + " |")
 	}
 	b.WriteString("\n")
 
@@ -62,7 +62,7 @@ func renderTable(f Format, cols []column) string {
 	for i := range cols {
 		rule := strings.Repeat("-", width[i]+2)
 		if f == FormatMarkdown {
-			if cols[i].right {
+			if cols[i].Right {
 				rule = strings.Repeat("-", width[i]+1) + ":"
 			}
 			b.WriteString(rule + "|")
@@ -81,8 +81,8 @@ func renderTable(f Format, cols []column) string {
 		b.WriteString("|")
 		for i, c := range cols {
 			v := ""
-			if r < len(c.cells) {
-				v = c.cells[r]
+			if r < len(c.Cells) {
+				v = c.Cells[r]
 			}
 			b.WriteString(" " + pad(i, v) + " |")
 		}
@@ -90,6 +90,36 @@ func renderTable(f Format, cols []column) string {
 	}
 
 	return b.String()
+}
+
+// ValidateTable checks that rendered text really is a table: every line is a
+// row, and every row has the same column count.  Sibling studies apply it to
+// their own fragments, so it returns an error rather than taking a *testing.T.
+func ValidateTable(body string) error {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if len(lines) < 3 {
+		return fmt.Errorf("want header, rule, and at least one row, got %d lines",
+			len(lines))
+	}
+
+	// The org rule row separates columns with "+", so count both delimiters
+	// to compare column counts across formats.
+	delims := func(s string) int {
+		return strings.Count(s, "|") + strings.Count(s, "+")
+	}
+
+	want := delims(lines[0])
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "|") {
+			return fmt.Errorf("line %d is not a table row: %q", i, ln)
+		}
+		if got := delims(ln); got != want {
+			return fmt.Errorf("line %d has %d columns, want %d: %q",
+				i, got, want, ln)
+		}
+	}
+
+	return nil
 }
 
 // code wraps an inline literal in the target format's verbatim markup.
@@ -100,8 +130,8 @@ func code(f Format, s string) string {
 	return "=" + s + "="
 }
 
-// commas groups an integer with thousands separators.
-func commas(v int64) string {
+// Commas groups an integer with thousands separators.
+func Commas(v int64) string {
 	s := fmt.Sprintf("%d", v)
 	neg := strings.HasPrefix(s, "-")
 	if neg {
@@ -146,41 +176,41 @@ func Fragments(f Format) map[string]string {
 	frag := map[string]string{}
 
 	// Asset representation matrix -------------------------------------------
-	cols := []column{
-		{header: "Class", cells: pluck(Assets, func(a Asset) string { return a.Class })},
-		{header: "Symbol", cells: pluck(Assets, func(a Asset) string { return a.Symbol })},
-		{header: "Price", right: true, cells: pluck(Assets, func(a Asset) string { return a.Price })},
-		{header: "Tick", right: true, cells: pluck(Assets, func(a Asset) string { return a.TickSize })},
-		{header: "Dec", right: true, cells: pluck(Assets, func(a Asset) string { return fmt.Sprint(a.Decimals) })},
+	cols := []Column{
+		{Header: "Class", Cells: pluck(Assets, func(a Asset) string { return a.Class })},
+		{Header: "Symbol", Cells: pluck(Assets, func(a Asset) string { return a.Symbol })},
+		{Header: "Price", Right: true, Cells: pluck(Assets, func(a Asset) string { return a.Price })},
+		{Header: "Tick", Right: true, Cells: pluck(Assets, func(a Asset) string { return a.TickSize })},
+		{Header: "Dec", Right: true, Cells: pluck(Assets, func(a Asset) string { return fmt.Sprint(a.Decimals) })},
 	}
 	for i, sc := range Candidates {
 		cells := make([]string, 0, len(Assets))
 		for _, a := range Assets {
 			cells = append(cells, scaledCells(a.Price)[i])
 		}
-		cols = append(cols, column{header: sc.Name, right: true, cells: cells})
+		cols = append(cols, Column{Header: sc.Name, Right: true, Cells: cells})
 	}
-	frag["asset-matrix"] = renderTable(f, cols)
+	frag["asset-matrix"] = RenderTable(f, cols)
 
 	// Range and headroom ----------------------------------------------------
 	var name, dec, maxp, unit, head []string
 	for _, sc := range Candidates {
 		name = append(name, sc.Name)
 		dec = append(dec, fmt.Sprint(sc.Decimals))
-		maxp = append(maxp, commas(MaxPrice(sc)))
+		maxp = append(maxp, Commas(MaxPrice(sc)))
 		unit = append(unit, FormatDecimal(1, sc))
 		if v, err := ParseDecimal("750000.00", sc); err == nil {
-			head = append(head, commas(Headroom(v, sc))+"x")
+			head = append(head, Commas(Headroom(v, sc))+"x")
 		} else {
 			head = append(head, "n/a")
 		}
 	}
-	frag["range-headroom"] = renderTable(f, []column{
-		{header: "Scale", cells: name},
-		{header: "Decimals", right: true, cells: dec},
-		{header: "Max price", right: true, cells: maxp},
-		{header: "Smallest unit", right: true, cells: unit},
-		{header: "Headroom over 750000.00", right: true, cells: head},
+	frag["range-headroom"] = RenderTable(f, []Column{
+		{Header: "Scale", Cells: name},
+		{Header: "Decimals", Right: true, Cells: dec},
+		{Header: "Max price", Right: true, Cells: maxp},
+		{Header: "Smallest unit", Right: true, Cells: unit},
+		{Header: "Headroom over 750000.00", Right: true, Cells: head},
 	})
 
 	// Price x Quantity margins ----------------------------------------------
@@ -197,18 +227,18 @@ func Fragments(f Format) map[string]string {
 			continue
 		}
 		rsScale = append(rsScale, sc.Name)
-		rsBars = append(rsBars, commas(MaxPriceCeil(v)))
+		rsBars = append(rsBars, Commas(MaxPriceCeil(v)))
 	}
-	frag["rolling-sum"] = renderTable(f, []column{
-		{header: "Scale", cells: rsScale},
-		{header: "Bars of 750000.00 before overflow", right: true, cells: rsBars},
+	frag["rolling-sum"] = RenderTable(f, []Column{
+		{Header: "Scale", Cells: rsScale},
+		{Header: "Bars of 750000.00 before overflow", Right: true, Cells: rsBars},
 	})
 
 	// Sub-quantum values ----------------------------------------------------
-	frag["subquantum"] = renderTable(f, []column{
-		{header: "Value", cells: pluckSub(func(i int) string { return code(f, SubQuantumValues[i].Value) })},
-		{header: "Digits", right: true, cells: pluckSub(func(i int) string { return fmt.Sprint(SubQuantumValues[i].Digits) })},
-		{header: "Note", cells: pluckSub(func(i int) string { return SubQuantumValues[i].Note })},
+	frag["subquantum"] = RenderTable(f, []Column{
+		{Header: "Value", Cells: pluckSub(func(i int) string { return code(f, SubQuantumValues[i].Value) })},
+		{Header: "Digits", Right: true, Cells: pluckSub(func(i int) string { return fmt.Sprint(SubQuantumValues[i].Digits) })},
+		{Header: "Note", Cells: pluckSub(func(i int) string { return SubQuantumValues[i].Note })},
 	})
 
 	// Unsupported quotation formats -----------------------------------------
@@ -219,20 +249,20 @@ func Fragments(f Format) map[string]string {
 		ud = append(ud, q.Decimal)
 		ur = append(ur, q.Reason)
 	}
-	frag["unsupported"] = renderTable(f, []column{
-		{header: "Format", cells: uf},
-		{header: "Example", cells: ue},
-		{header: "Normalizes to", right: true, cells: ud},
-		{header: "Reason", cells: ur},
+	frag["unsupported"] = RenderTable(f, []Column{
+		{Header: "Format", Cells: uf},
+		{Header: "Example", Cells: ue},
+		{Header: "Normalizes to", Right: true, Cells: ud},
+		{Header: "Reason", Cells: ur},
 	})
 
 	return frag
 }
 
 func notionalTable(f Format, scales []Scale) string {
-	cols := []column{
-		{header: "Case", cells: pluckNotional(func(n Notional) string { return n.Name })},
-		{header: "Quantity", right: true, cells: pluckNotional(func(n Notional) string { return commas(n.Quantity) })},
+	cols := []Column{
+		{Header: "Case", Cells: pluckNotional(func(n Notional) string { return n.Name })},
+		{Header: "Quantity", Right: true, Cells: pluckNotional(func(n Notional) string { return Commas(n.Quantity) })},
 	}
 	for _, sc := range scales {
 		cells := make([]string, 0, len(Notionals))
@@ -244,12 +274,12 @@ func notionalTable(f Format, scales []Scale) string {
 			case MulOverflows(p, n.Quantity):
 				cells = append(cells, "OVERFLOW")
 			default:
-				cells = append(cells, commas(MaxPriceCeil(p*n.Quantity))+"x")
+				cells = append(cells, Commas(MaxPriceCeil(p*n.Quantity))+"x")
 			}
 		}
-		cols = append(cols, column{header: sc.Name, right: true, cells: cells})
+		cols = append(cols, Column{Header: sc.Name, Right: true, Cells: cells})
 	}
-	return renderTable(f, cols)
+	return RenderTable(f, cols)
 }
 
 // MaxPriceCeil reports how many times v divides into the int64 ceiling — the
