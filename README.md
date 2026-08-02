@@ -46,6 +46,7 @@ Trader's architecture is guided by a small set of principles:
 - [Contribution guide](CONTRIBUTING.org)
 - [Workflows](docs/workflows/workflows.org)
 - [Testing](docs/workflows/testing.org)
+- [M0 foundation review](docs/reviews/m0-foundation-review.org)
 
 ## Development
 

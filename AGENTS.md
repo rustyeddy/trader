@@ -15,10 +15,10 @@ Planned (not yet in repo):
 
 - docs/arch/package-boundaries.org
 
-Detailed workflows (not yet populated):
+Detailed workflows:
 
 - `docs/workflows/workflows.org`
-- `docs/workflows/testing.org`
+- `docs/workflows/testing.org` (not yet populated)
 
 ## Development
 

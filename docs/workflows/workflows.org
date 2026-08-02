@@ -8,8 +8,8 @@ Rules= in ./docs/arch/adr-decisions.org
 
 ** Testing
 
-All new code must be provided with tests achieving as close to 100%
-code coverage as possible.  
+All new code must be provided with tests achieving the project
+coverage target of 85% or greater, as stated in =AGENTS.md=.
 
 All tests will be written using the Go package testify.
 

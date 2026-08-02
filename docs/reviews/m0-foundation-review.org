@@ -1,0 +1,195 @@
+#+TITLE: M0 Foundation Review
+#+SUBTITLE: Repository and architecture review closing out milestone M0
+#+DATE: [2026-08-02 Sun]
+#+STARTUP: overview indent
+
+* Purpose
+
+This report records the M0 review required by issue #7 (M0-07).  It
+examines the repository as a whole after M0-01 through M0-06 and states
+whether milestone M0 is ready to close.
+
+The review covers the repository at branch
+=claude/m0-07-perform-m0-architecture-review=, based on =main= at commit
+=c225657=.
+
+* Items Reviewed
+
+| Item                                          | Result                          |
+|-----------------------------------------------+---------------------------------|
+| =README.md= accuracy                          | Accurate                        |
+| Architecture / requirements / ADR consistency | Consistent; divergences noted   |
+| =CONTRIBUTING.org= consistency                | Consistent                      |
+| Repository-relative documentation links       | All resolve                     |
+| ADR statuses                                  | Correct                         |
+| Issue and pull-request templates              | *Missing*                       |
+| Package boundaries document                   | *Missing*                       |
+| =Makefile= and CI parity                      | Matches                         |
+| =make check= from a clean checkout            | Passes                          |
+| Speculative empty package tree                | None present                    |
+| Premature implementation                      | None present                    |
+| Live-trading behavior                         | None present                    |
+| Root package documentation                    | Accurate                        |
+| License and module path                       | Correct                         |
+
+** README
+
+=README.md= describes Trader's purpose, project status, design
+principles, documentation index, =Makefile= targets, license, and the
+relationship to the legacy repository.  Every claim matches the
+repository: the =Makefile= targets listed exist, the license is BSD
+2-Clause, and the package-boundaries document is explicitly marked
+=planned= rather than linked.
+
+** Documentation Links
+
+All repository-relative references in =README.md=, =AGENTS.md=,
+=CLAUDE.md=, =CONTRIBUTING.org=, and =docs/= resolve to existing files.
+The single non-resolving path, =docs/arch/package-boundaries.org=, is
+labelled as planned in both =README.md= and =AGENTS.md= and is therefore
+not a broken link.
+
+** ADR Statuses
+
+=docs/arch/adr-decisions.org= contains ADR-001 through ADR-014.  The
+decision index agrees with the =Status= section of every record.  The
+eight =Accepted= records (001, 002, 005, 006, 007, 008, 013, 014) are
+settled boundary decisions.  The six =Proposed= records (003, 004, 009,
+010, 011, 012) correctly cover the areas the architecture document still
+lists as open: identifier encoding, exact numeric backing, journal
+schema, wire protocol, versioning enforcement, and calendar
+representation.  No =Proposed= decision has been prematurely relied upon
+by code, because no domain code exists yet.
+
+** Makefile and CI Parity
+
+=make check= runs =fmt-check=, =vet=, =test=, and =race=.  The CI
+workflow runs the same four targets through =make=, plus a =go mod tidy=
+drift check.  There is no check present in one and absent from the
+other.  =make check= passes from a clean checkout of this branch.
+
+** Repository Contents
+
+The Go surface is a single file, =trader.go=, declaring =package trader=
+with a one-line doc comment.  There is no speculative package tree, no
+partially implemented domain type, and no broker, transport, or
+live-session code.  Nothing in the repository can place an order, so the
+paper-trading default required by ADR-014 is trivially satisfied.
+
+=go.mod= declares module path =github.com/rustyeddy/trader=, matching the
+import paths used throughout the architecture document, and =LICENSE=
+contains the BSD 2-Clause text that =README.md= advertises.
+
+* Problems Found
+
+** P1 (high): Issue and pull-request templates are absent
+
+Issue #5 (M0-04 "Add pull-request and issue templates") is closed, but
+=.github/= contains only =copilot-instructions.md= and
+=workflows/ci.yml=.  There is no =.github/ISSUE_TEMPLATE/= directory and
+no =pull_request_template.md=.  =CONTRIBUTING.org= requires every pull
+request to explain what changed, why, how it was tested, and which
+documentation changed, and defines a Definition of Done that a template
+is meant to make visible at authoring time.  That requirement is
+currently unenforced by tooling.
+
+** P2 (high): Package boundaries document is absent
+
+Issue #6 (M0-06 "Document package boundaries and repository rules") is
+closed, but =docs/arch/package-boundaries.org= does not exist.  Both
+=AGENTS.md= and =README.md= reference it as planned.  The architecture
+document requires dependency direction to be enforced mechanically in
+CI; without the boundaries document, neither the rules nor their
+enforcement mechanism are specified, and M1 will begin adding packages
+with no written boundary contract.
+
+** P3 (medium): Milestone plan is not in the repository
+
+Issue #7 cites =docs/plans/Trader-M0-TODO.org= as its source, and the
+architecture document (Appendix D) cites a companion
+=Trader-GitHub-Project-Plan.org=.  Neither file is in the repository, so
+the milestone breakdown and per-issue acceptance criteria are not
+version-controlled alongside the architecture they implement.
+
+** P4 (low): Contradictory test-coverage targets
+
+=AGENTS.md= set a coverage target of 85% or greater, while
+=docs/workflows/workflows.org= asked for "as close to 100% code coverage
+as possible".  Corrected; see below.
+
+** P5 (low): =AGENTS.md= described populated workflow docs as empty
+
+=AGENTS.md= listed both =docs/workflows/workflows.org= and
+=docs/workflows/testing.org= as "not yet populated".  =workflows.org= has
+content; only =testing.org= remains a stub.  Corrected; see below.
+
+* Corrections Made
+
+- =AGENTS.md=: the "Detailed workflows" heading no longer claims that
+  =workflows.org= is unpopulated; the =(not yet populated)= note is now
+  attached to =testing.org= alone.
+- =docs/workflows/workflows.org=: the testing coverage statement now
+  cites the 85% project target from =AGENTS.md= instead of an
+  incompatible "close to 100%" goal.
+- Added this report at =docs/reviews/m0-foundation-review.org= and linked
+  it from the =README.md= documentation index.
+
+P1, P2, and P3 were *not* corrected in this pull request.  Each belongs
+to a separate closed issue (M0-04, M0-06) or to plan-document
+maintenance, and =CONTRIBUTING.org= directs contributors not to widen a
+pull request's scope.  They are recorded here so the milestone is not
+closed over them.
+
+* Deferred Questions
+
+These questions are recorded rather than answered.  None blocks M1.
+
+1. *Default log destination.*  =AGENTS.md= specifies a default log file
+   of =/var/log/trader.log=, which is not writable by an unprivileged
+   user on a typical Linux host.  Whether the default should fall back to
+   stderr, to a user-writable path, or fail loudly is undecided.
+2. *Requirements versus ADR-007.*  The requirements document states that
+   applications will interact with the broker "through the account".
+   ADR-007 splits this into a =broker.Account= handle and an immutable
+   =account.Snapshot=.  The architecture document explains the divergence,
+   but the requirements document has not been annotated to point at the
+   decision that supersedes its phrasing.
+3. *Dependency-rule enforcement mechanism.*  The architecture document
+   lists =depguard=, =go list=, custom vet analyzers, and =apidiff= as
+   candidates.  No mechanism has been selected, and CI runs none of them.
+4. *Testify dependency.*  =AGENTS.md= mandates testify, but the module has
+   no dependencies and no =go.sum=.  The CI tidy check is written to
+   tolerate a missing =go.sum=; that tolerance should be removed once the
+   first dependency lands.
+5. The open design questions in the architecture document (intent style,
+   hedged positions, asset-class scope, multi-account live sessions,
+   simulator realism, strategy state ownership, journal durability) remain
+   open and are the correct input to M1 and M3 planning.
+
+* Recommendation
+
+*Keep M0 open.*
+
+M0's documentation core is sound: the README, architecture, ADRs, and
+contribution guide agree with one another and with the repository, all
+links resolve, CI mirrors the =Makefile=, =make check= passes from a
+clean checkout, and no premature implementation or live-trading behavior
+has been introduced.
+
+However, two M0 deliverables are missing from =main= despite their issues
+being closed: the issue and pull-request templates (M0-04) and the
+package boundaries document (M0-06).  Both are guardrails intended to be
+in place *before* M1 begins adding packages, so closing M0 without them
+would remove the protection M0 exists to provide.
+
+Recommended actions before closing M0:
+
+1. Reopen or re-file M0-04 and land =.github/ISSUE_TEMPLATE/= plus
+   =pull_request_template.md= aligned with the Definition of Done.
+2. Reopen or re-file M0-06 and land =docs/arch/package-boundaries.org=,
+   including the dependency rules and the CI mechanism that enforces
+   them.
+3. Optionally, commit the milestone plan under =docs/plans/= so issue
+   sources are version-controlled.
+
+Once P1 and P2 are resolved, M0 may be closed without a further review.
