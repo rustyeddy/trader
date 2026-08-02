@@ -261,18 +261,29 @@ Final review of [[https://github.com/rustyeddy/trader/pull/45][PR #45]] confirme
 scale of =1e8=.  The original review concerns were addressed, CI passed, and
 [[https://github.com/rustyeddy/trader/issues/33][#33]] is complete for purposes of ADR-004.
 
-Three non-blocking cleanup items remain in the study harness and must not be
-mistaken for changes to the selected scale:
+Three non-blocking cleanup items were raised against the study harness.  They
+must not be mistaken for changes to the selected scale, and all three were
+corrected in [[https://github.com/rustyeddy/trader/pull/46][PR #46]]:
 
-- Documentation should say that exact parsing and formatting paths avoid
-  =float64=; the study uses =float64= in a reporting-only margin comparison.
-- =FormatFixed= can emit negative zero after truncation and should suppress the
-  sign when the rendered magnitude is zero.
-- The =Scale= documentation must describe exact scaling and rejection of excess
-  precision, not rounding.
+- Documentation claimed the study used no =float64= at all, while a
+  reporting-only margin comparison did.  That comparison is now integer
+  arithmetic, and =TestNoFloatingPoint= fails on any float identifier or
+  literal anywhere in the package.  The guarantee that matters — exact parsing
+  and formatting never passing through binary floating point — held throughout.
+- =FormatFixed= could emit negative zero after truncation.  The sign is now
+  suppressed when the rendered magnitude is zero.
+- The =Scale= documentation described storage as rounding.  It now states that
+  a value is accepted only if it scales to an integer exactly, and excess
+  precision is rejected.
 
-These items do not weaken the =1e8= decision.  They are follow-up concerns for
-[[https://github.com/rustyeddy/trader/issues/38][#38]] and [[https://github.com/rustyeddy/trader/issues/39][#39]], especially if the study helpers are reused as implementation references.
+These items never weakened the =1e8= decision, and the study helpers are safe
+to read as implementation references on these three points.  The production
+rounding and overflow policy remains [[https://github.com/rustyeddy/trader/issues/38][#38]]'s decision, and the exact parsing
+boundary, including the =math.MinInt64= range gap, remains [[https://github.com/rustyeddy/trader/issues/39][#39]]'s.
+
+Related decisions this issue deliberately did not settle: scaled =Quantity=
+multiplication semantics remain with [[https://github.com/rustyeddy/trader/issues/36][#36]]; widened intermediates, accumulation,
+and rounding remain with [[https://github.com/rustyeddy/trader/issues/38][#38]]; exact parsing boundaries remain with [[https://github.com/rustyeddy/trader/issues/39][#39]].
 
 ** Exact input and output boundaries
 
