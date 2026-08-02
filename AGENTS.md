@@ -41,7 +41,13 @@ Detailed workflows (not yet populated):
 
 ## Testing 
 
+### Unit Tests
+
 - For all new or changed code must be accompanied by testing.
 - We will use the Go testify package for testing
 - We will shoot for test coverage of 85% or greater
 - Tests need to target corner, edge and failure mode completely
+
+### System Tests
+
+TBD
