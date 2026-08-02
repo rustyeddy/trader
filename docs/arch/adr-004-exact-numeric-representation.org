@@ -75,11 +75,14 @@ The validation evidence is in =test/internal/numericstudy=, a test-only spike th
 parses and formats decimal text directly to and from scaled =int64= without
 passing through =float64=.
 
-No test compares the generated tables against the text below, so these tables
-can drift; regenerate and re-paste them whenever the asset matrix changes:
+Every table below sits between =# BEGIN numericstudy:= and =# END
+numericstudy:= markers and is generated from that package.
+=TestGeneratedTables= fails if any region no longer matches what the code
+produces, so these tables cannot drift from the evidence.  Do not hand-edit
+inside the markers; regenerate instead:
 
 #+begin_src sh
-go test ./test/internal/numericstudy/ -run TestGenerateReport -v
+go test ./test/internal/numericstudy/ -run TestGeneratedTables -update
 #+end_src
 
 **** Asset representation matrix
@@ -88,18 +91,20 @@ Stored =int64= at each candidate scale.  =—= means the value needs more
 decimal places than the scale can hold, and is therefore rejected rather than
 silently rounded.
 
-| Class   | Symbol    |          Price |       Tick | Dec |     1e5 |          1e6 |            1e8 |             1e9 |
-|---------+-----------+----------------+------------+-----+---------+--------------+----------------+-----------------|
-| FX      | EUR/USD   |        1.08473 |    0.00001 |   5 |  108473 |      1084730 |      108473000 |      1084730000 |
-| FX      | USD/JPY   |        147.325 |      0.001 |   3 | 14732500 |    147325000 |    14732500000 |    147325000000 |
-| Equity  | SPY       |         700.12 |       0.01 |   2 | 70012000 |    700120000 |    70012000000 |    700120000000 |
-| Equity  | BRK.A     |      750000.00 |       0.01 |   2 | 75000000000 | 750000000000 | 75000000000000 | 750000000000000 |
-| Equity  | sub-penny |         0.0001 |     0.0001 |   4 |      10 |          100 |          10000 |          100000 |
-| Futures | ES        |        6250.25 |       0.25 |   2 | 625025000 |   6250250000 |   625025000000 |   6250250000000 |
-| Futures | ZN        |     110.515625 |   0.015625 |   6 |       — |    110515625 |    11051562500 |    110515625000 |
-| Crypto  | BTC/USD   | 150000.12345678 | 0.00000001 |  8 |       — |            — | 15000012345678 | 150000123456780 |
-| Crypto  | SHIB/USD  |     0.00000001 | 0.00000001 |   8 |       — |            — |              1 |              10 |
-| Rate    | financing |       0.000125 |   0.000001 |   6 |       — |          125 |          12500 |          125000 |
+# BEGIN numericstudy:asset-matrix
+| Class   | Symbol    |           Price |       Tick | Dec |         1e5 |          1e6 |            1e8 |             1e9 |
+|---------+-----------+-----------------+------------+-----+-------------+--------------+----------------+-----------------|
+| FX      | EUR/USD   |         1.08473 |    0.00001 |   5 |      108473 |      1084730 |      108473000 |      1084730000 |
+| FX      | USD/JPY   |         147.325 |      0.001 |   3 |    14732500 |    147325000 |    14732500000 |    147325000000 |
+| Equity  | SPY       |          700.12 |       0.01 |   2 |    70012000 |    700120000 |    70012000000 |    700120000000 |
+| Equity  | BRK.A     |       750000.00 |       0.01 |   2 | 75000000000 | 750000000000 | 75000000000000 | 750000000000000 |
+| Equity  | SUB-PENNY |          0.0001 |     0.0001 |   4 |          10 |          100 |          10000 |          100000 |
+| Futures | ES        |         6250.25 |       0.25 |   2 |   625025000 |   6250250000 |   625025000000 |   6250250000000 |
+| Futures | ZN        |      110.515625 |   0.015625 |   6 |           — |    110515625 |    11051562500 |    110515625000 |
+| Crypto  | BTC/USD   | 150000.12345678 | 0.00000001 |   8 |           — |            — | 15000012345678 | 150000123456780 |
+| Crypto  | SHIB/USD  |      0.00000001 | 0.00000001 |   8 |           — |            — |              1 |              10 |
+| Rate    | FINANCING |        0.000125 |   0.000001 |   6 |           — |          125 |          12500 |          125000 |
+# END numericstudy:asset-matrix
 
 1e5 and 1e6 are disqualified outright: neither can represent satoshi
 precision, and 1e5 cannot represent the 64ths that Treasury futures expand to.
@@ -107,12 +112,14 @@ Both 1e8 and 1e9 represent every intended asset class exactly.
 
 **** Range and headroom
 
-| Scale | Decimals |      Max price |  Smallest unit | Headroom over 750000.00 |
-|-------+----------+----------------+----------------+-------------------------|
-| 1e5   |        5 | 92,233,720,368,547 |        0.00001 |           122,978,293 x |
-| 1e6   |        6 |  9,223,372,036,854 |       0.000001 |            12,297,829 x |
-| 1e8   |        8 |     92,233,720,368 |     0.00000001 |               122,978 x |
-| 1e9   |        9 |      9,223,372,036 |    0.000000001 |                12,297 x |
+# BEGIN numericstudy:range-headroom
+| Scale | Decimals |          Max price | Smallest unit | Headroom over 750000.00 |
+|-------+----------+--------------------+---------------+-------------------------|
+| 1e5   |        5 | 92,233,720,368,547 |       0.00001 |            122,978,293x |
+| 1e6   |        6 |  9,223,372,036,854 |      0.000001 |             12,297,829x |
+| 1e8   |        8 |     92,233,720,368 |    0.00000001 |                122,978x |
+| 1e9   |        9 |      9,223,372,036 |   0.000000001 |                 12,297x |
+# END numericstudy:range-headroom
 
 At 1e8 the maximum representable price is ~92.2 billion, roughly 122,000x the
 highest-priced listed equity.  Storage range is not the binding constraint at
@@ -124,12 +131,15 @@ Intermediate arithmetic decides it.  Margin to the =int64= ceiling for
 =Price x Quantity=, using whole unscaled quantities so only one operand
 carries a scale and no descaling divide is required:
 
-| Case             |      Quantity |     1e8 |   1e9 |
-|------------------+---------------+---------+-------|
-| BRK.A block      |        10,000 |    12 x |   1 x |
-| FX 10M notional  |    10,000,000 |  8503 x | 850 x |
-| FX 1B notional   | 1,000,000,000 |    85 x |   9 x |
-| BTC 1k coins     |         1,000 |   615 x |  61 x |
+# BEGIN numericstudy:notional-8v9
+| Case            |          Quantity |        1e8 |      1e9 |
+|-----------------+-------------------+------------+----------|
+| BRK.A block     |            10,000 |        12x |       1x |
+| FX 10M notional |        10,000,000 |     8,502x |     850x |
+| FX 1B notional  |     1,000,000,000 |        85x |       8x |
+| BTC 1k coins    |             1,000 |       614x |      61x |
+| SHIB 1e12 units | 1,000,000,000,000 | 9,223,372x | 922,337x |
+# END numericstudy:notional-8v9
 
 1e9 leaves the largest realistic notional essentially at the ceiling — a
 BRK.A-sized block consumes the entire =int64= range with 1x to spare.  1e8
@@ -143,6 +153,22 @@ like =Price x Rate=, the margins above no longer apply, and the operation
 requires a widened intermediate regardless of price scale.  That would not
 change the 1e8 selection — it still beats 1e9 by 10x — but it would move
 =Price x Quantity= from "safe in =int64=" to "must use the widened path".
+
+***** Margins at every candidate scale
+
+For completeness, the same product margins across all four candidates.  The
+=n/a= cells are assets the narrow scales cannot represent at all, which is why
+their apparently generous margins are not evidence of safety.
+
+# BEGIN numericstudy:notional-all
+| Case            |          Quantity |        1e5 |      1e6 |        1e8 |      1e9 |
+|-----------------+-------------------+------------+----------+------------+----------|
+| BRK.A block     |            10,000 |    12,297x |   1,229x |        12x |       1x |
+| FX 10M notional |        10,000,000 | 8,502,919x | 850,291x |     8,502x |     850x |
+| FX 1B notional  |     1,000,000,000 |    85,029x |   8,502x |        85x |       8x |
+| BTC 1k coins    |             1,000 |        n/a |      n/a |       614x |      61x |
+| SHIB 1e12 units | 1,000,000,000,000 |        n/a |      n/a | 9,223,372x | 922,337x |
+# END numericstudy:notional-all
 
 **** Consequences for intermediate arithmetic
 
@@ -160,10 +186,14 @@ Two findings belong to [[https://github.com/rustyeddy/trader/issues/38][#38]] an
    months of M1 data.  Rolling sums and averages need a widened accumulator or
    a running-mean formulation, not a raw =int64= total.
 
+# BEGIN numericstudy:rolling-sum
 | Scale | Bars of 750000.00 before overflow |
 |-------+-----------------------------------|
+| 1e5   |                       122,978,293 |
+| 1e6   |                        12,297,829 |
 | 1e8   |                           122,978 |
 | 1e9   |                            12,297 |
+# END numericstudy:rolling-sum
 
 **** Tick size stays separate from scale
 
@@ -180,13 +210,15 @@ These are provider quotation *conventions*, not decimal numbers.  Each must be
 normalized to plain decimal text in a provider adapter before reaching =Price=;
 the parser rejects all of them.
 
-| Format                       | Example       | Normalizes to | Reason                                              |
-|------------------------------+---------------+---------------+-----------------------------------------------------|
-| Treasury 32nds               | =110-16=      |         110.5 | =-= is a fraction separator, not a sign             |
-| Treasury 32nds + halves      | =110-16.5=    |    110.515625 | expands to 64ths; needs 6 decimals                  |
-| Grain eighths                | =575'6=       |        575.75 | apostrophe-delimited eighths of a cent              |
-| Scientific notation          | =1.5e-7=      |    0.00000015 | exponent form rejected; expand before parsing       |
-| Grouped thousands            | =750,000.00=  |     750000.00 | locale grouping is display, not exact input         |
+# BEGIN numericstudy:unsupported
+| Format                              | Example      | Normalizes to | Reason                                                    |
+|-------------------------------------+--------------+---------------+-----------------------------------------------------------|
+| Treasury 32nds (dash)               | =110-16=     |         110.5 | not decimal text; '-' is a fraction separator, not a sign |
+| Treasury 32nds plus halves/quarters | =110-16.5=   |    110.515625 | fraction of a 32nd; expands to 64ths, needing 6 decimals  |
+| Grain fractions in eighths          | =575'6=      |        575.75 | apostrophe-delimited eighths of a cent                    |
+| Scientific notation                 | =1.5e-7=     |    0.00000015 | exponent form is rejected; expand before parsing          |
+| Grouped thousands                   | =750,000.00= |     750000.00 | locale grouping is a display concern, not an exact input  |
+# END numericstudy:unsupported
 
 All of these are representable once normalized, so no intended instrument is
 excluded by the 1e8 choice — the constraint is on the adapter layer, not the
@@ -199,11 +231,13 @@ satisfies the precision policy.  Values finer than the 1e8 quantum are
 syntactically valid but not representable, and are rejected rather than
 silently rounded:
 
-| Value         | Digits | Note                                        |
-|---------------+--------+---------------------------------------------|
-| =0.000000015= |      9 | =1.5e-8= expanded; half of the 1e8 quantum  |
-| =0.000000001= |      9 | one 1e9 unit; below the 1e8 quantum         |
-| =1.000000005= |      9 | ordinary price carrying one digit too many  |
+# BEGIN numericstudy:subquantum
+| Value         | Digits | Note                                         |
+|---------------+--------+----------------------------------------------|
+| =0.000000015= |      9 | 1.5e-8 expanded; half of the 1e8 quantum     |
+| =0.000000001= |      9 | one 1e9 unit; below the 1e8 quantum entirely |
+| =1.000000005= |      9 | ordinary price carrying one digit too many   |
+# END numericstudy:subquantum
 
 Each is accepted at 1e9, confirming the failure is the precision policy rather
 than a parser defect (=TestSubQuantumValuesRejected=).  Whether adapters reject

@@ -23,19 +23,30 @@ Or write them straight to a file, with no test framing around them:
 NUMERICSTUDY_REPORT=report.org go test ./test/internal/numericstudy/ -run TestGenerateReport
 ```
 
-The tables come out as org-mode and paste directly into the ADR. They are
-computed from the same `Assets`, `Notionals`, and `Rates` data the assertions
-exercise, so regenerating always reflects current evidence.
-
-No test compares the generated output against the checked-in ADR text, so the
-tables in the document **can** drift. Regenerate and re-paste whenever
-`Assets`, `Notionals`, `Rates`, or `Candidates` change.
-
 Run everything, including the assertions behind the findings below:
 
 ```sh
 go test ./test/internal/numericstudy/ -v
 ```
+
+## The tables are generated, not hand-written
+
+Every table in this README and in ADR-004 sits between `numericstudy:` markers
+and is generated from `Assets`, `Notionals`, `Rates`, and `Candidates`.
+`TestGeneratedTables` fails if any region drifts from what the code produces,
+so **the documents cannot silently fall out of date**.
+
+Change the data, then regenerate both documents in place:
+
+```sh
+go test ./test/internal/numericstudy/ -run TestGeneratedTables -update
+```
+
+Do not hand-edit inside the markers — the next run will overwrite it, and CI
+fails in the meantime. Two companion tests keep the mechanism honest:
+`TestEveryFragmentIsUsed` catches a generated table that no document embeds,
+and `TestFragmentsRenderInBothFormats` checks the org and markdown renderers
+agree on structure.
 
 ## Recommendation: scale 1e8
 
@@ -58,12 +69,15 @@ billion, still far above anything we intend to trade.
 carries a scale and no descaling divide is needed. This is the favorable case —
 see the caveat below the table:
 
-| Case                    | Quantity      |   1e8 |  1e9 |
-| ----------------------- | ------------- | ----: | ---: |
-| BRK.A block             | 10,000        |  12×  |  1×  |
-| FX 10M notional         | 10,000,000    | 8503× | 850× |
-| FX 1B notional          | 1,000,000,000 |   85× |   9× |
-| BTC 1k coins            | 1,000         |  615× |  61× |
+<!-- BEGIN numericstudy:notional-8v9 -->
+| Case            |          Quantity |        1e8 |      1e9 |
+|-----------------|------------------:|-----------:|---------:|
+| BRK.A block     |            10,000 |        12x |       1x |
+| FX 10M notional |        10,000,000 |     8,502x |     850x |
+| FX 1B notional  |     1,000,000,000 |        85x |       8x |
+| BTC 1k coins    |             1,000 |       614x |      61x |
+| SHIB 1e12 units | 1,000,000,000,000 | 9,223,372x | 922,337x |
+<!-- END numericstudy:notional-8v9 -->
 
 1e9 leaves the largest realistic notional essentially *at* the ceiling — a
 BRK.A-sized block consumes the entire `int64` range with 1× to spare. 1e8 buys
@@ -101,10 +115,14 @@ path is valid.
 A plain `int64` sum of BRK.A-priced bars overflows after ~122,978 bars at 1e8 —
 under three months of M1 data.
 
+<!-- BEGIN numericstudy:rolling-sum -->
 | Scale | Bars of 750000.00 before overflow |
-| ----- | --------------------------------: |
+|-------|----------------------------------:|
+| 1e5   |                       122,978,293 |
+| 1e6   |                        12,297,829 |
 | 1e8   |                           122,978 |
 | 1e9   |                            12,297 |
+<!-- END numericstudy:rolling-sum -->
 
 Rolling sums and averages need a widened accumulator or a running-mean
 formulation, not a raw `int64` total.
@@ -125,13 +143,15 @@ These are provider quotation *conventions*, not decimal numbers. The parser
 rejects all of them; each must be normalized to plain decimal text in a
 provider adapter before reaching `Price`.
 
-| Format                  | Example      | Normalizes to | Reason                                        |
-| ----------------------- | ------------ | ------------- | --------------------------------------------- |
-| Treasury 32nds          | `110-16`     | 110.5         | `-` is a fraction separator, not a sign       |
-| Treasury 32nds + halves | `110-16.5`   | 110.515625    | expands to 64ths; needs 6 decimals            |
-| Grain eighths           | `575'6`      | 575.75        | apostrophe-delimited eighths of a cent        |
-| Scientific notation     | `1.5e-7`     | 0.00000015    | exponent form rejected; expand before parsing |
-| Grouped thousands       | `750,000.00` | 750000.00     | locale grouping is display, not exact input   |
+<!-- BEGIN numericstudy:unsupported -->
+| Format                              | Example      | Normalizes to | Reason                                                    |
+|-------------------------------------|--------------|--------------:|-----------------------------------------------------------|
+| Treasury 32nds (dash)               | `110-16`     |         110.5 | not decimal text; '-' is a fraction separator, not a sign |
+| Treasury 32nds plus halves/quarters | `110-16.5`   |    110.515625 | fraction of a 32nd; expands to 64ths, needing 6 decimals  |
+| Grain fractions in eighths          | `575'6`      |        575.75 | apostrophe-delimited eighths of a cent                    |
+| Scientific notation                 | `1.5e-7`     |    0.00000015 | exponent form is rejected; expand before parsing          |
+| Grouped thousands                   | `750,000.00` |     750000.00 | locale grouping is a display concern, not an exact input  |
+<!-- END numericstudy:unsupported -->
 
 All are representable once normalized, so **no intended instrument is excluded
 by the 1e8 choice** — the constraint lands on the adapter layer, not on the
@@ -144,11 +164,13 @@ fits the precision policy. A value finer than the 1e8 quantum is rejected even
 though it is syntactically valid — `1.5e-8` expands to `0.000000015`, which
 needs 9 decimals and **cannot** be represented at 1e8.
 
-| Value | Digits | Note |
-| --- | ---: | --- |
-| `0.000000015` | 9 | `1.5e-8` expanded; half of the 1e8 quantum |
-| `0.000000001` | 9 | one 1e9 unit; below the 1e8 quantum entirely |
-| `1.000000005` | 9 | ordinary price carrying one digit too many |
+<!-- BEGIN numericstudy:subquantum -->
+| Value         | Digits | Note                                         |
+|---------------|-------:|----------------------------------------------|
+| `0.000000015` |      9 | 1.5e-8 expanded; half of the 1e8 quantum     |
+| `0.000000001` |      9 | one 1e9 unit; below the 1e8 quantum entirely |
+| `1.000000005` |      9 | ordinary price carrying one digit too many   |
+<!-- END numericstudy:subquantum -->
 
 `TestSubQuantumValuesRejected` pins this: each is rejected at 1e8 with
 `ErrTooManyDecimals` and accepted at 1e9, confirming the failure is the
@@ -173,10 +195,12 @@ symmetric.
 | File               | Contents                                                                                |
 |--------------------|-----------------------------------------------------------------------------------------|
 | `scale.go`         | `ParseDecimal`, `FormatDecimal`, `FormatFixed`, `Canonical`, range and overflow helpers |
-| `assets.go`        | The asset matrix, notional and rate cases, unsupported-quotation list — all as data     |
+| `assets.go`        | The asset matrix, notional, rate, and sub-quantum cases — all as data                   |
+| `tables.go`        | Renders each table fragment in org or markdown from that data                           |
 | `scale_test.go`    | Round-trip, tick, boundary, and rejection tests                                         |
 | `overflow_test.go` | Intermediate-arithmetic evidence, plus 128-bit mul/div study helpers                    |
-| `report_test.go`   | Generates the org tables above                                                          |
+| `golden_test.go`   | Verifies (and with `-update`, rewrites) the generated regions in this file and the ADR  |
+| `report_test.go`   | Prints the full report for reading                                                      |
 
 Two deliberate choices in `scale.go`:
 
