@@ -9,10 +9,15 @@ import (
 
 // Scale is a candidate fixed internal representation scale for Price.
 //
-// A decimal value v is stored as the int64 round(v * Factor), where Factor is
-// exactly 10**Decimals.  The scale is a property of the representation, not of
-// any instrument: instrument tick size, permitted increment, and display
-// precision are separate concerns (see TickSize on Asset and FormatFixed).
+// A decimal value v is stored as the int64 v * Factor, where Factor is exactly
+// 10**Decimals.  There is no rounding: a value is accepted only if it scales
+// to an integer exactly, and ParseDecimal rejects anything finer with
+// ErrTooManyDecimals.  The eventual production rounding policy is #38's
+// decision, not this study's.
+//
+// The scale is a property of the representation, not of any instrument:
+// instrument tick size, permitted increment, and display precision are
+// separate concerns (see TickSize on Asset and FormatFixed).
 type Scale struct {
 	Name     string
 	Decimals int
@@ -180,10 +185,20 @@ func FormatFixed(v int64, sc Scale, decimals int) string {
 		}
 		out += "." + f
 	}
-	if neg {
+
+	// Truncating toward zero can erase the whole magnitude, e.g. -1 at scale
+	// 1e9 shown with 2 decimals.  Emit "0.00", not "-0.00": the sign would
+	// claim a precision the display does not have.
+	if neg && !isDisplayZero(out) {
 		out = "-" + out
 	}
 	return out
+}
+
+// isDisplayZero reports whether rendered decimal text is all zero digits, so
+// a sign would be meaningless.
+func isDisplayZero(s string) bool {
+	return strings.Trim(s, "0.") == ""
 }
 
 // Canonical returns the canonical decimal text for s, independent of any

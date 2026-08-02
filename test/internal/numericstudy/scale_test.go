@@ -3,6 +3,7 @@ package numericstudy
 import (
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -229,6 +230,48 @@ func TestFormatFixed(t *testing.T) {
 	assert.Equal(t, "1.08473", FormatFixed(v, sc, 5))
 	assert.Equal(t, "1.084730000000", FormatFixed(v, sc, 12))
 	assert.Equal(t, "-1.08473", FormatFixed(-v, sc, 5))
+}
+
+// TestFormatFixedNoNegativeZero pins the sign rule at low display precision.
+// Truncating toward zero can erase the entire magnitude, and a "-0.00" would
+// assert a precision the display does not have.
+func TestFormatFixedNoNegativeZero(t *testing.T) {
+	sc := scaleByName(t, "1e9")
+
+	cases := []struct {
+		name     string
+		v        int64
+		decimals int
+		want     string
+	}{
+		{"smallest negative, no decimals", -1, 0, "0"},
+		{"smallest negative, 2 decimals", -1, 2, "0.00"},
+		{"smallest negative, full scale", -1, 9, "-0.000000001"},
+		{"truncates to zero at 2dp", -4_000_000, 2, "0.00"},
+		{"survives at 3dp", -4_000_000, 3, "-0.004"},
+		{"exact zero", 0, 2, "0.00"},
+		{"negative one still signed", -1_000_000_000, 2, "-1.00"},
+		{"rounds nothing away", -1_500_000_000, 0, "-1"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, FormatFixed(c.v, sc, c.decimals))
+		})
+	}
+
+	// Sweep the range where truncation bites: no output may be a signed zero.
+	for _, sc := range Candidates {
+		for _, v := range []int64{-1, -9, -99, -999, -12345, -999999999} {
+			for d := range sc.Decimals + 1 {
+				got := FormatFixed(v, sc, d)
+				if strings.Trim(got, "0.") == "" {
+					assert.NotContains(t, got, "-",
+						"scale %s, v=%d, %d decimals: signed zero", sc.Name, v, d)
+				}
+			}
+		}
+	}
 }
 
 func TestCanonical(t *testing.T) {

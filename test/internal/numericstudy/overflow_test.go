@@ -46,20 +46,27 @@ func TestScaleMargins(t *testing.T) {
 	worst := Notionals[0] // BRK.A block: highest price x institutional size
 	require.Equal(t, "BRK.A block", worst.Name)
 
-	margin := func(name string) float64 {
+	// Computed in integer arithmetic throughout: a study arguing against
+	// binary floating point should not lean on it to reach its conclusion.
+	product := func(name string) int64 {
 		sc := scaleByName(t, name)
 		p, err := ParseDecimal(worst.Price, sc)
 		require.NoError(t, err)
 		require.False(t, MulOverflows(p, worst.Quantity))
-		return float64(math.MaxInt64) / float64(p*worst.Quantity)
+		return p * worst.Quantity
 	}
 
-	m8, m9 := margin("1e8"), margin("1e9")
-	t.Logf("%s margin to int64 ceiling: 1e8=%.1fx 1e9=%.1fx", worst.Name, m8, m9)
+	p8, p9 := product("1e8"), product("1e9")
+	m8, m9 := MaxPriceCeil(p8), MaxPriceCeil(p9)
+	t.Logf("%s margin to int64 ceiling: 1e8=%dx 1e9=%dx", worst.Name, m8, m9)
 
-	assert.Greater(t, m8, 10.0, "1e8 must leave an order of magnitude spare")
-	assert.Less(t, m9, 10.0, "1e9 is expected to be the tight option")
-	assert.InDelta(t, 10.0, m8/m9, 0.1, "the two scales differ by exactly 10x")
+	assert.Greater(t, m8, int64(10), "1e8 must leave an order of magnitude spare")
+	assert.Less(t, m9, int64(10), "1e9 is expected to be the tight option")
+
+	// One decimal place apart, so the intermediates differ by exactly 10x.
+	// Asserting on the products rather than the margins keeps this exact:
+	// the margins are truncating quotients and would only agree approximately.
+	assert.Equal(t, p8*10, p9, "the two scales differ by exactly 10x")
 }
 
 // TestPriceTimesRate is the decisive intermediate case: both operands are
