@@ -200,12 +200,18 @@ symmetric.
 | `scale_test.go`    | Round-trip, tick, boundary, and rejection tests                                         |
 | `overflow_test.go` | Intermediate-arithmetic evidence, plus 128-bit mul/div study helpers                    |
 | `golden_test.go`   | Verifies (and with `-update`, rewrites) the generated regions in this file and the ADR  |
+| `nofloat_test.go`  | Fails if `float32`/`float64` or a float literal appears anywhere in the package         |
 | `report_test.go`   | Prints the full report for reading                                                      |
 
 Two deliberate choices in `scale.go`:
 
-- **No `float64` anywhere.** Decimal text converts directly to and from scaled
-  `int64`, digit by digit, with an overflow guard on each step.
+- **No binary floating point anywhere, including the reporting.** Parsing,
+  formatting, round trips, tick checks, and every overflow and margin
+  calculation are integer arithmetic end to end: decimal text converts directly
+  to and from scaled `int64`, digit by digit, with an overflow guard on each
+  step. A study arguing against binary floating point should not lean on it to
+  reach its conclusions, so `TestNoFloatingPoint` fails if `float32` or
+  `float64` appears anywhere in the package.
 - **Parsing rejects rather than rounds.** `ErrTooManyDecimals`, `ErrOverflow`,
   and `ErrSyntax` are distinct because losing precision and exceeding range
   lead to different conclusions. A study that silently rounded would hide the
