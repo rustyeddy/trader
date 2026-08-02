@@ -1,0 +1,71 @@
+name: Feature
+description: Propose new functionality or an enhancement to existing behavior.
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Problem or desired outcome
+      description: What cannot be done today, and what should be possible afterwards?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which packages, contracts, or workflows this work is expected to touch.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: What this issue deliberately does not cover, so the work stays bounded.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: >
+        A checklist an implementer can verify without further clarification.
+        Each item should be independently checkable.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing expectations
+      description: >
+        Which tests are required: unit, contract, race, determinism. Name the
+        error and boundary cases that must be covered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Documentation expectations
+      description: >
+        Which documents must be updated: Go doc comments, architecture,
+        package boundaries, workflows, README, examples.
+    validations:
+      required: true
+
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture considerations
+      description: >
+        Dependency direction, public versus `internal/` placement, determinism,
+        concurrency ownership, and live-trading safety. State whether an ADR is
+        expected.
+    validations:
+      required: true

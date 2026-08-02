@@ -1,0 +1,61 @@
+name: Architecture decision
+description: Raise a design question that needs a durable, recorded decision.
+labels: ["type: architecture"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >
+        The forces and constraints that make this a decision rather than an
+        implementation detail. Link the relevant architecture sections or ADRs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision required
+      description: State the question in one sentence, so it can be answered yes or no, or by choosing one named option.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: >
+        Architectural invariants, accepted ADRs, determinism, and safety rules
+        that any acceptable answer must respect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: The credible options, each with its tradeoffs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      description: What the chosen option commits Trader to, and what it forecloses.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: adr
+    attributes:
+      label: ADR requirement
+      description: >
+        Whether this issue must produce a record in
+        `docs/arch/adr-decisions.org`.
+      options:
+        - New ADR required
+        - Existing ADR amended or superseded
+        - No ADR required
+    validations:
+      required: true

@@ -1,0 +1,173 @@
+#+TITLE: Trader Package Boundaries
+#+SUBTITLE: Dependency direction, placement rules, and public API guidance
+#+STARTUP: overview indent
+
+* Purpose
+
+This document records the package boundary rules for Trader.  It states
+which packages may depend on which, what belongs in a public package
+versus =internal/=, and which behaviors are prohibited inside domain
+code.
+
+It is a companion to, not a replacement for, the canonical architecture
+document =docs/arch/trader-framework-architecture.org= and the decision
+registry =docs/arch/adr-decisions.org=.  Where this document and the
+canonical architecture appear to disagree, the canonical architecture
+governs and the disagreement is a defect in this document.
+
+This document deliberately does *not* create package directories.  Rules
+are recorded before code exists so that the first implementation lands
+inside a boundary rather than defining one by accident.
+
+* Preliminary Package Map (Non-Final)
+
+The map below is *directional, not mandatory*.  It shows the intended
+direction of dependency, not a required set of packages.  Package names,
+counts, and groupings will change as real consumers appear.  Nothing in
+this map authorizes creating a directory before a package has working
+code.
+
+#+BEGIN_EXAMPLE
+                        instrument
+                            ^
+                            |
+        +-------------------+-------------------+
+        |                   |                   |
+    marketdata            order              account
+        ^                   ^                   ^
+        |                   |                   |
+    strategy              broker            portfolio
+         \                  |                  /
+          +-----------------+-----------------+
+                            |
+                   application services
+                  (backtest, live, scanner)
+                            ^
+                            |
+                  adapters and commands
+#+END_EXAMPLE
+
+Arrows point from a dependent package toward the package it depends on.
+Read upward: =strategy= may depend on =marketdata=; =marketdata= may
+depend on =instrument=; nothing in the upper rows may depend on
+application services, adapters, or commands.
+
+* Dependency Rules
+
+These rules apply to every package in the module.  A change that
+violates one requires an architecture decision record, not a code
+comment.
+
+1. Domain packages must not import adapters.  Vendor SDK types, database
+   drivers, and wire protocols never appear in a domain signature.
+2. Strategies must not import broker implementations.  A strategy that
+   can name a broker package can be coupled to one.
+3. Strategies emit intents and cannot submit orders.  There is no path
+   from strategy code to an order submission call.  See ADR-005.
+4. Risk evaluates proposed exposure and cannot call brokers.  Risk rules
+   are pure functions over a proposal and a snapshot, so they remain
+   deterministic and auditable.
+5. Execution coordinates approved actions.  It owns order mechanics:
+   tick and quantity rounding, order-type selection, working-order
+   tracking, replacement, and cancellation.  It does not decide whether
+   the exposure is acceptable.  See ADR-006.
+6. Broker adapters translate external APIs and do not contain trading
+   policy.  An adapter that decides *whether* to trade has absorbed a
+   responsibility belonging to risk or to the live session.
+7. Transport DTOs must not become public domain types.  A type shaped by
+   JSON, Protobuf, or a database schema is an encoding concern; the
+   domain owns its own vocabulary.
+8. Domain behavior must not call =time.Now()= directly.  Time arrives
+   through an injected clock so backtests are reproducible.
+9. Packages must not launch hidden goroutines from =init()=.  Background
+   work is owned by an explicit context and returns a closer, a reader,
+   or a =Run(ctx)= lifecycle.
+10. Live trading requires deliberate configuration and cannot be the
+    default.  A zero-value or minimally configured runtime operates in
+    paper mode.  See ADR-014.
+11. New public packages require a real consumer, a documented
+    responsibility, and a stable reason to be public.
+12. Implementation details should prefer =internal/=.  Promotion from
+    =internal/= to public is cheap; demotion is a breaking change.
+13. Public interfaces should exist at seams where implementations
+    genuinely vary.  An interface with exactly one implementation and no
+    external implementers is a concrete type wearing a costume.
+14. Concrete structs are preferred for domain values.  Value types are
+    data, not behavior contracts.
+15. No empty placeholder directories.  A package directory exists only
+    when it holds working code and its tests.
+16. Package dependencies must remain acyclic.  Resolve a cycle by moving
+    the shared value type into the package that owns its meaning, not by
+    adding an interface to break the compile error.
+
+* Public Versus =internal/=
+
+Apply this test before placing a type or behavior in a public package.
+
+1. Is this type or behavior intended for external framework consumers?
+2. Does it have a stable contract?
+3. Are multiple implementations expected?
+4. Would exposing it constrain internal evolution?
+
+If the answers do not support a public API, prefer =internal/=.
+
+Guidance for the common cases:
+
+- *Domain value types* (prices, bars, orders, snapshots) are public.
+  They are the vocabulary users write code against.
+- *Extension points* users are expected to implement (broker adapters,
+  market-data sources, journals) are public interfaces, kept small.
+- *Orchestration internals* (engine loops, reconciliation mechanics,
+  runtime plumbing) belong in =internal/= until a user needs to replace
+  them.
+- *Adapters* are public when users construct them directly, and
+  =internal/= when only Trader's own commands use them.
+- *Test infrastructure* intended for users belongs in a public
+  =tradertest= package; everything else belongs in =internal/=.
+
+* Prohibited in Domain Code
+
+These are restatements of rules 8, 9, and 10, collected because they are
+the ones most easily violated by otherwise reasonable code.
+
+- *Direct =time.Now()= calls.*  Domain behavior receives time from an
+  injected clock.  A backtest that cannot control the clock cannot be
+  reproduced.
+- *Hidden goroutines from =init()=.*  Package initialization must not
+  start background work.  A caller cannot cancel what it did not start.
+- *Real-money trading by default.*  No default configuration, example,
+  or zero value may submit a real-money order.  Enabling real-money
+  trading is an explicit, account-scoped, operator-visible decision.
+
+Also avoid, for the same reasons: global mutable state, package-level
+loggers, environment-variable reads inside domain code, and global
+random sources.
+
+* Enforcement
+
+These rules are currently enforced by review, not by tooling.  That is a
+known gap.
+
+Mechanical enforcement is expected to arrive as the package tree grows
+and will likely combine:
+
+- an import-direction check built on =go list=, or =depguard= rules for
+  forbidden imports;
+- =go vet= analyzers for the =time.Now()= and =init()= goroutine
+  prohibitions;
+- =apidiff= against a committed public API baseline;
+- compiled and executed examples in CI.
+
+Selecting and landing the enforcement mechanism is tracked separately.
+Until then, the pull-request template's "Architectural impact" section
+is the review checkpoint for these rules.
+
+* Relationship to Other Documents
+
+- =docs/arch/trader-framework-architecture.org= is canonical.  It owns
+  the architectural invariants, the package responsibilities, and the
+  reasoning behind them.
+- =docs/arch/adr-decisions.org= owns durable decisions.  A boundary rule
+  that becomes contested is resolved by an ADR, and this document is
+  then updated to match.
+- =CONTRIBUTING.org= owns the workflow and the Definition of Done.

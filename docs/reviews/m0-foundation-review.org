@@ -22,8 +22,8 @@ The review covers the repository at branch
 | =CONTRIBUTING.org= consistency                | Consistent                      |
 | Repository-relative documentation links       | All resolve                     |
 | ADR statuses                                  | Correct                         |
-| Issue and pull-request templates              | *Missing*                       |
-| Package boundaries document                   | *Missing*                       |
+| Issue and pull-request templates              | Missing; added by this review   |
+| Package boundaries document                   | Missing; added by this review   |
 | =Makefile= and CI parity                      | Matches                         |
 | =make check= from a clean checkout            | Passes                          |
 | Speculative empty package tree                | None present                    |
@@ -37,17 +37,16 @@ The review covers the repository at branch
 =README.md= describes Trader's purpose, project status, design
 principles, documentation index, =Makefile= targets, license, and the
 relationship to the legacy repository.  Every claim matches the
-repository: the =Makefile= targets listed exist, the license is BSD
-2-Clause, and the package-boundaries document is explicitly marked
-=planned= rather than linked.
+repository: the =Makefile= targets listed exist and the license is BSD
+2-Clause.
 
 ** Documentation Links
 
 All repository-relative references in =README.md=, =AGENTS.md=,
 =CLAUDE.md=, =CONTRIBUTING.org=, and =docs/= resolve to existing files.
-The single non-resolving path, =docs/arch/package-boundaries.org=, is
-labelled as planned in both =README.md= and =AGENTS.md= and is therefore
-not a broken link.
+=docs/arch/package-boundaries.org= was the one non-resolving path, and
+was described as planned rather than linked; it now exists and is linked
+from both =README.md= and =AGENTS.md=.
 
 ** ADR Statuses
 
@@ -82,34 +81,37 @@ contains the BSD 2-Clause text that =README.md= advertises.
 
 * Problems Found
 
-** P1 (high): Issue and pull-request templates are absent
+** P1 (high): Issue and pull-request templates were absent
 
 Issue #5 (M0-04 "Add pull-request and issue templates") is closed, but
-=.github/= contains only =copilot-instructions.md= and
-=workflows/ci.yml=.  There is no =.github/ISSUE_TEMPLATE/= directory and
+=.github/= contained only =copilot-instructions.md= and
+=workflows/ci.yml=.  There was no =.github/ISSUE_TEMPLATE/= directory and
 no =pull_request_template.md=.  =CONTRIBUTING.org= requires every pull
 request to explain what changed, why, how it was tested, and which
 documentation changed, and defines a Definition of Done that a template
-is meant to make visible at authoring time.  That requirement is
-currently unenforced by tooling.
+is meant to make visible at authoring time.  That requirement was
+unenforced by tooling.  Corrected; see below.
 
-** P2 (high): Package boundaries document is absent
+** P2 (high): Package boundaries document was absent
 
 Issue #6 (M0-06 "Document package boundaries and repository rules") is
-closed, but =docs/arch/package-boundaries.org= does not exist.  Both
-=AGENTS.md= and =README.md= reference it as planned.  The architecture
+closed, but =docs/arch/package-boundaries.org= did not exist.  Both
+=AGENTS.md= and =README.md= referenced it as planned.  The architecture
 document requires dependency direction to be enforced mechanically in
 CI; without the boundaries document, neither the rules nor their
-enforcement mechanism are specified, and M1 will begin adding packages
-with no written boundary contract.
+enforcement mechanism were specified, and M1 would have begun adding
+packages with no written boundary contract.  Corrected; see below.
 
-** P3 (medium): Milestone plan is not in the repository
+** P3 (medium): Milestone plan was not in the repository
 
 Issue #7 cites =docs/plans/Trader-M0-TODO.org= as its source, and the
 architecture document (Appendix D) cites a companion
-=Trader-GitHub-Project-Plan.org=.  Neither file is in the repository, so
-the milestone breakdown and per-issue acceptance criteria are not
-version-controlled alongside the architecture they implement.
+=Trader-GitHub-Project-Plan.org=.  Neither file was in the repository, so
+the milestone breakdown and per-issue acceptance criteria were not
+version-controlled alongside the architecture they implement.  Corrected;
+see below.  Because neither source file was ever committed, the plan was
+reconstructed from the GitHub issue list and architecture Appendix D
+rather than copied.
 
 ** P4 (low): Contradictory test-coverage targets
 
@@ -133,12 +135,17 @@ content; only =testing.org= remains a stub.  Corrected; see below.
   incompatible "close to 100%" goal.
 - Added this report at =docs/reviews/m0-foundation-review.org= and linked
   it from the =README.md= documentation index.
-
-P1, P2, and P3 were *not* corrected in this pull request.  Each belongs
-to a separate closed issue (M0-04, M0-06) or to plan-document
-maintenance, and =CONTRIBUTING.org= directs contributors not to widen a
-pull request's scope.  They are recorded here so the milestone is not
-closed over them.
+- P1: added =.github/pull_request_template.md= and
+  =.github/ISSUE_TEMPLATE/= containing =feature.yml=, =architecture.yml=,
+  and =defect.yml=.  The pull-request template mirrors the Definition of
+  Done in =CONTRIBUTING.org= and adds an "Architectural impact" section
+  that serves as the review checkpoint for the boundary rules.
+- P2: added =docs/arch/package-boundaries.org= recording the dependency
+  direction, the public-versus-=internal/= test, the behaviors prohibited
+  in domain code, and the current enforcement gap.  =README.md= and
+  =AGENTS.md= now link it instead of describing it as planned.
+- P3: added =docs/plans/milestones.org= recording the M0-M8 milestone
+  table, the M0 issue breakdown, and M0's exit criteria.
 
 * Deferred Questions
 
@@ -168,7 +175,7 @@ These questions are recorded rather than answered.  None blocks M1.
 
 * Recommendation
 
-*Keep M0 open.*
+*M0 may be closed.*
 
 M0's documentation core is sound: the README, architecture, ADRs, and
 contribution guide agree with one another and with the repository, all
@@ -176,20 +183,17 @@ links resolve, CI mirrors the =Makefile=, =make check= passes from a
 clean checkout, and no premature implementation or live-trading behavior
 has been introduced.
 
-However, two M0 deliverables are missing from =main= despite their issues
-being closed: the issue and pull-request templates (M0-04) and the
-package boundaries document (M0-06).  Both are guardrails intended to be
-in place *before* M1 begins adding packages, so closing M0 without them
-would remove the protection M0 exists to provide.
+The two missing M0 deliverables found by this review have been landed on
+this branch: the issue and pull-request templates (M0-04) and the package
+boundaries document (M0-06).  Both are guardrails intended to be in place
+*before* M1 begins adding packages, and both are now present.  The
+milestone plan is also version-controlled, so a future review can detect
+a closed issue whose deliverable never landed.
 
-Recommended actions before closing M0:
+Every M0 exit criterion in =docs/plans/milestones.org= is therefore
+satisfied.  M0 may close once this pull request merges; no further review
+is required.
 
-1. Reopen or re-file M0-04 and land =.github/ISSUE_TEMPLATE/= plus
-   =pull_request_template.md= aligned with the Definition of Done.
-2. Reopen or re-file M0-06 and land =docs/arch/package-boundaries.org=,
-   including the dependency rules and the CI mechanism that enforces
-   them.
-3. Optionally, commit the milestone plan under =docs/plans/= so issue
-   sources are version-controlled.
-
-Once P1 and P2 are resolved, M0 may be closed without a further review.
+The deferred questions above are inputs to M1 planning, not blockers.
+The one worth scheduling early is the dependency-rule enforcement
+mechanism, because its value decreases as the package tree grows.

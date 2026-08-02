@@ -1,0 +1,62 @@
+name: Defect
+description: Report incorrect behavior in existing code or documentation.
+labels: ["type: defect"]
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What actually happens.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen, and which contract or document says so.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: >
+        The smallest sequence that reproduces the defect, including commands,
+        configuration, and the commit or version used.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: >
+        Who or what is affected. Note explicitly if backtest determinism,
+        account reconciliation, or live-trading safety is involved.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant logs or data
+      description: >
+        Logs, journal records, or fixtures. Do not include broker credentials
+        or other secrets.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: regression-test
+    attributes:
+      label: Regression test
+      options:
+        - label: A test reproducing this defect must be added and must fail before the fix.
+          required: true
