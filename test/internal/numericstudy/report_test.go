@@ -10,8 +10,12 @@ import (
 )
 
 // TestGenerateReport prints the validation tables for ADR-004 in org-mode
-// syntax, generated from the same data the assertions above exercise so the
-// document cannot drift from the evidence.
+// syntax, computed from the same data the assertions above exercise.
+//
+// Nothing compares this output against the checked-in ADR text, so the tables
+// in the document CAN drift if the matrix changes and nobody re-pastes them.
+// Regenerate and re-paste whenever Assets, Notionals, Rates, or Candidates
+// change.
 //
 // Print it to the terminal:
 //
@@ -111,7 +115,12 @@ func TestGenerateReport(t *testing.T) {
 		t.Logf("report written to %s", path)
 		return
 	}
-	fmt.Print(b.String())
+
+	// Only print when explicitly asked, so a plain `go test ./...` (and
+	// therefore `make check`) stays quiet.
+	if testing.Verbose() {
+		fmt.Print(b.String())
+	}
 }
 
 const maxInt64 = int64(^uint64(0) >> 1)

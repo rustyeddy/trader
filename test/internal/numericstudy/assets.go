@@ -67,10 +67,16 @@ var Assets = []Asset{
 
 // Notional is an intermediate-arithmetic case: a realistic largest position
 // whose Price x Quantity product must not overflow int64 before the descale.
+//
+// Quantity here is a WHOLE, UNSCALED unit count, so only one operand carries a
+// scale and the product needs no descaling divide.  This is the favorable
+// case.  If #36 gives Quantity its own scale, these products become
+// double-scaled — like Price x Rate — and the margins below no longer apply;
+// production multiplication would then need a widened intermediate too.
 type Notional struct {
 	Name     string
 	Price    string // decimal text
-	Quantity int64  // whole units; fractional quantity is #36's problem
+	Quantity int64  // whole units; scaled quantity is #36's decision
 	Why      string
 }
 
@@ -112,6 +118,24 @@ var Rates = []struct {
 	{Name: "JPY cross 147.325", Rate: "147.325", Why: "large-magnitude conversion rate"},
 }
 
+// SubQuantumValues are values that are syntactically valid decimal text but
+// carry more precision than the selected scale can hold.
+//
+// Normalizing a quotation into plain decimal text is necessary but not
+// sufficient: the normalized result must still satisfy the precision policy.
+// A provider quoting below the 1e8 quantum cannot be represented exactly at
+// any price, and the adapter must reject or explicitly round it — the choice
+// belongs to #38 and #39, not to this study.
+var SubQuantumValues = []struct {
+	Value  string
+	Digits int
+	Note   string
+}{
+	{Value: "0.000000015", Digits: 9, Note: "1.5e-8 expanded; half of the 1e8 quantum"},
+	{Value: "0.000000001", Digits: 9, Note: "one 1e9 unit; below the 1e8 quantum entirely"},
+	{Value: "1.000000005", Digits: 9, Note: "ordinary price carrying one digit too many"},
+}
+
 // UnsupportedQuotations records provider quotation formats that this
 // representation cannot ingest directly.  Each must be normalized to plain
 // decimal text in a provider adapter before reaching Price.
@@ -141,8 +165,8 @@ var UnsupportedQuotations = []struct {
 	},
 	{
 		Format:  "Scientific notation",
-		Example: "1.5e-8",
-		Decimal: "0.000000015",
+		Example: "1.5e-7",
+		Decimal: "0.00000015",
 		Reason:  "exponent form is rejected; expand before parsing",
 	},
 	{

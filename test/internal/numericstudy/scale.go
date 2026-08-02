@@ -242,9 +242,14 @@ func MulOverflows(a, b int64) bool {
 	if a == 0 || b == 0 {
 		return false
 	}
-	if a == math.MinInt64 || b == math.MinInt64 {
+
+	// MinInt64 has no positive twin, so negating it overflows.  This is the
+	// one case the division check below cannot catch: Go defines
+	// MinInt64 / -1 as MinInt64, so p/b == a holds spuriously.
+	if (a == math.MinInt64 && b == -1) || (b == math.MinInt64 && a == -1) {
 		return true
 	}
+
 	p := a * b
 	return p/b != a
 }

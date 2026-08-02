@@ -24,8 +24,12 @@ NUMERICSTUDY_REPORT=report.org go test ./test/internal/numericstudy/ -run TestGe
 ```
 
 The tables come out as org-mode and paste directly into the ADR. They are
-generated from the same `Assets`, `Notionals`, and `Rates` data that the
-assertions exercise, so the document cannot drift from the evidence.
+computed from the same `Assets`, `Notionals`, and `Rates` data the assertions
+exercise, so regenerating always reflects current evidence.
+
+No test compares the generated output against the checked-in ADR text, so the
+tables in the document **can** drift. Regenerate and re-paste whenever
+`Assets`, `Notionals`, `Rates`, or `Candidates` change.
 
 Run everything, including the assertions behind the findings below:
 
@@ -50,7 +54,9 @@ roughly 122,000× the highest-priced listed equity; 1e9 tops out at ~9.2
 billion, still far above anything we intend to trade.
 
 **Intermediate arithmetic decides it.** Margin to the `int64` ceiling for
-`Price × Quantity`, where only one operand is scaled:
+`Price × Quantity`, using **whole, unscaled** quantities so only one operand
+carries a scale and no descaling divide is needed. This is the favorable case —
+see the caveat below the table:
 
 | Case                    | Quantity      |   1e8 |  1e9 |
 | ----------------------- | ------------- | ----: | ---: |
@@ -64,6 +70,14 @@ BRK.A-sized block consumes the entire `int64` range with 1× to spare. 1e8 buys
 back an order of magnitude for one decimal place that no intended asset class
 needs. 8 decimals is also the natural stopping point: it is exactly satoshi
 precision, the widest decimal requirement Trader accepts.
+
+**Caveat, pending [#36](https://github.com/rustyeddy/trader/issues/36).** These
+margins assume whole unscaled quantities. If `Quantity` gets its own scale,
+`Price × Quantity` becomes double-scaled exactly like `Price × Rate`, the
+margins above no longer apply, and production multiplication needs a widened
+intermediate regardless of the price scale. That would not change the 1e8
+recommendation — 1e8 still beats 1e9 by 10× — but it would move `Price ×
+Quantity` from "safe in `int64`" to "must use the widened path."
 
 ## Findings for #38 (rounding, overflow, intermediate arithmetic)
 
@@ -116,12 +130,43 @@ provider adapter before reaching `Price`.
 | Treasury 32nds          | `110-16`     | 110.5         | `-` is a fraction separator, not a sign       |
 | Treasury 32nds + halves | `110-16.5`   | 110.515625    | expands to 64ths; needs 6 decimals            |
 | Grain eighths           | `575'6`      | 575.75        | apostrophe-delimited eighths of a cent        |
-| Scientific notation     | `1.5e-8`     | 0.000000015   | exponent form rejected; expand before parsing |
+| Scientific notation     | `1.5e-7`     | 0.00000015    | exponent form rejected; expand before parsing |
 | Grouped thousands       | `750,000.00` | 750000.00     | locale grouping is display, not exact input   |
 
 All are representable once normalized, so **no intended instrument is excluded
 by the 1e8 choice** — the constraint lands on the adapter layer, not on the
 representation.
+
+### Normalization is necessary but not sufficient
+
+Converting a quotation to plain decimal text does not guarantee the result
+fits the precision policy. A value finer than the 1e8 quantum is rejected even
+though it is syntactically valid — `1.5e-8` expands to `0.000000015`, which
+needs 9 decimals and **cannot** be represented at 1e8.
+
+| Value | Digits | Note |
+| --- | ---: | --- |
+| `0.000000015` | 9 | `1.5e-8` expanded; half of the 1e8 quantum |
+| `0.000000001` | 9 | one 1e9 unit; below the 1e8 quantum entirely |
+| `1.000000005` | 9 | ordinary price carrying one digit too many |
+
+`TestSubQuantumValuesRejected` pins this: each is rejected at 1e8 with
+`ErrTooManyDecimals` and accepted at 1e9, confirming the failure is the
+precision policy rather than a parser defect. Whether adapters reject such
+values or round them explicitly is [#38](https://github.com/rustyeddy/trader/issues/38)
+and [#39](https://github.com/rustyeddy/trader/issues/39)'s call, not this
+study's.
+
+### Known parser gap: `math.MinInt64`
+
+`FormatDecimal` renders `math.MinInt64`, but `ParseDecimal` cannot construct
+it. Parsing builds the magnitude first and negates last, and the magnitude
+`9223372036854775808` exceeds `MaxInt64`, so the guard fires one unit before
+the true negative bound. The gap is exactly one representable value wide, and
+`TestParseCannotConstructMinInt64` documents it. The final negative-range
+policy belongs to [#39](https://github.com/rustyeddy/trader/issues/39): either
+the parser accepts the full `int64` range, or the domain range is deliberately
+symmetric.
 
 ## How the code is organized
 

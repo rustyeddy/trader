@@ -73,7 +73,10 @@ The internal =Price= scale is *1e8*: a decimal value =v= is stored as the
 
 The validation evidence is in =test/internal/numericstudy=, a test-only spike that
 parses and formats decimal text directly to and from scaled =int64= without
-passing through =float64=.  Regenerate the tables below with:
+passing through =float64=.
+
+No test compares the generated tables against the text below, so these tables
+can drift; regenerate and re-paste them whenever the asset matrix changes:
 
 #+begin_src sh
 go test ./test/internal/numericstudy/ -run TestGenerateReport -v
@@ -118,7 +121,8 @@ either candidate scale.
 **** Why 1e8 over 1e9
 
 Intermediate arithmetic decides it.  Margin to the =int64= ceiling for
-=Price x Quantity=, where only one operand is scaled:
+=Price x Quantity=, using whole unscaled quantities so only one operand
+carries a scale and no descaling divide is required:
 
 | Case             |      Quantity |     1e8 |   1e9 |
 |------------------+---------------+---------+-------|
@@ -132,6 +136,13 @@ BRK.A-sized block consumes the entire =int64= range with 1x to spare.  1e8
 buys back an order of magnitude at the cost of one decimal place that no
 intended asset class needs.  8 decimals is also the natural stopping point:
 it is exactly satoshi precision, the widest decimal requirement Trader accepts.
+
+These margins hold only for whole unscaled quantities.  If [[https://github.com/rustyeddy/trader/issues/36][#36]] gives
+=Quantity= its own scale, =Price x Quantity= becomes double-scaled exactly
+like =Price x Rate=, the margins above no longer apply, and the operation
+requires a widened intermediate regardless of price scale.  That would not
+change the 1e8 selection — it still beats 1e9 by 10x — but it would move
+=Price x Quantity= from "safe in =int64=" to "must use the widened path".
 
 **** Consequences for intermediate arithmetic
 
@@ -174,12 +185,41 @@ the parser rejects all of them.
 | Treasury 32nds               | =110-16=      |         110.5 | =-= is a fraction separator, not a sign             |
 | Treasury 32nds + halves      | =110-16.5=    |    110.515625 | expands to 64ths; needs 6 decimals                  |
 | Grain eighths                | =575'6=       |        575.75 | apostrophe-delimited eighths of a cent              |
-| Scientific notation          | =1.5e-8=      |   0.000000015 | exponent form rejected; expand before parsing       |
+| Scientific notation          | =1.5e-7=      |    0.00000015 | exponent form rejected; expand before parsing       |
 | Grouped thousands            | =750,000.00=  |     750000.00 | locale grouping is display, not exact input         |
 
 All of these are representable once normalized, so no intended instrument is
 excluded by the 1e8 choice — the constraint is on the adapter layer, not the
 representation.
+
+***** Normalization is necessary but not sufficient
+
+Converting a quotation to plain decimal text does not guarantee the result
+satisfies the precision policy.  Values finer than the 1e8 quantum are
+syntactically valid but not representable, and are rejected rather than
+silently rounded:
+
+| Value         | Digits | Note                                        |
+|---------------+--------+---------------------------------------------|
+| =0.000000015= |      9 | =1.5e-8= expanded; half of the 1e8 quantum  |
+| =0.000000001= |      9 | one 1e9 unit; below the 1e8 quantum         |
+| =1.000000005= |      9 | ordinary price carrying one digit too many  |
+
+Each is accepted at 1e9, confirming the failure is the precision policy rather
+than a parser defect (=TestSubQuantumValuesRejected=).  Whether adapters reject
+sub-quantum values or round them explicitly is decided by [[https://github.com/rustyeddy/trader/issues/38][#38]] and [[https://github.com/rustyeddy/trader/issues/39][#39]].
+
+***** Known parser gap: most negative value
+
+=FormatDecimal= renders =math.MinInt64=, but =ParseDecimal= cannot construct
+it: parsing builds the magnitude before negating, and that magnitude exceeds
+=MaxInt64=, so the guard fires one unit before the true negative bound.  The
+gap is exactly one representable value wide
+(=TestParseCannotConstructMinInt64=).
+
+[[https://github.com/rustyeddy/trader/issues/39][#39]] must make the negative-range policy explicit: either parsing accepts the
+full =int64= range, or the domain range is deliberately symmetric and the most
+negative value is not a valid =Price=.
 
 ** Exact input and output boundaries
 

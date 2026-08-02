@@ -265,14 +265,72 @@ func TestUnsupportedQuotationsAreRejected(t *testing.T) {
 	}
 }
 
+// TestSubQuantumValuesRejected records the limit of normalization: turning a
+// provider quotation into plain decimal text does not guarantee the result is
+// representable.  Values finer than the 1e8 quantum are rejected outright
+// rather than silently rounded, so #38 and #39 must decide whether adapters
+// reject or explicitly round them.
+func TestSubQuantumValuesRejected(t *testing.T) {
+	sc := scaleByName(t, "1e8")
+	for _, v := range SubQuantumValues {
+		t.Run(v.Value, func(t *testing.T) {
+			require.Greater(t, v.Digits, sc.Decimals)
+
+			_, err := ParseDecimal(v.Value, sc)
+			assert.ErrorIs(t, err, ErrTooManyDecimals, v.Note)
+
+			// The same value is representable at 1e9, confirming the failure
+			// is the precision policy and not a parser defect.
+			_, err = ParseDecimal(v.Value, scaleByName(t, "1e9"))
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// TestParseCannotConstructMinInt64 documents an asymmetry between the parser
+// and the formatter: FormatDecimal renders math.MinInt64, but ParseDecimal
+// cannot construct it.  Parsing builds the magnitude first and negates last,
+// and the magnitude 9223372036854775808 exceeds MaxInt64, so the guard fires
+// one unit before the true negative bound.
+//
+// The study does not paper over this; the final negative-range policy belongs
+// to #39, which must decide whether the parser accepts the full int64 range or
+// the domain range is deliberately symmetric.
+func TestParseCannotConstructMinInt64(t *testing.T) {
+	sc := scaleByName(t, "1e8")
+
+	assert.Equal(t, "-92233720368.54775808", FormatDecimal(math.MinInt64, sc))
+
+	_, err := ParseDecimal("-92233720368.54775808", sc)
+	assert.ErrorIs(t, err, ErrOverflow,
+		"known gap: the most negative value cannot be parsed back")
+
+	// One unit inside the bound round-trips normally, so the gap is exactly
+	// one representable value wide.
+	v, err := ParseDecimal("-92233720368.54775807", sc)
+	require.NoError(t, err)
+	assert.Equal(t, int64(math.MinInt64+1), v)
+	assert.Equal(t, "-92233720368.54775807", FormatDecimal(v, sc))
+}
+
 func TestMulOverflows(t *testing.T) {
 	assert.False(t, MulOverflows(0, math.MaxInt64))
 	assert.False(t, MulOverflows(math.MaxInt64, 0))
 	assert.False(t, MulOverflows(math.MaxInt64, 1))
 	assert.False(t, MulOverflows(-1, math.MaxInt64))
 	assert.True(t, MulOverflows(math.MaxInt64, 2))
-	assert.True(t, MulOverflows(math.MinInt64, 1), "MinInt64 has no positive twin")
 	assert.True(t, MulOverflows(1<<32, 1<<32))
+
+	// Signed boundary.  MinInt64 x 1 is exact; only negation overflows,
+	// because MinInt64 has no positive twin.  Go defines MinInt64 / -1 as
+	// MinInt64, so the usual p/b != a check misses MinInt64 x -1 and it
+	// needs an explicit guard.
+	assert.False(t, MulOverflows(math.MinInt64, 1))
+	assert.False(t, MulOverflows(1, math.MinInt64))
+	assert.True(t, MulOverflows(math.MinInt64, -1))
+	assert.True(t, MulOverflows(-1, math.MinInt64))
+	assert.True(t, MulOverflows(math.MinInt64, 2))
+	assert.True(t, MulOverflows(math.MinInt64, math.MinInt64))
 }
 
 func TestAddOverflows(t *testing.T) {
