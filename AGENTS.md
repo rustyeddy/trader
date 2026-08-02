@@ -9,16 +9,13 @@ Read before making changes:
 - `docs/arch/trader-framework-architecture.org`
 - `docs/arch/trader-framework-requirements.org`
 - `docs/arch/adr-decisions.org`
+- `docs/arch/package-boundaries.org`
 - `CONTRIBUTING.org`
 
-Planned (not yet in repo):
-
-- docs/arch/package-boundaries.org
-
-Detailed workflows (not yet populated):
+Detailed workflows:
 
 - `docs/workflows/workflows.org`
-- `docs/workflows/testing.org`
+- `docs/workflows/testing.org` (not yet populated)
 
 ## Development
 

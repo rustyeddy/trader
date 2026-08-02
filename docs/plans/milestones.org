@@ -1,0 +1,87 @@
+#+TITLE: Trader Milestone Plan
+#+SUBTITLE: Version-controlled milestone and issue breakdown
+#+STARTUP: overview indent
+
+* Purpose
+
+This document version-controls Trader's milestone plan so that the issue
+breakdown lives beside the architecture it implements.
+
+The canonical architecture document
+=docs/arch/trader-framework-architecture.org= (Appendix D) defines the
+milestones.  This document restates them and records the issue
+breakdown per milestone.  Where the two disagree, the architecture
+document governs.
+
+GitHub remains the working tracker.  This file is the durable record of
+what each milestone is *for*, so that a closed issue whose deliverable
+never landed can be detected.
+
+* Milestones
+
+| ID | Milestone                                 | Usable outcome                                                                    |
+|----+-------------------------------------------+-----------------------------------------------------------------------------------|
+| M0 | Repository Foundation and Guardrails      | Repository, CI, docs, ADRs, dependency rules, and legacy transplant policy         |
+| M1 | Domain Foundation and Test Kit            | Exact values, identity, instruments, time, orders, snapshots, and testing helpers  |
+| M2 | Market Data Vertical Slice                | Acquire, normalize, validate, store, query, resample, and report coverage          |
+| M3 | Broker Simulation and Account State       | Broker port, simulated execution, account projection, portfolio, reconciliation    |
+| M4 | Strategy-to-Execution Pipeline            | Strategy descriptors, intents, planner, risk, execution, correlated journal records |
+| M5 | Deterministic Backtesting and Org Reports | Repeatable backtest, run manifest, metrics, journal, CLI, and Org output           |
+| M6 | OANDA Paper Trading and Live Safety       | Real adapter, reconciliation, guards, recovery, paper-default live runner          |
+| M7 | Scanner and Operator Workflow             | Watch/hot/tradeable state machine, ranking, alerts, reports, operator CLI/API      |
+| M8 | Research and External Strategy Extensions | Sweeps, walk-forward, comparison validation, external strategy protocol            |
+
+Real-money trading is deliberately not a milestone.  It is a release
+gate after M6 has operated safely in paper mode for a sustained period
+and reconciliation, recovery, and guard behavior have been reviewed.
+
+* M0: Repository Foundation and Guardrails
+
+M0 establishes the rules and tooling that constrain every later
+milestone.  Its deliverables are documentation and CI, not domain code.
+M0 deliberately produces no packages: an empty speculative package tree
+would predetermine boundaries before M1 has a real consumer.
+
+** Issue Breakdown
+
+| Issue | ID    | Title                                              | Deliverable                                     |
+|-------+-------+----------------------------------------------------+-------------------------------------------------|
+|     2 | M0-01 | Expand the project README                          | =README.md=                                     |
+|     3 | M0-02 | Complete the initial ADR records                   | =docs/arch/adr-decisions.org=                   |
+|     4 | M0-03 | Add contribution and Definition-of-Done docs       | =CONTRIBUTING.org=                              |
+|     5 | M0-04 | Add pull-request and issue templates               | =.github/pull_request_template.md=, =.github/ISSUE_TEMPLATE/= |
+|     1 | M0-05 | Add baseline GitHub Actions CI                     | =Makefile=, =.github/workflows/ci.yml=          |
+|     6 | M0-06 | Document package boundaries and repository rules   | =docs/arch/package-boundaries.org=              |
+|     7 | M0-07 | Perform M0 architecture and repository review      | =docs/reviews/m0-foundation-review.org=         |
+
+Supporting issues outside the numbered M0 sequence:
+
+| Issue | Title                                              | Deliverable                        |
+|-------+----------------------------------------------------+------------------------------------|
+|     8 | Setup AGENTS.md main file and supports             | =AGENTS.md=, =CLAUDE.md=           |
+|    10 | Add content to ./docs/workflows/testing.org        | =docs/workflows/=                  |
+
+** Exit Criteria
+
+M0 may close when all of the following hold:
+
+- Every deliverable above exists on the default branch.  A closed issue
+  whose file is absent does not count.
+- =README.md=, the architecture document, the ADR registry, the package
+  boundaries document, and =CONTRIBUTING.org= do not contradict one
+  another.
+- Every repository-relative documentation link resolves.
+- CI mirrors the =Makefile= and passes from a clean checkout.
+- No speculative empty package tree exists.
+- No live-trading behavior is present or reachable by default.
+
+* M1 and Later
+
+Issue breakdowns for M1 through M8 are recorded here as each milestone
+is planned.  They are intentionally absent until the preceding
+milestone's exit criteria are met, so that planning reflects what was
+actually learned rather than what was assumed.
+
+The architecture document's "Recommended Development Sequence" section
+describes the intended content of each milestone and is the input to
+that planning.

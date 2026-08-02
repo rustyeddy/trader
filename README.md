@@ -42,10 +42,11 @@ Trader's architecture is guided by a small set of principles:
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
 - [Framework architecture](docs/arch/trader-framework-architecture.org)
 - [Architecture Decision Records](docs/arch/adr-decisions.org)
-- Package boundaries (planned: `docs/arch/package-boundaries.org`)
+- [Package boundaries](docs/arch/package-boundaries.org)
 - [Contribution guide](CONTRIBUTING.org)
 - [Workflows](docs/workflows/workflows.org)
 - [Testing](docs/workflows/testing.org)
+- [M0 foundation review](docs/reviews/m0-foundation-review.org)
 
 ## Development
 
