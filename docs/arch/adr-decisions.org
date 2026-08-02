@@ -204,7 +204,7 @@ ratified before =v0= freezes the instrument package.
 
 ** Status
 
-Proposed
+Work in Progress
 
 ** Context
 
