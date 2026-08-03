@@ -160,6 +160,12 @@ func scaledCells(price string) []string {
 		switch {
 		case err != nil:
 			out = append(out, "—")
+		// Unreachable by construction: ParseDecimal succeeds only for values
+		// that scale to an integer exactly, so a successful parse always
+		// round-trips.  TestRoundTrip asserts that property across the whole
+		// matrix.  The branch stays as a visible tripwire — if the parser ever
+		// starts rounding, the table says so rather than printing a plausible
+		// wrong number.
 		case FormatDecimal(v, sc) != Canonical(price):
 			out = append(out, "INEXACT")
 		default:
@@ -271,6 +277,11 @@ func notionalTable(f Format, scales []Scale) string {
 			switch {
 			case err != nil:
 				cells = append(cells, "n/a")
+			// Not reached by the current data, and that absence is itself the
+			// #33 finding: with a whole unscaled quantity, no realistic
+			// notional overflows at any candidate scale.  quantitystudy's
+			// equivalent table does hit this branch, because scaling Quantity
+			// makes the product double-scaled.
 			case MulOverflows(p, n.Quantity):
 				cells = append(cells, "OVERFLOW")
 			default:
