@@ -96,8 +96,7 @@ func TestFrontier(t *testing.T) {
 	// as prose: satoshi precision needs 8 fraction digits, and a trillion
 	// whole units at 8 digits needs more than int64 has.
 	const trillion = int64(1_000_000_000_000)
-	satoshiScale := ns.Scale{Name: "1e8", Decimals: 8, Factor: 100_000_000}
-	assert.True(t, ns.MulOverflows(trillion, satoshiScale.Factor),
+	assert.True(t, ns.MulOverflows(trillion, SelectedScale.Factor),
 		"1e12 units at satoshi precision must exceed int64")
 }
 
