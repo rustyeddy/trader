@@ -486,18 +486,20 @@ The following issues must be resolved before this ADR can be accepted:
 - [[https://github.com/rustyeddy/trader/issues/43][#43 — Review reusable legacy Trader numeric code]]
 - [[https://github.com/rustyeddy/trader/issues/44][#44 — Draft and accept exact numeric representation ADR]]
 
-* Provisional Decision Matrix
+* Numeric Type Decision Matrix
 
 The unresolved cells must be completed by #35, #37–#42.
+| Type     | Backing | Scale | Domain range / sign policy                              | Zero policy                             | Related metadata                                       | Arithmetic direction                                                   |
+|----------+---------+-------+---------------------------------------------------------+-----------------------------------------+--------------------------------------------------------+------------------------------------------------------------------------|
+| Price    | int64   |   1e8 | Normally non-negative; max 92,233,720,368.54775807      | Representable; context decides validity | Tick size belongs to listing                           | Exact typed operations; scaled products use widened intermediate       |
+| Money    | int64   |   1e8 | Signed; full scaled-int64 range                         | Valid only with explicit currency       | Currency owned by Money                                | Same-currency arithmetic only; conversion explicit                     |
+| Quantity | int64   |   1e8 | Public values non-negative; max 92,233,720,368.54775807 | Representable; orders require > 0       | Increment and limits belong to instrument/broker rules | Direction separate from sign; scaled products use widened intermediate |
+| Rate     | int64   |   1e8 | Signed representation; semantic bounds depend on use    | Domain-dependent                        | Semantic constraints belong to wrapper or operation    | Explicit multiply/divide; scaled products use widened intermediate     |
 
-| Type     | Backing | Scale                  | Related metadata             | Current arithmetic direction                                                           |
-|----------+---------+------------------------+------------------------------+----------------------------------------------------------------------------------------|
-| Price    | int64   | Fixed 1e8 (8 dp) (#33) | Tick size belongs to listing | Exact typed operations; products need a widened intermediate                           |
-| Money    | int64   | Fixed 1e8 (8 dp)       | Currency ownership Money     | Cross-currency math forbidden                                                          |
-| Quantity | int64   | Fixed 1e8 (8 dp) (#36) | Increment belongs to listing | Exact typed operations; non-negative, zero valid, products need a widened intermediate |
-| Rate     | int64   | Fixed 1e8 (8 dp)       | Semantic unit documented     | Explicit multiply/divide                                                               |
-
-For every type, the final matrix must specify:
+Rate is the foundational exact dimensionless representation. Domain
+APIs may introduce semantic wrappers when direction, bounds, or
+interpretation would otherwise be ambiguous.  For every type, the
+final matrix must specify:
 
 - representation scale
 - signedness and zero-value policy
@@ -507,6 +509,27 @@ For every type, the final matrix must specify:
 - overflow behavior
 - parsing and formatting
 - JSON, text, CSV, configuration, and persistence representation
+
+** Operation boundaries
+
+Valid foundational operations include:
+
+- same-type comparison;
+- checked addition and subtraction where semantic units are compatible;
+- =Price * Rate -> Price=;
+- =Money * Rate -> Money=;
+- =Quantity * Rate -> Quantity=;
+- division of compatible like values to produce =Rate=;
+- =Price * Quantity= only with instrument and currency context.
+
+Intentionally absent operations include:
+
+- implicit arithmetic between unlike semantic types;
+- addition or comparison of unlike currencies;
+- implicit currency conversion;
+- negative public order quantities;
+- using quantity sign to encode buy or sell;
+- implicit tick-size or quantity-increment rounding.
 
 * Consequences Identified So Far
 
