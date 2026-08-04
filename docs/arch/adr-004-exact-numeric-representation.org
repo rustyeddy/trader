@@ -473,7 +473,7 @@ The following issues must be resolved before this ADR can be accepted:
 - [X] [[https://github.com/rustyeddy/trader/issues/33][#33 — Validate Price scale across supported asset classes]] — resolved:
   =Price= scale is 1e8.  Evidence in =test/internal/numericstudy= and final
   review disposition recorded above.
-- [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
+- [X] [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
 - [X] [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]] — resolved:
   =Quantity= scale is 1e8, backed by signed =int64=, with a bounded supported
   range.  Evidence in =test/internal/quantitystudy=.
@@ -493,7 +493,7 @@ The unresolved cells must be completed by #35, #37–#42.
 | Type     | Backing | Scale                  | Related metadata             | Current arithmetic direction                                                           |
 |----------+---------+------------------------+------------------------------+----------------------------------------------------------------------------------------|
 | Price    | int64   | Fixed 1e8 (8 dp) (#33) | Tick size belongs to listing | Exact typed operations; products need a widened intermediate                           |
-| Money    | int64   | Fixed 1e8 (8 dp)       | Currency ownership TBD       | Cross-currency math forbidden                                                          |
+| Money    | int64   | Fixed 1e8 (8 dp)       | Currency ownership Money     | Cross-currency math forbidden                                                          |
 | Quantity | int64   | Fixed 1e8 (8 dp) (#36) | Increment belongs to listing | Exact typed operations; non-negative, zero valid, products need a widened intermediate |
 | Rate     | int64   | Fixed 1e8 (8 dp)       | Semantic unit documented     | Explicit multiply/divide                                                               |
 
