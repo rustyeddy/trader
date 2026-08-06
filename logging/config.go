@@ -26,7 +26,9 @@ type Config struct {
 	Output string `default:"stderr"`
 }
 
-// New builds a *slog.Logger from cfg.
+// New builds a *slog.Logger from cfg. The returned logger's handler is
+// wrapped with NewContextHandler, so WithCorrelationID and WithCausationID
+// work automatically with it.
 //
 // The returned io.Closer must be closed by the caller when the logger is no
 // longer needed — New starts no unmanaged background work, but a file
@@ -51,7 +53,7 @@ func New(cfg Config) (*slog.Logger, io.Closer, error) {
 		return nil, nil, fmt.Errorf("logging: unsupported format %q", cfg.Format)
 	}
 
-	return slog.New(h), closer, nil
+	return slog.New(NewContextHandler(h)), closer, nil
 }
 
 // resolveOutput turns a Config.Output value into a writer and the closer
