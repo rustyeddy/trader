@@ -225,6 +225,21 @@ func TestLoadSecretValueRedactedFromFieldError(t *testing.T) {
 	}
 }
 
+func TestLoadSecretEnumRejectionRedactsValue(t *testing.T) {
+	type Config struct {
+		Level string `enum:"debug,info,warn" secret:"true"`
+	}
+	_, err := Load[Config](Options{Environ: []string{"LEVEL=trace-but-actually-a-leaked-token"}})
+	require.Error(t, err)
+
+	var agg *Error
+	require.ErrorAs(t, err, &agg)
+	require.Len(t, agg.Fields, 1)
+	assert.ErrorIs(t, agg.Fields[0], ErrEnum)
+	assert.Empty(t, agg.Fields[0].Value)
+	assert.NotContains(t, agg.Fields[0].Error(), "leaked-token")
+}
+
 func TestLoadUsesRealEnvironmentWhenEnvironNil(t *testing.T) {
 	// A single Go field name becomes one lowercased path segment, not split
 	// on its internal camelCase word boundaries — see doc.go.

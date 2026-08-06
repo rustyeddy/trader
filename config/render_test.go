@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,21 @@ func TestRenderOptionalFieldSet(t *testing.T) {
 
 	out := Sprint(got)
 	assert.Contains(t, out, "retries = 3")
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+func TestRenderPropagatesWriteError(t *testing.T) {
+	got, err := Load[renderConfig](Options{Environ: []string{}})
+	require.NoError(t, err)
+
+	err = Render(failingWriter{}, got)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disk full")
 }
 
 func TestRenderRejectsNonStruct(t *testing.T) {
