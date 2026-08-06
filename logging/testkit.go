@@ -36,12 +36,33 @@ type Recorder struct {
 }
 
 // Records returns every record captured so far, in the order they were
-// logged.
+// logged. The returned records, including their Attrs maps, are an
+// independent copy: mutating one has no effect on the Recorder's internal
+// state or on any other slice Records has returned, including one returned
+// by an earlier or later call.
 func (r *Recorder) Records() []Record {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Record, len(r.records))
-	copy(out, r.records)
+	for i, rec := range r.records {
+		out[i] = rec
+		out[i].Attrs = deepCopyAttrs(rec.Attrs)
+	}
+	return out
+}
+
+// deepCopyAttrs copies attrs, recursively copying any nested map[string]any
+// produced by a grouped attribute (see addAttr). A shallow slice copy alone
+// would still leave every Record's Attrs map — a reference type — aliased
+// between the Recorder's internal state and whatever Records returns.
+func deepCopyAttrs(attrs map[string]any) map[string]any {
+	out := make(map[string]any, len(attrs))
+	for k, v := range attrs {
+		if nested, ok := v.(map[string]any); ok {
+			v = deepCopyAttrs(nested)
+		}
+		out[k] = v
+	}
 	return out
 }
 

@@ -131,6 +131,43 @@ func TestRecorderRecordsIsASnapshotCopy(t *testing.T) {
 	assert.Len(t, rec.Records(), 2)
 }
 
+// TestRecorderRecordsDeepCopiesAttrs is the regression test for Records
+// returning a slice copy while every Record's Attrs map still aliased the
+// Recorder's internal state: mutating a map obtained from one call to
+// Records used to be visible in a later call, silently violating the
+// "independent snapshot" contract Records documents.
+func TestRecorderRecordsDeepCopiesAttrs(t *testing.T) {
+	logger, rec := Capture()
+	logger.Info("event", "key", "original")
+
+	first := rec.Records()
+	first[0].Attrs["key"] = "mutated"
+	first[0].Attrs["injected"] = "should not leak"
+
+	second := rec.Records()
+	assert.Equal(t, "original", second[0].Attrs["key"],
+		"mutating a returned record must not affect a later snapshot")
+	_, present := second[0].Attrs["injected"]
+	assert.False(t, present, "a key added to a returned map must not leak into a later snapshot")
+}
+
+// TestRecorderRecordsDeepCopiesNestedGroupAttrs covers the same guarantee
+// for a grouped attribute's nested map, which deepCopyAttrs must recurse
+// into rather than copying only the top level.
+func TestRecorderRecordsDeepCopiesNestedGroupAttrs(t *testing.T) {
+	logger, rec := Capture()
+	logger.Info("event", slog.Group("http", "status", 200))
+
+	first := rec.Records()
+	group := first[0].Attrs["http"].(map[string]any)
+	group["status"] = 999
+
+	second := rec.Records()
+	secondGroup := second[0].Attrs["http"].(map[string]any)
+	assert.Equal(t, int64(200), secondGroup["status"],
+		"mutating a nested group map must not affect a later snapshot")
+}
+
 func TestRecorderConcurrentUse(t *testing.T) {
 	logger, rec := Capture()
 
