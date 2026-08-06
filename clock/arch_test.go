@@ -71,25 +71,9 @@ func TestDomainCodeDoesNotCallTimeDirectly(t *testing.T) {
 			return err
 		}
 
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			pkg, ok := sel.X.(*ast.Ident)
-			if !ok || pkg.Name != "time" {
-				return true
-			}
-			if directTimeCalls[sel.Sel.Name] {
-				violations = append(violations,
-					rel+": calls time."+sel.Sel.Name+" at "+fset.Position(call.Pos()).String())
-			}
-			return true
-		})
+		for _, pos := range findDirectTimeCalls(fset, file) {
+			violations = append(violations, rel+": "+pos)
+		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -97,6 +81,124 @@ func TestDomainCodeDoesNotCallTimeDirectly(t *testing.T) {
 	for _, v := range violations {
 		assert.Fail(t, "domain/application code calls a time function directly instead of receiving a clock.Clock", v)
 	}
+}
+
+// findDirectTimeCalls returns one description per call to a name in
+// directTimeCalls on the package imported as "time" in file, resolving
+// whatever local identifier that import was actually bound to
+// (import stdtime "time" included) rather than assuming it is literally
+// named "time". A dot import of "time" is not handled: resolving a bare,
+// unqualified call against a dot-imported package's exported names would
+// need full identifier resolution to avoid false positives against an
+// unrelated local function of the same name, and a dot import of "time" is
+// both extremely rare and easy to catch in ordinary review.
+func findDirectTimeCalls(fset *token.FileSet, file *ast.File) []string {
+	alias, imported := timeImportAlias(file)
+	if !imported {
+		return nil
+	}
+
+	var found []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != alias {
+			return true
+		}
+		if directTimeCalls[sel.Sel.Name] {
+			found = append(found, "calls "+alias+"."+sel.Sel.Name+" at "+fset.Position(call.Pos()).String())
+		}
+		return true
+	})
+	return found
+}
+
+// timeImportAlias reports the local identifier file binds the standard
+// library's "time" package to — "time" itself unless the import is
+// aliased — and whether file imports it at all.
+func timeImportAlias(file *ast.File) (alias string, imported bool) {
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != "time" {
+			continue
+		}
+		if imp.Name == nil {
+			return "time", true
+		}
+		return imp.Name.Name, true
+	}
+	return "", false
+}
+
+// TestFindDirectTimeCallsResolvesImportAlias is the regression test for the
+// bypass a hardcoded "time" identifier check would miss: aliasing the
+// import (import stdtime "time") does not change what package a call
+// reaches, and the check must not either.
+func TestFindDirectTimeCallsResolvesImportAlias(t *testing.T) {
+	const src = `package example
+
+import stdtime "time"
+
+func f() {
+	_ = stdtime.Now()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "example.go", src, 0)
+	require.NoError(t, err)
+
+	found := findDirectTimeCalls(fset, file)
+	require.Len(t, found, 1)
+	assert.Contains(t, found[0], "calls stdtime.Now")
+}
+
+// TestFindDirectTimeCallsUnaliasedImport confirms the ordinary case — an
+// unaliased "time" import — still works the same way it did before alias
+// resolution was added.
+func TestFindDirectTimeCallsUnaliasedImport(t *testing.T) {
+	const src = `package example
+
+import "time"
+
+func f() {
+	_ = time.Now()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "example.go", src, 0)
+	require.NoError(t, err)
+
+	found := findDirectTimeCalls(fset, file)
+	require.Len(t, found, 1)
+	assert.Contains(t, found[0], "calls time.Now")
+}
+
+// TestFindDirectTimeCallsNoTimeImport confirms a file that never imports
+// "time" at all — including one with an unrelated selector call that
+// happens to be named Now — produces no findings.
+func TestFindDirectTimeCallsNoTimeImport(t *testing.T) {
+	const src = `package example
+
+type clock struct{}
+
+func (clock) Now() int { return 0 }
+
+func f() {
+	var c clock
+	_ = c.Now()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "example.go", src, 0)
+	require.NoError(t, err)
+
+	assert.Empty(t, findDirectTimeCalls(fset, file))
 }
 
 func isDirectTimeCallExempt(rel string) bool {

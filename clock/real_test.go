@@ -51,7 +51,12 @@ func TestRealTimerFires(t *testing.T) {
 	}
 }
 
-func TestRealTimerDeliversDeadline(t *testing.T) {
+// TestRealTimerDeliversApproximateExpirationTime checks only what the
+// shared Timer contract actually promises for Real: the delivered value
+// identifies expiration, not necessarily the exact requested deadline
+// (that stronger guarantee is Simulated-only — see
+// TestSimulatedTimerDeliversScheduledDeadlineNotAdvancedTime).
+func TestRealTimerDeliversApproximateExpirationTime(t *testing.T) {
 	c := Real{}
 	before := c.Now()
 	timer := c.NewTimer(10 * time.Millisecond)
@@ -116,10 +121,12 @@ func TestRealTimerChannelIsNotClosedAfterFiring(t *testing.T) {
 
 	<-timer.C()
 
-	// A closed channel receive returns immediately with ok == false; a
-	// buffered-but-empty, still-open channel blocks. Use a non-blocking
-	// receive via select+default to distinguish the two without hanging
-	// the test if the (correct) behavior is "still open."
+	// A closed channel receive returns immediately with ok == false; an
+	// empty, still-open channel does not, regardless of whether it happens
+	// to be buffered — a real timer channel's capacity is a runtime detail
+	// this package does not depend on. Use a non-blocking receive via
+	// select+default to distinguish the two without hanging the test if the
+	// (correct) behavior is "still open."
 	select {
 	case _, ok := <-timer.C():
 		assert.True(t, ok, "the channel must not be closed after firing")

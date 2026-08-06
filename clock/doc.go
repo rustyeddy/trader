@@ -11,11 +11,13 @@
 // A pure function that only compares or transforms a caller-supplied
 // timestamp does not need a Clock at all.
 //
-// This constraint targets domain and application code specifically.
-// Infrastructure adapters, provider integrations, metrics, profiling,
-// benchmarks, and tooling may use the standard library's time functions
-// directly — the goal is deterministic trading behavior, not eliminating
-// every direct use of time from the module.
+// This constraint targets domain and application code specifically, not
+// every direct use of time in the module. Infrastructure adapters,
+// composition roots, and test code (including benchmarks, which live in
+// test files) are exempt. TestDomainCodeDoesNotCallTimeDirectly enforces
+// this against an explicit list of exempt paths; a future package with a
+// legitimate reason to use time directly is added to that list when it is
+// introduced, rather than assumed exempt in advance.
 //
 // Production composition roots use Real. Tests, backtests, paper
 // simulations, and the simulated broker use Simulated, which advances only

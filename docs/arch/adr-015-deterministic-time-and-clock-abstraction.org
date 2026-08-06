@@ -44,11 +44,13 @@ current time or timers.
 - Domain and application components that need "now" or timer behavior receive
   a clock explicitly.  They do not call =time.Now=, =time.NewTimer=,
   =time.After=, or =time.Sleep= directly.  This constraint targets domain and
-  application-orchestration code specifically.  Infrastructure adapters,
-  provider integrations, metrics, profiling, benchmarks, and tooling may use
-  standard library time functions directly; the goal is deterministic
-  trading behavior, not eliminating every direct use of =time= from the
-  module.
+  application-orchestration code specifically, not every direct use of
+  =time= in the module.  Infrastructure adapters, composition roots, and
+  test code (including benchmarks, which live in test files) are exempt.
+  The mechanical check enforcing this lists exempt paths explicitly; a
+  future package with a legitimate reason to use =time= directly — a
+  metrics or profiling package, for example — is added to that list when it
+  is introduced, rather than assumed exempt in advance.
 - Pure functions that only compare or transform caller-supplied timestamps do
   not require a clock.
 - The initial public contract is deliberately minimal: current time and only
@@ -72,8 +74,13 @@ The deterministic implementation follows these semantics:
 - a non-positive timer duration is ready before the constructing call
   returns, matching =time.Timer= behavior, rather than waiting for the next
   =Advance=;
-- a ready timer's channel receives the timer's scheduled deadline, not the
-  clock's time at delivery;
+- a ready simulated timer's channel receives the timer's exact scheduled
+  deadline, not the clock's time at delivery, even when one =Advance= call
+  crosses several timers' deadlines by a larger amount than any one of them
+  needed.  This is a Simulated-specific guarantee: the shared =Timer=
+  contract promises only that a delivered value identifies expiration,
+  because =Real='s channel comes directly from =time.Timer=, whose own
+  contract does not promise the exact requested instant;
 - timers with equal deadlines are made ready in creation order.  This
   guarantees the order in which independent timer channels are marked ready
   internally; it does not guarantee the order in which independent
@@ -92,8 +99,12 @@ The deterministic implementation follows these semantics:
   a future pass to sweep — an unbounded pending-timer collection is a slow
   memory leak across a long backtest;
 - timer delivery must not block the clock or require one goroutine per
-  timer: timer channels are buffered with capacity one, are never closed
-  (matching =time.Timer=), and delivery uses a non-blocking send;
+  timer: a simulated timer's channel is buffered with capacity one — an
+  implementation detail that makes this guarantee possible, not part of the
+  shared =Timer= contract, since a real timer channel's capacity is a
+  runtime detail =time.Timer= itself does not document (and, since Go 1.23,
+  is not literally a buffered channel) — is never closed, and delivery uses
+  a non-blocking send;
 - the simulated implementation contains no goroutines of its own;
 - real and deterministic clocks are verified by shared contract tests
   limited to behavior both genuinely provide: =Now= returns a valid instant,

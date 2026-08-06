@@ -15,14 +15,24 @@ type Clock interface {
 	NewTimer(d time.Duration) Timer
 }
 
-// Timer is a one-shot timer, matching the shape of time.Timer: a buffered,
-// never-closed channel that receives the timer's scheduled deadline when it
-// becomes ready, and a Stop method that prevents delivery if called before
-// then.
+// Timer is a one-shot timer, matching the shape of time.Timer: a
+// never-closed channel that reports expiration, and a Stop method that
+// prevents delivery if called before then.
+//
+// This shared contract deliberately promises less than either concrete
+// implementation actually delivers: Real's channel comes directly from
+// time.Timer, whose documented behavior is "the current time will be sent
+// on C" at expiration — not necessarily the exact instant requested, and,
+// since Go 1.23, not literally a buffered channel (its capacity is an
+// unexported runtime implementation detail, not part of time.Timer's own
+// contract). Simulated provides both stronger guarantees — exact scheduled-
+// deadline delivery and an internally buffered channel — documented on
+// Simulated itself rather than promised here, where they would not hold for
+// Real.
 type Timer interface {
-	// C returns the channel on which the timer delivers its scheduled
-	// deadline when it becomes ready. It is buffered with capacity one and
-	// is never closed.
+	// C returns the channel on which the timer reports that it has
+	// expired. The delivered value identifies the expiration instant; it is
+	// never closed.
 	C() <-chan time.Time
 
 	// Stop prevents the timer from firing, if it has not already. It

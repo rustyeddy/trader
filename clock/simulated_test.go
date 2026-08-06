@@ -86,6 +86,18 @@ func TestSimulatedTimerDeliversScheduledDeadlineNotAdvancedTime(t *testing.T) {
 		"delivered value must be the timer's own deadline, not the clock's time after advancing")
 }
 
+// TestSimulatedTimerChannelIsBuffered pins the implementation detail that
+// makes Advance's non-blocking delivery guarantee possible: unlike Real's
+// channel (whose capacity is a runtime detail the shared Timer contract
+// does not describe), Simulated's is deliberately buffered with capacity
+// one so a fire pass never blocks on a receiver.
+func TestSimulatedTimerChannelIsBuffered(t *testing.T) {
+	c := NewSimulated(mustParse(t, "2026-01-01T00:00:00Z"))
+	timer := c.NewTimer(time.Second).(*simTimer)
+
+	assert.Equal(t, 1, cap(timer.c))
+}
+
 func TestSimulatedMultipleDeadlinesCrossedInOneAdvance(t *testing.T) {
 	c := NewSimulated(mustParse(t, "2026-01-01T00:00:00Z"))
 	t1 := c.NewTimer(1 * time.Second)

@@ -19,10 +19,13 @@ func (Real) NewTimer(d time.Duration) Timer {
 	return &realTimer{t: time.NewTimer(d)}
 }
 
-// realTimer adapts *time.Timer to the Timer interface. time.Timer already
-// provides every guarantee Timer documents — a buffered, never-closed
-// channel and Stop's transition semantics — so this is a direct pass
-// through with no additional logic.
+// realTimer adapts *time.Timer to the Timer interface: a direct pass
+// through with no additional logic. time.Timer already provides everything
+// the shared Timer contract promises — a never-closed channel and Stop's
+// transition semantics — but not the stronger guarantees Simulated adds:
+// its delivered value is approximately, not necessarily exactly, the
+// requested deadline, and its channel's capacity is a runtime
+// implementation detail Timer does not describe.
 type realTimer struct {
 	t *time.Timer
 }

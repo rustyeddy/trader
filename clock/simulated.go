@@ -20,6 +20,16 @@ var ErrNegativeAdvance = errors.New("clock: Advance does not accept a negative d
 // of its own: Now, NewTimer, Advance, and Stop are all synchronous, and
 // timer delivery is a non-blocking send on a buffered channel. It is safe
 // for concurrent use.
+//
+// Simulated's timers provide two guarantees beyond the shared Timer
+// contract, neither of which Real promises: delivery carries the exact
+// scheduled deadline, even when a single Advance call crosses several
+// timers' deadlines by a larger amount than any one of them needed, and the
+// channel is internally buffered with capacity one, which is what lets
+// Advance deliver without blocking on a receiver. The buffering is an
+// implementation detail that makes the non-blocking delivery guarantee
+// possible; callers should rely on that guarantee, not on the channel's
+// capacity itself.
 type Simulated struct {
 	mu     sync.Mutex
 	now    time.Time
