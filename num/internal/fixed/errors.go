@@ -29,9 +29,9 @@ var (
 	// grouping separators, exponent notation, or any other malformed form.
 	ErrSyntax = errors.New("invalid decimal syntax")
 
-	// ErrPrecision reports decimal text carrying more than eight decimal
-	// places.  Exact parsing never silently rounds; excess precision is an
-	// error the caller must resolve.
+	// ErrPrecision reports decimal text carrying more significant fraction
+	// digits than the places constant supports.  Exact parsing never
+	// silently rounds; excess precision is an error the caller must resolve.
 	ErrPrecision = errors.New("excess decimal precision")
 
 	// ErrRange reports decimal text whose value lies outside the representable

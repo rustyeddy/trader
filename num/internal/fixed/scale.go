@@ -3,9 +3,9 @@
 //
 // This package is deliberately unexported outside num.  It knows nothing about
 // prices, quantities, money, or currencies; it knows only how to represent an
-// exact decimal value as a signed int64 scaled by the common scale, how to do
-// checked arithmetic on such values, and how to convert between that
-// representation and canonical decimal text.
+// exact decimal value as a signed int64 scaled by the scale constant below,
+// how to do checked arithmetic on such values, and how to convert between
+// that representation and canonical decimal text.
 //
 // The division of responsibility is:
 //

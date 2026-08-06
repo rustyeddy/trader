@@ -24,13 +24,14 @@ import "math"
 //   - exponent notation, which an adapter must expand first;
 //   - grouping separators, currency symbols, and locale-dependent forms;
 //   - leading, trailing, or embedded whitespace;
-//   - significant precision beyond the eight supported decimal places;
+//   - significant precision beyond what the places constant supports;
 //   - values outside the representable scaled range.
 //
-// Trailing zeros beyond the eighth place are accepted because dropping them
-// is exact and requires no rounding; ADR-004 allows readers to accept
-// equivalent exact forms.  A non-zero digit beyond the eighth place reports
-// ErrPrecision, since honouring it would require discarding information.
+// Trailing zeros beyond the places constant's digit count are accepted
+// because dropping them is exact and requires no rounding; ADR-004 allows
+// readers to accept equivalent exact forms.  A non-zero digit past that
+// point reports ErrPrecision, since honouring it would require discarding
+// information.
 //
 // The full signed range is parsable, including the most negative value.  The
 // magnitude is accumulated unsigned and the sign applied only at the end, so
