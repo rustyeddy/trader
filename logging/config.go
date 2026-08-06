@@ -40,7 +40,7 @@ func New(cfg Config) (*slog.Logger, io.Closer, error) {
 		return nil, nil, err
 	}
 
-	opts := &slog.HandlerOptions{Level: cfg.Level}
+	opts := &slog.HandlerOptions{Level: cfg.Level, ReplaceAttr: redactSensitiveKeys}
 
 	var h slog.Handler
 	switch cfg.Format {
