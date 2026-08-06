@@ -43,8 +43,14 @@
 //	flag:"name"      overrides the Overrides map key (default: the dotted path with "." replaced by "-")
 //	default:"value"  the value used when no source sets this field
 //	enum:"a,b,c"     restricts an already-decoded string field to this list
-//	required:"true"  Load fails if this field is still its zero value after every source
+//	required:"true"  Load fails if no source (including default) supplied this field a value
 //	secret:"true"    this field's value is never written to error messages or Render output
+//
+// required is a presence check, not a zero-value check: an explicitly
+// supplied false, 0, "", or an exact numeric zero such as num.Rate("0")
+// satisfies it. A field with both required and default is not a
+// contradiction — default just means the field is always satisfied — but
+// combining them is usually redundant.
 //
 // # Environment variable naming convention
 //

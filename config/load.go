@@ -51,6 +51,7 @@ func Load[T any](opts Options) (T, error) {
 		if !ok {
 			continue
 		}
+		l.Resolved = true
 		if err := decodeLeaf(l, raw); err != nil {
 			errs = append(errs, fieldErr(l, raw, err))
 		}

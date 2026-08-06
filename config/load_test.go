@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -128,6 +129,55 @@ func TestLoadRequiredFieldSatisfied(t *testing.T) {
 	got, err := Load[Config](Options{Environ: []string{"APIKEY=secret-key"}})
 	require.NoError(t, err)
 	assert.Equal(t, "secret-key", got.APIKey)
+}
+
+// TestLoadRequiredAcceptsExplicitZeroValues is the regression test for the
+// bug where checkRequired used reflect.Value.IsZero, which rejected a
+// required field explicitly supplied as its zero value: required false,
+// required 0, and required "" all used to fail as if the field had been
+// omitted entirely, even though an operator had supplied it.
+func TestLoadRequiredAcceptsExplicitZeroValues(t *testing.T) {
+	type Config struct {
+		Enabled bool   `required:"true"`
+		Retries int    `required:"true"`
+		Suffix  string `required:"true"`
+	}
+
+	got, err := Load[Config](Options{
+		Environ: []string{"ENABLED=false", "RETRIES=0", "SUFFIX="},
+	})
+	require.NoError(t, err)
+	assert.False(t, got.Enabled)
+	assert.Equal(t, 0, got.Retries)
+	assert.Equal(t, "", got.Suffix)
+}
+
+// TestLoadRequiredAcceptsExplicitNumRateZero covers the same bug for an
+// exact numeric type: num.Rate("0") is a perfectly valid explicit zero, not
+// a missing field.
+func TestLoadRequiredAcceptsExplicitNumRateZero(t *testing.T) {
+	type Config struct {
+		Rate num.Rate `required:"true"`
+	}
+
+	got, err := Load[Config](Options{
+		Environ:     []string{},
+		FileContent: []byte("rate: \"0\"\n"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "0", got.Rate.String())
+}
+
+// TestLoadRequiredStillRejectsOmittedField keeps the presence check itself
+// honest: a required field no source mentions at all must still fail,
+// distinguishing "explicitly zero" from "never supplied."
+func TestLoadRequiredStillRejectsOmittedField(t *testing.T) {
+	type Config struct {
+		Enabled bool `required:"true"`
+	}
+
+	_, err := Load[Config](Options{Environ: []string{}})
+	require.ErrorIs(t, err, ErrRequired)
 }
 
 func TestLoadAggregatesMultipleErrors(t *testing.T) {

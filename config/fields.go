@@ -20,6 +20,7 @@ type leaf struct {
 	Required     bool
 	Secret       bool
 	Value        reflect.Value // addressable, settable
+	Resolved     bool          // set once some source has supplied a value, whether or not it decoded successfully
 }
 
 // EnvName returns l's environment variable name: the env tag verbatim if
