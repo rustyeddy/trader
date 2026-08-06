@@ -21,15 +21,25 @@ import "math/bits"
 
 // MulScaled returns the product of two raw scaled values, restored to the
 // common scale and rounded by mode.
+//
+// An unrecognized mode reports ErrInvalidRounding rather than silently
+// falling back to a default policy.
 func MulScaled(a, b int64, mode Rounding) (int64, error) {
+	if !mode.valid() {
+		return 0, ErrInvalidRounding
+	}
 	return mulDiv(a, b, Scale, mode)
 }
 
 // DivScaled returns the quotient of two raw scaled values, restored to the
 // common scale and rounded by mode.
 //
-// A zero divisor reports ErrDivideByZero.
+// A zero divisor reports ErrDivideByZero. An unrecognized mode reports
+// ErrInvalidRounding rather than silently falling back to a default policy.
 func DivScaled(a, b int64, mode Rounding) (int64, error) {
+	if !mode.valid() {
+		return 0, ErrInvalidRounding
+	}
 	if b == 0 {
 		return 0, ErrDivideByZero
 	}

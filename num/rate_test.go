@@ -54,12 +54,6 @@ func TestRateZeroValueIsValidZero(t *testing.T) {
 	assert.Equal(t, 0, r.Sign())
 }
 
-func TestRateFromScaledAndScaled(t *testing.T) {
-	r := RateFromScaled(105_000_000)
-	assert.Equal(t, "1.05", r.String())
-	assert.Equal(t, int64(105_000_000), r.Scaled())
-}
-
 func TestRateComparison(t *testing.T) {
 	low := MustParseRate("1.00")
 	high := MustParseRate("2.00")
@@ -93,19 +87,21 @@ func TestRateArithmetic(t *testing.T) {
 }
 
 func TestRateArithmeticOverflow(t *testing.T) {
-	max := RateFromScaled(math.MaxInt64)
+	// Rate{raw: ...} is a representation-boundary test construction, not a
+	// public API: num exports no raw-scaled constructor. See doc.go.
+	max := Rate{raw: math.MaxInt64}
 	one := MustParseRate("0.00000001")
 
 	_, err := max.Add(one)
 	require.ErrorIs(t, err, ErrOverflow)
 
-	min := RateFromScaled(math.MinInt64)
+	min := Rate{raw: math.MinInt64}
 	_, err = min.Sub(one)
 	require.ErrorIs(t, err, ErrUnderflow)
 }
 
 func TestRateNegAbsMinInt64(t *testing.T) {
-	min := RateFromScaled(math.MinInt64)
+	min := Rate{raw: math.MinInt64}
 
 	_, err := min.Neg()
 	require.ErrorIs(t, err, ErrNotRepresentable)

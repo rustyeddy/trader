@@ -122,6 +122,20 @@ func TestCurrencyUnmarshalRejectsMalformed(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCurrency)
 }
 
+// TestCurrencyMarshalRejectsInvalid guards against silently writing an
+// invalid Currency, including the Go zero value, as an empty string. An
+// empty currency code is not a valid wire value: it must fail loudly, not
+// round-trip as if it were legitimate.
+func TestCurrencyMarshalRejectsInvalid(t *testing.T) {
+	var zero Currency
+
+	_, err := zero.MarshalText()
+	require.ErrorIs(t, err, ErrInvalidCurrency)
+
+	_, err = json.Marshal(zero)
+	require.ErrorIs(t, err, ErrInvalidCurrency)
+}
+
 func TestMoneyTextRoundTrip(t *testing.T) {
 	want := usd("123.45")
 

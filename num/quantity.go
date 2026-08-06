@@ -49,24 +49,6 @@ func MustParseQuantity(s string) Quantity {
 	return q
 }
 
-// QuantityFromScaled constructs a Quantity directly from a raw value already
-// scaled by 1e8.
-//
-// This is a narrowly scoped escape hatch for trusted internal code,
-// persistence reconstruction, and tests that exercise representation
-// boundaries directly. Ordinary callers should use ParseQuantity.
-func QuantityFromScaled(raw int64) (Quantity, error) {
-	if raw < 0 {
-		return Quantity{}, ErrNegative
-	}
-	return Quantity{raw: raw}, nil
-}
-
-// Scaled returns the raw value backing q, scaled by 1e8.
-func (q Quantity) Scaled() int64 {
-	return q.raw
-}
-
 // String returns q formatted as canonical decimal text.
 func (q Quantity) String() string {
 	return fixed.Format(q.raw)

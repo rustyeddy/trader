@@ -45,27 +45,6 @@ func MustParsePrice(s string) Price {
 	return p
 }
 
-// PriceFromScaled constructs a Price directly from a raw value already scaled
-// by 1e8.
-//
-// This is a narrowly scoped escape hatch for trusted internal code,
-// persistence reconstruction, and tests that exercise representation
-// boundaries directly. Ordinary callers should use ParsePrice.
-//
-// PriceFromScaled rejects a negative raw value, matching ParsePrice, since a
-// deserialized Price is still subject to the same domain invariant.
-func PriceFromScaled(raw int64) (Price, error) {
-	if raw < 0 {
-		return Price{}, ErrNegative
-	}
-	return Price{raw: raw}, nil
-}
-
-// Scaled returns the raw value backing p, scaled by 1e8.
-func (p Price) Scaled() int64 {
-	return p.raw
-}
-
 // String returns p formatted as canonical decimal text.
 func (p Price) String() string {
 	return fixed.Format(p.raw)

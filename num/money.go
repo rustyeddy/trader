@@ -51,19 +51,6 @@ func MustParseMoney(s string, currency Currency) Money {
 	return m
 }
 
-// MoneyFromScaled constructs Money directly from a raw amount already scaled
-// by 1e8, and a currency.
-//
-// This is a narrowly scoped escape hatch for trusted internal code,
-// persistence reconstruction, and tests that exercise representation
-// boundaries directly. Ordinary callers should use ParseMoney.
-func MoneyFromScaled(raw int64, currency Currency) (Money, error) {
-	if !currency.IsValid() {
-		return Money{}, ErrMissingCurrency
-	}
-	return Money{amount: raw, currency: currency, valid: true}, nil
-}
-
 // IsValid reports whether m has a valid currency. The Go zero value of Money,
 // and any Money left unset, reports false.
 func (m Money) IsValid() bool {
@@ -75,14 +62,19 @@ func (m Money) Currency() Currency {
 	return m.currency
 }
 
-// Scaled returns the raw amount backing m, scaled by 1e8.
-func (m Money) Scaled() int64 {
-	return m.amount
-}
-
 // String returns m formatted as "<canonical amount> <currency>", for example
 // "123.45 USD". This is Money's canonical text form; see MarshalText.
+//
+// String renders invalid Money, including the Go zero value, as
+// "<invalid money>" rather than a currency-shaped string such as "0 ": an
+// amount with no currency is not canonical output and must not be mistaken
+// for it. MarshalText and MarshalJSON reject invalid Money outright; String
+// exists for logging and debugging, where a caller cannot check an error, so
+// it makes the problem visible instead.
 func (m Money) String() string {
+	if !m.IsValid() {
+		return "<invalid money>"
+	}
 	return fixed.Format(m.amount) + " " + m.currency.String()
 }
 

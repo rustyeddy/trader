@@ -44,25 +44,6 @@ func MustParseRate(s string) Rate {
 	return r
 }
 
-// RateFromScaled constructs a Rate directly from a raw value already scaled by
-// 1e8.
-//
-// This is a narrowly scoped escape hatch for trusted internal code,
-// persistence reconstruction, and tests that exercise representation
-// boundaries directly.  Ordinary callers should use ParseRate.
-func RateFromScaled(raw int64) Rate {
-	return Rate{raw: raw}
-}
-
-// Scaled returns the raw value backing r, scaled by 1e8.
-//
-// This exposes the same representation detail as RateFromScaled and exists
-// for the same narrowly scoped callers: persistence, encoding, and
-// representation-boundary tests.
-func (r Rate) Scaled() int64 {
-	return r.raw
-}
-
 // String returns r formatted as canonical decimal text.
 func (r Rate) String() string {
 	return fixed.Format(r.raw)

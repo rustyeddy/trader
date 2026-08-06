@@ -42,6 +42,19 @@ func (r Rounding) String() string {
 	}
 }
 
+// valid reports whether r is one of the four named policies. It is checked at
+// every entry point that accepts a caller-supplied Rounding (MulScaled,
+// DivScaled) so that an unrecognized value is rejected outright rather than
+// silently resolved to a default — see roundMagnitude for why that matters.
+func (r Rounding) valid() bool {
+	switch r {
+	case RoundHalfEven, RoundTowardZero, RoundDown, RoundUp:
+		return true
+	default:
+		return false
+	}
+}
+
 // roundMagnitude reports whether the magnitude of a quotient should be
 // incremented, given the truncated magnitude quotient, the magnitude
 // remainder, the divisor magnitude, and the sign of the true result.
@@ -51,6 +64,11 @@ func (r Rounding) String() string {
 // remainder is strictly less than the divisor, and the divisor is at most
 // 2^63, so doubling the remainder to compare against the divisor cannot
 // overflow uint64.
+//
+// mode is assumed valid: every caller reaches this function through
+// MulScaled or DivScaled, which reject an unrecognized Rounding before
+// getting here.  The switch below is therefore exhaustive over Rounding's
+// four named values, not a silent fallback for a fifth one.
 func roundMagnitude(quo, rem, div uint64, negative bool, mode Rounding) bool {
 	if rem == 0 {
 		return false
@@ -66,7 +84,7 @@ func roundMagnitude(quo, rem, div uint64, negative bool, mode Rounding) bool {
 	case RoundUp:
 		return !negative
 
-	default: // RoundHalfEven
+	case RoundHalfEven:
 		twice := rem * 2
 		switch {
 		case twice > div:
@@ -77,5 +95,11 @@ func roundMagnitude(quo, rem, div uint64, negative bool, mode Rounding) bool {
 			// Exact midpoint: move to the even neighbour.
 			return quo%2 == 1
 		}
+
+	default:
+		// Unreachable: MulScaled and DivScaled validate mode before calling
+		// mulDiv. A panic here would indicate that guarantee was bypassed,
+		// not a value a caller could trigger through the public API.
+		panic("fixed: roundMagnitude called with unvalidated Rounding")
 	}
 }

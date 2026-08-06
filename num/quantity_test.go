@@ -46,15 +46,6 @@ func TestMustParseQuantity(t *testing.T) {
 	assert.Panics(t, func() { MustParseQuantity("-1") })
 }
 
-func TestQuantityFromScaled(t *testing.T) {
-	q, err := QuantityFromScaled(1000 * 100_000_000)
-	require.NoError(t, err)
-	assert.Equal(t, "1000", q.String())
-
-	_, err = QuantityFromScaled(-1)
-	require.ErrorIs(t, err, ErrNegative)
-}
-
 func TestQuantityZeroValueIsValidZero(t *testing.T) {
 	var q Quantity
 	assert.True(t, q.IsZero())
@@ -101,11 +92,12 @@ func TestQuantitySubToExactlyZeroIsValid(t *testing.T) {
 }
 
 func TestQuantityAddOverflow(t *testing.T) {
-	max, err := QuantityFromScaled(math.MaxInt64)
-	require.NoError(t, err)
+	// Quantity{raw: ...} is a representation-boundary test construction, not
+	// a public API: num exports no raw-scaled constructor. See doc.go.
+	max := Quantity{raw: math.MaxInt64}
 	one := MustParseQuantity("0.00000001")
 
-	_, err = max.Add(one)
+	_, err := max.Add(one)
 	require.ErrorIs(t, err, ErrOverflow)
 }
 

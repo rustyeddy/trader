@@ -115,7 +115,13 @@ func (r *Rate) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalText implements encoding.TextMarshaler.
+//
+// MarshalText reports ErrInvalidCurrency for an invalid Currency, including
+// the zero value, rather than silently writing an empty or malformed code.
 func (c Currency) MarshalText() ([]byte, error) {
+	if !c.IsValid() {
+		return nil, ErrInvalidCurrency
+	}
 	return []byte(c.code), nil
 }
 
@@ -131,7 +137,13 @@ func (c *Currency) UnmarshalText(text []byte) error {
 
 // MarshalJSON implements json.Marshaler, encoding c as a JSON string holding
 // the currency code.
+//
+// MarshalJSON reports ErrInvalidCurrency for an invalid Currency, including
+// the zero value, rather than silently writing "".
 func (c Currency) MarshalJSON() ([]byte, error) {
+	if !c.IsValid() {
+		return nil, ErrInvalidCurrency
+	}
 	return json.Marshal(c.code)
 }
 

@@ -47,16 +47,6 @@ func TestMustParsePrice(t *testing.T) {
 	assert.Panics(t, func() { MustParsePrice("-1") })
 }
 
-func TestPriceFromScaled(t *testing.T) {
-	p, err := PriceFromScaled(108_473_000)
-	require.NoError(t, err)
-	assert.Equal(t, "1.08473", p.String())
-	assert.Equal(t, int64(108_473_000), p.Scaled())
-
-	_, err = PriceFromScaled(-1)
-	require.ErrorIs(t, err, ErrNegative)
-}
-
 func TestPriceZeroValueIsValidZero(t *testing.T) {
 	var p Price
 	assert.True(t, p.IsZero())
@@ -103,11 +93,12 @@ func TestPriceSubExactlyZeroIsValid(t *testing.T) {
 }
 
 func TestPriceAddOverflow(t *testing.T) {
-	max, err := PriceFromScaled(math.MaxInt64)
-	require.NoError(t, err)
+	// Price{raw: ...} is a representation-boundary test construction, not a
+	// public API: num exports no raw-scaled constructor. See doc.go.
+	max := Price{raw: math.MaxInt64}
 	one := MustParsePrice("0.00000001")
 
-	_, err = max.Add(one)
+	_, err := max.Add(one)
 	require.ErrorIs(t, err, ErrOverflow)
 }
 

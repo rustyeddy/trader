@@ -37,4 +37,10 @@ var (
 	// ErrRange reports decimal text whose value lies outside the representable
 	// scaled range.
 	ErrRange = errors.New("value out of range")
+
+	// ErrInvalidRounding reports a Rounding value that is none of the four
+	// named policies.  An unrecognized mode is rejected outright rather than
+	// silently resolved to a default: ADR-004 forbids exactly this kind of
+	// hidden policy fallback.
+	ErrInvalidRounding = errors.New("invalid rounding mode")
 )

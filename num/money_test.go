@@ -63,19 +63,19 @@ func TestMoneyZeroValueIsInvalid(t *testing.T) {
 	assert.False(t, m.Currency().IsValid())
 }
 
+// TestMoneyStringMarksInvalidMoneyVisibly guards against String() rendering
+// invalid Money as something that merely looks like canonical output, such as
+// "0 " for the Go zero value.
+func TestMoneyStringMarksInvalidMoneyVisibly(t *testing.T) {
+	var m Money
+	assert.Equal(t, "<invalid money>", m.String())
+	assert.NotContains(t, m.String(), " USD")
+}
+
 func TestMoneyExplicitZeroIsValid(t *testing.T) {
 	m := usd("0")
 	assert.True(t, m.IsValid())
 	assert.True(t, m.IsZero())
-}
-
-func TestMoneyFromScaled(t *testing.T) {
-	m, err := MoneyFromScaled(12_345_000_000, MustParseCurrency("USD"))
-	require.NoError(t, err)
-	assert.Equal(t, "123.45 USD", m.String())
-
-	_, err = MoneyFromScaled(100, Currency{})
-	require.ErrorIs(t, err, ErrMissingCurrency)
 }
 
 func TestMoneySameCurrencyArithmetic(t *testing.T) {
@@ -174,10 +174,12 @@ func TestMoneyNegAbs(t *testing.T) {
 }
 
 func TestMoneyNegAbsMinInt64(t *testing.T) {
-	m, err := MoneyFromScaled(math.MinInt64, MustParseCurrency("USD"))
-	require.NoError(t, err)
+	// Money{amount: ..., currency: ..., valid: true} is a
+	// representation-boundary test construction, not a public API: num
+	// exports no raw-scaled constructor. See doc.go.
+	m := Money{amount: math.MinInt64, currency: MustParseCurrency("USD"), valid: true}
 
-	_, err = m.Neg()
+	_, err := m.Neg()
 	require.ErrorIs(t, err, ErrNotRepresentable)
 
 	_, err = m.Abs()
@@ -185,11 +187,10 @@ func TestMoneyNegAbsMinInt64(t *testing.T) {
 }
 
 func TestMoneyOverflow(t *testing.T) {
-	max, err := MoneyFromScaled(math.MaxInt64, MustParseCurrency("USD"))
-	require.NoError(t, err)
+	max := Money{amount: math.MaxInt64, currency: MustParseCurrency("USD"), valid: true}
 	one := usd("0.00000001")
 
-	_, err = max.Add(one)
+	_, err := max.Add(one)
 	require.ErrorIs(t, err, ErrOverflow)
 }
 

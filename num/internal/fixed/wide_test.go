@@ -188,6 +188,20 @@ func TestRoundingNeighbourhood(t *testing.T) {
 	}
 }
 
+// TestUnrecognizedRoundingIsRejected guards against the hidden-fallback
+// failure mode: an out-of-range Rounding value must be rejected explicitly,
+// not silently resolved to RoundHalfEven by a switch statement's default
+// case.
+func TestUnrecognizedRoundingIsRejected(t *testing.T) {
+	const bogus Rounding = 99
+
+	_, err := MulScaled(Scale, Scale, bogus)
+	require.ErrorIs(t, err, ErrInvalidRounding)
+
+	_, err = DivScaled(Scale, Scale, bogus)
+	require.ErrorIs(t, err, ErrInvalidRounding)
+}
+
 func TestRoundingString(t *testing.T) {
 	assert.Equal(t, "half-even", RoundHalfEven.String())
 	assert.Equal(t, "toward-zero", RoundTowardZero.String())

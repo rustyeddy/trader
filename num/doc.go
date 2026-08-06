@@ -46,9 +46,14 @@
 //
 // # Construction
 //
-// Ordinary callers construct values from exact decimal text (ParsePrice,
-// ParseQuantity, ...) or from the text/JSON unmarshalers.  Raw scaled int64
-// construction (PriceFromScaled, ...) is reserved for trusted internal code,
-// persistence reconstruction, and tests that exercise representation
-// boundaries directly; it is not the ordinary public API.
+// Callers construct values from exact decimal text (ParsePrice,
+// ParseQuantity, ...) or from the text/JSON unmarshalers.  There is no public
+// raw-scaled-int64 constructor or accessor: ADR-004 reserves that
+// representation detail for trusted internal code, persistence
+// reconstruction, and representation-boundary tests, and a public
+// FromScaled/Scaled pair on every semantic type would leak the 1e8 scale to
+// every importer of num rather than keep it narrowly scoped. A future
+// persistence adapter that needs exact scaled BIGINT reconstruction should
+// introduce its own narrowly scoped boundary for that purpose rather than
+// reuse a general-purpose escape hatch here.
 package num
