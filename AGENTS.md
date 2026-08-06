@@ -28,13 +28,18 @@ Detailed workflows:
 ### Logging
 
 - We will use structured logging with the go log/slog package
-- Typical log levels will be used fatal, error, warning, info and debug. 
-- Logger by default will log to /var/log/trader.log 
-- Logger flags will be available for 
-  - log output file, default: /var/log/trader.log
-  - Output flag for writing to stderr or stdout
-  - Flag to change the log level: From Fatal to Debug
-  - Flag to change the output format includes: text (human readable) or JSON
+- Log levels are slog's four standard levels: error, warn, info, and debug.
+  There is no fatal level: an operator-actionable "this must stop the
+  process" decision belongs to the composition root as an explicit
+  `os.Exit` call after logging, not to a logging helper that hides process
+  termination inside a log call.
+- Logger output defaults to stderr.
+- Logger flags will be available for
+  - log output destination: stderr, stdout, or an arbitrary file path
+    supplied by the operator
+  - Flag to change the log level: from Error to Debug
+  - Flag to change the output format: text (human readable, the default) or
+    JSON
 
 ## Testing 
 
