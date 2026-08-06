@@ -77,6 +77,26 @@ cfg, err := config.Load[Settings](config.Options{EnvPrefix: "TRADER"})
 See the [package doc comment](config/doc.go) for the tag reference and
 environment-variable naming convention.
 
+### logging
+
+`logging` builds Trader's structured loggers on top of `log/slog` — text or
+JSON output, a configurable level, and canonical attribute names
+(`CorrelationID`, `OrderID`, `AccountID`, ...) so records stay correlatable
+across components. It is not a wrapper around `slog.Logger`: components
+accept and use `*slog.Logger` directly.
+
+```go
+logger, closer, err := logging.New(logging.Config{Format: "json"})
+defer closer.Close()
+
+logger.Info("order placed", logging.OrderID, "abc123", "password", logging.Secret(pw))
+```
+
+`logging.Config` works directly with `config.Load` — `slog.Level` already
+implements the same text encoding `config` expects. See the
+[package doc comment](logging/doc.go) for context propagation, redaction,
+and the `Discard`/`Capture` test helpers.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
