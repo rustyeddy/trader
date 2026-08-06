@@ -5,8 +5,8 @@ import (
 	"sync"
 )
 
-// Deterministic is a Source that draws entropy from a seeded PRNG, for
-// tests and replay: given the same seed, it produces the same sequence of
+// Deterministic is an EntropySource that draws entropy from a seeded PRNG,
+// for tests and replay: given the same seed, it produces the same sequence of
 // entropy values every time, so — combined with a clock.Simulated — a
 // Generator using it produces the same sequence of identifiers every time,
 // satisfying issue #24's "deterministic generation produces reproducible
@@ -28,7 +28,7 @@ func NewDeterministic(seed1, seed2 uint64) *Deterministic {
 	return &Deterministic{rng: rand.New(rand.NewPCG(seed1, seed2))}
 }
 
-// Entropy implements Source.
+// Entropy implements EntropySource.
 func (d *Deterministic) Entropy() ([10]byte, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -10,17 +10,17 @@ import (
 	"github.com/rustyeddy/trader/id/internal/ulid"
 )
 
-// Source supplies the 80-bit entropy component of a new identifier.
-type Source interface {
+// EntropySource supplies the 80-bit entropy component of a new identifier.
+type EntropySource interface {
 	// Entropy returns 10 fresh random bytes.
 	Entropy() ([10]byte, error)
 }
 
-// Random is a Source backed by crypto/rand: the production default. Its
-// zero value is ready to use.
+// Random is an EntropySource backed by crypto/rand: the production
+// default. Its zero value is ready to use.
 type Random struct{}
 
-// Entropy implements Source.
+// Entropy implements EntropySource.
 func (Random) Entropy() ([10]byte, error) {
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -45,8 +45,8 @@ var ErrClockMovedBackward = errors.New("id: clock moved backward")
 var ErrEntropyExhausted = errors.New("id: entropy exhausted within one millisecond")
 
 // Generator produces monotonic Trader-owned identifiers from an injected
-// clock.Clock and entropy Source, per ADR-015: it never calls time.Now
-// itself. Multiple identifiers generated within the same millisecond
+// clock.Clock and entropy EntropySource, per ADR-015: it never calls
+// time.Now itself. Multiple identifiers generated within the same millisecond
 // receive strictly increasing entropy rather than fresh random values —
 // the ULID spec's monotonic generation guidance — so their lexicographic
 // sort order matches creation order at millisecond resolution.
@@ -57,7 +57,7 @@ var ErrEntropyExhausted = errors.New("id: entropy exhausted within one milliseco
 // just within a single goroutine's calls to it.
 type Generator struct {
 	clock  clock.Clock
-	source Source
+	source EntropySource
 
 	mu       sync.Mutex
 	hasLast  bool
@@ -67,7 +67,7 @@ type Generator struct {
 
 // NewGenerator returns a Generator that timestamps identifiers using c and
 // draws entropy from source.
-func NewGenerator(c clock.Clock, source Source) *Generator {
+func NewGenerator(c clock.Clock, source EntropySource) *Generator {
 	return &Generator{clock: c, source: source}
 }
 

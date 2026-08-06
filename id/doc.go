@@ -90,5 +90,5 @@
 //	Order:    correlation = same workflow ID, causation = proposal's EventID
 //	Fill:     correlation = same workflow ID, causation = order's EventID
 //
-// See ref.go.
+// See metadata.go.
 package id
