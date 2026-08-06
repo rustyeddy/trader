@@ -36,8 +36,19 @@ func withAttr(ctx context.Context, attr slog.Attr) context.Context {
 	// (e.g. two goroutines each adding their own causation ID to a shared
 	// correlation-scoped context), and appending in place could let one
 	// branch's attribute leak into the other.
-	next := make([]slog.Attr, len(existing), len(existing)+1)
-	copy(next, existing)
+	//
+	// Drop any existing entry for the same key rather than keeping both: a
+	// second WithCorrelationID call on an already-scoped context replaces
+	// the value for every record logged from that point on, the same way a
+	// derived context's value shadows its parent's everywhere else. Without
+	// this, nested calls would accumulate duplicate correlation_id /
+	// causation_id keys in every subsequent record.
+	next := make([]slog.Attr, 0, len(existing)+1)
+	for _, a := range existing {
+		if a.Key != attr.Key {
+			next = append(next, a)
+		}
+	}
 	next = append(next, attr)
 
 	return context.WithValue(ctx, ctxKey{}, next)
@@ -66,9 +77,34 @@ func NewContextHandler(h slog.Handler) slog.Handler {
 }
 
 func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if attrs := attrsFromContext(ctx); len(attrs) > 0 {
-		r.AddAttrs(attrs...)
+	attrs := attrsFromContext(ctx)
+	if len(attrs) == 0 {
+		return h.Handler.Handle(ctx, r)
 	}
+
+	// An attribute the caller set explicitly on this record wins over the
+	// same key injected from context: it is the more specific of the two,
+	// chosen deliberately for this one record rather than inherited
+	// ambiently. Without this check, a call site that (accidentally or
+	// deliberately) logs its own "correlation_id" attribute while a context
+	// value with the same key is in scope would end up with two
+	// correlation_id keys in the same record.
+	recordKeys := make(map[string]bool, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		recordKeys[a.Key] = true
+		return true
+	})
+
+	toAdd := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		if !recordKeys[a.Key] {
+			toAdd = append(toAdd, a)
+		}
+	}
+	if len(toAdd) > 0 {
+		r.AddAttrs(toAdd...)
+	}
+
 	return h.Handler.Handle(ctx, r)
 }
 

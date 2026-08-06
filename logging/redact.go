@@ -5,12 +5,13 @@ import (
 	"strings"
 )
 
-// secretValue wraps a value so its structured-log representation is always
-// the literal string "REDACTED", regardless of what the value actually is
-// or what key it is logged under.
-type secretValue struct {
-	v any
-}
+// secretValue is deliberately stateless: it does not retain the value
+// Secret was called with. LogValue never needs it, and holding onto it
+// would keep the credential reachable through the wrapper itself — by
+// reflection, by fmt's default struct formatting, or by any code that
+// inspects the value before an slog handler resolves it as a LogValuer —
+// defeating the point of wrapping it in the first place.
+type secretValue struct{}
 
 // Secret wraps v so logging it never reveals its actual content — logging a
 // value wrapped with Secret always resolves to the string "REDACTED". This
@@ -20,13 +21,17 @@ type secretValue struct {
 //
 //	logger.Info("authenticated", "password", logging.Secret(pw))
 //
+// v is accepted only so the call site documents what is being redacted; it
+// is discarded immediately and never stored — see secretValue.
+//
 // New also installs a small denylist-based ReplaceAttr (see
 // redactSensitiveKeys) as a second, best-effort layer that catches a
 // sensitive value logged under a conventionally-named key without an
 // explicit Secret wrap. Secret is the mechanism that is actually reliable,
 // since it does not depend on guessing key names.
 func Secret(v any) slog.LogValuer {
-	return secretValue{v: v}
+	_ = v
+	return secretValue{}
 }
 
 // LogValue implements slog.LogValuer.

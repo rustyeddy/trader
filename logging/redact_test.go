@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -19,6 +20,28 @@ func TestSecretRedactsUnderAnyKeyName(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "totally_unremarkable_key=REDACTED")
 	assert.NotContains(t, out, "super-secret-value")
+}
+
+// TestSecretWrapperCannotLeakThroughOrdinaryFormatting is the regression
+// test for secretValue previously retaining the wrapped value in a field.
+// A LogValuer's job is to control what an slog handler prints, but nothing
+// stops other code from formatting or reflecting over the wrapper directly
+// -- fmt.Sprintf("%v", ...) does not know about slog.LogValuer and will
+// happily print an unexported field's content. The wrapper must therefore
+// hold nothing worth printing, not just resolve to "REDACTED" through the
+// interface slog itself calls.
+func TestSecretWrapperCannotLeakThroughOrdinaryFormatting(t *testing.T) {
+	const original = "hunter2-super-secret"
+
+	wrapped := Secret(original)
+
+	assert.NotContains(t, fmt.Sprintf("%v", wrapped), original)
+	assert.NotContains(t, fmt.Sprintf("%+v", wrapped), original)
+	assert.NotContains(t, fmt.Sprintf("%#v", wrapped), original)
+
+	// The wrapper itself must carry no fields at all, not merely fields that
+	// happen not to print the secret.
+	assert.Equal(t, secretValue{}, wrapped)
 }
 
 func TestSecretRedactsInJSON(t *testing.T) {
