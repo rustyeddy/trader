@@ -43,25 +43,77 @@ current time or timers.
   manually advanced deterministic clock implementing the same contract.
 - Domain and application components that need "now" or timer behavior receive
   a clock explicitly.  They do not call =time.Now=, =time.NewTimer=,
-  =time.After=, or =time.Sleep= directly.
+  =time.After=, or =time.Sleep= directly.  This constraint targets domain and
+  application-orchestration code specifically.  Infrastructure adapters,
+  provider integrations, metrics, profiling, benchmarks, and tooling may use
+  standard library time functions directly; the goal is deterministic
+  trading behavior, not eliminating every direct use of =time= from the
+  module.
 - Pure functions that only compare or transform caller-supplied timestamps do
   not require a clock.
 - The initial public contract is deliberately minimal: current time and only
   the timer behavior required by current consumers.  Tickers, callback
   schedulers, cron behavior, and a reimplementation of the full =time= package
-  are not part of the initial abstraction.
+  are not part of the initial abstraction.  =Sleep= and =After= convenience
+  wrappers are deferred until a concrete consumer needs them: a =Sleep=
+  helper over a manually advanced clock is a foot-gun on the goroutine that
+  is also expected to advance it, and the recommended pattern —
+  =NewTimer= plus =select= plus =context.Context= cancellation — already
+  covers the need without adding a wrapper that hides that risk behind a
+  friendly name.
 
 The deterministic implementation follows these semantics:
 
-- simulated time advances only when explicitly requested;
+- simulated time advances only when explicitly requested, and never moves
+  backward: =Advance= rejects a negative duration rather than accepting one;
 - advancing time never waits on wall-clock time;
 - timers whose deadlines are crossed by one advance become ready during that
   advance;
-- timers with equal deadlines fire in creation order;
-- stopping a timer before it fires prevents delivery;
-- timer delivery must not block the clock or require one goroutine per timer;
-- real and deterministic clocks are verified by shared contract tests where
-  their observable behavior overlaps.
+- a non-positive timer duration is ready before the constructing call
+  returns, matching =time.Timer= behavior, rather than waiting for the next
+  =Advance=;
+- a ready timer's channel receives the timer's scheduled deadline, not the
+  clock's time at delivery;
+- timers with equal deadlines are made ready in creation order.  This
+  guarantees the order in which independent timer channels are marked ready
+  internally; it does not guarantee the order in which independent
+  goroutines or a =select= statement observe or consume those channels.  A
+  globally observable execution order would require a scheduler or event
+  queue rather than a channel-per-timer API, which is out of scope for this
+  abstraction;
+- stopping a timer before it fires prevents delivery.  =Stop= returns =true=
+  only on the transition from pending to stopped; it returns =false= if the
+  timer has already fired or was already stopped.  Once =Stop= returns
+  =true=, no value is ever delivered on that timer's channel.  A concurrent
+  =Stop= and the =Advance= that would have fired the same timer are
+  serialized so exactly one outcome wins;
+- timers are one-shot; a fired or stopped timer is removed from the
+  scheduler's active state immediately, not merely marked dead and left for
+  a future pass to sweep — an unbounded pending-timer collection is a slow
+  memory leak across a long backtest;
+- timer delivery must not block the clock or require one goroutine per
+  timer: timer channels are buffered with capacity one, are never closed
+  (matching =time.Timer=), and delivery uses a non-blocking send;
+- the simulated implementation contains no goroutines of its own;
+- real and deterministic clocks are verified by shared contract tests
+  limited to behavior both genuinely provide: =Now= returns a valid instant,
+  a timer eventually becomes ready, a pre-expiry =Stop= prevents delivery,
+  =Stop= returns =false= after firing, and delivery does not require a
+  receiver to already be waiting.  Exact timing, deadline arithmetic, and
+  equal-deadline readiness ordering are simulated-clock-only guarantees and
+  are tested only against the simulated implementation.
+
+Both clock implementations return canonical UTC, since the clock is itself a
+boundary where time enters Trader: the real clock's =Now= converts and strips
+Go's process-local monotonic-clock reading (=time.Now().UTC().Round(0)=); the
+simulated clock's constructor canonicalizes the supplied start time the same
+way, and every subsequent =Now= reflects it.
+
+=Real= has a useful, ready-to-use zero value: it wraps no state.
+=Simulated= does not; it must be constructed with =NewSimulated(start)= so an
+accidentally zero-valued clock is not silently mistaken for a real one.  A
+=Simulated= value that bypasses the constructor reads as year one, which is
+self-evidently broken rather than a silently plausible wrong time.
 
 Trader represents authoritative instants inside domain and application APIs
 with =time.Time= and elapsed intervals with =time.Duration=.
