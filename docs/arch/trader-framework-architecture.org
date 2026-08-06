@@ -1686,7 +1686,7 @@ Configuration is an application concern.  Public libraries should accept typed
 configuration values rather than reading YAML, environment variables, or home
 directories internally.
 
-Trader applications may load YAML/TOML/JSON and environment overrides, then
+Trader applications may load YAML/JSON and environment overrides, then
 construct typed dependencies.
 
 Secrets should be represented by credential-provider interfaces or injected
