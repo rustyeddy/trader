@@ -686,6 +686,76 @@ quantities, across every candidate scale:
 | SHIB 1e12 units | 1,000,000,000,000 |        n/a |      n/a | 9,223,372x | 922,337x |
 # END numericstudy:notional-all
 
+** Quantity representation matrix
+
+Representative quantities stored at each candidate scale, from
+=test/internal/quantitystudy=.  =PRECISION= marks a value needing more decimals
+than the scale holds; =RANGE= marks one exceeding =int64= at that scale:
+
+# BEGIN quantitystudy:quantity-matrix
+| Class    | Symbol  |      Quantity | Dec | Integral |                 1e6 |               1e7 |                1e8 |                 1e9 |
+|----------+---------+---------------+-----+----------+---------------------+-------------------+--------------------+---------------------|
+| FX       | EUR/USD |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
+| FX       | EUR/USD |         10000 |   0 | no       |         10000000000 |      100000000000 |      1000000000000 |      10000000000000 |
+| FX       | EUR/USD |      10000000 |   0 | no       |      10000000000000 |   100000000000000 |   1000000000000000 |   10000000000000000 |
+| FX       | EUR/USD |    1000000000 |   0 | no       |    1000000000000000 | 10000000000000000 | 100000000000000000 | 1000000000000000000 |
+| Equity   | SPY     |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
+| Equity   | SPY     |           0.5 |   1 | no       |              500000 |           5000000 |           50000000 |           500000000 |
+| Equity   | SPY     |      0.000001 |   6 | no       |                   1 |                10 |                100 |                1000 |
+| Futures  | ES      |             1 |   0 | yes      |             1000000 |          10000000 |          100000000 |          1000000000 |
+| Futures  | ES      |             3 |   0 | yes      |             3000000 |          30000000 |          300000000 |          3000000000 |
+| Futures  | ES      |         10000 |   0 | yes      |         10000000000 |      100000000000 |      1000000000000 |      10000000000000 |
+| Crypto   | BTC     |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
+| Crypto   | BTC     |    0.00000001 |   8 | no       |           PRECISION |         PRECISION |                  1 |                  10 |
+| Token    | SHIB    | 1000000000000 |   0 | no       | 1000000000000000000 |             RANGE |              RANGE |               RANGE |
+| Boundary | ZERO    |             0 |   0 | no       |                   0 |                 0 |                  0 |                   0 |
+# END quantitystudy:quantity-matrix
+
+** Quantity precision/range frontier
+
+No scaled =int64= holds both the finest and the largest quantity in the
+representation matrix above:
+
+# BEGIN quantitystudy:frontier
+| Scale | Smallest unit |   Max whole units | Holds 1 satoshi | Holds 1e12 units |
+|-------+---------------+-------------------+-----------------+------------------|
+| 1e6   |      0.000001 | 9,223,372,036,854 | no              | yes              |
+| 1e7   |     0.0000001 |   922,337,203,685 | no              | no               |
+| 1e8   |    0.00000001 |    92,233,720,368 | yes             | no               |
+| 1e9   |   0.000000001 |     9,223,372,036 | yes             | no               |
+# END quantitystudy:frontier
+
+** Quantity instrument rules
+
+Representation scale is separate from what instrument rules permit trading:
+
+# BEGIN quantitystudy:instrument-rules
+| Symbol  |  Increment |  Minimum |   Maximum | Integral only |
+|---------+------------+----------+-----------+---------------|
+| EUR/USD |          1 |        1 | 100000000 | no            |
+| SPY     |   0.000001 | 0.000001 |         — | no            |
+| ES      |          1 |        1 |     10000 | yes           |
+| BTC     | 0.00000001 |   0.0001 |         — | no            |
+| SHIB    |          1 |     1000 |         — | no            |
+# END quantitystudy:instrument-rules
+
+** Price x Quantity notional intermediates
+
+With =Price= at =1e8= and =Quantity= scaled too, =Price x Quantity= is
+double-scaled, so the intermediate overflows =int64= before the descaling
+divide at every candidate scale:
+
+# BEGIN quantitystudy:notional
+| Case            |           Price |      Quantity |      1e6 |      1e7 |      1e8 |      1e9 |
+|-----------------+-----------------+---------------+----------+----------+----------+----------|
+| BRK.A block     |       750000.00 |         10000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
+| FX 10M notional |         1.08473 |      10000000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
+| FX 1B notional  |         1.08473 |    1000000000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
+| BTC 1k coins    | 150000.12345678 |          1000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
+| SPY fractional  |          700.12 |           0.5 |     263x |      26x |       2x | OVERFLOW |
+| SHIB 1e12 units |      0.00000001 | 1000000000000 |       9x |      n/a |      n/a |      n/a |
+# END quantitystudy:notional
+
 * Consequences
 
 ** Positive consequences
