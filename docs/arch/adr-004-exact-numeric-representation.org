@@ -466,6 +466,193 @@ internally while evidence is gathered.  Numeric representation should not be
 used as the permanent public package boundary unless a later decision finds a
 compelling reason.
 
+** Exact parsing and formatting policy
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/39][#39]]
+
+Trader's internal fixed scale is an implementation detail. It is not part of
+the ordinary external API contract.
+
+External callers work with semantic values such as =Price=, =Money=,
+=Quantity=, and =Rate=. They should not normally construct or exchange raw
+scaled integers.
+
+*** Exact decimal input
+
+Decimal text is the preferred exact boundary representation wherever the
+transport or provider supports it.
+
+Decimal text is parsed directly into the semantic type's scaled =int64=
+representation. Parsing must not use =float64= as an intermediate.
+
+Examples of exact input boundaries include:
+
+- broker APIs that provide decimal strings;
+- configuration files;
+- command-line input;
+- journals;
+- CSV fields;
+- tests and fixtures;
+- external JSON contracts controlled by Trader.
+
+Exact parsers return errors for:
+
+- malformed input;
+- excess precision beyond eight decimal places;
+- values outside the supported range;
+- values that violate the semantic type's construction invariants.
+
+Exact parsing never silently rounds.
+
+*** Raw scaled construction
+
+Construction from raw scaled =int64= values is reserved for:
+
+- trusted internal code;
+- persistence reconstruction;
+- narrowly scoped low-level packages;
+- tests that explicitly exercise representation boundaries.
+
+Such APIs must clearly identify the value as already scaled. Raw scaled
+construction is not the normal external integration API.
+
+*** Floating-point boundaries
+
+Some external providers or libraries may require or return binary
+floating-point values.
+
+When a =float64= boundary is unavoidable:
+
+- conversion is isolated to the relevant provider or transport adapter;
+- the conversion uses an explicit rounding policy;
+- NaN is rejected;
+- positive and negative infinity are rejected;
+- out-of-range values are rejected;
+- the conversion is visibly named as rounded or lossy;
+- the resulting semantic Trader value is validated before entering the domain.
+
+=float64= must not be used as an unnecessary intermediate when decimal text is
+already available.
+
+Conceptually:
+
+#+begin_example
+external decimal text
+    -> direct exact parse
+    -> Trader semantic value
+#+end_example
+
+For a provider that requires floating point:
+
+#+begin_example
+external float
+    -> explicit checked and rounded adapter conversion
+    -> Trader semantic value
+#+end_example
+
+*** Canonical formatting
+
+Canonical formatting emits normalized plain decimal text directly from the
+scaled integer representation.
+
+Canonical output:
+
+- does not use scientific notation;
+- does not use thousands separators;
+- does not contain unnecessary trailing zeros;
+- does not end with a decimal point;
+- normalizes negative zero to =0=;
+- does not convert through =float64=;
+- round-trips to the identical scaled value.
+
+Examples:
+
+#+begin_example
+123.45000000 -> 123.45
+1.00000000   -> 1
+0.00000001   -> 0.00000001
+0            -> 0
+#+end_example
+
+Fixed-precision, instrument-specific, or user-facing formatting is a separate
+presentation operation. It may apply an explicit rounding policy and must not
+change the stored authoritative value.
+
+*** Signed range boundary
+
+Exact parsing for signed types must support the full signed =int64=
+representation range, including =math.MinInt64=.
+
+The parser must not create an artificial one-value gap by first constructing a
+positive magnitude that cannot fit before applying the negative sign.
+
+=Price= and =Quantity= may still reject negative values according to their
+domain invariants. =Money= and =Rate= support signed values.
+
+*** Required implementation tests
+
+The eventual parsing and formatting implementation must test:
+
+- zero, positive, and negative values;
+- values using all eight decimal places;
+- accepted trailing zeros;
+- canonical removal of unnecessary trailing zeros;
+- malformed input rejection;
+- excess-precision rejection;
+- out-of-range rejection;
+- exact parsing of the full negative boundary for signed types;
+- canonical format-and-parse round trips;
+- negative-zero normalization;
+- rejection of NaN and infinities at floating-point adapter boundaries;
+- absence of =float64= conversion in exact decimal parsing and formatting.
+
+** Price Serialization Policy
+Trader-controlled public wire formats serialize Price, Quantity, and
+Rate as canonical decimal strings. Money is serialized as a structured
+value containing a canonical decimal amount and explicit currency. CSV
+and configuration use decimal text, with currency in a separate
+field. Authoritative internal databases store scaled signed BIGINT
+values, with the common 1e8 scale defined by the schema and migration
+version; Money stores currency separately and mandatorily. Public
+events and external APIs do not expose raw scaled
+integers. Provider-required floating-point formats are isolated to
+provider adapters. Public schemas are versioned, writers emit
+canonical values, readers may accept equivalent exact decimal forms,
+and incompatible representation changes require a schema-version
+change.
+
+** Is float64 permissable in indicators
+Authoritative Trader calculations use exact semantic numeric
+types. Binary floating-point values are prohibited from domain,
+brokerage, accounting, risk, order, position, portfolio, persistence,
+and public API packages. float64 may be used only inside explicitly
+approved internal analytical implementations where fixed-point
+arithmetic would be impractical or provide no meaningful decision
+benefit. Such implementations accept semantic Trader inputs and return
+semantic Trader outputs, applying checked quantization at their
+boundary. Floating-point values may not be stored in domain objects,
+serialized as authoritative values, or passed into execution and
+accounting paths. Approved floating-point boundaries are enforced
+through package structure and automated architecture checks.
+
+
+** Are floats ever permitted in where numeric determinism is required
+Authoritative Trader calculations use exact semantic numeric
+types. Binary floating-point values are prohibited from domain,
+brokerage, accounting, risk, order, position, portfolio, persistence,
+and public API packages. float64 may be used only inside explicitly
+approved internal analytical implementations where fixed-point
+arithmetic would be impractical or provide no meaningful decision
+benefit. Such implementations accept semantic Trader inputs and return
+semantic Trader outputs, applying checked quantization at their
+boundary. Floating-point values may not be stored in domain objects,
+serialized as authoritative values, or passed into execution and
+accounting paths. Approved floating-point boundaries are enforced
+through package structure and automated architecture checks.
+
+
+
+
 * Open Decision Work
 
 The following issues must be resolved before this ADR can be accepted:
@@ -477,12 +664,12 @@ The following issues must be resolved before this ADR can be accepted:
 - [X] [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]] — resolved:
   =Quantity= scale is 1e8, backed by signed =int64=, with a bounded supported
   range.  Evidence in =test/internal/quantitystudy=.
-- [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
-- [[https://github.com/rustyeddy/trader/issues/38][#38 — Define rounding, overflow, and intermediate arithmetic policy]]
-- [[https://github.com/rustyeddy/trader/issues/39][#39 — Define exact parsing and formatting policy]]
-- [[https://github.com/rustyeddy/trader/issues/40][#40 — Define numeric serialization and persistence representation]]
-- [[https://github.com/rustyeddy/trader/issues/41][#41 — Define indicator fixed-point versus float64 policy]]
-- [[https://github.com/rustyeddy/trader/issues/42][#42 — Define numeric determinism guarantees]]
+- [X] [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
+- [[https://github.com/rustyeddy/trader/issues/38][[X] #38 — Define rounding, overflow, and intermediate arithmetic policy]]
+- [X] [[https://github.com/rustyeddy/trader/issues/39][#39 — Define exact parsing and formatting policy]]
+- [[https://github.com/rustyeddy/trader/issues/40][[X] #40 — Define numeric serialization and persistence representation]]
+- [X] [[https://github.com/rustyeddy/trader/issues/41][#41 — Define indicator fixed-point versus float64 policy]]
+- [[https://github.com/rustyeddy/trader/issues/42][[X] #42 — Define numeric determinism guarantees]]
 - [[https://github.com/rustyeddy/trader/issues/43][#43 — Review reusable legacy Trader numeric code]]
 - [[https://github.com/rustyeddy/trader/issues/44][#44 — Draft and accept exact numeric representation ADR]]
 
@@ -530,6 +717,141 @@ Intentionally absent operations include:
 - negative public order quantities;
 - using quantity sign to encode buy or sell;
 - implicit tick-size or quantity-increment rounding.
+
+** Arithmetic, rounding, and overflow policy
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/38][#38]]
+
+All arithmetic on authoritative Trader numeric values is checked.
+
+*** Default rounding
+
+The default rounding mode for arithmetic results that cannot be represented
+exactly at the common =1e8= scale is:
+
+#+begin_example
+round to nearest, ties to even
+#+end_example
+
+Operations that require another rounding policy must select and document that
+policy explicitly.
+
+Supported policy names are expected to include:
+
+* round to nearest, ties to even;
+* round toward zero;
+* round down, toward negative infinity;
+* round up, toward positive infinity.
+
+The exact Go API and exported identifiers are implementation details.
+
+Public arithmetic must not rely on implicit integer division or truncation as
+an undocumented rounding policy.
+
+*** Overflow and failure behavior
+
+Public arithmetic operations must detect and report:
+
+* overflow;
+* underflow;
+* division by zero;
+* results outside the representable domain;
+* results that cannot be represented under the selected rounding policy.
+
+Arithmetic must never silently:
+
+* wrap;
+* saturate;
+* clamp;
+* discard overflow;
+* or convert through =float64= to avoid fixed-point range constraints.
+
+Normal public operations return explicit errors.
+
+=Must...= APIs may panic only when used with programmer-controlled constants,
+fixtures, tests, or equivalent trusted inputs. They are not appropriate for
+broker, configuration, persistence, user, or market-data input.
+
+*** Addition, subtraction, negation, and absolute value
+
+Addition and subtraction use checked =int64= arithmetic.
+
+Negation and absolute value must explicitly reject the =math.MinInt64= boundary,
+because its positive counterpart cannot be represented by a signed =int64=.
+
+Failures are reported rather than wrapped or saturated.
+
+*** Scaled multiplication and division
+
+Multiplication and division involving two scaled operands use a widened signed
+intermediate before restoring the common =1e8= scale.
+
+This includes operations such as:
+
+* =Price * Quantity=;
+* =Price * Rate=;
+* =Money * Rate=;
+* =Quantity * Rate=;
+* =Rate * Rate=;
+* and corresponding scaled division operations.
+
+Conceptually:
+
+#+begin_example
+result = round((a * b) / scale)
+#+end_example
+
+The intermediate product must be evaluated in a representation wider than
+=int64=. The production implementation may use =math/bits= or an internal
+signed-128 abstraction, but that mechanism is not part of the public numeric
+API.
+
+Binary =float64= is not an acceptable overflow escape path.
+
+Arithmetic may be reordered only when the reordered operation is:
+
+* mathematically equivalent;
+* exact under the documented rounding policy;
+* and proven not to introduce overflow or precision loss.
+
+*** Accumulation
+
+Finite domain totals use checked addition.
+
+Potentially long-running analytical accumulations use either:
+
+* a widened accumulator; or
+* a bounded, mathematically equivalent algorithm such as a running mean.
+
+Potentially unbounded series must not use unchecked:
+
+#+begin_src go
+sum += value
+#+end_src
+
+Overflow must be detected and reported at the operation where it occurs.
+
+*** Required implementation tests
+
+The eventual arithmetic implementation must test at least:
+
+* addition above =math.MaxInt64= fails;
+* subtraction below =math.MinInt64= fails;
+* negating =math.MinInt64= fails;
+* taking the absolute value of =math.MinInt64= fails;
+* valid boundary-adjacent operations succeed;
+* realistic =Price * Quantity= calculations succeed using the widened path;
+* realistic =Price * Rate= calculations succeed using the widened path;
+* values below, above, and exactly at a rounding midpoint follow the selected
+  rounding mode;
+* negative midpoint cases follow the same documented policy;
+* division by zero fails;
+* long accumulation uses the selected widened or bounded strategy, or fails
+  explicitly;
+* no arithmetic operation silently wraps.
+
+The arithmetic helpers and their final Go API are implementation work. This
+ADR defines their required observable behavior.
 
 * Consequences Identified So Far
 
