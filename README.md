@@ -37,6 +37,46 @@ Trader's architecture is guided by a small set of principles:
   for orders, fills, positions, and balances; Trader maintains reconciled
   projections for speed, reporting, and recovery.
 
+## Packages
+
+### num
+
+`num` provides Trader's exact numeric types — `Price`, `Quantity`, `Rate`,
+`Currency`, and `Money` — backed by scaled integers instead of binary
+floating point, so authoritative values never suffer float rounding error.
+Construct values from decimal text, then use their checked arithmetic
+methods; malformed input and cross-currency mistakes are caught as errors
+rather than silently miscomputed:
+
+```go
+price, err := num.ParsePrice("108.473")
+qty := num.MustParseQuantity("100")
+fee, err := price.MulRate(num.MustParseRate("0.001"))
+```
+
+See [ADR-004](docs/arch/adr-004-exact-numeric-representation.org) for the
+full design rationale.
+
+### config
+
+`config` assembles typed application configuration for Trader's executable
+composition roots, resolving each field from defaults, a YAML file, the
+environment, and command-line overrides, in that precedence order. Define a
+struct with tags for defaults, required fields, and secrets, then load it in
+one call:
+
+```go
+type Settings struct {
+    Port     int    `default:"8080"`
+    APIKey   string `required:"true" secret:"true"`
+}
+
+cfg, err := config.Load[Settings](config.Options{EnvPrefix: "TRADER"})
+```
+
+See the [package doc comment](config/doc.go) for the tag reference and
+environment-variable naming convention.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
