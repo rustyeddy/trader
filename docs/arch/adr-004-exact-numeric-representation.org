@@ -3,699 +3,266 @@
 
 * Status
 
-Proposed
+Accepted
 
 Parent decision: [[https://github.com/rustyeddy/trader/issues/19][#19 — M1-01 Decide exact numeric representation]]
 
-This working ADR records decisions as the numeric-design sub-issues
-are resolved.  It remains =Proposed= until [[https://github.com/rustyeddy/trader/issues/44][#44]] consolidates the
-evidence, completes the alternatives and consequences, and marks the
-decision =Accepted=.
+Accepted after resolution of issues #33 and #35 through #43.  Issue #44 records
+the final consolidation and acceptance review.
 
 * Context
 
 Trader must represent authoritative prices, money, quantities, rates,
-balances, fees, margin, order values, fill values, and PnL without
-relying on binary floating-point approximation.  These values must
-round-trip through broker, configuration, storage, journal, and
-reporting boundaries while preserving clear domain semantics.
+balances, fees, margin, order values, fill values, and PnL without relying on
+binary floating-point approximation.
 
-Trader is intended to support more than FX.  The representation must
-be validated against equities, ETFs, futures, high-priced assets,
-large FX positions, fractional quantities, and small fees or financing
-values.
-
-The legacy Trader repository already contains scaled-integer =Price=,
-=Money=, =Rate=, accumulators, and fixed-point indicator
-implementations.  Under ADR-013, that repository is a selective code
-donor and behavior reference, not a dependency of the new Trader.
+The same values must behave consistently across:
 
-* Decisions Reached
+- backtesting;
+- historical replay;
+- paper trading;
+- live execution;
+- broker and provider adapters;
+- configuration and command-line input;
+- persistence, journals, events, and reports.
 
-** Authoritative backing representation
+Trader is intended to support more than FX.  The representation must cover the
+intended requirements of equities, ETFs, futures, crypto assets, fractional
+quantities, high-priced instruments, small fees, and financing rates.
 
-Decision source: [[https://github.com/rustyeddy/trader/issues/19][#19]]
+The legacy =trader-first-try= repository contains useful fixed-point concepts,
+algorithms, tests, and operational lessons.  Under ADR-013 it is a code donor
+and behavior reference, not a dependency of the new Trader.
 
-The authoritative foundational numeric types use scaled signed =int64= values.
-
-The initial semantic types are:
-
-- =Price=
-- =Money=
-- =Quantity=
-- =Rate=
-
-=Currency= remains a separate domain concept used with =Money=; the precise
-ownership relationship is still open in [[https://github.com/rustyeddy/trader/issues/35][#35]].
-
-The public API must not expose one generic decimal type in place of these
-semantic types.  Distinct types prevent accidental substitution of price,
-quantity, money, and rate values.
-
-** Price representation versus instrument rules
-
-Decision source: [[https://github.com/rustyeddy/trader/issues/33][#33]]
-
-=Price= will use a fixed internal representation scale.  Instrument-specific
-market rules remain separate:
-
-- tick size
-- permitted price increment
-- display precision
-- provider quotation format
-
-The internal representation scale is not itself the instrument tick size.
-
-*** Selected scale: 1e8 (8 decimal places)
-
-The internal =Price= scale is *1e8*: a decimal value =v= is stored as the
-=int64= =v * 100_000_000=.
-
-The validation evidence is in =test/internal/numericstudy=, a test-only spike that
-parses and formats decimal text directly to and from scaled =int64= without
-passing through =float64=.
-
-Every table below sits between =# BEGIN numericstudy:= and =# END
-numericstudy:= markers and is generated from that package.
-=TestGeneratedTables= fails if any region no longer matches what the code
-produces, so these tables cannot drift from the evidence.  Do not hand-edit
-inside the markers; regenerate instead:
-
-#+begin_src sh
-go test ./test/internal/numericstudy/ -run TestGeneratedTables -update
-#+end_src
-
-**** Asset representation matrix
-
-Stored =int64= at each candidate scale.  =—= means the value needs more
-decimal places than the scale can hold, and is therefore rejected rather than
-silently rounded.
-
-# BEGIN numericstudy:asset-matrix
-| Class   | Symbol    |           Price |       Tick | Dec |         1e5 |          1e6 |            1e8 |             1e9 |
-|---------+-----------+-----------------+------------+-----+-------------+--------------+----------------+-----------------|
-| FX      | EUR/USD   |         1.08473 |    0.00001 |   5 |      108473 |      1084730 |      108473000 |      1084730000 |
-| FX      | USD/JPY   |         147.325 |      0.001 |   3 |    14732500 |    147325000 |    14732500000 |    147325000000 |
-| Equity  | SPY       |          700.12 |       0.01 |   2 |    70012000 |    700120000 |    70012000000 |    700120000000 |
-| Equity  | BRK.A     |       750000.00 |       0.01 |   2 | 75000000000 | 750000000000 | 75000000000000 | 750000000000000 |
-| Equity  | SUB-PENNY |          0.0001 |     0.0001 |   4 |          10 |          100 |          10000 |          100000 |
-| Futures | ES        |         6250.25 |       0.25 |   2 |   625025000 |   6250250000 |   625025000000 |   6250250000000 |
-| Futures | ZN        |      110.515625 |   0.015625 |   6 |           — |    110515625 |    11051562500 |    110515625000 |
-| Crypto  | BTC/USD   | 150000.12345678 | 0.00000001 |   8 |           — |            — | 15000012345678 | 150000123456780 |
-| Crypto  | SHIB/USD  |      0.00000001 | 0.00000001 |   8 |           — |            — |              1 |              10 |
-| Rate    | FINANCING |        0.000125 |   0.000001 |   6 |           — |          125 |          12500 |          125000 |
-# END numericstudy:asset-matrix
-
-1e5 and 1e6 are disqualified outright: neither can represent satoshi
-precision, and 1e5 cannot represent the 64ths that Treasury futures expand to.
-Both 1e8 and 1e9 represent every intended asset class exactly.
-
-**** Range and headroom
-
-# BEGIN numericstudy:range-headroom
-| Scale | Decimals |          Max price | Smallest unit | Headroom over 750000.00 |
-|-------+----------+--------------------+---------------+-------------------------|
-| 1e5   |        5 | 92,233,720,368,547 |       0.00001 |            122,978,293x |
-| 1e6   |        6 |  9,223,372,036,854 |      0.000001 |             12,297,829x |
-| 1e8   |        8 |     92,233,720,368 |    0.00000001 |                122,978x |
-| 1e9   |        9 |      9,223,372,036 |   0.000000001 |                 12,297x |
-# END numericstudy:range-headroom
-
-At 1e8 the maximum representable price is ~92.2 billion, roughly 122,000x the
-highest-priced listed equity.  Storage range is not the binding constraint at
-either candidate scale.
-
-**** Why 1e8 over 1e9
-
-Intermediate arithmetic decides it.  Margin to the =int64= ceiling for
-=Price x Quantity=, using whole unscaled quantities so only one operand
-carries a scale and no descaling divide is required:
-
-# BEGIN numericstudy:notional-8v9
-| Case            |          Quantity |        1e8 |      1e9 |
-|-----------------+-------------------+------------+----------|
-| BRK.A block     |            10,000 |        12x |       1x |
-| FX 10M notional |        10,000,000 |     8,502x |     850x |
-| FX 1B notional  |     1,000,000,000 |        85x |       8x |
-| BTC 1k coins    |             1,000 |       614x |      61x |
-| SHIB 1e12 units | 1,000,000,000,000 | 9,223,372x | 922,337x |
-# END numericstudy:notional-8v9
-
-1e9 leaves the largest realistic notional essentially at the ceiling — a
-BRK.A-sized block consumes the entire =int64= range with 1x to spare.  1e8
-buys back an order of magnitude at the cost of one decimal place that no
-intended asset class needs.  8 decimals is also the natural stopping point:
-it is exactly satoshi precision, the widest decimal requirement Trader accepts.
-
-These margins hold only for whole unscaled quantities.  If [[https://github.com/rustyeddy/trader/issues/36][#36]] gives
-=Quantity= its own scale, =Price x Quantity= becomes double-scaled exactly
-like =Price x Rate=, the margins above no longer apply, and the operation
-requires a widened intermediate regardless of price scale.  That would not
-change the 1e8 selection — it still beats 1e9 by 10x — but it would move
-=Price x Quantity= from "safe in =int64=" to "must use the widened path".
-
-***** Margins at every candidate scale
-
-For completeness, the same product margins across all four candidates.  The
-=n/a= cells are assets the narrow scales cannot represent at all, which is why
-their apparently generous margins are not evidence of safety.
-
-# BEGIN numericstudy:notional-all
-| Case            |          Quantity |        1e5 |      1e6 |        1e8 |      1e9 |
-|-----------------+-------------------+------------+----------+------------+----------|
-| BRK.A block     |            10,000 |    12,297x |   1,229x |        12x |       1x |
-| FX 10M notional |        10,000,000 | 8,502,919x | 850,291x |     8,502x |     850x |
-| FX 1B notional  |     1,000,000,000 |    85,029x |   8,502x |        85x |       8x |
-| BTC 1k coins    |             1,000 |        n/a |      n/a |       614x |      61x |
-| SHIB 1e12 units | 1,000,000,000,000 |        n/a |      n/a | 9,223,372x | 922,337x |
-# END numericstudy:notional-all
-
-**** Consequences for intermediate arithmetic
-
-Two findings belong to [[https://github.com/rustyeddy/trader/issues/38][#38]] and are recorded here as evidence:
-
-1. *Double-scaled products overflow at every usable scale.*  =Price x Rate=
-   scales both operands, so the product carries the scale twice before the
-   descaling divide.  At 1e8, realistic pairs such as BRK.A x a financing rate,
-   or BTC/USD x a JPY conversion rate, overflow =int64=.  1e9 is worse.  This
-   is not fixable by choosing a different scale — it requires a widened
-   (128-bit) intermediate, demonstrated in =TestPriceTimesRateWidened=.
-
-2. *Naive accumulation overflows inside a single backtest.*  A plain =int64=
-   sum of 750000.00 bars overflows after ~122,978 bars at 1e8 — under three
-   months of M1 data.  Rolling sums and averages need a widened accumulator or
-   a running-mean formulation, not a raw =int64= total.
-
-# BEGIN numericstudy:rolling-sum
-| Scale | Bars of 750000.00 before overflow |
-|-------+-----------------------------------|
-| 1e5   |                       122,978,293 |
-| 1e6   |                        12,297,829 |
-| 1e8   |                           122,978 |
-| 1e9   |                            12,297 |
-# END numericstudy:rolling-sum
-
-**** Tick size stays separate from scale
-
-Instrument tick size is parsed into the same internal scale but remains an
-instrument property.  With both in one scale, increment validation is exact
-integer modulo (=price % tick == 0=) with no per-scale special cases; this is
-asserted in =TestPriceIsMultipleOfTick=.  Display precision is likewise
-independent: a value stored at 1e8 renders at whatever precision the
-instrument declares.
-
-**** Unsupported quotation formats
-
-These are provider quotation *conventions*, not decimal numbers.  Each must be
-normalized to plain decimal text in a provider adapter before reaching =Price=;
-the parser rejects all of them.
-
-# BEGIN numericstudy:unsupported
-| Format                              | Example      | Normalizes to | Reason                                                    |
-|-------------------------------------+--------------+---------------+-----------------------------------------------------------|
-| Treasury 32nds (dash)               | =110-16=     |         110.5 | not decimal text; '-' is a fraction separator, not a sign |
-| Treasury 32nds plus halves/quarters | =110-16.5=   |    110.515625 | fraction of a 32nd; expands to 64ths, needing 6 decimals  |
-| Grain fractions in eighths          | =575'6=      |        575.75 | apostrophe-delimited eighths of a cent                    |
-| Scientific notation                 | =1.5e-7=     |    0.00000015 | exponent form is rejected; expand before parsing          |
-| Grouped thousands                   | =750,000.00= |     750000.00 | locale grouping is a display concern, not an exact input  |
-# END numericstudy:unsupported
-
-All of these are representable once normalized, so no intended instrument is
-excluded by the 1e8 choice — the constraint is on the adapter layer, not the
-representation.
-
-***** Normalization is necessary but not sufficient
-
-Converting a quotation to plain decimal text does not guarantee the result
-satisfies the precision policy.  Values finer than the 1e8 quantum are
-syntactically valid but not representable, and are rejected rather than
-silently rounded:
-
-# BEGIN numericstudy:subquantum
-| Value         | Digits | Note                                         |
-|---------------+--------+----------------------------------------------|
-| =0.000000015= |      9 | 1.5e-8 expanded; half of the 1e8 quantum     |
-| =0.000000001= |      9 | one 1e9 unit; below the 1e8 quantum entirely |
-| =1.000000005= |      9 | ordinary price carrying one digit too many   |
-# END numericstudy:subquantum
-
-Each is accepted at 1e9, confirming the failure is the precision policy rather
-than a parser defect (=TestSubQuantumValuesRejected=).  Whether adapters reject
-sub-quantum values or round them explicitly is decided by [[https://github.com/rustyeddy/trader/issues/38][#38]] and [[https://github.com/rustyeddy/trader/issues/39][#39]].
-
-***** Known parser gap: most negative value
-
-=FormatDecimal= renders =math.MinInt64=, but =ParseDecimal= cannot construct
-it: parsing builds the magnitude before negating, and that magnitude exceeds
-=MaxInt64=, so the guard fires one unit before the true negative bound.  The
-gap is exactly one representable value wide
-(=TestParseCannotConstructMinInt64=).
-
-[[https://github.com/rustyeddy/trader/issues/39][#39]] must make the negative-range policy explicit: either parsing accepts the
-full =int64= range, or the domain range is deliberately symmetric and the most
-negative value is not a valid =Price=.
-
-*** Review disposition for #33
-
-Final review of [[https://github.com/rustyeddy/trader/pull/45][PR #45]] confirmed that the executable evidence supports a fixed =Price=
-scale of =1e8=.  The original review concerns were addressed, CI passed, and
-[[https://github.com/rustyeddy/trader/issues/33][#33]] is complete for purposes of ADR-004.
-
-Three non-blocking cleanup items were raised against the study harness.  They
-must not be mistaken for changes to the selected scale, and all three were
-corrected in [[https://github.com/rustyeddy/trader/pull/46][PR #46]]:
-
-- Documentation claimed the study used no =float64= at all, while a
-  reporting-only margin comparison did.  That comparison is now integer
-  arithmetic, and =TestNoFloatingPoint= fails on any float identifier or
-  literal anywhere in the package.  The guarantee that matters — exact parsing
-  and formatting never passing through binary floating point — held throughout.
-- =FormatFixed= could emit negative zero after truncation.  The sign is now
-  suppressed when the rendered magnitude is zero.
-- The =Scale= documentation described storage as rounding.  It now states that
-  a value is accepted only if it scales to an integer exactly, and excess
-  precision is rejected.
-
-These items never weakened the =1e8= decision, and the study helpers are safe
-to read as implementation references on these three points.  The production
-rounding and overflow policy remains [[https://github.com/rustyeddy/trader/issues/38][#38]]'s decision, and the exact parsing
-boundary, including the =math.MinInt64= range gap, remains [[https://github.com/rustyeddy/trader/issues/39][#39]]'s.
-
-Related decisions this issue deliberately did not settle: scaled =Quantity=
-multiplication semantics remain with [[https://github.com/rustyeddy/trader/issues/36][#36]]; widened intermediates, accumulation,
-and rounding remain with [[https://github.com/rustyeddy/trader/issues/38][#38]]; exact parsing boundaries remain with [[https://github.com/rustyeddy/trader/issues/39][#39]].
-
-** Quantity representation and asset constraints
-
-Decision source: [[https://github.com/rustyeddy/trader/issues/36][#36]]
-
-=Quantity= uses a single fixed Trader-wide scale of *1e8*, backed by signed
-=int64= — the same scale as =Price=.  A decimal quantity =v= is stored as the
-=int64= =v * 100_000_000=.
-
-- smallest representable quantity: =0.00000001= (one satoshi)
-- maximum whole-unit quantity: =92,233,720,368= (~92.2 billion)
-- quantities above that bound are rejected as out of range, never truncated
-- positions in extremely high-supply tokens above the bound are outside the
-  initial supported domain
-
-The evidence is in =test/internal/quantitystudy=, a test-only spike that reuses
-=test/internal/numericstudy= for exact decimal parsing, table rendering, and
-the generated-documentation guard.  Regenerate the tables with:
-
-#+begin_src sh
-go test ./test/internal/quantitystudy/ -run TestGeneratedTables -update
-#+end_src
-
-*** Quantity representation matrix
-
-=PRECISION= marks a value needing more decimals than the scale holds; =RANGE=
-marks one exceeding =int64= at that scale.  The two are reported separately
-because they lead to different conclusions: precision narrows which asset
-classes a scale can serve, range bounds the supported domain.
-
-# BEGIN quantitystudy:quantity-matrix
-| Class    | Symbol  |      Quantity | Dec | Integral |                 1e6 |               1e7 |                1e8 |                 1e9 |
-|----------+---------+---------------+-----+----------+---------------------+-------------------+--------------------+---------------------|
-| FX       | EUR/USD |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
-| FX       | EUR/USD |         10000 |   0 | no       |         10000000000 |      100000000000 |      1000000000000 |      10000000000000 |
-| FX       | EUR/USD |      10000000 |   0 | no       |      10000000000000 |   100000000000000 |   1000000000000000 |   10000000000000000 |
-| FX       | EUR/USD |    1000000000 |   0 | no       |    1000000000000000 | 10000000000000000 | 100000000000000000 | 1000000000000000000 |
-| Equity   | SPY     |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
-| Equity   | SPY     |           0.5 |   1 | no       |              500000 |           5000000 |           50000000 |           500000000 |
-| Equity   | SPY     |      0.000001 |   6 | no       |                   1 |                10 |                100 |                1000 |
-| Futures  | ES      |             1 |   0 | yes      |             1000000 |          10000000 |          100000000 |          1000000000 |
-| Futures  | ES      |             3 |   0 | yes      |             3000000 |          30000000 |          300000000 |          3000000000 |
-| Futures  | ES      |         10000 |   0 | yes      |         10000000000 |      100000000000 |      1000000000000 |      10000000000000 |
-| Crypto   | BTC     |             1 |   0 | no       |             1000000 |          10000000 |          100000000 |          1000000000 |
-| Crypto   | BTC     |    0.00000001 |   8 | no       |           PRECISION |         PRECISION |                  1 |                  10 |
-| Token    | SHIB    | 1000000000000 |   0 | no       | 1000000000000000000 |             RANGE |              RANGE |               RANGE |
-| Boundary | ZERO    |             0 |   0 | no       |                   0 |                 0 |                  0 |                   0 |
-# END quantitystudy:quantity-matrix
-
-*** The precision and range frontier
-
-No scaled =int64= holds both extremes of the pressure matrix.  One satoshi
-needs 8 fraction digits; a trillion whole units at 8 fraction digits needs
-1e20, which is 67 bits against =int64='s 63.
-
-# BEGIN quantitystudy:frontier
-| Scale | Smallest unit |   Max whole units | Holds 1 satoshi | Holds 1e12 units |
-|-------+---------------+-------------------+-----------------+------------------|
-| 1e6   |      0.000001 | 9,223,372,036,854 | no              | yes              |
-| 1e7   |     0.0000001 |   922,337,203,685 | no              | no               |
-| 1e8   |    0.00000001 |    92,233,720,368 | yes             | no               |
-| 1e9   |   0.000000001 |     9,223,372,036 | yes             | no               |
-# END quantitystudy:frontier
-
-Only 1e6 holds a trillion units, and it cannot represent a satoshi.  Only 1e8
-and 1e9 represent a satoshi, and neither reaches a trillion units.  Trading
-range for precision is not a free move — it swaps which asset class is
-excluded.
-
-The trillion-unit row is a deliberate range-pressure case, not a requirement.
-It is retained in the evidence to mark the boundary rather than removed or
-quietly made to pass, and =TestOutOfDomainQuantityIsRejected= asserts it fails
-with a range error specifically, so the boundary is visible in behaviour.
-
-*** Why 1e8
-
-Both 1e8 and 1e9 cover every intended asset class exactly.  1e9 spends a ninth
-decimal place that nothing in the matrix needs and pays a factor of ten in
-supported range for it.  1e8 also matches the =Price= scale fixed by [[https://github.com/rustyeddy/trader/issues/33][#33]],
-keeping both scales in one mental model.
-
-Explicitly rejected: per-asset-class quantity scales, and a widened =Quantity=
-backing type, adopted solely for the pressure case.  Either would add
-substantial complexity to all quantity arithmetic, serialization, and public
-APIs for a requirement Trader does not currently have.
-
-If a future concrete broker or supported instrument requires positions above
-the bound, this decision reopens with actual provider constraints and usage
-evidence.  The likely options then are a widened backing representation or a
-specialised asset-unit model — not silent scale variation inside =Quantity=.
-
-*** Representation scale versus instrument rules
-
-The scale says what can be stored; instrument rules say what may be traded.
-The study models them separately:
+* Decision
+
+** Semantic numeric types
+
+Trader defines distinct foundational semantic types:
+
+- =Price=;
+- =Money=;
+- =Quantity=;
+- =Rate=.
+
+The public API does not expose one generic decimal type in place of these
+semantic types.  Distinct types prevent accidental substitution of prices,
+quantities, monetary amounts, and dimensionless rates.
+
+=Currency= is a separate domain concept owned directly by =Money=.
+
+** Common authoritative representation
+
+The authoritative numeric amount for =Price=, =Money=, =Quantity=, and =Rate=
+is a signed =int64= scaled by =1e8=.
+
+A decimal value =v= is represented as:
+
+#+begin_example
+raw = v * 100_000_000
+#+end_example
+
+The quantum is:
+
+#+begin_example
+0.00000001
+#+end_example
+
+The exact representational range is:
+
+#+begin_example
+minimum raw:    -9,223,372,036,854,775,808
+maximum raw:     9,223,372,036,854,775,807
+minimum scaled: -92,233,720,368.54775808
+maximum scaled:  92,233,720,368.54775807
+#+end_example
+
+The selected scale is an internal representation detail.  It is not an
+instrument tick size, display precision, public wire-format scale, or provider
+quotation convention.
+
+** Price
+
+=Price= represents an authoritative instrument price.
+
+- Backing amount: signed =int64= at scale =1e8=.
+- Normal domain values are non-negative.
+- Zero is representable; the surrounding operation determines whether zero is
+  valid.
+- Negative construction is rejected where the domain requires a market price.
+- Tick size, permitted increments, and display precision are instrument rules,
+  not properties of the numeric scale.
+
+Price increment validation is exact when price and tick size are represented in
+the same scale:
 
 #+begin_src go
-type QuantityRules struct {
-    Increment    int64 // smallest tradable step
-    Minimum      int64 // smallest permitted order size
-    Maximum      int64 // largest permitted order size
-    IntegralOnly bool  // whole units only, e.g. futures contracts
+priceRaw % tickRaw == 0
+#+end_src
+
+Provider-specific quotation conventions such as Treasury 32nds, grain
+fractions, grouped thousands, and scientific notation are normalized by the
+provider adapter before reaching the exact decimal parser.
+
+** Money and currency ownership
+
+=Money= is an immutable semantic value containing:
+
+- a signed scaled =int64= amount at scale =1e8=; and
+- a required =Currency= denomination.
+
+Conceptually:
+
+#+begin_src go
+type Money struct {
+    amount   int64
+    currency Currency
 }
 #+end_src
 
-# BEGIN quantitystudy:instrument-rules
-| Symbol  |  Increment |  Minimum |   Maximum | Integral only |
-|---------+------------+----------+-----------+---------------|
-| EUR/USD |          1 |        1 | 100000000 | no            |
-| SPY     |   0.000001 | 0.000001 |         — | no            |
-| ES      |          1 |        1 |     10000 | yes           |
-| BTC     | 0.00000001 |   0.0001 |         — | no            |
-| SHIB    |          1 |     1000 |         — | no            |
-# END quantitystudy:instrument-rules
+Rules:
 
-Holding quantity and increment in the same scale makes increment validation
-exact integer modulo, with no tolerance and no rounding.  Integral-only
-instruments are validated the same way against the scale factor.
+- Same-currency amounts may be compared, added, and subtracted using checked
+  arithmetic.
+- Cross-currency arithmetic and comparison are rejected.
+- Currency is never silently assumed, dropped, or coerced.
+- Currency conversion is an explicit domain operation requiring a target
+  currency, conversion rate, and provenance.
+- =Money{}= is invalid because it has no currency.
+- Valid zero money is constructed explicitly for a denomination.
+- Fees, balances, realized PnL, unrealized PnL, and other monetary values remain
+  self-describing across domain and external boundaries.
+- Homogeneous internal containers may share one currency across raw amounts as
+  an optimization, but that does not replace the domain-facing =Money= value.
 
-*** Zero and sign policy
+** Quantity
 
-Zero is representable and is a valid =Quantity=: a flat position, a fully
-closed lot.  Only order construction rejects it, so instrument conformance and
-order validity remain separate questions.
+=Quantity= uses signed =int64= storage at scale =1e8=.
 
-Public order quantities are non-negative.  Direction is never encoded in the
-quantity sign; side belongs to the order.  A negative quantity is a programming
-error, and the most negative =int64= is rejected as a quantity rather than
-mishandled.
+Rules:
 
-*** Consequence for intermediate arithmetic
+- Public quantities are non-negative.
+- Direction is represented by =Side=, never by quantity sign.
+- Zero is representable and valid for states such as a flat position or fully
+  closed lot.
+- Order construction normally requires a quantity greater than zero.
+- Negative public order quantities are rejected.
+- The maximum whole-unit quantity is approximately =92,233,720,368=.
+- Quantities above the supported range are rejected, never truncated or
+  silently rescaled.
 
-With =Price= at 1e8 and =Quantity= also scaled, =Price x Quantity= is
-double-scaled — the same shape as =Price x Rate= — so the intermediate
-overflows =int64= before the descaling divide.
+Instrument and broker rules remain separate from representation:
 
-# BEGIN quantitystudy:notional
-| Case            |           Price |      Quantity |      1e6 |      1e7 |      1e8 |      1e9 |
-|-----------------+-----------------+---------------+----------+----------+----------+----------|
-| BRK.A block     |       750000.00 |         10000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
-| FX 10M notional |         1.08473 |      10000000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
-| FX 1B notional  |         1.08473 |    1000000000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
-| BTC 1k coins    | 150000.12345678 |          1000 | OVERFLOW | OVERFLOW | OVERFLOW | OVERFLOW |
-| SPY fractional  |          700.12 |           0.5 |     263x |      26x |       2x | OVERFLOW |
-| SHIB 1e12 units |      0.00000001 | 1000000000000 |       9x |      n/a |      n/a |      n/a |
-# END quantitystudy:notional
+- quantity increment;
+- minimum order size;
+- maximum order size;
+- integral-only requirements.
 
-This confirms the caveat recorded above from [[https://github.com/rustyeddy/trader/issues/33][#33]]: scaling =Quantity= is what
-pushes the product past =int64=, and notional calculation must use the widened
-path owned by [[https://github.com/rustyeddy/trader/issues/38][#38]].  The same block that is comfortable with a whole unscaled
-quantity overflows with a scaled one.
+The initial domain does not support positions above the =1e8=-scaled =int64=
+range merely to accommodate extreme high-supply-token pressure cases.  A
+future concrete provider requirement may reopen that boundary.
 
-** Exact input and output boundaries
+** Rate
 
-Decision source: [[https://github.com/rustyeddy/trader/issues/39][#39]]
+=Rate= is the foundational exact dimensionless numeric type.
 
-Decimal text and raw scaled integers are the preferred exact construction and
-serialization boundaries.  Parsing and formatting should avoid conversion
-through binary =float64= whenever practical.
+- Backing amount: signed =int64= at scale =1e8=.
+- The representation is signed.
+- Zero validity and semantic bounds depend on use.
+- Domain APIs may introduce semantic wrappers where direction, bounds, or
+  interpretation would otherwise be ambiguous.
 
-Any =float64= constructor retained for adapter interoperability must be
-explicitly named as a rounded or lossy boundary conversion.  It must not be the
-preferred path for configuration, broker decimal strings, persistence, or
-journal records.
+Examples include percentages, financing rates, conversion rates, ratios, and
+bounded oscillators.
 
-** Indicator arithmetic is not yet globally fixed
+** Numeric type decision matrix
 
-Decision source: [[https://github.com/rustyeddy/trader/issues/41][#41]]
+| Type     | Backing | Scale | Domain range and sign policy                            | Zero policy                             | Related metadata                                       |
+|----------+---------+-------+---------------------------------------------------------+-----------------------------------------+--------------------------------------------------------|
+| Price    | int64   |   1e8 | Normally non-negative; max 92,233,720,368.54775807      | Representable; context decides validity | Tick size and display precision belong to instrument   |
+| Money    | int64   |   1e8 | Signed; full scaled-int64 amount range                  | Valid only with explicit currency       | Currency is owned by Money                             |
+| Quantity | int64   |   1e8 | Public values non-negative; max 92,233,720,368.54775807 | Representable; orders normally require >0 | Increment and limits belong to instrument or broker  |
+| Rate     | int64   |   1e8 | Signed; semantic bounds depend on use                   | Domain-dependent                        | Semantic constraints belong to wrapper or operation    |
 
-The authoritative domain types remain scaled integers regardless of how an
-indicator performs internal analytical arithmetic.
+* Arithmetic Policy
 
-The fixed-point versus =float64= choice will be made per indicator
-implementation, not per invocation.  Public callers should pass and receive
-semantic Trader types where appropriate; callers should not manually perform
-representation conversions at every indicator call site.
+** Checked authoritative arithmetic
 
-Alternative fixed-point and floating-point implementations may coexist
-internally while evidence is gathered.  Numeric representation should not be
-used as the permanent public package boundary unless a later decision finds a
-compelling reason.
+All arithmetic on authoritative Trader numeric values is checked.
 
-** Exact parsing and formatting policy
+Operations report errors for:
 
-Decision source: [[https://github.com/rustyeddy/trader/issues/39][#39]]
+- overflow;
+- underflow;
+- division by zero;
+- results outside the semantic domain;
+- results that cannot be represented under the selected rounding policy.
 
-Trader's internal fixed scale is an implementation detail. It is not part of
-the ordinary external API contract.
+Authoritative arithmetic never silently:
 
-External callers work with semantic values such as =Price=, =Money=,
-=Quantity=, and =Rate=. They should not normally construct or exchange raw
-scaled integers.
+- wraps;
+- saturates;
+- clamps;
+- discards overflow;
+- or converts through =float64= to escape fixed-point range constraints.
 
-*** Exact decimal input
+Normal public operations return errors.  =Must...= helpers may panic only for
+programmer-controlled constants, fixtures, tests, and equivalent trusted
+inputs.
 
-Decimal text is the preferred exact boundary representation wherever the
-transport or provider supports it.
+** Default rounding
 
-Decimal text is parsed directly into the semantic type's scaled =int64=
-representation. Parsing must not use =float64= as an intermediate.
+The default rounding mode for arithmetic results that cannot be represented
+exactly at scale =1e8= is:
 
-Examples of exact input boundaries include:
+#+begin_example
+round to nearest, ties to even
+#+end_example
 
-- broker APIs that provide decimal strings;
-- configuration files;
-- command-line input;
-- journals;
-- CSV fields;
-- tests and fixtures;
-- external JSON contracts controlled by Trader.
+Operations requiring another policy must select and document it explicitly.
+Supported named policies include:
 
-Exact parsers return errors for:
+- round to nearest, ties to even;
+- round toward zero;
+- round down, toward negative infinity;
+- round up, toward positive infinity.
 
-- malformed input;
-- excess precision beyond eight decimal places;
-- values outside the supported range;
-- values that violate the semantic type's construction invariants.
+Implicit integer truncation is not an undocumented rounding policy.
 
-Exact parsing never silently rounds.
+** Addition, subtraction, negation, and absolute value
 
-*** Raw scaled construction
+Addition and subtraction use checked =int64= arithmetic.
 
-Construction from raw scaled =int64= values is reserved for:
+Negation and absolute value reject =math.MinInt64= because its positive
+counterpart is not representable by signed =int64=.
 
-- trusted internal code;
-- persistence reconstruction;
-- narrowly scoped low-level packages;
-- tests that explicitly exercise representation boundaries.
+** Scaled multiplication and division
 
-Such APIs must clearly identify the value as already scaled. Raw scaled
-construction is not the normal external integration API.
+Operations involving two scaled operands use a widened signed intermediate
+before restoring the common =1e8= scale.
 
-*** Floating-point boundaries
+Examples include:
 
-Some external providers or libraries may require or return binary
-floating-point values.
-
-When a =float64= boundary is unavoidable:
-
-- conversion is isolated to the relevant provider or transport adapter;
-- the conversion uses an explicit rounding policy;
-- NaN is rejected;
-- positive and negative infinity are rejected;
-- out-of-range values are rejected;
-- the conversion is visibly named as rounded or lossy;
-- the resulting semantic Trader value is validated before entering the domain.
-
-=float64= must not be used as an unnecessary intermediate when decimal text is
-already available.
+- =Price * Quantity=;
+- =Price * Rate=;
+- =Money * Rate=;
+- =Quantity * Rate=;
+- =Rate * Rate=;
+- corresponding scaled division operations.
 
 Conceptually:
 
 #+begin_example
-external decimal text
-    -> direct exact parse
-    -> Trader semantic value
+result = round((a * b) / scale)
 #+end_example
 
-For a provider that requires floating point:
+The intermediate product is wider than =int64=.  Production may use
+=math/bits= or an internal signed-128 abstraction.  The widened representation
+is not part of the public numeric API.
 
-#+begin_example
-external float
-    -> explicit checked and rounded adapter conversion
-    -> Trader semantic value
-#+end_example
-
-*** Canonical formatting
-
-Canonical formatting emits normalized plain decimal text directly from the
-scaled integer representation.
-
-Canonical output:
-
-- does not use scientific notation;
-- does not use thousands separators;
-- does not contain unnecessary trailing zeros;
-- does not end with a decimal point;
-- normalizes negative zero to =0=;
-- does not convert through =float64=;
-- round-trips to the identical scaled value.
-
-Examples:
-
-#+begin_example
-123.45000000 -> 123.45
-1.00000000   -> 1
-0.00000001   -> 0.00000001
-0            -> 0
-#+end_example
-
-Fixed-precision, instrument-specific, or user-facing formatting is a separate
-presentation operation. It may apply an explicit rounding policy and must not
-change the stored authoritative value.
-
-*** Signed range boundary
-
-Exact parsing for signed types must support the full signed =int64=
-representation range, including =math.MinInt64=.
-
-The parser must not create an artificial one-value gap by first constructing a
-positive magnitude that cannot fit before applying the negative sign.
-
-=Price= and =Quantity= may still reject negative values according to their
-domain invariants. =Money= and =Rate= support signed values.
-
-*** Required implementation tests
-
-The eventual parsing and formatting implementation must test:
-
-- zero, positive, and negative values;
-- values using all eight decimal places;
-- accepted trailing zeros;
-- canonical removal of unnecessary trailing zeros;
-- malformed input rejection;
-- excess-precision rejection;
-- out-of-range rejection;
-- exact parsing of the full negative boundary for signed types;
-- canonical format-and-parse round trips;
-- negative-zero normalization;
-- rejection of NaN and infinities at floating-point adapter boundaries;
-- absence of =float64= conversion in exact decimal parsing and formatting.
-
-** Price Serialization Policy
-Trader-controlled public wire formats serialize Price, Quantity, and
-Rate as canonical decimal strings. Money is serialized as a structured
-value containing a canonical decimal amount and explicit currency. CSV
-and configuration use decimal text, with currency in a separate
-field. Authoritative internal databases store scaled signed BIGINT
-values, with the common 1e8 scale defined by the schema and migration
-version; Money stores currency separately and mandatorily. Public
-events and external APIs do not expose raw scaled
-integers. Provider-required floating-point formats are isolated to
-provider adapters. Public schemas are versioned, writers emit
-canonical values, readers may accept equivalent exact decimal forms,
-and incompatible representation changes require a schema-version
-change.
-
-** Is float64 permissable in indicators
-Authoritative Trader calculations use exact semantic numeric
-types. Binary floating-point values are prohibited from domain,
-brokerage, accounting, risk, order, position, portfolio, persistence,
-and public API packages. float64 may be used only inside explicitly
-approved internal analytical implementations where fixed-point
-arithmetic would be impractical or provide no meaningful decision
-benefit. Such implementations accept semantic Trader inputs and return
-semantic Trader outputs, applying checked quantization at their
-boundary. Floating-point values may not be stored in domain objects,
-serialized as authoritative values, or passed into execution and
-accounting paths. Approved floating-point boundaries are enforced
-through package structure and automated architecture checks.
-
-
-** Are floats ever permitted in where numeric determinism is required
-Authoritative Trader calculations use exact semantic numeric
-types. Binary floating-point values are prohibited from domain,
-brokerage, accounting, risk, order, position, portfolio, persistence,
-and public API packages. float64 may be used only inside explicitly
-approved internal analytical implementations where fixed-point
-arithmetic would be impractical or provide no meaningful decision
-benefit. Such implementations accept semantic Trader inputs and return
-semantic Trader outputs, applying checked quantization at their
-boundary. Floating-point values may not be stored in domain objects,
-serialized as authoritative values, or passed into execution and
-accounting paths. Approved floating-point boundaries are enforced
-through package structure and automated architecture checks.
-
-
-
-
-* Open Decision Work
-
-The following issues must be resolved before this ADR can be accepted:
-
-- [X] [[https://github.com/rustyeddy/trader/issues/33][#33 — Validate Price scale across supported asset classes]] — resolved:
-  =Price= scale is 1e8.  Evidence in =test/internal/numericstudy= and final
-  review disposition recorded above.
-- [X] [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
-- [X] [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]] — resolved:
-  =Quantity= scale is 1e8, backed by signed =int64=, with a bounded supported
-  range.  Evidence in =test/internal/quantitystudy=.
-- [X] [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
-- [[https://github.com/rustyeddy/trader/issues/38][[X] #38 — Define rounding, overflow, and intermediate arithmetic policy]]
-- [X] [[https://github.com/rustyeddy/trader/issues/39][#39 — Define exact parsing and formatting policy]]
-- [[https://github.com/rustyeddy/trader/issues/40][[X] #40 — Define numeric serialization and persistence representation]]
-- [X] [[https://github.com/rustyeddy/trader/issues/41][#41 — Define indicator fixed-point versus float64 policy]]
-- [[https://github.com/rustyeddy/trader/issues/42][[X] #42 — Define numeric determinism guarantees]]
-- [[https://github.com/rustyeddy/trader/issues/43][#43 — Review reusable legacy Trader numeric code]]
-- [[https://github.com/rustyeddy/trader/issues/44][#44 — Draft and accept exact numeric representation ADR]]
-
-* Numeric Type Decision Matrix
-
-The unresolved cells must be completed by #35, #37–#42.
-| Type     | Backing | Scale | Domain range / sign policy                              | Zero policy                             | Related metadata                                       | Arithmetic direction                                                   |
-|----------+---------+-------+---------------------------------------------------------+-----------------------------------------+--------------------------------------------------------+------------------------------------------------------------------------|
-| Price    | int64   |   1e8 | Normally non-negative; max 92,233,720,368.54775807      | Representable; context decides validity | Tick size belongs to listing                           | Exact typed operations; scaled products use widened intermediate       |
-| Money    | int64   |   1e8 | Signed; full scaled-int64 range                         | Valid only with explicit currency       | Currency owned by Money                                | Same-currency arithmetic only; conversion explicit                     |
-| Quantity | int64   |   1e8 | Public values non-negative; max 92,233,720,368.54775807 | Representable; orders require > 0       | Increment and limits belong to instrument/broker rules | Direction separate from sign; scaled products use widened intermediate |
-| Rate     | int64   |   1e8 | Signed representation; semantic bounds depend on use    | Domain-dependent                        | Semantic constraints belong to wrapper or operation    | Explicit multiply/divide; scaled products use widened intermediate     |
-
-Rate is the foundational exact dimensionless representation. Domain
-APIs may introduce semantic wrappers when direction, bounds, or
-interpretation would otherwise be ambiguous.  For every type, the
-final matrix must specify:
-
-- representation scale
-- signedness and zero-value policy
-- supported range
-- valid and intentionally absent operations
-- rounding rules
-- overflow behavior
-- parsing and formatting
-- JSON, text, CSV, configuration, and persistence representation
+Arithmetic may be reordered only when the reordered operation is
+mathematically equivalent, exact under the documented rounding policy, and
+proven not to introduce overflow or precision loss.
 
 ** Operation boundaries
 
@@ -707,7 +274,8 @@ Valid foundational operations include:
 - =Money * Rate -> Money=;
 - =Quantity * Rate -> Quantity=;
 - division of compatible like values to produce =Rate=;
-- =Price * Quantity= only with instrument and currency context.
+- =Price * Quantity= only with the instrument and currency context needed to
+  interpret the resulting notional value.
 
 Intentionally absent operations include:
 
@@ -718,194 +286,480 @@ Intentionally absent operations include:
 - using quantity sign to encode buy or sell;
 - implicit tick-size or quantity-increment rounding.
 
-** Arithmetic, rounding, and overflow policy
-
-Decision source: [[https://github.com/rustyeddy/trader/issues/38][#38]]
-
-All arithmetic on authoritative Trader numeric values is checked.
-
-*** Default rounding
-
-The default rounding mode for arithmetic results that cannot be represented
-exactly at the common =1e8= scale is:
-
-#+begin_example
-round to nearest, ties to even
-#+end_example
-
-Operations that require another rounding policy must select and document that
-policy explicitly.
-
-Supported policy names are expected to include:
-
-* round to nearest, ties to even;
-* round toward zero;
-* round down, toward negative infinity;
-* round up, toward positive infinity.
-
-The exact Go API and exported identifiers are implementation details.
-
-Public arithmetic must not rely on implicit integer division or truncation as
-an undocumented rounding policy.
-
-*** Overflow and failure behavior
-
-Public arithmetic operations must detect and report:
-
-* overflow;
-* underflow;
-* division by zero;
-* results outside the representable domain;
-* results that cannot be represented under the selected rounding policy.
-
-Arithmetic must never silently:
-
-* wrap;
-* saturate;
-* clamp;
-* discard overflow;
-* or convert through =float64= to avoid fixed-point range constraints.
-
-Normal public operations return explicit errors.
-
-=Must...= APIs may panic only when used with programmer-controlled constants,
-fixtures, tests, or equivalent trusted inputs. They are not appropriate for
-broker, configuration, persistence, user, or market-data input.
-
-*** Addition, subtraction, negation, and absolute value
-
-Addition and subtraction use checked =int64= arithmetic.
-
-Negation and absolute value must explicitly reject the =math.MinInt64= boundary,
-because its positive counterpart cannot be represented by a signed =int64=.
-
-Failures are reported rather than wrapped or saturated.
-
-*** Scaled multiplication and division
-
-Multiplication and division involving two scaled operands use a widened signed
-intermediate before restoring the common =1e8= scale.
-
-This includes operations such as:
-
-* =Price * Quantity=;
-* =Price * Rate=;
-* =Money * Rate=;
-* =Quantity * Rate=;
-* =Rate * Rate=;
-* and corresponding scaled division operations.
-
-Conceptually:
-
-#+begin_example
-result = round((a * b) / scale)
-#+end_example
-
-The intermediate product must be evaluated in a representation wider than
-=int64=. The production implementation may use =math/bits= or an internal
-signed-128 abstraction, but that mechanism is not part of the public numeric
-API.
-
-Binary =float64= is not an acceptable overflow escape path.
-
-Arithmetic may be reordered only when the reordered operation is:
-
-* mathematically equivalent;
-* exact under the documented rounding policy;
-* and proven not to introduce overflow or precision loss.
-
-*** Accumulation
+** Accumulation
 
 Finite domain totals use checked addition.
 
 Potentially long-running analytical accumulations use either:
 
-* a widened accumulator; or
-* a bounded, mathematically equivalent algorithm such as a running mean.
+- a widened accumulator; or
+- a bounded mathematically equivalent formulation such as a running mean.
 
-Potentially unbounded series must not use unchecked:
+Potentially unbounded series do not use unchecked =sum += value= accumulation.
+Overflow is detected and reported at the operation where it occurs.
 
-#+begin_src go
-sum += value
+* Parsing and Formatting Policy
+
+** Exact decimal input
+
+Decimal text is the preferred exact external boundary representation whenever
+the transport or provider supports it.
+
+Decimal text is parsed directly into the semantic type's scaled =int64=
+representation.  Exact parsing never uses =float64= as an intermediate.
+
+Examples include:
+
+- broker APIs that provide decimal strings;
+- configuration files;
+- command-line input;
+- journals;
+- CSV fields;
+- tests and fixtures;
+- Trader-controlled JSON contracts.
+
+Exact parsers reject:
+
+- malformed input;
+- exponent notation unless an adapter first expands it;
+- grouped or locale-dependent numbers;
+- excess precision beyond eight decimal places;
+- values outside the supported range;
+- values violating semantic-type invariants.
+
+Exact parsing never silently rounds.
+
+Signed exact parsers support the full signed =int64= range, including
+=math.MinInt64=.  Implementations must not create a one-value gap by first
+constructing an unrepresentable positive magnitude and only then applying a
+negative sign.
+
+** Raw scaled construction
+
+Construction from raw scaled =int64= values is reserved for:
+
+- trusted internal code;
+- persistence reconstruction;
+- narrowly scoped low-level packages;
+- tests explicitly exercising representation boundaries.
+
+Such APIs clearly identify the input as already scaled.  Raw scaled
+construction is not the ordinary external integration API.
+
+** Floating-point adapter boundaries
+
+Some external providers and libraries require or return binary floating-point
+values.
+
+When a =float64= boundary is unavoidable:
+
+- conversion is isolated to the provider or transport adapter;
+- conversion uses an explicit rounding policy;
+- NaN is rejected;
+- positive and negative infinity are rejected;
+- out-of-range values are rejected;
+- the conversion is visibly named as rounded or lossy;
+- the semantic value is validated before entering the domain.
+
+=float64= is never used as an unnecessary intermediate when decimal text is
+available.
+
+** Canonical formatting
+
+Canonical formatting emits normalized plain decimal text directly from the
+scaled integer representation.
+
+Canonical output:
+
+- does not use scientific notation;
+- does not use thousands separators;
+- contains no unnecessary trailing zeros;
+- does not end with a decimal point;
+- normalizes negative zero to =0=;
+- does not convert through =float64=;
+- round-trips to the identical raw scaled value.
+
+Examples:
+
+#+begin_example
+123.45000000 -> 123.45
+1.00000000   -> 1
+0.00000001   -> 0.00000001
+0            -> 0
+#+end_example
+
+Fixed-precision, instrument-specific, and user-facing formatting is a separate
+presentation operation.  It may apply an explicit rounding policy and does not
+change the stored authoritative value.
+
+* Serialization and Persistence Policy
+
+** Trader-controlled JSON and event payloads
+
+Trader-controlled public wire formats serialize =Price=, =Quantity=, and
+=Rate= as canonical decimal strings.
+
+Example:
+
+#+begin_src json
+{
+  "price": "1.08473",
+  "quantity": "1000",
+  "rate": "0.005"
+}
 #+end_src
 
-Overflow must be detected and reported at the operation where it occurs.
+=Money= is serialized as a structured value containing both amount and
+currency:
 
-*** Required implementation tests
+#+begin_src json
+{
+  "amount": "123.45",
+  "currency": "USD"
+}
+#+end_src
 
-The eventual arithmetic implementation must test at least:
+Raw scaled integers are not exposed in ordinary public events or APIs.
 
-* addition above =math.MaxInt64= fails;
-* subtraction below =math.MinInt64= fails;
-* negating =math.MinInt64= fails;
-* taking the absolute value of =math.MinInt64= fails;
-* valid boundary-adjacent operations succeed;
-* realistic =Price * Quantity= calculations succeed using the widened path;
-* realistic =Price * Rate= calculations succeed using the widened path;
-* values below, above, and exactly at a rounding midpoint follow the selected
-  rounding mode;
-* negative midpoint cases follow the same documented policy;
-* division by zero fails;
-* long accumulation uses the selected widened or bounded strategy, or fails
-  explicitly;
-* no arithmetic operation silently wraps.
+** CSV and configuration
 
-The arithmetic helpers and their final Go API are implementation work. This
-ADR defines their required observable behavior.
+CSV and Trader-controlled configuration use canonical decimal text.
 
-* Consequences Identified So Far
+- Currency is stored in a separate required field where money is represented.
+- Currency symbols are not embedded in numeric fields.
+- Thousands separators and scientific notation are not emitted.
+- Empty means absent only when the schema declares the field optional.
+- Zero is emitted as =0=, not as an empty field.
+
+** Database persistence
+
+Authoritative internal databases store scaled values as signed =BIGINT=.
+
+- The common =1e8= scale is defined by schema and migration version.
+- Scale is not redundantly stored on every row.
+- =Money= stores its currency separately and mandatorily.
+- Database reconstruction uses clearly named raw-scaled constructors.
+- Authoritative database columns do not use binary floating-point types.
+
+** Compatibility
+
+Public schemas are versioned.
+
+Writers emit canonical decimal text.  Readers may accept equivalent exact
+forms, such as trailing zeros, when doing so does not require rounding.
+
+The following are breaking changes once a format is public:
+
+- changing a decimal-string field into a JSON number;
+- dropping currency from =Money=;
+- changing field meaning, units, or semantic type;
+- changing accepted precision or canonical representation incompatibly;
+- exposing raw scaled integers without a separately versioned contract.
+
+Changing the internal scale is not externally breaking only when no public
+contract exposes raw scaled values.
+
+* Floating-Point Containment Policy
+
+Authoritative Trader calculations use exact semantic numeric types.
+
+Binary floating-point values are prohibited from authoritative:
+
+- domain packages;
+- brokerage and execution packages;
+- accounting and ledger packages;
+- risk and position-sizing packages;
+- order, fill, trade, position, and portfolio models;
+- persistence models;
+- public API models and authoritative events.
+
+=float64= may be used only inside explicitly approved internal analytical
+implementations where fixed-point arithmetic would be impractical or provide
+no meaningful decision benefit.
+
+Approved implementations:
+
+- accept semantic Trader inputs at their boundary;
+- keep floating-point values private to the implementation;
+- return semantic Trader outputs where the result has domain meaning;
+- apply checked quantization and explicit rounding before returning such
+  outputs;
+- never store float values in authoritative domain objects;
+- never pass unquantized float values into execution, accounting, risk, or
+  persistence paths.
+
+Arithmetic mode is selected per implementation, not per invocation.  A caller
+does not toggle fixed-point versus floating-point with a runtime flag on each
+calculation.
+
+Alternative fixed-point and floating-point implementations may coexist only
+inside approved internal evaluation packages.  The numeric representation is
+not exposed as a permanent public package boundary.
+
+Approved float boundaries are enforced by package structure and automated
+architecture checks.  Exceptions require an explicit architectural waiver.
+
+* Numeric Determinism Guarantees
+
+** Authoritative exact values
+
+For supported platforms, authoritative fixed-point operations are required to
+produce bit-identical raw values when given identical ordered inputs and the
+same explicit policy parameters.
+
+This guarantee applies to:
+
+- exact parsing;
+- canonical formatting;
+- checked addition and subtraction;
+- widened multiplication and division;
+- explicit rounding;
+- quantization;
+- serialization and persistence reconstruction.
+
+Backtest, replay, paper, and live execution use the same semantic numeric
+operations, rounding modes, threshold comparisons, and quantization behavior.
+
+** Analytical floating-point implementations
+
+Sealed analytical =float64= implementations are not automatically promised to
+be bit-identical across every processor architecture, compiler version, or
+third-party statistical implementation.
+
+A floating analytical result cannot directly become an authoritative order,
+price, stop, target, quantity, money amount, risk value, or account update.
+
+Before entering an authoritative decision path, the result is converted into a
+validated semantic Trader value or an explicit discrete decision.  Once
+quantized into a semantic type, subsequent comparison and execution behavior is
+exact and deterministic.
+
+Where cross-platform float reproducibility is required for a specific
+implementation, that guarantee must be demonstrated and documented by that
+implementation rather than assumed globally.
+
+** Threshold behavior
+
+Decision thresholds are tested at:
+
+- the representable value immediately below the threshold;
+- exactly at the threshold;
+- the representable value immediately above the threshold.
+
+Tests verify both numeric output and resulting trading decisions, including
+crossover timing, entry and exit selection, stops, targets, risk limits, and
+position sizing.
+
+** Test expectations
+
+The implementation includes:
+
+- golden tests for canonical parse, format, arithmetic, and serialization
+  vectors;
+- property tests for algebraic and range invariants where applicable;
+- fuzz tests for parser and formatter round trips;
+- repeated-run tests for authoritative calculations;
+- replay comparisons across backtest, paper, and live-compatible calculation
+  paths;
+- cross-platform CI coverage for supported operating systems and architectures;
+- architecture tests preventing unauthorized =float32= or =float64= use.
+
+* Legacy Trader Code Disposition
+
+Decision source: [[https://github.com/rustyeddy/trader/issues/43][#43]]
+
+The foundational numeric implementation is rewritten cleanly against this ADR.
+Legacy numeric packages are not copied wholesale and are not imported as
+dependencies.
+
+| Legacy component                              | Disposition        | Rationale |
+|-----------------------------------------------+--------------------+-----------|
+| Distinct Price, Money, and Rate concepts      | Retain concept     | Semantic separation remains correct |
+| Existing concrete numeric type implementations | Rewrite          | Old backing widths, scales, APIs, and invariants conflict with ADR-004 |
+| Legacy Price =int32= and 1e5 scale            | Reject             | Insufficient range and precision for the selected multi-asset domain |
+| Legacy Money and Rate 1e6 scale               | Reject             | Conflicts with the common 1e8 decision |
+| Money without owned Currency                  | Reject             | Violates the self-describing Money decision |
+| Float-first constructors                      | Reference only     | Provider adapters may need explicit conversions, but float is not the primary construction path |
+| Float-based decimal formatting                | Reject             | Canonical formatting must operate directly on scaled integers |
+| Panic-first external constructors             | Reject             | External and market inputs return explicit errors |
+| NaN, infinity, and range validation cases     | Adapt tests        | Useful adapter-boundary scenarios |
+| Boundary, parsing, and formatting test cases  | Adapt tests        | Scenarios remain useful; expectations are rewritten for ADR-004 |
+| Fixed-point indicator implementations         | Port algorithm only | Review individually against semantic APIs, widened arithmetic, and float containment |
+| Integer square-root and logarithm helpers     | Reference or adapt | Reuse only after correctness, range, and complexity review |
+| Accumulator implementations                   | Reference or rewrite | Must satisfy widened or bounded accumulation policy |
+| Legacy Range abstractions                     | Reject unless a concrete consumer justifies them | Do not preserve abstractions without proven domain need |
+| Replay and backtest golden vectors            | Reuse selectively  | Valuable for behavioral comparison and determinism testing |
+
+The legacy repository is therefore used to harvest:
+
+- test scenarios;
+- edge cases;
+- golden vectors;
+- mathematical algorithms;
+- realistic calling patterns;
+- documented failure modes.
+
+The migration pattern is:
+
+#+begin_example
+inspect legacy behavior
+    -> define the new semantic contract
+    -> implement cleanly
+    -> compare against useful historical vectors
+#+end_example
+
+It is not:
+
+#+begin_example
+copy legacy package
+    -> modify until old tests pass
+#+end_example
+
+* Evidence
+
+The scale and quantity decisions are supported by executable test-only studies:
+
+- =test/internal/numericstudy=;
+- =test/internal/quantitystudy=.
+
+These studies cover representative FX, equity, futures, crypto, rate,
+precision, range, and intermediate-overflow cases.  Generated tables in the
+working decision history are guarded against drift by their test harnesses.
+
+Key findings include:
+
+- =1e5= and =1e6= cannot represent all intended asset precision;
+- =1e8= covers the intended eight-decimal maximum while retaining ten times
+  the range of =1e9=;
+- double-scaled products require widened intermediates at every usable scale;
+- naïve =int64= accumulation can overflow within realistic long-running market
+  series;
+- instrument tick and quantity increments remain exact when represented in the
+  common scale but validated separately from representation.
+
+* Consequences
+
+** Positive consequences
 
 - Authoritative financial values do not depend on binary floating-point
-  representation.
+  approximation.
 - Public APIs distinguish price, money, quantity, and rate at compile time.
-- Instrument tick size and quantity increment must be validated separately
-  from internal numeric scale.
-- Multiplication and division require explicit scale restoration, rounding,
-  and overflow handling.
-- Indicator implementations may choose different internal arithmetic while
-  retaining semantic public contracts.
-- Legacy fixed-point code and tests can be reused only after multi-asset and
-  package-boundary review.
+- =Money= remains self-describing and prevents accidental cross-currency
+  arithmetic.
+- Exact values round-trip through parsing, formatting, wire formats, and
+  persistence.
+- Backtest, replay, paper, and live calculations share one authoritative
+  numeric contract.
+- Instrument tick size, quantity increment, and display precision remain
+  separate from storage scale.
+- Float use is constrained structurally rather than by convention alone.
+- The old repository can contribute evidence without imposing obsolete
+  architecture on the new system.
 
-* Alternatives Under Consideration
+** Costs and constraints
 
-** Arbitrary-precision or third-party decimal throughout
+- Scaled multiplication and division require widened intermediate arithmetic.
+- Checked APIs are more verbose than raw primitive arithmetic.
+- =Money= carries currency metadata.
+- The common =1e8= quantity scale imposes an initial maximum of approximately
+  92.2 billion whole units.
+- Exact parsing, canonical formatting, and serialization require custom code.
+- Analytical code using transcendental and statistical operations needs an
+  explicit sealed float boundary or a more complex fixed-point implementation.
+- Architecture checks and golden tests become part of the permanent
+  maintenance burden.
 
-Not selected as the current direction.  It may simplify some decimal
-operations but risks exposing a third-party representation in public APIs and
-may add allocation and performance costs.  #43 must record whether any legacy
-or third-party helpers are still useful internally.
+* Alternatives Considered
 
 ** Raw float64 throughout
 
-Rejected for authoritative values because it cannot provide exact decimal
-broker and accounting semantics.
+Rejected.  Binary floating point cannot provide exact decimal broker,
+accounting, persistence, and replay semantics for authoritative values.
 
 ** One generic decimal domain type
 
-Rejected as the primary public API because it permits accidental interchange
-of price, money, quantity, and rate values.
+Rejected as the public domain model.  A generic type permits accidental
+interchange of prices, money, quantities, and rates.
+
+** Arbitrary precision or a third-party decimal throughout
+
+Not selected for the foundational representation.  It may reduce some decimal
+arithmetic concerns, but would add allocation, performance, dependency, and
+public-API risks.  A third-party representation must not become the implicit
+public contract without a separate ADR.
+
+** Per-type or per-asset scales
+
+Rejected for the initial foundation.  Variable scales increase arithmetic,
+serialization, persistence, comparison, and API complexity.  The common =1e8=
+scale covers the intended supported domain.
+
+** Scale 1e9
+
+Rejected.  It provides a ninth decimal place not required by the intended
+domain while reducing representable range and intermediate headroom by a
+factor of ten compared with =1e8=.
+
+** Unscaled integral Quantity
+
+Rejected because Trader supports fractional equities and crypto quantities.
+
+** Widened Quantity solely for extreme token supply
+
+Rejected without a concrete provider requirement.  The initial supported
+quantity domain is bounded explicitly instead.
 
 ** Fixed-point arithmetic for every indicator
 
-Not yet accepted or rejected.  #41 will determine when fixed-point behavior
-provides enough determinism or decision-boundary value to justify its added
-complexity.
+Rejected as a universal requirement.  Authoritative values and execution paths
+remain exact, while explicitly approved sealed analytical implementations may
+use =float64= under the containment and determinism policies above.
 
-* Acceptance Gate
+** Exposing raw scaled integers in public APIs
 
-ADR-004 may move from =Proposed= to =Accepted= only when:
+Rejected as the ordinary contract.  It would couple consumers to Trader's
+internal scale and make future representation changes externally breaking.
 
-- #33 and #35–#43 are resolved or explicitly deferred with rationale.
-- Final scales and supported ranges are documented.
-- Money currency ownership and quantity semantics are decided.
-- The numeric decision matrix is complete.
-- Rounding, overflow, and intermediate arithmetic rules are explicit.
-- Exact parsing, formatting, serialization, and persistence formats are set.
-- Indicator arithmetic and determinism policies are set.
-- Legacy code has a documented transplant/adapt/reference/reject disposition.
-- Representative multi-asset evidence supports the decision.
-- #22 can implement the foundational types without reopening these decisions.
-- #44 reviews this record, integrates it into the canonical ADR registry, and
-  marks the ADR =Accepted=.
+* Implementation Requirements
 
+Implementation issue [[https://github.com/rustyeddy/trader/issues/22][#22]] may choose
+package layout, naming, and internal helper structure without reopening this
+ADR, provided the observable behavior satisfies this decision.
+
+At minimum, implementation tests cover:
+
+- full positive and negative scaled boundaries where semantically valid;
+- rejection of negative =Price= and =Quantity= where required;
+- invalid =Money{}= and explicit same-currency zero money;
+- same-currency arithmetic and cross-currency rejection;
+- addition and subtraction overflow;
+- negation and absolute value of =math.MinInt64=;
+- widened realistic =Price * Quantity= and =Price * Rate= products;
+- division by zero;
+- rounding immediately below, at, and above midpoints, including negatives;
+- exact decimal parsing with all eight places;
+- rejection of excess precision, malformed input, grouping, and exponent text;
+- canonical format-parse round trips;
+- full =math.MinInt64= parsing for signed semantic types;
+- negative-zero normalization;
+- rejection of NaN and infinities at float adapter boundaries;
+- JSON, text, CSV, configuration, and database round trips;
+- mandatory currency preservation for =Money=;
+- architecture enforcement of approved floating-point package boundaries;
+- repeated-run and cross-path determinism of authoritative decisions.
+
+* Related Issues
+
+- [[https://github.com/rustyeddy/trader/issues/19][#19 — Decide exact numeric representation]]
+- [[https://github.com/rustyeddy/trader/issues/22][#22 — Implement foundational numeric types]]
+- [[https://github.com/rustyeddy/trader/issues/33][#33 — Validate Price scale across supported asset classes]]
+- [[https://github.com/rustyeddy/trader/issues/35][#35 — Decide Money currency ownership and arithmetic semantics]]
+- [[https://github.com/rustyeddy/trader/issues/36][#36 — Decide Quantity precision and asset constraints]]
+- [[https://github.com/rustyeddy/trader/issues/37][#37 — Define numeric type decision matrix]]
+- [[https://github.com/rustyeddy/trader/issues/38][#38 — Define rounding, overflow, and intermediate arithmetic policy]]
+- [[https://github.com/rustyeddy/trader/issues/39][#39 — Define exact parsing and formatting policy]]
+- [[https://github.com/rustyeddy/trader/issues/40][#40 — Define numeric serialization and persistence representation]]
+- [[https://github.com/rustyeddy/trader/issues/41][#41 — Define indicator fixed-point versus float64 policy]]
+- [[https://github.com/rustyeddy/trader/issues/42][#42 — Define numeric determinism guarantees]]
+- [[https://github.com/rustyeddy/trader/issues/43][#43 — Review reusable legacy Trader numeric code]]
+- [[https://github.com/rustyeddy/trader/issues/44][#44 — Draft and accept exact numeric representation ADR]]
