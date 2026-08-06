@@ -28,7 +28,7 @@ func MulScaled(a, b int64, mode Rounding) (int64, error) {
 	if !mode.valid() {
 		return 0, ErrInvalidRounding
 	}
-	return mulDiv(a, b, Scale, mode)
+	return mulDiv(a, b, scale, mode)
 }
 
 // DivScaled returns the quotient of two raw scaled values, restored to the
@@ -43,7 +43,7 @@ func DivScaled(a, b int64, mode Rounding) (int64, error) {
 	if b == 0 {
 		return 0, ErrDivideByZero
 	}
-	return mulDiv(a, Scale, b, mode)
+	return mulDiv(a, scale, b, mode)
 }
 
 // mulDiv computes round(a*b/c) exactly, using a 128-bit intermediate product.
@@ -89,7 +89,7 @@ func mulDiv(a, b, c int64, mode Rounding) (int64, error) {
 
 // magnitude returns the absolute value of v as an unsigned integer.
 //
-// Unsigned negation is used rather than -v so that MinRaw, whose positive
+// Unsigned negation is used rather than -v so that minRaw, whose positive
 // counterpart is not a valid int64, yields its true magnitude of 2^63.
 func magnitude(v int64) uint64 {
 	u := uint64(v)
@@ -105,20 +105,20 @@ func magnitude(v int64) uint64 {
 // The negative range extends one further than the positive range, so the two
 // signs are bounded separately.
 func fromMagnitude(mag uint64, negative bool) (int64, error) {
-	const negativeLimit = uint64(1) << 63 // magnitude of MinRaw
+	const negativeLimit = uint64(1) << 63 // magnitude of minRaw
 
 	if negative {
 		switch {
 		case mag > negativeLimit:
 			return 0, ErrUnderflow
 		case mag == negativeLimit:
-			return MinRaw, nil
+			return minRaw, nil
 		default:
 			return -int64(mag), nil
 		}
 	}
 
-	if mag > uint64(MaxRaw) {
+	if mag > uint64(maxRaw) {
 		return 0, ErrOverflow
 	}
 	return int64(mag), nil

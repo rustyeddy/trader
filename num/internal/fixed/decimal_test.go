@@ -20,10 +20,10 @@ func TestParseValid(t *testing.T) {
 		{name: "zero with a zero fraction", in: "0.00000000", want: 0},
 		{name: "negative zero fraction is normalized", in: "-0.00000000", want: 0},
 
-		{name: "whole number", in: "1", want: Scale},
-		{name: "negative whole number", in: "-1", want: -Scale},
-		{name: "explicit plus sign", in: "+1", want: Scale},
-		{name: "leading zeros are accepted", in: "007", want: 7 * Scale},
+		{name: "whole number", in: "1", want: scale},
+		{name: "negative whole number", in: "-1", want: -scale},
+		{name: "explicit plus sign", in: "+1", want: scale},
+		{name: "leading zeros are accepted", in: "007", want: 7 * scale},
 
 		{name: "one decimal place", in: "0.5", want: 50_000_000},
 		{name: "two decimal places", in: "123.45", want: 12_345_000_000},
@@ -33,16 +33,16 @@ func TestParseValid(t *testing.T) {
 		{name: "one negative quantum", in: "-0.00000001", want: -1},
 		{name: "smallest fraction digit in each place", in: "0.00000009", want: 9},
 
-		{name: "trailing zeros are accepted", in: "1.00000000", want: Scale},
+		{name: "trailing zeros are accepted", in: "1.00000000", want: scale},
 		{name: "trailing zeros within the scale", in: "123.45000000", want: 12_345_000_000},
 		// Digits beyond the scale are accepted only when dropping them is
 		// exact; no rounding is involved.
-		{name: "zeros beyond the scale are exact", in: "1.000000000000", want: Scale},
+		{name: "zeros beyond the scale are exact", in: "1.000000000000", want: scale},
 		{name: "many zeros beyond the scale", in: "0.5000000000000000000", want: 50_000_000},
 
-		{name: "maximum representable value", in: "92233720368.54775807", want: MaxRaw},
-		{name: "minimum representable value", in: "-92233720368.54775808", want: MinRaw},
-		{name: "one above the minimum", in: "-92233720368.54775807", want: MinRaw + 1},
+		{name: "maximum representable value", in: "92233720368.54775807", want: maxRaw},
+		{name: "minimum representable value", in: "-92233720368.54775808", want: minRaw},
+		{name: "one above the minimum", in: "-92233720368.54775807", want: minRaw + 1},
 	}
 
 	for _, tt := range tests {
@@ -136,8 +136,8 @@ func TestFormat(t *testing.T) {
 		want string
 	}{
 		{name: "zero", in: 0, want: "0"},
-		{name: "whole number", in: Scale, want: "1"},
-		{name: "negative whole number", in: -Scale, want: "-1"},
+		{name: "whole number", in: scale, want: "1"},
+		{name: "negative whole number", in: -scale, want: "-1"},
 		{name: "trailing zeros are removed", in: 12_345_000_000, want: "123.45"},
 		{name: "all eight places are kept when significant", in: 112_345_678, want: "1.12345678"},
 		{name: "one quantum", in: 1, want: "0.00000001"},
@@ -145,8 +145,8 @@ func TestFormat(t *testing.T) {
 		{name: "leading fraction zeros are kept", in: 50_000_000, want: "0.5"},
 		{name: "interior zeros are kept", in: 100_000_001, want: "1.00000001"},
 		{name: "five decimal places", in: 108_473_000, want: "1.08473"},
-		{name: "maximum", in: MaxRaw, want: "92233720368.54775807"},
-		{name: "minimum", in: MinRaw, want: "-92233720368.54775808"},
+		{name: "maximum", in: maxRaw, want: "92233720368.54775807"},
+		{name: "minimum", in: minRaw, want: "-92233720368.54775808"},
 	}
 
 	for _, tt := range tests {
@@ -161,7 +161,7 @@ func TestFormat(t *testing.T) {
 // Format cannot quietly reintroduce scientific notation or padding.
 func TestFormatIsCanonical(t *testing.T) {
 	values := []int64{
-		MinRaw, MinRaw + 1, -Scale, -1, 0, 1, Scale, 12_345_000_000, MaxRaw,
+		minRaw, minRaw + 1, -scale, -1, 0, 1, scale, 12_345_000_000, maxRaw,
 	}
 
 	for _, v := range values {
@@ -177,7 +177,7 @@ func TestFormatIsCanonical(t *testing.T) {
 		if i := indexByte(out, '.'); i >= 0 {
 			assert.NotEqual(t, byte('0'), out[len(out)-1],
 				"no unnecessary trailing zeros: %q", out)
-			assert.LessOrEqual(t, len(out)-i-1, Places,
+			assert.LessOrEqual(t, len(out)-i-1, places,
 				"never more than the scale's places: %q", out)
 		}
 	}
@@ -185,9 +185,9 @@ func TestFormatIsCanonical(t *testing.T) {
 
 func TestParseFormatRoundTrip(t *testing.T) {
 	values := []int64{
-		MinRaw, MinRaw + 1, -12_345_000_000, -Scale, -1, 0, 1,
-		9, 50_000_000, Scale, 108_473_000, 112_345_678, 12_345_000_000,
-		MaxRaw - 1, MaxRaw,
+		minRaw, minRaw + 1, -12_345_000_000, -scale, -1, 0, 1,
+		9, 50_000_000, scale, 108_473_000, 112_345_678, 12_345_000_000,
+		maxRaw - 1, maxRaw,
 	}
 
 	for _, v := range values {

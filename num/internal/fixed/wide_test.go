@@ -14,34 +14,34 @@ func TestMulScaled(t *testing.T) {
 		want    int64
 		wantErr error
 	}{
-		{name: "zero times anything", a: 0, b: 5 * Scale, want: 0},
-		{name: "anything times zero", a: 5 * Scale, b: 0, want: 0},
-		{name: "identity", a: 7 * Scale, b: Scale, want: 7 * Scale},
-		{name: "negative identity", a: -7 * Scale, b: Scale, want: -7 * Scale},
-		{name: "two negatives give a positive", a: -3 * Scale, b: -4 * Scale, want: 12 * Scale},
-		{name: "mixed signs give a negative", a: -3 * Scale, b: 4 * Scale, want: -12 * Scale},
+		{name: "zero times anything", a: 0, b: 5 * scale, want: 0},
+		{name: "anything times zero", a: 5 * scale, b: 0, want: 0},
+		{name: "identity", a: 7 * scale, b: scale, want: 7 * scale},
+		{name: "negative identity", a: -7 * scale, b: scale, want: -7 * scale},
+		{name: "two negatives give a positive", a: -3 * scale, b: -4 * scale, want: 12 * scale},
+		{name: "mixed signs give a negative", a: -3 * scale, b: 4 * scale, want: -12 * scale},
 
 		// Realistic Price * Rate: 1.08473 marked up by 1.05.
 		{name: "price times rate", a: 108_473_000, b: 105_000_000, want: 113_896_650},
 
 		// Realistic Quantity * Rate: 1000 units at a 0.005 financing rate.
-		{name: "quantity times rate", a: 1000 * Scale, b: 500_000, want: 5 * Scale},
+		{name: "quantity times rate", a: 1000 * scale, b: 500_000, want: 5 * scale},
 
 		// Realistic Price * Quantity, which needs the widened intermediate:
 		// the raw product of 1.08473 and 1,000,000 units exceeds int64 by four
 		// orders of magnitude before the scale is restored.
-		{name: "price times large quantity", a: 108_473_000, b: 1_000_000 * Scale, want: 1_084_730 * Scale},
+		{name: "price times large quantity", a: 108_473_000, b: 1_000_000 * scale, want: 1_084_730 * scale},
 
 		// The full negative range is reachable; its positive counterpart is
 		// one quantum beyond the representable maximum.
-		{name: "reaches the minimum exactly", a: MinRaw, b: Scale, want: MinRaw},
-		{name: "reaches the maximum exactly", a: MaxRaw, b: Scale, want: MaxRaw},
-		{name: "negating the minimum overflows", a: MinRaw, b: -Scale, wantErr: ErrOverflow},
+		{name: "reaches the minimum exactly", a: minRaw, b: scale, want: minRaw},
+		{name: "reaches the maximum exactly", a: maxRaw, b: scale, want: maxRaw},
+		{name: "negating the minimum overflows", a: minRaw, b: -scale, wantErr: ErrOverflow},
 
-		{name: "overflows past the maximum", a: MaxRaw, b: 2 * Scale, wantErr: ErrOverflow},
-		{name: "underflows past the minimum", a: MinRaw, b: 2 * Scale, wantErr: ErrUnderflow},
-		{name: "quotient wider than 64 bits overflows", a: MaxRaw, b: MaxRaw, wantErr: ErrOverflow},
-		{name: "negative quotient wider than 64 bits underflows", a: MinRaw, b: MaxRaw, wantErr: ErrUnderflow},
+		{name: "overflows past the maximum", a: maxRaw, b: 2 * scale, wantErr: ErrOverflow},
+		{name: "underflows past the minimum", a: minRaw, b: 2 * scale, wantErr: ErrUnderflow},
+		{name: "quotient wider than 64 bits overflows", a: maxRaw, b: maxRaw, wantErr: ErrOverflow},
+		{name: "negative quotient wider than 64 bits underflows", a: minRaw, b: maxRaw, wantErr: ErrUnderflow},
 	}
 
 	for _, tt := range tests {
@@ -59,7 +59,7 @@ func TestMulScaled(t *testing.T) {
 }
 
 func TestMulScaledIsCommutative(t *testing.T) {
-	values := []int64{0, 1, -1, Scale, -Scale, 108_473_000, -250_000_000, 3 * Scale}
+	values := []int64{0, 1, -1, scale, -scale, 108_473_000, -250_000_000, 3 * scale}
 
 	for _, a := range values {
 		for _, b := range values {
@@ -78,25 +78,25 @@ func TestDivScaled(t *testing.T) {
 		want    int64
 		wantErr error
 	}{
-		{name: "zero divided by anything", a: 0, b: 5 * Scale, want: 0},
-		{name: "identity", a: 7 * Scale, b: Scale, want: 7 * Scale},
-		{name: "exact halving", a: 3 * Scale, b: 2 * Scale, want: 150_000_000},
-		{name: "negative dividend", a: -3 * Scale, b: 2 * Scale, want: -150_000_000},
-		{name: "negative divisor", a: 3 * Scale, b: -2 * Scale, want: -150_000_000},
-		{name: "two negatives give a positive", a: -3 * Scale, b: -2 * Scale, want: 150_000_000},
+		{name: "zero divided by anything", a: 0, b: 5 * scale, want: 0},
+		{name: "identity", a: 7 * scale, b: scale, want: 7 * scale},
+		{name: "exact halving", a: 3 * scale, b: 2 * scale, want: 150_000_000},
+		{name: "negative dividend", a: -3 * scale, b: 2 * scale, want: -150_000_000},
+		{name: "negative divisor", a: 3 * scale, b: -2 * scale, want: -150_000_000},
+		{name: "two negatives give a positive", a: -3 * scale, b: -2 * scale, want: 150_000_000},
 
 		// Repeating decimals must round at the last representable place, not
 		// truncate: 1/3 rounds down, 2/3 rounds up.
-		{name: "one third rounds down", a: Scale, b: 3 * Scale, want: 33_333_333},
-		{name: "two thirds rounds up", a: 2 * Scale, b: 3 * Scale, want: 66_666_667},
+		{name: "one third rounds down", a: scale, b: 3 * scale, want: 33_333_333},
+		{name: "two thirds rounds up", a: 2 * scale, b: 3 * scale, want: 66_666_667},
 
 		// Realistic Price / Price producing a Rate.
 		{name: "price ratio", a: 108_473_000, b: 108_000_000, want: 100_437_963},
 
-		{name: "divide by zero", a: 5 * Scale, b: 0, wantErr: ErrDivideByZero},
+		{name: "divide by zero", a: 5 * scale, b: 0, wantErr: ErrDivideByZero},
 		{name: "zero divided by zero", a: 0, b: 0, wantErr: ErrDivideByZero},
-		{name: "overflows past the maximum", a: MaxRaw, b: 1, wantErr: ErrOverflow},
-		{name: "underflows past the minimum", a: MinRaw, b: 1, wantErr: ErrUnderflow},
+		{name: "overflows past the maximum", a: maxRaw, b: 1, wantErr: ErrOverflow},
+		{name: "underflows past the minimum", a: minRaw, b: 1, wantErr: ErrUnderflow},
 	}
 
 	for _, tt := range tests {
@@ -195,10 +195,10 @@ func TestRoundingNeighbourhood(t *testing.T) {
 func TestUnrecognizedRoundingIsRejected(t *testing.T) {
 	const bogus Rounding = 99
 
-	_, err := MulScaled(Scale, Scale, bogus)
+	_, err := MulScaled(scale, scale, bogus)
 	require.ErrorIs(t, err, ErrInvalidRounding)
 
-	_, err = DivScaled(Scale, Scale, bogus)
+	_, err = DivScaled(scale, scale, bogus)
 	require.ErrorIs(t, err, ErrInvalidRounding)
 }
 
@@ -211,11 +211,11 @@ func TestRoundingString(t *testing.T) {
 }
 
 func TestMagnitudeHandlesTheMostNegativeValue(t *testing.T) {
-	// The magnitude of MinRaw has no int64 counterpart; representing it
+	// The magnitude of minRaw has no int64 counterpart; representing it
 	// unsigned is what lets the full negative range participate in widened
 	// arithmetic and parsing.
-	assert.Equal(t, uint64(1)<<63, magnitude(MinRaw))
-	assert.Equal(t, uint64(MaxRaw), magnitude(MaxRaw))
+	assert.Equal(t, uint64(1)<<63, magnitude(minRaw))
+	assert.Equal(t, uint64(maxRaw), magnitude(maxRaw))
 	assert.Equal(t, uint64(0), magnitude(0))
 	assert.Equal(t, uint64(1), magnitude(-1))
 }

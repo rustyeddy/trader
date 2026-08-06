@@ -13,8 +13,8 @@ import (
 // authoritative value could change merely by being written and read again.
 func FuzzFormatParse(f *testing.F) {
 	seeds := []int64{
-		MinRaw, MinRaw + 1, -12_345_000_000, -Scale, -9, -1, 0, 1, 9,
-		50_000_000, Scale, 108_473_000, 112_345_678, MaxRaw - 1, MaxRaw,
+		minRaw, minRaw + 1, -12_345_000_000, -scale, -9, -1, 0, 1, 9,
+		50_000_000, scale, 108_473_000, 112_345_678, maxRaw - 1, maxRaw,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -66,8 +66,8 @@ func FuzzParseFormat(f *testing.F) {
 // result.
 func FuzzAddSub(f *testing.F) {
 	seeds := [][2]int64{
-		{0, 0}, {1, -1}, {MaxRaw, 1}, {MinRaw, -1}, {MaxRaw, MaxRaw},
-		{MinRaw, MinRaw}, {MinRaw, MaxRaw}, {Scale, Scale},
+		{0, 0}, {1, -1}, {maxRaw, 1}, {minRaw, -1}, {maxRaw, maxRaw},
+		{minRaw, minRaw}, {minRaw, maxRaw}, {scale, scale},
 	}
 	for _, s := range seeds {
 		f.Add(s[0], s[1])
@@ -92,8 +92,8 @@ func FuzzAddSub(f *testing.F) {
 // make that exact.
 func FuzzMulDivScaled(f *testing.F) {
 	seeds := [][2]int64{
-		{0, 0}, {Scale, Scale}, {108_473_000, 105_000_000}, {MaxRaw, Scale},
-		{MinRaw, Scale}, {MaxRaw, MaxRaw}, {1, 250_000_000}, {-1, 150_000_000},
+		{0, 0}, {scale, scale}, {108_473_000, 105_000_000}, {maxRaw, scale},
+		{minRaw, scale}, {maxRaw, maxRaw}, {1, 250_000_000}, {-1, 150_000_000},
 	}
 	for _, s := range seeds {
 		f.Add(s[0], s[1])
@@ -107,7 +107,7 @@ func FuzzMulDivScaled(f *testing.F) {
 		}
 
 		// Scaling by exactly one is the identity, in both directions.
-		if b == Scale {
+		if b == scale {
 			assert.Equalf(t, a, product, "MulScaled(%d, 1) is not the identity", a)
 		}
 

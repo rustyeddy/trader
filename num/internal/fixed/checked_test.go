@@ -15,17 +15,17 @@ func TestAdd(t *testing.T) {
 		wantErr error
 	}{
 		{name: "zero and zero", a: 0, b: 0, want: 0},
-		{name: "positive and positive", a: 3 * Scale, b: 4 * Scale, want: 7 * Scale},
-		{name: "positive and negative", a: 3 * Scale, b: -4 * Scale, want: -1 * Scale},
-		{name: "negative and negative", a: -3 * Scale, b: -4 * Scale, want: -7 * Scale},
+		{name: "positive and positive", a: 3 * scale, b: 4 * scale, want: 7 * scale},
+		{name: "positive and negative", a: 3 * scale, b: -4 * scale, want: -1 * scale},
+		{name: "negative and negative", a: -3 * scale, b: -4 * scale, want: -7 * scale},
 		{name: "quantum granularity", a: 1, b: 2, want: 3},
-		{name: "cancels to zero", a: MinRaw, b: MaxRaw, want: -1},
-		{name: "reaches maximum exactly", a: MaxRaw - 1, b: 1, want: MaxRaw},
-		{name: "reaches minimum exactly", a: MinRaw + 1, b: -1, want: MinRaw},
-		{name: "overflows past maximum", a: MaxRaw, b: 1, wantErr: ErrOverflow},
-		{name: "overflows from two large positives", a: MaxRaw, b: MaxRaw, wantErr: ErrOverflow},
-		{name: "underflows past minimum", a: MinRaw, b: -1, wantErr: ErrUnderflow},
-		{name: "underflows from two large negatives", a: MinRaw, b: MinRaw, wantErr: ErrUnderflow},
+		{name: "cancels to zero", a: minRaw, b: maxRaw, want: -1},
+		{name: "reaches maximum exactly", a: maxRaw - 1, b: 1, want: maxRaw},
+		{name: "reaches minimum exactly", a: minRaw + 1, b: -1, want: minRaw},
+		{name: "overflows past maximum", a: maxRaw, b: 1, wantErr: ErrOverflow},
+		{name: "overflows from two large positives", a: maxRaw, b: maxRaw, wantErr: ErrOverflow},
+		{name: "underflows past minimum", a: minRaw, b: -1, wantErr: ErrUnderflow},
+		{name: "underflows from two large negatives", a: minRaw, b: minRaw, wantErr: ErrUnderflow},
 	}
 
 	for _, tt := range tests {
@@ -50,16 +50,16 @@ func TestSub(t *testing.T) {
 		wantErr error
 	}{
 		{name: "zero and zero", a: 0, b: 0, want: 0},
-		{name: "positive difference", a: 7 * Scale, b: 4 * Scale, want: 3 * Scale},
-		{name: "negative difference", a: 4 * Scale, b: 7 * Scale, want: -3 * Scale},
-		{name: "subtracting a negative", a: 4 * Scale, b: -3 * Scale, want: 7 * Scale},
-		{name: "subtracting the minimum from zero overflows", a: 0, b: MinRaw, wantErr: ErrOverflow},
-		{name: "reaches maximum exactly", a: 0, b: -MaxRaw, want: MaxRaw},
-		{name: "reaches minimum exactly", a: -1, b: MaxRaw, want: MinRaw},
-		{name: "overflows past maximum", a: MaxRaw, b: -1, wantErr: ErrOverflow},
-		{name: "underflows past minimum", a: MinRaw, b: 1, wantErr: ErrUnderflow},
-		{name: "underflows from opposite extremes", a: MinRaw, b: MaxRaw, wantErr: ErrUnderflow},
-		{name: "extremes cancel", a: MinRaw, b: MinRaw, want: 0},
+		{name: "positive difference", a: 7 * scale, b: 4 * scale, want: 3 * scale},
+		{name: "negative difference", a: 4 * scale, b: 7 * scale, want: -3 * scale},
+		{name: "subtracting a negative", a: 4 * scale, b: -3 * scale, want: 7 * scale},
+		{name: "subtracting the minimum from zero overflows", a: 0, b: minRaw, wantErr: ErrOverflow},
+		{name: "reaches maximum exactly", a: 0, b: -maxRaw, want: maxRaw},
+		{name: "reaches minimum exactly", a: -1, b: maxRaw, want: minRaw},
+		{name: "overflows past maximum", a: maxRaw, b: -1, wantErr: ErrOverflow},
+		{name: "underflows past minimum", a: minRaw, b: 1, wantErr: ErrUnderflow},
+		{name: "underflows from opposite extremes", a: minRaw, b: maxRaw, wantErr: ErrUnderflow},
+		{name: "extremes cancel", a: minRaw, b: minRaw, want: 0},
 	}
 
 	for _, tt := range tests {
@@ -82,7 +82,7 @@ func TestSub(t *testing.T) {
 // range.  Native wrapping would satisfy neither.
 func TestAddSubNeverWrap(t *testing.T) {
 	operands := []int64{
-		MinRaw, MinRaw + 1, -Scale, -1, 0, 1, Scale, MaxRaw - 1, MaxRaw,
+		minRaw, minRaw + 1, -scale, -1, 0, 1, scale, maxRaw - 1, maxRaw,
 	}
 
 	for _, a := range operands {
@@ -105,10 +105,10 @@ func TestNeg(t *testing.T) {
 		wantErr error
 	}{
 		{name: "zero stays zero", in: 0, want: 0},
-		{name: "positive becomes negative", in: 5 * Scale, want: -5 * Scale},
-		{name: "negative becomes positive", in: -5 * Scale, want: 5 * Scale},
-		{name: "maximum is negatable", in: MaxRaw, want: -MaxRaw},
-		{name: "minimum is not representable", in: MinRaw, wantErr: ErrNotRepresentable},
+		{name: "positive becomes negative", in: 5 * scale, want: -5 * scale},
+		{name: "negative becomes positive", in: -5 * scale, want: 5 * scale},
+		{name: "maximum is negatable", in: maxRaw, want: -maxRaw},
+		{name: "minimum is not representable", in: minRaw, wantErr: ErrNotRepresentable},
 	}
 
 	for _, tt := range tests {
@@ -132,11 +132,11 @@ func TestAbs(t *testing.T) {
 		wantErr error
 	}{
 		{name: "zero stays zero", in: 0, want: 0},
-		{name: "positive is unchanged", in: 5 * Scale, want: 5 * Scale},
-		{name: "negative is inverted", in: -5 * Scale, want: 5 * Scale},
-		{name: "maximum is unchanged", in: MaxRaw, want: MaxRaw},
-		{name: "minimum plus one is representable", in: MinRaw + 1, want: MaxRaw},
-		{name: "minimum is not representable", in: MinRaw, wantErr: ErrNotRepresentable},
+		{name: "positive is unchanged", in: 5 * scale, want: 5 * scale},
+		{name: "negative is inverted", in: -5 * scale, want: 5 * scale},
+		{name: "maximum is unchanged", in: maxRaw, want: maxRaw},
+		{name: "minimum plus one is representable", in: minRaw + 1, want: maxRaw},
+		{name: "minimum is not representable", in: minRaw, wantErr: ErrNotRepresentable},
 	}
 
 	for _, tt := range tests {
@@ -153,15 +153,15 @@ func TestAbs(t *testing.T) {
 }
 
 func TestSignAndCmp(t *testing.T) {
-	assert.Equal(t, -1, Sign(MinRaw))
+	assert.Equal(t, -1, Sign(minRaw))
 	assert.Equal(t, -1, Sign(-1))
 	assert.Equal(t, 0, Sign(0))
 	assert.Equal(t, 1, Sign(1))
-	assert.Equal(t, 1, Sign(MaxRaw))
+	assert.Equal(t, 1, Sign(maxRaw))
 
-	assert.Equal(t, -1, Cmp(MinRaw, MaxRaw))
+	assert.Equal(t, -1, Cmp(minRaw, maxRaw))
 	assert.Equal(t, 0, Cmp(0, 0))
-	assert.Equal(t, 0, Cmp(MinRaw, MinRaw))
-	assert.Equal(t, 1, Cmp(MaxRaw, MinRaw))
+	assert.Equal(t, 0, Cmp(minRaw, minRaw))
+	assert.Equal(t, 1, Cmp(maxRaw, minRaw))
 	assert.Equal(t, 1, Cmp(1, 0))
 }

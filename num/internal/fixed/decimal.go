@@ -24,13 +24,14 @@ import "math"
 //   - exponent notation, which an adapter must expand first;
 //   - grouping separators, currency symbols, and locale-dependent forms;
 //   - leading, trailing, or embedded whitespace;
-//   - significant precision beyond Places decimal places;
+//   - significant precision beyond what the places constant supports;
 //   - values outside the representable scaled range.
 //
-// Trailing zeros beyond Places are accepted because dropping them is exact and
-// requires no rounding; ADR-004 allows readers to accept equivalent exact
-// forms.  A non-zero digit beyond Places reports ErrPrecision, since honouring
-// it would require discarding information.
+// Trailing zeros beyond the places constant's digit count are accepted
+// because dropping them is exact and requires no rounding; ADR-004 allows
+// readers to accept equivalent exact forms.  A non-zero digit past that
+// point reports ErrPrecision, since honouring it would require discarding
+// information.
 //
 // The full signed range is parsable, including the most negative value.  The
 // magnitude is accumulated unsigned and the sign applied only at the end, so
@@ -67,10 +68,10 @@ func Parse(s string) (int64, error) {
 
 	// Apply the scale to the integer part before adding the fraction, so the
 	// two halves are combined in one exactly-scaled magnitude.
-	if mag > math.MaxUint64/uint64(Scale) {
+	if mag > math.MaxUint64/uint64(scale) {
 		return 0, ErrRange
 	}
-	mag *= uint64(Scale)
+	mag *= uint64(scale)
 
 	if i < len(s) {
 		if s[i] != '.' {
@@ -80,13 +81,13 @@ func Parse(s string) (int64, error) {
 
 		start = i
 		var frac uint64
-		places := 0
+		fracDigits := 0
 		for ; i < len(s) && isDigit(s[i]); i++ {
 			d := uint64(s[i] - '0')
 			switch {
-			case places < Places:
+			case fracDigits < places:
 				frac = frac*10 + d
-				places++
+				fracDigits++
 			case d != 0:
 				return 0, ErrPrecision
 			}
@@ -100,7 +101,7 @@ func Parse(s string) (int64, error) {
 
 		// Left-align the fraction to the common scale: "0.5" contributes one
 		// place and must become 50000000, not 5.
-		for ; places < Places; places++ {
+		for ; fracDigits < places; fracDigits++ {
 			frac *= 10
 		}
 
@@ -134,8 +135,8 @@ func Format(raw int64) string {
 	}
 
 	mag := magnitude(raw)
-	whole := mag / uint64(Scale)
-	frac := mag % uint64(Scale)
+	whole := mag / uint64(scale)
+	frac := mag % uint64(scale)
 
 	// Longest possible output: sign, 11 integer digits, point, 8 fraction
 	// digits.
@@ -151,12 +152,12 @@ func Format(raw int64) string {
 
 	// Render the fraction zero-padded to the full scale, then trim the
 	// trailing zeros that padding and the scale itself introduced.
-	var digits [Places]byte
-	for i := Places - 1; i >= 0; i-- {
+	var digits [places]byte
+	for i := places - 1; i >= 0; i-- {
 		digits[i] = byte('0' + frac%10)
 		frac /= 10
 	}
-	end := Places
+	end := places
 	for end > 1 && digits[end-1] == '0' {
 		end--
 	}
