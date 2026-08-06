@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -58,7 +59,12 @@ type tagSet struct {
 	Secret     bool
 }
 
-func parseTagSet(sf reflect.StructField) tagSet {
+// parseTagSet parses one struct field's config-related tags. It fails closed
+// on a malformed required or secret tag value (required:"treu") rather than
+// silently treating it as false: for secret in particular, silently
+// defaulting to false would disable redaction with no signal that it had
+// happened, turning a typo into a leaked value.
+func parseTagSet(sf reflect.StructField) (tagSet, error) {
 	ts := tagSet{
 		Name: sf.Tag.Get("config"),
 		Env:  sf.Tag.Get("env"),
@@ -72,13 +78,21 @@ func parseTagSet(sf reflect.StructField) tagSet {
 			ts.Enum = append(ts.Enum, strings.TrimSpace(e))
 		}
 	}
-	if v, err := strconv.ParseBool(sf.Tag.Get("required")); err == nil {
-		ts.Required = v
+	if v, ok := sf.Tag.Lookup("required"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return ts, fmt.Errorf("%w: required:%q: %v", ErrInvalidTag, v, err)
+		}
+		ts.Required = b
 	}
-	if v, err := strconv.ParseBool(sf.Tag.Get("secret")); err == nil {
-		ts.Secret = v
+	if v, ok := sf.Tag.Lookup("secret"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return ts, fmt.Errorf("%w: secret:%q: %v", ErrInvalidTag, v, err)
+		}
+		ts.Secret = b
 	}
-	return ts
+	return ts, nil
 }
 
 // collectLeaves walks dst — which must be an addressable struct value,
@@ -99,7 +113,7 @@ func collect(v reflect.Value, path []string) ([]*leaf, error) {
 			continue // unexported
 		}
 		fv := v.Field(i)
-		tg := parseTagSet(sf)
+		tg, tagErr := parseTagSet(sf)
 
 		fieldPath := path
 		if sf.Anonymous && tg.Name == "" {
@@ -111,6 +125,10 @@ func collect(v reflect.Value, path []string) ([]*leaf, error) {
 				segment = strings.ToLower(sf.Name)
 			}
 			fieldPath = append(append([]string{}, path...), segment)
+		}
+
+		if tagErr != nil {
+			return nil, &FieldError{Path: strings.Join(fieldPath, "."), Err: tagErr}
 		}
 
 		if isLeafType(fv.Type()) {

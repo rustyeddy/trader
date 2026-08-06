@@ -97,6 +97,32 @@ func TestCollectLeavesNameTagOverridesSegment(t *testing.T) {
 	assert.Equal(t, "listen_port", leaves[0].Path)
 }
 
+// TestCollectLeavesRejectsMalformedRequiredTag is the regression test for
+// silently defaulting an unparseable required/secret tag to false.
+func TestCollectLeavesRejectsMalformedRequiredTag(t *testing.T) {
+	type Config struct {
+		APIKey string `required:"treu"`
+	}
+	var c Config
+
+	_, err := collectLeaves(reflect.ValueOf(&c).Elem())
+	require.ErrorIs(t, err, ErrInvalidTag)
+}
+
+// TestCollectLeavesRejectsMalformedSecretTag is the security-relevant half
+// of the same bug: a typo'd secret:"treu" used to silently leave Secret
+// false, disabling redaction for that field with no signal that it had
+// happened.
+func TestCollectLeavesRejectsMalformedSecretTag(t *testing.T) {
+	type Config struct {
+		Password string `secret:"treu"`
+	}
+	var c Config
+
+	_, err := collectLeaves(reflect.ValueOf(&c).Elem())
+	require.ErrorIs(t, err, ErrInvalidTag)
+}
+
 func TestCollectLeavesUnsupportedTypeErrors(t *testing.T) {
 	type Config struct {
 		Ch chan int

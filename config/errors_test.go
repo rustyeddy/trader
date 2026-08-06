@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,17 @@ func TestFieldErrorMessageWithAndWithoutValue(t *testing.T) {
 	withoutValue := &FieldError{Path: "apikey", Err: ErrRequired}
 	assert.Contains(t, withoutValue.Error(), "apikey")
 	assert.NotContains(t, withoutValue.Error(), `""`)
+}
+
+// TestFieldErrorMessageEmptyPath is the regression test for the bug where a
+// Validate() failure's *FieldError (Path=="") formatted as "config: : ...",
+// with an awkward empty field segment that read like a bug rather than a
+// deliberately field-less error.
+func TestFieldErrorMessageEmptyPath(t *testing.T) {
+	fe := &FieldError{Err: fmt.Errorf("%w: min must not exceed max", ErrValidation)}
+	msg := fe.Error()
+	assert.NotContains(t, msg, "config: :")
+	assert.Equal(t, "config: config: validation failed: min must not exceed max", msg)
 }
 
 func TestFieldErrorUnwrap(t *testing.T) {

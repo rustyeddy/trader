@@ -64,9 +64,11 @@
 // # Supported field types
 //
 // string, bool, every sized int/uint, float32/float64, time.Duration,
-// *url.URL, string- or int-based named types (via the enum tag), pointer
-// fields for optional values (nil means "absent," decoded otherwise), and
-// any type implementing encoding.TextUnmarshaler. There is no float64
+// *url.URL, a string field restricted to a fixed set of values (via the
+// enum tag; enum only constrains string-kind fields, and is silently
+// ignored on any other kind), pointer fields for optional values (nil means
+// "absent," decoded otherwise), and any type implementing
+// encoding.TextUnmarshaler. There is no float64
 // prohibition here as there is in num: config values are not authoritative
 // trading data, and num.Price/num.Quantity/num.Rate/num.Money/num.Currency
 // can be used directly as config field types since they already implement

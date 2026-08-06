@@ -9,9 +9,10 @@ import (
 // Inspect them with errors.Is against the error Load returns; Load's error
 // may wrap several of these at once (see Error).
 var (
-	// ErrInvalidTarget reports that Load's destination is not a non-nil
-	// pointer to a struct.
-	ErrInvalidTarget = errors.New("config: destination must be a non-nil pointer to a struct")
+	// ErrInvalidTarget reports a destination of the wrong shape: Load's type
+	// parameter must itself be a struct type, and Render/Sprint's cfg
+	// argument must be a struct or a non-nil pointer to one.
+	ErrInvalidTarget = errors.New("config: destination must be a struct, or a non-nil pointer to a struct")
 
 	// ErrUnsupportedType reports a field whose type config does not know how
 	// to decode: not one of the supported kinds, not time.Duration or
@@ -25,9 +26,17 @@ var (
 	// ErrEnum reports a value outside the set named by a field's enum tag.
 	ErrEnum = errors.New("config: value is not one of the allowed enum values")
 
-	// ErrRequired reports a field tagged required:"true" that is still its
-	// zero value after every source has been applied.
+	// ErrRequired reports a field tagged required:"true" that no source
+	// supplied a value for. This is a presence check: an explicitly supplied
+	// zero value (false, 0, "", num.Rate("0"), ...) satisfies required.
 	ErrRequired = errors.New("config: required value is missing")
+
+	// ErrInvalidTag reports a struct tag whose value config could not parse,
+	// such as required:"treu". This is a fail-closed check: parseTagSet
+	// rejects a malformed required or secret tag outright rather than
+	// silently treating it as false, since a typo'd secret:"treu" would
+	// otherwise disable redaction without any signal that it had happened.
+	ErrInvalidTag = errors.New("config: invalid struct tag")
 
 	// ErrValidation reports a non-nil error returned by the destination's
 	// Validate method.
@@ -37,7 +46,8 @@ var (
 // FieldError reports one problem with one field, identified by its dotted
 // path (see the package doc comment). Value holds the offending source text;
 // it is empty for a secret field or when no source supplied a value, such as
-// a required-field failure.
+// a required-field failure. Path itself is empty only for a failure from the
+// destination's Validate method, which is not about any single field.
 type FieldError struct {
 	Path  string
 	Value string
@@ -45,10 +55,14 @@ type FieldError struct {
 }
 
 func (e *FieldError) Error() string {
-	if e.Value == "" {
+	switch {
+	case e.Path == "":
+		return fmt.Sprintf("config: %v", e.Err)
+	case e.Value == "":
 		return fmt.Sprintf("config: %s: %v", e.Path, e.Err)
+	default:
+		return fmt.Sprintf("config: %s=%q: %v", e.Path, e.Value, e.Err)
 	}
-	return fmt.Sprintf("config: %s=%q: %v", e.Path, e.Value, e.Err)
 }
 
 func (e *FieldError) Unwrap() error {
