@@ -13,13 +13,13 @@ package fixed
 // Add returns a+b, or an error if the true sum falls outside int64.
 //
 // The bound is rearranged rather than computed, so no intermediate ever wraps:
-// a+b exceeds MaxRaw exactly when a > MaxRaw-b, and MaxRaw-b is itself
+// a+b exceeds maxRaw exactly when a > maxRaw-b, and maxRaw-b is itself
 // representable whenever b is positive.
 func Add(a, b int64) (int64, error) {
-	if b > 0 && a > MaxRaw-b {
+	if b > 0 && a > maxRaw-b {
 		return 0, ErrOverflow
 	}
-	if b < 0 && a < MinRaw-b {
+	if b < 0 && a < minRaw-b {
 		return 0, ErrUnderflow
 	}
 	return a + b, nil
@@ -28,12 +28,12 @@ func Add(a, b int64) (int64, error) {
 // Sub returns a-b, or an error if the true difference falls outside int64.
 //
 // Sub is implemented directly rather than as Add(a, -b) because b may be
-// MinRaw, which cannot be negated.
+// minRaw, which cannot be negated.
 func Sub(a, b int64) (int64, error) {
-	if b < 0 && a > MaxRaw+b {
+	if b < 0 && a > maxRaw+b {
 		return 0, ErrOverflow
 	}
-	if b > 0 && a < MinRaw+b {
+	if b > 0 && a < minRaw+b {
 		return 0, ErrUnderflow
 	}
 	return a - b, nil
@@ -41,10 +41,10 @@ func Sub(a, b int64) (int64, error) {
 
 // Neg returns -a.
 //
-// MinRaw is rejected: its positive counterpart is not representable in signed
+// minRaw is rejected: its positive counterpart is not representable in signed
 // int64, so negating it would wrap back to itself.
 func Neg(a int64) (int64, error) {
-	if a == MinRaw {
+	if a == minRaw {
 		return 0, ErrNotRepresentable
 	}
 	return -a, nil
@@ -52,9 +52,9 @@ func Neg(a int64) (int64, error) {
 
 // Abs returns the absolute value of a.
 //
-// MinRaw is rejected for the same reason as Neg.
+// minRaw is rejected for the same reason as Neg.
 func Abs(a int64) (int64, error) {
-	if a == MinRaw {
+	if a == minRaw {
 		return 0, ErrNotRepresentable
 	}
 	if a < 0 {

@@ -20,7 +20,7 @@ var (
 
 	// ErrNotRepresentable reports an operation whose result cannot be
 	// represented even though it is within range.  Negation and absolute value
-	// of MinRaw are the canonical cases: the positive counterpart of MinInt64
+	// of minRaw are the canonical cases: the positive counterpart of MinInt64
 	// does not exist in signed int64.
 	ErrNotRepresentable = errors.New("result is not representable")
 
@@ -29,7 +29,7 @@ var (
 	// grouping separators, exponent notation, or any other malformed form.
 	ErrSyntax = errors.New("invalid decimal syntax")
 
-	// ErrPrecision reports decimal text carrying more than Places decimal
+	// ErrPrecision reports decimal text carrying more than eight decimal
 	// places.  Exact parsing never silently rounds; excess precision is an
 	// error the caller must resolve.
 	ErrPrecision = errors.New("excess decimal precision")
