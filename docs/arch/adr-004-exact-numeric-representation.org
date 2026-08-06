@@ -714,7 +714,7 @@ than the scale holds; =RANGE= marks one exceeding =int64= at that scale:
 ** Quantity precision/range frontier
 
 No scaled =int64= holds both the finest and the largest quantity in the
-pressure matrix:
+representation matrix above:
 
 # BEGIN quantitystudy:frontier
 | Scale | Smallest unit |   Max whole units | Holds 1 satoshi | Holds 1e12 units |
