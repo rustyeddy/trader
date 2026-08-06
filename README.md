@@ -117,6 +117,25 @@ See [ADR-015](docs/arch/adr-015-deterministic-time-and-clock-abstraction.org)
 for the full design rationale, including the precise equal-deadline
 ordering and UTC/monotonic-metadata guarantees.
 
+### id
+
+`id` provides Trader-owned identifiers — `RunID`, `OrderID`, `EventID`,
+`CorrelationID`, and seven more — each a distinct Go type at compile time,
+backed internally by a monotonic ULID (time-sortable, generated from an
+injected `clock.Clock`) but never exposing that as a public dependency:
+
+```go
+g := id.NewGenerator(clock.Real{}, id.Random{})
+order, err := id.GenerateOrderID(g)
+// order.String() == "ord_01J8Z3K5H7T1MDCE9WNRP2VXY0"
+```
+
+`id.Metadata` traces a value through a multi-stage workflow — one
+`CorrelationID` shared throughout, each stage's `CausationID` pointing at
+the `EventID` immediately before it. See the
+[package doc comment](id/doc.go) for the full identifier list and the
+worked intent → proposal → order → fill example.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
