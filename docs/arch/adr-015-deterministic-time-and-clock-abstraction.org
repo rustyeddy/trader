@@ -1,0 +1,197 @@
+#+title: ADR-015 Deterministic Time and Clock Abstraction
+#+startup: overview
+
+* ADR-015: Deterministic time and clock abstraction
+
+** Status
+
+Proposed
+
+** Context
+
+Trader must run the same application and domain behavior in live, paper,
+backtest, and simulated environments.  Code that calls =time.Now=,
+=time.NewTimer=, =time.After=, or =time.Sleep= directly cannot be controlled by
+a simulation and forces tests to wait on wall-clock time.  This makes timeout,
+expiry, scheduling, candle-boundary, retry, and simulated-latency behavior slow
+and nondeterministic.
+
+Trader's earlier implementation commonly represented event and candle times as
+Unix integers.  Bare integers are compact and convenient at storage and wire
+boundaries, but they do not carry their unit and invite confusion between
+seconds, milliseconds, microseconds, and nanoseconds.  They also make ordinary
+comparison, arithmetic, formatting, UTC normalization, and calendar conversion
+less explicit than Go's standard time types.
+
+This decision concerns two related but separate questions:
+
+- where code obtains the current time and timer behavior;
+- how Trader represents instants and elapsed durations internally.
+
+Trading-calendar and session-alignment rules remain governed by ADR-012.  A
+clock controls the passage of time; it does not define exchange sessions,
+holidays, or daily-bar alignment.
+
+** Decision
+
+Trader introduces a small clock port for code whose behavior depends on the
+current time or timers.
+
+- Production composition roots provide a real clock backed by Go's =time=
+  package.
+- Tests, backtests, paper simulations, and the simulated broker may provide a
+  manually advanced deterministic clock implementing the same contract.
+- Domain and application components that need "now" or timer behavior receive
+  a clock explicitly.  They do not call =time.Now=, =time.NewTimer=,
+  =time.After=, or =time.Sleep= directly.  This constraint targets domain and
+  application-orchestration code specifically, not every direct use of
+  =time= in the module.  Infrastructure adapters, composition roots, and
+  test code (including benchmarks, which live in test files) are exempt.
+  The mechanical check enforcing this lists exempt paths explicitly; a
+  future package with a legitimate reason to use =time= directly — a
+  metrics or profiling package, for example — is added to that list when it
+  is introduced, rather than assumed exempt in advance.
+- Pure functions that only compare or transform caller-supplied timestamps do
+  not require a clock.
+- The initial public contract is deliberately minimal: current time and only
+  the timer behavior required by current consumers.  Tickers, callback
+  schedulers, cron behavior, and a reimplementation of the full =time= package
+  are not part of the initial abstraction.  =Sleep= and =After= convenience
+  wrappers are deferred until a concrete consumer needs them: a =Sleep=
+  helper over a manually advanced clock is a foot-gun on the goroutine that
+  is also expected to advance it, and the recommended pattern —
+  =NewTimer= plus =select= plus =context.Context= cancellation — already
+  covers the need without adding a wrapper that hides that risk behind a
+  friendly name.
+
+The deterministic implementation follows these semantics:
+
+- simulated time advances only when explicitly requested, and never moves
+  backward: =Advance= rejects a negative duration rather than accepting one;
+- advancing time never waits on wall-clock time;
+- timers whose deadlines are crossed by one advance become ready during that
+  advance;
+- a non-positive timer duration is ready before the constructing call
+  returns, matching =time.Timer= behavior, rather than waiting for the next
+  =Advance=;
+- a ready simulated timer's channel receives the timer's exact scheduled
+  deadline, not the clock's time at delivery, even when one =Advance= call
+  crosses several timers' deadlines by a larger amount than any one of them
+  needed.  This is a Simulated-specific guarantee: the shared =Timer=
+  contract promises only that a delivered value identifies expiration,
+  because =Real='s channel comes directly from =time.Timer=, whose own
+  contract does not promise the exact requested instant;
+- timers with equal deadlines are made ready in creation order.  This
+  guarantees the order in which independent timer channels are marked ready
+  internally; it does not guarantee the order in which independent
+  goroutines or a =select= statement observe or consume those channels.  A
+  globally observable execution order would require a scheduler or event
+  queue rather than a channel-per-timer API, which is out of scope for this
+  abstraction;
+- stopping a timer before it fires prevents delivery.  =Stop= returns =true=
+  only on the transition from pending to stopped; it returns =false= if the
+  timer has already fired or was already stopped.  Once =Stop= returns
+  =true=, no value is ever delivered on that timer's channel.  A concurrent
+  =Stop= and the =Advance= that would have fired the same timer are
+  serialized so exactly one outcome wins;
+- timers are one-shot; a fired or stopped timer is removed from the
+  scheduler's active state immediately, not merely marked dead and left for
+  a future pass to sweep — an unbounded pending-timer collection is a slow
+  memory leak across a long backtest;
+- timer delivery must not block the clock or require one goroutine per
+  timer: a simulated timer's channel is buffered with capacity one — an
+  implementation detail that makes this guarantee possible, not part of the
+  shared =Timer= contract, since a real timer channel's capacity is a
+  runtime detail =time.Timer= itself does not document (and, since Go 1.23,
+  is not literally a buffered channel) — is never closed, and delivery uses
+  a non-blocking send;
+- the simulated implementation contains no goroutines of its own;
+- real and deterministic clocks are verified by shared contract tests
+  limited to behavior both genuinely provide: =Now= returns a valid instant,
+  a timer eventually becomes ready, a pre-expiry =Stop= prevents delivery,
+  =Stop= returns =false= after firing, and delivery does not require a
+  receiver to already be waiting.  Exact timing, deadline arithmetic, and
+  equal-deadline readiness ordering are simulated-clock-only guarantees and
+  are tested only against the simulated implementation.
+
+Both clock implementations return canonical UTC, since the clock is itself a
+boundary where time enters Trader: the real clock's =Now= converts and strips
+Go's process-local monotonic-clock reading (=time.Now().UTC().Round(0)=); the
+simulated clock's constructor canonicalizes the supplied start time the same
+way, and every subsequent =Now= reflects it.
+
+=Real= has a useful, ready-to-use zero value: it wraps no state.
+=Simulated= does not; it must be constructed with =NewSimulated(start)= so an
+accidentally zero-valued clock is not silently mistaken for a real one.  A
+=Simulated= value that bypasses the constructor reads as year one, which is
+self-evidently broken rather than a silently plausible wrong time.
+
+Trader represents authoritative instants inside domain and application APIs
+with =time.Time= and elapsed intervals with =time.Duration=.
+
+- Authoritative timestamps are canonicalized to UTC when they enter Trader.
+- Code compares instants with =Equal=, =Before=, and =After= rather than using
+  =time.Time= value equality casually.
+- Candle and event timestamps identify an instant; candle fields should name
+  their semantics explicitly, for example =Start= rather than an ambiguous
+  =Timestamp=.
+- Unix timestamps remain valid at broker, file, database, Parquet, and
+  transport boundaries.
+- Every Unix representation must make its unit explicit in the field or method
+  name, such as =UnixSeconds=, =TimestampMillis=, or =UnixNanos=.
+- Boundary adapters convert Unix values to canonical UTC =time.Time= values on
+  ingress and convert back to the required external unit on egress.
+- Persisted or serialized timestamps must not depend on Go's monotonic-clock
+  metadata, which is process-local and is not preserved by serialization.
+
+** Consequences
+
+- Backtests and simulations can execute time-dependent behavior without
+  sleeping or waiting for real time.
+- Timeout, cancellation, expiry, retry, and equal-deadline behavior become
+  reproducible and race-testable.
+- Live and simulated components can share the same clock-dependent contracts.
+- Components expose their dependency on current time through construction
+  rather than through hidden global process state.
+- Internal APIs become clearer and avoid Unix-unit ambiguity.
+- Existing data adapters using Unix timestamps must perform explicit boundary
+  conversions.
+- UTC is the canonical event-time representation, while exchange-local time
+  remains available through explicit calendar and location conversion.
+- A simulated clock introduces concurrency and ordering responsibilities that
+  require contract, cancellation, leak, and race tests.
+- This ADR does not imply that all bar intervals are =time.Duration= values;
+  session-aligned daily, weekly, and monthly bars remain calendar concerns under
+  ADR-012.
+
+** Alternatives Considered
+
+- *Call Go's time functions directly everywhere.* Rejected because tests and
+  simulations would depend on wall-clock time and could not deterministically
+  reproduce timer ordering or expiry behavior.
+- *Use a package-level mutable clock or global "current time" variable.*
+  Rejected because hidden mutable process state causes test interference,
+  obscures dependencies, and complicates concurrent simulations.
+- *Represent all internal timestamps as bare Unix =int64= values.* Rejected
+  because the unit is not encoded in the type, calendar and UTC behavior become
+  implicit, and callers repeatedly recreate functionality already provided by
+  =time.Time=.
+- *Forbid Unix timestamps entirely.* Rejected because many brokers, storage
+  engines, and wire formats use them efficiently and unambiguously when the
+  unit is explicit at the boundary.
+- *Build a complete replacement for Go's time package.* Rejected because Trader
+  needs a narrow seam for current time and deterministic timers, not a parallel
+  implementation of formatting, parsing, locations, calendars, and every timer
+  primitive.
+- *Use =time.Duration= alone for all candle intervals.* Rejected for
+  session-aligned daily, weekly, and monthly bars; ADR-012 owns those calendar
+  semantics.
+
+** Related Work
+
+- Issue #23 implements the initial clock contract and real and deterministic
+  adapters.
+- ADR-008 requires deterministic clocks to be injectable into the simulated
+  broker.
+- ADR-012 defines trading-calendar and bar-alignment semantics separately from
+  the passage of time.

@@ -97,6 +97,26 @@ implements the same text encoding `config` expects. See the
 [package doc comment](logging/doc.go) for context propagation, redaction,
 and the `Discard`/`Capture` test helpers.
 
+### clock
+
+`clock` is Trader's deterministic time seam: domain and application code
+receives a `clock.Clock` instead of calling `time.Now`/`time.NewTimer`
+directly, so backtests and simulations can advance time manually with no
+wall-clock waiting. `Real` wraps the standard library for production;
+`Simulated` advances only when told to:
+
+```go
+c := clock.NewSimulated(start)
+timer := c.NewTimer(5 * time.Second)
+
+c.Advance(10 * time.Second)
+deadline := <-timer.C() // ready immediately, no sleep
+```
+
+See [ADR-015](docs/arch/adr-015-deterministic-time-and-clock-abstraction.org)
+for the full design rationale, including the precise equal-deadline
+ordering and UTC/monotonic-metadata guarantees.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
