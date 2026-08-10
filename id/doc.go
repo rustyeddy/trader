@@ -56,14 +56,17 @@
 //
 // # Generation
 //
-// Generator produces monotonic ULIDs from an injected clock.Clock and
-// entropy Source, per ADR-015: it never calls time.Now itself. Multiple
-// identifiers generated within the same millisecond receive strictly
-// increasing entropy rather than fresh random values, preserving
+// Generator produces monotonic ULIDs from an injected clock.Clock and an
+// entropy EntropySource, per ADR-015: it never calls time.Now itself.
+// Multiple identifiers generated within the same millisecond receive
+// strictly increasing entropy rather than fresh random values, preserving
 // lexicographic sort order at millisecond resolution; see generate.go.
-// Random is the production Source; Deterministic is a seeded, injectable
-// Source for tests and replay — given the same simulated clock and seed,
-// it produces the same sequence of identifiers every time.
+// Random is the production EntropySource; Deterministic is a seeded,
+// injectable EntropySource for tests and replay — given the same simulated
+// clock and seed, it produces the same sequence of identifiers every time.
+// (EntropySource, not Source: Source is a separate type below, for
+// Metadata's originating-component label — the two are unrelated despite
+// the similar name.)
 //
 // # Zero value
 //

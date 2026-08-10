@@ -1,6 +1,7 @@
 package id
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -56,9 +57,8 @@ func TestGenerateDifferentKindsProduceDifferentPrefixedStrings(t *testing.T) {
 	order, err := GenerateOrderID(g)
 	require.NoError(t, err)
 
-	assert.NotEqual(t, run.String()[:3], "")
-	assert.Equal(t, "run", run.String()[:3])
-	assert.Equal(t, "ord", order.String()[:3])
+	assert.True(t, strings.HasPrefix(run.String(), "run_"))
+	assert.True(t, strings.HasPrefix(order.String(), "ord_"))
 }
 
 func TestGenerateSameMillisecondIsMonotonicallyIncreasing(t *testing.T) {

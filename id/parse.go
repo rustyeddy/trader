@@ -2,9 +2,12 @@ package id
 
 // Concrete Parse<Kind> and MustParse<Kind> functions for each of the ten
 // identifier kinds. These are thin wrappers over the generic Parse[K] and
-// MustParse[K] — id.Parse[id.OrderID] works too — provided so that each
-// kind has its own discoverable, directly named constructor rather than
-// requiring every call site to spell out a type parameter.
+// MustParse[K], instantiated here with the unexported kind marker types
+// (runKind, orderKind, ...) that callers outside this package cannot name
+// directly — id.Parse[id.OrderID] does not compile, since OrderID is an
+// alias for ID[orderKind], not for orderKind itself, and only orderKind
+// implements Kind. ParseOrderID and its siblings are therefore the only way
+// to parse a given kind from outside this package.
 
 // ParseRunID parses s as a RunID. See Parse.
 func ParseRunID(s string) (RunID, error) { return Parse[runKind](s) }
