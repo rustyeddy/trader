@@ -14,12 +14,16 @@ import (
 // file, a future persistent catalog — is an implementation concern, not
 // part of the contract callers depend on.
 //
-// Both methods treat an empty provider, venue, or symbol argument as
-// meaning "unconstrained on this axis," never as a literal empty value to
-// match against. A Listing legitimately registered with an empty Venue —
-// spot FX has no meaningful centralized venue, see Listing — is still
-// found by a query that passes "" for venue; "" is a wildcard on the
-// query side, not a distinct registered value to search for.
+// venue is the only axis either method treats as a wildcard: an empty
+// venue means "unconstrained," never a literal empty value to match
+// against. A Listing legitimately registered with an empty Venue — spot FX
+// has no meaningful centralized venue, see Listing — is still found by a
+// query that passes "" for venue; "" is a wildcard on the query side, not
+// a distinct registered value to search for. provider and instrumentID are
+// not wildcardable: ResolveSymbol requires a non-empty provider (and
+// symbol), and ResolveInstrument always operates within one instrumentID.
+// ResolveInstrument's provider parameter, unlike ResolveSymbol's, may be
+// left "" — see its own doc comment.
 //
 // Both methods resolve to exactly one Listing or fail: zero matches after
 // applying whatever context was supplied reports ErrUnknownSymbol, and
@@ -28,14 +32,18 @@ import (
 // context to narrow the match to one.
 type Resolver interface {
 	// ResolveSymbol resolves the Listing registered under provider, venue,
-	// and symbol. provider and symbol should normally be supplied; venue
-	// may be left "" when it does not disambiguate — but if a provider
-	// exposes the same symbol on more than one venue, an unconstrained
-	// venue will report ErrAmbiguousSymbol rather than pick one.
+	// and symbol. provider and symbol must both be non-empty —
+	// ResolveSymbol reports ErrInvalidResolution otherwise. venue may be
+	// left "" when it does not disambiguate, but if provider exposes
+	// symbol on more than one venue, an unconstrained venue reports
+	// ErrAmbiguousSymbol rather than picking one.
 	ResolveSymbol(provider, venue, symbol string) (Listing, error)
 
-	// ResolveInstrument resolves the orderable Listing for instrumentID,
-	// optionally narrowed by provider and/or venue.
+	// ResolveInstrument resolves the orderable Listing — one whose
+	// Tradable is true — for instrumentID, optionally narrowed by
+	// provider and/or venue (either or both may be left ""). A registered
+	// non-tradable Listing for instrumentID is never returned and never
+	// contributes to an ambiguous match.
 	ResolveInstrument(instrumentID ID, provider, venue string) (Listing, error)
 }
 
@@ -98,10 +106,12 @@ func (r *MemoryResolver) Register(listing Listing) error {
 // RegisterAlias registers an additional provider/venue/symbol lookup key —
 // aliasProvider, aliasVenue, aliasSymbol — that resolves to the Listing
 // already registered under canonicalProvider/canonicalVenue/
-// canonicalSymbol. The canonical reference is resolved with the same
-// zero/one/many logic ResolveSymbol uses, so an underspecified canonical
-// reference reports ErrAmbiguousSymbol here too, at registration time
-// rather than silently aliasing the wrong Listing.
+// canonicalSymbol. The canonical reference is resolved with the same logic
+// ResolveSymbol uses — canonicalProvider and canonicalSymbol must both be
+// non-empty, and an underspecified or unmatched canonical reference
+// reports the same ErrInvalidResolution/ErrUnknownSymbol/
+// ErrAmbiguousSymbol here, at registration time, rather than silently
+// aliasing the wrong Listing.
 //
 // The Listing an alias resolves to is always the canonical Listing value,
 // unchanged: its own Provider, Venue, and Symbol remain whatever it was
@@ -142,8 +152,15 @@ func (r *MemoryResolver) ResolveSymbol(provider, venue, symbol string) (Listing,
 // lookupSymbol is ResolveSymbol's implementation, factored out so
 // RegisterAlias can call it while already holding the write lock — it
 // assumes the caller holds whatever lock is appropriate and never locks
-// itself.
+// itself. provider and symbol are not wildcardable: unlike venue, an empty
+// provider or symbol is a missing required argument, not "unconstrained,"
+// because providerSymbolKey is a direct map lookup on (provider, symbol) —
+// there is no candidate list to scan the way byInstrument gives
+// ResolveInstrument for its optional axes.
 func (r *MemoryResolver) lookupSymbol(provider, venue, symbol string) (Listing, error) {
+	if provider == "" || symbol == "" {
+		return Listing{}, fmt.Errorf("%w: provider and symbol are both required", ErrInvalidResolution)
+	}
 	key := newProviderSymbolKey(provider, symbol)
 	candidates := filterByVenue(r.bySymbol[key], venue)
 	return exactlyOne(candidates, fmt.Sprintf("provider %q venue %q symbol %q", provider, venue, symbol))
@@ -154,7 +171,7 @@ func (r *MemoryResolver) ResolveInstrument(instrumentID ID, provider, venue stri
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	candidates := r.byInstrument[instrumentID]
+	candidates := filterTradable(r.byInstrument[instrumentID])
 	if provider != "" {
 		candidates = filterByProvider(candidates, provider)
 	}
@@ -212,6 +229,21 @@ func filterByProvider(candidates []Listing, provider string) []Listing {
 	var out []Listing
 	for _, l := range candidates {
 		if normalizeIdentifierPart(l.Provider()) == provider {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// filterTradable narrows candidates to those with Tradable() true. Only
+// ResolveInstrument uses this — it promises an orderable Listing;
+// ResolveSymbol makes no such promise, since a caller may legitimately
+// look up a known non-tradable Listing (a continuous series, for example)
+// by its own symbol.
+func filterTradable(candidates []Listing) []Listing {
+	var out []Listing
+	for _, l := range candidates {
+		if l.Tradable() {
 			out = append(out, l)
 		}
 	}

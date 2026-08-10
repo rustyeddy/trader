@@ -33,4 +33,9 @@ var (
 	// alias under a provider/venue/symbol combination that is already
 	// registered on that Resolver.
 	ErrDuplicateListing = errors.New("instrument: duplicate listing registration")
+
+	// ErrInvalidResolution reports a Resolver query missing required
+	// context: ResolveSymbol requires a non-empty provider and symbol
+	// (venue alone may be left unconstrained).
+	ErrInvalidResolution = errors.New("instrument: invalid resolution query")
 )

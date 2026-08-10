@@ -744,8 +744,9 @@ canonical value, unchanged — an alias never becomes identity.
   already had to handle correctly.
 - *A query/options struct (for example =SymbolQuery{Provider, Venue,
   Symbol}=) instead of positional string parameters.*  Rejected for M1 as
-  premature: two string parameters are enough for both methods today: the
-  struct is the natural next step only if a third resolution axis proves
+  premature: =ResolveSymbol='s three parameters and =ResolveInstrument='s
+  three are still few enough to stay readable positionally; the struct is
+  the natural next step only if a further resolution axis proves
   necessary.
 - *A package-level global registry.*  Rejected per issue #26's explicit
   constraint and Trader's broader avoidance of hidden global state (see

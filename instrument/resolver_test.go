@@ -63,6 +63,24 @@ func TestResolveSymbolUnknown(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnknownSymbol)
 }
 
+// TestResolveSymbolRequiresProviderAndSymbol pins the corrected contract:
+// unlike venue, provider and symbol are not wildcardable on ResolveSymbol.
+// An earlier draft's doc comment claimed otherwise while the
+// implementation only ever wildcarded venue — "" for provider or symbol
+// reports ErrInvalidResolution rather than silently searching a
+// nonsensical empty-provider or empty-symbol bucket.
+func TestResolveSymbolRequiresProviderAndSymbol(t *testing.T) {
+	eurUsd := mustEurUsd(t)
+	r := NewMemoryResolver()
+	require.NoError(t, r.Register(mustListing(t, eurUsd, "OANDA", "", "EUR_USD")))
+
+	_, err := r.ResolveSymbol("", "", "EUR_USD")
+	require.ErrorIs(t, err, ErrInvalidResolution)
+
+	_, err = r.ResolveSymbol("OANDA", "", "")
+	require.ErrorIs(t, err, ErrInvalidResolution)
+}
+
 // TestResolveSymbolAmbiguousAcrossVenues shows that an unconstrained venue
 // query is a wildcard, not a filter for a literal empty Venue: when one
 // provider exposes the same symbol on two different venues, an
@@ -127,6 +145,77 @@ func TestResolveInstrumentAmbiguousThenNarrowed(t *testing.T) {
 	got, err = r.ResolveInstrument(apple.ID(), "AnotherBroker", "NASDAQ")
 	require.NoError(t, err)
 	assert.Equal(t, "AAPL.US", got.Symbol())
+}
+
+// TestResolveInstrumentOnlyReturnsOrderableListings is the "resolve an
+// instrument and venue to an orderable listing" acceptance criterion:
+// ResolveInstrument must filter to Tradable listings, not merely narrow by
+// provider/venue among all registered listings regardless of tradability.
+func TestResolveInstrumentOnlyReturnsOrderableListings(t *testing.T) {
+	inst, err := NewContinuousSeries("ES")
+	require.NoError(t, err)
+	r := NewMemoryResolver()
+
+	nonTradable, err := NewListing(ListingParams{
+		Instrument: inst,
+		Provider:   "Trader Research",
+		Symbol:     "ES-CONT",
+		Spec:       validFXSpec(t),
+		Tradable:   false,
+	})
+	require.NoError(t, err)
+	require.NoError(t, r.Register(nonTradable))
+
+	// The only registered listing for this instrument is non-tradable, so
+	// there is nothing orderable to resolve to.
+	_, err = r.ResolveInstrument(inst.ID(), "", "")
+	require.ErrorIs(t, err, ErrUnknownSymbol)
+
+	// ResolveSymbol makes no orderable promise, so the same listing is
+	// still reachable by its own symbol.
+	got, err := r.ResolveSymbol("Trader Research", "", "ES-CONT")
+	require.NoError(t, err)
+	assert.False(t, got.Tradable())
+}
+
+// TestResolveInstrumentIgnoresNonTradableListingsWhenDisambiguating shows
+// that a non-tradable listing sharing an instrument and venue with a
+// tradable one never contributes to ambiguity: without the Tradable
+// filter, these two registrations would make an unnarrowed-by-provider
+// lookup ambiguous even though only one of them is actually orderable.
+func TestResolveInstrumentIgnoresNonTradableListingsWhenDisambiguating(t *testing.T) {
+	apple, err := NewEquity("NASDAQ", "AAPL")
+	require.NoError(t, err)
+	r := NewMemoryResolver()
+
+	tradable, err := NewListing(ListingParams{
+		Instrument: apple,
+		Provider:   "IBKR",
+		Venue:      "NASDAQ",
+		Symbol:     "AAPL",
+		Spec:       validFXSpec(t),
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, r.Register(tradable))
+
+	// Halted at this venue through this second provider -- still a real
+	// registered listing of the same instrument and venue, just not
+	// currently orderable.
+	nonTradable, err := NewListing(ListingParams{
+		Instrument: apple,
+		Provider:   "AnotherBroker",
+		Venue:      "NASDAQ",
+		Symbol:     "AAPL",
+		Spec:       validFXSpec(t),
+		Tradable:   false,
+	})
+	require.NoError(t, err)
+	require.NoError(t, r.Register(nonTradable))
+
+	got, err := r.ResolveInstrument(apple.ID(), "", "NASDAQ")
+	require.NoError(t, err)
+	assert.Equal(t, "IBKR", got.Provider())
 }
 
 func TestRegisterRejectsUnconstructedListing(t *testing.T) {
