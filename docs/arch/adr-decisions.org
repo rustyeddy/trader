@@ -284,9 +284,9 @@ and =Currency=, backed by a signed scaled int64 at a common 1e8 scale
 accounting boundaries.  =Money= carries a mandatory =Currency= and
 rejects cross-currency arithmetic and comparison outright; the one
 sanctioned currency-conversion operation is =Money.Convert=, added by
-ADR-019 for =portfolio='s cross-account aggregation, which requires an
-explicit target currency and an explicit rate and performs only the
-arithmetic — rate provenance is the caller's responsibility.
+ADR-019 for the =portfolio= package's cross-account aggregation; it
+requires an explicit target currency and an explicit rate and performs
+only the arithmetic — rate provenance is the caller's responsibility.
 
 ** Consequences
 

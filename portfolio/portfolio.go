@@ -194,7 +194,12 @@ func aggregateEquity(accounts []account.Snapshot, base num.Currency, rateByFrom 
 	}
 
 	if len(missing) > 0 {
-		return ConversionIncomplete, usedRates, missing, nil, nil
+		// usedRates only reflects accounts processed before the loop
+		// found a missing currency, not a settled answer to "what was
+		// used to compute Equity" — there is no such total in the
+		// incomplete case, so ConversionRates must not return a
+		// partial, possibly-misleading subset alongside it.
+		return ConversionIncomplete, nil, missing, nil, nil
 	}
 	return ConversionComplete, usedRates, nil, &total, nil
 }

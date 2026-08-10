@@ -99,6 +99,10 @@ func TestNewPortfolioMissingRateIsIncomplete(t *testing.T) {
 	missing := p.MissingCurrencies()
 	require.Len(t, missing, 1)
 	assert.Equal(t, "GBP", missing[0].String())
+
+	// ConversionRates must not report a partial, seemingly-usable subset
+	// when Equity itself could not be computed.
+	assert.Empty(t, p.ConversionRates())
 }
 
 func TestNewPortfolioRejectsInvalidBaseCurrency(t *testing.T) {

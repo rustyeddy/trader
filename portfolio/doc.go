@@ -5,9 +5,12 @@
 //
 // # Currency-safe aggregation
 //
-// num deliberately implements no currency conversion (see the num.Money
-// doc comment and num.Money.Convert); portfolio is the layer that needs
-// it, so it is the layer that owns conversion policy. NewPortfolio takes
+// num deliberately implements no implicit currency conversion (see the
+// num.Money doc comment): Money.Convert performs only the exact
+// arithmetic for an explicit target currency and rate, with no policy
+// about when conversion is appropriate or where a rate comes from.
+// portfolio is the layer that needs that policy, so it is the layer
+// that owns it. NewPortfolio takes
 // a BaseCurrency and a set of ConversionRate values supplied by the
 // caller — portfolio never fetches rates itself. An account already
 // denominated in BaseCurrency needs no rate. An account in any other
