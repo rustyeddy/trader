@@ -133,3 +133,35 @@ func TestQuantityDivByZero(t *testing.T) {
 	_, err := a.Div(Quantity{})
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
+
+func TestQuantityDivisibleBy(t *testing.T) {
+	tests := []struct {
+		name string
+		q    string
+		step string
+		want bool
+	}{
+		{name: "exact multiple", q: "100", step: "5", want: true},
+		{name: "on the step itself", q: "0.001", step: "0.001", want: true},
+		{name: "zero is divisible by anything nonzero", q: "0", step: "1", want: true},
+		{name: "not a multiple", q: "101", step: "5", want: false},
+		{name: "fractional increment not met", q: "1.00000001", step: "0.00000010", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := MustParseQuantity(tt.q)
+			step := MustParseQuantity(tt.step)
+
+			got, err := q.DivisibleBy(step)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestQuantityDivisibleByZeroStep(t *testing.T) {
+	q := MustParseQuantity("1")
+	_, err := q.DivisibleBy(Quantity{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}

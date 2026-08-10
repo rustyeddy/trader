@@ -121,3 +121,16 @@ func (q Quantity) Div(o Quantity) (Rate, error) {
 	}
 	return Rate{raw: raw}, nil
 }
+
+// DivisibleBy reports whether q is an exact integer multiple of step, the
+// same exact-remainder rule ADR-004 prescribes for price increments applied
+// to quantity increments. The comparison is exact scaled-integer arithmetic;
+// no rounding is involved.
+//
+// DivisibleBy reports ErrDivideByZero when step is zero.
+func (q Quantity) DivisibleBy(step Quantity) (bool, error) {
+	if step.raw == 0 {
+		return false, ErrDivideByZero
+	}
+	return q.raw%step.raw == 0, nil
+}

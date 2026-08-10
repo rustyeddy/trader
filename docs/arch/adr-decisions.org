@@ -69,7 +69,7 @@ believed at that time.
 |-----+-------------------------------------------------------------------+------------|
 | 001 | Modular monolith before service decomposition                     | Accepted   |
 | 002 | Ports and adapters dependency direction                           | Accepted   |
-| 003 | Instrument versus listing identity                                | Proposed   |
+| 003 | Instrument versus listing identity                                | Accepted   |
 | 004 | Exact numeric representation                                      | Proposed   |
 | 005 | Strategy emits intents, not broker orders                         | Accepted   |
 | 006 | Execution and risk are separate stages                            | Accepted   |
@@ -172,33 +172,90 @@ stable domain concepts.
 
 ** Status
 
-Proposed
+Accepted
 
 ** Context
 
 Symbols collide across venues, brokers rename products, and futures
 contracts expire.  The architecture proposes distinct concepts for
-economic instruments, venue listings, and specific contracts.  The exact
-identifier scheme, resolver contract, and equivalence rules are still
-under discussion.
+economic instruments, venue listings, and specific contracts.  Issue #25
+(M1-07) required settling the exact identifier scheme, the field split
+between =Instrument= and =Listing=, and — the one genuine inconsistency
+found during design review — whether a futures =Instrument= denotes a
+contract family (e.g. E-mini S&P 500) or one specific expiring contract
+(e.g. ES December 2026).
 
 ** Decision
 
-Adopt separate types for =instrument.ID=, =instrument.Listing=, and
-=instrument.Spec= as sketched in the architecture document.  Final field
-sets, identifier encoding, and resolver semantics remain open and will be
-ratified before =v0= freezes the instrument package.
+=instrument.ID= is canonical and deterministic, never a generated
+identifier: two calls to the same per-kind constructor with the same
+normalized economic attributes always produce an equal ID, regardless of
+which provider symbol spelling produced the inputs.  This is a different
+identity scheme from the =id= package's =ID[K]=, which is deliberately
+random and regenerated per event; instruments must not receive a fresh
+identity every run.  Six initial kinds are supported: =KindCurrencyPair=,
+=KindEquity=, =KindETF=, =KindFuture=, =KindContinuousSeries=, and
+=KindIndex=.
+
+=Instrument= holds economic identity only: what the thing is, independent
+of provider or venue.  =Listing= holds venue-specific trading mechanics:
+provider symbol (display-only, never identity), tick size, quantity
+increment, contract multiplier, settlement currency, and current
+tradability, via a separate =Spec= value embedded in =Listing=.
+
+A futures =Instrument= is one specific expiring contract, not the contract
+family: ES December 2026 and ES March 2027 are distinct =Instrument=
+values, because expiration is part of what makes them the actual, distinct
+orderable economic objects — the same way base/quote defines a currency
+pair's identity.  A continuous, back-adjusted research series is not a
+flag on a =Listing= of what looks like a tradable contract; it is its own
+kind, =KindContinuousSeries=, with its own ID constructor and no single
+expiration.  This makes "tradable versus research-only" and "a specific
+contract versus its continuous series" decidable from =Kind= alone.
+
+Equity and ETF identity uses exchange+ticker as Trader's =v0= identity
+convention, explicitly documented as a convention rather than a claim of
+permanent global security identity — corporate actions, ticker reuse, and
+venue changes remain a known, deferred concern.
+
+A =Resolver= mapping Trader IDs to provider- or broker-native symbols, and
+any persistent registry/catalog beyond this deterministic construction
+scheme, remain future, additive concerns and are not part of this
+decision.
 
 ** Consequences
 
-- Prevents symbol collisions across brokers.
-- Requires a resolver at every provider or broker boundary.
-- Multi-leg and synthetic instruments remain an explicit deferred concern.
+- Prevents symbol collisions across brokers without a generated identifier
+  or a persistent registry.
+- Two different provider adapters parsing different spellings of the same
+  instrument converge on the same =Instrument= automatically once they
+  normalize into typed inputs (=num.Currency=, exchange, ticker) before
+  constructing an ID.
+- Futures require two kinds rather than one, and a =Listing= is never
+  itself the unit that distinguishes a contract from its continuous
+  series.
+- Equity/ETF identity is acknowledged as provisional; a more durable
+  identity scheme is a later, additive change if exchange+ticker proves
+  insufficient.
+- Multi-leg and synthetic instruments remain an explicit deferred concern,
+  mechanically enforced by an architecture test rejecting leg/synthetic
+  field names in the =instrument= package.
 
 ** Alternatives Considered
 
 - *Single =Symbol= string as identity.* Rejected because it cannot
   represent multi-venue listings or expiring contracts safely.
+- *Generated (ULID-style) instrument identity, matching the =id=
+  package's other kinds.* Rejected because it would give two
+  representations of the same real-world instrument — or the same
+  instrument across two runs — different identities, which is exactly
+  backwards for something with natural economic identity.
+- *Futures =Instrument= as the contract family, with expiration living on
+  a =Listing= or a new =Contract= type.* Considered and rejected during
+  design review: it required inventing a third top-level concept solely to
+  hold what is actually part of a contract's identity, and blurred
+  =Listing='s meaning from "how a venue exposes an instrument" into also
+  meaning "which specific contract."
 
 * ADR-004: Exact numeric representation
 

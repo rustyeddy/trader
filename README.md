@@ -137,6 +137,31 @@ the `EventID` immediately before it. See the
 [package doc comment](id/doc.go) for the full identifier list and the
 worked intent → proposal → order → fill example.
 
+### instrument
+
+`instrument` separates *what an economic thing is* (`Instrument`) from *how
+a venue exposes it for trading* (`Listing`). Unlike `id`'s generated
+identifiers, `instrument.ID` is canonical and deterministic — two provider
+adapters parsing different spellings of the same pair resolve to the same
+identity:
+
+```go
+eur, usd := num.MustParseCurrency("EUR"), num.MustParseCurrency("USD")
+eurUsd, err := instrument.NewCurrencyPair(eur, usd)
+// eurUsd.ID().String() == "fx:EUR/USD", regardless of whether the
+// provider spelled it "EUR_USD", "EURUSD", or "EUR/USD"
+
+dec, err := instrument.NewFuture("ES", time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC))
+mar, err := instrument.NewFuture("ES", time.Date(2027, time.March, 20, 0, 0, 0, 0, time.UTC))
+// dec and mar are distinct Instruments: an individual expiring contract,
+// not the contract family, is the Instrument
+```
+
+Initial kinds are currency pairs, equities, ETFs, individual futures
+contracts, non-orderable continuous research series, and indices. See the
+[package doc comment](instrument/doc.go) for why futures split into two
+kinds instead of one, and why synthetic/multi-leg instruments are deferred.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
