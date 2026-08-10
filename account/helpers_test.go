@@ -41,41 +41,32 @@ func mustEventID(t *testing.T) id.EventID {
 
 func mustEurUsdListing(t *testing.T) instrument.Listing {
 	t.Helper()
-	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
-	require.NoError(t, err)
-	spec, err := instrument.NewSpec(
-		num.MustParsePrice("0.00001"),
-		num.MustParseQuantity("1"),
-		num.MustParseRate("1"),
-		num.MustParseCurrency("USD"),
-	)
-	require.NoError(t, err)
-	listing, err := instrument.NewListing(instrument.ListingParams{
-		Instrument: inst,
-		Provider:   "OANDA",
-		Symbol:     "EUR_USD",
-		Spec:       spec,
-		Tradable:   true,
-	})
-	require.NoError(t, err)
-	return listing
+	return mustListing(t, "EUR", "USD", "OANDA", "EUR_USD")
 }
 
 func mustGbpUsdListing(t *testing.T) instrument.Listing {
 	t.Helper()
-	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	return mustListing(t, "GBP", "USD", "OANDA", "GBP_USD")
+}
+
+// mustListing builds a currency-pair Listing under the given provider,
+// so tests can exercise cross-provider mismatches against a Snapshot's
+// Broker.
+func mustListing(t *testing.T, base, quote, provider, symbol string) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency(base), num.MustParseCurrency(quote))
 	require.NoError(t, err)
 	spec, err := instrument.NewSpec(
 		num.MustParsePrice("0.00001"),
 		num.MustParseQuantity("1"),
 		num.MustParseRate("1"),
-		num.MustParseCurrency("USD"),
+		num.MustParseCurrency(quote),
 	)
 	require.NoError(t, err)
 	listing, err := instrument.NewListing(instrument.ListingParams{
 		Instrument: inst,
-		Provider:   "OANDA",
-		Symbol:     "GBP_USD",
+		Provider:   provider,
+		Symbol:     symbol,
 		Spec:       spec,
 		Tradable:   true,
 	})

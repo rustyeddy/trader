@@ -1336,9 +1336,13 @@ this account with no two positions naming the same
 "the venue's listing for an instrument"), and every open order
 revalidated through =order.NewOrder=, belonging to this account, not
 already =Terminal= (=order.Status.Terminal=), and not repeating an
-=OrderID=.  =account.CashLedgerEntry= (deposit/withdrawal history,
-named in the architecture document) is not part of this decision;
-it is additive future work.
+=OrderID=.  Every =Position=/open order's =Listing.Provider= must
+also case-insensitively equal =SnapshotParams.Broker=: a =Snapshot=
+represents one broker account's observation, so a contained listing
+from a different provider would misrepresent whose position or order
+it actually is.  =account.CashLedgerEntry= (deposit/withdrawal
+history, named in the architecture document) is not part of this
+decision; it is additive future work.
 
 =Positions=, =OpenOrders=, and =CashBalances= are deep-copied on
 ingestion and again by every accessor call: =order.Order= and
@@ -1355,8 +1359,11 @@ grow a public cloning API it does not otherwise need.
 values into a =BaseCurrency=-denominated view, constructed via
 =NewPortfolio(PortfolioParams)= the same
 params-struct-in/immutable-value-out way.  Because =num= deliberately
-implements no currency conversion (see =num.Money='s doc comment),
-this decision adds the one sanctioned conversion primitive,
+implements no /implicit/ currency conversion (see =num.Money='s doc
+comment) — =Convert= performs only exact arithmetic for an explicit
+target currency and rate, with no policy about when conversion is
+appropriate or where a rate comes from — this decision adds the one
+sanctioned conversion primitive,
 =Money.Convert(to Currency, rate Rate) (Money, error)=: same
 arithmetic and rounding contract as =MulRate=/=DivRate=, but
 re-denominating into an explicit target currency.  =Convert= performs
@@ -1365,9 +1372,13 @@ only the exact arithmetic; rate provenance is a caller concern.
 =ConversionRate{From, To, Rate, AsOf, Source}=, not a bare
 =map[Currency]Rate=: every supplied rate's =To= must equal
 =BaseCurrency=, its =From= must not already equal =BaseCurrency=, its
-=Rate= must be strictly positive, and its =AsOf= must be set, so a
+=Rate= must be strictly positive, its =AsOf= must be set, and its
+=AsOf= must not be after the =Portfolio='s own =AsOf=, so a
 =Portfolio= can later report exactly which rates, from where and as
-of when, produced its total.
+of when, produced its total, and a historical =Portfolio= can never be
+built from a rate that could not actually have been known as of its
+own observation time — look-ahead a backtest replaying a historical
+=Portfolio.AsOf= must not be able to see.
 
 An account already denominated in =BaseCurrency= needs no rate; an
 account in any other currency needs a matching =ConversionRate= or its
@@ -1424,6 +1435,17 @@ fully immutable, so there is no mutable state an element could expose.
   contract multipliers) or mark-to-market valuation must build that
   themselves from =Exposure.Contributors= today; this package does not
   yet provide it.
+- A =Snapshot= cannot silently accumulate another broker's listings
+  under this account's identity: a caller building one from data that
+  actually spans providers must construct separate =Snapshot= values,
+  one per provider, and let =Portfolio= do the cross-broker
+  aggregation — which is exactly the role =Portfolio.Exposures=
+  exists to fill.
+- A historical =Portfolio= cannot be built, even accidentally, from a
+  conversion rate observed after its own =AsOf=; a caller that only
+  has a same-day or later rate must either accept
+  =ConversionIncomplete= or supply a rate actually available as of
+  that =AsOf=.
 
 ** Alternatives Considered
 
@@ -1460,6 +1482,20 @@ fully immutable, so there is no mutable state an element could expose.
   =Money= is exactly the implicit workaround that comment warns
   against. =Money.Convert= is the explicit, minimal primitive =num=
   was already documented as willing to add for a real consumer.
+- *Validating only =AccountID= consistency for =Positions=/=OpenOrders=,
+  leaving listing provider unchecked.* Rejected on design review: a
+  =Snapshot= with =Broker="OANDA"= could otherwise validly contain a
+  =Listing= whose =Provider()= is =IBKR=, silently misrepresenting
+  which broker a position or order actually came from. Every entry's
+  =Listing.Provider= must now case-insensitively equal
+  =SnapshotParams.Broker=.
+- *Leaving =ConversionRate.AsOf= unconstrained relative to
+  =Portfolio.AsOf=.* Rejected on design review: an unconstrained rate
+  timestamp lets a historical =Portfolio= report =ConversionComplete=
+  using a rate that could not actually have been known as of its own
+  observation time — look-ahead risk that matters most for backtests
+  replaying a historical =Portfolio.AsOf=. =NewPortfolio= now rejects
+  any =ConversionRate= whose =AsOf= is after the =Portfolio='s own.
 
 * ADR Template                                                       :noexport:
 

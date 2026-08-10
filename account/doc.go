@@ -23,14 +23,19 @@
 // balance field denominated in the account's home Currency is checked
 // against it; CashBalances may span several currencies (a real FX
 // account routinely holds more than one) and must not repeat a
-// currency. Every Position must belong to this account and name a
+// currency. Every Position must belong to this account, must be listed
+// through this account's own Broker (Listing.Provider must
+// case-insensitively equal SnapshotParams.Broker — a snapshot is one
+// broker account's observation, so a contained listing from a different
+// provider would misrepresent whose position it is), and must name a
 // distinct (instrument, provider, venue) listing; every OpenOrder must
-// belong to this account, must not already be in a terminal status (see
-// order.Status.Terminal), and must not repeat an OrderID. Positions and
-// orders are revalidated through order.NewPosition/order.NewOrder rather
-// than trusted by provenance, for the same reason order's own
-// constructors revalidate nested stages: exported struct fields let a
-// caller build an invalid value as a bare literal.
+// belong to this account and this Broker, must not already be in a
+// terminal status (see order.Status.Terminal), and must not repeat an
+// OrderID. Positions and orders are revalidated through
+// order.NewPosition/order.NewOrder rather than trusted by provenance,
+// for the same reason order's own constructors revalidate nested
+// stages: exported struct fields let a caller build an invalid value as
+// a bare literal.
 //
 // Positions, OpenOrders, and CashBalances are deep-copied on the way in
 // and every time an accessor returns them: order.Order and

@@ -22,9 +22,20 @@
 // had no matching rate, ConversionStatus is ConversionIncomplete and
 // Equity's second return value is false rather than a partial or
 // misleading sum — see MissingCurrencies for exactly which currencies
-// blocked it. ConversionRates returns only the rates actually used,
-// preserving the provenance (source, observation time) the caller
-// supplied, so a report can show what produced the total.
+// blocked it. In that case ConversionRates is also empty, even for
+// currencies that did resolve before the missing one was found: there
+// is no settled total for a partial rate list to explain. When
+// ConversionStatus is ConversionComplete, ConversionRates returns only
+// the rates actually used, preserving the provenance (source,
+// observation time) the caller supplied, so a report can show what
+// produced the total.
+//
+// Every ConversionRate's AsOf must not be after the Portfolio's own
+// AsOf — NewPortfolio rejects one that is. A rate observed later than
+// the portfolio being assembled is look-ahead information a caller
+// could not actually have had at the time; this matters most for a
+// backtest replaying a historical Portfolio.AsOf, which must not be
+// allowed to see a rate from its own future.
 //
 // # Exposure is a grouping, not a valuation
 //

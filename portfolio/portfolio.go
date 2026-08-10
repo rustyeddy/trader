@@ -90,7 +90,7 @@ func NewPortfolio(params PortfolioParams) (Portfolio, error) {
 		return Portfolio{}, fmt.Errorf("%w: accounts: %v", ErrInvalidPortfolio, err)
 	}
 
-	rateByFrom, err := checkRates(params.Rates, params.BaseCurrency)
+	rateByFrom, err := checkRates(params.Rates, params.BaseCurrency, params.AsOf)
 	if err != nil {
 		return Portfolio{}, fmt.Errorf("%w: rates: %v", ErrInvalidPortfolio, err)
 	}
@@ -128,10 +128,10 @@ func checkAccounts(accounts []account.Snapshot) ([]account.Snapshot, error) {
 	return cloned, nil
 }
 
-func checkRates(rates []ConversionRate, base num.Currency) (map[num.Currency]ConversionRate, error) {
+func checkRates(rates []ConversionRate, base num.Currency, portfolioAsOf time.Time) (map[num.Currency]ConversionRate, error) {
 	byFrom := make(map[num.Currency]ConversionRate, len(rates))
 	for i, r := range rates {
-		if err := checkConversionRate(r, base); err != nil {
+		if err := checkConversionRate(r, base, portfolioAsOf); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
 		if _, ok := byFrom[r.From]; ok {

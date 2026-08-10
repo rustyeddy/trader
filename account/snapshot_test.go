@@ -198,6 +198,15 @@ func TestNewSnapshotRejectsInvalidPosition(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidSnapshot)
 }
 
+func TestNewSnapshotRejectsPositionProviderMismatch(t *testing.T) {
+	p := validParams(t)
+	require.Equal(t, "OANDA", p.Broker)
+	otherProviderListing := mustListing(t, "EUR", "USD", "IBKR", "EURUSD")
+	p.Positions = []order.Position{mustPosition(t, p.AccountID, otherProviderListing)}
+	_, err := NewSnapshot(p)
+	require.ErrorIs(t, err, ErrInvalidSnapshot)
+}
+
 func TestNewSnapshotRejectsDuplicateListingPosition(t *testing.T) {
 	p := validParams(t)
 	listing := mustEurUsdListing(t)
@@ -207,6 +216,15 @@ func TestNewSnapshotRejectsDuplicateListingPosition(t *testing.T) {
 	}
 	_, err := NewSnapshot(p)
 	require.ErrorIs(t, err, ErrInvalidSnapshot)
+}
+
+func TestNewSnapshotAllowsCaseInsensitiveProviderMatch(t *testing.T) {
+	p := validParams(t)
+	p.Broker = "oanda"
+	listing := mustEurUsdListing(t) // Provider "OANDA"
+	p.Positions = []order.Position{mustPosition(t, p.AccountID, listing)}
+	_, err := NewSnapshot(p)
+	require.NoError(t, err)
 }
 
 func TestNewSnapshotAllowsMultipleDistinctPositions(t *testing.T) {
@@ -226,6 +244,15 @@ func TestNewSnapshotRejectsOpenOrderAccountMismatch(t *testing.T) {
 	p := validParams(t)
 	other := mustAccountID(t)
 	p.OpenOrders = []order.Order{mustWorkingOrder(t, other, mustEurUsdListing(t))}
+	_, err := NewSnapshot(p)
+	require.ErrorIs(t, err, ErrInvalidSnapshot)
+}
+
+func TestNewSnapshotRejectsOpenOrderProviderMismatch(t *testing.T) {
+	p := validParams(t)
+	require.Equal(t, "OANDA", p.Broker)
+	otherProviderListing := mustListing(t, "EUR", "USD", "IBKR", "EURUSD")
+	p.OpenOrders = []order.Order{mustWorkingOrder(t, p.AccountID, otherProviderListing)}
 	_, err := NewSnapshot(p)
 	require.ErrorIs(t, err, ErrInvalidSnapshot)
 }

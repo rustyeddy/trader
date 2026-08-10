@@ -31,6 +31,7 @@ func TestPortfolioExposuresGroupsAcrossAccountsByInstrument(t *testing.T) {
 	require.NoError(t, err)
 
 	paramsB := snapshotParamsFor(t, accountB, "USD", "5000")
+	paramsB.Broker = "IBKR"
 	paramsB.Positions = []order.Position{posB}
 	snapB, err := account.NewSnapshot(paramsB)
 	require.NoError(t, err)

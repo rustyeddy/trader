@@ -2,6 +2,7 @@ package account
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/id"
@@ -82,12 +83,15 @@ type SnapshotParams struct {
 	Financing num.Money
 
 	// Positions is this account's open positions. Every entry's
-	// AccountID must equal AccountID, and no two entries may name the
-	// same (instrument, provider, venue) listing.
+	// AccountID must equal AccountID, every entry's Listing.Provider
+	// must case-insensitively equal Broker, and no two entries may name
+	// the same (instrument, provider, venue) listing.
 	Positions []order.Position
 	// OpenOrders is this account's outstanding orders. Every entry's
-	// Request.AccountID must equal AccountID, no entry may already be
-	// in a terminal Status, and no two entries may share an OrderID.
+	// Request.AccountID must equal AccountID, every entry's
+	// Request.Listing.Provider must case-insensitively equal Broker, no
+	// entry may already be in a terminal Status, and no two entries may
+	// share an OrderID.
 	OpenOrders []order.Order
 }
 
@@ -131,12 +135,12 @@ func NewSnapshot(params SnapshotParams) (Snapshot, error) {
 		}
 	}
 
-	positions, err := checkPositions(params.AccountID, params.Positions)
+	positions, err := checkPositions(params.AccountID, params.Broker, params.Positions)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("%w: positions: %v", ErrInvalidSnapshot, err)
 	}
 
-	openOrders, err := checkOpenOrders(params.AccountID, params.OpenOrders)
+	openOrders, err := checkOpenOrders(params.AccountID, params.Broker, params.OpenOrders)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("%w: open orders: %v", ErrInvalidSnapshot, err)
 	}
@@ -188,7 +192,7 @@ func keyFor(l instrument.Listing) listingKey {
 	return listingKey{instrumentID: l.InstrumentID(), provider: l.Provider(), venue: l.Venue()}
 }
 
-func checkPositions(accountID id.AccountID, positions []order.Position) ([]order.Position, error) {
+func checkPositions(accountID id.AccountID, broker string, positions []order.Position) ([]order.Position, error) {
 	seen := make(map[listingKey]struct{}, len(positions))
 	cloned := make([]order.Position, len(positions))
 	for i, p := range positions {
@@ -199,6 +203,10 @@ func checkPositions(accountID id.AccountID, positions []order.Position) ([]order
 		if validated.AccountID != accountID {
 			return nil, fmt.Errorf("entry %d: account id %s does not match snapshot account id %s",
 				i, validated.AccountID, accountID)
+		}
+		if !strings.EqualFold(validated.Listing.Provider(), broker) {
+			return nil, fmt.Errorf("entry %d: listing provider %s does not match snapshot broker %s",
+				i, validated.Listing.Provider(), broker)
 		}
 		key := keyFor(validated.Listing)
 		if _, ok := seen[key]; ok {
@@ -211,7 +219,7 @@ func checkPositions(accountID id.AccountID, positions []order.Position) ([]order
 	return cloned, nil
 }
 
-func checkOpenOrders(accountID id.AccountID, orders []order.Order) ([]order.Order, error) {
+func checkOpenOrders(accountID id.AccountID, broker string, orders []order.Order) ([]order.Order, error) {
 	seen := make(map[id.OrderID]struct{}, len(orders))
 	cloned := make([]order.Order, len(orders))
 	for i, o := range orders {
@@ -222,6 +230,10 @@ func checkOpenOrders(accountID id.AccountID, orders []order.Order) ([]order.Orde
 		if validated.Request.AccountID != accountID {
 			return nil, fmt.Errorf("entry %d: account id %s does not match snapshot account id %s",
 				i, validated.Request.AccountID, accountID)
+		}
+		if !strings.EqualFold(validated.Request.Listing.Provider(), broker) {
+			return nil, fmt.Errorf("entry %d: listing provider %s does not match snapshot broker %s",
+				i, validated.Request.Listing.Provider(), broker)
 		}
 		if validated.Status.Terminal() {
 			return nil, fmt.Errorf("entry %d: order %s is in terminal status %s and is not open",

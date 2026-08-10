@@ -173,6 +173,45 @@ func TestNewPortfolioRejectsNonPositiveRate(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidPortfolio)
 }
 
+func TestNewPortfolioRejectsFutureDatedRate(t *testing.T) {
+	portfolioAsOf := time.Date(2026, 1, 2, 13, 0, 0, 0, time.UTC)
+	_, err := NewPortfolio(PortfolioParams{
+		BaseCurrency: num.MustParseCurrency("USD"),
+		AsOf:         portfolioAsOf,
+		Accounts:     []account.Snapshot{mustSnapshot(t, "EUR", "1")},
+		Rates: []ConversionRate{
+			{
+				From: num.MustParseCurrency("EUR"),
+				To:   num.MustParseCurrency("USD"),
+				Rate: num.MustParseRate("1.1"),
+				// One second after Portfolio.AsOf: look-ahead the
+				// portfolio could not actually have had.
+				AsOf: portfolioAsOf.Add(time.Second),
+			},
+		},
+	})
+	require.ErrorIs(t, err, ErrInvalidPortfolio)
+}
+
+func TestNewPortfolioAllowsRateAsOfExactlyPortfolioAsOf(t *testing.T) {
+	portfolioAsOf := time.Date(2026, 1, 2, 13, 0, 0, 0, time.UTC)
+	p, err := NewPortfolio(PortfolioParams{
+		BaseCurrency: num.MustParseCurrency("USD"),
+		AsOf:         portfolioAsOf,
+		Accounts:     []account.Snapshot{mustSnapshot(t, "EUR", "1000")},
+		Rates: []ConversionRate{
+			{
+				From: num.MustParseCurrency("EUR"),
+				To:   num.MustParseCurrency("USD"),
+				Rate: num.MustParseRate("1.1"),
+				AsOf: portfolioAsOf,
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ConversionComplete, p.ConversionStatus())
+}
+
 func TestNewPortfolioRejectsDuplicateRateCurrency(t *testing.T) {
 	_, err := NewPortfolio(PortfolioParams{
 		BaseCurrency: num.MustParseCurrency("USD"),

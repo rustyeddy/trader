@@ -25,7 +25,11 @@ type ConversionRate struct {
 	// amountInFrom * Rate. Must be strictly positive; a real exchange
 	// rate is never zero or negative.
 	Rate num.Rate
-	// AsOf is when this rate was observed.
+	// AsOf is when this rate was observed. Must not be after the
+	// Portfolio's own AsOf: a rate observed later than the portfolio
+	// being assembled is look-ahead information, most dangerous in a
+	// backtest replaying a historical Portfolio.AsOf against a rate
+	// that could not actually have been known yet.
 	AsOf time.Time
 	// Source names where this rate came from, for example
 	// "oanda.rates" or "ecb.reference". May be empty.
@@ -33,8 +37,8 @@ type ConversionRate struct {
 }
 
 // checkConversionRate validates r against base, the Portfolio's
-// BaseCurrency.
-func checkConversionRate(r ConversionRate, base num.Currency) error {
+// BaseCurrency, and portfolioAsOf, the Portfolio's own AsOf.
+func checkConversionRate(r ConversionRate, base num.Currency, portfolioAsOf time.Time) error {
 	if !r.From.IsValid() {
 		return fmt.Errorf("conversion rate: from currency must be valid")
 	}
@@ -52,6 +56,9 @@ func checkConversionRate(r ConversionRate, base num.Currency) error {
 	}
 	if r.AsOf.IsZero() {
 		return fmt.Errorf("conversion rate: as-of time must be set")
+	}
+	if r.AsOf.After(portfolioAsOf) {
+		return fmt.Errorf("conversion rate: as-of %s is after portfolio as-of %s", r.AsOf, portfolioAsOf)
 	}
 	return nil
 }
