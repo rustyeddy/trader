@@ -28,13 +28,18 @@ type ReplaceRequest struct {
 
 // NewReplaceRequest validates and returns a ReplaceRequest. OrderID must
 // be non-zero, and at least one of NewQuantity, NewLimitPrice, or
-// NewStopPrice must be set — otherwise there is nothing to replace.
+// NewStopPrice must be set — otherwise there is nothing to replace. A
+// non-nil NewQuantity must be greater than zero, consistent with every
+// other quantity in this package's vocabulary.
 func NewReplaceRequest(r ReplaceRequest) (ReplaceRequest, error) {
 	if r.OrderID.IsZero() {
 		return ReplaceRequest{}, fmt.Errorf("%w: order id must be set", ErrInvalidReplaceRequest)
 	}
 	if r.NewQuantity == nil && r.NewLimitPrice == nil && r.NewStopPrice == nil {
 		return ReplaceRequest{}, fmt.Errorf("%w: at least one of NewQuantity, NewLimitPrice, or NewStopPrice must be set", ErrInvalidReplaceRequest)
+	}
+	if r.NewQuantity != nil && r.NewQuantity.IsZero() {
+		return ReplaceRequest{}, fmt.Errorf("%w: new quantity must be greater than zero", ErrInvalidReplaceRequest)
 	}
 	return r, nil
 }
@@ -56,7 +61,7 @@ type ReplaceResult struct {
 // be non-zero.
 func NewReplaceResult(r ReplaceResult) (ReplaceResult, error) {
 	if r.OrderID.IsZero() {
-		return ReplaceResult{}, fmt.Errorf("%w: order id must be set", ErrInvalidReplaceRequest)
+		return ReplaceResult{}, fmt.Errorf("%w: order id must be set", ErrInvalidReplaceResult)
 	}
 	return r, nil
 }

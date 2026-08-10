@@ -23,9 +23,17 @@ var (
 	// argument that fails validation.
 	ErrInvalidCancelRequest = errors.New("order: invalid cancel request")
 
+	// ErrInvalidCancelResult reports a CancelResult constructor argument
+	// that fails validation.
+	ErrInvalidCancelResult = errors.New("order: invalid cancel result")
+
 	// ErrInvalidReplaceRequest reports a ReplaceRequest constructor
 	// argument that fails validation.
 	ErrInvalidReplaceRequest = errors.New("order: invalid replace request")
+
+	// ErrInvalidReplaceResult reports a ReplaceResult constructor
+	// argument that fails validation.
+	ErrInvalidReplaceResult = errors.New("order: invalid replace result")
 
 	// ErrInvalidPosition reports a Position constructor argument that
 	// fails validation.

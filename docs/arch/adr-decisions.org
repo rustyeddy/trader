@@ -927,12 +927,26 @@ applied to the =id= package's deferred identifiers.
 
 Constructors in this package validate snapshot/domain invariants only:
 required fields, exact-value tick/increment divisibility, required price
-presence for a given =Type=, =FilledQuantity <= AcceptedQuantity=, and
-valid rejection/status combinations (=Rejection= non-nil exactly when
-=Status= is =StatusRejected=).  Whether a given =Status= is reachable
-from an order's prior state — legal transitions, terminal-state
-enforcement, duplicate/out-of-order event handling — is issue #29
-(M1-11)'s responsibility, not this package's.
+presence for a given =Type=, =FilledQuantity <= AcceptedQuantity=,
+whether =Status= implies the broker has (or has not) accepted the order
+and so requires (or precludes) a non-nil =AcceptedQuantity=, and valid
+rejection/status combinations (=Rejection= non-nil exactly when =Status=
+is =StatusRejected=).  Whether a given =Status= is reachable from an
+order's prior state — legal transitions, terminal-state enforcement,
+duplicate/out-of-order event handling — is issue #29 (M1-11)'s
+responsibility, not this package's.
+
+Because =Proposal=, =Request=, and =Order= are ordinary exported structs,
+Go cannot prevent a caller from building a later stage as a bare struct
+literal that embeds an earlier, invalid stage — bypassing that earlier
+stage's own constructor entirely.  A design-review comment on the PR
+identified this as a real hole: checking only the outermost identity
+field (=Request.OrderID=, say) does not prove the embedded =Proposal= is
+valid.  Each stage's constructor therefore fully revalidates every stage
+beneath it through a shared unexported validator
+(=checkProposal=/=checkRequest=) rather than trusting an earlier stage by
+provenance — the same shared-validator shape =Order='s accepted-value
+checks reuse from =Proposal='s requested-value checks.
 
 OCO/bracket order grouping and parent/child order relationships are
 deferred as capability-driven features, consistent with the
@@ -988,6 +1002,16 @@ for.
   the same rule of thumb =id/doc.go= already applies to its deferred
   identifiers — add it when a concrete, persisted consumer needs it, not
   speculatively.
+- *=CancelResult= and =ReplaceResult= reusing =ErrInvalidCancelRequest=/
+  =ErrInvalidReplaceRequest=.*  Rejected on review: those sentinels'
+  doc comments describe request validation specifically, and reusing
+  them for result validation makes error classification imprecise for
+  callers.  Dedicated =ErrInvalidCancelResult=/=ErrInvalidReplaceResult=
+  sentinels were added instead, matching this package's existing
+  per-type sentinel granularity.
+- *Trusting an earlier stage's validity by constructor provenance
+  alone.*  Rejected on review once it was shown a bare struct literal
+  defeats it; see the shared-validator discussion above.
 
 * ADR Template                                                       :noexport:
 

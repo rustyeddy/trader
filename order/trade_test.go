@@ -101,6 +101,31 @@ func TestNewTradeRejectsZeroExitFillID(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidTrade)
 }
 
+func TestNewTradeRejectsClosedAtBeforeOpenedAt(t *testing.T) {
+	opened := time.Now()
+	_, err := NewTrade(Trade{
+		AccountID:    mustAccountID(t),
+		Listing:      mustEurUsdListing(t),
+		Side:         Long,
+		EntryFillIDs: []id.FillID{mustFillID(t)},
+		OpenedAt:     opened,
+		ClosedAt:     opened.Add(-time.Hour),
+	})
+	assert.ErrorIs(t, err, ErrInvalidTrade)
+}
+
+func TestNewTradeAllowsOpenTradeWithPartialExitFillsAndNoClosedAt(t *testing.T) {
+	_, err := NewTrade(Trade{
+		AccountID:    mustAccountID(t),
+		Listing:      mustEurUsdListing(t),
+		Side:         Long,
+		EntryFillIDs: []id.FillID{mustFillID(t)},
+		ExitFillIDs:  []id.FillID{mustFillID(t)},
+		OpenedAt:     time.Now(),
+	})
+	require.NoError(t, err)
+}
+
 func TestNewTradeRejectsZeroOpenedAt(t *testing.T) {
 	_, err := NewTrade(Trade{
 		AccountID:    mustAccountID(t),

@@ -3,6 +3,7 @@ package order
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,5 +38,11 @@ func TestNewReplaceResultValid(t *testing.T) {
 
 func TestNewReplaceResultRejectsZeroOrderID(t *testing.T) {
 	_, err := NewReplaceResult(ReplaceResult{})
+	assert.ErrorIs(t, err, ErrInvalidReplaceResult)
+}
+
+func TestNewReplaceRequestRejectsZeroQuantity(t *testing.T) {
+	zero := num.Quantity{}
+	_, err := NewReplaceRequest(ReplaceRequest{OrderID: mustOrderID(t), NewQuantity: &zero})
 	assert.ErrorIs(t, err, ErrInvalidReplaceRequest)
 }

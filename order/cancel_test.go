@@ -25,7 +25,7 @@ func TestNewCancelResultValid(t *testing.T) {
 
 func TestNewCancelResultRejectsZeroOrderID(t *testing.T) {
 	_, err := NewCancelResult(CancelResult{})
-	assert.ErrorIs(t, err, ErrInvalidCancelRequest)
+	assert.ErrorIs(t, err, ErrInvalidCancelResult)
 }
 
 func TestNewCancelResultDeclinedCarriesRejection(t *testing.T) {

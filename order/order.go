@@ -50,21 +50,32 @@ type Order struct {
 	UpdatedAt time.Time
 }
 
-// NewOrder validates and returns an Order. o.Request must already be a
-// validated Request. If o.AcceptedQuantity is non-nil, it must be
-// positive, a multiple of the listing's quantity increment, and
-// AcceptedLimitPrice/AcceptedStopPrice must be present or nil exactly as
-// o.Request.Type requires; if non-nil, they must be exact multiples of
-// the listing's tick size. o.FilledQuantity must not exceed
-// AcceptedQuantity, and must be zero if AcceptedQuantity is nil.
-// o.Rejection must be non-nil exactly when o.Status is StatusRejected.
+// NewOrder validates and returns an Order. o.Request is fully
+// revalidated, including its embedded Proposal — not merely trusted by
+// provenance, since Request's exported fields let a caller build one as
+// a bare struct literal. o.Status must be one of its defined values. If
+// o.AcceptedQuantity is non-nil, it must be positive, a multiple of the
+// listing's quantity increment, and AcceptedLimitPrice/AcceptedStopPrice
+// must be present or nil exactly as o.Request.Type requires; if non-nil,
+// they must be exact multiples of the listing's tick size.
+// o.FilledQuantity must not exceed AcceptedQuantity, and must be zero if
+// AcceptedQuantity is nil. A Status that implies the broker has accepted
+// the order (StatusWorking, StatusPartiallyFilled, StatusFilled,
+// StatusPendingCancel, StatusCanceled, StatusPendingReplace,
+// StatusExpired) requires a non-nil AcceptedQuantity; a Status that
+// implies it has not (StatusPendingSubmit, StatusRejected) requires a
+// nil one. o.Rejection must be non-nil exactly when o.Status is
+// StatusRejected.
 //
 // NewOrder validates this snapshot's internal consistency only. Whether
 // a given Status is reachable from the order's prior state is issue #29
 // (M1-11)'s responsibility, not this constructor's.
 func NewOrder(o Order) (Order, error) {
-	if o.Request.OrderID.IsZero() {
-		return Order{}, fmt.Errorf("%w: request must be constructed", ErrInvalidOrder)
+	if err := checkRequest(o.Request); err != nil {
+		return Order{}, fmt.Errorf("%w: request: %v", ErrInvalidOrder, err)
+	}
+	if !o.Status.valid() {
+		return Order{}, fmt.Errorf("%w: invalid status %v", ErrInvalidOrder, o.Status)
 	}
 
 	if o.AcceptedQuantity != nil {
@@ -84,6 +95,13 @@ func NewOrder(o Order) (Order, error) {
 		return Order{}, fmt.Errorf("%w: filled quantity requires an accepted quantity", ErrInvalidOrder)
 	} else if o.AcceptedLimitPrice != nil || o.AcceptedStopPrice != nil {
 		return Order{}, fmt.Errorf("%w: accepted prices require an accepted quantity", ErrInvalidOrder)
+	}
+
+	if o.Status.requiresAcceptance() && o.AcceptedQuantity == nil {
+		return Order{}, fmt.Errorf("%w: status %s requires an accepted quantity", ErrInvalidOrder, o.Status)
+	}
+	if o.Status.precludesAcceptance() && o.AcceptedQuantity != nil {
+		return Order{}, fmt.Errorf("%w: status %s must not have an accepted quantity", ErrInvalidOrder, o.Status)
 	}
 
 	if o.Status == StatusRejected && o.Rejection == nil {

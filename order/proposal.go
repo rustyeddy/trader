@@ -47,26 +47,39 @@ type Proposal struct {
 // and StopPrice must be present or nil exactly as Type requires, and
 // when present must be exact multiples of Listing's tick size.
 func NewProposal(p Proposal) (Proposal, error) {
-	if p.Listing.InstrumentID().IsZero() {
-		return Proposal{}, fmt.Errorf("%w: listing must be constructed", ErrInvalidProposal)
-	}
-	if p.AccountID.IsZero() {
-		return Proposal{}, fmt.Errorf("%w: account id must be set", ErrInvalidProposal)
-	}
-	if !p.Side.valid() {
-		return Proposal{}, fmt.Errorf("%w: invalid side %v", ErrInvalidProposal, p.Side)
-	}
-	if !p.Type.valid() {
-		return Proposal{}, fmt.Errorf("%w: invalid type %v", ErrInvalidProposal, p.Type)
-	}
-	if !p.TimeInForce.valid() {
-		return Proposal{}, fmt.Errorf("%w: invalid time in force %v", ErrInvalidProposal, p.TimeInForce)
-	}
-	if err := validatePricePresence(p.Type, p.LimitPrice, p.StopPrice); err != nil {
-		return Proposal{}, fmt.Errorf("%w: %v", ErrInvalidProposal, err)
-	}
-	if err := validatePriceAndQuantity(p.Listing, p.Quantity, p.LimitPrice, p.StopPrice); err != nil {
+	if err := checkProposal(p); err != nil {
 		return Proposal{}, fmt.Errorf("%w: %v", ErrInvalidProposal, err)
 	}
 	return p, nil
+}
+
+// checkProposal validates p's fields and returns a plain, unwrapped
+// error describing the first problem found, or nil. It is shared by
+// NewProposal and every later stage (NewRequest, NewOrder) that embeds a
+// Proposal, so a Proposal built as a bare struct literal — bypassing
+// NewProposal entirely — cannot slip an invalid value past a later
+// stage's constructor.
+func checkProposal(p Proposal) error {
+	if p.Listing.InstrumentID().IsZero() {
+		return fmt.Errorf("listing must be constructed")
+	}
+	if p.AccountID.IsZero() {
+		return fmt.Errorf("account id must be set")
+	}
+	if !p.Side.valid() {
+		return fmt.Errorf("invalid side %v", p.Side)
+	}
+	if !p.Type.valid() {
+		return fmt.Errorf("invalid type %v", p.Type)
+	}
+	if !p.TimeInForce.valid() {
+		return fmt.Errorf("invalid time in force %v", p.TimeInForce)
+	}
+	if err := validatePricePresence(p.Type, p.LimitPrice, p.StopPrice); err != nil {
+		return err
+	}
+	if err := validatePriceAndQuantity(p.Listing, p.Quantity, p.LimitPrice, p.StopPrice); err != nil {
+		return err
+	}
+	return nil
 }

@@ -76,3 +76,43 @@ func (s Status) String() string {
 		return fmt.Sprintf("Status(%d)", uint8(s))
 	}
 }
+
+// valid reports whether s is one of Status's defined values, including
+// StatusUnknown: unlike Side/Type/TimeInForce's zero value, StatusUnknown
+// is itself a legitimate, storable value for broker-reported state
+// Trader does not recognize — valid rejects only out-of-range values
+// such as Status(200).
+func (s Status) valid() bool {
+	switch s {
+	case StatusUnknown, StatusPendingSubmit, StatusWorking, StatusPartiallyFilled,
+		StatusFilled, StatusPendingCancel, StatusCanceled, StatusPendingReplace,
+		StatusRejected, StatusExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// requiresAcceptance reports whether s implies the broker has accepted
+// the order, and therefore that Order.AcceptedQuantity must be non-nil.
+func (s Status) requiresAcceptance() bool {
+	switch s {
+	case StatusWorking, StatusPartiallyFilled, StatusFilled, StatusPendingCancel,
+		StatusCanceled, StatusPendingReplace, StatusExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// precludesAcceptance reports whether s implies the broker has not (or
+// has not yet) accepted the order, and therefore that
+// Order.AcceptedQuantity must be nil.
+func (s Status) precludesAcceptance() bool {
+	switch s {
+	case StatusPendingSubmit, StatusRejected:
+		return true
+	default:
+		return false
+	}
+}

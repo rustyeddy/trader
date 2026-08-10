@@ -35,6 +35,63 @@ func TestNewOrderRejectsUnconstructedRequest(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidOrder)
 }
 
+// NewOrder must fully revalidate its embedded Request (and, through it,
+// the embedded Proposal), not merely trust it by provenance: Request's
+// exported fields let a caller build one as a bare struct literal,
+// bypassing both NewProposal and NewRequest entirely.
+func TestNewOrderRevalidatesRequestBuiltAsStructLiteral(t *testing.T) {
+	bypassed := Request{
+		Proposal: Proposal{
+			Listing: mustEurUsdListing(t),
+			// AccountID deliberately left zero.
+			Side:        Buy,
+			Type:        Market,
+			TimeInForce: GTC,
+			Quantity:    num.MustParseQuantity("1000"),
+		},
+		OrderID: mustOrderID(t),
+	}
+	_, err := NewOrder(Order{Request: bypassed})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsInvalidStatus(t *testing.T) {
+	_, err := NewOrder(Order{
+		Request: mustRequest(t),
+		Status:  Status(200),
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsWorkingStatusWithoutAcceptedQuantity(t *testing.T) {
+	_, err := NewOrder(Order{
+		Request: mustRequest(t),
+		Status:  StatusWorking,
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsPendingSubmitWithAcceptedQuantity(t *testing.T) {
+	accepted := num.MustParseQuantity("1000")
+	_, err := NewOrder(Order{
+		Request:          mustRequest(t),
+		AcceptedQuantity: &accepted,
+		Status:           StatusPendingSubmit,
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsRejectedWithAcceptedQuantity(t *testing.T) {
+	accepted := num.MustParseQuantity("1000")
+	_, err := NewOrder(Order{
+		Request:          mustRequest(t),
+		AcceptedQuantity: &accepted,
+		Status:           StatusRejected,
+		Rejection:        &Rejection{Reason: ReasonRiskRejected},
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
 func TestNewOrderRejectsZeroAcceptedQuantity(t *testing.T) {
 	zero := num.Quantity{}
 	_, err := NewOrder(Order{
@@ -126,10 +183,12 @@ func TestNewOrderRejectsRejectedStatusWithoutRejection(t *testing.T) {
 }
 
 func TestNewOrderRejectsRejectionOnNonRejectedStatus(t *testing.T) {
+	accepted := num.MustParseQuantity("1000")
 	_, err := NewOrder(Order{
-		Request:   mustRequest(t),
-		Status:    StatusWorking,
-		Rejection: &Rejection{Reason: ReasonMarketClosed},
+		Request:          mustRequest(t),
+		AcceptedQuantity: &accepted,
+		Status:           StatusWorking,
+		Rejection:        &Rejection{Reason: ReasonMarketClosed},
 	})
 	assert.ErrorIs(t, err, ErrInvalidOrder)
 }

@@ -20,15 +20,28 @@ type Request struct {
 	OrderID id.OrderID
 }
 
-// NewRequest validates and returns a Request for proposal, which must
-// already be a validated Proposal (see NewProposal), and orderID, which
-// must be non-zero.
+// NewRequest validates and returns a Request for proposal and orderID.
+// proposal is fully revalidated against the same rules NewProposal
+// applies — not merely trusted by provenance — since Proposal's exported
+// fields let a caller build one as a bare struct literal, bypassing
+// NewProposal entirely. orderID must be non-zero.
 func NewRequest(proposal Proposal, orderID id.OrderID) (Request, error) {
-	if proposal.Listing.InstrumentID().IsZero() {
-		return Request{}, fmt.Errorf("%w: proposal must be constructed", ErrInvalidRequest)
+	r := Request{Proposal: proposal, OrderID: orderID}
+	if err := checkRequest(r); err != nil {
+		return Request{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if orderID.IsZero() {
-		return Request{}, fmt.Errorf("%w: order id must be set", ErrInvalidRequest)
+	return r, nil
+}
+
+// checkRequest validates r's fields, including its embedded Proposal,
+// and returns a plain, unwrapped error, or nil. Shared with NewOrder for
+// the same reason checkProposal is shared with NewRequest.
+func checkRequest(r Request) error {
+	if err := checkProposal(r.Proposal); err != nil {
+		return fmt.Errorf("proposal: %w", err)
 	}
-	return Request{Proposal: proposal, OrderID: orderID}, nil
+	if r.OrderID.IsZero() {
+		return fmt.Errorf("order id must be set")
+	}
+	return nil
 }

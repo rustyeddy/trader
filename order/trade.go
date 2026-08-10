@@ -38,7 +38,10 @@ type Trade struct {
 // NewTrade validates and returns a Trade. AccountID must be non-zero,
 // Listing must be constructed, Side must be Long or Short (never Flat —
 // a trade with no direction has nothing to report), at least one entry
-// fill must be present, and OpenedAt must be non-zero.
+// fill must be present, and OpenedAt must be non-zero. If ClosedAt is
+// set, it must not precede OpenedAt; ClosedAt is not otherwise required
+// merely because ExitFillIDs is non-empty, since partial exits are
+// legitimate for a still-open trade.
 func NewTrade(t Trade) (Trade, error) {
 	if t.AccountID.IsZero() {
 		return Trade{}, fmt.Errorf("%w: account id must be set", ErrInvalidTrade)
@@ -64,6 +67,9 @@ func NewTrade(t Trade) (Trade, error) {
 	}
 	if t.OpenedAt.IsZero() {
 		return Trade{}, fmt.Errorf("%w: opened at must be set", ErrInvalidTrade)
+	}
+	if !t.ClosedAt.IsZero() && t.ClosedAt.Before(t.OpenedAt) {
+		return Trade{}, fmt.Errorf("%w: closed at must not precede opened at", ErrInvalidTrade)
 	}
 	return t, nil
 }

@@ -45,7 +45,7 @@ type CancelResult struct {
 // non-zero.
 func NewCancelResult(r CancelResult) (CancelResult, error) {
 	if r.OrderID.IsZero() {
-		return CancelResult{}, fmt.Errorf("%w: order id must be set", ErrInvalidCancelRequest)
+		return CancelResult{}, fmt.Errorf("%w: order id must be set", ErrInvalidCancelResult)
 	}
 	return r, nil
 }
