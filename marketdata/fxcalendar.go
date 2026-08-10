@@ -180,10 +180,11 @@ func literalDateKey(h time.Time) dateKey {
 }
 
 // utcBar truncates t to the most recent multiple of duration since the
-// Go zero time, which — because the zero time falls at 00:00:00 UTC and
-// every calendar day divides evenly into duration for the minute/hour
-// counts Interval permits — aligns bars to the UTC clock (00:00, 04:00,
-// ... for four-hour bars, for example).
+// Go zero time. The zero time falls at 00:00:00 UTC, so this always
+// aligns to the UTC clock rather than to an arbitrary epoch. For
+// durations that evenly divide 24 hours — as every predefined Interval
+// here does — the resulting boundaries repeat at the same clock time
+// every day (00:00, 04:00, ... for four-hour bars, for example).
 func utcBar(t time.Time, duration time.Duration) (TimeRange, error) {
 	start := t.UTC().Truncate(duration)
 	return NewTimeRange(start, start.Add(duration))
