@@ -1,15 +1,17 @@
 // Package id implements Trader-owned identifiers and correlation metadata,
 // as decided by issue #24 (M1-06).
 //
-// # Ten identifier kinds
+// # Six identifier kinds
 //
-// RunID, SessionID, IntentID, ProposalID, OrderID, FillID, EventID,
-// CorrelationID, AccountID, and InstrumentID are each a distinct Go type —
-// a RunID can never be assigned where an OrderID is expected, caught at
-// compile time, not at runtime. Internally they share one generic
-// implementation (ID[K], in id.go) rather than ten hand-copied ones, but
-// nothing about that is visible at a call site: id.RunID is used exactly
-// like any other named type.
+// RunID, OrderID, FillID, EventID, CorrelationID, and AccountID are each a
+// distinct Go type — a RunID can never be assigned where an OrderID is
+// expected, caught at compile time, not at runtime. Internally they share
+// one generic implementation (ID[K], in id.go) rather than six hand-copied
+// ones, but nothing about that is visible at a call site: id.RunID is used
+// exactly like any other named type.
+//
+// This is deliberately fewer kinds than issue #24 originally proposed; see
+// "Deferred identifiers" below for which ones were cut, and why.
 //
 // Each kind's canonical string form carries a short prefix identifying it —
 // "run_01J8Z3K3R2N4XG9YB6HFA1V7ZQ", "ord_01J8Z3K5H7T1MDCE9WNRP2VXY0" — so a
@@ -42,17 +44,33 @@
 // BrokerAccountID, ...) alongside whatever mapping they need between the
 // two; that mapping is a broker-adapter concern, not this package's.
 //
-// # AccountID and InstrumentID have different lifecycles
+// # AccountID has a different lifecycle
 //
 // Every other kind is generated fresh for the event it identifies: a new
-// RunID per run, a new OrderID per order. AccountID and InstrumentID are
-// not: an AccountID is generated once when the account entity is created
-// and then persisted for that account's lifetime, never regenerated on a
-// later run. InstrumentID's ULID-based identity here is a placeholder for
-// M1 — EUR/USD must not receive a fresh identity every run — and is
-// expected to eventually be superseded or wrapped by a canonical
-// instrument registry once the architecture document's instrument package
-// exists.
+// RunID per run, a new OrderID per order. AccountID is not: it is
+// generated once when the account entity is created and then persisted
+// for that account's lifetime, never regenerated on a later run.
+//
+// # Deferred identifiers
+//
+// Issue #24 originally proposed SessionID, IntentID, ProposalID, and
+// InstrumentID alongside the six kinds this package actually exports.
+// They were cut from the initial scope on review, using this rule of
+// thumb: would two otherwise-identical instances of this thing ever need
+// to coexist and be distinguished by Trader? That is clearly true for
+// runs, orders, fills, and accounts. It was not yet true for sessions,
+// intents, and proposals — none of those have a concrete, persisted
+// domain object in the codebase yet to justify a generated identity for.
+// They will be added, alongside their corresponding domain objects, when
+// that changes.
+//
+// InstrumentID was cut for a different reason: an instrument has a
+// natural, canonical identity (EUR/USD, an exchange/symbol/asset triple,
+// ...), not an arbitrary generated one. A ULID-based InstrumentID would
+// have given EUR/USD a fresh identity every run, which is exactly wrong.
+// Instrument identity is expected to come from a canonical instrument
+// registry once the architecture document's instrument package exists,
+// not from this package.
 //
 // # Generation
 //

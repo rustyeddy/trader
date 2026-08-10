@@ -119,10 +119,11 @@ ordering and UTC/monotonic-metadata guarantees.
 
 ### id
 
-`id` provides Trader-owned identifiers — `RunID`, `OrderID`, `EventID`,
-`CorrelationID`, and seven more — each a distinct Go type at compile time,
-backed internally by a monotonic ULID (time-sortable, generated from an
-injected `clock.Clock`) but never exposing that as a public dependency:
+`id` provides Trader-owned identifiers — `RunID`, `OrderID`, `FillID`,
+`EventID`, `CorrelationID`, and `AccountID` — each a distinct Go type at
+compile time, backed internally by a monotonic ULID (time-sortable,
+generated from an injected `clock.Clock`) but never exposing that as a
+public dependency:
 
 ```go
 g := id.NewGenerator(clock.Real{}, id.Random{})

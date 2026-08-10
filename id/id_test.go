@@ -17,15 +17,11 @@ func TestKindPrefixes(t *testing.T) {
 		prefix string
 	}{
 		{runKind{}, "run"},
-		{sessionKind{}, "ses"},
-		{intentKind{}, "int"},
-		{proposalKind{}, "prp"},
 		{orderKind{}, "ord"},
 		{fillKind{}, "fil"},
 		{eventKind{}, "evt"},
 		{correlationKind{}, "cor"},
 		{accountKind{}, "acc"},
-		{instrumentKind{}, "ins"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.prefix, tt.kind.Prefix())

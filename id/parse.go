@@ -1,6 +1,6 @@
 package id
 
-// Concrete Parse<Kind> and MustParse<Kind> functions for each of the ten
+// Concrete Parse<Kind> and MustParse<Kind> functions for each of the six
 // identifier kinds. These are thin wrappers over the generic Parse[K] and
 // MustParse[K], instantiated here with the unexported kind marker types
 // (runKind, orderKind, ...) that callers outside this package cannot name
@@ -14,24 +14,6 @@ func ParseRunID(s string) (RunID, error) { return Parse[runKind](s) }
 
 // MustParseRunID is like ParseRunID but panics on error. See MustParse.
 func MustParseRunID(s string) RunID { return MustParse[runKind](s) }
-
-// ParseSessionID parses s as a SessionID. See Parse.
-func ParseSessionID(s string) (SessionID, error) { return Parse[sessionKind](s) }
-
-// MustParseSessionID is like ParseSessionID but panics on error. See MustParse.
-func MustParseSessionID(s string) SessionID { return MustParse[sessionKind](s) }
-
-// ParseIntentID parses s as an IntentID. See Parse.
-func ParseIntentID(s string) (IntentID, error) { return Parse[intentKind](s) }
-
-// MustParseIntentID is like ParseIntentID but panics on error. See MustParse.
-func MustParseIntentID(s string) IntentID { return MustParse[intentKind](s) }
-
-// ParseProposalID parses s as a ProposalID. See Parse.
-func ParseProposalID(s string) (ProposalID, error) { return Parse[proposalKind](s) }
-
-// MustParseProposalID is like ParseProposalID but panics on error. See MustParse.
-func MustParseProposalID(s string) ProposalID { return MustParse[proposalKind](s) }
 
 // ParseOrderID parses s as an OrderID. See Parse.
 func ParseOrderID(s string) (OrderID, error) { return Parse[orderKind](s) }
@@ -62,9 +44,3 @@ func ParseAccountID(s string) (AccountID, error) { return Parse[accountKind](s) 
 
 // MustParseAccountID is like ParseAccountID but panics on error. See MustParse.
 func MustParseAccountID(s string) AccountID { return MustParse[accountKind](s) }
-
-// ParseInstrumentID parses s as an InstrumentID. See Parse.
-func ParseInstrumentID(s string) (InstrumentID, error) { return Parse[instrumentKind](s) }
-
-// MustParseInstrumentID is like ParseInstrumentID but panics on error. See MustParse.
-func MustParseInstrumentID(s string) InstrumentID { return MustParse[instrumentKind](s) }

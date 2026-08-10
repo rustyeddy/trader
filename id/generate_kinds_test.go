@@ -10,7 +10,7 @@ import (
 )
 
 // TestConcreteGenerateFunctionsMatchTheirKind exercises every one of the
-// ten Generate<Kind> wrappers and confirms each produces an identifier
+// six Generate<Kind> wrappers and confirms each produces an identifier
 // carrying its own kind's prefix — the same defense against a copy-paste
 // wiring mistake that TestConcreteParseFunctionsMatchTheirKind provides for
 // the Parse<Kind> wrappers.
@@ -21,15 +21,11 @@ func TestConcreteGenerateFunctionsMatchTheirKind(t *testing.T) {
 		generate func(*Generator) (string, error)
 	}{
 		{"RunID", "run", func(g *Generator) (string, error) { v, err := GenerateRunID(g); return v.String(), err }},
-		{"SessionID", "ses", func(g *Generator) (string, error) { v, err := GenerateSessionID(g); return v.String(), err }},
-		{"IntentID", "int", func(g *Generator) (string, error) { v, err := GenerateIntentID(g); return v.String(), err }},
-		{"ProposalID", "prp", func(g *Generator) (string, error) { v, err := GenerateProposalID(g); return v.String(), err }},
 		{"OrderID", "ord", func(g *Generator) (string, error) { v, err := GenerateOrderID(g); return v.String(), err }},
 		{"FillID", "fil", func(g *Generator) (string, error) { v, err := GenerateFillID(g); return v.String(), err }},
 		{"EventID", "evt", func(g *Generator) (string, error) { v, err := GenerateEventID(g); return v.String(), err }},
 		{"CorrelationID", "cor", func(g *Generator) (string, error) { v, err := GenerateCorrelationID(g); return v.String(), err }},
 		{"AccountID", "acc", func(g *Generator) (string, error) { v, err := GenerateAccountID(g); return v.String(), err }},
-		{"InstrumentID", "ins", func(g *Generator) (string, error) { v, err := GenerateInstrumentID(g); return v.String(), err }},
 	}
 
 	for _, tt := range tests {
