@@ -116,3 +116,15 @@ func (p Price) Div(o Price) (Rate, error) {
 	}
 	return Rate{raw: raw}, nil
 }
+
+// DivisibleBy reports whether p is an exact integer multiple of step, per
+// ADR-004's price-increment rule: priceRaw % tickRaw == 0. The comparison is
+// exact scaled-integer arithmetic; no rounding is involved.
+//
+// DivisibleBy reports ErrDivideByZero when step is zero.
+func (p Price) DivisibleBy(step Price) (bool, error) {
+	if step.raw == 0 {
+		return false, ErrDivideByZero
+	}
+	return p.raw%step.raw == 0, nil
+}

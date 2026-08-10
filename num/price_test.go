@@ -134,3 +134,35 @@ func TestPriceDivByZero(t *testing.T) {
 	_, err := a.Div(Price{})
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
+
+func TestPriceDivisibleBy(t *testing.T) {
+	tests := []struct {
+		name string
+		p    string
+		step string
+		want bool
+	}{
+		{name: "exact multiple", p: "1.08450", step: "0.00010", want: true},
+		{name: "on the step itself", p: "0.25", step: "0.25", want: true},
+		{name: "zero is divisible by anything nonzero", p: "0", step: "0.01", want: true},
+		{name: "not a multiple", p: "1.08453", step: "0.00010", want: false},
+		{name: "one quantum short", p: "1.00000001", step: "0.00000010", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := MustParsePrice(tt.p)
+			step := MustParsePrice(tt.step)
+
+			got, err := p.DivisibleBy(step)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPriceDivisibleByZeroStep(t *testing.T) {
+	p := MustParsePrice("1.00")
+	_, err := p.DivisibleBy(Price{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
