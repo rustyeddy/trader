@@ -116,23 +116,40 @@ func ApplyExpiration(o Order) (Order, error) {
 // ApplyCancelRequest transitions o from StatusWorking or
 // StatusPartiallyFilled to StatusPendingCancel, marking a cancel as
 // locally in flight before the broker confirms it. req.OrderID must
-// match o.
+// match o, and req.Metadata.EventID must be non-zero: it becomes
+// o.PendingCommandID, the correlation key ApplyCancelResult requires a
+// result to match before applying it.
 func ApplyCancelRequest(o Order, req CancelRequest) (Order, error) {
 	if err := checkOrderIDMatch(o, req.OrderID); err != nil {
 		return Order{}, err
+	}
+	if req.Metadata.EventID.IsZero() {
+		return Order{}, fmt.Errorf("%w: cancel request must have a non-zero Metadata.EventID to correlate its result", ErrIllegalTransition)
 	}
 	if o.Status != StatusWorking && o.Status != StatusPartiallyFilled {
 		return Order{}, fmt.Errorf("%w: cannot request cancel for order in status %s", ErrIllegalTransition, o.Status)
 	}
 	o.Status = StatusPendingCancel
+	o.PendingCommandID = req.Metadata.EventID
 	return NewOrder(o)
 }
 
-// ApplyCancelResult transitions o from StatusPendingCancel to
-// result.Status: typically StatusCanceled, but a cancel can also be
-// declined (result.Rejection explains why), in which case result.Status
-// reflects the order's actual resulting state. result.OrderID must
-// match o.
+// ApplyCancelResult transitions o to result.Status: typically
+// StatusCanceled, but a cancel can also be declined (result.Rejection
+// explains why), in which case result.Status reflects the order's
+// actual resulting state. result.OrderID must match o.
+//
+// If o.PendingCommandID is set (o is currently StatusPendingCancel with
+// an outstanding command), result.Metadata.CausationID must match it —
+// ErrStaleResult otherwise. This is what prevents a delayed result from
+// an earlier cancel cycle on this same order from being misapplied
+// during a later one. If o.PendingCommandID is unset — for example
+// because ApplyFill already overrode a pending cancel with a complete
+// fill — there is no outstanding command to correlate against, and
+// result is validated purely against the transition graph: a result
+// matching o's current (possibly terminal) Status is accepted as an
+// idempotent no-op, satisfying redelivery of the same confirmation,
+// while a result naming any other status is rejected as unreachable.
 //
 // ApplyCancelResult never copies result.Rejection into o.Rejection:
 // those are distinct concepts. result.Rejection explains why the cancel
@@ -145,41 +162,67 @@ func ApplyCancelResult(o Order, result CancelResult) (Order, error) {
 	if err := checkOrderIDMatch(o, result.OrderID); err != nil {
 		return Order{}, err
 	}
-	if o.Status != StatusPendingCancel {
-		return Order{}, fmt.Errorf("%w: cannot apply cancel result to order in status %s", ErrIllegalTransition, o.Status)
+	if !o.PendingCommandID.IsZero() && result.Metadata.CausationID != o.PendingCommandID {
+		return Order{}, fmt.Errorf("%w: cancel result causation id %s does not match outstanding command %s", ErrStaleResult, result.Metadata.CausationID, o.PendingCommandID)
 	}
 	if !o.Status.CanTransitionTo(result.Status) {
 		return Order{}, fmt.Errorf("%w: cancel result status %s not reachable from %s", ErrIllegalTransition, result.Status, o.Status)
 	}
 	o.Status = result.Status
+	if o.Status != StatusPendingCancel {
+		o.PendingCommandID = id.EventID{}
+	}
 	return NewOrder(o)
 }
 
 // ApplyReplaceRequest transitions o from StatusWorking or
 // StatusPartiallyFilled to StatusPendingReplace, marking a replace as
 // locally in flight before the broker confirms it. req.OrderID must
-// match o. The requested new values are not applied yet — only
-// ApplyReplaceResult applies them, once the broker has actually
-// confirmed the replace.
+// match o, and req.Metadata.EventID must be non-zero: it becomes
+// o.PendingCommandID, the correlation key ApplyReplaceResult requires a
+// result to match before applying it. The requested new values are not
+// applied yet — only ApplyReplaceResult applies them, once the broker
+// has actually confirmed the replace.
 func ApplyReplaceRequest(o Order, req ReplaceRequest) (Order, error) {
 	if err := checkOrderIDMatch(o, req.OrderID); err != nil {
 		return Order{}, err
+	}
+	if req.Metadata.EventID.IsZero() {
+		return Order{}, fmt.Errorf("%w: replace request must have a non-zero Metadata.EventID to correlate its result", ErrIllegalTransition)
 	}
 	if o.Status != StatusWorking && o.Status != StatusPartiallyFilled {
 		return Order{}, fmt.Errorf("%w: cannot request replace for order in status %s", ErrIllegalTransition, o.Status)
 	}
 	o.Status = StatusPendingReplace
+	o.PendingCommandID = req.Metadata.EventID
 	return NewOrder(o)
 }
 
-// ApplyReplaceResult transitions o from StatusPendingReplace to
-// result.Status. request and result must both refer to o (their
-// OrderIDs must match o.Request.OrderID and each other). On success
-// (result.Rejection == nil), request's non-nil NewQuantity/
-// NewLimitPrice/NewStopPrice replace o's corresponding Accepted* fields
-// — modeling replace as in-place amendment of the same Trader OrderID,
-// not as a distinct "superseded" order with its own identity; see
-// ADR-018. On decline, o's accepted values are left unchanged.
+// ApplyReplaceResult transitions o to result.Status. request and result
+// must both refer to o (their OrderIDs must match o.Request.OrderID and
+// each other).
+//
+// If o.PendingCommandID is set, result.Metadata.CausationID must match
+// it — ErrStaleResult otherwise — for the same reason as
+// ApplyCancelResult: a delayed result from an earlier replace cycle on
+// this same order must not be applied during a later one. If
+// o.PendingCommandID is unset, result is validated purely against the
+// transition graph, allowing a redelivered confirmation matching o's
+// current status as an idempotent no-op.
+//
+// The replace is only treated as having taken effect — request's
+// non-nil NewQuantity/NewLimitPrice/NewStopPrice replacing o's
+// corresponding Accepted* fields — when result.Rejection is nil AND
+// result.Status is StatusWorking or StatusPartiallyFilled: the order
+// remaining live is what "the replacement took effect" actually means.
+// A non-rejected result of StatusCanceled or StatusFilled means the
+// order's life resolved a different way around the same time, and
+// applying new accepted terms first would be misleading even though
+// nothing was technically rejected. This model replace as in-place
+// amendment of the same Trader OrderID, never as a distinct
+// "superseded" order with its own identity; see ADR-018. On decline, or
+// when the result does not mean success, o's accepted values are left
+// unchanged.
 func ApplyReplaceResult(o Order, request ReplaceRequest, result ReplaceResult) (Order, error) {
 	if err := checkOrderIDMatch(o, request.OrderID); err != nil {
 		return Order{}, err
@@ -187,13 +230,15 @@ func ApplyReplaceResult(o Order, request ReplaceRequest, result ReplaceResult) (
 	if request.OrderID != result.OrderID {
 		return Order{}, fmt.Errorf("%w: replace request order id %s does not match result order id %s", ErrOrderMismatch, request.OrderID, result.OrderID)
 	}
-	if o.Status != StatusPendingReplace {
-		return Order{}, fmt.Errorf("%w: cannot apply replace result to order in status %s", ErrIllegalTransition, o.Status)
+	if !o.PendingCommandID.IsZero() && result.Metadata.CausationID != o.PendingCommandID {
+		return Order{}, fmt.Errorf("%w: replace result causation id %s does not match outstanding command %s", ErrStaleResult, result.Metadata.CausationID, o.PendingCommandID)
 	}
 	if !o.Status.CanTransitionTo(result.Status) {
 		return Order{}, fmt.Errorf("%w: replace result status %s not reachable from %s", ErrIllegalTransition, result.Status, o.Status)
 	}
-	if result.Rejection == nil {
+
+	amended := result.Rejection == nil && (result.Status == StatusWorking || result.Status == StatusPartiallyFilled)
+	if amended {
 		if request.NewQuantity != nil {
 			o.AcceptedQuantity = request.NewQuantity
 		}
@@ -205,6 +250,9 @@ func ApplyReplaceResult(o Order, request ReplaceRequest, result ReplaceResult) (
 		}
 	}
 	o.Status = result.Status
+	if o.Status != StatusPendingReplace {
+		o.PendingCommandID = id.EventID{}
+	}
 	return NewOrder(o)
 }
 
@@ -282,6 +330,9 @@ func ApplyFill(o Order, fill Fill) (Order, error) {
 	o.FilledQuantity = newFilled
 	o.AvgFillPrice = nil
 	o.Status = target
+	if o.Status != StatusPendingCancel && o.Status != StatusPendingReplace {
+		o.PendingCommandID = id.EventID{}
+	}
 	o.AppliedFillIDs = append(append([]id.FillID(nil), o.AppliedFillIDs...), fill.FillID)
 	if fill.BrokerFillID != "" {
 		o.AppliedBrokerFillIDs = append(append([]string(nil), o.AppliedBrokerFillIDs...), fill.BrokerFillID)

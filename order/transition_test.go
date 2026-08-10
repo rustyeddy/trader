@@ -3,6 +3,7 @@ package order
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -165,24 +166,33 @@ func TestApplyExpirationIsTerminal(t *testing.T) {
 
 func TestApplyCancelRequestValid(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPendingCancel, o.Status)
+	assert.Equal(t, req.Metadata.EventID, o.PendingCommandID)
 }
 
 func TestApplyCancelRequestRejectsMismatchedOrderID(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: mustOrderID(t)})
+	req, err := NewCancelRequest(CancelRequest{OrderID: mustOrderID(t), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	_, err = ApplyCancelRequest(o, req)
 	assert.ErrorIs(t, err, ErrOrderMismatch)
 }
 
+func TestApplyCancelRequestRejectsZeroEventID(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	require.NoError(t, err)
+	_, err = ApplyCancelRequest(o, req)
+	assert.ErrorIs(t, err, ErrIllegalTransition)
+}
+
 func TestApplyCancelRequestRejectsWrongSourceStatus(t *testing.T) {
 	o := mustPendingSubmitOrder(t)
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	_, err = ApplyCancelRequest(o, req)
 	assert.ErrorIs(t, err, ErrIllegalTransition)
@@ -190,25 +200,32 @@ func TestApplyCancelRequestRejectsWrongSourceStatus(t *testing.T) {
 
 func TestApplyCancelResultSuccess(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
 
-	result, err := NewCancelResult(CancelResult{OrderID: o.Request.OrderID, Status: StatusCanceled})
+	result, err := NewCancelResult(CancelResult{OrderID: o.Request.OrderID, Status: StatusCanceled, Metadata: resultMetadataFor(o)})
 	require.NoError(t, err)
 	o, err = ApplyCancelResult(o, result)
 	require.NoError(t, err)
 	assert.Equal(t, StatusCanceled, o.Status)
 	assert.Nil(t, o.Rejection, "a declined cancel must never set Order.Rejection")
+	assert.True(t, o.PendingCommandID.IsZero(), "PendingCommandID must clear once the cycle resolves")
 }
 
 func TestApplyCancelResultDeclinedDoesNotSetOrderRejection(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
+
+	// The order is not actually fully filled in this fixture, so
+	// completing the transition also requires FilledQuantity to match.
+	accepted := num.MustParseQuantity("1000")
+	o.AcceptedQuantity = &accepted
+	o.FilledQuantity = accepted
 
 	// The cancel was declined because the order was already fully
 	// filled by the time the broker processed it.
@@ -216,15 +233,9 @@ func TestApplyCancelResultDeclinedDoesNotSetOrderRejection(t *testing.T) {
 		OrderID:   o.Request.OrderID,
 		Status:    StatusFilled,
 		Rejection: &Rejection{Reason: ReasonUnknown, Detail: "already filled"},
+		Metadata:  resultMetadataFor(o),
 	})
 	require.NoError(t, err)
-
-	// The order is not actually fully filled in this fixture, so
-	// completing the transition also requires FilledQuantity to match;
-	// use a fresh order where FilledQuantity already equals accepted.
-	accepted := num.MustParseQuantity("1000")
-	o.AcceptedQuantity = &accepted
-	o.FilledQuantity = accepted
 
 	o, err = ApplyCancelResult(o, result)
 	require.NoError(t, err)
@@ -234,12 +245,12 @@ func TestApplyCancelResultDeclinedDoesNotSetOrderRejection(t *testing.T) {
 
 func TestApplyCancelResultRejectsMismatchedOrderID(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
 
-	result, err := NewCancelResult(CancelResult{OrderID: mustOrderID(t), Status: StatusCanceled})
+	result, err := NewCancelResult(CancelResult{OrderID: mustOrderID(t), Status: StatusCanceled, Metadata: resultMetadataFor(o)})
 	require.NoError(t, err)
 	_, err = ApplyCancelResult(o, result)
 	assert.ErrorIs(t, err, ErrOrderMismatch)
@@ -247,7 +258,7 @@ func TestApplyCancelResultRejectsMismatchedOrderID(t *testing.T) {
 
 func TestApplyCancelResultRejectsIllegalResultStatus(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
@@ -257,6 +268,7 @@ func TestApplyCancelResultRejectsIllegalResultStatus(t *testing.T) {
 		OrderID:   o.Request.OrderID,
 		Status:    StatusRejected,
 		Rejection: &Rejection{Reason: ReasonUnknown},
+		Metadata:  resultMetadataFor(o),
 	})
 	require.NoError(t, err)
 	_, err = ApplyCancelResult(o, result)
@@ -271,28 +283,108 @@ func TestApplyCancelResultRejectsWithoutPendingCancel(t *testing.T) {
 	assert.ErrorIs(t, err, ErrIllegalTransition)
 }
 
+// Regression coverage for the delayed-result race a design review
+// flagged: a stale CancelResult from an earlier cancel cycle on the
+// same order must not be applied during a later cancel cycle.
+func TestApplyCancelResultRejectsStaleResultFromEarlierCycle(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+
+	// First cancel cycle: declined, order reverts to Working.
+	firstReq, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyCancelRequest(o, firstReq)
+	require.NoError(t, err)
+	firstResult, err := NewCancelResult(CancelResult{
+		OrderID:   o.Request.OrderID,
+		Status:    StatusWorking,
+		Rejection: &Rejection{Reason: ReasonUnknown},
+		Metadata:  resultMetadataFor(o),
+	})
+	require.NoError(t, err)
+	o, err = ApplyCancelResult(o, firstResult)
+	require.NoError(t, err)
+	assert.Equal(t, StatusWorking, o.Status)
+
+	// Second cancel cycle begins.
+	secondReq, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyCancelRequest(o, secondReq)
+	require.NoError(t, err)
+
+	// A delayed result from the *first* cycle finally arrives, correlated
+	// to firstReq's EventID rather than the currently outstanding
+	// secondReq's EventID.
+	staleResult, err := NewCancelResult(CancelResult{
+		OrderID:  o.Request.OrderID,
+		Status:   StatusCanceled,
+		Metadata: id.Metadata{CausationID: firstReq.Metadata.EventID},
+	})
+	require.NoError(t, err)
+	_, err = ApplyCancelResult(o, staleResult)
+	assert.ErrorIs(t, err, ErrStaleResult)
+}
+
+// Regression coverage for the race Copilot flagged: once ApplyFill has
+// already overridden a pending cancel with a complete fill, a late or
+// duplicate CancelResult confirming that same terminal status must be a
+// safe no-op, not an error.
+func TestApplyCancelResultIsIdempotentAfterFillOverridesPendingCancel(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyCancelRequest(o, req)
+	require.NoError(t, err)
+
+	o, err = ApplyFill(o, mustFillFor(t, o, "1000"))
+	require.NoError(t, err)
+	require.Equal(t, StatusFilled, o.Status)
+	require.True(t, o.PendingCommandID.IsZero())
+
+	lateResult, err := NewCancelResult(CancelResult{OrderID: o.Request.OrderID, Status: StatusFilled})
+	require.NoError(t, err)
+	unchanged, err := ApplyCancelResult(o, lateResult)
+	require.NoError(t, err)
+	assert.Equal(t, o, unchanged)
+
+	// But a late result claiming something inconsistent with the actual
+	// resulting state must still be rejected.
+	wrongResult, err := NewCancelResult(CancelResult{OrderID: o.Request.OrderID, Status: StatusCanceled})
+	require.NoError(t, err)
+	_, err = ApplyCancelResult(o, wrongResult)
+	assert.ErrorIs(t, err, ErrIllegalTransition)
+}
+
 // --- ApplyReplaceRequest / ApplyReplaceResult ---
 
 func TestApplyReplaceRequestValid(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPendingReplace, o.Status)
+	assert.Equal(t, req.Metadata.EventID, o.PendingCommandID)
 }
 
 func TestApplyReplaceRequestRejectsMismatchedOrderID(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: mustOrderID(t), NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: mustOrderID(t), NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	_, err = ApplyReplaceRequest(o, req)
 	assert.ErrorIs(t, err, ErrOrderMismatch)
 }
 
+func TestApplyReplaceRequestRejectsZeroEventID(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	require.NoError(t, err)
+	_, err = ApplyReplaceRequest(o, req)
+	assert.ErrorIs(t, err, ErrIllegalTransition)
+}
+
 func TestApplyReplaceRequestRejectsWrongSourceStatus(t *testing.T) {
 	o := mustPendingSubmitOrder(t)
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	_, err = ApplyReplaceRequest(o, req)
 	assert.ErrorIs(t, err, ErrIllegalTransition)
@@ -326,12 +418,13 @@ func TestApplyReplaceResultSuccessAppliesNewLimitAndStopPrice(t *testing.T) {
 		OrderID:       o.Request.OrderID,
 		NewLimitPrice: price(t, "1.10500"),
 		NewStopPrice:  price(t, "1.10000"),
+		Metadata:      mustCommandMetadata(t),
 	})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
 
-	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusWorking})
+	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusWorking, Metadata: resultMetadataFor(o)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceResult(o, req, result)
 	require.NoError(t, err)
@@ -343,7 +436,7 @@ func TestApplyReplaceResultSuccessAppliesNewLimitAndStopPrice(t *testing.T) {
 
 func TestApplyReplaceResultRejectsIllegalResultStatus(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
@@ -353,6 +446,7 @@ func TestApplyReplaceResultRejectsIllegalResultStatus(t *testing.T) {
 		OrderID:   o.Request.OrderID,
 		Status:    StatusRejected,
 		Rejection: &Rejection{Reason: ReasonUnknown},
+		Metadata:  resultMetadataFor(o),
 	})
 	require.NoError(t, err)
 	_, err = ApplyReplaceResult(o, req, result)
@@ -361,23 +455,24 @@ func TestApplyReplaceResultRejectsIllegalResultStatus(t *testing.T) {
 
 func TestApplyReplaceResultSuccessAppliesNewQuantity(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
 
-	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusWorking})
+	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusWorking, Metadata: resultMetadataFor(o)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceResult(o, req, result)
 	require.NoError(t, err)
 	assert.Equal(t, StatusWorking, o.Status)
 	require.NotNil(t, o.AcceptedQuantity)
 	assert.True(t, o.AcceptedQuantity.Equal(num.MustParseQuantity("2000")), "in-place amendment: same OrderID, updated accepted quantity")
+	assert.True(t, o.PendingCommandID.IsZero())
 }
 
 func TestApplyReplaceResultDeclinedLeavesAcceptedValuesUnchanged(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
@@ -386,6 +481,7 @@ func TestApplyReplaceResultDeclinedLeavesAcceptedValuesUnchanged(t *testing.T) {
 		OrderID:   o.Request.OrderID,
 		Status:    StatusWorking,
 		Rejection: &Rejection{Reason: ReasonUnsupportedCapability},
+		Metadata:  resultMetadataFor(o),
 	})
 	require.NoError(t, err)
 	o, err = ApplyReplaceResult(o, req, result)
@@ -394,15 +490,34 @@ func TestApplyReplaceResultDeclinedLeavesAcceptedValuesUnchanged(t *testing.T) {
 	assert.True(t, o.AcceptedQuantity.Equal(num.MustParseQuantity("1000")), "declined replace must not change accepted quantity")
 }
 
+// A non-rejected replace result whose Status is StatusCanceled must not
+// apply the new accepted terms first: "the replacement took effect" is
+// only true for a result that leaves the order live.
+func TestApplyReplaceResultCanceledDoesNotApplyNewValues(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyReplaceRequest(o, req)
+	require.NoError(t, err)
+
+	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusCanceled, Metadata: resultMetadataFor(o)})
+	require.NoError(t, err)
+	o, err = ApplyReplaceResult(o, req, result)
+	require.NoError(t, err)
+	assert.Equal(t, StatusCanceled, o.Status)
+	require.NotNil(t, o.AcceptedQuantity)
+	assert.True(t, o.AcceptedQuantity.Equal(num.MustParseQuantity("1000")), "a Canceled result must not apply the new accepted quantity")
+}
+
 func TestApplyReplaceResultRejectsRequestOrderIDNotMatchingOrder(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	realReq, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	realReq, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, realReq)
 	require.NoError(t, err)
 
 	otherOrderID := mustOrderID(t)
-	unrelatedReq, err := NewReplaceRequest(ReplaceRequest{OrderID: otherOrderID, NewQuantity: qty(t, "2000")})
+	unrelatedReq, err := NewReplaceRequest(ReplaceRequest{OrderID: otherOrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	unrelatedResult, err := NewReplaceResult(ReplaceResult{OrderID: otherOrderID, Status: StatusWorking})
 	require.NoError(t, err)
@@ -413,7 +528,7 @@ func TestApplyReplaceResultRejectsRequestOrderIDNotMatchingOrder(t *testing.T) {
 
 func TestApplyReplaceResultRejectsMismatchedRequestResultOrderIDs(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
@@ -426,12 +541,73 @@ func TestApplyReplaceResultRejectsMismatchedRequestResultOrderIDs(t *testing.T) 
 
 func TestApplyReplaceResultRejectsWithoutPendingReplace(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
-	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusWorking})
+	// result.Status is not idempotent-equal to o.Status (Working) and
+	// is not reachable directly from Working without having gone
+	// through PendingReplace first.
+	result, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusCanceled})
 	require.NoError(t, err)
 	_, err = ApplyReplaceResult(o, req, result)
 	assert.ErrorIs(t, err, ErrIllegalTransition)
+}
+
+// Regression coverage for the delayed-result race a design review
+// flagged: a stale ReplaceResult from an earlier replace cycle on the
+// same order must not be applied during a later replace cycle.
+func TestApplyReplaceResultRejectsStaleResultFromEarlierCycle(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+
+	firstReq, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "1500"), Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyReplaceRequest(o, firstReq)
+	require.NoError(t, err)
+	firstResult, err := NewReplaceResult(ReplaceResult{
+		OrderID:   o.Request.OrderID,
+		Status:    StatusWorking,
+		Rejection: &Rejection{Reason: ReasonUnknown},
+		Metadata:  resultMetadataFor(o),
+	})
+	require.NoError(t, err)
+	o, err = ApplyReplaceResult(o, firstReq, firstResult)
+	require.NoError(t, err)
+
+	secondReq, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "3000"), Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyReplaceRequest(o, secondReq)
+	require.NoError(t, err)
+
+	staleResult, err := NewReplaceResult(ReplaceResult{
+		OrderID:  o.Request.OrderID,
+		Status:   StatusWorking,
+		Metadata: id.Metadata{CausationID: firstReq.Metadata.EventID},
+	})
+	require.NoError(t, err)
+	_, err = ApplyReplaceResult(o, firstReq, staleResult)
+	assert.ErrorIs(t, err, ErrStaleResult)
+}
+
+// Regression coverage for the race Copilot flagged: once ApplyFill has
+// already overridden a pending replace with a complete fill, a late or
+// duplicate ReplaceResult confirming that same terminal status must be a
+// safe no-op, not an error.
+func TestApplyReplaceResultIsIdempotentAfterFillOverridesPendingReplace(t *testing.T) {
+	o := mustWorkingOrder(t, "1000")
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "2000"), Metadata: mustCommandMetadata(t)})
+	require.NoError(t, err)
+	o, err = ApplyReplaceRequest(o, req)
+	require.NoError(t, err)
+
+	o, err = ApplyFill(o, mustFillFor(t, o, "1000"))
+	require.NoError(t, err)
+	require.Equal(t, StatusFilled, o.Status)
+	require.True(t, o.PendingCommandID.IsZero())
+
+	lateResult, err := NewReplaceResult(ReplaceResult{OrderID: o.Request.OrderID, Status: StatusFilled})
+	require.NoError(t, err)
+	unchanged, err := ApplyReplaceResult(o, req, lateResult)
+	require.NoError(t, err)
+	assert.Equal(t, o, unchanged)
 }
 
 // --- ApplyFill ---
@@ -590,7 +766,7 @@ func TestApplyFillDetectsDuplicateByBrokerFillIDEvenWithNewFillID(t *testing.T) 
 
 func TestApplyFillPreservesPendingCancelOnPartialFill(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
@@ -599,11 +775,12 @@ func TestApplyFillPreservesPendingCancelOnPartialFill(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusPendingCancel, o.Status, "a partial fill must not discard the pending cancel")
 	assert.True(t, o.FilledQuantity.Equal(num.MustParseQuantity("400")))
+	assert.False(t, o.PendingCommandID.IsZero(), "the outstanding cancel command is still outstanding")
 }
 
 func TestApplyFillOverridesPendingCancelOnCompleteFill(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID})
+	req, err := NewCancelRequest(CancelRequest{OrderID: o.Request.OrderID, Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyCancelRequest(o, req)
 	require.NoError(t, err)
@@ -611,11 +788,12 @@ func TestApplyFillOverridesPendingCancelOnCompleteFill(t *testing.T) {
 	o, err = ApplyFill(o, mustFillFor(t, o, "1000"))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFilled, o.Status, "a complete fill leaves nothing left to cancel")
+	assert.True(t, o.PendingCommandID.IsZero(), "no command is outstanding once fully filled")
 }
 
 func TestApplyFillPreservesPendingReplaceOnPartialFill(t *testing.T) {
 	o := mustWorkingOrder(t, "1000")
-	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "1500")})
+	req, err := NewReplaceRequest(ReplaceRequest{OrderID: o.Request.OrderID, NewQuantity: qty(t, "1500"), Metadata: mustCommandMetadata(t)})
 	require.NoError(t, err)
 	o, err = ApplyReplaceRequest(o, req)
 	require.NoError(t, err)
@@ -623,4 +801,5 @@ func TestApplyFillPreservesPendingReplaceOnPartialFill(t *testing.T) {
 	o, err = ApplyFill(o, mustFillFor(t, o, "400"))
 	require.NoError(t, err)
 	assert.Equal(t, StatusPendingReplace, o.Status, "a partial fill must not discard the pending replace")
+	assert.False(t, o.PendingCommandID.IsZero(), "the outstanding replace command is still outstanding")
 }

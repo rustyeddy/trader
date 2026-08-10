@@ -157,6 +157,21 @@ func mustFillFor(t *testing.T, o Order, quantity string) Fill {
 	return f
 }
 
+// mustCommandMetadata returns Metadata for a new CancelRequest/
+// ReplaceRequest, with a fresh non-zero EventID that ApplyCancelRequest/
+// ApplyReplaceRequest will record as the order's PendingCommandID.
+func mustCommandMetadata(t *testing.T) id.Metadata {
+	t.Helper()
+	return id.Metadata{EventID: mustEventID(t)}
+}
+
+// resultMetadataFor returns Metadata for a CancelResult/ReplaceResult
+// that correlates to o's currently outstanding command
+// (o.PendingCommandID), as ApplyCancelResult/ApplyReplaceResult require.
+func resultMetadataFor(o Order) id.Metadata {
+	return id.Metadata{CausationID: o.PendingCommandID}
+}
+
 func price(t *testing.T, s string) *num.Price {
 	t.Helper()
 	p := num.MustParsePrice(s)

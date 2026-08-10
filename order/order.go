@@ -36,6 +36,17 @@ type Order struct {
 	AcceptedStopPrice *num.Price
 
 	Status Status
+	// PendingCommandID identifies the CancelRequest or ReplaceRequest
+	// (by its Metadata.EventID) currently outstanding while Status is
+	// StatusPendingCancel or StatusPendingReplace; the zero value
+	// otherwise. ApplyCancelResult/ApplyReplaceResult require a result
+	// to correlate to this exact command before applying it, so a stale
+	// result from an earlier cancel/replace cycle on this same order
+	// cannot be mistaken for the currently outstanding one. Cleared
+	// whenever Status leaves StatusPendingCancel/StatusPendingReplace,
+	// including when ApplyFill overrides a pending cancel/replace with
+	// a complete fill.
+	PendingCommandID id.EventID
 	// FilledQuantity is the cumulative quantity executed so far. It can
 	// only be non-zero once AcceptedQuantity is set, and never exceeds
 	// it.
@@ -127,6 +138,14 @@ func NewOrder(o Order) (Order, error) {
 	}
 	if o.Status != StatusRejected && o.Rejection != nil {
 		return Order{}, fmt.Errorf("%w: only a rejected order may carry a Rejection", ErrInvalidOrder)
+	}
+
+	pending := o.Status == StatusPendingCancel || o.Status == StatusPendingReplace
+	if pending && o.PendingCommandID.IsZero() {
+		return Order{}, fmt.Errorf("%w: status %s requires a PendingCommandID", ErrInvalidOrder, o.Status)
+	}
+	if !pending && !o.PendingCommandID.IsZero() {
+		return Order{}, fmt.Errorf("%w: PendingCommandID requires status StatusPendingCancel or StatusPendingReplace, got %s", ErrInvalidOrder, o.Status)
 	}
 
 	if err := checkNoDuplicateFillIDs(o.AppliedFillIDs); err != nil {

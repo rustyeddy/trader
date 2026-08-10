@@ -62,4 +62,13 @@ var (
 	// returned Order is unchanged and remains valid; callers may treat
 	// this as a safe no-op rather than a fatal error.
 	ErrDuplicateFill = errors.New("order: fill already applied")
+
+	// ErrStaleResult reports that ApplyCancelResult or ApplyReplaceResult
+	// was called with a result whose Metadata.CausationID does not match
+	// Order.PendingCommandID: the result does not correlate to the
+	// currently outstanding cancel/replace command, typically because it
+	// is a delayed result from an earlier cancel/replace cycle on the
+	// same order. This is distinct from ErrOrderMismatch, which means
+	// the event belongs to a different order entirely.
+	ErrStaleResult = errors.New("order: result does not correlate to the outstanding command")
 )

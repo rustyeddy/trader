@@ -115,6 +115,21 @@
 // entirely is a more serious failure than an otherwise-valid but
 // unreachable state change.
 //
+// Matching OrderID is not enough to prove a CancelResult/ReplaceResult
+// belongs to the *currently outstanding* cancel/replace cycle: a delayed
+// result from an earlier cycle on the same order could otherwise be
+// misapplied during a later one. ApplyCancelRequest/ApplyReplaceRequest
+// record the request's Metadata.EventID as Order.PendingCommandID, and
+// ApplyCancelResult/ApplyReplaceResult require a result's
+// Metadata.CausationID to match it — ErrStaleResult otherwise — whenever
+// PendingCommandID is set. Once no command is outstanding (for example,
+// because ApplyFill already overrode a pending cancel/replace with a
+// complete fill), there is nothing left to correlate against, and the
+// result is validated purely against the transition graph instead: a
+// result matching the Order's current status is accepted as an
+// idempotent no-op, satisfying redelivery of the same confirmation,
+// while a result naming anything else is rejected as unreachable.
+//
 // ApplyFill additionally detects duplicate delivery of the same broker
 // execution: fill.BrokerFillID is checked first, against
 // Order.AppliedBrokerFillIDs, since an adapter is not guaranteed to
@@ -132,10 +147,16 @@
 // overrides the pending status to StatusFilled, since there is nothing
 // left to cancel or replace once an order is fully filled.
 //
-// A successful replace amends Order in place — same Trader OrderID,
-// updated Accepted* fields — rather than modeling "replaced/superseded"
-// as a distinct persistent state or a new order identity; see ADR-018
-// for why.
+// A replace result amends Order in place — same Trader OrderID, updated
+// Accepted* fields — rather than modeling "replaced/superseded" as a
+// distinct persistent state or a new order identity; see ADR-018 for
+// why. The amendment only applies when result.Rejection is nil AND
+// result.Status is StatusWorking or StatusPartiallyFilled: those are
+// the only outcomes that actually mean "the replacement took effect and
+// the order remains live." A non-rejected StatusCanceled or
+// StatusFilled result still transitions Order.Status, but leaves the
+// accepted values untouched, since the order's life resolved a
+// different way around the same time as the replace.
 //
 // ApplyFill clears AvgFillPrice to nil on every fill rather than
 // maintain it: num has no Price-by-Quantity multiplication yet, and

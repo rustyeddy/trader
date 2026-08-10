@@ -1036,7 +1036,13 @@ assumed adapters reuse the same Trader =FillID= across redelivery, the
 issue's "replaced/superseded" vocabulary not being modeled or explicitly
 decided against, =AvgFillPrice= being left to go stale after a fill, and
 a same-status-idempotent rule that conflicted with =StatusUnknown= never
-being a legal target.
+being a legal target.  A second review round on the resulting pull
+request found two further gaps: matching only =OrderID= does not prove a
+=CancelResult=/=ReplaceResult= belongs to the *currently outstanding*
+cancel/replace cycle rather than a delayed result from an earlier cycle
+on the same order, and treating "not rejected" as synonymous with
+"replace succeeded" let a non-rejected =Canceled= result apply the
+replace's new accepted terms immediately before canceling the order.
 
 ** Decision
 
@@ -1151,6 +1157,51 @@ example, "already filled"); =Order.Rejection= (ADR-017) means the
 invariant the moment a cancel is declined against, say, an already-
 =Filled= order.
 
+Matching =OrderID= alone does not prove a =CancelResult=/=ReplaceResult=
+belongs to the *currently outstanding* command: a delayed result from an
+earlier cancel/replace cycle on the same order could otherwise be
+misapplied during a later cycle.  =Order= gains a new
+=PendingCommandID id.EventID= field, set to the request's
+=Metadata.EventID= by =ApplyCancelRequest=/=ApplyReplaceRequest= and
+required, non-zero, on that request (=ErrIllegalTransition= otherwise,
+since without it nothing could ever correlate a later result).  Whenever
+=PendingCommandID= is set, =ApplyCancelResult=/=ApplyReplaceResult=
+require the result's =Metadata.CausationID= to match it exactly —
+=ErrStaleResult= otherwise, a new sentinel distinct from
+=ErrOrderMismatch= since the event does belong to this order, just not
+to its current command.  =PendingCommandID= is cleared whenever =Status=
+leaves =StatusPendingCancel=/=StatusPendingReplace=, including when
+=ApplyFill= overrides a pending cancel/replace with a complete fill.
+=NewOrder= enforces that =PendingCommandID= is non-zero exactly when
+=Status= is =StatusPendingCancel=/=StatusPendingReplace=, the same
+paired-field pattern ADR-017 already established for =AcceptedQuantity=
+and =Status=.
+
+Once =PendingCommandID= is unset — most notably after =ApplyFill= has
+already overridden a pending cancel/replace with a complete fill — there
+is no outstanding command left to correlate a result against.  In that
+case =ApplyCancelResult=/=ApplyReplaceResult= fall back to validating the
+result purely against the transition graph: a result whose =Status=
+matches the =Order='s current =Status= is accepted as an idempotent
+no-op (satisfying redelivery of the same broker confirmation after the
+order has already reached that state), while a result naming any other
+status is rejected as unreachable through the graph's existing terminal-
+state and adjacency rules.  This single mechanism resolves both review
+findings without their being in tension: correlation is enforced exactly
+while a command is genuinely outstanding, and idempotent redelivery is
+still safe once it is not.
+
+=ApplyReplaceResult= no longer infers "the replacement took effect" from
+=result.Rejection == nil= alone.  The new accepted values are applied
+only when =result.Rejection= is =nil= *and* =result.Status= is
+=StatusWorking= or =StatusPartiallyFilled= — the only two outcomes that
+actually mean the order remains live under the amended terms.  A
+non-rejected =StatusCanceled= or =StatusFilled= result still transitions
+=Order.Status=, but leaves =AcceptedQuantity=/=AcceptedLimitPrice=/
+=AcceptedStopPrice= untouched, since the order's life resolved a
+different way around the same time as the replace, and applying new
+terms first would misrepresent what actually happened.
+
 ** Consequences
 
 - Every lifecycle transition is validated against one shared graph,
@@ -1172,6 +1223,18 @@ invariant the moment a cancel is declined against, say, an already-
 - Reconciliation of out-of-order terminal events that skip the local
   pending-state step remains unimplemented and is explicitly deferred to
   the future =live= package.
+- Every =CancelRequest=/=ReplaceRequest= submitted through
+  =ApplyCancelRequest=/=ApplyReplaceRequest= must carry a non-zero
+  =Metadata.EventID=; a caller that omits it can never have its cancel
+  or replace applied, by design, since there would be nothing for the
+  eventual result to correlate against.
+- A caller cannot mistake a delayed result from an earlier cancel/
+  replace cycle on the same order for a result belonging to the current
+  cycle — =ErrStaleResult= makes that distinction explicit rather than
+  silently applying whichever result arrives first.
+- A non-rejected =Canceled=/=Filled= replace result no longer risks
+  silently amending accepted terms moments before the order's life ends
+  a different way.
 
 ** Alternatives Considered
 
@@ -1202,6 +1265,21 @@ invariant the moment a cancel is declined against, say, an already-
   review: it would implicitly discard a still-outstanding broker
   cancel/replace confirmation, which a later terminal event might still
   legitimately reference.
+- *Requiring =Order.Status= to remain exactly =StatusPendingCancel=/
+  =StatusPendingReplace= before =ApplyCancelResult=/=ApplyReplaceResult=
+  will accept anything.*  This was the original implementation, but a
+  PR review round showed it made a common race impossible to handle
+  correctly: once =ApplyFill= overrides a pending cancel/replace to
+  =StatusFilled=, a later matching confirmation for that same terminal
+  state would always fail with =ErrIllegalTransition= even though it is
+  exactly the redelivery the same-status idempotent rule is meant to
+  absorb.  Replaced with the =PendingCommandID=-based correlation check
+  plus a graph-only fallback once no command is outstanding.
+- *Correlating cancel/replace results by embedding the request itself on
+  =Order= instead of just its =Metadata.EventID=.*  Rejected as carrying
+  more state than the correlation check needs; a single
+  =id.EventID= is sufficient to detect a stale result and imposes no
+  obligation to keep a full, possibly-stale copy of the request around.
 
 * ADR Template                                                       :noexport:
 

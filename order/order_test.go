@@ -215,6 +215,27 @@ func TestOrderRemainingQuantityRequiresAcceptance(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidOrder)
 }
 
+func TestNewOrderRejectsPendingStatusWithoutPendingCommandID(t *testing.T) {
+	accepted := num.MustParseQuantity("1000")
+	_, err := NewOrder(Order{
+		Request:          mustRequest(t),
+		AcceptedQuantity: &accepted,
+		Status:           StatusPendingCancel,
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsPendingCommandIDWithoutPendingStatus(t *testing.T) {
+	accepted := num.MustParseQuantity("1000")
+	_, err := NewOrder(Order{
+		Request:          mustRequest(t),
+		AcceptedQuantity: &accepted,
+		Status:           StatusWorking,
+		PendingCommandID: mustEventID(t),
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
 func TestNewOrderRejectsZeroAppliedFillID(t *testing.T) {
 	_, err := NewOrder(Order{
 		Request:        mustRequest(t),
