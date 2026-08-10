@@ -228,6 +228,39 @@ See [ADR-012](docs/arch/adr-decisions.org) and the
 [package doc comment](marketdata/doc.go) for the full half-open range
 convention, DST handling, and why day/week bars use a `Calendar` seam.
 
+### order
+
+`order` defines Trader's broker-neutral order and execution vocabulary —
+what a proposal, request, accepted order, and fill are, not order-state
+transition rules or broker I/O. The stages are distinct types, not
+variations on one struct:
+
+```go
+proposal, err := order.NewProposal(order.Proposal{ /* ... */ })
+request, err := order.NewRequest(proposal, orderID) // orderID doubles as the idempotency key
+```
+
+`Order` embeds its originating `Request` (the requested values) alongside
+separate `Accepted*` fields (what the broker actually accepted, which may
+differ due to broker-side normalization); `RemainingQuantity` derives
+from the accepted quantity, never the requested one:
+
+```go
+remaining, err := acceptedOrder.RemainingQuantity() // AcceptedQuantity - FilledQuantity
+```
+
+`Fill` preserves both Trader's `FillID` and the broker's own
+`BrokerFillID`, plus its own `AccountID`, so it never requires a join
+through the parent order. `Status` and `RejectReason` reserve their zero
+value for `Unknown` — the same safe-default pattern `marketdata.Status`
+uses — so an adapter parsing an unfamiliar broker status or rejection
+code never has to crash or guess.
+
+See [ADR-017](docs/arch/adr-decisions.org) and the
+[package doc comment](order/doc.go) for the full requested-versus-accepted
+model, the idempotency-key scope, and why `Position`/`Trade` are shaped
+the way they are.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
