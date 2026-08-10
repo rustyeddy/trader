@@ -171,26 +171,63 @@ func TestFXCalendarWeekBarFallBackGainsAnHour(t *testing.T) {
 	assert.Equal(t, 7*24*time.Hour+time.Hour, bar.Duration())
 }
 
-func TestFXCalendarHoliday(t *testing.T) {
+// The holiday closure covers the entire rollover-to-rollover session
+// that ends on the named date, not just that calendar day's own hours —
+// Status and Session must agree on every instant within that session.
+func TestFXCalendarHolidayClosesTheWholeSessionThatEndsOnIt(t *testing.T) {
 	holiday := nyTime(2026, time.January, 1, 0, 0) // New Year's Day, a Thursday
 	c := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{holiday}})
 
+	// The session ending Jan 1 17:00 NY opens Dec 31 17:00 NY.
+	assert.Equal(t, StatusHoliday, c.Status(nyTime(2025, time.December, 31, 20, 0)), "evening portion of the session ending on the holiday")
 	assert.Equal(t, StatusHoliday, c.Status(nyTime(2026, time.January, 1, 10, 0)))
-	assert.Equal(t, StatusHoliday, c.Status(nyTime(2026, time.January, 1, 23, 59)))
+	assert.Equal(t, StatusHoliday, c.Status(nyTime(2026, time.January, 1, 16, 59)))
 
-	_, ok := c.Session(nyTime(2026, time.January, 1, 10, 0))
-	assert.False(t, ok, "holiday has no session")
+	_, ok := c.Session(nyTime(2025, time.December, 31, 20, 0))
+	assert.False(t, ok, "holiday session has no Session")
+	_, ok = c.Session(nyTime(2026, time.January, 1, 10, 0))
+	assert.False(t, ok, "holiday has no Session")
 
-	assert.Equal(t, StatusOpen, c.Status(nyTime(2026, time.January, 2, 10, 0)), "the following day is unaffected")
+	// The next session, ending Jan 2, is unaffected.
+	assert.Equal(t, StatusOpen, c.Status(nyTime(2026, time.January, 1, 20, 0)))
+	assert.Equal(t, StatusOpen, c.Status(nyTime(2026, time.January, 2, 10, 0)))
 }
 
-func TestFXCalendarHolidayIgnoresTimeOfDayAndLocation(t *testing.T) {
-	// Supplied in UTC, at a time-of-day that would fall on a different
-	// New York calendar date; only the New York civil date must match.
-	holiday := time.Date(2026, time.July, 4, 23, 30, 0, 0, time.UTC) // 19:30 NY on July 4
+// Regression coverage for the previous Status/Session disagreement:
+// every instant inside a returned Session must itself report StatusOpen,
+// and Session's ok must exactly track Status == StatusOpen, across a
+// window that includes a configured holiday.
+func TestFXCalendarStatusAndSessionAgreeAcrossAHoliday(t *testing.T) {
+	holiday := nyTime(2026, time.January, 1, 0, 0)
 	c := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{holiday}})
 
-	assert.Equal(t, StatusHoliday, c.Status(nyTime(2026, time.July, 4, 8, 0)))
+	start := nyTime(2025, time.December, 29, 0, 0)
+	for i := range 14 * 24 {
+		at := start.Add(time.Duration(i) * time.Hour)
+
+		session, ok := c.Session(at)
+		open := c.Status(at) == StatusOpen
+		require.Equal(t, open, ok, "Session ok must track Status==StatusOpen at %s", at)
+		if !ok {
+			continue
+		}
+		require.True(t, session.Contains(at))
+		assert.Equal(t, StatusOpen, c.Status(session.Start()), "session start must be open")
+		assert.Equal(t, StatusOpen, c.Status(session.End().Add(-time.Nanosecond)), "instant just before session end must be open")
+	}
+}
+
+func TestFXCalendarHolidayUsesLiteralDateFieldsNotConvertedLocation(t *testing.T) {
+	// 03:00 UTC on Jan 2 is Jan 1 22:00 EST in New York — a different
+	// civil date. The holiday's literal Year/Month/Day (Jan 2) is what
+	// must match, regardless of Location.
+	holiday := time.Date(2026, time.January, 2, 3, 0, 0, 0, time.UTC)
+	c := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{holiday}})
+
+	// Session ending Jan 2 17:00 NY (opens Jan 1 17:00 NY) is the holiday.
+	assert.Equal(t, StatusHoliday, c.Status(nyTime(2026, time.January, 2, 10, 0)))
+	// Session ending Jan 1 17:00 NY is not.
+	assert.Equal(t, StatusOpen, c.Status(nyTime(2026, time.January, 1, 10, 0)))
 }
 
 func TestFXCalendarImplementsCalendar(t *testing.T) {

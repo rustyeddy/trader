@@ -9,8 +9,14 @@ import (
 type Status uint8
 
 const (
+	// StatusUnknown is Status's zero value: no Calendar implementation
+	// returns it. Reserving zero for an invalid/unset state means an
+	// uninitialized Status can never be silently mistaken for
+	// StatusOpen, the least conservative possible default for trading
+	// code.
+	StatusUnknown Status = iota
 	// StatusOpen means the market is trading at the queried time.
-	StatusOpen Status = iota
+	StatusOpen
 	// StatusClosed means the market is not trading (a weekend or a
 	// non-session hour), but the closure is routine rather than a
 	// named holiday.
@@ -23,6 +29,8 @@ const (
 // String returns a human-readable Status name.
 func (s Status) String() string {
 	switch s {
+	case StatusUnknown:
+		return "unknown"
 	case StatusOpen:
 		return "open"
 	case StatusClosed:

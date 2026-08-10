@@ -603,8 +603,8 @@ decision ships, covering spot FX's continuous weekly session: open Sunday
 time on every other day.  =D1= bars align to that daily rollover; =W1=
 bars align to the Sunday 17:00 week open.  Minute and hour bars instead
 align to the UTC clock, via truncation since the Go zero time — which
-falls at 2:00 UTC, itself hour-of-day zero — so =H4= bars land on
-00:00/04:00/.../20:00 UTC regardless of date.  =FXCalendar= only aligns
+falls at 00:00:00 UTC — so =H4= bars land on 00:00/04:00/.../20:00 UTC
+regardless of date.  =FXCalendar= only aligns
 single-day and single-week bars; multi-day/multi-week counts report an
 error rather than inventing an untested grouping convention, since
 grouping is a resampling concern this issue explicitly excludes.
@@ -619,12 +619,15 @@ deliberate binary-size tradeoff (roughly 450 KB) made in favor of
 deterministic backtests, not an incidental one.
 
 Holidays are representable via an optional =FXCalendarParams.Holidays=
-list of civil dates (matched in New York local time, independent of the
-time-of-day or location the caller happened to supply): a holiday date
-reports =StatusHoliday= for its entire span and no =Session=.  No real
-holiday data ships with this decision — populating an actual holiday
-calendar is a data-acquisition concern, deferred along with the rest of
-M2.
+list: each entry's Year/Month/Day fields, read literally regardless of
+its own time-of-day or Location, name a New York civil date.  A holiday
+closes the entire rollover-to-rollover trading session that ends on that
+date — the same session grouping =Session= uses — not just that
+calendar day's own clock hours, so =Status= and =Session= always agree:
+every instant a returned =Session= contains reports =StatusOpen=.  No
+real holiday data ships with this decision — populating an actual
+holiday calendar is a data-acquisition concern, deferred along with the
+rest of M2.
 
 ** Consequences
 

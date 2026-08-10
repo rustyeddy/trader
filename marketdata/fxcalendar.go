@@ -49,9 +49,13 @@ type dateKey struct {
 
 // FXCalendarParams configures a new FXCalendar.
 type FXCalendarParams struct {
-	// Holidays lists dates, in New York civil time, on which the
-	// market is closed all day. Only the date portion is used; any
-	// time-of-day and any other location are ignored.
+	// Holidays names New York civil dates on which the market is closed
+	// for the entire rollover-to-rollover trading session that ends on
+	// that date (see Session): the Year/Month/Day fields of each entry
+	// are taken literally, regardless of its Location or time-of-day —
+	// construct entries with time.Date(y, m, d, 0, 0, 0, 0, loc) using
+	// whatever Location is convenient, since only the calendar fields
+	// are read.
 	Holidays []time.Time
 }
 
@@ -59,19 +63,20 @@ type FXCalendarParams struct {
 func NewFXCalendar(params FXCalendarParams) *FXCalendar {
 	holidays := make(map[dateKey]struct{}, len(params.Holidays))
 	for _, h := range params.Holidays {
-		holidays[dateKeyOf(h)] = struct{}{}
+		holidays[literalDateKey(h)] = struct{}{}
 	}
 	return &FXCalendar{holidays: holidays}
 }
 
 var _ Calendar = (*FXCalendar)(nil)
 
-// Status implements Calendar.
+// Status implements Calendar. Status and Session agree with each other:
+// both group time by the same rollover-to-rollover trading session
+// (dayStart to dayStart+1day), labeled by the New York civil date on
+// which that session closes, so every instant a returned Session
+// contains reports the same Status.
 func (c *FXCalendar) Status(t time.Time) Status {
 	nyT := t.In(newYorkLocation)
-	if _, holiday := c.holidays[dateKeyOf(nyT)]; holiday {
-		return StatusHoliday
-	}
 	switch nyT.Weekday() {
 	case time.Saturday:
 		return StatusClosed
@@ -83,6 +88,10 @@ func (c *FXCalendar) Status(t time.Time) Status {
 		if nyT.Before(rolloverOn(nyT)) {
 			return StatusClosed
 		}
+	}
+	sessionEnd := c.dayStart(t).AddDate(0, 0, 1)
+	if _, holiday := c.holidays[dateKeyOf(sessionEnd)]; holiday {
+		return StatusHoliday
 	}
 	return StatusOpen
 }
@@ -153,9 +162,20 @@ func rolloverOn(nyT time.Time) time.Time {
 	return time.Date(nyT.Year(), nyT.Month(), nyT.Day(), fxRolloverHour, 0, 0, 0, newYorkLocation)
 }
 
+// dateKeyOf returns t's New York civil date, converting t to
+// newYorkLocation first. Used for query times, which may be expressed in
+// any location.
 func dateKeyOf(t time.Time) dateKey {
 	nyT := t.In(newYorkLocation)
 	y, m, d := nyT.Date()
+	return dateKey{year: y, month: m, day: d}
+}
+
+// literalDateKey returns h's Year/Month/Day fields as given, with no
+// Location conversion. Used for FXCalendarParams.Holidays entries, whose
+// calendar fields are documented as the literal holiday date.
+func literalDateKey(h time.Time) dateKey {
+	y, m, d := h.Date()
 	return dateKey{year: y, month: m, day: d}
 }
 
