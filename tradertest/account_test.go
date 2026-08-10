@@ -19,7 +19,7 @@ func TestNewSnapshotDefaults(t *testing.T) {
 
 	assert.Equal(t, "OANDA", s.Broker())
 	assert.Equal(t, "USD", s.Currency().String())
-	assert.True(t, tradertest.DefaultAsOf.Equal(s.AsOf()))
+	assert.True(t, tradertest.DefaultAsOf().Equal(s.AsOf()))
 	assert.Empty(t, s.Positions())
 	assert.Empty(t, s.OpenOrders())
 	tradertest.AssertMoneyEqual(t, s.Equity(), s.BuyingPower())
@@ -62,6 +62,18 @@ func TestNewSnapshotExplicitCashBalances(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Len(t, s.CashBalances(), 2)
+}
+
+func TestNewSnapshotExplicitEmptyCashBalancesIsPreserved(t *testing.T) {
+	g := testGenerator()
+	s, err := tradertest.NewSnapshot(tradertest.SnapshotParams{
+		AccountID:    tradertest.MustAccountID(g),
+		CashBalances: []num.Money{},
+	})
+	require.NoError(t, err)
+	// A nil CashBalances would have defaulted to one entry holding
+	// Equity; an explicitly empty, non-nil slice must not be defaulted.
+	assert.Empty(t, s.CashBalances())
 }
 
 func TestNewSnapshotRejectsInvalidCurrency(t *testing.T) {

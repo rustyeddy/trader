@@ -22,7 +22,7 @@ func TestNewPortfolioDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "USD", p.BaseCurrency().String())
-	assert.True(t, tradertest.DefaultAsOf.Equal(p.AsOf()))
+	assert.True(t, tradertest.DefaultAsOf().Equal(p.AsOf()))
 	assert.Equal(t, portfolio.ConversionComplete, p.ConversionStatus())
 }
 

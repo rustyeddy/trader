@@ -10,8 +10,8 @@ import (
 
 // PortfolioParams builds a portfolio.Portfolio. Accounts is required
 // and must be non-empty; BaseCurrency and AsOf default to "USD" and
-// DefaultAsOf. Rates is optional, matching portfolio.NewPortfolio's own
-// contract — supply it when Accounts spans more than one currency.
+// DefaultAsOf(). Rates is optional, matching portfolio.NewPortfolio's
+// own contract — supply it when Accounts spans more than one currency.
 type PortfolioParams struct {
 	BaseCurrency string
 	AsOf         time.Time
@@ -26,7 +26,7 @@ func NewPortfolio(p PortfolioParams) (portfolio.Portfolio, error) {
 		p.BaseCurrency = "USD"
 	}
 	if p.AsOf.IsZero() {
-		p.AsOf = DefaultAsOf
+		p.AsOf = defaultAsOf
 	}
 
 	base, err := num.ParseCurrency(p.BaseCurrency)

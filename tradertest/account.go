@@ -9,20 +9,32 @@ import (
 	"github.com/rustyeddy/trader/order"
 )
 
-// DefaultAsOf is a fixed reference time for builders in this package
-// that need one. It carries no significance beyond being deterministic
-// and reused, matching every M1 test fixture's habit of hard-coding one
-// literal date rather than calling time.Now.
-var DefaultAsOf = time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)
+// defaultAsOf is the fixed reference time DefaultAsOf returns. It
+// carries no significance beyond being deterministic and reused,
+// matching every M1 test fixture's habit of hard-coding one literal
+// date rather than calling time.Now. It is unexported and returned
+// only through a function, not an exported var: a mutable package-level
+// variable would let one test's assignment leak into every other test
+// sharing this default, which is exactly the kind of global mutable
+// state a determinism-focused package must not introduce.
+var defaultAsOf = time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)
+
+// DefaultAsOf returns the fixed reference time builders in this package
+// use when AsOf is left zero. Tests that need to compare against the
+// default explicitly (rather than just accepting whatever a builder
+// produced) can call this instead of hard-coding the literal date
+// themselves.
+func DefaultAsOf() time.Time { return defaultAsOf }
 
 // SnapshotParams builds an account.Snapshot. AccountID is required;
 // Broker, Currency, AsOf, and Equity default to "OANDA", "USD",
-// DefaultAsOf, and "10000". CashBalances defaults to a single entry
-// holding Equity in Currency. BuyingPower and MarginAvailable default
-// to Equity; MarginUsed, RealizedPnL, UnrealizedPnL, Fees, and
-// Financing default to zero — the common case of an account test only
-// cares about one or two of these fields and would otherwise have to
-// populate all nine by hand.
+// DefaultAsOf(), and "10000". CashBalances defaults, when nil, to a
+// single entry holding Equity in Currency; an explicitly empty
+// (non-nil) slice is preserved as-is rather than defaulted. BuyingPower
+// and MarginAvailable default to Equity; MarginUsed, RealizedPnL,
+// UnrealizedPnL, Fees, and Financing default to zero — the common case
+// of an account test only cares about one or two of these fields and
+// would otherwise have to populate all nine by hand.
 type SnapshotParams struct {
 	AccountID       id.AccountID
 	Broker          string
@@ -52,7 +64,7 @@ func NewSnapshot(p SnapshotParams) (account.Snapshot, error) {
 		p.Currency = "USD"
 	}
 	if p.AsOf.IsZero() {
-		p.AsOf = DefaultAsOf
+		p.AsOf = defaultAsOf
 	}
 	if p.Equity == "" {
 		p.Equity = "10000"

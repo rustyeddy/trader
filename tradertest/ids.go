@@ -2,11 +2,19 @@ package tradertest
 
 import "github.com/rustyeddy/trader/id"
 
+// MustAccountID, MustOrderID, and MustFillID are panic adapters over
+// id.GenerateAccountID/GenerateOrderID/GenerateFillID — nothing more.
+// They do not construct, own, or configure a *id.Generator; g is
+// entirely caller-owned, built the same way any Trader consumer builds
+// one: id.NewGenerator(clock.NewSimulated(start),
+// id.NewDeterministic(seed1, seed2)) for deterministic tests. These
+// exist only because every one of order, account, and portfolio's own
+// M1 tests independently wrote the identical
+// "generate-or-fail-the-test" wrapper around those three calls; they
+// are not a reason to stop calling id.Generate* directly when a caller
+// wants to handle the (rare) error itself instead of panicking.
+
 // MustAccountID generates a new id.AccountID from g, panicking on error.
-// g is a caller-owned *id.Generator (see the package doc comment for
-// why tradertest does not construct one for you) — typically
-// id.NewGenerator(clock.NewSimulated(start), id.NewDeterministic(seed1, seed2))
-// for deterministic tests.
 func MustAccountID(g *id.Generator) id.AccountID {
 	v, err := id.GenerateAccountID(g)
 	if err != nil {

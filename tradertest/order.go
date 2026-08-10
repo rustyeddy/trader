@@ -30,7 +30,13 @@ type OrderParams struct {
 	// AcceptedQuantity is decimal text. Empty means "use
 	// Request.Quantity".
 	AcceptedQuantity string
-	Status           order.Status
+	// AcceptedLimitPrice and AcceptedStopPrice are decimal text. Empty
+	// means "use Request.LimitPrice"/"use Request.StopPrice". Set
+	// either to test broker-side price normalization specifically;
+	// most tests only need to override AcceptedQuantity.
+	AcceptedLimitPrice string
+	AcceptedStopPrice  string
+	Status             order.Status
 }
 
 // NewOrder returns a valid, accepted order.Order built from p, filling
@@ -52,12 +58,30 @@ func NewOrder(p OrderParams) (order.Order, error) {
 		acceptedQuantity = q
 	}
 
+	acceptedLimitPrice := p.Request.LimitPrice
+	if p.AcceptedLimitPrice != "" {
+		lp, err := num.ParsePrice(p.AcceptedLimitPrice)
+		if err != nil {
+			return order.Order{}, err
+		}
+		acceptedLimitPrice = &lp
+	}
+
+	acceptedStopPrice := p.Request.StopPrice
+	if p.AcceptedStopPrice != "" {
+		sp, err := num.ParsePrice(p.AcceptedStopPrice)
+		if err != nil {
+			return order.Order{}, err
+		}
+		acceptedStopPrice = &sp
+	}
+
 	return order.NewOrder(order.Order{
 		Request:            p.Request,
 		BrokerOrderID:      p.BrokerOrderID,
 		AcceptedQuantity:   &acceptedQuantity,
-		AcceptedLimitPrice: p.Request.LimitPrice,
-		AcceptedStopPrice:  p.Request.StopPrice,
+		AcceptedLimitPrice: acceptedLimitPrice,
+		AcceptedStopPrice:  acceptedStopPrice,
 		Status:             p.Status,
 	})
 }
