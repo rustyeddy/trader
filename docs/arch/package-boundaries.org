@@ -4,16 +4,17 @@
 
 * Purpose
 
-This document records the package boundary rules for Trader.  It states
-which packages may depend on which, what belongs in a public package
-versus =internal/=, and which behaviors are prohibited inside domain
-code.
+This document records the package boundary rules for Trader.  It
+states which packages may depend on which, what belongs in a public
+package versus =internal/=, and which behaviors are prohibited inside
+domain code.
 
-It is a companion to, not a replacement for, the canonical architecture
-document =docs/arch/trader-framework-architecture.org= and the decision
-registry =docs/arch/adr-decisions.org=.  Where this document and the
-canonical architecture appear to disagree, the canonical architecture
-governs and the disagreement is a defect in this document.
+It is a companion to, not a replacement for, the canonical
+architecture document =docs/arch/trader-framework-architecture.org=
+and the decision registry =docs/arch/adr-decisions.org=.  Where this
+document and the canonical architecture appear to disagree, the
+canonical architecture governs and the disagreement is a defect in
+this document.
 
 This document deliberately does *not* create package directories.  Rules
 are recorded before code exists so that the first implementation lands
