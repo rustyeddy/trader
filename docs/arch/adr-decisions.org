@@ -81,6 +81,7 @@ believed at that time.
 | 012 | Trading calendar and bar-alignment semantics                      | Proposed   |
 | 013 | Greenfield repository with controlled legacy transplant           | Accepted   |
 | 014 | Paper trading is the safe default                                 | Accepted   |
+| 016 | Symbol and listing resolution                                     | Accepted   |
 
 * ADR-001: Modular monolith before service decomposition
 
@@ -669,6 +670,88 @@ depending on any particular risk configuration.
   default because it complicates simulation and paper workflows without
   additional safety benefit beyond what an explicit enablement decision
   already provides.
+
+* ADR-016: Symbol and listing resolution
+
+** Status
+
+Accepted
+
+** Context
+
+ADR-003 established =Instrument= and =Listing= as distinct concepts but
+explicitly deferred the resolver mapping provider-native symbols to them:
+"A =Resolver= mapping Trader IDs to provider- or broker-native symbols ...
+remain[s] a future, additive concern[] and [is] not part of this
+decision."  Issue #26 (M1-08) required settling that resolver: how
+provider symbols and aliases resolve to a =Listing= without ever becoming
+instrument identity themselves, how ambiguity is detected rather than
+silently guessed at, and how registration works without a package-level
+global registry.
+
+** Decision
+
+=instrument.Resolver= is a small, read-only interface with two resolution
+directions:
+
+- =ResolveSymbol(provider, venue, symbol string) (Listing, error)=
+- =ResolveInstrument(instrumentID ID, provider, venue string) (Listing, error)=
+
+Both treat an empty =provider=/=venue=/=symbol= argument as "unconstrained
+on this axis," and both resolve to exactly one =Listing= or fail: zero
+matches after applying whatever context was supplied reports
+=ErrUnknownSymbol=, and more than one reports =ErrAmbiguousSymbol=.  A
+=Resolver= never guesses which =Listing= a caller means.  In particular, a
+provider is not assumed to expose a given symbol on at most one venue —
+=(provider, symbol)= alone is not treated as a globally unique lookup key,
+so an unconstrained venue on =ResolveSymbol= is a real, tested source of
+ambiguity, not a convenience default that happens to always resolve.
+
+=instrument.MemoryResolver= is the in-memory reference implementation:
+a plain value returned by =NewMemoryResolver=, with no package-level
+state, so independently configured resolver instances (per environment,
+per test) require no special support.  It exposes =Register= (indexes a
+constructed =Listing= under its own provider/venue/symbol and its
+=InstrumentID=, rejecting an exact provider/venue/symbol duplicate) and
+=RegisterAlias= (adds an additional provider/venue/symbol lookup key that
+resolves to an existing registration's =Listing=, resolving that canonical
+reference through the same zero/one/many logic =ResolveSymbol= uses, so an
+underspecified alias target is caught at registration time).  An alias is
+never itself indexed as a new =Listing= and never gains its own entry in
+the instrument index, and the =Listing= it resolves to is always the
+canonical value, unchanged — an alias never becomes identity.
+=MemoryResolver= holds a =sync.RWMutex= and is safe for concurrent use.
+
+** Consequences
+
+- Registration/loading strategy (in-memory, a future config-file-backed
+  or persistent resolver) can vary behind the same =Resolver= interface
+  that consumers (execution, broker adapters) depend on.
+- Ambiguity is a first-class, tested outcome distinguishable from
+  "unknown," on both resolution directions, via distinct sentinel errors.
+- No global mutable registry exists anywhere in the package; every
+  =MemoryResolver= is independent by construction.
+- Aliases add lookup keys, never new identity: resolving through one
+  returns the exact canonical =Listing= value.
+
+** Alternatives Considered
+
+- *=(provider, symbol)= as a globally unique lookup key, ambiguity only on
+  the =Instrument= -> =Listing= direction.*  Considered and rejected during
+  design review: a provider is not guaranteed to expose a symbol on only
+  one venue, and baking that assumption into the public contract would
+  have made =ResolveSymbol= unable to express a case =ResolveInstrument=
+  already had to handle correctly.
+- *A query/options struct (for example =SymbolQuery{Provider, Venue,
+  Symbol}=) instead of positional string parameters.*  Rejected for M1 as
+  premature: =ResolveSymbol='s three parameters and =ResolveInstrument='s
+  three are still few enough to stay readable positionally; the struct is
+  the natural next step only if a further resolution axis proves
+  necessary.
+- *A package-level global registry.*  Rejected per issue #26's explicit
+  constraint and Trader's broader avoidance of hidden global state (see
+  ADR-002's dependency-direction rules and the architecture document's
+  determinism principles).
 
 * ADR Template                                                       :noexport:
 
