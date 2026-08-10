@@ -83,6 +83,7 @@ believed at that time.
 | 014 | Paper trading is the safe default                                 | Accepted   |
 | 016 | Symbol and listing resolution                                     | Accepted   |
 | 017 | Broker-neutral order and execution vocabulary                     | Accepted   |
+| 018 | Order lifecycle transition rules                                  | Accepted   |
 
 * ADR-001: Modular monolith before service decomposition
 
@@ -1012,6 +1013,195 @@ for.
 - *Trusting an earlier stage's validity by constructor provenance
   alone.*  Rejected on review once it was shown a bare struct literal
   defeats it; see the shared-validator discussion above.
+
+* ADR-018: Order lifecycle transition rules
+
+** Status
+
+Accepted
+
+** Context
+
+ADR-017 defined =order.Status='s values but explicitly deferred which
+transitions between them are legal to issue #29 (M1-11), which depends
+on it.  Issue #29 required: a classifiable error for an illegal
+transition; filled quantity never exceeding accepted quantity; explicit,
+enforced terminal states; thoroughly tested partial-fill sequences;
+detectable-or-safely-idempotent duplicate application; and documented
+handling of out-of-order events — all without broker I/O, an execution
+manager, or a simulated broker.  A design review on the issue identified
+five gaps in the initial plan before implementation began: missing
+event/order identity verification, a duplicate-fill key that silently
+assumed adapters reuse the same Trader =FillID= across redelivery, the
+issue's "replaced/superseded" vocabulary not being modeled or explicitly
+decided against, =AvgFillPrice= being left to go stale after a fill, and
+a same-status-idempotent rule that conflicted with =StatusUnknown= never
+being a legal target.
+
+** Decision
+
+Lifecycle transitions live in the same =order= package as the M1-10
+vocabulary, in a new =transition.go=, rather than a new package — the
+rules operate directly on =order.Order=/=order.Status=, and M1-10's own
+=NewOrder= doc comment already assigned this responsibility to M1-11.
+
+=Status.CanTransitionTo(to Status) bool= is the transition graph:
+
+#+BEGIN_EXAMPLE
+PendingSubmit   -> Working, Rejected
+Working         -> PartiallyFilled, Filled, PendingCancel, PendingReplace, Expired
+PartiallyFilled -> Filled, PendingCancel, PendingReplace, Expired
+PendingCancel   -> Canceled, Working, PartiallyFilled, Filled
+PendingReplace  -> Working, PartiallyFilled, Filled, Canceled
+Filled, Canceled, Rejected, Expired -> (terminal: nothing)
+#+END_EXAMPLE
+
+=to == from= is always legal for any valid, known Status, including a
+terminal one — this is what makes redelivery of an unchanged status
+event a safe no-op rather than an error, matching the architecture
+document's at-least-once delivery assumption, and it is how duplicate
+*status* events are handled (duplicate *fills* are handled separately,
+below).  =StatusUnknown= is never a legal target, including
+=StatusUnknown -> StatusUnknown=: the same-status rule is stated as
+applying only to "valid, known" statuses specifically to resolve the
+conflict a design-review comment identified, keeping =Unknown='s
+safe-value-for-external-parsing role (ADR-017) separate from the
+validated lifecycle graph — an =Unknown= target signals "needs operator
+attention," not "safe to no-op."  Reaching =Canceled=, or a replace's
+resulting status, requires having passed through
+=PendingCancel=/=PendingReplace= first; there is no direct
+=Working -> Canceled= edge.  A terminal confirmation arriving without
+Trader ever having locally recorded the pending step is treated as an
+out-of-order event and rejected by the graph — reconciling that gap is a
+=live=-package concern, not this package's.  =Rejected= is reachable
+only from =PendingSubmit=, and =Expired= only from
+=Working=/=PartiallyFilled=, matching real broker semantics rather than
+leaving the graph permissive by default.
+
+Named functions apply one event to an =Order= each: =ApplyAcceptance=,
+=ApplyRejection=, =ApplyFill=, =ApplyCancelRequest=/=ApplyCancelResult=,
+=ApplyReplaceRequest=/=ApplyReplaceResult=, =ApplyExpiration=.  There is
+no generic =ApplyTransition=: each real transition carries its own
+associated data (a fill's quantity, a rejection reason, a replace's new
+terms), which a generic mutator would force callers to pre-populate
+correctly by convention rather than by the type system.  Every function
+that takes an external event (=Fill=, =CancelResult=, =ReplaceRequest=,
+=ReplaceResult=) verifies the event's identifying fields match the
+=Order= before applying it, reporting the new =ErrOrderMismatch= —
+distinct from =ErrIllegalTransition= — if they do not: =ApplyFill=
+checks =OrderID=, =AccountID=, =Listing=, =Side=, and (when both are
+non-empty) =BrokerOrderID=; the cancel/replace appliers check =OrderID=,
+and =ApplyReplaceResult= additionally checks that the supplied
+=ReplaceRequest= and =ReplaceResult= refer to the same order.  An event
+that belongs to a different order entirely is a more serious failure
+than an otherwise-valid but unreachable state change, so it gets its own
+sentinel.
+
+=ApplyFill= detects duplicate delivery of the same broker execution
+before accumulating: =fill.BrokerFillID= is checked first, against a new
+=Order.AppliedBrokerFillIDs= field, since an adapter is not guaranteed to
+reuse the same Trader =FillID= across redelivery of one broker
+execution, while broker state is architecturally authoritative (per the
+architecture document); =fill.FillID= against a new
+=Order.AppliedFillIDs= field is the fallback for adapters that do not
+report a =BrokerFillID=.  A detected duplicate returns the =Order=
+unchanged alongside the new =ErrDuplicateFill=, satisfying "detectable
+or safely idempotent" as both: detectable via =errors.Is=, but not a
+fatal error, since the returned =Order= remains valid and current.  Both
+fields are additive changes to M1-10's =order.go=; =NewOrder= rejects a
+zero or duplicate entry in either.
+
+Issue #29's "replaced/superseded" vocabulary is resolved as *in-place
+amendment*: a successful replace updates the same =Order='s
+=AcceptedQuantity=/=AcceptedLimitPrice=/=AcceptedStopPrice= fields and
+returns to =Working=/=PartiallyFilled=, under the same Trader =OrderID=
+throughout.  Trader does not model =Replaced=/=Superseded= as a
+persistent =Status= or give the amended order a new identity.  This
+choice is recorded explicitly, per the design review's request, rather
+than silently dropped: a cancel/replace-as-new-order model remains
+available as a future alternative if a broker's native behavior proves
+difficult to normalize into in-place amendment, but is not needed by any
+current adapter.
+
+A fill that exactly completes =AcceptedQuantity= moves an =Order= to
+=StatusFilled= regardless of its prior status, including
+=PendingCancel=/=PendingReplace= — there is nothing left to cancel or
+replace once an order is fully filled.  A *partial* fill arriving while
+a cancel or replace is pending instead preserves
+=PendingCancel=/=PendingReplace= rather than downgrading to
+=PartiallyFilled=, since the broker's pending confirmation may still
+arrive and should not be implicitly discarded by a race with a partial
+execution.
+
+=ApplyFill= clears =AvgFillPrice= to =nil= on every fill rather than
+compute or preserve it.  =num= has no Price-by-Quantity multiplication
+yet, so a correct quantity-weighted average cannot be maintained here
+without expanding =num='s API outside this issue's scope; the design
+review's alternative of adding the minimal needed operation was
+considered and deferred (see Alternatives Considered) in favor of making
+the gap explicit — a cleared field signals "not currently tracked,"
+where a stale value would look like a valid, false snapshot.
+
+=ApplyCancelResult= never copies =CancelResult.Rejection= into
+=Order.Rejection=: those are distinct concepts.
+=CancelResult.Rejection= explains why the *cancel* was declined (for
+example, "already filled"); =Order.Rejection= (ADR-017) means the
+*order* itself was declined and is non-nil exactly when =Status= is
+=StatusRejected= — copying one into the other would violate that
+invariant the moment a cancel is declined against, say, an already-
+=Filled= order.
+
+** Consequences
+
+- Every lifecycle transition is validated against one shared graph,
+  so backtest, paper, and future live adapters cannot each invent
+  slightly different transition rules.
+- A caller cannot accidentally apply one order's fill, cancel result, or
+  replace result to a different order — identity mismatches fail loudly
+  as =ErrOrderMismatch= rather than silently corrupting state.
+- Duplicate fill delivery is safe by default without requiring every
+  broker adapter to implement its own deduplication layer, as long as
+  the adapter reports either a stable =FillID= or a =BrokerFillID=.
+- =AvgFillPrice= is not usable from this package alone; any consumer
+  needing it must compute it elsewhere (or =num= must grow
+  Price-by-Quantity arithmetic first) until a later ADR revisits this.
+- In-place replace amendment means Trader never needs to track a
+  "superseded" order's lineage in M1, but an adapter for a broker whose
+  native replace semantics are closer to cancel-and-resubmit-as-new-order
+  must normalize that behavior into this model at the adapter boundary.
+- Reconciliation of out-of-order terminal events that skip the local
+  pending-state step remains unimplemented and is explicitly deferred to
+  the future =live= package.
+
+** Alternatives Considered
+
+- *One generic =ApplyTransition(o, to)=.*  Rejected: it would force
+  callers to hand-populate accepted values, rejections, and fill
+  quantities correctly before calling it, with no type-level help,
+  instead of each named function owning its own associated data.
+- *Deduplicating fills by Trader =FillID= alone.*  Rejected on design
+  review: it silently assumes an adapter always reuses the same
+  =FillID= for a redelivered broker execution, an unstated convention
+  this package cannot enforce.  Checking =BrokerFillID= first when
+  present removes that assumption.
+- *Modeling replace as cancel-and-resubmit, with the old order becoming
+  =Superseded= and the replacement getting its own identity.*  Considered
+  as the more broker-native model for some venues, but rejected for M1
+  as more machinery than currently needed; in-place amendment is
+  simpler and sufficient until a real adapter's behavior forces the
+  question.
+- *Adding the minimal Price-by-Quantity =num= operation now so
+  =AvgFillPrice= can be correctly maintained.*  Considered, per the
+  design review's stated preference, but deferred: it reopens =num='s
+  public API outside this issue's scope and dependency chain (M1-11
+  depends only on M1-10, =id=, and =num= as they exist today).  Clearing
+  the field is the safe interim choice; adding the operation is a
+  natural, separate follow-up.
+- *Allowing partial fills while =PendingCancel=/=PendingReplace= to
+  downgrade the status to =PartiallyFilled=.*  Rejected on design
+  review: it would implicitly discard a still-outstanding broker
+  cancel/replace confirmation, which a later terminal event might still
+  legitimately reference.
 
 * ADR Template                                                       :noexport:
 

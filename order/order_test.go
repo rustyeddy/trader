@@ -3,6 +3,7 @@ package order
 import (
 	"testing"
 
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -211,6 +212,43 @@ func TestOrderRemainingQuantityRequiresAcceptance(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = o.RemainingQuantity()
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsZeroAppliedFillID(t *testing.T) {
+	_, err := NewOrder(Order{
+		Request:        mustRequest(t),
+		Status:         StatusPendingSubmit,
+		AppliedFillIDs: []id.FillID{{}},
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsDuplicateAppliedFillID(t *testing.T) {
+	fid := mustFillID(t)
+	_, err := NewOrder(Order{
+		Request:        mustRequest(t),
+		Status:         StatusPendingSubmit,
+		AppliedFillIDs: []id.FillID{fid, fid},
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsEmptyAppliedBrokerFillID(t *testing.T) {
+	_, err := NewOrder(Order{
+		Request:              mustRequest(t),
+		Status:               StatusPendingSubmit,
+		AppliedBrokerFillIDs: []string{""},
+	})
+	assert.ErrorIs(t, err, ErrInvalidOrder)
+}
+
+func TestNewOrderRejectsDuplicateAppliedBrokerFillID(t *testing.T) {
+	_, err := NewOrder(Order{
+		Request:              mustRequest(t),
+		Status:               StatusPendingSubmit,
+		AppliedBrokerFillIDs: []string{"broker-exec-1", "broker-exec-1"},
+	})
 	assert.ErrorIs(t, err, ErrInvalidOrder)
 }
 

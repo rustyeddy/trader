@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/num"
 )
 
@@ -39,12 +40,29 @@ type Order struct {
 	// only be non-zero once AcceptedQuantity is set, and never exceeds
 	// it.
 	FilledQuantity num.Quantity
-	// AvgFillPrice is the quantity-weighted average price across all
-	// fills so far. Nil until the first fill.
+	// AvgFillPrice is reserved for a quantity-weighted average price
+	// across all fills so far, but is not currently maintained by
+	// ApplyFill (see order/transition.go): num has no Price-by-Quantity
+	// multiplication yet, so ApplyFill clears this to nil on every fill
+	// rather than let it silently go stale relative to FilledQuantity.
 	AvgFillPrice *num.Price
 	// Rejection explains why the broker declined this order. Non-nil
 	// exactly when Status is StatusRejected.
 	Rejection *Rejection
+
+	// AppliedFillIDs records every Fill.FillID already applied via
+	// ApplyFill, and AppliedBrokerFillIDs every non-empty
+	// Fill.BrokerFillID, so a redelivered fill can be detected as a
+	// duplicate and safely ignored rather than double-counted. Broker
+	// execution identity (BrokerFillID) is checked first, since an
+	// adapter is not guaranteed to reuse the same Trader FillID across
+	// redelivery of the same broker execution, while broker state is
+	// architecturally authoritative; Trader's own FillID is the
+	// fallback for adapters that do not report a BrokerFillID. Both are
+	// maintained only by ApplyFill; NewOrder does not otherwise
+	// interpret them beyond rejecting duplicate or zero entries.
+	AppliedFillIDs       []id.FillID
+	AppliedBrokerFillIDs []string
 
 	// UpdatedAt is when this Order value was last observed to change.
 	UpdatedAt time.Time
@@ -111,7 +129,42 @@ func NewOrder(o Order) (Order, error) {
 		return Order{}, fmt.Errorf("%w: only a rejected order may carry a Rejection", ErrInvalidOrder)
 	}
 
+	if err := checkNoDuplicateFillIDs(o.AppliedFillIDs); err != nil {
+		return Order{}, fmt.Errorf("%w: applied fill ids: %v", ErrInvalidOrder, err)
+	}
+	if err := checkNoDuplicateBrokerFillIDs(o.AppliedBrokerFillIDs); err != nil {
+		return Order{}, fmt.Errorf("%w: applied broker fill ids: %v", ErrInvalidOrder, err)
+	}
+
 	return o, nil
+}
+
+func checkNoDuplicateFillIDs(ids []id.FillID) error {
+	seen := make(map[id.FillID]struct{}, len(ids))
+	for _, fillID := range ids {
+		if fillID.IsZero() {
+			return fmt.Errorf("entries must be non-zero")
+		}
+		if _, ok := seen[fillID]; ok {
+			return fmt.Errorf("duplicate entry %s", fillID)
+		}
+		seen[fillID] = struct{}{}
+	}
+	return nil
+}
+
+func checkNoDuplicateBrokerFillIDs(ids []string) error {
+	seen := make(map[string]struct{}, len(ids))
+	for _, brokerFillID := range ids {
+		if brokerFillID == "" {
+			return fmt.Errorf("entries must be non-empty")
+		}
+		if _, ok := seen[brokerFillID]; ok {
+			return fmt.Errorf("duplicate entry %q", brokerFillID)
+		}
+		seen[brokerFillID] = struct{}{}
+	}
+	return nil
 }
 
 // RemainingQuantity returns AcceptedQuantity minus FilledQuantity. It

@@ -1,9 +1,9 @@
 // Package order defines Trader's broker-neutral order and execution
-// vocabulary, as decided by issue #28 (M1-10) and ADR-017. It defines
-// what these lifecycle concepts are and what makes one well-formed; it
-// does not implement order-state transition rules (Working -> Filled,
-// terminal-state enforcement, duplicate/out-of-order event handling —
-// see issue #29/M1-11), broker I/O, or an execution manager.
+// vocabulary (issue #28, M1-10, ADR-017) and its lifecycle transition
+// rules (issue #29, M1-11, ADR-018). It defines what these lifecycle
+// concepts are, what makes one well-formed, and which transitions
+// between them are legal; it does not implement broker I/O or an
+// execution manager.
 //
 // # The proposal-to-fill chain
 //
@@ -76,6 +76,71 @@
 // be recalculated or revised as fills continue to arrive — a dedicated
 // TradeID is additive future work if the journal/report milestones later
 // need one.
+//
+// # Lifecycle transitions
+//
+// Status.CanTransitionTo names the legal transition graph, and Terminal
+// names StatusFilled, StatusCanceled, StatusRejected, and StatusExpired
+// as states nothing follows. Named functions — ApplyAcceptance,
+// ApplyRejection, ApplyFill, ApplyCancelRequest/ApplyCancelResult,
+// ApplyReplaceRequest/ApplyReplaceResult, ApplyExpiration — apply one
+// event to an Order, each checking the graph and its own identity
+// requirements before mutating, then revalidating the result through
+// NewOrder. There is no single generic ApplyTransition: each real
+// transition carries its own associated data (a fill's quantity, a
+// rejection reason, a replace's new terms), which a generic mutator
+// would force callers to pre-populate correctly by convention instead of
+// by the type system.
+//
+// Two rules make redelivered and out-of-order events safe rather than
+// merely detected:
+//
+//   - Redelivering an unchanged Status (a broker resending "Filled" for
+//     an already-Filled Order) is always legal — CanTransitionTo(s, s)
+//     is true for every valid, known Status, including terminal ones.
+//     StatusUnknown is the one exception: it is never a legal target,
+//     not even from itself, since Unknown means "needs operator
+//     attention," not "safe to no-op."
+//   - Reaching StatusCanceled, or a replace's resulting status, requires
+//     having passed through StatusPendingCancel/StatusPendingReplace
+//     first. A terminal confirmation arriving without Trader ever having
+//     locally recorded the pending step is treated as an out-of-order
+//     event and rejected by the graph, not silently absorbed;
+//     reconciling that gap is a live-package concern.
+//
+// Every Apply* function that takes an external event (Fill, CancelResult,
+// ReplaceRequest, ReplaceResult) verifies the event's identifying fields
+// match the Order before applying it — ErrOrderMismatch, distinct from
+// ErrIllegalTransition, since an event that belongs to a different order
+// entirely is a more serious failure than an otherwise-valid but
+// unreachable state change.
+//
+// ApplyFill additionally detects duplicate delivery of the same broker
+// execution: fill.BrokerFillID is checked first, against
+// Order.AppliedBrokerFillIDs, since an adapter is not guaranteed to
+// reuse the same Trader FillID across redelivery of one broker
+// execution, while broker state is architecturally authoritative;
+// fill.FillID against Order.AppliedFillIDs is the fallback for adapters
+// that do not report a BrokerFillID. A detected duplicate returns the
+// Order unchanged alongside ErrDuplicateFill — detectable, but not
+// fatal.
+//
+// A partial fill arriving while a cancel or replace is pending preserves
+// StatusPendingCancel/StatusPendingReplace rather than downgrading to
+// StatusPartiallyFilled, since the broker's pending confirmation may
+// still arrive; only a fill that exactly completes AcceptedQuantity
+// overrides the pending status to StatusFilled, since there is nothing
+// left to cancel or replace once an order is fully filled.
+//
+// A successful replace amends Order in place — same Trader OrderID,
+// updated Accepted* fields — rather than modeling "replaced/superseded"
+// as a distinct persistent state or a new order identity; see ADR-018
+// for why.
+//
+// ApplyFill clears AvgFillPrice to nil on every fill rather than
+// maintain it: num has no Price-by-Quantity multiplication yet, and
+// leaving a stale average computed against an earlier, smaller
+// FilledQuantity would be a false snapshot.
 //
 // # Deferred
 //

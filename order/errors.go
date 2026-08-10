@@ -42,4 +42,24 @@ var (
 	// ErrInvalidTrade reports a Trade constructor argument that fails
 	// validation.
 	ErrInvalidTrade = errors.New("order: invalid trade")
+
+	// ErrIllegalTransition reports an Apply* lifecycle function call
+	// whose requested Status is not reachable from the Order's current
+	// Status — see order/transition.go's transition graph.
+	ErrIllegalTransition = errors.New("order: illegal status transition")
+
+	// ErrOrderMismatch reports an Apply* lifecycle function called with
+	// an event (Fill, CancelResult, ReplaceRequest, ReplaceResult) whose
+	// identifying fields (OrderID, AccountID, Listing, Side,
+	// BrokerOrderID) do not match the Order it was applied to. This is
+	// distinct from ErrIllegalTransition: the requested state change
+	// might otherwise be legal, but the event does not belong to this
+	// order at all.
+	ErrOrderMismatch = errors.New("order: event does not match order identity")
+
+	// ErrDuplicateFill reports that ApplyFill was called with a Fill
+	// already recorded on the Order (by FillID or BrokerFillID). The
+	// returned Order is unchanged and remains valid; callers may treat
+	// this as a safe no-op rather than a fatal error.
+	ErrDuplicateFill = errors.New("order: fill already applied")
 )

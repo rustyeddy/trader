@@ -261,6 +261,23 @@ See [ADR-017](docs/arch/adr-decisions.org) and the
 model, the idempotency-key scope, and why `Position`/`Trade` are shaped
 the way they are.
 
+`order` also validates lifecycle transitions: `Status.CanTransitionTo`
+is the legal transition graph, and named `Apply*` functions
+(`ApplyAcceptance`, `ApplyFill`, `ApplyCancelRequest`/`ApplyCancelResult`,
+`ApplyReplaceRequest`/`ApplyReplaceResult`, `ApplyExpiration`,
+`ApplyRejection`) apply one event to an `Order`, checking both the graph
+and that the event's identity actually matches the order:
+
+```go
+o, err = order.ApplyFill(o, fill) // rejects a Fill belonging to a different order
+```
+
+Redelivering an unchanged status is always a safe no-op; a duplicate
+`Fill` (by `BrokerFillID` or `FillID`) is detected and returns the order
+unchanged. See [ADR-018](docs/arch/adr-decisions.org) for the full
+transition graph, the in-place-amendment model for replace, and why
+`AvgFillPrice` is cleared rather than maintained.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
