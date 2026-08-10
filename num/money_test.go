@@ -205,6 +205,65 @@ func TestMoneyMulRate(t *testing.T) {
 	assert.Equal(t, "USD", got.Currency().String())
 }
 
+func TestMoneyConvert(t *testing.T) {
+	m := usd("100.00")
+	rate := MustParseRate("0.85")
+
+	got, err := m.Convert(MustParseCurrency("EUR"), rate)
+	require.NoError(t, err)
+	assert.Equal(t, "85 EUR", got.String())
+	assert.Equal(t, "EUR", got.Currency().String())
+	assert.Equal(t, "100 USD", m.String(), "Convert must not mutate the receiver")
+}
+
+func TestMoneyConvertToSameCurrency(t *testing.T) {
+	m := usd("100.00")
+
+	got, err := m.Convert(MustParseCurrency("USD"), MustParseRate("1.05"))
+	require.NoError(t, err)
+	assert.Equal(t, "105 USD", got.String())
+}
+
+func TestMoneyConvertRoundsHalfToEven(t *testing.T) {
+	// Mirrors MulRate's rounding contract; Convert differs only in the
+	// resulting currency.
+	m := usd("0.00000005")
+	rate := MustParseRate("1")
+
+	got, err := m.Convert(MustParseCurrency("EUR"), rate)
+	require.NoError(t, err)
+	want, err := m.MulRate(rate)
+	require.NoError(t, err)
+	assert.Equal(t, want.String(), "0.00000005 USD")
+	assert.Equal(t, got.String(), "0.00000005 EUR")
+}
+
+func TestMoneyConvertRejectsInvalidMoney(t *testing.T) {
+	_, err := Money{}.Convert(MustParseCurrency("EUR"), MustParseRate("1"))
+	require.ErrorIs(t, err, ErrMissingCurrency)
+}
+
+func TestMoneyConvertRejectsInvalidTargetCurrency(t *testing.T) {
+	m := usd("100.00")
+	_, err := m.Convert(Currency{}, MustParseRate("1"))
+	require.ErrorIs(t, err, ErrMissingCurrency)
+}
+
+func TestMoneyConvertZeroRate(t *testing.T) {
+	m := usd("100.00")
+	got, err := m.Convert(MustParseCurrency("EUR"), Rate{})
+	require.NoError(t, err)
+	assert.True(t, got.IsZero())
+	assert.Equal(t, "EUR", got.Currency().String())
+}
+
+func TestMoneyConvertNegativeRate(t *testing.T) {
+	m := usd("100.00")
+	got, err := m.Convert(MustParseCurrency("EUR"), MustParseRate("-1"))
+	require.NoError(t, err)
+	assert.Equal(t, "-100 EUR", got.String())
+}
+
 func TestMoneyDivRate(t *testing.T) {
 	m := usd("105.00")
 	rate := MustParseRate("1.05")

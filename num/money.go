@@ -12,10 +12,12 @@ import "github.com/rustyeddy/trader/num/internal/fixed"
 // Same-currency amounts may be compared, added, and subtracted with checked
 // arithmetic. Cross-currency arithmetic and comparison are rejected outright:
 // currency is never silently assumed, dropped, or coerced. Currency
-// conversion is not implicit; it is not implemented by this type at all. Any
-// future conversion operation must require an explicit target currency, an
-// explicit rate, and provenance for that rate — Money.MulRate deliberately
-// keeps the existing currency rather than serving as a disguised conversion.
+// conversion is not implicit. Money.MulRate deliberately keeps the existing
+// currency rather than serving as a disguised conversion; Convert is the one
+// method that changes currency, and it requires an explicit target currency
+// and an explicit rate. Convert performs only the arithmetic — rate
+// provenance (source, observation time) is a caller concern, most notably
+// the portfolio package's cross-account aggregation.
 type Money struct {
 	amount   int64
 	currency Currency
@@ -191,6 +193,30 @@ func (m Money) MulRate(r Rate) (Money, error) {
 		return Money{}, wrapFixedErr(err)
 	}
 	return Money{amount: raw, currency: m.currency, valid: true}, nil
+}
+
+// Convert returns m's amount multiplied by rate and re-denominated in to,
+// rounding to nearest with ties to even.
+//
+// Convert is the one sanctioned currency-conversion primitive in num; see
+// the package-level Money doc comment for why MulRate deliberately does
+// not serve this purpose. Convert performs only the exact arithmetic:
+// it has no concept of market data, so callers are responsible for the
+// rate's provenance (source currency pair, observation time, source) and
+// for deciding whether a stale or missing rate is acceptable.
+//
+// Convert reports ErrMissingCurrency if m is invalid or to is not a
+// structurally valid Currency. Converting to m's own currency is
+// permitted and is equivalent to MulRate(rate).
+func (m Money) Convert(to Currency, rate Rate) (Money, error) {
+	if !m.IsValid() || !to.IsValid() {
+		return Money{}, ErrMissingCurrency
+	}
+	raw, err := fixed.MulScaled(m.amount, rate.raw, fixed.RoundHalfEven)
+	if err != nil {
+		return Money{}, wrapFixedErr(err)
+	}
+	return Money{amount: raw, currency: to, valid: true}, nil
 }
 
 // DivRate returns m/r, preserving currency and rounding to nearest with ties
