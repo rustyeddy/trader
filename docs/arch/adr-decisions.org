@@ -78,7 +78,7 @@ believed at that time.
 | 009 | Journal and reconciliation model                                  | Proposed   |
 | 010 | gRPC primary external strategy protocol; MQTT integration         | Proposed   |
 | 011 | Public API and semantic-versioning policy                         | Proposed   |
-| 012 | Trading calendar and bar-alignment semantics                      | Proposed   |
+| 012 | Trading calendar and bar-alignment semantics                      | Accepted   |
 | 013 | Greenfield repository with controlled legacy transplant           | Accepted   |
 | 014 | Paper trading is the safe default                                 | Accepted   |
 | 016 | Symbol and listing resolution                                     | Accepted   |
@@ -559,33 +559,107 @@ rules will be ratified by a later ADR.
 
 ** Status
 
-Proposed
+Accepted
 
 ** Context
 
 Daily, weekly, and monthly bars must align to trading sessions or named
 calendars, not solely to elapsed seconds.  Trader must eventually support
 exchange sessions, holidays, early closes, futures session boundaries,
-and FX week boundaries.  The concrete calendar model, session
-identifiers, and resampling rules are not yet finalized.
+and FX week boundaries.  Issue #27 (M1-09) required settling the initial
+=Interval= and calendar vocabulary: how a bar interval is represented
+without core string parsing, how daily/weekly bars align to something
+other than UTC midnight, how DST transitions are handled, and how closed
+markets, holidays, and incomplete bars are made representable — scoped to
+a basic FX calendar, with non-FX session calendars, resampling, and
+coverage tracking explicitly deferred to M2.
 
 ** Decision
 
-Represent bar intervals with a unit, count, and calendar/alignment as
-sketched in the architecture document.  The precise calendar
-representation, session identifiers, and resampling contract will be
-ratified by a later ADR.
+=marketdata.Interval= is a typed =Unit= (=UnitMinute=, =UnitHour=,
+=UnitDay=, =UnitWeek=) plus a count, constructed via =NewInterval= or one
+of five predefined values (=M1=, =H1=, =H4=, =D1=, =W1=).  Intervals are
+never parsed from provider-native strings such as ="H4"= in core code;
+=Interval.String= exists only for display and is documented as
+one-directional.
+
+=marketdata.TimeRange= is the shared half-open range type, =[start,
+end)=, used for sessions and bars alike.  =Contains= includes =start= and
+excludes =end=; =Elapsed(now)= reports whether a range has finished,
+expressing bar completeness without a separate concept.
+
+=marketdata.Calendar= is a small interface — =Status=, =Session=, =Bar= —
+kept as an interface rather than a single concrete type because the
+architecture document's "Important Missing Requirements" section already
+commits M2+ to exchange, futures, and holiday calendars distinct from FX;
+a second implementation is a documented near-term certainty, not a
+speculative one.  Every =Calendar= method is a pure function of its
+=time.Time= argument; no implementation may call =time.Now=.
+
+=marketdata.FXCalendar= is the one =Calendar= implementation this
+decision ships, covering spot FX's continuous weekly session: open Sunday
+17:00 and closed Friday 17:00 through Sunday 17:00, both in
+=America/New_York= civil time, with a daily rollover at 17:00 New York
+time on every other day.  =D1= bars align to that daily rollover; =W1=
+bars align to the Sunday 17:00 week open.  Minute and hour bars instead
+align to the UTC clock, via truncation since the Go zero time — which
+falls at 00:00:00 UTC — so =H4= bars land on 00:00/04:00/.../20:00 UTC
+regardless of date.  =FXCalendar= only aligns
+single-day and single-week bars; multi-day/multi-week counts report an
+error rather than inventing an untested grouping convention, since
+grouping is a resampling concern this issue explicitly excludes.
+
+DST correctness comes directly from computing rollover instants with
+=time.Date= in the =America/New_York= =*time.Location=, which resolves
+the correct UTC offset for whichever regime applies on that date — no
+manual offset arithmetic.  =FXCalendar= blank-imports =time/tzdata= to
+embed the IANA database in the binary, so DST transitions resolve
+identically regardless of the host's installed time zone data; this is a
+deliberate binary-size tradeoff (roughly 450 KB) made in favor of
+deterministic backtests, not an incidental one.
+
+Holidays are representable via an optional =FXCalendarParams.Holidays=
+list: each entry's Year/Month/Day fields, read literally regardless of
+its own time-of-day or Location, name a New York civil date.  A holiday
+closes the entire rollover-to-rollover trading session that ends on that
+date — the same session grouping =Session= uses — not just that
+calendar day's own clock hours, so =Status= and =Session= always agree:
+every instant a returned =Session= contains reports =StatusOpen=.  No
+real holiday data ships with this decision — populating an actual
+holiday calendar is a data-acquisition concern, deferred along with the
+rest of M2.
 
 ** Consequences
 
 - Bar alignment can be validated against provider-native session bars.
 - Session-aware calendars will be required before non-FX asset classes
-  are supported end-to-end.
+  are supported end-to-end; =Calendar= is already shaped to add them
+  without disturbing =FXCalendar= or its callers.
+- DST transition weeks and days have wall-clock durations other than
+  exactly 24h or 7×24h, and callers relying on =TimeRange.Duration= must
+  account for that rather than assuming a fixed bar length.
+- Multi-day and multi-week bars are not yet representable through
+  =FXCalendar=; a caller needing them must wait for the resampling work
+  in M2 rather than assuming =Bar= silently groups sessions.
 
 ** Alternatives Considered
 
 - *=time.Duration= alone as an interval.* Rejected because it cannot
   represent session-aligned daily, weekly, or monthly bars correctly.
+- *A single concrete =FXCalendar= type with no =Calendar= interface.*
+  Rejected because the architecture document already commits to a second
+  (exchange/holiday) implementation in M2, and package-boundaries.org's
+  guidance against interfaces with exactly one implementation applies
+  only when a second implementation is speculative, not documented and
+  imminent.
+- *Deriving DST behavior from a fixed UTC offset table maintained inside
+  =marketdata=.* Rejected in favor of the standard library's =time.Date=
+  plus =*time.Location= arithmetic, which is already correct and does not
+  require Trader to track its own transition rules.
+- *Grouping multi-day/multi-week bars via a simple day-count modulus
+  anchored at the Unix epoch.* Rejected as an untested, arbitrary
+  convention with no real consumer yet; reporting an error keeps the
+  decision honest about what is actually implemented.
 
 * ADR-013: Greenfield repository with controlled legacy transplant
 
