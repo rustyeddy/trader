@@ -41,7 +41,15 @@ func (id ID) Equal(o ID) bool {
 // base/quote. Two calls with the same base and quote always produce an
 // equal ID, regardless of which provider symbol spelling — "EUR_USD",
 // "EURUSD", "EUR/USD" — a caller parsed before extracting base and quote.
+//
+// CurrencyPairID returns the zero ID if base or quote is not structurally
+// valid, or if base and quote are equal — the zero value of ID is
+// reserved for exactly this: a non-zero ID is always structurally
+// meaningful, never a malformed identity built from invalid input.
 func CurrencyPairID(base, quote num.Currency) ID {
+	if !base.IsValid() || !quote.IsValid() || base.Equal(quote) {
+		return ID{}
+	}
 	return ID{raw: "fx:" + base.String() + "/" + quote.String()}
 }
 
@@ -49,40 +57,113 @@ func CurrencyPairID(base, quote num.Currency) ID {
 // ticker on exchange. exchange and ticker are trimmed and upper-cased
 // before joining; see the package doc comment for why exchange+ticker is
 // Trader's M1 identity convention, not a claim of permanent identity.
+//
+// EquityID returns the zero ID if, once normalized, exchange or ticker is
+// empty or contains a character outside the safe identifier alphabet — see
+// isValidIdentifierPart. That alphabet excludes ':' and '/' specifically
+// so EquityID("A:B", "C") and EquityID("A", "B:C") can never both collapse
+// to the same canonical string; rejecting the input is preferred over
+// escaping it.
 func EquityID(exchange, ticker string) ID {
-	return ID{raw: "eq:" + normalizeIdentifierPart(exchange) + ":" + normalizeIdentifierPart(ticker)}
+	exchange = normalizeIdentifierPart(exchange)
+	ticker = normalizeIdentifierPart(ticker)
+	if !isValidIdentifierPart(exchange) || !isValidIdentifierPart(ticker) {
+		return ID{}
+	}
+	return ID{raw: "eq:" + exchange + ":" + ticker}
 }
 
 // ETFID is EquityID's counterpart for exchange-traded funds. It is a
 // distinct constructor, not a shared one, so an ETF can never collide with
-// an equity that happens to share an exchange and ticker.
+// an equity that happens to share an exchange and ticker. Its input
+// validation is identical to EquityID's.
 func ETFID(exchange, ticker string) ID {
-	return ID{raw: "etf:" + normalizeIdentifierPart(exchange) + ":" + normalizeIdentifierPart(ticker)}
+	exchange = normalizeIdentifierPart(exchange)
+	ticker = normalizeIdentifierPart(ticker)
+	if !isValidIdentifierPart(exchange) || !isValidIdentifierPart(ticker) {
+		return ID{}
+	}
+	return ID{raw: "etf:" + exchange + ":" + ticker}
 }
 
 // FutureID returns the canonical identity for one specific expiring
 // futures contract identified by its underlying root symbol and
-// expiration month. Contracts on the same root with different expirations
-// — ES December 2026 versus ES March 2027 — produce different IDs; see
-// the package doc comment for why the individual contract, not the
+// expiration month. Contracts on the same root with different expiration
+// months — ES December 2026 versus ES March 2027 — produce different IDs;
+// see the package doc comment for why the individual contract, not the
 // contract family, is the Instrument.
+//
+// Only expiration's year and month are significant: FutureID's canonical
+// string carries "YYYY-MM", not a full date, matching standard futures
+// contract-month conventions and matching what NewFuture stores as
+// Instrument.Expiration — the two are always kept in exact agreement, so
+// there is no month in which two differently-timed calls could produce the
+// same ID but disagree about Expiration, or vice versa.
+//
+// FutureID returns the zero ID if, once normalized, root is empty or
+// contains a character outside the safe identifier alphabet, or if
+// expiration is the zero time.Time.
 func FutureID(root string, expiration time.Time) ID {
-	return ID{raw: "fut:" + normalizeIdentifierPart(root) + ":" + expiration.UTC().Format("2006-01")}
+	root = normalizeIdentifierPart(root)
+	if !isValidIdentifierPart(root) || expiration.IsZero() {
+		return ID{}
+	}
+	return ID{raw: "fut:" + root + ":" + expiration.UTC().Format("2006-01")}
 }
 
 // ContinuousSeriesID returns the canonical identity for the continuous,
 // non-orderable research series derived from the futures family rooted at
 // root. It is always distinct from any FutureID sharing the same root.
+//
+// ContinuousSeriesID returns the zero ID if, once normalized, root is
+// empty or contains a character outside the safe identifier alphabet.
 func ContinuousSeriesID(root string) ID {
-	return ID{raw: "cont:" + normalizeIdentifierPart(root)}
+	root = normalizeIdentifierPart(root)
+	if !isValidIdentifierPart(root) {
+		return ID{}
+	}
+	return ID{raw: "cont:" + root}
 }
 
 // IndexID returns the canonical identity for the non-orderable index
 // name.
+//
+// IndexID returns the zero ID if, once normalized, name is empty or
+// contains a character outside the safe identifier alphabet.
 func IndexID(name string) ID {
-	return ID{raw: "idx:" + normalizeIdentifierPart(name)}
+	name = normalizeIdentifierPart(name)
+	if !isValidIdentifierPart(name) {
+		return ID{}
+	}
+	return ID{raw: "idx:" + name}
 }
 
 func normalizeIdentifierPart(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
+}
+
+// isValidIdentifierPart reports whether s — already normalized by
+// normalizeIdentifierPart — is safe to use as one segment of a canonical
+// ID string: non-empty, and built only from characters that can never be
+// confused with the ':' and '/' separators used to join segments together.
+// Real exchange codes, tickers, and futures roots are well served by
+// letters, digits, '.', and '-' (for example "BRK.B", "RDS-A", "6E"); this
+// package intentionally does not attempt to escape or otherwise accept a
+// wider alphabet, since rejecting an ambiguous input is safer than
+// guessing how to encode it unambiguously.
+func isValidIdentifierPart(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '.' || c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

@@ -4,10 +4,10 @@
 // # Instrument versus Listing
 //
 // Instrument is what an economic thing is, independent of any provider,
-// venue, or symbol spelling. Listing is how one specific venue exposes an
-// Instrument for trading: its venue-native symbol, tick size, quantity
-// increment, contract multiplier, settlement currency, and whether it is
-// currently tradable there.
+// venue, or symbol spelling. Listing is how one specific provider exposes
+// an Instrument for trading: its provider-native symbol, tick size,
+// quantity increment, contract multiplier, settlement currency, and
+// whether it is currently tradable there.
 //
 //	Instrument = what economic thing is this?
 //	Listing    = how does a provider/venue expose or trade it?
@@ -18,6 +18,15 @@
 // provider's own listing of it — its symbol text, tick size, and whether it
 // is currently tradable there — is a separate Listing referencing that one
 // Instrument by ID.
+//
+// A Listing distinguishes its provider (a broker or data vendor, such as
+// "OANDA" or "IBKR") from its venue (an exchange or execution venue, such
+// as "NASDAQ" or "CME"); they are not the same thing, and one provider can
+// expose listings on several venues. Venue may be empty for markets with
+// no meaningful centralized venue, such as spot FX. NewListing also
+// rejects a Listing with Tradable set true for an Instrument that is
+// non-orderable by Kind — KindContinuousSeries or KindIndex — since a
+// Listing given only an ID could not otherwise catch that contradiction.
 //
 // # ID is canonical and deterministic, not generated
 //
@@ -39,6 +48,17 @@
 // package sees the input, there is no spelling left to be inconsistent
 // about.
 //
+// Each constructor validates its own input and returns the zero ID, never
+// a malformed non-zero one, when given an empty or invalid component: this
+// keeps IsZero a reliable check even for direct callers of the ID
+// constructors, not only for the Instrument constructors that call them
+// after their own validation. Identifier components are further
+// restricted to letters, digits, '.', and '-' — enough for real exchange
+// codes, tickers, and futures roots ("BRK.B", "RDS-A", "6E") — specifically
+// excluding ':' and '/', the characters this package uses to join
+// components together; without that restriction, EquityID("A:B", "C") and
+// EquityID("A", "B:C") could collide on the same canonical string.
+//
 // # Six initial kinds, and why futures split in two
 //
 // KindCurrencyPair, KindEquity, KindETF, KindFuture, KindContinuousSeries,
@@ -57,6 +77,15 @@
 // This makes "tradable versus research-only" and "a specific contract
 // versus its continuous series" both decidable from Kind alone, not from
 // validating a combination of Listing flags.
+//
+// Only a future's year and month are significant to its identity, matching
+// standard contract-month conventions (a real contract's exact last
+// trading day is a settlement detail, not part of what makes it "the
+// December 2026 contract"). NewFuture normalizes whatever time.Time it is
+// given down to the first instant of that month in UTC before building the
+// ID and storing Instrument.Expiration, so the two can never disagree —
+// two calls with expirations on different days of the same month always
+// produce the same Instrument.
 //
 // # Equity and ETF identity is a convention, not a permanent identifier
 //

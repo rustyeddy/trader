@@ -75,16 +75,18 @@ func Example_future() {
 	// false
 }
 
-// Example_listing shows a Listing referencing an Instrument by ID, with
-// its own venue-specific symbol and trading mechanics.
+// Example_listing shows a Listing referencing an Instrument, with its own
+// provider, symbol, and trading mechanics. Provider and Venue are kept
+// distinct: IBKR (the provider) exposes a NASDAQ (the venue) listing of
+// Apple.
 func Example_listing() {
-	eurUsd, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	apple, err := instrument.NewEquity("NASDAQ", "AAPL")
 	if err != nil {
 		panic(err)
 	}
 
 	spec, err := instrument.NewSpec(
-		num.MustParsePrice("0.00001"),
+		num.MustParsePrice("0.01"),
 		num.MustParseQuantity("1"),
 		num.MustParseRate("1"),
 		num.MustParseCurrency("USD"),
@@ -94,23 +96,26 @@ func Example_listing() {
 	}
 
 	listing, err := instrument.NewListing(instrument.ListingParams{
-		InstrumentID: eurUsd.ID(),
-		Venue:        "OANDA",
-		Symbol:       "EUR_USD",
-		Spec:         spec,
-		Tradable:     true,
+		Instrument: apple,
+		Provider:   "IBKR",
+		Venue:      "NASDAQ",
+		Symbol:     "AAPL",
+		Spec:       spec,
+		Tradable:   true,
 	})
 	if err != nil {
 		panic(err)
 	}
 
+	fmt.Println(listing.Provider())
 	fmt.Println(listing.Venue())
 	fmt.Println(listing.Symbol())
 	fmt.Println(listing.Tradable())
-	fmt.Println(listing.InstrumentID().Equal(eurUsd.ID()))
+	fmt.Println(listing.InstrumentID().Equal(apple.ID()))
 	// Output:
-	// OANDA
-	// EUR_USD
+	// IBKR
+	// NASDAQ
+	// AAPL
 	// true
 	// true
 }

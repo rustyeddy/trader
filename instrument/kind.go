@@ -31,7 +31,8 @@ const (
 	KindIndex
 )
 
-// String returns a lowercase, human-readable name for k.
+// String returns a human-readable name for k. Names are lowercase except
+// where an initialism reads better uppercase, such as KindETF's "ETF".
 func (k Kind) String() string {
 	switch k {
 	case KindCurrencyPair:

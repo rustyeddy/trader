@@ -9,6 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func mustFuture(t *testing.T) Instrument {
+	t.Helper()
+	inst, err := NewFuture("ES", time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	return inst
+}
+
 func TestNewCurrencyPair(t *testing.T) {
 	eur := num.MustParseCurrency("EUR")
 	usd := num.MustParseCurrency("USD")
@@ -106,19 +113,23 @@ func TestNewFuture(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "ES", root)
 
+	want := time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
 	got, ok := inst.Expiration()
 	assert.True(t, ok)
-	assert.True(t, got.Equal(expiration))
+	assert.True(t, got.Equal(want), "Expiration returns the canonical first-of-month value, not the exact input")
 
 	_, ok = inst.Name()
 	assert.False(t, ok)
 }
 
-func TestNewFutureRejectsEmptyRootOrZeroExpiration(t *testing.T) {
+func TestNewFutureRejectsInvalidRootOrZeroExpiration(t *testing.T) {
 	_, err := NewFuture("", time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC))
 	require.ErrorIs(t, err, ErrInvalidInstrument)
 
 	_, err = NewFuture("ES", time.Time{})
+	require.ErrorIs(t, err, ErrInvalidInstrument)
+
+	_, err = NewFuture("E:S", time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC))
 	require.ErrorIs(t, err, ErrInvalidInstrument)
 }
 
@@ -130,6 +141,25 @@ func TestTwoFutureContractsOnTheSameRootAreDistinctInstruments(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, dec.ID().Equal(mar.ID()))
+}
+
+// TestTwoExpirationsInTheSameMonthProduceTheSameInstrument is the
+// identity-invariant test: since FutureID only encodes year and month,
+// Instrument.Expiration must be normalized to match exactly, or two
+// Instrument values could share an ID while disagreeing about
+// Expiration.
+func TestTwoExpirationsInTheSameMonthProduceTheSameInstrument(t *testing.T) {
+	early, err := NewFuture("ES", time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+
+	late, err := NewFuture("ES", time.Date(2026, time.December, 19, 15, 30, 0, 0, time.UTC))
+	require.NoError(t, err)
+
+	assert.True(t, early.ID().Equal(late.ID()))
+
+	earlyExp, _ := early.Expiration()
+	lateExp, _ := late.Expiration()
+	assert.True(t, earlyExp.Equal(lateExp), "Expiration is normalized to contract month, matching ID exactly")
 }
 
 func TestNewContinuousSeries(t *testing.T) {
@@ -147,8 +177,11 @@ func TestNewContinuousSeries(t *testing.T) {
 	assert.False(t, ok, "a continuous series has no single expiration")
 }
 
-func TestNewContinuousSeriesRejectsEmptyRoot(t *testing.T) {
+func TestNewContinuousSeriesRejectsEmptyOrInvalidRoot(t *testing.T) {
 	_, err := NewContinuousSeries("")
+	require.ErrorIs(t, err, ErrInvalidInstrument)
+
+	_, err = NewContinuousSeries("E:S")
 	require.ErrorIs(t, err, ErrInvalidInstrument)
 }
 
@@ -175,8 +208,19 @@ func TestNewIndex(t *testing.T) {
 	assert.Equal(t, "SPX", name)
 }
 
-func TestNewIndexRejectsEmptyName(t *testing.T) {
+func TestNewIndexRejectsEmptyOrInvalidName(t *testing.T) {
 	_, err := NewIndex("   ")
+	require.ErrorIs(t, err, ErrInvalidInstrument)
+
+	_, err = NewIndex("SPX:500")
+	require.ErrorIs(t, err, ErrInvalidInstrument)
+}
+
+func TestNewEquityRejectsInvalidCharacters(t *testing.T) {
+	_, err := NewEquity("A:B", "C")
+	require.ErrorIs(t, err, ErrInvalidInstrument)
+
+	_, err = NewEquity("A", "B/C")
 	require.ErrorIs(t, err, ErrInvalidInstrument)
 }
 

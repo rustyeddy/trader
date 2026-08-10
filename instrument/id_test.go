@@ -98,6 +98,41 @@ func TestIndexID(t *testing.T) {
 	assert.Equal(t, "idx:SPX", IndexID(" spx ").String())
 }
 
+func TestIDConstructorsReturnZeroForInvalidInput(t *testing.T) {
+	eur := num.MustParseCurrency("EUR")
+	usd := num.MustParseCurrency("USD")
+	dec := time.Date(2026, time.December, 19, 0, 0, 0, 0, time.UTC)
+
+	assert.True(t, CurrencyPairID(num.Currency{}, usd).IsZero())
+	assert.True(t, CurrencyPairID(eur, num.Currency{}).IsZero())
+	assert.True(t, CurrencyPairID(eur, eur).IsZero(), "a pair cannot have equal base and quote")
+
+	assert.True(t, EquityID("", "AAPL").IsZero())
+	assert.True(t, EquityID("NASDAQ", "").IsZero())
+
+	assert.True(t, ETFID("", "SPY").IsZero())
+	assert.True(t, ETFID("NASDAQ", "").IsZero())
+
+	assert.True(t, FutureID("", dec).IsZero())
+	assert.True(t, FutureID("ES", time.Time{}).IsZero())
+
+	assert.True(t, ContinuousSeriesID("").IsZero())
+	assert.True(t, IndexID("").IsZero())
+}
+
+// TestEquityIDRejectsAmbiguousSeparatorCharacters is the collision-
+// prevention test: without character-set validation,
+// EquityID("A:B", "C") and EquityID("A", "B:C") would both collapse to
+// "eq:A:B:C". Rejecting ':' at the input boundary (returning the zero ID)
+// closes that collision instead of trying to escape it.
+func TestEquityIDRejectsAmbiguousSeparatorCharacters(t *testing.T) {
+	a := EquityID("A:B", "C")
+	b := EquityID("A", "B:C")
+
+	assert.True(t, a.IsZero())
+	assert.True(t, b.IsZero())
+}
+
 func TestIDZeroValue(t *testing.T) {
 	var id ID
 	assert.True(t, id.IsZero())

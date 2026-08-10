@@ -58,8 +58,13 @@ func (s Spec) Multiplier() num.Rate { return s.multiplier }
 func (s Spec) SettlementCurrency() num.Currency { return s.settlementCurrency }
 
 // ValidatePrice reports an error unless price is an exact multiple of s's
-// tick size, per ADR-004's exact price-increment rule.
+// tick size, per ADR-004's exact price-increment rule. ValidatePrice
+// reports ErrInvalidSpec, not num.ErrDivideByZero, if s is the
+// unconstructed zero value.
 func (s Spec) ValidatePrice(price num.Price) error {
+	if s.tickSize.IsZero() {
+		return fmt.Errorf("%w: spec must be constructed with NewSpec", ErrInvalidSpec)
+	}
 	ok, err := price.DivisibleBy(s.tickSize)
 	if err != nil {
 		return err
@@ -71,8 +76,12 @@ func (s Spec) ValidatePrice(price num.Price) error {
 }
 
 // ValidateQuantity reports an error unless qty is an exact multiple of s's
-// quantity increment.
+// quantity increment. ValidateQuantity reports ErrInvalidSpec, not
+// num.ErrDivideByZero, if s is the unconstructed zero value.
 func (s Spec) ValidateQuantity(qty num.Quantity) error {
+	if s.quantityIncrement.IsZero() {
+		return fmt.Errorf("%w: spec must be constructed with NewSpec", ErrInvalidSpec)
+	}
 	ok, err := qty.DivisibleBy(s.quantityIncrement)
 	if err != nil {
 		return err

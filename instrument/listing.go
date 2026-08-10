@@ -6,17 +6,22 @@ import (
 )
 
 // Listing is one venue's tradable, or research-only non-tradable,
-// representation of an Instrument: which venue, under what provider
-// symbol, with what trading mechanics, and whether it can currently be
-// traded there.
+// representation of an Instrument: which provider and venue, under what
+// provider symbol, with what trading mechanics, and whether it can
+// currently be traded there.
 //
-// Listing's fields are unexported; construct one with NewListing. A
-// Listing's InstrumentID names an Instrument by ID but does not itself
-// reference or validate against a constructed Instrument value — Listing
-// has no dependency on a catalog or registry; composing the two, if a
-// caller needs that, is left to the caller.
+// Provider and Venue are kept distinct. A provider is a broker or data
+// vendor — "OANDA", "IBKR" — and a venue is an exchange or execution
+// venue — "NASDAQ", "CME". They are not interchangeable: one provider can
+// expose listings on several venues (IBKR can offer a NASDAQ listing), and
+// the same venue's listing can be reached through several providers.
+// Venue may be empty for markets with no meaningful centralized venue,
+// such as spot FX.
+//
+// Listing's fields are unexported; construct one with NewListing.
 type Listing struct {
 	instrumentID ID
+	provider     string
 	venue        string
 	symbol       string
 	spec         Spec
@@ -25,14 +30,21 @@ type Listing struct {
 
 // ListingParams collects NewListing's arguments.
 type ListingParams struct {
-	// InstrumentID is the Instrument this Listing represents.
-	InstrumentID ID
+	// Instrument is the Instrument this Listing represents. NewListing
+	// stores only its ID, but uses the full value to validate Tradable
+	// against Instrument.Kind — see Tradable below.
+	Instrument Instrument
 
-	// Venue names the provider or exchange offering this listing, for
-	// example "OANDA" or "NASDAQ".
+	// Provider names the broker or data vendor offering this listing, for
+	// example "OANDA" or "IBKR".
+	Provider string
+
+	// Venue names the exchange or execution venue, for example "NASDAQ"
+	// or "CME". Venue may be left empty for markets with no meaningful
+	// centralized venue, such as spot FX.
 	Venue string
 
-	// Symbol is the venue's own symbol text, for example "EUR_USD" or
+	// Symbol is the provider's own symbol text, for example "EUR_USD" or
 	// "AAPL". It is preserved verbatim except for trimming — it is
 	// display-only and never used as identity; see the package doc
 	// comment.
@@ -43,23 +55,24 @@ type ListingParams struct {
 	Spec Spec
 
 	// Tradable reports whether this listing can currently be traded.
-	// KindContinuousSeries instruments are never tradable in practice,
-	// but Listing does not enforce that against Kind — see the package
-	// doc comment for why that distinction is Instrument.Kind's
-	// responsibility, not a Listing-level flag combination.
+	// NewListing rejects Tradable: true when Instrument.Kind() is
+	// KindContinuousSeries or KindIndex — both are non-orderable by
+	// definition, not merely by convention — see the package doc comment.
 	Tradable bool
 }
 
-// NewListing validates and returns a Listing. InstrumentID must be
-// non-zero, Venue and Symbol must be non-empty once trimmed, and Spec must
-// have been constructed with NewSpec.
+// NewListing validates and returns a Listing. Instrument must be a
+// constructed, non-zero Instrument; Provider and Symbol must be non-empty
+// once trimmed; Venue is trimmed but may be empty; Spec must have been
+// constructed with NewSpec; and Tradable must not be true when Instrument
+// is a KindContinuousSeries or KindIndex.
 func NewListing(p ListingParams) (Listing, error) {
-	if p.InstrumentID.IsZero() {
-		return Listing{}, fmt.Errorf("%w: instrument ID must not be zero", ErrInvalidListing)
+	if p.Instrument.ID().IsZero() {
+		return Listing{}, fmt.Errorf("%w: instrument must be constructed", ErrInvalidListing)
 	}
-	venue := strings.TrimSpace(p.Venue)
-	if venue == "" {
-		return Listing{}, fmt.Errorf("%w: venue must not be empty", ErrInvalidListing)
+	provider := strings.TrimSpace(p.Provider)
+	if provider == "" {
+		return Listing{}, fmt.Errorf("%w: provider must not be empty", ErrInvalidListing)
 	}
 	symbol := strings.TrimSpace(p.Symbol)
 	if symbol == "" {
@@ -68,22 +81,39 @@ func NewListing(p ListingParams) (Listing, error) {
 	if p.Spec.TickSize().IsZero() {
 		return Listing{}, fmt.Errorf("%w: spec must be constructed with NewSpec", ErrInvalidListing)
 	}
+	if p.Tradable && isNeverTradable(p.Instrument.Kind()) {
+		return Listing{}, fmt.Errorf("%w: a %s listing can never be tradable", ErrInvalidListing, p.Instrument.Kind())
+	}
 	return Listing{
-		instrumentID: p.InstrumentID,
-		venue:        venue,
+		instrumentID: p.Instrument.ID(),
+		provider:     provider,
+		venue:        strings.TrimSpace(p.Venue),
 		symbol:       symbol,
 		spec:         p.Spec,
 		tradable:     p.Tradable,
 	}, nil
 }
 
+// isNeverTradable reports whether k is non-orderable by definition, not
+// merely by convention: a continuous research series and an index are
+// never the tradable thing themselves, even though tradable instruments —
+// futures contracts on a root, ETFs tracking an index — may exist
+// alongside them.
+func isNeverTradable(k Kind) bool {
+	return k == KindContinuousSeries || k == KindIndex
+}
+
 // InstrumentID returns the Instrument l represents.
 func (l Listing) InstrumentID() ID { return l.instrumentID }
 
-// Venue returns the provider or exchange offering l.
+// Provider returns the broker or data vendor offering l.
+func (l Listing) Provider() string { return l.provider }
+
+// Venue returns the exchange or execution venue for l, or "" if l has no
+// meaningful centralized venue.
 func (l Listing) Venue() string { return l.venue }
 
-// Symbol returns the venue's own symbol text for l.
+// Symbol returns the provider's own symbol text for l.
 func (l Listing) Symbol() string { return l.symbol }
 
 // Spec returns l's trading mechanics.

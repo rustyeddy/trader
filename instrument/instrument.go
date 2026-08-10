@@ -65,8 +65,12 @@ func (i Instrument) Root() (string, bool) {
 	return i.root, i.kind == KindFuture || i.kind == KindContinuousSeries
 }
 
-// Expiration returns i's contract expiration and true when i.Kind() is
-// KindFuture; otherwise it returns the zero time.Time and false.
+// Expiration returns i's contract month and true when i.Kind() is
+// KindFuture; otherwise it returns the zero time.Time and false. The
+// returned value is always the first instant of the contract's expiration
+// month in UTC, not necessarily the exact time.Time NewFuture was called
+// with — see NewFuture and FutureID for why only the year and month are
+// significant to a futures contract's identity.
 func (i Instrument) Expiration() (time.Time, bool) {
 	return i.expiration, i.kind == KindFuture
 }
@@ -95,7 +99,8 @@ func NewCurrencyPair(base, quote num.Currency) (Instrument, error) {
 }
 
 // NewEquity returns the Instrument for the equity listed under ticker on
-// exchange. exchange and ticker must both be non-empty once trimmed.
+// exchange. Once trimmed and upper-cased, exchange and ticker must both be
+// non-empty and contain only letters, digits, '.', or '-'.
 func NewEquity(exchange, ticker string) (Instrument, error) {
 	exchange, ticker, err := validateExchangeTicker(exchange, ticker)
 	if err != nil {
@@ -110,8 +115,8 @@ func NewEquity(exchange, ticker string) (Instrument, error) {
 }
 
 // NewETF returns the Instrument for the exchange-traded fund listed under
-// ticker on exchange. exchange and ticker must both be non-empty once
-// trimmed.
+// ticker on exchange. Once trimmed and upper-cased, exchange and ticker
+// must both be non-empty and contain only letters, digits, '.', or '-'.
 func NewETF(exchange, ticker string) (Instrument, error) {
 	exchange, ticker, err := validateExchangeTicker(exchange, ticker)
 	if err != nil {
@@ -128,43 +133,62 @@ func NewETF(exchange, ticker string) (Instrument, error) {
 func validateExchangeTicker(exchange, ticker string) (string, string, error) {
 	exchange = normalizeIdentifierPart(exchange)
 	ticker = normalizeIdentifierPart(ticker)
-	if exchange == "" {
-		return "", "", fmt.Errorf("%w: exchange must not be empty", ErrInvalidInstrument)
+	if !isValidIdentifierPart(exchange) {
+		return "", "", fmt.Errorf("%w: exchange must be non-empty and contain only letters, digits, '.', or '-'", ErrInvalidInstrument)
 	}
-	if ticker == "" {
-		return "", "", fmt.Errorf("%w: ticker must not be empty", ErrInvalidInstrument)
+	if !isValidIdentifierPart(ticker) {
+		return "", "", fmt.Errorf("%w: ticker must be non-empty and contain only letters, digits, '.', or '-'", ErrInvalidInstrument)
 	}
 	return exchange, ticker, nil
 }
 
 // NewFuture returns the Instrument for one specific expiring futures
-// contract identified by its underlying root symbol and expiration. root
-// must be non-empty once trimmed and expiration must be non-zero.
-// Contracts on the same root with different expirations are different
-// Instruments — see the package doc comment.
+// contract identified by its underlying root symbol and expiration
+// month. Once trimmed and upper-cased, root must be non-empty and contain
+// only letters, digits, '.', or '-'; expiration must be non-zero.
+// Contracts on the same root with different expiration months are
+// different Instruments — see the package doc comment.
+//
+// Only expiration's year and month are significant to a futures
+// contract's identity, matching standard contract-month conventions: two
+// calls with expirations in the same month, even on different days,
+// produce the same ID. Expiration() returns the canonicalized first
+// instant of that month, never the exact time.Time passed in, so it can
+// never disagree with what FutureID encoded into the ID.
 func NewFuture(root string, expiration time.Time) (Instrument, error) {
 	root = normalizeIdentifierPart(root)
-	if root == "" {
-		return Instrument{}, fmt.Errorf("%w: root must not be empty", ErrInvalidInstrument)
+	if !isValidIdentifierPart(root) {
+		return Instrument{}, fmt.Errorf("%w: root must be non-empty and contain only letters, digits, '.', or '-'", ErrInvalidInstrument)
 	}
 	if expiration.IsZero() {
 		return Instrument{}, fmt.Errorf("%w: expiration must not be zero", ErrInvalidInstrument)
 	}
+	contractMonth := canonicalContractMonth(expiration)
 	return Instrument{
-		id:         FutureID(root, expiration),
+		id:         FutureID(root, contractMonth),
 		kind:       KindFuture,
 		root:       root,
-		expiration: expiration.UTC(),
+		expiration: contractMonth,
 	}, nil
+}
+
+// canonicalContractMonth truncates t to the first instant of its month in
+// UTC — the only granularity that is significant to a futures contract's
+// identity. Keeping FutureID and Instrument.Expiration derived from this
+// same canonicalization is what keeps them from ever disagreeing.
+func canonicalContractMonth(t time.Time) time.Time {
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
 // NewContinuousSeries returns the Instrument for the continuous,
 // non-orderable research series derived from the futures family rooted at
-// root. root must be non-empty once trimmed.
+// root. Once trimmed and upper-cased, root must be non-empty and contain
+// only letters, digits, '.', or '-'.
 func NewContinuousSeries(root string) (Instrument, error) {
 	root = normalizeIdentifierPart(root)
-	if root == "" {
-		return Instrument{}, fmt.Errorf("%w: root must not be empty", ErrInvalidInstrument)
+	if !isValidIdentifierPart(root) {
+		return Instrument{}, fmt.Errorf("%w: root must be non-empty and contain only letters, digits, '.', or '-'", ErrInvalidInstrument)
 	}
 	return Instrument{
 		id:   ContinuousSeriesID(root),
@@ -173,16 +197,17 @@ func NewContinuousSeries(root string) (Instrument, error) {
 	}, nil
 }
 
-// NewIndex returns the Instrument for the non-orderable index name. name
-// must be non-empty once trimmed.
+// NewIndex returns the Instrument for the non-orderable index name. Once
+// trimmed and upper-cased, name must be non-empty and contain only
+// letters, digits, '.', or '-'.
 func NewIndex(name string) (Instrument, error) {
-	trimmed := normalizeIdentifierPart(name)
-	if trimmed == "" {
-		return Instrument{}, fmt.Errorf("%w: name must not be empty", ErrInvalidInstrument)
+	name = normalizeIdentifierPart(name)
+	if !isValidIdentifierPart(name) {
+		return Instrument{}, fmt.Errorf("%w: name must be non-empty and contain only letters, digits, '.', or '-'", ErrInvalidInstrument)
 	}
 	return Instrument{
-		id:   IndexID(trimmed),
+		id:   IndexID(name),
 		kind: KindIndex,
-		name: trimmed,
+		name: name,
 	}, nil
 }
