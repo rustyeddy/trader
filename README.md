@@ -199,6 +199,35 @@ reports `ErrAmbiguousSymbol` rather than picking one; no match reports
 [package doc comment](instrument/doc.go) for the full resolution
 semantics.
 
+### marketdata
+
+`marketdata` defines Trader's bar-interval and trading-calendar vocabulary
+— not yet acquisition, storage, or resampling, which land in a later
+milestone. `Interval` is built from a typed unit and count, never parsed
+from a provider string, with five predefined values:
+
+```go
+marketdata.M1, marketdata.H1, marketdata.H4, marketdata.D1, marketdata.W1
+```
+
+`Calendar` aligns a `time.Time` to sessions and bar boundaries; minute and
+hour bars align to the UTC clock, but day and week bars do not, since a
+trading day is not a UTC calendar day. `FXCalendar` is the one
+implementation so far, covering spot FX's continuous weekly session —
+open Sunday 17:00 New York time, closed Friday 17:00 through Sunday
+17:00 — with `time.Date`-based arithmetic in the `America/New_York`
+location so daylight-saving transitions resolve correctly:
+
+```go
+c := marketdata.NewFXCalendar(marketdata.FXCalendarParams{})
+bar, err := c.Bar(someTime, marketdata.D1)
+// bar.Start() and bar.End() are the 17:00 New York rollovers bracketing someTime
+```
+
+See [ADR-012](docs/arch/adr-decisions.org) and the
+[package doc comment](marketdata/doc.go) for the full half-open range
+convention, DST handling, and why day/week bars use a `Calendar` seam.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
