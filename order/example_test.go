@@ -145,3 +145,80 @@ func Example_unknownBrokerStatus() {
 	// working
 	// unknown
 }
+
+// Example_lifecycle walks an order from submission through acceptance
+// and two partial fills to StatusFilled, using the named Apply*
+// functions rather than setting Status directly.
+func Example_lifecycle() {
+	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(3, 4))
+	accountID, err := id.GenerateAccountID(g)
+	if err != nil {
+		panic(err)
+	}
+	listing := exampleListing()
+
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        order.Market,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	orderID, err := id.GenerateOrderID(g)
+	if err != nil {
+		panic(err)
+	}
+	request, err := order.NewRequest(proposal, orderID)
+	if err != nil {
+		panic(err)
+	}
+	o, err := order.NewOrder(order.Order{Request: request, Status: order.StatusPendingSubmit})
+	if err != nil {
+		panic(err)
+	}
+
+	o, err = order.ApplyAcceptance(o, "broker-order-1", num.MustParseQuantity("1000"), nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	fill := func(quantity string) order.Fill {
+		fillID, ferr := id.GenerateFillID(g)
+		if ferr != nil {
+			panic(ferr)
+		}
+		f, ferr := order.NewFill(order.Fill{
+			FillID:        fillID,
+			OrderID:       o.Request.OrderID,
+			BrokerOrderID: o.BrokerOrderID,
+			AccountID:     o.Request.AccountID,
+			Listing:       listing,
+			Side:          o.Request.Side,
+			Price:         num.MustParsePrice("1.10000"),
+			Quantity:      num.MustParseQuantity(quantity),
+		})
+		if ferr != nil {
+			panic(ferr)
+		}
+		return f
+	}
+
+	o, err = order.ApplyFill(o, fill("400"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(o.Status, o.FilledQuantity)
+
+	o, err = order.ApplyFill(o, fill("600"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(o.Status, o.FilledQuantity)
+	// Output:
+	// partially_filled 400
+	// filled 1000
+}
