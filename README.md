@@ -174,6 +174,31 @@ non-orderable `Instrument` — see the
 [package doc comment](instrument/doc.go) for why futures split into two
 kinds instead of one, and why synthetic/multi-leg instruments are deferred.
 
+`instrument.Resolver` resolves provider symbols and `Instrument`+venue
+combinations to `Listing`s without ever letting a symbol or alias become
+identity. `MemoryResolver` is the in-memory reference implementation —
+a plain value with no package-level registry, so independent instances
+need no special setup:
+
+```go
+r := instrument.NewMemoryResolver()
+if err := r.Register(oandaListing); err != nil {
+	log.Fatal(err)
+}
+if err := r.RegisterAlias("OANDA", "", "EURUSD", "OANDA", "", "EUR_USD"); err != nil {
+	log.Fatal(err)
+}
+
+listing, err := r.ResolveSymbol("OANDA", "", "EURUSD") // resolves via the alias
+// listing.Symbol() == "EUR_USD" -- the alias never becomes the identity
+```
+
+An unconstrained provider/venue that matches more than one `Listing`
+reports `ErrAmbiguousSymbol` rather than picking one; no match reports
+`ErrUnknownSymbol`. See [ADR-016](docs/arch/adr-decisions.org) and the
+[package doc comment](instrument/doc.go) for the full resolution
+semantics.
+
 ## Documentation
 
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
