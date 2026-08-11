@@ -50,6 +50,39 @@ M1 deliberately shipped none of this: the M1 completion review confirms
 =marketdata= contains only interval/calendar/time-range vocabulary and
 that =Quote=/=Bar= are correctly absent.
 
+* Legacy Reference Implementation
+
+The legacy repository at
+[[https://github.com/rustyeddy/trader-first-try]] is the reference
+implementation for M2, per ADR-013's controlled greenfield transplant
+policy: inspect it for proven algorithms, fixtures, and edge cases, then
+copy only the smallest useful portion behind the new package contracts.
+The new module never imports the legacy repository.
+
+The directly relevant legacy code, concentrated in
+=trader-first-try/datamanager/= and =trader-first-try/market/=:
+
+| Legacy path                              | Relevant to | What it offers                                        |
+|------------------------------------------+-------------+-------------------------------------------------------|
+| =market/candle.go=, =market/tick.go=     | M2-01       | Prior candle/tick shapes and their edge cases         |
+| =market/forex_hours.go=                  | M2-01/03/09 | FX session-hours logic; behavior oracle for =FXCalendar= |
+| =datamanager/data_validation.go=         | M2-03       | Existing validation checks and their test cases       |
+| =datamanager/candle_gap.go=              | M2-03/10    | Gap detection approach                                |
+| =datamanager/store*.go=                  | M2-04       | Store keying, inventory, and cache behavior           |
+| =datamanager/data_writer.go=, =data_raw.go= | M2-05    | On-disk candle layout and writer behavior             |
+| =datamanager/oanda/=                     | M2-06       | OANDA candle provider, paging, and its tests          |
+| =datamanager/dukascopy/=                 | M2-06       | Second provider implementation; validity tests        |
+| =datamanager/data_manager.go=, =data_sync.go=, =data_downloader.go= | M2-07 | Ingest/sync orchestration and download planning |
+| =datamanager/get_candles.go=, =candle_iter.go=, =candle_set.go= | M2-08 | Query/iteration behavior over stored candles |
+| =datamanager/candle_agg.go=, =slot_boundaries.go= | M2-09 | Candle aggregation and slot-boundary alignment with tests |
+| =datamanager/store_inventory.go=, =data_stats*.go= | M2-10 | Coverage inventory and data-quality statistics |
+| =datamanager/testdata_generator.go=, =testdata_helper.go=, =testdata/= | M2-11 | Fixture generation and recorded candle data |
+
+Per ADR-013, transplant only when the legacy code is easier to prove
+correct than a new implementation; legacy package layout, global state
+(=store_globals.go=), and configuration access must not be carried
+forward.
+
 * Out of Scope for M2
 
 Kept out deliberately, per the architecture document:
@@ -151,6 +184,11 @@ Value types only; no behavior beyond construction/validation.
 Acceptance: constructors reject malformed records; no =time.Now()=;
 types compose with =instrument.ID=/=Listing= from M1.
 
+Legacy reference: =trader-first-try/market/candle.go= and
+=market/tick.go= for prior candle/tick field sets and their edge cases;
+=market/forex_hours.go= as a behavior oracle for session boundaries
+already covered by =FXCalendar= (ADR-012).
+
 ** M2-02: Define historical query contracts and typed reader
 
 The public seam every later M2 issue programs against.
@@ -173,6 +211,11 @@ The public seam every later M2 issue programs against.
 Acceptance: an in-memory fake (M2-04) satisfies =HistoricalSource=
 without modification; contract-test hooks exist for later adapters.
 
+Legacy reference: =trader-first-try/datamanager/candle_iter.go=,
+=candle_set.go=, and =data_iterator.go= for the iteration/query shapes
+that worked (and the channel/cursor pain points =Reader[T]= should
+avoid).
+
 ** M2-03: Implement validation and data-quality policies
 
 The second, independent stage of the two-stage normalization pipeline
@@ -191,6 +234,10 @@ Acceptance: each check and each policy is unit-tested, including
 boundary cases (exactly-on-session-boundary bars, DST transition weeks
 via =FXCalendar=).
 
+Legacy reference: =trader-first-try/datamanager/data_validation.go=
+(with =data_validation_test.go=) for the proven check list, and
+=candle_gap.go= for gap-detection edge cases.
+
 ** M2-04: Define persistence port and implement in-memory store
 
 The narrow storage port the architecture requires to hide CSV, Parquet,
@@ -206,6 +253,12 @@ a remote data service, and in-memory implementations from callers.
 Acceptance: =MemoryStore= passes the same contract tests later run
 against the CSV adapter (M2-05); no file I/O in the port's contract.
 
+Legacy reference: =trader-first-try/datamanager/store.go=,
+=store_key.go=, =store_keymap.go=, and =store_inventory.go= for keying
+and inventory semantics.  Do not transplant =store_globals.go= — its
+package-level global state is exactly what ADR-013 forbids carrying
+forward.
+
 ** M2-05: Implement CSV market-data adapter
 
 The initial real storage adapter, per the development sequence ("use
@@ -219,6 +272,11 @@ CSV initially if useful").
 Acceptance: round-trip fidelity for all M2-01 fields including
 provenance; malformed-row handling is explicit (fail the read, never
 silently skip).
+
+Legacy reference: =trader-first-try/datamanager/data_writer.go= and
+=data_raw.go= for the on-disk candle layout the legacy repository
+already uses; matching it where sensible lets existing legacy data
+directories serve as test fixtures.
 
 ** M2-06: Implement one real provider adapter
 
@@ -234,6 +292,13 @@ One provider-native historical-bar source — OANDA is the natural choice
 
 Acceptance: a recorded-fixture test proves byte-for-byte canonical
 output for a known provider response; no network access in unit tests.
+
+Legacy reference: =trader-first-try/datamanager/oanda/provider.go= for
+the OANDA candle request/paging logic and =provider_test.go= for its
+test approach; =datamanager/dukascopy/= is a second proven provider
+(and its =validity_test.go= a source of validation fixtures) if a
+second adapter is wanted to prove the port is genuinely
+provider-neutral.
 
 ** M2-07: Implement the market-data ingestor service
 
@@ -252,6 +317,11 @@ Acceptance: an end-to-end test ingests fixture bars from the memory
 source through validation into the memory store and reports exactly
 what was written.
 
+Legacy reference: =trader-first-try/datamanager/data_manager.go=,
+=data_sync.go=, =data_downloader.go=, and =data_plan.go= for the
+sync/download planning behavior — as a behavior oracle only; the
+orchestration itself is rewritten around injected dependencies.
+
 ** M2-08: Implement the historical query service with fetch policy
 
 The read half of the vertical slice: bounded historical queries over
@@ -268,6 +338,10 @@ the store with an explicit, reproducible fetch policy.
 Acceptance: identical query against memory and CSV stores yields
 identical results; =ExactManifest= failure is a typed error naming the
 missing ranges.
+
+Legacy reference: =trader-first-try/datamanager/get_candles.go= and
+=data_wants.go= for the query-shape and "what data do we want" logic
+that worked in practice.
 
 ** M2-09: Implement the canonical interval resampler
 
@@ -288,6 +362,12 @@ work).
 Acceptance: derived vs. native comparison test passes for a
 multi-week fixture spanning a DST transition.
 
+Legacy reference: =trader-first-try/datamanager/candle_agg.go= and
+=slot_boundaries.go= (with their tests) are the strongest transplant
+candidates in the slice — proven aggregation and boundary-alignment
+logic.  Adapt them to =Calendar=-based alignment rather than carrying
+forward any hardcoded session math.
+
 ** M2-10: Implement coverage catalog and data-quality reporting
 
 Coverage manifests and quality reporting, added early per the
@@ -304,6 +384,10 @@ Acceptance: ingesting two disjoint ranges reports exactly one gap of
 the correct duration; holiday-aware coverage shows no false gap across
 a configured FX holiday.
 
+Legacy reference: =trader-first-try/datamanager/store_inventory.go=
+for coverage inventory and =data_stats*.go= for the quality statistics
+(spread, distribution, session) that coverage reporting can draw on.
+
 ** M2-11: Add tradertest market-data builders and a runnable example
 
 Public testing support and proof the slice is consumable.
@@ -318,6 +402,11 @@ Public testing support and proof the slice is consumable.
 Acceptance: the example runs green in =make check= and uses only public
 packages; no =internal/= imports.
 
+Legacy reference: =trader-first-try/datamanager/testdata_generator.go=
+and =testdata_helper.go= for fixture generation, and the recorded
+candle data under =trader-first-try/testdata/= as real fixtures to
+vendor into this repository's own =testdata= directories.
+
 ** M2-12: Perform M2 milestone completion review
 
 Verification-first sign-off, mirroring the M1-14 review.
@@ -329,6 +418,8 @@ Verification-first sign-off, mirroring the M1-14 review.
   =marketdata= must still not import =order=, =account=, adapters, or
   transports.
 - Record the M2 public API baseline; confirm no M3+ behavior leaked in.
+- Confirm every transplanted legacy fragment obeys ADR-013: smallest
+  useful portion, adapted to the new contracts, no legacy import.
 - Recommend close or enumerate blockers.
 
 Acceptance: =docs/milestones/m2-completion-review.org= exists and
