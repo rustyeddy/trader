@@ -1,0 +1,353 @@
+#+TITLE: M2 Issue Plan — Market Data Vertical Slice
+#+SUBTITLE: Proposed GitHub issue breakdown for milestone M2
+#+STARTUP: overview indent
+
+* Purpose
+
+This document proposes the issue breakdown for milestone M2 (Market Data
+Vertical Slice), as defined by Appendix D of
+=docs/arch/trader-framework-architecture.org=:
+
+#+BEGIN_QUOTE
+M2 | Market Data Vertical Slice | Acquire, normalize, validate, store,
+query, resample, and report coverage for one data path
+#+END_QUOTE
+
+and by the architecture document's "Recommended Development Sequence"
+(Phase 2):
+
+#+BEGIN_EXAMPLE
+Provider native data -> normalization -> canonical store -> historical query
+#+END_EXAMPLE
+
+Use CSV initially if useful, but test the public API with an in-memory
+store and one provider adapter.  The application should not know which
+storage adapter is used.  Add coverage manifests and data-quality
+reporting early.
+
+This is a proposal for review.  Once accepted, each row becomes a GitHub
+issue, and the accepted breakdown is folded into
+=docs/plans/milestones.org=.
+
+* Inputs
+
+The issues below are derived from:
+
+- The =marketdata= package section of the architecture document, which
+  distinguishes =HistoricalSource=, =LiveFeed=, =Store=/=Sink=,
+  =CoverageCatalog=, provider adapters, normalizer/validator, and
+  resampler as separate concerns.
+- ADR-012 (Accepted): the existing =Interval=, =TimeRange=, =Calendar=,
+  and =FXCalendar= vocabulary in package =marketdata= — the foundation
+  M2 builds on.
+- ADR-004 / ADR-019: exact numeric types (=num=) used for all canonical
+  price/volume values.
+- The package-boundary rules in =docs/arch/package-boundaries.org=
+  (no =time.Now()= in domain code, no hidden goroutines, interfaces only
+  where implementations genuinely vary, =internal/= by default).
+
+M1 deliberately shipped none of this: the M1 completion review confirms
+=marketdata= contains only interval/calendar/time-range vocabulary and
+that =Quote=/=Bar= are correctly absent.
+
+* Out of Scope for M2
+
+Kept out deliberately, per the architecture document:
+
+- =LiveFeed= (real-time subscriptions) — needed by M6, not by a
+  historical vertical slice.
+- =BookUpdate=, tick-level =Trade= ingestion, and bid/ask quotes beyond
+  the canonical =Quote= type definition.
+- Adjustment/corporate-action machinery beyond defining the
+  =AdjustmentMode= vocabulary (=Raw= must work; others may initially
+  reject with a typed error).
+- Automatic read-through download in the query path (=FetchMissing=) —
+  acquisition is an explicit ingestor step; queries default to
+  =LocalOnly= so a reproducible backtest cannot silently change its
+  input set.
+- Exchange/equity/futures calendars beyond =FXCalendar= (M2 vertical
+  slice uses FX).
+- CLI commands (a =trader-data= command belongs to a later application
+  milestone; M2 ships library APIs plus a runnable example).
+
+* Dependency Order
+
+#+BEGIN_EXAMPLE
+M2-01 (canonical types + ADR-020)
+        |
+        v
+M2-02 (Reader[T] + query/port contracts + ADR-021)
+        |
+        v
+M2-03 (validator + policies)
+        |
+        v
+M2-04 (storage port + memory store) --------+
+        |                                   |
+        v                                   v
+M2-05 (CSV adapter)                 M2-06 (one provider adapter)
+        |                                   |
+        +---------------+-------------------+
+                        |
+                        v
+              M2-07 (ingestor service)
+                        |
+                        v
+              M2-08 (query service + fetch policy)
+                        |
+                        v
+              M2-09 (resampler)
+                        |
+                        v
+              M2-10 (coverage catalog + report)
+                        |
+                        v
+              M2-11 (tradertest builders + runnable example)
+                        |
+                        v
+              M2-12 (milestone completion review)
+#+END_EXAMPLE
+
+M2-05 and M2-06 are independent of each other and may proceed in
+parallel once M2-04 lands.  Everything else is ordered.
+
+* Issue Breakdown
+
+| ID    | Title                                                        | Deliverable                                        |
+|-------+--------------------------------------------------------------+----------------------------------------------------|
+| M2-01 | Define canonical market-data event types                     | =marketdata= =Quote=, =Trade=, =Bar=, =Event=; ADR-020 |
+| M2-02 | Define historical query contracts and typed reader           | =Reader[T]=, =BarQuery=, =HistoricalSource=; ADR-021 |
+| M2-03 | Implement validation and data-quality policies               | =Validator=, =QualityFlag=, reject/drop/repair policies |
+| M2-04 | Define persistence port and implement in-memory store        | =Sink=/=Source= port, =MemoryStore=                |
+| M2-05 | Implement CSV market-data adapter                            | =adapters/marketdata/csv= (or =internal/=)         |
+| M2-06 | Implement one real provider adapter                          | one provider (e.g. OANDA) historical-bar adapter   |
+| M2-07 | Implement the market-data ingestor service                   | =marketdata.Ingestor= application service          |
+| M2-08 | Implement the historical query service with fetch policy     | =QueryService= honoring =LocalOnly=/=ExactManifest= |
+| M2-09 | Implement the canonical interval resampler                   | =Resampler= deriving aligned bars from finer bars  |
+| M2-10 | Implement coverage catalog and data-quality reporting        | =Coverage=, =Gap=, coverage query API              |
+| M2-11 | Add tradertest market-data builders and a runnable example   | =tradertest= bar/quote builders; =examples/m2=     |
+| M2-12 | Perform M2 milestone completion review                       | =docs/milestones/m2-completion-review.org=         |
+
+* Issue Details
+
+** M2-01: Define canonical market-data event types
+
+Value types only; no behavior beyond construction/validation.
+
+- =Bar=: open, high, low, close (=num.Price=), volume, =Interval=,
+  =TimeRange=, instrument/listing identity.
+- =Quote=: bid, ask, optional sizes, event time.
+- =Trade=: last price, size, event time (canonical vocabulary; ingestion
+  of tick trades is out of scope for M2).
+- Provenance on every record: source provider, event time,
+  observed-at time, sequence number when available, raw/adjusted status,
+  quality flags, revision when data may be corrected.
+- A convenience union =Event= with the concrete kind remaining explicit.
+- ADR-020 records the decisions: provenance field set, exact-value
+  usage, =Trade= naming per the architecture's vocabulary warning, and
+  what validation constructors enforce (e.g. =low <= high=, half-open
+  range non-empty).
+
+Acceptance: constructors reject malformed records; no =time.Now()=;
+types compose with =instrument.ID=/=Listing= from M1.
+
+** M2-02: Define historical query contracts and typed reader
+
+The public seam every later M2 issue programs against.
+
+- =Reader[T]=: =Next(ctx) (T, error)= returning =io.EOF= at completion,
+  =Close() error=.  Documented concurrency ownership, backpressure, and
+  close semantics per the architecture's streaming conventions.
+- =BarQuery=: instruments, =Interval=, half-open =[Start, End)=,
+  =AdjustmentMode=, =FetchPolicy=.
+- =HistoricalSource= interface: =Bars=, plus coverage access (detailed
+  in M2-10).  =LiveFeed= is explicitly not defined here.
+- =AdjustmentMode= and =FetchPolicy= enumerations with =Raw= and
+  =LocalOnly= as the working values; unimplemented modes return a
+  classifiable unsupported-capability error rather than silently
+  ignoring the request.
+- ADR-021 records the boundary decisions: reader over channels,
+  half-open ranges, half-open interval boundaries, and the
+  unsupported-mode error policy.
+
+Acceptance: an in-memory fake (M2-04) satisfies =HistoricalSource=
+without modification; contract-test hooks exist for later adapters.
+
+** M2-03: Implement validation and data-quality policies
+
+The second, independent stage of the two-stage normalization pipeline
+(adaptation is per-adapter; validation is shared).
+
+- Checks: gaps, duplicates, ordering violations, session misalignment
+  against a =Calendar=, impossible prices (=low > high=, negative),
+  suspicious spikes, malformed volume, revisions.
+- Explicit per-check policies: reject, drop, repair-with-quality-flag,
+  pass-and-record-anomaly.  Repairs are never hidden — every repair
+  produces a quality flag and a recorded anomaly.
+- Deterministic: pure functions over records plus an injected calendar;
+  no I/O, no clock reads.
+
+Acceptance: each check and each policy is unit-tested, including
+boundary cases (exactly-on-session-boundary bars, DST transition weeks
+via =FXCalendar=).
+
+** M2-04: Define persistence port and implement in-memory store
+
+The narrow storage port the architecture requires to hide CSV, Parquet,
+a remote data service, and in-memory implementations from callers.
+
+- Minimal =Sink= (write bars/quotes) and read side satisfying
+  =HistoricalSource= (M2-02).
+- =MemoryStore= reference implementation used by tests and by the
+  vertical-slice example.
+- Duplicate-write and revision-handling semantics documented and tested
+  (what happens when the same bar arrives twice, or corrected).
+
+Acceptance: =MemoryStore= passes the same contract tests later run
+against the CSV adapter (M2-05); no file I/O in the port's contract.
+
+** M2-05: Implement CSV market-data adapter
+
+The initial real storage adapter, per the development sequence ("use
+CSV initially if useful").
+
+- Read and write canonical bars (M2-01) to a documented CSV layout.
+- Implements the M2-04 port; passes the shared contract tests.
+- Storage layout is an implementation detail — not exposed in the
+  public port.
+
+Acceptance: round-trip fidelity for all M2-01 fields including
+provenance; malformed-row handling is explicit (fail the read, never
+silently skip).
+
+** M2-06: Implement one real provider adapter
+
+One provider-native historical-bar source — OANDA is the natural choice
+(it is M6's broker and FX is M2's calendar).
+
+- Provider-native records -> canonical records (the adaptation stage;
+  validation stays in M2-03).
+- Bounded historical queries only; rate limits and paging handled inside
+  the adapter.
+- Credentials via injected configuration; never read from the
+  environment inside the package.
+
+Acceptance: a recorded-fixture test proves byte-for-byte canonical
+output for a known provider response; no network access in unit tests.
+
+** M2-07: Implement the market-data ingestor service
+
+The application service composing provider adapter -> validation ->
+store.
+
+- =Ingestor= with injected dependencies (source, validator, sink,
+  clock, ID source); no goroutines without a =Run(ctx)= or returned
+  closer.
+- Records what was ingested (instrument, interval, range, revision)
+  for the coverage catalog (M2-10).
+- Classifiable errors: invalid request, provider failure, validation
+  rejection, storage failure.
+
+Acceptance: an end-to-end test ingests fixture bars from the memory
+source through validation into the memory store and reports exactly
+what was written.
+
+** M2-08: Implement the historical query service with fetch policy
+
+The read half of the vertical slice: bounded historical queries over
+the store with an explicit, reproducible fetch policy.
+
+- =QueryService= wrapping one or more =HistoricalSource=/
+  =Store= implementations behind the M2-02 contract.
+- =FetchPolicy= enforced: =LocalOnly= returns what exists and reports
+  gaps; =ExactManifest= fails the run when requested data is missing
+  from the recorded manifest.  Read-through download (=FetchMissing=)
+  is defined in vocabulary but returns unsupported for now.
+- The service never knows which storage adapter is underneath.
+
+Acceptance: identical query against memory and CSV stores yields
+identical results; =ExactManifest= failure is a typed error naming the
+missing ranges.
+
+** M2-09: Implement the canonical interval resampler
+
+One canonical resampler derives aligned coarser intervals from
+finer-grained canonical bars — the single place bar-grouping rules
+live (ADR-012 deliberately left multi-day/multi-week grouping to this
+work).
+
+- Resample M1 -> H1/H4, H1 -> H4, and any source -> D1/W1 via the
+  injected =Calendar=, so session-aligned bars are correct across DST.
+- Aggregation rules fixed and documented: open = first, high = max,
+  low = min, close = last, volume = sum; incomplete trailing bars are
+  flagged, not emitted as complete.
+- Validation: derived H4 bars compared against provider-native H4 bars
+  for the same session calendar (fixture from M2-06); disagreement
+  indicates a boundary/holiday/DST error and fails the test.
+
+Acceptance: derived vs. native comparison test passes for a
+multi-week fixture spanning a DST transition.
+
+** M2-10: Implement coverage catalog and data-quality reporting
+
+Coverage manifests and quality reporting, added early per the
+development sequence.
+
+- =Coverage=: per instrument/interval — first, last, =Gap= list,
+  sources, revision, quality warnings.
+- Coverage query API on the store/service; the ingestor (M2-07) keeps
+  it current.
+- Gap detection uses the =Calendar=, so weekends and holidays are not
+  reported as gaps for FX.
+
+Acceptance: ingesting two disjoint ranges reports exactly one gap of
+the correct duration; holiday-aware coverage shows no false gap across
+a configured FX holiday.
+
+** M2-11: Add tradertest market-data builders and a runnable example
+
+Public testing support and proof the slice is consumable.
+
+- =tradertest= builders for =Bar=, =Quote=, =Coverage=, and an
+  in-memory =HistoricalSource= preset — mirroring the M1 builder
+  conventions.
+- =examples/m2=: resolve an instrument, ingest fixture bars, query them
+  back with =LocalOnly=, resample H1 -> H4, and print a coverage
+  summary — the M2 analog of =examples/m1=, compiled and run in CI.
+
+Acceptance: the example runs green in =make check= and uses only public
+packages; no =internal/= imports.
+
+** M2-12: Perform M2 milestone completion review
+
+Verification-first sign-off, mirroring the M1-14 review.
+
+- Exercise the M2 public surface as an external consumer would.
+- Documentation/naming/glossary audit (new terms: Bar, Quote, Coverage,
+  Gap, AdjustmentMode, FetchPolicy, Resampler).
+- Dependency-boundary review against =package-boundaries.org=;
+  =marketdata= must still not import =order=, =account=, adapters, or
+  transports.
+- Record the M2 public API baseline; confirm no M3+ behavior leaked in.
+- Recommend close or enumerate blockers.
+
+Acceptance: =docs/milestones/m2-completion-review.org= exists and
+=make check= passes.
+
+* Exit Criteria for M2
+
+Proposed, mirroring the M0/M1 pattern:
+
+- Every deliverable above exists on the default branch; a closed issue
+  whose code or ADR is absent does not count.
+- The vertical slice works end to end with at least two interchangeable
+  stores (memory, CSV) and one real provider adapter, behind one public
+  contract.
+- A historical query under =ExactManifest= fails rather than silently
+  fetching, and under =LocalOnly= reports gaps.
+- Resampled bars agree with provider-native bars across a DST
+  transition.
+- Coverage reporting distinguishes real gaps from weekend/holiday
+  closures.
+- =make check= (=gofmt=, =go vet=, =go test -race=) is green.
+- No live-feed, broker, or strategy behavior is present or reachable.
