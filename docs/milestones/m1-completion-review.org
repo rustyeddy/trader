@@ -1,0 +1,258 @@
+#+TITLE: M1 Completion Review
+#+SUBTITLE: Domain Foundation and Test Kit — verification-first sign-off (issue #32, M1-14)
+#+STARTUP: overview indent
+
+* Purpose
+
+This is the verification-first M1 completion review agreed on issue
+#32: prove M1 is a coherent, externally consumable foundation by
+exercising it the way code outside Trader would actually consume it,
+then record what that exercise found. It is not a feature-building
+issue; code changes here exist only where the exercise below exposed a
+real, concrete deficiency.
+
+M1's public package surface at the time of this review — every
+non-internal package under the module root except this review's own
+=examples/m1= addition, confirmed via =go list ./...=:
+
+#+BEGIN_EXAMPLE
+account  clock  config  id  instrument  logging  marketdata
+num  order  portfolio  tradertest
+#+END_EXAMPLE
+
+* 1. External-consumer exercise
+
+New package =examples/m1= (=package m1_test=), importing ten of the
+eleven packages above — every one of them except =marketdata=, which
+is correctly absent: it has no =Quote=/=Bar= yet (M2), so nothing in an
+M1 flow touches it.
+
+The central lifecycle in =buildM1Scenario= is built almost entirely
+through the real domain constructors, not =tradertest=:
+=instrument.NewCurrencyPair=/=NewSpec=/=NewListing= →
+=order.NewProposal= → =order.NewRequest= →
+=order.NewOrder=(=StatusPendingSubmit=) → =order.ApplyAcceptance= →
+=order.NewFill= → =order.ApplyFill= → =order.NewPosition= →
+=account.NewSnapshot= (two accounts, two brokers, two currencies) →
+=portfolio.NewPortfolio= (with an explicit =ConversionRate=, so the
+conversion path is genuinely exercised rather than trivially
+same-currency). =tradertest= is used only incidentally, for assertions
+(=AssertTerminal=, =AssertStatus=, =AssertMoneyEqual=) in the
+accompanying =Test= function — never to build the scenario itself.
+
+=Example_m1Vocabulary= is the runnable example the acceptance criteria
+require; =TestConfigRedactsSecrets= and
+=TestLoggingStructuredFieldsAndInjectedLogger= separately, directly
+cover the configuration-secret-redaction and
+structured-fields/injected-logger criteria rather than leaving them
+incidental to the domain flow.
+
+** Result
+
+*Pass, no API deficiencies.* Every real constructor composed cleanly
+with no awkward workaround, no field that had to be worked around, and
+no place where reaching for a =tradertest= builder felt necessary to
+avoid friction in the real API. The full chain — including the
+=StatusPendingSubmit= → =ApplyAcceptance= → =ApplyFill= lifecycle
+transition path exercised directly, not just the pre-accepted-order
+shortcut — worked exactly as each package's own documentation says it
+should.
+
+* 2. Documentation, naming, and glossary audit
+
+Three checks, run against all 11 packages' non-test source:
+
+1. A =go/doc=-based scan for undocumented top-level exported
+   identifiers (funcs, types, consts, vars). *Zero found.* (An earlier,
+   naive per-struct-field version of this check produced many false
+   positives — =go/doc= collapses a =const (...)= block's individual
+   per-spec comments into one group-level =Doc= string, and Go's own
+   documentation convention does not require every struct field to
+   carry its own comment when the containing type's doc comment already
+   covers it, or the field name is self-evident from its type, e.g.
+   =Side Side=. The check was corrected to test what "documented
+   identifiers" actually means for Go — top-level declarations — not
+   discarded.)
+2. =staticcheck ./account/... ./clock/... ./config/... ./id/...
+   ./instrument/... ./logging/... ./marketdata/... ./num/... ./order/...
+   ./portfolio/... ./tradertest/...=, filtered to non-test files.
+   *Zero findings.*
+3. Every one of the 11 packages has a =// Package <name>= doc comment.
+   *Confirmed.*
+
+** Glossary cross-check (architecture document, Appendix A)
+
+| Glossary term | M1 status |
+|---+---|
+| Instrument, Listing | Implemented as documented (=instrument=) |
+| Proposal, Request, Order, Fill, Position, Trade | Implemented as documented (=order=) |
+| Account | Implemented as =account.Snapshot=, *not* =Account* — a deliberate, ADR-007-recorded decision (broker-scoped action handle vs. observed-state value), not naming drift |
+| Portfolio | Implemented as documented (=portfolio=) |
+| Symbol | Correctly *not* a standalone type — ADR-003: symbol is display/provider-facing, never identity |
+| Quote, Trade event, Bar | Correctly absent — M2 |
+| Indicator, Analysis | Correctly absent — M2/M3 |
+| Strategy, Intent, Risk decision | Correctly absent — M4/M3 |
+| Reconciliation, Journal, Report | Correctly absent — M3/M5+ |
+
+No naming drift found beyond the one already-documented,
+already-decided =Account= → =account.Snapshot= difference.
+
+** Deficiencies found and fixed
+
+The issue's original scope explicitly named "exact values" and
+"configuration" among the packages needing runnable examples. Neither
+=num= nor =config= had a single =Example= function — every other M1
+package did. Fixed:
+
+- =num/example_test.go=: =Example= (Price/Quantity arithmetic, exact —
+  no floating-point drift) and =Example_money= (Money's mandatory
+  currency and =Convert=, the one sanctioned conversion primitive).
+- =config/example_test.go=: =Example= (=Load= plus =Sprint=, showing a
+  =secret:"true"= field rendering as =REDACTED=).
+
+No other documentation, naming, or glossary deficiency was found.
+
+* 3. Dependency-boundary review
+
+Manual review of each package's project-local imports
+(=go list -f '{{join .Imports "\n"}}' ./<pkg>=), against
+=docs/arch/package-boundaries.org='s preliminary map and dependency
+rules. No new enforcement tooling added, per the #32 discussion —
+automated dependency-direction enforcement, if wanted, is a deliberate
+follow-on decision, not part of this sign-off.
+
+#+BEGIN_EXAMPLE
+account     -> id, instrument, num, order
+clock       -> (none)
+config      -> (none)
+id          -> clock
+instrument  -> num
+logging     -> (none)
+marketdata  -> (none)
+num         -> (none)
+order       -> id, instrument, num
+portfolio   -> account, id, instrument, num, order
+tradertest  -> account, id, instrument, num, order, portfolio
+#+END_EXAMPLE
+
+** Findings
+
+- Matches the preliminary map's direction throughout: nothing points
+  "backward" (e.g. =instrument= depends on nothing but =num=; =order=
+  and =account= depend on =instrument= but never the reverse;
+  =portfolio= depends on =account= but nothing depends on
+  =portfolio= except =tradertest=).
+- No cycles.
+- No domain package (=account=, =clock=, =id=, =instrument=,
+  =marketdata=, =num=, =order=, =portfolio=) imports =config=,
+  =logging=, or =tradertest= — confirmed by grep, not just the import
+  list above. Domain code reading configuration, logging, or depending
+  on test-support code would each be a distinct rule violation; none
+  exist.
+- =tradertest= is imported only by its own tests and by
+  =examples/m1= — confirmed by
+  =grep -rl "rustyeddy/trader/tradertest"=. Nothing in the domain
+  surface depends on it.
+- =examples/m1= itself imports no =internal/= path (confirmed by its
+  import list: =account=, =clock=, =config=, =id=, =instrument=,
+  =logging=, =num=, =order=, =portfolio=, =tradertest= — all public).
+- =num/internal/fixed= and =id/internal/ulid= are each imported only by
+  their own parent package. No cross-package =internal/= leakage.
+
+No violations found; no code changes required by this section.
+
+* 4. M1 public API baseline
+
+Recorded here directly (per the #32 discussion, this is intentionally
+not a generated/CI-enforced artifact — formal =apidiff=-style tooling
+and a semver policy are ADR-011's job, and ADR-011 is still Proposed).
+Future changes to any of the signatures below are a compatibility
+question worth a deliberate look, not a mechanically blocked one yet.
+
+- *account*: =Snapshot=, =SnapshotParams=, =NewSnapshot=,
+  =ErrInvalidSnapshot=.
+- *clock*: =Clock=, =Timer=, =Real=, =Simulated=, =NewSimulated=,
+  =ErrNegativeAdvance=.
+- *config*: =Load[T]=, =Render=, =Sprint=, =Options=, =Error=,
+  =FieldError=, =Redacted=, plus the =ErrInvalidTarget=/
+  =ErrUnsupportedType=/=ErrParse=/=ErrEnum=/=ErrRequired=/
+  =ErrInvalidTag=/=ErrValidation= sentinels.
+- *id*: =ID[K]=, =Kind=, =RunID=/=OrderID=/=FillID=/=EventID=/
+  =CorrelationID=/=AccountID= (aliases of =ID[K]=), =Metadata=,
+  =Source=, =Generator=, =NewGenerator=, =EntropySource=, =Random=,
+  =Deterministic=, =NewDeterministic=, the =Generate*ID= family, the
+  =Parse*ID=/=MustParse*ID= family, =ErrInvalidID=, =ErrZeroValue=,
+  =ErrClockMovedBackward=, =ErrEntropyExhausted=.
+- *instrument*: =ID=, =Kind=, =Instrument= + per-kind constructors,
+  =Listing=, =ListingParams=, =NewListing=, =Spec=, =NewSpec=,
+  =Resolver=, =MemoryResolver=, =NewMemoryResolver=, the
+  =ErrInvalid*=/=ErrUnknownSymbol=/=ErrAmbiguousSymbol=/
+  =ErrDuplicateListing=/=ErrInvalidResolution= sentinels.
+- *logging*: =New=, =Config=, =Discard=, =Secret=, =NewContextHandler=,
+  =WithComponent=, =WithCorrelationID=, =WithCausationID=, the
+  =RunID=/=SessionID=/=AccountID=/... attribute-key constants, plus the
+  testkit surface (=Capture=, =Record=, =Recorder=).
+- *marketdata*: =Interval= + =M1=/=H1=/=H4=/=D1=/=W1=, =Unit=,
+  =TimeRange=, =Calendar=, =FXCalendar=, =FXCalendarParams=, =Status=.
+- *num*: =Price=, =Quantity=, =Money=, =Rate=, =Currency=, each with
+  =Parse*=/=MustParse*= plus their exact arithmetic methods (including
+  =Money.Convert=), and the =Err*= sentinel family.
+- *order*: =Proposal=, =Request=, =Order=, =Fill=, =Position=, =Trade=,
+  =CancelRequest=/=CancelResult=, =ReplaceRequest=/=ReplaceResult=,
+  =Side=, =Type=, =TimeInForce=, =Status=, =PositionSide=,
+  =RejectReason=, =Rejection=, the =New*=/=Apply*= constructor and
+  lifecycle-transition families, and the =Err*= sentinel family.
+- *portfolio*: =Portfolio=, =PortfolioParams=, =NewPortfolio=,
+  =ConversionRate=, =ConversionStatus=, =Exposure=,
+  =AccountPosition=, =ErrInvalidPortfolio=.
+- *tradertest*: the =New*=/=Must*New*= builder family for =Listing=,
+  =Proposal=, =Order=, =Fill=, =Position=, =Snapshot=, =Portfolio=; the
+  =Must*ID= panic adapters; =DefaultAsOf=; the =Assert*= family.
+
+* 5. No later-milestone behavior leaked into M1
+
+- *account*: snapshot/aggregate value types only; no broker queries, no
+  reconciliation (ADR-019).
+- *clock*: time abstraction only.
+- *config*: composition-root configuration loading only; no network or
+  broker calls.
+- *id*: identifier generation/parsing only.
+- *instrument*: identity/listing/spec value types and a resolver only;
+  no market data, no pricing.
+- *logging*: structured logging framework only.
+- *marketdata*: interval/calendar/time-range vocabulary only —
+  =Quote=/=Bar=/live feeds/historical sources are M2 and are absent.
+- *num*: exact value types only.
+- *order*: broker-neutral order/execution vocabulary and lifecycle
+  rules only; no broker I/O, no execution manager (ADR-006, ADR-008).
+- *portfolio*: aggregation/exposure grouping only; no valuation, no
+  reconciliation.
+- *tradertest*: builders/assertions over the above only; no simulated
+  broker, no strategy harness, no journal/report helpers.
+
+Confirmed: nothing in M3 (broker execution), M4 (strategy), or M2
+(market-data pipelines beyond interval/calendar vocabulary) is present.
+
+* 6. make check
+
+=make check= (=gofmt -l=, =go vet ./...=, =go test -race ./...=)
+passes across the whole repository, including the new
+=examples/m1=, =num=, and =config= additions from this review.
+
+* Recommendation
+
+*M1 is ready to close.*
+
+Every acceptance criterion in issue #32 is satisfied: documentation
+audit clean (two real gaps found and fixed), a runnable integrated
+example exists and passes, the external-consumer package imports only
+public code, the dependency graph has no violations, no later-milestone
+behavior is present, secrets are redacted in configuration output,
+logging examples use structured fields through an injected logger, and
+=make check=/=go test -race ./...= are green.
+
+No outstanding blockers are known. The one deliberately deferred item —
+automated, CI-enforced dependency-direction and API-compatibility
+tooling — is a known, named gap (=package-boundaries.org= already says
+so), not a defect in M1's current surface, and is left for a future,
+separate decision rather than folded into this sign-off.
