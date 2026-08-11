@@ -11,8 +11,9 @@ then record what that exercise found. It is not a feature-building
 issue; code changes here exist only where the exercise below exposed a
 real, concrete deficiency.
 
-M1's public package surface at the time of this review, confirmed via
-=go list ./... | grep -v internal=:
+M1's public package surface at the time of this review — every
+non-internal package under the module root except this review's own
+=examples/m1= addition, confirmed via =go list ./...=:
 
 #+BEGIN_EXAMPLE
 account  clock  config  id  instrument  logging  marketdata
@@ -21,10 +22,10 @@ num  order  portfolio  tradertest
 
 * 1. External-consumer exercise
 
-New package =examples/m1= (=package m1_test=), importing only the nine
-of the above packages the flow actually needs — =marketdata= is
-correctly absent; it has no =Quote=/=Bar= yet (M2), so nothing in an M1
-flow touches it.
+New package =examples/m1= (=package m1_test=), importing ten of the
+eleven packages above — every one of them except =marketdata=, which
+is correctly absent: it has no =Quote=/=Bar= yet (M2), so nothing in an
+M1 flow touches it.
 
 The central lifecycle in =buildM1Scenario= is built almost entirely
 through the real domain constructors, not =tradertest=:

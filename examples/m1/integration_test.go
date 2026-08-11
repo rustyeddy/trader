@@ -16,7 +16,11 @@
 package m1_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -222,11 +226,19 @@ func buildM1Scenario(g *id.Generator) (m1Scenario, error) {
 	}, nil
 }
 
+// scenarioClockStart is the fixed reference time buildM1Scenario's
+// clock uses. A literal, not time.Now(): this scenario specifically
+// demonstrates Trader's deterministic clock/ID vocabulary, so it must
+// be deterministic by construction — not just incidentally so because
+// nothing today happens to print a generated ID or a clock-derived
+// value.
+var scenarioClockStart = time.Date(2026, time.January, 2, 9, 0, 0, 0, time.UTC)
+
 // Example_m1Vocabulary is the runnable example issue #32 requires: it
 // exercises the integrated M1 vocabulary end to end, using only public
 // packages.
 func Example_m1Vocabulary() {
-	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(1, 2))
+	g := id.NewGenerator(clock.NewSimulated(scenarioClockStart), id.NewDeterministic(1, 2))
 
 	scenario, err := buildM1Scenario(g)
 	if err != nil {
@@ -248,7 +260,7 @@ func Example_m1Vocabulary() {
 // incidental, verification-only use of tradertest the #32 plan calls
 // for, as opposed to using it to build the scenario itself.
 func TestM1VocabularyReachesExpectedState(t *testing.T) {
-	g := id.NewGenerator(clock.NewSimulated(time.Now()), id.NewDeterministic(3, 4))
+	g := id.NewGenerator(clock.NewSimulated(scenarioClockStart), id.NewDeterministic(3, 4))
 
 	scenario, err := buildM1Scenario(g)
 	require.NoError(t, err)
@@ -299,30 +311,36 @@ func TestConfigRedactsSecrets(t *testing.T) {
 	assert.Contains(t, out, "OANDA", "non-secret fields still render normally")
 }
 
-// TestLoggingStructuredFieldsAndInjectedLogger exercises an injected
-// (not global) *slog.Logger built by logging.New, and confirms
-// structured fields — including one wrapped by logging.Secret — are
-// captured correctly rather than interpolated into a formatted string.
+// TestLoggingStructuredFieldsAndInjectedLogger exercises the actual
+// *slog.Logger a caller injects into its own components — the one
+// logging.New itself returns, not logging package's separate Capture
+// testkit helper — and confirms structured fields it logs, including
+// one wrapped by logging.Secret, reach the real output correctly
+// redacted rather than interpolated into a formatted string. Output is
+// a temp file (New's "any other value is a file path" case) so the
+// real JSON New produces can be read back and asserted on directly.
 func TestLoggingStructuredFieldsAndInjectedLogger(t *testing.T) {
-	logger, closer, err := logging.New(logging.Config{Format: "json", Output: "stderr"})
+	logPath := filepath.Join(t.TempDir(), "trader.log")
+
+	logger, closer, err := logging.New(logging.Config{Format: "json", Output: logPath})
 	require.NoError(t, err)
-	defer closer.Close()
 	require.NotNil(t, logger, "New returns a logger a caller injects into its own components, not a package-level global")
 
-	// logging.Capture is the public testkit counterpart to New: same
-	// structured-record shape, but assertable instead of writing to an
-	// io.Writer.
-	captured, rec := logging.Capture()
-	captured.Info("order filled",
+	logger.Info("order filled",
 		"order_status", "filled",
 		"broker", "OANDA",
 		"api_key", logging.Secret("sk_live_deadbeefdeadbeef"),
 	)
+	require.NoError(t, closer.Close())
 
-	records := rec.Records()
-	require.Len(t, records, 1)
-	assert.Equal(t, "order filled", records[0].Message)
-	assert.Equal(t, "filled", records[0].Attrs["order_status"])
-	assert.Equal(t, "OANDA", records[0].Attrs["broker"])
-	assert.Equal(t, "REDACTED", records[0].Attrs["api_key"])
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(data), &record))
+
+	assert.Equal(t, "order filled", record["msg"])
+	assert.Equal(t, "filled", record["order_status"])
+	assert.Equal(t, "OANDA", record["broker"])
+	assert.Equal(t, "REDACTED", record["api_key"])
 }
