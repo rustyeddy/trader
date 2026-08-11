@@ -1658,6 +1658,7 @@ a closer, a reader tied to the supplied context, or a service with an explicit
 
 ** Options
 
+
 Avoid constructors with many positional parameters.  Prefer a dependency struct
 for required infrastructure and request/config structs for per-operation data.
 Functional options are useful for a small number of truly optional behaviors,
