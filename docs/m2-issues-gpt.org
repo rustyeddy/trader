@@ -1,0 +1,702 @@
+#+TITLE: Trader M2 Issue Breakdown — GPT Proposal
+#+SUBTITLE: Independent first-pass decomposition for Milestone 2: Market Data Vertical Slice
+#+AUTHOR: GPT (proposal for review)
+#+DATE: [2026-08-10 Mon]
+#+STARTUP: overview indent
+
+* Purpose
+
+This document records an independent GPT proposal for breaking Trader
+Milestone 2 into implementation issues.
+
+The intent is to keep this proposal independent from Claude's and
+Copilot's decompositions so the three can later be compared and
+normalized without prematurely converging on the same assumptions.
+
+The M2 milestone outcome is:
+
+#+BEGIN_EXAMPLE
+Acquire -> normalize -> validate -> store -> query -> resample -> report coverage
+#+END_EXAMPLE
+
+The architecture describes M2 as one complete vertical slice:
+
+#+BEGIN_EXAMPLE
+Provider native data -> normalization -> canonical store -> historical query
+#+END_EXAMPLE
+
+The architecture also establishes the primary market-data concepts that should
+guide the issue breakdown:
+
+- Canonical observations such as Bar, Quote, and Trade.
+- Provenance and quality flags.
+- HistoricalSource.
+- Reader[T].
+- Store or Sink.
+- CoverageCatalog.
+- Coverage and Gap.
+- Provider adaptation and normalization.
+- Validation.
+- Resampling.
+- A possible application-level marketdata service.
+
+The goal of M2 is not to build every future market-data capability.  It is to
+prove a coherent historical-data path through Trader's public architecture.
+
+M2 also has an important reference implementation available:
+
+#+BEGIN_EXAMPLE
+https://github.com/rustyeddy/trader-first-try
+#+END_EXAMPLE
+
+The previous Trader implementation should be actively mined for proven
+behavior, tests, edge cases, data formats, algorithms, and
+provider-specific knowledge.  It is a reference implementation, not an
+architectural authority.  Code should be transplanted only when it
+fits the new Trader contracts and boundaries.
+
+The old implementation already contains useful market-data behavior
+including:
+
+- Dukascopy historical tick acquisition.
+- OANDA historical candle acquisition.
+- Canonical candle storage.
+- Raw OANDA data preservation.
+- Inventory scanning.
+- Want-list generation for missing or incomplete datasets.
+- Download/build planning.
+- Tick -> M1 -> H1 -> D1 candle derivation.
+- Candle completeness validation.
+- Missing expected-open-market-bar detection.
+- Historical dataset statistics and inspection commands.
+
+These capabilities should be reviewed before equivalent M2
+functionality is designed from scratch.
+
+* Proposed M2 Issue Breakdown
+
+| ID    | Proposed Issue                                                  | Purpose                                                                                                                                                                                                                 |
+|-------+-----------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| M2-00 | Audit trader-first-try market-data implementation               | Inventory the old implementation's reusable market-data behavior, tests, algorithms, formats, and edge cases; classify what to transplant, adapt, replace, or deliberately discard before new M2 implementation begins. |
+| M2-01 | Define canonical market-data observation types                  | Define Bar, Quote, probably Trade, provenance, and quality flags; complete the vocabulary M1 intentionally did not implement.                                                                                           |
+| M2-02 | Define historical market-data query contracts                   | Define BarQuery, QuoteQuery, Reader[T], HistoricalSource, half-open range semantics, cancellation, and resource lifecycle.                                                                                              |
+| M2-03 | Define market-data persistence contracts and in-memory store    | Define a narrow Store/Sink contract and an in-memory reference implementation to prove callers are storage-independent.                                                                                                 |
+| M2-04 | Define coverage, gaps, manifests, and data-quality model        | Define Coverage, Gap, revision/provenance information, warnings, and the distinction between missing, invalid, and incomplete data.                                                                                     |
+| M2-05 | Implement canonical market-data validation pipeline             | Validate ordering, duplicates, impossible values, malformed records, and session/calendar alignment with explicit reject/drop/flag policies.                                                                            |
+| M2-06 | Implement provider adaptation/normalization contract            | Define the provider-native -> canonical boundary without leaking provider-specific types into the public marketdata API.                                                                                                |
+| M2-07 | Implement first historical provider adapter                     | Select one provider/data source and bring real historical data through the adaptation and validation path.                                                                                                              |
+| M2-08 | Implement persistent canonical market-data store                | Add the first durable store implementation while keeping storage format details behind the persistence contract.                                                                                                        |
+| M2-09 | Implement canonical bar resampling                              | Derive coarser intervals from canonical finer-grained bars using the M1 calendar, with DST and session-boundary tests.                                                                                                  |
+| M2-10 | Implement market-data coverage inspection and quality reporting | Provide an application/user-visible view of available data, gaps, anomalies, source, and revision information.                                                                                                          |
+| M2-11 | Implement market-data ingestion application service             | Orchestrate provider -> normalize -> validate -> store -> coverage without coupling CLI, provider, and storage implementations.                                                                                         |
+| M2-12 | Add market-data contract test suite                             | Provide reusable contract tests for ordering, boundaries, duplicate handling, provenance, cancellation, cleanup, and other public adapter guarantees.                                                                   |
+| M2-13 | Exercise the complete M2 vertical slice                         | Run one real acquisition -> normalized storage -> historical query -> resample -> coverage report scenario through public contracts.                                                                                    |
+| M2-14 | Perform M2 completion and public API review                     | Repeat the successful M1 completion pattern: external-consumer exercise, boundary review, documentation/API audit, and milestone-close recommendation.                                                                  |
+
+* Issue Notes and Rationale
+
+** M2-00: Audit trader-first-try Market-Data Implementation
+
+Before implementing new M2 components, inspect the previous Trader repository:
+
+#+BEGIN_EXAMPLE
+https://github.com/rustyeddy/trader-first-try
+#+END_EXAMPLE
+
+The purpose is not to preserve the old architecture.  The purpose is to avoid
+throwing away working knowledge.
+
+The audit should identify:
+
+- Existing provider adapters and download code.
+- Existing canonical/raw data structures.
+- Filesystem layout and naming rules.
+- Candle aggregation/resampling behavior.
+- Trading-calendar/session assumptions.
+- Completeness and gap-detection rules.
+- Inventory and want-list logic.
+- Data dependency/planning logic.
+- Raw-source preservation.
+- Validation and anomaly handling.
+- Iterator/resource-lifecycle patterns.
+- Useful unit/integration fixtures.
+- CLI workflows that reveal real operator requirements.
+- Bugs, awkward coupling, and architectural decisions that should *not* be
+  carried forward.
+
+A useful classification for every discovered component is:
+
+| Classification | Meaning                                                                               |
+|----------------+---------------------------------------------------------------------------------------|
+| Transplant     | Behavior/code is already compatible with the new contracts with limited adaptation.   |
+| Adapt          | Valuable behavior exists but should be reshaped behind new M2 interfaces/types.       |
+| Reference      | Keep as behavioral evidence or test oracle, but rewrite the implementation.           |
+| Discard        | Old behavior or structure conflicts with the new architecture or is no longer needed. |
+
+Particularly noteworthy behavior already visible in the old implementation is
+the DataManager flow:
+
+#+BEGIN_EXAMPLE
+Inventory
+   |
+   v
+WantList
+   |
+   v
+Plan
+   |
+   +--> Download missing raw data
+   |
+   +--> Build derivable canonical intervals
+#+END_EXAMPLE
+
+The old planner recognizes dependency relationships such as:
+
+#+BEGIN_EXAMPLE
+Dukascopy ticks -> M1 -> H1 -> D1
+#+END_EXAMPLE
+
+and only schedules a derived dataset when its required inputs are complete.
+
+This is conceptually valuable for M2 coverage, ingestion, and resampling even if
+the new implementation uses different packages and domain types.
+
+M2-00 should produce a short checked-in audit document identifying concrete
+transplant candidates and lessons.  Later M2 issues should reference those
+findings where applicable.
+
+** M2-01: Canonical Observation Types
+
+This should establish the canonical observations that every later market-data
+adapter and consumer uses.
+
+Likely scope:
+
+- Bar.
+- Quote.
+- Trade, if needed by the first vertical slice or clearly required by the
+  public vocabulary.
+- Observation timestamp semantics.
+- Instrument/listing association.
+- Source/provenance information.
+- Data-quality flags.
+- Exact numeric types from M1.
+
+This issue should not include downloading, persistence, or resampling.
+
+** M2-02: Historical Query Contracts
+
+This issue should define how callers consume bounded historical data without
+knowing whether it comes from memory, disk, Parquet, CSV, or a remote service.
+
+Likely concepts:
+
+- BarQuery.
+- QuoteQuery.
+- Reader[T] or equivalent cursor abstraction.
+- HistoricalSource.
+- Half-open query ranges: [Start, End).
+- Context cancellation.
+- Close/resource ownership semantics.
+- Adjustment and fetch-policy vocabulary only if justified by immediate M2
+  consumers.
+
+The interface should remain narrow enough that an in-memory implementation and a
+persistent implementation can both satisfy it naturally.
+
+** M2-03: Persistence Contract and In-Memory Store
+
+Define the storage boundary before selecting a durable storage technology.
+
+Likely scope:
+
+- Store, Sink, or similarly narrow persistence port.
+- Write canonical observations.
+- Query canonical observations through the same historical-source contract where
+  appropriate.
+- In-memory reference implementation.
+- Contract tests shared by future storage implementations.
+
+The in-memory implementation is important because it verifies that the public
+API does not accidentally depend on filesystem, database, CSV, or Parquet
+details.
+
+** M2-04: Coverage, Gaps, Manifests, and Quality
+
+Coverage should be an early architectural concern, not an end-of-milestone
+reporting feature.
+
+Likely concepts:
+
+- Coverage.
+- Gap.
+- First/last observation.
+- Expected versus present intervals.
+- Data source.
+- Revision or dataset identity.
+- Warnings.
+- Incomplete intervals.
+- Missing data versus rejected/invalid data.
+
+This model will later be important for deterministic backtesting because a run
+must be able to know exactly what historical data existed rather than silently
+changing its input set.
+
+** M2-05: Validation Pipeline
+
+Normalization and validation should remain distinct.
+
+Validation should detect and report such conditions as:
+
+- Out-of-order observations.
+- Duplicate observations.
+- Impossible OHLC values.
+- Negative or otherwise invalid quantities where prohibited.
+- Session/calendar misalignment.
+- Gaps.
+- Suspicious timestamps.
+- Malformed provider records.
+- Incomplete bars.
+- Other quality anomalies exposed by the first provider.
+
+Policies should be explicit.  Examples include:
+
+- Reject.
+- Drop.
+- Accept with quality flag.
+- Repair only when the repair is explicit and recorded.
+
+Repairs must never be invisible.
+
+** M2-06: Provider Adaptation and Normalization Contract
+
+Separate provider adaptation from canonical validation.
+
+The adaptation layer should:
+
+- Accept provider-native records.
+- Resolve provider symbols/listings using M1 instrument facilities.
+- Convert provider-native numerical and timestamp fields to Trader canonical
+  values.
+- Attach provenance.
+- Produce canonical observations.
+
+Provider SDK or wire types must not leak through Trader's public marketdata
+contracts.
+
+** M2-07: First Historical Provider Adapter
+
+Choose one real source and use it to prove the provider boundary.
+
+The provider should be selected for architectural usefulness rather than for
+building every desired data source immediately.
+
+Acceptance should focus on:
+
+- Real historical records can be obtained.
+- Symbols resolve to canonical Trader instruments/listings.
+- Provider records normalize to canonical observations.
+- Validation is applied.
+- Failures are classified and reported.
+- Credentials, if any, remain adapter configuration and never become domain
+  state.
+
+This issue should not define a general provider framework beyond what the first
+real adapter proves is needed.
+
+** M2-08: Persistent Canonical Store
+
+Implement the first durable store only after the persistence and query contracts
+have been exercised in memory.
+
+The implementation technology should remain an adapter detail.
+
+CSV or Parquet may be useful initial formats, but neither should become the
+public marketdata API.
+
+The key requirement is:
+
+#+BEGIN_EXAMPLE
+Callers depend on marketdata contracts, not the storage representation.
+#+END_EXAMPLE
+
+The first persistent implementation should preserve:
+
+- Canonical values.
+- Provenance.
+- Quality information.
+- Stable ordering.
+- Query boundaries.
+- Dataset/revision identity where applicable.
+
+** M2-09: Canonical Bar Resampling
+
+Trader should have one authoritative interval-derivation implementation rather
+than provider-specific aggregation scattered throughout adapters.
+
+Likely requirements:
+
+- Aggregate finer-grained canonical bars into coarser intervals.
+- Use M1 interval and FX calendar semantics.
+- Respect D1 and W1 boundaries.
+- Handle DST transitions.
+- Handle closed sessions.
+- Identify incomplete output intervals.
+- Preserve or derive provenance and quality flags.
+
+Tests should compare derived bars against known/native bars where useful to
+expose boundary errors.
+
+** M2-10: Coverage Inspection and Quality Reporting
+
+Expose enough information for a developer/operator to answer:
+
+- What data do I have?
+- For which instruments?
+- At which intervals?
+- Over what dates?
+- Where are the gaps?
+- What anomalies were detected?
+- What source produced the data?
+- Was anything rejected, dropped, repaired, or marked incomplete?
+
+This can begin as library/report data structures and a simple human-readable
+report.  It should not force the final M5 reporting architecture into M2.
+
+** M2-11: Market-Data Ingestion Application Service
+
+Once the contracts and implementations exist, compose them into a complete use
+case.
+
+Conceptually:
+
+#+BEGIN_EXAMPLE
+Provider
+   |
+   v
+Adapter / Normalizer
+   |
+   v
+Validator
+   |
+   v
+Canonical Store
+   |
+   +--> Coverage Catalog
+#+END_EXAMPLE
+
+The service should:
+
+- Accept dependencies through construction.
+- Accept typed request/config values.
+- Coordinate the workflow.
+- Define cancellation and error behavior.
+- Avoid importing CLI frameworks.
+- Avoid provider-specific behavior outside the adapter.
+- Avoid storage-specific behavior outside the store adapter.
+
+This is where the individual M2 components become a useful application-level
+operation.
+
+** M2-12: Market-Data Contract Tests
+
+The architecture explicitly anticipates public contract-test suites for
+third-party implementations.
+
+A market-data contract suite should verify at least:
+
+- Ordering.
+- Inclusive/exclusive time boundaries.
+- Duplicate handling.
+- Interval alignment.
+- UTC/session semantics.
+- Cancellation.
+- Resource cleanup.
+- Data provenance.
+- Zero-result behavior.
+- Invalid-query behavior.
+
+The suite should be usable by:
+
+- In-memory store.
+- Persistent store.
+- Future remote source adapters.
+- Third-party implementations.
+
+** M2-13: Complete Vertical Slice
+
+Exercise M2 as one coherent externally consumable system rather than merely
+testing each package independently.
+
+The scenario should demonstrate something close to:
+
+#+BEGIN_EXAMPLE
+Real provider-native historical data
+        |
+        v
+Provider adapter
+        |
+        v
+Canonical normalization
+        |
+        v
+Validation
+        |
+        v
+Persistent canonical storage
+        |
+        v
+Historical query
+        |
+        v
+Resampling
+        |
+        v
+Coverage / quality report
+#+END_EXAMPLE
+
+The test/example should rely on public contracts wherever practical and should
+expose any awkwardness in the M2 API before the milestone closes.
+
+** M2-14: M2 Completion Review
+
+Use the same verification-first pattern that worked well at the end of M1.
+
+Review:
+
+- Public API usability.
+- Package boundaries.
+- Documentation.
+- Runnable examples.
+- Contract tests.
+- Provider abstraction leakage.
+- Storage abstraction leakage.
+- Determinism where applicable.
+- Concurrency/resource lifecycle.
+- Coverage semantics.
+- Data-quality semantics.
+- Whether later milestone behavior leaked into M2.
+
+Produce a short checked-in completion review recommending whether M2 is ready to
+close.
+
+* Deliberate Scope Choices
+
+** Treat trader-first-try as Evidence, Not Architecture
+
+The previous implementation is valuable because it has already encountered real
+market-data problems.  It should therefore influence implementation details,
+test cases, provider edge cases, and operational workflows.
+
+It should *not* override the new architecture.
+
+In particular:
+
+- Do not copy old package boundaries merely because working code lives there.
+- Do not expose old provider-specific or storage-specific types through the new
+  public API.
+- Do not preserve globals, direct environment access, wall-clock dependencies,
+  or other patterns that conflict with M0/M1 decisions.
+- Prefer preserving externally useful behavior and tests over preserving source
+  layout.
+- When old and new semantics disagree, document the difference and make an
+  explicit decision.
+- Where possible, use old outputs or fixtures as comparison/oracle data for the
+  new implementation.
+
+A transplant should pass through this question:
+
+#+BEGIN_EXAMPLE
+Is this proven market-data behavior that fits behind the new contract,
+or are we merely copying an old design because it already exists?
+#+END_EXAMPLE
+
+** Do Not Start with a CSV or Parquet Architecture
+
+CSV and Parquet are implementation choices, not Trader's market-data model.
+
+The order should be:
+
+#+BEGIN_EXAMPLE
+public persistence/query contract
+        |
+        v
+in-memory reference implementation
+        |
+        v
+first durable adapter
+#+END_EXAMPLE
+
+This lets the persistent format be selected based on what the real contract
+requires rather than shaping the public API around one storage technology.
+
+** Do Not Build LiveFeed Unless M2 Proves It Is Needed
+
+The architecture includes LiveFeed as part of the eventual marketdata package,
+but M2's required vertical slice is historical:
+
+#+BEGIN_EXAMPLE
+Provider native data -> normalization -> canonical store -> historical query
+#+END_EXAMPLE
+
+Live streaming becomes much more important for the later broker/live milestones.
+
+M2 should define canonical observations so live data can reuse the same types,
+but it should not automatically build streaming infrastructure merely because it
+will eventually exist.
+
+** Add Coverage Early
+
+Coverage is necessary for trustworthy historical research and later deterministic
+backtesting.
+
+Trader should eventually be able to distinguish:
+
+- Data known to exist locally.
+- Missing data.
+- Incomplete intervals.
+- Invalid/rejected observations.
+- Repaired or flagged data.
+- Different source/revision sets.
+
+Therefore coverage belongs near the beginning of M2 rather than as a final
+reporting-only issue.
+
+** Keep Issues Reviewable
+
+Each issue should represent a reasonably focused architectural decision surface.
+
+Avoid issues that simultaneously invent:
+
+- Canonical Bar.
+- Provider APIs.
+- Downloader behavior.
+- Storage schema.
+- Parquet layout.
+- Gap repair.
+- Query API.
+- Resampling.
+- Reporting.
+
+Small enough issues let the public contract be reviewed before implementation
+choices make it difficult to change.
+
+* Proposed Dependency Sequence
+
+A likely implementation sequence is:
+
+#+BEGIN_EXAMPLE
+M2-00 Audit trader-first-try
+   |
+   v
+M2-01 Canonical observations
+   |
+   +--> M2-02 Historical query contracts
+   |
+   +--> M2-04 Coverage / quality model
+            |
+            v
+M2-03 Persistence contract + in-memory store
+   |
+   +--> M2-05 Validation
+   |
+   +--> M2-06 Provider adaptation
+            |
+            v
+         M2-07 First provider
+            |
+            +--> M2-08 Persistent store
+            |
+            +--> M2-09 Resampling
+            |
+            v
+         M2-10 Coverage reporting
+            |
+            v
+         M2-11 Ingestion service
+
+M2-12 Contract tests evolve alongside the contracts and implementations.
+
+M2-13 integrates the whole milestone.
+
+M2-14 audits and closes the milestone.
+#+END_EXAMPLE
+
+This ordering is not intended to imply that every issue must be implemented
+strictly serially.  It identifies the architectural dependencies that should be
+resolved before dependent contracts are frozen.
+
+* Normalizing GPT, Claude, and Copilot Proposals
+
+The three independent proposals should not be normalized solely by matching
+issue titles.
+
+Different proposals may describe the same architectural responsibility at
+different granularities.
+
+For example:
+
+#+BEGIN_EXAMPLE
+Proposal A:
+  Canonical market-data model and query API
+
+Proposal B:
+  Define canonical observations
+  Define historical query contracts
+#+END_EXAMPLE
+
+This is primarily a granularity difference, not an architectural disagreement.
+
+Instead, place every proposed issue into four categories:
+
+1. Public contract and domain vocabulary.
+2. Infrastructure and adapters.
+3. Application orchestration.
+4. Verification and vertical-slice completion.
+
+Then compare the actual deliverables and dependencies.
+
+For each candidate issue, capture:
+
+| Field          | Description                                           |
+|----------------+-------------------------------------------------------|
+| GPT            | Corresponding issue(s) from this proposal             |
+| Claude         | Corresponding issue(s) from Claude's proposal         |
+| Copilot        | Corresponding issue(s) from Copilot's proposal        |
+| Common Ground  | What all proposals are trying to accomplish           |
+| Difference     | Granularity or substantive architectural disagreement |
+| Recommendation | Proposed normalized issue                             |
+| Dependencies   | Issues that should precede it                         |
+| Deferred       | Related work intentionally postponed                  |
+
+The important distinction is between a granularity disagreement and a real
+scope/design disagreement.
+
+Examples of substantive disagreements worth discussing explicitly include:
+
+- Whether LiveFeed belongs in M2.
+- Whether automatic gap repair belongs in M2.
+- Whether the first storage implementation is part of the public API.
+- Whether provider downloading and provider normalization are one concern or two.
+- Whether coverage manifests are foundational or reporting-only.
+- Whether resampling occurs before or after canonical persistence.
+- Whether a provider SDK type appears in any public contract.
+
+* Recommendation
+
+Use the three-agent process:
+
+1. GPT produces an independent M2 decomposition.
+2. Claude produces an independent M2 decomposition.
+3. Copilot produces an independent M2 decomposition.
+4. Do not show the agents one another's lists before the first drafts are done.
+5. Put the three proposals side by side.
+6. Normalize by responsibility, deliverable, and dependency rather than title.
+7. Discuss true architectural differences.
+8. Incorporate M2-00 findings from =trader-first-try= into the normalized list.
+9. Produce the final M2 issue list.
+10. Record the accepted M2 breakdown in =docs/plans/milestones.org=.
+11. Create the corresponding GitHub milestone issues.
+
+This should provide enough independent perspectives to expose missing work and
+over-scoping while still keeping the final issue set coherent and reviewable.

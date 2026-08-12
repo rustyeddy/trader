@@ -1,5 +1,7 @@
 #+TITLE: M2 Issue Plan — Market Data Vertical Slice
 #+SUBTITLE: Proposed GitHub issue breakdown for milestone M2
+#+AUTHOR: Copilot (Kimi)
+#+DATE: [2026-08-10 Mon]
 #+STARTUP: overview indent
 
 * Purpose
@@ -62,21 +64,21 @@ The new module never imports the legacy repository.
 The directly relevant legacy code, concentrated in
 =trader-first-try/datamanager/= and =trader-first-try/market/=:
 
-| Legacy path                              | Relevant to | What it offers                                        |
-|------------------------------------------+-------------+-------------------------------------------------------|
-| =market/candle.go=, =market/tick.go=     | M2-01       | Prior candle/tick shapes and their edge cases         |
-| =market/forex_hours.go=                  | M2-01/03/09 | FX session-hours logic; behavior oracle for =FXCalendar= |
-| =datamanager/data_validation.go=         | M2-03       | Existing validation checks and their test cases       |
-| =datamanager/candle_gap.go=              | M2-03/10    | Gap detection approach                                |
-| =datamanager/store*.go=                  | M2-04       | Store keying, inventory, and cache behavior           |
-| =datamanager/data_writer.go=, =data_raw.go= | M2-05    | On-disk candle layout and writer behavior             |
-| =datamanager/oanda/=                     | M2-06       | OANDA candle provider, paging, and its tests          |
-| =datamanager/dukascopy/=                 | M2-06       | Second provider implementation; validity tests        |
-| =datamanager/data_manager.go=, =data_sync.go=, =data_downloader.go= | M2-07 | Ingest/sync orchestration and download planning |
-| =datamanager/get_candles.go=, =candle_iter.go=, =candle_set.go= | M2-08 | Query/iteration behavior over stored candles |
-| =datamanager/candle_agg.go=, =slot_boundaries.go= | M2-09 | Candle aggregation and slot-boundary alignment with tests |
-| =datamanager/store_inventory.go=, =data_stats*.go= | M2-10 | Coverage inventory and data-quality statistics |
-| =datamanager/testdata_generator.go=, =testdata_helper.go=, =testdata/= | M2-11 | Fixture generation and recorded candle data |
+| Legacy path                                                            | Relevant to | What it offers                                            |
+|------------------------------------------------------------------------+-------------+-----------------------------------------------------------|
+| =market/candle.go=, =market/tick.go=                                   | M2-01       | Prior candle/tick shapes and their edge cases             |
+| =market/forex_hours.go=                                                | M2-01/03/09 | FX session-hours logic; behavior oracle for =FXCalendar=  |
+| =datamanager/data_validation.go=                                       | M2-03       | Existing validation checks and their test cases           |
+| =datamanager/candle_gap.go=                                            | M2-03/10    | Gap detection approach                                    |
+| =datamanager/store*.go=                                                | M2-04       | Store keying, inventory, and cache behavior               |
+| =datamanager/data_writer.go=, =data_raw.go=                            | M2-05       | On-disk candle layout and writer behavior                 |
+| =datamanager/oanda/=                                                   | M2-06       | OANDA candle provider, paging, and its tests              |
+| =datamanager/dukascopy/=                                               | M2-06       | Second provider implementation; validity tests            |
+| =datamanager/data_manager.go=, =data_sync.go=, =data_downloader.go=    | M2-07       | Ingest/sync orchestration and download planning           |
+| =datamanager/get_candles.go=, =candle_iter.go=, =candle_set.go=        | M2-08       | Query/iteration behavior over stored candles              |
+| =datamanager/candle_agg.go=, =slot_boundaries.go=                      | M2-09       | Candle aggregation and slot-boundary alignment with tests |
+| =datamanager/store_inventory.go=, =data_stats*.go=                     | M2-10       | Coverage inventory and data-quality statistics            |
+| =datamanager/testdata_generator.go=, =testdata_helper.go=, =testdata/= | M2-11       | Fixture generation and recorded candle data               |
 
 Per ADR-013, transplant only when the legacy code is easier to prove
 correct than a new implementation; legacy package layout, global state
@@ -146,20 +148,20 @@ parallel once M2-04 lands.  Everything else is ordered.
 
 * Issue Breakdown
 
-| ID    | Title                                                        | Deliverable                                        |
-|-------+--------------------------------------------------------------+----------------------------------------------------|
-| M2-01 | Define canonical market-data event types                     | =marketdata= =Quote=, =Trade=, =Bar=, =Event=; ADR-020 |
-| M2-02 | Define historical query contracts and typed reader           | =Reader[T]=, =BarQuery=, =HistoricalSource=; ADR-021 |
-| M2-03 | Implement validation and data-quality policies               | =Validator=, =QualityFlag=, reject/drop/repair policies |
-| M2-04 | Define persistence port and implement in-memory store        | =Sink=/=Source= port, =MemoryStore=                |
-| M2-05 | Implement CSV market-data adapter                            | =adapters/marketdata/csv= (or =internal/=)         |
-| M2-06 | Implement one real provider adapter                          | one provider (e.g. OANDA) historical-bar adapter   |
-| M2-07 | Implement the market-data ingestor service                   | =marketdata.Ingestor= application service          |
-| M2-08 | Implement the historical query service with fetch policy     | =QueryService= honoring =LocalOnly=/=ExactManifest= |
-| M2-09 | Implement the canonical interval resampler                   | =Resampler= deriving aligned bars from finer bars  |
-| M2-10 | Implement coverage catalog and data-quality reporting        | =Coverage=, =Gap=, coverage query API              |
-| M2-11 | Add tradertest market-data builders and a runnable example   | =tradertest= bar/quote builders; =examples/m2=     |
-| M2-12 | Perform M2 milestone completion review                       | =docs/milestones/m2-completion-review.org=         |
+| ID    | Title                                                      | Deliverable                                             |
+|-------+------------------------------------------------------------+---------------------------------------------------------|
+| M2-01 | Define canonical market-data event types                   | =marketdata= =Quote=, =Trade=, =Bar=, =Event=; ADR-020  |
+| M2-02 | Define historical query contracts and typed reader         | =Reader[T]=, =BarQuery=, =HistoricalSource=; ADR-021    |
+| M2-03 | Implement validation and data-quality policies             | =Validator=, =QualityFlag=, reject/drop/repair policies |
+| M2-04 | Define persistence port and implement in-memory store      | =Sink=/=Source= port, =MemoryStore=                     |
+| M2-05 | Implement CSV market-data adapter                          | =adapters/marketdata/csv= (or =internal/=)              |
+| M2-06 | Implement one real provider adapter                        | one provider (e.g. OANDA) historical-bar adapter        |
+| M2-07 | Implement the market-data ingestor service                 | =marketdata.Ingestor= application service               |
+| M2-08 | Implement the historical query service with fetch policy   | =QueryService= honoring =LocalOnly=/=ExactManifest=     |
+| M2-09 | Implement the canonical interval resampler                 | =Resampler= deriving aligned bars from finer bars       |
+| M2-10 | Implement coverage catalog and data-quality reporting      | =Coverage=, =Gap=, coverage query API                   |
+| M2-11 | Add tradertest market-data builders and a runnable example | =tradertest= bar/quote builders; =examples/m2=          |
+| M2-12 | Perform M2 milestone completion review                     | =docs/milestones/m2-completion-review.org=              |
 
 * Issue Details
 

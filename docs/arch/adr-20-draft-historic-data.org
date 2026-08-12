@@ -1,0 +1,81 @@
+* Org Canonical Bars - Initial Thoughts
+
+* Dukascopy proved to be problematic we won't be using their "ticks"
+It has proved to be a bit problematic and not as complete as OandA
+
+* OandA Forex Pairs
+
+** We will be using OandA data
+We have about 20years of 21 pairs of OandA data that will be re-using.
+We have Raw data and derived Canonical data.  We may decide to
+reformat the canonical data if the shape on disk changes.
+
+We will NOT re-download the raw data from OandA unless we find missing
+gaps, or download recent days.  But no need to re-download gigabytes
+of historical data.
+
+OandA data has spreads Max & Avg spreads, it will be nice to keep those.
+
+* Do we preserve provider-native/raw data separately?
+All new data downloaded will be store separate in it's original
+pristine format, in a completely different directory structure than
+the derived data.
+
+* We will perserve the "spirit" of the DataManager model
+We will perserve the DataManager model in spirit.  That is ALL data
+consumers MUST go through the DataManager.  DataManager is the only
+entity that may request downloads from providers or initiate canonical
+historic  data builds.
+
+                 +-- Download Manager -- Data Provider
+                 |                 
+  Consumer -> DM +-- Data Store  -- Storage Mechanism (Memory, CSV, Parquet)
+                 |
+                 +-- Bar Maker
+
+Everthing behind the data manager will live in a 'internal' directory.
+No other package is allowed to retrieve, build or store data, all must
+go through the DM.
+
+
+* We will use the term Bar (not candle)
+And Tick, Trade if/when the time comes
+
+* What is the canonical persisted observation?
+
+* Is canonical storage immutable or replaceable?
+TBD - Should not need to be modified, but if it does maybe just needs
+to be replaced.
+
+* How are revisions represented?
+TBD - would revisions be used to associate with backtests?
+
+* What constitutes dataset identity?
+INST/YYYY/MM/inst-yyyy-mm-intvl ??
+
+* How is data partitioned conceptually—instrument / interval / time?
+Same or similar to trader-first-try?
+
+* Do stored candles carry source/provenance/quality metadata?
+TBD - Yes I think probably
+
+* How are incomplete intervals represented?
+TBD - Should we continue to use the fixed index method from before
+
+* Is derived H1/H4/D1 data persisted or computed on demand?
+We will persist M1, H1, H4, D1, W1 if that at all makes sense.  We
+will opt for performance over diskspace.
+
+* What does “complete” mean?
+No missing data?
+
+
+* What is authoritative: raw provider data or canonical normalized data?
+Hmm. good question.  I am thinking Raw provider data will be
+autoritative.  But that can be left open to discussion.
+
+* How does coverage relate to storage?
+TBD
+
+* What guarantees must every storage adapter provide?
+TBD
