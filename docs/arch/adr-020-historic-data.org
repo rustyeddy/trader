@@ -1,0 +1,198 @@
+#+TITLE: Historic Data ADR-020
+#+STARTUP: overview num
+#+TODO: TODO | DONE
+
+Here are the principals I want to keep that are important now.
+
+* DONE Dukascopy will not be used
+It has proved to be a bit problematic and not as complete as OandA
+
+* DONE OandA Forex Pairs
+** DONE Existing OandA Forex Pairs will be used
+We have downloaded a lots of OandA raw Forex price data in CSV format
+that will continue to be used.
+** DONE XAUUSD is out of scope
+XAUUSD is present in the existing corpus but we have no way to trade
+it through OandA, so the data is not needed.  It is not ingested.  The
+25th instrument in the corpus is therefore intentionally skipped, and
+every instrument M2 handles is an FX pair.
+
+** TODO Derived / Conanical Data needs to be defined
+If the existing derived .CSV format differs it will be re-derived
+** DONE Conanical format will be immutable and versioned
+If any formatting needs to be changed or gaps need to be filled the
+new data will be rebuilt if needed and reversioned.
+
+The version identifier lives in the manifest, or in a header of the
+derived CSV file.  It does not appear in the path.
+
+Old versions are not retained.  A reversion presumably means the prior
+derivation was wrong, so the old data is invalid, and so is any
+backtest or analysis that used it.  The old version is wiped.
+Retaining prior versions may be added later as a configuration item;
+for now the assumption is that old versions are thrown away.
+
+** TODO We may keep a manifest
+If an external / meta data is valuable we can keep a manifest
+
+** TODO Day and week alignment needs to be resolved.
+We may download any missing interval data from OandA and derive it
+from that source vs. from earler sources.  
+** DONE OandA Volume represents ticks at OandA
+It is not volume by any means but may serve as a proxy for how active
+a pair was at the exchange OandA gets it data from.  It can be ignored
+if it is not desired, but it will be included in the derived data
+** TODO Avg and Max Spread will also be kept in derived format
+OandA provides a bid and an ask for each of O, H, L and C.  Max and
+avg spread will be calculated from those values.
+
+Still to write down: the exact formula, and the aggregation rule used
+when a derived interval is resampled from a finer one.  M5's simulated
+broker fill model depends on what avg spread means, so it should not
+be left implicit.
+* DONE Raw Provider data will be saved separately
+
+All new data downloaded will be store separate in it's original
+pristine format, in a completely different directory structure than
+the derived data.
+
+* DONE We will use the term Bar (not candle)
+And Tick, Trade if/when the time comes
+
+* DONE marketdata.Manager will be the exported access to data
+
+marketdata.Manager will be referred to as datamanager or DM for short.
+
+That is ALL data consumers MUST go through the marketdata.Manager.
+marketdata.Manager is the only entity that may request downloads from
+providers or initiate canonical historic data builds.
+
+                 +-- Download Manager -- Data Provider
+                 |                 
+  Consumer -> DM +-- Data Store  -- Storage Mechanism (Memory, CSV, Parquet)
+                 |
+                 +-- Bar Maker
+
+Everthing behind the data manager will live in a 'internal' directory.
+No other package is allowed to retrieve, build or store data, all must
+go through the DM.
+
+** DONE DM will provide a memory cached version of data
+DM will handle all data requests, caching data as it is programmed.
+The cache cleaning protocol will be defined during implementation.
+
+** DONE Store root will be a configuration item
+* TODO Determine the marketdata.Bar structure
+That is what is contained in the marktdata.Bar structure.  Generally
+speaking there will be two sets of data, meta data applied to a
+particular collection of bars a timerange of bars of a particular
+interval of a specific instrument.
+
+Issue #72.
+** TODO How will gaps and closed market days be handled
+Fixed index with dummy data as done in the trader-first-try will not
+be supported
+
+* DONE Data at rest will be stored as it has been.
+The current path will be something like it is now
+	.../data/raw/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
+	.../data/derived/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
+Furture data format such as Parquet if we implement will be determined
+when it is implemented
+
+* DONE All derived data will be persisted
+All data that is downloaded or derived will be persisted
+
+* DONE Livefeed will not be included in M2
+Title says it all
+* TODO Where does FX holiday data come from?
+Refer to trader-first-try for fx-holidays and closed datys.  Need to
+retrieve it from source and decide how it is represented here.
+
+Candidate source, located but not yet adopted:
+=trader-first-try/market/forex_hours.go=, functions
+=isForexMarketClosed= and =isMajorForexHolidayClosed=.  It works in
+=America/New_York=, which lines up with ADR-012's 17:00 NY rollover.
+The rules are:
+
+- Jan 1, Dec 25, Dec 26 -- closed all day
+- Dec 24, Dec 31 -- closed from 13:00 onward
+- Sunday evening session stays closed when Sunday itself, or the
+  following Monday, is one of the three full-day holidays
+
+Note it is hardcoded rules, not a data file, and it covers only those
+five dates -- no Good Friday, and no handling of holidays that shift
+when they fall on a weekend.  Decide whether to carry that set forward
+as-is or source a real calendar.
+
+* TODO Review comments to work in
+
+Parked here from review.  Work them into the sections above during the
+next edit and delete this section.
+
+** TODO Volume's Go type belongs to the Bar structure work
+Deferred to the =marketdata.Bar= decision (issue #72), which is the
+right home for it.  Two things for #72 to avoid getting wrong:
+
+- Do not use =num.Quantity=.  It carries exact, 1e8-scaled, tradable
+  quantity semantics, and ADR-004 defines no count type.  A tick count
+  wants a plain =int64=.
+- Pick one name and use it in both trees.  Raw calls the column
+  =volume=; the old canonical format calls the same value =ticks=.
+
+** TODO State that raw is authoritative
+It is strongly implied by "raw saved separately, pristine" plus
+"canonical is rebuilt and reversioned", but never actually written
+down.  The entire rebuild story rests on it, so it deserves a
+sentence of its own.
+
+** TODO Do not delete the existing candle-v2 tree until it has been diffed
+Once the new canonical build exists, diff it against the old
+=candle-v2= tree before deleting anything.  Bid OHLC only, tolerance
+about one unit at 1e5 scale -- legacy built values through
+=types.PriceFromFloat=, so last-digit differences are expected and
+byte-for-byte parity is neither achievable nor the goal.
+
+The point is catching gross errors: off-by-one slot indices, DST
+drift, wrong instrument mapping, missing months.  It is a 21-year
+regression test and it is only available once.  This does not conflict
+with the no-retention policy above -- that policy governs superseded
+/new-format/ versions, not the one-time legacy comparison.
+
+** TODO Provider-declared incompleteness is separate from gaps
+Raw carries OANDA's own =complete= column, and legacy silently skipped
+rows where it was false (=datamanager/data_validation.go=).  That is a
+different thing from a calendar-derived gap: one is the provider
+saying "this bar had not closed yet", the other is Trader inferring
+"data should exist here and does not".  Fold the distinction into "How
+will gaps and closed market days be handled" so it does not get lost.
+
+** TODO Say that third-party data sources are deferred
+"Everything behind DM lives in =internal/=" plus "no other package may
+retrieve, build or store data" means an outside user cannot supply a
+data source.  The architecture document promises exactly that seam via
+=marketdata.HistoricalSource= and =LiveFeed=.  For M2, OandA-only,
+deferring it is the right answer -- it just needs to be stated, since
+the promise exists elsewhere.
+
+** TODO Resolve W1 alignment before implementation starts
+Still correctly open under "Day and week alignment", but it is a short
+check against the OandA API rather than a design question: does
+=weeklyAlignment= accept Sunday?  ADR-012 defines the FX week as
+opening Sunday 17:00 New York, and =weeklyAlignment= is believed to
+default to Friday.  The answer decides whether W1 is provider-native
+like the other four intervals or the single derived one, which shapes
+the interval materialization work.
+
+Related, and already verified: the existing D1 corpus opens at 21:00Z
+in July and 22:00Z in January -- both 17:00 America/New_York.  That
+matches ADR-012.  But the legacy client sends no alignment parameters
+at all, so that boundary came from OandA's request defaults
+(=dailyAlignment=17=, =alignmentTimezone=America/New_York=).  The new
+downloader should pin them explicitly rather than inherit them.
+
+** TODO Typos, for whenever this folds into adr-decisions.org
+"Conanical" (x3), "principals" -> "principles", "Furture", "datys",
+"earler", "Everthing".  OANDA is usually all-caps.
+
+

@@ -15,8 +15,9 @@ source of truth.  The principal additions are:
 
 - Explicit architectural invariants.
 - A controlled greenfield repository strategy.
-- Historical source, live feed, persistence, coverage, adjustment, and fetch
-  policies as distinct market-data concerns.
+- A closed market-data subsystem behind =marketdata.Manager=, with historical
+  acquisition, live feeds, persistence, coverage, adjustment, and fetch policy
+  kept as distinct internal concerns.
 - Strategy descriptors and optional capability interfaces.
 - Explicit concurrency ownership and backpressure rules.
 - Live operational guards separated from trade-risk rules.
@@ -230,8 +231,11 @@ boundary inside one process.
 
 ** Ports and Adapters
 
-Trader's public interfaces are ports.  Brokers, data vendors, databases,
-message buses, and network protocols are adapters.
+Trader's public extension interfaces are ports.  Brokers, journals, message
+buses, and network protocols are adapters.  Market-data vendors and storage
+engines are a deliberate exception: they are internal adapters owned by the
+closed =marketdata= subsystem and are accessible only through
+=marketdata.Manager=.
 
 #+BEGIN_EXAMPLE
                 +-----------------------------+
@@ -250,15 +254,15 @@ message buses, and network protocols are adapters.
                                |
                 +--------------v--------------+
                 | Ports / extension contracts |
-                | broker, marketdata, journal |
+                | broker, journal, transports |
                 +--------------+--------------+
                                |
           +--------------------+---------------------+
           |                    |                     |
    +------v------+      +------v------+       +------v------+
-   | OANDA       |      | Parquet     |       | gRPC/MQTT   |
-   | Alpaca      |      | CSV         |       | HTTP/SSE    |
-   | Sim broker  |      | live feed   |       | CLI         |
+   | Broker      |      | Journal     |       | gRPC/MQTT   |
+   | adapters    |      | adapters    |       | HTTP/SSE    |
+   | Sim broker  |      |             |       | CLI         |
    +-------------+      +-------------+       +-------------+
 #+END_EXAMPLE
 
@@ -292,7 +296,9 @@ These are supplied at composition time when deterministic behavior matters.
 ** Capabilities Over Lowest-Common-Denominator APIs
 
 Broker and data providers differ.  Do not create one enormous interface that
-pretends all providers support identical features.
+pretends all providers support identical features.  Broker capability
+interfaces may be public.  Data-provider capability contracts remain internal
+to =marketdata= and are not user extension points.
 
 Use a small required core plus capability discovery or optional narrow
 interfaces.
@@ -505,19 +511,42 @@ It should not fetch prices or place orders.
 
 ** =marketdata=
 
-Owns canonical market observations and the contracts used to query, stream,
-validate, persist, and describe them.
+Owns canonical market observations and the complete acquisition, normalization,
+storage, caching, and retrieval subsystem.  =marketdata.Manager= is the sole
+exported access point for data operations.  All consumers use the manager; no
+other package or user code directly acquires, builds, retrieves, or persists
+market data.
 
-The public vocabulary should distinguish these roles:
+The implementation should still distinguish these internal roles:
 
-- =HistoricalSource=: bounded historical queries.
-- =LiveFeed=: unbounded subscriptions.
-- =Store= or =Sink=: persistence of canonical records; this may remain an
-  internal extension point until users genuinely need to implement it.
-- =CoverageCatalog=: what data exists, where gaps occur, and how it was derived.
-- Provider adapter: obtains provider-native records.
+- Historical acquisition: obtains bounded provider-native data.
+- Live feed: obtains unbounded provider-native updates when live data is added.
+- Store: persists raw provider data and canonical records.
+- Coverage catalog: records what data exists and where gaps occur.
 - Normalizer/validator: converts and checks provider records.
 - Resampler: derives aligned intervals from finer-grained canonical data.
+- Cache: retains requested canonical data in memory according to manager policy.
+
+Provider and storage interfaces may be used behind an =internal/= boundary when
+they improve implementation or testing, but they are not public extension
+points.  Only =marketdata.Manager= may invoke them or initiate acquisition and
+canonical builds.
+
+A request describes the data product the consumer needs, not how to acquire or
+store it.  The manager normally selects the provider and feed.  A request may
+optionally constrain that selection when the source materially changes the
+meaning or fitness of the data.  For example, equity pricing and volume from an
+IEX-only feed are not equivalent to consolidated SIP data.  Naming such a
+source is analogous to requesting a particular brand from a supplier's account
+manager: the consumer still does not access, configure, or implement the
+supplier.
+
+A successful request returns canonical data that is accurate and complete for
+the requested range and source constraint.  If the manager cannot meet that
+contract, it returns an explicit error rather than silently returning a partial
+or questionable result.  Provenance and quality metadata should identify the
+provider/feed and disclose material scope or quality limitations so a backtest
+or strategy can determine whether the data is suitable.
 
 Public concepts:
 
@@ -525,11 +554,11 @@ Public concepts:
 - =Interval=
 - =BarQuery=, =QuoteQuery=
 - =Reader[T]= or another typed cursor abstraction
-- =HistoricalSource=
-- =LiveFeed=
+- =Manager=
 - =Coverage= and =Gap=
 - =AdjustmentMode=
 - =FetchPolicy=
+- Optional provider/feed constraints when source is materially significant
 - Data provenance and quality flags
 
 Suggested API sketch:
@@ -574,6 +603,7 @@ type BarQuery struct {
     End         time.Time       // half-open range [Start, End)
     Adjustment  AdjustmentMode
     Fetch       FetchPolicy
+    Source      SourceConstraint // zero value lets Manager select the source
 }
 
 type Coverage struct {
@@ -587,28 +617,21 @@ type Coverage struct {
     Warnings   []QualityWarning
 }
 
-type HistoricalSource interface {
-    Bars(ctx context.Context, query BarQuery) (Reader[Bar], error)
-    Quotes(ctx context.Context, query QuoteQuery) (Reader[Quote], error)
-    Coverage(ctx context.Context, query CoverageQuery) (Coverage, error)
+type Manager struct {
+    // unexported fields own providers, stores, normalization, and caching
 }
 
-type LiveFeed interface {
-    Subscribe(ctx context.Context, request Subscription)
-        (Reader[Event], error)
-}
+func NewManager(config Config) (*Manager, error)
+func (m *Manager) Bars(ctx context.Context, query BarQuery) (Reader[Bar], error)
+func (m *Manager) Quotes(ctx context.Context, query QuoteQuery) (Reader[Quote], error)
+func (m *Manager) Coverage(ctx context.Context, query CoverageQuery) (Coverage, error)
 
-type Sink interface {
-    WriteBars(ctx context.Context, bars []Bar) error
-    WriteQuotes(ctx context.Context, quotes []Quote) error
-}
-
-var _ = io.EOF
+var _ = io.EOF // Reader.Next returns io.EOF when complete
 #+END_SRC
 
-The storage engine is hidden behind a narrow persistence port.  CSV, Parquet, a
-remote data service, and in-memory tests may satisfy the same contracts without
-changing callers.
+The storage engine and provider implementations are hidden inside the manager's
+internal implementation.  CSV, Parquet, OANDA, and in-memory test components
+may satisfy narrow internal contracts without becoming accessible to callers.
 
 Automatic read-through download is convenient for exploratory work, but it must
 be explicit.  A reproducible backtest should be able to require =LocalOnly= or
@@ -628,9 +651,9 @@ Use one canonical resampler for interval derivation.  Validate it by comparing a
 derived interval against a provider's native bars for the same session calendar.
 Disagreement usually exposes a boundary, holiday, or daylight-saving error.
 
-A top-level =marketdata.Service= may compose sources, feeds, stores, cache,
-normalization, and resampling for convenience.  The underlying extension
-contracts should remain narrow.
+=marketdata.Manager= composes acquisition, feeds, stores, cache, normalization,
+and resampling.  These implementation contracts should remain narrow and
+internal.
 
 ** =indicator=
 
@@ -1280,8 +1303,7 @@ Possible public service packages:
 - =backtest.Runner=
 - =scanner.Service=
 - =live.Manager=
-- =marketdata.Ingestor=
-- =marketdata.QueryService=
+- =marketdata.Manager=
 - =report.Service=
 
 An application service:
@@ -1425,7 +1447,7 @@ trader/
   LICENSE
 
   instrument/             public instrument/listing model
-  marketdata/             public canonical data and source/sink ports
+  marketdata/             public canonical data types and Manager facade
   indicator/              public indicator APIs and common indicators
   analysis/               public analysis observations
   strategy/               public strategy and intent contracts
@@ -1452,11 +1474,6 @@ trader/
       alpaca/
       ibkr/
       sim/
-    marketdata/
-      csv/
-      parquet/
-      dukascopy/
-      oanda/
     journal/
       sqlite/
       jsonl/
@@ -1466,6 +1483,11 @@ trader/
       mqtt/
 
   internal/
+    marketdata/
+      provider/            provider acquisition adapters
+      storage/             CSV/Parquet/in-memory persistence
+      normalize/           canonical conversion and validation
+      cache/               Manager-owned memory cache
     engine/               orchestration details not promised as public API
     reconcile/            shared recovery/reconciliation implementation
     runtime/              process lifecycle helpers
@@ -1490,7 +1512,6 @@ trader/
 
   contracttest/
     broker/
-    marketdata/
     strategy/
 
   docs/
@@ -1506,12 +1527,12 @@ without requiring users to reinvent framework scaffolding.  It may include:
 
 - Deterministic clocks and ID generators.
 - Candle, quote, order, fill, account, and portfolio builders.
-- In-memory historical sources and live feeds.
+- Canonical market-data readers and Manager-backed fixtures.
 - Simulated broker presets.
 - Strategy harnesses.
 - No-lookahead assertions.
 - Golden journal and report helpers.
-- Contract-test entry points for third-party adapters.
+- Contract-test entry points for supported public adapters.
 
 Testing utilities are part of framework usability.  Runnable examples should use
 them and execute in CI so public documentation cannot silently rot.
@@ -1935,11 +1956,11 @@ areas should be added before public APIs are considered mature.
 
 | Requirement                         | Proposed owner                                      |
 |-------------------------------------+-----------------------------------------------------|
-| Acquire OHLCV/tick data             | provider adapter + =marketdata= ingestor            |
-| Normalize canonical data            | =marketdata= normalizer                              |
-| Hide CSV/Parquet storage            | =marketdata.Source/Sink= adapters                    |
-| Historical retrieval                | =marketdata.Source=                                  |
-| Real-time data                       | =marketdata= typed readers/feeds                     |
+| Acquire OHLCV/tick data             | =marketdata.Manager= + internal provider adapter     |
+| Normalize canonical data            | =marketdata.Manager= + internal normalizer           |
+| Hide CSV/Parquet storage            | =marketdata.Manager= + internal storage              |
+| Historical retrieval                | =marketdata.Manager=                                 |
+| Real-time data                       | =marketdata.Manager= typed readers                   |
 | Multiple brokers                    | =broker= ports + adapter packages                    |
 | Place/manage orders                 | =execution= + =broker.Account=                       |
 | Broker asynchronous events          | =broker.EventReader=                                 |
@@ -2010,9 +2031,9 @@ Build one complete flow:
 Provider native data -> normalization -> canonical store -> historical query
 #+END_EXAMPLE
 
-Use CSV initially if useful, but test the public API with an in-memory store and
-one provider adapter.  The application should not know which storage adapter is
-used.
+Use CSV initially if useful, but test the public =marketdata.Manager= API with
+an internal in-memory store and one internal provider adapter.  Applications
+cannot access or replace either implementation.
 
 Add coverage manifests and data-quality reporting early.
 
@@ -2115,7 +2136,6 @@ contract-test suite.
 Examples:
 
 - =broker/contracttest=
-- =marketdata/contracttest=
 - =strategy/contracttest=
 
 A broker adapter contract suite should test:
@@ -2130,7 +2150,7 @@ A broker adapter contract suite should test:
 - Cancel/replace races
 - Error classification
 
-A market-data adapter suite should test:
+An internal market-data implementation suite should test:
 
 - Ordering
 - Inclusive/exclusive time boundaries
@@ -2140,7 +2160,9 @@ A market-data adapter suite should test:
 - Cancellation and resource cleanup
 - Data provenance
 
-This is more valuable to extension authors than interface comments alone.
+For public ports this is more valuable to extension authors than interface
+comments alone.  For market data it protects the Manager facade while its
+internal providers and storage implementations evolve.
 
 * Design Decisions I Recommend Making Now
 
@@ -2182,11 +2204,12 @@ contract.
 Yes.  It is needed for multi-account and cross-broker risk and should not be
 forced into the broker account abstraction.
 
-** Separate Historical Sources, Live Feeds, and Persistence
+** Keep Acquisition, Live Feeds, and Persistence Internal to Market Data
 
 Yes.  Bounded historical queries, unbounded subscriptions, and storage have
-different lifecycle and failure semantics.  A convenience service may compose
-them, but the extension contracts remain distinct.
+different lifecycle and failure semantics.  They remain distinct internal
+responsibilities composed exclusively by =marketdata.Manager=; they are not
+public extension contracts.
 
 ** Make Paper Trading the Default
 
@@ -2325,8 +2348,8 @@ report
 Minimal end-to-end capabilities:
 
 - One canonical bar type and one quote type
-- One historical source adapter
-- One real-time source adapter
+- One internal historical provider adapter behind =marketdata.Manager=
+- One internal real-time provider adapter behind =marketdata.Manager=
 - One simulated broker
 - One real broker adapter
 - Market, limit, and stop orders

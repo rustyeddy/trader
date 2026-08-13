@@ -116,8 +116,10 @@ Guidance for the common cases:
 
 - *Domain value types* (prices, bars, orders, snapshots) are public.
   They are the vocabulary users write code against.
-- *Extension points* users are expected to implement (broker adapters,
-  market-data sources, journals) are public interfaces, kept small.
+- *Extension points* users are expected to implement (broker adapters and
+  journals) are public interfaces, kept small.  Market-data providers and
+  storage are deliberately not extension points; they remain internal and are
+  accessible only through =marketdata.Manager=.
 - *Orchestration internals* (engine loops, reconciliation mechanics,
   runtime plumbing) belong in =internal/= until a user needs to replace
   them.
