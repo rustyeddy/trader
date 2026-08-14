@@ -26,6 +26,7 @@ import (
 // without enumerating each one.
 var forbiddenImportSubstrings = []string{
 	"internal/marketdata",
+	"marketdata/internal",
 	"marketdata/provider",
 	"marketdata/storage",
 	"/oanda",
