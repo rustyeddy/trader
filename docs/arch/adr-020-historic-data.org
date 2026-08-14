@@ -152,6 +152,97 @@ All new data downloaded will be store separate in it's original
 pristine format, in a completely different directory structure than
 the derived data.
 
+** DONE State that raw is authoritative
+Raw is the authoritative rebuild input: canonical data is derived from
+it and is rebuilt and reversioned from it, never the reverse, and never
+hand-edited independently of it.  This was already strongly implied by
+"raw saved separately, pristine" plus "canonical is rebuilt and
+reversioned," but had never been written down on its own; issue #75
+(M2-07, the raw-archive inventory) is the first consumer that actually
+depends on this being explicit, since an inventory's entire purpose is
+producing integrity evidence *about* an authoritative input.
+
+** DONE Raw-archive inventory and integrity inspection
+Settled by issue #75 (branch =feature/75-oanda-inventory=):
+=oanda.Inspect(ctx, root) (Inventory, error)= walks a raw OANDA archive
+and produces a deterministic, read-only =Inventory= — it never repairs,
+renames, deletes, re-downloads, or otherwise modifies anything under
+=root=.  It lives in =marketdata/internal/provider/oanda= alongside the
+reader (#70), per the boundary the issue's own tracking comment settled
+with the owner: the reader parses one partition given a path; inventory
+walks the archive tree and inspects what it finds.  =Inspect= reuses the
+reader's =Meta=, =Record=, sentinels, and unexported =parsePathMeta= —
+resolving instrument/interval/year/month from a file name is exactly
+the reader's already-tested logic, not reimplemented.
+
+=Inventory= holds three deterministically sorted slices:
+
+- =Partitions= — one entry per discovered =*.csv= file whose name
+  resolves to a known instrument and supported interval.  Each carries a
+  =PartitionStatus= (=OK=, =Unreadable=, =Malformed=), row count,
+  provider-incomplete row count, any duplicate timestamps found, the
+  observed first/last record time, and an algorithm-qualified
+  =sha256:<hex>= content fingerprint — exactly the form
+  =marketdata.Manifest.RawFingerprint= (#73) expects, so a later build
+  step can carry an =Inspect= fingerprint straight into a =Manifest=
+  without reformatting it.  A file that fails to open, or whose rows
+  fail to parse, is recorded with its status and error rather than
+  aborting the walk: one bad file must not hide the rest of the
+  inventory.
+- =Skipped= — every file Inspect deliberately did not inventory as a
+  partition, and why: an out-of-scope instrument (XAUUSD,
+  =ErrInstrumentOutOfScope=), an interval the raw corpus does not carry
+  (a stray =w1= file, =ErrUnsupportedInterval=), or a file name that does
+  not match the =PAIR-YYYY-MM-tf.csv= shape at all
+  (=ErrMalformedData=) — all distinguishable via =errors.Is=.
+- =Gaps= — a =MonthGap= for every month strictly between an
+  (instrument, interval) group's earliest and latest discovered
+  partition that has no partition *file* at all.  This needs no trading
+  calendar: it is purely a hole in the discovered month sequence, so a
+  malformed or unreadable partition still counts as present (the file
+  exists) and is not a gap.
+
+*Deliberate non-goal, to keep the package boundary intact*: Inspect does
+not attempt to judge whether an individual bar interval *within* a
+present partition is missing because the market was closed or because
+data is genuinely lost.  That judgment needs #74's =FXCalendar=/
+=ClassifyInterval= machinery, and =marketdata/internal/provider/oanda=
+deliberately does not import the root =marketdata= package at all (see
+that package's own doc comment) — precisely so =marketdata.Manager= can
+own and wire it without an import cycle.  Row-interval-level
+completeness against calendar knowledge belongs to issue #79's coverage
+engine, which operates on canonical data where that knowledge is
+already available; #75 only ever reports the calendar-blind, purely
+structural =MonthGap=.  This is also how "closed-market periods are not
+reported as missing merely because no row exists" is satisfied: Inspect
+simply never attempts row-level completeness inference in the first
+place, so it cannot mistake a weekend or holiday for lost data.
+
+Backup/save trees that mirror the raw archive's own =PAIR/YYYY/MM=
+shape (confirmed to exist in practice, alongside the real archive) can
+never be mistaken for it: =Inspect= never searches for =root=, only ever
+descending from the exact directory the caller supplies, so a sibling
+tree elsewhere on disk is simply never visited.
+
+Full-archive inspection against a real, multi-decade archive is
+operator-run, not part of normal CI: it lives behind the
+=fullarchive= build tag
+(=marketdata/internal/provider/oanda/inventory_fullarchive_test.go=)
+and reads its target from a local =fullArchiveRoot= constant an
+operator edits by hand and never commits, skipping itself whenever that
+constant is empty (always true for a fresh checkout).  An environment
+variable was the first design, but domain code under =marketdata/= may
+not read the environment or flags — =config/arch_test.go= enforces this
+mechanically across the whole module — and this package's own
+=internal/= visibility rule means the test cannot be relocated to the
+exempt =test/= tree either, since =oanda.Inspect= is only reachable from
+within the =marketdata/= tree.  A hand-edited local constant is the
+compliant alternative.  Deterministic, fixture-backed unit tests
+covering every =PartitionStatus=, every =SkippedEntry= reason, month-gap
+detection (including out-of-order
+input and multi-group sort tie-breaks), and fingerprint stability run
+in normal CI.
+
 * DONE We will use the term Bar (not candle)
 And Tick, Trade if/when the time comes
 
