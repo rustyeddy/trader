@@ -33,10 +33,12 @@ const fxRolloverHour = 17
 // FXCalendar is a Calendar for spot FX's continuous weekly session: open
 // Sunday 17:00 New York time, closed Friday 17:00 through Sunday 17:00,
 // with a daily rollover at 17:00 New York time every other day of the
-// week. It supports an optional fixed holiday list; no holiday data
-// ships with Trader itself.
+// week. It supports an optional fixed holiday list and partial-closure
+// list; no holiday data ships with Trader itself — see StandardFXHolidays
+// for Trader's own accepted M2 rule set (issue #74, ADR-020).
 type FXCalendar struct {
-	holidays map[dateKey]struct{}
+	holidays        map[dateKey]struct{}
+	partialClosures map[dateKey]time.Duration
 }
 
 // dateKey identifies a civil date in New York's calendar, independent of
@@ -45,6 +47,25 @@ type dateKey struct {
 	year  int
 	month time.Month
 	day   int
+}
+
+// PartialClosure names a session that is truncated early rather than
+// closed for its entire span: the session ending on Date remains open
+// from its normal Sunday/weekday open through Date at New York midnight
+// plus From, and is closed (StatusHoliday) from that instant through the
+// session's normal 17:00 New York end. Christmas Eve and New Year's Eve,
+// both closing at 13:00 New York time, are Trader's two M2 examples (see
+// StandardFXHolidays).
+type PartialClosure struct {
+	// Date names, via its literal Year/Month/Day fields — the same
+	// convention Holidays uses — the New York civil date on which the
+	// session ending on Date is truncated.
+	Date time.Time
+	// From is the offset from New York midnight on Date at which trading
+	// stops for the session ending on Date. It is ordinarily well within
+	// [0, 17h): a value at or beyond 17h would never actually truncate
+	// anything, since the session already ends at 17:00.
+	From time.Duration
 }
 
 // FXCalendarParams configures a new FXCalendar.
@@ -57,6 +78,10 @@ type FXCalendarParams struct {
 	// whatever Location is convenient, since only the calendar fields
 	// are read.
 	Holidays []time.Time
+
+	// PartialClosures names sessions that end early rather than not
+	// opening at all. See PartialClosure.
+	PartialClosures []PartialClosure
 }
 
 // NewFXCalendar returns an FXCalendar configured with params.
@@ -65,7 +90,11 @@ func NewFXCalendar(params FXCalendarParams) *FXCalendar {
 	for _, h := range params.Holidays {
 		holidays[literalDateKey(h)] = struct{}{}
 	}
-	return &FXCalendar{holidays: holidays}
+	partial := make(map[dateKey]time.Duration, len(params.PartialClosures))
+	for _, pc := range params.PartialClosures {
+		partial[literalDateKey(pc.Date)] = pc.From
+	}
+	return &FXCalendar{holidays: holidays, partialClosures: partial}
 }
 
 var _ Calendar = (*FXCalendar)(nil)
@@ -88,10 +117,29 @@ func (c *FXCalendar) Status(t time.Time) Status {
 		if nyT.Before(rolloverOn(nyT)) {
 			return StatusClosed
 		}
+		// At or after Sunday's rollover, the week would normally reopen.
+		// It doesn't when this Sunday is itself a full holiday (Jan 1 or
+		// Dec 25 landing on a Sunday): the session that would open
+		// tonight and end the following Monday isn't otherwise caught by
+		// the ending-date check below, since an ordinary Monday isn't a
+		// holiday date in its own right.
+		if _, holiday := c.holidays[dateKeyOf(nyT)]; holiday {
+			return StatusHoliday
+		}
 	}
 	sessionEnd := c.dayStart(t).AddDate(0, 0, 1)
-	if _, holiday := c.holidays[dateKeyOf(sessionEnd)]; holiday {
+	endKey := dateKeyOf(sessionEnd)
+	if _, holiday := c.holidays[endKey]; holiday {
 		return StatusHoliday
+	}
+	if from, ok := c.partialClosures[endKey]; ok {
+		// sessionEnd already carries newYorkLocation (built from
+		// rolloverOn), so its own Y/M/D give the correct civil date for
+		// the truncation threshold without a further location conversion.
+		midnight := time.Date(sessionEnd.Year(), sessionEnd.Month(), sessionEnd.Day(), 0, 0, 0, 0, newYorkLocation)
+		if threshold := midnight.Add(from); !t.Before(threshold) {
+			return StatusHoliday
+		}
 	}
 	return StatusOpen
 }

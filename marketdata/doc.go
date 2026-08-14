@@ -85,4 +85,21 @@
 // field rather than storing a caller-supplied one, and Manifest.Matches
 // checks that a Manifest and a BarSet describe the same data. Full
 // Coverage/Gap detail remains a separate concern (issue #79).
+//
+// # Closures, gaps, and interval state
+//
+// FXCalendar's holiday support now includes partial closures
+// (PartialClosure) alongside full-session ones, and StandardFXHolidays
+// supplies Trader's own accepted M2 FX holiday rule set (issue #74,
+// ADR-020) — New Year's Day, Christmas Day, and Boxing Day as full
+// closures, Christmas Eve and New Year's Eve as partial closures from
+// 13:00 New York time. IntervalState and ClassifyInterval give the
+// vocabulary for why one expected bar interval does or does not have
+// data — Present, Closed, Missing, Incomplete, or InProgress —
+// replacing any dense, zero-filled representation: absence plus this
+// state is how a closed market or a genuine gap is represented.
+// DatasetComplete formally defines completeness over an
+// already-classified range. The engine that walks a real query range
+// and produces these states is issue #79's coverage catalog, not this
+// package.
 package marketdata

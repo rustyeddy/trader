@@ -53,4 +53,20 @@
 // position. Malformed rows — wrong field count, unparseable price, time,
 // volume, or complete flag — are reported as errors rather than silently
 // skipped or coerced.
+//
+// # Future live synchronization
+//
+// This package does not talk to OANDA's API; it only reads the preserved
+// archive. When a later milestone adds live acquisition, it must pin
+// dailyAlignment=17 and alignmentTimezone=America/New_York explicitly on
+// every daily request rather than relying on OANDA's undocumented
+// defaults (issue #74, ADR-020) — the archive's own D1 opens already
+// match a 17:00 America/New_York rollover, which is only true because
+// the legacy client happened to inherit those same defaults, not because
+// it requested them. A pinned request survives a provider default
+// changing without Trader silently mis-aligning new data against the
+// old archive. There is no OANDA-native weekly partition in the
+// preserved archive (see RawInterval); W1 is a derived interval in M2,
+// built by resampling canonical D1, not synchronized from OANDA
+// directly, so no weeklyAlignment parameter is pinned here.
 package oanda
