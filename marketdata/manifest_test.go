@@ -14,8 +14,15 @@ func gbpusd() instrument.ID {
 	return instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
 }
 
+// validRawFingerprint is a well-formed "<algorithm>:<hex digest>" value,
+// long enough to look like a real sha256 digest without needing to be
+// one.
+const validRawFingerprint = "sha256:" +
+	"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7a"
+
 // validManifest returns a well-formed manifest, paired with validBarSet's
-// EUR/USD H1 span, for the tests to mutate.
+// EUR/USD H1 span, for the tests to mutate. It has no parent (built
+// directly from raw), matching its "none" ResamplerVersion.
 func validManifest(t *testing.T) Manifest {
 	t.Helper()
 	start := time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC)
@@ -29,10 +36,10 @@ func validManifest(t *testing.T) Manifest {
 		Span:             span,
 		Basis:            BasisBid,
 		SchemaVersion:    1,
-		RawFingerprint:   "deadbeef",
+		RawFingerprint:   validRawFingerprint,
 		BuilderVersion:   "builder-v1",
 		ValidatorVersion: "validator-v1",
-		ResamplerVersion: "none",
+		ResamplerVersion: noResampler,
 		CalendarVersion:  "fxcalendar-v1",
 		BuiltAt:          time.Date(2020, 3, 3, 0, 0, 0, 0, time.UTC),
 		BarCount:         2,
@@ -41,16 +48,60 @@ func validManifest(t *testing.T) Manifest {
 	}
 }
 
+// validDerivedManifest returns a well-formed manifest resampled from a
+// finer parent dataset over the same instrument.
+func validDerivedManifest(t *testing.T) Manifest {
+	t.Helper()
+	m := validManifest(t)
+	m.ResamplerVersion = "resampler-v1"
+	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "parent-rev-1"}
+	return m
+}
+
 func TestManifestValidate_OK(t *testing.T) {
 	require.NoError(t, validManifest(t).Validate())
 }
 
-func TestManifestValidate_ZeroBarCountAllowsZeroBarRange(t *testing.T) {
+func TestManifestValidate_DerivedOK(t *testing.T) {
+	require.NoError(t, validDerivedManifest(t).Validate())
+}
+
+func TestManifestValidate_ZeroBarCountRequiresZeroBarRange(t *testing.T) {
 	m := validManifest(t)
 	m.BarCount = 0
 	m.FirstBar = time.Time{}
 	m.LastBar = time.Time{}
 	assert.NoError(t, m.Validate(), "an empty dataset over a span is valid")
+}
+
+func TestManifestValidate_ZeroBarCountWithNonZeroRangeRejected(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 0
+	// FirstBar/LastBar left at the two-bar defaults: BarCount says empty,
+	// but the coverage summary still claims a range.
+	assert.ErrorIs(t, m.Validate(), ErrManifestBarRange)
+}
+
+func TestManifestValidate_SingleBarRequiresEqualFirstLast(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 1
+	// FirstBar/LastBar left unequal (the two-bar defaults).
+	assert.ErrorIs(t, m.Validate(), ErrManifestBarRange)
+}
+
+func TestManifestValidate_SingleBarEqualFirstLastOK(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 1
+	m.LastBar = m.FirstBar
+	assert.NoError(t, m.Validate())
+}
+
+func TestManifestValidate_SingleBarOutsideSpan(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 1
+	m.FirstBar = m.Span.end.Add(time.Hour)
+	m.LastBar = m.FirstBar
+	assert.ErrorIs(t, m.Validate(), ErrManifestBarRange)
 }
 
 func TestManifestValidate_EmptyProvider(t *testing.T) {
@@ -83,10 +134,39 @@ func TestManifestValidate_UnknownBasis(t *testing.T) {
 	assert.ErrorIs(t, m.Validate(), ErrManifestBasis)
 }
 
+func TestManifestValidate_SchemaVersionZero(t *testing.T) {
+	m := validManifest(t)
+	m.SchemaVersion = 0
+	assert.ErrorIs(t, m.Validate(), ErrManifestSchemaVersion)
+}
+
+func TestManifestValidate_SchemaVersionNegative(t *testing.T) {
+	m := validManifest(t)
+	m.SchemaVersion = -1
+	assert.ErrorIs(t, m.Validate(), ErrManifestSchemaVersion)
+}
+
 func TestManifestValidate_EmptyFingerprint(t *testing.T) {
 	m := validManifest(t)
 	m.RawFingerprint = ""
 	assert.ErrorIs(t, m.Validate(), ErrManifestFingerprint)
+}
+
+func TestManifestValidate_MalformedFingerprint(t *testing.T) {
+	for _, bad := range []string{
+		"not hex",
+		"deadbeef",         // no algorithm prefix
+		"sha256:",          // empty digest
+		"sha256:DEADBEEF",  // uppercase hex not accepted
+		":deadbeef",        // empty algorithm
+		"sha256:dead beef", // embedded space
+	} {
+		t.Run(bad, func(t *testing.T) {
+			m := validManifest(t)
+			m.RawFingerprint = bad
+			assert.ErrorIs(t, m.Validate(), ErrManifestFingerprint)
+		})
+	}
 }
 
 func TestManifestValidate_EmptyVersionStrings(t *testing.T) {
@@ -121,6 +201,7 @@ func TestManifestValidate_NegativeBarCount(t *testing.T) {
 
 func TestManifestValidate_BarRangeReversed(t *testing.T) {
 	m := validManifest(t)
+	m.BarCount = 2
 	m.FirstBar, m.LastBar = m.LastBar, m.FirstBar
 	assert.ErrorIs(t, m.Validate(), ErrManifestBarRange)
 }
@@ -137,27 +218,77 @@ func TestManifestValidate_BarCountPositiveButZeroFirstBar(t *testing.T) {
 	assert.ErrorIs(t, m.Validate(), ErrManifestBarRange)
 }
 
-func TestManifestValidate_ParentMissingRevision(t *testing.T) {
+// --- Parent / resampler lineage ---
+
+func TestManifestValidate_ResamplerSetWithoutParent(t *testing.T) {
 	m := validManifest(t)
-	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1}
+	m.ResamplerVersion = "resampler-v1"
+	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
+}
+
+func TestManifestValidate_ParentSetWithoutResampler(t *testing.T) {
+	m := validManifest(t)
+	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "abc"}
+	// ResamplerVersion still "none" from validManifest.
+	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
+}
+
+func TestManifestValidate_ParentMissingRevision(t *testing.T) {
+	m := validDerivedManifest(t)
+	m.Parent.Revision = ""
 	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
 }
 
 func TestManifestValidate_ParentMissingInstrument(t *testing.T) {
-	m := validManifest(t)
-	m.Parent = &ParentRef{Interval: M1, Revision: "abc"}
+	m := validDerivedManifest(t)
+	m.Parent.Instrument = instrument.ID{}
 	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
 }
 
 func TestManifestValidate_ParentInvalidInterval(t *testing.T) {
-	m := validManifest(t)
-	m.Parent = &ParentRef{Instrument: eurusd(), Revision: "abc"}
+	m := validDerivedManifest(t)
+	m.Parent.Interval = Interval{}
+	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
+}
+
+func TestManifestValidate_ParentDifferentInstrument(t *testing.T) {
+	m := validDerivedManifest(t)
+	m.Parent.Instrument = gbpusd()
+	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
+}
+
+func TestManifestValidate_ParentSameInterval(t *testing.T) {
+	m := validDerivedManifest(t)
+	m.Parent.Interval = m.Interval // H1 parent for an H1 child
+	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
+}
+
+func TestManifestValidate_ParentCoarserInterval(t *testing.T) {
+	m := validDerivedManifest(t)
+	m.Parent.Interval = D1 // coarser than the H1 child
 	assert.ErrorIs(t, m.Validate(), ErrManifestParent)
 }
 
 func TestManifestValidate_ValidParentOK(t *testing.T) {
+	assert.NoError(t, validDerivedManifest(t).Validate())
+}
+
+func TestManifestValidate_ParentDailyChildWeeklyOK(t *testing.T) {
+	// Exercises the UnitWeek arm of the finer-than-coarser check: a D1
+	// parent is finer than a W1 child.
+	start := time.Date(2020, 3, 1, 17, 0, 0, 0, time.UTC)
+	span, err := NewTimeRange(start, start.Add(7*24*time.Hour))
+	require.NoError(t, err)
+
 	m := validManifest(t)
-	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "abc"}
+	m.Interval = W1
+	m.Span = span
+	m.BarCount = 0
+	m.FirstBar = time.Time{}
+	m.LastBar = time.Time{}
+	m.ResamplerVersion = "resampler-v1"
+	m.Parent = &ParentRef{Instrument: eurusd(), Interval: D1, Revision: "parent-rev-1"}
+
 	assert.NoError(t, m.Validate())
 }
 
@@ -206,12 +337,54 @@ func TestManifestMatches_BarCountMismatch(t *testing.T) {
 	assert.ErrorIs(t, m.Matches(bs), ErrManifestMismatch)
 }
 
+func TestManifestMatches_FirstBarMismatch(t *testing.T) {
+	m := validManifest(t)
+	m.FirstBar = m.FirstBar.Add(time.Minute)
+	bs := validBarSet(t)
+	assert.ErrorIs(t, m.Matches(bs), ErrManifestMismatch)
+}
+
+func TestManifestMatches_LastBarMismatch(t *testing.T) {
+	m := validManifest(t)
+	m.LastBar = m.LastBar.Add(time.Minute)
+	bs := validBarSet(t)
+	assert.ErrorIs(t, m.Matches(bs), ErrManifestMismatch)
+}
+
+func TestManifestMatches_EmptyBarSetNonZeroManifestRange(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 0
+	bs := validBarSet(t)
+	bs.Bars = nil
+	// m.FirstBar/LastBar are still set from validManifest's two-bar
+	// defaults, so this must be reported even though BarCount agrees.
+	assert.ErrorIs(t, m.Matches(bs), ErrManifestMismatch)
+}
+
+func TestManifestMatches_EmptyBarSetZeroManifestRangeOK(t *testing.T) {
+	m := validManifest(t)
+	m.BarCount = 0
+	m.FirstBar = time.Time{}
+	m.LastBar = time.Time{}
+	bs := validBarSet(t)
+	bs.Bars = nil
+	assert.NoError(t, m.Matches(bs))
+}
+
 // --- Revision ---
 
 func TestManifestRevision_DeterministicForIdenticalValues(t *testing.T) {
 	a := validManifest(t)
 	b := validManifest(t)
 	assert.Equal(t, a.Revision(), b.Revision())
+}
+
+func TestManifestRevision_BuiltAtExcluded(t *testing.T) {
+	a := validManifest(t)
+	b := validManifest(t)
+	b.BuiltAt = a.BuiltAt.Add(24 * time.Hour)
+	assert.Equal(t, a.Revision(), b.Revision(),
+		"BuiltAt is provenance, not identity, and must not affect Revision")
 }
 
 func TestManifestRevision_ChangesPerField(t *testing.T) {
@@ -232,18 +405,19 @@ func TestManifestRevision_ChangesPerField(t *testing.T) {
 		}},
 		{"basis", func(m *Manifest) { m.Basis = BasisAsk }},
 		{"schemaVersion", func(m *Manifest) { m.SchemaVersion = 2 }},
-		{"rawFingerprint", func(m *Manifest) { m.RawFingerprint = "otherhash" }},
+		{"rawFingerprint", func(m *Manifest) {
+			m.RawFingerprint = "sha256:" + "0000000000000000000000000000000000000000000000000000000000000"
+		}},
 		{"builderVersion", func(m *Manifest) { m.BuilderVersion = "builder-v2" }},
 		{"validatorVersion", func(m *Manifest) { m.ValidatorVersion = "validator-v2" }},
-		{"resamplerVersion", func(m *Manifest) { m.ResamplerVersion = "resampler-v1" }},
+		{"resamplerVersion+parent", func(m *Manifest) {
+			m.ResamplerVersion = "resampler-v1"
+			m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "abc"}
+		}},
 		{"calendarVersion", func(m *Manifest) { m.CalendarVersion = "fxcalendar-v2" }},
-		{"builtAt", func(m *Manifest) { m.BuiltAt = m.BuiltAt.Add(time.Hour) }},
 		{"barCount", func(m *Manifest) { m.BarCount = 3; m.LastBar = m.LastBar.Add(time.Hour) }},
 		{"firstBar", func(m *Manifest) { m.FirstBar = m.FirstBar.Add(time.Minute) }},
 		{"lastBar", func(m *Manifest) { m.LastBar = m.LastBar.Add(time.Minute) }},
-		{"parent", func(m *Manifest) {
-			m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "abc"}
-		}},
 	}
 
 	for _, tc := range mutations {
@@ -256,21 +430,36 @@ func TestManifestRevision_ChangesPerField(t *testing.T) {
 }
 
 func TestManifestRevision_ParentRevisionAffectsHash(t *testing.T) {
-	m1 := validManifest(t)
-	m1.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "rev-1"}
+	m1 := validDerivedManifest(t)
+	m1.Parent.Revision = "rev-1"
 
-	m2 := validManifest(t)
-	m2.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "rev-2"}
+	m2 := validDerivedManifest(t)
+	m2.Parent.Revision = "rev-2"
 
 	assert.NotEqual(t, m1.Revision(), m2.Revision())
 }
 
 func TestManifestRevision_NilParentDiffersFromSetParent(t *testing.T) {
 	withoutParent := validManifest(t)
-	withParent := validManifest(t)
-	withParent.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "rev-1"}
+	withParent := validDerivedManifest(t)
 
 	assert.NotEqual(t, withoutParent.Revision(), withParent.Revision())
+}
+
+func TestManifestRevision_NoDelimiterCollisionAcrossFields(t *testing.T) {
+	// Regression test: a hand-built, newline-joined "key=value" encoding
+	// let a suffix of one field bleed into the next field's key, so two
+	// distinct (RawFingerprint, BuilderVersion) pairs could hash equal.
+	// The JSON-based encoding must not have that problem.
+	a := validManifest(t)
+	a.RawFingerprint = "x\nbuilder=y"
+	a.BuilderVersion = "z"
+
+	b := validManifest(t)
+	b.RawFingerprint = "x"
+	b.BuilderVersion = "y\nbuilder=z"
+
+	assert.NotEqual(t, a.Revision(), b.Revision())
 }
 
 func TestManifestRevision_HexEncodedSHA256Length(t *testing.T) {

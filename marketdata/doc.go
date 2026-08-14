@@ -80,9 +80,9 @@
 // instrument, interval, span, price basis, schema/builder/validator/
 // resampler/calendar versions, a raw-source fingerprint, a lightweight
 // coverage summary, and optional parent lineage for a derived dataset.
-// Dataset identity is never a filename or directory path. Manifest.
-// Revision computes a deterministic fingerprint from every other field
-// rather than storing a caller-supplied one, and Manifest.Matches checks
-// that a Manifest and a BarSet describe the same data. Full Coverage/Gap
-// detail remains a separate concern (issue #79).
+// Dataset identity is never a filename or directory path.
+// Manifest.Revision computes a deterministic fingerprint from every other
+// field rather than storing a caller-supplied one, and Manifest.Matches
+// checks that a Manifest and a BarSet describe the same data. Full
+// Coverage/Gap detail remains a separate concern (issue #79).
 package marketdata
