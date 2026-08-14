@@ -1,0 +1,3 @@
+# schema=raw-v1 source=oanda instrument=GBPUSD tf=h1 year=2020 month=09
+time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume,complete
+2020-09-01T00:00:00Z,1.09439,1.09548,1.09339,1.09452,1.09457,1.09565,1.09352,1.09466,2235,true

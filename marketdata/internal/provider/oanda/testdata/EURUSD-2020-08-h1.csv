@@ -1,0 +1,4 @@
+# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2020 month=08
+time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume,complete
+2020-08-01T00:00:00Z,1.09439,1.09548,1.09339,1.09452,1.09457,1.09565,1.09352,1.09466,2235,true
+not-a-timestamp,1.09451,1.09460,1.09360,1.09414,1.09471,1.09477,1.09375,1.09430,1730,true

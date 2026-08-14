@@ -1,0 +1,2 @@
+# schema=raw-v1 source=oanda instrument=EURUSD tf=h1 year=2021 month=01
+2021-01-01T00:00:00Z,1.09439,1.09548,1.09339,1.09452,1.09457,1.09565,1.09352,1.09466,2235,true
