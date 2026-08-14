@@ -85,6 +85,13 @@ believed at that time.
 | 017 | Broker-neutral order and execution vocabulary                     | Accepted   |
 | 018 | Order lifecycle transition rules                                  | Accepted   |
 | 019 | Account and portfolio snapshot models                             | Accepted   |
+| 020 | Historic data subsystem (in adr-020-historic-data.org)            | See file   |
+
+Note: ADR-020 is maintained in its own file,
+=docs/arch/adr-020-historic-data.org=, rather than inline in this
+registry.  Consult that file for its current status, decisions, and open
+questions; the row above is a pointer so the registry index remains
+complete.
 
 * ADR-001: Modular monolith before service decomposition
 
@@ -1496,6 +1503,15 @@ fully immutable, so there is no mutable state an element could expose.
   observation time — look-ahead risk that matters most for backtests
   replaying a historical =Portfolio.AsOf=. =NewPortfolio= now rejects
   any =ConversionRate= whose =AsOf= is after the =Portfolio='s own.
+
+* ADR-020: Historic data subsystem
+
+ADR-020 is maintained in its own file rather than inline in this
+registry: =docs/arch/adr-020-historic-data.org=.  It governs the
+=marketdata= historic-data subsystem — provider scope, canonical/derived
+data, and the =marketdata.Manager= boundary that M2 issues (for example
+#71) build against.  Refer to that file for its current status,
+decisions, and open questions.
 
 * ADR Template                                                       :noexport:
 
