@@ -99,63 +99,114 @@ func NewFXCalendar(params FXCalendarParams) *FXCalendar {
 
 var _ Calendar = (*FXCalendar)(nil)
 
-// Status implements Calendar. Status and Session agree with each other:
-// both group time by the same rollover-to-rollover trading session
-// (dayStart to dayStart+1day), labeled by the New York civil date on
-// which that session closes, so every instant a returned Session
-// contains reports the same Status.
+// Status implements Calendar. Status and Session are never computed
+// independently — both are thin wrappers over classify — so they cannot
+// disagree: every instant a returned Session contains reports the same
+// Status that produced it.
 func (c *FXCalendar) Status(t time.Time) Status {
+	status, _ := c.classify(t)
+	return status
+}
+
+// Session implements Calendar. When a partial closure or a holiday-Sunday
+// head truncation applies to t's session, the returned range is the
+// truncated open window, not the nominal rollover-to-rollover span — see
+// classify.
+func (c *FXCalendar) Session(t time.Time) (TimeRange, bool) {
+	status, window := c.classify(t)
+	if status != StatusOpen {
+		return TimeRange{}, false
+	}
+	return window, true
+}
+
+// classify is Status and Session's single shared implementation. It
+// returns t's Status, and — only when that Status is StatusOpen — the
+// actual open trading window containing t: the nominal
+// [dayStart, dayStart+1day) rollover-to-rollover session, truncated at
+// its start when the session opened on a holiday Sunday (see the Sunday
+// case below) and truncated at its end when a PartialClosure applies.
+// When Status is not StatusOpen, the returned TimeRange is the zero
+// value and must not be used — Session reports ok=false in that case
+// without inspecting it.
+//
+// Computing both together in one place, rather than letting Status and
+// Session each independently decide where a session's boundaries fall,
+// is what guarantees they can never disagree about which instants are
+// open.
+func (c *FXCalendar) classify(t time.Time) (Status, TimeRange) {
 	nyT := t.In(newYorkLocation)
 	switch nyT.Weekday() {
 	case time.Saturday:
-		return StatusClosed
+		return StatusClosed, TimeRange{}
 	case time.Friday:
 		if !nyT.Before(rolloverOn(nyT)) {
-			return StatusClosed
+			return StatusClosed, TimeRange{}
 		}
 	case time.Sunday:
 		if nyT.Before(rolloverOn(nyT)) {
-			return StatusClosed
+			return StatusClosed, TimeRange{}
 		}
 		// At or after Sunday's rollover, the week would normally reopen.
 		// It doesn't when this Sunday is itself a full holiday (Jan 1 or
 		// Dec 25 landing on a Sunday): the session that would open
 		// tonight and end the following Monday isn't otherwise caught by
 		// the ending-date check below, since an ordinary Monday isn't a
-		// holiday date in its own right.
+		// holiday date in its own right. This case is reached only while
+		// t's own New York civil date is still that Sunday — once the
+		// date rolls to Monday, nyT.Weekday() no longer matches here, so
+		// the closed head of the session is exactly [Sunday 17:00,
+		// Monday 00:00 NY), matching the reopening-at-midnight semantics
+		// below.
 		if _, holiday := c.holidays[dateKeyOf(nyT)]; holiday {
-			return StatusHoliday
+			return StatusHoliday, TimeRange{}
 		}
 	}
-	sessionEnd := c.dayStart(t).AddDate(0, 0, 1)
-	endKey := dateKeyOf(sessionEnd)
+
+	start := c.dayStart(t)
+	end := start.AddDate(0, 0, 1)
+	endKey := dateKeyOf(end)
+
 	if _, holiday := c.holidays[endKey]; holiday {
-		return StatusHoliday
+		return StatusHoliday, TimeRange{}
 	}
 	if from, ok := c.partialClosures[endKey]; ok {
-		// sessionEnd already carries newYorkLocation (built from
-		// rolloverOn), so its own Y/M/D give the correct civil date for
+		// end already carries newYorkLocation (built from rolloverOn via
+		// dayStart), so its own Y/M/D give the correct civil date for
 		// the truncation threshold without a further location conversion.
-		midnight := time.Date(sessionEnd.Year(), sessionEnd.Month(), sessionEnd.Day(), 0, 0, 0, 0, newYorkLocation)
-		if threshold := midnight.Add(from); !t.Before(threshold) {
-			return StatusHoliday
+		midnight := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, newYorkLocation)
+		threshold := midnight.Add(from)
+		if !t.Before(threshold) {
+			return StatusHoliday, TimeRange{}
+		}
+		if threshold.Before(end) {
+			end = threshold
 		}
 	}
-	return StatusOpen
-}
-
-// Session implements Calendar.
-func (c *FXCalendar) Session(t time.Time) (TimeRange, bool) {
-	if c.Status(t) != StatusOpen {
-		return TimeRange{}, false
+	if start.Weekday() == time.Sunday {
+		// Reaching this point means the Sunday-holiday check above did
+		// not return Holiday for t, so t is already past that session's
+		// closed head (see the comment there). Report the window's
+		// actual open start as the following New York midnight, not the
+		// nominal Sunday 17:00 rollover.
+		if _, holiday := c.holidays[dateKeyOf(start)]; holiday {
+			reopen := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, newYorkLocation).AddDate(0, 0, 1)
+			if reopen.After(start) {
+				start = reopen
+			}
+		}
 	}
-	start := c.dayStart(t)
-	r, err := NewTimeRange(start, start.AddDate(0, 0, 1))
+
+	window, err := NewTimeRange(start, end)
 	if err != nil {
-		// start.AddDate(0, 0, 1) is always strictly after start.
+		// Unreachable: start < end always holds here — the Sunday head
+		// truncation only ever moves start forward to a point still
+		// strictly before the nominal end, and the partial-closure tail
+		// truncation only ever moves end backward to threshold, which is
+		// only applied when threshold is itself before end.
 		panic(fmt.Sprintf("marketdata: unreachable: %v", err))
 	}
-	return r, true
+	return StatusOpen, window
 }
 
 // Bar implements Calendar.

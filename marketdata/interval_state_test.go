@@ -29,19 +29,43 @@ func TestClassifyInterval_ClosedByCalendar(t *testing.T) {
 	span := h1Span(t, nyTime(2026, time.January, 3, 10, 0)) // Saturday
 	now := span.End().Add(time.Hour)
 
-	state, err := ClassifyInterval(c, span, now, true, true)
+	state, err := ClassifyInterval(c, span, now, false, false)
 	require.NoError(t, err)
-	assert.Equal(t, IntervalStateClosed, state, "closed wins even though a bar is present")
+	assert.Equal(t, IntervalStateClosed, state)
 }
 
-func TestClassifyInterval_ClosedWinsOverPresence(t *testing.T) {
+func TestClassifyInterval_ClosedByFullHoliday(t *testing.T) {
 	c := NewFXCalendar(StandardFXHolidays(2029))
 	span := h1Span(t, nyTime(2029, time.January, 1, 10, 0)) // full holiday, ordinary weekday
 	now := span.End().Add(time.Hour)
 
-	state, err := ClassifyInterval(c, span, now, true, true)
+	state, err := ClassifyInterval(c, span, now, false, false)
 	require.NoError(t, err)
 	assert.Equal(t, IntervalStateClosed, state)
+}
+
+// A present Bar during a calendar closure is a contradiction, not a
+// routine closure: it must classify as Unexpected, never silently as
+// Closed (which DatasetComplete treats as accepted-absent — collapsing
+// this into Closed would hide a real calendar/data disagreement).
+func TestClassifyInterval_PresentDuringClosureIsUnexpected(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	span := h1Span(t, nyTime(2026, time.January, 3, 10, 0)) // Saturday
+	now := span.End().Add(time.Hour)
+
+	state, err := ClassifyInterval(c, span, now, true, true)
+	require.NoError(t, err)
+	assert.Equal(t, IntervalStateUnexpected, state)
+}
+
+func TestClassifyInterval_PresentDuringFullHolidayIsUnexpected(t *testing.T) {
+	c := NewFXCalendar(StandardFXHolidays(2029))
+	span := h1Span(t, nyTime(2029, time.January, 1, 10, 0))
+	now := span.End().Add(time.Hour)
+
+	state, err := ClassifyInterval(c, span, now, true, false)
+	require.NoError(t, err)
+	assert.Equal(t, IntervalStateUnexpected, state, "providerComplete is irrelevant once the interval is Unexpected")
 }
 
 func TestClassifyInterval_InProgress(t *testing.T) {
@@ -116,6 +140,53 @@ func TestClassifyInterval_ProviderCompleteIgnoredWhenAbsent(t *testing.T) {
 	assert.Equal(t, IntervalStateMissing, state, "providerComplete is meaningless when present is false")
 }
 
+// --- Straddling a calendar boundary ---
+
+func TestClassifyInterval_StraddlesPartialClosureThreshold(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{
+		PartialClosures: []PartialClosure{
+			{Date: nyTime(2026, time.December, 24, 0, 0), From: 13 * time.Hour},
+		},
+	})
+	// 12:30-13:30 NY straddles the 13:00 partial-closure threshold.
+	span, err := NewTimeRange(nyTime(2026, time.December, 24, 12, 30), nyTime(2026, time.December, 24, 13, 30))
+	require.NoError(t, err)
+
+	state, err := ClassifyInterval(c, span, span.End(), false, false)
+	assert.ErrorIs(t, err, ErrIntervalStraddlesBoundary)
+	assert.Equal(t, IntervalStateUnknown, state)
+}
+
+func TestClassifyInterval_StraddlesHolidaySundayReopen(t *testing.T) {
+	holiday := nyTime(2023, time.January, 1, 0, 0) // a Sunday
+	c := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{holiday}})
+	// 23:30 Sunday (still closed) through 00:30 Monday (reopened)
+	// straddles the New York midnight reopen.
+	span, err := NewTimeRange(nyTime(2023, time.January, 1, 23, 30), nyTime(2023, time.January, 2, 0, 30))
+	require.NoError(t, err)
+
+	state, err := ClassifyInterval(c, span, span.End(), false, false)
+	assert.ErrorIs(t, err, ErrIntervalStraddlesBoundary)
+	assert.Equal(t, IntervalStateUnknown, state)
+}
+
+func TestClassifyInterval_FullyWithinTruncatedSessionOK(t *testing.T) {
+	// A span fully inside the open portion of a truncated session must
+	// still classify normally — straddle detection must not be
+	// overzealous.
+	c := NewFXCalendar(FXCalendarParams{
+		PartialClosures: []PartialClosure{
+			{Date: nyTime(2026, time.December, 24, 0, 0), From: 13 * time.Hour},
+		},
+	})
+	span, err := NewTimeRange(nyTime(2026, time.December, 24, 9, 0), nyTime(2026, time.December, 24, 10, 0))
+	require.NoError(t, err)
+
+	state, classifyErr := ClassifyInterval(c, span, span.End(), true, true)
+	require.NoError(t, classifyErr)
+	assert.Equal(t, IntervalStatePresent, state)
+}
+
 func TestIntervalState_String(t *testing.T) {
 	cases := map[IntervalState]string{
 		IntervalStateUnknown:    "unknown",
@@ -124,6 +195,7 @@ func TestIntervalState_String(t *testing.T) {
 		IntervalStateMissing:    "missing",
 		IntervalStateIncomplete: "incomplete",
 		IntervalStateInProgress: "in-progress",
+		IntervalStateUnexpected: "unexpected",
 		IntervalState(200):      "IntervalState(200)",
 	}
 	for state, want := range cases {
@@ -144,6 +216,7 @@ func TestDatasetComplete(t *testing.T) {
 		{"one missing", []IntervalState{IntervalStatePresent, IntervalStateMissing}, false},
 		{"one incomplete", []IntervalState{IntervalStatePresent, IntervalStateIncomplete}, false},
 		{"one in progress", []IntervalState{IntervalStatePresent, IntervalStateInProgress}, false},
+		{"one unexpected", []IntervalState{IntervalStatePresent, IntervalStateUnexpected}, false},
 		{"one unknown", []IntervalState{IntervalStatePresent, IntervalStateUnknown}, false},
 	}
 	for _, tc := range tests {
@@ -151,4 +224,31 @@ func TestDatasetComplete(t *testing.T) {
 			assert.Equal(t, tc.want, DatasetComplete(tc.states))
 		})
 	}
+}
+
+// A span can start and end open (matching Status samples at both ends)
+// while still skipping over a closed block in the middle — a giant span
+// that opens before a partial-closure threshold and extends into the
+// next, unaffected session. uniformStatus's Session-containment check
+// exists specifically to catch this even when the start/end Status
+// samples alone would agree.
+func TestClassifyInterval_StraddlesMidSpanClosureDespiteMatchingEndpoints(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{
+		PartialClosures: []PartialClosure{
+			// An artificially early threshold so most of Dec 24's
+			// session is closed, isolating the open sliver at its start.
+			{Date: nyTime(2026, time.December, 24, 0, 0), From: time.Hour},
+		},
+	})
+	// Open at 00:30 Dec 24 (before the 01:00 threshold); open again at
+	// 00:30 Dec 25 (the next, unaffected session) — but the entire
+	// 01:00-17:00 Dec 24 block in between is closed.
+	span, err := NewTimeRange(nyTime(2026, time.December, 24, 0, 30), nyTime(2026, time.December, 25, 0, 30))
+	require.NoError(t, err)
+	require.Equal(t, StatusOpen, c.Status(span.Start()))
+	require.Equal(t, StatusOpen, c.Status(span.End().Add(-time.Nanosecond)))
+
+	state, err := ClassifyInterval(c, span, span.End(), false, false)
+	assert.ErrorIs(t, err, ErrIntervalStraddlesBoundary)
+	assert.Equal(t, IntervalStateUnknown, state)
 }

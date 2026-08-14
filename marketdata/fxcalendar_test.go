@@ -374,3 +374,63 @@ func TestStandardFXHolidaysMultipleYearsIndependent(t *testing.T) {
 	assert.Equal(t, StatusHoliday, c.Status(nyTime(2030, time.January, 1, 12, 0)))
 	assert.Equal(t, StatusHoliday, c.Status(nyTime(2030, time.December, 25, 12, 0)))
 }
+
+// --- Session truncation regressions (issue #74 review) ---
+
+// A partial closure must truncate Session's returned end, not just
+// Status: every instant in the returned range must itself report
+// StatusOpen, matching FXCalendar's documented Status/Session agreement.
+func TestFXCalendarSessionTruncatedByPartialClosure(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{
+		PartialClosures: []PartialClosure{
+			{Date: nyTime(2026, time.December, 24, 0, 0), From: 13 * time.Hour},
+		},
+	})
+
+	session, ok := c.Session(nyTime(2026, time.December, 24, 9, 0))
+	require.True(t, ok)
+	assert.Equal(t, nyTime(2026, time.December, 23, 17, 0), session.Start())
+	assert.Equal(t, nyTime(2026, time.December, 24, 13, 0), session.End(), "truncated to the partial-closure threshold, not the normal 17:00 end")
+
+	assert.Equal(t, StatusOpen, c.Status(session.Start()))
+	assert.Equal(t, StatusOpen, c.Status(session.End().Add(-time.Nanosecond)))
+	assert.Equal(t, StatusHoliday, c.Status(session.End()), "the instant Session ends must not itself be open")
+}
+
+// A session that opened on a holiday Sunday must report Session bounds
+// starting at the following New York midnight, not the nominal Sunday
+// 17:00 rollover — otherwise the returned range would contain the closed
+// Sunday-evening portion, which reports a different Status.
+func TestFXCalendarSessionTruncatedByHolidaySundayHead(t *testing.T) {
+	holiday := nyTime(2023, time.January, 1, 0, 0) // a Sunday
+	c := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{holiday}})
+
+	session, ok := c.Session(nyTime(2023, time.January, 2, 10, 0)) // Monday morning
+	require.True(t, ok)
+	assert.Equal(t, nyTime(2023, time.January, 2, 0, 0), session.Start(), "reopens at New York midnight, not the Sunday 17:00 rollover")
+	assert.Equal(t, nyTime(2023, time.January, 2, 17, 0), session.End())
+
+	assert.Equal(t, StatusOpen, c.Status(session.Start()))
+	assert.Equal(t, StatusHoliday, c.Status(session.Start().Add(-time.Nanosecond)), "just before New York midnight is still the closed Sunday-evening head")
+}
+
+// Exhaustive Status/Session agreement across a window spanning both a
+// partial closure and a holiday-Sunday head truncation.
+func TestFXCalendarStatusAndSessionAgreeAcrossPartialClosuresAndHolidaySunday(t *testing.T) {
+	c := NewFXCalendar(StandardFXHolidays(2022, 2023))
+
+	start := nyTime(2022, time.December, 20, 0, 0)
+	for i := range 20 * 24 {
+		at := start.Add(time.Duration(i) * time.Hour)
+
+		session, ok := c.Session(at)
+		open := c.Status(at) == StatusOpen
+		require.Equal(t, open, ok, "Session ok must track Status==StatusOpen at %s", at)
+		if !ok {
+			continue
+		}
+		require.True(t, session.Contains(at))
+		assert.Equal(t, StatusOpen, c.Status(session.Start()), "session start must be open, at %s", at)
+		assert.Equal(t, StatusOpen, c.Status(session.End().Add(-time.Nanosecond)), "instant just before session end must be open, at %s", at)
+	}
+}

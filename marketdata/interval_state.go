@@ -29,7 +29,8 @@ const (
 	IntervalStatePresent
 	// IntervalStateClosed means the calendar reports the market was not
 	// open for this interval (a weekend, a holiday, or a partial
-	// closure). No Bar is expected, and none being present is not a gap.
+	// closure), and no Bar is present. No Bar is expected, and none
+	// being present is not a gap.
 	IntervalStateClosed
 	// IntervalStateMissing means the calendar reports the market was
 	// open, the interval has already elapsed, and no Bar is present: a
@@ -43,6 +44,13 @@ const (
 	// the query time, so whether it will end up Present, Missing, or
 	// Incomplete cannot yet be judged.
 	IntervalStateInProgress
+	// IntervalStateUnexpected means the calendar reports the market was
+	// not open for this interval, yet a Bar is present anyway. This is a
+	// contradiction, not a routine closure: either the calendar (holiday
+	// list, DST rule) is wrong, the data is misaligned, or the data is
+	// simply wrong. It must never be treated the same as
+	// IntervalStateClosed — see DatasetComplete, which rejects it.
+	IntervalStateUnexpected
 )
 
 // String returns a human-readable IntervalState name.
@@ -60,17 +68,28 @@ func (s IntervalState) String() string {
 		return "incomplete"
 	case IntervalStateInProgress:
 		return "in-progress"
+	case IntervalStateUnexpected:
+		return "unexpected"
 	default:
 		return fmt.Sprintf("IntervalState(%d)", uint8(s))
 	}
 }
 
-// ErrNilCalendar is returned (wrapped) by ClassifyInterval when cal is
-// nil.
-var ErrNilCalendar = errors.New("marketdata: nil calendar")
+// Sentinel errors returned (wrapped) by ClassifyInterval.
+var (
+	// ErrNilCalendar marks a nil Calendar argument.
+	ErrNilCalendar = errors.New("marketdata: nil calendar")
+	// ErrIntervalStraddlesBoundary marks a span ClassifyInterval cannot
+	// safely classify as a whole: the calendar reports more than one
+	// Status somewhere within span, so no single IntervalState can
+	// honestly describe it. Splitting or otherwise resolving such a span
+	// is the caller's decision, not something ClassifyInterval guesses
+	// at by sampling only its start.
+	ErrIntervalStraddlesBoundary = errors.New("marketdata: interval straddles a calendar status boundary")
+)
 
 // ClassifyInterval reports which IntervalState applies to the bar
-// interval span, given cal's status at span's start, the current time
+// interval span, given cal's status throughout span, the current time
 // now, whether a canonical Bar is present for span, and — when present —
 // whether the provider declared its underlying record complete.
 // providerComplete is ignored when present is false.
@@ -78,23 +97,43 @@ var ErrNilCalendar = errors.New("marketdata: nil calendar")
 // now is supplied by the caller's own clock; ClassifyInterval never calls
 // time.Now, so it stays deterministic in a backtest.
 //
-// Classification order is fixed and matters: a calendar closure always
-// wins, regardless of how much time has passed or whether data happens
-// to be present. An interval that has not yet elapsed is next,
+// Classification order is fixed and matters. First, span must be
+// uniformly one Status throughout — see below. Given that: a calendar
+// closure wins over presence, except that a present Bar during a closure
+// is IntervalStateUnexpected, not IntervalStateClosed, because a bar
+// existing when the calendar says the market was shut is a contradiction
+// that must never silently read as a routine, accepted closure (see
+// DatasetComplete). An interval that has not yet elapsed comes next,
 // regardless of whether a still-forming Bar happens to already be
 // present. Only once both are settled do presence and provider
 // completeness decide Present, Missing, or Incomplete.
 //
-// ClassifyInterval samples the calendar at span.Start() only. A bar
-// interval that straddles a calendar status boundary mid-span — possible
-// for a UTC-aligned M1/H1/H4 bar very close to the weekly open or close,
-// not for a session-aligned D1/W1 bar — is classified by its start;
-// resolving that finer boundary is left to issue #79's coverage engine.
+// # Straddling a calendar boundary
+//
+// A bar interval spanning a status change — for example a UTC-aligned H4
+// bar that starts before a 13:00 New York partial-closure threshold and
+// ends after it — cannot be honestly described by one IntervalState.
+// ClassifyInterval detects this by requiring the calendar to report the
+// same Status at span's start and just before span's end, and, when that
+// Status is StatusOpen, requiring cal.Session(span.Start()) to fully
+// contain span. If either check fails, ClassifyInterval returns a
+// wrapped ErrIntervalStraddlesBoundary instead of guessing from span's
+// start alone; splitting or otherwise resolving such a span is left to
+// the caller (issue #79's coverage engine, in practice). This cannot
+// happen for a session-aligned D1/W1 bar, whose span already equals one
+// Calendar-defined session or week.
 func ClassifyInterval(cal Calendar, span TimeRange, now time.Time, present, providerComplete bool) (IntervalState, error) {
 	if cal == nil {
 		return IntervalStateUnknown, fmt.Errorf("marketdata: classify interval: %w", ErrNilCalendar)
 	}
-	if cal.Status(span.Start()) != StatusOpen {
+	status, err := uniformStatus(cal, span)
+	if err != nil {
+		return IntervalStateUnknown, err
+	}
+	if status != StatusOpen {
+		if present {
+			return IntervalStateUnexpected, nil
+		}
 		return IntervalStateClosed, nil
 	}
 	if !span.Elapsed(now) {
@@ -109,14 +148,36 @@ func ClassifyInterval(cal Calendar, span TimeRange, now time.Time, present, prov
 	return IntervalStatePresent, nil
 }
 
+// uniformStatus returns cal's Status throughout span, and an error
+// wrapping ErrIntervalStraddlesBoundary if span is not uniformly one
+// Status. See ClassifyInterval's "Straddling a calendar boundary"
+// section for exactly what is checked and why.
+func uniformStatus(cal Calendar, span TimeRange) (Status, error) {
+	start := cal.Status(span.Start())
+	end := cal.Status(span.End().Add(-time.Nanosecond))
+	if start != end {
+		return StatusUnknown, fmt.Errorf("marketdata: classify interval: [%s, %s): %w", span.Start(), span.End(), ErrIntervalStraddlesBoundary)
+	}
+	if start == StatusOpen {
+		session, ok := cal.Session(span.Start())
+		if !ok || session.Start().After(span.Start()) || session.End().Before(span.End()) {
+			return StatusUnknown, fmt.Errorf("marketdata: classify interval: [%s, %s): %w", span.Start(), span.End(), ErrIntervalStraddlesBoundary)
+		}
+	}
+	return start, nil
+}
+
 // DatasetComplete formally defines dataset completeness (issue #74): a
 // range is complete when every calendar-open interval in it is Present
 // and every calendar-closed interval is accepted as legitimately absent.
 // states holds the IntervalState of every expected interval boundary
 // across a queried range; DatasetComplete reports true only when every
 // entry is IntervalStatePresent or IntervalStateClosed. Any Missing,
-// Incomplete, InProgress, or Unknown entry means the range is not (yet,
-// or in Missing's case, ever) complete.
+// Incomplete, InProgress, Unexpected, or Unknown entry means the range is
+// not (yet, or in Missing's and Unexpected's cases, ever, without
+// correction) complete — in particular, IntervalStateUnexpected is never
+// treated as equivalent to IntervalStateClosed, so a bar contradicting
+// the calendar can never make a dataset look complete.
 //
 // DatasetComplete takes the already-classified states directly rather
 // than a range and a data source: producing that slice for a real query

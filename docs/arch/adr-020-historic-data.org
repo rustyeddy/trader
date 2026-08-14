@@ -257,25 +257,45 @@ so a missing interval is an *absent* Bar -- there is no zero-filled
 dummy row and no per-Bar status flag.  Issue #74 adds the vocabulary for
 *why* an interval is absent (or present but not final):
 =marketdata.IntervalState= — =Present=, =Closed=, =Missing=,
-=Incomplete=, =InProgress= — and
+=Incomplete=, =InProgress=, =Unexpected= — and
 =ClassifyInterval(cal, span, now, present, providerComplete)=, a pure
-classifier over facts a caller already has.  Classification order is
-fixed: a calendar closure always wins over presence; an interval that
-has not yet elapsed is next, ahead of a still-forming Bar that happens
-to already be present; only then do presence and the provider's own
-=complete= flag decide =Present=/=Missing=/=Incomplete=.
+classifier over facts a caller already has.  A present Bar during a
+calendar closure classifies as =Unexpected=, never silently as
+=Closed=: the two are not equivalent, since =Closed= means "the
+calendar says no bar belongs here and none is present," while
+=Unexpected= means the calendar and the data actively disagree — a
+contradiction a design-review comment on the PR caught the first draft
+silently collapsing into =Closed=, which would have let
+=DatasetComplete= treat a real calendar/data conflict as accepted-absent.
+Classification order beyond that is fixed: an interval that has not yet
+elapsed is next, ahead of a still-forming Bar that happens to already be
+present; only then do presence and the provider's own =complete= flag
+decide =Present=/=Missing=/=Incomplete=.
 =DatasetComplete(states []IntervalState)= formally defines completeness:
-true iff every entry is =Present= or =Closed=.
+true iff every entry is =Present= or =Closed= — =Unexpected= is
+deliberately excluded from that set.
 
-=ClassifyInterval= samples the calendar at the interval's start only —
-a documented simplification for the rare case a UTC-aligned M1/H1/H4 bar
-straddles a status boundary mid-span (not possible for session-aligned
-D1/W1 bars).  Walking a real query range, producing a =[]IntervalState=
-for it, and reading raw's =complete= flag to populate =providerComplete=
-during normalization all remain later work: walking a range is #79's
-coverage engine, and populating =providerComplete= from OANDA's raw
-=complete= column is #76's normalization stage.  #74 defines the
-vocabulary and its classification rules only.
+=ClassifyInterval= requires the calendar to report one uniform =Status=
+across the *entire* span, not just its start: it samples =Status= at
+both =span.Start()= and just before =span.End()=, and, when that status
+is =StatusOpen=, additionally requires =cal.Session(span.Start())= to
+fully contain =span=.  A span that fails either check — for example a
+UTC-aligned H4 bar straddling a 13:00 New York partial-closure threshold
+— is rejected with a wrapped =ErrIntervalStraddlesBoundary= rather than
+silently classified from its start alone, which a design-review comment
+identified as unsafe in the first draft: sampling only =span.Start()=
+would have misclassified exactly that straddling case, and would have
+kept doing so silently.  Splitting or otherwise resolving a straddling
+span is left to the caller (#79's coverage engine, in practice); this
+cannot happen for a session-aligned D1/W1 bar, whose span already equals
+one =Calendar=-defined session or week.
+
+Walking a real query range, producing a =[]IntervalState= for it, and
+reading raw's =complete= flag to populate =providerComplete= during
+normalization all remain later work: walking a range is #79's coverage
+engine, and populating =providerComplete= from OANDA's raw =complete=
+column is #76's normalization stage.  #74 defines the vocabulary and its
+classification rules only.
 
 * DONE Data at rest will be stored as it has been.
 The current path will be something like it is now
@@ -310,6 +330,25 @@ accepted M2 rule set:
   half of the old rule needs no special case at all: it is already
   covered by the ordinary ending-date holiday check, since the session
   opening Sunday evening is labeled by the Monday it ends on.
+
+=FXCalendar.Status= and =FXCalendar.Session= are computed by one shared,
+unexported =classify= method rather than independently, specifically
+because a partial closure or the Sunday-holiday rule can *truncate* a
+session rather than remove it outright — a design-review comment on the
+PR caught the first draft computing them separately, which let =Session=
+keep returning the full nominal rollover-to-rollover range even where
+=Status= reported the tail (or, for the Sunday case, the head) of that
+same range as closed, violating =FXCalendar='s own documented invariant
+that every instant a returned =Session= contains reports the same
+=Status=.  With one shared implementation, =Session= now returns the
+truncated open window directly (for example, ending at 13:00 on Dec 24
+rather than 17:00, or starting at the following New York midnight rather
+than the nominal Sunday 17:00 rollover when that Sunday is a holiday),
+so the two methods cannot drift apart again.  =Bar= is unaffected by
+truncation on purpose: its nominal, calendar-aligned D1/W1 range answers
+a different question ("what interval does this instant belong to") than
+=Session= ("when was trading actually open"), and truncating it would
+conflate the two.
 
 This is still deliberately narrow, unchanged from the source: no Good
 Friday, no in-lieu observance when a holiday falls on a weekend, and no
