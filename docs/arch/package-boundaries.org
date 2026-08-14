@@ -118,8 +118,10 @@ Guidance for the common cases:
   They are the vocabulary users write code against.
 - *Extension points* users are expected to implement (broker adapters and
   journals) are public interfaces, kept small.  Market-data providers and
-  storage are deliberately not extension points; they remain internal and are
-  accessible only through =marketdata.Manager=.
+  storage are deliberately not extension points; they live under
+  =marketdata/internal/= (for example =marketdata/internal/provider/oanda=),
+  which Go restricts to importers within the =marketdata/= subtree, so they
+  are reachable only through =marketdata.Manager=.
 - *Orchestration internals* (engine loops, reconciliation mechanics,
   runtime plumbing) belong in =internal/= until a user needs to replace
   them.

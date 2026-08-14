@@ -1448,6 +1448,14 @@ trader/
 
   instrument/             public instrument/listing model
   marketdata/             public canonical data types and Manager facade
+    internal/             marketdata-only implementation; Go restricts these
+                          imports to the marketdata/ subtree, so no other
+                          package can reach a provider, store, or builder
+      provider/           provider acquisition adapters
+        oanda/            OANDA raw archive reader and acquisition
+      storage/            CSV/Parquet/in-memory persistence
+      normalize/          canonical conversion and validation
+      cache/              Manager-owned memory cache
   indicator/              public indicator APIs and common indicators
   analysis/               public analysis observations
   strategy/               public strategy and intent contracts
@@ -1482,12 +1490,9 @@ trader/
       http/
       mqtt/
 
-  internal/
-    marketdata/
-      provider/            provider acquisition adapters
-      storage/             CSV/Parquet/in-memory persistence
-      normalize/           canonical conversion and validation
-      cache/               Manager-owned memory cache
+  internal/               module-wide non-public implementation (the
+                          marketdata subsystem keeps its own internals under
+                          marketdata/internal/ instead, see above)
     engine/               orchestration details not promised as public API
     reconcile/            shared recovery/reconciliation implementation
     runtime/              process lifecycle helpers
