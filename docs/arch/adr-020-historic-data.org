@@ -32,8 +32,71 @@ backtest or analysis that used it.  The old version is wiped.
 Retaining prior versions may be added later as a configuration item;
 for now the assumption is that old versions are thrown away.
 
-** TODO We may keep a manifest
-If an external / meta data is valuable we can keep a manifest
+** DONE We may keep a manifest
+Settled by issue #73 (branch =feature/73-manifest=): =marketdata.Manifest=
+is the collection-level identity, provenance, and revision record for a
+canonical =BarSet=.  =Bar=/=BarSet= (#72) hold observation-local facts;
+=Manifest= holds why the dataset is trustworthy and what produced it,
+independently of any filesystem path.
+
+Fields: =Provider= (opaque logical provider name, e.g. ="oanda"=),
+=Instrument=, =Interval=, =Span= (half-open partition range), =Basis=;
+=SchemaVersion=, =RawFingerprint= (hex-encoded content fingerprint of the
+raw source artifact(s)), =BuilderVersion=, =ValidatorVersion=,
+=ResamplerVersion= (="none"= when not derived — never left empty, so
+empty always means "not yet set"), =CalendarVersion=; =BuiltAt= (from an
+injected clock, never =time.Now=); a lightweight coverage summary
+(=BarCount=, =FirstBar=, =LastBar=) — not the full Coverage/Gap model,
+which stays with #79; and =Parent *ParentRef= for a derived/resampled
+dataset, =nil= for a dataset built directly from raw.
+
+=Manifest= has no stored "Revision" or "ID" field a caller could set
+inconsistently with the rest of the record.  =Manifest.Revision()
+string= computes a deterministic hex-encoded sha256 fingerprint from
+every other field on demand: two independently built manifests with
+identical inputs always produce the same revision, and changing any one
+field except =BuiltAt= — including =Parent= — changes it.  =BuiltAt= is
+excluded on purpose: it is Manager's own build-time provenance, not part
+of dataset identity, so two datasets built from identical inputs at
+different times must still agree.  The hash input is an unambiguous
+JSON-encoded struct (fixed field order, no map, every string properly
+quoted/escaped) tagged with an explicit encoding version, not a
+hand-joined delimited string — a delimited encoding let one field's
+content be crafted to collide with an adjacent field's key, which a
+design review caught before merge.  A canonical file header or store
+records this computed string as the dataset's version identifier,
+matching the principle above that the version identifier lives in the
+manifest or a file header, never in the path.
+
+=Parent= carries the parent dataset's instrument, interval, and its own
+=Revision()= string at build time — not an embedded parent =Manifest= —
+so lineage does not force retention of a superseded revision; if the
+parent is later rebuilt, the recorded revision simply stops matching the
+parent's current one, which is the intended staleness signal.  A
+Manifest's =Parent= and =ResamplerVersion= must agree with each other:
+=Parent= is nil if and only if =ResamplerVersion= is the literal
+=="none"==.  When =Parent= is set, it must name the same instrument as
+the child and an interval strictly finer (shorter nominal duration) than
+the child's own =Interval= — a resampled dataset only ever derives a
+coarser interval from a finer one, so any other relationship is rejected
+as impossible lineage rather than merely unverified.
+
+=Manifest.Matches(bs BarSet) error= is the manifest/data pairing check:
+instrument, interval, and basis must agree; =Span= must agree;
+=BarCount= must equal =len(bs.Bars)=; and — closing a design-review gap
+in the first draft — =FirstBar=/=LastBar= must agree with the actual
+first and last bar's =Time= in =bs.Bars= (both zero when =bs.Bars= is
+empty).  =Manifest.Validate()= checks the manifest's own structural
+invariants independently of any =BarSet=: non-zero/non-empty required
+fields, a positive =SchemaVersion=, a =RawFingerprint= matching the
+required =<algorithm>:<hex digest>= form, a coverage summary consistent
+with =BarCount= (empty means a zero range, exactly one bar means
+=FirstBar= equals =LastBar=, more than one requires a strictly
+increasing range), and the =Parent=/=ResamplerVersion= lineage rules
+above.
+
+This issue is the model only.  =marketdata.Manager= has no build/publish
+operation to attach a =Manifest= to yet; that is later M2 work.
 
 ** TODO Day and week alignment needs to be resolved.
 We may download any missing interval data from OandA and derive it

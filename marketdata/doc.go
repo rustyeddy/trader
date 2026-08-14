@@ -72,4 +72,17 @@
 // revision and coverage/gap detail live at other levels (issues #73 and
 // #79), not on BarSet. A missing interval is an absent Bar described by
 // coverage — never a zero-filled dummy row.
+//
+// # Manifests identify a dataset without a path
+//
+// Manifest (issue #73, ADR-020) is the collection-level identity,
+// provenance, and revision record for a canonical BarSet: provider,
+// instrument, interval, span, price basis, schema/builder/validator/
+// resampler/calendar versions, a raw-source fingerprint, a lightweight
+// coverage summary, and optional parent lineage for a derived dataset.
+// Dataset identity is never a filename or directory path.
+// Manifest.Revision computes a deterministic fingerprint from every other
+// field rather than storing a caller-supplied one, and Manifest.Matches
+// checks that a Manifest and a BarSet describe the same data. Full
+// Coverage/Gap detail remains a separate concern (issue #79).
 package marketdata
