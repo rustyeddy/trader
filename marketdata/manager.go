@@ -1,7 +1,6 @@
 package marketdata
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -46,11 +45,10 @@ import (
 //
 // # Construction and lifecycle
 //
-// A Manager is created with New and is unusable in its zero value: its
-// methods report ErrNotConfigured rather than misbehaving. Manager owns no
-// background work — every operation is scoped to the context passed to it —
-// so there is no Run, Start, or Stop, and construction starts no
-// goroutines.
+// A Manager is created with New and is unusable in its zero value; New is
+// the only way to obtain a valid Manager. Manager owns no background work —
+// operations, when they are added, are scoped to the context passed to them —
+// so there is no Run, Start, or Stop, and construction starts no goroutines.
 //
 // This issue establishes construction, ownership, and dependency direction
 // only. The read and mutation operations themselves depend on the M2-01 /
@@ -118,21 +116,9 @@ type barStore interface {
 	root() string
 }
 
-// Sentinel errors returned by Manager. They are classifiable with
-// errors.Is so callers can distinguish a misconfigured Manager and a
-// not-yet-built operation from a genuine data or I/O failure.
-var (
-	// ErrNotConfigured is returned by a method called on a zero-value or
-	// otherwise unconfigured Manager (for example one built by mistake as a
-	// struct literal rather than through New).
-	ErrNotConfigured = errors.New("marketdata: manager is not configured")
-
-	// ErrNotImplemented is returned by an operation whose contract depends
-	// on the M2-01 / ADR-020 query, coverage, or canonical-persistence
-	// decisions that have not yet landed. It is deliberately distinct from
-	// a successful empty result and from an I/O error.
-	ErrNotImplemented = errors.New("marketdata: manager operation not implemented")
-)
+// ErrInvalidConfig is returned (wrapped) by New when a required dependency
+// is missing or invalid.
+var ErrInvalidConfig = errors.New("marketdata: invalid manager config")
 
 // New constructs a Manager from cfg, validating that every required
 // dependency is present. It returns a wrapped ErrInvalidConfig if the clock
@@ -153,45 +139,26 @@ func New(cfg Config) (*Manager, error) {
 	}, nil
 }
 
-// ErrInvalidConfig is returned (wrapped) by New when a required dependency
-// is missing or invalid.
-var ErrInvalidConfig = errors.New("marketdata: invalid manager config")
-
 // configured reports whether m was constructed through New with its
-// required dependencies. The zero-value Manager is not configured.
+// required dependencies. It is the explicit, tested predicate for the
+// zero-value-unusable contract: the zero-value Manager, and a nil *Manager,
+// are both reported as not configured rather than being allowed to
+// misbehave.
 func (m *Manager) configured() bool {
 	return m != nil && m.clock != nil && m.storeRoot != ""
 }
 
-// Sync is the explicit acquisition command: it obtains missing provider
-// data for a requested range. It is a mutation, never triggered implicitly
-// by a read.
+// Manager intentionally defines no operation methods yet. This issue (#71)
+// establishes only the Manager boundary — construction, ownership, and
+// dependency direction.
 //
-// Its request and result types depend on the unresolved M2-01 / ADR-020
-// contracts, so its full signature is not frozen in this issue; it reports
-// ErrNotImplemented (or ErrNotConfigured on an unconfigured Manager) until
-// those land.
-func (m *Manager) Sync(ctx context.Context) error {
-	if !m.configured() {
-		return fmt.Errorf("marketdata: sync: %w", ErrNotConfigured)
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("marketdata: sync: %w", err)
-	}
-	return fmt.Errorf("marketdata: sync: %w", ErrNotImplemented)
-}
-
-// Build is the explicit canonical-build command: it materializes canonical
-// bars from previously acquired data and publishes them with their
-// manifest. Like Sync it is a mutation, and like Sync its full signature
-// waits on the M2-01 / ADR-020 contracts; it reports ErrNotImplemented (or
-// ErrNotConfigured) until then.
-func (m *Manager) Build(ctx context.Context) error {
-	if !m.configured() {
-		return fmt.Errorf("marketdata: build: %w", ErrNotConfigured)
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("marketdata: build: %w", err)
-	}
-	return fmt.Errorf("marketdata: build: %w", ErrNotImplemented)
-}
+// Earlier drafts carried placeholder Sync(ctx) and Build(ctx) methods that
+// returned an ErrNotImplemented sentinel. They were removed in response to
+// the M2-03 architectural review: Manager's operations must not be frozen
+// speculatively. Their real inputs and result contracts depend on the
+// still-unresolved M2-01 / ADR-020 query, coverage, and
+// canonical-persistence decisions, so the operations — and the
+// ErrNotImplemented / ErrNotConfigured sentinels that existed only to serve
+// those placeholders — are introduced with their real use cases, not here.
+// The read-versus-mutation split those methods illustrated is documented on
+// the Manager type above and remains the intended shape.
