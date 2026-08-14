@@ -119,9 +119,15 @@ Guidance for the common cases:
 - *Extension points* users are expected to implement (broker adapters and
   journals) are public interfaces, kept small.  Market-data providers and
   storage are deliberately not extension points; they live under
-  =marketdata/internal/= (for example =marketdata/internal/provider/oanda=),
-  which Go restricts to importers within the =marketdata/= subtree, so they
-  are reachable only through =marketdata.Manager=.
+  =marketdata/internal/= (for example =marketdata/internal/provider/oanda=).
+  Go's =internal/= rule enforces the boundary that matters: nothing outside
+  the =marketdata/= subtree can import them, so no external package can reach
+  a provider or store except through the =marketdata= package's own API.  No
+  hand-written architecture test is needed for that — the compiler is the
+  enforcement.  A finer rule — that /within/ =marketdata=, only
+  =marketdata.Manager= drives providers and stores, not other functions in
+  the package — is intra-package and cannot be compiler-enforced; it is
+  policy, upheld in review, not by a test.
 - *Orchestration internals* (engine loops, reconciliation mechanics,
   runtime plumbing) belong in =internal/= until a user needs to replace
   them.
