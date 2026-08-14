@@ -41,4 +41,17 @@
 // time.Time argument. Nothing here calls time.Now; callers supply
 // whatever time they want evaluated, including from a clock.Clock at a
 // composition root.
+//
+// # Bars and bar sets
+//
+// Bar is one canonical observed FX bar (issue #72, ADR-020): bid-basis
+// OHLC, an average and maximum spread, a tick count, and an authoritative
+// observed open Time stored verbatim rather than reconstructed from array
+// position. BarSet is the homogeneous collection level, holding the
+// instrument, interval, span, and price basis shared by all its bars so
+// that metadata is not repeated on every Bar. Both are plain records
+// validated with Validate at the normalization/store boundary; dataset
+// revision and coverage/gap detail live at other levels (issues #73 and
+// #79), not on BarSet. A missing interval is an absent Bar described by
+// coverage — never a zero-filled dummy row.
 package marketdata

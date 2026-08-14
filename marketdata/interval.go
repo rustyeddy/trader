@@ -48,15 +48,38 @@ type Interval struct {
 // NewInterval returns an Interval for unit and count. It reports an error
 // if count is less than 1 or unit is not one of the defined Unit values.
 func NewInterval(unit Unit, count int) (Interval, error) {
-	switch unit {
+	i := Interval{unit: unit, count: count}
+	if err := i.validate(); err != nil {
+		return Interval{}, err
+	}
+	return i, nil
+}
+
+// validate reports whether i's unit and count are well-formed, returning
+// a descriptive error otherwise. It is the single source of interval
+// validity: NewInterval builds through it, and Valid exposes it. Because
+// unexported fields cannot stop an out-of-package caller from producing
+// the zero Interval (unit UnitMinute, count 0), which never passes
+// through NewInterval, consumers that receive an Interval they did not
+// construct should validate it at the point of use.
+func (i Interval) validate() error {
+	switch i.unit {
 	case UnitMinute, UnitHour, UnitDay, UnitWeek:
 	default:
-		return Interval{}, fmt.Errorf("marketdata: invalid interval unit %v", unit)
+		return fmt.Errorf("marketdata: invalid interval unit %v", i.unit)
 	}
-	if count < 1 {
-		return Interval{}, fmt.Errorf("marketdata: invalid interval count %d: must be at least 1", count)
+	if i.count < 1 {
+		return fmt.Errorf("marketdata: invalid interval count %d: must be at least 1", i.count)
 	}
-	return Interval{unit: unit, count: count}, nil
+	return nil
+}
+
+// Valid reports whether i is a well-formed interval: a defined Unit with a
+// count of at least 1. The zero Interval is not valid. Consumers that
+// accept an Interval they did not construct cannot assume it came from
+// NewInterval and should check Valid before relying on it.
+func (i Interval) Valid() bool {
+	return i.validate() == nil
 }
 
 // Unit returns i's calendar unit.

@@ -46,10 +46,18 @@ if it is not desired, but it will be included in the derived data
 OandA provides a bid and an ask for each of O, H, L and C.  Max and
 avg spread will be calculated from those values.
 
-Still to write down: the exact formula, and the aggregation rule used
-when a derived interval is resampled from a finer one.  M5's simulated
-broker fill model depends on what avg spread means, so it should not
-be left implicit.
+#72 settled the *representation* on =Bar=: =AvgSpread= and =MaxSpread=
+are both =num.Price=.  It also settled the build-from-raw *formula*,
+which is the only one reconstructible from raw's bid/ask OHLC (raw
+preserves no per-tick spread stream, so the legacy tick-weighted
+variant in =data_manager.go= is off the table): the per-corner spread
+is =(ask - bid)= at each of O, H, L, C; =AvgSpread= is the mean of
+those four and =MaxSpread= the max of those four.
+
+Still open, and deferred to M5 not #72: what avg spread *means* for the
+simulated-broker fill model, and the aggregation rule when a derived
+interval is resampled from a finer one (#81).  Representation is fixed;
+meaning is not.
 * DONE Raw Provider data will be saved separately
 
 All new data downloaded will be store separate in it's original
@@ -82,16 +90,41 @@ DM will handle all data requests, caching data as it is programmed.
 The cache cleaning protocol will be defined during implementation.
 
 ** DONE Store root will be a configuration item
-* TODO Determine the marketdata.Bar structure
-That is what is contained in the marktdata.Bar structure.  Generally
-speaking there will be two sets of data, meta data applied to a
-particular collection of bars a timerange of bars of a particular
-interval of a specific instrument.
+* DONE Determine the marketdata.Bar structure
+Settled by issue #72 (branch =feature/72-marketdata-bar=).
 
-Issue #72.
-** TODO How will gaps and closed market days be handled
+Two levels, as anticipated:
+
+- =marketdata.Bar= (per observation): =Time= (authoritative observed
+  open, stored verbatim, never index-reconstructed -- the #179 DST
+  lesson), bid-basis =Open/High/Low/Close= (=num.Price=), =AvgSpread=,
+  =MaxSpread= (=num.Price=), and =Ticks= (plain =int64=, not
+  =num.Quantity= -- ADR-004 defines no count type).
+- =marketdata.BarSet= (collection): the homogeneous metadata shared by
+  every bar -- =Instrument=, =Interval=, =Span= (half-open =TimeRange=),
+  and =Basis= (=PriceBasis=) -- so it is never repeated per Bar.
+
+Both are plain records with exported fields, validated via =Validate()=
+at the normalization/store boundary rather than through a constructor,
+per the architecture document's "plain data transfer structs may remain
+literals" convention. =Mid()= and =Range(interval, calendar)= are
+derived getters; mid and the half-open range are computed, not stored.
+
+Dataset revision/provenance stays with the manifest (#73) and
+coverage/gap detail with coverage (#79); =BarSet= references those
+levels rather than absorbing them.
+
+** DONE How will gaps and closed market days be handled
 Fixed index with dummy data as done in the trader-first-try will not
-be supported
+be supported.
+
+Settled at the =Bar= level by #72: a Bar existing *is* an observation,
+so a missing interval is an *absent* Bar -- there is no zero-filled
+dummy row and no per-Bar status flag. Which intervals are expected,
+closed, or missing is a coverage concern (#79), and the
+provider-declared-incompleteness distinction below (OANDA's =complete=
+flag versus a calendar-derived gap) is resolved at normalization (#76),
+not by persisting incomplete bars.
 
 * DONE Data at rest will be stored as it has been.
 The current path will be something like it is now
@@ -130,15 +163,11 @@ as-is or source a real calendar.
 Parked here from review.  Work them into the sections above during the
 next edit and delete this section.
 
-** TODO Volume's Go type belongs to the Bar structure work
-Deferred to the =marketdata.Bar= decision (issue #72), which is the
-right home for it.  Two things for #72 to avoid getting wrong:
-
-- Do not use =num.Quantity=.  It carries exact, 1e8-scaled, tradable
-  quantity semantics, and ADR-004 defines no count type.  A tick count
-  wants a plain =int64=.
-- Pick one name and use it in both trees.  Raw calls the column
-  =volume=; the old canonical format calls the same value =ticks=.
+** DONE Volume's Go type belongs to the Bar structure work
+Settled by #72: =Bar.Ticks= is a plain =int64= (not =num.Quantity=),
+and =Ticks= is the single name used going forward. The raw tree's
+=volume= column is normalized to =Ticks= at read time; both trees'
+values are the same OANDA tick count.
 
 ** TODO State that raw is authoritative
 It is strongly implied by "raw saved separately, pristine" plus

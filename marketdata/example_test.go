@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 )
 
 // Example_interval shows the predefined intervals and their display form.
@@ -35,6 +37,45 @@ func ExampleFXCalendar_Bar() {
 	// Output:
 	// 2026-01-06 17:00:00 -0500 EST
 	// 2026-01-07 17:00:00 -0500 EST
+}
+
+// ExampleBarSet shows a homogeneous set of bid-basis bars and how the
+// half-open range and mid close are derived rather than stored.
+func ExampleBarSet() {
+	open := time.Date(2020, time.March, 2, 0, 0, 0, 0, time.UTC)
+	bar := marketdata.Bar{
+		Time:      open,
+		Open:      num.MustParsePrice("1.10000"),
+		High:      num.MustParsePrice("1.10250"),
+		Low:       num.MustParsePrice("1.09900"),
+		Close:     num.MustParsePrice("1.10100"),
+		AvgSpread: num.MustParsePrice("0.00012"),
+		MaxSpread: num.MustParsePrice("0.00030"),
+		Ticks:     4213,
+	}
+
+	span, err := marketdata.NewTimeRange(open, open.Add(time.Hour))
+	if err != nil {
+		panic(err)
+	}
+	set := marketdata.BarSet{
+		Instrument: instrument.CurrencyPairID(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD")),
+		Interval:   marketdata.H1,
+		Span:       span,
+		Basis:      marketdata.BasisBid,
+		Bars:       []marketdata.Bar{bar},
+	}
+	if err := set.Validate(); err != nil {
+		panic(err)
+	}
+
+	mid, err := bar.Mid()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(set.Basis, set.Len(), mid)
+	// Output:
+	// bid 1 1.10106
 }
 
 // ExampleFXCalendar_Session shows that Session reports ok=false outside
