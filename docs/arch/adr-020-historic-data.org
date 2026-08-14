@@ -85,6 +85,52 @@ Everthing behind the data manager will live in a 'internal' directory.
 No other package is allowed to retrieve, build or store data, all must
 go through the DM.
 
+** DONE The boundary is non-negotiable and closed to outside implementation
+
+The rule above is stronger than "consumers should prefer the DM".  No
+package outside the =marketdata= hierarchy may implement, supply, or
+even name a provider or storage seam.  Stated normatively:
+
+#+BEGIN_QUOTE
+The =marketdata= package is the sole public entry point for historical
+market data.  No package outside the =marketdata= package hierarchy may
+directly access, construct, configure, inject, or depend upon a
+market-data provider, storage implementation, data-normalization or
+derivation mechanism, cache, or persistence format.  These are private
+implementation details owned by =marketdata= and packages beneath its
+=internal= boundary.
+
+A consumer may request data through =marketdata.Manager=.  If provider
+choice must be exposed, the consumer may select a provider only by an
+opaque logical name or identifier -- for example, =oanda=, =alpaca/iex=,
+or =alpaca/sip=.  That selection must not expose a provider interface,
+concrete provider type, credentials model, transport, or construction
+mechanism.
+
+Storage is never selected, supplied, or accessed by a data consumer.
+The manager owns all decisions concerning storage, persistence layout,
+canonicalization, aggregation/derivation, caching, and retrieval.
+
+This restriction is intentional.  Relaxing it later requires an explicit
+architectural decision and refactor; it must not happen incrementally by
+exporting implementation seams.
+#+END_QUOTE
+
+Consequences:
+
+- =Config= supplied to =marketdata= carries only consumer-level policy
+  and selections.  If provider choice must be exposed later, it is an
+  opaque logical name -- never a provider or storage implementation, an
+  interface, a concrete type, a credentials model, or a construction
+  mechanism.
+- There is no externally implementable provider or storage injection
+  seam.  Any such seam an implementation adds is a violation of this
+  boundary, not an extension point.
+- The boundary is enforced mechanically where Go's package rules allow
+  it (an architecture test forbidding =marketdata= from importing
+  provider/storage/vendor packages, and the =internal= boundary keeping
+  the implementations un-importable from outside).
+
 ** DONE DM will provide a memory cached version of data
 DM will handle all data requests, caching data as it is programmed.
 The cache cleaning protocol will be defined during implementation.

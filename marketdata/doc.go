@@ -1,7 +1,10 @@
 // Package marketdata defines Trader's bar-interval and trading-calendar
-// vocabulary, as decided by issue #27 (M1-09) and ADR-012. It does not yet
-// acquire, normalize, store, or resample market data — see the
-// architecture document for that larger scope, which lands in M2.
+// vocabulary, as decided by issue #27 (M1-09) and ADR-012, and owns
+// Manager, the sole application-service boundary through which consumers
+// obtain historical market data (issue #71, M2-03; ADR-020). The
+// acquisition, normalization, storage, resampling, and coverage machinery
+// that Manager coordinates lands incrementally through M2 behind internal
+// boundaries; see the architecture document for that larger scope.
 //
 // # Half-open ranges
 //
@@ -37,10 +40,25 @@
 //
 // # No time.Now
 //
-// Every method in this package is a pure function of an explicit
-// time.Time argument. Nothing here calls time.Now; callers supply
-// whatever time they want evaluated, including from a clock.Clock at a
-// composition root.
+// The interval and calendar methods are pure functions of an explicit
+// time.Time argument. Manager receives a clock.Clock at construction and
+// uses it wherever the current time matters — judging whether the current
+// interval is still open, and answering as-of coverage without look-ahead.
+// Nothing in this package calls time.Now, time.NewTimer, time.After, or
+// time.Sleep directly; the composition root supplies the clock.
+//
+// # Manager: the historical-data gateway
+//
+// Manager is the only way to reach historical market data. It separates
+// read-only queries, which never download or rebuild and report missing
+// data explicitly, from explicit acquisition and build commands. Provider-
+// and storage-native types never cross its boundary, and the internal
+// provider, storage, normalization, and resampling components it
+// coordinates depend on this package's types rather than the reverse. See
+// Manager's own documentation for the full boundary and lifecycle contract.
+// The M2-03 skeleton establishes construction, ownership, and dependency
+// direction; the read and mutation operations report ErrNotImplemented
+// until the M2-01 / ADR-020 query and canonical-persistence contracts land.
 //
 // # Bars and bar sets
 //
