@@ -11,8 +11,8 @@ import (
 )
 
 // fakeProvider and fakeStore are in-package fakes for Manager's internal
-// collaborator seams. They let the Manager tests exercise construction and
-// injection without any filesystem or network dependency.
+// collaborator seams. They let the Manager tests exercise internal wiring
+// without any filesystem or network dependency.
 type fakeProvider struct{ id string }
 
 func (f fakeProvider) name() string { return f.id }
@@ -34,12 +34,12 @@ func TestNewManagerValid(t *testing.T) {
 	assert.True(t, m.configured())
 }
 
-func TestNewManagerWithCollaborators(t *testing.T) {
+func TestNewManagerWithInternalCollaborators(t *testing.T) {
 	m, err := New(Config{
 		Clock:     testClock(),
 		StoreRoot: "/data/candles",
-		Provider:  fakeProvider{id: "fake"},
-		Store:     fakeStore{dir: "/data/candles"},
+		provider:  fakeProvider{id: "fake"},
+		store:     fakeStore{dir: "/data/candles"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "fake", m.provider.name())

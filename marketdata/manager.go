@@ -40,7 +40,7 @@ import (
 //
 // Manager coordinates these responsibilities; it does not implement all of
 // them itself. The collaborator contracts are narrow interfaces owned by
-// this package and supplied at construction (see Config); provider- and
+// this package and wired internally during construction; provider- and
 // storage-native types — OANDA rows, CSV records, filesystem paths,
 // persistence layouts — never cross the Manager boundary.
 //
@@ -63,13 +63,13 @@ type Manager struct {
 	clock     clock.Clock
 	storeRoot string
 
-	// Collaborator seams. These are interfaces owned by this package and
-	// injected through Config so that the real provider, storage,
-	// normalization, and resampling implementations can live behind
-	// internal boundaries without marketdata importing them (which would
-	// create an import cycle, since those implementations depend on this
-	// package's Bar type). They are permitted to be nil in this skeleton:
-	// no operation depends on them yet.
+	// Collaborator seams. These are interfaces owned by this package so the
+	// real provider, storage, normalization, and resampling
+	// implementations can live behind internal boundaries without
+	// marketdata importing them (which would create an import cycle, since
+	// those implementations depend on this package's Bar type). They are
+	// wired only within this package, permitted to be nil in this
+	// skeleton, and are not public extension points.
 	provider provider
 	store    barStore
 }
@@ -92,13 +92,13 @@ type Config struct {
 	// Manager operation.
 	StoreRoot string
 
-	// Provider and Store are optional internal collaborators. When nil,
-	// Manager is still constructible; the operations that would use them
-	// report ErrNotImplemented. They exist so tests and, later, the real
-	// composition root can inject fakes or concrete internal
-	// implementations without widening the public surface.
-	Provider provider
-	Store    barStore
+	// provider and store are optional internal collaborators. They remain
+	// unexported so no external package can supply provider or storage
+	// implementations through Config. They exist only for in-package tests
+	// and future internal wiring while this skeleton still reports
+	// ErrNotImplemented for every operation that would use them.
+	provider provider
+	store    barStore
 }
 
 // provider is the narrow internal contract for acquiring provider-native
@@ -148,8 +148,8 @@ func New(cfg Config) (*Manager, error) {
 	return &Manager{
 		clock:     cfg.Clock,
 		storeRoot: cfg.StoreRoot,
-		provider:  cfg.Provider,
-		store:     cfg.Store,
+		provider:  cfg.provider,
+		store:     cfg.store,
 	}, nil
 }
 
