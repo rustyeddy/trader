@@ -8,9 +8,9 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
-// PriceBasis records what a Bar's OHLC prices represent. FX providers
-// quote a bid and an ask; a canonical Bar persists one basis and records
-// which, so a consumer is never left guessing whether Close is a bid, an
+// PriceBasis records what a BarSet's OHLC prices represent. FX providers
+// quote a bid and an ask; a canonical BarSet records one basis for all its
+// bars so a consumer is never left guessing whether Close is a bid, an
 // ask, or a mid. M2's canonical FX bars use BasisBid (see ADR-020).
 type PriceBasis uint8
 

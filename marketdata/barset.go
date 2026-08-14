@@ -58,7 +58,12 @@ func (bs BarSet) Validate() error {
 	if bs.Instrument.IsZero() {
 		return fmt.Errorf("marketdata: bar set validate: %w", ErrBarSetInstrument)
 	}
-	if bs.Interval.count < 1 {
+	if bs.Interval.Count() < 1 {
+		return fmt.Errorf("marketdata: bar set validate: %w", ErrBarSetInterval)
+	}
+	switch bs.Interval.Unit() {
+	case UnitMinute, UnitHour, UnitDay, UnitWeek:
+	default:
 		return fmt.Errorf("marketdata: bar set validate: %w", ErrBarSetInterval)
 	}
 	if bs.Span.start.IsZero() || bs.Span.end.IsZero() || !bs.Span.end.After(bs.Span.start) {
