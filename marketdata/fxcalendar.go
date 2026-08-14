@@ -112,6 +112,13 @@ func (c *FXCalendar) Session(t time.Time) (TimeRange, bool) {
 
 // Bar implements Calendar.
 func (c *FXCalendar) Bar(t time.Time, interval Interval) (TimeRange, error) {
+	// Reject a malformed interval — including the zero Interval, which
+	// carries UnitMinute with a zero count — before it reaches the
+	// unit-specific alignment below, where a zero count would otherwise
+	// surface as a confusing empty-range error rather than an interval one.
+	if err := interval.validate(); err != nil {
+		return TimeRange{}, err
+	}
 	switch interval.Unit() {
 	case UnitMinute:
 		return utcBar(t, time.Duration(interval.Count())*time.Minute)

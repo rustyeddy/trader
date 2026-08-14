@@ -26,6 +26,18 @@ func TestNewIntervalRejectsUnknownUnit(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestIntervalValid(t *testing.T) {
+	valid, err := NewInterval(UnitHour, 4)
+	require.NoError(t, err)
+	assert.True(t, valid.Valid())
+
+	// The zero Interval carries UnitMinute (iota 0) with a zero count and
+	// never passes through NewInterval, so it must report as invalid.
+	assert.False(t, Interval{}.Valid())
+	assert.False(t, Interval{unit: UnitHour, count: 0}.Valid(), "zero count")
+	assert.False(t, Interval{unit: Unit(200), count: 1}.Valid(), "unknown unit")
+}
+
 func TestPredefinedIntervals(t *testing.T) {
 	cases := []struct {
 		name  string

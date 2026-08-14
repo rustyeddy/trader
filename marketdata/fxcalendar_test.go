@@ -122,6 +122,15 @@ func TestFXCalendarBarRejectsUnknownUnit(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// The zero Interval carries UnitMinute with a zero count, which would
+// otherwise pass the unit switch and surface as an empty-range error; Bar
+// must reject it up front as an invalid interval.
+func TestFXCalendarBarRejectsZeroInterval(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	_, err := c.Bar(nyTime(2026, time.January, 7, 9, 0), Interval{})
+	assert.Error(t, err)
+}
+
 // 2026-03-08 is the US spring-forward transition: New York clocks jump
 // from 02:00 to 03:00, so the trading day containing that instant loses
 // an hour of wall-clock time.
