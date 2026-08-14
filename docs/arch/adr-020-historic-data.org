@@ -98,9 +98,34 @@ above.
 This issue is the model only.  =marketdata.Manager= has no build/publish
 operation to attach a =Manifest= to yet; that is later M2 work.
 
-** TODO Day and week alignment needs to be resolved.
-We may download any missing interval data from OandA and derive it
-from that source vs. from earler sources.  
+** DONE Day and week alignment needs to be resolved.
+Settled by issue #74 (branch =feature/74-fx-calendar-completeness=),
+building on ADR-012's already-accepted =FXCalendar= day/week boundaries
+(17:00 New York rollover for D1, Sunday 17:00 New York open for W1; both
+DST-safe via =time.Date= in =America/New_York=, never fixed-duration
+arithmetic).  What #74 adds:
+
+- *OANDA alignment parameters*: any future live/download synchronization
+  must pin =dailyAlignment=17= and =alignmentTimezone=America/New_York=
+  explicitly, documented in
+  =marketdata/internal/provider/oanda/doc.go=.  The preserved raw
+  archive's own D1 opens already match this rollover, but only because
+  the legacy client happened to inherit OANDA's undocumented defaults —
+  not because it requested them (see =trader-first-try/types/time.go= and
+  =docs/Archive/candle-store-timestamp-fix.org= in that repo).  A pinned
+  request survives a provider default changing without Trader silently
+  mis-aligning new data against the old archive.
+- *W1 native versus derived*: decided as *derived*.  The preserved raw
+  archive has no OANDA-native weekly partition at all — see
+  =oanda.RawInterval=, which has no =RawW1= token and reports
+  =ErrUnsupportedInterval= for one — so there is nothing to synchronize
+  weekly alignment against for M2.  This decision has not been verified
+  against OANDA's live =weeklyAlignment= API parameter (no live network
+  access was available to check it); it is recorded as M2's scope
+  decision, not a verified API fact, and should be revisited when live
+  synchronization is actually built.  W1 bars are produced by resampling
+  canonical D1 — see the =Manifest.Parent=/=ResamplerVersion= lineage
+  model (#73) built for exactly this relationship.
 ** DONE OandA Volume represents ticks at OandA
 It is not volume by any means but may serve as a proxy for how active
 a pair was at the exchange OandA gets it data from.  It can be ignored
@@ -229,11 +254,48 @@ be supported.
 
 Settled at the =Bar= level by #72: a Bar existing *is* an observation,
 so a missing interval is an *absent* Bar -- there is no zero-filled
-dummy row and no per-Bar status flag. Which intervals are expected,
-closed, or missing is a coverage concern (#79), and the
-provider-declared-incompleteness distinction below (OANDA's =complete=
-flag versus a calendar-derived gap) is resolved at normalization (#76),
-not by persisting incomplete bars.
+dummy row and no per-Bar status flag.  Issue #74 adds the vocabulary for
+*why* an interval is absent (or present but not final):
+=marketdata.IntervalState= — =Present=, =Closed=, =Missing=,
+=Incomplete=, =InProgress=, =Unexpected= — and
+=ClassifyInterval(cal, span, now, present, providerComplete)=, a pure
+classifier over facts a caller already has.  A present Bar during a
+calendar closure classifies as =Unexpected=, never silently as
+=Closed=: the two are not equivalent, since =Closed= means "the
+calendar says no bar belongs here and none is present," while
+=Unexpected= means the calendar and the data actively disagree — a
+contradiction a design-review comment on the PR caught the first draft
+silently collapsing into =Closed=, which would have let
+=DatasetComplete= treat a real calendar/data conflict as accepted-absent.
+Classification order beyond that is fixed: an interval that has not yet
+elapsed is next, ahead of a still-forming Bar that happens to already be
+present; only then do presence and the provider's own =complete= flag
+decide =Present=/=Missing=/=Incomplete=.
+=DatasetComplete(states []IntervalState)= formally defines completeness:
+true iff every entry is =Present= or =Closed= — =Unexpected= is
+deliberately excluded from that set.
+
+=ClassifyInterval= requires the calendar to report one uniform =Status=
+across the *entire* span, not just its start: it samples =Status= at
+both =span.Start()= and just before =span.End()=, and, when that status
+is =StatusOpen=, additionally requires =cal.Session(span.Start())= to
+fully contain =span=.  A span that fails either check — for example a
+UTC-aligned H4 bar straddling a 13:00 New York partial-closure threshold
+— is rejected with a wrapped =ErrIntervalStraddlesBoundary= rather than
+silently classified from its start alone, which a design-review comment
+identified as unsafe in the first draft: sampling only =span.Start()=
+would have misclassified exactly that straddling case, and would have
+kept doing so silently.  Splitting or otherwise resolving a straddling
+span is left to the caller (#79's coverage engine, in practice); this
+cannot happen for a session-aligned D1/W1 bar, whose span already equals
+one =Calendar=-defined session or week.
+
+Walking a real query range, producing a =[]IntervalState= for it, and
+reading raw's =complete= flag to populate =providerComplete= during
+normalization all remain later work: walking a range is #79's coverage
+engine, and populating =providerComplete= from OANDA's raw =complete=
+column is #76's normalization stage.  #74 defines the vocabulary and its
+classification rules only.
 
 * DONE Data at rest will be stored as it has been.
 The current path will be something like it is now
@@ -247,25 +309,54 @@ All data that is downloaded or derived will be persisted
 
 * DONE Livefeed will not be included in M2
 Title says it all
-* TODO Where does FX holiday data come from?
-Refer to trader-first-try for fx-holidays and closed datys.  Need to
-retrieve it from source and decide how it is represented here.
+* DONE Where does FX holiday data come from?
+Settled by issue #74: adopted, unchanged, from
+=trader-first-try/market/forex_hours.go='s =isMajorForexHolidayClosed= —
+the one holiday source Trader had already exercised against real OANDA
+data, and the source this note originally pointed at.  It is exposed as
+=marketdata.StandardFXHolidays(years ...int) FXCalendarParams=, Trader's
+accepted M2 rule set:
 
-Candidate source, located but not yet adopted:
-=trader-first-try/market/forex_hours.go=, functions
-=isForexMarketClosed= and =isMajorForexHolidayClosed=.  It works in
-=America/New_York=, which lines up with ADR-012's 17:00 NY rollover.
-The rules are:
+- Jan 1, Dec 25, Dec 26 — closed all day.
+- Dec 24, Dec 31 — closed from 13:00 New York time onward (not fully
+  closed; the market is open earlier that day).  =FXCalendar= gained a
+  new =PartialClosure= concept for exactly this: a session that is
+  truncated early rather than not opening at all.
+- Sunday evening stays closed when *that Sunday itself* is one of the
+  three full-day holidays — implemented as one additional rule in
+  =FXCalendar.Status=, since the existing session-labeled-by-ending-date
+  model does not otherwise cover it (the following Monday is not itself
+  a holiday date in that scenario).  The "following Monday is a holiday"
+  half of the old rule needs no special case at all: it is already
+  covered by the ordinary ending-date holiday check, since the session
+  opening Sunday evening is labeled by the Monday it ends on.
 
-- Jan 1, Dec 25, Dec 26 -- closed all day
-- Dec 24, Dec 31 -- closed from 13:00 onward
-- Sunday evening session stays closed when Sunday itself, or the
-  following Monday, is one of the three full-day holidays
+=FXCalendar.Status= and =FXCalendar.Session= are computed by one shared,
+unexported =classify= method rather than independently, specifically
+because a partial closure or the Sunday-holiday rule can *truncate* a
+session rather than remove it outright — a design-review comment on the
+PR caught the first draft computing them separately, which let =Session=
+keep returning the full nominal rollover-to-rollover range even where
+=Status= reported the tail (or, for the Sunday case, the head) of that
+same range as closed, violating =FXCalendar='s own documented invariant
+that every instant a returned =Session= contains reports the same
+=Status=.  With one shared implementation, =Session= now returns the
+truncated open window directly (for example, ending at 13:00 on Dec 24
+rather than 17:00, or starting at the following New York midnight rather
+than the nominal Sunday 17:00 rollover when that Sunday is a holiday),
+so the two methods cannot drift apart again.  =Bar= is unaffected by
+truncation on purpose: its nominal, calendar-aligned D1/W1 range answers
+a different question ("what interval does this instant belong to") than
+=Session= ("when was trading actually open"), and truncating it would
+conflate the two.
 
-Note it is hardcoded rules, not a data file, and it covers only those
-five dates -- no Good Friday, and no handling of holidays that shift
-when they fall on a weekend.  Decide whether to carry that set forward
-as-is or source a real calendar.
+This is still deliberately narrow, unchanged from the source: no Good
+Friday, no in-lieu observance when a holiday falls on a weekend, and no
+non-FX venue calendars.  Extending it is a separate, later decision, not
+a silent addition made while implementing #74.  =FXCalendar= itself
+remains a pure calendar with no holiday data of its own —
+=StandardFXHolidays= is a caller-supplied params builder, not a change to
+what =FXCalendar= assumes by default.
 
 * TODO Review comments to work in
 
@@ -297,13 +388,17 @@ regression test and it is only available once.  This does not conflict
 with the no-retention policy above -- that policy governs superseded
 /new-format/ versions, not the one-time legacy comparison.
 
-** TODO Provider-declared incompleteness is separate from gaps
-Raw carries OANDA's own =complete= column, and legacy silently skipped
-rows where it was false (=datamanager/data_validation.go=).  That is a
-different thing from a calendar-derived gap: one is the provider
-saying "this bar had not closed yet", the other is Trader inferring
-"data should exist here and does not".  Fold the distinction into "How
-will gaps and closed market days be handled" so it does not get lost.
+** DONE Provider-declared incompleteness is separate from gaps
+Folded in by issue #74, as this note asked.  Raw's =complete= column
+(OANDA's own "this bar had not closed yet" flag) and a calendar-derived
+gap are now two of five distinct, named states — see "How will gaps and
+closed market days be handled" below for the full =IntervalState= model.
+Unlike legacy's =datamanager/data_validation.go=, which silently skipped
+incomplete rows, Trader represents the distinction explicitly
+(=IntervalStateIncomplete= vs. =IntervalStateMissing=) rather than
+dropping data on the floor; actually consuming raw's =complete= flag to
+populate that state during normalization is issue #76's job, not #74's —
+#74 only defines the vocabulary and its classification rules.
 
 ** TODO Say that third-party data sources are deferred
 "Everything behind DM lives in =internal/=" plus "no other package may
@@ -313,21 +408,22 @@ data source.  The architecture document promises exactly that seam via
 deferring it is the right answer -- it just needs to be stated, since
 the promise exists elsewhere.
 
-** TODO Resolve W1 alignment before implementation starts
-Still correctly open under "Day and week alignment", but it is a short
-check against the OandA API rather than a design question: does
-=weeklyAlignment= accept Sunday?  ADR-012 defines the FX week as
-opening Sunday 17:00 New York, and =weeklyAlignment= is believed to
-default to Friday.  The answer decides whether W1 is provider-native
-like the other four intervals or the single derived one, which shapes
-the interval materialization work.
+** DONE Resolve W1 alignment before implementation starts
+Resolved by issue #74 under "Day and week alignment" above, by
+sidestepping the OANDA =weeklyAlignment= question entirely for M2: the
+preserved raw archive has no OANDA-native weekly partition at all, so
+there is nothing to check =weeklyAlignment= against yet, and W1 is
+decided as *derived* (resampled from canonical D1) rather than
+provider-native for M2.  Whether =weeklyAlignment= accepts Sunday
+remains genuinely unverified — no live network access was available
+during #74 — and must be checked before any future milestone adds live
+weekly synchronization.
 
-Related, and already verified: the existing D1 corpus opens at 21:00Z
-in July and 22:00Z in January -- both 17:00 America/New_York.  That
-matches ADR-012.  But the legacy client sends no alignment parameters
-at all, so that boundary came from OandA's request defaults
-(=dailyAlignment=17=, =alignmentTimezone=America/New_York=).  The new
-downloader should pin them explicitly rather than inherit them.
+The related =dailyAlignment=/=alignmentTimezone= point is also resolved:
+documented in =marketdata/internal/provider/oanda/doc.go= as a
+requirement for any future live synchronization to pin
+=dailyAlignment=17= and =alignmentTimezone=America/New_York= explicitly,
+rather than inherit undocumented defaults the way the legacy client did.
 
 ** TODO Typos, for whenever this folds into adr-decisions.org
 "Conanical" (x3), "principals" -> "principles", "Furture", "datys",
