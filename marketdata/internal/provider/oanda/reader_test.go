@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +19,7 @@ func TestReadFileEURUSDH1(t *testing.T) {
 	meta, records, err := ReadFile(context.Background(), fixture("EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
 
-	assert.Equal(t, marketdata.H1, meta.Interval)
+	assert.Equal(t, RawH1, meta.Interval)
 	assert.Equal(t, 2020, meta.Year)
 	assert.Equal(t, time.May, meta.Month)
 	assert.Equal(t, "EURUSD", meta.Symbol)
@@ -57,12 +56,12 @@ func TestReadFileJPYPairExactDecimals(t *testing.T) {
 func TestReadFileDailyIntervalTokenReconciled(t *testing.T) {
 	meta, records, err := ReadFile(context.Background(), fixture("EURUSD-2020-05-d1.csv"))
 	require.NoError(t, err)
-	assert.Equal(t, marketdata.D1, meta.Interval)
+	assert.Equal(t, RawD1, meta.Interval)
 	require.NotEmpty(t, records)
 }
 
 func TestOpenXAUUSDOutOfScope(t *testing.T) {
-	r, err := Open(fixture("XAUUSD-2026-07-h4.csv"))
+	r, err := Open(fixture("XAUUSD-2026-06-h4.csv"))
 	assert.Nil(t, r)
 	assert.ErrorIs(t, err, ErrInstrumentOutOfScope)
 }
@@ -80,7 +79,7 @@ func TestMeta(t *testing.T) {
 
 	m := r.Meta()
 	assert.Equal(t, "EURUSD", m.Symbol)
-	assert.Equal(t, marketdata.H1, m.Interval)
+	assert.Equal(t, RawH1, m.Interval)
 	assert.Equal(t, 2020, m.Year)
 	assert.Equal(t, time.May, m.Month)
 }
@@ -100,6 +99,16 @@ func TestReadFileMalformedRows(t *testing.T) {
 		_, _, err := ReadFile(context.Background(), fixture(name))
 		assert.ErrorIs(t, err, ErrMalformedData, kind)
 	}
+}
+
+// A header with the same columns in a different order must be rejected, not
+// read positionally — otherwise bid_h values would be assigned to bid_o.
+func TestOpenReorderedHeaderRejected(t *testing.T) {
+	r, err := Open(fixture("EURUSD-2021-02-h1.csv"))
+	if r != nil {
+		_ = r.Close()
+	}
+	assert.ErrorIs(t, err, ErrMalformedData)
 }
 
 func TestOpenBadYearMonthInFileName(t *testing.T) {

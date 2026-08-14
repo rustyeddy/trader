@@ -13,6 +13,12 @@
 // is deliberately close to the file: bid/ask OHLC and OANDA's own tick/
 // activity count and complete flag, preserved rather than interpreted.
 //
+// To keep the dependency direction clean — and to let marketdata.Manager own
+// and wire this provider without an import cycle — the package does not import
+// the root marketdata package. It carries a provider-native RawInterval token
+// rather than marketdata.Interval; mapping a RawInterval to the canonical
+// Interval is a normalization concern, not this reader's.
+//
 // # Archive shape
 //
 // The corpus is laid out as
@@ -32,12 +38,13 @@
 //
 // # Scope
 //
-// The 24 in-scope FX pairs are those whose base and quote are both in-scope
-// FX currencies (AUD, CAD, CHF, EUR, GBP, JPY, NZD, USD). XAUUSD is present
-// in the corpus but out of scope: XAU is not an in-scope currency, so opening
-// an XAUUSD partition reports ErrInstrumentOutOfScope rather than silently
-// treating gold as an FX pair. W1 is not present in the raw corpus and is not
-// invented: a w1 partition reports an unsupported-interval error.
+// Scope is an exact, audited set of the 24 FX pairs preserved in the archive,
+// not a currency-combination rule: two in-scope currencies do not by
+// themselves make an in-scope pair (there is no USDEUR or CADNZD partition).
+// A symbol outside that set — XAUUSD (gold is not an FX leg) or a valid-looking
+// but absent pair — reports ErrInstrumentOutOfScope rather than being treated
+// as an FX pair. W1 is not present in the raw corpus and is not invented: a w1
+// partition reports ErrUnsupportedInterval.
 //
 // # Exactness and provenance
 //

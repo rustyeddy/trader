@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,7 +14,7 @@ import (
 func eurusdMeta() Meta {
 	return Meta{
 		Instrument: instrument.CurrencyPairID(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD")),
-		Interval:   marketdata.H1,
+		Interval:   RawH1,
 		Year:       2020,
 		Month:      time.May,
 		Symbol:     "EURUSD",
@@ -32,7 +31,7 @@ func TestCrossCheckSchemaAccepts(t *testing.T) {
 // the same interval; the cross-check must accept that.
 func TestCrossCheckSchemaAcceptsDailyTokenVariance(t *testing.T) {
 	meta := eurusdMeta()
-	meta.Interval = marketdata.D1
+	meta.Interval = RawD1
 	comment := "# schema=raw-v1 source=oanda instrument=EURUSD tf=d year=2020 month=05"
 	require.NoError(t, crossCheckSchema(comment, "p.csv", meta, "d1"))
 }

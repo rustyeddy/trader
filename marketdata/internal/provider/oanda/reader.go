@@ -14,6 +14,10 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
+// rawV1Header is the exact raw-v1 column header. It is matched verbatim so a
+// reordered or altered header cannot be misread positionally.
+const rawV1Header = "time,bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,volume,complete"
+
 // rawFieldCount is the number of columns in a raw-v1 row:
 // time, bid O/H/L/C, ask O/H/L/C, volume, complete.
 const rawFieldCount = 11
@@ -84,9 +88,12 @@ func (r *Reader) consumeHeader(meta Meta, token string) error {
 			}
 			continue
 		}
-		// First non-comment line must be the column header.
-		if !strings.HasPrefix(line, "time,") {
-			return fmt.Errorf("%w: %s: expected column header, got %q", ErrMalformedData, r.path, line)
+		// The first non-comment line must be the raw-v1 column header, matched
+		// exactly. Every data field is read positionally, so a reordered,
+		// renamed, or extended header would silently misassign values to the
+		// wrong columns — the exact match is what prevents that.
+		if line != rawV1Header {
+			return fmt.Errorf("%w: %s: unexpected column header %q, want %q", ErrMalformedData, r.path, line, rawV1Header)
 		}
 		sawColumnHeader = true
 		break

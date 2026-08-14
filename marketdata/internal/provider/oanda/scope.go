@@ -5,16 +5,16 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 )
 
 // Sentinel errors, classifiable with errors.Is.
 var (
-	// ErrInstrumentOutOfScope reports a provider symbol that is recognized as
-	// not an in-scope M2 FX pair — most notably XAUUSD, whose XAU leg is not
-	// an in-scope currency. It is deliberately distinct from a malformed or
-	// unrecognizable symbol: a caller walking the archive uses it to skip a
+	// ErrInstrumentOutOfScope reports a provider symbol that is well-formed
+	// but is not one of the 24 in-scope M2 FX pairs — XAUUSD (gold is not an
+	// FX leg), and also any valid-looking pair such as USDEUR that is simply
+	// not part of the preserved corpus. It is deliberately distinct from a
+	// malformed symbol: a caller walking the archive uses it to skip a
 	// partition on purpose rather than treating it as an error in the data.
 	ErrInstrumentOutOfScope = errors.New("oanda: instrument out of scope")
 
@@ -29,59 +29,57 @@ var (
 	ErrMalformedData = errors.New("oanda: malformed data")
 )
 
-// inScopeFXCurrencies is the set of currencies whose pairwise combinations
-// make up the 24 in-scope M2 FX pairs. A symbol is in scope only when both
-// its legs are in this set; XAU (gold) is intentionally absent, which is what
-// takes XAUUSD out of scope. num.ParseCurrency accepts any 3–5 uppercase
-// letters and embeds no ISO table, so XAU would otherwise parse as a
-// structurally valid currency — this allowlist is what keeps gold from being
-// silently treated as an FX leg.
-var inScopeFXCurrencies = map[string]struct{}{
-	"AUD": {}, "CAD": {}, "CHF": {}, "EUR": {},
-	"GBP": {}, "JPY": {}, "NZD": {}, "USD": {},
+// inScopeFXPairs is the exact set of 24 FX pairs preserved in the archive and
+// in scope for M2. It is an audited symbol set, not a currency-combination
+// rule: two in-scope currencies do not by themselves make an in-scope pair
+// (there is no USDEUR or CADNZD partition), and gold (XAU) is not present at
+// all. A symbol is in scope only if it appears here verbatim.
+var inScopeFXPairs = map[string]struct{}{
+	"AUDCAD": {}, "AUDCHF": {}, "AUDJPY": {}, "AUDNZD": {}, "AUDUSD": {},
+	"CADJPY": {}, "CHFJPY": {},
+	"EURAUD": {}, "EURCAD": {}, "EURCHF": {}, "EURGBP": {}, "EURJPY": {}, "EURNZD": {}, "EURUSD": {},
+	"GBPAUD": {}, "GBPCAD": {}, "GBPJPY": {}, "GBPNZD": {}, "GBPUSD": {},
+	"NZDJPY": {}, "NZDUSD": {},
+	"USDCAD": {}, "USDCHF": {}, "USDJPY": {},
 }
 
 // resolveSymbol maps a raw OANDA provider symbol such as "EURUSD" to its
 // canonical instrument.ID through instrument's currency-pair facility. It
-// reports ErrInstrumentOutOfScope for a well-formed six-letter symbol whose
-// legs are not both in-scope FX currencies (for example XAUUSD), and
+// reports ErrInstrumentOutOfScope for a well-formed six-letter symbol that is
+// not one of the 24 in-scope pairs (for example XAUUSD or USDEUR), and
 // ErrMalformedData for a symbol that is not six uppercase letters at all.
 func resolveSymbol(symbol string) (instrument.ID, error) {
 	if len(symbol) != 6 || !isUpperAlpha(symbol) {
 		return instrument.ID{}, fmt.Errorf("%w: symbol %q is not six uppercase letters", ErrMalformedData, symbol)
 	}
-	base, quote := symbol[:3], symbol[3:]
-	if _, ok := inScopeFXCurrencies[base]; !ok {
-		return instrument.ID{}, fmt.Errorf("%w: %q (base %q)", ErrInstrumentOutOfScope, symbol, base)
+	if _, ok := inScopeFXPairs[symbol]; !ok {
+		return instrument.ID{}, fmt.Errorf("%w: %q", ErrInstrumentOutOfScope, symbol)
 	}
-	if _, ok := inScopeFXCurrencies[quote]; !ok {
-		return instrument.ID{}, fmt.Errorf("%w: %q (quote %q)", ErrInstrumentOutOfScope, symbol, quote)
-	}
-	id := instrument.CurrencyPairID(num.MustParseCurrency(base), num.MustParseCurrency(quote))
+	id := instrument.CurrencyPairID(num.MustParseCurrency(symbol[:3]), num.MustParseCurrency(symbol[3:]))
 	if id.IsZero() {
-		// Unreachable for two distinct in-scope currencies, but never return a
-		// zero ID as if it were a real identity.
+		// Unreachable for an in-scope pair, but never return a zero ID as if
+		// it were a real identity.
 		return instrument.ID{}, fmt.Errorf("%w: %q produced a zero instrument id", ErrMalformedData, symbol)
 	}
 	return id, nil
 }
 
-// resolveInterval maps a raw partition's interval token to a marketdata
-// Interval. Both the path token "d1" and the schema comment's "d" map to D1;
-// "m1", "h1", and "h4" map to their obvious intervals. Anything else,
-// including "w1", reports ErrUnsupportedInterval.
-func resolveInterval(token string) (marketdata.Interval, error) {
+// resolveInterval maps a raw partition's interval token to a RawInterval. Both
+// the path token "d1" and the schema comment's "d" map to RawD1; "m1", "h1",
+// and "h4" map to their obvious tokens. Anything else, including "w1", reports
+// ErrUnsupportedInterval.
+func resolveInterval(token string) (RawInterval, error) {
 	switch token {
 	case "m1":
-		return marketdata.M1, nil
+		return RawM1, nil
 	case "h1":
-		return marketdata.H1, nil
+		return RawH1, nil
 	case "h4":
-		return marketdata.H4, nil
+		return RawH4, nil
 	case "d1", "d":
-		return marketdata.D1, nil
+		return RawD1, nil
 	default:
-		return marketdata.Interval{}, fmt.Errorf("%w: %q", ErrUnsupportedInterval, token)
+		return "", fmt.Errorf("%w: %q", ErrUnsupportedInterval, token)
 	}
 }
 
