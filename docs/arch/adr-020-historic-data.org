@@ -130,7 +130,7 @@ arithmetic).  What #74 adds:
 It is not volume by any means but may serve as a proxy for how active
 a pair was at the exchange OandA gets it data from.  It can be ignored
 if it is not desired, but it will be included in the derived data
-** TODO Avg and Max Spread will also be kept in derived format
+** DONE Avg and Max Spread will also be kept in derived format
 OandA provides a bid and an ask for each of O, H, L and C.  Max and
 avg spread will be calculated from those values.
 
@@ -140,7 +140,14 @@ which is the only one reconstructible from raw's bid/ask OHLC (raw
 preserves no per-tick spread stream, so the legacy tick-weighted
 variant in =data_manager.go= is off the table): the per-corner spread
 is =(ask - bid)= at each of O, H, L, C; =AvgSpread= is the mean of
-those four and =MaxSpread= the max of those four.
+those four and =MaxSpread= the max of those four.  Issue #76 implements
+this formula, in =spreadSummary= (unexported, in the =marketdata=
+package itself): four =num.Price.Sub= calls for the corner spreads (an
+ask below its bid reports =num.ErrNegative=, classified
+=recordOutcomeSuspicious= — a crossed market, not an impossible =Bar=
+shape), a running =num.Price.Add= for their sum, and one
+=num.Price.MulRate(0.25)= for the mean — exact throughout, never
+=float64=.
 
 Still open, and deferred to M5 not #72: what avg spread *means* for the
 simulated-broker fill model, and the aggregation rule when a derived
@@ -531,7 +538,93 @@ incomplete rows, Trader represents the distinction explicitly
 (=IntervalStateIncomplete= vs. =IntervalStateMissing=) rather than
 dropping data on the floor; actually consuming raw's =complete= flag to
 populate that state during normalization is issue #76's job, not #74's —
-#74 only defines the vocabulary and its classification rules.
+#74 only defines the vocabulary and its classification rules.  #76 does
+this at the record level with =recordOutcomeIncomplete=, its own
+classification distinct from =IntervalStateIncomplete= — the latter
+describes a range-query answer over already-published canonical data
+(#79's job), while =recordOutcomeIncomplete= is what normalization
+itself produces for one raw record whose =complete= flag is false: a
+structurally valid =Bar= that ADR-020 requires never be persisted as
+though it were a final, accepted observation.
+
+** DONE Normalize and validate OANDA records into canonical Bars
+Settled by issue #76 (branch =feature/76-normalize-oanda-bars=):
+=normalizeOANDARecord= and =normalizeOANDASequence=, unexported
+functions living directly in the =marketdata= package (not a new
+=marketdata/internal/...= package — see below for why), convert
+=oanda.Record= values into =Bar= candidates and classify each into one
+of four =recordOutcome= values (also unexported — see the review note
+below for why):
+
+- =recordOutcomeAccepted= — a valid, provider-complete, correctly
+  ordered and interval-aligned =Bar=.
+- =recordOutcomeIncomplete= — a structurally valid =Bar=, but OANDA's
+  own =complete= flag was false; never treated as final and never
+  persisted as a canonical =Bar= (see the note above).
+- =recordOutcomeSuspicious= — an ask below its corresponding bid at some
+  OHLC corner, caught by =num.Price.Sub= reporting =num.ErrNegative=
+  before a candidate =Bar= can even be built.  A crossed market is a
+  real data anomaly the raw CSV format does not rule out on its own,
+  distinct from an otherwise-well-formed =Bar= shape that fails
+  validation, and distinct from a spread computation that fails for any
+  other reason (checked-arithmetic overflow, say) — a design-review
+  comment on the PR caught the first draft classifying every
+  =spreadSummary= error =Suspicious=, which would have mislabeled a pure
+  computation failure as a market anomaly.  =spreadSummary= now reports
+  whether a failure was specifically a crossed corner, and only that
+  case is =Suspicious=; anything else is =Rejected=.
+- =recordOutcomeRejected= — an impossible =Bar= shape (=Bar.Validate=,
+  from #72, reused as-is — not reimplemented), a non-crossed spread
+  computation failure, a timestamp that duplicates *any* earlier record
+  in the same sequence (not only the immediately preceding one — another
+  review fix; the first draft's =prevTime=-only comparison missed a
+  timestamp repeating an older, non-adjacent record) or precedes the
+  previous record, or a timestamp that does not land on
+  =Calendar.Bar='s computed interval boundary.
+
+=normalizeOANDASequence= processes one partition's records in file
+order and returns exactly one =normalizedRecord= per input record, in
+that order: nothing is silently dropped, repaired, or coalesced, and a
+rejected record never breaks validation of the records after it — each
+record's ordering/duplicate check compares against every record seen so
+far in the actual input sequence, not just the previously accepted
+ones.  A =Calendar.Bar= failure while checking alignment is treated as
+its own kind of problem, not folded into =errRecordMisaligned=: a
+review comment pointed out that a calendar unable to evaluate a
+boundary is not evidence the timestamp is misaligned, so
+=normalizeOANDASequence= now aborts with that error directly (a
+sequence-level failure) rather than misclassifying the record.
+
+*Why =recordOutcome=/=normalizedRecord=/the sentinels are unexported*:
+a review comment on the PR flagged that exporting them would expand and
+stabilize the public =marketdata= API for values no external caller can
+currently obtain, since both normalization entry points are themselves
+unexported.  Should =Manager= later need an operator-facing
+normalization report, that is the right time to design a deliberate,
+provider-neutral public result contract — not to promote these internal
+types as-is.
+
+*Why this lives directly in the =marketdata= package*: the normalizer
+must both consume =oanda.Record=/=oanda.RawInterval= (importable only
+from within the =marketdata/= tree) and produce =marketdata.Bar=
+values.  =oanda= deliberately never imports =marketdata= (documented,
+so =Manager= can wire it without a cycle); if the normalizer instead
+lived in its own =marketdata/internal/normalize= package that imported
+root =marketdata= for =Bar=, wiring it into =Manager= later would
+recreate exactly that cycle.  Living directly in package =marketdata= —
+where =Bar=, =BarSet=, =Interval=, =Calendar=, and =Manifest= already
+live — avoids this: =marketdata= may already import its own
+=internal/= subtree, one-directionally.  Both functions stay
+unexported, reachable only from within =marketdata=, the same boundary
+#75's archive inventory already established.
+
+*Non-goals, deferred on purpose*: assembling a full =BarSet=/=Manifest=
+from a normalized partition (span computation, dataset publishing) is
+later canonical-build work, not record-level normalization; and no gap
+or coverage reasoning happens here at all — #76 only ever sees the
+records actually present in one partition, exactly as #74 and #75 already
+scoped their own calendar- and file-level concerns away from each
+other's.
 
 ** TODO Say that third-party data sources are deferred
 "Everything behind DM lives in =internal/=" plus "no other package may
