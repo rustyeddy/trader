@@ -144,7 +144,7 @@ those four and =MaxSpread= the max of those four.  Issue #76 implements
 this formula, in =spreadSummary= (unexported, in the =marketdata=
 package itself): four =num.Price.Sub= calls for the corner spreads (an
 ask below its bid reports =num.ErrNegative=, classified
-=RecordOutcomeSuspicious= — a crossed market, not an impossible =Bar=
+=recordOutcomeSuspicious= — a crossed market, not an impossible =Bar=
 shape), a running =num.Price.Add= for their sum, and one
 =num.Price.MulRate(0.25)= for the mean — exact throughout, never
 =float64=.
@@ -539,10 +539,10 @@ incomplete rows, Trader represents the distinction explicitly
 dropping data on the floor; actually consuming raw's =complete= flag to
 populate that state during normalization is issue #76's job, not #74's —
 #74 only defines the vocabulary and its classification rules.  #76 does
-this at the record level with =RecordOutcomeIncomplete=, its own
+this at the record level with =recordOutcomeIncomplete=, its own
 classification distinct from =IntervalStateIncomplete= — the latter
 describes a range-query answer over already-published canonical data
-(#79's job), while =RecordOutcomeIncomplete= is what normalization
+(#79's job), while =recordOutcomeIncomplete= is what normalization
 itself produces for one raw record whose =complete= flag is false: a
 structurally valid =Bar= that ADR-020 requires never be persisted as
 though it were a final, accepted observation.
