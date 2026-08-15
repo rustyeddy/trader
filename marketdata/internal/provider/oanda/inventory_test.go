@@ -471,3 +471,127 @@ func TestInspect_MultipleDuplicateTimesSorted(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 5, 1, 1, 0, 0, 0, time.UTC), p.DuplicateTimes[0])
 	assert.Equal(t, time.Date(2020, 5, 1, 3, 0, 0, 0, time.UTC), p.DuplicateTimes[1])
 }
+
+// --- Path-layout verification (review finding) ---
+
+// A file nested inside an unrelated subtree beneath root -- for example
+// a "backup" directory sitting alongside the real pair directories --
+// must not be accepted as an authoritative partition merely because its
+// own file name happens to parse.
+func TestInspect_NestedBackupTreeSkipped(t *testing.T) {
+	root := t.TempDir()
+	buildArchive(t, root)
+
+	nested := root + "/backup/EURUSD/2020/05"
+	writeFile(t, nested, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	for _, p := range inv.Partitions {
+		if p.Symbol == "EURUSD" && p.Interval == RawH1 && p.Year == 2020 && p.Month == time.May {
+			assert.NotContains(t, p.Path, "backup", "the nested backup copy must not be treated as the authoritative partition")
+		}
+	}
+
+	var found *SkippedEntry
+	for i, s := range inv.Skipped {
+		if s.Path == filepath.Join(nested, "EURUSD-2020-05-h1.csv") {
+			found = &inv.Skipped[i]
+		}
+	}
+	require.NotNil(t, found, "the nested backup file must be reported as skipped")
+	assert.ErrorIs(t, found.Reason, ErrMalformedData)
+}
+
+// A file whose own name parses to one partition but sits under a
+// directory naming a *different* pair/year/month must not be silently
+// accepted under the file name's identity: the directory placement
+// disagreeing with the file name is itself a corruption signal.
+func TestInspect_MisplacedFileSkipped(t *testing.T) {
+	root := t.TempDir()
+	buildArchive(t, root)
+
+	// Filed under USDJPY/2021/06, but named as an EURUSD 2020-05 file.
+	misplacedDir := root + "/USDJPY/2021/06"
+	writeFile(t, misplacedDir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	for _, p := range inv.Partitions {
+		if p.Symbol == "USDJPY" && p.Year == 2021 && p.Month == time.June {
+			t.Fatalf("misplaced file must not become a USDJPY 2021-06 partition: %+v", p)
+		}
+	}
+
+	var found *SkippedEntry
+	for i, s := range inv.Skipped {
+		if s.Path == filepath.Join(misplacedDir, "EURUSD-2020-05-h1.csv") {
+			found = &inv.Skipped[i]
+		}
+	}
+	require.NotNil(t, found, "the misplaced file must be reported as skipped")
+	assert.ErrorIs(t, found.Reason, ErrMalformedData)
+}
+
+func TestInspect_WrongDepthBeneathRootSkipped(t *testing.T) {
+	root := t.TempDir()
+	// Only two path components beneath root, not the required three.
+	writeFile(t, root+"/EURUSD", "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	assert.Empty(t, inv.Partitions)
+	require.Len(t, inv.Skipped, 1)
+	assert.ErrorIs(t, inv.Skipped[0].Reason, ErrMalformedData)
+}
+
+func TestInspect_DirectoryYearMismatchSkipped(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2021/05" // directory year 2021, file name year 2020
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	assert.Empty(t, inv.Partitions)
+	require.Len(t, inv.Skipped, 1)
+	assert.ErrorIs(t, inv.Skipped[0].Reason, ErrMalformedData)
+}
+
+func TestInspect_DirectoryMonthMismatchSkipped(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2020/06" // directory month 06, file name month 05
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 9, 0, 0, 0, time.UTC), true))
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	assert.Empty(t, inv.Partitions)
+	require.Len(t, inv.Skipped, 1)
+	assert.ErrorIs(t, inv.Skipped[0].Reason, ErrMalformedData)
+}
+
+// A valid header followed by a data row that fails to parse must still
+// classify as Malformed, exercised through the shared in-memory
+// (newReaderFromBytes-backed) parse path rather than a bad header.
+func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2020/05"
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+"not-a-valid-row-at-all\n")
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+
+	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.May)
+	assert.Equal(t, PartitionStatusMalformed, p.Status)
+	assert.ErrorIs(t, p.Err, ErrMalformedData)
+}

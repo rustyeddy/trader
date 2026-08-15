@@ -193,6 +193,14 @@ func TestOpenBadFileName(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// newReaderFromBytes resolves its own metadata from path independently
+// of any caller-side check, the same way Open does; a bad name is
+// rejected the same way regardless of entry point.
+func TestNewReaderFromBytesBadFileName(t *testing.T) {
+	_, err := newReaderFromBytes("not-a-valid-name.csv", []byte("irrelevant"))
+	assert.Error(t, err)
+}
+
 func TestOpenMissingFile(t *testing.T) {
 	// A well-formed, in-scope name that does not exist on disk.
 	_, err := Open(fixture("EURUSD-1999-01-h1.csv"))

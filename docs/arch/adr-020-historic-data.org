@@ -222,7 +222,31 @@ Backup/save trees that mirror the raw archive's own =PAIR/YYYY/MM=
 shape (confirmed to exist in practice, alongside the real archive) can
 never be mistaken for it: =Inspect= never searches for =root=, only ever
 descending from the exact directory the caller supplies, so a sibling
-tree elsewhere on disk is simply never visited.
+tree elsewhere on disk is simply never visited.  A design-review comment
+on the PR caught a second, subtler version of the same risk: nothing
+originally stopped a backup/save subtree *nested inside* =root=, or a
+file simply filed under the wrong pair/year/month directory, from being
+silently accepted as authoritative — =parsePathMeta= only ever looks at
+a file's own name, never where it was actually found.  Fixed by
+=verifyPathLayout=: every candidate file's path relative to =root= must
+be exactly =SYMBOL/YYYY/MM/<filename>=, with those three directory
+components agreeing with what the file name itself resolves to, or the
+file is recorded as skipped (=ErrMalformedData=) rather than
+inventoried.  Re-run against the real archive after this fix with
+identical results (24,960 OK, 0 skipped-by-mistake), confirming it
+rejects nothing legitimate.
+
+A second review round (Copilot) found =inspectFile= reading each
+partition's bytes twice — once to fingerprint, once via =ReadFile= to
+parse — and pointed out that the second read's own OS-level failures
+(a file vanishing between the two reads) would be misclassified as
+=PartitionStatusMalformed= rather than =PartitionStatusUnreadable=.
+Both are fixed together: the reader gained
+=newReaderFromBytes(path, data)=, letting =inspectFile= read a
+partition's bytes exactly once, fingerprint them directly, and parse
+records from that same in-memory copy.  With only one read left, there
+is no second filesystem access that could produce the misclassification
+at all.
 
 Full-archive inspection against a real, multi-decade archive is
 operator-run, not part of normal CI: it lives behind the

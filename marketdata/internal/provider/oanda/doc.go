@@ -83,7 +83,12 @@
 // writes, renames, or deletes anything, and never searches for its root
 // — a sibling tree sharing the same PAIR/YYYY/MM shape (a candles backup
 // or save tree, for example) is only ever seen if the caller mistakenly
-// points Inspect at it directly.
+// points Inspect at it directly. Nor can such a tree, or a misplaced
+// file, be mistaken for the archive by being nested inside root:
+// verifyPathLayout requires every candidate file's path relative to root
+// to be exactly SYMBOL/YYYY/MM/<filename>, agreeing with what the file
+// name itself resolves to, or the file is recorded as skipped rather
+// than inventoried.
 //
 // Inspect does not judge whether a bar missing from a present partition
 // reflects a routine market closure or genuine data loss: that needs

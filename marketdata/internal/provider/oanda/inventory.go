@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
@@ -154,7 +155,13 @@ type Inventory struct {
 // candles backup or save tree, for example — is therefore never seen
 // unless the caller mistakenly points root at it directly: Inspect only
 // ever descends from the root it is given, and never walks upward or
-// sideways to find one.
+// sideways to find one. Nor can such a tree be mistaken for the real
+// archive by being nested *inside* root (a backup subtree parallel to
+// the pair directories, or a stray file filed under the wrong
+// pair/year/month directory): every candidate file's path relative to
+// root must itself be exactly SYMBOL/YYYY/MM/<filename>, agreeing with
+// what the file name resolves to, or it is recorded as skipped rather
+// than inventoried as a partition — see verifyPathLayout.
 //
 // A file that cannot be opened, or whose rows fail to parse, is recorded
 // in the returned Inventory with a non-OK PartitionStatus and Err rather
@@ -182,7 +189,7 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 			return nil
 		}
 
-		partition, skipped := inspectFile(ctx, path)
+		partition, skipped := inspectFile(ctx, root, path)
 		if skipped != nil {
 			inv.Skipped = append(inv.Skipped, *skipped)
 			return nil
@@ -203,13 +210,23 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 // inspectFile inventories one candidate file. It returns either a
 // Partition (possibly with a non-OK Status) or a non-nil *SkippedEntry,
 // never both.
-func inspectFile(ctx context.Context, path string) (Partition, *SkippedEntry) {
+func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEntry) {
 	meta, _, err := parsePathMeta(path)
 	if err != nil {
 		// ErrInstrumentOutOfScope, ErrUnsupportedInterval, and a
 		// malformed file name (ErrMalformedData, no parts to resolve at
 		// all) are all "this file is not a partition Inspect can
 		// inventory," distinguished from each other only by Reason.
+		return Partition{}, &SkippedEntry{Path: path, Reason: err}
+	}
+	if err := verifyPathLayout(root, path, meta); err != nil {
+		// A file name can resolve to a perfectly valid partition on its
+		// own and still not belong where it was found: nested inside an
+		// unrelated backup/save subtree beneath root, or filed under the
+		// wrong pair/year/month directory entirely. parsePathMeta alone
+		// only ever looks at the file's own name, so this is the check
+		// that actually stops such a file from being silently accepted
+		// as authoritative.
 		return Partition{}, &SkippedEntry{Path: path, Reason: err}
 	}
 
@@ -222,15 +239,24 @@ func inspectFile(ctx context.Context, path string) (Partition, *SkippedEntry) {
 		Path:       path,
 	}
 
-	fingerprint, hashErr := fileFingerprint(path)
-	if hashErr != nil {
+	// Read the file's bytes exactly once: fingerprint them directly, and
+	// parse records from the same in-memory copy via
+	// newReaderFromBytes rather than reopening and re-reading the file a
+	// second time through ReadFile(path). This also means a file that
+	// vanishes or becomes unreadable between listing and reading can
+	// only ever surface here, as PartitionStatusUnreadable — there is no
+	// second filesystem access left that could instead misreport it as
+	// PartitionStatusMalformed.
+	data, err := os.ReadFile(path)
+	if err != nil {
 		p.Status = PartitionStatusUnreadable
-		p.Err = hashErr
+		p.Err = err
 		return p, nil
 	}
-	p.Fingerprint = fingerprint
+	sum := sha256.Sum256(data)
+	p.Fingerprint = "sha256:" + hex.EncodeToString(sum[:])
 
-	_, records, readErr := ReadFile(ctx, path)
+	records, readErr := readRecordsFromBytes(ctx, path, data)
 	if readErr != nil {
 		p.Status = PartitionStatusMalformed
 		p.Err = readErr
@@ -261,19 +287,63 @@ func inspectFile(ctx context.Context, path string) (Partition, *SkippedEntry) {
 	return p, nil
 }
 
-// fileFingerprint returns an algorithm-qualified sha256 hash of path's
-// bytes, in marketdata.Manifest's RawFingerprint form.
-func fileFingerprint(path string) (string, error) {
-	f, err := os.Open(path)
+// verifyPathLayout checks that path, relative to root, is exactly
+// SYMBOL/YYYY/MM/<filename> and that those three directory components
+// agree with meta — itself resolved from path's file name alone by
+// parsePathMeta, which never looks at directory structure. This is what
+// actually prevents a nested backup/save subtree, or a file simply filed
+// under the wrong pair/year/month directory, from being accepted as an
+// authoritative partition merely because its own file name happens to
+// parse: both would otherwise produce a valid Meta while disagreeing
+// with where the file was actually found.
+func verifyPathLayout(root, path string, meta Meta) error {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("%w: %s: not under root %s: %v", ErrMalformedData, path, root, err)
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) != 4 {
+		return fmt.Errorf("%w: %s: expected SYMBOL/YYYY/MM/filename beneath root, got %d path component(s)",
+			ErrMalformedData, path, len(parts))
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	dirSymbol, dirYear, dirMonth := parts[0], parts[1], parts[2]
+	if dirSymbol != meta.Symbol {
+		return fmt.Errorf("%w: %s: directory %q disagrees with file name instrument %q",
+			ErrMalformedData, path, dirSymbol, meta.Symbol)
+	}
+	if wantYear := fmt.Sprintf("%04d", meta.Year); dirYear != wantYear {
+		return fmt.Errorf("%w: %s: directory year %q disagrees with file name year %q",
+			ErrMalformedData, path, dirYear, wantYear)
+	}
+	if wantMonth := fmt.Sprintf("%02d", int(meta.Month)); dirMonth != wantMonth {
+		return fmt.Errorf("%w: %s: directory month %q disagrees with file name month %q",
+			ErrMalformedData, path, dirMonth, wantMonth)
+	}
+	return nil
+}
+
+// readRecordsFromBytes parses path's records from data, already read
+// into memory by the caller, via newReaderFromBytes — avoiding a second
+// disk read of a file inspectFile has already fingerprinted.
+func readRecordsFromBytes(ctx context.Context, path string, data []byte) ([]Record, error) {
+	r, err := newReaderFromBytes(path, data)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var records []Record
+	for {
+		rec, err := r.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 func sortPartitions(ps []Partition) {
