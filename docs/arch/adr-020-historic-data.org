@@ -553,31 +553,56 @@ Settled by issue #76 (branch =feature/76-normalize-oanda-bars=):
 functions living directly in the =marketdata= package (not a new
 =marketdata/internal/...= package — see below for why), convert
 =oanda.Record= values into =Bar= candidates and classify each into one
-of four =RecordOutcome= values:
+of four =recordOutcome= values (also unexported — see the review note
+below for why):
 
-- =RecordOutcomeAccepted= — a valid, provider-complete, correctly
+- =recordOutcomeAccepted= — a valid, provider-complete, correctly
   ordered and interval-aligned =Bar=.
-- =RecordOutcomeIncomplete= — a structurally valid =Bar=, but OANDA's
+- =recordOutcomeIncomplete= — a structurally valid =Bar=, but OANDA's
   own =complete= flag was false; never treated as final and never
   persisted as a canonical =Bar= (see the note above).
-- =RecordOutcomeSuspicious= — an ask below its corresponding bid at some
+- =recordOutcomeSuspicious= — an ask below its corresponding bid at some
   OHLC corner, caught by =num.Price.Sub= reporting =num.ErrNegative=
   before a candidate =Bar= can even be built.  A crossed market is a
   real data anomaly the raw CSV format does not rule out on its own,
   distinct from an otherwise-well-formed =Bar= shape that fails
-  validation.
-- =RecordOutcomeRejected= — an impossible =Bar= shape (=Bar.Validate=,
-  from #72, reused as-is — not reimplemented), a timestamp that
-  duplicates or precedes the previous record in the same sequence, or a
-  timestamp that does not land on =Calendar.Bar='s computed interval
-  boundary.
+  validation, and distinct from a spread computation that fails for any
+  other reason (checked-arithmetic overflow, say) — a design-review
+  comment on the PR caught the first draft classifying every
+  =spreadSummary= error =Suspicious=, which would have mislabeled a pure
+  computation failure as a market anomaly.  =spreadSummary= now reports
+  whether a failure was specifically a crossed corner, and only that
+  case is =Suspicious=; anything else is =Rejected=.
+- =recordOutcomeRejected= — an impossible =Bar= shape (=Bar.Validate=,
+  from #72, reused as-is — not reimplemented), a non-crossed spread
+  computation failure, a timestamp that duplicates *any* earlier record
+  in the same sequence (not only the immediately preceding one — another
+  review fix; the first draft's =prevTime=-only comparison missed a
+  timestamp repeating an older, non-adjacent record) or precedes the
+  previous record, or a timestamp that does not land on
+  =Calendar.Bar='s computed interval boundary.
 
 =normalizeOANDASequence= processes one partition's records in file
-order and returns exactly one =NormalizedRecord= per input record, in
+order and returns exactly one =normalizedRecord= per input record, in
 that order: nothing is silently dropped, repaired, or coalesced, and a
 rejected record never breaks validation of the records after it — each
-record's ordering/duplicate check compares against the previous
-record's raw =Time= regardless of that record's own outcome.
+record's ordering/duplicate check compares against every record seen so
+far in the actual input sequence, not just the previously accepted
+ones.  A =Calendar.Bar= failure while checking alignment is treated as
+its own kind of problem, not folded into =errRecordMisaligned=: a
+review comment pointed out that a calendar unable to evaluate a
+boundary is not evidence the timestamp is misaligned, so
+=normalizeOANDASequence= now aborts with that error directly (a
+sequence-level failure) rather than misclassifying the record.
+
+*Why =recordOutcome=/=normalizedRecord=/the sentinels are unexported*:
+a review comment on the PR flagged that exporting them would expand and
+stabilize the public =marketdata= API for values no external caller can
+currently obtain, since both normalization entry points are themselves
+unexported.  Should =Manager= later need an operator-facing
+normalization report, that is the right time to design a deliberate,
+provider-neutral public result contract — not to promote these internal
+types as-is.
 
 *Why this lives directly in the =marketdata= package*: the normalizer
 must both consume =oanda.Record=/=oanda.RawInterval= (importable only

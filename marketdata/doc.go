@@ -119,14 +119,20 @@
 // normalizeOANDARecord and normalizeOANDASequence (issue #76, ADR-020)
 // are this package's raw-to-canonical pipeline for OANDA: exact
 // normalization (never through float64), then Bar.Validate, then
-// classification into one of four RecordOutcome values — Accepted,
-// Incomplete (OANDA's own complete flag was false), Suspicious (a
-// crossed bid/ask, caught before a candidate Bar can even be built), or
-// Rejected (an impossible Bar shape, a duplicate or out-of-order
-// timestamp, or a timestamp that does not align to the partition's
-// interval boundary). AvgSpread and MaxSpread follow the formula
-// ADR-020 settled on: the mean and max of the four corner (ask - bid)
-// spreads. Both functions are unexported — reachable only from within
-// this package, the same boundary #75's archive inventory already
-// established — since no oanda-native type is meant to escape it.
+// classification into one of four recordOutcome values — accepted,
+// incomplete (OANDA's own complete flag was false), suspicious (a
+// crossed bid/ask, caught before a candidate Bar can even be built and
+// distinguished from any other spread-computation failure, which is
+// rejected instead), or rejected (an impossible Bar shape, a duplicate
+// or out-of-order timestamp, or a timestamp that does not align to the
+// partition's interval boundary). A Calendar failure while checking
+// alignment is not itself a misaligned-timestamp verdict — it means
+// alignment could not be evaluated — so normalizeOANDASequence aborts
+// with that error rather than folding it into a per-record outcome.
+// AvgSpread and MaxSpread follow the formula ADR-020 settled on: the
+// mean and max of the four corner (ask - bid) spreads. Every type and
+// function here is unexported — reachable only from within this
+// package, the same boundary #75's archive inventory already
+// established — since no oanda-native type is meant to escape it and
+// there is no public consumer yet for a normalization result.
 package marketdata
