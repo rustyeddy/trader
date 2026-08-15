@@ -2,6 +2,7 @@ package oanda
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -57,13 +58,37 @@ func Open(path string) (*Reader, error) {
 		return nil, err
 	}
 
-	r := &Reader{path: path, meta: meta, file: f, scanner: bufio.NewScanner(f)}
+	return newReader(path, meta, token, f, f)
+}
+
+// newReaderFromBytes builds a Reader over data already read into memory,
+// resolving path's metadata the same way Open does. It exists for a
+// caller (inventory.go's Inspect) that already has a partition's raw
+// bytes for another purpose — fingerprinting them — and would otherwise
+// have to read the same file from disk a second time just to parse it.
+// There is no file for Close to release; Close is a no-op beyond marking
+// the Reader closed.
+func newReaderFromBytes(path string, data []byte) (*Reader, error) {
+	meta, token, err := parsePathMeta(path)
+	if err != nil {
+		return nil, err
+	}
+	return newReader(path, meta, token, bytes.NewReader(data), nil)
+}
+
+// newReader is Open and newReaderFromBytes's shared constructor: it wraps
+// src in a Reader, consuming its schema and column-header lines. file is
+// non-nil only when there is an underlying *os.File Close must release.
+func newReader(path string, meta Meta, token string, src io.Reader, file *os.File) (*Reader, error) {
+	r := &Reader{path: path, meta: meta, file: file, scanner: bufio.NewScanner(src)}
 	// m1 partitions can be a few MB; grow the scanner's line budget well past
 	// bufio's 64 KiB default even though rows are short, to be safe.
 	r.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if err := r.consumeHeader(meta, token); err != nil {
-		_ = f.Close()
+		if file != nil {
+			_ = file.Close()
+		}
 		return nil, err
 	}
 	return r, nil
@@ -136,6 +161,9 @@ func (r *Reader) Close() error {
 		return nil
 	}
 	r.closed = true
+	if r.file == nil {
+		return nil
+	}
 	return r.file.Close()
 }
 

@@ -69,4 +69,41 @@
 // preserved archive (see RawInterval); W1 is a derived interval in M2,
 // built by resampling canonical D1, not synchronized from OANDA
 // directly, so no weeklyAlignment parameter is pinned here.
+//
+// # Archive inventory and integrity inspection
+//
+// Inspect (issue #75, ADR-020) walks a raw archive rooted at a caller-
+// supplied directory and returns a deterministic Inventory: every
+// discovered partition file's identity, PartitionStatus (OK, Unreadable,
+// or Malformed), row/duplicate/incomplete-row counts, observed first and
+// last record time, and a "sha256:<hex>" content fingerprint in the form
+// marketdata.Manifest's RawFingerprint expects; every file it
+// deliberately did not inventory, and why (SkippedEntry); and every hole
+// in an otherwise-populated month sequence (MonthGap). Inspect never
+// writes, renames, or deletes anything, and never searches for its root
+// — a sibling tree sharing the same PAIR/YYYY/MM shape (a candles backup
+// or save tree, for example) is only ever seen if the caller mistakenly
+// points Inspect at it directly. Nor can such a tree, or a misplaced
+// file, be mistaken for the archive by being nested inside root:
+// verifyPathLayout requires every candidate file's path relative to root
+// to be exactly SYMBOL/YYYY/MM/<filename>, agreeing with what the file
+// name itself resolves to, or the file is recorded as skipped rather
+// than inventoried.
+//
+// Inspect does not judge whether a bar missing from a present partition
+// reflects a routine market closure or genuine data loss: that needs
+// trading-calendar knowledge, and this package does not import the root
+// marketdata package (see above) precisely so Manager can wire it
+// without a cycle. MonthGap is calendar-blind by design; calendar-aware,
+// row-level completeness belongs to issue #79's coverage engine,
+// operating on canonical data where that knowledge is available.
+//
+// Full-archive inspection against a real archive is operator-run, not
+// part of normal CI: it lives behind the fullarchive build tag
+// (inventory_fullarchive_test.go), and its target is a local constant an
+// operator edits by hand rather than an environment variable — domain
+// code under marketdata/ must not read the environment or flags
+// (config/arch_test.go enforces this mechanically), and this package's
+// own internal/ visibility means the test cannot be relocated to the
+// exempt test/ tree either.
 package oanda
