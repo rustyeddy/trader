@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -171,8 +172,10 @@ type Inventory struct {
 // subdirectories aborts Inspect entirely, since there is nothing
 // meaningful to report about entries Inspect could not even enumerate.
 //
-// Inspect honors ctx cancellation, checked between files, so a large
-// full-archive run can be stopped promptly. It performs no long-running
+// Inspect honors ctx cancellation both between files and while one is
+// being parsed, so a large full-archive run can be stopped promptly and
+// a cancellation arriving mid-file is never misreported as that file
+// being malformed (see inspectFile). It performs no long-running
 // background work and starts no goroutines; it returns once the walk
 // completes, fails, or ctx is done.
 func Inspect(ctx context.Context, root string) (Inventory, error) {
@@ -189,7 +192,13 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 			return nil
 		}
 
-		partition, skipped := inspectFile(ctx, root, path)
+		partition, skipped, fatalErr := inspectFile(ctx, root, path)
+		if fatalErr != nil {
+			// Only ctx cancellation/deadline reaches here (see
+			// inspectFile): archive corruption is never fatal to the
+			// walk, but the caller asking Inspect to stop is.
+			return fatalErr
+		}
 		if skipped != nil {
 			inv.Skipped = append(inv.Skipped, *skipped)
 			return nil
@@ -208,16 +217,26 @@ func Inspect(ctx context.Context, root string) (Inventory, error) {
 }
 
 // inspectFile inventories one candidate file. It returns either a
-// Partition (possibly with a non-OK Status) or a non-nil *SkippedEntry,
-// never both.
-func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEntry) {
+// Partition (possibly with a non-OK Status), a non-nil *SkippedEntry, or
+// a non-nil fatal error — never more than one of the three.
+//
+// The fatal return is reserved for ctx being cancelled or timing out
+// while inspectFile was itself doing work (as opposed to Inspect's own
+// per-file check in its WalkDir callback, which only ever catches
+// cancellation observed *between* files). Without distinguishing it,
+// cancellation arriving mid-parse would flow through the same path as a
+// genuine parse failure and mislabel the partition
+// PartitionStatusMalformed instead of stopping the walk — archive
+// corruption must never be fatal to Inspect, but the caller asking it to
+// stop must be.
+func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEntry, error) {
 	meta, _, err := parsePathMeta(path)
 	if err != nil {
 		// ErrInstrumentOutOfScope, ErrUnsupportedInterval, and a
 		// malformed file name (ErrMalformedData, no parts to resolve at
 		// all) are all "this file is not a partition Inspect can
 		// inventory," distinguished from each other only by Reason.
-		return Partition{}, &SkippedEntry{Path: path, Reason: err}
+		return Partition{}, &SkippedEntry{Path: path, Reason: err}, nil
 	}
 	if err := verifyPathLayout(root, path, meta); err != nil {
 		// A file name can resolve to a perfectly valid partition on its
@@ -227,7 +246,7 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 		// only ever looks at the file's own name, so this is the check
 		// that actually stops such a file from being silently accepted
 		// as authoritative.
-		return Partition{}, &SkippedEntry{Path: path, Reason: err}
+		return Partition{}, &SkippedEntry{Path: path, Reason: err}, nil
 	}
 
 	p := Partition{
@@ -251,16 +270,19 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 	if err != nil {
 		p.Status = PartitionStatusUnreadable
 		p.Err = err
-		return p, nil
+		return p, nil, nil
 	}
 	sum := sha256.Sum256(data)
 	p.Fingerprint = "sha256:" + hex.EncodeToString(sum[:])
 
 	records, readErr := readRecordsFromBytes(ctx, path, data)
 	if readErr != nil {
+		if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) {
+			return Partition{}, nil, readErr
+		}
 		p.Status = PartitionStatusMalformed
 		p.Err = readErr
-		return p, nil
+		return p, nil, nil
 	}
 
 	p.Status = PartitionStatusOK
@@ -284,7 +306,7 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 		}
 	}
 	sort.Slice(p.DuplicateTimes, func(i, j int) bool { return p.DuplicateTimes[i].Before(p.DuplicateTimes[j]) })
-	return p, nil
+	return p, nil, nil
 }
 
 // verifyPathLayout checks that path, relative to root, is exactly

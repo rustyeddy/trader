@@ -595,3 +595,47 @@ func TestInspect_MalformedDataRowAfterValidHeader(t *testing.T) {
 	assert.Equal(t, PartitionStatusMalformed, p.Status)
 	assert.ErrorIs(t, p.Err, ErrMalformedData)
 }
+
+// --- Context cancellation during file parsing (review finding) ---
+
+// A context cancelled before inspectFile parses a file's rows must
+// propagate as cancellation, not be misclassified as
+// PartitionStatusMalformed. This exercises the same failure mode
+// Inspect's own per-file WalkDir pre-check cannot catch: cancellation
+// observed by Reader.Next from *inside* inspectFile's own work, not
+// between files.
+func TestInspectFile_ContextCancelledDuringParseIsFatal(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2020/05"
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p, skipped, fatalErr := inspectFile(ctx, root, filepath.Join(dir, "EURUSD-2020-05-h1.csv"))
+	require.ErrorIs(t, fatalErr, context.Canceled)
+	assert.Zero(t, p, "no partition result when inspectFile fails fatally")
+	assert.Nil(t, skipped, "cancellation is not a skip reason")
+}
+
+// Companion to TestInspectFile_ContextCancelledDuringParseIsFatal, at
+// the Inspect level: proves the fatal error inspectFile now returns
+// actually propagates all the way out through WalkDir and Inspect's own
+// error wrapping as context.Canceled, and that Inspect never reports a
+// successful Inventory containing a bogus Malformed partition when that
+// happens.
+func TestInspect_ContextCancelledDuringParsePropagates(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2020/05"
+	writeFile(t, dir, "EURUSD-2020-05-h1.csv",
+		fmtHeader("EURUSD", 2020, 5)+h1Row(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), true))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	inv, err := Inspect(ctx, root)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, inv.Partitions)
+	assert.Empty(t, inv.Skipped)
+}

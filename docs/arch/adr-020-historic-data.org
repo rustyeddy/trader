@@ -248,6 +248,24 @@ records from that same in-memory copy.  With only one read left, there
 is no second filesystem access that could produce the misclassification
 at all.
 
+A third review round found one more edge case in that same fix:
+=readRecordsFromBytes= can itself return =context.Canceled= or
+=context.DeadlineExceeded= from =Reader.Next= when =ctx= is cancelled
+while =inspectFile= is actively parsing a file's rows — and that path
+was still unconditionally classified =PartitionStatusMalformed=, exactly
+the same misclassification bug in a different guise.  This one could not
+be caught by =Inspect='s own per-file =ctx.Err()= pre-check in its
+=WalkDir= callback, since that check only ever observes cancellation
+/between/ files; cancellation arriving while one file is being parsed
+has no earlier checkpoint to catch it, and if that file happens to be
+the last one =WalkDir= visits, there is no later checkpoint either —
+=Inspect= would have returned a superficially successful =Inventory=
+containing a bogus =Malformed= partition.  Fixed by giving =inspectFile=
+a third, fatal-error return distinct from its =Partition=/=SkippedEntry=
+results: a context error is propagated as fatal and aborts the walk,
+while every other parse failure remains ordinary archive corruption that
+never stops =Inspect=.
+
 Full-archive inspection against a real, multi-decade archive is
 operator-run, not part of normal CI: it lives behind the
 =fullarchive= build tag
