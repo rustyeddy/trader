@@ -444,6 +444,65 @@ The current path will be something like it is now
 Furture data format such as Parquet if we implement will be determined
 when it is implemented
 
+** DONE Canonical CSV Bar store and atomic publication
+Settled by issue #77 (branch =feature/77-canonical-csv-store=):
+=canonicalCSVStore=, living directly in the =marketdata= package for
+the same import-cycle reason as #76's normalizer (it needs both
+=Bar=/=BarSet=/=Manifest= and filesystem/CSV mechanics; a separate
+=marketdata/internal/store= package importing root =marketdata= would
+recreate the cycle once wired into =Manager=), implements the derived
+tree exactly as this section already specifies:
+
+#+BEGIN_EXAMPLE
+root/provider/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<tf>.csv        (data)
+root/provider/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<tf>.manifest   (paired manifest)
+#+END_EXAMPLE
+
+=SYMBOL= is caller-supplied (a =partitionKey= field alongside
+=instrument.ID=), not derived from =instrument.ID= — there is no
+reverse mapping from Trader's canonical identity back to a display
+symbol, the same reason =oanda.Meta= already carries both.  Neither
+path ever encodes a revision, per the existing principle above ("the
+version identifier ... does not appear in the path"); the manifest
+file, and a schema-comment line in the data file (mirroring the raw
+reader's own convention, cross-checked on read), are where dataset
+identity and version information actually live.
+
+=Manager='s own =barStore= interface (from #71's skeleton, previously
+just a diagnostic =root()= method) now names the real contract:
+=publish(ctx, key, Manifest, BarSet) error= and
+=load(ctx, key) (Manifest, BarSet, error)=.  Both are exercised by a
+reusable, implementation-agnostic contract-test function
+(=testBarStoreContract=) parameterized over a =barStore= constructor,
+so a later Parquet implementation can run the identical suite against
+its own constructor rather than a copy.
+
+**** Atomic publication
+=os.Rename= is atomic for one file on the same filesystem, but not
+across two — and the path-never-encodes-a-revision rule above rules
+out the usual revision-suffixed-filename-plus-pointer-file trick that
+would otherwise sidestep that.  =publish= writes the new data and
+manifest to temporary names, then renames data into place followed by
+manifest into place — manifest last, deliberately.  A reader always
+calls =Manifest.Matches(bs)= (#73) before trusting a loaded pair
+(=load= does this itself), which makes the narrow window between the
+two renames safe: a reader landing there sees new data still paired
+with the old manifest, which fails =Matches= and reads as "not
+currently published," never as corrupt data silently served as valid.
+If =publish= is cancelled or fails before either rename — including
+while still writing the temporary files — the previously published
+pair is completely untouched.  This is a deliberate, documented
+trade-off, not an oversight: true multi-file atomicity needs either a
+path-embedded revision (ruled out above) or a directory-level swap (a
+layout change this issue's scope does not call for), and "where the
+filesystem permits" in the issue's own acceptance criteria already
+anticipates exactly this kind of limit.
+
+**** Non-goals
+Building or resampling a =BarSet=/=Manifest= from raw records is #76's
+job; this issue only ever persists and re-reads an already-valid pair.
+Coverage/gap reasoning over what a store *should* contain remains #79's.
+
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted
 

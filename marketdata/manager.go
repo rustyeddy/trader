@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -108,12 +109,22 @@ type provider interface {
 	name() string
 }
 
-// barStore is the narrow internal contract for reading and writing
-// canonical bars. It is intentionally unexported and minimal in this
-// skeleton, for the same reason as provider.
+// barStore is the internal contract for reading and writing canonical
+// Bar/Manifest pairs. canonicalCSVStore (issue #77, ADR-020) is its one
+// implementation today; the interface exists so a later implementation
+// (a Parquet store, say) can be substituted without changing Manager or
+// its wiring, and so the store's own contract tests can run against any
+// implementation satisfying it.
 type barStore interface {
 	// root reports the store's configured root, for diagnostics only.
 	root() string
+	// publish writes m and bs as the current revision for key,
+	// atomically per the guarantee documented on
+	// canonicalCSVStore.publish.
+	publish(ctx context.Context, key partitionKey, m Manifest, bs BarSet) error
+	// load reads the current published (Manifest, BarSet) pair for key,
+	// verifying they still Match before returning either.
+	load(ctx context.Context, key partitionKey) (Manifest, BarSet, error)
 }
 
 // ErrInvalidConfig is returned (wrapped) by New when a required dependency

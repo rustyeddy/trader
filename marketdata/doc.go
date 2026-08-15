@@ -135,4 +135,21 @@
 // package, the same boundary #75's archive inventory already
 // established — since no oanda-native type is meant to escape it and
 // there is no public consumer yet for a normalization result.
+//
+// # The canonical CSV store
+//
+// canonicalCSVStore (issue #77, ADR-020) persists a published
+// (Manifest, BarSet) pair as two files — data and manifest — under
+// root/provider/SYMBOL/YYYY/MM, ADR-020's derived-tree convention. It
+// implements the small unexported barStore interface Manager's store
+// field already names, so a later implementation (a Parquet store, say)
+// can be substituted without changing Manager. publish writes both
+// files to temporary names, then renames data into place followed by
+// manifest into place — manifest last, deliberately: a reader always
+// calls Manifest.Matches before trusting a loaded pair, so the narrow
+// window between the two renames is detected, never silently served, as
+// invalid. Revision never appears in the path, per ADR-020; the manifest
+// file, and a schema line in the data file, are where dataset identity
+// and version information actually live. Every type and function here
+// is unexported, for the same reason as the normalizer above.
 package marketdata
