@@ -363,6 +363,12 @@ Consequences:
 DM will handle all data requests, caching data as it is programmed.
 The cache cleaning protocol will be defined during implementation.
 
+Settled by issue #78 (branch =feature/78-bar-queries-cache=): see "Bar
+queries and Manager-owned memory cache" below for the concrete design —
+an unexported =barCache=, owned only by =Manager=, with simple
+capacity-bounded FIFO eviction and an =invalidate= hook for the future
+publish path.
+
 ** DONE Store root will be a configuration item
 * DONE Determine the marketdata.Bar structure
 Settled by issue #72 (branch =feature/72-marketdata-bar=).
@@ -584,6 +590,207 @@ original revision remains fully loadable in every case.
 Building or resampling a =BarSet=/=Manifest= from raw records is #76's
 job; this issue only ever persists and re-reads an already-valid pair.
 Coverage/gap reasoning over what a store *should* contain remains #79's.
+
+** DONE Bar queries and Manager-owned memory cache
+Settled by issue #78 (branch =feature/78-bar-queries-cache=): the
+read-only historical =Bar= retrieval path through public
+=marketdata.Manager=, backed by the internal canonical store (#77) and a
+new =Manager=-owned memory cache.
+
+- =BarQuery{Instrument, Interval, Range}= names the data a caller wants
+  — an instrument, an interval, a half-open =[Start, End)= range — never
+  how to fetch it. Its own =validate= method reports a wrapped
+  =ErrInvalidQuery= for a zero instrument, an invalid interval, or a
+  malformed range.
+- =Manager.Bars(ctx, query)= resolves =query.Instrument= to this
+  Manager's provider-native =Listing= through the configured
+  =instrument.Resolver= (ADR-016), loads every partition that could
+  plausibly hold data for the query (see "Proving coverage" below),
+  filters every returned =Bar= back down to the query's exact range,
+  and returns a =*BarReader=. It never downloads, builds, or republishes
+  anything — strictly read-only, matching this issue's own "important
+  constraint."
+- =BarReader= is a fully materialized, in-memory iterator:
+  =Next(ctx) (Bar, io.EOF)=, =Manifests() []Manifest= (one entry per
+  partition the result was assembled from, disclosing provenance), and
+  an idempotent =Close()=. Because =Bars= already loaded and validated
+  every partition before returning, =Next= never itself does I/O; only
+  =Bars= can be slow or fail on missing data. A =nil= =*BarReader= and a
+  =*BarReader= after =Close= both behave as an already-exhausted,
+  closed reader rather than panicking.
+- A query range =Bars= cannot prove full coverage for reports a wrapped
+  =ErrDataUnavailable= naming the uncovered sub-range, and no reader is
+  returned at all — never a reader over a silently partial result. A
+  different load failure (a malformed or corrupted partition file) is
+  deliberately /not/ classified as =ErrDataUnavailable=: the two are
+  different failures — "we have never built this data" versus "the data
+  we have is broken" — and a caller must be able to tell them apart
+  rather than treating both as "go acquire the missing data."
+
+**** The store stays fully private to =marketdata=
+This issue also closed a real gap the M2-03 skeleton left open: because
+=Config.store= is unexported, no composition root outside this package
+could ever set it, so before this issue =New= simply passed that
+always-nil field through, and =Manager= had no way to reach real data in
+production. =New= now builds its own =canonicalCSVStore= from
+=Config.StoreRoot= internally whenever =cfg.store= is unset (the normal
+case for every caller outside this package); =cfg.store= remains
+purely an in-package test seam. No =Config= field, accessor, or return
+value ever exposes the store type, an implementation, or a handle to
+one — the only door in or out of published canonical =Bar= data is
+=Manager.Bars=, for exactly the reason the boundary section above
+already states. =Config.StoreRoot= itself is not new and is not this
+issue's exception to that rule: it is a bare filesystem path string
+supplied at construction, the same category of configuration as
+=Clock=, and it was already documented as "an internal storage concern
+... never exposed through a Manager operation" before this issue.
+
+**** =Config= grows two more required fields
+=Bars= cannot resolve an instrument to a provider symbol without a
+resolver, and cannot know which provider's data it serves without a
+name, so =Config= gains =Resolver instrument.Resolver= and
+=ProviderName string=, both required (empty/nil is a wrapped
+=ErrInvalidConfig=, matching =Clock=/=StoreRoot='s existing pattern).
+=CacheCapacity int= is also added, optional: non-positive selects a
+package-defined default (32 partitions).
+
+**** =barCache=: bounded, FIFO, revision-aware, concurrency-safe
+=barCache= lives in its own file (=cache.go=), unexported, and is
+reachable only as =Manager='s own private field — nothing in =Config=
+can inject or replace it, and no =Manager= method returns it, the same
+invisibility the store itself has. It keys cached
+=(Manifest, BarSet)= pairs by =partitionKey= and evicts the single
+oldest entry once a =put= exceeds capacity — plain FIFO by insertion
+order, not LRU/adaptive: this issue's own non-goals explicitly excluded
+"sophisticated adaptive cache eviction," and refreshing an already-cached
+key's value does not move it to the back of the eviction queue, so a
+frequently-read partition gets no special exemption from eviction. A
+=nil= =*barCache= behaves as an always-miss, no-op cache rather than
+panicking, mirroring =BarReader='s nil-safety.
+
+Revision-awareness is a forward-looking hook, not yet wired to a live
+write path: =invalidate(key)= evicts one key's cached entry, so that
+once =Manager= gains a canonical-build/publish operation, publishing a
+new revision under a key can evict any older revision already sitting in
+memory. No such publish operation exists yet — every operation this
+issue adds is read-only — so =invalidate= is exercised directly by
+tests today; it is the seam that operation will need, not dead code.
+
+A design review on the PR found =barCache='s map and =container/list=
+were entirely unsynchronized, even though =Manager.Bars= is an
+application-service entry point with no documented single-goroutine
+restriction. Every method (=get=/=put=/=invalidate=/=len=) now locks a
+=sync.Mutex= around its state; =TestBarCacheConcurrentAccess= and
+=TestManagerBars_ConcurrentQueries= are the =-race= regressions proving
+it.
+
+The same review found a second hazard one level up: =Manifest.Parent= is
+a pointer, so returning a =Manifest= by value out of =get= (or storing
+one via =put=) shared that pointer between the cache and whatever the
+caller held — a caller mutating =Parent.Revision= on a =Manifest= handed
+back by one query could silently corrupt what a later query, hitting the
+same cached entry, would receive. =cloneManifest= (also in =cache.go=)
+deep-copies =Parent= and is now applied at every ownership boundary that
+crosses out of or into the cache: =barCache.get=, =barCache.put=, and
+=BarReader.Manifests=. =TestBarCacheGetReturnsIndependentManifestClone=,
+=TestBarCachePutClonesManifestFromCaller=, and the end-to-end
+=TestManagerBars_ManifestMutationDoesNotPoisonSubsequentQuery= pin this
+down at all three layers.
+
+**** Proving coverage, not just loading files
+The first draft derived partition keys solely from the UTC calendar
+months a query's range overlaps (=monthPartitionKeys=) and treated
+"every one of those files loaded without error" as proof the query was
+satisfiable. A design review identified two related correctness holes in
+that assumption, both now fixed by the same mechanism:
+
+1. *Silent partial-range success.* Loading a partition file proves
+   nothing about how much of the query's range it actually covers — a
+   manifest's own =Span= can be far narrower than the calendar month it
+   is filed under. The original multi-month test was, on inspection,
+   itself codifying this bug: it asked for a range through April 1 while
+   its March partition's =Span= covered only four hours, and the query
+   still "succeeded," silently returning less data than was requested.
+2. *D1/W1 partition-routing.* The canonical store's own
+   =checkKeyMatchesManifest= (#77) permits a partition's =Manifest.Span=
+   to merely /overlap/, not be contained by, the calendar month it is
+   filed under — deliberately, to allow a session-aligned D1/W1 bar
+   whose session opens in the closing hours of the previous UTC month.
+   That means a bar's observed =Time= can legitimately live in a
+   partition filed under an /adjacent/ calendar month from the one
+   =monthPartitionKeys= would compute for it, and a query entirely
+   within that adjacent month — with no partition file of its own —
+   would previously report =ErrDataUnavailable= even though the data
+   exists, findable only by looking at the neighboring key.
+
+Both are fixed together: =Bars= now loads the core months
+=monthPartitionKeys= identifies /plus/ =boundaryProbeKeys= — the one
+calendar month immediately before the first core month and immediately
+after the last. Every key, core or probe alike, is loaded the same
+tolerant way: a missing file (=os.ErrNotExist=) is not itself an error,
+since most month boundaries have nothing filed at the adjacent key, but
+a file that exists and fails to load (malformed, cancelled context)
+still fails the query immediately. What actually decides success is the
+new =coverageGap= helper: the union of every =Manifest.Span= that was
+found, clipped to the query's range, must cover that range with no gap;
+=coverageGap= reports the first uncovered sub-range otherwise, which
+=Bars= surfaces directly in its =ErrDataUnavailable=. Bars gathered from
+every loaded partition are deduplicated by =Time= and sorted before
+being returned, since a boundary-spillover bar could in principle be
+reachable through more than one loaded partition and the merge across
+files is not otherwise guaranteed sorted.
+
+=TestManagerBars_GapInCoverageReportsErrDataUnavailable= and
+=TestManagerBars_BoundarySpilloverIsFoundViaProbe= (the latter
+reproducing the exact D1 scenario above: a partition filed under April
+whose two bars are dated the last two days of March, queried through a
+range entirely inside March with no March partition ever published) are
+the regression tests for each finding; =TestCoverageGap_*= and
+=TestBoundaryProbeKeys_*=/=TestShiftPartitionKeyMonth_*= test the
+helpers directly.
+
+This remains deliberately narrow — a "does the query's own range have
+proof of coverage" check, not the general coverage/gap catalog issue #79
+owns — and does not attempt session-calendar-aware routing beyond the
+one-month blast radius a D1/W1 bar can plausibly spill across.
+
+**** Conflicting duplicates across overlapping partitions
+Loading both a core and a boundary-probe partition (or, in general, any
+two partitions whose overlap-permitted =Span=s cross) means =Bars= can
+legitimately encounter the same bar =Time= twice. A second review round
+on the boundary-probing fix above caught that the first version resolved
+this the wrong way: deduplicating on =Time= alone silently kept whichever
+partition happened to be processed first, so two partitions disagreeing
+about the same instant's OHLC/spread/tick values — a broken publication
+invariant, not a benign duplicate — would produce a result that
+depended on key iteration order instead of failing loudly.
+
+=Bars= now accepts a repeated =Time= only when the second occurrence is
+byte-for-byte identical to the first (the new =barsEqual= helper,
+comparing every field via =num.Price.Equal= rather than Go's =\=\== so
+it does not depend on =Price='s internal representation being unique per
+value); a repeated =Time= with any differing field is reported as a
+wrapped =ErrInconsistentData= naming the conflicting instant, and the
+query fails outright rather than picking a side.
+=TestManagerBars_IdenticalOverlapDuplicateIsAccepted= and
+=TestManagerBars_ConflictingOverlapDuplicateReportsError= cover both
+outcomes against two genuinely overlapping March/April partitions;
+=TestBarsEqual= tests the comparison directly.
+
+**** External example uses a checked-in fixture
+=Manager= has no publish/build operation yet, so
+=ExampleManager_Bars= (external =marketdata_test= package,
+=example_test.go=) reads a small checked-in EUR/USD H1 partition under
+=marketdata/testdata/=, generated once with the real
+=canonicalCSVStore= (so its bytes, including the manifest header's
+revision hash, are exactly what production code would produce) rather
+than hand-written.
+
+**** Non-goals
+Query-time resampling, live feeds, quotes/trades, and adjustment modes
+are all out of scope, per the issue. Coverage/gap reasoning over what
+the store *should* contain remains #79's; this issue only reports
+whether the specific months a query touches are actually present.
 
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted

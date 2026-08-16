@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/instrument"
 )
 
 // Manager is Trader's sole application-service boundary for historical
@@ -59,8 +60,10 @@ import (
 // caller can never mistake an unbuilt operation for an empty-but-successful
 // result.
 type Manager struct {
-	clock     clock.Clock
-	storeRoot string
+	clock        clock.Clock
+	storeRoot    string
+	resolver     instrument.Resolver
+	providerName string
 
 	// Collaborator seams. These are interfaces owned by this package so the
 	// real provider, storage, normalization, and resampling
@@ -71,6 +74,13 @@ type Manager struct {
 	// skeleton, and are not public extension points.
 	provider provider
 	store    barStore
+
+	// cache is Manager's own bounded, FIFO-evicted memory cache of
+	// published canonical partitions (issue #78, ADR-020). It is never
+	// exposed: no accessor returns it, and no Config field can replace it
+	// with an external implementation. Caching is entirely Manager's own
+	// affair, the same way the store itself is.
+	cache *barCache
 }
 
 // Config holds the explicit dependencies a Manager is constructed from.
@@ -88,14 +98,37 @@ type Config struct {
 	// StoreRoot is the root location of the canonical store, supplied as
 	// configuration. It is required. Its interpretation (a filesystem path,
 	// today) is an internal storage concern and is never exposed through a
-	// Manager operation.
+	// Manager operation. Manager builds its own store implementation from
+	// this path internally (see New); no Config field lets a caller supply
+	// a store implementation of its own, and the store type itself is
+	// never exported.
 	StoreRoot string
+
+	// Resolver resolves an instrument.ID to the tradable Listing this
+	// Manager's provider exposes it under (ADR-016), giving Manager the
+	// provider-native display symbol its canonical store partitions are
+	// keyed by. It is required.
+	Resolver instrument.Resolver
+
+	// ProviderName identifies, opaquely, the canonical dataset provider
+	// this Manager serves — for example "oanda" — matching the value
+	// recorded in each partition's Manifest.Provider and used as the
+	// provider argument to Resolver.ResolveInstrument. It is required.
+	ProviderName string
+
+	// CacheCapacity bounds the number of canonical partitions Manager's
+	// internal memory cache retains before evicting the oldest one (FIFO;
+	// see barCache). Zero or negative selects a package-defined default.
+	// This is the only cache-shaped knob Config exposes: the cache
+	// implementation itself is never a Config field, so nothing outside
+	// this package can supply, replace, or directly read it.
+	CacheCapacity int
 
 	// provider and store are optional internal collaborators. They remain
 	// unexported so no external package can supply provider or storage
-	// implementations through Config. They exist only for in-package tests
-	// and future internal wiring while this skeleton still reports
-	// ErrNotImplemented for every operation that would use them.
+	// implementations through Config. They exist only for in-package
+	// tests: real construction always builds its own canonicalCSVStore
+	// from StoreRoot (see New).
 	provider provider
 	store    barStore
 }
@@ -132,9 +165,15 @@ type barStore interface {
 var ErrInvalidConfig = errors.New("marketdata: invalid manager config")
 
 // New constructs a Manager from cfg, validating that every required
-// dependency is present. It returns a wrapped ErrInvalidConfig if the clock
-// is nil or the store root is empty. New performs no I/O and starts no
-// goroutines.
+// dependency is present. It returns a wrapped ErrInvalidConfig if the
+// clock, store root, resolver, or provider name is missing. New performs
+// no I/O and starts no goroutines.
+//
+// New builds its own canonical store from cfg.StoreRoot when cfg.store is
+// unset (the normal case for every caller outside this package, since
+// cfg.store is unexported). No composition root ever supplies, replaces,
+// or otherwise sees the store implementation: it is constructed here and
+// held only as m.store, an unexported field with no accessor.
 func New(cfg Config) (*Manager, error) {
 	if cfg.Clock == nil {
 		return nil, fmt.Errorf("marketdata: new manager: %w: clock is required", ErrInvalidConfig)
@@ -142,11 +181,26 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.StoreRoot == "" {
 		return nil, fmt.Errorf("marketdata: new manager: %w: store root is required", ErrInvalidConfig)
 	}
+	if cfg.Resolver == nil {
+		return nil, fmt.Errorf("marketdata: new manager: %w: resolver is required", ErrInvalidConfig)
+	}
+	if cfg.ProviderName == "" {
+		return nil, fmt.Errorf("marketdata: new manager: %w: provider name is required", ErrInvalidConfig)
+	}
+
+	store := cfg.store
+	if store == nil {
+		store = newCanonicalCSVStore(cfg.StoreRoot)
+	}
+
 	return &Manager{
-		clock:     cfg.Clock,
-		storeRoot: cfg.StoreRoot,
-		provider:  cfg.provider,
-		store:     cfg.store,
+		clock:        cfg.Clock,
+		storeRoot:    cfg.StoreRoot,
+		resolver:     cfg.Resolver,
+		providerName: cfg.ProviderName,
+		provider:     cfg.provider,
+		store:        store,
+		cache:        newBarCache(cfg.CacheCapacity),
 	}, nil
 }
 
@@ -156,12 +210,15 @@ func New(cfg Config) (*Manager, error) {
 // are both reported as not configured rather than being allowed to
 // misbehave.
 func (m *Manager) configured() bool {
-	return m != nil && m.clock != nil && m.storeRoot != ""
+	return m != nil && m.clock != nil && m.storeRoot != "" &&
+		m.resolver != nil && m.providerName != "" && m.store != nil
 }
 
-// Manager intentionally defines no operation methods yet. This issue (#71)
-// establishes only the Manager boundary — construction, ownership, and
-// dependency direction.
+// Manager's first operation, Bars, is defined in query.go (issue #78):
+// a read-only historical query that never downloads, rebuilds, or
+// otherwise mutates the canonical store. Acquisition and canonical-build
+// commands remain future, separate operations — see the read-versus-
+// mutation split documented on the Manager type above.
 //
 // Earlier drafts carried placeholder Sync(ctx) and Build(ctx) methods that
 // returned an ErrNotImplemented sentinel. They were removed in response to
@@ -171,5 +228,3 @@ func (m *Manager) configured() bool {
 // canonical-persistence decisions, so the operations — and the
 // ErrNotImplemented / ErrNotConfigured sentinels that existed only to serve
 // those placeholders — are introduced with their real use cases, not here.
-// The read-versus-mutation split those methods illustrated is documented on
-// the Manager type above and remains the intended shape.

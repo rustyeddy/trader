@@ -35,18 +35,44 @@ func testClock() clock.Clock {
 }
 
 func TestNewManagerValid(t *testing.T) {
-	m, err := New(Config{Clock: testClock(), StoreRoot: "/data/candles"})
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    "/data/candles",
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+	})
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	assert.True(t, m.configured())
 }
 
+func TestNewManagerBuildsRealStoreFromStoreRoot(t *testing.T) {
+	// New must not leave m.store nil for real (non-test) construction:
+	// nothing outside this package can ever set Config.store, so if New
+	// didn't build one internally, Manager would be unusable in
+	// production. This is what closes the gap the M2-03 skeleton left
+	// open.
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    t.TempDir(),
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, m.store)
+	if _, ok := m.store.(*canonicalCSVStore); !ok {
+		t.Fatalf("expected *canonicalCSVStore, got %T", m.store)
+	}
+}
+
 func TestNewManagerWithInternalCollaborators(t *testing.T) {
 	m, err := New(Config{
-		Clock:     testClock(),
-		StoreRoot: "/data/candles",
-		provider:  fakeProvider{id: "fake"},
-		store:     fakeStore{dir: "/data/candles"},
+		Clock:        testClock(),
+		StoreRoot:    "/data/candles",
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+		provider:     fakeProvider{id: "fake"},
+		store:        fakeStore{dir: "/data/candles"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "fake", m.provider.name())
@@ -54,14 +80,28 @@ func TestNewManagerWithInternalCollaborators(t *testing.T) {
 }
 
 func TestNewManagerRejectsMissingClock(t *testing.T) {
-	m, err := New(Config{StoreRoot: "/data/candles"})
+	m, err := New(Config{StoreRoot: "/data/candles", Resolver: testResolver(t), ProviderName: "oanda"})
 	assert.Nil(t, m)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidConfig)
 }
 
 func TestNewManagerRejectsEmptyStoreRoot(t *testing.T) {
-	m, err := New(Config{Clock: testClock()})
+	m, err := New(Config{Clock: testClock(), Resolver: testResolver(t), ProviderName: "oanda"})
+	assert.Nil(t, m)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNewManagerRejectsMissingResolver(t *testing.T) {
+	m, err := New(Config{Clock: testClock(), StoreRoot: "/data/candles", ProviderName: "oanda"})
+	assert.Nil(t, m)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNewManagerRejectsEmptyProviderName(t *testing.T) {
+	m, err := New(Config{Clock: testClock(), StoreRoot: "/data/candles", Resolver: testResolver(t)})
 	assert.Nil(t, m)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidConfig)
