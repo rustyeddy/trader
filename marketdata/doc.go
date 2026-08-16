@@ -139,17 +139,22 @@
 // # The canonical CSV store
 //
 // canonicalCSVStore (issue #77, ADR-020) persists a published
-// (Manifest, BarSet) pair as two files — data and manifest — under
+// (Manifest, BarSet) pair as one file — a schema comment, a JSON-encoded
+// manifest header line, then canonical CSV rows — under
 // root/provider/SYMBOL/YYYY/MM, ADR-020's derived-tree convention. It
-// implements the small unexported barStore interface Manager's store
-// field already names, so a later implementation (a Parquet store, say)
-// can be substituted without changing Manager. publish writes both
-// files to temporary names, then renames data into place followed by
-// manifest into place — manifest last, deliberately: a reader always
-// calls Manifest.Matches before trusting a loaded pair, so the narrow
-// window between the two renames is detected, never silently served, as
-// invalid. Revision never appears in the path, per ADR-020; the manifest
-// file, and a schema line in the data file, are where dataset identity
-// and version information actually live. Every type and function here
-// is unexported, for the same reason as the normalizer above.
+// implements the barStore interface Manager's store field names, so a
+// later implementation (a Parquet store, say) can be substituted without
+// changing Manager, and a reusable, implementation-agnostic contract
+// test exercises any barStore against that same interface. publish
+// writes the file to a temporary name and renames it into place in one
+// step: manifest and data were originally two separate files, but a
+// design review found that let a cancelled or failed publish leave the
+// prior revision merely detectably-inconsistent rather than genuinely
+// intact, so they were merged into one atomically-renamed artifact — an
+// option the issue's own scope explicitly allowed. Revision never
+// appears in the path, per ADR-020; the file's own manifest header is
+// where dataset identity and version information live, and load
+// recomputes and cross-checks that header's revision against the
+// decoded Manifest before trusting it. Every type and function here is
+// unexported, for the same reason as the normalizer above.
 package marketdata

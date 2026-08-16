@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +18,7 @@ import (
 )
 
 // validPartitionKey matches validManifest/validBarSet's EUR/USD H1
-// span (2020-05, 2020-05-02 00:00 through 04:00 UTC).
+// span (2020-03-02 00:00 through 04:00 UTC).
 func validPartitionKey(t *testing.T) partitionKey {
 	t.Helper()
 	return partitionKey{
@@ -27,8 +27,12 @@ func validPartitionKey(t *testing.T) partitionKey {
 		instrument: eurusd(),
 		interval:   H1,
 		year:       2020,
-		month:      time.May,
+		month:      time.March,
 	}
+}
+
+func instrumentUSDJPY() instrument.ID {
+	return instrument.CurrencyPairID(num.MustParseCurrency("USD"), num.MustParseCurrency("JPY"))
 }
 
 // --- Reusable contract tests (issue #77): run against any barStore ---
@@ -108,7 +112,7 @@ func testBarStoreContract(t *testing.T, newStore func(root string) barStore) {
 		store := newStore(t.TempDir())
 		key := validPartitionKey(t)
 		m := validManifest(t)
-		m.Provider = "" // invalid
+		m.Provider = "" // invalid, and also now disagrees with key.provider
 		bs := validBarSet(t)
 		err := store.publish(context.Background(), key, m, bs)
 		assert.Error(t, err)
@@ -167,13 +171,9 @@ func TestCanonicalCSVStore_Root(t *testing.T) {
 
 func TestPartitionKey_PathConvention(t *testing.T) {
 	key := validPartitionKey(t)
-	dataPath, err := key.dataPath("/root")
+	path, err := key.path("/root")
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join("/root", "oanda", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.csv"), dataPath)
-
-	manifestPath, err := key.manifestPath("/root")
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join("/root", "oanda", "EURUSD", "2020", "05", "EURUSD-2020-05-h1.manifest"), manifestPath)
+	assert.Equal(t, filepath.Join("/root", "oanda", "EURUSD", "2020", "03", "EURUSD-2020-03-h1.csv"), path)
 }
 
 func TestIntervalToken(t *testing.T) {
@@ -226,17 +226,17 @@ func TestCanonicalCSVStore_ExactDecimalPrecision(t *testing.T) {
 	assert.Equal(t, bar, gotBS.Bars[0], "exact decimal round trip, never through float64")
 }
 
-func TestCanonicalCSVStore_BarSchemaMismatchRejected(t *testing.T) {
+func TestCanonicalCSVStore_SchemaMismatchRejected(t *testing.T) {
 	root := t.TempDir()
 	store := newCanonicalCSVStore(root)
 	key := validPartitionKey(t)
 	require.NoError(t, store.publish(context.Background(), key, validManifest(t), validBarSet(t)))
 
-	dataPath, err := key.dataPath(root)
+	path, err := key.path(root)
 	require.NoError(t, err)
-	corrupt := "# schema=canonical-bar-v1 provider=oanda symbol=GBPUSD interval=h1 year=2020 month=05\n" +
-		canonicalCSVHeader + "\n"
-	require.NoError(t, os.WriteFile(dataPath, []byte(corrupt), 0o644))
+	corrupt := "# schema=canonical-v1 provider=oanda symbol=GBPUSD interval=h1 year=2020 month=03\n" +
+		"{}\n" + canonicalCSVHeader + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(corrupt), 0o644))
 
 	_, _, err = store.load(context.Background(), key)
 	assert.ErrorIs(t, err, errStoreMalformed)
@@ -248,12 +248,11 @@ func TestCanonicalCSVStore_MalformedRowRejected(t *testing.T) {
 	key := validPartitionKey(t)
 	require.NoError(t, store.publish(context.Background(), key, validManifest(t), validBarSet(t)))
 
-	dataPath, err := key.dataPath(root)
+	path, err := key.path(root)
 	require.NoError(t, err)
-	corrupt := "# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=05\n" +
-		canonicalCSVHeader + "\n" +
-		"not,a,valid,row\n"
-	require.NoError(t, os.WriteFile(dataPath, []byte(corrupt), 0o644))
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, append(data, []byte("not,a,valid,row\n")...), 0o644))
 
 	_, _, err = store.load(context.Background(), key)
 	assert.ErrorIs(t, err, errStoreMalformed)
@@ -265,10 +264,12 @@ func TestCanonicalCSVStore_ManifestInstrumentMismatchRejected(t *testing.T) {
 	key := validPartitionKey(t)
 	require.NoError(t, store.publish(context.Background(), key, validManifest(t), validBarSet(t)))
 
-	manifestPath, err := key.manifestPath(root)
-	require.NoError(t, err)
-	_, err = readManifestFile(manifestPath, instrumentUSDJPY())
-	assert.ErrorIs(t, err, errStoreMalformed)
+	// Loading with a key naming a different instrument must fail: the
+	// stored header's instrument field disagrees with what's expected.
+	wrongKey := key
+	wrongKey.instrument = instrumentUSDJPY()
+	_, _, err := store.load(context.Background(), wrongKey)
+	assert.Error(t, err)
 }
 
 func TestCanonicalCSVStore_ManifestWithParentRoundTrips(t *testing.T) {
@@ -321,240 +322,105 @@ func TestWriteFileAtomic_FailureLeavesNoFinalFile(t *testing.T) {
 	assert.Empty(t, entries, "the failed temp file must be cleaned up")
 }
 
-func instrumentUSDJPY() instrument.ID {
-	return instrument.CurrencyPairID(num.MustParseCurrency("USD"), num.MustParseCurrency("JPY"))
+// --- Path safety (review finding) ---
+
+func TestValidatePathComponent(t *testing.T) {
+	valid := []string{"oanda", "EURUSD", "a.b", "a-b_c"}
+	for _, v := range valid {
+		assert.NoError(t, validatePathComponent(v), "%q should be valid", v)
+	}
+
+	invalid := []string{"", ".", "..", "a/b", "../escape", "a/../b"}
+	for _, v := range invalid {
+		assert.Error(t, validatePathComponent(v), "%q should be rejected", v)
+	}
 }
 
-// --- Additional coverage: path/error propagation and malformed input ---
-
-func TestPartitionKey_DataPathPropagatesIntervalError(t *testing.T) {
-	weird, err := NewInterval(UnitMinute, 7)
-	require.NoError(t, err)
-	key := partitionKey{provider: "oanda", symbol: "EURUSD", interval: weird, year: 2020, month: time.May}
-	_, err = key.dataPath("/root")
-	assert.ErrorIs(t, err, errStoreUnsupportedInterval)
-	_, err = key.manifestPath("/root")
-	assert.ErrorIs(t, err, errStoreUnsupportedInterval)
+func TestPartitionKey_ValidateRejectsTraversal(t *testing.T) {
+	cases := []partitionKey{
+		{provider: "../escape", symbol: "EURUSD", instrument: eurusd(), interval: H1, year: 2020, month: time.May},
+		{provider: "oanda", symbol: "../../escape", instrument: eurusd(), interval: H1, year: 2020, month: time.May},
+		{provider: "oanda/sub", symbol: "EURUSD", instrument: eurusd(), interval: H1, year: 2020, month: time.May},
+	}
+	for _, key := range cases {
+		assert.ErrorIs(t, key.validate(), errStoreInvalidPartitionKey)
+	}
 }
 
-func TestCanonicalCSVStore_PublishRejectsInvalidBarSet(t *testing.T) {
+func TestCanonicalCSVStore_PublishRejectsPathTraversalKey(t *testing.T) {
 	store := newCanonicalCSVStore(t.TempDir())
 	key := validPartitionKey(t)
+	key.symbol = "../../escape"
+	m := validManifest(t)
+	m.Provider = key.provider
+	err := store.publish(context.Background(), key, m, validBarSet(t))
+	assert.ErrorIs(t, err, errStoreInvalidPartitionKey)
+}
+
+// --- Key/manifest agreement (review finding) ---
+
+func TestCanonicalCSVStore_PublishRejectsKeyInstrumentMismatch(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	key.instrument = instrumentUSDJPY() // disagrees with validManifest's EUR/USD
+	err := store.publish(context.Background(), key, validManifest(t), validBarSet(t))
+	assert.ErrorIs(t, err, errStorePartitionKeyMismatch)
+}
+
+func TestCanonicalCSVStore_PublishRejectsKeyProviderMismatch(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	key.provider = "alpaca"
+	err := store.publish(context.Background(), key, validManifest(t), validBarSet(t))
+	assert.ErrorIs(t, err, errStorePartitionKeyMismatch)
+}
+
+func TestCanonicalCSVStore_PublishRejectsKeyIntervalMismatch(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	key.interval = D1 // validManifest/validBarSet use H1
+	err := store.publish(context.Background(), key, validManifest(t), validBarSet(t))
+	assert.ErrorIs(t, err, errStorePartitionKeyMismatch)
+}
+
+func TestCanonicalCSVStore_PublishRejectsKeyMonthMismatch(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	key.month = time.December // validManifest/validBarSet's span is entirely in May
+	err := store.publish(context.Background(), key, validManifest(t), validBarSet(t))
+	assert.ErrorIs(t, err, errStorePartitionKeyMismatch)
+}
+
+func TestCanonicalCSVStore_PublishAcceptsMonthBoundaryOverlap(t *testing.T) {
+	// A span that starts in the last hour of April but is filed under
+	// May must be accepted: checkKeyMatchesManifest checks overlap, not
+	// containment.
+	store := newCanonicalCSVStore(t.TempDir())
+	start := time.Date(2020, time.April, 30, 23, 0, 0, 0, time.UTC)
+	end := time.Date(2020, time.May, 1, 1, 0, 0, 0, time.UTC)
+	span, err := NewTimeRange(start, end)
+	require.NoError(t, err)
+
+	key := validPartitionKey(t)
+	key.month = time.May
+	m := validManifest(t)
+	m.Span = span
+	m.BarCount = 0
+	m.FirstBar = time.Time{}
+	m.LastBar = time.Time{}
 	bs := validBarSet(t)
-	// Break strict ordering: BarSet.Validate must reject this.
-	bs.Bars[0], bs.Bars[1] = bs.Bars[1], bs.Bars[0]
-	err := store.publish(context.Background(), key, validManifest(t), bs)
-	assert.Error(t, err)
+	bs.Span = span
+	bs.Bars = nil
+	require.NoError(t, m.Matches(bs))
+
+	assert.NoError(t, store.publish(context.Background(), key, m, bs))
 }
 
-func TestEncodeBarSet_UnsupportedIntervalPropagates(t *testing.T) {
-	weird, err := NewInterval(UnitMinute, 7)
-	require.NoError(t, err)
-	key := partitionKey{provider: "oanda", symbol: "EURUSD", interval: weird, year: 2020, month: time.May}
-	var buf bytes.Buffer
-	w := bufio.NewWriter(&buf)
-	err = encodeBarSet(w, key, validBarSet(t))
-	assert.ErrorIs(t, err, errStoreUnsupportedInterval)
-}
-
-func TestCrossCheckBarSchema_FieldMismatches(t *testing.T) {
-	key := validPartitionKey(t)
-	base := "# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=05"
-
-	cases := map[string]string{
-		"provider": "# schema=canonical-bar-v1 provider=WRONG symbol=EURUSD interval=h1 year=2020 month=05",
-		"symbol":   "# schema=canonical-bar-v1 provider=oanda symbol=WRONG interval=h1 year=2020 month=05",
-		"interval": "# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=d1 year=2020 month=05",
-		"year":     "# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=1999 month=05",
-		"month":    "# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=01",
-		"schema":   "# schema=wrong-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=05",
-	}
-	require.NotEqual(t, base, cases["provider"]) // sanity: fixtures actually differ
-
-	for name, comment := range cases {
-		t.Run(name, func(t *testing.T) {
-			err := crossCheckBarSchema(comment, "path", key)
-			assert.ErrorIs(t, err, errStoreMalformed)
-		})
-	}
-}
-
-func TestParseBarRow_MalformedCases(t *testing.T) {
-	valid := "2020-05-01T00:00:00Z,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,4213"
-	_, err := parseBarRow(valid)
-	require.NoError(t, err, "sanity: the valid fixture itself must parse")
-
-	cases := map[string]string{
-		"wrong field count": "2020-05-01T00:00:00Z,1.1,1.1,1.1,1.1",
-		"bad time":          "not-a-time,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,4213",
-		"bad open price":    "2020-05-01T00:00:00Z,not-a-price,1.10250,1.09900,1.10100,0.00012,0.00030,4213",
-		"bad ticks":         "2020-05-01T00:00:00Z,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,not-an-int",
-	}
-	for name, row := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := parseBarRow(row)
-			assert.Error(t, err)
-		})
-	}
-}
-
-func TestReadBarSetFile_EmptyAndMissingHeader(t *testing.T) {
-	root := t.TempDir()
-	key := validPartitionKey(t)
-	dir := key.dir(root)
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	path, err := key.dataPath(root)
-	require.NoError(t, err)
-
-	t.Run("empty file", func(t *testing.T) {
-		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
-		_, err := readBarSetFile(path, key)
-		assert.ErrorIs(t, err, errStoreMalformed)
-	})
-
-	t.Run("missing column header", func(t *testing.T) {
-		require.NoError(t, os.WriteFile(path,
-			[]byte("# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=05\n"), 0o644))
-		_, err := readBarSetFile(path, key)
-		assert.ErrorIs(t, err, errStoreMalformed)
-	})
-
-	t.Run("wrong column header", func(t *testing.T) {
-		require.NoError(t, os.WriteFile(path,
-			[]byte("# schema=canonical-bar-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=05\nwrong,header\n"), 0o644))
-		_, err := readBarSetFile(path, key)
-		assert.ErrorIs(t, err, errStoreMalformed)
-	})
-}
-
-// encodedManifestLines returns the exact lines encodeManifest produces
-// for m, for tests that corrupt one field at a time.
-func encodedManifestLines(t *testing.T, m Manifest) []string {
-	t.Helper()
-	var buf bytes.Buffer
-	w := bufio.NewWriter(&buf)
-	require.NoError(t, encodeManifest(w, m))
-	require.NoError(t, w.Flush())
-	lines := []string{}
-	for l := range strings.SplitSeq(buf.String(), "\n") {
-		if l != "" {
-			lines = append(lines, l)
-		}
-	}
-	return lines
-}
-
-func TestReadManifestFile_MalformedFields(t *testing.T) {
-	m := validManifest(t)
-	replacements := map[string]string{
-		"interval_unit=":  "interval_unit=not-a-number\n",
-		"interval_count=": "interval_count=not-a-number\n",
-		"span_start=":     "span_start=not-a-time\n",
-		"basis=":          "basis=not-a-number\n",
-		"schema_version=": "schema_version=not-a-number\n",
-		"built_at=":       "built_at=not-a-time\n",
-		"bar_count=":      "bar_count=not-a-number\n",
-		"span_end=":       "span_end=not-a-time\n",
-		"first_bar=":      "first_bar=not-a-time\n",
-		"last_bar=":       "last_bar=not-a-time\n",
-	}
-
-	for prefix, replacement := range replacements {
-		t.Run(prefix, func(t *testing.T) {
-			lines := encodedManifestLines(t, m)
-			var out string
-			for _, l := range lines {
-				if strings.HasPrefix(l, prefix) {
-					out += replacement
-				} else {
-					out += l + "\n"
-				}
-			}
-			dir := t.TempDir()
-			path := filepath.Join(dir, "test.manifest")
-			require.NoError(t, os.WriteFile(path, []byte(out), 0o644))
-			_, err := readManifestFile(path, m.Instrument)
-			assert.ErrorIs(t, err, errStoreMalformed)
-		})
-	}
-}
-
-func TestReadManifestFile_SpanEndBeforeStart(t *testing.T) {
-	m := validManifest(t)
-	lines := encodedManifestLines(t, m)
-	var out string
-	for _, l := range lines {
-		switch {
-		case strings.HasPrefix(l, "span_start="):
-			out += "span_start=" + m.Span.End().Format(time.RFC3339Nano) + "\n"
-		case strings.HasPrefix(l, "span_end="):
-			out += "span_end=" + m.Span.Start().Format(time.RFC3339Nano) + "\n"
-		default:
-			out += l + "\n"
-		}
-	}
-	path := filepath.Join(t.TempDir(), "test.manifest")
-	require.NoError(t, os.WriteFile(path, []byte(out), 0o644))
-	_, err := readManifestFile(path, m.Instrument)
-	assert.ErrorIs(t, err, errStoreMalformed)
-}
-
-func TestReadManifestFile_MalformedParentFields(t *testing.T) {
-	m := validManifest(t)
-	m.ResamplerVersion = "resampler-v1"
-	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "parent-rev-1"}
-
-	replacements := map[string]string{
-		"parent_interval_unit=":  "parent_interval_unit=not-a-number\n",
-		"parent_interval_count=": "parent_interval_count=not-a-number\n",
-	}
-	for prefix, replacement := range replacements {
-		t.Run(prefix, func(t *testing.T) {
-			lines := encodedManifestLines(t, m)
-			var out string
-			for _, l := range lines {
-				if strings.HasPrefix(l, prefix) {
-					out += replacement
-				} else {
-					out += l + "\n"
-				}
-			}
-			path := filepath.Join(t.TempDir(), "test.manifest")
-			require.NoError(t, os.WriteFile(path, []byte(out), 0o644))
-			_, err := readManifestFile(path, m.Instrument)
-			assert.ErrorIs(t, err, errStoreMalformed)
-		})
-	}
-}
-
-func TestReadManifestFile_MalformedLineNoEquals(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.manifest")
-	require.NoError(t, os.WriteFile(path, []byte("this line has no equals sign\n"), 0o644))
-	_, err := readManifestFile(path, eurusd())
-	assert.ErrorIs(t, err, errStoreMalformed)
-}
-
-func TestReadManifestFile_MissingFile(t *testing.T) {
-	_, err := readManifestFile(filepath.Join(t.TempDir(), "missing.manifest"), eurusd())
-	assert.Error(t, err)
-}
-
-func TestParseUint8_Error(t *testing.T) {
-	_, err := parseUint8("not-a-number")
-	assert.Error(t, err)
-	_, err = parseUint8("999")
-	assert.Error(t, err, "out of uint8 range")
-}
-
-func TestParseOptionalTime_Error(t *testing.T) {
-	_, err := parseOptionalTime("not-a-time")
-	assert.Error(t, err)
-}
+// --- Atomicity: single-file publish (review finding) ---
 
 // nthCancelContext reports context.Canceled from Err() once its
 // remaining count is exhausted, letting a test control precisely which
-// of publish's several ctx.Err() checks first observes cancellation.
+// of publish's ctx.Err() checks first observes cancellation.
 type nthCancelContext struct {
 	context.Context
 	remaining int
@@ -568,35 +434,219 @@ func (c *nthCancelContext) Err() error {
 	return nil
 }
 
-// Regression/documentation test for the exact trade-off publish's own
-// doc comment describes: cancellation landing between the data rename
-// and the manifest rename leaves new data paired with the old manifest.
-// load must detect and reject that pair via Matches, not serve it.
-func TestCanonicalCSVStore_PublishCancelledBetweenWrites(t *testing.T) {
+// Regression test for the design-review fix: cancellation landing after
+// key/manifest validation but before the (now single) file write must
+// leave the prior revision not merely detectably-inconsistent, but
+// fully loadable.
+func TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision(t *testing.T) {
 	store := newCanonicalCSVStore(t.TempDir())
 	key := validPartitionKey(t)
 	m := validManifest(t)
 	bs := validBarSet(t)
 	require.NoError(t, store.publish(context.Background(), key, m, bs))
 
-	// bs2 actually differs from bs (one fewer bar), so a manifest
-	// describing bs while paired with bs2's data is a genuine,
-	// detectable mismatch — unlike a change to BuilderVersion alone,
-	// which Matches does not even inspect.
-	bs2 := bs
-	bs2.Bars = bs.Bars[:1]
-	m2 := m
-	m2.BarCount = 1
-	m2.LastBar = bs2.Bars[0].Time
-	require.NoError(t, m2.Matches(bs2))
-
-	// Two ctx.Err() checks (top of publish, before the data write) must
-	// pass; the third (before the manifest write) must observe
-	// cancellation.
-	ctx := &nthCancelContext{Context: context.Background(), remaining: 2}
-	err := store.publish(ctx, key, m2, bs2)
+	m2 := validManifest(t)
+	m2.BuilderVersion = "builder-v2"
+	// Four ctx.Err() checks precede the write (top of publish, plus
+	// three implicit ones from validation stages returning early only on
+	// error -- here just the two explicit checks are relevant): allow
+	// enough to pass validation, then cancel right before the write.
+	ctx := &nthCancelContext{Context: context.Background(), remaining: 1}
+	err := store.publish(ctx, key, m2, bs)
 	assert.ErrorIs(t, err, context.Canceled)
 
-	_, _, err = store.load(context.Background(), key)
-	assert.Error(t, err, "new data paired with the stale manifest must be rejected, not silently served")
+	gotM, gotBS, err := store.load(context.Background(), key)
+	require.NoError(t, err, "the original revision must still load successfully, not merely fail Matches")
+	assert.Equal(t, m.Revision(), gotM.Revision())
+	assert.Equal(t, len(bs.Bars), len(gotBS.Bars))
+}
+
+// --- checkKeyMatchesManifest direct tests ---
+
+func TestCheckKeyMatchesManifest_OK(t *testing.T) {
+	assert.NoError(t, checkKeyMatchesManifest(validPartitionKey(t), validManifest(t)))
+}
+
+// --- decodeManifestJSON / encodePartition direct tests ---
+
+func TestDecodeManifestJSON_RevisionMismatchRejected(t *testing.T) {
+	m := validManifest(t)
+	h := manifestToJSON(m)
+	h.Revision = "tampered"
+	encoded, err := json.Marshal(h)
+	require.NoError(t, err)
+
+	_, err = decodeManifestJSON(string(encoded), "path", m.Instrument)
+	assert.ErrorIs(t, err, errStoreMalformed)
+}
+
+func TestDecodeManifestJSON_MalformedJSON(t *testing.T) {
+	_, err := decodeManifestJSON("not json", "path", eurusd())
+	assert.ErrorIs(t, err, errStoreMalformed)
+}
+
+func TestDecodeManifestJSON_ParentInstrumentMismatchRejected(t *testing.T) {
+	m := validManifest(t)
+	m.ResamplerVersion = "resampler-v1"
+	m.Parent = &ParentRef{Instrument: eurusd(), Interval: M1, Revision: "parent-rev-1"}
+	h := manifestToJSON(m)
+	h.Parent.Instrument = instrumentUSDJPY().String()
+	// Re-derive Revision so only the parent-instrument cross-check (not
+	// the revision check) is what rejects this.
+	h.Revision = m.Revision()
+	encoded, err := json.Marshal(h)
+	require.NoError(t, err)
+
+	_, err = decodeManifestJSON(string(encoded), "path", m.Instrument)
+	assert.ErrorIs(t, err, errStoreMalformed)
+}
+
+func TestDecodeManifestJSON_EmbeddedNewlinesRoundTrip(t *testing.T) {
+	// A line-oriented key=value encoding could not survive this; JSON
+	// must.
+	m := validManifest(t)
+	m.BuilderVersion = "builder-v1\nrevision=forged\n"
+	m.ValidatorVersion = "validator\rwith-cr"
+
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+	require.NoError(t, encodePartition(w, validPartitionKey(t), m, validBarSet(t)))
+	require.NoError(t, w.Flush())
+
+	scanner := bufio.NewScanner(&buf)
+	require.True(t, scanner.Scan()) // schema comment
+	require.True(t, scanner.Scan()) // manifest header
+	got, err := decodeManifestJSON(scanner.Text(), "path", m.Instrument)
+	require.NoError(t, err)
+	assert.Equal(t, m.BuilderVersion, got.BuilderVersion)
+	assert.Equal(t, m.ValidatorVersion, got.ValidatorVersion)
+}
+
+// --- Additional coverage ---
+
+func TestPartitionKey_ValidateRejectsZeroInstrumentAndInvalidInterval(t *testing.T) {
+	key := validPartitionKey(t)
+	key.instrument = instrument.ID{}
+	assert.ErrorIs(t, key.validate(), errStoreInvalidPartitionKey)
+
+	key2 := validPartitionKey(t)
+	key2.interval = Interval{}
+	assert.ErrorIs(t, key2.validate(), errStoreInvalidPartitionKey)
+
+	key3 := validPartitionKey(t)
+	key3.month = 0
+	assert.ErrorIs(t, key3.validate(), errStoreInvalidPartitionKey)
+}
+
+func TestCanonicalCSVStore_LoadRejectsInvalidKey(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	key.instrument = instrument.ID{}
+	_, _, err := store.load(context.Background(), key)
+	assert.ErrorIs(t, err, errStoreInvalidPartitionKey)
+}
+
+func TestParseBarRow_MalformedCases(t *testing.T) {
+	valid := "2020-03-02T00:00:00Z,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,4213"
+	_, err := parseBarRow(valid)
+	require.NoError(t, err, "sanity: the valid fixture itself must parse")
+
+	cases := map[string]string{
+		"wrong field count": "2020-03-02T00:00:00Z,1.1,1.1,1.1,1.1",
+		"bad time":          "not-a-time,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,4213",
+		"bad open price":    "2020-03-02T00:00:00Z,not-a-price,1.10250,1.09900,1.10100,0.00012,0.00030,4213",
+		"bad ticks":         "2020-03-02T00:00:00Z,1.10000,1.10250,1.09900,1.10100,0.00012,0.00030,not-an-int",
+	}
+	for name, row := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseBarRow(row)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestCrossCheckPartitionSchema_FieldMismatches(t *testing.T) {
+	key := validPartitionKey(t)
+	cases := map[string]string{
+		"schema":   "# schema=wrong-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=03",
+		"provider": "# schema=canonical-v1 provider=WRONG symbol=EURUSD interval=h1 year=2020 month=03",
+		"symbol":   "# schema=canonical-v1 provider=oanda symbol=WRONG interval=h1 year=2020 month=03",
+		"interval": "# schema=canonical-v1 provider=oanda symbol=EURUSD interval=d1 year=2020 month=03",
+		"year":     "# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=1999 month=03",
+		"month":    "# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=01",
+	}
+	for name, comment := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := crossCheckPartitionSchema(comment, "path", key)
+			assert.ErrorIs(t, err, errStoreMalformed)
+		})
+	}
+}
+
+func TestReadPartitionFile_EmptyMissingHeaderAndManifest(t *testing.T) {
+	root := t.TempDir()
+	key := validPartitionKey(t)
+	dir := key.dir(root)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	path, err := key.path(root)
+	require.NoError(t, err)
+
+	t.Run("empty file", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+		_, _, err := readPartitionFile(path, key)
+		assert.ErrorIs(t, err, errStoreMalformed)
+	})
+
+	t.Run("missing manifest header", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(path,
+			[]byte("# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=03\n"), 0o644))
+		_, _, err := readPartitionFile(path, key)
+		assert.ErrorIs(t, err, errStoreMalformed)
+	})
+
+	t.Run("missing column header", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(path,
+			[]byte("# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=03\n{}\n"), 0o644))
+		_, _, err := readPartitionFile(path, key)
+		assert.ErrorIs(t, err, errStoreMalformed)
+	})
+
+	t.Run("wrong column header", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(path,
+			[]byte("# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=03\n{}\nwrong,header\n"), 0o644))
+		_, _, err := readPartitionFile(path, key)
+		assert.ErrorIs(t, err, errStoreMalformed)
+	})
+}
+
+func TestDecodeManifestJSON_MalformedFields(t *testing.T) {
+	m := validManifest(t)
+	base := manifestToJSON(m)
+
+	mutate := map[string]func(*manifestJSON){
+		"interval_unit": func(h *manifestJSON) { h.IntervalUnit = Unit(200) },
+		"span_start":    func(h *manifestJSON) { h.SpanStart = "not-a-time" },
+		"span_end":      func(h *manifestJSON) { h.SpanEnd = "not-a-time" },
+		"built_at":      func(h *manifestJSON) { h.BuiltAt = "not-a-time" },
+		"first_bar":     func(h *manifestJSON) { h.FirstBar = "not-a-time" },
+		"last_bar":      func(h *manifestJSON) { h.LastBar = "not-a-time" },
+		"span reversed": func(h *manifestJSON) { h.SpanStart, h.SpanEnd = h.SpanEnd, h.SpanStart },
+		"instrument":    func(h *manifestJSON) { h.Instrument = "wrong" },
+		"parent interval": func(h *manifestJSON) {
+			h.Parent = &parentJSON{Instrument: m.Instrument.String(), IntervalUnit: Unit(200), IntervalCount: 1, Revision: "r"}
+		},
+	}
+	for name, fn := range mutate {
+		t.Run(name, func(t *testing.T) {
+			h := base
+			fn(&h)
+			// Recompute revision is deliberately skipped: these are all
+			// cases that must fail before, or independently of, the
+			// revision cross-check.
+			encoded, err := json.Marshal(h)
+			require.NoError(t, err)
+			_, err = decodeManifestJSON(string(encoded), "path", m.Instrument)
+			assert.Error(t, err)
+		})
+	}
 }

@@ -3,6 +3,7 @@ package marketdata
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,36 +16,37 @@ import (
 	"github.com/rustyeddy/trader/num"
 )
 
-// canonicalManifestSchema and canonicalBarSchema tag the two file
-// formats this store reads and writes, the same convention the raw
-// OANDA reader uses for its own "# schema=..." line. Neither is a
-// public wire format: both are internal to marketdata, checked only to
-// catch a file that does not contain what its path claims.
-const (
-	canonicalManifestSchema = "canonical-manifest-v1"
-	canonicalBarSchema      = "canonical-bar-v1"
-)
+// canonicalSchema tags this store's one file format, the same
+// convention the raw OANDA reader uses for its own "# schema=..." line.
+// It is not a public wire format: it is internal to marketdata, checked
+// only to catch a file that does not contain what its path claims.
+const canonicalSchema = "canonical-v1"
 
 // canonicalCSVHeader is the exact canonical Bar CSV column header.
 const canonicalCSVHeader = "time,open,high,low,close,avg_spread,max_spread,ticks"
 
 // Sentinel errors returned (wrapped) by the canonical store.
 var (
-	// errStoreMalformed marks a data or manifest file that does not
-	// parse, or whose content disagrees with what its path or caller-
-	// supplied identity claims.
+	// errStoreMalformed marks a file that does not parse, whose content
+	// disagrees with what its path or caller-supplied identity claims,
+	// or whose stored revision disagrees with its own recomputed one.
 	errStoreMalformed = errors.New("marketdata: store: malformed file")
 	// errStoreUnsupportedInterval marks an Interval this store cannot
 	// map to a path token.
 	errStoreUnsupportedInterval = errors.New("marketdata: store: unsupported interval")
+	// errStoreInvalidPartitionKey marks a partitionKey that is not safe
+	// or complete enough to build a path from.
+	errStoreInvalidPartitionKey = errors.New("marketdata: store: invalid partition key")
+	// errStorePartitionKeyMismatch marks a partitionKey that disagrees
+	// with the Manifest being published under it.
+	errStorePartitionKeyMismatch = errors.New("marketdata: store: partition key disagrees with manifest")
 )
 
-// partitionKey identifies one canonical partition file pair (data and
-// manifest) within a store root. instrument is carried alongside symbol
-// the same way oanda.Meta carries both: symbol is what builds a
-// filesystem path, instrument is Trader's canonical identity, and
-// neither is reliably derivable from the other without a resolver this
-// package does not have.
+// partitionKey identifies one canonical partition file within a store
+// root. instrument is carried alongside symbol the same way oanda.Meta
+// carries both: symbol is what builds a filesystem path, instrument is
+// Trader's canonical identity, and neither is reliably derivable from
+// the other without a resolver this package does not have.
 type partitionKey struct {
 	provider   string
 	symbol     string
@@ -54,39 +56,72 @@ type partitionKey struct {
 	month      time.Month
 }
 
+// validate reports whether k is safe and complete enough to build a
+// path and publish under. provider and symbol are checked as path
+// components specifically because, even though this store is internal,
+// both are name-based values that ultimately originate outside it (a
+// provider identifier, an instrument's display symbol) — a value
+// containing ".." or a path separator must never be able to escape the
+// intended provider/symbol partition.
+func (k partitionKey) validate() error {
+	if err := validatePathComponent(k.provider); err != nil {
+		return fmt.Errorf("%w: provider: %v", errStoreInvalidPartitionKey, err)
+	}
+	if err := validatePathComponent(k.symbol); err != nil {
+		return fmt.Errorf("%w: symbol: %v", errStoreInvalidPartitionKey, err)
+	}
+	if k.instrument.IsZero() {
+		return fmt.Errorf("%w: zero instrument", errStoreInvalidPartitionKey)
+	}
+	if !k.interval.Valid() {
+		return fmt.Errorf("%w: invalid interval", errStoreInvalidPartitionKey)
+	}
+	if k.month < time.January || k.month > time.December {
+		return fmt.Errorf("%w: invalid month %d", errStoreInvalidPartitionKey, int(k.month))
+	}
+	return nil
+}
+
+// validatePathComponent reports whether name is safe to use as exactly
+// one path component: non-empty, not "." or "..", and free of any path
+// separator.
+func validatePathComponent(name string) error {
+	if name == "" {
+		return errors.New("empty")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("reserved name %q", name)
+	}
+	if strings.ContainsRune(name, '/') || (os.PathSeparator != '/' && strings.ContainsRune(name, os.PathSeparator)) {
+		return fmt.Errorf("contains a path separator: %q", name)
+	}
+	return nil
+}
+
 // dir returns the partition's directory under root, following ADR-020's
 // derived-tree convention: root/provider/SYMBOL/YYYY/MM.
 func (k partitionKey) dir(root string) string {
 	return filepath.Join(root, k.provider, k.symbol, fmt.Sprintf("%04d", k.year), fmt.Sprintf("%02d", int(k.month)))
 }
 
-// baseName returns the partition's file base name, without extension:
-// SYMBOL-YYYY-MM-<tf>.
-func (k partitionKey) baseName() (string, error) {
+// path returns the partition's one file path: SYMBOL-YYYY-MM-<tf>.csv.
+// It never encodes a revision: ADR-020 requires the version identifier
+// to live in the file's own header, never the path. As a defense-in-depth
+// check beyond validate's path-component rules, path also verifies the
+// resolved path is still beneath root.
+func (k partitionKey) path(root string) (string, error) {
 	token, err := intervalToken(k.interval)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s-%04d-%02d-%s", k.symbol, k.year, int(k.month), token), nil
-}
+	base := fmt.Sprintf("%s-%04d-%02d-%s.csv", k.symbol, k.year, int(k.month), token)
+	full := filepath.Join(k.dir(root), base)
 
-// dataPath and manifestPath return the two paths a partition occupies.
-// Neither ever encodes a revision: ADR-020 requires the version
-// identifier to live in the manifest or a file header, never the path.
-func (k partitionKey) dataPath(root string) (string, error) {
-	base, err := k.baseName()
-	if err != nil {
-		return "", err
+	cleanRoot := filepath.Clean(root)
+	if full != cleanRoot && !strings.HasPrefix(full, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w: resolved path %q escapes root %q", errStoreInvalidPartitionKey, full, cleanRoot)
 	}
-	return filepath.Join(k.dir(root), base+".csv"), nil
-}
-
-func (k partitionKey) manifestPath(root string) (string, error) {
-	base, err := k.baseName()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(k.dir(root), base+".manifest"), nil
+	return full, nil
 }
 
 // intervalToken maps a canonical Interval to its path token. Unlike
@@ -110,11 +145,18 @@ func intervalToken(i Interval) (string, error) {
 	}
 }
 
+// barStore is the internal contract for reading and writing canonical
+// Bar/Manifest pairs. canonicalCSVStore (issue #77, ADR-020) is its one
+// implementation today; the interface exists so a later implementation
+// (a Parquet store, say) can be substituted without changing Manager or
+// its wiring, and so the store's own contract tests can run against any
+// implementation satisfying it.
+//
 // canonicalCSVStore is marketdata's CSV-backed implementation of
-// barStore (issue #77, ADR-020). CSV is selected pragmatically because
-// the existing raw and canonical archives already use it; it is not a
-// public storage contract, and nothing about barStore or partitionKey
-// prevents a future Parquet implementation.
+// barStore. CSV is selected pragmatically because the existing raw and
+// canonical archives already use it; it is not a public storage
+// contract, and nothing about barStore or partitionKey prevents a
+// future Parquet implementation.
 type canonicalCSVStore struct {
 	rootDir string
 }
@@ -129,30 +171,43 @@ var _ barStore = (*canonicalCSVStore)(nil)
 // root reports the store's configured root, for diagnostics only.
 func (s *canonicalCSVStore) root() string { return s.rootDir }
 
-// publish validates m, bs, and their pairing (Manifest.Matches), then
-// writes both to disk.
+// publish validates key, m, bs, and their mutual agreement, then writes
+// both as one file, atomically.
 //
-// # Atomicity
+// # One file, not two
 //
-// os.Rename is atomic for one file on the same filesystem, but there is
-// no single-operation atomic rename across two files — and ADR-020
-// rules out the usual revision-suffixed-filename-plus-pointer-file
-// trick that would sidestep that ("the version identifier ... does not
-// appear in the path"). publish therefore writes the new data and
-// manifest to temporary names first, then renames data into place
-// followed by manifest into place — manifest last, deliberately.
+// An earlier draft of this store published data and manifest as two
+// separate files, relying on os.Rename's single-file atomicity plus a
+// documented ordering (data renamed, then manifest) and the expectation
+// that Manifest.Matches would reject the pair a reader could observe
+// mid-sequence. A design review correctly identified that this still
+// violated the issue's own acceptance criterion that failure or
+// cancellation must leave the prior published revision intact: once the
+// data file's rename succeeded, the *old* data was already gone,
+// replaced by the new file's bytes — Matches failing on the resulting
+// pair meant the corruption was detected, but the previously published
+// dataset was no longer loadable at all until a further successful
+// publish. Detecting a problem is not the same as leaving the prior
+// revision intact.
 //
-// A reader must always call Manifest.Matches(bs) before trusting a
-// loaded pair (load does this). That makes the narrow window between
-// the two renames safe: a reader that lands there sees new data paired
-// with the still-old manifest, which fails Matches and is correctly
-// read as "not currently published" rather than silently served as
-// valid, mismatched data. If publish is cancelled or fails before
-// either rename — including while still writing the temporary files —
-// the previously published pair is completely untouched.
+// The fix is the other option the issue's own scope explicitly allowed
+// ("the dataset manifest or agreed file header"): manifest and data now
+// share one file, so there is exactly one os.Rename — genuinely atomic,
+// not "atomic per file with a window between two files." A publish that
+// is cancelled or fails before that one rename leaves the previously
+// published file completely untouched and fully loadable; a publish
+// that completes it replaces the whole (manifest, data) pair in a
+// single indivisible step. There is no intermediate state to reach at
+// all.
 func (s *canonicalCSVStore) publish(ctx context.Context, key partitionKey, m Manifest, bs BarSet) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if err := key.validate(); err != nil {
+		return fmt.Errorf("marketdata: store: publish: %w", err)
+	}
+	if err := checkKeyMatchesManifest(key, m); err != nil {
+		return fmt.Errorf("marketdata: store: publish: %w", err)
 	}
 	if err := m.Validate(); err != nil {
 		return fmt.Errorf("marketdata: store: publish: manifest: %w", err)
@@ -164,11 +219,7 @@ func (s *canonicalCSVStore) publish(ctx context.Context, key partitionKey, m Man
 		return fmt.Errorf("marketdata: store: publish: %w", err)
 	}
 
-	dataPath, err := key.dataPath(s.rootDir)
-	if err != nil {
-		return err
-	}
-	manifestPath, err := key.manifestPath(s.rootDir)
+	path, err := key.path(s.rootDir)
 	if err != nil {
 		return err
 	}
@@ -176,50 +227,70 @@ func (s *canonicalCSVStore) publish(ctx context.Context, key partitionKey, m Man
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(dataPath, func(w *bufio.Writer) error {
-		return encodeBarSet(w, key, bs)
+	if err := writeFileAtomic(path, func(w *bufio.Writer) error {
+		return encodePartition(w, key, m, bs)
 	}); err != nil {
-		return fmt.Errorf("marketdata: store: publish: data: %w", err)
-	}
-
-	if err := ctx.Err(); err != nil {
-		// Data is already published under the new revision; the old
-		// manifest is still in place and will fail Matches against it
-		// (see the doc comment above) until a later successful publish
-		// completes both writes.
-		return err
-	}
-	if err := writeFileAtomic(manifestPath, func(w *bufio.Writer) error {
-		return encodeManifest(w, m)
-	}); err != nil {
-		return fmt.Errorf("marketdata: store: publish: manifest: %w", err)
+		return fmt.Errorf("marketdata: store: publish: %w", err)
 	}
 	return nil
 }
 
-// load reads the manifest and data files for key, verifies they Match,
-// and returns them. It reports an error — never a partial or
-// best-effort result — for a missing file, a malformed file, or a
-// manifest/data pair that disagrees.
+// checkKeyMatchesManifest verifies key's identity fields agree with m,
+// so publish can never succeed while producing a partition that could
+// not subsequently be loaded (a zero or mismatched instrument, or a
+// file filed under the wrong provider/interval/calendar-month
+// directory).
+//
+// The year/month check is deliberately an overlap check, not exact
+// containment: m.Span is checked against [key's month start, key's
+// month end) as a half-open range, not required to fall entirely
+// within it. A session-aligned D1 span can legitimately start in the
+// closing hours of the previous UTC day — near a month boundary, the
+// previous UTC month — while still correctly belonging to the calendar
+// month a caller filed it under; overlap rather than containment avoids
+// rejecting that real case while still catching a gross mismatch (data
+// from an unrelated month published under this key).
+func checkKeyMatchesManifest(key partitionKey, m Manifest) error {
+	if !key.instrument.Equal(m.Instrument) {
+		return fmt.Errorf("%w: key instrument %s != manifest instrument %s",
+			errStorePartitionKeyMismatch, key.instrument, m.Instrument)
+	}
+	if key.provider != m.Provider {
+		return fmt.Errorf("%w: key provider %q != manifest provider %q",
+			errStorePartitionKeyMismatch, key.provider, m.Provider)
+	}
+	if key.interval != m.Interval {
+		return fmt.Errorf("%w: key interval %s != manifest interval %s",
+			errStorePartitionKeyMismatch, key.interval, m.Interval)
+	}
+	monthStart := time.Date(key.year, key.month, 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	if !m.Span.Start().Before(monthEnd) || !m.Span.End().After(monthStart) {
+		return fmt.Errorf("%w: manifest span [%s, %s) does not overlap key month %04d-%02d",
+			errStorePartitionKeyMismatch, m.Span.Start(), m.Span.End(), key.year, int(key.month))
+	}
+	return nil
+}
+
+// load reads and parses the file for key, verifying its header's
+// recomputed Revision agrees with its stored one and that the resulting
+// Manifest and BarSet Match, before returning either. It reports an
+// error — never a partial or best-effort result — for a missing file,
+// a malformed file, or a manifest/data pair that disagrees.
 func (s *canonicalCSVStore) load(ctx context.Context, key partitionKey) (Manifest, BarSet, error) {
 	if err := ctx.Err(); err != nil {
 		return Manifest{}, BarSet{}, err
 	}
-
-	manifestPath, err := key.manifestPath(s.rootDir)
-	if err != nil {
-		return Manifest{}, BarSet{}, err
-	}
-	dataPath, err := key.dataPath(s.rootDir)
-	if err != nil {
-		return Manifest{}, BarSet{}, err
+	if err := key.validate(); err != nil {
+		return Manifest{}, BarSet{}, fmt.Errorf("marketdata: store: load: %w", err)
 	}
 
-	m, err := readManifestFile(manifestPath, key.instrument)
+	path, err := key.path(s.rootDir)
 	if err != nil {
 		return Manifest{}, BarSet{}, err
 	}
-	bars, err := readBarSetFile(dataPath, key)
+
+	m, bars, err := readPartitionFile(path, key)
 	if err != nil {
 		return Manifest{}, BarSet{}, err
 	}
@@ -281,19 +352,75 @@ func writeFileAtomic(finalPath string, encode func(*bufio.Writer) error) error {
 	return nil
 }
 
-// encodeBarSet writes bs's bars as canonical CSV rows, preceded by a
-// schema comment cross-checked against key on read. It never writes a
-// dense, zero-filled placeholder row: an empty bs.Bars produces a valid
-// file with a header and no data rows at all.
-func encodeBarSet(w *bufio.Writer, key partitionKey, bs BarSet) error {
+// manifestJSON is the exact, unambiguous structure a partition file's
+// manifest header line encodes. Using JSON rather than hand-joined
+// key=value lines removes an encoding ambiguity a line-oriented format
+// has: Manifest.Validate only requires its string fields (Provider, the
+// version fields, Parent.Revision) to be non-empty, not free of "\n" or
+// "\r", so a key=value-per-line encoding cannot round-trip every value
+// Validate accepts. JSON quotes and escapes each string field, so no
+// field's content can be misread as a line boundary — the same reason
+// Manifest.Revision (#73) already hashes a JSON-encoded struct rather
+// than a delimited string.
+type manifestJSON struct {
+	Provider         string      `json:"provider"`
+	Instrument       string      `json:"instrument"`
+	IntervalUnit     Unit        `json:"interval_unit"`
+	IntervalCount    int         `json:"interval_count"`
+	SpanStart        string      `json:"span_start"`
+	SpanEnd          string      `json:"span_end"`
+	Basis            PriceBasis  `json:"basis"`
+	SchemaVersion    int         `json:"schema_version"`
+	RawFingerprint   string      `json:"raw_fingerprint"`
+	BuilderVersion   string      `json:"builder_version"`
+	ValidatorVersion string      `json:"validator_version"`
+	ResamplerVersion string      `json:"resampler_version"`
+	CalendarVersion  string      `json:"calendar_version"`
+	BuiltAt          string      `json:"built_at"`
+	BarCount         int         `json:"bar_count"`
+	FirstBar         string      `json:"first_bar,omitempty"`
+	LastBar          string      `json:"last_bar,omitempty"`
+	Parent           *parentJSON `json:"parent,omitempty"`
+	// Revision is m.Revision() at encode time. load recomputes it from
+	// the decoded Manifest and rejects the file if the two disagree —
+	// the cheapest possible defense against a hand-edited or partially
+	// corrupted header whose individual fields still happen to parse.
+	Revision string `json:"revision"`
+}
+
+type parentJSON struct {
+	Instrument    string `json:"instrument"`
+	IntervalUnit  Unit   `json:"interval_unit"`
+	IntervalCount int    `json:"interval_count"`
+	Revision      string `json:"revision"`
+}
+
+// encodePartition writes key's schema line, m's JSON header line, the
+// canonical CSV column header, and bs's rows in order. It never writes
+// a dense, zero-filled placeholder row: an empty bs.Bars produces a
+// valid file with a header and no data rows at all.
+func encodePartition(w *bufio.Writer, key partitionKey, m Manifest, bs BarSet) error {
 	token, err := intervalToken(key.interval)
 	if err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "# schema=%s provider=%s symbol=%s interval=%s year=%04d month=%02d\n",
-		canonicalBarSchema, key.provider, key.symbol, token, key.year, int(key.month)); err != nil {
+		canonicalSchema, key.provider, key.symbol, token, key.year, int(key.month)); err != nil {
 		return err
 	}
+
+	header := manifestToJSON(m)
+	encoded, err := json.Marshal(header)
+	if err != nil {
+		return fmt.Errorf("marketdata: store: encode manifest: %w", err)
+	}
+	if _, err := w.Write(encoded); err != nil {
+		return err
+	}
+	if err := w.WriteByte('\n'); err != nil {
+		return err
+	}
+
 	if _, err := fmt.Fprintln(w, canonicalCSVHeader); err != nil {
 		return err
 	}
@@ -306,12 +433,45 @@ func encodeBarSet(w *bufio.Writer, key partitionKey, bs BarSet) error {
 	return nil
 }
 
-// readBarSetFile reads and parses the data file at path, cross-checking
-// its schema comment against key, and returns its bars in file order.
-func readBarSetFile(path string, key partitionKey) ([]Bar, error) {
+func manifestToJSON(m Manifest) manifestJSON {
+	h := manifestJSON{
+		Provider:         m.Provider,
+		Instrument:       m.Instrument.String(),
+		IntervalUnit:     m.Interval.Unit(),
+		IntervalCount:    m.Interval.Count(),
+		SpanStart:        m.Span.Start().Format(time.RFC3339Nano),
+		SpanEnd:          m.Span.End().Format(time.RFC3339Nano),
+		Basis:            m.Basis,
+		SchemaVersion:    m.SchemaVersion,
+		RawFingerprint:   m.RawFingerprint,
+		BuilderVersion:   m.BuilderVersion,
+		ValidatorVersion: m.ValidatorVersion,
+		ResamplerVersion: m.ResamplerVersion,
+		CalendarVersion:  m.CalendarVersion,
+		BuiltAt:          m.BuiltAt.Format(time.RFC3339Nano),
+		BarCount:         m.BarCount,
+		FirstBar:         formatOptionalTime(m.FirstBar),
+		LastBar:          formatOptionalTime(m.LastBar),
+		Revision:         m.Revision(),
+	}
+	if m.Parent != nil {
+		h.Parent = &parentJSON{
+			Instrument:    m.Parent.Instrument.String(),
+			IntervalUnit:  m.Parent.Interval.Unit(),
+			IntervalCount: m.Parent.Interval.Count(),
+			Revision:      m.Parent.Revision,
+		}
+	}
+	return h
+}
+
+// readPartitionFile reads and parses the file at path, cross-checking
+// its schema line against key, and returns the decoded Manifest and its
+// bars in file order.
+func readPartitionFile(path string, key partitionKey) (Manifest, []Bar, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return Manifest{}, nil, err
 	}
 	defer f.Close()
 
@@ -319,20 +479,29 @@ func readBarSetFile(path string, key partitionKey) ([]Bar, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	if !scanner.Scan() {
-		return nil, fmt.Errorf("%w: %s: empty file", errStoreMalformed, path)
+		return Manifest{}, nil, fmt.Errorf("%w: %s: empty file", errStoreMalformed, path)
 	}
-	if err := crossCheckBarSchema(scanner.Text(), path, key); err != nil {
-		return nil, err
+	if err := crossCheckPartitionSchema(scanner.Text(), path, key); err != nil {
+		return Manifest{}, nil, err
 	}
+
 	if !scanner.Scan() {
-		return nil, fmt.Errorf("%w: %s: missing column header", errStoreMalformed, path)
+		return Manifest{}, nil, fmt.Errorf("%w: %s: missing manifest header", errStoreMalformed, path)
 	}
-	if header := scanner.Text(); header != canonicalCSVHeader {
-		return nil, fmt.Errorf("%w: %s: unexpected column header %q, want %q", errStoreMalformed, path, header, canonicalCSVHeader)
+	m, err := decodeManifestJSON(scanner.Text(), path, key.instrument)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+
+	if !scanner.Scan() {
+		return Manifest{}, nil, fmt.Errorf("%w: %s: missing column header", errStoreMalformed, path)
+	}
+	if got := scanner.Text(); got != canonicalCSVHeader {
+		return Manifest{}, nil, fmt.Errorf("%w: %s: unexpected column header %q, want %q", errStoreMalformed, path, got, canonicalCSVHeader)
 	}
 
 	var bars []Bar
-	line := 2
+	line := 3
 	for scanner.Scan() {
 		line++
 		row := scanner.Text()
@@ -341,17 +510,17 @@ func readBarSetFile(path string, key partitionKey) ([]Bar, error) {
 		}
 		b, err := parseBarRow(row)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s:%d: %v", errStoreMalformed, path, line, err)
+			return Manifest{}, nil, fmt.Errorf("%w: %s:%d: %v", errStoreMalformed, path, line, err)
 		}
 		bars = append(bars, b)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+		return Manifest{}, nil, fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
 	}
-	return bars, nil
+	return m, bars, nil
 }
 
-func crossCheckBarSchema(comment, path string, key partitionKey) error {
+func crossCheckPartitionSchema(comment, path string, key partitionKey) error {
 	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(comment), "#"))
 	kv := map[string]string{}
 	for tok := range strings.FieldsSeq(trimmed) {
@@ -360,7 +529,7 @@ func crossCheckBarSchema(comment, path string, key partitionKey) error {
 			kv[k] = v
 		}
 	}
-	if kv["schema"] != canonicalBarSchema {
+	if kv["schema"] != canonicalSchema {
 		return fmt.Errorf("%w: %s: unexpected schema %q", errStoreMalformed, path, kv["schema"])
 	}
 	if kv["provider"] != key.provider {
@@ -421,99 +590,37 @@ func parseBarRow(row string) (Bar, error) {
 	}, nil
 }
 
-// encodeManifest writes m as key=value lines, one per field, plus its
-// computed Revision for a cheap sanity check on read.
-func encodeManifest(w *bufio.Writer, m Manifest) error {
-	lines := []string{
-		"schema=" + canonicalManifestSchema,
-		"provider=" + m.Provider,
-		"instrument=" + m.Instrument.String(),
-		fmt.Sprintf("interval_unit=%d", m.Interval.Unit()),
-		fmt.Sprintf("interval_count=%d", m.Interval.Count()),
-		"span_start=" + m.Span.Start().Format(time.RFC3339Nano),
-		"span_end=" + m.Span.End().Format(time.RFC3339Nano),
-		fmt.Sprintf("basis=%d", m.Basis),
-		fmt.Sprintf("schema_version=%d", m.SchemaVersion),
-		"raw_fingerprint=" + m.RawFingerprint,
-		"builder_version=" + m.BuilderVersion,
-		"validator_version=" + m.ValidatorVersion,
-		"resampler_version=" + m.ResamplerVersion,
-		"calendar_version=" + m.CalendarVersion,
-		"built_at=" + m.BuiltAt.Format(time.RFC3339Nano),
-		fmt.Sprintf("bar_count=%d", m.BarCount),
-		"first_bar=" + formatOptionalTime(m.FirstBar),
-		"last_bar=" + formatOptionalTime(m.LastBar),
-	}
-	if m.Parent != nil {
-		lines = append(lines,
-			"parent_instrument="+m.Parent.Instrument.String(),
-			fmt.Sprintf("parent_interval_unit=%d", m.Parent.Interval.Unit()),
-			fmt.Sprintf("parent_interval_count=%d", m.Parent.Interval.Count()),
-			"parent_revision="+m.Parent.Revision,
-		)
-	}
-	lines = append(lines, "revision="+m.Revision())
-
-	for _, line := range lines {
-		if _, err := fmt.Fprintln(w, line); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// readManifestFile reads and parses the manifest file at path.
-// expectedInstrument supplies Manifest.Instrument (and, when present,
-// ParentRef.Instrument, which Manifest's own lineage rules require to
-// equal the child's instrument): this package cannot parse an
-// instrument.ID back out of its own String() form, so the caller
+// decodeManifestJSON parses line as a manifestJSON header, cross-checks
+// its instrument (and, when present, its parent's instrument) against
+// expectedInstrument, builds the resulting Manifest, and verifies that
+// Manifest's own recomputed Revision agrees with the header's stored
+// one before returning it.
+//
+// expectedInstrument supplies Manifest.Instrument directly rather than
+// parsing it out of the header's own instrument string: this package
+// cannot parse an instrument.ID back out of its String() form (there is
+// no inverse of instrument.CurrencyPairID and friends), so the caller
 // supplies the identity it already knows from the partition key, and
-// the stored text is cross-checked against it rather than parsed.
-func readManifestFile(path string, expectedInstrument instrument.ID) (Manifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Manifest{}, err
+// the stored text is cross-checked against it instead.
+func decodeManifestJSON(line, path string, expectedInstrument instrument.ID) (Manifest, error) {
+	var h manifestJSON
+	if err := json.Unmarshal([]byte(line), &h); err != nil {
+		return Manifest{}, fmt.Errorf("%w: %s: manifest header: %v", errStoreMalformed, path, err)
 	}
-
-	kv := make(map[string]string)
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			return Manifest{}, fmt.Errorf("%w: %s: malformed line %q", errStoreMalformed, path, line)
-		}
-		kv[k] = v
-	}
-
-	if kv["schema"] != canonicalManifestSchema {
-		return Manifest{}, fmt.Errorf("%w: %s: unexpected schema %q", errStoreMalformed, path, kv["schema"])
-	}
-	if kv["instrument"] != expectedInstrument.String() {
+	if h.Instrument != expectedInstrument.String() {
 		return Manifest{}, fmt.Errorf("%w: %s: manifest instrument %q disagrees with expected %q",
-			errStoreMalformed, path, kv["instrument"], expectedInstrument.String())
+			errStoreMalformed, path, h.Instrument, expectedInstrument.String())
 	}
 
-	intervalUnit, err := parseUint8(kv["interval_unit"])
-	if err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: interval_unit: %v", errStoreMalformed, path, err)
-	}
-	intervalCount, err := strconv.Atoi(kv["interval_count"])
-	if err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: interval_count: %v", errStoreMalformed, path, err)
-	}
-	interval, err := NewInterval(Unit(intervalUnit), intervalCount)
+	interval, err := NewInterval(h.IntervalUnit, h.IntervalCount)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: interval: %v", errStoreMalformed, path, err)
 	}
-
-	spanStart, err := time.Parse(time.RFC3339Nano, kv["span_start"])
+	spanStart, err := time.Parse(time.RFC3339Nano, h.SpanStart)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: span_start: %v", errStoreMalformed, path, err)
 	}
-	spanEnd, err := time.Parse(time.RFC3339Nano, kv["span_end"])
+	spanEnd, err := time.Parse(time.RFC3339Nano, h.SpanEnd)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: span_end: %v", errStoreMalformed, path, err)
 	}
@@ -521,75 +628,59 @@ func readManifestFile(path string, expectedInstrument instrument.ID) (Manifest, 
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: span: %v", errStoreMalformed, path, err)
 	}
-
-	basisVal, err := parseUint8(kv["basis"])
-	if err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: basis: %v", errStoreMalformed, path, err)
-	}
-	schemaVersion, err := strconv.Atoi(kv["schema_version"])
-	if err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: schema_version: %v", errStoreMalformed, path, err)
-	}
-	builtAt, err := time.Parse(time.RFC3339Nano, kv["built_at"])
+	builtAt, err := time.Parse(time.RFC3339Nano, h.BuiltAt)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: built_at: %v", errStoreMalformed, path, err)
 	}
-	barCount, err := strconv.Atoi(kv["bar_count"])
-	if err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: bar_count: %v", errStoreMalformed, path, err)
-	}
-	firstBar, err := parseOptionalTime(kv["first_bar"])
+	firstBar, err := parseOptionalTime(h.FirstBar)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: first_bar: %v", errStoreMalformed, path, err)
 	}
-	lastBar, err := parseOptionalTime(kv["last_bar"])
+	lastBar, err := parseOptionalTime(h.LastBar)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: last_bar: %v", errStoreMalformed, path, err)
 	}
 
 	m := Manifest{
-		Provider:         kv["provider"],
+		Provider:         h.Provider,
 		Instrument:       expectedInstrument,
 		Interval:         interval,
 		Span:             span,
-		Basis:            PriceBasis(basisVal),
-		SchemaVersion:    schemaVersion,
-		RawFingerprint:   kv["raw_fingerprint"],
-		BuilderVersion:   kv["builder_version"],
-		ValidatorVersion: kv["validator_version"],
-		ResamplerVersion: kv["resampler_version"],
-		CalendarVersion:  kv["calendar_version"],
+		Basis:            h.Basis,
+		SchemaVersion:    h.SchemaVersion,
+		RawFingerprint:   h.RawFingerprint,
+		BuilderVersion:   h.BuilderVersion,
+		ValidatorVersion: h.ValidatorVersion,
+		ResamplerVersion: h.ResamplerVersion,
+		CalendarVersion:  h.CalendarVersion,
 		BuiltAt:          builtAt.UTC(),
-		BarCount:         barCount,
+		BarCount:         h.BarCount,
 		FirstBar:         firstBar,
 		LastBar:          lastBar,
 	}
 
-	if kv["parent_revision"] != "" {
-		parentUnit, err := parseUint8(kv["parent_interval_unit"])
-		if err != nil {
-			return Manifest{}, fmt.Errorf("%w: %s: parent_interval_unit: %v", errStoreMalformed, path, err)
+	if h.Parent != nil {
+		if h.Parent.Instrument != expectedInstrument.String() {
+			return Manifest{}, fmt.Errorf("%w: %s: parent instrument %q disagrees with expected %q",
+				errStoreMalformed, path, h.Parent.Instrument, expectedInstrument.String())
 		}
-		parentCount, err := strconv.Atoi(kv["parent_interval_count"])
+		parentInterval, err := NewInterval(h.Parent.IntervalUnit, h.Parent.IntervalCount)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("%w: %s: parent_interval_count: %v", errStoreMalformed, path, err)
+			return Manifest{}, fmt.Errorf("%w: %s: parent interval: %v", errStoreMalformed, path, err)
 		}
-		parentInterval, err := NewInterval(Unit(parentUnit), parentCount)
-		if err != nil {
-			return Manifest{}, fmt.Errorf("%w: %s: parent_interval: %v", errStoreMalformed, path, err)
-		}
-		// Manifest's own lineage rules (validateLineage) require a
-		// derived dataset's parent to name the same instrument as the
-		// child, so expectedInstrument is correct for the parent too.
 		m.Parent = &ParentRef{
 			Instrument: expectedInstrument,
 			Interval:   parentInterval,
-			Revision:   kv["parent_revision"],
+			Revision:   h.Parent.Revision,
 		}
 	}
 
 	if err := m.Validate(); err != nil {
 		return Manifest{}, fmt.Errorf("%w: %s: %v", errStoreMalformed, path, err)
+	}
+	if got, want := m.Revision(), h.Revision; got != want {
+		return Manifest{}, fmt.Errorf("%w: %s: recomputed revision %s disagrees with stored revision %s",
+			errStoreMalformed, path, got, want)
 	}
 	return m, nil
 }
@@ -614,13 +705,4 @@ func parseOptionalTime(s string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return t.UTC(), nil
-}
-
-// parseUint8 parses s as a base-10 uint8.
-func parseUint8(s string) (uint8, error) {
-	v, err := strconv.ParseUint(s, 10, 8)
-	if err != nil {
-		return 0, err
-	}
-	return uint8(v), nil
 }
