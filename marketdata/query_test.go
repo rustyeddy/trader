@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,13 +150,24 @@ func TestManagerBars_NarrowerRangeFiltersBars(t *testing.T) {
 func TestManagerBars_SpansMultipleMonths(t *testing.T) {
 	mgr := newTestManager(t)
 
+	aprilStart := time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)
+	aprilEnd := time.Date(2020, 4, 1, 2, 0, 0, 0, time.UTC)
+
+	// March's manifest Span is extended all the way to aprilStart, so its
+	// coverage is contiguous with April's: only two actual bars sit in
+	// that span (an unrealistically large gap between real observations,
+	// but Manifest.Span is a coverage claim, not a promise of bar
+	// density — see BarSet's doc comment), yet the *coverage* union has
+	// no hole, which is the property Bars actually verifies.
 	marchKey := validPartitionKey(t)
 	marchManifest := validManifest(t)
 	marchBars := validBarSet(t)
+	marchSpan, err := NewTimeRange(marchManifest.Span.Start(), aprilStart)
+	require.NoError(t, err)
+	marchManifest.Span = marchSpan
+	marchBars.Span = marchSpan
 	publishTestPartition(t, mgr, marchKey, marchManifest, marchBars)
 
-	aprilStart := time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)
-	aprilEnd := time.Date(2020, 4, 1, 2, 0, 0, 0, time.UTC)
 	aprilSpan, err := NewTimeRange(aprilStart, aprilEnd)
 	require.NoError(t, err)
 	aprilBars := marchBars
@@ -186,6 +198,92 @@ func TestManagerBars_SpansMultipleMonths(t *testing.T) {
 	}
 	assert.Len(t, got, len(marchBars.Bars)+1)
 	assert.Len(t, reader.Manifests(), 2)
+}
+
+// TestManagerBars_GapInCoverageReportsErrDataUnavailable is the case a
+// design review flagged as silently succeeding in an earlier draft: a
+// query range that a partition's own Manifest.Span does not actually
+// cover must fail explicitly, even though a partition file exists for
+// the touched month.
+func TestManagerBars_GapInCoverageReportsErrDataUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	key := validPartitionKey(t)
+	m := validManifest(t)
+	publishTestPartition(t, mgr, key, m, validBarSet(t))
+
+	// m.Span covers only March 2 00:00-04:00; ask for a range that
+	// extends well past it, still inside the same UTC month so only one
+	// (existing) partition is even touched.
+	wide, err := NewTimeRange(m.Span.Start(), m.Span.End().Add(20*time.Hour))
+	require.NoError(t, err)
+
+	_, err = mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: wide})
+	assert.ErrorIs(t, err, ErrDataUnavailable)
+}
+
+// TestManagerBars_BoundarySpilloverIsFoundViaProbe reproduces the
+// D1/W1 partition-routing gap a design review identified: the canonical
+// store's own overlap-not-containment rule (checkKeyMatchesManifest)
+// permits a partition filed under one calendar month to hold bars whose
+// observed Time actually falls in the *adjacent* month. A query entirely
+// within that adjacent month, with no partition file of its own, must
+// still find those bars — exactly once — by probing the neighboring key.
+func TestManagerBars_BoundarySpilloverIsFoundViaProbe(t *testing.T) {
+	mgr := newTestManager(t)
+
+	// Filed under April, but its bars' observed Times are the last two
+	// days of March, and its Span only barely pokes into April — the
+	// exact shape checkKeyMatchesManifest allows for a session-aligned
+	// D1 bar (see store_csv.go), here used with D1 to match that real
+	// scenario directly.
+	spanStart := time.Date(2020, 3, 30, 17, 0, 0, 0, time.UTC)
+	spanEnd := time.Date(2020, 4, 1, 17, 0, 0, 0, time.UTC)
+	span, err := NewTimeRange(spanStart, spanEnd)
+	require.NoError(t, err)
+	bar1 := barAt(t, spanStart)
+	bar2 := barAt(t, time.Date(2020, 3, 31, 17, 0, 0, 0, time.UTC))
+	bs := BarSet{Instrument: eurusd(), Interval: D1, Span: span, Basis: BasisBid, Bars: []Bar{bar1, bar2}}
+	require.NoError(t, bs.Validate())
+
+	man := validManifest(t)
+	man.Interval = D1
+	man.Span = span
+	man.BarCount = 2
+	man.FirstBar = bar1.Time
+	man.LastBar = bar2.Time
+	require.NoError(t, man.Matches(bs))
+
+	aprilKey := partitionKey{
+		provider:   "oanda",
+		symbol:     "EURUSD",
+		instrument: eurusd(),
+		interval:   D1,
+		year:       2020,
+		month:      time.April,
+	}
+	publishTestPartition(t, mgr, aprilKey, man, bs)
+
+	// Entirely within March; no March partition was ever published. The
+	// range starts exactly at spanStart so the April-filed manifest's own
+	// Span fully covers it — this test is about partition *routing*, not
+	// the separate coverage-gap check.
+	queryRange, err := NewTimeRange(spanStart, time.Date(2020, 3, 31, 18, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+
+	reader, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: D1, Range: queryRange})
+	require.NoError(t, err)
+
+	var got []Bar
+	for {
+		b, err := reader.Next(context.Background())
+		if err != nil {
+			break
+		}
+		got = append(got, b)
+	}
+	require.Len(t, got, 2, "both March-dated bars must be found via the April-filed partition, exactly once each")
+	assert.Equal(t, bar1.Time, got[0].Time)
+	assert.Equal(t, bar2.Time, got[1].Time)
 }
 
 func TestManagerBars_MissingPartitionReportsErrDataUnavailable(t *testing.T) {
@@ -301,6 +399,64 @@ func TestManagerBars_InvalidateForcesReload(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDataUnavailable, "cache was invalidated, so this must re-read the (now-missing) file")
 }
 
+// TestManagerBars_ConcurrentQueries is the -race regression a design
+// review asked for at the Manager.Bars level, not just barCache's own
+// unit tests: many goroutines querying the same and different partitions
+// concurrently through the real Manager.Bars entry point.
+func TestManagerBars_ConcurrentQueries(t *testing.T) {
+	mgr := newTestManager(t)
+	key := validPartitionKey(t)
+	m := validManifest(t)
+	publishTestPartition(t, mgr, key, m, validBarSet(t))
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for range 32 {
+		wg.Go(func() {
+			reader, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: m.Span})
+			if err != nil {
+				errs <- err
+				return
+			}
+			for {
+				if _, err := reader.Next(context.Background()); err != nil {
+					break
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("unexpected error from concurrent Bars call: %v", err)
+	}
+}
+
+// TestManagerBars_ManifestMutationDoesNotPoisonSubsequentQuery is the
+// end-to-end version of the cache-level aliasing tests: mutating a
+// Manifest returned from one query's BarReader.Manifests must not affect
+// what a later query, hitting the same cached partition, returns.
+func TestManagerBars_ManifestMutationDoesNotPoisonSubsequentQuery(t *testing.T) {
+	mgr := newTestManager(t)
+	key := validPartitionKey(t)
+	m := validDerivedManifest(t)
+	publishTestPartition(t, mgr, key, m, validBarSet(t))
+
+	reader1, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: m.Span})
+	require.NoError(t, err)
+	manifests1 := reader1.Manifests()
+	require.Len(t, manifests1, 1)
+	require.NotNil(t, manifests1[0].Parent)
+	manifests1[0].Parent.Revision = "mutated-by-caller"
+
+	reader2, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: m.Span})
+	require.NoError(t, err)
+	manifests2 := reader2.Manifests()
+	require.Len(t, manifests2, 1)
+	assert.Equal(t, m.Revision(), manifests2[0].Revision())
+	assert.Equal(t, m.Parent.Revision, manifests2[0].Parent.Revision)
+}
+
 func TestBarQueryValidate(t *testing.T) {
 	span, err := NewTimeRange(time.Now(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
@@ -330,6 +486,98 @@ func TestMonthPartitionKeys_CrossesMonthBoundary(t *testing.T) {
 	require.Len(t, keys, 2)
 	assert.Equal(t, time.March, keys[0].month)
 	assert.Equal(t, time.April, keys[1].month)
+}
+
+func TestBoundaryProbeKeys_EmptyCoreReturnsNil(t *testing.T) {
+	assert.Nil(t, boundaryProbeKeys(nil))
+}
+
+func TestBoundaryProbeKeys_SurroundsCoreRange(t *testing.T) {
+	core := []partitionKey{
+		{year: 2020, month: time.March},
+		{year: 2020, month: time.April},
+	}
+	probes := boundaryProbeKeys(core)
+	require.Len(t, probes, 2)
+	assert.Equal(t, 2020, probes[0].year)
+	assert.Equal(t, time.February, probes[0].month)
+	assert.Equal(t, 2020, probes[1].year)
+	assert.Equal(t, time.May, probes[1].month)
+}
+
+func TestShiftPartitionKeyMonth_RollsOverYearBoundary(t *testing.T) {
+	dec := partitionKey{year: 2020, month: time.December}
+	assert.Equal(t, partitionKey{year: 2021, month: time.January}, shiftPartitionKeyMonth(dec, 1))
+
+	jan := partitionKey{year: 2020, month: time.January}
+	assert.Equal(t, partitionKey{year: 2019, month: time.December}, shiftPartitionKeyMonth(jan, -1))
+}
+
+func TestCoverageGap_FullyCovered(t *testing.T) {
+	want, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	gap, ok := coverageGap(want, []TimeRange{want})
+	assert.True(t, ok)
+	assert.Equal(t, TimeRange{}, gap)
+}
+
+func TestCoverageGap_NoSpansIsFullGap(t *testing.T) {
+	want, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	gap, ok := coverageGap(want, nil)
+	assert.False(t, ok)
+	assert.Equal(t, want, gap)
+}
+
+func TestCoverageGap_GapInMiddleDetected(t *testing.T) {
+	want, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	first, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	last, err := NewTimeRange(
+		time.Date(2020, 3, 3, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 4, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	// Spans deliberately out of order: coverageGap must sort internally.
+	gap, ok := coverageGap(want, []TimeRange{last, first})
+	require.False(t, ok)
+	assert.Equal(t, time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC), gap.Start())
+	assert.Equal(t, time.Date(2020, 3, 3, 0, 0, 0, 0, time.UTC), gap.End())
+}
+
+func TestCoverageGap_OverlappingSpansMergeCleanly(t *testing.T) {
+	want, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 3, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	a, err := NewTimeRange(
+		time.Date(2020, 3, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 2, 12, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	b, err := NewTimeRange(
+		time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 3, 3, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	_, ok := coverageGap(want, []TimeRange{a, b})
+	assert.True(t, ok)
 }
 
 func TestBarReaderNextAfterCloseErrors(t *testing.T) {

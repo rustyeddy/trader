@@ -604,12 +604,12 @@ new =Manager=-owned memory cache.
   malformed range.
 - =Manager.Bars(ctx, query)= resolves =query.Instrument= to this
   Manager's provider-native =Listing= through the configured
-  =instrument.Resolver= (ADR-016), derives every UTC calendar-month
-  =partitionKey= the query's range touches, loads each one (through the
-  cache), filters every returned =Bar= back down to the query's exact
-  range, and returns a =*BarReader=. It never downloads, builds, or
-  republishes anything — strictly read-only, matching this issue's own
-  "important constraint."
+  =instrument.Resolver= (ADR-016), loads every partition that could
+  plausibly hold data for the query (see "Proving coverage" below),
+  filters every returned =Bar= back down to the query's exact range,
+  and returns a =*BarReader=. It never downloads, builds, or republishes
+  anything — strictly read-only, matching this issue's own "important
+  constraint."
 - =BarReader= is a fully materialized, in-memory iterator:
   =Next(ctx) (Bar, io.EOF)=, =Manifests() []Manifest= (one entry per
   partition the result was assembled from, disclosing provenance), and
@@ -618,15 +618,14 @@ new =Manager=-owned memory cache.
   =Bars= can be slow or fail on missing data. A =nil= =*BarReader= and a
   =*BarReader= after =Close= both behave as an already-exhausted,
   closed reader rather than panicking.
-- A month with no published partition reports a wrapped
-  =ErrDataUnavailable=, identifying which provider/symbol/interval/month
-  is missing, and no reader is returned at all — never a reader over a
-  silently partial result. A different load failure (a malformed or
-  corrupted partition file) is deliberately /not/ classified as
-  =ErrDataUnavailable=: the two are different failures — "we have never
-  built this data" versus "the data we have is broken" — and a caller
-  must be able to tell them apart rather than treating both as "go
-  acquire the missing data."
+- A query range =Bars= cannot prove full coverage for reports a wrapped
+  =ErrDataUnavailable= naming the uncovered sub-range, and no reader is
+  returned at all — never a reader over a silently partial result. A
+  different load failure (a malformed or corrupted partition file) is
+  deliberately /not/ classified as =ErrDataUnavailable=: the two are
+  different failures — "we have never built this data" versus "the data
+  we have is broken" — and a caller must be able to tell them apart
+  rather than treating both as "go acquire the missing data."
 
 **** The store stays fully private to =marketdata=
 This issue also closed a real gap the M2-03 skeleton left open: because
@@ -655,7 +654,7 @@ name, so =Config= gains =Resolver instrument.Resolver= and
 =CacheCapacity int= is also added, optional: non-positive selects a
 package-defined default (32 partitions).
 
-**** =barCache=: bounded, FIFO, revision-aware
+**** =barCache=: bounded, FIFO, revision-aware, concurrency-safe
 =barCache= lives in its own file (=cache.go=), unexported, and is
 reachable only as =Manager='s own private field — nothing in =Config=
 can inject or replace it, and no =Manager= method returns it, the same
@@ -677,16 +676,83 @@ memory. No such publish operation exists yet — every operation this
 issue adds is read-only — so =invalidate= is exercised directly by
 tests today; it is the seam that operation will need, not dead code.
 
-**** Multi-month spans and range filtering
-The canonical store partitions by UTC calendar month (#77); a query
-range that crosses a month boundary, or starts/ends mid-month, touches
-more than one partition file. =monthPartitionKeys= derives one
-=partitionKey= per UTC calendar month the query's range overlaps, in
-chronological order, and =Bars= aborts the whole query — no partial
-result — the moment any one of them fails to load. Bars from every
-loaded partition are then filtered against the query's exact
-=TimeRange.Contains=, since a full calendar month's data is coarser than
-what the caller actually asked for.
+A design review on the PR found =barCache='s map and =container/list=
+were entirely unsynchronized, even though =Manager.Bars= is an
+application-service entry point with no documented single-goroutine
+restriction. Every method (=get=/=put=/=invalidate=/=len=) now locks a
+=sync.Mutex= around its state; =TestBarCacheConcurrentAccess= and
+=TestManagerBars_ConcurrentQueries= are the =-race= regressions proving
+it.
+
+The same review found a second hazard one level up: =Manifest.Parent= is
+a pointer, so returning a =Manifest= by value out of =get= (or storing
+one via =put=) shared that pointer between the cache and whatever the
+caller held — a caller mutating =Parent.Revision= on a =Manifest= handed
+back by one query could silently corrupt what a later query, hitting the
+same cached entry, would receive. =cloneManifest= (also in =cache.go=)
+deep-copies =Parent= and is now applied at every ownership boundary that
+crosses out of or into the cache: =barCache.get=, =barCache.put=, and
+=BarReader.Manifests=. =TestBarCacheGetReturnsIndependentManifestClone=,
+=TestBarCachePutClonesManifestFromCaller=, and the end-to-end
+=TestManagerBars_ManifestMutationDoesNotPoisonSubsequentQuery= pin this
+down at all three layers.
+
+**** Proving coverage, not just loading files
+The first draft derived partition keys solely from the UTC calendar
+months a query's range overlaps (=monthPartitionKeys=) and treated
+"every one of those files loaded without error" as proof the query was
+satisfiable. A design review identified two related correctness holes in
+that assumption, both now fixed by the same mechanism:
+
+1. *Silent partial-range success.* Loading a partition file proves
+   nothing about how much of the query's range it actually covers — a
+   manifest's own =Span= can be far narrower than the calendar month it
+   is filed under. The original multi-month test was, on inspection,
+   itself codifying this bug: it asked for a range through April 1 while
+   its March partition's =Span= covered only four hours, and the query
+   still "succeeded," silently returning less data than was requested.
+2. *D1/W1 partition-routing.* The canonical store's own
+   =checkKeyMatchesManifest= (#77) permits a partition's =Manifest.Span=
+   to merely /overlap/, not be contained by, the calendar month it is
+   filed under — deliberately, to allow a session-aligned D1/W1 bar
+   whose session opens in the closing hours of the previous UTC month.
+   That means a bar's observed =Time= can legitimately live in a
+   partition filed under an /adjacent/ calendar month from the one
+   =monthPartitionKeys= would compute for it, and a query entirely
+   within that adjacent month — with no partition file of its own —
+   would previously report =ErrDataUnavailable= even though the data
+   exists, findable only by looking at the neighboring key.
+
+Both are fixed together: =Bars= now loads the core months
+=monthPartitionKeys= identifies /plus/ =boundaryProbeKeys= — the one
+calendar month immediately before the first core month and immediately
+after the last. Every key, core or probe alike, is loaded the same
+tolerant way: a missing file (=os.ErrNotExist=) is not itself an error,
+since most month boundaries have nothing filed at the adjacent key, but
+a file that exists and fails to load (malformed, cancelled context)
+still fails the query immediately. What actually decides success is the
+new =coverageGap= helper: the union of every =Manifest.Span= that was
+found, clipped to the query's range, must cover that range with no gap;
+=coverageGap= reports the first uncovered sub-range otherwise, which
+=Bars= surfaces directly in its =ErrDataUnavailable=. Bars gathered from
+every loaded partition are deduplicated by =Time= and sorted before
+being returned, since a boundary-spillover bar could in principle be
+reachable through more than one loaded partition and the merge across
+files is not otherwise guaranteed sorted.
+
+=TestManagerBars_GapInCoverageReportsErrDataUnavailable= and
+=TestManagerBars_BoundarySpilloverIsFoundViaProbe= (the latter
+reproducing the exact D1 scenario above: a partition filed under April
+whose two bars are dated the last two days of March, queried through a
+range entirely inside March with no March partition ever published) are
+the regression tests for each finding; =TestCoverageGap_*= and
+=TestBoundaryProbeKeys_*=/=TestShiftPartitionKeyMonth_*= test the
+helpers directly.
+
+This remains deliberately narrow — a "does the query's own range have
+proof of coverage" check, not the general coverage/gap catalog issue #79
+owns — and does not attempt session-calendar-aware routing beyond the
+one-month blast radius a D1/W1 bar can plausibly spill across.
 
 **** External example uses a checked-in fixture
 =Manager= has no publish/build operation yet, so

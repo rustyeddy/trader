@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,4 +118,72 @@ func TestNilBarCacheIsSafe(t *testing.T) {
 	assert.NotPanics(t, func() { c.put(keyFor(t, "EURUSD"), validManifest(t), validBarSet(t)) })
 	assert.NotPanics(t, func() { c.invalidate(keyFor(t, "EURUSD")) })
 	assert.Equal(t, 0, c.len())
+}
+
+// TestBarCacheConcurrentAccess is the -race regression a design review
+// asked for: barCache's map and list must survive concurrent get/put/
+// invalidate/len from multiple goroutines without racing or panicking.
+// Run with `go test -race` to be meaningful.
+func TestBarCacheConcurrentAccess(t *testing.T) {
+	c := newBarCache(8)
+	m, bs := validManifest(t), validBarSet(t)
+	keys := make([]partitionKey, 4)
+	for i := range keys {
+		keys[i] = keyFor(t, string(rune('A'+i))+string(rune('A'+i))+string(rune('A'+i)))
+	}
+
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			key := keys[g%len(keys)]
+			for i := range 50 {
+				c.put(key, m, bs)
+				c.get(key)
+				c.len()
+				if i%10 == 0 {
+					c.invalidate(key)
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+}
+
+// TestBarCacheGetReturnsIndependentManifestClone proves the cache
+// boundary a design review asked for directly: mutating a Manifest
+// returned by get must never affect what a later get for the same key
+// returns.
+func TestBarCacheGetReturnsIndependentManifestClone(t *testing.T) {
+	c := newBarCache(4)
+	key := keyFor(t, "EURUSD")
+	c.put(key, validDerivedManifest(t), validBarSet(t))
+
+	got1, _, ok := c.get(key)
+	require.True(t, ok)
+	require.NotNil(t, got1.Parent)
+	got1.Parent.Revision = "mutated-by-caller"
+
+	got2, _, ok := c.get(key)
+	require.True(t, ok)
+	require.NotNil(t, got2.Parent)
+	assert.Equal(t, validDerivedManifest(t).Parent.Revision, got2.Parent.Revision,
+		"mutating one get's result must not affect a later get")
+}
+
+// TestBarCachePutClonesManifestFromCaller proves the other direction:
+// mutating the Manifest a caller passed to put, after put returns, must
+// not affect what the cache goes on to serve.
+func TestBarCachePutClonesManifestFromCaller(t *testing.T) {
+	c := newBarCache(4)
+	key := keyFor(t, "EURUSD")
+	m := validDerivedManifest(t)
+	c.put(key, m, validBarSet(t))
+
+	m.Parent.Revision = "mutated-after-put"
+
+	got, _, ok := c.get(key)
+	require.True(t, ok)
+	assert.Equal(t, validDerivedManifest(t).Parent.Revision, got.Parent.Revision)
 }

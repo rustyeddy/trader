@@ -169,18 +169,28 @@
 // interval, half-open range) and returning a *BarReader over stable,
 // chronologically ordered Bars. Bars resolves the query's instrument to
 // this Manager's provider-native Listing through the configured
-// instrument.Resolver (ADR-016), derives every UTC calendar-month
-// partition the range touches, and loads each one — through an
-// unexported, Manager-owned barCache (cache.go) — before returning a
-// reader; BarReader.Next therefore never itself does I/O. Missing
-// canonical data for any touched month reports a wrapped
-// ErrDataUnavailable and no reader at all, never a partial result; an
-// invalid query reports a wrapped ErrInvalidQuery. BarReader.Manifests
-// discloses the provenance of every partition a result was assembled
-// from. barCache evicts FIFO once its capacity (Config.CacheCapacity,
+// instrument.Resolver (ADR-016), then loads every partition that could
+// hold data for the query — through an unexported, Manager-owned
+// barCache (cache.go) — before returning a reader; BarReader.Next
+// therefore never itself does I/O. Loading is not by itself proof the
+// query is satisfiable: coverageGap checks that the union of every
+// loaded Manifest.Span, clipped to the query's range, actually covers
+// it with no hole, and boundaryProbeKeys additionally loads the one
+// calendar month on each side of the query's core months, tolerating a
+// missing file there, so a session-aligned D1/W1 bar filed under an
+// adjacent month (the canonical store's own overlap-not-containment
+// rule permits this) is still found. Any gap reports a wrapped
+// ErrDataUnavailable naming the uncovered sub-range and no reader at
+// all, never a partial result; an invalid query reports a wrapped
+// ErrInvalidQuery. BarReader.Manifests discloses the provenance of every
+// partition a result was assembled from, and — like barCache.get/put —
+// returns manifests cloned via cloneManifest, so mutating one (through
+// its Parent pointer) can never poison the cache or a later query.
+// barCache evicts FIFO once its capacity (Config.CacheCapacity,
 // defaulted if unset) is exceeded — no adaptive or LRU policy, matching
-// the issue's own scope — and exposes an invalidate hook for a future
-// canonical-build/publish operation to evict a superseded revision.
+// the issue's own scope — exposes an invalidate hook for a future
+// canonical-build/publish operation to evict a superseded revision, and
+// is safe for concurrent use (every method locks its own mutex).
 //
 // New now builds its own canonicalCSVStore from Config.StoreRoot
 // whenever no store is already wired in (the normal case for every

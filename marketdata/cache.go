@@ -1,6 +1,9 @@
 package marketdata
 
-import "container/list"
+import (
+	"container/list"
+	"sync"
+)
 
 // defaultCacheCapacity is the number of canonical partitions barCache
 // retains when Config.CacheCapacity is not set to a positive value.
@@ -26,12 +29,19 @@ type cacheEntry struct {
 // one. Only Manager itself reads or writes it, the same boundary that
 // keeps the canonical store itself invisible outside this package.
 //
+// barCache is safe for concurrent use: Manager.Bars is an
+// application-service entry point, and nothing about it promises a
+// caller single-goroutine use, so every method locks mu. A review
+// finding on the original, unsynchronized implementation is what added
+// this — see TestBarCacheConcurrentAccess for the -race regression.
+//
 // A zero-value *barCache (nil) is safe to use as an always-miss cache;
 // every method treats a nil receiver as an empty, capacity-zero cache
 // rather than panicking. This is deliberate defense for a hypothetical
 // Manager constructed without going through New, not an expected runtime
 // path.
 type barCache struct {
+	mu       sync.Mutex
 	capacity int
 	order    *list.List
 	entries  map[partitionKey]*list.Element
@@ -50,17 +60,24 @@ func newBarCache(capacity int) *barCache {
 	}
 }
 
-// get returns the cached (Manifest, BarSet) for key, if present.
+// get returns the cached (Manifest, BarSet) for key, if present. The
+// returned Manifest is a defensive clone (see cloneManifest): it shares
+// no mutable state with the cached entry, so a caller mutating it (for
+// example through its Parent pointer) can never poison what a later get
+// for the same key returns.
 func (c *barCache) get(key partitionKey) (Manifest, BarSet, bool) {
 	if c == nil {
 		return Manifest{}, BarSet{}, false
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	el, ok := c.entries[key]
 	if !ok {
 		return Manifest{}, BarSet{}, false
 	}
 	e := el.Value.(*cacheEntry)
-	return e.manifest, e.bars, true
+	return cloneManifest(e.manifest), e.bars, true
 }
 
 // put caches (m, bs) under key, refreshing an existing entry in place
@@ -70,10 +87,21 @@ func (c *barCache) get(key partitionKey) (Manifest, BarSet, bool) {
 // does not get to skip the eviction queue simply by being read
 // repeatedly — issue #78 asks for simple bounded behavior, not an
 // adaptive policy.
+//
+// m is stored as a defensive clone (see cloneManifest), so a caller that
+// goes on to mutate the Manifest value it passed in — through its Parent
+// pointer — cannot reach back into the cache.
 func (c *barCache) put(key partitionKey, m Manifest, bs BarSet) {
-	if c == nil || c.capacity <= 0 {
+	if c == nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.capacity <= 0 {
+		return
+	}
+	m = cloneManifest(m)
 	if el, ok := c.entries[key]; ok {
 		e := el.Value.(*cacheEntry)
 		e.manifest = m
@@ -106,6 +134,9 @@ func (c *barCache) invalidate(key partitionKey) {
 	if c == nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if el, ok := c.entries[key]; ok {
 		c.order.Remove(el)
 		delete(c.entries, key)
@@ -117,5 +148,25 @@ func (c *barCache) len() int {
 	if c == nil {
 		return 0
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.order.Len()
+}
+
+// cloneManifest returns a copy of m that shares no mutable state with m.
+// Manifest is otherwise a plain value type, but its one pointer field,
+// Parent *ParentRef, is shared by a shallow assignment — a caller
+// mutating *m.Parent (for example Revision) would otherwise reach
+// through to any other Manifest value copied from the same m, including
+// one sitting in barCache or already handed out by an earlier get/
+// Manifests call. cloneManifest is the single place that guards every
+// such boundary: barCache.get, barCache.put, and BarReader.Manifests
+// all route through it rather than duplicating the *ParentRef check.
+func cloneManifest(m Manifest) Manifest {
+	if m.Parent == nil {
+		return m
+	}
+	parent := *m.Parent
+	m.Parent = &parent
+	return m
 }
