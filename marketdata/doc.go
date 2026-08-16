@@ -161,4 +161,33 @@
 // so cancelling a large publish part-way through never silently
 // replaces the prior revision. Every type and function here is
 // unexported, for the same reason as the normalizer above.
+//
+// # Historical Bar queries and the memory cache
+//
+// Manager.Bars (issue #78, ADR-020) is Manager's first operation: a
+// strictly read-only historical query, taking a BarQuery (instrument,
+// interval, half-open range) and returning a *BarReader over stable,
+// chronologically ordered Bars. Bars resolves the query's instrument to
+// this Manager's provider-native Listing through the configured
+// instrument.Resolver (ADR-016), derives every UTC calendar-month
+// partition the range touches, and loads each one — through an
+// unexported, Manager-owned barCache (cache.go) — before returning a
+// reader; BarReader.Next therefore never itself does I/O. Missing
+// canonical data for any touched month reports a wrapped
+// ErrDataUnavailable and no reader at all, never a partial result; an
+// invalid query reports a wrapped ErrInvalidQuery. BarReader.Manifests
+// discloses the provenance of every partition a result was assembled
+// from. barCache evicts FIFO once its capacity (Config.CacheCapacity,
+// defaulted if unset) is exceeded — no adaptive or LRU policy, matching
+// the issue's own scope — and exposes an invalidate hook for a future
+// canonical-build/publish operation to evict a superseded revision.
+//
+// New now builds its own canonicalCSVStore from Config.StoreRoot
+// whenever no store is already wired in (the normal case for every
+// caller outside this package), closing the gap left by the M2-03
+// skeleton: previously nothing could construct a working Manager outside
+// tests. Neither the store nor barCache is ever exposed through Config,
+// an accessor, or a return value — Manager.Bars remains the only door in
+// or out of published canonical Bar data, the same boundary the rest of
+// this package doc already describes.
 package marketdata

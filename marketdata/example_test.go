@@ -1,9 +1,12 @@
 package marketdata_test
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -94,4 +97,80 @@ func ExampleFXCalendar_Session() {
 	// Output:
 	// closed
 	// false
+}
+
+// ExampleManager_Bars shows the only way to reach historical canonical
+// data: constructing a Manager and calling Bars. testdata/ holds a
+// checked-in canonical EUR/USD H1 partition; Manager has no exported
+// build/publish operation yet (that lands in a later M2 issue), so this
+// example reads a partition placed there ahead of time rather than
+// publishing one itself.
+func ExampleManager_Bars() {
+	eurusd, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	if err != nil {
+		panic(err)
+	}
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: eurusd,
+		Provider:   "oanda",
+		Symbol:     "EURUSD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	if err != nil {
+		panic(err)
+	}
+	resolver := instrument.NewMemoryResolver()
+	if err := resolver.Register(listing); err != nil {
+		panic(err)
+	}
+
+	mgr, err := marketdata.New(marketdata.Config{
+		Clock:        clock.NewSimulated(time.Date(2020, time.March, 3, 0, 0, 0, 0, time.UTC)),
+		StoreRoot:    "testdata",
+		Resolver:     resolver,
+		ProviderName: "oanda",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	start := time.Date(2020, time.March, 2, 0, 0, 0, 0, time.UTC)
+	span, err := marketdata.NewTimeRange(start, start.Add(4*time.Hour))
+	if err != nil {
+		panic(err)
+	}
+
+	reader, err := mgr.Bars(context.Background(), marketdata.BarQuery{
+		Instrument: eurusd.ID(),
+		Interval:   marketdata.H1,
+		Range:      span,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer reader.Close()
+
+	for {
+		bar, err := reader.Next(context.Background())
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(bar.Time.Format(time.RFC3339), bar.Close)
+	}
+	// Output:
+	// 2020-03-02T00:00:00Z 1.101
+	// 2020-03-02T01:00:00Z 1.101
 }

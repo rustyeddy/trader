@@ -1,0 +1,5 @@
+# schema=canonical-v1 provider=oanda symbol=EURUSD interval=h1 year=2020 month=03
+{"provider":"oanda","instrument":"fx:EUR/USD","interval_unit":1,"interval_count":1,"span_start":"2020-03-02T00:00:00Z","span_end":"2020-03-02T04:00:00Z","basis":1,"schema_version":1,"raw_fingerprint":"sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7a","builder_version":"builder-v1","validator_version":"validator-v1","resampler_version":"none","calendar_version":"fxcalendar-v1","built_at":"2020-03-03T00:00:00Z","bar_count":2,"first_bar":"2020-03-02T00:00:00Z","last_bar":"2020-03-02T01:00:00Z","revision":"3e9436ebd623ca9124812b1df495272fe558cb7c49dc123e8c33fe586da09785"}
+time,open,high,low,close,avg_spread,max_spread,ticks
+2020-03-02T00:00:00Z,1.1,1.1025,1.099,1.101,0.00012,0.0003,4213
+2020-03-02T01:00:00Z,1.1,1.1025,1.099,1.101,0.00012,0.0003,4213
