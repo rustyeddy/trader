@@ -1,6 +1,8 @@
 package marketdata
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,6 +21,12 @@ func (f fakeProvider) name() string { return f.id }
 type fakeStore struct{ dir string }
 
 func (f fakeStore) root() string { return f.dir }
+func (f fakeStore) publish(context.Context, partitionKey, Manifest, BarSet) error {
+	return errors.New("fakeStore: publish not implemented")
+}
+func (f fakeStore) load(context.Context, partitionKey) (Manifest, BarSet, error) {
+	return Manifest{}, BarSet{}, errors.New("fakeStore: load not implemented")
+}
 
 // testClock returns a deterministic clock for construction tests; no test
 // here depends on wall-clock time.

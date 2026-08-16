@@ -444,6 +444,147 @@ The current path will be something like it is now
 Furture data format such as Parquet if we implement will be determined
 when it is implemented
 
+** DONE Canonical CSV Bar store and atomic publication
+Settled by issue #77 (branch =feature/77-canonical-csv-store=):
+=canonicalCSVStore=, living directly in the =marketdata= package for
+the same import-cycle reason as #76's normalizer (it needs both
+=Bar=/=BarSet=/=Manifest= and filesystem/CSV mechanics; a separate
+=marketdata/internal/store= package importing root =marketdata= would
+recreate the cycle once wired into =Manager=), implements the derived
+tree exactly as this section already specifies:
+
+#+BEGIN_EXAMPLE
+root/provider/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<tf>.csv   (manifest header + data, one file)
+#+END_EXAMPLE
+
+=SYMBOL= is caller-supplied (a =partitionKey= field alongside
+=instrument.ID=), not derived from =instrument.ID= — there is no
+reverse mapping from Trader's canonical identity back to a display
+symbol, the same reason =oanda.Meta= already carries both.  The path
+never encodes a revision, per the existing principle above ("the
+version identifier ... does not appear in the path"); the file's own
+manifest header (a JSON line, cross-checked against a schema-comment
+line mirroring the raw reader's own convention) is where dataset
+identity and version information actually live.
+
+=Manager='s own =barStore= interface (from #71's skeleton, previously
+just a diagnostic =root()= method) now names the real contract:
+=publish(ctx, key, Manifest, BarSet) error= and
+=load(ctx, key) (Manifest, BarSet, error)=.  Both are exercised by a
+reusable, implementation-agnostic contract-test function
+(=testBarStoreContract=) parameterized over a =barStore= constructor,
+so a later Parquet implementation can run the identical suite against
+its own constructor rather than a copy.
+
+**** One file, not two — a design-review correction
+The first draft published manifest and data as two separate files,
+relying on =os.Rename='s single-file atomicity plus a documented
+ordering (data renamed, then manifest) and =Manifest.Matches= to reject
+whatever a reader might observe mid-sequence.  A design review on the
+PR identified that this still violated the issue's own acceptance
+criterion that failure or cancellation must leave the prior published
+revision /intact/: once the data file's rename succeeded, the old data
+was already gone, overwritten by the new file's bytes.  =Matches=
+failing on the resulting mixed pair meant the corruption was
+/detected/, but the previously published dataset was not /loadable/
+again until a further publish completed successfully — the regression
+test written to demonstrate the mechanism (=PublishCancelledBetweenWrites=)
+was, on inspection, codifying exactly that contradictory outcome rather
+than proving safety.
+
+The fix is the other option the issue's own scope explicitly allowed
+("the dataset manifest or agreed file header"): manifest and data now
+share one file, so there is exactly one =os.Rename= — genuinely atomic,
+not "atomic per file with a window between two files."  A publish
+cancelled or failed before that one rename leaves the previously
+published file completely untouched and fully loadable; a publish that
+completes it replaces the whole (manifest, data) pair in a single
+indivisible step.  There is no intermediate state to reach at all, so
+the regression test now asserts what the acceptance criterion actually
+requires: cancelling a republish leaves the *original* revision
+loadable, not merely a detectably-broken one.
+
+**** Encoding the manifest header as JSON, not key=value lines
+A second review finding: the first draft's manifest header used
+hand-joined =key=value= lines, but =Manifest.Validate= only requires
+its string fields (=Provider=, the version fields, =Parent.Revision=)
+to be non-empty — none of them are required to be free of embedded
+=\n=/=\r=, so a line-oriented encoding cannot round-trip every
+=Manifest= value =Validate= itself accepts.  This is the identical
+ambiguity a review already caught and fixed in
+=Manifest.Revision()= (#73), which is why that function already hashes
+a JSON-encoded struct rather than a delimited string.  The store's
+header now does the same: one JSON-encoded line, quoted/escaped by
+construction, immune to the field-boundary ambiguity a delimited format
+has.
+
+**** Verifying, not just storing, the manifest
+Two related review findings hardened what =load= actually checks
+against a stored header, beyond =Manifest.Validate=/=Matches=:
+
+- The header's =revision= field (=Manifest.Revision()= at encode time)
+  is now recomputed from the decoded =Manifest= and compared against
+  the stored value; a mismatch is =errStoreMalformed=.  This is the
+  cheapest possible defense against a hand-edited or partially
+  corrupted header whose individual fields still happen to parse
+  correctly in isolation.
+- A derived manifest's =parent.instrument= field is now cross-checked
+  against the caller-supplied expected instrument (the same check
+  already applied to the manifest's own top-level instrument) rather
+  than being silently discarded and overwritten — the first draft threw
+  the stored value away entirely and always substituted the expected
+  instrument, which meant a manifest whose parent stanza actually named
+  a *different* instrument than expected would still validate.
+
+**** Partition-key/manifest agreement and path safety
+Two further review findings, both about =publish= accepting input that
+should never have been accepted in the first place:
+
+- =publish= now calls =checkKeyMatchesManifest=, verifying =key='s
+  instrument, provider, and interval agree with =m= before writing
+  anything, and that =m.Span= *overlaps* — not necessarily falls
+  entirely within — the calendar month =key.year=/=key.month= name.
+  Overlap rather than exact containment is deliberate: a session-aligned
+  D1 span can legitimately open in the closing hours of the previous UTC
+  day, occasionally the previous UTC month, while still correctly
+  belonging to the calendar month a caller filed it under.  Without this
+  check, =publish= could succeed while writing a partition that could
+  never subsequently be loaded (a zero or mismatched instrument) or that
+  landed under the wrong provider/interval directory entirely.
+- =partitionKey.provider= and =partitionKey.symbol= are now validated as
+  safe, single path components (non-empty, not =.=/=..=, free of any
+  path separator) before any filesystem operation, with a defense-in-depth
+  check that the resolved path still falls beneath the configured root.
+  Both values are name-based and originate outside the storage
+  implementation (a provider identifier, an instrument's display
+  symbol); even though this store is internal, nothing before this fix
+  stopped a value containing =..= from escaping the intended
+  provider/symbol partition.
+
+**** Cancellation checked all the way to the commit point
+A second review round on the single-file redesign above found the fix
+still had a gap: =publish= only checked =ctx.Err()= twice, both before
+any writing began, so a cancellation arriving while =encodePartition=
+was actively writing a large partition's rows — real work already
+under way — went unnoticed until the write, flush, sync, and rename had
+*all* already succeeded, silently replacing the prior revision anyway.
+=writeFileAtomic= now takes =ctx= and checks it once more immediately
+before =os.Rename= — nothing after that check can leave a torn or
+unexpectedly-replaced file, so this is the genuine commit point.
+=encodePartition= additionally checks =ctx.Err()= on every bar row, so
+cancellation on a large (M1-scale) partition is caught promptly rather
+than only at the end. Three regression tests, using a custom
+=context.Context= whose =Err()= returns nil a controlled number of
+times before reporting cancellation, pin down exactly where in the
+sequence — before the write starts, mid-loop after real work has begun,
+and immediately before the rename — cancellation lands, confirming the
+original revision remains fully loadable in every case.
+
+**** Non-goals
+Building or resampling a =BarSet=/=Manifest= from raw records is #76's
+job; this issue only ever persists and re-reads an already-valid pair.
+Coverage/gap reasoning over what a store *should* contain remains #79's.
+
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted
 
