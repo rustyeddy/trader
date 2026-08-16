@@ -310,7 +310,7 @@ func TestWriteFileAtomic_FailureLeavesNoFinalFile(t *testing.T) {
 	final := filepath.Join(dir, "out.csv")
 	boom := errors.New("boom")
 
-	err := writeFileAtomic(final, func(w *bufio.Writer) error {
+	err := writeFileAtomic(context.Background(), final, func(w *bufio.Writer) error {
 		return boom
 	})
 	assert.ErrorIs(t, err, boom)
@@ -447,10 +447,9 @@ func TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision(
 
 	m2 := validManifest(t)
 	m2.BuilderVersion = "builder-v2"
-	// Four ctx.Err() checks precede the write (top of publish, plus
-	// three implicit ones from validation stages returning early only on
-	// error -- here just the two explicit checks are relevant): allow
-	// enough to pass validation, then cancel right before the write.
+	// publish checks ctx.Err() twice before ever calling writeFileAtomic
+	// (top of publish, then again just before it); allow both to pass,
+	// then cancel right as writeFileAtomic/encodePartition would begin.
 	ctx := &nthCancelContext{Context: context.Background(), remaining: 1}
 	err := store.publish(ctx, key, m2, bs)
 	assert.ErrorIs(t, err, context.Canceled)
@@ -459,6 +458,70 @@ func TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision(
 	require.NoError(t, err, "the original revision must still load successfully, not merely fail Matches")
 	assert.Equal(t, m.Revision(), gotM.Revision())
 	assert.Equal(t, len(bs.Bars), len(gotBS.Bars))
+}
+
+// Regression test for the second review finding: publish's earlier
+// ctx.Err() checks only ran before any writing began, so cancellation
+// arriving while encodePartition's bar loop was still running -- after
+// real work had already started -- went unnoticed until the write
+// completed successfully. encodePartition now checks ctx.Err() on every
+// bar; this confirms cancellation landing after the first of
+// validBarSet's two bars, but before the second, is caught before
+// anything is renamed into place.
+func TestCanonicalCSVStore_PublishCancelledDuringEncodeLoadsOriginalRevision(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	m := validManifest(t)
+	bs := validBarSet(t)
+	require.GreaterOrEqual(t, len(bs.Bars), 2, "fixture must have at least two bars for this test to be meaningful")
+	require.NoError(t, store.publish(context.Background(), key, m, bs))
+
+	m2 := validManifest(t)
+	m2.BuilderVersion = "builder-v2"
+	// Checks, in order: top of publish, pre-write, bar[0]'s loop check
+	// (all must pass) -- then bar[1]'s loop check must observe
+	// cancellation.
+	ctx := &nthCancelContext{Context: context.Background(), remaining: 3}
+	err := store.publish(ctx, key, m2, bs)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	gotM, gotBS, err := store.load(context.Background(), key)
+	require.NoError(t, err, "the original revision must still load successfully after mid-encode cancellation")
+	assert.Equal(t, m.Revision(), gotM.Revision())
+	assert.Equal(t, len(bs.Bars), len(gotBS.Bars))
+
+	dir := key.dir(store.root())
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), ".tmp-", "the abandoned temp file must not be left behind")
+	}
+}
+
+// Regression test for the commit-point check itself: cancellation
+// landing after encoding, flushing, and syncing have all already
+// succeeded -- with nothing left but the rename -- must still be caught
+// before that rename, per writeFileAtomic's own commit-point check.
+func TestCanonicalCSVStore_PublishCancelledJustBeforeRenameLoadsOriginalRevision(t *testing.T) {
+	store := newCanonicalCSVStore(t.TempDir())
+	key := validPartitionKey(t)
+	m := validManifest(t)
+	bs := validBarSet(t)
+	require.NoError(t, store.publish(context.Background(), key, m, bs))
+
+	m2 := validManifest(t)
+	m2.BuilderVersion = "builder-v2"
+	// Checks, in order: top of publish, pre-write, one per bar (two
+	// bars in the fixture) -- all five must pass -- then the
+	// commit-point check in writeFileAtomic, immediately before
+	// os.Rename, must observe cancellation.
+	ctx := &nthCancelContext{Context: context.Background(), remaining: 4}
+	err := store.publish(ctx, key, m2, bs)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	gotM, _, err := store.load(context.Background(), key)
+	require.NoError(t, err, "the original revision must still load successfully after cancellation right before commit")
+	assert.Equal(t, m.Revision(), gotM.Revision())
 }
 
 // --- checkKeyMatchesManifest direct tests ---
@@ -510,7 +573,7 @@ func TestDecodeManifestJSON_EmbeddedNewlinesRoundTrip(t *testing.T) {
 
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
-	require.NoError(t, encodePartition(w, validPartitionKey(t), m, validBarSet(t)))
+	require.NoError(t, encodePartition(context.Background(), w, validPartitionKey(t), m, validBarSet(t)))
 	require.NoError(t, w.Flush())
 
 	scanner := bufio.NewScanner(&buf)

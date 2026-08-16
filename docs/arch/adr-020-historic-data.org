@@ -561,6 +561,25 @@ should never have been accepted in the first place:
   stopped a value containing =..= from escaping the intended
   provider/symbol partition.
 
+**** Cancellation checked all the way to the commit point
+A second review round on the single-file redesign above found the fix
+still had a gap: =publish= only checked =ctx.Err()= twice, both before
+any writing began, so a cancellation arriving while =encodePartition=
+was actively writing a large partition's rows — real work already
+under way — went unnoticed until the write, flush, sync, and rename had
+*all* already succeeded, silently replacing the prior revision anyway.
+=writeFileAtomic= now takes =ctx= and checks it once more immediately
+before =os.Rename= — nothing after that check can leave a torn or
+unexpectedly-replaced file, so this is the genuine commit point.
+=encodePartition= additionally checks =ctx.Err()= on every bar row, so
+cancellation on a large (M1-scale) partition is caught promptly rather
+than only at the end. Three regression tests, using a custom
+=context.Context= whose =Err()= returns nil a controlled number of
+times before reporting cancellation, pin down exactly where in the
+sequence — before the write starts, mid-loop after real work has begun,
+and immediately before the rename — cancellation lands, confirming the
+original revision remains fully loadable in every case.
+
 **** Non-goals
 Building or resampling a =BarSet=/=Manifest= from raw records is #76's
 job; this issue only ever persists and re-reads an already-valid pair.

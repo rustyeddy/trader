@@ -198,7 +198,12 @@ func (s *canonicalCSVStore) root() string { return s.rootDir }
 // published file completely untouched and fully loadable; a publish
 // that completes it replaces the whole (manifest, data) pair in a
 // single indivisible step. There is no intermediate state to reach at
-// all.
+// all — and ctx is checked all the way to that commit point, not only
+// before writing begins: writeFileAtomic checks it once more
+// immediately before the rename, and encodePartition checks it on every
+// bar row while writing, so a cancellation arriving during a large
+// partition's encode is caught promptly rather than only after the
+// whole file, and the rename, have already succeeded.
 func (s *canonicalCSVStore) publish(ctx context.Context, key partitionKey, m Manifest, bs BarSet) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -227,8 +232,8 @@ func (s *canonicalCSVStore) publish(ctx context.Context, key partitionKey, m Man
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(path, func(w *bufio.Writer) error {
-		return encodePartition(w, key, m, bs)
+	if err := writeFileAtomic(ctx, path, func(w *bufio.Writer) error {
+		return encodePartition(ctx, w, key, m, bs)
 	}); err != nil {
 		return fmt.Errorf("marketdata: store: publish: %w", err)
 	}
@@ -314,7 +319,7 @@ func (s *canonicalCSVStore) load(ctx context.Context, key partitionKey) (Manifes
 // file created alongside finalPath, then renames it into place only
 // once encode and the flush both succeed. On any failure the temporary
 // file is removed and finalPath is left untouched.
-func writeFileAtomic(finalPath string, encode func(*bufio.Writer) error) error {
+func writeFileAtomic(ctx context.Context, finalPath string, encode func(*bufio.Writer) error) error {
 	dir := filepath.Dir(finalPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -343,6 +348,15 @@ func writeFileAtomic(finalPath string, encode func(*bufio.Writer) error) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// The commit point: nothing after this check can leave a torn or
+	// unexpectedly-replaced file, so it is checked once more here even
+	// though callers (and encode itself) may have already checked ctx
+	// earlier. A cancellation observed any time up to and including this
+	// instant still leaves finalPath completely untouched — only a
+	// successful Rename below changes that.
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
@@ -399,7 +413,7 @@ type parentJSON struct {
 // canonical CSV column header, and bs's rows in order. It never writes
 // a dense, zero-filled placeholder row: an empty bs.Bars produces a
 // valid file with a header and no data rows at all.
-func encodePartition(w *bufio.Writer, key partitionKey, m Manifest, bs BarSet) error {
+func encodePartition(ctx context.Context, w *bufio.Writer, key partitionKey, m Manifest, bs BarSet) error {
 	token, err := intervalToken(key.interval)
 	if err != nil {
 		return err
@@ -424,7 +438,16 @@ func encodePartition(w *bufio.Writer, key partitionKey, m Manifest, bs BarSet) e
 	if _, err := fmt.Fprintln(w, canonicalCSVHeader); err != nil {
 		return err
 	}
+	// Checked every row, not just once before the loop: for a large
+	// partition (M1 can run to tens of thousands of rows) this is what
+	// makes cancellation prompt rather than only detected after the
+	// whole file has already been written. The per-row cost is one
+	// interface call against an already-buffered writer, negligible next
+	// to the write itself.
 	for _, b := range bs.Bars {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, err := fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%s,%d\n",
 			b.Time.Format(time.RFC3339Nano), b.Open, b.High, b.Low, b.Close, b.AvgSpread, b.MaxSpread, b.Ticks); err != nil {
 			return err

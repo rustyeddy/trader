@@ -155,6 +155,10 @@
 // appears in the path, per ADR-020; the file's own manifest header is
 // where dataset identity and version information live, and load
 // recomputes and cross-checks that header's revision against the
-// decoded Manifest before trusting it. Every type and function here is
+// decoded Manifest before trusting it. Cancellation is checked all the
+// way to the actual commit point — immediately before the rename, and
+// once per bar row while encoding, not only before the write begins —
+// so cancelling a large publish part-way through never silently
+// replaces the prior revision. Every type and function here is
 // unexported, for the same reason as the normalizer above.
 package marketdata
