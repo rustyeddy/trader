@@ -182,7 +182,12 @@
 // rule permits this) is still found. Any gap reports a wrapped
 // ErrDataUnavailable naming the uncovered sub-range and no reader at
 // all, never a partial result; an invalid query reports a wrapped
-// ErrInvalidQuery. BarReader.Manifests discloses the provenance of every
+// ErrInvalidQuery. Because core and probe partitions can genuinely
+// overlap, the same bar Time can be encountered twice; barsEqual accepts
+// a repeat only when it is byte-for-byte the same observation, and
+// reports any disagreement as a wrapped ErrInconsistentData rather than
+// silently keeping whichever partition loaded first. BarReader.Manifests
+// discloses the provenance of every
 // partition a result was assembled from, and — like barCache.get/put —
 // returns manifests cloned via cloneManifest, so mutating one (through
 // its Parent pointer) can never poison the cache or a later query.

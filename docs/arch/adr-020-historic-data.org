@@ -754,6 +754,29 @@ proof of coverage" check, not the general coverage/gap catalog issue #79
 owns — and does not attempt session-calendar-aware routing beyond the
 one-month blast radius a D1/W1 bar can plausibly spill across.
 
+**** Conflicting duplicates across overlapping partitions
+Loading both a core and a boundary-probe partition (or, in general, any
+two partitions whose overlap-permitted =Span=s cross) means =Bars= can
+legitimately encounter the same bar =Time= twice. A second review round
+on the boundary-probing fix above caught that the first version resolved
+this the wrong way: deduplicating on =Time= alone silently kept whichever
+partition happened to be processed first, so two partitions disagreeing
+about the same instant's OHLC/spread/tick values — a broken publication
+invariant, not a benign duplicate — would produce a result that
+depended on key iteration order instead of failing loudly.
+
+=Bars= now accepts a repeated =Time= only when the second occurrence is
+byte-for-byte identical to the first (the new =barsEqual= helper,
+comparing every field via =num.Price.Equal= rather than Go's =\=\== so
+it does not depend on =Price='s internal representation being unique per
+value); a repeated =Time= with any differing field is reported as a
+wrapped =ErrInconsistentData= naming the conflicting instant, and the
+query fails outright rather than picking a side.
+=TestManagerBars_IdenticalOverlapDuplicateIsAccepted= and
+=TestManagerBars_ConflictingOverlapDuplicateReportsError= cover both
+outcomes against two genuinely overlapping March/April partitions;
+=TestBarsEqual= tests the comparison directly.
+
 **** External example uses a checked-in fixture
 =Manager= has no publish/build operation yet, so
 =ExampleManager_Bars= (external =marketdata_test= package,

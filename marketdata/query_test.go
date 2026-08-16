@@ -286,6 +286,96 @@ func TestManagerBars_BoundarySpilloverIsFoundViaProbe(t *testing.T) {
 	assert.Equal(t, bar2.Time, got[1].Time)
 }
 
+// publishOverlappingMonthPair publishes a March partition (Span poking
+// into April) and an April partition (Span poking back into March),
+// both containing a Bar at the exact same overlapDupTime, so both core
+// keys legitimately load a bar at that instant. dupBar lets each test
+// case control whether the two partitions agree.
+func publishOverlappingMonthPair(t *testing.T, mgr *Manager, marchBar, aprilBar Bar) (queryRange TimeRange) {
+	t.Helper()
+
+	marchSpan, err := NewTimeRange(
+		time.Date(2020, 3, 31, 23, 0, 0, 0, time.UTC),
+		time.Date(2020, 4, 1, 1, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	marchKey := partitionKey{provider: "oanda", symbol: "EURUSD", instrument: eurusd(), interval: H1, year: 2020, month: time.March}
+	marchBS := BarSet{Instrument: eurusd(), Interval: H1, Span: marchSpan, Basis: BasisBid, Bars: []Bar{marchBar}}
+	require.NoError(t, marchBS.Validate())
+	marchManifest := validManifest(t)
+	marchManifest.Span = marchSpan
+	marchManifest.BarCount = 1
+	marchManifest.FirstBar = marchBar.Time
+	marchManifest.LastBar = marchBar.Time
+	require.NoError(t, marchManifest.Matches(marchBS))
+	publishTestPartition(t, mgr, marchKey, marchManifest, marchBS)
+
+	aprilSpan, err := NewTimeRange(
+		time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 4, 1, 2, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	aprilKey := marchKey
+	aprilKey.month = time.April
+	aprilBS := BarSet{Instrument: eurusd(), Interval: H1, Span: aprilSpan, Basis: BasisBid, Bars: []Bar{aprilBar}}
+	require.NoError(t, aprilBS.Validate())
+	aprilManifest := marchManifest
+	aprilManifest.Span = aprilSpan
+	aprilManifest.FirstBar = aprilBar.Time
+	aprilManifest.LastBar = aprilBar.Time
+	require.NoError(t, aprilManifest.Matches(aprilBS))
+	publishTestPartition(t, mgr, aprilKey, aprilManifest, aprilBS)
+
+	full, err := NewTimeRange(marchSpan.Start(), aprilSpan.End())
+	require.NoError(t, err)
+	return full
+}
+
+// TestManagerBars_IdenticalOverlapDuplicateIsAccepted covers the benign
+// case a design review asked for directly: the same bar, reachable
+// through both its "home" partition and a neighboring one, must be
+// accepted and returned exactly once, not treated as a conflict.
+func TestManagerBars_IdenticalOverlapDuplicateIsAccepted(t *testing.T) {
+	mgr := newTestManager(t)
+	dupTime := time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)
+	dup := barAt(t, dupTime)
+	queryRange := publishOverlappingMonthPair(t, mgr, dup, dup)
+
+	reader, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: queryRange})
+	require.NoError(t, err)
+
+	var got []Bar
+	for {
+		b, err := reader.Next(context.Background())
+		if err != nil {
+			break
+		}
+		got = append(got, b)
+	}
+	count := 0
+	for _, b := range got {
+		if b.Time.Equal(dupTime) {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "an identical overlap duplicate must be returned exactly once")
+}
+
+// TestManagerBars_ConflictingOverlapDuplicateReportsError covers the
+// finding directly: two partitions disagreeing about the same bar Time
+// must not be silently resolved by keeping whichever loaded first.
+func TestManagerBars_ConflictingOverlapDuplicateReportsError(t *testing.T) {
+	mgr := newTestManager(t)
+	dupTime := time.Date(2020, 4, 1, 0, 0, 0, 0, time.UTC)
+	marchBar := barAt(t, dupTime)
+	aprilBar := marchBar
+	aprilBar.Close = num.MustParsePrice("1.10050") // disagrees with marchBar, still valid OHLC
+	queryRange := publishOverlappingMonthPair(t, mgr, marchBar, aprilBar)
+
+	_, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: queryRange})
+	assert.ErrorIs(t, err, ErrInconsistentData)
+}
+
 func TestManagerBars_MissingPartitionReportsErrDataUnavailable(t *testing.T) {
 	mgr := newTestManager(t)
 	span, err := NewTimeRange(
@@ -455,6 +545,25 @@ func TestManagerBars_ManifestMutationDoesNotPoisonSubsequentQuery(t *testing.T) 
 	require.Len(t, manifests2, 1)
 	assert.Equal(t, m.Revision(), manifests2[0].Revision())
 	assert.Equal(t, m.Parent.Revision, manifests2[0].Parent.Revision)
+}
+
+func TestBarsEqual(t *testing.T) {
+	base := barAt(t, time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC))
+
+	same := base
+	assert.True(t, barsEqual(base, same))
+
+	diffClose := base
+	diffClose.Close = num.MustParsePrice("1.10050")
+	assert.False(t, barsEqual(base, diffClose))
+
+	diffTicks := base
+	diffTicks.Ticks = base.Ticks + 1
+	assert.False(t, barsEqual(base, diffTicks))
+
+	diffTime := base
+	diffTime.Time = base.Time.Add(time.Hour)
+	assert.False(t, barsEqual(base, diffTime))
 }
 
 func TestBarQueryValidate(t *testing.T) {

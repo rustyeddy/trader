@@ -23,6 +23,15 @@ var (
 	// reader over accurate, complete data for the requested range, or it
 	// returns this error and no reader at all.
 	ErrDataUnavailable = errors.New("marketdata: requested data unavailable")
+	// ErrInconsistentData marks a query that found two canonical
+	// partitions disagreeing about the same bar's Time — for example, a
+	// core partition and an adjacent-month boundary probe (see
+	// boundaryProbeKeys) both claiming a Bar at the same instant with
+	// different OHLC/spread/tick values. This is never silently
+	// resolved by picking one: it indicates a broken publication
+	// invariant (the same instant should have exactly one canonical
+	// observation) that the caller needs to know about directly.
+	ErrInconsistentData = errors.New("marketdata: conflicting canonical data")
 	// errBarReaderClosed marks a BarReader that Close has already been
 	// called on.
 	errBarReaderClosed = errors.New("marketdata: bar reader is closed")
@@ -171,6 +180,16 @@ func (r *BarReader) Close() error {
 // still fails the query immediately — silently ignoring a file that is
 // known to exist but cannot be read would be worse than the coverage
 // hole this design exists to close.
+//
+// Because core and probe partitions can genuinely overlap (a boundary
+// bar reachable through both its "home" file and a neighboring one),
+// Bars can encounter the same bar Time twice. A second occurrence is
+// accepted only when it is byte-for-byte the same observation
+// (barsEqual); a same-Time bar with different OHLC/spread/tick values
+// is a broken publication invariant, not a duplicate to silently
+// resolve by keeping whichever partition happened to load first, and
+// Bars reports it as a wrapped ErrInconsistentData rather than
+// returning a result that would depend on key iteration order.
 func (m *Manager) Bars(ctx context.Context, query BarQuery) (*BarReader, error) {
 	if !m.configured() {
 		return nil, fmt.Errorf("marketdata: bars: %w: manager is not configured", ErrInvalidConfig)
@@ -193,7 +212,7 @@ func (m *Manager) Bars(ctx context.Context, query BarQuery) (*BarReader, error) 
 
 	var spans []TimeRange
 	var bars []Bar
-	seen := make(map[time.Time]bool)
+	seen := make(map[time.Time]Bar)
 	manifests := make([]Manifest, 0, len(keys))
 
 	for _, key := range keys {
@@ -213,10 +232,17 @@ func (m *Manager) Bars(ctx context.Context, query BarQuery) (*BarReader, error) 
 		manifests = append(manifests, man)
 		spans = append(spans, man.Span)
 		for _, b := range bs.Bars {
-			if !query.Range.Contains(b.Time) || seen[b.Time] {
+			if !query.Range.Contains(b.Time) {
 				continue
 			}
-			seen[b.Time] = true
+			if existing, ok := seen[b.Time]; ok {
+				if barsEqual(existing, b) {
+					continue // the same observation, reachable through two loaded partitions
+				}
+				return nil, fmt.Errorf("marketdata: bars: %w: conflicting bars at %s across canonical partitions",
+					ErrInconsistentData, b.Time)
+			}
+			seen[b.Time] = b
 			bars = append(bars, b)
 		}
 	}
@@ -244,6 +270,25 @@ func (m *Manager) loadPartition(ctx context.Context, key partitionKey) (Manifest
 	}
 	m.cache.put(key, man, bs)
 	return man, bs, nil
+}
+
+// barsEqual reports whether a and b represent the same canonical
+// observation: every field equal, using num.Price's own Equal for the
+// price fields rather than Go's == (Price's zero-scale internal
+// representation is not guaranteed unique per value in general, even
+// though today's construction paths happen to produce one). It is used
+// only to distinguish "the same bar, reachable through two loaded
+// partitions" from a genuine data-consistency conflict; see
+// ErrInconsistentData.
+func barsEqual(a, b Bar) bool {
+	return a.Time.Equal(b.Time) &&
+		a.Open.Equal(b.Open) &&
+		a.High.Equal(b.High) &&
+		a.Low.Equal(b.Low) &&
+		a.Close.Equal(b.Close) &&
+		a.AvgSpread.Equal(b.AvgSpread) &&
+		a.MaxSpread.Equal(b.MaxSpread) &&
+		a.Ticks == b.Ticks
 }
 
 // monthPartitionKeys returns one partitionKey for every UTC calendar
