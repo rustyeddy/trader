@@ -443,6 +443,17 @@ engine, and populating =providerComplete= from OANDA's raw =complete=
 column is #76's normalization stage.  #74 defines the vocabulary and its
 classification rules only.
 
+*Correction (issue #79):* the claim above that a straddle "cannot happen
+for a session-aligned D1/W1 bar" is wrong for W1.  Building #79's
+coverage engine found that =FXCalendar.Bar='s W1 span is a full
+seven-day week — it always contains the Friday-to-Sunday closure within
+it, so it is never uniformly one =Status= throughout, and
+=ClassifyInterval='s straddle check rejects every genuine W1 span with
+=ErrIntervalStraddlesBoundary=.  The claim holds for D1 (one session) but
+not W1 (a week, which spans multiple sessions and the closure between
+them by construction).  #79's coverage engine does not call
+=ClassifyInterval= for W1 at all — see its own section below.
+
 * DONE Data at rest will be stored as it has been.
 The current path will be something like it is now
 	.../data/raw/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
@@ -791,6 +802,146 @@ Query-time resampling, live feeds, quotes/trades, and adjustment modes
 are all out of scope, per the issue. Coverage/gap reasoning over what
 the store *should* contain remains #79's; this issue only reports
 whether the specific months a query touches are actually present.
+
+** DONE Coverage, gap detection, and data-build planning
+Settled by issue #79 (M2-11, branch =feature/79-coverage-and-plan=):
+Manager-owned coverage analysis plus a deterministic, non-mutating plan
+describing what raw downloads and canonical builds would be required —
+never performing any of them. Two new files, =coverage.go= and =plan.go=,
+both public.
+
+**** =Manager.Coverage=
+=Coverage(ctx, query BarQuery) (Coverage, error)= reuses =BarQuery='s
+exact shape (no separate =CoverageQuery= type — the extra type would add
+nothing over reusing what #78 already defined) and reports, per UTC
+calendar month touched:
+
+- =PartitionCoverageStatus= (=Missing=, =Invalid=, =Stale=, =Current=):
+  one canonical partition *file's* own standing — does it exist, can it
+  be trusted, is it current — deliberately orthogonal to =IntervalState=
+  (#74), which classifies individual bar intervals *within* a partition
+  that already exists and can be trusted. Conflating the two would have
+  made a genuinely different kind of fact ("this file is stale") look
+  like a bar-level state ("this hour is missing"), which it is not.
+- =Gap{State IntervalState, Span TimeRange}=: consecutive
+  non-Present/non-Closed boundaries merged into one entry each, computed
+  only within =Current= partitions — a =Missing=/=Invalid=/=Stale=
+  partition's own =PartitionCoverageStatus= already says everything a Gap
+  would say, less precisely, so no Gaps are produced for it.
+
+**** Staleness: two self-contained mechanisms, no speculative "current version" config
+- Raw-built intervals (M1/H1/H4/D1): =Manifest.RawFingerprint= against
+  the current raw partition's fingerprint from
+  =marketdata/internal/provider/oanda.Inspect=.
+- W1 (derived from D1, ADR-012's one-hop resampling model):
+  =Manifest.Parent.Revision= against the D1 partition filed under the
+  *same* (year, month) key, recomputing its =Revision()= live — exactly
+  the mechanism #73's own =Parent= documentation already described
+  ("the recorded revision simply stops matching the parent's current
+  one, which is the intended staleness signal"), now actually exercised.
+
+Deliberately *not* implemented: builder/validator/calendar *code*-version
+staleness. No build/normalize-to-manifest operation exists anywhere in
+this codebase yet to define "the current version," and inventing =Config=
+fields for a comparison with no real producer would be speculative. Any
+canonical partition whose raw or parent counterpart cannot itself be
+found or trusted is conservatively judged *not* stale by =isStale= — that
+condition already surfaces separately (via =RawIncompleteCount= or a
+=Plan= download/normalize action), rather than making an unrelated axis
+say "stale" for a fact it cannot actually verify.
+
+**** "Incomplete" is observable raw-side only
+=marketdata.Bar= carries no provider-completeness flag (#72/#73), so a
+published canonical Bar's original OANDA =complete= flag is not
+recoverable from canonical data alone — =Coverage='s bar-level walk
+always passes =providerComplete=true= to =ClassifyInterval= for a
+present canonical Bar. =IntervalStateIncomplete= remains part of the
+vocabulary (forward-compatible; a future build step could still choose
+to preserve the signal) but is not currently producible by =Coverage=
+over canonical data. What *is* observable today:
+=PartitionCoverage.RawIncompleteCount=, sourced directly from
+=oanda.Partition.IncompleteCount=.
+
+**** W1 cannot reuse =ClassifyInterval= — a genuine #74 correction
+See the correction note added to #74's section above:
+=FXCalendar.Bar='s W1 span is a full seven-day week that always contains
+the Friday-to-Sunday closure within it, so =ClassifyInterval='s
+=uniformStatus= straddle check rejects every real W1 span. Coverage
+therefore classifies W1 weeks with a separate, direct walk
+(=gapsForWeeklyPartition=): =InProgress= if the week has not elapsed,
+=Present= if a bar exists at the week's start, =Missing= otherwise — a
+week is never itself "calendar-closed" the way a single day or hour can
+be, so that branch of =IntervalState= does not apply at the week level.
+Both walks share one merge helper (=gapAccumulator=) so "consecutive
+same-state boundaries merge into one Gap" is implemented exactly once.
+
+**** A real map-key bug caught by the W1 tests
+The bar-presence lookup was originally =map[time.Time]bool=, keyed by
+=Bar.Time= and looked up via a boundary's =span.Start()=. This is unsafe:
+a loaded =Bar.Time= is always UTC-located (=parseBarRow= calls =.UTC()=),
+but =FXCalendar.Bar='s D1/W1 boundaries are New York-located — the same
+*instant* represented by two =time.Time= values with different internal
+representations, which Go's map-key equality (structural, not
+=.Equal()=) treats as different keys. A W1 test publishing a bar at
+=dayBoundary.Start()= and then failing to find it present is what
+surfaced this. Fixed by keying on =b.Time.UTC().UnixNano()= throughout —
+an =int64=, immune to =Location=-sensitivity — rather than the
+=time.Time= value itself.
+
+**** =Manager.Plan= and gated scheduling
+=Plan(ctx, query BarQuery) (Plan, error)= calls the same coverage
+analysis =Coverage= does (factored into an unexported =coverage= method
+so a =Plan= call performs exactly one raw-archive =Inspect=, not two),
+then derives =[]Action= (=ActionDownloadRaw=, =ActionNormalizeCanonical=,
+=ActionDeriveCanonical=), ordered download, then normalize, then derive
+— each bucket internally chronological.
+
+Governing rule, "gated scheduling": an action for one stage is only
+produced once that stage's own input is already satisfiable —
+=ActionNormalizeCanonical= is never produced for a month whose raw
+partition is missing or failed integrity checks (only
+=ActionDownloadRaw= is, for that month); =ActionDeriveCanonical= is never
+produced for a W1 month whose underlying D1 range is not itself complete
+(=DatasetComplete=-equivalent: every =PartitionCoverage= =Current= and no
+Gaps). This reproduces the legacy planner's =Inventory -> WantList ->
+Plan -> Download/Build= dependency-aware scheduling (mined from the
+documented behavior in the M2 issue-breakdown proposal, not transplanted
+code — no legacy repository was available in this session to mine
+directly) without coupling to legacy structure.
+
+=ActionDownloadRaw= with reason ="extend"= additionally covers the most
+recently touched month when the calendar reports an open interval past
+the raw partition's own =LastTime=, walked forward to
+=min(now, query.Range.End)= via =Manager='s own clock — never
+=time.Now= directly, the same determinism contract every other Manager
+operation honors. An OK but empty raw partition (=LastTime= zero) falls
+back to the start of its own filed month rather than an arbitrarily
+distant past instant, bounding the walk to at most one month's worth of
+boundaries. When "extend" is needed, a normalize action is also emitted
+(reason ="extend: rebuild once raw catches up"=) even though the current
+=PartitionCoverageStatus= might otherwise be =Current=, since raw is
+about to change under it.
+
+**** Two more optional =Config= fields
+- =RawRoot string=: the raw archive location. Unlike =StoreRoot=, not
+  required by =New= — =Bars= never reads raw data, so a query-only
+  Manager need not configure it. =Coverage=/=Plan= report a wrapped
+  =ErrInvalidConfig= if it is empty when actually needed (any interval
+  except W1, which has no raw side at all).
+- =Calendar Calendar=: defaults to
+  =NewFXCalendar(FXCalendarParams{})= in =New= when unset — the same
+  "build a real internal default when not overridden" pattern the
+  canonical store (=StoreRoot=) already established in #78. Manager held
+  no calendar at all before this issue.
+
+**** Non-goals
+A general resampling-dependency graph (W1's D1 dependency is hard-coded,
+matching ADR-012's single-hop model — there is no chain to generalize
+yet). Raw interior-gap detection at the bar level (kept, per #75's own
+documented hand-off, file-level only: exists/missing,
+OK/malformed/unreadable, =IncompleteCount=, =LastTime= vs. expected).
+Actually executing any =Action= — that is a future, explicit
+synchronization/build operation, not this issue's =Plan=.
 
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted

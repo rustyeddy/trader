@@ -46,6 +46,47 @@ func TestNewManagerValid(t *testing.T) {
 	assert.True(t, m.configured())
 }
 
+func TestNewManagerDefaultsCalendarWhenUnset(t *testing.T) {
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    "/data/candles",
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, m.calendar)
+	if _, ok := m.calendar.(*FXCalendar); !ok {
+		t.Fatalf("expected *FXCalendar default, got %T", m.calendar)
+	}
+}
+
+func TestNewManagerHonorsExplicitCalendar(t *testing.T) {
+	cal := NewFXCalendar(FXCalendarParams{Holidays: []time.Time{time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)}})
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    "/data/candles",
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+		Calendar:     cal,
+	})
+	require.NoError(t, err)
+	assert.Same(t, cal, m.calendar)
+}
+
+func TestNewManagerRawRootOptional(t *testing.T) {
+	// RawRoot is not required for construction: only Coverage/Plan need
+	// it, and they check for it themselves when called.
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    "/data/candles",
+		Resolver:     testResolver(t),
+		ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	assert.True(t, m.configured())
+	assert.Empty(t, m.rawRoot)
+}
+
 func TestNewManagerBuildsRealStoreFromStoreRoot(t *testing.T) {
 	// New must not leave m.store nil for real (non-test) construction:
 	// nothing outside this package can ever set Config.store, so if New
