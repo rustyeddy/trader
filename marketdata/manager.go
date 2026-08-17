@@ -62,8 +62,10 @@ import (
 type Manager struct {
 	clock        clock.Clock
 	storeRoot    string
+	rawRoot      string
 	resolver     instrument.Resolver
 	providerName string
+	calendar     Calendar
 
 	// Collaborator seams. These are interfaces owned by this package so the
 	// real provider, storage, normalization, and resampling
@@ -115,6 +117,26 @@ type Config struct {
 	// recorded in each partition's Manifest.Provider and used as the
 	// provider argument to Resolver.ResolveInstrument. It is required.
 	ProviderName string
+
+	// RawRoot is the root location of the preserved raw provider archive
+	// (ADR-020's root/PAIR/YYYY/MM/PAIR-YYYY-MM-tf.csv layout), supplied
+	// as configuration. Unlike StoreRoot, it is optional: Bars never
+	// reads raw data, so a Manager used only for historical queries need
+	// not configure it. Coverage and Plan (issue #79) require it and
+	// report a clear error if it is empty when called. Its
+	// interpretation is an internal detail, the same as StoreRoot: it is
+	// never exposed through a Manager operation, and nothing outside
+	// this package ever touches the raw archive directly.
+	RawRoot string
+
+	// Calendar aligns Coverage's and Plan's bar-boundary reasoning to
+	// trading sessions (issue #79). It is optional: New defaults to
+	// NewFXCalendar(FXCalendarParams{}) when unset, the same "build a
+	// real internal default when not overridden" pattern StoreRoot's
+	// canonical store already uses. A composition root only needs to
+	// supply this explicitly to select non-default holiday rules or a
+	// future non-FX Calendar implementation.
+	Calendar Calendar
 
 	// CacheCapacity bounds the number of canonical partitions Manager's
 	// internal memory cache retains before evicting the oldest one (FIFO;
@@ -192,12 +214,18 @@ func New(cfg Config) (*Manager, error) {
 	if store == nil {
 		store = newCanonicalCSVStore(cfg.StoreRoot)
 	}
+	cal := cfg.Calendar
+	if cal == nil {
+		cal = NewFXCalendar(FXCalendarParams{})
+	}
 
 	return &Manager{
 		clock:        cfg.Clock,
 		storeRoot:    cfg.StoreRoot,
+		rawRoot:      cfg.RawRoot,
 		resolver:     cfg.Resolver,
 		providerName: cfg.ProviderName,
+		calendar:     cal,
 		provider:     cfg.provider,
 		store:        store,
 		cache:        newBarCache(cfg.CacheCapacity),
@@ -211,7 +239,7 @@ func New(cfg Config) (*Manager, error) {
 // misbehave.
 func (m *Manager) configured() bool {
 	return m != nil && m.clock != nil && m.storeRoot != "" &&
-		m.resolver != nil && m.providerName != "" && m.store != nil
+		m.resolver != nil && m.providerName != "" && m.store != nil && m.calendar != nil
 }
 
 // Manager's first operation, Bars, is defined in query.go (issue #78):

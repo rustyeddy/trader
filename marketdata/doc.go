@@ -205,4 +205,59 @@
 // an accessor, or a return value — Manager.Bars remains the only door in
 // or out of published canonical Bar data, the same boundary the rest of
 // this package doc already describes.
+//
+// # Coverage, gaps, and data-build planning
+//
+// Manager.Coverage and Manager.Plan (issue #79, ADR-020) are Manager's
+// second read-only operation pair: given the same BarQuery shape Bars
+// takes, Coverage reports what canonical data exists and why any of it
+// is absent, and Plan derives the deterministic sequence of raw
+// downloads and canonical builds that would close those gaps — without
+// downloading, building, or publishing anything itself.
+//
+// PartitionCoverageStatus (Missing, Invalid, Stale, Current) classifies
+// one UTC-calendar-month canonical partition file's own standing, and is
+// deliberately orthogonal to IntervalState (#74), which classifies
+// individual bar intervals within a partition that already exists and
+// can be trusted. Staleness is judged two ways, both self-contained: a
+// raw-built interval's canonical Manifest.RawFingerprint against the
+// current raw partition's fingerprint (marketdata/internal/provider/
+// oanda.Inspect), and the derived W1 interval's Manifest.Parent.Revision
+// against the underlying D1 partition's Revision recomputed live — no
+// speculative "current builder/validator/calendar code version" config
+// was introduced, since no build operation exists yet to define one.
+// Coverage.Gaps merges consecutive non-Present/non-Closed boundaries
+// (Missing, Incomplete, InProgress, Unexpected) into one Gap each; a
+// closed market is never a Gap. Canonical Bar carries no provider-
+// completeness flag, so IntervalStateIncomplete is not currently
+// producible from canonical data — the closest available signal is raw-
+// side, PartitionCoverage.RawIncompleteCount from oanda.Partition.
+// IncompleteCount.
+//
+// W1 cannot reuse ClassifyInterval directly: FXCalendar.Bar's W1 span is
+// a full seven-day week that always contains the Friday-to-Sunday
+// closure within it, so it is never uniformly one Calendar Status
+// throughout, and ClassifyInterval's straddle check would reject every
+// genuine W1 span. Coverage classifies W1 weeks separately (Present,
+// Missing, or InProgress only — a week is never itself calendar-closed
+// the way a single day or hour can be).
+//
+// Plan applies gated scheduling: an action for one stage is only
+// produced once that stage's own input is already satisfiable — no
+// ActionNormalizeCanonical for a month whose raw partition is missing or
+// failed integrity checks, and no ActionDeriveCanonical for a W1 month
+// whose underlying D1 range is not itself complete. This reproduces the
+// legacy Inventory -> WantList -> Plan -> Download/Build planner's
+// dependency-aware scheduling without transplanting legacy code.
+// ActionDownloadRaw with reason "extend" additionally covers the most
+// recently touched month when the calendar reports open intervals past
+// the raw partition's last known record, using Manager's own clock — the
+// same determinism contract Bars and Coverage already honor.
+//
+// Config gains two more optional fields for this: RawRoot (the raw
+// archive location; required only when Coverage/Plan are actually
+// called, unlike StoreRoot) and Calendar (defaults to
+// NewFXCalendar(FXCalendarParams{}) when unset, the same "build a real
+// internal default when not overridden" pattern the canonical store
+// already uses).
 package marketdata
