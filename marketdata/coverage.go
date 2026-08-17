@@ -331,6 +331,29 @@ func (a *gapAccumulator) flush() {
 	}
 }
 
+// firstBoundaryAtOrAfter returns the start of the first interval
+// boundary at or after at. cal.Bar(at, interval) can return a boundary
+// that started strictly before at, when at itself does not fall exactly
+// on a boundary edge (interval is not UTC-clock-aligned — D1/W1 — or at
+// is simply mid-boundary); using that boundary's own Start() as a walk's
+// starting cursor would then produce a Gap whose Span begins before the
+// range actually being asked about, and — for a multi-month query —
+// would make the following month's walk reprocess (and double-report)
+// the same boundary a previous month's walk already covered. Advancing
+// to the boundary's End() in that case is what fixes both: a design
+// review caught the first symptom; tracing it further surfaced the
+// second, more important one.
+func firstBoundaryAtOrAfter(cal Calendar, at time.Time, interval Interval) (time.Time, error) {
+	span, err := cal.Bar(at, interval)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if span.Start().Before(at) {
+		return span.End(), nil
+	}
+	return span.Start(), nil
+}
+
 // gapsForPartition walks every expected bar boundary within key's UTC
 // calendar month, clipped to queryRange, and returns the merged Gaps
 // found.
@@ -378,11 +401,10 @@ func (m *Manager) gapsForPartition(key partitionKey, bs BarSet, queryRange TimeR
 		return m.gapsForWeeklyPartition(present, clipStart, clipEnd)
 	}
 
-	startSpan, err := m.calendar.Bar(clipStart, key.interval)
+	cursor, err := firstBoundaryAtOrAfter(m.calendar, clipStart, key.interval)
 	if err != nil {
 		return nil, fmt.Errorf("marketdata: coverage: %w", err)
 	}
-	cursor := startSpan.Start()
 	now := m.clock.Now()
 
 	acc := &gapAccumulator{}
@@ -408,11 +430,10 @@ func (m *Manager) gapsForPartition(key partitionKey, bs BarSet, queryRange TimeR
 // [clipStart, clipEnd) directly — see gapsForPartition's doc comment for
 // why it cannot reuse ClassifyInterval.
 func (m *Manager) gapsForWeeklyPartition(present map[int64]bool, clipStart, clipEnd time.Time) ([]Gap, error) {
-	startSpan, err := m.calendar.Bar(clipStart, W1)
+	cursor, err := firstBoundaryAtOrAfter(m.calendar, clipStart, W1)
 	if err != nil {
 		return nil, fmt.Errorf("marketdata: coverage: %w", err)
 	}
-	cursor := startSpan.Start()
 	now := m.clock.Now()
 
 	acc := &gapAccumulator{}

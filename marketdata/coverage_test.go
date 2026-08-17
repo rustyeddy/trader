@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -454,6 +455,87 @@ func TestCoverage_W1InProgressWeekIsAGap(t *testing.T) {
 	require.Equal(t, PartitionCoverageCurrent, cov.Partitions[0].Status)
 	require.Len(t, cov.Gaps, 1)
 	assert.Equal(t, IntervalStateInProgress, cov.Gaps[0].State)
+}
+
+// TestCoverage_GapNeverStartsBeforeQueryRange is the regression for a
+// review finding: a query range starting mid-boundary (D1/W1 are not
+// UTC-clock-aligned, so this is routine) must never produce a Gap whose
+// Span begins before the range actually asked about — a bar dated
+// before the range's own Start would never be returned by Bars anyway
+// (BarQuery.Range.Contains excludes it), so it must not be reported as
+// missing from this query's results either.
+func TestCoverage_GapNeverStartsBeforeQueryRange(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, t.TempDir())
+	day1, err := mgr.calendar.Bar(aWeekday(0), D1)
+	require.NoError(t, err)
+	day2, err := mgr.calendar.Bar(day1.End(), D1)
+	require.NoError(t, err)
+
+	// Query starts three hours into day1 — mid-boundary — and runs
+	// through day2's end. Publish a D1 partition covering both days
+	// with no bars at all (both Missing, once elapsed).
+	queryStart := day1.Start().Add(3 * time.Hour)
+	span, err := NewTimeRange(day1.Start(), day2.End())
+	require.NoError(t, err)
+	publishCanonicalMonth(t, mgr, D1, day1.Start().UTC().Year(), day1.Start().UTC().Month(), span, nil, validRawFingerprint, nil)
+
+	queryRange, err := NewTimeRange(queryStart, day2.End())
+	require.NoError(t, err)
+	cov, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: D1, Range: queryRange})
+	require.NoError(t, err)
+
+	for _, g := range cov.Gaps {
+		assert.False(t, g.Span.Start().Before(queryStart),
+			"gap %+v starts before the query range %s", g, queryStart)
+	}
+	// day1's partial portion is skipped entirely (its bar, if any,
+	// could never be returned by Bars for this range); only day2's full
+	// boundary is reported.
+	require.Len(t, cov.Gaps, 1)
+	assert.True(t, cov.Gaps[0].Span.Start().Equal(day2.Start()))
+}
+
+// TestCoverage_StraddlingMonthBoundaryNotDoubleCounted is the second,
+// more important symptom the same review finding traced to: without
+// advancing the cursor to the first boundary at or after clipStart, a
+// D1/W1 boundary that straddles a UTC calendar-month division would be
+// walked once by the month it starts in and *again* by the following
+// month (whose own clipStart falls inside that same boundary) — the
+// same Gap reported twice, as two overlapping Span values.
+func TestCoverage_StraddlingMonthBoundaryNotDoubleCounted(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, t.TempDir())
+
+	// Find a D1 session boundary that starts in January and ends in
+	// February (routine: D1 sessions roll over at 17:00 New York, not
+	// UTC midnight).
+	probe := time.Date(2024, time.January, 31, 23, 0, 0, 0, time.UTC)
+	straddle, err := mgr.calendar.Bar(probe, D1)
+	require.NoError(t, err)
+	require.Equal(t, time.January, straddle.Start().UTC().Month())
+	require.Equal(t, time.February, straddle.End().UTC().Month(), "fixture assumption: this boundary must straddle Jan/Feb")
+
+	// January's own manifest/coverage window reaches into February,
+	// including the straddling boundary — matching the store's own
+	// overlap-not-containment convention (store_csv.go) for a session
+	// that pokes past the calendar month.
+	janSpan, err := NewTimeRange(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), straddle.End())
+	require.NoError(t, err)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, janSpan, nil, validRawFingerprint, nil)
+
+	febSpan, err := NewTimeRange(straddle.End(), time.Date(2024, 2, 3, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.February, febSpan, nil, validRawFingerprint, nil)
+
+	queryRange, err := NewTimeRange(time.Date(2024, 1, 30, 0, 0, 0, 0, time.UTC), time.Date(2024, 2, 2, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	cov, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: D1, Range: queryRange})
+	require.NoError(t, err)
+
+	sort.Slice(cov.Gaps, func(i, j int) bool { return cov.Gaps[i].Span.Start().Before(cov.Gaps[j].Span.Start()) })
+	for i := 1; i < len(cov.Gaps); i++ {
+		assert.False(t, cov.Gaps[i].Span.Start().Before(cov.Gaps[i-1].Span.End()),
+			"gaps %+v and %+v overlap: the straddling boundary was double-counted", cov.Gaps[i-1], cov.Gaps[i])
+	}
 }
 
 func TestCoverage_CancelledMidLoop(t *testing.T) {

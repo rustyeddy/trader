@@ -943,6 +943,46 @@ OK/malformed/unreadable, =IncompleteCount=, =LastTime= vs. expected).
 Actually executing any =Action= — that is a future, explicit
 synchronization/build operation, not this issue's =Plan=.
 
+**** Two PR-review fixes
+A design review on the PR found two further problems, both in cursor
+handling:
+
+- *Cursor seeding could start before the query range.*
+  =gapsForPartition=/=gapsForWeeklyPartition= originally seeded their
+  walk from =calendar.Bar(clipStart, interval).Start()= directly. D1/W1
+  are not UTC-clock-aligned, so a =clipStart= that does not land exactly
+  on a boundary edge — routine, not an edge case — resolves to a
+  boundary whose own start is *before* =clipStart=. Reporting a Gap for
+  that boundary is misleading: a bar dated before the query's own
+  =Range.Start= would never be returned by =Bars= anyway
+  (=TimeRange.Contains= excludes it), so it must not be reported as
+  "missing from this query" either. Tracing the fix further surfaced a
+  second, more important symptom: for a multi-month query, the *next*
+  month's walk would independently recompute the *same* straddling
+  boundary (its own =clipStart= — that month's start — also falls inside
+  it) and process it again, producing the same Gap twice as two
+  overlapping =Span= values. New =firstBoundaryAtOrAfter= fixes both by
+  advancing to the boundary's =End()= whenever its computed =Start()=
+  precedes the requested =at=, so each straddling boundary is owned by
+  exactly the one month whose own clip window it actually starts in.
+  =TestCoverage_GapNeverStartsBeforeQueryRange= and
+  =TestCoverage_StraddlingMonthBoundaryNotDoubleCounted= are the
+  regressions; both were confirmed to fail against the pre-fix code
+  before being kept.
+- *=Plan(W1)= required =RawRoot= it never needed.* =deriveActionsW1='s
+  D1-completeness prerequisite check went through the public =Coverage=
+  method, which requires =RawRoot= for D1 (a raw-built interval) — even
+  though a =Manager= used only for W1 planning has no reason to ever
+  configure =RawRoot= at all, since W1 itself has no raw side. Fixed by
+  calling the unexported =coverage= directly with a =nil= raw lookup for
+  this one internal check; =isStale='s existing "cannot verify, don't
+  judge stale" default already handles a =nil= map safely, so the D1
+  prerequisite check simply cannot detect D1's own raw-fingerprint
+  staleness from inside a W1 plan — a narrower question than a direct
+  =Plan=/=Coverage= call for D1 itself would answer, not a silent
+  correctness gap.  =TestPlan_DeriveW1WorksWithoutRawRootConfigured= is
+  the regression.
+
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted
 

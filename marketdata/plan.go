@@ -124,7 +124,7 @@ func (m *Manager) Plan(ctx context.Context, query BarQuery) (Plan, error) {
 
 	var actions []Action
 	if query.Interval == W1 {
-		actions, err = m.deriveActionsW1(ctx, query, cov)
+		actions, err = m.deriveActionsW1(ctx, query, cov, symbol)
 	} else {
 		actions, err = m.deriveActionsRawBuilt(query, cov, symbol, rawByKey)
 	}
@@ -245,7 +245,18 @@ func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval 
 // Present or Closed) — the ADR-012 single-hop dependency, reproduced
 // without a general resampling-dependency graph since W1 is this
 // package's only derived interval.
-func (m *Manager) deriveActionsW1(ctx context.Context, query BarQuery, cov Coverage) ([]Action, error) {
+//
+// The D1 prerequisite check calls the unexported coverage directly, with
+// a nil raw lookup, rather than the public Coverage method: Coverage(D1)
+// requires RawRoot (D1 is raw-built), but a Manager legitimately used
+// for W1 planning only may never have configured RawRoot at all — W1
+// itself has no raw side. A nil rawByKey simply means isStale can never
+// confirm D1 staleness from this check (its existing "cannot verify,
+// don't judge stale" default applies); that is an acceptable, narrower
+// question than a direct Plan(D1) call would answer, not a silent
+// correctness gap — a caller who cares about D1's own raw-fingerprint
+// staleness can and should call Plan/Coverage for D1 directly.
+func (m *Manager) deriveActionsW1(ctx context.Context, query BarQuery, cov Coverage, symbol string) ([]Action, error) {
 	var actions []Action
 	for _, pc := range cov.Partitions {
 		if pc.Status == PartitionCoverageCurrent {
@@ -269,7 +280,8 @@ func (m *Manager) deriveActionsW1(ctx context.Context, query BarQuery, cov Cover
 			return nil, fmt.Errorf("marketdata: plan: %w", err)
 		}
 
-		d1Cov, err := m.Coverage(ctx, BarQuery{Instrument: query.Instrument, Interval: D1, Range: d1Range})
+		d1Query := BarQuery{Instrument: query.Instrument, Interval: D1, Range: d1Range}
+		d1Cov, err := m.coverage(ctx, d1Query, symbol, nil)
 		if err != nil {
 			return nil, fmt.Errorf("marketdata: plan: derive: check D1 prerequisite: %w", err)
 		}

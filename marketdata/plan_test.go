@@ -243,6 +243,28 @@ func TestPlan_ExtendWithEmptyRawPartitionFallsBackToFiledMonth(t *testing.T) {
 	assert.Equal(t, "extend", downloads[0].Reason)
 }
 
+// TestPlan_DeriveW1WorksWithoutRawRootConfigured is the regression for a
+// review finding: deriveActionsW1's D1 prerequisite check previously
+// went through the public Coverage method, which requires RawRoot for
+// D1 (a raw-built interval) — even though a Manager used only for W1
+// planning has no reason to configure RawRoot at all, since W1 itself
+// has no raw side.
+func TestPlan_DeriveW1WorksWithoutRawRootConfigured(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "") // no RawRoot configured
+	span, err := NewTimeRange(aWeekday(0), aWeekday(4))
+	require.NoError(t, err)
+
+	dayBoundary, err := mgr.calendar.Bar(aWeekday(0), D1)
+	require.NoError(t, err)
+	d1Bars := []Bar{barAt(t, dayBoundary.Start())}
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, dayBoundary, d1Bars, validRawFingerprint, nil)
+
+	plan, err := mgr.Plan(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: span})
+	require.NoError(t, err, "Plan(W1) must not require RawRoot")
+	derives := actionsOfKind(plan.Actions, ActionDeriveCanonical)
+	require.Len(t, derives, 1)
+}
+
 func TestPlan_UnsupportedRawIntervalErrors(t *testing.T) {
 	mgr := newTestManagerWithRaw(t, t.TempDir())
 	odd, err := NewInterval(UnitHour, 7) // valid Interval, but not one of M1/H1/H4/D1
