@@ -1402,6 +1402,150 @@ requirement for any future live synchronization to pin
 =dailyAlignment=17= and =alignmentTimezone=America/New_York= explicitly,
 rather than inherit undocumented defaults the way the legacy client did.
 
+** DONE Canonical Bar resampling and interval materialization
+Settled by issue #81 (M2-13, branch =feature/81-bar-resampling=): one
+canonical =Manager.Build= orchestration entry point, mirroring =Sync='s
+own "only these =ActionKind=s" shape (#80), that executes
+=ActionNormalizeCanonical= (raw -> same-interval canonical, #76's
+normalizer wired to publication for the first time) and
+=ActionDeriveCanonical= (canonical D1 -> canonical W1, the resampler
+this issue actually builds) from a caller-supplied =Plan=, reporting
+anything else as a =SkippedAction= exactly as =Sync= already does for
+actions outside its own scope.
+
+**** Two build paths, two different failure postures
+=normalizeAndPublish= (=build_normalize.go=) and =deriveAndPublish=
+(=resample.go=) share the same publish/manifest/cache-invalidate tail
+(=publishCanonicalMonth=, =build.go=) but diverge deliberately on how
+they treat a bad or not-yet-ready input:
+
+- *Normalize aborts, never partially publishes.* Any
+  =recordOutcomeSuspicious= or =recordOutcomeRejected= record anywhere
+  in a partition (#76) fails the whole =normalizeAndPublish= call
+  before any store write happens; =recordOutcomeIncomplete= records are
+  silently excluded (matching #76/#79's own finding that canonical
+  =Bar= carries no completeness flag) without aborting. A corrupt or
+  anomalous raw record is treated as a hard normalization failure, not
+  a gap.
+- *Derive skips a not-yet-ready week, never aborts the month.*
+  =weekIsD1Ready= re-checks D1 completeness per calendar week — a
+  non-=PartitionCoverageCurrent= overlapping D1 partition or an
+  overlapping =Gap=, both drawn from the same =Coverage= (#79) —
+  independently of whatever range originally triggered the
+  =ActionDeriveCanonical= entry in =Plan= (#79's own gating only
+  proves the range was complete when =Plan= ran, not that the target
+  month still is by the time =Build= actually runs). An unready week is
+  left absent from the published W1 partition, exactly like any other
+  coverage gap, rather than treated as a normalization-style failure.
+
+**** =Bars= requires full coverage; =Coverage= does not — this shaped the loop
+=deriveAndPublish= originally called =m.Bars= once for the whole target
+month to fetch its D1 input, and failed immediately whenever any week
+of that month was not yet ready, since =Bars= (#78) refuses to return
+anything for a range it cannot fully satisfy. Fixed by splitting the
+two calls apart: =m.coverage= (unexported, #79) is called once for the
+whole month — it never requires full coverage, only reports on it — to
+answer =weekIsD1Ready= for every week cheaply, while the new
+=readAllBars= (=query.go=, a =Bars=-draining convenience wrapper kept
+unexported since a streaming =Reader= remains the right public shape
+for =Bars= itself) is called once *per ready week only*. Each ready
+week's own span is, by definition, fully coverable, so this succeeds
+where the single whole-month call did not.
+
+**** The aggregation formula, mined from legacy
+=aggregateBars= (=resample.go=) folds a week's D1 bars into one W1 bar
+per the formula in
+=~/src/trader-first-try/datamanager/candle_agg.go='s own
+=aggregateWindow=: Open is the first bar's Open, High/Low are the
+max/min across the window, Close is the last bar's Close, =Ticks= is
+summed, =MaxSpread= is the max, and =AvgSpread= is the tick-weighted
+mean, falling back to zero when total ticks is 0 (legacy's own guard,
+not a new fallback invented here). Legacy never actually built W1 — its
+own =dailyAligned= only ever covered D1/H4 — so this is the formula
+applied to a genuinely new resampling target, not transplanted code;
+only the aggregation math itself is mined. =AvgSpread <= MaxSpread=
+holds on the output by construction (every input's own =AvgSpread= is
+at most that input's =MaxSpread=, itself at most the aggregate
+=MaxSpread=), so a tick-weighted average of values each bounded by the
+aggregate maximum cannot exceed it — verified directly by
+=TestAggregateBars_ResultValidates=.
+
+=num= has no direct Price-by-=int64=/scalar-divide operation, so the
+weighted mean is computed by converting each bar's tick count to a
+=num.Rate= (=strconv.FormatInt= + =num.MustParseRate=), weighting via
+=Price.MulRate=, summing via =Price.Add=, and finally multiplying by
+the reciprocal total-tick =Rate= (via =Rate.DivRate=) rather than
+dividing directly — composing existing =num= operations (ADR-004)
+instead of adding a new one for this issue's narrow need.
+
+**** One parent, the same-month-key convention
+A W1 partition's =Manifest.Parent= always names the D1 partition filed
+under the identical =(year, month)= key, never a set of parents, even
+though a week near a month boundary can pull some of its D1 bars from
+an adjacent month's file (=Bars= already handles that spillover
+transparently, #78). This mirrors the identical same-month-key
+assumption =Plan='s own staleness check already makes for W1 (#79's
+=deriveActionsW1=) and is what lets =Manifest.Parent= stay a single
+={Instrument, Interval, Revision}= triple rather than a set.
+=RawFingerprint= propagates the parent D1 manifest's value verbatim,
+since W1 has no raw source of its own — this is what lets a caller
+trace a derived dataset back to its ultimate raw source without
+walking =Parent= itself.
+
+**** Corpus-scale validation tooling, and what a real run against it found
+=build_corpus_test.go= is excluded from normal =go test ./...=/=make
+check= by a =corpus= build tag, matching #75's =fullArchiveRoot=
+precedent exactly: comparing derived output against a real archive is
+an operator action against real data on disk, and domain code under
+=marketdata/= must not read a path from the environment or a flag
+(=config/arch_test.go=). An operator edits =corpusRawRoot=/
+=corpusLegacyCandleRoot= locally (never committed — both default to
+=""=, and every test skips itself when its required constant is empty)
+and runs, e.g., =go test -tags corpus ./marketdata/... -run
+TestCorpusH4AgreesWithNative -v=.
+
+A real run was performed during this issue against the operator's
+preserved archive (raw: =/srv/trading/data/raw/oanda=; legacy
+candle-v2: =/srv/trading/data/candles=, the tree this ADR's own "do not
+delete candle-v2 until it has been diffed" note refers to — located
+during this issue's own investigation, not a fact about the codebase)
+before the path constants were reverted to empty for commit. Two
+findings came out of it:
+
+- *D1 derivation (this issue's actual production output path) agrees
+  with native OANDA D1.* The only disagreements =TestCorpusD1AgreesWithNativeFromH1=
+  found were at the first/last day of each month's raw partition —
+  exactly where this comparison tool's own single-partition read (it
+  does not span adjacent months the way production's =readAllBars=/
+  =Bars= does) produces a partial window. Zero disagreements appeared
+  mid-month, which is the tell that this is the tool's own
+  simplification and not a defect in =deriveAndPublish=.
+- *OANDA's native H4 does not align the way ADR-012 assumes.*
+  =TestCorpusH4AgreesWithNative= found essentially every H4 bar in
+  every compared partition disagreeing. Inspecting a raw H4 partition
+  file directly confirmed why: OANDA's native H4 candles are anchored
+  to the same FX daily rollover D1 already uses (02:00/06:00/.../22:00
+  UTC in winter, shifting with DST), not to UTC-midnight truncation as
+  ADR-012 currently specifies for H4. D1's own native rollover matches
+  FXCalendar's D1 boundary exactly — confirmed the same way — which is
+  what this issue's actual derivation (W1 from D1) depends on; H4 is
+  not a production derivation target here. This is recorded as the
+  quality finding the issue's own scope calls for ("disagreements are
+  quality findings, not authority to overwrite native canonical data")
+  and left unfixed: revising H4's alignment is an ADR-012 change (a new,
+  superseding ADR), out of this issue's scope, not guessed at here.
+
+The one-time legacy candle-v2 comparison
+(=TestCorpusLegacyComparison=) is documented and available per the
+issue's acceptance criteria but was not exhaustively run to completion
+against the full archive during this issue (each corpus test walks and
+fingerprints the entire raw archive on every invocation, making a full
+multi-decade run expensive); it is ready for an operator to run before
+any future candle-v2 deletion, at a tolerance of one unit at legacy's
+own 1e5 scale (0.00001), matching the byte-for-byte-parity-is-not-the-
+goal rationale already recorded in its own doc comment (legacy routed
+every value through =float64=).
+
 ** TODO Typos, for whenever this folds into adr-decisions.org
 "Conanical" (x3), "principals" -> "principles", "Furture", "datys",
 "earler", "Everthing".  OANDA is usually all-caps.

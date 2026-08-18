@@ -194,3 +194,25 @@ func TestWritePartition_CancelledJustBeforeRenameLeavesExistingFileIntact(t *tes
 	require.NoError(t, err)
 	require.Len(t, got, 1, "original file must still be intact; cancelled write must not have replaced it")
 }
+
+func TestFingerprintPartition(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
+	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+
+	got, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	assert.Regexp(t, "^sha256:[0-9a-f]{64}$", got)
+
+	// Must match Inspect's own fingerprint for the identical file.
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	p := findPartition(t, inv, "EURUSD", RawH1, 2024, time.January)
+	assert.Equal(t, p.Fingerprint, got)
+}
+
+func TestFingerprintPartition_MissingFile(t *testing.T) {
+	root := t.TempDir()
+	_, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	assert.True(t, errors.Is(err, fs.ErrNotExist))
+}

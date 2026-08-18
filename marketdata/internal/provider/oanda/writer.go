@@ -3,6 +3,8 @@ package oanda
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -196,4 +198,22 @@ func ReadPartitionRecords(ctx context.Context, root, symbol string, interval Raw
 		records = append(records, rec)
 	}
 	return records, nil
+}
+
+// FingerprintPartition returns the "sha256:<hex>" content fingerprint
+// (Inspect's own Partition.Fingerprint form, and the form
+// marketdata.Manifest.RawFingerprint expects, ADR-020) of the raw
+// partition file for (symbol, interval, year, month) under root — a
+// targeted, single-file equivalent of what Inspect computes while
+// walking an entire archive, for a caller (marketdata's canonical build,
+// issue #81) that already knows exactly which partition it needs and
+// should not have to re-walk the whole raw tree to get one file's hash.
+func FingerprintPartition(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
+	path := partitionPath(root, symbol, interval, year, month)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
