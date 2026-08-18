@@ -28,6 +28,22 @@ const (
 	// ActionDeriveCanonical means a canonical W1 partition must be
 	// built or rebuilt by resampling canonical D1 data (ADR-012).
 	ActionDeriveCanonical
+	// ActionRepairRaw means a raw partition file exists but failed
+	// integrity checks (PartitionCoverageInvalid's raw-side analogue) —
+	// its content cannot be trusted, merged with, or extended, only
+	// entirely replaced. This is deliberately a distinct ActionKind
+	// from ActionDownloadRaw, not the same Kind with a different Reason
+	// string: repairing a corrupted raw artifact is a materially
+	// different, more destructive operation than acquiring or extending
+	// a trustworthy one (issue #80's "prevent accidental replacement of
+	// an existing authoritative raw artifact unless an explicit repair
+	// operation is authorized"), and Manager.Sync must be able to tell
+	// them apart from the Kind alone rather than parsing Reason text.
+	// Sync does not execute ActionRepairRaw at all — see its own doc
+	// comment — so every ActionRepairRaw a Plan produces always
+	// surfaces in SyncResult.Skipped; implementing the actual repair
+	// operation remains future, separately-authorized work.
+	ActionRepairRaw
 )
 
 // String returns a human-readable ActionKind name.
@@ -41,6 +57,8 @@ func (k ActionKind) String() string {
 		return "normalize-canonical"
 	case ActionDeriveCanonical:
 		return "derive-canonical"
+	case ActionRepairRaw:
+		return "repair-raw"
 	default:
 		return fmt.Sprintf("ActionKind(%d)", uint8(k))
 	}
@@ -70,13 +88,17 @@ type Action struct {
 // builds, or publishes anything itself.
 type Plan struct {
 	Coverage Coverage
-	// Actions is ordered download-raw, then normalize-canonical, then
-	// derive-canonical — each bucket internally chronological, matching
-	// Coverage.Partitions — since later stages depend on earlier ones
+	// Actions is ordered raw (download-raw and repair-raw, interleaved
+	// in Coverage.Partitions order), then normalize-canonical, then
+	// derive-canonical — since later stages depend on earlier ones
 	// having already run. This is "gated scheduling": an action for one
 	// stage is only produced once that stage's own input is already
 	// satisfiable (see the Plan method's doc comment), not a promise
 	// that every dependency completes before the next Plan is computed.
+	// Manager.Sync only ever executes ActionDownloadRaw; ActionRepairRaw
+	// always ends up in Sync's SkippedAction list today (see its own
+	// doc comment) — Plan still reports it so a caller can see the
+	// distinction rather than a query that simply never converges.
 	Actions []Action
 }
 
@@ -136,33 +158,40 @@ func (m *Manager) Plan(ctx context.Context, query BarQuery) (Plan, error) {
 }
 
 // deriveActionsRawBuilt derives Actions for a raw-built interval (M1,
-// H1, H4, D1): for each touched month, a missing or integrity-failed raw
-// partition schedules ActionDownloadRaw and blocks any canonical action
-// that month; an OK raw partition may still additionally need
-// ActionDownloadRaw with reason "extend" if it is the most recent
-// touched month and the calendar reports open intervals past its last
-// record. A canonical partition that is Missing, Invalid, or Stale
-// schedules ActionNormalizeCanonical once its raw is confirmed OK.
+// H1, H4, D1): for each touched month, a missing raw partition schedules
+// ActionDownloadRaw and an integrity-failed one schedules
+// ActionRepairRaw instead (see its own doc comment for why that is a
+// distinct Kind) — either way blocking any canonical action that month;
+// an OK raw partition may still additionally need ActionDownloadRaw with
+// reason "extend" if it is the most recent touched month and the
+// calendar reports open intervals past its last record. A canonical
+// partition that is Missing, Invalid, or Stale schedules
+// ActionNormalizeCanonical once its raw is confirmed OK.
 func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol string, rawByKey map[rawPartitionKey]oanda.Partition) ([]Action, error) {
 	rawInterval, ok := intervalToRawInterval(query.Interval)
 	if !ok {
 		return nil, fmt.Errorf("marketdata: plan: %w: interval %s has no raw partition", ErrInvalidQuery, query.Interval)
 	}
 
-	var downloads, normalizes []Action
+	var rawActions, normalizes []Action
 	for i, pc := range cov.Partitions {
 		p, found := rawByKey[rawPartitionKey{symbol, rawInterval, pc.Year, pc.Month}]
 		switch {
 		case !found:
-			downloads = append(downloads, Action{
+			rawActions = append(rawActions, Action{
 				Kind: ActionDownloadRaw, Instrument: query.Instrument, Interval: query.Interval,
 				Year: pc.Year, Month: pc.Month, Reason: "missing",
 			})
 			continue // gated: nothing downstream can run without raw
 		case p.Status != oanda.PartitionStatusOK:
-			downloads = append(downloads, Action{
-				Kind: ActionDownloadRaw, Instrument: query.Instrument, Interval: query.Interval,
-				Year: pc.Year, Month: pc.Month, Reason: fmt.Sprintf("raw partition %s: needs re-acquisition", p.Status),
+			// A distinct Kind, not ActionDownloadRaw with a different
+			// Reason: this raw file exists but cannot be trusted, so
+			// nothing can extend or merge with it — only an explicitly
+			// authorized repair can replace it. See ActionRepairRaw's
+			// own doc comment.
+			rawActions = append(rawActions, Action{
+				Kind: ActionRepairRaw, Instrument: query.Instrument, Interval: query.Interval,
+				Year: pc.Year, Month: pc.Month, Reason: fmt.Sprintf("raw partition %s", p.Status),
 			})
 			continue
 		}
@@ -175,7 +204,7 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 				return nil, err
 			}
 			if needExtend {
-				downloads = append(downloads, Action{
+				rawActions = append(rawActions, Action{
 					Kind: ActionDownloadRaw, Instrument: query.Instrument, Interval: query.Interval,
 					Year: pc.Year, Month: pc.Month, Reason: "extend",
 				})
@@ -198,14 +227,25 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 		}
 	}
 
-	return append(downloads, normalizes...), nil
+	return append(rawActions, normalizes...), nil
 }
 
 // needsExtend reports whether p — an OK raw partition for the most
-// recently touched month in the query — should be extended: whether the
-// calendar reports any open bar interval strictly after p's last known
-// record and at or before min(now, query.Range.End).
+// recently touched month in the query — should be extended: either the
+// calendar reports an open bar interval strictly after p's last known
+// record and at or before min(now, query.Range.End), or p's own last
+// record is itself still provider-incomplete (LastComplete false) — a
+// design review's finding: without this second check, a partition whose
+// tail candle OANDA had not yet finalized at fetch time would never be
+// revisited even though the calendar has nothing new to report, freezing
+// a provisional OHLC/volume in place permanently. See
+// marketdata.Manager.Sync's own from-selection for the matching
+// re-fetch-not-skip behavior once an extend is actually scheduled.
 func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval Interval) (bool, error) {
+	if p.RowCount > 0 && !p.LastComplete {
+		return true, nil
+	}
+
 	upper := queryRange.End()
 	if now := m.clock.Now(); now.Before(upper) {
 		upper = now

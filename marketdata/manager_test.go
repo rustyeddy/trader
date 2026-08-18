@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -85,6 +86,47 @@ func TestNewManagerRawRootOptional(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, m.configured())
 	assert.Empty(t, m.rawRoot)
+}
+
+func TestNewManagerRejectsOANDACredentialWithoutBaseURL(t *testing.T) {
+	m, err := New(Config{
+		Clock: testClock(), StoreRoot: "/data/candles",
+		Resolver: testResolver(t), ProviderName: "oanda",
+		OANDACredential: oanda.StaticCredential("test"),
+	})
+	assert.Nil(t, m)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNewManagerRejectsOANDABaseURLWithoutCredential(t *testing.T) {
+	m, err := New(Config{
+		Clock: testClock(), StoreRoot: "/data/candles",
+		Resolver: testResolver(t), ProviderName: "oanda",
+		OANDABaseURL: "https://api-fxpractice.oanda.com",
+	})
+	assert.Nil(t, m)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNewManagerBuildsOANDAClientWhenBothSupplied(t *testing.T) {
+	m, err := New(Config{
+		Clock: testClock(), StoreRoot: "/data/candles",
+		Resolver: testResolver(t), ProviderName: "oanda",
+		OANDACredential: oanda.StaticCredential("test"), OANDABaseURL: "https://api-fxpractice.oanda.com",
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, m.oandaClient)
+}
+
+func TestNewManagerOANDAClientNilWhenNeitherSupplied(t *testing.T) {
+	m, err := New(Config{
+		Clock: testClock(), StoreRoot: "/data/candles",
+		Resolver: testResolver(t), ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+	assert.Nil(t, m.oandaClient)
 }
 
 func TestNewManagerBuildsRealStoreFromStoreRoot(t *testing.T) {

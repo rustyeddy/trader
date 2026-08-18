@@ -260,4 +260,47 @@
 // NewFXCalendar(FXCalendarParams{}) when unset, the same "build a real
 // internal default when not overridden" pattern the canonical store
 // already uses).
+//
+// # Explicit OANDA synchronization
+//
+// Manager.Sync (issue #80, ADR-020) executes exactly the
+// ActionDownloadRaw entries in a Plan a caller already obtained from
+// Manager.Plan — never a caller-supplied instrument/interval/range, and
+// never a plan Sync recomputes itself — acquiring missing or extending
+// raw OANDA partitions through an internal oanda.Client while leaving
+// canonical data completely untouched. ActionNormalizeCanonical and
+// ActionDeriveCanonical entries are reported in SyncResult.Skipped, not
+// executed: building canonical data from raw remains a separate, future
+// Manager operation, keeping Sync's scope exactly "fill missing raw
+// partitions and extend recent history."
+//
+// Sync decides missing-versus-extend operationally, by checking whether
+// a raw partition file already exists, rather than trusting an Action's
+// Reason text (diagnostic, not a dispatch key): no file means a brand-
+// new, atomically-written partition (oanda.WritePartition's
+// mustNotExist, which errors rather than silently overwriting anything
+// that unexpectedly appeared — see WritePartition's own doc comment for
+// why this is Link-based, not a Stat-then-Rename with a real race
+// window); an existing, readable file means only the range since its
+// last record is fetched and merged in by timestamp — through now or
+// the calendar month's end, whichever is earlier, never a bulk
+// redownload of already-preserved history, and re-fetched from that
+// record's own Time rather than skipped past when it is itself still
+// provider-incomplete, so a refreshed, finalized candle replaces a
+// stale provisional one instead of being lost. A malformed existing raw
+// file is not something Sync ever attempts to extend or repair: Plan
+// reports that case as the distinct ActionRepairRaw (not
+// ActionDownloadRaw), which Sync always reports in SkippedAction —
+// repairing a corrupted raw artifact remains a separate, explicitly-
+// authorized operation this issue does not build.
+//
+// Config gains OANDACredential (an oanda.CredentialProvider, never a
+// bare token field — see its own doc comment) and OANDABaseURL, both
+// optional but required together: New rejects one supplied without the
+// other. Bars, Coverage, and Plan never need either; only Sync does, and
+// it reports a clear configuration error if neither was supplied. The
+// bearer token itself is never held anywhere in this package as a plain
+// value, and never appears in a DownloadResult, SkippedAction, or error
+// Sync returns — oanda.Client places it on exactly one outgoing request
+// header and nowhere else.
 package marketdata

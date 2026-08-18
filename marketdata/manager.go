@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 )
 
 // Manager is Trader's sole application-service boundary for historical
@@ -66,6 +67,14 @@ type Manager struct {
 	resolver     instrument.Resolver
 	providerName string
 	calendar     Calendar
+
+	// oandaClient is Manager's own OANDA synchronization client (issue
+	// #80), built at construction from Config.OANDACredential/
+	// Config.OANDABaseURL when both are supplied. It is nil otherwise —
+	// Sync then reports a clear configuration error rather than a nil
+	// dereference — since most Manager uses (queries, coverage,
+	// planning) never need it.
+	oandaClient *oanda.Client
 
 	// Collaborator seams. These are interfaces owned by this package so the
 	// real provider, storage, normalization, and resampling
@@ -146,13 +155,38 @@ type Config struct {
 	// this package can supply, replace, or directly read it.
 	CacheCapacity int
 
-	// provider and store are optional internal collaborators. They remain
-	// unexported so no external package can supply provider or storage
-	// implementations through Config. They exist only for in-package
-	// tests: real construction always builds its own canonicalCSVStore
-	// from StoreRoot (see New).
-	provider provider
-	store    barStore
+	// OANDACredential and OANDABaseURL configure Manager's OANDA
+	// synchronization client (issue #80). Both are optional — Bars,
+	// Coverage, and Plan never need them — but must be supplied together:
+	// New rejects one being set without the other, since a half-
+	// configured client (a token with no endpoint, or vice versa) is a
+	// silent footgun rather than a usable partial configuration. Sync
+	// reports a clear configuration error if neither was supplied.
+	//
+	// OANDACredential is never a bare secret string on this struct — see
+	// oanda.CredentialProvider — so Config itself never holds a token in
+	// a form that could be logged or serialized by accident.
+	//
+	// OANDABaseURL is a full URL (for example
+	// "https://api-fxpractice.oanda.com"), not a "practice"/"live" enum
+	// Manager would parse itself: environment selection is the
+	// composition root's own typed configuration decision.
+	OANDACredential oanda.CredentialProvider
+	OANDABaseURL    string
+
+	// provider, store, and oandaClient are optional internal
+	// collaborators. They remain unexported so no external package can
+	// supply provider, storage, or an OANDA client implementation
+	// through Config. They exist only for in-package tests: real
+	// construction always builds its own canonicalCSVStore from
+	// StoreRoot, and its own *oanda.Client from OANDACredential/
+	// OANDABaseURL when set (see New). oandaClient specifically lets
+	// this package's own Sync tests inject a Client built with a fake
+	// oanda.HTTPDoer (oanda's own exported test seam), without
+	// widening Config's public surface to expose an HTTP transport.
+	provider    provider
+	store       barStore
+	oandaClient *oanda.Client
 }
 
 // provider is the narrow internal contract for acquiring provider-native
@@ -209,6 +243,9 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.ProviderName == "" {
 		return nil, fmt.Errorf("marketdata: new manager: %w: provider name is required", ErrInvalidConfig)
 	}
+	if (cfg.OANDACredential == nil) != (cfg.OANDABaseURL == "") {
+		return nil, fmt.Errorf("marketdata: new manager: %w: OANDA credential and base URL must be supplied together", ErrInvalidConfig)
+	}
 
 	store := cfg.store
 	if store == nil {
@@ -219,6 +256,18 @@ func New(cfg Config) (*Manager, error) {
 		cal = NewFXCalendar(FXCalendarParams{})
 	}
 
+	oandaClient := cfg.oandaClient
+	if oandaClient == nil && cfg.OANDACredential != nil {
+		var err error
+		oandaClient, err = oanda.NewClient(oanda.ClientConfig{
+			BaseURL:    cfg.OANDABaseURL,
+			Credential: cfg.OANDACredential,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marketdata: new manager: %w: %v", ErrInvalidConfig, err)
+		}
+	}
+
 	return &Manager{
 		clock:        cfg.Clock,
 		storeRoot:    cfg.StoreRoot,
@@ -226,6 +275,7 @@ func New(cfg Config) (*Manager, error) {
 		resolver:     cfg.Resolver,
 		providerName: cfg.ProviderName,
 		calendar:     cal,
+		oandaClient:  oandaClient,
 		provider:     cfg.provider,
 		store:        store,
 		cache:        newBarCache(cfg.CacheCapacity),

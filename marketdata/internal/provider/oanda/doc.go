@@ -54,21 +54,53 @@
 // volume, or complete flag — are reported as errors rather than silently
 // skipped or coerced.
 //
-// # Future live synchronization
+// # Live synchronization
 //
-// This package does not talk to OANDA's API; it only reads the preserved
-// archive. When a later milestone adds live acquisition, it must pin
-// dailyAlignment=17 and alignmentTimezone=America/New_York explicitly on
-// every daily request rather than relying on OANDA's undocumented
-// defaults (issue #74, ADR-020) — the archive's own D1 opens already
-// match a 17:00 America/New_York rollover, which is only true because
-// the legacy client happened to inherit those same defaults, not because
-// it requested them. A pinned request survives a provider default
-// changing without Trader silently mis-aligning new data against the
-// old archive. There is no OANDA-native weekly partition in the
-// preserved archive (see RawInterval); W1 is a derived interval in M2,
-// built by resampling canonical D1, not synchronized from OANDA
-// directly, so no weeklyAlignment parameter is pinned here.
+// Client (issue #80, ADR-020) is this package's live acquisition path:
+// a minimal OANDA v20 REST client for historical candle download,
+// authenticated through a CredentialProvider rather than any bare token
+// field or environment read (this package never calls os.Getenv; see
+// CredentialProvider's own doc comment). It pins dailyAlignment=17 and
+// alignmentTimezone=America/New_York explicitly on every request rather
+// than relying on OANDA's undocumented account defaults (issue #74,
+// ADR-020) — the archive's own D1 opens already match a 17:00
+// America/New_York rollover, which is only true because the legacy
+// client happened to inherit those same defaults, not because it
+// requested them. A pinned request survives a provider default changing
+// without Trader silently mis-aligning new data against the old
+// archive. There is no OANDA-native weekly partition in the preserved
+// archive (see RawInterval); W1 is a derived interval in M2, built by
+// resampling canonical D1, not synchronized from OANDA directly, so no
+// weeklyAlignment parameter is ever requested.
+//
+// FetchCandles paginates automatically (OANDA caps one response at
+// 5000 candles), retries a transient failure (a network error, HTTP
+// 429, or 5xx) with backoff up to a configured attempt limit, and
+// classifies a permanent failure (401/403, 400/404) as a distinct,
+// non-retried sentinel error rather than retrying blindly against
+// something that cannot succeed. Every dependency — the HTTP transport,
+// the clock backoff and rate-limit pacing run against, the page size —
+// is exported or injected explicitly (HTTPDoer, ClientConfig), so no
+// test in this package makes a real network call or a real sleep.
+//
+// WritePartition (writer.go) atomically writes a raw partition file —
+// temp file, then rename — the same discipline
+// marketdata.canonicalCSVStore.publish uses for canonical data (#77),
+// applied here to raw data; the legacy client wrote raw files with a
+// direct os.Create and no atomicity at all. Its mustNotExist parameter
+// is the mechanism behind ADR-020's "prevent accidental replacement of
+// an existing authoritative raw artifact" requirement: a genuinely new
+// partition is written only when nothing already exists at that path,
+// and an "extend" (new data appended to an existing partition) is the
+// only case that replaces an existing file — always with a
+// caller-merged superset of records, never a blind overwrite. Repairing
+// a corrupted existing partition remains a distinct, explicitly-
+// authorized future operation, not something an ordinary sync performs.
+//
+// marketdata.Manager.Sync (sync.go's counterpart in the parent package)
+// is the only caller of Client/WritePartition; nothing outside the
+// marketdata tree ever reaches either directly, the same boundary every
+// other internal provider component in this package already keeps.
 //
 // # Archive inventory and integrity inspection
 //
