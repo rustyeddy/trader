@@ -300,6 +300,101 @@ func TestPlan_DeriveW1WorksWithoutRawRootConfigured(t *testing.T) {
 	require.Len(t, derives, 1)
 }
 
+// TestPlan_W1ConvergesAfterBoundaryGapFillsIn is the end-to-end
+// regression for a design-review finding on PR #96: a boundary week
+// deriveAndPublish must skip because its D1 input spills into a
+// not-yet-available next-month partition leaves the published W1
+// partition PartitionCoverageCurrent (the rest of the month did
+// publish) but with a real W1 Gap for that week. Because the
+// partition's own recorded lineage only reflects what it *did* draw
+// from, nothing about it changes once the missing D1 data arrives, and
+// deriveActionsW1 previously skipped every Current partition
+// unconditionally — so the gap would never converge. This test drives
+// the full cycle: build with February D1 absent, verify the boundary W1
+// gap; publish February D1; call Plan again and verify it emits
+// ActionDeriveCanonical for the already-Current January partition; run
+// Build; verify the boundary W1 bar is now present and the gap is gone.
+func TestPlan_W1ConvergesAfterBoundaryGapFillsIn(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	febStart := time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)
+	janSpan := deriveMonthSpan(t, 2024, time.January)
+	boundaryWeek := lastWeekSpanOfMonth(t, mgr, 2024, time.January)
+	require.True(t, boundaryWeek.End().After(febStart), "fixture assumption: January 2024's final W1 week spills into February")
+
+	// Publish a *complete* January D1 dataset (every week, not just the
+	// boundary one) so the only real gap is the boundary week's own —
+	// otherwise weeks with no D1 data at all would merge into one large
+	// W1 gap alongside the boundary week, confusing exactly what this
+	// test means to isolate. Walk from the first real D1 boundary at or
+	// after janSpan's own start, not janSpan.Start() itself (a bare UTC
+	// midnight, not a real 17:00-NY D1 boundary) — otherwise the first
+	// generated bar would land in the D1 session straddling New Year's
+	// Eve, outside January's own declared Span.
+	janFirstDay, err := firstBoundaryAtOrAfter(mgr.calendar, janSpan.Start(), D1)
+	require.NoError(t, err)
+	janDaySpan, err := NewTimeRange(janFirstDay, janSpan.End())
+	require.NoError(t, err)
+	allJanD1Bars := fullWeekD1Bars(t, mgr, janDaySpan)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, janSpan, allJanD1Bars, validRawFingerprint, nil)
+
+	// The boundary week's own February portion, withheld for now.
+	_, boundaryFebBars := splitBarsAtMonthBoundary(fullWeekD1Bars(t, mgr, boundaryWeek), febStart)
+	require.NotEmpty(t, boundaryFebBars, "fixture assumption: the boundary week has at least one February day")
+
+	// 1. Build January's W1 with the boundary week's February D1 absent:
+	// that one week is skipped, but the rest of the month publishes.
+	result1, err := mgr.Build(context.Background(), Plan{Actions: []Action{
+		{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January},
+	}})
+	require.NoError(t, err)
+	require.Len(t, result1.Published, 1)
+	assert.Equal(t, 3, result1.Published[0].BarCount, "January 2024 has 4 W1 weeks; only the boundary week is skipped")
+
+	cov1, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: janSpan})
+	require.NoError(t, err)
+	require.Len(t, cov1.Partitions, 1)
+	assert.Equal(t, PartitionCoverageCurrent, cov1.Partitions[0].Status, "the published weeks make the partition Current even with one week missing")
+	require.Len(t, cov1.Gaps, 1, "only the boundary week is a gap; the rest of January is Present")
+	assert.True(t, cov1.Gaps[0].Span.Start().Equal(boundaryWeek.Start()))
+
+	// 2. Publish the boundary week's February D1 data.
+	publishCanonicalMonth(t, mgr, D1, 2024, time.February, deriveMonthSpan(t, 2024, time.February), boundaryFebBars, validRawFingerprint, nil)
+
+	// 3. Plan again: must now emit ActionDeriveCanonical for January's
+	// W1 partition, even though it is already PartitionCoverageCurrent.
+	plan2, err := mgr.Plan(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: janSpan})
+	require.NoError(t, err)
+	derives := actionsOfKind(plan2.Actions, ActionDeriveCanonical)
+	require.Len(t, derives, 1, "a Current partition with a real gap whose D1 input is now available must reconverge")
+	assert.Equal(t, 2024, derives[0].Year)
+	assert.Equal(t, time.January, derives[0].Month)
+	assert.Contains(t, derives[0].Reason, "gap")
+
+	// 4. Run Build again: the boundary week must now be present and the
+	// gap gone.
+	result2, err := mgr.Build(context.Background(), Plan{Actions: derives})
+	require.NoError(t, err)
+	require.Len(t, result2.Published, 1)
+
+	cov2, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: janSpan})
+	require.NoError(t, err)
+	assert.Empty(t, cov2.Gaps, "the boundary week must no longer be a gap")
+
+	// A narrow query around just the bar's own start, entirely within
+	// January: the boundary week's single W1 bar is stored under
+	// January's own partition key (deriveAndPublish's own convention),
+	// but boundaryWeek itself, as a TimeRange, crosses into February —
+	// querying that full range would touch a February W1 partition key
+	// that (correctly) never gets published at all.
+	narrowRange, err := NewTimeRange(boundaryWeek.Start(), boundaryWeek.Start().Add(time.Hour))
+	require.NoError(t, err)
+	reader, err := mgr.Bars(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: narrowRange})
+	require.NoError(t, err)
+	b, err := reader.Next(context.Background())
+	require.NoError(t, err)
+	assert.True(t, b.Time.Equal(boundaryWeek.Start()), "the boundary week's W1 bar must now be present")
+}
+
 func TestPlan_UnsupportedRawIntervalErrors(t *testing.T) {
 	mgr := newTestManagerWithRaw(t, t.TempDir())
 	odd, err := NewInterval(UnitHour, 7) // valid Interval, but not one of M1/H1/H4/D1

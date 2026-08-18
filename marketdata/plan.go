@@ -279,12 +279,13 @@ func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval 
 }
 
 // deriveActionsW1 derives Actions for the derived W1 interval: a month
-// schedules ActionDeriveCanonical only when it is not already
-// PartitionCoverageCurrent and the underlying canonical D1 range for
-// that same UTC month is itself complete (every expected D1 interval
-// Present or Closed) — the ADR-012 single-hop dependency, reproduced
-// without a general resampling-dependency graph since W1 is this
-// package's only derived interval.
+// schedules ActionDeriveCanonical when it is not already
+// PartitionCoverageCurrent (see below for the Current-with-gaps
+// exception) and the underlying canonical D1 range for that same UTC
+// month is itself complete (every expected D1 interval Present or
+// Closed) — the ADR-012 single-hop dependency, reproduced without a
+// general resampling-dependency graph since W1 is this package's only
+// derived interval.
 //
 // The D1 prerequisite check calls the unexported coverage directly, with
 // a nil raw lookup, rather than the public Coverage method: Coverage(D1)
@@ -296,15 +297,45 @@ func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval 
 // question than a direct Plan(D1) call would answer, not a silent
 // correctness gap — a caller who cares about D1's own raw-fingerprint
 // staleness can and should call Plan/Coverage for D1 directly.
+//
+// # A Current partition can still need reconvergence
+//
+// deriveAndPublish (issue #81) can leave a boundary week absent from an
+// otherwise-published, PartitionCoverageCurrent W1 partition, when that
+// week's D1 input (potentially spilling into the next month's D1
+// partition — see w1SpansNextMonth) was not yet available at build
+// time. The partition's own recorded lineage (Manifest.Parent) reflects
+// only what it *did* draw from, so once the missing D1 data arrives,
+// nothing about the W1 partition's own state changes — it stays
+// Current, and unconditionally skipping every Current partition here
+// would mean that boundary week never converges. w1CurrentPartitionReady
+// reconsiders a Current partition specifically when Coverage's own
+// W1-level Gaps (computed only for Current partitions, coverage.go) show
+// such a gap, checking D1 completeness over the gap's true dependency —
+// unclipped by query.Range, unlike the missing/invalid/stale branches
+// below, which stay deliberately lazy about how much of the month a
+// caller's own query asked about.
 func (m *Manager) deriveActionsW1(ctx context.Context, query BarQuery, cov Coverage, symbol string) ([]Action, error) {
 	var actions []Action
 	for _, pc := range cov.Partitions {
+		monthStart := time.Date(pc.Year, pc.Month, 1, 0, 0, 0, 0, time.UTC)
+		monthEnd := monthStart.AddDate(0, 1, 0)
+
 		if pc.Status == PartitionCoverageCurrent {
+			needsDerive, err := m.w1CurrentPartitionNeedsDerive(ctx, query, cov, monthStart, monthEnd, symbol)
+			if err != nil {
+				return nil, err
+			}
+			if !needsDerive {
+				continue
+			}
+			actions = append(actions, Action{
+				Kind: ActionDeriveCanonical, Instrument: query.Instrument, Interval: W1,
+				Year: pc.Year, Month: pc.Month, Reason: "gap: D1 input now available for a previously incomplete week",
+			})
 			continue
 		}
 
-		monthStart := time.Date(pc.Year, pc.Month, 1, 0, 0, 0, 0, time.UTC)
-		monthEnd := monthStart.AddDate(0, 1, 0)
 		clipStart, clipEnd := monthStart, monthEnd
 		if query.Range.Start().After(clipStart) {
 			clipStart = query.Range.Start()
@@ -342,6 +373,65 @@ func (m *Manager) deriveActionsW1(ctx context.Context, query BarQuery, cov Cover
 		})
 	}
 	return actions, nil
+}
+
+// w1CurrentPartitionNeedsDerive reports whether a Current W1 partition
+// for [monthStart, monthEnd) should still schedule ActionDeriveCanonical
+// because at least one genuine W1-level Gap (cov.Gaps, computed only
+// for Current partitions by coverage's own gapsForPartition) overlapping
+// this month now has a satisfiable D1 dependency.
+//
+// Unlike the missing/invalid/stale branches in deriveActionsW1, this
+// check does not require the D1 input to be gapless across the whole
+// month (d1Complete's stricter bar): a Current partition's other weeks
+// already published successfully, so only the specific gapped week(s)
+// need to be re-checked, via weekIsD1Ready — the identical per-week
+// readiness test deriveAndPublish itself applies at Build time — over a
+// D1 Coverage queried through weekSpansForMonth's own coverageEnd, so a
+// gap's spillover into the next month's D1 partition is visible here
+// too. It also does not clip to query.Range the way the other branches
+// deliberately do: a gap's true D1 dependency determines whether it can
+// converge, independent of how narrowly the caller's own W1 query
+// happened to be scoped. A Current partition with no overlapping gap
+// needs no reconsideration at all, and never reaches the D1 check.
+func (m *Manager) w1CurrentPartitionNeedsDerive(ctx context.Context, query BarQuery, cov Coverage, monthStart, monthEnd time.Time, symbol string) (bool, error) {
+	gapSpans := overlappingGapSpans(cov.Gaps, monthStart, monthEnd)
+	if len(gapSpans) == 0 {
+		return false, nil
+	}
+
+	_, coverageEnd, err := weekSpansForMonth(m.calendar, monthStart, monthEnd)
+	if err != nil {
+		return false, fmt.Errorf("marketdata: plan: %w", err)
+	}
+	d1Range, err := NewTimeRange(monthStart, coverageEnd)
+	if err != nil {
+		return false, fmt.Errorf("marketdata: plan: %w", err)
+	}
+	d1Query := BarQuery{Instrument: query.Instrument, Interval: D1, Range: d1Range}
+	d1Cov, err := m.coverage(ctx, d1Query, symbol, nil)
+	if err != nil {
+		return false, fmt.Errorf("marketdata: plan: derive: check D1 prerequisite: %w", err)
+	}
+
+	for _, gapSpan := range gapSpans {
+		if weekIsD1Ready(d1Cov, gapSpan) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// overlappingGapSpans returns the Span of every gap in gaps that
+// overlaps the half-open range [start, end).
+func overlappingGapSpans(gaps []Gap, start, end time.Time) []TimeRange {
+	var spans []TimeRange
+	for _, g := range gaps {
+		if g.Span.Start().Before(end) && g.Span.End().After(start) {
+			spans = append(spans, g.Span)
+		}
+	}
+	return spans
 }
 
 // d1Complete reports whether cov (a D1 Coverage) describes a fully

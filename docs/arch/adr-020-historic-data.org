@@ -1602,6 +1602,39 @@ initial implementation above, all fixed before merge:
   record, so the two can never disagree about which case applies to a
   given W1 partition.
 
+**** A second review round found one more convergence gap
+
+A follow-up review comment found a real edge case the six fixes above
+did not close: =deriveAndPublish= can leave a boundary week absent from
+an otherwise-published =PartitionCoverageCurrent= W1 partition (its D1
+input was not yet available at build time). Because that partition's
+own recorded lineage only reflects what it *did* draw from, nothing
+about its state changes once the missing D1 data later arrives — and
+=deriveActionsW1= (=plan.go=) previously skipped every
+=PartitionCoverageCurrent= partition unconditionally, so the gap would
+never reconverge on its own.
+
+=deriveActionsW1= now reconsiders a =Current= partition specifically
+when Coverage's own W1-level =Gaps= (computed only for =Current=
+partitions, =gapsForPartition=) overlap its month.
+=w1CurrentPartitionNeedsDerive= checks each overlapping gap's own D1
+readiness via =weekIsD1Ready= — the identical per-week test
+=deriveAndPublish= itself applies at Build time, over a D1 =Coverage=
+queried through =weekSpansForMonth='s own =coverageEnd= so a gap's
+spillover into the next month's D1 partition is visible here too —
+rather than requiring the whole month's D1 input to be gapless
+(=d1Complete='s stricter bar, still used unchanged by the
+missing/invalid/stale branches, which stay deliberately lazy about how
+much of the month a caller's own query asked about). A =Current=
+partition with no overlapping gap is never reconsidered at all.
+
+=TestPlan_W1ConvergesAfterBoundaryGapFillsIn= is the requested
+end-to-end regression: build January's W1 with the boundary week's
+February D1 absent (verifying the resulting gap), publish that D1 data,
+call =Plan= again (verifying it now emits =ActionDeriveCanonical= for
+the already-=Current= January partition), run =Build=, and verify the
+boundary week's bar is now present and the gap gone.
+
 ** TODO Typos, for whenever this folds into adr-decisions.org
 "Conanical" (x3), "principals" -> "principles", "Furture", "datys",
 "earler", "Everthing".  OANDA is usually all-caps.
