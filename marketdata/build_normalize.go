@@ -40,6 +40,14 @@ import (
 // actually ended up present — a BarSet's Span is a coverage claim, not
 // a promise of bar density (#79's own precedent).
 func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (PublishResult, error) {
+	// RawRoot is checked here, not in Build, because normalizeAndPublish
+	// is the only canonical build path that actually reads raw data —
+	// see Build's own doc comment for why a W1-only (or otherwise
+	// raw-independent) Plan must not fail on this before it even
+	// executes.
+	if m.rawRoot == "" {
+		return PublishResult{}, fmt.Errorf("marketdata: build: %w: raw root is not configured", ErrInvalidConfig)
+	}
 	rawInterval, ok := intervalToRawInterval(action.Interval)
 	if !ok {
 		return PublishResult{}, fmt.Errorf("interval %s has no raw partition to normalize from", action.Interval)
@@ -49,7 +57,15 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		return PublishResult{}, err
 	}
 
-	records, err := oanda.ReadPartitionRecords(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month)
+	// ReadPartitionSnapshot, not separate ReadPartitionRecords/
+	// FingerprintPartition calls: those would open the raw file twice,
+	// admitting a window in which Sync atomically replaces it in
+	// between, so the records normalized below and the fingerprint
+	// recorded on the published Manifest could end up describing two
+	// different revisions of the raw file (see ReadPartitionSnapshot's
+	// own doc comment). One read guarantees they always describe the
+	// same bytes.
+	snapshot, err := oanda.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month)
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("read raw partition: %w", err)
 	}
@@ -57,7 +73,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		return PublishResult{}, err
 	}
 
-	normalized, err := normalizeOANDASequence(rawInterval, m.calendar, records)
+	normalized, err := normalizeOANDASequence(rawInterval, m.calendar, snapshot.Records)
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("normalize: %w", err)
 	}
@@ -73,10 +89,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		}
 	}
 
-	fingerprint, err := oanda.FingerprintPartition(m.rawRoot, symbol, rawInterval, action.Year, action.Month)
-	if err != nil {
-		return PublishResult{}, fmt.Errorf("fingerprint raw partition: %w", err)
-	}
+	fingerprint := snapshot.Fingerprint
 
 	monthStart := time.Date(action.Year, action.Month, 1, 0, 0, 0, 0, time.UTC)
 	span, err := NewTimeRange(monthStart, monthStart.AddDate(0, 1, 0))

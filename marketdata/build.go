@@ -52,6 +52,17 @@ type PublishResult struct {
 // completely untouched; Build is never invoked implicitly by any of
 // them.
 //
+// Build itself does not require RawRoot to be configured: only
+// normalizeAndPublish (ActionNormalizeCanonical) actually reads raw
+// partitions, so only it checks RawRoot, and only when an
+// ActionNormalizeCanonical entry is actually present. deriveAndPublish
+// (ActionDeriveCanonical, W1 from canonical D1) never touches raw data
+// at all — matching Plan's own deriveActionsW1, which already documents
+// working correctly with no RawRoot configured — so a W1-only Plan, or
+// a Plan whose only raw-dependent entries are ActionDownloadRaw/
+// ActionRepairRaw (both reported in Skipped, never executed here), must
+// not fail before those entries can even be reported.
+//
 // # Only canonical builds
 //
 // ActionDownloadRaw and ActionRepairRaw entries are reported in
@@ -72,9 +83,6 @@ type PublishResult struct {
 func (m *Manager) Build(ctx context.Context, plan Plan) (BuildResult, error) {
 	if !m.configured() {
 		return BuildResult{}, fmt.Errorf("marketdata: build: %w: manager is not configured", ErrInvalidConfig)
-	}
-	if m.rawRoot == "" {
-		return BuildResult{}, fmt.Errorf("marketdata: build: %w: raw root is not configured", ErrInvalidConfig)
 	}
 	if err := ctx.Err(); err != nil {
 		return BuildResult{}, err

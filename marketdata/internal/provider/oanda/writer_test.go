@@ -216,3 +216,103 @@ func TestFingerprintPartition_MissingFile(t *testing.T) {
 	_, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
 	assert.True(t, errors.Is(err, fs.ErrNotExist))
 }
+
+func TestReadPartitionSnapshot_RecordsAndFingerprintAgree(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{
+		testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true),
+		testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true),
+	}
+	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true))
+
+	snap, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	require.Len(t, snap.Records, 2)
+
+	wantFingerprint, err := FingerprintPartition(root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	assert.Equal(t, wantFingerprint, snap.Fingerprint)
+
+	wantRecords, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	require.Len(t, wantRecords, len(snap.Records))
+	for i := range wantRecords {
+		assert.True(t, wantRecords[i].Time.Equal(snap.Records[i].Time))
+	}
+}
+
+func TestReadPartitionSnapshot_MissingFile(t *testing.T) {
+	root := t.TempDir()
+	_, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	assert.True(t, errors.Is(err, fs.ErrNotExist))
+}
+
+// TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace is the
+// regression for a design-review finding on issue #81's PR: calling
+// ReadPartitionRecords and FingerprintPartition as two separate file
+// opens (the pattern this replaces) admits a window in which a
+// concurrent WritePartition "extend" replaces the file in between,
+// pairing one revision's records with another revision's fingerprint.
+// One goroutine repeatedly replaces the partition with one of two
+// distinguishable, precomputed contents (contentA/contentB, differing
+// row counts and hence differing fingerprints); another repeatedly
+// calls ReadPartitionSnapshot. Every single snapshot observed must pair
+// a row count with the fingerprint that actually corresponds to it —
+// under the old two-open pattern this test would (non-deterministically,
+// but reliably across enough iterations) observe a snapshot whose row
+// count matches one content variant and whose fingerprint matches the
+// other.
+func TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace(t *testing.T) {
+	root := t.TempDir()
+	contentA := []Record{testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true)}
+	contentB := []Record{
+		testRecord(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), true),
+		testRecord(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC), true),
+		testRecord(time.Date(2024, 1, 1, 2, 0, 0, 0, time.UTC), true),
+	}
+	require.NoError(t, WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, contentA, true))
+
+	fpFor := func(records []Record) string {
+		tmp := t.TempDir()
+		require.NoError(t, WritePartition(context.Background(), tmp, "EURUSD", RawH1, 2024, time.January, records, true))
+		fp, err := FingerprintPartition(tmp, "EURUSD", RawH1, 2024, time.January)
+		require.NoError(t, err)
+		return fp
+	}
+	fpA, fpB := fpFor(contentA), fpFor(contentB)
+	require.NotEqual(t, fpA, fpB, "fixture assumption: the two contents must fingerprint differently")
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range iterations {
+			content := contentA
+			if i%2 == 0 {
+				content = contentB
+			}
+			_ = WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, content, false)
+		}
+	}()
+
+	var mismatches int
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			snap, err := ReadPartitionSnapshot(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+			if err != nil {
+				continue // a rename mid-open is a legitimate transient read error, not the hazard under test
+			}
+			switch {
+			case len(snap.Records) == len(contentA) && snap.Fingerprint != fpA:
+				mismatches++
+			case len(snap.Records) == len(contentB) && snap.Fingerprint != fpB:
+				mismatches++
+			}
+		}
+	}()
+	wg.Wait()
+
+	assert.Equal(t, 0, mismatches, "every snapshot's record count and fingerprint must describe the same file revision")
+}

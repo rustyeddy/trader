@@ -1,7 +1,10 @@
 package marketdata
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"time"
@@ -13,18 +16,22 @@ import (
 // canonical D1 into W1 for the target (instrument, year, month), and
 // publishes the result through the canonical store.
 //
-// # One parent partition, matching the store's own convention
+// # Parent lineage can span two D1 partitions
 //
-// A W1 partition's Manifest.Parent always references the D1 partition
-// filed under the *same* (year, month) key — never a set of parent
-// partitions, even though a week near a month boundary can pull some of
-// its D1 bars from an adjacent month's file (Bars, #78, already handles
-// that boundary-spillover transparently). This mirrors the identical
-// same-month-key assumption Plan's own isStale check (#79) already
-// makes for W1 staleness, and is a deliberate simplification the
-// single-parent Manifest.Parent shape already implies, not an
-// oversight: it is what lets Parent stay one {Instrument, Interval,
-// Revision} triple instead of a set.
+// A W1 partition's Manifest.Parent always names the D1 partition filed
+// under the *same* (year, month) key, but its Revision (and the
+// Manifest's own RawFingerprint) is a composite over every D1 partition
+// that actually contributed a published bar: a week near a month
+// boundary can pull some of its D1 bars from the immediately following
+// month's file (Bars, #78, already handles that spillover
+// transparently when reading), and only the final published week in a
+// month can ever do so (see w1SpansNextMonth). combineParentLineage
+// folds one or two contributing manifests into single Revision/
+// RawFingerprint values; with exactly one contributor (the common,
+// non-boundary-spanning case) the composite is that manifest's own
+// values, unchanged. isStale (coverage.go) recomputes the identical
+// composite from a stored Manifest's own LastBar/Span, so the two never
+// disagree about which case applies to a given W1 partition.
 //
 // # Per-week completeness, not a whole-month gate
 //
@@ -61,52 +68,100 @@ func (m *Manager) deriveAndPublish(ctx context.Context, action Action) (PublishR
 		return PublishResult{}, fmt.Errorf("load parent D1 partition: %w", err)
 	}
 
-	// d1Cov analyzes the whole month up front — cheaply, since Coverage
-	// (unlike Bars) never requires full coverage of what it's asked
-	// about, only reports on it — so weekIsD1Ready can be checked for
-	// every week without a per-week Coverage call. Bars itself is
-	// different: it refuses a query it cannot fully satisfy, so it is
-	// called per *ready* week below, never once for the whole month —
-	// most months have some not-yet-ready weeks, and a single whole-
-	// month Bars call would fail on the first one of those rather than
-	// let the ready weeks publish.
-	d1Query := BarQuery{Instrument: action.Instrument, Interval: D1, Range: monthSpan}
+	// weekSpans collects every calendar week whose Start() falls in
+	// [monthStart, monthEnd) — every week this month's W1 partition
+	// could publish — before any coverage check or read happens, so
+	// coverageEnd (below) can already account for a final week's
+	// spillover past monthEnd into next month's D1 partition.
+	weekSpans, coverageEnd, err := weekSpansForMonth(m.calendar, monthStart, monthEnd)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
+	}
+
+	// d1Cov analyzes the full union of week spans up front — cheaply,
+	// since Coverage (unlike Bars) never requires full coverage of what
+	// it's asked about, only reports on it — so weekIsD1Ready can be
+	// checked for every week without a per-week Coverage call. Querying
+	// through coverageEnd rather than just monthEnd matters: the final
+	// week's span commonly extends past monthEnd into next month's D1
+	// partition, and weekIsD1Ready must be able to see a missing,
+	// stale, or invalid *next*-month partition too, not only this
+	// month's own — querying only [monthStart, monthEnd) would leave
+	// that adjacent partition's status completely invisible to it.
+	//
+	// Bars itself is different from Coverage: it refuses a query it
+	// cannot fully satisfy, so it is called per *ready* week below,
+	// never once for the whole span — most months have some not-yet-
+	// ready weeks, and a single call spanning all of them would fail on
+	// the first one rather than let the ready weeks publish.
+	coverageRange, err := NewTimeRange(monthStart, coverageEnd)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
+	}
+	d1Query := BarQuery{Instrument: action.Instrument, Interval: D1, Range: coverageRange}
 	d1Cov, err := m.coverage(ctx, d1Query, symbol, nil)
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("check D1 prerequisite: %w", err)
 	}
 
-	cursor, err := firstBoundaryAtOrAfter(m.calendar, monthStart, W1)
-	if err != nil {
-		return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
-	}
 	var bars []Bar
-	for cursor.Before(monthEnd) {
-		weekSpan, err := m.calendar.Bar(cursor, W1)
+	for _, weekSpan := range weekSpans {
+		if !weekIsD1Ready(d1Cov, weekSpan) {
+			continue
+		}
+		weekBars, err := m.readAllBars(ctx, BarQuery{Instrument: action.Instrument, Interval: D1, Range: weekSpan})
 		if err != nil {
-			return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
+			return PublishResult{}, fmt.Errorf("load D1 bars for week %s: %w", weekSpan.Start(), err)
 		}
-		if weekIsD1Ready(d1Cov, weekSpan) {
-			weekBars, err := m.readAllBars(ctx, BarQuery{Instrument: action.Instrument, Interval: D1, Range: weekSpan})
-			if err != nil {
-				return PublishResult{}, fmt.Errorf("load D1 bars for week %s: %w", weekSpan.Start(), err)
-			}
-			if len(weekBars) > 0 {
-				agg, err := aggregateBars(weekBars)
-				if err != nil {
-					return PublishResult{}, fmt.Errorf("marketdata: build: aggregate week %s: %w", weekSpan.Start(), err)
-				}
-				agg.Time = weekSpan.Start()
-				bars = append(bars, agg)
-			}
+		if len(weekBars) == 0 {
+			continue
 		}
-		cursor = weekSpan.End()
+		agg, err := aggregateBars(weekBars)
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("marketdata: build: aggregate week %s: %w", weekSpan.Start(), err)
+		}
+		agg.Time = weekSpan.Start()
+		bars = append(bars, agg)
 	}
 
 	bs := BarSet{Instrument: action.Instrument, Interval: W1, Span: monthSpan, Basis: BasisBid, Bars: bars}
 	if err := bs.Validate(); err != nil {
 		return PublishResult{}, fmt.Errorf("marketdata: build: assembled bar set: %w", err)
 	}
+
+	// contributingD1Manifests/combineParentLineage: a published bar's
+	// week can draw D1 input from this month's own partition alone, or
+	// from that partition plus the immediately following month's — see
+	// w1SpansNextMonth's own doc comment for why only the final
+	// published week can ever do so. Recording only the same-month
+	// parent (this issue's original, simpler design) means rebuilding
+	// an adjacent D1 partition that actually contributed would never
+	// mark this W1 partition stale; combining every real contributor's
+	// Revision/RawFingerprint into one composite closes that gap. See
+	// isStale (coverage.go) for the matching recomputation that keeps
+	// Coverage's own staleness check in agreement with what was
+	// recorded here.
+	var lastBarTime time.Time
+	if len(bars) > 0 {
+		lastBarTime = bars[len(bars)-1].Time
+	}
+	spansNext, err := w1SpansNextMonth(m.calendar, lastBarTime, monthEnd)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
+	}
+	contributing := []Manifest{parentManifest}
+	if spansNext {
+		nextKey := partitionKey{
+			provider: m.providerName, symbol: symbol, instrument: action.Instrument,
+			interval: D1, year: monthEnd.Year(), month: monthEnd.Month(),
+		}
+		nextManifest, _, err := m.loadPartition(ctx, nextKey)
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("load spillover D1 partition: %w", err)
+		}
+		contributing = append(contributing, nextManifest)
+	}
+	parentRevision, rawFingerprint := combineParentLineage(contributing)
 
 	manifest := Manifest{
 		Provider:      m.providerName,
@@ -115,13 +170,11 @@ func (m *Manager) deriveAndPublish(ctx context.Context, action Action) (PublishR
 		Span:          monthSpan,
 		Basis:         BasisBid,
 		SchemaVersion: canonicalSchemaVersion,
-		// RawFingerprint propagates the parent D1 manifest's own value
-		// verbatim: W1 has no raw source of its own, and this is what
-		// lets a caller trace a derived dataset all the way back to its
-		// ultimate raw source without walking Parent (and composes
-		// correctly if a future multi-hop chain ever existed, though
-		// ADR-012 stays single-hop for M2).
-		RawFingerprint:   parentManifest.RawFingerprint,
+		// RawFingerprint is the (possibly composite, see above) parent
+		// D1 fingerprint(s): W1 has no raw source of its own, and this
+		// is what lets a caller trace a derived dataset back to its
+		// ultimate raw source without walking Parent.
+		RawFingerprint:   rawFingerprint,
 		BuilderVersion:   builderVersion,
 		ValidatorVersion: validatorVersion,
 		ResamplerVersion: resamplerVersionCurrent,
@@ -131,7 +184,7 @@ func (m *Manager) deriveAndPublish(ctx context.Context, action Action) (PublishR
 		Parent: &ParentRef{
 			Instrument: action.Instrument,
 			Interval:   D1,
-			Revision:   parentManifest.Revision(),
+			Revision:   parentRevision,
 		},
 	}
 	if len(bars) > 0 {
@@ -150,6 +203,96 @@ func (m *Manager) deriveAndPublish(ctx context.Context, action Action) (PublishR
 	}
 
 	return PublishResult{Action: action, Manifest: manifest, BarCount: len(bars)}, nil
+}
+
+// weekSpansForMonth walks cal's W1 boundaries starting at the first one
+// at or after monthStart, collecting every week whose Start() falls in
+// [monthStart, monthEnd), in chronological order. It also returns
+// coverageEnd: monthEnd, or the final collected week's own End() when
+// that extends past monthEnd — the upper bound a caller needs to query
+// D1 coverage/readiness over the complete set of D1 data these weeks
+// could possibly draw from, including a final week's spillover into the
+// next month's D1 partition. Purely a function of cal and the two
+// bounds; it reads no store data and cannot itself detect whether any
+// of that D1 data actually exists yet.
+func weekSpansForMonth(cal Calendar, monthStart, monthEnd time.Time) ([]TimeRange, time.Time, error) {
+	cursor, err := firstBoundaryAtOrAfter(cal, monthStart, W1)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+
+	var spans []TimeRange
+	coverageEnd := monthEnd
+	for cursor.Before(monthEnd) {
+		weekSpan, err := cal.Bar(cursor, W1)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		spans = append(spans, weekSpan)
+		if weekSpan.End().After(coverageEnd) {
+			coverageEnd = weekSpan.End()
+		}
+		cursor = weekSpan.End()
+	}
+	return spans, coverageEnd, nil
+}
+
+// w1SpansNextMonth reports whether a W1 partition's final published bar
+// — lastBar, the zero value when the partition has no bars at all —
+// falls in a calendar week that extends past monthEnd. Because
+// weekSpansForMonth only ever walks forward from monthStart, and each
+// week starts exactly where the previous one ended, at most the last
+// week in a month's own sequence can extend past monthEnd; no earlier
+// week ever can. Checking only the final published bar's own week is
+// therefore both necessary and sufficient to know whether the next
+// month's D1 partition was actually a contributor — not merely a
+// structural possibility — which is exactly what both deriveAndPublish
+// (deciding what to combine while building) and isStale (deciding what
+// to recompute while checking an already-published Manifest) need, and
+// is why they share this one function rather than each encoding the
+// rule separately.
+func w1SpansNextMonth(cal Calendar, lastBar time.Time, monthEnd time.Time) (bool, error) {
+	if lastBar.IsZero() {
+		return false, nil
+	}
+	lastWeek, err := cal.Bar(lastBar, W1)
+	if err != nil {
+		return false, err
+	}
+	return lastWeek.End().After(monthEnd), nil
+}
+
+// combineParentLineage folds one or more contributing D1 manifests
+// (always in chronological order — see w1SpansNextMonth) into a single
+// ParentRef Revision and a single Manifest RawFingerprint.
+//
+// With exactly one contributor, the composite is simply that manifest's
+// own Revision()/RawFingerprint, unchanged — the common case, and
+// deliberately identical to what a single-parent design would have
+// recorded, so a non-boundary-spanning W1 partition's lineage values
+// are unaffected by this scheme existing. With more than one
+// contributor, both values become a deterministic sha256 over the
+// ordered list of contributors' own values, still qualified "sha256:"
+// per RawFingerprint's own documented "raw source artifact(s)"
+// (plural) contract — a composite fingerprint of multiple raw artifacts
+// is exactly what that contract already anticipates.
+func combineParentLineage(contributing []Manifest) (revision, rawFingerprint string) {
+	if len(contributing) == 1 {
+		return contributing[0].Revision(), contributing[0].RawFingerprint
+	}
+
+	var revBuf, fpBuf bytes.Buffer
+	for i, man := range contributing {
+		if i > 0 {
+			revBuf.WriteByte('|')
+			fpBuf.WriteByte('|')
+		}
+		revBuf.WriteString(man.Revision())
+		fpBuf.WriteString(man.RawFingerprint)
+	}
+	revSum := sha256.Sum256(revBuf.Bytes())
+	fpSum := sha256.Sum256(fpBuf.Bytes())
+	return "sha256:" + hex.EncodeToString(revSum[:]), "sha256:" + hex.EncodeToString(fpSum[:])
 }
 
 // weekIsD1Ready reports whether cov proves the D1 input for weekSpan is
@@ -220,7 +363,15 @@ func aggregateBars(bars []Bar) (Bar, error) {
 		if b.Ticks <= 0 {
 			continue
 		}
-		weight := num.MustParseRate(strconv.FormatInt(b.Ticks, 10))
+		// ParseRate, not MustParseRate: b.Ticks is a runtime value read
+		// from stored data, not a programmer-controlled constant or
+		// fixture (MustParseRate's own documented contract), and an
+		// implausibly large tick count must fail this build with an
+		// error rather than panic it.
+		weight, err := num.ParseRate(strconv.FormatInt(b.Ticks, 10))
+		if err != nil {
+			return Bar{}, fmt.Errorf("parse ticks as rate: %w", err)
+		}
 		contribution, err := b.AvgSpread.MulRate(weight)
 		if err != nil {
 			return Bar{}, fmt.Errorf("weight spread: %w", err)
@@ -238,7 +389,14 @@ func aggregateBars(bars []Bar) (Bar, error) {
 	agg.Ticks = totalTicks
 
 	if totalTicks > 0 {
-		inv, err := num.MustParseRate("1").DivRate(num.MustParseRate(strconv.FormatInt(totalTicks, 10)))
+		// MustParseRate("1") is a programmer-controlled constant — safe
+		// per its own documented contract — but totalTicks is not; see
+		// the identical ParseRate-not-MustParseRate reasoning above.
+		totalRate, err := num.ParseRate(strconv.FormatInt(totalTicks, 10))
+		if err != nil {
+			return Bar{}, fmt.Errorf("parse total ticks as rate: %w", err)
+		}
+		inv, err := num.MustParseRate("1").DivRate(totalRate)
 		if err != nil {
 			return Bar{}, fmt.Errorf("compute weight inverse: %w", err)
 		}

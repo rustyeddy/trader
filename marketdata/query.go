@@ -263,6 +263,13 @@ func (m *Manager) Bars(ctx context.Context, query BarQuery) (*BarReader, error) 
 // I/O behavior here beyond what Bars itself already does — kept
 // unexported since a streaming Reader remains the right public shape
 // for Bars itself.
+//
+// On any error other than the expected end-of-stream io.EOF (context
+// cancellation mid-drain, most notably), readAllBars returns nil rather
+// than whatever prefix of bars it had already accumulated: Bars' own
+// contract elsewhere is "no partial results on error," and a caller
+// silently receiving a truncated-but-non-nil slice here could easily
+// mistake it for a complete result.
 func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]Bar, error) {
 	reader, err := m.Bars(ctx, query)
 	if err != nil {
@@ -277,7 +284,7 @@ func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]Bar, error
 			if err == io.EOF {
 				break
 			}
-			return bars, err
+			return nil, err
 		}
 		bars = append(bars, b)
 	}

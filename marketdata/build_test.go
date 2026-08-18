@@ -3,6 +3,7 @@ package marketdata
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -215,6 +216,196 @@ func TestBuild_DeriveMissingParentErrors(t *testing.T) {
 	plan := Plan{Actions: []Action{{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January}}}
 	_, err := mgr.Build(context.Background(), plan)
 	assert.Error(t, err)
+}
+
+// TestBuild_DeriveWorksWithNoRawRoot is the regression for a design-
+// review finding: Build previously required RawRoot unconditionally,
+// even though ActionDeriveCanonical (W1 from canonical D1) never reads
+// raw data at all — contradicting deriveActionsW1's own documented
+// support for a Manager with no RawRoot configured. A W1-only Plan must
+// succeed with RawRoot unset.
+func TestBuild_DeriveWorksWithNoRawRoot(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	weekSpan, err := mgr.calendar.Bar(aWeekday(0), W1)
+	require.NoError(t, err)
+	d1Bars := fullWeekD1Bars(t, mgr, weekSpan)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, weekSpan, d1Bars, validRawFingerprint, nil)
+
+	plan := Plan{Actions: []Action{{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January}}}
+	result, err := mgr.Build(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, 1, result.Published[0].BarCount)
+}
+
+// TestBuild_PlanWithOnlySkippedActionsReportsThemWithoutRawRoot is the
+// same finding's second half: a Plan whose only entries are outside
+// Build's own scope (ActionDownloadRaw/ActionRepairRaw, Sync's
+// responsibility) must still report them in Skipped rather than failing
+// before they can even be reported, when RawRoot is unset.
+func TestBuild_PlanWithOnlySkippedActionsReportsThemWithoutRawRoot(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	plan := Plan{Actions: []Action{
+		{Kind: ActionDownloadRaw, Instrument: eurusd(), Interval: H1, Year: 2024, Month: time.January},
+	}}
+	result, err := mgr.Build(context.Background(), plan)
+	require.NoError(t, err)
+	assert.Empty(t, result.Published)
+	require.Len(t, result.Skipped, 1)
+}
+
+// deriveMonthSpan returns a full calendar-month TimeRange, the Span
+// convention every real deriveAndPublish/normalizeAndPublish Manifest
+// uses (and which w1SpansNextMonth's month-boundary arithmetic depends
+// on).
+func deriveMonthSpan(t *testing.T, year int, month time.Month) TimeRange {
+	t.Helper()
+	start := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	span, err := NewTimeRange(start, start.AddDate(0, 1, 0))
+	require.NoError(t, err)
+	return span
+}
+
+// lastWeekSpanOfMonth returns the W1-aligned week whose Start() is the
+// last one before monthEnd — the only week a month's own D1 partition
+// boundary can ever spill past, per w1SpansNextMonth's own reasoning.
+func lastWeekSpanOfMonth(t *testing.T, mgr *Manager, year int, month time.Month) TimeRange {
+	t.Helper()
+	monthStart := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	spans, _, err := weekSpansForMonth(mgr.calendar, monthStart, monthEnd)
+	require.NoError(t, err)
+	require.NotEmpty(t, spans)
+	return spans[len(spans)-1]
+}
+
+// splitBarsAtMonthBoundary partitions bars (a boundary week's full D1
+// set, which can span two calendar months) into the subset before
+// boundary and the subset at-or-after it, so each half can be published
+// under its own month's D1 partition key without a bar ever appearing
+// outside its own partition's declared Span.
+func splitBarsAtMonthBoundary(bars []Bar, boundary time.Time) (before, atOrAfter []Bar) {
+	for _, b := range bars {
+		if b.Time.Before(boundary) {
+			before = append(before, b)
+		} else {
+			atOrAfter = append(atOrAfter, b)
+		}
+	}
+	return before, atOrAfter
+}
+
+// TestBuild_DeriveSkipsBoundaryWeekWhenNextMonthD1Missing is the
+// regression for a design-review finding: the original coverage check
+// only queried [monthStart, monthEnd), so it could not see that the
+// final week's D1 input spills into a *missing* next-month partition —
+// weekIsD1Ready would incorrectly declare that week ready, and
+// readAllBars would then fail the whole build trying to read D1 data
+// that Coverage never reported as absent. Querying through the full
+// week-span union (this issue's fix) must make that week correctly
+// unready — skipped, not a build failure.
+func TestBuild_DeriveSkipsBoundaryWeekWhenNextMonthD1Missing(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	febStart := time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)
+	boundaryWeek := lastWeekSpanOfMonth(t, mgr, 2024, time.January)
+	require.True(t, boundaryWeek.End().After(febStart),
+		"fixture assumption: January 2024's final W1 week spills into February")
+
+	janBars, _ := splitBarsAtMonthBoundary(fullWeekD1Bars(t, mgr, boundaryWeek), febStart)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, deriveMonthSpan(t, 2024, time.January), janBars, validRawFingerprint, nil)
+	// Deliberately no February D1 partition published.
+
+	plan := Plan{Actions: []Action{{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January}}}
+	result, err := mgr.Build(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, 0, result.Published[0].BarCount, "the boundary week must be skipped, not aborted, when its spillover D1 partition is missing")
+}
+
+// TestBuild_DeriveSkipsBoundaryWeekWhenNextMonthD1Invalid mirrors the
+// missing-partition case above for a next-month D1 partition that
+// exists but is unreadable/corrupted (PartitionCoverageInvalid, not
+// PartitionCoverageMissing): the union-range coverage query must see
+// that status too, not just outright absence. (deriveAndPublish's own
+// D1 coverage query deliberately passes a nil raw inventory lookup —
+// the same "cannot verify staleness" precedent already established
+// elsewhere in this package — so PartitionCoverageStale specifically is
+// never reachable through this particular query; Invalid is the
+// non-Current, non-Missing status this query path can actually produce.)
+func TestBuild_DeriveSkipsBoundaryWeekWhenNextMonthD1Invalid(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	febStart := time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)
+	boundaryWeek := lastWeekSpanOfMonth(t, mgr, 2024, time.January)
+	require.True(t, boundaryWeek.End().After(febStart))
+
+	janBars, febBars := splitBarsAtMonthBoundary(fullWeekD1Bars(t, mgr, boundaryWeek), febStart)
+	require.NotEmpty(t, febBars, "fixture assumption: the boundary week has at least one February day")
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, deriveMonthSpan(t, 2024, time.January), janBars, validRawFingerprint, nil)
+	publishCanonicalMonth(t, mgr, D1, 2024, time.February, deriveMonthSpan(t, 2024, time.February), febBars, validRawFingerprint, nil)
+
+	// Corrupt the published February D1 partition file directly, the
+	// same technique TestCoverage_InvalidPartition uses.
+	febKey := partitionKey{provider: "oanda", symbol: "EURUSD", instrument: eurusd(), interval: D1, year: 2024, month: time.February}
+	path, err := febKey.path(mgr.storeRoot)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("not a canonical partition\n"), 0o644))
+
+	plan := Plan{Actions: []Action{{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January}}}
+	result, err := mgr.Build(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, 0, result.Published[0].BarCount, "the boundary week must be skipped when its spillover D1 partition is invalid")
+}
+
+// TestBuild_DeriveCombinesParentLineageAcrossMonthBoundary is the
+// regression for a design-review finding: recording only the same-month
+// D1 manifest as Parent means rebuilding a genuinely-contributing
+// next-month D1 partition would never mark the resulting W1 partition
+// stale. With both months' D1 data present and current, the boundary
+// week must publish, and its RawFingerprint/Parent.Revision must be a
+// composite that changes if *either* contributing D1 partition changes
+// — verified here by rebuilding only the February partition and
+// confirming Coverage now reports the January W1 partition Stale.
+func TestBuild_DeriveCombinesParentLineageAcrossMonthBoundary(t *testing.T) {
+	mgr := newTestManagerWithRaw(t, "")
+	febStart := time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)
+	boundaryWeek := lastWeekSpanOfMonth(t, mgr, 2024, time.January)
+	require.True(t, boundaryWeek.End().After(febStart))
+
+	janBars, febBars := splitBarsAtMonthBoundary(fullWeekD1Bars(t, mgr, boundaryWeek), febStart)
+	require.NotEmpty(t, febBars, "fixture assumption: the boundary week has at least one February day")
+	publishCanonicalMonth(t, mgr, D1, 2024, time.January, deriveMonthSpan(t, 2024, time.January), janBars, validRawFingerprint, nil)
+	febManifest := publishCanonicalMonth(t, mgr, D1, 2024, time.February, deriveMonthSpan(t, 2024, time.February), febBars, validRawFingerprint, nil)
+
+	plan := Plan{Actions: []Action{{Kind: ActionDeriveCanonical, Instrument: eurusd(), Interval: W1, Year: 2024, Month: time.January}}}
+	result, err := mgr.Build(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Published, 1)
+	require.Equal(t, 1, result.Published[0].BarCount, "the boundary week must publish when both contributing D1 partitions are current")
+
+	w1 := result.Published[0].Manifest
+	require.NotNil(t, w1.Parent)
+	assert.NotEqual(t, febManifest.Revision(), w1.Parent.Revision, "a two-contributor composite must not collapse to either single contributor's own revision")
+
+	cov, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: deriveMonthSpan(t, 2024, time.January)})
+	require.NoError(t, err)
+	require.Len(t, cov.Partitions, 1)
+	assert.Equal(t, PartitionCoverageCurrent, cov.Partitions[0].Status, "composite parent revision must match: not stale immediately after build")
+
+	// Rebuild only February's D1 partition with different content: one
+	// extra open day right after the boundary week's own February span.
+	febKey := partitionKey{provider: "oanda", symbol: "EURUSD", instrument: eurusd(), interval: D1, year: 2024, month: time.February}
+	mgr.cache.invalidate(febKey)
+	extraDay, err := mgr.calendar.Bar(boundaryWeek.End(), D1)
+	require.NoError(t, err)
+	febBars2 := append(append([]Bar{}, febBars...), barAt(t, extraDay.Start()))
+	publishCanonicalMonth(t, mgr, D1, 2024, time.February, deriveMonthSpan(t, 2024, time.February), febBars2, validRawFingerprint, nil)
+
+	cov2, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: W1, Range: deriveMonthSpan(t, 2024, time.January)})
+	require.NoError(t, err)
+	require.Len(t, cov2.Partitions, 1)
+	assert.Equal(t, PartitionCoverageStale, cov2.Partitions[0].Status,
+		"rebuilding the contributing NEXT-month D1 partition must mark the W1 partition stale, not just the same-month one")
 }
 
 func TestBuild_SkipsNonCanonicalActions(t *testing.T) {

@@ -208,12 +208,76 @@ func ReadPartitionRecords(ctx context.Context, root, symbol string, interval Raw
 // walking an entire archive, for a caller (marketdata's canonical build,
 // issue #81) that already knows exactly which partition it needs and
 // should not have to re-walk the whole raw tree to get one file's hash.
+//
+// Calling FingerprintPartition and ReadPartitionRecords separately opens
+// the file twice, which admits a window in which Sync (#80) atomically
+// replaces the file — via its own Link/Rename commit — in between the
+// two reads: the records parsed would then belong to one revision while
+// the recorded fingerprint names another. A caller that needs both a
+// partition's records and its fingerprint describing the exact same
+// bytes must use ReadPartitionSnapshot instead, not this function
+// followed by ReadPartitionRecords (or the reverse order).
 func FingerprintPartition(root, symbol string, interval RawInterval, year int, month time.Month) (string, error) {
 	path := partitionPath(root, symbol, interval, year, month)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
+	return fingerprintBytes(data), nil
+}
+
+// fingerprintBytes is FingerprintPartition/ReadPartitionSnapshot's
+// shared "sha256:<hex>" encoding of already-read file content.
+func fingerprintBytes(data []byte) string {
 	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// PartitionSnapshot pairs the records parsed from a raw partition with
+// the content fingerprint of the exact bytes they were parsed from.
+type PartitionSnapshot struct {
+	Records     []Record
+	Fingerprint string
+}
+
+// ReadPartitionSnapshot reads the raw partition file for (symbol,
+// interval, year, month) under root exactly once — a single
+// os.ReadFile — then both fingerprints and parses that same in-memory
+// byte slice, so Records and Fingerprint necessarily describe one
+// identical revision of the file. This is the atomic-snapshot
+// counterpart to calling FingerprintPartition and ReadPartitionRecords
+// separately (see FingerprintPartition's own doc comment for the race
+// that would otherwise admit): a caller — marketdata's canonical
+// normalization build, issue #81 — that needs a raw fingerprint to
+// record alongside the canonical bars built from that exact data must
+// use this function, not the two-open pattern.
+func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month) (PartitionSnapshot, error) {
+	path := partitionPath(root, symbol, interval, year, month)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PartitionSnapshot{}, err
+	}
+	fingerprint := fingerprintBytes(data)
+
+	r, err := newReaderFromBytes(path, data)
+	if err != nil {
+		return PartitionSnapshot{}, err
+	}
+	defer r.Close()
+
+	var records []Record
+	for {
+		if err := ctx.Err(); err != nil {
+			return PartitionSnapshot{}, err
+		}
+		rec, err := r.Next(ctx)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return PartitionSnapshot{}, err
+		}
+		records = append(records, rec)
+	}
+	return PartitionSnapshot{Records: records, Fingerprint: fingerprint}, nil
 }

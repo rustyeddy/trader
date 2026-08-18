@@ -1546,6 +1546,62 @@ own 1e5 scale (0.00001), matching the byte-for-byte-parity-is-not-the-
 goal rationale already recorded in its own doc comment (legacy routed
 every value through =float64=).
 
+**** Post-review correctness fixes
+
+PR review (Copilot and a human reviewer) found six issues in the
+initial implementation above, all fixed before merge:
+
+- =aggregateBars= used =num.MustParseRate= on tick counts read from
+  stored data, not programmer-controlled constants — an implausibly
+  large tick count would have panicked =Build= instead of failing it
+  with an error. Switched to =num.ParseRate= with the error propagated.
+- =readAllBars= (=query.go=) returned whatever prefix of bars it had
+  already accumulated on a non-=io.EOF= error (context cancellation
+  mid-drain, most notably), contradicting =Bars='s own "no partial
+  results on error" contract. It now returns =nil= on any such error.
+- =Manager.Build= required =RawRoot= unconditionally, even though only
+  =normalizeAndPublish= (=ActionNormalizeCanonical=) actually reads raw
+  data — =deriveAndPublish= (W1 from canonical D1) never does, matching
+  =deriveActionsW1='s own documented "works with no =RawRoot=" support.
+  The check moved from =Build= into =normalizeAndPublish= itself, so a
+  W1-only =Plan=, or a =Plan= whose only raw-dependent entries are
+  =ActionDownloadRaw=/=ActionRepairRaw= (both reported in =Skipped=,
+  never executed by =Build=), no longer fails before those entries can
+  even be reported.
+- =normalizeAndPublish= called =oanda.ReadPartitionRecords= and
+  =oanda.FingerprintPartition= as two separate file opens, admitting a
+  window in which =Sync= atomically replaces the raw partition in
+  between — pairing one revision's parsed records with a different
+  revision's recorded fingerprint. =oanda= gained
+  =ReadPartitionSnapshot=, a single =os.ReadFile= that both fingerprints
+  and parses the identical in-memory bytes;
+  =TestReadPartitionSnapshot_ConsistentUnderConcurrentReplace= races a
+  writer against it under =-race= and asserts every observed snapshot's
+  record count and fingerprint always describe the same file revision.
+- The D1 coverage check inside =deriveAndPublish= originally queried
+  only =[monthStart, monthEnd)=, so it could not see a missing, invalid,
+  or stale *next*-month D1 partition that a final boundary week's data
+  actually spills into (only the final week in a month can ever do so —
+  see =w1SpansNextMonth='s own doc comment for why). A missing spillover
+  partition was wrongly declared "ready," and =readAllBars= then failed
+  the whole build trying to read data =Coverage= never reported absent.
+  Fixed by having the new =weekSpansForMonth= compute the full union of
+  week spans up front, so the coverage query's range already covers any
+  spillover before =weekIsD1Ready= is ever asked about it.
+- =Manifest.Parent= recorded only the same-month D1 manifest's own
+  =Revision=/=RawFingerprint=, even when a boundary week's bars actually
+  came from two D1 partitions (this month's and the next's) — so
+  rebuilding the *next*-month partition would never mark the resulting
+  W1 partition stale. =combineParentLineage= now folds every actually-
+  contributing D1 manifest (still exactly one in the common,
+  non-boundary-spanning case, where its output is byte-identical to the
+  single-parent design) into one composite =sha256:= value for both
+  fields. =coverage.go='s =isStale= recomputes the identical composite
+  from a stored =Manifest='s own =LastBar=/=Span= via the same
+  =w1SpansNextMonth= rule =deriveAndPublish= used to decide what to
+  record, so the two can never disagree about which case applies to a
+  given W1 partition.
+
 ** TODO Typos, for whenever this folds into adr-decisions.org
 "Conanical" (x3), "principals" -> "principles", "Furture", "datys",
 "earler", "Everthing".  OANDA is usually all-caps.
