@@ -1112,6 +1112,89 @@ authorized operation this issue does not build. A =cmd/= composition
 root that actually resolves =OANDA_TOKEN=/practice-vs-live — none
 exists yet in this repository.
 
+**** Four PR-review fixes
+A design review on the PR found four further problems, all real:
+
+- *=fixedIntervalLimiter= raced under concurrent use.* =last= was read
+  and written with no synchronization, and neither =Client= nor
+  =Manager.Sync= documented a single-goroutine restriction — a =Client=
+  is shared state, and concurrent =FetchCandles= calls against it are a
+  real, intended use, not a misuse. Fixed with a =sync.Mutex= guarding
+  both the read/write of =last= and the wait itself, so two concurrent
+  callers are paced *against each other*, not just against whichever one
+  last happened to update the timestamp.
+  =TestFixedIntervalLimiter_ConcurrentWaitIsRaceFree= is the =-race=
+  regression.
+- *=mustNotExist= was not actually atomic.* The original implementation
+  checked =os.Stat= first, then wrote a temp file, then called
+  =os.Rename= — but on Unix, =Rename= silently replaces an existing
+  destination regardless of what an earlier =Stat= saw, leaving a real
+  window in which a file created by a concurrent writer would be
+  silently overwritten: precisely the "accidental replacement" this
+  parameter exists to prevent. Fixed by replacing the Stat-then-Rename
+  sequence with =os.Link= for the =mustNotExist= case specifically:
+  =link(2)= atomically fails with =EEXIST= if the destination already
+  exists, with no separate check-then-act window at all. The extend
+  case (=mustNotExist= false) still uses =Rename=, the correct primitive
+  there, since replacing an existing file is exactly what an authorized
+  extend means to do.
+  =TestWritePartition_ConcurrentMustNotExistIsRaceFree= spawns eight
+  concurrent writers at the same path and asserts exactly one succeeds.
+- *=syncOne= assumed a pre-existing raw file was already Time-ordered.*
+  =ReadPartitionRecords= returns rows in file order, and nothing on the
+  read path validates that order — a hand-edited or otherwise
+  irregular file could still parse cleanly while being out of order, in
+  which case trusting the last *row* as the extend point could
+  duplicate or skip candles. Fixed by sorting the read-back records by
+  Time before computing the extend point, not only ever sorting on
+  write. =TestSync_ExtendUsesActualLastRecordEvenIfFileOutOfOrder=
+  writes a fixture with rows deliberately out of position and confirms
+  the correct (chronologically last) record is used.
+- *An incomplete tail candle was frozen forever.* The original extend
+  logic always resumed from =last.Time + 1ns=, regardless of whether
+  =last= was itself still provider-incomplete. Since =Client= preserves
+  incomplete candles (by design — #76-style provider-declared metadata
+  is not discarded), a newly-created current-month file could hit this
+  immediately, and its provisional OHLC/volume would never be
+  refreshed even after OANDA finalized the real values. Fixed three
+  ways together: =oanda.Partition= gains a new =LastComplete= field
+  (set from whichever record's =Time= is the partition's =LastTime=
+  specifically, not just any record — =TestInspect_
+  LastCompleteReflectsTheLatestRecordSpecifically= covers the
+  distinction); =needsExtend= now also schedules an extend when
+  =!p.LastComplete=, independent of what the calendar reports
+  (=TestPlan_ExtendsWhenLastRawRecordIsIncomplete=); and =syncOne=
+  resumes from the incomplete record's own =Time= (not past it) and
+  merges the refetch back in by =Time= (new =mergeRecordsByTime=, keyed
+  by UTC =UnixNano= the same way #79's coverage-gap work already
+  established as the correct way to compare a stored and a freshly-
+  computed =time.Time= as a map key), so the refreshed, now-complete
+  record replaces the stale provisional one instead of duplicating it.
+  =TestSync_RefetchesIncompleteTailRecordInstead= is the end-to-end
+  regression.
+
+**** A fifth finding: an unexecutable =Action= the system's own =Plan= could produce
+A design review also found that =Manager.Plan= could produce an
+=ActionDownloadRaw= (reason "needs re-acquisition") for a month whose
+raw file exists but is malformed — yet =Manager.Sync= could never
+actually execute that specific =Action=: it always treats an existing,
+unreadable file as a fatal error, since nothing can safely extend or
+merge with content that cannot be trusted. The system could not fully
+converge by executing its own plan.
+
+Fixed by introducing =ActionRepairRaw= as a distinct =ActionKind=, not
+=ActionDownloadRaw= with a different =Reason= string — Reason is
+diagnostic, never a dispatch key, the same principle =Sync= already
+applies to distinguishing missing from extend.
+=deriveActionsRawBuilt= now produces =ActionRepairRaw= for the
+malformed-existing-file case; =Sync='s existing "not
+=ActionDownloadRaw=" branch already routes it into
+=SyncResult.Skipped= without any further change, since repairing a
+corrupted raw artifact remains the distinct, explicitly-authorized
+operation this issue's own scope reserves for later.
+=TestSync_AlwaysSkipsRepairRaw= confirms it is reported, not attempted
+and failed.
+
 * DONE All derived data will be persisted
 All data that is downloaded or derived will be persisted
 

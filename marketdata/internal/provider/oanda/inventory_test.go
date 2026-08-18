@@ -115,8 +115,26 @@ func TestInspect_OKPartitionSummary(t *testing.T) {
 	assert.Equal(t, time.Date(2020, 5, 1, 1, 0, 0, 0, time.UTC), p.DuplicateTimes[0])
 	assert.Equal(t, time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC), p.FirstTime)
 	assert.Equal(t, time.Date(2020, 5, 1, 1, 0, 0, 0, time.UTC), p.LastTime)
+	// The first row at LastTime (false-complete) is what sets
+	// LastComplete; the later duplicate-time row does not retrigger it,
+	// since its Time is not strictly after the current LastTime.
+	assert.False(t, p.LastComplete)
 	assert.NotEmpty(t, p.Fingerprint)
 	assert.Regexp(t, "^sha256:[0-9a-f]{64}$", p.Fingerprint)
+}
+
+func TestInspect_LastCompleteReflectsTheLatestRecordSpecifically(t *testing.T) {
+	root := t.TempDir()
+	dir := root + "/EURUSD/2020/06"
+	writeFile(t, dir, "EURUSD-2020-06-h1.csv",
+		fmtHeader("EURUSD", 2020, 6)+
+			h1Row(time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC), false)+ // earlier, incomplete
+			h1Row(time.Date(2020, 6, 1, 1, 0, 0, 0, time.UTC), true)) // latest, complete
+
+	inv, err := Inspect(context.Background(), root)
+	require.NoError(t, err)
+	p := findPartition(t, inv, "EURUSD", RawH1, 2020, time.June)
+	assert.True(t, p.LastComplete, "the latest record is complete even though an earlier one was not")
 }
 
 func TestInspect_FingerprintDeterministicAndContentSensitive(t *testing.T) {

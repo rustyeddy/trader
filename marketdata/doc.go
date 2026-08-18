@@ -279,12 +279,19 @@
 // Reason text (diagnostic, not a dispatch key): no file means a brand-
 // new, atomically-written partition (oanda.WritePartition's
 // mustNotExist, which errors rather than silently overwriting anything
-// that unexpectedly appeared); an existing, readable file means only the
-// range since its last record (through now or the calendar month's end,
-// whichever is earlier) is fetched and merged in — never a bulk
-// redownload of already-preserved history. An existing but
-// unreadable/malformed file fails the Action loudly rather than being
-// silently extended or replaced; repairing it is a distinct, explicitly-
+// that unexpectedly appeared — see WritePartition's own doc comment for
+// why this is Link-based, not a Stat-then-Rename with a real race
+// window); an existing, readable file means only the range since its
+// last record is fetched and merged in by timestamp — through now or
+// the calendar month's end, whichever is earlier, never a bulk
+// redownload of already-preserved history, and re-fetched from that
+// record's own Time rather than skipped past when it is itself still
+// provider-incomplete, so a refreshed, finalized candle replaces a
+// stale provisional one instead of being lost. A malformed existing raw
+// file is not something Sync ever attempts to extend or repair: Plan
+// reports that case as the distinct ActionRepairRaw (not
+// ActionDownloadRaw), which Sync always reports in SkippedAction —
+// repairing a corrupted raw artifact remains a separate, explicitly-
 // authorized operation this issue does not build.
 //
 // Config gains OANDACredential (an oanda.CredentialProvider, never a

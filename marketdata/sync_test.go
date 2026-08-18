@@ -152,6 +152,75 @@ func TestSync_ExtendsExistingRawPartition(t *testing.T) {
 	require.Len(t, records, 2)
 }
 
+// TestSync_ExtendUsesActualLastRecordEvenIfFileOutOfOrder is the
+// regression for a design review finding: syncOne must not trust file
+// order to find "the last record" — a pre-existing partition file
+// (hand-edited, or written by something other than WritePartition,
+// which always sorts) could have rows out of Time order while still
+// parsing cleanly. Written directly, bypassing WritePartition's own
+// sort, to simulate exactly that.
+func TestSync_ExtendUsesActualLastRecordEvenIfFileOutOfOrder(t *testing.T) {
+	rawRoot := t.TempDir()
+	late := time.Date(2020, 3, 2, 3, 0, 0, 0, time.UTC)
+	early := time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC)
+	// late's row is written before early's: out of Time order on disk.
+	writeRawPartition(t, rawRoot, "EURUSD", H1, 2020, time.March,
+		rawRow(late, true), rawRow(early, true))
+
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{time.Date(2020, 3, 2, 4, 0, 0, 0, time.UTC)}, true)},
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: eurusd(), Interval: H1,
+		Year: 2020, Month: time.March, Reason: "extend",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 3, result.Downloaded[0].RecordsWritten)
+
+	// The fetch must start after `late` (the true last record by Time),
+	// not after `early` (the file's last row by position).
+	gotFrom := doer.requests[0].URL.Query().Get("from")
+	wantFrom := late.Add(time.Nanosecond).Format(time.RFC3339Nano)
+	assert.Equal(t, wantFrom, gotFrom)
+}
+
+// TestSync_RefetchesIncompleteTailRecordInstead is the regression for a
+// design review finding: if the existing partition's last record is
+// still provider-incomplete, extending must re-fetch from that record's
+// own Time (not skip past it with +1ns) and the refreshed record must
+// replace the stale provisional one — never duplicate it.
+func TestSync_RefetchesIncompleteTailRecordInstead(t *testing.T) {
+	rawRoot := t.TempDir()
+	tailTime := time.Date(2020, 3, 2, 0, 0, 0, 0, time.UTC)
+	writeRawPartition(t, rawRoot, "EURUSD", H1, 2020, time.March, rawRow(tailTime, false))
+
+	doer := &fakeOandaDoer{responses: []fakeOandaResponse{
+		{status: 200, body: candlesJSONForTest([]time.Time{tailTime}, true)}, // now finalized
+	}}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: eurusd(), Interval: H1,
+		Year: 2020, Month: time.March, Reason: "extend",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	require.Len(t, result.Downloaded, 1)
+	assert.Equal(t, 1, result.Downloaded[0].RecordsWritten, "the refreshed record must replace, not duplicate, the stale one")
+
+	gotFrom := doer.requests[0].URL.Query().Get("from")
+	assert.Equal(t, tailTime.Format(time.RFC3339Nano), gotFrom, "must refetch from the incomplete record's own Time, not past it")
+
+	records, err := oanda.ReadPartitionRecords(context.Background(), rawRoot, "EURUSD", oanda.RawH1, 2020, time.March)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.True(t, records[0].Complete, "the partition must now hold the finalized record")
+}
+
 func TestSync_SkipsNonDownloadActions(t *testing.T) {
 	rawRoot := t.TempDir()
 	doer := &fakeOandaDoer{}
@@ -166,6 +235,33 @@ func TestSync_SkipsNonDownloadActions(t *testing.T) {
 	assert.Empty(t, result.Downloaded)
 	require.Len(t, result.Skipped, 2)
 	assert.Equal(t, 0, doer.requestCount(), "non-download actions must never trigger a request")
+}
+
+// TestSync_AlwaysSkipsRepairRaw is the regression for a design review
+// finding: Manager.Plan can legitimately produce an ActionDownloadRaw
+// for a month whose raw file exists but is malformed (reason "needs
+// re-acquisition") — but Sync could never actually execute that
+// specific Action, since it always treats an existing, unreadable file
+// as a fatal error rather than something to re-fetch or overwrite. That
+// action kind is now ActionRepairRaw, a distinct Kind Sync always
+// reports in Skipped rather than attempting and failing — the system
+// can now fully account for its own Plan instead of getting stuck on an
+// action it produces but can never itself execute.
+func TestSync_AlwaysSkipsRepairRaw(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeOandaDoer{}
+	mgr := newTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionRepairRaw, Instrument: eurusd(), Interval: H1,
+		Year: 2020, Month: time.March, Reason: "raw partition malformed",
+	}}}
+	result, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+	assert.Empty(t, result.Downloaded)
+	require.Len(t, result.Skipped, 1)
+	assert.Equal(t, ActionRepairRaw, result.Skipped[0].Action.Kind)
+	assert.Equal(t, 0, doer.requestCount())
 }
 
 func TestSync_RequiresOANDAClientConfigured(t *testing.T) {

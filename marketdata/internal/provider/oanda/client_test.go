@@ -354,6 +354,24 @@ func TestFixedIntervalLimiter_ZeroIntervalNeverWaits(t *testing.T) {
 	require.NoError(t, l.Wait(context.Background()))
 }
 
+// TestFixedIntervalLimiter_ConcurrentWaitIsRaceFree is the regression
+// for a design review finding: last was read and written without
+// synchronization, racing under -race when a Client is shared across
+// goroutines (which it is documented to support). This does not assert
+// on pacing precision — a real clock and many goroutines make exact
+// timing assertions flaky — only that concurrent access is race-free
+// and every call still returns.
+func TestFixedIntervalLimiter_ConcurrentWaitIsRaceFree(t *testing.T) {
+	l := &fixedIntervalLimiter{clock: clock.Real{}, interval: time.Millisecond}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			assert.NoError(t, l.Wait(context.Background()))
+		})
+	}
+	wg.Wait()
+}
+
 func TestNewClient_RequiresBaseURLAndCredential(t *testing.T) {
 	_, err := NewClient(ClientConfig{Credential: StaticCredential("x")})
 	assert.Error(t, err)

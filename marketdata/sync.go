@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
@@ -149,8 +150,30 @@ func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, e
 	case err != nil:
 		return DownloadResult{}, fmt.Errorf("read existing raw partition: %w", err)
 	default:
+		// A design review's finding: this must not simply trust file
+		// order for "last." ReadPartitionRecords returns records in
+		// file order, and nothing on the read path validates that a
+		// pre-existing file is actually Time-ordered (a hand-edited or
+		// otherwise irregular file could still parse cleanly); sorting
+		// here, not just on write, is what keeps "the record with the
+		// greatest Time" honest regardless of how the file on disk got
+		// that way.
+		sort.Slice(existing, func(i, j int) bool { return existing[i].Time.Before(existing[j].Time) })
 		if n := len(existing); n > 0 {
-			from = existing[n-1].Time.Add(time.Nanosecond)
+			last := existing[n-1]
+			if last.Complete {
+				from = last.Time.Add(time.Nanosecond)
+			} else {
+				// A second design-review finding: an incomplete tail
+				// candle must be re-fetched from its own Time, not
+				// skipped past with +1ns — OANDA may still finalize its
+				// OHLC/volume, and advancing past it would freeze the
+				// provisional values in place permanently. The refetch
+				// below is merged back in by Time, so the refreshed
+				// record replaces the stale provisional one rather than
+				// duplicating it.
+				from = last.Time
+			}
 		}
 	}
 
@@ -163,7 +186,7 @@ func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, e
 			return DownloadResult{}, fmt.Errorf("fetch candles: %w", err)
 		}
 		if len(fetched) > 0 || mustNotExist {
-			merged = append(merged, fetched...)
+			merged = mergeRecordsByTime(existing, fetched)
 			if err := oanda.WritePartition(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month, merged, mustNotExist); err != nil {
 				return DownloadResult{}, fmt.Errorf("write partition: %w", err)
 			}
@@ -171,6 +194,27 @@ func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, e
 	}
 
 	return DownloadResult{Action: action, RecordsWritten: len(merged)}, nil
+}
+
+// mergeRecordsByTime combines existing and fetched into one set with at
+// most one Record per distinct Time: fetched always wins a collision.
+// This is what lets a re-fetched, now-finalized candle replace a stale
+// provisional one from an earlier sync rather than appearing twice —
+// see syncOne's incomplete-tail handling above. The result is unsorted;
+// WritePartition sorts before writing.
+func mergeRecordsByTime(existing, fetched []oanda.Record) []oanda.Record {
+	byTime := make(map[int64]oanda.Record, len(existing)+len(fetched))
+	for _, r := range existing {
+		byTime[r.Time.UTC().UnixNano()] = r
+	}
+	for _, r := range fetched {
+		byTime[r.Time.UTC().UnixNano()] = r
+	}
+	out := make([]oanda.Record, 0, len(byTime))
+	for _, r := range byTime {
+		out = append(out, r)
+	}
+	return out
 }
 
 // resolveRawSymbol resolves id to this Manager's provider-native display

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,28 +49,33 @@ func partitionPath(root, symbol string, interval RawInterval, year int, month ti
 // records itself; WritePartition never reads an existing file or merges
 // anything on its own.
 //
-// The write is atomic regardless: a temporary file alongside the
-// destination, written, flushed, and synced, then renamed into place —
-// the same discipline canonicalCSVStore.publish
-// (marketdata/store_csv.go, #77) uses for canonical data, applied here
-// to raw data. A failure or a context cancellation observed before the
-// rename leaves any existing file at path completely untouched; ctx is
+// mustNotExist's guarantee is enforced atomically, not by checking
+// os.Stat before writing: an initial existence check followed later by
+// os.Rename leaves a window in between — on Unix, Rename silently
+// replaces an existing destination regardless of what a prior Stat saw,
+// so a file created in that window would be silently overwritten
+// exactly the way this parameter promises not to. Instead, the new-file
+// case links (os.Link) the fully-written temporary file to path:
+// link(2) atomically fails with EEXIST if path already exists, with no
+// separate check-then-act window at all, and this package's own
+// TestWritePartition_ConcurrentMustNotExistIsRaceFree proves exactly
+// one of two concurrent callers targeting the same path can ever
+// succeed. The extend case (mustNotExist false) still uses Rename,
+// which is the correct, cheaper primitive there: replacing an existing
+// file is exactly what an authorized extend means to do.
+//
+// The write is atomic regardless of which commit primitive is used: a
+// temporary file alongside the destination, written, flushed, and
+// synced first. A failure or a context cancellation observed before the
+// commit leaves any existing file at path completely untouched; ctx is
 // checked before writing begins, once per record while encoding (a
 // large M1 partition can run to tens of thousands of rows), and once
-// more immediately before the rename — the actual commit point.
+// more immediately before the commit step — the actual commit point.
 func WritePartition(ctx context.Context, root, symbol string, interval RawInterval, year int, month time.Month, records []Record, mustNotExist bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	path := partitionPath(root, symbol, interval, year, month)
-
-	if mustNotExist {
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("%w: %s", ErrPartitionAlreadyExists, path)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("oanda: write partition: %w", err)
-		}
-	}
 
 	sorted := append([]Record(nil), records...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
@@ -112,6 +118,25 @@ func WritePartition(ctx context.Context, root, symbol string, interval RawInterv
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	if mustNotExist {
+		// Atomic create-if-not-exists: see the doc comment above for why
+		// this is Link, not a Stat check followed by Rename.
+		if err := os.Link(tmpPath, path); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return fmt.Errorf("%w: %s", ErrPartitionAlreadyExists, path)
+			}
+			return fmt.Errorf("oanda: write partition: %w", err)
+		}
+		succeeded = true
+		// The temporary name is now a second link to the same file
+		// Link just created at path; remove it so only path remains.
+		// Best-effort: the durable copy is already safely at path
+		// regardless of whether this cleanup succeeds.
+		_ = os.Remove(tmpPath)
+		return nil
+	}
+
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("oanda: write partition: %w", err)
 	}

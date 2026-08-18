@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,6 +55,49 @@ func TestWritePartition_MustNotExistRejectsExisting(t *testing.T) {
 
 	err := WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true)
 	assert.ErrorIs(t, err, ErrPartitionAlreadyExists)
+}
+
+// TestWritePartition_ConcurrentMustNotExistIsRaceFree is the regression
+// for a design review finding: an initial os.Stat check followed later
+// by os.Rename leaves a window in which a file created by a concurrent
+// writer would be silently replaced, defeating mustNotExist's whole
+// purpose. With the Link-based commit, exactly one of N concurrent
+// callers targeting the same path must succeed and every other must
+// fail with ErrPartitionAlreadyExists — never a corrupted or
+// unexpectedly-replaced file.
+func TestWritePartition_ConcurrentMustNotExistIsRaceFree(t *testing.T) {
+	root := t.TempDir()
+	const n = 8
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			records := []Record{testRecord(time.Date(2024, 1, 1, i, 0, 0, 0, time.UTC), true)}
+			errs[i] = WritePartition(context.Background(), root, "EURUSD", RawH1, 2024, time.January, records, true)
+		}(i)
+	}
+	wg.Wait()
+
+	successes, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrPartitionAlreadyExists):
+			conflicts++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	assert.Equal(t, 1, successes, "exactly one concurrent writer must win")
+	assert.Equal(t, n-1, conflicts, "every other writer must see ErrPartitionAlreadyExists")
+
+	got, err := ReadPartitionRecords(context.Background(), root, "EURUSD", RawH1, 2024, time.January)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "the file must hold exactly one writer's content, not a mix")
 }
 
 func TestWritePartition_ExtendReplacesExisting(t *testing.T) {

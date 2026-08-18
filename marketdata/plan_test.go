@@ -47,9 +47,14 @@ func TestPlan_RawMalformedGatesNormalize(t *testing.T) {
 	plan, err := mgr.Plan(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: span})
 	require.NoError(t, err)
 
-	downloads := actionsOfKind(plan.Actions, ActionDownloadRaw)
-	require.Len(t, downloads, 1)
-	assert.Contains(t, downloads[0].Reason, "malformed")
+	// A malformed *existing* raw file is ActionRepairRaw, not
+	// ActionDownloadRaw — a distinct Kind, since it cannot be merged
+	// with or extended, only explicitly replaced (see ActionRepairRaw's
+	// doc comment).
+	assert.Empty(t, actionsOfKind(plan.Actions, ActionDownloadRaw))
+	repairs := actionsOfKind(plan.Actions, ActionRepairRaw)
+	require.Len(t, repairs, 1)
+	assert.Contains(t, repairs[0].Reason, "malformed")
 	assert.Empty(t, actionsOfKind(plan.Actions, ActionNormalizeCanonical))
 }
 
@@ -109,6 +114,36 @@ func TestPlan_NoActionsWhenCurrentAndComplete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, plan.Actions)
 	assert.Empty(t, plan.Coverage.Gaps)
+}
+
+// TestPlan_ExtendsWhenLastRawRecordIsIncomplete is the regression for a
+// design review finding: even when the calendar reports nothing new
+// past raw's last record, an extend must still be scheduled if that
+// last record is itself still provider-incomplete — otherwise a
+// provisional OHLC/volume OANDA has not yet finalized would be frozen
+// in place forever.
+func TestPlan_ExtendsWhenLastRawRecordIsIncomplete(t *testing.T) {
+	rawRoot := t.TempDir()
+	mgr := newTestManagerWithRaw(t, rawRoot)
+	start := aWeekday(0)
+	end := aWeekday(1)
+	span, err := NewTimeRange(start, end)
+	require.NoError(t, err)
+
+	// The raw file's only record is incomplete; nothing about the
+	// calendar itself calls for more data past it (span already ends at
+	// the record's own hour).
+	rawPath := writeRawPartition(t, rawRoot, "EURUSD", H1, 2024, time.January, rawRow(start, false))
+	fp := rawFingerprint(t, rawPath)
+	bars := []Bar{barAt(t, start)}
+	publishCanonicalMonth(t, mgr, H1, 2024, time.January, span, bars, fp, nil)
+
+	plan, err := mgr.Plan(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: span})
+	require.NoError(t, err)
+
+	downloads := actionsOfKind(plan.Actions, ActionDownloadRaw)
+	require.Len(t, downloads, 1)
+	assert.Equal(t, "extend", downloads[0].Reason)
 }
 
 func TestPlan_ExtendCurrentMonthWhenRawLagsCalendar(t *testing.T) {
@@ -294,5 +329,6 @@ func TestActionKind_String(t *testing.T) {
 	assert.Equal(t, "download-raw", ActionDownloadRaw.String())
 	assert.Equal(t, "normalize-canonical", ActionNormalizeCanonical.String())
 	assert.Equal(t, "derive-canonical", ActionDeriveCanonical.String())
+	assert.Equal(t, "repair-raw", ActionRepairRaw.String())
 	assert.Contains(t, ActionKind(99).String(), "ActionKind")
 }

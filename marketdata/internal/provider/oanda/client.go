@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rustyeddy/trader/clock"
@@ -81,17 +82,28 @@ func (noopRateLimiter) Wait(context.Context) error { return nil }
 
 // fixedIntervalLimiter enforces a minimum spacing between requests,
 // timed through a clock.Clock rather than time.Sleep so tests can drive
-// it deterministically with clock.Simulated.
+// it deterministically with clock.Simulated. A single Client (and so a
+// single fixedIntervalLimiter) has no documented single-goroutine
+// restriction — a design review confirmed concurrent Wait calls do
+// happen and, unsynchronized, raced on last — so mu serializes both the
+// read/write of last and the wait itself: two concurrent callers are
+// paced against each other, not just against whichever one last updated
+// the timestamp.
 type fixedIntervalLimiter struct {
 	clock    clock.Clock
 	interval time.Duration
-	last     time.Time
+
+	mu   sync.Mutex
+	last time.Time
 }
 
 func (l *fixedIntervalLimiter) Wait(ctx context.Context) error {
 	if l.interval <= 0 {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	now := l.clock.Now()
 	if !l.last.IsZero() {
 		if wait := l.interval - now.Sub(l.last); wait > 0 {
@@ -161,7 +173,10 @@ const (
 
 // Client is a minimal OANDA v20 REST client for historical candle
 // download (issue #80). It is the only network-facing type in this
-// package; nothing else here makes an HTTP request.
+// package; nothing else here makes an HTTP request. Client is safe for
+// concurrent use: FetchCandles may be called from multiple goroutines
+// against the same Client, and the rate limiter serializes and paces
+// their requests against each other rather than merely against itself.
 type Client struct {
 	baseURL     string
 	credential  CredentialProvider

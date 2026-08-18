@@ -84,6 +84,16 @@ type Partition struct {
 	DuplicateTimes []time.Time
 	FirstTime      time.Time
 	LastTime       time.Time
+	// LastComplete is the provider-declared Complete flag of whichever
+	// record's Time equals LastTime — never any other record's, even if
+	// rows are not stored in Time order. It is meaningful only when
+	// Status is PartitionStatusOK and RowCount > 0. A caller deciding
+	// whether to extend a partition needs this distinctly from
+	// IncompleteCount: a provisional (incomplete) last candle must be
+	// re-fetched from its own Time, not skipped past, since OANDA may
+	// still finalize its OHLC/volume later — see
+	// marketdata.Manager.Sync's own handling of this.
+	LastComplete bool
 
 	// Fingerprint is an algorithm-qualified content hash of the raw
 	// file's bytes, in the "sha256:<hex>" form marketdata.Manifest's
@@ -298,6 +308,7 @@ func inspectFile(ctx context.Context, root, path string) (Partition, *SkippedEnt
 		}
 		if r.Time.After(p.LastTime) {
 			p.LastTime = r.Time
+			p.LastComplete = r.Complete
 		}
 	}
 	for t, n := range seen {
