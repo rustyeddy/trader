@@ -61,8 +61,11 @@ type Calendar interface {
 	Session(t time.Time) (session TimeRange, ok bool)
 
 	// Bar returns the half-open TimeRange for interval that contains t.
-	// Minute and hour intervals align to the UTC clock. Day and week
-	// intervals align to this Calendar's session and week boundaries
-	// rather than UTC midnight.
+	// Every unit aligns to this Calendar's own session anchor, not
+	// necessarily the UTC clock: day and week intervals align to session
+	// and week boundaries, and minute/hour intervals align to whatever
+	// anchor this Calendar's own trading day rolls over from (see
+	// FXCalendar, ADR-021, for why UTC-midnight truncation is not a safe
+	// assumption even for sub-day bars).
 	Bar(t time.Time, interval Interval) (TimeRange, error)
 }

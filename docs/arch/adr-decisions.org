@@ -63,6 +63,48 @@ Never rewrite the decision or context of an accepted ADR to change what it
 originally meant.  A superseded ADR remains a record of what Trader
 believed at that time.
 
+* Partial Amendment Rules
+
+Full supersession assumes one ADR records one decision.  Some ADRs in
+this registry bundle several genuinely separate decisions under one
+number (ADR-012, for example, decided the =Interval=/=TimeRange=/
+=Calendar= types, =FXCalendar='s D1/W1 rollover alignment, *and* a
+UTC-clock alignment rule for sub-day bars, all in one document).  When a
+later ADR corrects exactly one such sub-decision and every other
+decision in the original ADR remains correct, marking the *entire*
+original ADR =Superseded= would misrepresent it: a reader would
+reasonably conclude every decision in it was replaced, when most were
+not.
+
+A *partial amendment* is the alternative for exactly this case:
+
+1. The amending ADR's =Context= section names the specific sub-decision
+   being corrected, quotes or closely paraphrases the exact original
+   wording, and explains why it was wrong — the same evidentiary bar a
+   full supersession's =Context= already requires.
+2. The amending ADR's own =Status= is =Accepted= like any other adopted
+   decision.  It does not change the original ADR's =Status=: the
+   original stays =Accepted=, because everything in it *except* the
+   named sub-decision remains in force exactly as before.
+3. The original ADR gains one small, additive line under its own
+   =Status= section — =Amended by ADR-NNN: <one-line description of the
+   specific sub-decision corrected>= — the same append-only spirit as a
+   full supersession's =Superseded by= line.  Nothing else in the
+   original ADR's =Status=, =Context=, =Decision=, =Consequences=, or
+   =Alternatives Considered= sections is rewritten; the non-rewrite rule
+   above applies identically to a partial amendment.
+4. Update the decision index below with a note under the original ADR's
+   row, the same way ADR-020's own row already carries an explanatory
+   note.
+
+Reading =Accepted= on an ADR that carries an =Amended by= line means: in
+force, except for the specific sub-decision the amendment names, which is
+governed by the amending ADR instead.  A partial amendment is a narrower
+tool than full supersession and should be used only when the original
+ADR genuinely bundles independent decisions and only one is being
+corrected — when in doubt, or when the amendment touches most of what
+the original decided, use full supersession instead.
+
 * Decision Index
 
 | ADR | Title                                                             | Status     |
@@ -85,17 +127,17 @@ believed at that time.
 | 017 | Broker-neutral order and execution vocabulary                     | Accepted   |
 | 018 | Order lifecycle transition rules                                  | Accepted   |
 | 019 | Account and portfolio snapshot models                             | Accepted   |
-| 020 | Historic data subsystem (in adr-020-historic-data.org)            | Proposed   |
+| 020 | Historic data subsystem (in adr-020-historic-data.org)            | Accepted   |
+| 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
 
 Note: ADR-020 is maintained in its own file,
 =docs/arch/adr-020-historic-data.org=, rather than inline in this
 registry.  Its own Status section is authoritative; the status column
 above is kept in sync with it, not a substitute for reading the file —
-consult it for the full decisions and open questions.  As of this
-writing, ADR-020 remains =Proposed=: nearly every open question it
-raised has been settled (issues #70-#81), but issue #99 (H4 alignment
-disagreeing with ADR-012, discovered during #81's corpus validation) is
-an explicit blocker to promoting it to =Accepted=.
+consult it for the full decisions and open questions.  ADR-020 was held
+at =Proposed= pending issue #99 (H4 alignment disagreeing with ADR-012,
+discovered during #81's corpus validation); #99 resolved it (ADR-021),
+and ADR-020 is now =Accepted=.
 
 * ADR-001: Modular monolith before service decomposition
 
@@ -583,6 +625,13 @@ rules will be ratified by a later ADR.
 ** Status
 
 Accepted
+
+Amended by ADR-021: the sub-day (M1/H1/H4) UTC-clock alignment rule
+stated in the Decision section below is corrected — real OANDA H4 data
+disagreed with it (issue #99).  Every other decision in this ADR (the
+=Interval=/=TimeRange=/=Calendar= types, =FXCalendar='s D1/W1 rollover
+alignment, DST handling) remains in force, unchanged.  See the Partial
+Amendment Rules above.
 
 ** Context
 
@@ -1516,6 +1565,196 @@ registry: =docs/arch/adr-020-historic-data.org=.  It governs the
 data, and the =marketdata.Manager= boundary that M2 issues (for example
 #71) build against.  Refer to that file for its current status,
 decisions, and open questions.
+
+* ADR-021: FX hour-bar alignment corrected to daily-rollover anchoring
+
+** Status
+
+Accepted
+
+Amends ADR-012 (the sub-day M1/H1/H4 UTC-clock alignment rule only; see
+the Partial Amendment Rules above and ADR-012's own =Amended by= line).
+
+** Context
+
+ADR-012 specified that =FXCalendar='s minute and hour bars align to the
+UTC clock via truncation since the Go zero time, so that H4 bars land on
+00:00/04:00/.../20:00 UTC regardless of date. Issue #81's corpus-scale
+validation against the real, preserved OANDA archive — comparing derived
+H4 (resampled from raw H1) against OANDA's own native H4 partitions —
+found this claim wrong: OANDA's real H4 candles anchor to the FX daily
+rollover (17:00 New York, the same instant D1 already uses), landing on
+02:00/06:00/10:00/14:00/18:00/22:00 UTC in winter (shifting with DST),
+confirmed directly against a raw H4 partition file
+(=AUDCAD-2006-11-h4.csv=).
+
+This is not merely a documentation discrepancy. Issue #99 traced it to
+an active operational bug: =normalizeOANDASequence= validates every
+accepted/incomplete H4 record's alignment via =Calendar.Bar=, so under
+ADR-012's UTC-midnight rule, every real OANDA H4 record fails that
+check and is classified =recordOutcomeRejected=. =normalizeAndPublish=
+aborts the entire partition build — no partial publish — on any
+=Rejected= record, so =Manager.Build= for =ActionNormalizeCanonical(H4)=
+failed outright against real data. D1 was unaffected (OANDA's native D1
+rollover already matches =FXCalendar='s own D1 boundary exactly), and so
+was W1, since it derives from D1 and never touches H4 (#81).
+
+** Decision
+
+=FXCalendar.Bar='s =UnitMinute=/=UnitHour= cases now anchor to the FX
+daily rollover (=dayStart=, the same anchor D1 already uses) instead of
+UTC midnight: the boundary is the most recent whole multiple of the
+requested duration past =dayStart(t)=, computed by subtracting the
+remainder of elapsed time since that anchor (the same truncation idiom
+=time.Duration.Truncate= itself uses), not by truncating since Go's zero
+time (=time.Time{}=, year 1 — the previous implementation's actual
+reference instant, not the Unix epoch, though both happen to fall at UTC
+midnight so the distinction was immaterial to the boundary set produced).
+
+This changes H4's actual landing boundaries to match OANDA's real data.
+It changes nothing for M1 or H1: =dayStart= is always a whole-hour UTC
+instant (17:00 New York is either 21:00 or 22:00 UTC, depending on DST),
+so a 1-minute or 1-hour grid anchored there produces exactly the same
+boundary *set* as one anchored at UTC midnight — every instant is
+already a 1-minute boundary either way, and every whole-hour instant is
+already a 1-hour boundary either way. Only H4's 4-hour grid actually
+shifts, since neither 21:00 nor 22:00 UTC is itself a multiple of 4h
+from midnight. This equivalence is asserted by a dedicated test
+(=TestFXCalendarBarRolloverAlignmentForHourAndMinute=), not merely
+claimed.
+
+=Manifest.CalendarVersion= (ADR-020, issue #81) bumps from
+=fxcalendar-v1= to =fxcalendar-v2= to name this changed =Bar=
+implementation, even though no H4 canonical data had ever successfully
+published before this fix (there is no prior H4 dataset to invalidate)
+and M1/H1/D1/W1 data is unaffected in substance.
+
+A second design-review finding, surfaced after this ADR's first
+revision, identified a further gap even a divisor duration like H4 does
+not automatically avoid: =dayStart='s own real length is 23h or 25h on
+the two annual US DST-transition days (identical to D1's own variable
+=Bar= duration), so the naive anchor-plus-whole-multiples grid could
+still produce a final closed-period bucket whose end lands *after* the
+next real rollover — straddling from =StatusClosed= into =StatusOpen=,
+which =ClassifyInterval= correctly refuses to describe as one
+=IntervalState=, breaking any coverage walk that reaches it.
+=rolloverAnchoredBar='s computed =end= is therefore additionally clamped
+to the containing day's own real end (computed the same
+=AddDate=-in-New-York-location way =dayStart= and D1's =Bar= case
+already do, inheriting their DST correctness) — producing a shorter
+final bucket on a spring-forward day, or an extra short final bucket on
+a fall-back day, either way ending exactly at the next day's own start.
+This is a no-op on every ordinary day, where the naive end already
+equals the day's real end.
+
+This narrowly corrects one sub-decision within ADR-012, which bundles
+several unrelated decisions (the =Interval=/=TimeRange=/=Calendar=
+types, =FXCalendar='s D1/W1 rollover alignment, DST handling). Recorded
+as a *partial amendment* (this registry's own Partial Amendment Rules,
+added alongside this ADR): ADR-012 keeps its =Accepted= status and its
+Decision section completely unchanged — never rewritten, per this
+registry's non-rewrite rule — and gains only the one small =Amended by=
+line under its own Status section that the amendment process defines.
+=Accepted= on ADR-012 now specifically means "in force, except the named
+sub-decision, which this ADR governs instead" — the Partial Amendment
+Rules make that meaning explicit rather than leaving two =Accepted= ADRs
+in silent, undefined tension over the same boundary. Marking the entire
+ADR-012 =Superseded= was considered and rejected — see Alternatives
+Considered.
+
+** Consequences
+
+- Real OANDA H4 data now normalizes and publishes successfully;
+  =TestNormalizeOANDASequence_H4RealBoundaryAccepted= (#99) is the
+  regression proving it, alongside
+  =TestNormalizeOANDASequence_H4UTCMidnightNowMisaligned= proving the
+  fix actually moved the accepted grid rather than merely widening it.
+- Coverage queries spanning a DST-transition weekend no longer fail with
+  =ErrIntervalStraddlesBoundary=:
+  =TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen= and
+  its fall-back counterpart cover the clamp directly,
+  =TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification= covers
+  =ClassifyInterval= specifically, and
+  =TestCoverage_H4SurvivesSpringForwardWeekend= is the full
+  =Manager.Coverage= regression — each confirmed to fail with the exact
+  error a design review predicted when the day-end clamp is reverted,
+  not just to pass with it applied.
+- Re-verified against the real archive after the day-end clamp: re-running
+  =TestCorpusH4AgreesWithNative= found the identical 53 disagreements
+  across the same 25 partitions as before the clamp, confirming it is a
+  no-op for every live data boundary and only changes closed-period
+  buckets that never had real data to begin with.
+- =rolloverAnchoredBar='s divisor check now runs on =count= before it is
+  multiplied into a =time.Duration=, not on the resulting duration — a
+  third design-review finding: =NewInterval= has no upper bound on
+  count, so a pathologically large one (=NewInterval(UnitHour, 1<<51)=,
+  say) would overflow =time.Duration='s int64 nanosecond range when
+  multiplied, silently wrapping to an arbitrary value — confirmed to
+  wrap to exactly zero for that example, which would have reached the
+  divisor check as a =day % duration= divide-by-zero panic rather than
+  a normal error. Comparing =count= directly against
+  =minutesPerDay=/=hoursPerDay= before any multiplication is immune to
+  that overflow by construction.
+  =TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic= is the
+  regression, confirmed (the same way as the other findings above) to
+  actually panic before this fix, not merely to pass after it.
+- =FXCalendar.Bar='s returned =TimeRange= for M1/H1/H4 now carries a New
+  York =time.Location= (inherited from =dayStart=), matching D1/W1's
+  existing convention, rather than the UTC location =utcBar= previously
+  returned. The underlying instants are unchanged for M1/H1 and
+  intentionally different for H4; any caller comparing returned
+  boundaries must use =time.Time.Equal=, never struct/reflect equality,
+  which was already the documented-correct way to compare =time.Time=
+  values and is now exercised by a real regression
+  (=TestCoverage_GapsMergeContiguousMissingBoundaries= was fixed to use
+  it).
+- Any future third-party or non-OANDA hour-bar provider must be checked
+  against this same rollover-anchored rule, not assumed to share OANDA's
+  own alignment convention.
+- Because =dayStart= resets fresh every real trading day rather than
+  extending one fixed grid indefinitely, =FXCalendar= now rejects any
+  sub-day =Interval= whose duration does not evenly divide 24h (an
+  arbitrary count such as H5 or M7, constructible via =NewInterval= even
+  though no predefined value uses one) — a design-review finding on the
+  implementing PR: such a duration can produce two buckets that overlap
+  in wall-clock time across the daily reset.
+  =TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h= and
+  =TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset= cover the
+  rejection and reproduce the exact overlap it prevents. M1, H1, and H4 —
+  every predefined sub-day =Interval= — all evenly divide 24h and are
+  unaffected.
+
+** Alternatives Considered
+
+- *Special-case only H4, leaving =UnitMinute=/=UnitHour= on two
+  divergent code paths.* Rejected: M1/H1 are provably unaffected by
+  routing through the same rollover-anchored function (see Decision), so
+  a single shared implementation is both simpler and removes the risk of
+  the two paths silently drifting apart later.
+- *Mark all of ADR-012 =Superseded=.* Rejected: ADR-012 bundles several
+  decisions that remain entirely correct and unchanged (the type
+  definitions, =Calendar= interface, D1/W1 alignment, DST handling via
+  =time.Date=). Superseding the whole document would misleadingly imply
+  those parts were also being replaced. Recording this instead as a
+  *partial amendment* — a mechanism this ADR's own review added to the
+  registry's rules, since none existed for exactly this case — keeps the
+  historical record accurate without overclaiming scope, and gives
+  ADR-012's continued =Accepted= status a precise, defined meaning
+  instead of leaving two =Accepted= ADRs in undefined tension.
+- *Allow arbitrary sub-day interval counts by defining a continuous,
+  never-resetting rollover-relative grid instead of rejecting
+  non-divisors.* Considered, per the same review comment. Rejected for
+  this fix: it is materially more design work (a grid that never resets
+  needs its own answer for DST weeks, where "24h" itself is not
+  constant) for a case no predefined =Interval= or current consumer
+  needs; rejecting the unsafe case outright is the smaller, sufficient
+  change, and a continuous grid remains available as a future,
+  additive =FXCalendar= capability if a real need arises.
+- *Silently patch =FXCalendar= without a new ADR.* Rejected: this
+  reverses an explicit, Accepted architectural decision (ADR-012's own
+  stated H4 boundary) for an interval used throughout =marketdata=; per
+  =CONTRIBUTING.org=, that requires a recorded decision, not a quiet
+  code change.
 
 * ADR Template                                                       :noexport:
 

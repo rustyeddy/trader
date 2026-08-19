@@ -21,7 +21,14 @@ const (
 	builderVersion          = "builder-v1"
 	validatorVersion        = "validator-v1"
 	resamplerVersionCurrent = "resampler-v1"
-	calendarVersionCurrent  = "fxcalendar-v1"
+	// calendarVersionCurrent bumped to v2 for issue #99/ADR-021: Bar's
+	// sub-day (M1/H1/H4) alignment is now anchored to the FX daily
+	// rollover instead of UTC midnight, changing H4's actual boundaries
+	// (M1/H1 land on the same instants either way, so no previously
+	// published M1/H1/D1/W1 data is affected in substance — but any
+	// canonical dataset's CalendarVersion should still name the exact
+	// Bar implementation that produced it).
+	calendarVersionCurrent = "fxcalendar-v2"
 	// canonicalSchemaVersion is Manifest.SchemaVersion's current value:
 	// the canonical Bar/BarSet field layout this build writes.
 	canonicalSchemaVersion = 1

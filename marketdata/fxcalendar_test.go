@@ -101,19 +101,235 @@ func TestFXCalendarBarRejectsMultiDayAndMultiWeekCounts(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFXCalendarBarUTCAlignmentForHourAndMinute(t *testing.T) {
+// TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h is the
+// regression for a design-review finding on PR #100: rolloverAnchoredBar
+// recomputes its anchor fresh from dayStart every real trading day, so a
+// duration that does not evenly divide 24h can produce two buckets that
+// overlap in wall-clock time across a daily reset — H5 and M7 are both
+// constructible via NewInterval even though no predefined Interval value
+// uses them. FXCalendar must reject these outright rather than return a
+// silently overlapping range.
+func TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	h5, err := NewInterval(UnitHour, 5)
+	require.NoError(t, err)
+	_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), h5)
+	assert.Error(t, err)
+
+	m7, err := NewInterval(UnitMinute, 7)
+	require.NoError(t, err)
+	_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), m7)
+	assert.Error(t, err)
+}
+
+// TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic is the
+// regression for a third design-review finding on PR #100:
+// NewInterval accepts any count >= 1 with no upper bound, so
+// rolloverAnchoredBar must reject an oversized count *before*
+// multiplying it into a time.Duration, not after. Multiplying first
+// (count * time.Hour, say) can overflow time.Duration's int64
+// nanosecond range and silently wrap — potentially to zero — which
+// would otherwise reach the divisor check as a divide-by-zero panic
+// instead of a normal error.
+func TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	hugeHour, err := NewInterval(UnitHour, 1<<51)
+	require.NoError(t, err, "NewInterval itself has no upper bound on count")
+	assert.NotPanics(t, func() {
+		_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), hugeHour)
+		assert.Error(t, err)
+	})
+
+	hugeMinute, err := NewInterval(UnitMinute, 1<<51)
+	require.NoError(t, err)
+	assert.NotPanics(t, func() {
+		_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), hugeMinute)
+		assert.Error(t, err)
+	})
+}
+
+// TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset directly
+// reproduces the exact overlap the review comment on PR #100 described,
+// proving the rejection above is necessary and not merely theoretical:
+// without it, an ordinary winter day's H5 bucket computed just before
+// the 22:00 UTC rollover, and the H5 bucket computed just after it (once
+// dayStart resets), genuinely overlap in wall-clock time.
+func TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	h5, err := NewInterval(UnitHour, 5)
+	require.NoError(t, err)
+
+	_, err = c.Bar(time.Date(2026, time.January, 7, 21, 30, 0, 0, time.UTC), h5)
+	assert.Error(t, err, "would have returned [18:00, 23:00) UTC from the preceding day's anchor")
+
+	_, err = c.Bar(time.Date(2026, time.January, 7, 22, 0, 0, 0, time.UTC), h5)
+	assert.Error(t, err, "would have returned [22:00, 03:00) UTC from the freshly reset anchor, overlapping the previous bucket from 22:00-23:00")
+}
+
+// TestFXCalendarBarRolloverAlignmentForHourAndMinute is the corrected
+// successor to what was TestFXCalendarBarUTCAlignmentForHourAndMinute
+// (ADR-021, superseding ADR-012's UTC-clock alignment rule for sub-day
+// bars, issue #99): H4 boundaries are now anchored to the FX daily
+// rollover (dayStart), not UTC midnight. January 7 2026 09:13:27 UTC
+// falls in winter (EST, UTC-5), so dayStart is January 6 22:00 UTC
+// (17:00 NY) and H4 boundaries land on 02:00/06:00/10:00/... UTC —
+// matching OANDA's own real archive (confirmed directly against a raw
+// H4 partition file during #81/#99), not the old 00:00/04:00/08:00/...
+// UTC-midnight grid.
+//
+// M1's boundary is asserted unchanged from before: dayStart is always a
+// whole-hour UTC instant, so a 1-minute grid anchored there produces the
+// identical boundary set as one anchored at UTC midnight — this is
+// tested, not just claimed, so a future change that broke that
+// equivalence would be caught here.
+func TestFXCalendarBarRolloverAlignmentForHourAndMinute(t *testing.T) {
 	c := NewFXCalendar(FXCalendarParams{})
 	t9h13 := time.Date(2026, time.January, 7, 9, 13, 27, 0, time.UTC)
 
 	h4, err := c.Bar(t9h13, H4)
 	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, time.January, 7, 8, 0, 0, 0, time.UTC), h4.Start())
-	assert.Equal(t, time.Date(2026, time.January, 7, 12, 0, 0, 0, time.UTC), h4.End())
+	assert.True(t, h4.Start().Equal(time.Date(2026, time.January, 7, 6, 0, 0, 0, time.UTC)))
+	assert.True(t, h4.End().Equal(time.Date(2026, time.January, 7, 10, 0, 0, 0, time.UTC)))
 
 	m1, err := c.Bar(t9h13, M1)
 	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, time.January, 7, 9, 13, 0, 0, time.UTC), m1.Start())
-	assert.Equal(t, time.Date(2026, time.January, 7, 9, 14, 0, 0, time.UTC), m1.End())
+	assert.True(t, m1.Start().Equal(time.Date(2026, time.January, 7, 9, 13, 0, 0, time.UTC)))
+	assert.True(t, m1.End().Equal(time.Date(2026, time.January, 7, 9, 14, 0, 0, time.UTC)))
+}
+
+// TestFXCalendarBarH4MatchesRealOANDABoundaries asserts H4 boundaries
+// directly against real values read from the archive during #99's
+// investigation: winter (EST, offset 2h from UTC midnight — 02:00,
+// 06:00, ... UTC) and summer (EDT, offset 1h — 01:00, 05:00, ... UTC,
+// verified via the same corpus's Sunday-reopen boundary after the
+// spring-forward transition, see the DST tests below).
+func TestFXCalendarBarH4MatchesRealOANDABoundaries(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	winter, err := c.Bar(time.Date(2006, time.November, 1, 3, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, winter.Start().Equal(time.Date(2006, time.November, 1, 2, 0, 0, 0, time.UTC)),
+		"matches AUDCAD-2006-11-h4.csv's own 02:00/06:00/10:00/14:00/18:00/22:00 UTC boundaries")
+	assert.True(t, winter.End().Equal(time.Date(2006, time.November, 1, 6, 0, 0, 0, time.UTC)))
+}
+
+// TestFXCalendarBarH4AcrossSpringForwardWeekend and its fall-back
+// counterpart below confirm H4's rollover-anchored boundaries stay
+// exactly 4h-spaced straight through a DST transition weekend, matching
+// real EURUSD H4 data for the transitions in 2024. The US DST switch
+// happens at 2am New York on a Sunday, entirely within FX's closed
+// Friday-17:00-to-Sunday-17:00 window, so no *live* H4 bucket ever
+// straddles the transition: the reopening Sunday-17:00-NY boundary
+// itself is simply computed at whichever UTC offset is already in
+// effect by then. The *closed*-period bucket immediately before reopen
+// is a separate, once-real concern — see
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen and
+// its fall-back counterpart below, and ClassifyInterval's own
+// straddling tests in interval_state_test.go.
+func TestFXCalendarBarH4AcrossSpringForwardWeekend(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2024-03-10 is the US spring-forward Sunday; by 17:00 NY (the
+	// week's reopen) New York is already on EDT (UTC-4), so reopen is
+	// 21:00 UTC — matching EURUSD-2024-03-h4.csv's own
+	// 2024-03-10T21:00:00Z first bar after the weekend gap.
+	reopen, err := c.Bar(time.Date(2024, time.March, 10, 22, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopen.Start().Equal(time.Date(2024, time.March, 10, 21, 0, 0, 0, time.UTC)))
+
+	next, err := c.Bar(time.Date(2024, time.March, 11, 2, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, next.Start().Equal(time.Date(2024, time.March, 11, 1, 0, 0, 0, time.UTC)),
+		"matches EURUSD-2024-03-h4.csv's own 2024-03-11T01:00:00Z bar")
+}
+
+func TestFXCalendarBarH4AcrossFallBackWeekend(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2024-11-03 is the US fall-back Sunday; by 17:00 NY New York has
+	// already fallen back to EST (UTC-5), so reopen is 22:00 UTC —
+	// matching EURUSD-2024-11-h4.csv's own 2024-11-03T22:00:00Z first
+	// bar after the weekend gap.
+	reopen, err := c.Bar(time.Date(2024, time.November, 3, 23, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopen.Start().Equal(time.Date(2024, time.November, 3, 22, 0, 0, 0, time.UTC)))
+
+	next, err := c.Bar(time.Date(2024, time.November, 4, 3, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, next.Start().Equal(time.Date(2024, time.November, 4, 2, 0, 0, 0, time.UTC)),
+		"matches EURUSD-2024-11-h4.csv's own 2024-11-04T02:00:00Z bar")
+}
+
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen is the
+// regression for a second design-review finding on PR #100: the
+// Saturday-anchored closed period before a spring-forward Sunday reopen
+// is only 23h long (see TestFXCalendarDayBarSpringForwardLosesAnHour for
+// the identical D1 effect), so H4's naive fixed-4h grid from that
+// anchor would place its sixth bucket's end one hour *past* the actual
+// 21:00 UTC reopen (2026-03-08, matching the 2024 corpus dates used
+// above) — straddling from closed into open. The bucket must instead
+// end exactly at reopen, and the very next bucket (queried just after
+// reopen) must start exactly there too: no gap, no overlap.
+func TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2026-03-08 is the US spring-forward Sunday (verified against the
+	// same closed Saturday-anchored day TestFXCalendarDayBarSpringForwardLosesAnHour
+	// uses for D1). Reopen is 2026-03-08 17:00 EDT = 21:00 UTC.
+	closedBucket, err := c.Bar(time.Date(2026, time.March, 8, 19, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, closedBucket.Start().Equal(time.Date(2026, time.March, 8, 18, 0, 0, 0, time.UTC)))
+	assert.True(t, closedBucket.End().Equal(time.Date(2026, time.March, 8, 21, 0, 0, 0, time.UTC)),
+		"clamped to reopen, not the naive 22:00 UTC four hours after 18:00")
+	assert.Equal(t, 3*time.Hour, closedBucket.Duration(), "shortened by the 23h day's own missing hour")
+
+	reopenBucket, err := c.Bar(time.Date(2026, time.March, 8, 21, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopenBucket.Start().Equal(time.Date(2026, time.March, 8, 21, 0, 0, 0, time.UTC)),
+		"the very next bucket starts exactly where the closed one ended: no gap, no overlap")
+}
+
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtFallBackReopen mirrors the
+// spring-forward case for the fall-back Sunday, where the closed
+// Saturday-anchored day is 25h long instead of 23h: the naive grid's
+// sixth bucket ends exactly on time, but a seventh, short bucket is
+// needed to cover the extra hour up to the actual (later) reopen.
+func TestFXCalendarBarH4ClosedBucketEndsExactlyAtFallBackReopen(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2026-11-01 is the US fall-back Sunday. Reopen is 2026-11-01 17:00
+	// EST = 22:00 UTC (an hour later in UTC than the summer-clock
+	// reopen would have been, since New York has just fallen back).
+	closedBucket, err := c.Bar(time.Date(2026, time.November, 1, 21, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, closedBucket.Start().Equal(time.Date(2026, time.November, 1, 21, 0, 0, 0, time.UTC)))
+	assert.True(t, closedBucket.End().Equal(time.Date(2026, time.November, 1, 22, 0, 0, 0, time.UTC)),
+		"a short seventh bucket covering the 25h day's own extra hour, ending exactly at reopen")
+	assert.Equal(t, time.Hour, closedBucket.Duration())
+
+	reopenBucket, err := c.Bar(time.Date(2026, time.November, 1, 22, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopenBucket.Start().Equal(time.Date(2026, time.November, 1, 22, 0, 0, 0, time.UTC)),
+		"the very next bucket starts exactly where the closed one ended: no gap, no overlap")
+}
+
+// TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification is the
+// end-to-end version of the two tests above: before the dayEnd clamp,
+// ClassifyInterval rejected the pre-reopen closed bucket outright
+// (ErrIntervalStraddlesBoundary, since its Status disagreed between
+// start and end) — exactly the "breaking coverage across those
+// weekends" failure mode a design review identified. It must now
+// classify cleanly as IntervalStateClosed.
+func TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	span, err := c.Bar(time.Date(2026, time.March, 8, 19, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+
+	state, err := ClassifyInterval(c, span, time.Date(2026, time.March, 9, 0, 0, 0, 0, time.UTC), false, false)
+	require.NoError(t, err, "must not straddle a calendar status boundary")
+	assert.Equal(t, IntervalStateClosed, state)
 }
 
 func TestFXCalendarBarRejectsUnknownUnit(t *testing.T) {

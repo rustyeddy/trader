@@ -6,9 +6,11 @@ import "fmt"
 type Unit uint8
 
 const (
-	// UnitMinute counts elapsed minutes, aligned to the UTC clock.
+	// UnitMinute counts elapsed minutes, aligned to a Calendar's own
+	// session anchor (for FXCalendar, the FX daily rollover — see
+	// ADR-021; not necessarily UTC midnight).
 	UnitMinute Unit = iota
-	// UnitHour counts elapsed hours, aligned to the UTC clock.
+	// UnitHour counts elapsed hours, aligned the same way as UnitMinute.
 	UnitHour
 	// UnitDay counts trading days, aligned to a Calendar's session
 	// rollover rather than UTC midnight.
