@@ -1728,5 +1728,149 @@ call =Plan= again (verifying it now emits =ActionDeriveCanonical= for
 the already-=Current= January partition), run =Build=, and verify the
 boundary week's bar is now present and the gap gone.
 
+** DONE Exercise the complete historical-data vertical slice
+Settled by issue #82 (M2-14, PR #101): =examples/m2/integration_test.go=,
+an external consumer package (=package m2_test=) that imports only
+=clock=, =instrument=, =marketdata=, and =num= — the way real code
+outside this module would — proving M2 is one coherent, externally
+consumable whole rather than a set of individually compiling packages.
+It cannot reach =marketdata/internal/...= at all, so "no internal
+implementation type appears in the consumer-facing flow" holds by
+construction, not merely by inspection.
+
+=examples/m2/testdata/raw/oanda/EURUSD/2024/01= is a small,
+hand-generated, committed raw archive (two trading weeks of H1 and D1
+data, ~24KB total, generated via a throwaway script that itself called
+=FXCalendar.Bar=/=Status= to guarantee every row lands on a real,
+correctly-aligned boundary rather than a hand-computed one) with one
+deliberate gap (2024-01-16, a Tuesday) built in on purpose. A second,
+separate small partition
+(=examples/m2/testdata/raw/oanda/EURUSD/2024/02=) carries one
+OANDA-marked-incomplete row alongside two ordinary ones, isolated from
+January so it does not disturb that fixture's own exact bar-count and
+gap assertions. No network access or private archive is required to run
+this package; the =corpus=-tagged =corpus_test.go= (matching #75/#81's
+own =fullarchive=/=corpus= precedent exactly) runs the identical flow
+against an operator's real archive, skipping itself when unconfigured.
+A real run against the operator's archive completed successfully during
+this issue (H1/D1 published, W1 correctly scheduled zero actions since
+real January 2024 D1 data has its own gap spanning the whole queried
+month — expected, not a bug, matching exactly the "whole-month D1 gap
+blocks whole-month W1 derive" behavior already established by #79's own
+=deriveActionsW1= scoping).
+
+=TestM2VerticalSlice= drives the full chain through =Manager='s public
+=Plan=/=Build=/=Bars=/=Coverage= methods only: normalize H1 and D1 from
+raw, derive W1 from D1 (asserting =Manifest.Parent= names the exact D1
+=Revision()= consumed), query the published W1 bar, confirm
+=Manifest.Revision()= is reproducible by having a second, independent
+Manager build the identical dataset from a second copy of the same raw
+fixture and comparing revisions (rebuilding on the *same* Manager does
+not exercise this, since Plan correctly finds nothing left to do once a
+partition is Current), and confirm mutating one existing raw row (in a
+writable per-test copy of the fixture, never the checked-in file) is
+detected as stale by =Plan= and produces a new =Manifest.Revision()= on
+rebuild, with the row count unchanged.
+
+*Closed-versus-missing, precisely.* A first draft asserted only that no
+returned =Gap= carried =IntervalStateClosed=. A design review correctly
+caught that this does not actually prove routine closures are handled
+correctly: =Coverage.Gaps= never includes =IntervalStateClosed= at all —
+a closed interval is suppressed before a =Gap= is even created for it
+(=gapAccumulator=, coverage.go) — so that assertion would still pass
+even if the weekend had been misclassified as =Missing= instead of
+excluded. The fixed assertion checks the *exact* gap list: length one,
+exact span, exact state, over a fixture span containing two full
+weekends — proving both weekends produced no =Gap= at all (the real,
+observable behavior) rather than merely that none of whatever gaps did
+appear happened to say =Closed=.
+
+Two further scenarios cover conditions =TestM2VerticalSlice= itself
+doesn't reach, all part of #82's own required condition list (success,
+missing, closed, incomplete, invalid, stale):
+=TestM2VerticalSlice_IncompleteRecordExcludedNotAborted= (the February
+fixture's own provider-incomplete row is excluded from the published
+dataset without aborting the other two records' publication) and
+=TestM2Coverage_InvalidCanonicalPartition= (a canonical partition file
+corrupted in place — the same simulate-on-disk-corruption technique
+=TestCoverage_InvalidPartition= already uses internally, reconstructed
+externally from ADR-020's own documented canonical path layout, since
+there is no public API to corrupt a partition on purpose — reports
+=PartitionCoverageInvalid= through =Coverage=, not an error). A second
+design-review pass pointed out that excluding the incomplete bar from
+=Bars= alone is not, by itself, distinguishable from an ordinary missing
+bar — nothing about a plain absence tells a consumer *why* it's absent.
+=TestM2VerticalSlice_IncompleteRecordExcludedNotAborted= now also calls
+=Coverage= and asserts =PartitionCoverage.RawIncompleteCount == 1=: the
+one quality-result field that actually surfaces the raw archive fact
+(one record OANDA itself marked provisional) directly, completing the
+external-consumer proof of the "incomplete" condition rather than
+inferring it indirectly from an absence.
+
+*Cancellation, both halves — one provable externally, one only
+internally.* A first draft's only cancellation test cancelled the
+context *before* calling =Build=, which proves an already-cancelled
+request publishes nothing but cannot detect a partial-publication or
+cleanup problem arising *during* an active build — a design review
+caught this gap.
+=TestM2Build_AlreadyCancelledContextPublishesNothing= keeps that
+already-cancelled case, honestly named and worded to describe exactly
+what it tests.
+
+A second review round pushed further: does a *between-action*
+cancellation test (the natural next step) actually prove intra-action
+atomicity — that cancellation landing mid-publish, inside one action,
+leaves no partial or temporary artifact? It does not, and cannot: from
+outside =marketdata=, there is no way to land cancellation at a specific
+point *inside* one action's own encode/write/rename sequence without
+depending on exactly the kind of fragile internal call-count knowledge
+this package otherwise avoids. That specific proof already exists,
+correctly, at the internal level, where the real commit sequence is
+known: =marketdata='s own =store_csv_test.go= —
+=TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision=,
+=TestCanonicalCSVStore_PublishCancelledDuringEncodeLoadsOriginalRevision=
+(which explicitly asserts no abandoned =.tmp-= file remains), and
+=TestCanonicalCSVStore_PublishCancelledJustBeforeRenameLoadsOriginalRevision=
+— one test per meaningful checkpoint of the atomic temp-file-then-rename
+publish every canonical partition goes through.
+
+=TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished=
+(renamed from an earlier, overclaiming name) is scoped honestly to what
+an external, public-API-only test *can* prove: a two-action =Plan= (H1
+then D1 normalization, constructed directly, since =Build='s own
+contract accepts any caller-supplied =Plan=) with a context that lets
+the first action complete and publish, then reports cancelled before
+the second action starts — proving a later, not-yet-reached action is
+left completely unpublished, and confirming (via matching
+=Manifest.BarCount= and a full =Bars= readback, not merely a status
+flag) that the already-completed action's own publish is the complete
+dataset, not truncated by the later cancellation. Together, this test
+and the three internal ones above cover #82's full "failure/cancellation
+leaves no partially published canonical dataset" requirement, split
+deliberately across the external/internal boundary rather than one test
+overclaiming to prove both halves.
+
+The cutoff for landing cancellation exactly between the two actions is
+not a hardcoded call count — =Build= checks =ctx.Err()= far too many
+times, and too implementation-specifically, while completing one action
+(every raw row read is its own check, among others) to hardcode
+reliably. The test instead *calibrates* the cutoff empirically, by
+building the first action alone against a throwaway =Manager= and
+counting exactly how many =ctx.Err()= calls that costs; since one
+action's own processing is self-contained and deterministic given
+identical input, that measured count reproduces exactly when the same
+action is first in a real two-action =Plan=.
+
+=TestM2Queries_NeverWriteToStore= confirms =Bars=/=Coverage= — read-only
+queries — never create anything under =StoreRoot=, even when nothing
+has been published yet.
+
+=newTestManager= (the shared fixture-copying helper) deliberately
+returns the raw/store root paths alongside the =*Manager=, rather than
+adding any accessor to =Manager= itself for tests to call back: per
+=Config='s own field documentation, neither path is ever exposed through
+a Manager operation, and this package respects that boundary rather than
+punching a test-only hole in it.
+
 
 
