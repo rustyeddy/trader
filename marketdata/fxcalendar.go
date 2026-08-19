@@ -288,29 +288,61 @@ func literalDateKey(h time.Time) dateKey {
 // rolloverAnchoredBar returns the [start, start+duration) bar containing
 // t, where start is the most recent instant at or before t that is a
 // whole multiple of duration past the FX daily rollover containing t
-// (dayStart) — not since the Unix epoch or UTC midnight (ADR-021,
-// superseding ADR-012's UTC-clock alignment rule for sub-day bars: see
-// that ADR for why UTC-midnight truncation was wrong for H4 in
-// particular).
+// (dayStart) — not since Go's zero time (time.Time{}, year 1 — what the
+// previous implementation actually truncated against via
+// time.Time.Truncate, not the Unix epoch, though both fall at UTC
+// midnight so the distinction was immaterial to the boundary set
+// produced; ADR-021, superseding ADR-012's UTC-clock alignment rule for
+// sub-day bars: see that ADR for why UTC-midnight truncation was wrong
+// for H4 in particular).
 //
 // dayStart is always a whole-hour UTC instant (17:00 New York is either
 // 21:00 or 22:00 UTC, depending on DST), so for any duration that evenly
 // divides 24h — every predefined sub-day Interval — this produces
-// exactly the same boundary *set* as plain UTC-epoch truncation whenever
-// duration itself evenly divides dayStart's own UTC-minute offset from
-// midnight: true for M1 (any instant is a 1-minute boundary either way)
-// and H1 (any whole-hour instant is a 1-hour boundary either way), but
-// false for H4, where dayStart's offset (21:00 or 22:00 UTC, neither a
-// multiple of 4h from midnight) shifts every boundary by 1-2 hours from
-// where UTC-midnight truncation would have placed it — landing exactly
-// on OANDA's real native H4 boundaries instead.
+// exactly the same boundary *set* as plain UTC-midnight truncation
+// whenever duration itself evenly divides dayStart's own UTC-minute
+// offset from midnight: true for M1 (any instant is a 1-minute boundary
+// either way) and H1 (any whole-hour instant is a 1-hour boundary either
+// way), but false for H4, where dayStart's offset (21:00 or 22:00 UTC,
+// neither a multiple of 4h from midnight) shifts every boundary by 1-2
+// hours from where UTC-midnight truncation would have placed it —
+// landing exactly on OANDA's real native H4 boundaries instead.
 //
 // The truncation itself mirrors time.Duration.Truncate's own idiom
 // (subtracting the remainder) rather than integer-dividing and
 // re-multiplying, for the same reason: it is the direct, well-understood
 // pattern for "round down to a multiple," here applied to an elapsed
 // duration since a computed anchor instead of since the zero time.
+//
+// # Only durations that evenly divide 24h are safe
+//
+// anchor is recomputed fresh from dayStart on every call, and dayStart
+// itself resets once per real trading day (23h/24h/25h long around a DST
+// transition — see dayStart's own doc comment). When duration evenly
+// divides 24h, that reset always lands exactly on what would have been
+// the grid's own next boundary anyway, so the grid stays contiguous
+// across the reset. When it does not — an arbitrary Interval such as H5
+// or M7, both constructible via NewInterval even though no predefined
+// value uses them — the reset can move the anchor to an instant *before*
+// the previous day's grid had finished its own final, partial bucket,
+// producing two buckets that overlap in real wall-clock time (a design
+// review caught this: for example, on an ordinary winter day with
+// dayStart at 22:00 UTC, Bar(21:30 UTC, H5) returns [18:00, 23:00) from
+// the preceding day's own anchor, while Bar(22:00 UTC, H5) returns
+// [22:00, 03:00) from the freshly reset one — overlapping from 22:00 to
+// 23:00). Coverage and planning assume Bar produces a deterministic,
+// non-overlapping sequence, so this is rejected outright rather than
+// silently returning an overlapping range: FXCalendar has no continuous
+// rollover-relative grid definition for a non-divisor duration, and
+// inventing one is not this fix's job. A caller needing such an interval
+// must use a Calendar (or a future FXCalendar capability) that actually
+// defines one.
 func (c *FXCalendar) rolloverAnchoredBar(t time.Time, duration time.Duration) (TimeRange, error) {
+	const day = 24 * time.Hour
+	if day%duration != 0 {
+		return TimeRange{}, fmt.Errorf(
+			"marketdata: FXCalendar only aligns sub-day intervals whose duration evenly divides 24h, got %s", duration)
+	}
 	anchor := c.dayStart(t)
 	delta := t.Sub(anchor)
 	start := anchor.Add(delta - delta%duration)

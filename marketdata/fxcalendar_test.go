@@ -101,6 +101,46 @@ func TestFXCalendarBarRejectsMultiDayAndMultiWeekCounts(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h is the
+// regression for a design-review finding on PR #100: rolloverAnchoredBar
+// recomputes its anchor fresh from dayStart every real trading day, so a
+// duration that does not evenly divide 24h can produce two buckets that
+// overlap in wall-clock time across a daily reset — H5 and M7 are both
+// constructible via NewInterval even though no predefined Interval value
+// uses them. FXCalendar must reject these outright rather than return a
+// silently overlapping range.
+func TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	h5, err := NewInterval(UnitHour, 5)
+	require.NoError(t, err)
+	_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), h5)
+	assert.Error(t, err)
+
+	m7, err := NewInterval(UnitMinute, 7)
+	require.NoError(t, err)
+	_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), m7)
+	assert.Error(t, err)
+}
+
+// TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset directly
+// reproduces the exact overlap the review comment on PR #100 described,
+// proving the rejection above is necessary and not merely theoretical:
+// without it, an ordinary winter day's H5 bucket computed just before
+// the 22:00 UTC rollover, and the H5 bucket computed just after it (once
+// dayStart resets), genuinely overlap in wall-clock time.
+func TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	h5, err := NewInterval(UnitHour, 5)
+	require.NoError(t, err)
+
+	_, err = c.Bar(time.Date(2026, time.January, 7, 21, 30, 0, 0, time.UTC), h5)
+	assert.Error(t, err, "would have returned [18:00, 23:00) UTC from the preceding day's anchor")
+
+	_, err = c.Bar(time.Date(2026, time.January, 7, 22, 0, 0, 0, time.UTC), h5)
+	assert.Error(t, err, "would have returned [22:00, 03:00) UTC from the freshly reset anchor, overlapping the previous bucket from 22:00-23:00")
+}
+
 // TestFXCalendarBarRolloverAlignmentForHourAndMinute is the corrected
 // successor to what was TestFXCalendarBarUTCAlignmentForHourAndMinute
 // (ADR-021, superseding ADR-012's UTC-clock alignment rule for sub-day

@@ -24,8 +24,10 @@ tooling (#81) against the operator's archive — 53 residual disagreements
 across 25 compared partitions, down from ~3,496, and every one of those
 53 is the same already-documented month-boundary tool limitation D1
 already has, not a remaining alignment defect. See ADR-021 for the full
-decision; ADR-012 keeps its own =Accepted= status and original text
-unchanged, with only an additive forward-pointer note.
+decision, recorded as a *partial amendment* of ADR-012 (a mechanism
+=adr-decisions.org= gained specifically for this case): ADR-012 keeps
+its own =Accepted= status and original text completely unchanged, with
+only one small =Amended by= line under its own Status section.
 
 Two items remain open as ordinary follow-on work, not as blockers:
 running the legacy =candle-v2= comparison tooling (#81) to completion
