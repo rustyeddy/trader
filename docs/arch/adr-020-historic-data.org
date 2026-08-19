@@ -2,24 +2,76 @@
 #+STARTUP: overview num
 #+TODO: TODO | DONE
 
-Here are the principals I want to keep that are important now.
+* Status
+
+Proposed. Nearly every open question this document originally raised —
+canonical dataset definition and versioning, gap/completeness modeling,
+the store/cache/coverage contracts, explicit OANDA synchronization, raw
+normalization, and canonical build/derivation including W1 resampling —
+was settled by the body of M2 work below (issues #70 through #81), each
+recorded as its own =DONE= section as it landed. This ADR stayed
+=Proposed= in spirit (no explicit status was ever recorded) until issue
+#69 folded in the remaining parked review comments; a first pass at this
+Status section promoted it to =Accepted=, but PR #98 review correctly
+caught that this overstated day/week alignment specifically (see next
+paragraph), so promotion is held back pending that one item.
+
+*One blocking gap: H4 alignment.* #81's corpus validation against the
+real archive found that ADR-012's =FXCalendar= H4 alignment
+(UTC-midnight truncation) does not match OANDA's actual native H4
+candle boundaries (anchored to the FX daily rollover, like D1). This is
+not merely a documentation discrepancy: =normalizeOANDASequence=
+validates every H4 record's alignment against =FXCalendar.Bar=, so every
+real OANDA H4 record is currently rejected and =Manager.Build='s
+=ActionNormalizeCanonical(H4)= aborts outright against real data — see
+issue #99. D1 and W1 are unaffected (D1's native rollover already
+matches =FXCalendar='s own D1 boundary; W1 derives from D1, never H4).
+Per PR #98 review, this ADR should not be promoted to =Accepted= until
+issue #99 resolves it: a new ADR superseding ADR-012's H4 boundary,
+=FXCalendar= updated accordingly, and re-verification against the real
+corpus.
+
+Two further items remain open as ordinary follow-on work, not as
+blockers: running the legacy =candle-v2= comparison tooling (#81) to
+completion across the full archive before that tree is deleted, and the
+general Rate/string-parsing cache idea in issue #85 (deliberately
+deferred pending actual performance evidence).
+
+** DONE Persisted interval policy
+Canonical M1, H1, H4, D1, and W1 Bars are persisted (see "All derived
+data will be persisted" below for the no-recompute-on-every-query
+rationale). M1, H1, H4, and D1 are normalized directly from
+provider-native raw partitions (#76); W1 is derived from canonical D1,
+the one interval with no raw source of its own (#81). H4 persistence is
+currently blocked by issue #99 (see Status above) even though the
+policy itself — which intervals are persisted, and from what — is
+settled.
+
+Here are the principles I want to keep that are important now.
 
 * DONE Dukascopy will not be used
-It has proved to be a bit problematic and not as complete as OandA
+It has proved to be a bit problematic and not as complete as OANDA
 
-* DONE OandA Forex Pairs
-** DONE Existing OandA Forex Pairs will be used
-We have downloaded a lots of OandA raw Forex price data in CSV format
+* DONE OANDA Forex Pairs
+** DONE Existing OANDA Forex Pairs will be used
+We have downloaded a lot of OANDA raw Forex price data in CSV format
 that will continue to be used.
 ** DONE XAUUSD is out of scope
 XAUUSD is present in the existing corpus but we have no way to trade
-it through OandA, so the data is not needed.  It is not ingested.  The
+it through OANDA, so the data is not needed.  It is not ingested.  The
 25th instrument in the corpus is therefore intentionally skipped, and
 every instrument M2 handles is an FX pair.
 
-** TODO Derived / Conanical Data needs to be defined
-If the existing derived .CSV format differs it will be re-derived
-** DONE Conanical format will be immutable and versioned
+** DONE Derived / Canonical Data needs to be defined
+If the existing derived .CSV format differs it will be re-derived.
+
+Fully settled by the body of M2 work below: =Bar=/=BarSet= (#72),
+=Manifest= (#73), the canonical CSV store (#77), raw normalization into
+canonical =Bar= values (#76), and canonical build/derivation via
+=Manager.Build= (#81). The existing =candle-v2= format does differ (see
+"Do not delete the existing candle-v2 tree until it has been diffed"
+below), so it is re-derived from raw rather than adopted as-is.
+** DONE Canonical format will be immutable and versioned
 If any formatting needs to be changed or gaps need to be filled the
 new data will be rebuilt if needed and reversioned.
 
@@ -126,12 +178,12 @@ arithmetic).  What #74 adds:
   synchronization is actually built.  W1 bars are produced by resampling
   canonical D1 — see the =Manifest.Parent=/=ResamplerVersion= lineage
   model (#73) built for exactly this relationship.
-** DONE OandA Volume represents ticks at OandA
+** DONE OANDA Volume represents ticks at OANDA
 It is not volume by any means but may serve as a proxy for how active
-a pair was at the exchange OandA gets it data from.  It can be ignored
+a pair was at the exchange OANDA gets its data from.  It can be ignored
 if it is not desired, but it will be included in the derived data
 ** DONE Avg and Max Spread will also be kept in derived format
-OandA provides a bid and an ask for each of O, H, L and C.  Max and
+OANDA provides a bid and an ask for each of O, H, L and C.  Max and
 avg spread will be calculated from those values.
 
 #72 settled the *representation* on =Bar=: =AvgSpread= and =MaxSpread=
@@ -309,7 +361,7 @@ providers or initiate canonical historic data builds.
                  |
                  +-- Bar Maker
 
-Everthing behind the data manager will live in a 'internal' directory.
+Everything behind the data manager will live in an =internal/= directory.
 No other package is allowed to retrieve, build or store data, all must
 go through the DM.
 
@@ -458,8 +510,8 @@ them by construction).  #79's coverage engine does not call
 The current path will be something like it is now
 	.../data/raw/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
 	.../data/derived/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
-Furture data format such as Parquet if we implement will be determined
-when it is implemented
+Future data formats such as Parquet, if implemented, will have their
+layout determined at that time.
 
 ** DONE Canonical CSV Bar store and atomic publication
 Settled by issue #77 (branch =feature/77-canonical-csv-store=):
@@ -1249,10 +1301,12 @@ remains a pure calendar with no holiday data of its own —
 =StandardFXHolidays= is a caller-supplied params builder, not a change to
 what =FXCalendar= assumes by default.
 
-* TODO Review comments to work in
+* DONE Review comments to work in
 
-Parked here from review.  Work them into the sections above during the
-next edit and delete this section.
+Parked here from review.  Every comment below is now resolved in place
+(issue #69); left as its own section, matching how the rest of this
+document already builds up its history issue by issue, rather than
+relocated into the sections above.
 
 ** DONE Volume's Go type belongs to the Bar structure work
 Settled by #72: =Bar.Ticks= is a plain =int64= (not =num.Quantity=),
@@ -1260,13 +1314,23 @@ and =Ticks= is the single name used going forward. The raw tree's
 =volume= column is normalized to =Ticks= at read time; both trees'
 values are the same OANDA tick count.
 
-** TODO State that raw is authoritative
+** DONE State that raw is authoritative
 It is strongly implied by "raw saved separately, pristine" plus
 "canonical is rebuilt and reversioned", but never actually written
 down.  The entire rebuild story rests on it, so it deserves a
 sentence of its own.
 
-** TODO Do not delete the existing candle-v2 tree until it has been diffed
+Stated explicitly: the preserved raw OANDA archive is authoritative.
+Canonical data (any interval, including derived W1) is a rebuildable
+projection of raw — never the reverse. A canonical partition disagreeing
+with what raw actually contains is a canonical defect to be rebuilt, not
+evidence that raw should be edited or replaced. This is also why
+=Manifest.RawFingerprint= exists (#73) and why =Manager.Build= (#81)
+aborts rather than partially publishes when normalization finds raw data
+it cannot trust (a crossed market, an impossible =Bar= shape): raw's own
+authority is never silently overridden by a best-effort canonical build.
+
+** DONE Do not delete the existing candle-v2 tree until it has been diffed
 Once the new canonical build exists, diff it against the old
 =candle-v2= tree before deleting anything.  Bid OHLC only, tolerance
 about one unit at 1e5 scale -- legacy built values through
@@ -1278,6 +1342,18 @@ drift, wrong instrument mapping, missing months.  It is a 21-year
 regression test and it is only available once.  This does not conflict
 with the no-retention policy above -- that policy governs superseded
 /new-format/ versions, not the one-time legacy comparison.
+
+The comparison tooling this asks for was built by issue #81
+(=build_corpus_test.go=, =TestCorpusLegacyComparison=, behind the
+=corpus= build tag): it builds canonical H1 directly from raw — never
+publishing it — and compares its Close prices against the legacy
+=candle-v2= tree's own H1 files at a tolerance of one unit at candle-v2's
+1e5 scale, exactly the check this note asks for. It was exercised once
+against the operator's real archive during #81 (see that issue's own
+ADR-020 section above for what a partial run found) but has not yet been
+run to completion across the full ~21-year corpus, and =candle-v2= has
+not yet been deleted. Running it to completion remains the explicit
+prerequisite for that deletion, per this note's own instruction.
 
 ** DONE Provider-declared incompleteness is separate from gaps
 Folded in by issue #74, as this note asked.  Raw's =complete= column
@@ -1377,13 +1453,22 @@ records actually present in one partition, exactly as #74 and #75 already
 scoped their own calendar- and file-level concerns away from each
 other's.
 
-** TODO Say that third-party data sources are deferred
+** DONE Say that third-party data sources are deferred
 "Everything behind DM lives in =internal/=" plus "no other package may
 retrieve, build or store data" means an outside user cannot supply a
 data source.  The architecture document promises exactly that seam via
-=marketdata.HistoricalSource= and =LiveFeed=.  For M2, OandA-only,
+=marketdata.HistoricalSource= and =LiveFeed=.  For M2, OANDA-only,
 deferring it is the right answer -- it just needs to be stated, since
 the promise exists elsewhere.
+
+Stated explicitly: M2 supports exactly one data source, an internal
+OANDA provider adapter (=marketdata/internal/provider/oanda=), reachable
+only through =marketdata.Manager=. A user- or third-party-supplied
+historical source or live feed (=marketdata.HistoricalSource=,
+=LiveFeed=, per the architecture document) is out of scope for M2 and
+remains a deferred, additive extension — not a capability M2's closed
+=internal/= boundary (see "The boundary is non-negotiable and closed to
+outside implementation" above) is expected to accommodate yet.
 
 ** DONE Resolve W1 alignment before implementation starts
 Resolved by issue #74 under "Day and week alignment" above, by
@@ -1635,8 +1720,5 @@ call =Plan= again (verifying it now emits =ActionDeriveCanonical= for
 the already-=Current= January partition), run =Build=, and verify the
 boundary week's bar is now present and the gap gone.
 
-** TODO Typos, for whenever this folds into adr-decisions.org
-"Conanical" (x3), "principals" -> "principles", "Furture", "datys",
-"earler", "Everthing".  OANDA is usually all-caps.
 
 
