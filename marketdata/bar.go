@@ -144,13 +144,18 @@ func (b Bar) Validate() error {
 	return nil
 }
 
+// halfRate is 0.5, parsed once at package init rather than on every Mid
+// call (issue #85): MustParseRate's cost is only ever paid once for this
+// fixed, programmer-controlled constant.
+var halfRate = num.MustParseRate("0.5")
+
 // Mid returns the mid close price, derived as Close plus half of AvgSpread.
 // It assumes bid-basis OHLC (M2's canonical basis); the per-corner ask is
 // not retained, so this is the mid of the close specifically, computed
 // from the average spread rather than an exact close-time spread. Callers
 // needing a different basis or an exact spread must work from raw data.
 func (b Bar) Mid() (num.Price, error) {
-	half, err := b.AvgSpread.MulRate(num.MustParseRate("0.5"))
+	half, err := b.AvgSpread.MulRate(halfRate)
 	if err != nil {
 		return num.Price{}, fmt.Errorf("marketdata: bar mid: halving avg spread: %w", err)
 	}
