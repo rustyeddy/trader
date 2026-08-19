@@ -1629,6 +1629,24 @@ implementation, even though no H4 canonical data had ever successfully
 published before this fix (there is no prior H4 dataset to invalidate)
 and M1/H1/D1/W1 data is unaffected in substance.
 
+A second design-review finding, surfaced after this ADR's first
+revision, identified a further gap even a divisor duration like H4 does
+not automatically avoid: =dayStart='s own real length is 23h or 25h on
+the two annual US DST-transition days (identical to D1's own variable
+=Bar= duration), so the naive anchor-plus-whole-multiples grid could
+still produce a final closed-period bucket whose end lands *after* the
+next real rollover — straddling from =StatusClosed= into =StatusOpen=,
+which =ClassifyInterval= correctly refuses to describe as one
+=IntervalState=, breaking any coverage walk that reaches it.
+=rolloverAnchoredBar='s computed =end= is therefore additionally clamped
+to the containing day's own real end (computed the same
+=AddDate=-in-New-York-location way =dayStart= and D1's =Bar= case
+already do, inheriting their DST correctness) — producing a shorter
+final bucket on a spring-forward day, or an extra short final bucket on
+a fall-back day, either way ending exactly at the next day's own start.
+This is a no-op on every ordinary day, where the naive end already
+equals the day's real end.
+
 This narrowly corrects one sub-decision within ADR-012, which bundles
 several unrelated decisions (the =Interval=/=TimeRange=/=Calendar=
 types, =FXCalendar='s D1/W1 rollover alignment, DST handling). Recorded
@@ -1651,6 +1669,21 @@ Considered.
   regression proving it, alongside
   =TestNormalizeOANDASequence_H4UTCMidnightNowMisaligned= proving the
   fix actually moved the accepted grid rather than merely widening it.
+- Coverage queries spanning a DST-transition weekend no longer fail with
+  =ErrIntervalStraddlesBoundary=:
+  =TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen= and
+  its fall-back counterpart cover the clamp directly,
+  =TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification= covers
+  =ClassifyInterval= specifically, and
+  =TestCoverage_H4SurvivesSpringForwardWeekend= is the full
+  =Manager.Coverage= regression — each confirmed to fail with the exact
+  error a design review predicted when the day-end clamp is reverted,
+  not just to pass with it applied.
+- Re-verified against the real archive after the day-end clamp: re-running
+  =TestCorpusH4AgreesWithNative= found the identical 53 disagreements
+  across the same 25 partitions as before the clamp, confirming it is a
+  no-op for every live data boundary and only changes closed-period
+  buckets that never had real data to begin with.
 - =FXCalendar.Bar='s returned =TimeRange= for M1/H1/H4 now carries a New
   York =time.Location= (inherited from =dayStart=), matching D1/W1's
   existing convention, rather than the UTC location =utcBar= previously

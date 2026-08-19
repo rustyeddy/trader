@@ -193,12 +193,14 @@ func TestFXCalendarBarH4MatchesRealOANDABoundaries(t *testing.T) {
 // exactly 4h-spaced straight through a DST transition weekend, matching
 // real EURUSD H4 data for the transitions in 2024. The US DST switch
 // happens at 2am New York on a Sunday, entirely within FX's closed
-// Friday-17:00-to-Sunday-17:00 window — so unlike an arbitrary D1
-// bucket landing on the transition (which can be a real 23h/25h span,
-// see TestFXCalendarDayBarSpringForwardLosesAnHour), no *live* H4
-// bucket ever actually straddles the transition: the reopening
-// Sunday-17:00-NY boundary itself is simply computed at whichever UTC
-// offset is already in effect by then.
+// Friday-17:00-to-Sunday-17:00 window, so no *live* H4 bucket ever
+// straddles the transition: the reopening Sunday-17:00-NY boundary
+// itself is simply computed at whichever UTC offset is already in
+// effect by then. The *closed*-period bucket immediately before reopen
+// is a separate, once-real concern — see
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen and
+// its fall-back counterpart below, and ClassifyInterval's own
+// straddling tests in interval_state_test.go.
 func TestFXCalendarBarH4AcrossSpringForwardWeekend(t *testing.T) {
 	c := NewFXCalendar(FXCalendarParams{})
 
@@ -231,6 +233,76 @@ func TestFXCalendarBarH4AcrossFallBackWeekend(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, next.Start().Equal(time.Date(2024, time.November, 4, 2, 0, 0, 0, time.UTC)),
 		"matches EURUSD-2024-11-h4.csv's own 2024-11-04T02:00:00Z bar")
+}
+
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen is the
+// regression for a second design-review finding on PR #100: the
+// Saturday-anchored closed period before a spring-forward Sunday reopen
+// is only 23h long (see TestFXCalendarDayBarSpringForwardLosesAnHour for
+// the identical D1 effect), so H4's naive fixed-4h grid from that
+// anchor would place its sixth bucket's end one hour *past* the actual
+// 21:00 UTC reopen (2026-03-08, matching the 2024 corpus dates used
+// above) — straddling from closed into open. The bucket must instead
+// end exactly at reopen, and the very next bucket (queried just after
+// reopen) must start exactly there too: no gap, no overlap.
+func TestFXCalendarBarH4ClosedBucketEndsExactlyAtSpringForwardReopen(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2026-03-08 is the US spring-forward Sunday (verified against the
+	// same closed Saturday-anchored day TestFXCalendarDayBarSpringForwardLosesAnHour
+	// uses for D1). Reopen is 2026-03-08 17:00 EDT = 21:00 UTC.
+	closedBucket, err := c.Bar(time.Date(2026, time.March, 8, 19, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, closedBucket.Start().Equal(time.Date(2026, time.March, 8, 18, 0, 0, 0, time.UTC)))
+	assert.True(t, closedBucket.End().Equal(time.Date(2026, time.March, 8, 21, 0, 0, 0, time.UTC)),
+		"clamped to reopen, not the naive 22:00 UTC four hours after 18:00")
+	assert.Equal(t, 3*time.Hour, closedBucket.Duration(), "shortened by the 23h day's own missing hour")
+
+	reopenBucket, err := c.Bar(time.Date(2026, time.March, 8, 21, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopenBucket.Start().Equal(time.Date(2026, time.March, 8, 21, 0, 0, 0, time.UTC)),
+		"the very next bucket starts exactly where the closed one ended: no gap, no overlap")
+}
+
+// TestFXCalendarBarH4ClosedBucketEndsExactlyAtFallBackReopen mirrors the
+// spring-forward case for the fall-back Sunday, where the closed
+// Saturday-anchored day is 25h long instead of 23h: the naive grid's
+// sixth bucket ends exactly on time, but a seventh, short bucket is
+// needed to cover the extra hour up to the actual (later) reopen.
+func TestFXCalendarBarH4ClosedBucketEndsExactlyAtFallBackReopen(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2026-11-01 is the US fall-back Sunday. Reopen is 2026-11-01 17:00
+	// EST = 22:00 UTC (an hour later in UTC than the summer-clock
+	// reopen would have been, since New York has just fallen back).
+	closedBucket, err := c.Bar(time.Date(2026, time.November, 1, 21, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, closedBucket.Start().Equal(time.Date(2026, time.November, 1, 21, 0, 0, 0, time.UTC)))
+	assert.True(t, closedBucket.End().Equal(time.Date(2026, time.November, 1, 22, 0, 0, 0, time.UTC)),
+		"a short seventh bucket covering the 25h day's own extra hour, ending exactly at reopen")
+	assert.Equal(t, time.Hour, closedBucket.Duration())
+
+	reopenBucket, err := c.Bar(time.Date(2026, time.November, 1, 22, 30, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopenBucket.Start().Equal(time.Date(2026, time.November, 1, 22, 0, 0, 0, time.UTC)),
+		"the very next bucket starts exactly where the closed one ended: no gap, no overlap")
+}
+
+// TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification is the
+// end-to-end version of the two tests above: before the dayEnd clamp,
+// ClassifyInterval rejected the pre-reopen closed bucket outright
+// (ErrIntervalStraddlesBoundary, since its Status disagreed between
+// start and end) — exactly the "breaking coverage across those
+// weekends" failure mode a design review identified. It must now
+// classify cleanly as IntervalStateClosed.
+func TestFXCalendarBarH4ClosedBucketNeverStraddlesClassification(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+	span, err := c.Bar(time.Date(2026, time.March, 8, 19, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+
+	state, err := ClassifyInterval(c, span, time.Date(2026, time.March, 9, 0, 0, 0, 0, time.UTC), false, false)
+	require.NoError(t, err, "must not straddle a calendar status boundary")
+	assert.Equal(t, IntervalStateClosed, state)
 }
 
 func TestFXCalendarBarRejectsUnknownUnit(t *testing.T) {

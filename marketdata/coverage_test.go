@@ -323,6 +323,40 @@ func TestCoverage_GapsExcludeClosedWeekend(t *testing.T) {
 	}
 }
 
+// TestCoverage_H4SurvivesSpringForwardWeekend is the end-to-end
+// regression for a design-review finding on PR #100: before
+// rolloverAnchoredBar clamped a sub-day bucket's end to its own day's
+// real length, the closed H4 bucket immediately preceding a
+// spring-forward Sunday reopen straddled from StatusClosed into
+// StatusOpen, and gapsForPartition's own ClassifyInterval call
+// propagated that as a hard error — meaning Coverage(H4) failed outright
+// for any query touching a DST-transition weekend, not merely
+// misclassified it. A query spanning the 2026-03-08 transition must now
+// succeed and report the closed weekend as ordinary closed time, never
+// as an error or a Gap.
+func TestCoverage_H4SurvivesSpringForwardWeekend(t *testing.T) {
+	rawRoot := t.TempDir()
+	mgr := newTestManagerWithRaw(t, rawRoot)
+	// Spans the Friday close through the following Monday, straddling
+	// the 2026-03-08 US spring-forward transition inside the closed
+	// weekend.
+	start := time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC) // Friday
+	end := time.Date(2026, time.March, 9, 12, 0, 0, 0, time.UTC)   // Monday
+	span, err := NewTimeRange(start, end)
+	require.NoError(t, err)
+
+	rawPath := writeRawPartition(t, rawRoot, "EURUSD", H4, 2026, time.March, rawRow(start, true))
+	fp := rawFingerprint(t, rawPath)
+	bars := []Bar{barAt(t, start)}
+	publishCanonicalMonth(t, mgr, H4, 2026, time.March, span, bars, fp, nil)
+
+	cov, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: H4, Range: span})
+	require.NoError(t, err, "must not fail with ErrIntervalStraddlesBoundary across the DST weekend")
+	for _, g := range cov.Gaps {
+		assert.NotEqual(t, IntervalStateClosed, g.State, "a closed weekend must never appear as a Gap")
+	}
+}
+
 func TestCoverage_GapsMergeContiguousMissingBoundaries(t *testing.T) {
 	rawRoot := t.TempDir()
 	mgr := newTestManagerWithRaw(t, rawRoot)
