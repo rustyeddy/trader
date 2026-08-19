@@ -22,16 +22,19 @@
 //
 // # Calendars align bars to sessions, not just the clock
 //
-// Minute and hour bars align to the UTC clock. Day and week bars do not:
-// a trading day is not a UTC calendar day, and Calendar exists to make
-// that alignment explicit and testable rather than assumed. FXCalendar is
-// the one implementation this package provides, covering spot FX's
-// continuous weekly session — open Sunday 17:00 New York time, closed
-// Friday 17:00 through Sunday 17:00, with a daily rollover at 17:00 New
-// York time on every other day. Exchange-traded asset classes will need
-// their own Calendar implementations (holidays, early closes, futures
-// session boundaries) in later milestones; Calendar is an interface for
-// exactly that reason.
+// No bar interval, sub-day included, is assumed to align to the raw UTC
+// clock: a trading day is not a UTC calendar day, and Calendar exists to
+// make that alignment explicit and testable rather than assumed.
+// FXCalendar is the one implementation this package provides, covering
+// spot FX's continuous weekly session — open Sunday 17:00 New York time,
+// closed Friday 17:00 through Sunday 17:00, with a daily rollover at
+// 17:00 New York time on every other day. Every FXCalendar bar interval,
+// including minute and hour bars, anchors to that same daily rollover
+// (ADR-021 corrected an earlier, wrong UTC-midnight assumption for
+// sub-day bars — see that ADR for why OANDA's real H4 candles disagreed
+// with it). Exchange-traded asset classes will need their own Calendar
+// implementations (holidays, early closes, futures session boundaries)
+// in later milestones; Calendar is an interface for exactly that reason.
 //
 // FXCalendar blank-imports time/tzdata so its New York DST transitions
 // resolve identically regardless of the host's installed time zone

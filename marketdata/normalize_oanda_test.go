@@ -307,6 +307,40 @@ func TestNormalizeOANDASequence_D1UTCMidnightMisaligned(t *testing.T) {
 	assert.ErrorIs(t, out[0].err, errRecordMisaligned)
 }
 
+// TestNormalizeOANDASequence_H4RealBoundaryAccepted is the regression
+// for issue #99: before ADR-021's fix, every real OANDA H4 record was
+// rejected as misaligned (FXCalendar.Bar truncated H4 to UTC midnight,
+// which never matches OANDA's actual rollover-anchored H4 boundaries),
+// aborting normalizeAndPublish's entire partition build. This timestamp
+// is taken directly from the real archive
+// (AUDCAD-2006-11-h4.csv's own 2006-11-01T02:00:00Z row, #81/#99's own
+// investigation) and must now be accepted.
+func TestNormalizeOANDASequence_H4RealBoundaryAccepted(t *testing.T) {
+	rec := oandaRecord(t,
+		time.Date(2006, time.November, 1, 2, 0, 0, 0, time.UTC),
+		"0.86926", "0.87161", "0.86723", "0.87040", "0.86957", "0.87192", "0.86753", "0.87070", 2828, true)
+	out, err := normalizeOANDASequence(oanda.RawH4, h1FXCalendar(), []oanda.Record{rec})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, recordOutcomeAccepted, out[0].outcome, "%+v", out[0])
+}
+
+// TestNormalizeOANDASequence_H4UTCMidnightNowMisaligned is the fix's
+// other side: the *old* UTC-midnight H4 grid (00:00, 04:00, ... UTC)
+// this issue found was wrong must now itself be rejected as misaligned,
+// proving the fix actually changed H4's accepted grid rather than
+// merely widening it to accept everything.
+func TestNormalizeOANDASequence_H4UTCMidnightNowMisaligned(t *testing.T) {
+	rec := oandaRecord(t,
+		time.Date(2006, time.November, 1, 0, 0, 0, 0, time.UTC),
+		"0.86926", "0.87161", "0.86723", "0.87040", "0.86957", "0.87192", "0.86753", "0.87070", 2828, true)
+	out, err := normalizeOANDASequence(oanda.RawH4, h1FXCalendar(), []oanda.Record{rec})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, recordOutcomeRejected, out[0].outcome)
+	assert.ErrorIs(t, out[0].err, errRecordMisaligned)
+}
+
 // 2026-03-08 is the US spring-forward transition (see fxcalendar_test.go);
 // the D1 session opening 2026-03-07 17:00 NY still resolves to a single
 // correct UTC instant despite the DST shift, and a record there aligns.

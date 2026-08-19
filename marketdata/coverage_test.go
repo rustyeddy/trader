@@ -343,8 +343,13 @@ func TestCoverage_GapsMergeContiguousMissingBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cov.Gaps, 1, "three consecutive missing hours must merge into one Gap")
 	assert.Equal(t, IntervalStateMissing, cov.Gaps[0].State)
-	assert.Equal(t, aWeekday(1), cov.Gaps[0].Span.Start())
-	assert.Equal(t, aWeekday(4), cov.Gaps[0].Span.End())
+	// .Equal(), not assert.Equal: Bar's boundaries are computed relative
+	// to the FX daily rollover (ADR-021) and so carry a New York
+	// time.Location, while aWeekday constructs its comparison values in
+	// UTC — both name the identical instant, but time.Time's struct
+	// representation differs by Location even when the instant matches.
+	assert.True(t, cov.Gaps[0].Span.Start().Equal(aWeekday(1)))
+	assert.True(t, cov.Gaps[0].Span.End().Equal(aWeekday(4)))
 }
 
 func TestCoverage_RawRootRequiredForRawBuiltInterval(t *testing.T) {

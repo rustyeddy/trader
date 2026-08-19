@@ -4,48 +4,43 @@
 
 * Status
 
-Proposed. Nearly every open question this document originally raised —
-canonical dataset definition and versioning, gap/completeness modeling,
-the store/cache/coverage contracts, explicit OANDA synchronization, raw
-normalization, and canonical build/derivation including W1 resampling —
-was settled by the body of M2 work below (issues #70 through #81), each
-recorded as its own =DONE= section as it landed. This ADR stayed
-=Proposed= in spirit (no explicit status was ever recorded) until issue
-#69 folded in the remaining parked review comments; a first pass at this
-Status section promoted it to =Accepted=, but PR #98 review correctly
-caught that this overstated day/week alignment specifically (see next
-paragraph), so promotion is held back pending that one item.
+Accepted. Every open question this document originally raised —
+canonical dataset definition and versioning, day/week alignment,
+gap/completeness modeling, the store/cache/coverage contracts, explicit
+OANDA synchronization, raw normalization, and canonical build/derivation
+including W1 resampling — was settled by the body of M2 work below
+(issues #70 through #81 and #99), each recorded as its own =DONE=
+section as it landed. This ADR stayed =Proposed= in spirit (no explicit
+status was ever recorded) until issue #69 folded in the remaining parked
+review comments; a first pass at this Status section promoted it to
+=Accepted=, but PR #98 review correctly caught that this overstated
+day/week alignment specifically — H4's boundary disagreed with real
+OANDA data, an active bug (issue #99), not settled at all — so promotion
+was held back pending that one item. Issue #99 (ADR-021) has since fixed
+it: =FXCalendar='s hour-bar alignment now anchors to the FX daily
+rollover instead of UTC midnight, matching OANDA's real H4 boundaries,
+verified both by unit tests and by re-running the real-corpus comparison
+tooling (#81) against the operator's archive — 53 residual disagreements
+across 25 compared partitions, down from ~3,496, and every one of those
+53 is the same already-documented month-boundary tool limitation D1
+already has, not a remaining alignment defect. See ADR-021 for the full
+decision; ADR-012 keeps its own =Accepted= status and original text
+unchanged, with only an additive forward-pointer note.
 
-*One blocking gap: H4 alignment.* #81's corpus validation against the
-real archive found that ADR-012's =FXCalendar= H4 alignment
-(UTC-midnight truncation) does not match OANDA's actual native H4
-candle boundaries (anchored to the FX daily rollover, like D1). This is
-not merely a documentation discrepancy: =normalizeOANDASequence=
-validates every H4 record's alignment against =FXCalendar.Bar=, so every
-real OANDA H4 record is currently rejected and =Manager.Build='s
-=ActionNormalizeCanonical(H4)= aborts outright against real data — see
-issue #99. D1 and W1 are unaffected (D1's native rollover already
-matches =FXCalendar='s own D1 boundary; W1 derives from D1, never H4).
-Per PR #98 review, this ADR should not be promoted to =Accepted= until
-issue #99 resolves it: a new ADR superseding ADR-012's H4 boundary,
-=FXCalendar= updated accordingly, and re-verification against the real
-corpus.
-
-Two further items remain open as ordinary follow-on work, not as
-blockers: running the legacy =candle-v2= comparison tooling (#81) to
-completion across the full archive before that tree is deleted, and the
-general Rate/string-parsing cache idea in issue #85 (deliberately
-deferred pending actual performance evidence).
+Two items remain open as ordinary follow-on work, not as blockers:
+running the legacy =candle-v2= comparison tooling (#81) to completion
+across the full archive before that tree is deleted, and the general
+Rate/string-parsing cache idea in issue #85 (deliberately deferred
+pending actual performance evidence).
 
 ** DONE Persisted interval policy
 Canonical M1, H1, H4, D1, and W1 Bars are persisted (see "All derived
 data will be persisted" below for the no-recompute-on-every-query
 rationale). M1, H1, H4, and D1 are normalized directly from
 provider-native raw partitions (#76); W1 is derived from canonical D1,
-the one interval with no raw source of its own (#81). H4 persistence is
-currently blocked by issue #99 (see Status above) even though the
-policy itself — which intervals are persisted, and from what — is
-settled.
+the one interval with no raw source of its own (#81). H4 persistence,
+previously blocked by issue #99's alignment bug, now works against real
+data — see Status above and ADR-021.
 
 Here are the principles I want to keep that are important now.
 
@@ -1619,6 +1614,17 @@ findings came out of it:
   quality findings, not authority to overwrite native canonical data")
   and left unfixed: revising H4's alignment is an ADR-012 change (a new,
   superseding ADR), out of this issue's scope, not guessed at here.
+
+  *Resolved by issue #99 (ADR-021).* =FXCalendar.Bar='s M1/H1/H4
+  boundaries now anchor to the FX daily rollover instead of UTC
+  midnight, correcting exactly this disagreement (H4 only — M1/H1 are
+  mathematically unaffected, see ADR-021). Re-running
+  =TestCorpusH4AgreesWithNative= against the same real archive after the
+  fix found 53 total disagreements across the same 25 compared
+  partitions, down from ~3,496 (essentially every bar) before — and
+  every remaining disagreement clusters at month boundaries, the exact
+  same single-partition-read tool limitation already documented above
+  for D1, not a residual alignment defect.
 
 The one-time legacy candle-v2 comparison
 (=TestCorpusLegacyComparison=) is documented and available per the

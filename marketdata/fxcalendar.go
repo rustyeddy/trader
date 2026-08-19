@@ -220,9 +220,9 @@ func (c *FXCalendar) Bar(t time.Time, interval Interval) (TimeRange, error) {
 	}
 	switch interval.Unit() {
 	case UnitMinute:
-		return utcBar(t, time.Duration(interval.Count())*time.Minute)
+		return c.rolloverAnchoredBar(t, time.Duration(interval.Count())*time.Minute)
 	case UnitHour:
-		return utcBar(t, time.Duration(interval.Count())*time.Hour)
+		return c.rolloverAnchoredBar(t, time.Duration(interval.Count())*time.Hour)
 	case UnitDay:
 		if interval.Count() != 1 {
 			return TimeRange{}, fmt.Errorf("marketdata: FXCalendar only aligns single-day bars, got count %d", interval.Count())
@@ -285,13 +285,34 @@ func literalDateKey(h time.Time) dateKey {
 	return dateKey{year: y, month: m, day: d}
 }
 
-// utcBar truncates t to the most recent multiple of duration since the
-// Go zero time. The zero time falls at 00:00:00 UTC, so this always
-// aligns to the UTC clock rather than to an arbitrary epoch. For
-// durations that evenly divide 24 hours — as every predefined Interval
-// here does — the resulting boundaries repeat at the same clock time
-// every day (00:00, 04:00, ... for four-hour bars, for example).
-func utcBar(t time.Time, duration time.Duration) (TimeRange, error) {
-	start := t.UTC().Truncate(duration)
+// rolloverAnchoredBar returns the [start, start+duration) bar containing
+// t, where start is the most recent instant at or before t that is a
+// whole multiple of duration past the FX daily rollover containing t
+// (dayStart) — not since the Unix epoch or UTC midnight (ADR-021,
+// superseding ADR-012's UTC-clock alignment rule for sub-day bars: see
+// that ADR for why UTC-midnight truncation was wrong for H4 in
+// particular).
+//
+// dayStart is always a whole-hour UTC instant (17:00 New York is either
+// 21:00 or 22:00 UTC, depending on DST), so for any duration that evenly
+// divides 24h — every predefined sub-day Interval — this produces
+// exactly the same boundary *set* as plain UTC-epoch truncation whenever
+// duration itself evenly divides dayStart's own UTC-minute offset from
+// midnight: true for M1 (any instant is a 1-minute boundary either way)
+// and H1 (any whole-hour instant is a 1-hour boundary either way), but
+// false for H4, where dayStart's offset (21:00 or 22:00 UTC, neither a
+// multiple of 4h from midnight) shifts every boundary by 1-2 hours from
+// where UTC-midnight truncation would have placed it — landing exactly
+// on OANDA's real native H4 boundaries instead.
+//
+// The truncation itself mirrors time.Duration.Truncate's own idiom
+// (subtracting the remainder) rather than integer-dividing and
+// re-multiplying, for the same reason: it is the direct, well-understood
+// pattern for "round down to a multiple," here applied to an elapsed
+// duration since a computed anchor instead of since the zero time.
+func (c *FXCalendar) rolloverAnchoredBar(t time.Time, duration time.Duration) (TimeRange, error) {
+	anchor := c.dayStart(t)
+	delta := t.Sub(anchor)
+	start := anchor.Add(delta - delta%duration)
 	return NewTimeRange(start, start.Add(duration))
 }

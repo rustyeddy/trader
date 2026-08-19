@@ -85,17 +85,17 @@ believed at that time.
 | 017 | Broker-neutral order and execution vocabulary                     | Accepted   |
 | 018 | Order lifecycle transition rules                                  | Accepted   |
 | 019 | Account and portfolio snapshot models                             | Accepted   |
-| 020 | Historic data subsystem (in adr-020-historic-data.org)            | Proposed   |
+| 020 | Historic data subsystem (in adr-020-historic-data.org)            | Accepted   |
+| 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
 
 Note: ADR-020 is maintained in its own file,
 =docs/arch/adr-020-historic-data.org=, rather than inline in this
 registry.  Its own Status section is authoritative; the status column
 above is kept in sync with it, not a substitute for reading the file —
-consult it for the full decisions and open questions.  As of this
-writing, ADR-020 remains =Proposed=: nearly every open question it
-raised has been settled (issues #70-#81), but issue #99 (H4 alignment
-disagreeing with ADR-012, discovered during #81's corpus validation) is
-an explicit blocker to promoting it to =Accepted=.
+consult it for the full decisions and open questions.  ADR-020 was held
+at =Proposed= pending issue #99 (H4 alignment disagreeing with ADR-012,
+discovered during #81's corpus validation); #99 resolved it (ADR-021),
+and ADR-020 is now =Accepted=.
 
 * ADR-001: Modular monolith before service decomposition
 
@@ -683,6 +683,24 @@ rest of M2.
   anchored at the Unix epoch.* Rejected as an untested, arbitrary
   convention with no real consumer yet; reporting an error keeps the
   decision honest about what is actually implemented.
+
+** Note: hour-bar alignment corrected by ADR-021
+
+This ADR's own Decision section above states that "Minute and hour bars
+... align to the UTC clock ... so H4 bars land on 00:00/04:00/.../20:00
+UTC regardless of date." That specific claim was found, during M2's own
+corpus validation (issue #81) against the real OANDA archive, to
+disagree with OANDA's actual native H4 boundaries — an operational bug,
+not merely a documentation gap: real H4 data was rejected outright (see
+issue #99). *ADR-021* corrects this one sub-decision: hour bars (in
+practice, only H4 — M1 and H1 are unaffected, see that ADR) now align to
+the FX daily rollover instead of UTC midnight. Every other decision in
+this ADR — the =Interval=/=TimeRange=/=Calendar= types, =FXCalendar='s
+D1/W1 rollover alignment, DST handling via =time.Date=/=*time.Location=
+— remains unchanged and in force. This note is additive, per this
+registry's own rule against rewriting an accepted ADR's original
+Decision text; the paragraph above is left exactly as originally
+written for the historical record.
 
 * ADR-013: Greenfield repository with controlled legacy transplant
 
@@ -1516,6 +1534,115 @@ registry: =docs/arch/adr-020-historic-data.org=.  It governs the
 data, and the =marketdata.Manager= boundary that M2 issues (for example
 #71) build against.  Refer to that file for its current status,
 decisions, and open questions.
+
+* ADR-021: FX hour-bar alignment corrected to daily-rollover anchoring
+
+** Status
+
+Accepted
+
+** Context
+
+ADR-012 specified that =FXCalendar='s minute and hour bars align to the
+UTC clock via truncation since the Go zero time, so that H4 bars land on
+00:00/04:00/.../20:00 UTC regardless of date. Issue #81's corpus-scale
+validation against the real, preserved OANDA archive — comparing derived
+H4 (resampled from raw H1) against OANDA's own native H4 partitions —
+found this claim wrong: OANDA's real H4 candles anchor to the FX daily
+rollover (17:00 New York, the same instant D1 already uses), landing on
+02:00/06:00/10:00/14:00/18:00/22:00 UTC in winter (shifting with DST),
+confirmed directly against a raw H4 partition file
+(=AUDCAD-2006-11-h4.csv=).
+
+This is not merely a documentation discrepancy. Issue #99 traced it to
+an active operational bug: =normalizeOANDASequence= validates every
+accepted/incomplete H4 record's alignment via =Calendar.Bar=, so under
+ADR-012's UTC-midnight rule, every real OANDA H4 record fails that
+check and is classified =recordOutcomeRejected=. =normalizeAndPublish=
+aborts the entire partition build — no partial publish — on any
+=Rejected= record, so =Manager.Build= for =ActionNormalizeCanonical(H4)=
+failed outright against real data. D1 was unaffected (OANDA's native D1
+rollover already matches =FXCalendar='s own D1 boundary exactly), and so
+was W1, since it derives from D1 and never touches H4 (#81).
+
+** Decision
+
+=FXCalendar.Bar='s =UnitMinute=/=UnitHour= cases now anchor to the FX
+daily rollover (=dayStart=, the same anchor D1 already uses) instead of
+UTC midnight: the boundary is the most recent whole multiple of the
+requested duration past =dayStart(t)=, computed by subtracting the
+remainder of elapsed time since that anchor (the same truncation idiom
+=time.Duration.Truncate= itself uses), not by truncating since the Unix
+epoch.
+
+This changes H4's actual landing boundaries to match OANDA's real data.
+It changes nothing for M1 or H1: =dayStart= is always a whole-hour UTC
+instant (17:00 New York is either 21:00 or 22:00 UTC, depending on DST),
+so a 1-minute or 1-hour grid anchored there produces exactly the same
+boundary *set* as one anchored at UTC midnight — every instant is
+already a 1-minute boundary either way, and every whole-hour instant is
+already a 1-hour boundary either way. Only H4's 4-hour grid actually
+shifts, since neither 21:00 nor 22:00 UTC is itself a multiple of 4h
+from midnight. This equivalence is asserted by a dedicated test
+(=TestFXCalendarBarRolloverAlignmentForHourAndMinute=), not merely
+claimed.
+
+=Manifest.CalendarVersion= (ADR-020, issue #81) bumps from
+=fxcalendar-v1= to =fxcalendar-v2= to name this changed =Bar=
+implementation, even though no H4 canonical data had ever successfully
+published before this fix (there is no prior H4 dataset to invalidate)
+and M1/H1/D1/W1 data is unaffected in substance.
+
+This narrowly corrects one sub-decision within ADR-012, which bundles
+several unrelated decisions (the =Interval=/=TimeRange=/=Calendar=
+types, =FXCalendar='s D1/W1 rollover alignment, DST handling). Per this
+registry's own supersession rules, an accepted ADR's original text is
+never rewritten; ADR-012 keeps its =Accepted= status and its Decision
+section unchanged, with only a small additive forward-pointer note
+appended directing readers to this ADR for the corrected sub-decision.
+Marking the entire ADR-012 =Superseded= was considered and rejected — see
+Alternatives Considered.
+
+** Consequences
+
+- Real OANDA H4 data now normalizes and publishes successfully;
+  =TestNormalizeOANDASequence_H4RealBoundaryAccepted= (#99) is the
+  regression proving it, alongside
+  =TestNormalizeOANDASequence_H4UTCMidnightNowMisaligned= proving the
+  fix actually moved the accepted grid rather than merely widening it.
+- =FXCalendar.Bar='s returned =TimeRange= for M1/H1/H4 now carries a New
+  York =time.Location= (inherited from =dayStart=), matching D1/W1's
+  existing convention, rather than the UTC location =utcBar= previously
+  returned. The underlying instants are unchanged for M1/H1 and
+  intentionally different for H4; any caller comparing returned
+  boundaries must use =time.Time.Equal=, never struct/reflect equality,
+  which was already the documented-correct way to compare =time.Time=
+  values and is now exercised by a real regression
+  (=TestCoverage_GapsMergeContiguousMissingBoundaries= was fixed to use
+  it).
+- Any future third-party or non-OANDA hour-bar provider must be checked
+  against this same rollover-anchored rule, not assumed to share OANDA's
+  own alignment convention.
+
+** Alternatives Considered
+
+- *Special-case only H4, leaving =UnitMinute=/=UnitHour= on two
+  divergent code paths.* Rejected: M1/H1 are provably unaffected by
+  routing through the same rollover-anchored function (see Decision), so
+  a single shared implementation is both simpler and removes the risk of
+  the two paths silently drifting apart later.
+- *Mark all of ADR-012 =Superseded=.* Rejected: ADR-012 bundles several
+  decisions that remain entirely correct and unchanged (the type
+  definitions, =Calendar= interface, D1/W1 alignment, DST handling via
+  =time.Date=). Superseding the whole document would misleadingly imply
+  those parts were also being replaced. A narrow correcting ADR plus an
+  additive forward-pointer note keeps the historical record accurate
+  without overclaiming scope.
+- *Silently patch =FXCalendar= without a new ADR.* Rejected: this
+  reverses an explicit, Accepted architectural decision (ADR-012's own
+  stated H4 boundary) for an interval used throughout =marketdata=; per
+  =CONTRIBUTING.org=, that requires a recorded decision, not a quiet
+  code change.
 
 * ADR Template                                                       :noexport:
 

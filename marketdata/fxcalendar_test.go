@@ -101,19 +101,96 @@ func TestFXCalendarBarRejectsMultiDayAndMultiWeekCounts(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFXCalendarBarUTCAlignmentForHourAndMinute(t *testing.T) {
+// TestFXCalendarBarRolloverAlignmentForHourAndMinute is the corrected
+// successor to what was TestFXCalendarBarUTCAlignmentForHourAndMinute
+// (ADR-021, superseding ADR-012's UTC-clock alignment rule for sub-day
+// bars, issue #99): H4 boundaries are now anchored to the FX daily
+// rollover (dayStart), not UTC midnight. January 7 2026 09:13:27 UTC
+// falls in winter (EST, UTC-5), so dayStart is January 6 22:00 UTC
+// (17:00 NY) and H4 boundaries land on 02:00/06:00/10:00/... UTC —
+// matching OANDA's own real archive (confirmed directly against a raw
+// H4 partition file during #81/#99), not the old 00:00/04:00/08:00/...
+// UTC-midnight grid.
+//
+// M1's boundary is asserted unchanged from before: dayStart is always a
+// whole-hour UTC instant, so a 1-minute grid anchored there produces the
+// identical boundary set as one anchored at UTC midnight — this is
+// tested, not just claimed, so a future change that broke that
+// equivalence would be caught here.
+func TestFXCalendarBarRolloverAlignmentForHourAndMinute(t *testing.T) {
 	c := NewFXCalendar(FXCalendarParams{})
 	t9h13 := time.Date(2026, time.January, 7, 9, 13, 27, 0, time.UTC)
 
 	h4, err := c.Bar(t9h13, H4)
 	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, time.January, 7, 8, 0, 0, 0, time.UTC), h4.Start())
-	assert.Equal(t, time.Date(2026, time.January, 7, 12, 0, 0, 0, time.UTC), h4.End())
+	assert.True(t, h4.Start().Equal(time.Date(2026, time.January, 7, 6, 0, 0, 0, time.UTC)))
+	assert.True(t, h4.End().Equal(time.Date(2026, time.January, 7, 10, 0, 0, 0, time.UTC)))
 
 	m1, err := c.Bar(t9h13, M1)
 	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, time.January, 7, 9, 13, 0, 0, time.UTC), m1.Start())
-	assert.Equal(t, time.Date(2026, time.January, 7, 9, 14, 0, 0, time.UTC), m1.End())
+	assert.True(t, m1.Start().Equal(time.Date(2026, time.January, 7, 9, 13, 0, 0, time.UTC)))
+	assert.True(t, m1.End().Equal(time.Date(2026, time.January, 7, 9, 14, 0, 0, time.UTC)))
+}
+
+// TestFXCalendarBarH4MatchesRealOANDABoundaries asserts H4 boundaries
+// directly against real values read from the archive during #99's
+// investigation: winter (EST, offset 2h from UTC midnight — 02:00,
+// 06:00, ... UTC) and summer (EDT, offset 1h — 01:00, 05:00, ... UTC,
+// verified via the same corpus's Sunday-reopen boundary after the
+// spring-forward transition, see the DST tests below).
+func TestFXCalendarBarH4MatchesRealOANDABoundaries(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	winter, err := c.Bar(time.Date(2006, time.November, 1, 3, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, winter.Start().Equal(time.Date(2006, time.November, 1, 2, 0, 0, 0, time.UTC)),
+		"matches AUDCAD-2006-11-h4.csv's own 02:00/06:00/10:00/14:00/18:00/22:00 UTC boundaries")
+	assert.True(t, winter.End().Equal(time.Date(2006, time.November, 1, 6, 0, 0, 0, time.UTC)))
+}
+
+// TestFXCalendarBarH4AcrossSpringForwardWeekend and its fall-back
+// counterpart below confirm H4's rollover-anchored boundaries stay
+// exactly 4h-spaced straight through a DST transition weekend, matching
+// real EURUSD H4 data for the transitions in 2024. The US DST switch
+// happens at 2am New York on a Sunday, entirely within FX's closed
+// Friday-17:00-to-Sunday-17:00 window — so unlike an arbitrary D1
+// bucket landing on the transition (which can be a real 23h/25h span,
+// see TestFXCalendarDayBarSpringForwardLosesAnHour), no *live* H4
+// bucket ever actually straddles the transition: the reopening
+// Sunday-17:00-NY boundary itself is simply computed at whichever UTC
+// offset is already in effect by then.
+func TestFXCalendarBarH4AcrossSpringForwardWeekend(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2024-03-10 is the US spring-forward Sunday; by 17:00 NY (the
+	// week's reopen) New York is already on EDT (UTC-4), so reopen is
+	// 21:00 UTC — matching EURUSD-2024-03-h4.csv's own
+	// 2024-03-10T21:00:00Z first bar after the weekend gap.
+	reopen, err := c.Bar(time.Date(2024, time.March, 10, 22, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopen.Start().Equal(time.Date(2024, time.March, 10, 21, 0, 0, 0, time.UTC)))
+
+	next, err := c.Bar(time.Date(2024, time.March, 11, 2, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, next.Start().Equal(time.Date(2024, time.March, 11, 1, 0, 0, 0, time.UTC)),
+		"matches EURUSD-2024-03-h4.csv's own 2024-03-11T01:00:00Z bar")
+}
+
+func TestFXCalendarBarH4AcrossFallBackWeekend(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	// 2024-11-03 is the US fall-back Sunday; by 17:00 NY New York has
+	// already fallen back to EST (UTC-5), so reopen is 22:00 UTC —
+	// matching EURUSD-2024-11-h4.csv's own 2024-11-03T22:00:00Z first
+	// bar after the weekend gap.
+	reopen, err := c.Bar(time.Date(2024, time.November, 3, 23, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, reopen.Start().Equal(time.Date(2024, time.November, 3, 22, 0, 0, 0, time.UTC)))
+
+	next, err := c.Bar(time.Date(2024, time.November, 4, 3, 0, 0, 0, time.UTC), H4)
+	require.NoError(t, err)
+	assert.True(t, next.Start().Equal(time.Date(2024, time.November, 4, 2, 0, 0, 0, time.UTC)),
+		"matches EURUSD-2024-11-h4.csv's own 2024-11-04T02:00:00Z bar")
 }
 
 func TestFXCalendarBarRejectsUnknownUnit(t *testing.T) {
