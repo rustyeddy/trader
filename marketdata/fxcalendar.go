@@ -220,9 +220,9 @@ func (c *FXCalendar) Bar(t time.Time, interval Interval) (TimeRange, error) {
 	}
 	switch interval.Unit() {
 	case UnitMinute:
-		return c.rolloverAnchoredBar(t, time.Duration(interval.Count())*time.Minute)
+		return c.rolloverAnchoredBar(t, interval.Count(), time.Minute, minutesPerDay)
 	case UnitHour:
-		return c.rolloverAnchoredBar(t, time.Duration(interval.Count())*time.Hour)
+		return c.rolloverAnchoredBar(t, interval.Count(), time.Hour, hoursPerDay)
 	case UnitDay:
 		if interval.Count() != 1 {
 			return TimeRange{}, fmt.Errorf("marketdata: FXCalendar only aligns single-day bars, got count %d", interval.Count())
@@ -314,59 +314,83 @@ func literalDateKey(h time.Time) dateKey {
 // pattern for "round down to a multiple," here applied to an elapsed
 // duration since a computed anchor instead of since the zero time.
 //
-// # Only durations that evenly divide 24h are safe
+// minutesPerDay and hoursPerDay are rolloverAnchoredBar's per-unit
+// divisibility bound: a nominal (DST-free) trading day holds exactly
+// this many minutes or hours, so count must evenly divide it for the
+// resulting sub-day grid to be well-defined at all (see rolloverAnchoredBar's
+// own "Only counts that evenly divide a day are safe" section).
+const (
+	minutesPerDay = 24 * 60
+	hoursPerDay   = 24
+)
+
+// # Only counts that evenly divide a day are safe
 //
 // anchor is recomputed fresh from dayStart on every call, and dayStart
-// itself resets once per real trading day. duration must evenly divide
-// 24h for this grid to make sense at all: an arbitrary Interval such as
-// H5 or M7, both constructible via NewInterval even though no predefined
-// value uses them, would let one day's reset move the anchor to an
-// instant *before* the previous day's grid had finished its own final,
-// partial bucket, producing two buckets that overlap in real wall-clock
-// time (a design review caught this: for example, on an ordinary winter
-// day with dayStart at 22:00 UTC, Bar(21:30 UTC, H5) would return
-// [18:00, 23:00) from the preceding day's own anchor, while Bar(22:00
-// UTC, H5) returns [22:00, 03:00) from the freshly reset one —
-// overlapping from 22:00 to 23:00). Coverage and planning assume Bar
-// produces a deterministic, non-overlapping sequence, so a non-divisor
-// duration is rejected outright rather than silently returning an
-// overlapping range: FXCalendar has no continuous rollover-relative grid
-// definition for one, and inventing one is not this fix's job. A caller
-// needing such an interval must use a Calendar (or a future FXCalendar
-// capability) that actually defines one.
+// itself resets once per real trading day. count must evenly divide
+// maxUnitsPerDay (minutesPerDay or hoursPerDay) for this grid to make
+// sense at all: an arbitrary Interval such as H5 or M7, both
+// constructible via NewInterval even though no predefined value uses
+// them, would let one day's reset move the anchor to an instant *before*
+// the previous day's grid had finished its own final, partial bucket,
+// producing two buckets that overlap in real wall-clock time (a design
+// review caught this: for example, on an ordinary winter day with
+// dayStart at 22:00 UTC, Bar(21:30 UTC, H5) would return [18:00, 23:00)
+// from the preceding day's own anchor, while Bar(22:00 UTC, H5) returns
+// [22:00, 03:00) from the freshly reset one — overlapping from 22:00 to
+// 23:00). Coverage and planning assume Bar produces a deterministic,
+// non-overlapping sequence, so a non-divisor count is rejected outright
+// rather than silently returning an overlapping range: FXCalendar has no
+// continuous rollover-relative grid definition for one, and inventing
+// one is not this fix's job. A caller needing such an interval must use
+// a Calendar (or a future FXCalendar capability) that actually defines
+// one.
 //
-// # Even a divisor duration must not cross a DST-shortened or -lengthened day
+// This check runs on count *before* it is multiplied into a
+// time.Duration, not on the resulting duration — a second design-review
+// finding: NewInterval accepts any count >= 1 with no upper bound, so a
+// pathologically large one (NewInterval(UnitHour, 1<<51), say) would
+// overflow time.Duration's int64 nanosecond range when multiplied by
+// time.Hour, silently wrapping to an arbitrary (possibly zero) value;
+// checking the post-multiplication duration would then either miss the
+// problem (a wrapped nonzero value happening to still "divide" 24h) or
+// panic outright (a wrapped zero causing day%duration's own
+// divide-by-zero). Comparing count directly against maxUnitsPerDay
+// before any multiplication happens is immune to that overflow by
+// construction.
+//
+// # Even a divisor count must not cross a DST-shortened or -lengthened day
 //
 // dayStart's own real length is not always 24h: the FX trading day
 // containing a US DST transition is 23h (spring forward) or 25h (fall
 // back) — see dayStart's own doc comment, and the identical effect on
-// D1's own bar duration. A duration that evenly divides a nominal 24h
-// day does not necessarily evenly divide a 23h or 25h one, so the
-// naive anchor-plus-whole-multiples grid can still produce a final
-// bucket, before such a day's own end, whose naive end lands *after*
-// the next real rollover — a second design-review finding, this one
-// surviving the divisor check because H4 (4h) does divide 24h evenly.
-// Concretely: on the closed Friday-Saturday-Sunday weekend containing a
-// spring-forward transition, the Saturday-anchored day is only 23h
-// long, so its would-be sixth H4 bucket ([anchor+20h, anchor+24h))
-// extends one hour past the actual Sunday 17:00 New York reopen —
-// straddling from StatusClosed into StatusOpen, which ClassifyInterval
-// correctly refuses to describe as one IntervalState (see its own "
-// Straddling a calendar boundary" section), breaking any coverage walk
-// that reaches it. end is therefore clamped to the day's own real end
-// (dayEnd, computed the same AddDate-in-New-York-location way dayStart
-// and D1's own Bar case already do, so it inherits their DST
-// correctness): the result is a final bucket shorter than duration on a
-// spring-forward day, or an extra, shorter-than-duration final bucket
-// on a fall-back day, in both cases ending exactly at the next day's own
-// start — never straddling it. This never changes anything on an
-// ordinary (exactly-24h) day, where the naive end already equals dayEnd.
-func (c *FXCalendar) rolloverAnchoredBar(t time.Time, duration time.Duration) (TimeRange, error) {
-	const day = 24 * time.Hour
-	if day%duration != 0 {
+// D1's own bar duration. A count that evenly divides a nominal 24h day
+// does not necessarily evenly divide a 23h or 25h one, so the naive
+// anchor-plus-whole-multiples grid can still produce a final bucket,
+// before such a day's own end, whose naive end lands *after* the next
+// real rollover — a third design-review finding, this one surviving the
+// divisor check because H4 (4h) does divide 24h evenly. Concretely: on
+// the closed Friday-Saturday-Sunday weekend containing a spring-forward
+// transition, the Saturday-anchored day is only 23h long, so its
+// would-be sixth H4 bucket ([anchor+20h, anchor+24h)) extends one hour
+// past the actual Sunday 17:00 New York reopen — straddling from
+// StatusClosed into StatusOpen, which ClassifyInterval correctly refuses
+// to describe as one IntervalState (see its own "Straddling a calendar
+// boundary" section), breaking any coverage walk that reaches it. end is
+// therefore clamped to the day's own real end (dayEnd, computed the same
+// AddDate-in-New-York-location way dayStart and D1's own Bar case
+// already do, so it inherits their DST correctness): the result is a
+// final bucket shorter than duration on a spring-forward day, or an
+// extra, shorter-than-duration final bucket on a fall-back day, in both
+// cases ending exactly at the next day's own start — never straddling
+// it. This never changes anything on an ordinary (exactly-24h) day,
+// where the naive end already equals dayEnd.
+func (c *FXCalendar) rolloverAnchoredBar(t time.Time, count int, unit time.Duration, maxUnitsPerDay int) (TimeRange, error) {
+	if count > maxUnitsPerDay || maxUnitsPerDay%count != 0 {
 		return TimeRange{}, fmt.Errorf(
-			"marketdata: FXCalendar only aligns sub-day intervals whose duration evenly divides 24h, got %s", duration)
+			"marketdata: FXCalendar only aligns sub-day intervals whose count evenly divides a day, got %d x %s", count, unit)
 	}
+	duration := time.Duration(count) * unit
 	anchor := c.dayStart(t)
 	delta := t.Sub(anchor)
 	start := anchor.Add(delta - delta%duration)

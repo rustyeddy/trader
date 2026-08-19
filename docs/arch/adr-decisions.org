@@ -1684,6 +1684,20 @@ Considered.
   across the same 25 partitions as before the clamp, confirming it is a
   no-op for every live data boundary and only changes closed-period
   buckets that never had real data to begin with.
+- =rolloverAnchoredBar='s divisor check now runs on =count= before it is
+  multiplied into a =time.Duration=, not on the resulting duration — a
+  third design-review finding: =NewInterval= has no upper bound on
+  count, so a pathologically large one (=NewInterval(UnitHour, 1<<51)=,
+  say) would overflow =time.Duration='s int64 nanosecond range when
+  multiplied, silently wrapping to an arbitrary value — confirmed to
+  wrap to exactly zero for that example, which would have reached the
+  divisor check as a =day % duration= divide-by-zero panic rather than
+  a normal error. Comparing =count= directly against
+  =minutesPerDay=/=hoursPerDay= before any multiplication is immune to
+  that overflow by construction.
+  =TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic= is the
+  regression, confirmed (the same way as the other findings above) to
+  actually panic before this fix, not merely to pass after it.
 - =FXCalendar.Bar='s returned =TimeRange= for M1/H1/H4 now carries a New
   York =time.Location= (inherited from =dayStart=), matching D1/W1's
   existing convention, rather than the UTC location =utcBar= previously

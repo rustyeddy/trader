@@ -123,6 +123,33 @@ func TestFXCalendarBarRejectsSubDayIntervalsThatDontDivide24h(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic is the
+// regression for a third design-review finding on PR #100:
+// NewInterval accepts any count >= 1 with no upper bound, so
+// rolloverAnchoredBar must reject an oversized count *before*
+// multiplying it into a time.Duration, not after. Multiplying first
+// (count * time.Hour, say) can overflow time.Duration's int64
+// nanosecond range and silently wrap — potentially to zero — which
+// would otherwise reach the divisor check as a divide-by-zero panic
+// instead of a normal error.
+func TestFXCalendarBarRejectsHugeCountsWithoutOverflowPanic(t *testing.T) {
+	c := NewFXCalendar(FXCalendarParams{})
+
+	hugeHour, err := NewInterval(UnitHour, 1<<51)
+	require.NoError(t, err, "NewInterval itself has no upper bound on count")
+	assert.NotPanics(t, func() {
+		_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), hugeHour)
+		assert.Error(t, err)
+	})
+
+	hugeMinute, err := NewInterval(UnitMinute, 1<<51)
+	require.NoError(t, err)
+	assert.NotPanics(t, func() {
+		_, err = c.Bar(nyTime(2026, time.January, 7, 9, 0), hugeMinute)
+		assert.Error(t, err)
+	})
+}
+
 // TestFXCalendarBarH5WouldHaveOverlappedAcrossDailyReset directly
 // reproduces the exact overlap the review comment on PR #100 described,
 // proving the rejection above is necessary and not merely theoretical:
