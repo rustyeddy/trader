@@ -1728,5 +1728,63 @@ call =Plan= again (verifying it now emits =ActionDeriveCanonical= for
 the already-=Current= January partition), run =Build=, and verify the
 boundary week's bar is now present and the gap gone.
 
+** DONE Exercise the complete historical-data vertical slice
+Settled by issue #82 (M2-14, branch =feature/82-m2-vertical-slice=):
+=examples/m2/integration_test.go=, an external consumer package
+(=package m2_test=) that imports only =clock=, =instrument=,
+=marketdata=, and =num= — the way real code outside this module would —
+proving M2 is one coherent, externally consumable whole rather than a
+set of individually compiling packages. It cannot reach
+=marketdata/internal/...= at all, so "no internal implementation type
+appears in the consumer-facing flow" holds by construction, not merely
+by inspection.
+
+=examples/m2/testdata/raw/oanda/EURUSD/2024/01= is a small,
+hand-generated, committed raw archive (two trading weeks of H1 and D1
+data, ~24KB total, generated via a throwaway script that itself called
+=FXCalendar.Bar=/=Status= to guarantee every row lands on a real,
+correctly-aligned boundary rather than a hand-computed one) with one
+deliberate gap (2024-01-16, a Tuesday) built in on purpose. No network
+access or private archive is required to run this package; the
+=corpus=-tagged =corpus_test.go= (matching #75/#81's own
+=fullarchive=/=corpus= precedent exactly) runs the identical flow
+against an operator's real archive, skipping itself when unconfigured.
+A real run against the operator's archive completed successfully in
+this issue (H1/D1 published, W1 correctly scheduled zero actions since
+real January 2024 D1 data has its own gap spanning the whole queried
+month — expected, not a bug, matching exactly the "whole-month D1 gap
+blocks whole-month W1 derive" behavior already established by #79's own
+=deriveActionsW1= scoping).
+
+=TestM2VerticalSlice= drives the full chain through =Manager='s public
+=Plan=/=Build=/=Bars=/=Coverage= methods only: normalize H1 and D1 from
+raw, derive W1 from D1 (asserting =Manifest.Parent= names the exact D1
+=Revision()= consumed), query the published W1 bar, confirm
+=Manifest.Revision()= is reproducible by having a second, independent
+Manager build the identical dataset from a second copy of the same raw
+fixture and comparing revisions (rebuilding on the *same* Manager
+does not exercise this, since Plan correctly finds nothing left to do
+once a partition is Current), confirm Coverage reports the deliberate
+gap as =IntervalStateMissing= and the routine weekend as
+=IntervalStateClosed= — never conflated — and confirm mutating one
+existing raw row (in a writable per-test copy of the fixture, never the
+checked-in file) is detected as stale by =Plan= and produces a new
+=Manifest.Revision()= on rebuild, with the row count unchanged.
+
+Two further tests cover requirements =TestM2VerticalSlice= itself
+doesn't reach: =TestM2Build_CancelledContextPublishesNothing= confirms
+a =Build= cancelled mid-run leaves every partition exactly
+=PartitionCoverageMissing=, never a partial one, and
+=TestM2Queries_NeverWriteToStore= confirms =Bars=/=Coverage= — read-only
+queries — never create anything under =StoreRoot=, even when nothing
+has been published yet.
+
+=newTestManager= (the shared fixture-copying helper) deliberately
+returns the raw/store root paths alongside the =*Manager=, rather than
+adding any accessor to =Manager= itself for tests to call back: per
+=Config='s own field documentation, neither path is ever exposed through
+a Manager operation, and this package respects that boundary rather than
+punching a test-only hole in it.
+
 
 
