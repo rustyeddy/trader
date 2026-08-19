@@ -278,7 +278,40 @@ func (m *Manager) isStale(ctx context.Context, key partitionKey, man Manifest, s
 			// defensively rather than assumed.
 			return false, nil
 		}
-		return man.Parent.Revision != parentMan.Revision(), nil
+
+		// man's own Parent.Revision may be a composite over two D1
+		// manifests, not just this same-month one — deriveAndPublish
+		// records a composite whenever man's final published bar's
+		// week extends past its own Span's month boundary
+		// (w1SpansNextMonth). Recomputing that same rule here, from
+		// man's own stored LastBar/Span, is what lets this check agree
+		// with deriveAndPublish about which case applies; see
+		// deriveAndPublish's own doc comment for why the two share one
+		// function instead of encoding the rule twice.
+		spansNext, err := w1SpansNextMonth(m.calendar, man.LastBar, man.Span.End())
+		if err != nil {
+			return false, err
+		}
+		contributing := []Manifest{parentMan}
+		if spansNext {
+			nextStart := man.Span.End()
+			nextKey := parentKey
+			nextKey.year = nextStart.Year()
+			nextKey.month = nextStart.Month()
+			nextMan, _, err := m.loadPartition(ctx, nextKey)
+			if err != nil {
+				// The spillover D1 partition this W1 partition was
+				// actually built from can no longer be found or
+				// trusted. Matching the same-month case just above,
+				// that is not, by itself, grounds to call the child
+				// stale — a missing/invalid parent is surfaced through
+				// the parent's own status, not by this check.
+				return false, nil
+			}
+			contributing = append(contributing, nextMan)
+		}
+		revision, _ := combineParentLineage(contributing)
+		return man.Parent.Revision != revision, nil
 	}
 
 	if !rawApplicable {

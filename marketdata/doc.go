@@ -303,4 +303,38 @@
 // value, and never appears in a DownloadResult, SkippedAction, or error
 // Sync returns — oanda.Client places it on exactly one outgoing request
 // header and nowhere else.
+//
+// # Canonical build: normalization and resampling
+//
+// Manager.Build (issue #81, ADR-020) executes exactly the
+// ActionNormalizeCanonical and ActionDeriveCanonical entries in a Plan a
+// caller already obtained from Manager.Plan, mirroring Sync's own "only
+// these actions" scope split: Build never executes ActionDownloadRaw or
+// ActionRepairRaw (reported in BuildResult.Skipped, matching Sync's own
+// SkippedAction pattern), and Sync never executes a canonical build
+// action. ActionNormalizeCanonical converts one raw partition into
+// canonical Bars at the same interval and publishes it; a Suspicious or
+// Rejected record anywhere in the partition aborts the whole call before
+// anything is published, while an Incomplete record (OANDA's own
+// complete flag false) is silently excluded without aborting.
+// ActionDeriveCanonical resamples canonical D1 into canonical W1,
+// re-checking D1 completeness per calendar week against Manager's own
+// Coverage rather than trusting whatever range originally produced the
+// Action, and leaving any not-yet-ready week absent from the published
+// result rather than aborting the whole month. W1's Manifest.Parent
+// always names the D1 partition filed under the identical (year, month)
+// key, and RawFingerprint propagates that parent's value verbatim, since
+// W1 has no raw source of its own.
+//
+// Both paths publish through the same canonical store and cache
+// invalidation Bars and Coverage already rely on (#77, #78) — a
+// republished partition is immediately visible to the next Bars call,
+// never served stale from cache.
+//
+// A build-tag-gated (corpus) operator test file exercises Build's
+// derive path at corpus scale against a real, preserved OANDA archive,
+// comparing derived H4/D1 against OANDA's own native H4/D1 partitions
+// and, once, against the legacy candle-v2 canonical tree; see that
+// file's own doc comment and ADR-020 for what a real run against it
+// found.
 package marketdata

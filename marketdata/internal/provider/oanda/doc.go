@@ -138,4 +138,13 @@
 // (config/arch_test.go enforces this mechanically), and this package's
 // own internal/ visibility means the test cannot be relocated to the
 // exempt test/ tree either.
+//
+// FingerprintPartition (issue #81, ADR-020) computes the same
+// "sha256:<hex>" fingerprint form for one (symbol, interval, year,
+// month) partition file directly, without walking or inventorying the
+// rest of the archive — a targeted equivalent of what Inspect already
+// computes per-partition while walking an entire tree, for a caller
+// (marketdata.Manager's canonical build) that already knows exactly
+// which raw partition backs a given canonical normalization and needs
+// only that one file's fingerprint for its Manifest.RawFingerprint.
 package oanda

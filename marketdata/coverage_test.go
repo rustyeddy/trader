@@ -258,7 +258,14 @@ func TestCoverage_RawIncompleteCount(t *testing.T) {
 
 func TestCoverage_W1StaleWhenParentRevisionChanges(t *testing.T) {
 	mgr := newTestManagerWithRaw(t, t.TempDir()) // raw not needed for W1
-	span, err := NewTimeRange(aWeekday(0), aWeekday(4))
+	// A full calendar month, matching deriveAndPublish's own Span
+	// convention — not the short aWeekday(0)-aWeekday(4) range other
+	// fixtures in this file use, since isStale's W1 staleness check
+	// (coverage.go) derives an adjacent D1 partition's (year, month)
+	// key from this Span's own End(), which is only meaningful when
+	// End() is a real month boundary.
+	monthStart := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+	span, err := NewTimeRange(monthStart, monthStart.AddDate(0, 1, 0))
 	require.NoError(t, err)
 
 	d1Bars := []Bar{barAt(t, aWeekday(0))}

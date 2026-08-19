@@ -256,6 +256,41 @@ func (m *Manager) Bars(ctx context.Context, query BarQuery) (*BarReader, error) 
 	return &BarReader{bars: bars, manifests: manifests}, nil
 }
 
+// readAllBars calls Bars and drains the resulting reader into a plain
+// slice, for an internal caller (the D1->W1 resampler, issue #81) that
+// wants a query's full result at once rather than iterating a
+// BarReader. It is a thin convenience wrapper — there is no cache or
+// I/O behavior here beyond what Bars itself already does — kept
+// unexported since a streaming Reader remains the right public shape
+// for Bars itself.
+//
+// On any error other than the expected end-of-stream io.EOF (context
+// cancellation mid-drain, most notably), readAllBars returns nil rather
+// than whatever prefix of bars it had already accumulated: Bars' own
+// contract elsewhere is "no partial results on error," and a caller
+// silently receiving a truncated-but-non-nil slice here could easily
+// mistake it for a complete result.
+func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]Bar, error) {
+	reader, err := m.Bars(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	var bars []Bar
+	for {
+		b, err := reader.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		bars = append(bars, b)
+	}
+	return bars, nil
+}
+
 // loadPartition returns the (Manifest, BarSet) for key, serving it from
 // m.cache when present and populating the cache on a miss. It is the
 // only path Bars uses to reach the store, so caching is transparent to
