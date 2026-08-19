@@ -53,13 +53,17 @@
 // # Manager: the historical-data gateway
 //
 // Manager is the only way to reach historical market data. It separates
-// read-only queries (Bars, Coverage), which never download or rebuild and
-// report missing data explicitly, from explicit acquisition and build
-// commands (Plan, Sync, Build). Provider- and storage-native types never
-// cross its boundary, and the internal provider, storage, normalization,
-// and resampling components it coordinates depend on this package's types
-// rather than the reverse. See Manager's own documentation, and each
-// method's, for the full boundary and lifecycle contract.
+// read-only operations (Bars, Coverage, and Plan — Plan is deterministic
+// and read-only too, reporting what acquisition or build work a query
+// would require without performing any of it), which never download,
+// rebuild, or publish anything and report missing data explicitly, from
+// the explicit acquisition and build commands (Sync, Build) that a
+// caller executes a Plan's Actions through. Provider- and storage-native
+// types never cross its boundary, and the internal provider, storage,
+// normalization, and resampling components it coordinates depend on this
+// package's types rather than the reverse. See Manager's own
+// documentation, and each method's, for the full boundary and lifecycle
+// contract.
 //
 // # Bars and bar sets
 //
