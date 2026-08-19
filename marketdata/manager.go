@@ -53,13 +53,17 @@ import (
 // operations, when they are added, are scoped to the context passed to them —
 // so there is no Run, Start, or Stop, and construction starts no goroutines.
 //
-// This issue establishes construction, ownership, and dependency direction
-// only. The read and mutation operations themselves depend on the M2-01 /
-// ADR-020 query, coverage, and canonical-persistence contracts, which are
-// not yet resolved; their method signatures are deliberately not frozen
-// here. Until they land, the operations report ErrNotImplemented so a
-// caller can never mistake an unbuilt operation for an empty-but-successful
-// result.
+// Bars (query.go, issue #78) is the read-only historical query: it never
+// downloads, rebuilds, or otherwise mutates the canonical store, and
+// reports missing data explicitly (ErrDataUnavailable) rather than
+// silently returning a partial result. Coverage (coverage.go, issue #79)
+// and Plan (plan.go, issue #79) report on and schedule what acquisition
+// and canonical-build work a query would require, without performing any
+// of it themselves. Sync (sync.go, issue #80) and Build (build.go, issue
+// #81) are the explicit acquisition and canonical-build commands a caller
+// executes a Plan's Actions through. See each method's own documentation
+// for its full contract; the read-versus-mutation split above is the
+// organizing rule all five follow.
 type Manager struct {
 	clock        clock.Clock
 	storeRoot    string
@@ -189,10 +193,18 @@ type Config struct {
 	oandaClient *oanda.Client
 }
 
-// provider is the narrow internal contract for acquiring provider-native
-// historical data. It is intentionally unexported and minimal in this
-// skeleton: it names the seam without freezing an acquisition API that the
-// unresolved M2-01 / ADR-020 contracts still govern.
+// provider was the narrow internal contract this skeleton originally
+// reserved for acquiring provider-native historical data, before the
+// M2-01 / ADR-020 contracts it deferred to were resolved. They now are:
+// Sync (sync.go, #80) and Build (build.go, #81) acquire and normalize raw
+// OANDA data through *oanda.Client and the free functions in
+// marketdata/internal/provider/oanda directly, not through this
+// interface. provider (and Config's own unexported provider field) is
+// therefore currently unused by any real Manager operation — kept only
+// because TestNewManagerWithInternalCollaborators still wires it to prove
+// Config's unexported-field construction path in general; a safe,
+// non-urgent cleanup candidate is removing both once that test is
+// rewritten to no longer need it (M2 completion review, issue #83).
 type provider interface {
 	// name identifies the provider for diagnostics and manifest lineage.
 	name() string
@@ -292,17 +304,13 @@ func (m *Manager) configured() bool {
 		m.resolver != nil && m.providerName != "" && m.store != nil && m.calendar != nil
 }
 
-// Manager's first operation, Bars, is defined in query.go (issue #78):
-// a read-only historical query that never downloads, rebuilds, or
-// otherwise mutates the canonical store. Acquisition and canonical-build
-// commands remain future, separate operations — see the read-versus-
-// mutation split documented on the Manager type above.
-//
-// Earlier drafts carried placeholder Sync(ctx) and Build(ctx) methods that
-// returned an ErrNotImplemented sentinel. They were removed in response to
-// the M2-03 architectural review: Manager's operations must not be frozen
-// speculatively. Their real inputs and result contracts depend on the
-// still-unresolved M2-01 / ADR-020 query, coverage, and
-// canonical-persistence decisions, so the operations — and the
-// ErrNotImplemented / ErrNotConfigured sentinels that existed only to serve
-// those placeholders — are introduced with their real use cases, not here.
+// Historical note (M2-03 architectural review): an earlier draft of this
+// skeleton carried placeholder Sync(ctx) and Build(ctx) methods returning
+// an ErrNotImplemented sentinel, deliberately removed at the time because
+// Manager's real operations must not be frozen speculatively before the
+// M2-01 / ADR-020 query, coverage, and canonical-persistence decisions
+// were resolved. Those decisions landed issue by issue through the rest
+// of M2 (#78-#81); Bars, Coverage, Plan, Sync, and Build are now Manager's
+// real, complete operation set — see the type-level doc comment above for
+// where each is defined. No ErrNotImplemented sentinel exists in this
+// package today.
