@@ -19,6 +19,7 @@ package m2_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -260,21 +261,30 @@ func TestM2VerticalSlice(t *testing.T) {
 		assert.Equal(t, h1Manifest.Revision(), result.Published[0].Manifest.Revision())
 	})
 
-	t.Run("coverage reports the deliberate gap and the closed weekend, never conflating them", func(t *testing.T) {
+	t.Run("coverage reports exactly the deliberate gap, never the routine weekend", func(t *testing.T) {
+		// Coverage.Gaps never includes IntervalStateClosed at all — a
+		// routinely closed interval is suppressed before a Gap is ever
+		// created for it (coverage.go's own gapAccumulator), not merely
+		// reported with that state. So "no Closed entry in Gaps" is true
+		// whether or not the weekend was handled correctly; it is not,
+		// by itself, proof the weekend was excluded rather than
+		// mishandled as something else. Asserting the *exact* gap list —
+		// length 1, exact span, exact state — is what actually proves
+		// only the deliberately omitted 2024-01-16 session was reported,
+		// and every routine closure (two full weekends inside this
+		// fixture's own span) produced no Gap at all.
 		cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
 		require.NoError(t, err)
 
-		var foundMissing bool
-		for _, g := range cov.Gaps {
-			assert.NotEqual(t, marketdata.IntervalStateClosed, g.State,
-				"a routinely closed day must never appear as a reported Gap")
-			if g.State == marketdata.IntervalStateMissing {
-				foundMissing = true
-				assert.True(t, g.Span.Start().Equal(time.Date(2024, time.January, 16, 22, 0, 0, 0, time.UTC)),
-					"the gap is exactly the deliberately omitted 2024-01-16 session")
-			}
-		}
-		assert.True(t, foundMissing, "the deliberate gap must be reported, not silently absorbed")
+		wantSpan, err := marketdata.NewTimeRange(
+			time.Date(2024, time.January, 16, 22, 0, 0, 0, time.UTC),
+			time.Date(2024, time.January, 17, 22, 0, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		require.Len(t, cov.Gaps, 1, "exactly one gap: the deliberately omitted 2024-01-16 session, nothing else")
+		assert.Equal(t, marketdata.IntervalStateMissing, cov.Gaps[0].State)
+		assert.True(t, cov.Gaps[0].Span.Start().Equal(wantSpan.Start()))
+		assert.True(t, cov.Gaps[0].Span.End().Equal(wantSpan.End()))
 	})
 
 	t.Run("rebuilding stale raw data changes the published revision", func(t *testing.T) {
@@ -307,11 +317,15 @@ func TestM2VerticalSlice(t *testing.T) {
 	})
 }
 
-// TestM2Build_CancelledContextPublishesNothing confirms Build leaves no
-// partially published canonical dataset when its context is cancelled
-// mid-run: a follow-up Coverage call must show no trace of the aborted
-// action, not a partial or corrupt one.
-func TestM2Build_CancelledContextPublishesNothing(t *testing.T) {
+// TestM2Build_AlreadyCancelledContextPublishesNothing confirms Build
+// given an already-cancelled context — the request never gets to
+// execute any action at all — publishes nothing: a follow-up Coverage
+// call must show no trace of it, not a partial or corrupt dataset. This
+// is the "cancelled before it starts" half of #82's cancellation
+// requirement; see
+// TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished below for
+// the "cancelled after it starts" half.
+func TestM2Build_AlreadyCancelledContextPublishesNothing(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	span := fixtureSpan(t)
 
@@ -329,8 +343,99 @@ func TestM2Build_CancelledContextPublishesNothing(t *testing.T) {
 	require.NoError(t, err)
 	for _, pc := range cov.Partitions {
 		assert.Equal(t, marketdata.PartitionCoverageMissing, pc.Status,
-			"a cancelled Build must leave every partition exactly as unbuilt as before it ran")
+			"a Build given an already-cancelled context must leave every partition exactly as unbuilt as before it was called")
 	}
+}
+
+// cancelAfterN is a context.Context whose Err method reports nil for
+// its first n calls and context.Canceled on every call after —
+// duplicated here rather than imported from marketdata's own internal
+// test helpers, matching the established practice elsewhere in this
+// codebase of keeping small test seams local to each package rather
+// than exporting a testing-only type across a public/internal boundary.
+// cancelAfterN is a context.Context whose Err method reports nil for
+// its first n calls and context.Canceled on every call after —
+// duplicated here rather than imported from marketdata's own internal
+// test helpers, matching the established practice elsewhere in this
+// codebase of keeping small test seams local to each package rather
+// than exporting a testing-only type across a public/internal boundary.
+type cancelAfterN struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelAfterN) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
+
+// countingContext counts every call to Err() without ever reporting
+// cancellation itself, so it can calibrate exactly how many ctx.Err()
+// checks completing a given action costs.
+type countingContext struct {
+	context.Context
+	calls int
+}
+
+func (c *countingContext) Err() error {
+	c.calls++
+	return c.Context.Err()
+}
+
+// TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished exercises
+// genuine mid-run cancellation, unlike the already-cancelled case above.
+// Build checks ctx.Err() many times while completing one action (every
+// raw row read is its own check, among others) — far too many, and too
+// implementation-specific, to hardcode a fixed cutoff count reliably.
+// Instead, this test *calibrates* the cutoff empirically: it first
+// builds action0 alone, against a throwaway Manager, counting exactly
+// how many ctx.Err() calls that costs. Build's own per-action processing
+// is self-contained and deterministic given identical input, so that
+// exact count reproduces identically when action0 is the first of two
+// actions in a real Plan — it is a measured fact about this fixture and
+// this Build call, not a guessed magic number that would silently rot
+// if an unrelated internal loop changed shape.
+//
+// A context that permits exactly that many calls, then reports
+// Canceled, lets the first action (H1 normalization) complete and
+// publish normally, then aborts before the second action (D1) ever
+// starts — proving a later, not-yet-reached action is left completely
+// unpublished, and an already-completed one is left intact, not
+// retroactively corrupted by the later cancellation.
+func TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished(t *testing.T) {
+	action0 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.H1, Year: 2024, Month: time.January}
+	action1 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.D1, Year: 2024, Month: time.January}
+
+	calibration, _, _ := newTestManager(t)
+	counter := &countingContext{Context: context.Background()}
+	_, err := calibration.Build(counter, marketdata.Plan{Actions: []marketdata.Action{action0}})
+	require.NoError(t, err)
+	cutoff := counter.calls
+	require.Positive(t, cutoff, "fixture assumption: completing action0 alone requires at least one ctx.Err() check")
+
+	mgr, _, _ := newTestManager(t)
+	ctx := &cancelAfterN{Context: context.Background(), remaining: cutoff}
+	result, err := mgr.Build(ctx, marketdata.Plan{Actions: []marketdata.Action{action0, action1}})
+	assert.ErrorIs(t, err, context.Canceled)
+	require.Len(t, result.Published, 1, "the first action must have completed and published before cancellation was observed")
+	assert.Equal(t, marketdata.H1, result.Published[0].Action.Interval)
+
+	span := fixtureSpan(t)
+	cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
+	require.NoError(t, err)
+	for _, pc := range cov.Partitions {
+		assert.Equal(t, marketdata.PartitionCoverageMissing, pc.Status,
+			"the second action (D1) was never reached, so nothing must be published for it")
+	}
+
+	h1Cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	require.Len(t, h1Cov.Partitions, 1)
+	assert.Equal(t, marketdata.PartitionCoverageCurrent, h1Cov.Partitions[0].Status,
+		"the first action's own publish must remain intact, not retroactively undone by the later cancellation")
 }
 
 // TestM2Queries_NeverWriteToStore confirms Bars and Coverage — read-only
@@ -350,4 +455,90 @@ func TestM2Queries_NeverWriteToStore(t *testing.T) {
 	entries, err := os.ReadDir(storeRoot)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "Coverage and a failed Bars query must never create anything under StoreRoot")
+}
+
+// februaryIncompleteSpan is a second, separate fixture partition
+// (testdata/raw/oanda/EURUSD/2024/02), kept isolated from the January
+// fixture so this test's own assertions don't disturb the exact
+// BarCount/Gap assertions the main scenario makes: two accepted H1
+// records followed by one OANDA marks provider-incomplete
+// (complete=false in the raw row) — a still-forming bar, not a data
+// error.
+func februaryIncompleteSpan(t *testing.T) marketdata.TimeRange {
+	t.Helper()
+	span, err := marketdata.NewTimeRange(
+		time.Date(2024, time.February, 4, 22, 0, 0, 0, time.UTC),
+		time.Date(2024, time.February, 5, 1, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	return span
+}
+
+// TestM2VerticalSlice_IncompleteRecordExcludedNotAborted exercises #82's
+// required "incomplete" condition: a raw record OANDA itself marks
+// incomplete must be excluded from the published canonical dataset, but
+// must not abort the build the way a Suspicious/Rejected record would
+// (build_normalize.go's own documented distinction) — the other two
+// accepted records in the same partition still publish normally.
+func TestM2VerticalSlice_IncompleteRecordExcludedNotAborted(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	ctx := context.Background()
+	span := februaryIncompleteSpan(t)
+
+	result := planAndBuild(t, mgr, marketdata.H1, span)
+	require.Len(t, result.Published, 1)
+	assert.Equal(t, 2, result.Published[0].BarCount,
+		"3 raw records, but the third is provider-incomplete and must be excluded, not published")
+
+	reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	defer reader.Close()
+	var times []time.Time
+	for {
+		bar, err := reader.Next(ctx)
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		times = append(times, bar.Time)
+	}
+	require.Len(t, times, 2)
+	assert.True(t, times[1].Equal(time.Date(2024, time.February, 4, 23, 0, 0, 0, time.UTC)),
+		"the last published bar is the second accepted record; the incomplete third one never appears")
+}
+
+// canonicalPartitionPath reconstructs the canonical CSV store's own
+// documented file layout (ADR-020: root/provider/symbol/YYYY/MM/
+// SYMBOL-YYYY-MM-tf.csv) directly, since there is no public API to
+// corrupt a canonical partition on purpose — simulating on-disk
+// corruption to prove PartitionCoverageInvalid is detected is a
+// boundary-testing technique, not a normal consumer operation, the same
+// technique marketdata's own internal test suite
+// (TestCoverage_InvalidPartition) uses via its own unexported
+// partitionKey.path.
+func canonicalPartitionPath(storeRoot string, year int, month time.Month, token string) string {
+	return filepath.Join(storeRoot, "oanda", "EURUSD", fmt.Sprintf("%04d", year), fmt.Sprintf("%02d", int(month)),
+		fmt.Sprintf("EURUSD-%04d-%02d-%s.csv", year, int(month), token))
+}
+
+// TestM2Coverage_InvalidCanonicalPartition exercises #82's required
+// "invalid" condition: a canonical partition file that exists but
+// cannot be parsed must report PartitionCoverageInvalid through
+// Coverage, not an error and not silently treated as current or
+// missing.
+func TestM2Coverage_InvalidCanonicalPartition(t *testing.T) {
+	mgr, _, storeRoot := newTestManager(t)
+	ctx := context.Background()
+	span := fixtureSpan(t)
+
+	result := planAndBuild(t, mgr, marketdata.H1, span)
+	require.Len(t, result.Published, 1)
+
+	path := canonicalPartitionPath(storeRoot, 2024, time.January, "h1")
+	require.NoError(t, os.WriteFile(path, []byte("not a canonical partition\n"), 0o644))
+
+	cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	require.Len(t, cov.Partitions, 1)
+	assert.Equal(t, marketdata.PartitionCoverageInvalid, cov.Partitions[0].Status)
 }

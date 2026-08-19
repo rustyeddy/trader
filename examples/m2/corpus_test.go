@@ -17,6 +17,7 @@ package m2_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -91,6 +92,12 @@ func TestM2VerticalSlice_Corpus(t *testing.T) {
 	for {
 		_, err := reader.Next(ctx)
 		if err != nil {
+			// io.EOF is the only expected terminal condition; anything
+			// else (a decode failure, an I/O error) must fail this test
+			// loudly rather than being silently treated as "done" — a
+			// swallowed error here would make a real corpus-verification
+			// failure look like a clean, successful run.
+			require.ErrorIs(t, err, io.EOF)
 			break
 		}
 		n++
