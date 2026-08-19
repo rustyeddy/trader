@@ -4,23 +4,48 @@
 
 * Status
 
-Accepted (issue #69). Every open question this document originally
-raised — canonical dataset definition and versioning, day/week
-alignment, gap/completeness modeling, the store/cache/coverage
-contracts, explicit OANDA synchronization, raw normalization, and
-canonical build/derivation including W1 resampling — was settled by the
-body of M2 work below (issues #70 through #81), each recorded as its own
-=DONE= section as it landed. This ADR stayed =Proposed= in spirit (no
-explicit status was ever recorded) until issue #69 folded in the
-remaining parked review comments and promoted it deliberately, per
-=docs/arch/adr-decisions.org='s own supersession/promotion discipline.
+Proposed. Nearly every open question this document originally raised —
+canonical dataset definition and versioning, gap/completeness modeling,
+the store/cache/coverage contracts, explicit OANDA synchronization, raw
+normalization, and canonical build/derivation including W1 resampling —
+was settled by the body of M2 work below (issues #70 through #81), each
+recorded as its own =DONE= section as it landed. This ADR stayed
+=Proposed= in spirit (no explicit status was ever recorded) until issue
+#69 folded in the remaining parked review comments; a first pass at this
+Status section promoted it to =Accepted=, but PR #98 review correctly
+caught that this overstated day/week alignment specifically (see next
+paragraph), so promotion is held back pending that one item.
 
-Two items remain open as ordinary follow-on work, not as unresolved
-design questions blocking this ADR's acceptance: running the legacy
-=candle-v2= comparison tooling (#81) to completion across the full
-archive before that tree is deleted, and the general Rate/string-parsing
-cache idea in issue #85 (deliberately deferred pending actual
-performance evidence).
+*One blocking gap: H4 alignment.* #81's corpus validation against the
+real archive found that ADR-012's =FXCalendar= H4 alignment
+(UTC-midnight truncation) does not match OANDA's actual native H4
+candle boundaries (anchored to the FX daily rollover, like D1). This is
+not merely a documentation discrepancy: =normalizeOANDASequence=
+validates every H4 record's alignment against =FXCalendar.Bar=, so every
+real OANDA H4 record is currently rejected and =Manager.Build='s
+=ActionNormalizeCanonical(H4)= aborts outright against real data — see
+issue #99. D1 and W1 are unaffected (D1's native rollover already
+matches =FXCalendar='s own D1 boundary; W1 derives from D1, never H4).
+Per PR #98 review, this ADR should not be promoted to =Accepted= until
+issue #99 resolves it: a new ADR superseding ADR-012's H4 boundary,
+=FXCalendar= updated accordingly, and re-verification against the real
+corpus.
+
+Two further items remain open as ordinary follow-on work, not as
+blockers: running the legacy =candle-v2= comparison tooling (#81) to
+completion across the full archive before that tree is deleted, and the
+general Rate/string-parsing cache idea in issue #85 (deliberately
+deferred pending actual performance evidence).
+
+** DONE Persisted interval policy
+Canonical M1, H1, H4, D1, and W1 Bars are persisted (see "All derived
+data will be persisted" below for the no-recompute-on-every-query
+rationale). M1, H1, H4, and D1 are normalized directly from
+provider-native raw partitions (#76); W1 is derived from canonical D1,
+the one interval with no raw source of its own (#81). H4 persistence is
+currently blocked by issue #99 (see Status above) even though the
+policy itself — which intervals are persisted, and from what — is
+settled.
 
 Here are the principles I want to keep that are important now.
 

@@ -85,13 +85,17 @@ believed at that time.
 | 017 | Broker-neutral order and execution vocabulary                     | Accepted   |
 | 018 | Order lifecycle transition rules                                  | Accepted   |
 | 019 | Account and portfolio snapshot models                             | Accepted   |
-| 020 | Historic data subsystem (in adr-020-historic-data.org)            | See file   |
+| 020 | Historic data subsystem (in adr-020-historic-data.org)            | Proposed   |
 
 Note: ADR-020 is maintained in its own file,
 =docs/arch/adr-020-historic-data.org=, rather than inline in this
-registry.  Consult that file for its current status, decisions, and open
-questions; the row above is a pointer so the registry index remains
-complete.
+registry.  Its own Status section is authoritative; the status column
+above is kept in sync with it, not a substitute for reading the file —
+consult it for the full decisions and open questions.  As of this
+writing, ADR-020 remains =Proposed=: nearly every open question it
+raised has been settled (issues #70-#81), but issue #99 (H4 alignment
+disagreeing with ADR-012, discovered during #81's corpus validation) is
+an explicit blocker to promoting it to =Accepted=.
 
 * ADR-001: Modular monolith before service decomposition
 
