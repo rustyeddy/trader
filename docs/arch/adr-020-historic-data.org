@@ -1796,31 +1796,70 @@ corrupted in place — the same simulate-on-disk-corruption technique
 =TestCoverage_InvalidPartition= already uses internally, reconstructed
 externally from ADR-020's own documented canonical path layout, since
 there is no public API to corrupt a partition on purpose — reports
-=PartitionCoverageInvalid= through =Coverage=, not an error).
+=PartitionCoverageInvalid= through =Coverage=, not an error). A second
+design-review pass pointed out that excluding the incomplete bar from
+=Bars= alone is not, by itself, distinguishable from an ordinary missing
+bar — nothing about a plain absence tells a consumer *why* it's absent.
+=TestM2VerticalSlice_IncompleteRecordExcludedNotAborted= now also calls
+=Coverage= and asserts =PartitionCoverage.RawIncompleteCount == 1=: the
+one quality-result field that actually surfaces the raw archive fact
+(one record OANDA itself marked provisional) directly, completing the
+external-consumer proof of the "incomplete" condition rather than
+inferring it indirectly from an absence.
 
-*Cancellation, both halves.* A first draft's only cancellation test
-cancelled the context *before* calling =Build=, which proves an
-already-cancelled request publishes nothing but cannot detect a
-partial-publication or cleanup problem arising *during* an active
-build — a design review caught this gap too.
-=TestM2Build_AlreadyCancelledContextPublishesNothing= keeps the
+*Cancellation, both halves — one provable externally, one only
+internally.* A first draft's only cancellation test cancelled the
+context *before* calling =Build=, which proves an already-cancelled
+request publishes nothing but cannot detect a partial-publication or
+cleanup problem arising *during* an active build — a design review
+caught this gap.
+=TestM2Build_AlreadyCancelledContextPublishesNothing= keeps that
 already-cancelled case, honestly named and worded to describe exactly
 what it tests.
-=TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished= adds the
-genuine mid-run case: a two-action =Plan= (H1 then D1 normalization,
-constructed directly, since =Build='s own contract accepts any
-caller-supplied =Plan=) with a context that lets the first action
-complete and publish, then reports cancelled before the second action
-starts. The cutoff is not a hardcoded call count — =Build= checks
-=ctx.Err()= far too many times, and too
-implementation-specifically, while completing one action (every raw row
-read is its own check, among others) to hardcode reliably. The test
-instead *calibrates* the cutoff empirically, by building the first
-action alone against a throwaway =Manager= and counting exactly how
-many =ctx.Err()= calls that costs; since one action's own processing is
-self-contained and deterministic given identical input, that measured
-count reproduces exactly when the same action is first in a real
-two-action =Plan=.
+
+A second review round pushed further: does a *between-action*
+cancellation test (the natural next step) actually prove intra-action
+atomicity — that cancellation landing mid-publish, inside one action,
+leaves no partial or temporary artifact? It does not, and cannot: from
+outside =marketdata=, there is no way to land cancellation at a specific
+point *inside* one action's own encode/write/rename sequence without
+depending on exactly the kind of fragile internal call-count knowledge
+this package otherwise avoids. That specific proof already exists,
+correctly, at the internal level, where the real commit sequence is
+known: =marketdata='s own =store_csv_test.go= —
+=TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision=,
+=TestCanonicalCSVStore_PublishCancelledDuringEncodeLoadsOriginalRevision=
+(which explicitly asserts no abandoned =.tmp-= file remains), and
+=TestCanonicalCSVStore_PublishCancelledJustBeforeRenameLoadsOriginalRevision=
+— one test per meaningful checkpoint of the atomic temp-file-then-rename
+publish every canonical partition goes through.
+
+=TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished=
+(renamed from an earlier, overclaiming name) is scoped honestly to what
+an external, public-API-only test *can* prove: a two-action =Plan= (H1
+then D1 normalization, constructed directly, since =Build='s own
+contract accepts any caller-supplied =Plan=) with a context that lets
+the first action complete and publish, then reports cancelled before
+the second action starts — proving a later, not-yet-reached action is
+left completely unpublished, and confirming (via matching
+=Manifest.BarCount= and a full =Bars= readback, not merely a status
+flag) that the already-completed action's own publish is the complete
+dataset, not truncated by the later cancellation. Together, this test
+and the three internal ones above cover #82's full "failure/cancellation
+leaves no partially published canonical dataset" requirement, split
+deliberately across the external/internal boundary rather than one test
+overclaiming to prove both halves.
+
+The cutoff for landing cancellation exactly between the two actions is
+not a hardcoded call count — =Build= checks =ctx.Err()= far too many
+times, and too implementation-specifically, while completing one action
+(every raw row read is its own check, among others) to hardcode
+reliably. The test instead *calibrates* the cutoff empirically, by
+building the first action alone against a throwaway =Manager= and
+counting exactly how many =ctx.Err()= calls that costs; since one
+action's own processing is self-contained and deterministic given
+identical input, that measured count reproduces exactly when the same
+action is first in a real two-action =Plan=.
 
 =TestM2Queries_NeverWriteToStore= confirms =Bars=/=Coverage= — read-only
 queries — never create anything under =StoreRoot=, even when nothing

@@ -353,12 +353,6 @@ func TestM2Build_AlreadyCancelledContextPublishesNothing(t *testing.T) {
 // test helpers, matching the established practice elsewhere in this
 // codebase of keeping small test seams local to each package rather
 // than exporting a testing-only type across a public/internal boundary.
-// cancelAfterN is a context.Context whose Err method reports nil for
-// its first n calls and context.Canceled on every call after —
-// duplicated here rather than imported from marketdata's own internal
-// test helpers, matching the established practice elsewhere in this
-// codebase of keeping small test seams local to each package rather
-// than exporting a testing-only type across a public/internal boundary.
 type cancelAfterN struct {
 	context.Context
 	remaining int
@@ -385,8 +379,33 @@ func (c *countingContext) Err() error {
 	return c.Context.Err()
 }
 
-// TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished exercises
-// genuine mid-run cancellation, unlike the already-cancelled case above.
+// TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished proves
+// the *between-action* half of #82's cancellation requirement: given a
+// multi-action Plan, a Build cancelled after completing one action but
+// before starting the next leaves the not-yet-reached action completely
+// unpublished, and leaves the already-completed one fully intact and
+// queryable — not retroactively undone by the later cancellation.
+//
+// This test does not, and cannot from outside marketdata, prove the
+// other half — that cancellation landing *during* a single action's own
+// publish (mid-encode, or right before the commit-point rename) leaves
+// no partial or temporary artifact behind. That is proven at the
+// internal level, where the exact commit sequence is known, by
+// marketdata's own store_csv_test.go:
+// TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision,
+// TestCanonicalCSVStore_PublishCancelledDuringEncodeLoadsOriginalRevision
+// (which explicitly asserts no abandoned .tmp- file remains), and
+// TestCanonicalCSVStore_PublishCancelledJustBeforeRenameLoadsOriginalRevision
+// — three tests, one per meaningful internal checkpoint of the atomic
+// temp-file-then-rename publish every canonical partition goes through.
+// Together with this test's own between-action proof, #82's full
+// "failure/cancellation leaves no partially published canonical
+// dataset" requirement is covered — deliberately split across the
+// external (this package) and internal (marketdata's own suite)
+// boundary, since intra-publish atomicity is not something a
+// black-box, public-API-only consumer can observe or usefully
+// re-prove: only marketdata itself knows where the real commit point is.
+//
 // Build checks ctx.Err() many times while completing one action (every
 // raw row read is its own check, among others) — far too many, and too
 // implementation-specific, to hardcode a fixed cutoff count reliably.
@@ -398,21 +417,16 @@ func (c *countingContext) Err() error {
 // actions in a real Plan — it is a measured fact about this fixture and
 // this Build call, not a guessed magic number that would silently rot
 // if an unrelated internal loop changed shape.
-//
-// A context that permits exactly that many calls, then reports
-// Canceled, lets the first action (H1 normalization) complete and
-// publish normally, then aborts before the second action (D1) ever
-// starts — proving a later, not-yet-reached action is left completely
-// unpublished, and an already-completed one is left intact, not
-// retroactively corrupted by the later cancellation.
-func TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished(t *testing.T) {
+func TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished(t *testing.T) {
 	action0 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.H1, Year: 2024, Month: time.January}
 	action1 := marketdata.Action{Kind: marketdata.ActionNormalizeCanonical, Instrument: eurusdID(t), Interval: marketdata.D1, Year: 2024, Month: time.January}
 
 	calibration, _, _ := newTestManager(t)
 	counter := &countingContext{Context: context.Background()}
-	_, err := calibration.Build(counter, marketdata.Plan{Actions: []marketdata.Action{action0}})
+	calibrationResult, err := calibration.Build(counter, marketdata.Plan{Actions: []marketdata.Action{action0}})
 	require.NoError(t, err)
+	require.Len(t, calibrationResult.Published, 1)
+	wantBarCount := calibrationResult.Published[0].BarCount
 	cutoff := counter.calls
 	require.Positive(t, cutoff, "fixture assumption: completing action0 alone requires at least one ctx.Err() check")
 
@@ -422,6 +436,8 @@ func TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	require.Len(t, result.Published, 1, "the first action must have completed and published before cancellation was observed")
 	assert.Equal(t, marketdata.H1, result.Published[0].Action.Interval)
+	assert.Equal(t, wantBarCount, result.Published[0].BarCount,
+		"completion evidence: the published action is the full dataset, not a partial one truncated by the cancellation")
 
 	span := fixtureSpan(t)
 	cov, err := mgr.Coverage(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.D1, Range: span})
@@ -436,6 +452,22 @@ func TestM2Build_CancelledMidPlanLeavesLaterActionsUnpublished(t *testing.T) {
 	require.Len(t, h1Cov.Partitions, 1)
 	assert.Equal(t, marketdata.PartitionCoverageCurrent, h1Cov.Partitions[0].Status,
 		"the first action's own publish must remain intact, not retroactively undone by the later cancellation")
+
+	// Completion evidence, not just a status flag: the full H1 dataset
+	// is actually readable back through Bars, end to end.
+	reader, err := mgr.Bars(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	defer reader.Close()
+	var n int
+	for {
+		_, err := reader.Next(context.Background())
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		n++
+	}
+	assert.Equal(t, wantBarCount, n, "every published H1 bar is actually readable back, not just counted in the manifest")
 }
 
 // TestM2Queries_NeverWriteToStore confirms Bars and Coverage — read-only
@@ -505,6 +537,22 @@ func TestM2VerticalSlice_IncompleteRecordExcludedNotAborted(t *testing.T) {
 	require.Len(t, times, 2)
 	assert.True(t, times[1].Equal(time.Date(2024, time.February, 4, 23, 0, 0, 0, time.UTC)),
 		"the last published bar is the second accepted record; the incomplete third one never appears")
+
+	// A consumer reading Bars alone cannot distinguish "this bar is
+	// absent because the raw record was incomplete" from "this bar is
+	// absent because it is ordinarily missing" — both simply don't
+	// appear. Coverage's own quality result is what actually surfaces
+	// the incomplete condition: RawIncompleteCount reports the raw
+	// archive fact directly (one record OANDA itself marked
+	// provisional), independent of how the canonical build chose to
+	// handle it.
+	cov, err := mgr.Coverage(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	require.Len(t, cov.Partitions, 1)
+	assert.Equal(t, marketdata.PartitionCoverageCurrent, cov.Partitions[0].Status,
+		"an incomplete record does not itself make the partition Stale or Invalid")
+	assert.Equal(t, 1, cov.Partitions[0].RawIncompleteCount,
+		"Coverage must match the raw archive fact: exactly one record is provider-incomplete")
 }
 
 // canonicalPartitionPath reconstructs the canonical CSV store's own
