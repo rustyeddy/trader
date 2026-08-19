@@ -29,7 +29,7 @@ It has proved to be a bit problematic and not as complete as OANDA
 
 * DONE OANDA Forex Pairs
 ** DONE Existing OANDA Forex Pairs will be used
-We have downloaded a lots of OANDA raw Forex price data in CSV format
+We have downloaded a lot of OANDA raw Forex price data in CSV format
 that will continue to be used.
 ** DONE XAUUSD is out of scope
 XAUUSD is present in the existing corpus but we have no way to trade
@@ -155,7 +155,7 @@ arithmetic).  What #74 adds:
   model (#73) built for exactly this relationship.
 ** DONE OANDA Volume represents ticks at OANDA
 It is not volume by any means but may serve as a proxy for how active
-a pair was at the exchange OANDA gets it data from.  It can be ignored
+a pair was at the exchange OANDA gets its data from.  It can be ignored
 if it is not desired, but it will be included in the derived data
 ** DONE Avg and Max Spread will also be kept in derived format
 OANDA provides a bid and an ask for each of O, H, L and C.  Max and
@@ -336,7 +336,7 @@ providers or initiate canonical historic data builds.
                  |
                  +-- Bar Maker
 
-Everything behind the data manager will live in a 'internal' directory.
+Everything behind the data manager will live in an =internal/= directory.
 No other package is allowed to retrieve, build or store data, all must
 go through the DM.
 
@@ -485,8 +485,8 @@ them by construction).  #79's coverage engine does not call
 The current path will be something like it is now
 	.../data/raw/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
 	.../data/derived/provider/inst/yyyy/mm/inst-yyyy-mm-intvl.csv
-Future data format such as Parquet if we implement will be determined
-when it is implemented
+Future data formats such as Parquet, if implemented, will have their
+layout determined at that time.
 
 ** DONE Canonical CSV Bar store and atomic publication
 Settled by issue #77 (branch =feature/77-canonical-csv-store=):
