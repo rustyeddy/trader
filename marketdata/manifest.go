@@ -119,9 +119,9 @@ func (p ParentRef) valid() bool {
 //
 // RawFingerprint identifies the raw source artifact(s) this dataset was
 // built from, so a rebuild from unchanged raw data is verifiable. It is
-// supplied by the (not yet implemented) build step that reads raw
-// provider bytes; Manifest itself has no provider or storage dependency
-// and never reaches into a package such as
+// supplied by Manager's own build step (normalizeAndPublish, build.go,
+// #81) that reads raw provider bytes; Manifest itself has no provider or
+// storage dependency and never reaches into a package such as
 // marketdata/internal/provider/oanda.
 type Manifest struct {
 	// Provider is the opaque logical name of the data source this

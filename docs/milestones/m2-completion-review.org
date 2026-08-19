@@ -1,0 +1,339 @@
+#+TITLE: M2 Completion Review
+#+SUBTITLE: Market Data Vertical Slice — verification-first sign-off (issue #83, M2-15)
+#+STARTUP: overview indent
+
+* Purpose
+
+This is the verification-first M2 completion review agreed on issue
+#83, following the M1 completion review's own precedent (issue #32,
+=docs/milestones/m1-completion-review.org=): prove M2 — the historical
+market-data subsystem — is a coherent, externally consumable whole by
+exercising it the way code outside Trader would actually consume it,
+audit its boundaries and documentation against what was actually built,
+and record what that exercise found. It is not a feature-building
+issue; the code changes below exist only because the exercise itself
+exposed real, concrete deficiencies — no speculative feature expansion,
+and no new capability introduced for its own sake.
+
+M2's public package surface at the time of this review — every
+non-internal package this milestone added or materially extended,
+confirmed via =go list ./...=: exactly one, =marketdata=, plus this
+review's own =examples/m2= (inherited from issue #82). Every other
+package (=account=, =clock=, =config=, =id=, =instrument=, =logging=,
+=num=, =order=, =portfolio=, =tradertest=) was M1's concern and is out
+of this review's scope, except where =marketdata= depends on one of
+them.
+
+* 1. External-consumer exercise
+
+Issue #82 already built =examples/m2= (=package m2_test=), importing
+only =clock=, =instrument=, =marketdata=, and =num= — the way real code
+outside this module would — and drove the complete flow (acquire →
+normalize → canonical publish → query → W1 derive → coverage) entirely
+through =Manager='s public =Plan=/=Build=/=Bars=/=Coverage= methods.
+This review does not repeat that work; it cites what two rounds of
+design review on #82 already established as proven:
+
+- All six of #82's required conditions: successful retrieval, missing
+  data, closed-market exclusion (asserted as an *exact* gap list, not
+  merely "no =Closed= entry" — =Coverage.Gaps= suppresses closed
+  intervals before creating a =Gap= at all, so a weaker assertion would
+  pass even on a misclassified weekend), incomplete raw records
+  (surfaced through =Coverage='s own =RawIncompleteCount=, not merely
+  inferred from an absence), invalid canonical partitions, and stale
+  raw data.
+- =Manifest.Revision()= determinism: a second, independent =Manager=
+  building the identical fixture from a fresh copy reproduces the exact
+  same revision.
+- W1 lineage: =Manifest.Parent= names the exact D1 revision consumed.
+- Cancellation's two halves, deliberately split across the
+  external/internal boundary: between-action cancellation proven
+  externally (a later, not-yet-reached action is left unpublished; an
+  already-completed one stays intact, verified via matching =BarCount=
+  and a full =Bars= readback), intra-action publish atomicity (mid-
+  encode, pre-rename) proven internally, where the real commit sequence
+  is known —
+  =TestCanonicalCSVStore_PublishCancelledJustBeforeWriteLoadsOriginalRevision=,
+  =...DuringEncode...= (asserts no abandoned =.tmp-= file remains), and
+  =...JustBeforeRename...= (=store_csv_test.go=).
+- No hidden writes: =Bars=/=Coverage= alone never create anything under
+  =StoreRoot=.
+- A =corpus=-tagged, operator-run counterpart (=corpus_test.go=,
+  excluded from CI) exercising the identical flow against the real
+  preserved archive — run during #82, confirmed passing.
+
+** Result
+
+*Pass, no API deficiencies.* Two rounds of independent design review on
+#82 (five findings, then two more) progressively tightened the external
+exercise until it proved exactly what it claimed to, no more and no
+less — every finding was a precision or scope-honesty issue in the
+*test*, never a defect in =Manager='s own public API. Nothing in this
+review's own exercise (below) found anything #82 missed.
+
+* 2. Documentation, naming, and glossary audit
+
+Three checks, run against =marketdata= (non-test source) and, for the
+staticcheck pass, the whole module:
+
+1. A =go/doc=-based scan, corrected to check only *exported* top-level
+   identifiers in *non-test* files (the same correction the M1 review's
+   own scan needed) for =marketdata= and its internal
+   =provider/oanda= package. *Zero undocumented exported identifiers in
+   =marketdata=*, package doc comment present. Two flagged items in
+   =oanda= (=fixedIntervalLimiter.Wait=, =noopRateLimiter.Wait=) are
+   false positives of the same kind M1's own review already
+   documented: the *method* name is exported, but its receiver *type*
+   is not, so neither is reachable from outside the package regardless
+   — and =oanda= is =internal/=, not part of M2's public surface at
+   all.
+2. =staticcheck ./...=: *zero findings in =marketdata= or its
+   =internal/= tree.* Three pre-existing findings elsewhere
+   (=config/fields_test.go=, =instrument/resolver_test.go=,
+   =portfolio/helpers_test.go=) are M1-scope test-file issues, out of
+   this review's scope, and are left untouched — fixing them here would
+   be exactly the kind of unrelated change =CONTRIBUTING.org= asks
+   agents not to make.
+3. =marketdata= has a =// Package marketdata= doc comment. *Confirmed.*
+
+** Glossary cross-check (architecture document, Appendix A)
+
+| Glossary term                          | M2 status                                                             |
+|-----------------------------------------+------------------------------------------------------------------------|
+| Bar                                     | Implemented as documented (=marketdata.Bar=, bid-basis OHLC)          |
+| Indicator, Analysis                     | Correctly absent — M3                                                 |
+| Quote, Trade event                      | Correctly absent — no M2 consumer; deferred with the rest of live data |
+| Reconciliation, Journal, Report         | Correctly absent — M3/M5+                                             |
+| Strategy, Intent, Risk decision         | Correctly absent — M4/M3                                              |
+
+M2 introduced its own vocabulary beyond the architecture document's
+original glossary (=Interval=, =Calendar=, =Manifest=, =Coverage=,
+=Gap=, =Plan=/=Action=), all specified by ADR-012/ADR-020/ADR-021
+rather than the original glossary table; no drift found between those
+ADRs and the implementation (see section 4).
+
+** Deficiencies found and fixed
+
+The exercise (re-reading =marketdata='s own package documentation as an
+external reader would) found three stale doc-comment spots, all dating
+to the original M2-03 skeleton phase (issue #71) before =Bars=,
+=Coverage=, =Plan=, =Sync=, and =Build= existed:
+
+- =marketdata/doc.go= and =marketdata/manager.go=: both still said
+  Manager's "read and mutation operations report =ErrNotImplemented=
+  until the M2-01 / ADR-020 ... contracts land" — a sentinel that no
+  longer exists in this package, describing a stage of the milestone
+  that ended many issues ago. Rewritten to name the five real
+  operations and where each is defined.
+- =marketdata/manifest.go=: =RawFingerprint= was documented as
+  "supplied by the (not yet implemented) build step" — =build.go='s
+  =normalizeAndPublish= (issue #81) is that step, implemented. Fixed to
+  name it.
+
+The same read also found one genuinely unused, vestigial piece of the
+original skeleton: =Manager='s unexported =provider= field/interface
+(=provider interface { name() string }=) was reserved for provider
+acquisition before =Sync=/=Build= existed; they were built directly
+against =*oanda.Client= instead, and nothing in this codebase's real
+operation set ever reads =m.provider=. It is exercised only by
+=TestNewManagerWithInternalCollaborators=, a construction-wiring test.
+This is *not* fixed here — removing it means also rewriting that test,
+which is a small, real refactor rather than a documentation
+correction, and doing it inside a verification review risks exactly
+the scope creep this review is meant to avoid. Its doc comment is
+corrected to state plainly that it is currently unused and name the
+concrete future cleanup (see Known Deferrals).
+
+No other documentation, naming, or glossary deficiency was found.
+
+* 3. Dependency-boundary review
+
+#+BEGIN_EXAMPLE
+marketdata   -> clock, instrument, marketdata/internal/provider/oanda, num
+examples/m2  -> clock, instrument, marketdata, num
+#+END_EXAMPLE
+
+** Findings
+
+- =marketdata='s own imports match the architecture document's
+  dependency direction: it depends on =clock=/=instrument=/=num= (all
+  M1, all "below" it) and its own =internal/= subtree; nothing points
+  backward, and no M2 package imports =account=, =order=, =portfolio=,
+  or any later-milestone concept.
+- =marketdata/internal/provider/oanda= is imported *only* from within
+  =marketdata/= (=plan.go=, =manager.go=, =build_normalize.go=,
+  =coverage.go=, =sync.go=, and their own tests) — confirmed by
+  =grep -rl= across the whole module. Unlike =config='s
+  =os.Getenv= restriction (which needs its own =arch_test.go=, since
+  the compiler cannot enforce it), this boundary is mechanically
+  enforced by Go's own =internal/= visibility rule: no dedicated
+  architecture test is needed, or exists, for this specific check, and
+  none is missing — this is confirmed as intentional, not a gap.
+- =examples/m2= imports only public packages (=clock=, =instrument=,
+  =marketdata=, =num=) — confirmed directly from its own import
+  statements, matching #82's own review's confirmation of the same
+  fact.
+- No cycles.
+
+No violations found; no code changes required by this section.
+
+* 4. ADR and architecture-document consistency
+
+- *ADR-012* (Trading calendar and bar-alignment semantics): =Accepted=,
+  now carrying one =Amended by ADR-021= line (added during issue #99) —
+  its original =Interval=/=TimeRange=/=Calendar= types, D1/W1 rollover
+  alignment, and DST handling remain exactly as originally decided and
+  implemented; only its sub-day (M1/H1/H4) UTC-clock alignment
+  sub-decision was corrected.
+- *ADR-020* (Historic data subsystem): =Accepted=. Every =DONE= section
+  in it names a real, merged issue and matches what that issue actually
+  shipped — cross-checked against this review's own package-level
+  reading of =marketdata=, not merely trusted at face value. The two
+  items ADR-020's own Status section names as still open —
+  running the one-time legacy =candle-v2= comparison to completion
+  before deletion, and issue #85's deferred general Rate/string-parsing
+  cache — are both genuine, explicitly-scoped-out deferrals, not
+  blockers (see Known Deferrals below).
+- *ADR-021* (FX hour-bar alignment corrected to daily-rollover
+  anchoring): =Accepted=, a formal *partial amendment* of ADR-012 via
+  the registry's own new Partial Amendment Rules (added alongside
+  ADR-021 specifically for this case). Verified against the real
+  archive twice during #99's own review cycle (53 residual
+  disagreements, all the same pre-existing month-boundary tool
+  limitation D1 already has, both before and after the later
+  DST-straddling fix).
+- The architecture document's own =marketdata= section (canonical
+  types, =Manager= as the sole access point, provider/storage kept
+  internal, adjustment modes and third-party sources deferred) matches
+  the implementation throughout; no drift found.
+
+* 5. Corpus-scale and correctness verification already on record
+
+Not repeated here — cited as standing evidence this review checked for
+consistency, not re-derived:
+
+- *D1/W1/DST/session correctness*: =FXCalendar='s DST-transition tests
+  (spring-forward/fall-back, both for D1's own variable duration and
+  H4's rollover-anchored boundaries and day-end clamp) pass, and were
+  independently verified against real EURUSD 2024 corpus data during
+  issue #99's own review cycle. W1 materialization was verified against
+  the real archive during #81 and re-confirmed via #82's own corpus
+  test.
+- *Raw archive integrity*: #75's =Inspect=/inventory tooling
+  (checksums, malformed/duplicate/out-of-order detection,
+  =SkippedEntry=/=MonthGap= reporting) and #80's atomic, fingerprint-
+  verified synchronization remain the raw archive's only write path.
+- *Coverage, gap, incompleteness, and staleness semantics*: #79's
+  =IntervalState=/=ClassifyInterval=/=DatasetComplete= model, exercised
+  end-to-end (not just unit-tested) by #82's own six-condition external
+  proof.
+- *Cancellation, resource ownership, atomic publication*: see section 1
+  above — the split between #82's external between-action proof and
+  =store_csv_test.go='s internal intra-action proof is this review's
+  own considered position on where that evidence belongs, not a gap.
+
+* 6. M2 public API baseline
+
+Recorded here directly (per the M1 review's own precedent: not a
+generated/CI-enforced artifact — =apidiff=-style tooling and a semver
+policy remain ADR-011's job, and ADR-011 is still =Proposed=).
+
+- *marketdata*: =Manager=, =Config=, =New=; =BarQuery=, =BarReader=,
+  =Manager.Bars=; =Coverage=, =Gap=, =PartitionCoverage=,
+  =PartitionCoverageStatus=, =Manager.Coverage=; =Plan=, =Action=,
+  =ActionKind=, =Manager.Plan=; =SyncResult=, =DownloadResult=,
+  =SkippedAction=, =Manager.Sync=; =BuildResult=, =PublishResult=,
+  =Manager.Build=; =Bar=, =BarSet=, =PriceBasis=; =Manifest=,
+  =ParentRef=; =Interval= + =M1=/=H1=/=H4=/=D1=/=W1=, =Unit=,
+  =NewInterval=; =TimeRange=, =NewTimeRange=; =Calendar=, =FXCalendar=,
+  =FXCalendarParams=, =PartialClosure=, =NewFXCalendar=,
+  =StandardFXHolidays=, =Status=; =IntervalState=, =ClassifyInterval=,
+  =DatasetComplete=; =ErrInvalidConfig= and the package's other =Err*=
+  sentinel families (fingerprint, parent lineage, mismatch, coverage,
+  bar/manifest validation).
+
+* 7. No later-milestone behavior leaked into M2
+
+- No =LiveFeed= or streaming/subscription API of any kind.
+- No =Quote=/=Trade= (market-print) canonical type — only =Bar=.
+- =XAUUSD= is present in the raw archive on disk but is never ingested
+  (confirmed absent from any instrument construction path); Dukascopy
+  is mentioned only in ADR-020 as a rejected alternative, never in code.
+- No =AdjustmentMode= type exists; "Parquet" appears only in three doc
+  comments as a *future*, unbuilt possibility (=canonicalCSVStore= is
+  the one, current, CSV-only store implementation).
+- No third-party/user-extensible data-source seam — =marketdata='s
+  =internal/= boundary remains closed, exactly as ADR-020 requires.
+
+Confirmed: nothing from M3 (broker execution), M4 (strategy), or a
+later data milestone (live feeds, adjustment modes, additional
+providers) is present.
+
+* 8. make check
+
+=make check= (=gofmt -l=, =go vet ./...=, =go test -race ./...=) passes
+across the whole repository, including this review's own three doc
+fixes. =marketdata= coverage: 92.0%; =marketdata/internal/provider/oanda=
+coverage: 91.9% — both above the project's 85% target.
+
+* Known Deferrals
+
+Recorded explicitly, per this issue's own acceptance criteria, as safe
+— not blockers:
+
+- *One-time legacy =candle-v2= comparison, not yet run to completion.*
+  The tooling exists (#81's =corpus_test.go=, =TestCorpusLegacyComparison=)
+  and was exercised partially during #81; a full run across the entire
+  archive is an operator action ADR-020's own Status section already
+  names as outstanding. Safe: =candle-v2= itself is untouched and
+  un-deleted until that run happens.
+- *Issue #85's general Rate/string-parsing cache*, deliberately deferred
+  pending actual performance evidence, and already removed from the M2
+  milestone.
+- *=Manager.provider='s unused skeleton field/interface* (section 2
+  above). Safe: dead code with no behavioral effect, not reachable from
+  any real operation, documented as such. Concrete follow-up: remove
+  =provider=/=Config.provider= and rewrite
+  =TestNewManagerWithInternalCollaborators= to prove Config's
+  unexported-field wiring some other way (or accept that coverage is
+  redundant with =TestNewManagerBuildsRealStoreFromStoreRoot= and
+  similar, and drop it).
+- *=FXCalendar= has no continuous, always-safe rollover-relative grid
+  for sub-day =Interval= counts that don't evenly divide a day* (ADR-021's
+  own Alternatives Considered) — =H5=/=M7=-shaped intervals are rejected
+  outright rather than supported. Safe: no predefined =Interval= or
+  current consumer needs one; explicitly deferred, not silently
+  unhandled (the rejection itself is tested).
+- *=tradertest= has no =Bar=/=BarSet=/=Manager=-backed fixture
+  builders* yet, though the architecture document's own vision for
+  =tradertest= names them. Safe: M2's own milestone scope (acquire,
+  normalize, store, query, resample, report coverage for one data path)
+  never required them, and =examples/m2= demonstrates the real
+  =Manager= API is usable directly without one; adding builders is a
+  reasonable, separate future issue if a concrete consumer (a future
+  backtest runner, most likely) needs them.
+- *No CI-enforced dependency-direction or API-compatibility tooling*,
+  same deliberately-deferred item M1's own review already named
+  (=package-boundaries.org= already records this); still not part of
+  this sign-off, for the same reason.
+
+* Recommendation
+
+*M2 is ready to close.*
+
+Every acceptance criterion in issue #83 is satisfied: the external
+public-API exercise (#82) is reviewed and found sufficient; ADR-020 and
+the architecture document agree with the implementation; the
+package-boundary audit finds no unintended bypass of =Manager= and
+confirms the =internal/= boundary is both real and mechanically
+enforced; =go test -race= is green with coverage above the project
+target; the full M2 flow and every required failure mode (missing,
+closed, incomplete, invalid, stale, cancelled) are demonstrated: deferred
+scope is named explicitly, with a safety argument for each item; and
+=make check= passes.
+
+No outstanding blockers are known. The real defects this review's own
+exercise found — three stale doc comments describing a
+long-since-finished skeleton phase — are fixed in this same change.
+The known deferrals above are each a deliberate, named, low-risk
+decision, not a gap discovered too late to matter.

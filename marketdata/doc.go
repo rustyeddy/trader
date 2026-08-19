@@ -53,15 +53,13 @@
 // # Manager: the historical-data gateway
 //
 // Manager is the only way to reach historical market data. It separates
-// read-only queries, which never download or rebuild and report missing
-// data explicitly, from explicit acquisition and build commands. Provider-
-// and storage-native types never cross its boundary, and the internal
-// provider, storage, normalization, and resampling components it
-// coordinates depend on this package's types rather than the reverse. See
-// Manager's own documentation for the full boundary and lifecycle contract.
-// The M2-03 skeleton establishes construction, ownership, and dependency
-// direction; the read and mutation operations report ErrNotImplemented
-// until the M2-01 / ADR-020 query and canonical-persistence contracts land.
+// read-only queries (Bars, Coverage), which never download or rebuild and
+// report missing data explicitly, from explicit acquisition and build
+// commands (Plan, Sync, Build). Provider- and storage-native types never
+// cross its boundary, and the internal provider, storage, normalization,
+// and resampling components it coordinates depend on this package's types
+// rather than the reverse. See Manager's own documentation, and each
+// method's, for the full boundary and lifecycle contract.
 //
 // # Bars and bar sets
 //
