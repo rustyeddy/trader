@@ -3,6 +3,7 @@ package marketdata
 import (
 	"context"
 	"io"
+	"log/slog"
 
 	"github.com/rustyeddy/trader/marketdata"
 )
@@ -47,6 +48,7 @@ func (s *Service) Bars(ctx context.Context, req BarsRequest) (BarsResponse, erro
 
 	reader, err := s.manager.Bars(ctx, req.query())
 	if err != nil {
+		s.logOutcome(ctx, slog.LevelDebug, "bars queried", "bars query failed", req.DatasetRequest, err)
 		return BarsResponse{}, err
 	}
 	defer func() { _ = reader.Close() }()
@@ -58,11 +60,14 @@ func (s *Service) Bars(ctx context.Context, req BarsRequest) (BarsResponse, erro
 			if err == io.EOF {
 				break
 			}
+			s.logOutcome(ctx, slog.LevelDebug, "bars queried", "bars query failed", req.DatasetRequest, err)
 			return BarsResponse{}, err
 		}
 		bars = append(bars, bar)
 	}
 
+	s.logOutcome(ctx, slog.LevelDebug, "bars queried", "bars query failed", req.DatasetRequest, nil,
+		"bar_count", len(bars))
 	return BarsResponse{Bars: bars, Manifests: reader.Manifests()}, nil
 }
 
@@ -76,6 +81,7 @@ func (s *Service) Coverage(ctx context.Context, req CoverageRequest) (CoverageRe
 	}
 
 	cov, err := s.manager.Coverage(ctx, req.query())
+	s.logOutcome(ctx, slog.LevelDebug, "coverage queried", "coverage query failed", req.DatasetRequest, err)
 	if err != nil {
 		return CoverageResponse{}, err
 	}
@@ -95,7 +101,10 @@ func (s *Service) Plan(ctx context.Context, req PlanRequest) (PlanResponse, erro
 
 	plan, err := s.manager.Plan(ctx, req.query())
 	if err != nil {
+		s.logOutcome(ctx, slog.LevelDebug, "plan computed", "plan computation failed", req.DatasetRequest, err)
 		return PlanResponse{}, err
 	}
+	s.logOutcome(ctx, slog.LevelDebug, "plan computed", "plan computation failed", req.DatasetRequest, nil,
+		"action_count", len(plan.Actions))
 	return PlanResponse{Plan: plan}, nil
 }

@@ -3,6 +3,7 @@ package marketdata_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,16 @@ func newFakeOANDAServer(t *testing.T, body string) *httptest.Server {
 // nothing-to-download scenario needs one.
 func newTestManagerAndServiceWithOANDA(t *testing.T, baseURL, rawRoot string) (*marketdata.Manager, *svc.Service) {
 	t.Helper()
+	return newTestManagerAndServiceWithOANDAAndLogger(t, baseURL, rawRoot, nil)
+}
+
+// newTestManagerAndServiceWithOANDAAndLogger is
+// newTestManagerAndServiceWithOANDA's counterpart for logging tests
+// (issue #128): identical setup, but passed straight through to
+// svc.New so a test can inspect what Sync/Build/Update actually log
+// via logging.Capture.
+func newTestManagerAndServiceWithOANDAAndLogger(t *testing.T, baseURL, rawRoot string, logger *slog.Logger) (*marketdata.Manager, *svc.Service) {
+	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t)))
 
@@ -90,7 +101,7 @@ func newTestManagerAndServiceWithOANDA(t *testing.T, baseURL, rawRoot string) (*
 	})
 	require.NoError(t, err)
 
-	s, err := svc.New(mgr)
+	s, err := svc.New(mgr, logger)
 	require.NoError(t, err)
 	return mgr, s
 }

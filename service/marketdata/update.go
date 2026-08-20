@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/rustyeddy/trader/marketdata"
 )
@@ -90,16 +91,35 @@ var ErrUpdateIncomplete = errors.New("service/marketdata: update: dataset still 
 // successful Update produces, making repeated calls safe and
 // deterministic. The final Plan check likewise finds nothing
 // outstanding and Update returns success.
-func (s *Service) Update(ctx context.Context, req UpdateRequest) (UpdateResponse, error) {
+func (s *Service) Update(ctx context.Context, req UpdateRequest) (resp UpdateResponse, err error) {
 	if err := req.Validate(); err != nil {
 		return UpdateResponse{}, err
 	}
+
+	// Named returns plus one deferred log call, rather than a logOutcome
+	// call before every return statement below: Update has four distinct
+	// return points (initial Plan failure, Sync failure, Build failure,
+	// ErrUpdateIncomplete) and one success path, and every one of them
+	// needs the identical "log the overall outcome exactly once" record.
+	// A defer reading the named resp/err results is what makes that
+	// single log call correct regardless of which return statement below
+	// actually fires — see Update's own doc comment for why this
+	// higher-level record is a deliberate, distinct event from the
+	// inner Sync/Build calls' own logOutcome records, not a duplicate of
+	// them.
+	defer func() {
+		s.logOutcome(ctx, slog.LevelInfo, "update completed", "update failed", req.DatasetRequest, err,
+			"sync_performed", resp.SyncPerformed,
+			"downloaded_partitions", len(resp.Sync.Result.Downloaded),
+			"published_partitions", len(resp.Build.Result.Published),
+		)
+	}()
 
 	initialPlan, err := s.manager.Plan(ctx, req.query())
 	if err != nil {
 		return UpdateResponse{}, err
 	}
-	resp := UpdateResponse{InitialPlan: initialPlan}
+	resp = UpdateResponse{InitialPlan: initialPlan}
 
 	if planNeedsSync(initialPlan) {
 		resp.SyncPerformed = true

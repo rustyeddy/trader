@@ -3,6 +3,7 @@ package marketdata_test
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,6 +92,15 @@ func copyFixtureRaw(t *testing.T) string {
 // test-only setup, not something being tested here.
 func newTestManagerAndService(t *testing.T) (*marketdata.Manager, *svc.Service) {
 	t.Helper()
+	return newTestManagerAndServiceWithLogger(t, nil)
+}
+
+// newTestManagerAndServiceWithLogger is newTestManagerAndService's
+// counterpart for logging tests (issue #128): identical setup, but
+// passed straight through to svc.New so a test can inspect what the
+// Service actually logs via logging.Capture.
+func newTestManagerAndServiceWithLogger(t *testing.T, logger *slog.Logger) (*marketdata.Manager, *svc.Service) {
+	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t)))
 
@@ -103,7 +113,7 @@ func newTestManagerAndService(t *testing.T) (*marketdata.Manager, *svc.Service) 
 	})
 	require.NoError(t, err)
 
-	s, err := svc.New(mgr)
+	s, err := svc.New(mgr, logger)
 	require.NoError(t, err)
 	return mgr, s
 }
