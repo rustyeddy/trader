@@ -49,7 +49,7 @@ func (s *Service) Bars(ctx context.Context, req BarsRequest) (BarsResponse, erro
 	if err != nil {
 		return BarsResponse{}, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	var bars []marketdata.Bar
 	for {
