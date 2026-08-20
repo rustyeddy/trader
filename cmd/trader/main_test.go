@@ -28,16 +28,23 @@ func TestRun_SuccessReturnsZero(t *testing.T) {
 	require.Equal(t, 0, code)
 }
 
-func TestRun_ErrorReturnsOne(t *testing.T) {
-	// data (like root) is deliberately non-runnable in #108's own scope
-	// (no market-data commands yet), so an unrecognized flag -- which
-	// fails during Cobra's own flag parsing, before Runnable() is even
-	// checked -- is the one real, always-reachable failure mode run()
-	// has today. See root_test.go's newProbeCmd doc comment for why a
-	// PersistentPreRunE-level failure (an invalid --log-format, say)
-	// cannot be reached through the real, current command tree yet.
+func TestRun_ErrorReturnsOneOnFlagParseFailure(t *testing.T) {
+	// An unrecognized flag fails during Cobra's own flag parsing,
+	// before PersistentPreRunE (or even the Runnable() check) runs.
 	var code int
 	withArgs(t, []string{"--this-flag-does-not-exist"}, func() {
+		code = run()
+	})
+	require.Equal(t, 1, code)
+}
+
+func TestRun_ErrorReturnsOneOnInvalidLogFormat(t *testing.T) {
+	// Both root and data carry an explicit RunE (root.go's own doc
+	// comment explains why), so PersistentPreRunE's logging-config
+	// validation is reachable through a real "trader data" invocation,
+	// not only via a test-only probe command.
+	var code int
+	withArgs(t, []string{"--log-format=bogus", "data"}, func() {
 		code = run()
 	})
 	require.Equal(t, 1, code)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -29,6 +30,14 @@ type rootFlags struct {
 // I/O and starts nothing on its own — a caller (main, or a test) drives
 // execution via ExecuteContext.
 //
+// It also returns cleanup, which closes whatever logger output
+// PersistentPreRunE actually built (a no-op if PersistentPreRunE never
+// ran or never got that far — for example on a bare "trader --help").
+// The caller must defer cleanup() around its own call to
+// Execute(Context), unconditionally: see the "Logger lifetime" section
+// below for why Cobra's own PersistentPostRunE hook cannot be trusted
+// for this.
+//
 // # Context propagation
 //
 // PersistentPreRunE checks cmd.Context().Err() before doing anything
@@ -41,8 +50,24 @@ type rootFlags struct {
 // cancellation needs to be checked explicitly at the framework level;
 // individual commands additionally check ctx as their own work
 // requires it once they exist (#109-#112).
-func newRootCmd() *cobra.Command {
+//
+// # Logger lifetime
+//
+// The logger's closer is deliberately not installed as
+// PersistentPostRunE, as an earlier version of this function did.
+// Cobra's Command.execute returns immediately when a command's own
+// RunE returns a non-nil error — the PersistentPostRunE loop sits
+// below that call, unreached on that path, not behind a defer. A
+// failing leaf command (#109-#112) would therefore leak its log file
+// descriptor on every single failure, exactly the case that matters
+// most for an operator tailing a file-backed log. Returning the real
+// closer here and requiring the caller to defer it around
+// Execute(Context) instead guarantees cleanup runs on every return
+// path, success or failure, the same way any other Go resource is
+// deferred-closed — independent of which Cobra hook happened to fire.
+func newRootCmd() (*cobra.Command, func() error) {
 	var flags rootFlags
+	var closer io.Closer
 
 	cmd := &cobra.Command{
 		Use:   "trader",
@@ -61,14 +86,12 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logger, closer, err := logging.New(logCfg)
+			logger, c, err := logging.New(logCfg)
 			if err != nil {
 				return err
 			}
+			closer = c
 			cmd.SetContext(withLogger(cmd.Context(), logger))
-			cmd.Root().PersistentPostRunE = func(*cobra.Command, []string) error {
-				return closer.Close()
-			}
 			return nil
 		},
 		// RunE, not a nil Run/RunE: Cobra treats a command with neither
@@ -95,7 +118,13 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(newDataCmd())
 
-	return cmd
+	cleanup := func() error {
+		if closer == nil {
+			return nil
+		}
+		return closer.Close()
+	}
+	return cmd, cleanup
 }
 
 // buildLoggingConfig resolves a logging.Config from flags actually set

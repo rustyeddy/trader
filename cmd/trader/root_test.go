@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,7 +14,8 @@ import (
 )
 
 func TestNewRootCmd_HelpSucceeds(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	root.SetArgs([]string{"--help"})
 	root.SetOut(new(discard))
 	root.SetErr(new(discard))
@@ -23,7 +25,8 @@ func TestNewRootCmd_HelpSucceeds(t *testing.T) {
 }
 
 func TestNewRootCmd_DataGroupExists(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 
 	var found bool
 	for _, c := range root.Commands() {
@@ -47,7 +50,8 @@ func TestNewRootCmd_DataGroupExists(t *testing.T) {
 // current command tree rather than only through a future leaf command
 // (#109-#112) or a test-only stand-in.
 func TestNewRootCmd_PropagatesCancelledContext(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	root.SetArgs([]string{"data"})
 	root.SetOut(new(discard))
 	root.SetErr(new(discard))
@@ -60,7 +64,8 @@ func TestNewRootCmd_PropagatesCancelledContext(t *testing.T) {
 }
 
 func TestNewRootCmd_RejectsInvalidLogFormat(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	root.SetArgs([]string{"--log-format=bogus", "data"})
 	root.SetOut(new(discard))
 	root.SetErr(new(discard))
@@ -92,7 +97,8 @@ func newLoggerProbeCmd(got **slog.Logger) *cobra.Command {
 // newRootCmd built retrieves, through its own cmd.Context(), the exact
 // logger PersistentPreRunE constructed from --log-level.
 func TestNewRootCmd_LoggerReachesSubcommandContext(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	var got *slog.Logger
 	root.AddCommand(newLoggerProbeCmd(&got))
 	root.SetArgs([]string{"--log-level=DEBUG", "probe"})
@@ -107,7 +113,8 @@ func TestNewRootCmd_LoggerReachesSubcommandContext(t *testing.T) {
 }
 
 func TestNewRootCmd_DefaultLoggingWhenNoFlagsOrEnv(t *testing.T) {
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	var got *slog.Logger
 	root.AddCommand(newLoggerProbeCmd(&got))
 	root.SetArgs([]string{"probe"})
@@ -123,7 +130,8 @@ func TestNewRootCmd_DefaultLoggingWhenNoFlagsOrEnv(t *testing.T) {
 
 func TestNewRootCmd_EnvironmentVariableConfiguresLogger(t *testing.T) {
 	t.Setenv("TRADER_LEVEL", "DEBUG")
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	var got *slog.Logger
 	root.AddCommand(newLoggerProbeCmd(&got))
 	root.SetArgs([]string{"probe"})
@@ -138,7 +146,8 @@ func TestNewRootCmd_EnvironmentVariableConfiguresLogger(t *testing.T) {
 
 func TestNewRootCmd_FlagOverridesEnvironmentVariable(t *testing.T) {
 	t.Setenv("TRADER_LEVEL", "DEBUG")
-	root := newRootCmd()
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
 	var got *slog.Logger
 	root.AddCommand(newLoggerProbeCmd(&got))
 	root.SetArgs([]string{"--log-level=WARN", "probe"})
@@ -155,10 +164,11 @@ func TestNewRootCmd_FlagOverridesEnvironmentVariable(t *testing.T) {
 func TestNewRootCmd_LogFormatFlagAppliesToLogger(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "trader.log")
 
-	root := newRootCmd()
-	// The message must be logged from inside RunE, before
-	// PersistentPostRunE closes the file output -- logging after
-	// ExecuteContext returns would write to an already-closed file.
+	root, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
+	// The message must be logged from inside RunE, before cleanup runs
+	// and closes the file output -- logging after ExecuteContext
+	// returns would write to an already-closed file.
 	root.AddCommand(&cobra.Command{
 		Use: "probe",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -177,6 +187,45 @@ func TestNewRootCmd_LogFormatFlagAppliesToLogger(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(string(data)), "{"),
 		"--log-format=json must produce JSON output, got: %s", data)
+}
+
+// TestNewRootCmd_CleanupRunsAfterFailingSubcommand is the regression
+// test for the logger-lifetime fix newRootCmd's own doc comment
+// describes: a leaf command's RunE returning an error must not skip
+// cleanup. Before the fix, the logger closer was installed as
+// PersistentPostRunE, which Cobra's Command.execute never reaches once
+// RunE has already returned a non-nil error -- so a failing command
+// with file-backed logging would leak its open file descriptor on
+// every failure.
+//
+// The proof is a double Close: *os.File.Close() (the real closer
+// logging.New's file-output path returns, see logging/config.go's
+// resolveOutput) succeeds the first time and fails with "already
+// closed" the second. If cleanup here had not actually closed the
+// file — the exact bug being guarded against — a second manual
+// cleanup() call would still succeed, since the file would still be
+// genuinely open.
+func TestNewRootCmd_CleanupRunsAfterFailingSubcommand(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "trader.log")
+
+	root, cleanup := newRootCmd()
+	failure := errors.New("probe: deliberate failure")
+	root.AddCommand(&cobra.Command{
+		Use: "probe",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			loggerFromContext(cmd.Context()).Info("about to fail")
+			return failure
+		},
+	})
+	root.SetArgs([]string{"--log-output=" + logPath, "probe"})
+	root.SetOut(new(discard))
+	root.SetErr(new(discard))
+
+	err := root.ExecuteContext(context.Background())
+	require.ErrorIs(t, err, failure, "the subcommand's own error must still propagate")
+
+	require.NoError(t, cleanup(), "cleanup must succeed the first time, proving the file was genuinely open")
+	require.Error(t, cleanup(), "a second Close on the same *os.File must fail, proving the first one actually closed it")
 }
 
 func TestLoggerFromContext_DefaultsWhenUnset(t *testing.T) {

@@ -38,7 +38,10 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+	cmd, cleanup := newRootCmd()
+	defer func() { _ = cleanup() }()
+
+	if err := cmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "trader:", err)
 		return 1
 	}
