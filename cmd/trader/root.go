@@ -66,6 +66,14 @@ type rootFlags struct {
 // path, success or failure, the same way any other Go resource is
 // deferred-closed — independent of which Cobra hook happened to fire.
 func newRootCmd() (*cobra.Command, func() error) {
+	// Without this, Cobra runs only the *closest* PersistentPreRunE up
+	// the command tree for a given invocation -- data.go's own
+	// PersistentPreRunE (building the marketdata service) would
+	// entirely shadow this one (building the logger), rather than
+	// running after it, for every data subcommand. See data.go's own
+	// doc comment.
+	cobra.EnableTraverseRunHooks = true
+
 	var flags rootFlags
 	var closer io.Closer
 
