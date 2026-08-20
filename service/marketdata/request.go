@@ -102,3 +102,11 @@ type SyncRequest struct {
 type BuildRequest struct {
 	DatasetRequest
 }
+
+// UpdateRequest is the request for the higher-level Update use case
+// (issue #107): bring one dataset current by composing Plan, Sync, and
+// Build. Like every other request in this package, it names a dataset,
+// not a Plan or a sequence of steps to run.
+type UpdateRequest struct {
+	DatasetRequest
+}
