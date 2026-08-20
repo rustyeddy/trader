@@ -94,9 +94,21 @@ func ExampleWithComponent() {
 // example is not output-verified for the same reason ExampleNew isn't: a
 // wall-clock timestamp in the text output would differ on every run.
 func ExampleNewMulti() {
+	// A unique, self-cleaning temp file, not a fixed path: this example
+	// runs under `go test`, and a fixed path would leave a real file
+	// behind (or collide with a concurrent/repeated run).
+	f, err := os.CreateTemp("", "trader-example-*.log")
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
 	logger, closer, err := logging.NewMulti([]logging.Config{
 		{Format: "text", Output: "stdout"},
-		{Format: "json", Output: os.TempDir() + "/trader-example.log"},
+		{Format: "json", Output: path},
 	})
 	if err != nil {
 		fmt.Println("error:", err)
