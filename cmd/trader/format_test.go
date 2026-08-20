@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,6 +29,47 @@ func TestResolveFormatter_JSON(t *testing.T) {
 func TestResolveFormatter_RejectsUnknown(t *testing.T) {
 	_, err := resolveFormatter("xml")
 	require.Error(t, err)
+}
+
+// failingWriter always fails, simulating a broken pipe or other
+// output failure (piping trader's stdout into a command that exits
+// early, say). errAlways is returned verbatim so tests can assert on
+// it with errors.Is/require.ErrorIs rather than a string match.
+type failingWriter struct{}
+
+var errAlwaysFails = errors.New("failingWriter: always fails")
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errAlwaysFails }
+
+// TestTableFormatter_PropagatesWriteErrors is the regression test for
+// #131's review finding: an earlier version of tableFormatter
+// discarded every fmt.Fprintf/Fprintln error and always returned nil,
+// so a write failure would silently look like success. Covers every
+// Formatter method, including the ones (FormatPlan with zero Actions,
+// FormatUpdate/FormatUpdateProgress) whose only output is a single
+// literal line, not a loop over records.
+func TestTableFormatter_PropagatesWriteErrors(t *testing.T) {
+	f := tableFormatter{}
+	w := failingWriter{}
+
+	require.ErrorIs(t, f.FormatBars(w, svc.BarsResponse{Bars: []marketdata.Bar{sampleBar(t)}}), errAlwaysFails)
+	require.ErrorIs(t, f.FormatCoverage(w, svc.CoverageResponse{Coverage: marketdata.Coverage{
+		Partitions: []marketdata.PartitionCoverage{{Year: 2024, Month: time.January}},
+	}}), errAlwaysFails)
+	require.ErrorIs(t, f.FormatPlan(w, svc.PlanResponse{}), errAlwaysFails,
+		"FormatPlan's zero-Actions \"nothing required\" line must also report a write failure")
+	require.ErrorIs(t, f.FormatSync(w, svc.SyncResponse{Result: marketdata.SyncResult{
+		Downloaded: []marketdata.DownloadResult{{}},
+	}}), errAlwaysFails)
+	require.ErrorIs(t, f.FormatBuild(w, svc.BuildResponse{Result: marketdata.BuildResult{
+		Published: []marketdata.PublishResult{{}},
+	}}), errAlwaysFails)
+	require.ErrorIs(t, f.FormatUpdateProgress(w, svc.UpdateResponse{
+		SyncPerformed: true,
+		Sync:          svc.SyncResponse{Result: marketdata.SyncResult{Downloaded: []marketdata.DownloadResult{{}}}},
+	}), errAlwaysFails)
+	require.ErrorIs(t, f.FormatUpdate(w, svc.UpdateResponse{}), errAlwaysFails,
+		"FormatUpdate's \"already current\" line must also report a write failure")
 }
 
 func sampleBar(t *testing.T) marketdata.Bar {
