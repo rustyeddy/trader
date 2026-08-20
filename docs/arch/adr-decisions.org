@@ -129,6 +129,7 @@ the original decided, use full supersession instead.
 | 019 | Account and portfolio snapshot models                             | Accepted   |
 | 020 | Historic data subsystem (in adr-020-historic-data.org)            | Accepted   |
 | 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
+| 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Proposed |
 
 Note: ADR-020 is maintained in its own file,
 =docs/arch/adr-020-historic-data.org=, rather than inline in this
@@ -138,6 +139,16 @@ consult it for the full decisions and open questions.  ADR-020 was held
 at =Proposed= pending issue #99 (H4 alignment disagreeing with ADR-012,
 discovered during #81's corpus validation); #99 resolved it (ADR-021),
 and ADR-020 is now =Accepted=.
+
+Note: ADR-022 is likewise maintained in its own file,
+=docs/arch/adr-022-cli-app-service-layer.md=, rather than inline in
+this registry.  Its own Status section is authoritative; the status
+column above is kept in sync with it.  It remains =Proposed=: it has
+five open questions (application package name; whether =Update= grows
+policy/options; where CLI formatting lives; default =--to= behavior;
+confirmation/error UX for read versus mutation commands) still
+unresolved, and per =CONTRIBUTING.org= should not be treated as
+binding until those are settled or explicitly deferred.
 
 * ADR-001: Modular monolith before service decomposition
 
