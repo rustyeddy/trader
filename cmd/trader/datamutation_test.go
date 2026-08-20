@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -77,6 +78,40 @@ func runDataWithOANDA(t *testing.T, storeRoot, rawRoot, baseURL string, args ...
 
 	err := root.ExecuteContext(context.Background())
 	return out.String(), err
+}
+
+func TestDataBuild_JSONFormatProducesValidJSON(t *testing.T) {
+	rawRoot := copyFixtureRaw(t)
+	storeRoot := t.TempDir()
+
+	out, err := runData(t, storeRoot, rawRoot,
+		"build", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08", "--format", "json")
+	require.NoError(t, err)
+
+	var decoded struct {
+		Published []struct {
+			BarCount int `json:"bar_count"`
+		} `json:"published"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &decoded))
+	require.Len(t, decoded.Published, 1)
+	require.Equal(t, 216, decoded.Published[0].BarCount)
+}
+
+func TestDataUpdate_JSONFormatReflectsAlreadyCurrentOnErrorPath(t *testing.T) {
+	storeRoot := t.TempDir()
+	rawRoot := filepath.Join(t.TempDir(), "does-not-exist")
+
+	out, err := runData(t, storeRoot, rawRoot,
+		"update", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08", "--format", "json")
+	require.Error(t, err)
+
+	var decoded struct {
+		AlreadyCurrent bool `json:"already_current"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &decoded))
+	require.False(t, decoded.AlreadyCurrent,
+		"a failed Update must never report already_current: true in JSON either")
 }
 
 func TestDataBuild_PublishesFromExistingRaw(t *testing.T) {
