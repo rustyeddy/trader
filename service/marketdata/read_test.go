@@ -235,7 +235,7 @@ func TestCoverage_PropagatesContextCancellation(t *testing.T) {
 	cancel()
 
 	_, err := s.Coverage(ctx, svc.CoverageRequest{DatasetRequest: datasetRequest(t, marketdata.D1, fixtureSpan(t))})
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestPlan_PropagatesContextCancellation(t *testing.T) {
@@ -245,5 +245,5 @@ func TestPlan_PropagatesContextCancellation(t *testing.T) {
 	cancel()
 
 	_, err := s.Plan(ctx, svc.PlanRequest{DatasetRequest: datasetRequest(t, marketdata.D1, fixtureSpan(t))})
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

@@ -18,6 +18,28 @@ import (
 // the result, Bars returns a zero BarsResponse rather than a partial
 // one — the same "no partial results on error" contract
 // *marketdata.Manager.Bars itself documents.
+//
+// # Materialization is a deliberate, revisitable v0 decision
+//
+// *marketdata.Manager.Bars already fully resolves its result in memory
+// before returning a BarReader (BarReader's own doc comment); draining
+// that reader here into BarsResponse.Bars necessarily produces a
+// second, independent []marketdata.Bar the same size as the reader's
+// own — both are live for the duration of this call, before reader
+// goes out of scope and becomes eligible for garbage collection. For a
+// query spanning years of historical data this is a real, non-trivial
+// transient memory cost, not a rounding error.
+//
+// This is accepted for v0 rather than solved speculatively: it mirrors
+// the identical tradeoff marketdata's own internal readAllBars already
+// makes for the same reason (query.go), and BarsResponse is a plain
+// value — never a live handle a caller must remember to Close — which
+// is the service layer's own stated convention (service/doc.go). If a
+// real caller (CLI, REST, or otherwise) needs to query a range large
+// enough that this transient doubling actually matters, the fix
+// belongs in a bounded or streaming service response shape introduced
+// deliberately at that point — not a speculative abstraction added
+// here before any consumer exists to validate its shape.
 func (s *Service) Bars(ctx context.Context, req BarsRequest) (BarsResponse, error) {
 	if err := req.Validate(); err != nil {
 		return BarsResponse{}, err
