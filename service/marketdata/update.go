@@ -2,9 +2,18 @@ package marketdata
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/rustyeddy/trader/marketdata"
 )
+
+// ErrUpdateIncomplete marks an Update call that ran Sync and/or Build
+// but left the dataset with outstanding required work afterward — most
+// notably an ActionRepairRaw entry, which neither Sync nor Build ever
+// resolves (see Update's own doc comment). UpdateResponse.FinalPlan
+// names exactly what remains.
+var ErrUpdateIncomplete = errors.New("service/marketdata: update: dataset still requires action after update")
 
 // Update implements the higher-level Update use case (issue #107):
 // bring req's dataset current by composing Plan, Sync, and Build. It is
@@ -28,25 +37,48 @@ import (
 // silently skip exactly the canonical work Sync's own downloads just
 // made possible.
 //
-// # Sync is skipped when nothing raw-related is needed
+// # Sync is skipped unless raw data must actually be downloaded
 //
 // Update calls Sync only when InitialPlan contains at least one
-// ActionDownloadRaw or ActionRepairRaw entry. This means Update never
-// requires an OANDA client to be configured for a dataset that only
-// needs a canonical build from already-synced raw data — Manager.Sync
-// itself requires OANDA configuration unconditionally, even for a Plan
-// containing no download actions, so calling it needlessly would turn
-// an otherwise offline-capable canonical build into a hard failure.
+// ActionDownloadRaw entry — never merely because it contains
+// ActionRepairRaw. *marketdata.Manager.Sync executes only
+// ActionDownloadRaw; every other Action Kind, including
+// ActionRepairRaw, it reports in SyncResult.Skipped and otherwise
+// ignores (Manager.Sync's own "only raw downloads" doc comment). A plan
+// containing only a repair requirement would therefore gain nothing
+// from a Sync call — Sync cannot perform the repair — while still
+// paying the same unconditional OANDA-configuration requirement every
+// Sync call has, turning an unrelated repair need into a needless hard
+// failure for a dataset that may not even need a download. Since Build
+// cannot resolve a raw repair either (build.go's own "only canonical
+// builds" scope split), an unresolved ActionRepairRaw is instead caught
+// by the final-Plan check below, which reports it clearly rather than
+// silently leaving Sync to skip it and Update to report success anyway.
+//
+// # Success requires a clean final Plan, not just error-free calls
+//
+// Sync and Build both returning without error is not sufficient to
+// claim the dataset is now current: an ActionRepairRaw entry survives
+// both untouched, since neither stage ever executes one. Update
+// therefore recomputes the Plan one final time after Sync/Build
+// complete and fails with ErrUpdateIncomplete if any Action remains —
+// this catches ActionRepairRaw specifically today, and, by checking the
+// actual resulting state rather than special-casing one ActionKind,
+// remains correct if a future ActionKind neither Sync nor Build handles
+// is ever introduced. UpdateResponse.FinalPlan is always populated when
+// this final check runs, so a caller can see exactly what is still
+// outstanding.
 //
 // # Failure stops the pipeline
 //
 // If Sync is performed and fails, Update returns immediately: Build is
 // never attempted against raw data known to have partially failed to
 // acquire. UpdateResponse.Sync still carries whatever partial progress
-// Sync made (SyncResponse's own contract); UpdateResponse.Build remains
-// the zero value in that case. If Sync succeeds (or was not needed) and
-// Build then fails, Update returns with UpdateResponse.Build carrying
-// Build's own partial progress.
+// Sync made (SyncResponse's own contract); UpdateResponse.Build and
+// FinalPlan remain their zero values in that case. If Sync succeeds (or
+// was not needed) and Build then fails, Update returns with
+// UpdateResponse.Build carrying Build's own partial progress, and
+// FinalPlan is likewise never computed.
 //
 // # No work when nothing is required
 //
@@ -56,7 +88,8 @@ import (
 // *marketdata.Manager.Build's loop performs no writes — the same
 // "already current" outcome running Update again immediately after a
 // successful Update produces, making repeated calls safe and
-// deterministic.
+// deterministic. The final Plan check likewise finds nothing
+// outstanding and Update returns success.
 func (s *Service) Update(ctx context.Context, req UpdateRequest) (UpdateResponse, error) {
 	if err := req.Validate(); err != nil {
 		return UpdateResponse{}, err
@@ -83,17 +116,30 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (UpdateResponse
 		return resp, err
 	}
 
+	finalPlan, err := s.manager.Plan(ctx, req.query())
+	if err != nil {
+		return resp, err
+	}
+	resp.FinalPlan = finalPlan
+	if len(finalPlan.Actions) > 0 {
+		return resp, fmt.Errorf("%w: %d action(s) remain, first: %s %04d-%02d (%s)",
+			ErrUpdateIncomplete, len(finalPlan.Actions),
+			finalPlan.Actions[0].Kind, finalPlan.Actions[0].Year, int(finalPlan.Actions[0].Month),
+			finalPlan.Actions[0].Reason)
+	}
+
 	return resp, nil
 }
 
-// planNeedsSync reports whether plan contains any Action Sync itself
-// would act on or explicitly report skipping — ActionDownloadRaw or
-// ActionRepairRaw. A plan containing only canonical Actions
-// (ActionNormalizeCanonical, ActionDeriveCanonical) needs no Sync call
-// at all.
+// planNeedsSync reports whether plan contains an ActionDownloadRaw
+// entry — the only Action Kind *marketdata.Manager.Sync ever executes.
+// A plan containing only ActionRepairRaw, ActionNormalizeCanonical, or
+// ActionDeriveCanonical entries needs no Sync call at all; see Update's
+// own doc comment for why ActionRepairRaw specifically must not trigger
+// one.
 func planNeedsSync(plan marketdata.Plan) bool {
 	for _, a := range plan.Actions {
-		if a.Kind == marketdata.ActionDownloadRaw || a.Kind == marketdata.ActionRepairRaw {
+		if a.Kind == marketdata.ActionDownloadRaw {
 			return true
 		}
 	}

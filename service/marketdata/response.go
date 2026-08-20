@@ -95,9 +95,19 @@ type BuildResponse struct {
 // acquisition that is known to have partially failed. Sync.Result
 // still reports whatever partial progress Sync made before the
 // failure (SyncResponse's own contract).
+//
+// FinalPlan is a Plan recomputed after Sync/Build complete
+// successfully, and is populated only when that recomputation actually
+// runs (never after a Sync or Build failure, which each return before
+// reaching it). A non-empty FinalPlan.Actions means Update failed with
+// ErrUpdateIncomplete: something — most notably an unresolved
+// ActionRepairRaw, which neither Sync nor Build ever executes — is
+// still outstanding even though neither stage itself returned an
+// error. FinalPlan names exactly what remains for a caller to act on.
 type UpdateResponse struct {
 	InitialPlan   marketdata.Plan
 	SyncPerformed bool
 	Sync          SyncResponse
 	Build         BuildResponse
+	FinalPlan     marketdata.Plan
 }
