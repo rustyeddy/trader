@@ -48,3 +48,37 @@ func (r DatasetRequest) Validate() error {
 	}
 	return nil
 }
+
+// query translates r into the marketdata.BarQuery every read operation
+// (Bars, Coverage, Plan) ultimately calls its corresponding
+// *marketdata.Manager method with. It is the one place DatasetRequest's
+// fields are mapped onto BarQuery's, so every operation's translation
+// stays identical by construction rather than by convention.
+func (r DatasetRequest) query() marketdata.BarQuery {
+	return marketdata.BarQuery{
+		Instrument: r.Instrument,
+		Interval:   r.Interval,
+		Range:      r.Range,
+	}
+}
+
+// BarsRequest is the request for the read-only Bars use case (issue
+// #105): the canonical Bar data for one dataset.
+type BarsRequest struct {
+	DatasetRequest
+}
+
+// CoverageRequest is the request for the read-only Coverage use case
+// (issue #105): coverage and gap reporting for one dataset.
+type CoverageRequest struct {
+	DatasetRequest
+}
+
+// PlanRequest is the request for the read-only Plan use case (issue
+// #105): the acquisition/build work required to make one dataset
+// available. Plan is read-only itself — it never performs the work it
+// describes; see Sync and Build (issue #106) for the corresponding
+// mutating operations.
+type PlanRequest struct {
+	DatasetRequest
+}
