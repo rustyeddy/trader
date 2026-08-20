@@ -54,3 +54,55 @@ const (
 func WithComponent(l *slog.Logger, component string) *slog.Logger {
 	return l.With(Component, component)
 }
+
+// Canonical component names, per issue #126 (M2.6-02) and ADR-023. Each
+// names one stable architectural subsystem — the same granularity
+// package-boundaries.org already uses for Trader's own package layout —
+// not an individual file, function, or one-off debugging scope. A package
+// should generally scope its own logger with the one component name that
+// best matches its architectural role, calling WithComponent once at the
+// point a scoped logger is actually needed.
+//
+// This is a plain set of string constants, not a registry: there is no
+// lookup from a Component name to a pre-built logger, and no mutable
+// package-level state backs any of them. A composition root still owns
+// constructing every *slog.Logger (via New) and deciding which component
+// name to scope it with; these constants exist only so that decision uses
+// one agreed-on spelling instead of every call site inventing its own.
+//
+// The list is deliberately small and grows only when a real subsystem
+// needs its own name — see ADR-023's own initial vocabulary.
+const (
+	// ComponentMarketData scopes records from the marketdata subsystem.
+	ComponentMarketData = "marketdata"
+
+	// ComponentBroker scopes records from broker adapters and sessions.
+	ComponentBroker = "broker"
+
+	// ComponentAccount scopes records from account state and reconciliation.
+	ComponentAccount = "account"
+
+	// ComponentOrders scopes records from order lifecycle and execution.
+	ComponentOrders = "orders"
+
+	// ComponentPortfolio scopes records from portfolio aggregation.
+	ComponentPortfolio = "portfolio"
+
+	// ComponentStrategy scopes records from strategy decisions.
+	ComponentStrategy = "strategy"
+
+	// ComponentBacktest scopes records from backtest orchestration.
+	ComponentBacktest = "backtest"
+
+	// ComponentExecution scopes records from execution planning and
+	// management.
+	ComponentExecution = "execution"
+
+	// ComponentService scopes records from the application/service layer
+	// (ADR-022), as distinct from any one domain subsystem it orchestrates.
+	ComponentService = "service"
+
+	// ComponentCLI scopes records from the trader command-line transport
+	// adapter itself, as distinct from the services it calls.
+	ComponentCLI = "cli"
+)

@@ -48,6 +48,19 @@
 // causation IDs may initially be plain strings, per #21, until Trader-owned
 // ID types exist.
 //
+// # Components
+//
+// WithComponent scopes a logger to one architectural subsystem via the
+// canonical Component attribute. attrs.go also defines a small, named
+// vocabulary of component names (ComponentMarketData, ComponentBroker,
+// ComponentAccount, ComponentOrders, ComponentPortfolio, ComponentStrategy,
+// ComponentBacktest, ComponentExecution, ComponentService, ComponentCLI —
+// per issue #126 and ADR-023), so "which subsystem is this" has one agreed
+// spelling instead of every call site inventing its own. These are plain
+// string constants, not a registry: there is no global lookup from a
+// component name to a pre-built logger, and a composition root still
+// constructs and scopes every logger explicitly.
+//
 // # Redaction
 //
 // Wrap a sensitive value with Secret before logging it — logger.Info("auth",
