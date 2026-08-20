@@ -3,8 +3,20 @@
 # new golangci-lint release adds or reconfigures linters.
 LINT_VERSION := v2.13.0
 COVERPROFILE := coverage.out
+BINARY := trader
+BIN_DIR := bin
 
 all: check
+
+# build compiles the trader CLI (cmd/trader) to ./bin/trader.
+build:
+	go build -o $(BIN_DIR)/$(BINARY) ./cmd/trader
+
+# install builds and installs trader via `go install`, the standard Go
+# convention: it lands in $GOBIN, or $GOPATH/bin (~/go/bin by default)
+# when GOBIN is unset, and requires no elevated privileges.
+install:
+	go install ./cmd/trader
 
 fmt:
 	go fmt ./...
@@ -37,4 +49,4 @@ coverage-html: coverage
 
 check: fmt-check vet lint test race
 
-.PHONY: all fmt fmt-check vet test race lint coverage coverage-html check
+.PHONY: all build install fmt fmt-check vet test race lint coverage coverage-html check
