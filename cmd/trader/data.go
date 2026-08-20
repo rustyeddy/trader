@@ -3,8 +3,8 @@ package main
 import "github.com/spf13/cobra"
 
 // newDataCmd returns the "data" command group: the shell M2.5's
-// historical market-data commands attach to (bars/coverage/plan, this
-// issue's own scope; sync/build/update, #110).
+// historical market-data commands attach to (bars/coverage/plan, #109;
+// sync/build/update, this issue's own scope).
 //
 // Its PersistentPreRunE builds the *marketdata.Manager/Service every
 // data subcommand shares, from datasetFlags/datasetConfig
@@ -46,13 +46,19 @@ func newDataCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.storeRoot, "store-root", "",
 		"canonical data store root path, required")
 	cmd.PersistentFlags().StringVar(&flags.rawRoot, "raw-root", "",
-		"raw provider archive root path (required for coverage/plan)")
+		"raw provider archive root path (required for coverage/plan/sync/build/update)")
 	cmd.PersistentFlags().StringVar(&flags.provider, "provider", "",
 		"canonical dataset provider name (default oanda)")
+	cmd.PersistentFlags().StringVar(&flags.oandaBaseURL, "oanda-base-url", "",
+		"OANDA API base URL (required for sync/update; the token itself is "+
+			"never a flag -- set TRADER_OANDA_TOKEN instead)")
 
 	cmd.AddCommand(newBarsCmd())
 	cmd.AddCommand(newCoverageCmd())
 	cmd.AddCommand(newPlanCmd())
+	cmd.AddCommand(newSyncCmd())
+	cmd.AddCommand(newBuildCmd())
+	cmd.AddCommand(newUpdateCmd())
 
 	return cmd
 }
