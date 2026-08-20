@@ -238,7 +238,7 @@ func TestM2VerticalSlice(t *testing.T) {
 		require.NoError(t, err)
 		reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.W1, Range: weekSpan})
 		require.NoError(t, err)
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 
 		bar, err := reader.Next(ctx)
 		require.NoError(t, err)
@@ -457,7 +457,7 @@ func TestM2Build_CancelledBetweenActionsLeavesLaterActionUnpublished(t *testing.
 	// is actually readable back through Bars, end to end.
 	reader, err := mgr.Bars(context.Background(), marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	var n int
 	for {
 		_, err := reader.Next(context.Background())
@@ -524,7 +524,7 @@ func TestM2VerticalSlice_IncompleteRecordExcludedNotAborted(t *testing.T) {
 
 	reader, err := mgr.Bars(ctx, marketdata.BarQuery{Instrument: eurusdID(t), Interval: marketdata.H1, Range: span})
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	var times []time.Time
 	for {
 		bar, err := reader.Next(ctx)

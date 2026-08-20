@@ -181,7 +181,7 @@ func ReadPartitionRecords(ctx context.Context, root, symbol string, interval Raw
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var records []Record
 	for {
@@ -263,7 +263,7 @@ func ReadPartitionSnapshot(ctx context.Context, root, symbol string, interval Ra
 	if err != nil {
 		return PartitionSnapshot{}, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var records []Record
 	for {

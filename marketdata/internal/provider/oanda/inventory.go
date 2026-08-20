@@ -363,7 +363,7 @@ func readRecordsFromBytes(ctx context.Context, path string, data []byte) ([]Reco
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var records []Record
 	for {

@@ -384,7 +384,7 @@ func (c *Client) doFetchPage(ctx context.Context, apiSymbol, granularity string,
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errNetwork, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, classifyStatus(resp.StatusCode, resp.Body)

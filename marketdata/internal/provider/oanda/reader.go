@@ -239,7 +239,7 @@ func ReadFile(ctx context.Context, path string) (Meta, []Record, error) {
 	if err != nil {
 		return Meta{}, nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	var records []Record
 	for {
