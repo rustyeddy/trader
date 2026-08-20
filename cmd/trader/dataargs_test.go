@@ -11,35 +11,12 @@ import (
 	"github.com/rustyeddy/trader/marketdata"
 )
 
-func TestParseFXListing_Valid(t *testing.T) {
-	listing, err := parseFXListing("oanda", "eurusd")
-	require.NoError(t, err)
-	require.Equal(t, "EURUSD", listing.Symbol())
-	require.Equal(t, "oanda", listing.Provider())
-	require.False(t, listing.InstrumentID().IsZero())
-}
-
-func TestParseFXListing_JPYUsesFinerTickSize(t *testing.T) {
-	listing, err := parseFXListing("oanda", "USDJPY")
-	require.NoError(t, err)
-	require.Equal(t, "0.001", listing.Spec().TickSize().String())
-}
-
-func TestParseFXListing_NonJPYUsesStandardTickSize(t *testing.T) {
-	listing, err := parseFXListing("oanda", "EURUSD")
-	require.NoError(t, err)
-	require.Equal(t, "0.00001", listing.Spec().TickSize().String())
-}
-
-func TestParseFXListing_RejectsWrongLength(t *testing.T) {
-	_, err := parseFXListing("oanda", "EURO")
-	require.Error(t, err)
-}
-
-func TestParseFXListing_RejectsInvalidCurrencyCode(t *testing.T) {
-	_, err := parseFXListing("oanda", "1URUSD")
-	require.Error(t, err)
-}
+// Instrument-parsing coverage (valid symbols, JPY tick size, invalid
+// length/currency) now lives in service/marketdata's own
+// instrument_test.go, alongside svc.RegisterFXInstrument itself --
+// moved there per #124 review: constructing a Listing's domain/
+// execution metadata is service-layer work, not this transport's (see
+// dataargs.go's resolveDatasetRequest doc comment).
 
 func TestParseInterval_AllPredefinedValues(t *testing.T) {
 	cases := map[string]marketdata.Interval{

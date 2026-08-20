@@ -116,6 +116,16 @@ func TestDataBars_InvalidInstrumentIsRejected(t *testing.T) {
 }
 
 func TestDataBars_RequiresStoreRoot(t *testing.T) {
+	// Guard against a developer's shell or CI environment already
+	// having TRADER_STORE_ROOT set: config.Load's required check is a
+	// presence check, not a zero-value check, so an inherited env var
+	// would silently satisfy it and this test would pass for the wrong
+	// reason (or fail outright) depending on the ambient environment.
+	if v, ok := os.LookupEnv("TRADER_STORE_ROOT"); ok {
+		require.NoError(t, os.Unsetenv("TRADER_STORE_ROOT"))
+		t.Cleanup(func() { _ = os.Setenv("TRADER_STORE_ROOT", v) })
+	}
+
 	root, cleanup := newRootCmd()
 	defer func() { _ = cleanup() }()
 	root.SetArgs([]string{"data", "bars", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08"})

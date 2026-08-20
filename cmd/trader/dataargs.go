@@ -7,69 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
-	"github.com/rustyeddy/trader/num"
 	svc "github.com/rustyeddy/trader/service/marketdata"
 )
-
-// parseFXListing builds an instrument.Listing for a 6-letter FX pair
-// symbol (for example "EURUSD") under provider — the only instrument
-// shape the M2.5 CLI supports today. This is a deliberately narrow v0
-// convention, not a general instrument catalog or symbol-resolution
-// service: #109's own scope is proving the read-command framework
-// against the FX data M2 actually ingests, not building instrument
-// lookup. A tick size of 0.001 is used for JPY-quoted pairs and
-// 0.00001 otherwise, matching real FX convention closely enough for
-// CLI purposes; quantity increment and multiplier are both 1.
-func parseFXListing(provider, symbol string) (instrument.Listing, error) {
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-	if len(symbol) != 6 {
-		return instrument.Listing{}, fmt.Errorf(
-			"invalid instrument %q: expected a 6-letter FX pair symbol, e.g. EURUSD", symbol)
-	}
-	base, quote := symbol[:3], symbol[3:]
-
-	baseCur, err := num.ParseCurrency(base)
-	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
-	}
-	quoteCur, err := num.ParseCurrency(quote)
-	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
-	}
-
-	inst, err := instrument.NewCurrencyPair(baseCur, quoteCur)
-	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
-	}
-
-	tick := "0.00001"
-	if quote == "JPY" {
-		tick = "0.001"
-	}
-	spec, err := instrument.NewSpec(
-		num.MustParsePrice(tick),
-		num.MustParseQuantity("1"),
-		num.MustParseRate("1"),
-		quoteCur,
-	)
-	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
-	}
-
-	listing, err := instrument.NewListing(instrument.ListingParams{
-		Instrument: inst,
-		Provider:   provider,
-		Symbol:     symbol,
-		Spec:       spec,
-		Tradable:   true,
-	})
-	if err != nil {
-		return instrument.Listing{}, fmt.Errorf("invalid instrument %q: %w", symbol, err)
-	}
-	return listing, nil
-}
 
 // intervalsByName is the CLI's own string vocabulary for
 // marketdata.Interval, deliberately separate from Interval.String()
@@ -121,13 +61,19 @@ func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
 }
 
 // resolveDatasetRequest parses args (exactly [INSTRUMENT, INTERVAL])
-// and flags into a svc.DatasetRequest, registering the parsed
-// instrument's Listing into the data context's resolver so the
-// service's own Manager can resolve it. It is the one place every
+// and flags into a svc.DatasetRequest. It is the one place every
 // dataset command (#109-#110) builds its request, so instrument/
 // interval/range parsing behaves identically across all of them
 // (issue #109's own "common ... arguments are consistent" acceptance
 // criterion).
+//
+// Instrument resolution — turning the bare INSTRUMENT string into a
+// registered instrument.ID the service's Manager can resolve — is
+// deliberately not done here: svc.RegisterFXInstrument owns that,
+// living in the service layer rather than this transport, since it
+// has to invent domain/execution metadata (tick size and friends) that
+// a CLI adapter has no business fabricating itself. See its own doc
+// comment for the full reasoning.
 func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFlags) (svc.DatasetRequest, error) {
 	dc, ok := dataContextFrom(cmd.Context())
 	if !ok {
@@ -138,7 +84,7 @@ func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFl
 		return svc.DatasetRequest{}, fmt.Errorf("expected exactly two arguments: INSTRUMENT INTERVAL")
 	}
 
-	listing, err := parseFXListing(dc.Provider, args[0])
+	instrumentID, err := svc.RegisterFXInstrument(dc.Resolver, dc.Provider, args[0])
 	if err != nil {
 		return svc.DatasetRequest{}, err
 	}
@@ -163,12 +109,8 @@ func resolveDatasetRequest(cmd *cobra.Command, args []string, flags datasetArgFl
 		return svc.DatasetRequest{}, fmt.Errorf("invalid range: %w", err)
 	}
 
-	if err := dc.Resolver.Register(listing); err != nil {
-		return svc.DatasetRequest{}, fmt.Errorf("registering instrument %q: %w", args[0], err)
-	}
-
 	return svc.DatasetRequest{
-		Instrument: listing.InstrumentID(),
+		Instrument: instrumentID,
 		Interval:   interval,
 		Range:      timeRange,
 	}, nil
