@@ -1,0 +1,316 @@
+#+TITLE: M2.6 Completion Review
+#+SUBTITLE: Structured Logging — verification-first sign-off (issue #129, M2.6-05)
+#+STARTUP: overview indent
+
+* Purpose
+
+This is the verification-first M2.6 completion review, following the
+M1 (#32), M2 (#83), and M2.5 (#113) completion reviews' own precedent:
+prove Milestone 2.6 — Trader's structured-logging architecture and its
+first real production instrumentation — is a coherent, correctly
+behaved whole by exercising it directly, audit it against ADR-023 and
+this milestone's own acceptance criteria, and record what that
+exercise found before M3 brokerage/account development begins. It is
+not a feature-building issue; the only changes below exist because the
+exercise itself found a real, concrete gap worth closing now rather
+than after M3 starts.
+
+M2.6's own package surface: =logging= (M1-established, materially
+extended by #126/#127) and =service/marketdata= (M2.5-established,
+materially extended by #128's own logging instrumentation), plus one
+composition-root wiring change in =cmd/trader= (#128). Every other
+package is out of this review's scope.
+
+* 1. ADR-023 acceptance and dependency/lifecycle conformance
+
+ADR-023 (=docs/arch/adr-023-structured-logging.org=) is =Accepted=
+(#125). Its own Milestone 2.6 Scope section names five expected
+deliverables; every one is shipped, matched here against what actually
+landed rather than trusted from the ADR's prose alone:
+
+| ADR-023 scope item                                              | Issue | Status                                    |
+|-------------------------------------------------------------------+-------+--------------------------------------------|
+| Document structured logging conventions and architecture          |  #125 | ADR-023 itself                             |
+| Standardize component-scoped logging and component names          |  #126 | =logging.ComponentXxx= vocabulary          |
+| Evaluate and, if warranted, implement multi-output logging        |  #127 | =logging.NewMulti=; decided yes            |
+| Instrument application/service operations with structured events  |  #128 | =service/marketdata= completion/failure logs |
+| Verify correlation, redaction, lifecycle, JSON, failure cleanup   |  #129 | this review                               |
+
+Dependency/lifecycle rules ADR-023's own Decision and "Dependency and
+lifetime model" sections state, checked directly against the code:
+
+- "Composition roots create and own logger resources... Domain and
+  service packages must not initialize application logging
+  independently." Confirmed: =logging.New=/=NewMulti= are called only
+  from =cmd/trader/root.go= (the composition root) and from tests;
+  =service/marketdata.New= *accepts* a logger, it never constructs one
+  (=service/marketdata/service.go=, confirmed by reading it directly).
+- "Libraries return errors. They do not terminate the process." No
+  =os.Exit= call exists anywhere in =logging= or =service/marketdata=
+  (=grep -rn "os.Exit"= against both packages: zero matches).
+- "No logging package API should call =os.Exit=... Trader should not
+  require =slog.SetDefault= for normal application operation."
+  =logging/arch_test.go='s =TestNoPackageUsesSlogGlobalDefaultLogger=
+  mechanically enforces this across the whole module (not just
+  =logging= itself), confirmed still passing.
+
+No conformance gap found.
+
+* 2. No hidden global logger or component registry
+
+=TestNoPackageUsesSlogGlobalDefaultLogger= (pre-existing, #21/M1-03)
+re-run directly as part of this review: passes, unaffected by M2.6.
+
+The component vocabulary #126 added
+(=logging.ComponentMarketData=, =ComponentBroker=, ...,
+=ComponentCLI=) is a plain block of string constants, not a registry:
+confirmed by reading =logging/attrs.go= directly — no map, no
+package-level mutable state, no lookup from a component name to a
+pre-built logger. =grep -rn "WithComponent("= across the whole module
+finds exactly one production call site
+(=service/marketdata/service.go=, scoped once at construction with the
+canonical =ComponentMarketData= constant), confirming the vocabulary is
+actually used the way it is documented, not merely defined and
+ignored.
+
+* 3. Logger/sink resource lifecycle
+
+- =cmd/trader/main.go='s =run()= unconditionally =defer cleanup()=
+  around =cmd.ExecuteContext(ctx)= (#108); a failing command still
+  closes whatever the logger opened. Re-read directly: still true.
+- =logging.New='s error path closes whatever =resolveOutput= already
+  opened before returning (pre-existing, config.go).
+- =logging.NewMulti= (#127) closes every already-opened sink when a
+  later sink fails to build, joining every close error via
+  =errors.Join= rather than dropping any —
+  =TestNewMulti_PartialConstructionFailureClosesAlreadyOpenedSinks=
+  (real =/proc/self/fd= count, not a code-path assertion) and
+  =TestCloseAll_JoinsEveryCloseError=/
+  =TestMultiCloser_ClosePropagatesToEverySink= (genuine double-=Close=
+  on real =*os.File= values, #108's own established technique) all
+  re-run directly as part of this review: pass.
+
+No lifecycle gap found.
+
+* 4. Text and JSON output validity
+
+=logging/config_integration_test.go= and #127's own
+=TestNewMulti_SingleConfigBehavesLikeNew=/=TestNewMulti_FansOutToEverySink=
+already prove both formats produce valid, structurally correct output
+via a real =logging.New=/=NewMulti= call (not a bare handler). At the
+=service/marketdata= boundary specifically,
+=cmd/trader/logging_test.go='s
+=TestDataPlan_UsesRootLoggerForServiceRecords= (#128) drives the real
+CLI with =--log-format json --log-output <file>=, decodes the written
+file with =encoding/json.Unmarshal= (the way a real log-aggregation
+consumer would), and asserts on decoded field values — re-run directly
+as part of this review: passes, confirming JSON output retains
+structured canonical fields (=component=, =instrument_id=) rather than
+only embedding them in a message string.
+
+* 5. Component and canonical-attribute consistency
+
+A direct search across the whole module (not merely a claim), run as
+part of this review:
+
+- =grep -rn "\"component\"\|WithComponent("= outside =logging/=
+  itself: exactly one production call site
+  (=service/marketdata/service.go=), using the =logging.ComponentMarketData=
+  constant — never a raw string literal.
+- =grep -rn "\"instrument_id\"\|\"correlation_id\"\|\"causation_id\"\|..."=
+  outside =logging/=: zero matches in production code.
+  =service/marketdata/log.go='s own =datasetAttrs= helper uses
+  =logging.InstrumentID= (the constant), and every log call site in
+  =read.go=/=write.go=/=update.go= funnels through that one helper (via
+  =logOutcome=) rather than each call site inventing its own key names.
+
+No inconsistency found — the "consistent by construction, through one
+shared helper" design #128 chose is confirmed to actually hold, not
+merely intended.
+
+* 6. Correlation/causation propagation across representative operations
+
+#128's own =TestPlan_LogsCorrelationIDFromContext= demonstrated
+correlation propagation on one read-only operation. This review adds
+=service/marketdata/log_test.go='s new
+=TestSync_LogsCorrelationAndCausationFromContext=, covering a
+*mutating* operation and *both* IDs together — the read/mutation and
+correlation/causation combination #128's own test suite had not yet
+exercised — confirming the propagation mechanism is what it claims to
+be (generic, via the shared =*Context= logger methods and
+=logging.NewContextHandler=, not something each operation must
+individually implement) rather than something only demonstrated for
+one convenient case. Both tests pass; both were confirmed to actually
+exercise real propagation, not a tautology, by asserting the exact ID
+string value landed in the captured record's attributes.
+
+* 7. Sensitive-value redaction
+
+Two distinct claims, verified separately:
+
+1. =logging='s own redaction mechanism (=Secret=, the denylist-based
+   =redactSensitiveKeys=) is unchanged by M2.6 and already covered by
+   =logging/redact_test.go= and =ExampleSecret=; re-run directly:
+   passes.
+2. Whether =service/marketdata= — the one real production consumer
+   this milestone added — ever has a reason to *need* that mechanism.
+   This review adds =TestSync_NeverLogsOANDACredential=: a real Sync
+   round trip against a fake OANDA server requiring a specific token,
+   confirming no captured record's message or any attribute value
+   (checked by string-searching every attribute's formatted value, not
+   only the obvious ones) contains it. The credential is configured
+   only on =*marketdata.Manager= (=cmd/trader/dataservice.go='s own
+   =oandaTokenCredential=, production-side) and never reaches =Service=
+   or its logger at all — confirmed by reading =service/marketdata='s
+   own code (section 5's search already found no non-canonical
+   attribute keys, and =Service= holds no field a credential could
+   flow through even accidentally).
+
+** Deficiency found: denylist does not yet anticipate M3 credential key shapes
+
+=redactSensitiveKeys='s denylist (=password=, =passwd=, =secret=,
+=token=, =api_key=, =apikey=, =credential=, =credentials=,
+=private_key=, =privatekey=) matches by *exact* key name,
+case-insensitively — not substring. A plausible M3 brokerage field
+name like =access_token=, =refresh_token=, =client_secret=, or
+=authorization= would *not* match today, since none of those strings
+equals an entry in the list exactly. =Secret= — the primary, reliable
+mechanism this package's own doc comment says to actually depend on —
+is unaffected by this and already correct for any future key name.
+
+This is recorded as a Known Deferral (below), not fixed here:
+inventing plausible M3 field-name spellings now, before a real broker
+adapter defines its actual credential struct, would be exactly the
+kind of speculative expansion =CONTRIBUTING.org= and this milestone's
+own scope discipline ask agents to avoid. The concrete, actionable
+follow-up is named precisely so it is not silently forgotten once M3
+starts.
+
+* 8. Multi-output lifecycle and failure coverage
+
+Already covered directly by section 3 above (#127's own fd-leak and
+double-=Close= regressions). No gap found; =NewMulti= is not yet wired
+into =cmd/trader='s own CLI flags (see Known Deferrals) — an
+operator cannot yet request console+file output from the =trader=
+binary itself, but the underlying capability's own lifecycle and
+failure behavior is fully covered independent of that.
+
+* 9. Deliberately deferred capabilities remain deferred
+
+Confirmed by direct inspection, not merely re-asserted from ADR-023's
+own prose:
+
+- *Runtime reconfiguration*: no switch-handler or =Setup()=-style
+  mechanism exists anywhere in =logging=; =New=/=NewMulti= are the only
+  two logger constructors, both static-configuration-in,
+  logger-and-closer-out.
+- *Syslog/journald*: no such output target exists in
+  =resolveOutput='s implementation (stderr, stdout, or a file path —
+  the same three cases since before M2.6).
+- *Production in-memory sink*: =logging.Capture= remains a test-only
+  facility (=testkit.go=); no equivalent exists as a =Config.Output=
+  option.
+
+All three remain exactly as ADR-023 describes them: useful
+prior-art capabilities, deliberately not built, not silently dropped
+from consideration.
+
+* 10. =make check=
+
+=make check= (=gofmt -l=, =go vet ./...=, =golangci-lint run ./...=,
+=go test ./...=, =go test -race ./...=) passes across the whole
+repository, including this review's own two new regression tests.
+Re-run directly as the last step of this review.
+
+Coverage: =logging= 91.5%, =service/marketdata= 93.6%, =cmd/trader=
+90.4% — all above the project's 85% target, each re-measured directly
+(=go test -cover=) as part of this review rather than cited from an
+earlier session.
+
+* Known Deferrals
+
+Recorded explicitly, per this issue's own acceptance criteria, as
+safe — not blockers, and each with a concrete owner for when it
+actually becomes relevant:
+
+- *Redaction denylist does not yet cover M3-shaped OAuth/broker
+  credential key names* (section 7). Safe: =Secret= is the documented
+  primary, reliable mechanism and is unaffected; the denylist is
+  explicitly documented as best-effort defense in depth, not the
+  guarantee. Concrete follow-up: when M3's first real broker adapter
+  defines its actual credential struct field names, extend
+  =sensitiveKeys= (=logging/redact.go=) to match them, and require
+  every new broker adapter's own credential-handling code to use
+  =Secret= explicitly rather than relying on the denylist alone —
+  exactly the discipline =TestSync_NeverLogsOANDACredential= (section
+  7, this review) demonstrates for the OANDA case today.
+- *=NewMulti= is not wired into =cmd/trader='s own =--log-*= flags.*
+  Safe: the capability's own construction, fan-out, and cleanup
+  behavior is fully tested independent of CLI wiring (section 3), and
+  no current operator workflow has asked for simultaneous console+file
+  output from the =trader= binary itself. Concrete follow-up: add a
+  repeatable =--log-output= flag (or an equivalent) to =root.go= when
+  a real operational need for it arises, following the same
+  Config-per-sink shape =NewMulti= already accepts.
+- *=service/marketdata= is M2.6's only instrumented service.* Safe and
+  deliberate — #128's own scope was "beginning with M2 market-data use
+  cases" (issue #128's own title), not every future service. Concrete
+  follow-up: apply the identical =datasetAttrs=/=logOutcome=-shaped
+  pattern (component-scoped logger, DEBUG for reads, INFO for
+  mutations, one rollup record for a composed use case) to each new
+  M3 service package as it is built, rather than inventing a
+  different logging shape per package.
+- *No =run_id=/=session_id=/correlation ID generation exists in
+  =cmd/trader= itself.* The mechanism (=logging.WithCorrelationID=,
+  context propagation into =Service=) is proven correct end-to-end
+  (section 6), but nothing in the CLI's own composition root currently
+  calls it — every real =trader= invocation today logs with no
+  correlation ID at all, which is not wrong (an absent ID is simply
+  absent, not misleading), but is a real usability gap once M3 makes
+  multi-step, multi-service operations (a live session touching
+  broker, account, and order services together) common enough that
+  tying their records together actually matters. Concrete follow-up:
+  generate a per-invocation correlation ID (or per-session ID once
+  =live= exists) in =root.go='s own =PersistentPreRunE=, once a real
+  multi-service workflow exists to correlate.
+- *No CI-enforced dependency-direction or API-compatibility tooling*,
+  the same deliberately-deferred item every prior completion review
+  has already named; still not part of this sign-off, for the same
+  reason.
+
+* Recommendation
+
+*M2.6 is ready to close.*
+
+Every acceptance criterion in issue #129 is satisfied: ADR-023 is
+=Accepted= and its dependency/lifecycle rules match the implementation
+(section 1); no hidden global logger or component registry exists
+(section 2); logger/sink resources are closed on every success and
+error path, proven with genuine fd-leak and double-close regressions,
+not code-path assertions (section 3); text and JSON output are valid
+and JSON retains structured canonical fields, proven via a real
+decoded CLI round trip (section 4); component names and canonical
+attributes are used consistently everywhere in production code,
+confirmed by direct search rather than assumed (section 5);
+correlation/causation propagation is now demonstrated across both a
+read and a mutating operation together (section 6, this review's own
+added test); redaction is verified, with one concrete, named,
+non-blocking gap recorded for M3 rather than guessed at speculatively
+now (section 7, this review's own added test); multi-output lifecycle
+and failure behavior is covered (section 8); runtime reconfiguration,
+syslog/journald, and a production in-memory sink all remain
+deliberately, verifiably deferred (section 9); and =make check= passes
+(section 10).
+
+No outstanding blockers are known. This review's own exercise added
+two real regression tests
+(=TestSync_LogsCorrelationAndCausationFromContext=,
+=TestSync_NeverLogsOANDACredential=) that close the one gap in
+"representative operations" coverage the acceptance criteria named,
+and found one genuine, non-blocking deficiency — the redaction
+denylist's exact-match behavior not yet anticipating M3-shaped
+credential key names — which is recorded above with a concrete owner
+rather than fixed speculatively ahead of M3's real requirements. The
+other known deferrals are each a deliberate, named, low-risk decision
+consistent with every prior milestone's own completion review, not a
+gap discovered too late to matter.

@@ -2,6 +2,7 @@ package marketdata_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -100,6 +101,67 @@ func TestPlan_LogsCorrelationIDFromContext(t *testing.T) {
 	records := rec.Records()
 	require.Len(t, records, 1)
 	assert.Equal(t, "corr-plan-1", records[0].Attrs[logging.CorrelationID])
+}
+
+// TestSync_LogsCorrelationAndCausationFromContext is the M2.6
+// completion review's own (issue #129) representative check that
+// correlation/causation propagation is not something only Plan (a
+// read-only operation) happens to demonstrate: a mutating operation's
+// own INFO-level completion record carries both context-propagated
+// IDs identically, through the same generic *Context logger mechanism
+// -- no Sync-specific code exists, or is needed, for this to hold.
+func TestSync_LogsCorrelationAndCausationFromContext(t *testing.T) {
+	server := newFakeOANDAServer(t, oandaCandlesJSON(nil)) // never actually called; raw already present
+	logger, rec := logging.Capture()
+	_, s := newTestManagerAndServiceWithOANDAAndLogger(t, server.URL, copyFixtureRaw(t), logger)
+
+	ctx := logging.WithCorrelationID(context.Background(), "corr-sync-1")
+	ctx = logging.WithCausationID(ctx, "cause-sync-1")
+	_, err := s.Sync(ctx, svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, fixtureSpan(t))})
+	require.NoError(t, err)
+
+	records := rec.Records()
+	require.Len(t, records, 1)
+	assert.Equal(t, "sync completed", records[0].Message)
+	assert.Equal(t, "corr-sync-1", records[0].Attrs[logging.CorrelationID])
+	assert.Equal(t, "cause-sync-1", records[0].Attrs[logging.CausationID])
+}
+
+// TestSync_NeverLogsOANDACredential is the M2.6 completion review's own
+// (issue #129) direct redaction-adjacent verification for MarketData
+// specifically: OANDACredential is configured only on
+// *marketdata.Manager (dataservice.go's own oandaTokenCredential,
+// production-side) and never reaches Service or its logger at all, so
+// a real Sync round trip against a server that requires this exact
+// token must produce no record -- message or any attribute value --
+// containing it. This is not testing logging.Secret/redactSensitiveKeys
+// themselves (logging's own redact_test.go already does); it is
+// confirming service/marketdata's own call sites never had a reason to
+// need them in the first place.
+func TestSync_NeverLogsOANDACredential(t *testing.T) {
+	const token = "test-token"
+	server := newFakeOANDAServer(t, oandaCandlesJSON([]time.Time{
+		time.Date(2024, time.January, 8, 0, 0, 0, 0, time.UTC),
+	}))
+	logger, rec := logging.Capture()
+	_, s := newTestManagerAndServiceWithOANDAAndLogger(t, server.URL, t.TempDir(), logger)
+
+	span, err := marketdata.NewTimeRange(
+		time.Date(2024, time.January, 8, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, time.January, 8, 1, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	_, err = s.Sync(context.Background(), svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, span)})
+	require.NoError(t, err)
+
+	records := rec.Records()
+	require.NotEmpty(t, records)
+	for _, r := range records {
+		assert.NotContains(t, r.Message, token)
+		for k, v := range r.Attrs {
+			assert.NotContains(t, fmt.Sprintf("%v", v), token, "attribute %q must not carry the OANDA credential", k)
+		}
+	}
 }
 
 // TestUpdate_LogsSingleCompletionRecordWithPartitionCounts is the
