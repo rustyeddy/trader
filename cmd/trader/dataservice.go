@@ -27,12 +27,14 @@ type datasetFlags struct {
 }
 
 // datasetConfig is the typed configuration a *marketdata.Manager is
-// built from. StoreRoot is required: every data command needs
-// somewhere to read (and, for #110's mutating commands, publish)
-// canonical data. RawRoot is optional here at the framework level —
-// Bars never needs it — even though Coverage and Plan will report a
-// clear error from Manager itself if it is empty when they need it;
-// #109's own leaf commands don't second-guess that.
+// built from. StoreRoot and RawRoot are both optional here: neither
+// carries a required:"true" tag, so config.Load never rejects an
+// invocation that supplies neither. buildDataContext (issue #141)
+// fills an empty StoreRoot/RawRoot with a computed per-user default
+// after Load returns, rather than a static struct-tag default —
+// config's own default:"value" tag is a literal string with no
+// path/home-directory expansion, and the default here depends on
+// $HOME and (for RawRoot) the resolved Provider.
 //
 // OANDAToken/OANDABaseURL are both optional here for the identical
 // reason: only Sync (and Update, when it needs to Sync) actually
@@ -53,7 +55,7 @@ type datasetFlags struct {
 // future addition if that ever proves insufficient, but is not
 // invented speculatively here.
 type datasetConfig struct {
-	StoreRoot    string `config:"store_root" flag:"store-root" required:"true"`
+	StoreRoot    string `config:"store_root" flag:"store-root"`
 	RawRoot      string `config:"raw_root" flag:"raw-root"`
 	Provider     string `config:"provider" flag:"provider" default:"oanda"`
 	OANDAToken   string `config:"oanda_token" secret:"true"`
@@ -145,6 +147,9 @@ func (c oandaTokenCredential) Token(context.Context) (string, error) {
 func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, error) {
 	cfg, err := buildDatasetConfig(cmd, flags)
 	if err != nil {
+		return dataContext{}, err
+	}
+	if err := applyDefaultDataRoots(&cfg); err != nil {
 		return dataContext{}, err
 	}
 
