@@ -96,7 +96,19 @@ func TestM25VerticalSlice(t *testing.T) {
 		require.Contains(t, out, "already current")
 	})
 
-	t.Run("cancellation propagates through every layer", func(t *testing.T) {
+	// A context already cancelled before ExecuteContext is rejected by
+	// data's own PersistentPreRunE (cmd.Context().Err(), checked before
+	// building the service) -- the service and *marketdata.Manager are
+	// never reached on this path, so this subtest proves only that much,
+	// not deeper propagation. That narrower scope is deliberate and
+	// honestly named below, per review feedback on an earlier version
+	// of this test that claimed more than it exercised. The
+	// service-layer and Manager's own ctx handling are each already
+	// exercised directly, with a context genuinely reaching that far,
+	// by service/marketdata's own TestBars_PropagatesContextCancellation
+	// (#105) and marketdata's own per-operation cancellation tests --
+	// this test does not need to re-prove that here.
+	t.Run("an already-cancelled context is rejected before the pre-run wiring ever calls the service", func(t *testing.T) {
 		root, cleanup := newRootCmd()
 		defer func() { _ = cleanup() }()
 		args := append([]string{"data", "bars", "EURUSD", "H1"}, span...)
@@ -110,9 +122,7 @@ func TestM25VerticalSlice(t *testing.T) {
 
 		err := root.ExecuteContext(ctx)
 		require.ErrorIs(t, err, context.Canceled,
-			"a context cancelled before the command tree even runs must surface as "+
-				"context.Canceled all the way from Cobra's own PersistentPreRunE, through "+
-				"the service call, to Manager's own ctx check -- not a different error "+
-				"shape at any layer")
+			"data's PersistentPreRunE must reject an already-cancelled context "+
+				"immediately, before ever constructing the service or touching Manager")
 	})
 }
