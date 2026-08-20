@@ -1,6 +1,9 @@
 package marketdata
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // Sync implements the mutating Sync use case (issue #106): acquire the
 // raw data required to make req's dataset available. Sync computes a
@@ -28,10 +31,13 @@ func (s *Service) Sync(ctx context.Context, req SyncRequest) (SyncResponse, erro
 
 	plan, err := s.manager.Plan(ctx, req.query())
 	if err != nil {
+		s.logOutcome(ctx, slog.LevelInfo, "sync completed", "sync failed", req.DatasetRequest, err)
 		return SyncResponse{}, err
 	}
 
 	result, err := s.manager.Sync(ctx, plan)
+	s.logOutcome(ctx, slog.LevelInfo, "sync completed", "sync failed", req.DatasetRequest, err,
+		"downloaded_count", len(result.Downloaded), "skipped_count", len(result.Skipped))
 	return SyncResponse{Plan: plan, Result: result}, err
 }
 
@@ -55,9 +61,12 @@ func (s *Service) Build(ctx context.Context, req BuildRequest) (BuildResponse, e
 
 	plan, err := s.manager.Plan(ctx, req.query())
 	if err != nil {
+		s.logOutcome(ctx, slog.LevelInfo, "build completed", "build failed", req.DatasetRequest, err)
 		return BuildResponse{}, err
 	}
 
 	result, err := s.manager.Build(ctx, plan)
+	s.logOutcome(ctx, slog.LevelInfo, "build completed", "build failed", req.DatasetRequest, err,
+		"published_count", len(result.Published), "skipped_count", len(result.Skipped))
 	return BuildResponse{Plan: plan, Result: result}, err
 }

@@ -136,6 +136,12 @@ func (c oandaTokenCredential) Token(context.Context) (string, error) {
 // datasetConfig's own doc comment for why an unconfigured pair is left
 // for Manager itself to reject, only when a command that needs it is
 // actually run.
+//
+// The Service is given the same logger root.go's own PersistentPreRunE
+// already built and placed on cmd.Context() (loggerFromContext) — not
+// a second, independently constructed one — so every structured record
+// a data subcommand's use case emits (issue #128) shares this
+// invocation's own level/format/output configuration.
 func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, error) {
 	cfg, err := buildDatasetConfig(cmd, flags)
 	if err != nil {
@@ -166,7 +172,7 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 		return dataContext{}, err
 	}
 
-	service, err := svc.New(manager)
+	service, err := svc.New(manager, loggerFromContext(cmd.Context()))
 	if err != nil {
 		return dataContext{}, err
 	}

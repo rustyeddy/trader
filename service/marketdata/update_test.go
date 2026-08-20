@@ -159,7 +159,7 @@ func TestUpdate_FailsExplicitlyOnUnresolvedRepairRaw(t *testing.T) {
 		ProviderName: "oanda",
 	})
 	require.NoError(t, err)
-	s, err := svc.New(mgr)
+	s, err := svc.New(mgr, nil)
 	require.NoError(t, err)
 	ctx := context.Background()
 

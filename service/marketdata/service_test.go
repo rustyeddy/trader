@@ -14,7 +14,7 @@ import (
 )
 
 func TestNew_RejectsNilManager(t *testing.T) {
-	s, err := svc.New(nil)
+	s, err := svc.New(nil, nil)
 	require.Nil(t, s)
 	require.ErrorIs(t, err, svc.ErrNilManager)
 }
@@ -30,12 +30,12 @@ func TestNew_AcceptsConfiguredManager(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	s, err := svc.New(manager)
+	s, err := svc.New(manager, nil)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 }
 
 func TestErrNilManager_IsStableSentinel(t *testing.T) {
-	_, err := svc.New(nil)
+	_, err := svc.New(nil, nil)
 	require.True(t, errors.Is(err, svc.ErrNilManager))
 }
