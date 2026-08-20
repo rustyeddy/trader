@@ -141,14 +141,15 @@ discovered during #81's corpus validation); #99 resolved it (ADR-021),
 and ADR-020 is now =Accepted=.
 
 Note: ADR-022 is likewise maintained in its own file,
-=docs/arch/adr-022-cli-app-service-layer.md=, rather than inline in
+=docs/arch/adr-022-cli-app-service-layer.org=, rather than inline in
 this registry.  Its own Status section is authoritative; the status
-column above is kept in sync with it.  It remains =Proposed=: it has
-five open questions (application package name; whether =Update= grows
-policy/options; where CLI formatting lives; default =--to= behavior;
-confirmation/error UX for read versus mutation commands) still
-unresolved, and per =CONTRIBUTING.org= should not be treated as
-binding until those are settled or explicitly deferred.
+column above is kept in sync with it.  It remains =Proposed=: issue
+#104 settled the application package name (=service=) while building
+the service-layer foundation, but four open questions (whether
+=Update= grows policy/options; where CLI formatting lives; default
+=--to= behavior; confirmation/error UX for read versus mutation
+commands) remain unresolved, and per =CONTRIBUTING.org= should not be
+treated as binding until those are settled or explicitly deferred.
 
 * ADR-001: Modular monolith before service decomposition
 

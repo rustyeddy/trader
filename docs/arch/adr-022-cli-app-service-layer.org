@@ -3,13 +3,19 @@
 
 * Status
 
-Proposed. Five open questions (below) remain unresolved: the
-application package name, whether =Update= grows policy/options,
-where CLI formatting lives, the default =--to= behavior, and whether
-read versus mutation commands need visibly different confirmation/
-error UX. These do not need to be settled before this ADR is
-recorded, and may be resolved incrementally as the M2.5 implementation
-issues (#104-#113) actually raise them, rather than speculatively now.
+Proposed. Four open questions (below) remain unresolved: whether
+=Update= grows policy/options, where CLI formatting lives, the default
+=--to= behavior, and whether read versus mutation commands need
+visibly different confirmation/error UX. These do not need to be
+settled before this ADR is recorded, and may be resolved incrementally
+as the M2.5 implementation issues (#104-#113) actually raise them,
+rather than speculatively now.
+
+Issue #104 (M2.5-02) settled the application package name while
+building the service-layer foundation: it is =service=, with each
+domain area as its own subpackage (=service/marketdata= is the
+first). See the Open Questions section for the retired question's
+resolution.
 
 * Context
 
@@ -442,8 +448,10 @@ duplicating orchestration as additional interfaces are introduced.
 
 * Open questions
 
-1. Should the application package be named =service=, =application=,
-   or =app=?
+1. ~~Should the application package be named =service=, =application=,
+   or =app=?~~ *Resolved by issue #104:* =service=, with one
+   subpackage per domain area it orchestrates (=service/marketdata=
+   first). Package-level conventions live in =service/doc.go=.
 2. Should =Update= always perform Plan -> Sync -> Build, or should it
    eventually support policy/options controlling which actions are
    permitted?
@@ -456,11 +464,11 @@ duplicating orchestration as additional interfaces are introduced.
    operations (=sync=, =build=, =update=) have visibly different CLI
    confirmation/error behavior?
 
-These are expected to be resolved as the implementation issues
-(#104-#113) actually encounter them, rather than speculatively ahead
-of time; each resolution should be folded back into this ADR (or a
-follow-on ADR, per =adr-decisions.org='s supersession/amendment rules)
-once decided.
+The remaining four are expected to be resolved as the implementation
+issues (#105-#113) actually encounter them, rather than speculatively
+ahead of time; each resolution should be folded back into this ADR (or
+a follow-on ADR, per =adr-decisions.org='s supersession/amendment
+rules) once decided.
 
 * Recommendation
 
