@@ -68,15 +68,21 @@ func newFakeOANDAServer(t *testing.T, body string) *httptest.Server {
 // newTestManagerAndServiceWithOANDA is newTestManagerAndService's
 // counterpart for Sync tests: it additionally configures Manager's
 // OANDA client against baseURL, so Service.Sync can actually download.
-func newTestManagerAndServiceWithOANDA(t *testing.T, baseURL string) (*marketdata.Manager, *svc.Service) {
+// rawRoot lets a caller start from either an empty directory (raw
+// entirely missing) or a copy of this package's committed fixture (raw
+// already present) — Manager.Sync requires an OANDA client configured
+// regardless of whether the Plan it is given actually contains any
+// ActionDownloadRaw entries, so even a raw-already-present,
+// nothing-to-download scenario needs one.
+func newTestManagerAndServiceWithOANDA(t *testing.T, baseURL, rawRoot string) (*marketdata.Manager, *svc.Service) {
 	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t)))
 
 	mgr, err := marketdata.New(marketdata.Config{
-		Clock:           clock.NewSimulated(time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC)),
+		Clock:           clock.NewSimulated(time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC)),
 		StoreRoot:       t.TempDir(),
-		RawRoot:         t.TempDir(),
+		RawRoot:         rawRoot,
 		Resolver:        resolver,
 		ProviderName:    "oanda",
 		OANDACredential: staticCredential("test-token"),
@@ -109,7 +115,7 @@ func TestSync_DownloadsMissingRawPartition(t *testing.T) {
 		time.Date(2024, time.January, 3, 0, 0, 0, 0, time.UTC),
 	})
 	server := newFakeOANDAServer(t, body)
-	_, s := newTestManagerAndServiceWithOANDA(t, server.URL)
+	_, s := newTestManagerAndServiceWithOANDA(t, server.URL, t.TempDir())
 	ctx := context.Background()
 
 	resp, err := s.Sync(ctx, svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, januarySpan(t))})
@@ -124,7 +130,7 @@ func TestSync_DownloadsMissingRawPartition(t *testing.T) {
 func TestSync_InvalidRequestNeverReachesManager(t *testing.T) {
 	t.Parallel()
 	server := newFakeOANDAServer(t, oandaCandlesJSON(nil))
-	_, s := newTestManagerAndServiceWithOANDA(t, server.URL)
+	_, s := newTestManagerAndServiceWithOANDA(t, server.URL, t.TempDir())
 	ctx := context.Background()
 
 	_, err := s.Sync(ctx, svc.SyncRequest{})
@@ -134,7 +140,7 @@ func TestSync_InvalidRequestNeverReachesManager(t *testing.T) {
 func TestSync_PropagatesContextCancellation(t *testing.T) {
 	t.Parallel()
 	server := newFakeOANDAServer(t, oandaCandlesJSON(nil))
-	_, s := newTestManagerAndServiceWithOANDA(t, server.URL)
+	_, s := newTestManagerAndServiceWithOANDA(t, server.URL, t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -154,24 +160,85 @@ func TestSync_MissingOANDACredentialReturnsClearError(t *testing.T) {
 	require.Empty(t, resp.Result.Downloaded, "no partial progress possible before Manager.Sync's own configuration check")
 }
 
+// twoMonthSpan covers January and February 2024, so a Plan against
+// entirely-missing raw schedules two separate ActionDownloadRaw entries
+// (one per month) rather than one — what
+// TestSync_ReturnsPartialResultOnFetchFailure needs to prove a later
+// failure doesn't discard an earlier success.
+func twoMonthSpan(t *testing.T) marketdata.TimeRange {
+	t.Helper()
+	span, err := marketdata.NewTimeRange(
+		time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	return span
+}
+
+// newJanuarySucceedsFebruaryFailsServer answers a January candles
+// request with valid data and a February one with a malformed body,
+// distinguishing them by the "from" query parameter *oanda.Client sets
+// to each month's start — the two ActionDownloadRaw entries
+// twoMonthSpan produces fetch from those exact starts, in chronological
+// (January-then-February) order, matching Sync's own per-Action loop.
+func newJanuarySucceedsFebruaryFailsServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	validBody := oandaCandlesJSON([]time.Time{time.Date(2024, time.January, 2, 22, 0, 0, 0, time.UTC)})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Query().Get("from"), "2024-02") {
+			_, _ = w.Write([]byte("not valid json"))
+			return
+		}
+		_, _ = w.Write([]byte(validBody))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func TestSync_ReturnsPartialResultOnFetchFailure(t *testing.T) {
 	t.Parallel()
-	// A malformed body makes *oanda.Client's decode fail for every
-	// request, so Sync's single ActionDownloadRaw entry fails --
-	// exercising the "partial result alongside a non-nil error" branch
-	// SyncResponse's own doc comment describes. With only one Action in
-	// this Plan, "partial" here means Downloaded stays empty rather than
-	// containing a later action's success after an earlier failure; see
-	// SyncResponse's own doc comment for why Result is still populated
-	// (not zeroed) alongside the error regardless.
-	server := newFakeOANDAServer(t, `not valid json`)
-	_, s := newTestManagerAndServiceWithOANDA(t, server.URL)
+	// Proves the actual claim SyncResponse's doc comment makes: a
+	// successful earlier Action's result survives in Result.Downloaded
+	// alongside the error from a later Action's failure, rather than
+	// being discarded. A one-Action Plan (this test's previous version)
+	// could not distinguish that from Result simply being empty in every
+	// error case.
+	server := newJanuarySucceedsFebruaryFailsServer(t)
+	_, s := newTestManagerAndServiceWithOANDA(t, server.URL, t.TempDir())
 	ctx := context.Background()
 
-	resp, err := s.Sync(ctx, svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, januarySpan(t))})
+	resp, err := s.Sync(ctx, svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, twoMonthSpan(t))})
 	require.Error(t, err)
-	require.NotEmpty(t, resp.Plan.Actions, "the Plan itself was computed successfully before Sync's failure")
+	require.Len(t, resp.Plan.Actions, 2, "one ActionDownloadRaw per missing month")
+	require.Len(t, resp.Result.Downloaded, 1, "January succeeded before February's failure stopped the loop")
+	require.Equal(t, time.January, resp.Result.Downloaded[0].Action.Month)
+	require.Equal(t, 1, resp.Result.Downloaded[0].RecordsWritten)
+}
+
+func TestSync_SkipsNonDownloadActions(t *testing.T) {
+	t.Parallel()
+	// Raw already present (this package's committed fixture) but
+	// nothing canonical yet: Plan schedules ActionNormalizeCanonical,
+	// not ActionDownloadRaw, since gated scheduling only produces a raw
+	// action when raw is actually missing (marketdata's own
+	// deriveActionsRawBuilt doc comment). Sync must report that single
+	// non-download Action in Result.Skipped rather than silently
+	// dropping it or, worse, attempting to execute it — proving
+	// SyncResponse's "non-download Actions appear in Skipped" claim
+	// against a case that actually produces one, not just against an
+	// empty Skipped list.
+	server := newFakeOANDAServer(t, oandaCandlesJSON(nil)) // never actually called
+	_, s := newTestManagerAndServiceWithOANDA(t, server.URL, copyFixtureRaw(t))
+	ctx := context.Background()
+
+	resp, err := s.Sync(ctx, svc.SyncRequest{DatasetRequest: datasetRequest(t, marketdata.H1, fixtureSpan(t))})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Plan.Actions)
+	require.Equal(t, marketdata.ActionNormalizeCanonical, resp.Plan.Actions[0].Kind)
 	require.Empty(t, resp.Result.Downloaded)
+	require.Len(t, resp.Result.Skipped, 1)
+	require.Equal(t, marketdata.ActionNormalizeCanonical, resp.Result.Skipped[0].Action.Kind)
 }
 
 func TestBuild_PublishesFromExistingRawData(t *testing.T) {
