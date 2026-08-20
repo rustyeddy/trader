@@ -61,6 +61,28 @@
 // component name to a pre-built logger, and a composition root still
 // constructs and scopes every logger explicitly.
 //
+// # Multiple outputs
+//
+// New builds exactly one sink. NewMulti (issue #127, ADR-023) builds
+// several — the evaluated, accepted answer to ADR-023's own open question
+// of whether Trader needs simultaneous outputs, for the primary use case
+// it names: operator console output plus a persistent log file. Each sink
+// keeps its own independent Level and Format, so a console sink can stay
+// human-readable at INFO while a file sink captures DEBUG as JSON if a
+// caller wants that; passing Configs that differ only in Output keeps
+// every sink's behavior consistent by construction. The composition root
+// still owns every sink's closer, exactly as with New — NewMulti's own
+// returned io.Closer closes all of them and joins every close error
+// rather than dropping any of them, and a sink that fails to build after
+// an earlier one already opened never leaks that earlier sink's resource.
+//
+// Runtime reconfiguration (switching level, format, or destinations in a
+// running process), syslog/journald output, and a production in-memory
+// sink are deliberately not part of this package: ADR-023 records each as
+// useful prior art from trader-first-try/log that is not required for
+// Milestone 2.6, to be added only when a concrete requirement justifies
+// it.
+//
 // # Redaction
 //
 // Wrap a sensitive value with Secret before logging it — logger.Info("auth",

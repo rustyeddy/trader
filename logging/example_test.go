@@ -89,6 +89,24 @@ func ExampleWithComponent() {
 	// broker
 }
 
+// ExampleNewMulti shows the primary multi-output use case (issue #127):
+// simultaneous operator console output and a persistent log file. This
+// example is not output-verified for the same reason ExampleNew isn't: a
+// wall-clock timestamp in the text output would differ on every run.
+func ExampleNewMulti() {
+	logger, closer, err := logging.NewMulti([]logging.Config{
+		{Format: "text", Output: "stdout"},
+		{Format: "json", Output: os.TempDir() + "/trader-example.log"},
+	})
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	defer func() { _ = closer.Close() }()
+
+	logger.Info("dataset published", "instrument", "EURUSD")
+}
+
 // ExampleDiscard shows building a valid logger for a component test that
 // doesn't care about log output.
 func ExampleDiscard() {
