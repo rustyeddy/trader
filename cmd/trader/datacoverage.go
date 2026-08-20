@@ -7,7 +7,8 @@ import (
 )
 
 // newCoverageCmd implements "trader data coverage INSTRUMENT INTERVAL
-// --from --to" (issue #109): the read-only Coverage use case.
+// --from --to [--format]" (issue #109, formatting added by #111): the
+// read-only Coverage use case.
 func newCoverageCmd() *cobra.Command {
 	var flags datasetArgFlags
 
@@ -16,6 +17,10 @@ func newCoverageCmd() *cobra.Command {
 		Short: "Report canonical/raw coverage and gaps for a dataset.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			formatter, err := resolveFormatter(flags.format)
+			if err != nil {
+				return err
+			}
 			req, err := resolveDatasetRequest(cmd, args, flags)
 			if err != nil {
 				return err
@@ -27,8 +32,7 @@ func newCoverageCmd() *cobra.Command {
 				return err
 			}
 
-			printCoverage(cmd.OutOrStdout(), resp.Coverage)
-			return nil
+			return formatter.FormatCoverage(cmd.OutOrStdout(), resp)
 		},
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -66,6 +67,55 @@ func runData(t *testing.T, storeRoot, rawRoot string, args ...string) (string, e
 
 	err := root.ExecuteContext(context.Background())
 	return out.String(), err
+}
+
+func TestDataBars_JSONFormatProducesValidJSON(t *testing.T) {
+	rawRoot := copyFixtureRaw(t)
+	storeRoot := t.TempDir()
+
+	_, err := runData(t, storeRoot, rawRoot,
+		"build", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08")
+	require.NoError(t, err)
+
+	out, err := runData(t, storeRoot, rawRoot,
+		"bars", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08", "--format", "json")
+	require.NoError(t, err)
+
+	var decoded struct {
+		Bars []struct {
+			Open string `json:"open"`
+		} `json:"bars"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &decoded))
+	require.Len(t, decoded.Bars, 2, "the fixture's two H1 records for 2024-01-07")
+	require.Equal(t, "1.1", decoded.Bars[0].Open)
+}
+
+func TestDataPlan_JSONFormatProducesValidJSON(t *testing.T) {
+	rawRoot := copyFixtureRaw(t)
+	storeRoot := t.TempDir()
+
+	out, err := runData(t, storeRoot, rawRoot,
+		"plan", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08", "--format", "json")
+	require.NoError(t, err)
+
+	var decoded struct {
+		Actions []struct {
+			Kind string `json:"kind"`
+		} `json:"actions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &decoded))
+	require.Len(t, decoded.Actions, 1)
+	require.Equal(t, "normalize-canonical", decoded.Actions[0].Kind)
+}
+
+func TestDataBars_RejectsUnsupportedFormat(t *testing.T) {
+	rawRoot := copyFixtureRaw(t)
+	storeRoot := t.TempDir()
+
+	_, err := runData(t, storeRoot, rawRoot,
+		"bars", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08", "--format", "xml")
+	require.Error(t, err)
 }
 
 func TestDataBars_MissingCanonicalDataReturnsError(t *testing.T) {

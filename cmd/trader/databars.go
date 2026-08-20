@@ -7,10 +7,11 @@ import (
 )
 
 // newBarsCmd implements "trader data bars INSTRUMENT INTERVAL --from
-// --to" (issue #109): the read-only Bars use case. It gathers and
-// parses CLI arguments, builds the corresponding service request via
-// resolveDatasetRequest, invokes Service.Bars, and prints the result --
-// no market-data business logic of its own.
+// --to [--format]" (issue #109, formatting added by #111): the
+// read-only Bars use case. It gathers and parses CLI arguments, builds
+// the corresponding service request via resolveDatasetRequest, invokes
+// Service.Bars, and hands the structured response to a Formatter --
+// no market-data business logic or presentation logic of its own.
 func newBarsCmd() *cobra.Command {
 	var flags datasetArgFlags
 
@@ -19,6 +20,10 @@ func newBarsCmd() *cobra.Command {
 		Short: "Read canonical historical bars.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			formatter, err := resolveFormatter(flags.format)
+			if err != nil {
+				return err
+			}
 			req, err := resolveDatasetRequest(cmd, args, flags)
 			if err != nil {
 				return err
@@ -30,8 +35,7 @@ func newBarsCmd() *cobra.Command {
 				return err
 			}
 
-			printBars(cmd.OutOrStdout(), resp)
-			return nil
+			return formatter.FormatBars(cmd.OutOrStdout(), resp)
 		},
 	}
 

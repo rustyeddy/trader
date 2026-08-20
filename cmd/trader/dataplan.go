@@ -7,9 +7,9 @@ import (
 )
 
 // newPlanCmd implements "trader data plan INSTRUMENT INTERVAL --from
-// --to" (issue #109): the read-only Plan use case. Plan never
-// downloads, builds, or publishes anything; it only reports what
-// sync/build (#110) would need to do.
+// --to [--format]" (issue #109, formatting added by #111): the
+// read-only Plan use case. Plan never downloads, builds, or publishes
+// anything; it only reports what sync/build (#110) would need to do.
 func newPlanCmd() *cobra.Command {
 	var flags datasetArgFlags
 
@@ -18,6 +18,10 @@ func newPlanCmd() *cobra.Command {
 		Short: "Report the work required to make a dataset available.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			formatter, err := resolveFormatter(flags.format)
+			if err != nil {
+				return err
+			}
 			req, err := resolveDatasetRequest(cmd, args, flags)
 			if err != nil {
 				return err
@@ -29,8 +33,7 @@ func newPlanCmd() *cobra.Command {
 				return err
 			}
 
-			printPlan(cmd.OutOrStdout(), resp.Plan)
-			return nil
+			return formatter.FormatPlan(cmd.OutOrStdout(), resp)
 		},
 	}
 

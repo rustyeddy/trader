@@ -47,17 +47,21 @@ func parseDate(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD or RFC3339", s)
 }
 
-// datasetArgFlags holds the --from/--to flag values every dataset
-// command (bars, coverage, plan, and #110's sync/build/update) shares.
+// datasetArgFlags holds the --from/--to/--format flag values every
+// dataset command (bars, coverage, plan, sync, build, update) shares.
 type datasetArgFlags struct {
-	from string
-	to   string
+	from   string
+	to     string
+	format string
 }
 
-// addDatasetArgFlags registers --from and --to on cmd, both required.
+// addDatasetArgFlags registers --from, --to (both required), and
+// --format (issue #111; defaults to "table") on cmd.
 func addDatasetArgFlags(cmd *cobra.Command, flags *datasetArgFlags) {
 	cmd.Flags().StringVar(&flags.from, "from", "", "range start (YYYY-MM-DD or RFC3339), required")
 	cmd.Flags().StringVar(&flags.to, "to", "", "range end (YYYY-MM-DD or RFC3339), required")
+	cmd.Flags().StringVar(&flags.format, "format", formatTable,
+		"output format: "+formatTable+" or "+formatJSON)
 }
 
 // resolveDatasetRequest parses args (exactly [INSTRUMENT, INTERVAL])
