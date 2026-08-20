@@ -82,3 +82,23 @@ type CoverageRequest struct {
 type PlanRequest struct {
 	DatasetRequest
 }
+
+// SyncRequest is the request for the mutating Sync use case (issue
+// #106): acquire the raw data required to make one dataset available.
+// SyncRequest names a dataset the same way PlanRequest does, not an
+// already-computed marketdata.Plan — Sync computes and executes a fresh
+// Plan for req internally (Service.Sync's own doc comment), the same
+// "describe what you want, not how to get it" contract every other
+// request in this package follows.
+type SyncRequest struct {
+	DatasetRequest
+}
+
+// BuildRequest is the request for the mutating Build use case (issue
+// #106): build and publish the canonical data required to make one
+// dataset available, from whatever raw data already exists. Like
+// SyncRequest, it names a dataset, not an already-computed
+// marketdata.Plan.
+type BuildRequest struct {
+	DatasetRequest
+}
