@@ -20,9 +20,11 @@ import (
 // datasetConfig's own field names, the same split root.go's rootFlags/
 // buildLoggingConfig already established for logging.
 type datasetFlags struct {
-	storeRoot string
-	rawRoot   string
-	provider  string
+	storeRoot    string
+	rawRoot      string
+	provider     string
+	oandaToken   string
+	oandaBaseURL string
 }
 
 // datasetConfig is the typed configuration a *marketdata.Manager is
@@ -32,18 +34,29 @@ type datasetFlags struct {
 // Bars never needs it — even though Coverage and Plan will report a
 // clear error from Manager itself if it is empty when they need it;
 // #109's own leaf commands don't second-guess that.
+//
+// OANDAToken/OANDABaseURL are both optional here for the identical
+// reason: only Sync (and Update, when it needs to Sync) actually
+// requires them, and *marketdata.Manager itself already reports a
+// clear ErrInvalidConfig error — for a missing credential, or for one
+// supplied without the other — when a command that actually needs
+// them is run without them configured. #110's own commands don't
+// second-guess that either.
 type datasetConfig struct {
-	StoreRoot string `config:"store_root" flag:"store-root" required:"true"`
-	RawRoot   string `config:"raw_root" flag:"raw-root"`
-	Provider  string `config:"provider" flag:"provider" default:"oanda"`
+	StoreRoot    string `config:"store_root" flag:"store-root" required:"true"`
+	RawRoot      string `config:"raw_root" flag:"raw-root"`
+	Provider     string `config:"provider" flag:"provider" default:"oanda"`
+	OANDAToken   string `config:"oanda_token" flag:"oanda-token" secret:"true"`
+	OANDABaseURL string `config:"oanda_base_url" flag:"oanda-base-url"`
 }
 
 // buildDatasetConfig resolves a datasetConfig from flags actually set
 // on cmd, layered under the TRADER_STORE_ROOT/TRADER_RAW_ROOT/
-// TRADER_PROVIDER environment variables, via the same config.Load every
-// Trader composition root uses (see root.go's buildLoggingConfig for
-// the identical pattern this mirrors, including why only Changed
-// flags are ever placed in Overrides).
+// TRADER_PROVIDER/TRADER_OANDA_TOKEN/TRADER_OANDA_BASE_URL environment
+// variables, via the same config.Load every Trader composition root
+// uses (see root.go's buildLoggingConfig for the identical pattern
+// this mirrors, including why only Changed flags are ever placed in
+// Overrides).
 func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, error) {
 	overrides := map[string]string{}
 	if cmd.Flags().Changed("store-root") {
@@ -54,6 +67,12 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 	}
 	if cmd.Flags().Changed("provider") {
 		overrides["provider"] = flags.provider
+	}
+	if cmd.Flags().Changed("oanda-token") {
+		overrides["oanda-token"] = flags.oandaToken
+	}
+	if cmd.Flags().Changed("oanda-base-url") {
+		overrides["oanda-base-url"] = flags.oandaBaseURL
 	}
 
 	return config.Load[datasetConfig](config.Options{
@@ -67,9 +86,9 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 // command context for every data subcommand to use: the service
 // boundary itself, the resolver leaf commands register the requested
 // instrument's Listing into before calling it (instruments are
-// resolved per-request, not from a persistent catalog -- see
-// dataargs.go's parseFXListing), and the provider name every
-// registered Listing must share with the Manager for
+// resolved per-request, not from a persistent catalog — see
+// service/marketdata's RegisterFXInstrument), and the provider name
+// every registered Listing must share with the Manager for
 // ResolveInstrument's lookup to ever match.
 type dataContext struct {
 	Service  *svc.Service
@@ -88,11 +107,26 @@ func dataContextFrom(ctx context.Context) (dataContext, bool) {
 	return dc, ok
 }
 
+// oandaTokenCredential satisfies marketdata.Config.OANDACredential's
+// oanda.CredentialProvider interface structurally
+// (Token(ctx) (string, error)) without importing marketdata/internal —
+// the same technique service/marketdata's own tests use, now needed
+// here in production code for #110's Sync/Update commands.
+type oandaTokenCredential string
+
+func (c oandaTokenCredential) Token(context.Context) (string, error) {
+	return string(c), nil
+}
+
 // buildDataContext constructs the *marketdata.Manager and Service a
 // data subcommand invocation needs. The Manager's Resolver starts
 // empty: nothing is registered into it until a leaf command parses its
-// own INSTRUMENT argument, since #109's scope is proving the read
-// commands, not building a persistent instrument catalog.
+// own INSTRUMENT argument, since instruments are resolved per-request,
+// not from a persistent catalog. OANDA credentials are configured only
+// when both OANDAToken and OANDABaseURL are actually supplied — see
+// datasetConfig's own doc comment for why an unconfigured pair is left
+// for Manager itself to reject, only when a command that needs it is
+// actually run.
 func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, error) {
 	cfg, err := buildDatasetConfig(cmd, flags)
 	if err != nil {
@@ -100,13 +134,25 @@ func buildDataContext(cmd *cobra.Command, flags datasetFlags) (dataContext, erro
 	}
 
 	resolver := instrument.NewMemoryResolver()
-	manager, err := marketdata.New(marketdata.Config{
+	managerCfg := marketdata.Config{
 		Clock:        clock.Real{},
 		StoreRoot:    cfg.StoreRoot,
 		RawRoot:      cfg.RawRoot,
 		Resolver:     resolver,
 		ProviderName: cfg.Provider,
-	})
+	}
+	// OANDACredential must stay a genuinely nil interface when no token
+	// was supplied: oandaTokenCredential("") is a *non-nil* interface
+	// value wrapping an empty string, which would silently defeat
+	// Manager's own "credential and base URL must be supplied together"
+	// check (comparing cfg.OANDACredential == nil) if assigned
+	// unconditionally here.
+	if cfg.OANDAToken != "" {
+		managerCfg.OANDACredential = oandaTokenCredential(cfg.OANDAToken)
+	}
+	managerCfg.OANDABaseURL = cfg.OANDABaseURL
+
+	manager, err := marketdata.New(managerCfg)
 	if err != nil {
 		return dataContext{}, err
 	}

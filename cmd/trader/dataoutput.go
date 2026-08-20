@@ -8,12 +8,13 @@ import (
 	svc "github.com/rustyeddy/trader/service/marketdata"
 )
 
-// printBars, printCoverage, and printPlan are the read commands'
-// default output today: a plain, human-readable line per record. They
-// are deliberately minimal, not the formatter boundary issue #111
-// owns — that issue adds --format table/json and a real presentation
-// layer; this is only enough to make issue #109's commands usable and
-// testable in the meantime, replaced (not extended) when #111 lands.
+// printBars, printCoverage, printPlan, printSyncResult, printBuildResult,
+// and printUpdateResponse are every data command's default output
+// today: a plain, human-readable line per record. They are
+// deliberately minimal, not the formatter boundary issue #111 owns —
+// that issue adds --format table/json and a real presentation layer;
+// this is only enough to make these commands usable and testable in
+// the meantime, replaced (not extended) when #111 lands.
 func printBars(w io.Writer, resp svc.BarsResponse) {
 	for _, b := range resp.Bars {
 		_, _ = fmt.Fprintf(w, "%s  O=%s H=%s L=%s C=%s\n",
@@ -37,5 +38,38 @@ func printPlan(w io.Writer, plan marketdata.Plan) {
 	}
 	for _, a := range plan.Actions {
 		_, _ = fmt.Fprintf(w, "%s  %s %04d-%02d  %s\n", a.Kind, a.Interval, a.Year, int(a.Month), a.Reason)
+	}
+}
+
+func printSkipped(w io.Writer, skipped []marketdata.SkippedAction) {
+	for _, s := range skipped {
+		_, _ = fmt.Fprintf(w, "skipped  %s  %s %04d-%02d  %s\n",
+			s.Action.Kind, s.Action.Interval, s.Action.Year, int(s.Action.Month), s.Reason)
+	}
+}
+
+func printSyncResult(w io.Writer, result marketdata.SyncResult) {
+	for _, d := range result.Downloaded {
+		_, _ = fmt.Fprintf(w, "downloaded  %s %04d-%02d  %d record(s)\n",
+			d.Action.Interval, d.Action.Year, int(d.Action.Month), d.RecordsWritten)
+	}
+	printSkipped(w, result.Skipped)
+}
+
+func printBuildResult(w io.Writer, result marketdata.BuildResult) {
+	for _, p := range result.Published {
+		_, _ = fmt.Fprintf(w, "published  %s %04d-%02d  %d bar(s)\n",
+			p.Action.Interval, p.Action.Year, int(p.Action.Month), p.BarCount)
+	}
+	printSkipped(w, result.Skipped)
+}
+
+func printUpdateResponse(w io.Writer, resp svc.UpdateResponse) {
+	if resp.SyncPerformed {
+		printSyncResult(w, resp.Sync.Result)
+	}
+	printBuildResult(w, resp.Build.Result)
+	if !resp.SyncPerformed && len(resp.Build.Result.Published) == 0 && len(resp.Build.Result.Skipped) == 0 {
+		_, _ = fmt.Fprintln(w, "already current")
 	}
 }
