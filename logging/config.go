@@ -40,20 +40,31 @@ func New(cfg Config) (*slog.Logger, io.Closer, error) {
 		return nil, nil, err
 	}
 
-	opts := &slog.HandlerOptions{Level: cfg.Level, ReplaceAttr: redactSensitiveKeys}
-
-	var h slog.Handler
-	switch cfg.Format {
-	case "", "text":
-		h = slog.NewTextHandler(w, opts)
-	case "json":
-		h = slog.NewJSONHandler(w, opts)
-	default:
+	h, err := newHandler(cfg, w)
+	if err != nil {
 		_ = closer.Close()
-		return nil, nil, fmt.Errorf("logging: unsupported format %q", cfg.Format)
+		return nil, nil, err
 	}
 
 	return slog.New(NewContextHandler(h)), closer, nil
+}
+
+// newHandler builds the one handler cfg.Format selects, writing to w. It
+// holds no knowledge of where w came from or who owns closing it — New and
+// NewMulti each handle output resolution and cleanup themselves, since
+// NewMulti's partial-construction-failure cleanup needs to run across
+// several already-opened sinks, not just one.
+func newHandler(cfg Config, w io.Writer) (slog.Handler, error) {
+	opts := &slog.HandlerOptions{Level: cfg.Level, ReplaceAttr: redactSensitiveKeys}
+
+	switch cfg.Format {
+	case "", "text":
+		return slog.NewTextHandler(w, opts), nil
+	case "json":
+		return slog.NewJSONHandler(w, opts), nil
+	default:
+		return nil, fmt.Errorf("logging: unsupported format %q", cfg.Format)
+	}
 }
 
 // resolveOutput turns a Config.Output value into a writer and the closer
