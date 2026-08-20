@@ -31,3 +31,30 @@ type CoverageResponse struct {
 type PlanResponse struct {
 	Plan marketdata.Plan
 }
+
+// SyncResponse is the structured result of the Sync use case: the Plan
+// Service.Sync computed and executed against, alongside the raw
+// acquisition outcome. Plan is included so a caller can see exactly
+// what Sync was executing against, including any non-download Actions
+// it necessarily skipped (marketdata.SyncResult.Skipped already
+// explains why; Plan is what makes "why wasn't this raw partition
+// synced" answerable without a second Plan call).
+//
+// Result is populated even when Sync itself returns a non-nil error:
+// *marketdata.Manager.Sync documents returning whatever partial
+// SyncResult it had accumulated before the failure, not a zero value,
+// and Service.Sync preserves that same partial-progress contract rather
+// than discarding it.
+type SyncResponse struct {
+	Plan   marketdata.Plan
+	Result marketdata.SyncResult
+}
+
+// BuildResponse is the structured result of the Build use case, the
+// mirror of SyncResponse for canonical publication. Result is likewise
+// populated on partial failure, matching
+// *marketdata.Manager.Build's own contract.
+type BuildResponse struct {
+	Plan   marketdata.Plan
+	Result marketdata.BuildResult
+}
