@@ -27,7 +27,7 @@ func ExampleNew() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 
 	logger.Info("server started", "port", 8080)
 }
@@ -91,7 +91,7 @@ func ExampleWithComponent() {
 func ExampleDiscard() {
 	logger := logging.Discard()
 	logger.Info("this goes nowhere")
-	fmt.Fprintln(os.Stdout, "component ran without a real logger")
+	_, _ = fmt.Fprintln(os.Stdout, "component ran without a real logger")
 	// Output:
 	// component ran without a real logger
 }

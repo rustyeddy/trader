@@ -138,7 +138,7 @@ func TestResolveInstrumentAmbiguousThenNarrowed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "AAPL", got.Symbol())
 
-	got, err = r.ResolveInstrument(apple.ID(), "", "NASDAQ")
+	_, err = r.ResolveInstrument(apple.ID(), "", "NASDAQ")
 	require.Error(t, err) // still ambiguous: both are on NASDAQ
 	require.ErrorIs(t, err, ErrAmbiguousSymbol)
 

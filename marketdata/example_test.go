@@ -158,7 +158,7 @@ func ExampleManager_Bars() {
 	if err != nil {
 		panic(err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	for {
 		bar, err := reader.Next(context.Background())

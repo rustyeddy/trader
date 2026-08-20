@@ -198,7 +198,7 @@ func TestNewLoggerPropagatesContextAutomatically(t *testing.T) {
 	path := dir + "/out.log"
 	logger, closer, err := New(Config{Output: path})
 	require.NoError(t, err)
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 
 	ctx := WithCorrelationID(context.Background(), "corr-from-new")
 	logger.InfoContext(ctx, "processing")

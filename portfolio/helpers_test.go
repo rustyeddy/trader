@@ -26,11 +26,6 @@ func mustAccountID(t *testing.T) id.AccountID {
 	return aid
 }
 
-func money(t *testing.T, amount, currency string) num.Money {
-	t.Helper()
-	return num.MustParseMoney(amount, num.MustParseCurrency(currency))
-}
-
 func mustListing(t *testing.T, base, quote, provider, symbol string) instrument.Listing {
 	t.Helper()
 	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency(base), num.MustParseCurrency(quote))

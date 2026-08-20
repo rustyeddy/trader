@@ -75,7 +75,7 @@ func TestOpenW1Unsupported(t *testing.T) {
 func TestMeta(t *testing.T) {
 	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	m := r.Meta()
 	assert.Equal(t, "EURUSD", m.Symbol)
@@ -162,7 +162,7 @@ func TestReaderStreamingAndClose(t *testing.T) {
 func TestReaderNextReturnsEOF(t *testing.T) {
 	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	count := 0
 	for {
@@ -179,7 +179,7 @@ func TestReaderNextReturnsEOF(t *testing.T) {
 func TestReaderHonorsContextCancellation(t *testing.T) {
 	r, err := Open(fixture("EURUSD-2020-05-h1.csv"))
 	require.NoError(t, err)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

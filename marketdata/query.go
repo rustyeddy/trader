@@ -275,7 +275,7 @@ func (m *Manager) readAllBars(ctx context.Context, query BarQuery) ([]Bar, error
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	var bars []Bar
 	for {
