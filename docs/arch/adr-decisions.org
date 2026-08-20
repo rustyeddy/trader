@@ -130,6 +130,7 @@ the original decided, use full supersession instead.
 | 020 | Historic data subsystem (in adr-020-historic-data.org)            | Accepted   |
 | 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
 | 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Accepted |
+| 023 | Structured logging (in adr-023-structured-logging.org)            | Accepted   |
 
 Note: ADR-020 is maintained in its own file,
 =docs/arch/adr-020-historic-data.org=, rather than inline in this
@@ -149,6 +150,16 @@ pending five open questions raised while it was written; issues
 actually encountered each one, and the M2.5 completion review (issue
 #113) folded those resolutions back into the ADR and promoted it to
 =Accepted=.
+
+Note: ADR-023 is likewise maintained in its own file,
+=docs/arch/adr-023-structured-logging.org=, rather than inline in
+this registry.  Its own Status section is authoritative.  Issue #125
+(M2.6-01) asks for it to be drafted and adopted in the same step,
+establishing structured-logging conventions ahead of Milestone 3;
+several capabilities from the prior =trader-first-try/log=
+implementation (multi-output sinks, runtime reconfiguration,
+syslog/journald, a production in-memory sink) are recorded as
+deliberate, named deferrals rather than blockers to acceptance.
 
 * ADR-001: Modular monolith before service decomposition
 

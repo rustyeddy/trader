@@ -1,0 +1,398 @@
+#+TITLE: Structured Logging ADR-023
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #125 (M2.6-01) asks this ADR to be both drafted and
+adopted in one step, establishing Trader's structured-logging
+conventions before Milestone 3 brokerage/account work begins; it does
+not itself require implementing every capability discussed below.
+Several sections (multi-output support, runtime reconfiguration,
+syslog/journald, a production in-memory sink) record deliberate,
+named deferrals rather than open questions blocking acceptance — see
+Milestone 2.6 Scope and Consequences below for what remains future
+work under later M2.6 issues.
+
+* Context
+
+Trader has established a logging package and CLI composition-root wiring during
+Milestone 2.5. Before beginning brokerage/account development in Milestone 3,
+Trader needs a consistent production structured-logging architecture.
+
+The previous implementation in =rustyeddy/trader-first-try/log= is useful prior
+art. It demonstrated several operational capabilities that remain valuable:
+
+- Go =log/slog=-based structured logging.
+- component/module-scoped loggers.
+- text and JSON output.
+- file and console output.
+- multiple concurrent output sinks.
+- optional syslog output.
+- runtime log-level/reconfiguration plumbing.
+- in-memory capture for testing/diagnostics.
+
+The new Trader implementation already has a cleaner architectural foundation:
+
+- =logging.Config= with level, format, and output configuration.
+- caller-owned logger/output lifecycle via =logging.New=.
+- text and JSON structured handlers.
+- context correlation and causation support.
+- canonical structured attributes such as =run_id=, =session_id=,
+  =account_id=, =instrument_id=, =order_id=, =correlation_id=,
+  =causation_id=, and =component=.
+- sensitive-value redaction.
+- logging architecture tests and a logging testkit.
+- CLI composition-root construction and cleanup of the logger.
+
+Milestone 2.6 should therefore use =trader-first-try/log= as a feature and
+operational reference, not as code to transplant wholesale.
+
+* Decision
+
+Trader will use structured logging based on Go's standard =log/slog= package.
+
+Logging is an explicit application dependency. Composition roots create and own
+logger resources and pass logging context/dependencies downward. Domain and
+service packages must not initialize application logging independently.
+
+The previous Trader logging implementation may be referenced for useful
+operational behavior, but the new implementation will preserve the current
+architecture's explicit ownership and no-hidden-global-state rules.
+
+The primary principle is:
+
+#+begin_quote
+Log business events and operation boundaries, not program narration.
+#+end_quote
+
+* Dependency and lifetime model
+
+The intended model is:
+
+#+begin_example
+composition root
+      |
+      | constructs logger and owns closers
+      v
+context / explicit dependency
+      |
+      +--> application services
+      +--> domain/public packages where appropriate
+      +--> transport adapters
+#+end_example
+
+The composition root owns the lifetime of file descriptors and other logging
+resources. Cleanup must occur on success and failure paths.
+
+Libraries return errors. They do not terminate the process.
+
+* No hidden global logger
+
+Trader will not adopt the previous implementation's mutable global logging
+model, including patterns such as:
+
+#+begin_example
+defLog
+handlerState
+sinkClosers
+modules
+
+Data
+BacktestLog
+IndicatorLog
+Replay
+Strat
+#+end_example
+
+Nor should Trader depend on package-level =Info=, =Debug=, =Warn=, =Error=, or
+=Fatal= helpers backed by mutable global state.
+
+In particular, no logging package API should call =os.Exit=. Process termination
+belongs to a composition root.
+
+Trader should not require =slog.SetDefault= for normal application operation.
+
+* Component-scoped logging
+
+The old Trader concept of module-scoped loggers is retained, but implemented
+without global component loggers.
+
+The existing =logging.WithComponent= helper is the preferred model:
+
+#+begin_src go
+logger := logging.WithComponent(logger, "marketdata")
+#+end_src
+
+Every resulting record carries the canonical =component= attribute.
+
+An initial component vocabulary should be documented and kept intentionally
+small. Likely names include:
+
+- =marketdata=
+- =broker=
+- =account=
+- =orders=
+- =portfolio=
+- =strategy=
+- =backtest=
+- =execution=
+- =service=
+- =cli=
+
+Components should represent stable architectural subsystems rather than
+individual Go files or functions.
+
+* Canonical structured attributes
+
+Trader should continue using canonical attribute names from the existing
+=logging= package. At minimum these include:
+
+- =run_id=
+- =session_id=
+- =account_id=
+- =instrument_id=
+- =order_id=
+- =correlation_id=
+- =causation_id=
+- =component=
+
+Packages must not invent alternate names for an existing concept. Consistent
+keys are required so records can be correlated across components and, later,
+across processes and transports.
+
+Additional canonical attributes should be added only when repeated usage
+justifies them.
+
+* Correlation and causation
+
+Context is the propagation mechanism for operation-level correlation metadata.
+
+A correlation ID identifies records belonging to one logical operation. A
+causation ID identifies the more specific command/event that caused an action.
+
+CLI, REST, WebSocket, SSE, brokerage, strategy execution, and other future
+adapters should be able to participate in the same correlation model without
+changing domain APIs merely for logging.
+
+* Logging levels
+
+Logging levels should describe operational significance rather than source-code
+importance.
+
+** DEBUG
+
+Detailed diagnostic information useful while investigating behavior. DEBUG
+must not become line-by-line program narration.
+
+** INFO
+
+Meaningful successful operational events and state transitions, for example:
+
+- a market-data update completed;
+- a broker session connected;
+- an order was accepted;
+- a fill was received;
+- a backtest started or completed.
+
+** WARN
+
+An abnormal or degraded condition from which Trader can continue, for example:
+
+- retrying a provider request;
+- stale-but-usable data;
+- partial optional functionality unavailable.
+
+** ERROR
+
+An operation failed or Trader cannot fulfill the requested use case.
+
+Errors should normally be logged once at the appropriate operation boundary.
+Lower layers should generally return enriched errors rather than repeatedly log
+the same failure.
+
+* Event-oriented logging
+
+Prefer records describing useful events:
+
+#+begin_src go
+logger.InfoContext(ctx, "market data update completed",
+    logging.InstrumentID, id,
+    "interval", interval,
+    "downloaded_partitions", downloaded,
+    "published_partitions", published,
+)
+#+end_src
+
+Avoid narration such as:
+
+#+begin_src go
+logger.Debug("entering Update")
+logger.Debug("calling Plan")
+logger.Debug("loop iteration 4")
+#+end_src
+
+The goal is logs that remain useful to an operator and to machine analysis as
+Trader grows.
+
+* Sensitive data and redaction
+
+The existing redaction support is retained and treated as part of the logging
+contract.
+
+Credentials, broker tokens, passwords, secrets, authorization headers, and
+other sensitive values must not be emitted in logs.
+
+Milestone 3 brokerage work makes this requirement especially important.
+
+Redaction should occur centrally where practical rather than relying solely on
+every call site remembering not to log a sensitive field.
+
+* Output formats
+
+Trader supports structured text and JSON output.
+
+Text output is intended primarily for interactive human use.
+
+JSON output is intended for machine consumption, log aggregation, and future
+operational tooling. JSON records should preserve canonical structured
+attributes rather than embedding important fields inside message strings.
+
+* Output destinations
+
+The current implementation supports one configured output: stderr, stdout, or
+a file.
+
+The previous Trader implementation demonstrated useful multi-sink behavior,
+such as simultaneous console and file output. Milestone 2.6 should evaluate and,
+if justified, add multi-output support while preserving explicit resource
+ownership.
+
+A likely production use case is:
+
+#+begin_example
+console + persistent log file
+#+end_example
+
+Syslog/journald integration is useful prior art but is not required merely for
+feature parity. It should be added when a concrete deployment requirement
+justifies it.
+
+Any multi-sink implementation must return ownership of closable sinks to the
+composition root and must handle partial construction failures without leaking
+resources.
+
+* Runtime reconfiguration
+
+=trader-first-try/log= contains a switchable-handler design that allows existing
+logger pointers to survive calls to =Setup= and supports runtime reconfiguration.
+
+This is useful prior art but is not currently required.
+
+Trader should not add switch-handler/reconfiguration complexity until a real
+requirement exists for changing logging level, format, or destinations in a
+running process.
+
+Static startup configuration is sufficient for Milestone 2.6 unless an existing
+requirement demonstrates otherwise.
+
+* In-memory logging
+
+The previous implementation included an optional production memory sink.
+
+The new Trader logging testkit already provides a cleaner mechanism for testing
+log records. A production memory sink should therefore not be added merely to
+support tests.
+
+A bounded in-memory operational ring buffer may be considered later if there is
+a concrete use case, such as displaying recent events on the Trader kiosk/UI.
+That would be an operational feature rather than a testing facility.
+
+* Configuration
+
+Logging configuration remains integrated with Trader's generic configuration
+package.
+
+The CLI currently exposes concepts equivalent to:
+
+#+begin_example
+--log-level
+--log-format
+--log-output
+#+end_example
+
+with corresponding =TRADER_= environment configuration.
+
+Milestone 2.6 should evolve =logging.Config= only when required by selected
+capabilities such as multi-output support. Configuration should not be changed
+merely to resemble =trader-first-try=.
+
+* Service and domain integration
+
+Logging must not change the application-service boundary established in
+ADR-022.
+
+Transport adapters remain responsible for transport concerns. Application
+services orchestrate use cases. Domain packages own business semantics.
+Logging provides observability across those boundaries but does not become a
+new orchestration mechanism.
+
+Application services are a natural location for operation-boundary records,
+including request completion, failure, duration, and meaningful result counts.
+
+Lower-level domain logging should be added selectively where the lower layer has
+unique operational information that cannot be reconstructed at the service
+boundary.
+
+* Milestone 2.6 scope
+
+Milestone 2.6 should establish production structured-logging conventions before
+Milestone 3 brokerage/account development begins.
+
+Expected scope:
+
+1. Document structured logging conventions and architecture.
+2. Standardize component-scoped logging and component names.
+3. Evaluate and, if warranted, implement multi-output logging using the previous
+   Trader implementation as prior art.
+4. Instrument existing application/service operations with meaningful
+   structured events.
+5. Verify correlation, redaction, lifecycle ownership, JSON structure, and
+   failure-path cleanup.
+
+Milestone 2.6 explicitly does not require:
+
+- copying =trader-first-try/log= wholesale;
+- package-global component loggers;
+- package-level fatal logging;
+- runtime logging reconfiguration;
+- syslog/journald support without a concrete requirement;
+- a production in-memory sink solely for tests;
+- pervasive logging in every function.
+
+* Consequences
+
+** Positive
+
+- Establishes logging conventions before brokerage introduces credentials,
+  orders, fills, positions, and external API failures.
+- Preserves structured records suitable for both humans and machines.
+- Provides stable correlation keys across future transports and services.
+- Reuses useful experience from the previous Trader implementation without
+  importing its global-state architecture.
+- Keeps resource ownership explicit and testable.
+- Avoids duplicate/noisy logging by emphasizing operation boundaries.
+
+** Costs
+
+- Existing services will require selective instrumentation.
+- Multi-output support, if accepted, adds handler and lifecycle complexity.
+- Developers must consistently use canonical attributes and component names.
+- Some useful features from =trader-first-try= will intentionally remain
+  deferred until justified by real operational requirements.
+
+* References
+
+- ADR-022: CLI and Application Service Layer.
+- New Trader =logging= package.
+- =rustyeddy/trader-first-try/log= as prior implementation and operational
+  reference.
