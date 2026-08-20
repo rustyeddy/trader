@@ -21,10 +21,6 @@ test:
 race:
 	go test -race ./...
 
-# lint is intentionally not part of check/CI yet: golangci-lint's
-# default linters (errcheck, govet, staticcheck, ineffassign, unused)
-# currently flag pre-existing issues in already-merged code. Wire it
-# into check once those are cleaned up.
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION) run ./...
 
@@ -39,6 +35,6 @@ coverage:
 coverage-html: coverage
 	go tool cover -html=$(COVERPROFILE) -o coverage.html
 
-check: fmt-check vet test race
+check: fmt-check vet lint test race
 
 .PHONY: all fmt fmt-check vet test race lint coverage coverage-html check
