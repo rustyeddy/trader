@@ -3,13 +3,10 @@
 
 * Status
 
-Proposed. Four open questions (below) remain unresolved: whether
-=Update= grows policy/options, where CLI formatting lives, the default
-=--to= behavior, and whether read versus mutation commands need
-visibly different confirmation/error UX. These do not need to be
-settled before this ADR is recorded, and may be resolved incrementally
-as the M2.5 implementation issues (#104-#113) actually raise them,
-rather than speculatively now.
+Accepted. Promoted from Proposed during the M2.5 completion review
+(issue #113): all five original open questions are now resolved by
+what #104-#112 actually built and shipped, not merely proposed. See
+the Open Questions section for each resolution.
 
 Issue #104 (M2.5-02) settled the application package name while
 building the service-layer foundation: it is =service=, with each
@@ -452,23 +449,45 @@ duplicating orchestration as additional interfaces are introduced.
    or =app=?~~ *Resolved by issue #104:* =service=, with one
    subpackage per domain area it orchestrates (=service/marketdata=
    first). Package-level conventions live in =service/doc.go=.
-2. Should =Update= always perform Plan -> Sync -> Build, or should it
+2. ~~Should =Update= always perform Plan -> Sync -> Build, or should it
    eventually support policy/options controlling which actions are
-   permitted?
-3. Should CLI formatting be implemented in a shared presentation
+   permitted?~~ *Resolved by issue #107:* =Update= always performs the
+   full Plan -> Sync -> Build composition unconditionally (=Sync= is
+   skipped only when the initial =Plan= contains no
+   =ActionDownloadRaw= entry — never as a caller-selectable option).
+   No policy/options surface exists; one can be added additively if a
+   real caller need for partial orchestration ever arises.
+3. ~~Should CLI formatting be implemented in a shared presentation
    package or remain local to =cmd/trader= until another adapter needs
-   it?
-4. Should =data update= default its end time to the current completed
-   interval when =--to= is omitted?
-5. Should read operations (=bars=, =coverage=, =plan=) and mutation
+   it?~~ *Resolved by issue #111:* formatting stays local to
+   =cmd/trader= (=format.go='s =Formatter= interface and
+   format-name registry, =format_table.go=, =format_json.go=).
+   =service/marketdata= remains presentation-free per this ADR's own
+   rule; nothing here promotes formatting into a shared package ahead
+   of an actual second transport needing it.
+4. ~~Should =data update= default its end time to the current
+   completed interval when =--to= is omitted?~~ *Resolved by issue
+   #109:* no default. =--from=/=--to= are both required flags on
+   every dataset command, =update= included
+   (=addDatasetArgFlags=/=resolveDatasetRequest=); an omitted range
+   is a validation error, not an inferred one.
+5. ~~Should read operations (=bars=, =coverage=, =plan=) and mutation
    operations (=sync=, =build=, =update=) have visibly different CLI
-   confirmation/error behavior?
+   confirmation/error behavior?~~ *Resolved by issues #109/#110:* no.
+   Every dataset command follows the identical
+   resolve-formatter/resolve-request/call-service/format-response
+   shape; mutation commands add no confirmation prompt or distinct
+   error-reporting path beyond the partial-progress formatting
+   (=FormatUpdateProgress=) their responses already carry. The
+   read/mutation distinction is documented (each command's doc
+   comment and =Short= text say which it is) but not enforced through
+   different runtime UX.
 
-The remaining four are expected to be resolved as the implementation
-issues (#105-#113) actually encounter them, rather than speculatively
-ahead of time; each resolution should be folded back into this ADR (or
-a follow-on ADR, per =adr-decisions.org='s supersession/amendment
-rules) once decided.
+All five original open questions are now resolved by the M2.5
+implementation itself, folded back into this ADR by the M2.5
+completion review (issue #113) rather than left as a separate
+follow-on ADR, since none of the resolutions reverses or narrows what
+this ADR originally decided.
 
 * Recommendation
 

@@ -1,0 +1,454 @@
+#+TITLE: M2.5 Completion Review
+#+SUBTITLE: CLI and Application Service Layer — verification-first sign-off (issue #113, M2.5-11)
+#+STARTUP: overview indent
+
+* Purpose
+
+This is the verification-first M2.5 completion review, following the
+M1 (#32) and M2 (#83) completion reviews' own precedent: prove M2.5 —
+the application/service layer (ADR-022) and the =trader= CLI's first
+=data= command group built on it — is a coherent, externally usable
+whole by exercising it the way an operator actually would, audit its
+boundaries and documentation against what was actually built, and
+record what that exercise found. It is not a feature-building issue;
+the only code/doc changes it makes are the ones the exercise itself
+found necessary.
+
+M2.5's package surface, confirmed via =go list ./...= against packages
+introduced or materially extended since M2's own review (#83,
+=de20d00=): =service= (root, empty — a landing package for
+sub-packages and shared conventions only), =service/marketdata= (the
+first, and so far only, application service), and =cmd/trader=
+(=package main=, the Cobra CLI). Every M1/M2 package is out of this
+review's scope except where these three depend on one.
+
+* 1. External-consumer exercise
+
+=cmd/trader/vertical_slice_test.go='s =TestM25VerticalSlice= (issue
+#112) is this milestone's own counterpart to #82's =examples/m2=: one
+narrated story driven entirely through the real command tree
+(=newRootCmd=, =root.ExecuteContext=), never by calling a service or
+=Manager= method directly. It proves, in order:
+
+- =update= on a dataset with nothing published yet performs the full
+  acquire -> normalize -> publish orchestration via a real (test
+  server-backed) OANDA network round trip, reported as both
+  "downloaded" and "published" in its own table output.
+- =bars= reads back exactly what =update= just published, in JSON,
+  decoded through a plain, self-contained view struct — proving no
+  internal =marketdata= type leaks into the JSON document.
+- =coverage= reports the just-published range with no gap.
+- =plan= reports nothing further required.
+- Re-running =update= with no OANDA credentials configured performs no
+  network access and reports "already current" — a genuine no-op, not
+  merely a call that happens to succeed (matching
+  =service/marketdata='s own =TestUpdate_NothingToDoWhenAlreadyCurrent=,
+  #107).
+- A context already cancelled before =ExecuteContext= is rejected by
+  =data='s own =PersistentPreRunE=, before the service or =Manager= is
+  ever constructed — deliberately scoped to prove only that much (see
+  its own doc comment, added after review on #112 narrowed an earlier,
+  overclaiming version of this subtest). Deeper cancellation
+  propagation — into the service layer and into =Manager= itself — is
+  proven separately and directly by
+  =service/marketdata='s own =TestBars_PropagatesContextCancellation=
+  (#105) and by =marketdata='s own per-operation cancellation tests
+  (#82/M2), not re-proven here.
+
+This exercise deliberately does not re-cover what
+=datacmd_test.go=/=datamutation_test.go=/=format_test.go= already test
+in isolation per command (invalid arguments, missing configuration,
+JSON structure detail, individual cancellation and no-hidden-write
+checks, write-error propagation) — its own job is only to prove the
+full chain composes correctly end to end, once, as a single story,
+exactly as #82's =examples/m2= did for M2's own =Manager= API.
+
+** No-hidden-writes
+
+Every read command (=bars=, =coverage=, =plan=) is proven, per-command,
+to create nothing under =--store-root=/=--raw-root= even when given a
+range with no published data
+(=datacmd_test.go='s own no-hidden-write assertions, following #82's
+own precedent at the =Manager= layer). Only =sync=, =build=, and
+=update= — the three commands whose own doc comments and =Short= text
+call them mutating — ever write.
+
+** Result
+
+*Pass, no API deficiencies.* Two rounds of independent design review on
+#112 (the vertical-slice test's own cancellation subtest, and its
+narrated doc comments) progressively narrowed the exercise's claims
+until each one matched exactly what it actually tests, no more and no
+less. Nothing in this review's own reading of the exercise found
+anything #112 missed.
+
+* 2. Documentation, naming, and boundary audit
+
+A =go/doc=-based scan (the same corrected approach the M1/M2 reviews
+used: exported top-level identifiers in non-test files only) against
+=service=, =service/marketdata=, and =cmd/trader=. *Zero undocumented
+exported identifiers in any of the three.* Both =service= and
+=service/marketdata= carry a package doc comment; =cmd/trader= is
+=package main= and is documented at the file level instead, which is
+this repository's existing convention for command-line entry points
+(no M1/M2 =package main= tree exists to compare against, but this
+matches Go's own convention for non-library packages).
+
+=golangci-lint run ./...= (v2.13.0, the pinned version =make lint=
+already uses): *zero findings across the whole module*, =service=,
+=service/marketdata=, and =cmd/trader= included. This subsumes the
+=staticcheck= pass the M2 review ran separately, since =staticcheck= is
+one of golangci-lint's default linters.
+
+** Deficiencies found and fixed
+
+The exercise found ADR-022 itself stale, not the code: it had shipped
+recording five *open* questions (application package name; whether
+=Update= grows policy/options; where CLI formatting lives; default
+=--to= behavior; confirmation/error UX for read versus mutation
+commands), all five of which #104/#107/#109/#110/#111 had already
+concretely resolved by actually building the thing, without any of
+those resolutions ever being folded back into the ADR — exactly the
+gap ADR-022's own Open Questions section anticipated ("each resolution
+should be folded back into this ADR ... once decided"). Fixed in this
+review:
+
+- =docs/arch/adr-022-cli-app-service-layer.org=: all five open
+  questions recorded as resolved, each citing the specific issue that
+  resolved it and what was actually built (see section 4 below for the
+  resolutions themselves). Status promoted from =Proposed= to
+  =Accepted=, since every question that was gating acceptance is now
+  answered by shipped, tested code rather than by a proposal.
+- =docs/arch/adr-decisions.org=: index row and explanatory note updated
+  to match.
+
+No other documentation, naming, or boundary deficiency was found. In
+particular:
+
+- =service/doc.go= and =service/marketdata/service.go='s own doc
+  comments accurately describe what was built (verified by reading
+  every exported symbol's doc comment against its actual
+  implementation, not merely trusting the prose).
+- Every one of =cmd/trader='s six leaf command files
+  (=databars.go=, =datacoverage.go=, =dataplan.go=, =datasync.go=,
+  =databuild.go=, =dataupdate.go=) carries a doc comment naming which
+  issue added it and which use case it implements, and each one's
+  claim ("read-only," "mutating," "never reimplements X's own
+  orchestration") was checked directly against its ~30-45 line body,
+  not assumed from the comment alone.
+
+* 3. Dependency-boundary review
+
+#+BEGIN_EXAMPLE
+service              -> (no imports; empty landing package)
+service/marketdata    -> context, errors, fmt, io, strings,
+                          instrument, marketdata, num
+cmd/trader             -> context, encoding/json, errors, fmt, io,
+                          log/slog, os, os/signal, strings, syscall, time,
+                          clock, config, instrument, logging, marketdata,
+                          num, service/marketdata, spf13/cobra
+#+END_EXAMPLE
+
+(=go list -f '{{.Imports}}'=, run directly against both packages as
+part of this review, not merely cited from memory.)
+
+** Findings
+
+- =service/marketdata= imports only =marketdata= (the one M2 public
+  package it wraps), =instrument= and =num= (both M1, needed to
+  translate a bare symbol string into a real =instrument.ID= inside
+  =RegisterFXInstrument=), and the standard library. No HTTP, Cobra, or
+  other transport-framework import anywhere in the package — matching
+  ADR-022's "must not depend on ... Cobra, or another transport
+  framework" rule exactly.
+- =cmd/trader= imports =marketdata= directly, and this is intentional,
+  not a boundary violation: only =dataservice.go= — the composition-root
+  file that constructs the one =*marketdata.Manager= the whole command
+  tree shares, before handing it to =svc.New= — does so.
+  =TestCommandHandlers_NeverImportMarketdataDirectly=
+  (=cmd/trader/boundary_test.go=, #112) is a real regression test
+  enforcing that none of the six leaf command files import
+  =marketdata=; it parses each file's own import block directly
+  (=go/parser=, =ImportsOnly=) rather than using =go list=, since
+  =go list='s own =Imports= for a =package main= merges every file's
+  imports together and cannot attribute one back to the specific file
+  that added it — exactly the per-file distinction this guard needs. I
+  re-ran it standalone (=go test -run
+  TestCommandHandlers_NeverImportMarketdataDirectly ./cmd/trader/...=)
+  and confirmed it passes against the current tree.
+- =marketdata/internal/...= is unreachable from =cmd/trader= or
+  =service= by Go's own compiler-enforced =internal/= rule — =cmd/trader=
+  and =service= both live entirely outside the =marketdata= package's
+  own subtree, the same reasoning the M2 review already recorded for
+  this exact boundary. =boundary_test.go='s own package-level comment
+  records this explicitly rather than leaving it silently unstated;
+  no test exists for it because none would add coverage beyond what
+  the compiler already guarantees unconditionally.
+- =service/boundary_test.go= (#104) is the analogous guard one layer
+  up: it confirms every package under =service/...= has an import path
+  with that prefix and (per its own doc comment, corrected during
+  #104's own review) that transports are excluded by convention rather
+  than by an incorrect "already-validated input" claim.
+- No cycles.
+
+No violations found; no code changes required by this section beyond
+the ADR-022 fold-back in section 2.
+
+* 4. ADR and architecture-document consistency
+
+- *ADR-022* (CLI and application service layer): was =Proposed= with
+  five open questions; this review resolves and folds back all five,
+  promoting it to =Accepted= (see section 2). The resolutions
+  themselves, cross-checked directly against the shipped code as part
+  of this review, not merely asserted:
+  1. Application package name: =service=, one subpackage per domain
+     area (#104).
+  2. =Update= always performs the full =Plan -> Sync -> Build=
+     composition unconditionally — =Sync= is skipped only when the
+     initial =Plan= contains no =ActionDownloadRaw= entry, never as a
+     caller-selectable option (#107, =service/marketdata/update.go='s
+     =planNeedsSync=). No policy/options surface exists.
+  3. CLI formatting stays local to =cmd/trader= (#111,
+     =format.go='s =Formatter= interface and format-name registry);
+     =service/marketdata= remains presentation-free, confirmed
+     directly: =service/marketdata= imports no =encoding/json=
+     anywhere in the package, while =cmd/trader/format_json.go= is
+     the only file in the module that does.
+  4. =--from=/=--to= are both required on every dataset command,
+     =update= included; an omitted range is a validation error, not an
+     inferred default (#109, =addDatasetArgFlags=/
+     =resolveDatasetRequest=).
+  5. Read and mutation commands share one identical
+     resolve-formatter/resolve-request/call-service/format-response
+     shape; no confirmation prompt or distinct runtime error path
+     exists for mutation commands beyond the partial-progress
+     formatting (=FormatUpdateProgress=) their own responses already
+     carry (#109/#110) — confirmed by reading all six leaf command
+     files directly (section 2) rather than trusting their doc
+     comments alone.
+- *ADR-016* (Symbol and listing resolution): =RegisterFXInstrument=
+  (=service/marketdata/instrument.go=, moved here from =cmd/trader=
+  during #109's own review after a reviewer traced that no
+  =*marketdata.Manager= operation ever reads =Listing.Spec=) still
+  goes through =instrument.MemoryResolver.Register=/
+  =ResolveInstrument= exactly as ADR-016 specifies; no new resolution
+  path was invented.
+- *ADR-020/ADR-021* (historic data subsystem; FX hour-bar alignment):
+  untouched by M2.5 — =service/marketdata= calls =Manager= through its
+  existing public =Bars=/=Coverage=/=Plan=/=Sync=/=Build= methods only,
+  and this review's own dependency scan (section 3) confirms no new
+  =marketdata= behavior was added or bypassed to build M2.5.
+- The architecture document's own transport-boundary guidance
+  ("Transports wrap application services; application services do not
+  import HTTP, MQTT, GraphQL, or Cobra") matches what section 3 found
+  directly in =service/marketdata='s import list. No drift found.
+
+* 5. =data update= orchestration review
+
+Issue #107's own core finding — recorded in detail in the session that
+implemented it and re-verified directly here rather than only cited —
+was that =Update= must not treat =ActionRepairRaw= as a reason to
+invoke =Sync=, since =Manager.Sync= only ever executes
+=ActionDownloadRaw= and reports every other action kind, repair
+included, in =SyncResult.Skipped= without acting on it. A version of
+=Update= that treated any non-empty =Plan= as "needs Sync" could
+therefore report success while a genuinely unresolved repair
+requirement remained. The fix — =planNeedsSync= checking only
+=ActionDownloadRaw=, plus a final =Plan= re-check after
+=Sync=/=Build= that returns the new =ErrUpdateIncomplete= alongside
+=UpdateResponse.FinalPlan= when work still remains — is exercised by
+=TestUpdate_FailsExplicitlyOnUnresolvedRepairRaw=
+(=service/marketdata/update_test.go=), which I re-read directly: it
+constructs a real schema-malformed raw file to trigger an actual
+=ActionRepairRaw= from =Manager.Plan=, not a synthetic/mocked one.
+
+=cmd/trader/dataupdate.go= calls =Service.Update= exactly once and
+never recomputes or re-implements the =Plan -> Sync -> Build=
+sequence itself — confirmed directly by reading its ~40-line body
+(section 2) — matching this review area's acceptance criterion
+directly. Its own error branch calls =FormatUpdateProgress=, not
+=FormatUpdate=, specifically because the latter's "already current"
+line is a success-only claim that would misrepresent a failed update;
+=TestDataUpdate_ErrorPathNeverPrintsAlreadyCurrent= (#110) is the
+regression proving this, and the session that added it confirmed the
+test genuinely fails without the fix (not merely passes with it).
+
+* 6. Formatting boundary review
+
+=service/marketdata= returns only structured Go values
+(=BarsResponse=, =CoverageResponse=, =PlanResponse=, =SyncResponse=,
+=BuildResponse=, =UpdateResponse=) — confirmed by reading
+=service/marketdata/response.go= directly: no =fmt.Sprintf=-for-display,
+no =encoding/json= tags, no presentation concern of any kind. All
+rendering lives in =cmd/trader=, behind the =Formatter= interface
+(section 2/=format.go=) with two implementations,
+=tableFormatter= (=format_table.go=) and =jsonFormatter=
+(=format_json.go=).
+
+=jsonFormatter= encodes hand-built view types (=jsonBar=, =jsonAction=,
+=jsonSyncResult=, =jsonBuildResult=, =jsonUpdateResponse=, etc.), never
+a =marketdata= or =service/marketdata= type directly — necessary
+because =instrument.ID=, =marketdata.Interval=, and
+=marketdata.TimeRange= deliberately carry no =MarshalJSON=/
+=MarshalText= (unlike =num.Price=/=Quantity=/=Money=/etc., which do),
+so encoding a response type directly would either fail to compile
+usefully or leak unexported-field zero values. =TestM25VerticalSlice='s
+own JSON subtest (section 1) is the end-to-end proof that this
+actually produces a stable, self-contained document with no internal
+type leaking through.
+
+=tableFormatter= originally discarded every =fmt.Fprintf=/=Fprintln=
+write error despite advertising an =error= return on every method —
+found and fixed during #111's own review (both independent reviewers
+raised it), via the =errWriter= sticky-error wrapper;
+=TestTableFormatter_PropagatesWriteErrors= (a =failingWriter=) is the
+regression, confirmed at the time to genuinely fail against the
+pre-fix code. Re-read directly as part of this review: the fix is
+still in place and the test still exercises it.
+
+* 7. Read-only versus mutation semantics
+
+=bars=, =coverage=, and =plan= are read-only: each is proven, per
+command, to create nothing under =--store-root=/=--raw-root= even for
+an unpublished range (section 1). =sync=, =build=, and =update= are the
+three mutating commands, each documented as such in its own doc
+comment and Cobra =Short= text. As resolved in section 4 (open
+question 5), this distinction is documented but not given different
+runtime UX — no confirmation prompt, no distinct error-reporting shape
+beyond the partial-progress formatting every mutating response's own
+=SyncResponse=/=BuildResponse=/=UpdateResponse= already carries. This
+review finds that resolution reasonable for M2.5's scope (a
+single-operator CLI against a local or test OANDA backend, not yet a
+multi-operator or production live-trading surface) and records it as
+settled rather than open.
+
+* 8. Dependency direction and internal leakage
+
+Covered fully in section 3. No =marketdata/internal/...= leakage
+exists anywhere in =cmd/trader= or =service=; the compiler enforces
+this unconditionally, and =TestCommandHandlers_NeverImportMarketdataDirectly=
+additionally enforces the one boundary the compiler cannot (leaf
+command files bypassing =service/marketdata= to call =marketdata=
+directly).
+
+* 9. CLI output contracts
+
+Every dataset command supports =--format table= (default,
+human-readable) and =--format json= (machine-readable, stable view
+types per section 6); =resolveFormatter= returns a clear error for any
+other value before the service is ever called. =TestM25VerticalSlice='s
+own JSON subtest decodes real command output through
+=encoding/json.Unmarshal= into a plain anonymous struct, the same way
+an external automation consumer would, and asserts on decoded field
+values (not string-matching the raw output) — direct evidence the JSON
+contract is actually consumable by automation, not merely
+"structurally valid JSON" in the abstract.
+
+* 10. Test coverage and race detection
+
+=go test ./... -race= passes across the whole repository, =cmd/trader=
+and =service/...= included (re-run directly as part of this review,
+alongside the rest of =make check=; see section 12).
+=go test -cover=: =cmd/trader= 90.4%, =service/marketdata= 93.3%, both
+above the project's 85% target; =service= itself has no statements to
+cover (an empty landing package, matching its own doc comment).
+
+Cancellation, error propagation, and no-hidden-writes are each covered
+at more than one layer, deliberately not concentrated in a single
+test: =service/marketdata='s own per-operation tests
+(=TestBars_PropagatesContextCancellation= and siblings, #105),
+=cmd/trader/datacmd_test.go=/=datamutation_test.go='s per-command
+checks, and =TestM25VerticalSlice='s own end-to-end story (section 1).
+This layering matches the M2 review's own considered position on where
+this kind of evidence belongs (external proof for composition,
+internal proof for implementation detail) rather than being an
+oversight.
+
+* 11. No later-milestone or premature-transport behavior leaked into M2.5
+
+- No REST, gRPC, WebSocket, or SSE handler, route, or server of any
+  kind exists anywhere in the module — confirmed by a direct search
+  (=grep=) across =cmd/trader= and =service= for those terms; every
+  match found is a doc comment naming them as *future* transports
+  ADR-022 itself anticipates (its own dependency-direction diagram and
+  =service/doc.go='s "later" framing), never actual code.
+- No account/order/portfolio/broker/execution concept (M3/M4) appears
+  anywhere in =service/marketdata= or =cmd/trader= — both packages'
+  import lists (section 3) contain no M3+ package.
+- =service='s own doc comment names REST/WebSocket/SSE explicitly as
+  future transports the layer is *designed* to support, without
+  building any of them now — exactly the boundary ADR-022 draws.
+- No CI or build-time REST/gRPC scaffolding (protobuf, OpenAPI
+  generation, HTTP router dependency) was added to =go.mod= —
+  confirmed by reading the diff of dependencies added across
+  #103-#112: only =spf13/cobra= and its own transitive dependencies.
+
+Confirmed: nothing from M3, M4, or a later transport milestone is
+present.
+
+* 12. =make check=
+
+=make check= (=gofmt -l=, =go vet ./...=, =golangci-lint run ./...=,
+=go test ./...=, =go test -race ./...=) passes across the whole
+repository, including this review's own two ADR documentation fixes
+(section 2). Re-run directly as the last step of this review, not
+cited from an earlier session.
+
+* Known Deferrals
+
+Recorded explicitly, per this issue's own acceptance criteria, as
+safe — not blockers:
+
+- *REST, WebSocket, and SSE transports.* Deliberately out of scope for
+  M2.5 (ADR-022's own stated future direction). Safe: the service
+  layer's own boundary (=service/marketdata= has no transport-framework
+  dependency, section 3) is exactly what would let a future transport
+  reuse =Update= and the read operations without any change to
+  =service/marketdata= itself.
+- *=Update= policy/options for partial orchestration
+  (skip-Build-only, skip-Sync-only, etc.).* Not built; no current
+  caller needs it, and adding it speculatively would be exactly the
+  kind of premature API surface ADR-022 and the architecture document
+  both warn against. If a real caller need arises, it is additive.
+- *A shared, cross-transport presentation package.* Formatting remains
+  local to =cmd/trader= (open question 3's resolution, section 4);
+  revisiting this is only warranted once a second transport actually
+  needs to reuse table/JSON rendering logic.
+- *No README/=examples/= entry documenting =trader data= usage.* M1's
+  and M2's own completion reviews did not flag an equivalent gap
+  because =examples/m1=/=examples/m2= already served that role for
+  their milestones; M2.5 has no analogous =examples/m2.5= or README
+  section walking through the CLI. This is a real, if minor, gap:
+  =TestM25VerticalSlice= is executable, narrated proof the flow works,
+  but is not operator-facing documentation. Not fixed in this review
+  (adding user-facing docs is a real, separate piece of work, not a
+  correction the verification exercise itself requires) — recorded
+  here as a concrete, low-risk follow-up.
+- *No CI-enforced dependency-direction or API-compatibility tooling*,
+  the same deliberately-deferred item the M1 and M2 reviews already
+  named (=package-boundaries.org= already records this); still not
+  part of this sign-off, for the same reason.
+
+* Recommendation
+
+*M2.5 is ready to close.*
+
+Every acceptance criterion in issue #113 is satisfied: the full CLI ->
+service -> public market-data flow is reviewed and exercised
+end-to-end (section 1); dependency and transport boundaries are
+audited with no violations found, one compiler-enforced and one
+test-enforced (sections 3, 8); =data update= orchestration is reviewed
+against its own known-critical defect class (the #107 repair-skipping
+bug) and confirmed still fixed (section 5); the formatting boundary is
+reviewed and confirmed to hold cleanly in both directions (section 6);
+relevant tests include race detection and exceed the project's
+coverage target (section 10); deferred REST/WebSocket/SSE scope is
+explicitly recorded (section 11, Known Deferrals); and =make check=
+passes (section 12).
+
+No outstanding blockers are known. The one real deficiency this
+review's own exercise found — ADR-022 left =Proposed= with five
+already-resolved open questions never folded back — is fixed in this
+same change, promoting it to =Accepted=. The known deferrals above are
+each a deliberate, named, low-risk decision, not a gap discovered too
+late to matter.
