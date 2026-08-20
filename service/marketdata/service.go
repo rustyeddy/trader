@@ -15,9 +15,10 @@ var ErrNilManager = errors.New("service/marketdata: manager is nil")
 // spans several Manager calls (see Update, issue #107) is implemented
 // once and reused by every transport.
 //
-// Service holds no transport, formatting, or presentation state. It is
-// safe for concurrent use for the same reason *marketdata.Manager is:
-// Service adds no mutable state of its own beyond the Manager it wraps.
+// Service holds no transport, formatting, or presentation state, and no
+// mutable state of its own beyond the *marketdata.Manager it wraps:
+// its own concurrency properties are therefore exactly whatever the
+// wrapped Manager's are, whatever those turn out to be documented as.
 type Service struct {
 	manager *marketdata.Manager
 }

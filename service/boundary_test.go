@@ -9,8 +9,10 @@ import (
 )
 
 // forbiddenTransportImports names import paths a service subpackage must
-// never depend on, directly or transitively (service/doc.go). None of
-// them are imported today; this test exists to catch a future
+// never import directly (service/doc.go). This is a direct-import rule,
+// not a transitive one — see TestServiceHasNoTransportDependencies's own
+// doc comment for why a transitive ban would be wrong here. None of
+// these are imported today; this test exists to catch a future
 // regression as issues #105-#113 add real use cases and, eventually, a
 // CLI adapter that must stay separate from the service layer it calls.
 var forbiddenTransportImports = []string{
