@@ -75,10 +75,13 @@ func ExampleWithCorrelationID() {
 
 // ExampleWithComponent shows scoping a logger to one subsystem, so its
 // records stay distinguishable from other subsystems after aggregation.
+// ComponentBroker is one of the small, canonical vocabulary of component
+// names attrs.go defines (issue #126) — call sites use these names rather
+// than inventing their own spelling for the same subsystem.
 func ExampleWithComponent() {
 	logger, rec := logging.Capture()
 
-	broker := logging.WithComponent(logger, "broker")
+	broker := logging.WithComponent(logger, logging.ComponentBroker)
 	broker.Info("connected")
 
 	fmt.Println(rec.Records()[0].Attrs[logging.Component])
