@@ -1,0 +1,486 @@
+#+TITLE: CLI and Application Service Layer ADR-022
+#+STARTUP: overview indent
+
+* Status
+
+Proposed. Five open questions (below) remain unresolved: the
+application package name, whether =Update= grows policy/options,
+where CLI formatting lives, the default =--to= behavior, and whether
+read versus mutation commands need visibly different confirmation/
+error UX. These do not need to be settled before this ADR is
+recorded, and may be resolved incrementally as the M2.5 implementation
+issues (#104-#113) actually raise them, rather than speculatively now.
+
+* Context
+
+Trader now has a completed Milestone 2 historical market-data
+subsystem exposed through the public =marketdata.Manager= API.
+
+As Trader grows, the same application capabilities will need to be
+exposed through multiple interfaces:
+
+- command-line interface
+- REST API
+- WebSocket
+- Server-Sent Events
+- potentially other transports later
+
+The CLI should therefore not become an application layer of its own,
+nor should transport-specific code contain business logic.
+
+Likewise, future HTTP or streaming interfaces should not duplicate
+orchestration already implemented for the CLI.
+
+Trader needs a transport-neutral application boundary that sits
+between user-facing adapters and the domain/public packages.
+
+* Decision
+
+Introduce an *application/service layer* before adding the initial
+Trader CLI commands.
+
+The architecture will follow this general dependency direction:
+
+#+BEGIN_EXAMPLE
+CLI -----------+
+               |
+REST ----------+
+               |
+WebSocket -----+--> Application Services --> Domain/Public Packages
+               |
+SSE -----------+
+#+END_EXAMPLE
+
+Transport adapters are responsible only for:
+
+1. collecting transport-specific input;
+2. parsing and validating its representation;
+3. constructing a service request;
+4. invoking the appropriate service operation;
+5. formatting or encoding the returned response;
+6. translating errors into transport-appropriate output or status.
+
+Application services define transport-neutral use cases and
+orchestrate calls into Trader's public/domain packages.
+
+Business rules remain in the domain packages.
+
+Formatting and serialization remain outside the service layer.
+
+** Service-layer responsibilities
+
+The service layer may:
+
+- define request and response DTOs for application use cases;
+- coordinate calls across public Trader packages when a use case
+  requires it;
+- translate application requests into domain types;
+- return structured application results;
+- propagate cancellation through =context.Context=.
+
+The service layer must not:
+
+- contain trading or market-data business rules;
+- know about CLI flags or positional arguments;
+- print to stdout or stderr;
+- produce tables, Org output, JSON, HTML, or other presentation
+  formats;
+- depend on HTTP, WebSocket, SSE, Cobra, or another transport
+  framework;
+- expose internal implementation details from domain packages.
+
+** Initial M2 CLI surface
+
+The first CLI increment will expose the completed M2 historical
+market-data capabilities.
+
+Proposed commands:
+
+#+BEGIN_EXAMPLE
+trader data bars
+trader data coverage
+trader data plan
+trader data sync
+trader data build
+trader data update
+#+END_EXAMPLE
+
+*** =trader data bars=
+
+Read canonical historical bars.
+
+Example:
+
+#+BEGIN_EXAMPLE
+trader data bars EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+Maps to the historical-data query use case.
+
+*** =trader data coverage=
+
+Report canonical/raw coverage and gaps for a requested dataset.
+
+#+BEGIN_EXAMPLE
+trader data coverage EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+*** =trader data plan=
+
+Determine the work required to make the requested historical dataset
+available.
+
+=plan= is read-only. It must not download, build, or publish data.
+
+#+BEGIN_EXAMPLE
+trader data plan EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+*** =trader data sync=
+
+Perform the acquisition portion of an explicit historical-data plan.
+
+#+BEGIN_EXAMPLE
+trader data sync EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+*** =trader data build=
+
+Build/publish canonical datasets from available raw data.
+
+#+BEGIN_EXAMPLE
+trader data build EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+*** =trader data update=
+
+Provide the normal operator-facing operation for bringing a requested
+dataset current.
+
+#+BEGIN_EXAMPLE
+trader data update EURUSD D1 \
+    --from 2026-01-01 \
+    --to 2026-02-01
+#+END_EXAMPLE
+
+=update= is an application-level use case rather than a new
+market-data business primitive.
+
+Its expected orchestration is conceptually:
+
+#+BEGIN_EXAMPLE
+Plan
+  |
+  v
+Sync required acquisition actions
+  |
+  v
+Build required canonical actions
+  |
+  v
+Return resulting status
+#+END_EXAMPLE
+
+The service layer owns this orchestration using the existing public
+=marketdata.Manager= operations.
+
+The CLI itself must not implement the Plan -> Sync -> Build workflow.
+
+This distinction is important because the same update use case should
+later be callable through REST or another adapter without reproducing
+its orchestration.
+
+** Request model
+
+Transport adapters should convert their inputs into application
+request types rather than passing transport concepts into domain code.
+
+For example:
+
+#+BEGIN_SRC go
+type DatasetRequest struct {
+    Instrument instrument.ID
+    Interval   marketdata.Interval
+    Range      marketdata.TimeRange
+}
+#+END_SRC
+
+Specific operations may define request types around this common
+dataset description:
+
+#+BEGIN_SRC go
+type BarsRequest struct {
+    DatasetRequest
+}
+
+type CoverageRequest struct {
+    DatasetRequest
+}
+
+type PlanRequest struct {
+    DatasetRequest
+}
+
+type SyncRequest struct {
+    DatasetRequest
+}
+
+type BuildRequest struct {
+    DatasetRequest
+}
+
+type UpdateRequest struct {
+    DatasetRequest
+}
+#+END_SRC
+
+These types may evolve as real use cases require additional inputs.
+
+Transport-specific concepts must not appear in them.
+
+** Service API
+
+The initial application-facing interface may resemble:
+
+#+BEGIN_SRC go
+type MarketDataService interface {
+    Bars(context.Context, BarsRequest) (BarsResponse, error)
+    Coverage(context.Context, CoverageRequest) (CoverageResponse, error)
+    Plan(context.Context, PlanRequest) (PlanResponse, error)
+    Sync(context.Context, SyncRequest) (SyncResponse, error)
+    Build(context.Context, BuildRequest) (BuildResponse, error)
+    Update(context.Context, UpdateRequest) (UpdateResponse, error)
+}
+#+END_SRC
+
+This is illustrative rather than a requirement that every operation
+share one Go interface. The concrete API should remain small and
+follow actual use cases.
+
+** Output formatting
+
+Services return structured responses.
+
+They do not format those responses for users.
+
+The CLI may initially support:
+
+#+BEGIN_EXAMPLE
+--format table
+--format json
+#+END_EXAMPLE
+
+Additional presentation formats such as Org may be added later without
+changing the service API.
+
+Conceptually:
+
+#+BEGIN_EXAMPLE
+MarketDataService
+       |
+       v
+structured response
+       |
+       +--> CLI table formatter
+       +--> CLI JSON formatter
+       +--> REST JSON encoder
+       +--> future WebSocket encoder
+       +--> future SSE encoder
+#+END_EXAMPLE
+
+** Internal implementation details
+
+CLI commands must not expose or depend upon concepts such as:
+
+- OANDA-specific provider APIs;
+- canonical CSV storage;
+- raw archive paths;
+- canonical partition paths;
+- internal caches;
+- provider-native records;
+- =marketdata/internal/...=.
+
+Those remain implementation details behind the public market-data
+boundary.
+
+Commands such as the following should therefore not be introduced
+merely for convenience:
+
+#+BEGIN_EXAMPLE
+trader data oanda-fetch
+trader data raw-download
+trader data rebuild-partition
+trader data manifest-path
+trader data csv-inspect
+#+END_EXAMPLE
+
+If an operator capability is genuinely required, it should first be
+modeled as a supported application/domain capability.
+
+** Package direction
+
+A likely package structure is:
+
+#+BEGIN_EXAMPLE
+cmd/trader/
+    data/
+        bars.go
+        coverage.go
+        plan.go
+        sync.go
+        build.go
+        update.go
+
+service/
+    marketdata/
+        service.go
+        request.go
+        response.go
+
+marketdata/
+    ...
+
+marketdata/internal/
+    ...
+#+END_EXAMPLE
+
+The exact package names may change during implementation, but the
+dependency direction is intentional:
+
+#+BEGIN_EXAMPLE
+cmd/trader
+    |
+    v
+service
+    |
+    v
+marketdata
+    |
+    v
+marketdata/internal
+#+END_EXAMPLE
+
+Dependencies must not point upward.
+
+** CLI growth across milestones
+
+The CLI will be developed incrementally as milestones expose useful
+completed capabilities.
+
+A milestone should not design its domain API around CLI
+requirements. Instead:
+
+#+BEGIN_EXAMPLE
+domain capability
+      |
+      v
+public API
+      |
+      v
+application use case
+      |
+      v
+thin CLI adapter
+#+END_EXAMPLE
+
+This provides an ongoing external-consumer exercise for Trader's
+public architecture.
+
+Later milestones may introduce additional top-level command groups
+such as:
+
+#+BEGIN_EXAMPLE
+trader account ...
+trader broker ...
+trader order ...
+trader strategy ...
+trader backtest ...
+#+END_EXAMPLE
+
+Those command surfaces should be added only when the corresponding
+application capabilities exist.
+
+Future REST, WebSocket, and SSE transport adapters are explicitly
+supported by this architecture's dependency direction and are not
+foreclosed by anything decided here. Implementing them is out of
+scope for M2.5; only the CLI adapter is built in this milestone.
+
+* Consequences
+
+** Positive
+
+- CLI remains thin.
+- REST/WebSocket/SSE can reuse the same application use cases.
+- Business logic stays in domain packages.
+- Transport and presentation concerns stay outside services.
+- The CLI continuously exercises Trader's public architecture.
+- =data update= provides a convenient operator workflow without adding
+  a new market-data primitive.
+- Internal market-data implementation details remain hidden.
+
+** Costs
+
+- Even the initial CLI requires an application-layer abstraction.
+- Some operations that currently map almost directly to
+  =marketdata.Manager= gain an additional translation layer.
+- Request/response DTOs introduce types that may initially appear
+  redundant with domain types.
+
+These costs are accepted because they prevent transport interfaces
+from becoming tightly coupled to domain implementation and avoid
+duplicating orchestration as additional interfaces are introduced.
+
+* Open questions
+
+1. Should the application package be named =service=, =application=,
+   or =app=?
+2. Should =Update= always perform Plan -> Sync -> Build, or should it
+   eventually support policy/options controlling which actions are
+   permitted?
+3. Should CLI formatting be implemented in a shared presentation
+   package or remain local to =cmd/trader= until another adapter needs
+   it?
+4. Should =data update= default its end time to the current completed
+   interval when =--to= is omitted?
+5. Should read operations (=bars=, =coverage=, =plan=) and mutation
+   operations (=sync=, =build=, =update=) have visibly different CLI
+   confirmation/error behavior?
+
+These are expected to be resolved as the implementation issues
+(#104-#113) actually encounter them, rather than speculatively ahead
+of time; each resolution should be folded back into this ADR (or a
+follow-on ADR, per =adr-decisions.org='s supersession/amendment rules)
+once decided.
+
+* Recommendation
+
+Adopt the service-layer boundary now and implement the M2 CLI as the
+first transport adapter over it.
+
+Keep the initial command set intentionally thin:
+
+#+BEGIN_EXAMPLE
+trader data bars
+trader data coverage
+trader data plan
+trader data sync
+trader data build
+trader data update
+#+END_EXAMPLE
+
+=update= should be the normal high-level operator command, while
+=plan=, =sync=, and =build= remain available for inspection, explicit
+control, automation, and debugging.
+
+This establishes the architectural pattern subsequent Trader
+interfaces should follow.
