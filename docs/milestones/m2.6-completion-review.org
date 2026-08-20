@@ -154,11 +154,20 @@ Two distinct claims, verified separately:
    passes.
 2. Whether =service/marketdata= — the one real production consumer
    this milestone added — ever has a reason to *need* that mechanism.
-   This review adds =TestSync_NeverLogsOANDACredential=: a real Sync
-   round trip against a fake OANDA server requiring a specific token,
-   confirming no captured record's message or any attribute value
-   (checked by string-searching every attribute's formatted value, not
-   only the obvious ones) contains it. The credential is configured
+   This review adds =TestSync_NeverLogsOANDACredential=, against a new
+   =newTokenGatedOANDAServer= test helper — not =newFakeOANDAServer=,
+   which never inspects a request at all — that rejects any request
+   whose =Authorization= header does not match the expected token with
+   401 (PR review on #138 correctly caught an earlier version of this
+   test using the non-gating fake server, which proved nothing about
+   the credential actually being required). A real Sync round trip
+   against this genuinely token-gated server confirms both halves of
+   the property at once: Sync fails outright if the wrong credential
+   is presented (so the successful case really did exercise credentialed
+   acquisition), and no captured record's message or any attribute
+   value (checked by string-searching every attribute's formatted
+   value, not only the obvious ones) ever contains it. The credential
+   is configured
    only on =*marketdata.Manager= (=cmd/trader/dataservice.go='s own
    =oandaTokenCredential=, production-side) and never reaches =Service=
    or its logger at all — confirmed by reading =service/marketdata='s
@@ -276,7 +285,10 @@ actually becomes relevant:
 - *No CI-enforced dependency-direction or API-compatibility tooling*,
   the same deliberately-deferred item every prior completion review
   has already named; still not part of this sign-off, for the same
-  reason.
+  reason. Concrete follow-up: unchanged from the M1/M2/M2.5 reviews'
+  own — =package-boundaries.org= is where a =depguard=- or =go
+  list=-based mechanical check, if adopted, belongs; no milestone has
+  yet made it a blocking requirement, and this review does not either.
 
 * Recommendation
 

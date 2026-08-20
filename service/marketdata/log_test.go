@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -139,8 +141,8 @@ func TestSync_LogsCorrelationAndCausationFromContext(t *testing.T) {
 // confirming service/marketdata's own call sites never had a reason to
 // need them in the first place.
 func TestSync_NeverLogsOANDACredential(t *testing.T) {
-	const token = "test-token"
-	server := newFakeOANDAServer(t, oandaCandlesJSON([]time.Time{
+	const token = "test-token" // matches staticCredential("test-token"), write_test.go
+	server := newTokenGatedOANDAServer(t, token, oandaCandlesJSON([]time.Time{
 		time.Date(2024, time.January, 8, 0, 0, 0, 0, time.UTC),
 	}))
 	logger, rec := logging.Capture()
@@ -162,6 +164,33 @@ func TestSync_NeverLogsOANDACredential(t *testing.T) {
 			assert.NotContains(t, fmt.Sprintf("%v", v), token, "attribute %q must not carry the OANDA credential", k)
 		}
 	}
+}
+
+// newTokenGatedOANDAServer is newFakeOANDAServer's counterpart for
+// credential-verification tests: unlike newFakeOANDAServer (which
+// returns body unconditionally, never inspecting the request at all),
+// this rejects any request whose Authorization header is not exactly
+// "Bearer "+token with 401 and no body. Review on #138 correctly found
+// that a credential-non-leakage test proves nothing about the
+// credential actually being required/used if the fake server it talks
+// to never checks for it in the first place; this is what makes
+// TestSync_NeverLogsOANDACredential's "real Sync round trip against a
+// server that requires this exact token" claim true rather than
+// aspirational -- a Sync call presenting the wrong (or no) credential
+// against this server fails, which TestSync_NeverLogsOANDACredential's
+// own require.NoError would catch.
+func newTokenGatedOANDAServer(t *testing.T, token, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
 }
 
 // TestUpdate_LogsSingleCompletionRecordWithPartitionCounts is the
