@@ -64,11 +64,28 @@ func printBuildResult(w io.Writer, result marketdata.BuildResult) {
 	printSkipped(w, result.Skipped)
 }
 
-func printUpdateResponse(w io.Writer, resp svc.UpdateResponse) {
+// printUpdateProgress prints whatever partial Sync/Build progress resp
+// carries, without ever claiming completeness. It is safe to call
+// after Update returns an error (dataupdate.go's own error branch
+// does this): resp may be a zero or partially-populated value in that
+// case (a config/Plan failure never even reaches Sync or Build), and
+// this function never prints anything beyond the Downloaded/
+// Published/Skipped entries actually present.
+func printUpdateProgress(w io.Writer, resp svc.UpdateResponse) {
 	if resp.SyncPerformed {
 		printSyncResult(w, resp.Sync.Result)
 	}
 	printBuildResult(w, resp.Build.Result)
+}
+
+// printUpdateResponse is printUpdateProgress plus a success-only
+// "already current" line, and must therefore only ever be called on
+// Update's success path: printing "already current" alongside an
+// error would misleadingly suggest the dataset is actually current
+// when Update may have failed for an unrelated reason (a config or
+// Plan failure, say) before ever reaching Sync or Build.
+func printUpdateResponse(w io.Writer, resp svc.UpdateResponse) {
+	printUpdateProgress(w, resp)
 	if !resp.SyncPerformed && len(resp.Build.Result.Published) == 0 && len(resp.Build.Result.Skipped) == 0 {
 		_, _ = fmt.Fprintln(w, "already current")
 	}

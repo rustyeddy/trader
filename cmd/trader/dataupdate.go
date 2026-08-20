@@ -28,7 +28,11 @@ func newUpdateCmd() *cobra.Command {
 			dc, _ := dataContextFrom(cmd.Context())
 			resp, err := dc.Service.Update(cmd.Context(), svc.UpdateRequest{DatasetRequest: req})
 			if err != nil {
-				printUpdateResponse(cmd.OutOrStdout(), resp)
+				// printUpdateProgress, not printUpdateResponse: the
+				// latter's "already current" line is success-only and
+				// would misrepresent a failed Update (see its own doc
+				// comment).
+				printUpdateProgress(cmd.OutOrStdout(), resp)
 				return err
 			}
 

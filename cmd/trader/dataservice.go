@@ -23,7 +23,6 @@ type datasetFlags struct {
 	storeRoot    string
 	rawRoot      string
 	provider     string
-	oandaToken   string
 	oandaBaseURL string
 }
 
@@ -42,11 +41,22 @@ type datasetFlags struct {
 // supplied without the other — when a command that actually needs
 // them is run without them configured. #110's own commands don't
 // second-guess that either.
+//
+// OANDAToken deliberately has no corresponding CLI flag (see
+// datasetFlags and buildDatasetConfig below): a --oanda-token flag
+// would put the secret in shell history and in the process command
+// line (visible via ps, /proc/<pid>/cmdline, process monitors),
+// defeating the care config's own secret:"true" tag takes elsewhere.
+// TRADER_OANDA_TOKEN (the environment variable this field's
+// config/env naming convention derives) is the only way to supply it
+// today; a credential-file or keyring mechanism is a reasonable
+// future addition if that ever proves insufficient, but is not
+// invented speculatively here.
 type datasetConfig struct {
 	StoreRoot    string `config:"store_root" flag:"store-root" required:"true"`
 	RawRoot      string `config:"raw_root" flag:"raw-root"`
 	Provider     string `config:"provider" flag:"provider" default:"oanda"`
-	OANDAToken   string `config:"oanda_token" flag:"oanda-token" secret:"true"`
+	OANDAToken   string `config:"oanda_token" secret:"true"`
 	OANDABaseURL string `config:"oanda_base_url" flag:"oanda-base-url"`
 }
 
@@ -56,7 +66,9 @@ type datasetConfig struct {
 // variables, via the same config.Load every Trader composition root
 // uses (see root.go's buildLoggingConfig for the identical pattern
 // this mirrors, including why only Changed flags are ever placed in
-// Overrides).
+// Overrides). OANDAToken has no flag to check Changed against — see
+// datasetConfig's own doc comment — so it is resolved from the
+// environment/config source only, never from Overrides.
 func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, error) {
 	overrides := map[string]string{}
 	if cmd.Flags().Changed("store-root") {
@@ -67,9 +79,6 @@ func buildDatasetConfig(cmd *cobra.Command, flags datasetFlags) (datasetConfig, 
 	}
 	if cmd.Flags().Changed("provider") {
 		overrides["provider"] = flags.provider
-	}
-	if cmd.Flags().Changed("oanda-token") {
-		overrides["oanda-token"] = flags.oandaToken
 	}
 	if cmd.Flags().Changed("oanda-base-url") {
 		overrides["oanda-base-url"] = flags.oandaBaseURL

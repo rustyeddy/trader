@@ -49,10 +49,9 @@ func newDataCmd() *cobra.Command {
 		"raw provider archive root path (required for coverage/plan/sync/build/update)")
 	cmd.PersistentFlags().StringVar(&flags.provider, "provider", "",
 		"canonical dataset provider name (default oanda)")
-	cmd.PersistentFlags().StringVar(&flags.oandaToken, "oanda-token", "",
-		"OANDA API token (required together with --oanda-base-url for sync/update)")
 	cmd.PersistentFlags().StringVar(&flags.oandaBaseURL, "oanda-base-url", "",
-		"OANDA API base URL (required together with --oanda-token for sync/update)")
+		"OANDA API base URL (required for sync/update; the token itself is "+
+			"never a flag -- set TRADER_OANDA_TOKEN instead)")
 
 	cmd.AddCommand(newBarsCmd())
 	cmd.AddCommand(newCoverageCmd())
