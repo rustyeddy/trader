@@ -18,9 +18,13 @@ var ErrInvalidRequest = errors.New("service/marketdata: invalid request")
 // common shape every M2.5 MarketData use case (Bars, Coverage, Plan,
 // Sync, Build, Update; issues #105-#107) embeds, mirroring
 // marketdata.BarQuery's fields without depending on how a transport
-// adapter obtained them — a request is built from already-parsed,
-// already-validated transport input, never from a raw string interval
-// or an unparsed date.
+// adapter obtained them — a request is built from already-parsed
+// transport input (never a raw string interval or an unparsed date),
+// but parsing is as far as the transport adapter's responsibility
+// goes. Domain semantic validity — is this instrument known, is this
+// range actually well-formed — is Validate's and the underlying domain
+// constructors' responsibility, not something a transport adapter is
+// expected to re-check first.
 type DatasetRequest struct {
 	// Instrument is the canonical instrument identity to act on. Required.
 	Instrument instrument.ID

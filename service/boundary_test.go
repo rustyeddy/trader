@@ -41,13 +41,33 @@ var forbiddenTransportImports = []string{
 // docs/arch/package-boundaries.org applies to every other internal/
 // boundary in this module.
 func TestServiceHasNoTransportDependencies(t *testing.T) {
-	out, err := exec.Command("go", "list", "-f", "{{range .Imports}}{{.}}\n{{end}}", "./...").Output()
-	require.NoError(t, err, "go list -f {{.Imports}} ./...")
+	// The package pattern is the fully qualified
+	// github.com/rustyeddy/trader/service/... rather than a relative
+	// ./... so this check is unambiguously scoped to the service layer
+	// regardless of the test binary's working directory: a relative
+	// pattern here would happen to also work today (go test runs each
+	// package's tests with that package's own source directory as cwd),
+	// but that is an implicit dependency on go test's invocation
+	// behavior this test should not rely on to stay correctly scoped.
+	const pattern = "github.com/rustyeddy/trader/service/..."
 
-	for imp := range strings.FieldsSeq(string(out)) {
-		for _, forbidden := range forbiddenTransportImports {
-			require.NotEqual(t, forbidden, imp,
-				"service/... must not directly import transport package %q", forbidden)
+	out, err := exec.Command("go", "list", "-f", "{{.ImportPath}}\t{{range .Imports}}{{.}} {{end}}", pattern).Output()
+	require.NoError(t, err, "go list -f ... %s", pattern)
+
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	require.NotEmpty(t, lines, "expected at least one package under %s", pattern)
+
+	for _, line := range lines {
+		pkg, imports, ok := strings.Cut(line, "\t")
+		require.True(t, ok, "unexpected go list output line: %q", line)
+		require.True(t, strings.HasPrefix(pkg, "github.com/rustyeddy/trader/service"),
+			"go list returned a package outside the service layer: %q", pkg)
+
+		for imp := range strings.FieldsSeq(imports) {
+			for _, forbidden := range forbiddenTransportImports {
+				require.NotEqual(t, forbidden, imp,
+					"%s must not directly import transport package %q", pkg, forbidden)
+			}
 		}
 	}
 }

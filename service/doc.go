@@ -61,13 +61,18 @@
 //
 // Each service subpackage defines its own request and response types
 // rather than sharing one generic envelope across domain areas. A
-// request type is built by the transport adapter from already-parsed,
-// already-validated transport input; it names domain types directly
-// (for example instrument.ID, marketdata.Interval) and never a
-// transport-specific representation (a raw string interval, an
-// unparsed date, a CLI flag struct). A response type is a plain,
-// structured value the caller can format however it needs; it is never
-// pre-rendered as text, a table, or a specific encoding.
+// request type is built by the transport adapter from already-parsed
+// transport input; it names domain types directly (for example
+// instrument.ID, marketdata.Interval) and never a transport-specific
+// representation (a raw string interval, an unparsed date, a CLI flag
+// struct). The transport adapter is responsible only for syntactic
+// parsing — can this string become an instrument.ID, a valid interval,
+// a valid date — not for domain semantic validity; that remains the
+// service's and the underlying domain constructors' responsibility, so
+// it is enforced exactly once rather than duplicated in every future
+// transport. A response type is a plain, structured value the caller
+// can format however it needs; it is never pre-rendered as text, a
+// table, or a specific encoding.
 //
 // service/marketdata's DatasetRequest is the first example of a common
 // request shape reused by several operations in one subpackage; other
