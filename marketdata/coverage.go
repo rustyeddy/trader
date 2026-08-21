@@ -150,12 +150,32 @@ func intervalToRawInterval(i Interval) (oanda.RawInterval, bool) {
 // It returns a nil map with no error for W1, since raw inspection does
 // not apply to a derived interval, and a wrapped ErrInvalidConfig if
 // m.rawRoot is empty for any interval that does need it.
+//
+// A configured m.rawRoot that does not exist on disk at all is treated
+// as an empty archive (an empty lookup, no error) rather than
+// propagating Inspect's own ENOENT failure: nothing has ever been
+// synced there yet, which is exactly what an empty raw archive means,
+// and Coverage/Plan are read-only operations that must never create a
+// directory themselves to make Inspect succeed (that would violate the
+// no-hidden-writes invariant read-only operations are held to — see
+// datacmd_test.go's own no-hidden-write assertions). Sync creates
+// m.rawRoot itself, on demand, the moment it actually needs to write a
+// partition there (oanda.WritePartition's own os.MkdirAll) — by the
+// time Coverage/Plan next run against the same rawRoot, the directory
+// legitimately exists and is inspected normally. Any other failure to
+// list rawRoot (permission denied, a path that exists but is not a
+// directory, and so on) still propagates unchanged: those are real
+// configuration problems Coverage/Plan should surface, not silently
+// paper over as "nothing here yet."
 func (m *Manager) rawInventoryLookup(ctx context.Context, interval Interval) (map[rawPartitionKey]oanda.Partition, error) {
 	if _, ok := intervalToRawInterval(interval); !ok {
 		return nil, nil
 	}
 	if m.rawRoot == "" {
 		return nil, fmt.Errorf("%w: raw root is not configured", ErrInvalidConfig)
+	}
+	if _, statErr := os.Stat(m.rawRoot); errors.Is(statErr, os.ErrNotExist) {
+		return map[rawPartitionKey]oanda.Partition{}, nil
 	}
 	inv, err := oanda.Inspect(ctx, m.rawRoot)
 	if err != nil {
