@@ -225,3 +225,35 @@ func TestDataBars_NoWritesToStoreOrRawOnReadCommands(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, entries, "read commands must never publish anything to the canonical store")
 }
+
+// TestDataBars_NoWritesToDefaultStoreOrRawRootsOnReadCommands is the
+// #142 review's own regression: TestDataBars_NoWritesToStoreOrRawOnReadCommands
+// above only exercises the no-hidden-writes invariant with
+// --store-root/--raw-root explicitly supplied. It cannot catch a
+// defaulting path (issue #141) that creates either directory itself --
+// exactly the real regression review caught in an earlier version of
+// applyDefaultDataRoots. This test runs the same three read commands
+// with neither flag set at all, against an isolated XDG_DATA_HOME, and
+// asserts that neither computed default directory -- nor the data
+// directory's own parent -- ever gets created.
+func TestDataBars_NoWritesToDefaultStoreOrRawRootsOnReadCommands(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+
+	for _, cmdArgs := range [][]string{
+		{"bars", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08"},
+		{"coverage", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08"},
+		{"plan", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08"},
+	} {
+		root, cleanup := newRootCmd()
+		root.SetArgs(append([]string{"data"}, cmdArgs...))
+		root.SetOut(new(discard))
+		root.SetErr(new(discard))
+		_ = root.ExecuteContext(context.Background())
+		_ = cleanup()
+	}
+
+	_, err := os.Stat(filepath.Join(dataHome, "trader"))
+	require.True(t, os.IsNotExist(err),
+		"a read-only command must never create the default trader data directory")
+}

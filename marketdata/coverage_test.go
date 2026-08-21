@@ -173,6 +173,30 @@ func TestCoverage_MissingPartition(t *testing.T) {
 	assert.Nil(t, cov.Partitions[0].Manifest)
 }
 
+// TestCoverage_RawRootDirectoryDoesNotExistIsTreatedAsEmptyArchive is
+// the regression for the #142 review finding: a configured rawRoot
+// that has never been created yet (a fresh install's computed default
+// data directory, before anything has ever been synced there) must
+// report the same "missing" coverage a genuinely empty raw archive
+// would, not the raw filesystem error oanda.Inspect itself returns for
+// an ENOENT root. This is what lets cmd/trader's own
+// applyDefaultDataRoots (issue #141) compute a default RawRoot without
+// ever creating it -- a read-only command must never perform a hidden
+// write merely to make its own read succeed.
+func TestCoverage_RawRootDirectoryDoesNotExistIsTreatedAsEmptyArchive(t *testing.T) {
+	rawRoot := filepath.Join(t.TempDir(), "never-created")
+	mgr := newTestManagerWithRaw(t, rawRoot)
+	span, err := NewTimeRange(aWeekday(0), aWeekday(4))
+	require.NoError(t, err)
+
+	cov, err := mgr.Coverage(context.Background(), BarQuery{Instrument: eurusd(), Interval: H1, Range: span})
+	require.NoError(t, err)
+	require.Len(t, cov.Partitions, 1)
+	assert.Equal(t, PartitionCoverageMissing, cov.Partitions[0].Status)
+	assert.Nil(t, cov.Partitions[0].Manifest)
+	assert.NoDirExists(t, rawRoot, "Coverage must never create the raw root directory itself")
+}
+
 func TestCoverage_InvalidPartition(t *testing.T) {
 	rawRoot := t.TempDir()
 	mgr := newTestManagerWithRaw(t, rawRoot)

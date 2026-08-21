@@ -33,21 +33,24 @@ func defaultTraderDataDir() (string, error) {
 // own default ("oanda") resolved would be wrong for a non-default
 // provider).
 //
-// A directory it filled in itself is also created here
-// (os.MkdirAll) if it does not already exist, so a fresh install's
-// first read command finds a real, empty, readable directory rather
-// than the raw filesystem error Coverage/Plan's own raw-archive
-// inspection reports for a missing RawRoot (confirmed directly:
-// Bars/Coverage tolerate a missing StoreRoot as "no data found," but
-// Coverage/Plan do not tolerate a missing RawRoot the same way).
-// A path the caller explicitly configured is never auto-created here:
-// if it does not exist, that is preserved as the same error it always
-// was, rather than silently creating whatever the caller actually
-// mistyped.
+// This computes a path only -- it never creates a directory. An
+// earlier version of this function called os.MkdirAll on a defaulted
+// root, which review on #142 correctly identified as a real
+// regression: read-only data commands (bars, coverage, plan) would
+// then create directories on a fresh install, violating the
+// no-hidden-writes invariant M2.5 established and regression-tested
+// for read commands. The actual gap that MkdirAll was working around
+// -- Coverage/Plan's raw-archive inspection failing outright on a
+// RawRoot that does not exist yet -- is fixed at its real source
+// instead: Manager's own rawInventoryLookup (marketdata/coverage.go)
+// now treats a nonexistent rawRoot as an empty archive. Mutating
+// commands need no help from this function either: Sync and Build
+// each already create whatever directory they need themselves
+// (oanda.WritePartition's and canonicalCSVStore.publish's own
+// os.MkdirAll), exactly at the point they actually write, which is
+// where directory creation as a side effect belongs.
 func applyDefaultDataRoots(cfg *datasetConfig) error {
-	needsStoreRoot := cfg.StoreRoot == ""
-	needsRawRoot := cfg.RawRoot == ""
-	if !needsStoreRoot && !needsRawRoot {
+	if cfg.StoreRoot != "" && cfg.RawRoot != "" {
 		return nil
 	}
 
@@ -56,17 +59,11 @@ func applyDefaultDataRoots(cfg *datasetConfig) error {
 		return err
 	}
 
-	if needsStoreRoot {
+	if cfg.StoreRoot == "" {
 		cfg.StoreRoot = filepath.Join(dataDir, "data")
-		if err := os.MkdirAll(cfg.StoreRoot, 0o755); err != nil {
-			return fmt.Errorf("trader: creating default store root %s: %w", cfg.StoreRoot, err)
-		}
 	}
-	if needsRawRoot {
+	if cfg.RawRoot == "" {
 		cfg.RawRoot = filepath.Join(dataDir, "raw", cfg.Provider)
-		if err := os.MkdirAll(cfg.RawRoot, 0o755); err != nil {
-			return fmt.Errorf("trader: creating default raw root %s: %w", cfg.RawRoot, err)
-		}
 	}
 	return nil
 }

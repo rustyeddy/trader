@@ -49,9 +49,52 @@ func TestApplyDefaultDataRoots_FillsBothWhenEmpty(t *testing.T) {
 	wantRawRoot := filepath.Join(dataDir, "trader", "raw", "oanda")
 	assert.Equal(t, wantStoreRoot, cfg.StoreRoot)
 	assert.Equal(t, wantRawRoot, cfg.RawRoot)
+}
 
-	assert.DirExists(t, wantStoreRoot, "the default store root must be created, not merely computed")
-	assert.DirExists(t, wantRawRoot, "the default raw root must be created, not merely computed")
+// TestApplyDefaultDataRoots_NeverCreatesDirectories is the direct
+// regression for the #142 review finding: an earlier version of this
+// function called os.MkdirAll on a defaulted root, which meant
+// read-only commands (bars, coverage, plan) created directories on a
+// fresh install -- a real violation of the no-hidden-writes invariant
+// M2.5 established for read commands. This function must compute a
+// path only; the actual gap that MkdirAll was working around is fixed
+// separately, at its real source (Manager's own rawInventoryLookup,
+// marketdata/coverage.go).
+func TestApplyDefaultDataRoots_NeverCreatesDirectories(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+
+	cfg := datasetConfig{Provider: "oanda"}
+	require.NoError(t, applyDefaultDataRoots(&cfg))
+
+	assert.NoDirExists(t, cfg.StoreRoot, "applyDefaultDataRoots must never create a directory itself")
+	assert.NoDirExists(t, cfg.RawRoot, "applyDefaultDataRoots must never create a directory itself")
+}
+
+// TestApplyDefaultDataRoots_ExplicitEmptyStringIsTreatedAsUnset
+// documents and pins a deliberate decision, raised in #142's own
+// review: config.Load cannot distinguish "the caller never supplied
+// --store-root/TRADER_STORE_ROOT at all" from "the caller explicitly
+// supplied an empty value" -- a plain string field carries no such
+// presence information once decoded, and datasetConfig's StoreRoot/
+// RawRoot fields carry no required:"true" tag to make an empty value
+// a load-time error either. An empty string in either field is
+// therefore always treated as "use the computed default," regardless
+// of how it became empty. This is judged acceptable specifically
+// because applyDefaultDataRoots no longer creates any directory
+// (see TestApplyDefaultDataRoots_NeverCreatesDirectories): the
+// original review concern was that auto-creation could mask a
+// misconfiguration behind a silently-created directory, and that risk
+// no longer exists now that nothing is created here.
+func TestApplyDefaultDataRoots_ExplicitEmptyStringIsTreatedAsUnset(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+
+	cfg := datasetConfig{StoreRoot: "", RawRoot: "", Provider: "oanda"}
+	require.NoError(t, applyDefaultDataRoots(&cfg))
+
+	assert.Equal(t, filepath.Join(dataDir, "trader", "data"), cfg.StoreRoot)
+	assert.Equal(t, filepath.Join(dataDir, "trader", "raw", "oanda"), cfg.RawRoot)
 }
 
 // TestApplyDefaultDataRoots_RawRootIsScopedByProvider proves the
@@ -69,11 +112,10 @@ func TestApplyDefaultDataRoots_RawRootIsScopedByProvider(t *testing.T) {
 }
 
 // TestApplyDefaultDataRoots_NeverTouchesExplicitPaths proves an
-// explicitly configured StoreRoot/RawRoot is left completely alone --
-// including never being auto-created -- so a caller's own typo in an
-// explicit path still surfaces the same filesystem error it always
-// did, rather than this function silently creating the wrong
-// directory and masking the mistake.
+// explicitly configured, non-empty StoreRoot/RawRoot is left
+// completely alone -- neither overwritten with a computed default nor
+// auto-created -- so a caller's own typo in an explicit path still
+// surfaces the same filesystem error it always did.
 func TestApplyDefaultDataRoots_NeverTouchesExplicitPaths(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
