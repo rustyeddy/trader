@@ -2497,20 +2497,27 @@ The implementation project should use these milestones.  Detailed issues and
 acceptance criteria are maintained in the companion document
 =Trader-GitHub-Project-Plan.org=.
 
-| ID | Milestone                                 | Usable outcome                                                                                             |
-|----+-------------------------------------------+------------------------------------------------------------------------------------------------------------|
-| M0 | Repository Foundation and Guardrails      | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                             |
-| M1 | Domain Foundation and Test Kit            | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers                   |
-| M2 | Market Data Vertical Slice                | Acquire, normalize, validate, store, query, resample, and report coverage for one data path                |
-| M3 | Broker Simulation and Account State       | Broker port, simulated execution, account projection, portfolio aggregation, and reconciliation            |
-| M4 | Strategy-to-Execution Pipeline            | Descriptor-driven strategy, intents, planner, risk, execution management, and correlated journal records   |
-| M5 | Deterministic Backtesting and Org Reports | Repeatable end-to-end backtest, run manifest, metrics, journal, CLI, and Org output                        |
-| M6 | OANDA Paper Trading and Live Safety       | Real adapter, reconciliation, guards, recovery, paper-default live runner, and soak testing                |
-| M7 | Scanner and Operator Workflow             | Watch/hot/tradeable state machine, ranking, alerts, reports, and operator CLI/API                          |
-| M8 | Research and External Strategy Extensions | Sweeps, walk-forward, comparison validation, versioned external strategy protocol, and optional transports |
+| ID   | Milestone                            | Usable outcome                                                                                     |
+|------+--------------------------------------+----------------------------------------------------------------------------------------------------|
+| M0   | Repository Foundation and Guardrails | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                     |
+| M1   | Domain Foundation and Test Kit       | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers           |
+| M2   | Market Data Vertical Slice           | Acquire, normalize, validate, store, query, resample, and report coverage for one data path        |
+| M2.5 | CLI and Application Service Layer    | Thin CLI transport over reusable, transport-neutral application services                           |
+| M2.6 | Structured Logging                   | Production structured logging conventions, lifecycle ownership, correlation, and service events   |
+| M3   | Broker Simulation and Account State  | Public broker port, deterministic simulated broker, orders, fills, events, and account state       |
+| M4   | Execution and Risk                   | Intent/proposal execution planning, position sizing, risk admission, and approved broker requests  |
+| M5   | OANDA Broker Adapter                 | First real broker adapter, authoritative account truth, reconciliation, and demo/paper integration |
+| M6   | Strategy and Deterministic Backtesting | Strategies exercised through execution/risk against the simulator with repeatable backtests      |
+| M7   | Paper/Live Session Management        | Long-running paper/live orchestration, recovery, reconciliation, guards, and operational safety    |
+| M8   | Alpaca and Multi-Broker Validation   | Second materially different broker adapter validates broker/account/execution abstractions         |
+
+Scanner/operator workflow, external strategy protocols, and broader research
+extensions remain planned work after the core trading path above has been
+proven.  Their exact milestone numbering should be chosen when those scopes are
+ready to be scheduled rather than preserving the older ordering by inertia.
 
 Real-money trading is deliberately not a milestone.  It is a release gate after
-M6 has operated safely in paper mode for a sustained period and reconciliation,
+M7 has operated safely in paper mode for a sustained period and reconciliation,
 recovery, and guard behavior have been reviewed.
 
 * Appendix E: Deferred Capabilities
