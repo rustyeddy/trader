@@ -43,4 +43,25 @@
 // Rejection, AppliedFillIDs, AvgPrice, and so on) that a shallow copy
 // would still share with the caller, defeating immutability. See
 // cloneOrder and clonePosition.
+//
+// # Sufficiency for broker/simulator use
+//
+// Snapshot's field set — cash balances, equity, buying power, margin
+// used/available, realized/unrealized PnL, fees, financing, positions,
+// and open orders, all denominated in one exact-value home Currency
+// (num.Money/num.Quantity/num.Price, never float64) — is sufficient to
+// represent a broker's or deterministic simulator's authoritative
+// account state: a broker or simulator reconstructs a new Snapshot via
+// NewSnapshot after every state change, exactly as ADR-019 specifies,
+// rather than mutating one in place or exposing a broker-scoped handle
+// (that remains broker.Account's job; see ADR-007). See Snapshot's own
+// doc comment for its zero-value/unknown-state semantics. account
+// continues to import only id, instrument, num, and order — no broker
+// or transport dependency.
+//
+// Price-by-Quantity multiplication — needed to compute realized PnL
+// from a fill's Price and Quantity — is intentionally not part of this
+// package; see ADR-018's discussion of the same gap for
+// order.Order.AvgFillPrice. That arithmetic belongs to num/order, not
+// to any field Snapshot itself holds.
 package account
