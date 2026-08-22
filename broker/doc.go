@@ -25,27 +25,28 @@
 // An adapter translates at its own boundary; that translation is never
 // visible through this package's public contracts.
 //
+// # Events
+//
+// Account.Events (ADR-024) streams order, fill, account (balance/
+// margin/PnL), and status changes as Event values in a deterministic,
+// gap-free Sequence order per account stream. Submit/Cancel/Replace's
+// synchronous returns reflect only what the broker reports immediately;
+// later lifecycle changes are expected to arrive through Events instead
+// of a second Submit/Cancel/Replace call. See Event and EventReader for
+// the full identity, ordering, duplicate-delivery, and lifecycle
+// contract.
+//
 // # Deliberately deferred
 //
-// Two capabilities the architecture document describes for broker
-// adapters are intentionally not part of this core contract:
-//
-//   - Event streaming (order/fill/position/balance events, and the
-//     ordering guarantees around them) is issue #147 (M3-04)'s own
-//     scope, not this one's. Submit's synchronous return reflects only
-//     whatever the broker reports immediately (for example
-//     StatusPendingSubmit or StatusWorking); later state changes are
-//     expected to arrive as events once that contract exists.
-//   - Capability discovery (bracket orders, native trailing stops,
-//     and similar broker-specific features) is not needed by M3's
-//     deterministic simulator, which supports only market, limit, and
-//     stop orders; see the architecture document's discussion of
-//     capability discovery over a lowest-common-denominator API.
-//
-// Both are additive: a future capability interface can extend this
-// package without breaking Broker or Account, consistent with keeping
-// public interfaces small (see the architecture document's
-// architectural invariants).
+// Capability discovery (bracket orders, native trailing stops, and
+// similar broker-specific features) is intentionally not part of this
+// core contract: it is not needed by M3's deterministic simulator,
+// which supports only market, limit, and stop orders; see the
+// architecture document's discussion of capability discovery over a
+// lowest-common-denominator API. It is additive: a future capability
+// interface can extend this package without breaking Broker or
+// Account, consistent with keeping public interfaces small (see the
+// architecture document's architectural invariants).
 //
 // # Dependency direction
 //

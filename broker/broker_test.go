@@ -3,6 +3,7 @@ package broker_test
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -35,6 +36,13 @@ func mustEventID(t *testing.T) id.EventID {
 	eid, err := id.GenerateEventID(testGenerator)
 	require.NoError(t, err)
 	return eid
+}
+
+func mustFillID(t *testing.T) id.FillID {
+	t.Helper()
+	fid, err := id.GenerateFillID(testGenerator)
+	require.NoError(t, err)
+	return fid
 }
 
 func usd(s string) num.Money {
@@ -259,7 +267,7 @@ func TestAccountReplaceUnknownOrderReturnsNotFound(t *testing.T) {
 // defines is distinct and matchable with errors.Is, the "classifiable
 // broker errors" issue #145 calls for.
 func TestErrorsAreClassifiable(t *testing.T) {
-	sentinels := []error{broker.ErrAccountNotFound, broker.ErrOrderNotFound, broker.ErrUnsupported, broker.ErrClosed}
+	sentinels := []error{broker.ErrAccountNotFound, broker.ErrOrderNotFound, broker.ErrUnsupported, broker.ErrClosed, broker.ErrInvalidEvent}
 	for i, outer := range sentinels {
 		for j, inner := range sentinels {
 			if i == j {
@@ -269,4 +277,169 @@ func TestErrorsAreClassifiable(t *testing.T) {
 			assert.False(t, errors.Is(outer, inner), "%v should not match %v", outer, inner)
 		}
 	}
+}
+
+func drainEvents(t *testing.T, reader broker.EventReader) []broker.Event {
+	t.Helper()
+	ctx := context.Background()
+	var events []broker.Event
+	for {
+		e, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return events
+		}
+		require.NoError(t, err)
+		events = append(events, e)
+	}
+}
+
+func TestEventsDeliversDeterministicOrderAcrossOperations(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	cancelReq, err := order.NewCancelRequest(order.CancelRequest{
+		OrderID:  req.OrderID,
+		Metadata: id.Metadata{EventID: mustEventID(t)},
+	})
+	require.NoError(t, err)
+	_, err = acc.Cancel(ctx, cancelReq)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer reader.Close()
+
+	events := drainEvents(t, reader)
+	require.Len(t, events, 2)
+	assert.Equal(t, uint64(1), events[0].Sequence)
+	assert.Equal(t, uint64(2), events[1].Sequence)
+	assert.Equal(t, broker.EventKindOrder, events[0].Kind)
+	require.NotNil(t, events[0].Order)
+	assert.Equal(t, order.StatusWorking, events[0].Order.Status)
+	require.NotNil(t, events[1].Order)
+	assert.Equal(t, order.StatusCanceled, events[1].Order.Status)
+
+	// Repeating the drain from the beginning must reproduce the exact
+	// same order: the deterministic-ordering guarantee this issue (M3-04)
+	// requires.
+	reader2, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer reader2.Close()
+	replay := drainEvents(t, reader2)
+	assert.Equal(t, events, replay)
+}
+
+func TestEventsResumeFromCursorSkipsAlreadyDeliveredEvents(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	first := drainEvents(t, reader)
+	require.Len(t, first, 1)
+	reader.Close()
+
+	cancelReq, err := order.NewCancelRequest(order.CancelRequest{
+		OrderID:  req.OrderID,
+		Metadata: id.Metadata{EventID: mustEventID(t)},
+	})
+	require.NoError(t, err)
+	_, err = acc.Cancel(ctx, cancelReq)
+	require.NoError(t, err)
+
+	resumed, err := acc.Events(ctx, encodeCursor(first[len(first)-1].Sequence))
+	require.NoError(t, err)
+	defer resumed.Close()
+	second := drainEvents(t, resumed)
+	require.Len(t, second, 1)
+	assert.Equal(t, uint64(2), second[0].Sequence)
+}
+
+func TestEventsEmptyCursorReplaysFromBeginningIncludingDuplicates(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	reader1, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	first := drainEvents(t, reader1)
+	reader1.Close()
+
+	// A consumer that resumes from the zero cursor again (for example,
+	// after losing its own saved cursor) sees the same event a second
+	// time — the at-least-once redelivery this package's contract
+	// documents, which callers are expected to dedupe via
+	// Event.Metadata.EventID.
+	reader2, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer reader2.Close()
+	second := drainEvents(t, reader2)
+	require.Len(t, second, 1)
+	assert.Equal(t, first[0].Metadata.EventID, second[0].Metadata.EventID)
+}
+
+func TestEventsNextRespectsCanceledContext(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer reader.Close()
+
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = reader.Next(canceledCtx)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestEventsReaderCloseThenNextReturnsClosed(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	require.NoError(t, reader.Close()) // idempotent
+
+	_, err = reader.Next(ctx)
+	require.ErrorIs(t, err, broker.ErrClosed)
+}
+
+func TestBrokerCloseRejectsEventsCall(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	require.NoError(t, b.Close())
+
+	_, err = acc.Events(ctx, "")
+	require.ErrorIs(t, err, broker.ErrClosed)
 }
