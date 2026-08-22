@@ -889,7 +889,7 @@ its current status, decisions, and consequences.
 
 * ADR-019: Account and portfolio snapshot models
 
-ADR-001 is maintained in its own file rather than inline in this registry:
+ADR-019 is maintained in its own file rather than inline in this registry:
 =docs/arch/adr-019-account-portfolio-snapshots.org=.  It governs the
 =account.Snapshot= and =portfolio.Portfolio= models, including
 =Money.Convert=, that M1-12 built.  Refer to that file for its current

@@ -11,6 +11,15 @@ originally accepted inline in that document. The registry
 file is authoritative for ADR-017's Status, Context, Decision,
 Consequences, and Alternatives Considered.
 
+During extraction, two milestone references below were updated from
+=M5= to =M6=, correcting them to match the milestone roadmap as
+realigned by PR #143: deterministic backtesting/journal/report work is
+now =M6=, while =M5= is the OANDA broker adapter milestone.  This is a
+roadmap-alignment correction only, not an architectural decision
+change — the substance of what those two sentences describe (a
+=TradeID= remains additive future work, deferred to whichever
+milestone actually does journal/report work) is unchanged.
+
 * Context
 
 Trader needs broker-neutral value models for the stages of trading
@@ -98,7 +107,7 @@ identifies one immutable event; a derived trade can be recalculated,
 revised, or represented across multiple journal events as fills
 continue to arrive, so describing =EventID= as its identity would
 misstate what an event ID means.  A dedicated =TradeID= is additive
-future work if M5's journal/report work later finds that insufficient —
+future work if M6's journal/report work later finds that insufficient —
 not introduced speculatively now, consistent with the restraint already
 applied to the =id= package's deferred identifiers.
 
@@ -144,7 +153,7 @@ for.
   unsolved until a real requirement forces the question; callers must
   not assume retrying either is currently safe.
 - =Trade='s lack of identity means callers cannot yet reference "the
-  same trade" stably across journal events; M5 must revisit this if that
+  same trade" stably across journal events; M6 must revisit this if that
   becomes necessary.
 - Every broker adapter built later must map its own status and
   rejection vocabulary onto =Status=/=RejectReason=, explicitly falling
