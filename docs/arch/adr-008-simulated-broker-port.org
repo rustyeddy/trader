@@ -1,0 +1,45 @@
+#+TITLE: Simulated Broker Implements the Public Broker Port ADR-008
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#144 (M3-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-008's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+If backtests and paper simulations use a bespoke path inside the strategy
+runner, then backtest and live execution can diverge silently.  Bugs in
+one path do not surface in the other, and the strategy contract cannot be
+validated against the same broker port that live trading uses.
+
+* Decision
+
+The simulated broker is a real adapter that implements the public
+=broker.Broker= and =broker.Account= ports.  Backtests and paper runs
+compose it exactly as live runs compose a real broker adapter.
+Deterministic clocks, IDs, and fill models are injected at the
+composition root.
+
+* Consequences
+
+- Backtest and live pipelines exercise the same broker contracts.
+- Contract tests apply equally to simulated and real broker adapters.
+- Simulation realism (bar-close, bid/ask, tick replay) is selected via
+  configuration of the simulated adapter, not by conditionals in the
+  strategy runner.
+- The simulated broker becomes a first-class product concern, not a
+  research shortcut.
+
+* Alternatives Considered
+
+- *Special-case simulation inside the backtest runner.* Rejected because
+  it drifts from live behavior and hides bugs in the broker port.
+- *Two different broker interfaces for simulation and live.* Rejected
+  because strategies would then depend on which interface was active.
+

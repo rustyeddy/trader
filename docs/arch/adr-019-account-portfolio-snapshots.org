@@ -1,0 +1,213 @@
+#+TITLE: Account and Portfolio Snapshot Models ADR-019
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#144 (M3-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-019's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+Issue #30 (M1-12) required broker-neutral, currency-safe value models
+for one broker account's observed state and for a Trader-level view
+spanning several accounts, without implementing broker queries,
+reconciliation, or mutable projections — those remain =live=/future
+=broker= package concerns.  It depends on M1-04 (=num=), M1-07
+(=instrument=), and M1-10 (=order=), all already accepted.  A design
+review on the issue's initial plan identified several gaps before
+implementation: constructing =Snapshot= directly from itself was
+incompatible with keeping its collection fields unexported; a
+shallow slice copy does not protect =order.Order=/=order.Position=,
+both of which carry pointer and slice fields a caller could still
+mutate through a copied element; =map[num.Currency]num.Rate= discards
+exactly the provenance (source, observation time) a report needs to
+explain a converted total; and summing position quantities across
+=Listing= values for the same instrument is not safe in general,
+since =Spec.Multiplier= is not guaranteed identical across venues.
+
+* Decision
+
+=account.Snapshot= is one broker account's authoritative *observed*
+state — not a reconciled or broker-queried one; reconciliation is
+explicitly out of scope and belongs to the future =live= package.  It
+is constructed from a plain =SnapshotParams= value via =NewSnapshot=,
+not from a =Snapshot= itself, since =Snapshot='s own fields are
+unexported so nothing outside =account= can mutate them after
+construction.  =NewSnapshot= validates: non-zero =AccountID=,
+non-empty =Broker=, a valid home =Currency=, a non-zero =AsOf=, no
+duplicate currency among =CashBalances=, every home-currency
+=num.Money= field (=Equity=, =BuyingPower=, =MarginUsed=,
+=MarginAvailable=, =RealizedPnL=, =UnrealizedPnL=, =Fees=,
+=Financing=) valid and denominated in that =Currency=, every
+=Position= revalidated through =order.NewPosition= and belonging to
+this account with no two positions naming the same
+(=instrument.ID=, provider, venue) listing (ADR-016's identity for
+"the venue's listing for an instrument"), and every open order
+revalidated through =order.NewOrder=, belonging to this account, not
+already =Terminal= (=order.Status.Terminal=), and not repeating an
+=OrderID=.  Every =Position=/open order's =Listing.Provider= must
+also case-insensitively equal =SnapshotParams.Broker=: a =Snapshot=
+represents one broker account's observation, so a contained listing
+from a different provider would misrepresent whose position or order
+it actually is.  =account.CashLedgerEntry= (deposit/withdrawal
+history, named in the architecture document) is not part of this
+decision; it is additive future work.
+
+=Positions=, =OpenOrders=, and =CashBalances= are deep-copied on
+ingestion and again by every accessor call: =order.Order= and
+=order.Position= both carry pointer fields (=AcceptedQuantity=,
+=AcceptedLimitPrice=, =AcceptedStopPrice=, =AvgFillPrice=,
+=Rejection=, =AvgPrice=) and slice fields
+(=AppliedFillIDs=/=AppliedBrokerFillIDs=) that a shallow =append=
+copy of the outer slice would still share with whatever the snapshot
+holds internally.  =account= owns unexported =cloneOrder=/
+=clonePosition= helpers for this rather than requiring =order= to
+grow a public cloning API it does not otherwise need.
+
+=portfolio.Portfolio= aggregates one or more =account.Snapshot=
+values into a =BaseCurrency=-denominated view, constructed via
+=NewPortfolio(PortfolioParams)= the same
+params-struct-in/immutable-value-out way.  Because =num= deliberately
+implements no /implicit/ currency conversion (see =num.Money='s doc
+comment) — =Convert= performs only exact arithmetic for an explicit
+target currency and rate, with no policy about when conversion is
+appropriate or where a rate comes from — this decision adds the one
+sanctioned conversion primitive,
+=Money.Convert(to Currency, rate Rate) (Money, error)=: same
+arithmetic and rounding contract as =MulRate=/=DivRate=, but
+re-denominating into an explicit target currency.  =Convert= performs
+only the exact arithmetic; rate provenance is a caller concern.
+=portfolio= supplies that provenance itself via
+=ConversionRate{From, To, Rate, AsOf, Source}=, not a bare
+=map[Currency]Rate=: every supplied rate's =To= must equal
+=BaseCurrency=, its =From= must not already equal =BaseCurrency=, its
+=Rate= must be strictly positive, its =AsOf= must be set, and its
+=AsOf= must not be after the =Portfolio='s own =AsOf=, so a
+=Portfolio= can later report exactly which rates, from where and as
+of when, produced its total, and a historical =Portfolio= can never be
+built from a rate that could not actually have been known as of its
+own observation time — look-ahead a backtest replaying a historical
+=Portfolio.AsOf= must not be able to see.
+
+An account already denominated in =BaseCurrency= needs no rate; an
+account in any other currency needs a matching =ConversionRate= or its
+currency is recorded in =MissingCurrencies=.  If every account
+resolves, =ConversionStatus= is =ConversionComplete= and =Equity=
+returns the summed, converted total and =true=; if any account's
+currency has no matching rate, =ConversionStatus= is
+=ConversionIncomplete= and =Equity= returns the zero =Money= and
+=false= — never a partial sum silently presented as complete.
+
+=Portfolio.Exposures= groups every contributing account's =Position=
+by =instrument.ID= — the cross-venue, cross-broker economic
+instrument, and the reason this aggregation lives in =portfolio=
+rather than =account= — but does not sum position quantities into one
+number.  Two =Listing= values for the same instrument are not
+guaranteed to express one =Quantity= unit identically, and no live or
+historical price is available to =portfolio= to convert to a common
+notional value.  Each =Exposure= instead preserves every contributing
+=AccountPosition{AccountID, Position}= unmodified, so a caller with
+the additional data an aggregate would require (multipliers, marks,
+conversion rates) can compute one itself rather than being handed a
+number this package cannot vouch for.
+
+=Portfolio.AsOf= is documented as when the caller assembled the view,
+not a claim that every contributing account was observed
+simultaneously; each account's own =AsOf= survives unchanged through
+=Portfolio.Accounts=, and =Portfolio.AccountAsOfRange= reports the
+oldest and newest of them for a caller that wants to see how stale
+the least current account is. =Portfolio.Accounts= returns a plain
+slice copy rather than a deep clone: =account.Snapshot= is already
+fully immutable, so there is no mutable state an element could expose.
+
+* Consequences
+
+- =account= and =portfolio= gain no dependency on broker I/O,
+  reconciliation, or =live=-session behavior; both packages depend
+  only on =instrument=, =id=, =num=, and (for =portfolio=) =account=,
+  matching =docs/arch/package-boundaries.org='s preliminary map.
+- =Snapshot.Positions()=/=Snapshot.OpenOrders()=/
+  =Portfolio.Exposures()[].Contributors()= are safe to hand to
+  arbitrary calling code: mutating a returned element, including
+  through its pointer fields, cannot affect the snapshot or portfolio
+  it came from.
+- A =Portfolio='s =Equity= is trustworthy by construction: it is
+  either a complete, fully-converted total, or explicitly marked
+  incomplete with the exact missing currencies named — never a
+  quietly wrong partial sum.
+- =Money.Convert= is now part of =num='s public API, exercised first
+  by a real consumer (=portfolio=) rather than spec'd speculatively;
+  ADR-004 is promoted from Proposed to Accepted alongside this
+  decision, since the scaled-int64 backing it describes was already
+  shipped and =Convert= is now built directly on it.
+- Callers wanting summed cross-listing exposure (accounting for
+  contract multipliers) or mark-to-market valuation must build that
+  themselves from =Exposure.Contributors= today; this package does not
+  yet provide it.
+- A =Snapshot= cannot silently accumulate another broker's listings
+  under this account's identity: a caller building one from data that
+  actually spans providers must construct separate =Snapshot= values,
+  one per provider, and let =Portfolio= do the cross-broker
+  aggregation — which is exactly the role =Portfolio.Exposures=
+  exists to fill.
+- A historical =Portfolio= cannot be built, even accidentally, from a
+  conversion rate observed after its own =AsOf=; a caller that only
+  has a same-day or later rate must either accept
+  =ConversionIncomplete= or supply a rate actually available as of
+  that =AsOf=.
+
+* Alternatives Considered
+
+- *=NewSnapshot(Snapshot)=, mirroring =order.NewOrder(Order)=.*
+  Rejected: unlike =order='s types, =Snapshot='s collection fields are
+  unexported precisely so nothing outside =account= can mutate them
+  post-construction, which makes a caller-populated =Snapshot= literal
+  impossible to accept as constructor input in the first place.
+- *Shallow slice-copy accessors (=append([]T(nil), s.field...)=)
+  without deep-cloning pointer fields.* Rejected on design review:
+  demonstrably insufficient, since a caller could still mutate a
+  position's =AvgPrice= or an order's =AcceptedQuantity= through the
+  returned slice's elements while believing the snapshot was
+  immutable.
+- *=map[num.Currency]num.Rate= for portfolio conversion input.*
+  Rejected on design review: it preserves the numeric rate but
+  discards its provenance, and a rate's source/observation time is
+  exactly what a report explaining a converted total needs.
+- *Summing position quantities per instrument across accounts in
+  =Exposures=.* Rejected on design review: blindly summing
+  =Quantity= across =Listing= values is misleading unless their
+  contract multipliers are known to agree, which this package has no
+  way to verify; preserving contributors unmodified keeps the
+  aggregation honest about what it does and does not know.
+- *Requiring every account snapshot in a =Portfolio= to share the same
+  =AsOf=.* Rejected: a portfolio spanning multiple brokers routinely
+  combines observations from slightly different times, and forcing
+  identical timestamps would either be false or would require
+  discarding real accounts from the view.
+- *Deriving currency conversion from =Money.MulRate= directly, or by
+  parsing =Money.String()= to extract a raw amount.* Rejected:
+  =MulRate= deliberately preserves currency and is not conversion by
+  its own doc comment, and string-parsing an amount back out of
+  =Money= is exactly the implicit workaround that comment warns
+  against. =Money.Convert= is the explicit, minimal primitive =num=
+  was already documented as willing to add for a real consumer.
+- *Validating only =AccountID= consistency for =Positions=/=OpenOrders=,
+  leaving listing provider unchecked.* Rejected on design review: a
+  =Snapshot= with =Broker="OANDA"= could otherwise validly contain a
+  =Listing= whose =Provider()= is =IBKR=, silently misrepresenting
+  which broker a position or order actually came from. Every entry's
+  =Listing.Provider= must now case-insensitively equal
+  =SnapshotParams.Broker=.
+- *Leaving =ConversionRate.AsOf= unconstrained relative to
+  =Portfolio.AsOf=.* Rejected on design review: an unconstrained rate
+  timestamp lets a historical =Portfolio= report =ConversionComplete=
+  using a rate that could not actually have been known as of its own
+  observation time — look-ahead risk that matters most for backtests
+  replaying a historical =Portfolio.AsOf=. =NewPortfolio= now rejects
+  any =ConversionRate= whose =AsOf= is after the =Portfolio='s own.
+
