@@ -1,0 +1,48 @@
+#+TITLE: Broker Account Handle Versus Account Snapshot ADR-007
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#144 (M3-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-007's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+A mutable account object whose methods hide network calls conflates local
+state with remote operations.  It is unclear when a caller is reading
+cached data, calling the broker, or mutating shared state.
+
+* Decision
+
+Split the concept in two:
+
+- =broker.Account= is an account-scoped handle used for actions
+  (=Submit=, =Cancel=, =Replace=) and queries (=Snapshot=, =Events=,
+  =Capabilities=).
+- =account.Snapshot= is an immutable value object describing observed
+  account state.
+
+Higher-level application facades may combine them for convenience, but
+the domain preserves the distinction.
+
+* Consequences
+
+- The broker remains authoritative; snapshots are reconciled projections.
+- Callers can tell at the type level whether they are performing an
+  action, requesting state, or reading cached state.
+- Applications that need multiple accounts (per broker or across brokers)
+  compose multiple handles rather than mutating a single account object.
+
+* Alternatives Considered
+
+- *Single mutable =Account= type exposing =PlaceOrder()=, =Balance()=, and
+  more.* Rejected because it hides I/O and blocks a clean simulated
+  broker.
+- *Global broker singleton with implicit account context.* Rejected
+  because it prevents multi-account and multi-broker operation.
+

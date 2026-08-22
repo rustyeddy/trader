@@ -1,0 +1,192 @@
+#+TITLE: Broker-Neutral Order and Execution Vocabulary ADR-017
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#144 (M3-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-017's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+Trader needs broker-neutral value models for the stages of trading
+activity — proposal, request, accepted order, fill, position, and
+reporting trade — without implementing a broker, execution manager, or
+order-state transition rules.  Issue #28 (M1-10) required settling this
+vocabulary: how Trader IDs, broker-native IDs, idempotency, and
+correlation metadata attach to each stage; how requested and
+broker-accepted values are distinguished; how partial fills and
+remaining quantity are represented; how an unrecognized or unsupported
+broker-reported state is handled without crashing; and where the line
+falls against issue #29 (M1-11), which owns order-state transition
+rules and depends on this issue.  A design review on the issue tightened
+three points before implementation: requested-versus-accepted values
+needed to be explicit on =Order= rather than inferred from the request,
+=Fill= needed both a broker-native execution identifier and its own
+=AccountID=, and =Trade= should not be described as gaining identity
+from =id.Metadata.EventID=.
+
+* Decision
+
+The new =order= package defines =Side=, =Type=, =TimeInForce=,
+=Status=, =RejectReason=, =Proposal=, =Request=, =Order=, =Fill=,
+=CancelRequest=/=CancelResult=, =ReplaceRequest=/=ReplaceResult=,
+=Position=, and =Trade=, depending only on =instrument=, =id=, and
+=num= — all already built.  No new =id= package kinds are introduced:
+=id.OrderID= and =id.FillID= (M1-06) are used directly as =Order=/=Fill=
+identity, and =id.Metadata= supplies correlation, causation, and
+timestamp on every stage, continuing the intent→proposal→order→fill
+chain =id/doc.go= already documents.  =Order=/=Fill=/=Position=/=Trade=
+reference accounts by =id.AccountID= only, never an =account.Snapshot=,
+since that type does not exist until M1-12, which depends on this
+issue.
+
+=Request.OrderID= is the idempotency key for *creating* an order: a
+retried submission of the same =Request= reuses the same =OrderID=, and
+a broker adapter dedupes on it as the client order ID.  This is scoped
+narrowly to initial submission — a cancel or replace against an
+existing order is a separate command, and =CancelRequest=/
+=ReplaceRequest= do not yet have their own reusable command idempotency
+key; that is deferred until a real out-of-process or unreliable-
+transport requirement makes it necessary, not solved speculatively here.
+
+=Order= embeds its originating =Request= (preserving requested identity
+and values) alongside explicit =AcceptedQuantity=,
+=AcceptedLimitPrice=, and =AcceptedStopPrice= fields, all =nil= until
+the broker accepts the order — because a broker may accept a request
+but normalize its values (tick rounding, quantity increment, venue
+rules), and inferring "accepted" from "requested" would silently hide
+that normalization.  =RemainingQuantity= is a method deriving
+=AcceptedQuantity - FilledQuantity= (reporting an error if the order has
+not yet been accepted) rather than a stored field, so it can never
+independently drift from the two values it depends on.
+
+=Fill= carries =BrokerFillID= alongside =BrokerOrderID=, preserving the
+broker's native execution identity separately from its parent order's —
+a broker execution normally has its own native identifier, which matters
+for reconciliation and deduplicating broker execution events.  =Fill=
+also carries =AccountID= directly rather than requiring a join through
+the parent =Order=, since a fill is a broker/account event in its own
+right, particularly once fills are journaled or replayed independently.
+
+=Status= and =RejectReason= both reserve their zero value —
+=StatusUnknown=, =ReasonUnknown= — for broker-reported state Trader does
+not recognize, the same pattern ADR-012 established for
+=marketdata.Status=: an adapter parsing an unfamiliar broker status or
+rejection code produces the =Unknown= value instead of crashing or
+guessing, and =Rejection.BrokerCode= preserves the broker's original
+text even then.  =Side=, =Type=, and =TimeInForce= are closed,
+Trader-controlled vocabulary instead — nothing external reports a value
+Trader doesn't already define — but their zero value is still reserved
+as invalid/unset rather than defaulting to a real value, so a forgotten
+field can never be silently mistaken for =Buy= or =Market=.
+
+=PositionSide= (=Flat=, =Long=, =Short=) is a distinct type from =Side=:
+an order =Side= is a transaction direction, a =PositionSide= is a
+holding direction, and =Flat= has no order-side equivalent.  =Flat= is
+its zero value, so an unconstructed =Position= is safely flat.
+=Position= represents one net position per account/listing pair, the
+architecture's default assumption for the initial account model.
+
+=Trade=, the derived reporting concept grouping entry and exit fills,
+has no first-class identity in this package.  =id.Metadata.EventID=
+identifies one immutable event; a derived trade can be recalculated,
+revised, or represented across multiple journal events as fills
+continue to arrive, so describing =EventID= as its identity would
+misstate what an event ID means.  A dedicated =TradeID= is additive
+future work if M5's journal/report work later finds that insufficient —
+not introduced speculatively now, consistent with the restraint already
+applied to the =id= package's deferred identifiers.
+
+Constructors in this package validate snapshot/domain invariants only:
+required fields, exact-value tick/increment divisibility, required price
+presence for a given =Type=, =FilledQuantity <= AcceptedQuantity=,
+whether =Status= implies the broker has (or has not) accepted the order
+and so requires (or precludes) a non-nil =AcceptedQuantity=, and valid
+rejection/status combinations (=Rejection= non-nil exactly when =Status=
+is =StatusRejected=).  Whether a given =Status= is reachable from an
+order's prior state — legal transitions, terminal-state enforcement,
+duplicate/out-of-order event handling — is issue #29 (M1-11)'s
+responsibility, not this package's.
+
+Because =Proposal=, =Request=, and =Order= are ordinary exported structs,
+Go cannot prevent a caller from building a later stage as a bare struct
+literal that embeds an earlier, invalid stage — bypassing that earlier
+stage's own constructor entirely.  A design-review comment on the PR
+identified this as a real hole: checking only the outermost identity
+field (=Request.OrderID=, say) does not prove the embedded =Proposal= is
+valid.  Each stage's constructor therefore fully revalidates every stage
+beneath it through a shared unexported validator
+(=checkProposal=/=checkRequest=) rather than trusting an earlier stage by
+provenance — the same shared-validator shape =Order='s accepted-value
+checks reuse from =Proposal='s requested-value checks.
+
+OCO/bracket order grouping and parent/child order relationships are
+deferred as capability-driven features, consistent with the
+architecture document's guidance against a lowest-common-denominator
+API.  =GTD= (good-til-date) is deferred from =TimeInForce= for the same
+reason: it needs an expiration field this issue's scope does not call
+for.
+
+* Consequences
+
+- =Order= and =Fill= make broker-side normalization and broker-native
+  identity representable without inventing new =id= package kinds or a
+  parallel broker-identifier type system.
+- =RemainingQuantity= cannot be computed before an order is accepted,
+  which is an explicit, typed signal rather than a silently wrong zero
+  value.
+- =CancelRequest=/=ReplaceRequest= idempotency across retries remains
+  unsolved until a real requirement forces the question; callers must
+  not assume retrying either is currently safe.
+- =Trade='s lack of identity means callers cannot yet reference "the
+  same trade" stably across journal events; M5 must revisit this if that
+  becomes necessary.
+- Every broker adapter built later must map its own status and
+  rejection vocabulary onto =Status=/=RejectReason=, explicitly falling
+  back to =Unknown= plus preserved raw text for anything unrecognized,
+  rather than inventing ad hoc broker-specific types.
+
+* Alternatives Considered
+
+- *Inferring accepted quantity/prices from the request instead of
+  representing them explicitly on =Order=.*  Rejected on design review:
+  it leaves no representation for broker-side normalization, which the
+  issue's "requested versus accepted price and quantity" scope item
+  requires.
+- *Fill carrying only =BrokerOrderID=, with no separate broker-native
+  fill identifier.*  Rejected on design review: a broker execution
+  normally has its own native identity distinct from its parent order,
+  and the issue's acceptance criteria require broker-native identifiers,
+  plural, to be preserved.
+- *Requiring callers to join through =Order= to find a =Fill='s
+  account.*  Rejected on design review as unnecessary coupling, since a
+  fill is a broker/account event in its own right.
+- *Describing =Trade='s identity as =Metadata.EventID=.*  Rejected on
+  design review: an event ID identifies an event/envelope, not a
+  recalculable derived concept, so the description would misstate what
+  =Trade= actually has.
+- *A single =OrderID=-based idempotency key covering cancel and replace
+  as well as initial submission.*  Rejected as overclaiming: cancel/
+  replace commands crossing an unreliable transport may eventually need
+  their own command identity, and this decision should not read as
+  having already solved that.
+- *Adding a =TradeID= kind to =id= now.*  Rejected as premature under
+  the same rule of thumb =id/doc.go= already applies to its deferred
+  identifiers — add it when a concrete, persisted consumer needs it, not
+  speculatively.
+- *=CancelResult= and =ReplaceResult= reusing =ErrInvalidCancelRequest=/
+  =ErrInvalidReplaceRequest=.*  Rejected on review: those sentinels'
+  doc comments describe request validation specifically, and reusing
+  them for result validation makes error classification imprecise for
+  callers.  Dedicated =ErrInvalidCancelResult=/=ErrInvalidReplaceResult=
+  sentinels were added instead, matching this package's existing
+  per-type sentinel granularity.
+- *Trusting an earlier stage's validity by constructor provenance
+  alone.*  Rejected on review once it was shown a bare struct literal
+  defeats it; see the shared-validator discussion above.
+
