@@ -16,6 +16,29 @@ import (
 // or reachable only through an accessor that returns a defensive copy,
 // so nothing a caller does with a returned value can change what
 // Snapshot itself holds. Construct one with NewSnapshot.
+//
+// # Zero value and unknown state
+//
+// The zero Snapshot{} is never a valid, usable value — every field
+// would report the zero AccountID, empty Broker, invalid Currency, and
+// a zero AsOf, none of which NewSnapshot accepts. There is no
+// "partially observed" or "unknown" Snapshot state distinct from this:
+// a caller either has a complete, internally consistent Snapshot for
+// one AsOf instant (every required field validated, every Position and
+// OpenOrder revalidated and confirmed to belong to this account and
+// Broker), or it has none at all. A broker or simulator that cannot
+// currently produce every required field returns an error instead of a
+// Snapshot with some fields left at their zero value — the same
+// "explicit error over a partial or questionable result" rule the
+// architecture document applies to marketdata.Manager.
+//
+// A freshly opened account with no positions and no working orders is
+// still a completely valid Snapshot: Positions and OpenOrders are
+// simply empty (never nil after construction — see the Positions and
+// OpenOrders accessors), and every Money field may legitimately be
+// zero. Cursor, similarly, has no required format or "unknown" sentinel
+// of its own: it is opaque and may be empty, for example for a
+// simulated broker with no real pagination/version token to report.
 type Snapshot struct {
 	accountID id.AccountID
 	broker    string
