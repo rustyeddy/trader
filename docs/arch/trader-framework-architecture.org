@@ -2001,7 +2001,8 @@ areas should be added before public APIs are considered mature.
 
 The phase sequence below maps directly to the GitHub milestones in Appendix D.
 Each milestone should end with a runnable, testable capability rather than only
-internal scaffolding.
+internal scaffolding.  M2.5 and M2.6 record capabilities added after the
+original sequence was written and are part of the same roadmap.
 
 ** Phase 0: Architecture Rules and Vocabulary
 
@@ -2042,69 +2043,117 @@ cannot access or replace either implementation.
 
 Add coverage manifests and data-quality reporting early.
 
-** Phase 3: Broker and Simulated Account Slice
+** Phase 2.5: CLI and Application Service Layer
+
+Add a thin CLI transport over reusable, transport-neutral application services.
+Command handlers gather and validate representation-specific input, construct
+service requests, invoke services, and format responses.  Business rules remain
+in domain/public packages, and formatting/serialization remains outside the
+service layer so REST, WebSocket, SSE, and other transports can reuse the same
+use cases later.
+
+** Phase 2.6: Structured Logging
+
+Establish production structured logging before brokerage work introduces more
+long-running and externally connected operations.  Use explicit composition-root
+ownership, canonical component/domain attributes, correlation and causation,
+sensitive-value redaction, and event-oriented service logging without hidden
+mutable global loggers.
+
+** Phase 3: Broker Simulation and Account State
 
 Define broker contract tests, then implement:
 
-- Simulated broker
-- One real broker adapter
+- Public broker and account-scoped ports
+- Deterministic simulated broker
 - Account snapshots and event stream
 - Submit/cancel/replace
-- Reconciliation behavior
-- Capability discovery
+- Market, limit, and stop order behavior
+- Deterministic fill/fee/slippage models
+- Authoritative simulated cash, positions, realized/unrealized PnL, and margin
 
-The simulated broker is essential because it validates whether the public
-broker API is suitable for both backtest and paper/live workflows.
+Do not add a real broker adapter, external reconciliation, portfolio aggregation,
+or risk policy merely to expand this milestone.  The simulator validates the
+broker/account contracts before those concerns are layered on top.
 
-** Phase 4: Strategy, Execution, and Risk Pipeline
+** Phase 4: Execution and Risk
 
 Implement:
 
-- Strategy events and intents
-- Execution planner
-- Risk sizing and admission rules
-- Execution manager
-- Journal correlation across intent -> proposal -> decision -> order -> fill
+- Intent/proposal execution planning
+- Position sizing
+- Risk admission and explicit rejection reasons
+- Instrument/account exposure and buying-power checks
+- Approved broker requests
+- Correlation across proposal -> risk decision -> broker request
 
-Use a deliberately small example strategy.  The goal is API validation, not
-profitability.
+Normal trading flow should pass through execution and risk rather than allowing
+application code to grow ad-hoc direct broker submission paths.
 
-** Phase 5: Backtest Runner
+** Phase 5: OANDA Broker Adapter
+
+Implement the first real broker adapter and use it as an architectural reality
+check for the M3/M4 contracts:
+
+- OANDA broker and account handles
+- Provider/Trader identity translation
+- Authoritative account snapshots
+- Order submission/cancel/replace and broker events
+- Error/capability translation
+- Snapshot/event reconciliation needed for broker truth
+- Demo/paper account integration
+
+The adapter should preserve broker-neutral domain vocabulary and keep OANDA
+request/response types and credentials at the edge.
+
+** Phase 6: Strategy and Deterministic Backtesting
 
 Compose the historical source, simulation clock, simulated broker, strategy,
-execution, risk, journal, and reports.
+execution, risk, journal, metrics, and reports.
 
-Require deterministic repeat runs and record complete run manifests.
+Require:
 
-** Phase 6: Live Session Manager
+- Strategy contracts exercised through the same execution/risk path used by
+  broker-backed operation
+- Deterministic repeat runs
+- Complete run manifests including data and simulation-model identity
+- Structured journal/event records
+- Backtest metrics and diagnostics
+- A usable CLI entry point
+- First-class Org report output
 
-Add:
+The goal is a reproducible experiment capability, not merely a runner that
+returns final PnL.
+
+** Phase 7: Paper/Live Session Management
+
+Add the operational machinery required to run the proven pipeline continuously:
 
 - Connection supervision
-- Startup reconciliation
-- State checkpoints
+- Startup and ongoing reconciliation
+- Durable checkpoints and restart recovery
+- Duplicate-order prevention
 - Pause/resume/kill switch
-- Health/readiness
+- Stale-data and health/readiness guards
 - Operator-visible discrepancies
+- Long-running paper-account soak testing
 
-Paper trading should be the first live deployment mode.
+Paper trading remains the default and is the proving ground for live-like
+operation.  Real-money trading remains a separate release gate after sustained
+safe paper operation.
 
-** Phase 7: Scanner and Reports
+** Phase 8: Alpaca and Multi-Broker Validation
 
-Build scanner candidate models, watch/hot/tradeable classification, alert
-adapters, and Org reports.
+Implement Alpaca as the second materially different broker adapter.  Use its
+equity/ETF semantics, market sessions, quantity rules, buying power, and
+capabilities to challenge assumptions established with the FX-oriented OANDA
+adapter.  Prefer optional capability interfaces over widening the required
+broker port to the union of every provider feature.
 
-** Phase 8: Out-of-Process Strategy Protocol
-
-Only after the in-process strategy contract is useful and stable, freeze a
-versioned wire contract and build:
-
-- Strategy host/client
-- gRPC stream
-- State snapshot/restore
-- Capability negotiation
-- One private external strategy example
-- Fault and timeout tests
+Scanner/operator workflow, external strategy protocols, and broader research
+extensions remain planned after the core M0-M8 path is proven.  Assign their
+milestone numbers when those scopes are ready rather than preserving the older
+Phase 7/8 ordering by inertia.
 
 * Public API Stability Policy
 
@@ -2497,19 +2546,19 @@ The implementation project should use these milestones.  Detailed issues and
 acceptance criteria are maintained in the companion document
 =Trader-GitHub-Project-Plan.org=.
 
-| ID   | Milestone                            | Usable outcome                                                                                     |
-|------+--------------------------------------+----------------------------------------------------------------------------------------------------|
-| M0   | Repository Foundation and Guardrails | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                     |
-| M1   | Domain Foundation and Test Kit       | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers           |
-| M2   | Market Data Vertical Slice           | Acquire, normalize, validate, store, query, resample, and report coverage for one data path        |
-| M2.5 | CLI and Application Service Layer    | Thin CLI transport over reusable, transport-neutral application services                           |
-| M2.6 | Structured Logging                   | Production structured logging conventions, lifecycle ownership, correlation, and service events   |
-| M3   | Broker Simulation and Account State  | Public broker port, deterministic simulated broker, orders, fills, events, and account state       |
-| M4   | Execution and Risk                   | Intent/proposal execution planning, position sizing, risk admission, and approved broker requests  |
-| M5   | OANDA Broker Adapter                 | First real broker adapter, authoritative account truth, reconciliation, and demo/paper integration |
-| M6   | Strategy and Deterministic Backtesting | Strategies exercised through execution/risk against the simulator with repeatable backtests      |
-| M7   | Paper/Live Session Management        | Long-running paper/live orchestration, recovery, reconciliation, guards, and operational safety    |
-| M8   | Alpaca and Multi-Broker Validation   | Second materially different broker adapter validates broker/account/execution abstractions         |
+| ID   | Milestone                              | Usable outcome                                                                                                                  |
+|------+----------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
+| M0   | Repository Foundation and Guardrails   | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                                                  |
+| M1   | Domain Foundation and Test Kit         | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers                                        |
+| M2   | Market Data Vertical Slice             | Acquire, normalize, validate, store, query, resample, and report coverage for one data path                                     |
+| M2.5 | CLI and Application Service Layer      | Thin CLI transport over reusable, transport-neutral application services                                                        |
+| M2.6 | Structured Logging                     | Production structured logging conventions, lifecycle ownership, correlation, and service events                                |
+| M3   | Broker Simulation and Account State    | Public broker port, deterministic simulated broker, orders, fills, events, and account state                                    |
+| M4   | Execution and Risk                     | Intent/proposal execution planning, position sizing, risk admission, and approved broker requests                               |
+| M5   | OANDA Broker Adapter                   | First real broker adapter, authoritative account truth, reconciliation, and demo/paper integration                              |
+| M6   | Strategy and Deterministic Backtesting | Strategy execution through execution/risk and simulator, deterministic runs, run manifests, journal, metrics, CLI, and Org reports |
+| M7   | Paper/Live Session Management          | Long-running paper/live orchestration, recovery, reconciliation, guards, and operational safety                                 |
+| M8   | Alpaca and Multi-Broker Validation     | Second materially different broker adapter validates broker/account/execution abstractions                                      |
 
 Scanner/operator workflow, external strategy protocols, and broader research
 extensions remain planned work after the core trading path above has been
