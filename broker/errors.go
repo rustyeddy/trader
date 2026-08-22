@@ -4,8 +4,17 @@ import "errors"
 
 var (
 	// ErrAccountNotFound reports that Broker.OpenAccount was called
-	// with an account id the broker session does not recognize.
+	// with an account id the broker session does not recognize. It is
+	// distinct from ErrOrderNotFound: this always means the *account*
+	// handle itself could not be opened, never that an order within an
+	// already-open account is unrecognized.
 	ErrAccountNotFound = errors.New("broker: account not found")
+
+	// ErrOrderNotFound reports that Account.Cancel or Account.Replace
+	// was called with an order id the account does not recognize —
+	// distinct from ErrAccountNotFound, which means the account handle
+	// itself could not be opened.
+	ErrOrderNotFound = errors.New("broker: order not found")
 
 	// ErrUnsupported reports that a broker adapter does not support
 	// requested behavior — for example an order.Type or

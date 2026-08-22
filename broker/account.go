@@ -32,10 +32,16 @@ type Account interface {
 	// through Submit's return value.
 	Submit(ctx context.Context, req order.Request) (order.Order, error)
 
-	// Cancel asks the broker to cancel an existing order.
+	// Cancel asks the broker to cancel an existing order. It returns an
+	// error satisfying errors.Is(err, ErrOrderNotFound) if req.OrderID
+	// does not name an order this account knows about — distinct from
+	// ErrAccountNotFound, which means the account handle itself could
+	// not be opened.
 	Cancel(ctx context.Context, req order.CancelRequest) (order.CancelResult, error)
 
 	// Replace asks the broker to modify an existing order's quantity
-	// and/or prices in place.
+	// and/or prices in place. It returns an error satisfying
+	// errors.Is(err, ErrOrderNotFound) if req.OrderID does not name an
+	// order this account knows about.
 	Replace(ctx context.Context, req order.ReplaceRequest) (order.ReplaceResult, error)
 }

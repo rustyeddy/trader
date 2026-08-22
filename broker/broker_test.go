@@ -208,7 +208,7 @@ func TestAccountCancelUnknownOrderReturnsNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = acc.Cancel(ctx, cancelReq)
-	require.ErrorIs(t, err, broker.ErrAccountNotFound)
+	require.ErrorIs(t, err, broker.ErrOrderNotFound)
 }
 
 func TestAccountReplaceUpdatesAcceptedQuantity(t *testing.T) {
@@ -252,14 +252,14 @@ func TestAccountReplaceUnknownOrderReturnsNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = acc.Replace(ctx, replaceReq)
-	require.ErrorIs(t, err, broker.ErrAccountNotFound)
+	require.ErrorIs(t, err, broker.ErrOrderNotFound)
 }
 
 // TestErrorsAreClassifiable confirms every sentinel this package
 // defines is distinct and matchable with errors.Is, the "classifiable
 // broker errors" issue #145 calls for.
 func TestErrorsAreClassifiable(t *testing.T) {
-	sentinels := []error{broker.ErrAccountNotFound, broker.ErrUnsupported, broker.ErrClosed}
+	sentinels := []error{broker.ErrAccountNotFound, broker.ErrOrderNotFound, broker.ErrUnsupported, broker.ErrClosed}
 	for i, outer := range sentinels {
 		for j, inner := range sentinels {
 			if i == j {

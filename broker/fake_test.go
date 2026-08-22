@@ -149,7 +149,7 @@ func (a *fakeAccount) Cancel(ctx context.Context, req order.CancelRequest) (orde
 
 	o, ok := a.state.orders[req.OrderID]
 	if !ok {
-		return order.CancelResult{}, broker.ErrAccountNotFound
+		return order.CancelResult{}, broker.ErrOrderNotFound
 	}
 
 	pending, err := order.ApplyCancelRequest(o, req)
@@ -157,10 +157,14 @@ func (a *fakeAccount) Cancel(ctx context.Context, req order.CancelRequest) (orde
 		return order.CancelResult{}, err
 	}
 
+	resultEventID, err := id.GenerateEventID(testGenerator)
+	if err != nil {
+		return order.CancelResult{}, err
+	}
 	result, err := order.NewCancelResult(order.CancelResult{
 		OrderID:  req.OrderID,
 		Status:   order.StatusCanceled,
-		Metadata: id.Metadata{EventID: req.Metadata.EventID, CausationID: req.Metadata.EventID},
+		Metadata: id.Metadata{EventID: resultEventID, CausationID: req.Metadata.EventID},
 	})
 	if err != nil {
 		return order.CancelResult{}, err
@@ -183,7 +187,7 @@ func (a *fakeAccount) Replace(ctx context.Context, req order.ReplaceRequest) (or
 
 	o, ok := a.state.orders[req.OrderID]
 	if !ok {
-		return order.ReplaceResult{}, broker.ErrAccountNotFound
+		return order.ReplaceResult{}, broker.ErrOrderNotFound
 	}
 
 	pending, err := order.ApplyReplaceRequest(o, req)
@@ -191,10 +195,14 @@ func (a *fakeAccount) Replace(ctx context.Context, req order.ReplaceRequest) (or
 		return order.ReplaceResult{}, err
 	}
 
+	resultEventID, err := id.GenerateEventID(testGenerator)
+	if err != nil {
+		return order.ReplaceResult{}, err
+	}
 	result, err := order.NewReplaceResult(order.ReplaceResult{
 		OrderID:  req.OrderID,
 		Status:   order.StatusWorking,
-		Metadata: id.Metadata{EventID: req.Metadata.EventID, CausationID: req.Metadata.EventID},
+		Metadata: id.Metadata{EventID: resultEventID, CausationID: req.Metadata.EventID},
 	})
 	if err != nil {
 		return order.ReplaceResult{}, err
