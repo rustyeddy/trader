@@ -131,6 +131,7 @@ the original decided, use full supersession instead.
 | 021 | FX hour-bar alignment corrected to daily-rollover anchoring       | Accepted   |
 | 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Accepted |
 | 023 | Structured logging (in adr-023-structured-logging.org)            | Accepted   |
+| 024 | Broker event model and deterministic ordering (in adr-024-broker-events.org) | Accepted |
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -173,6 +174,14 @@ several capabilities from the prior =trader-first-try/log=
 implementation (multi-output sinks, runtime reconfiguration,
 syslog/journald, a production in-memory sink) are recorded as
 deliberate, named deferrals rather than blockers to acceptance.
+
+Note: ADR-024 is likewise maintained in its own file,
+=docs/arch/adr-024-broker-events.org=, rather than inline in this
+registry.  Its own Status section is authoritative.  Issue #147
+(M3-04) asks for the canonical broker event model and its
+deterministic-ordering/delivery guarantees to be drafted and adopted
+in the same step, ahead of the deterministic simulator (#148-#153)
+being built against =broker.Account.Events=.
 
 * ADR-001: Modular monolith before service decomposition
 

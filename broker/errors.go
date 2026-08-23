@@ -27,4 +27,8 @@ var (
 	// ErrClosed reports that a Broker or Account method was called
 	// after the owning Broker's Close returned.
 	ErrClosed = errors.New("broker: closed")
+
+	// ErrInvalidEvent reports an Event constructor argument that fails
+	// NewEvent's validation.
+	ErrInvalidEvent = errors.New("broker: invalid event")
 )

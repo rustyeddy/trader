@@ -1,0 +1,253 @@
+#+TITLE: Broker Event Model and Deterministic Ordering ADR-024
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #147 (M3-04) asks for the canonical broker event model
+and its ordering/delivery guarantees to be defined before the
+deterministic simulator (#148-#153) is implemented against it,
+alongside broker.Broker/broker.Account (ADR-007, ADR-008, issue #145).
+
+* Context
+
+broker.Account.Submit/Cancel/Replace (ADR-007, ADR-008) only report
+what a broker knows synchronously at the moment of the call. Real
+lifecycle changes — an order moving from working to filled, a fill
+arriving, account balances/margin/PnL changing, an account's
+operational status changing — happen asynchronously and were
+explicitly deferred out of the M3-02 core contract to this issue.
+
+Before the simulator can be built, Trader needs: a broker-neutral,
+typed event model naming what kinds of things can happen; explicit
+identity, correlation/causation, and time semantics on each event;
+a deterministic ordering guarantee the simulator can honor and tests
+can assert on; and a documented policy for duplicate, delayed, and
+out-of-order delivery at the contract boundary, without yet
+implementing live reconciliation (that remains ADR-009 and the future
+=live= package's job).
+
+* Decision
+
+** Event kinds are one struct with an explicit Kind tag, not a bare interface
+
+=broker.Event= is a concrete struct carrying =Metadata id.Metadata=,
+=ObservedAt time.Time=, =Sequence uint64=, =Kind EventKind=, and four
+mutually exclusive payload pointers: =Order *order.Order=,
+=Fill *order.Fill=, =Account *account.Snapshot=, =Status *Status=. This
+follows the architecture document's own guidance for canonical
+market-data events: "A convenience union may be named X.Event, but the
+concrete event kind should remain explicit." =NewEvent= enforces that
+exactly one payload pointer is set and that it matches =Kind=.
+
+=EventKindOrder= covers acceptance, rejection, and every other status
+change as *one* kind, not one kind per =order.Status= value:
+=order.Order= (ADR-017) already carries its own full lifecycle state
+in =Status=, and a consumer needs the complete =Order= regardless of
+which transition produced it, so multiplying event kinds per status
+would only duplicate information =order.Order= already provides.
+
+=EventKindAccount= carries a complete, new =account.Snapshot= rather
+than a partial "balance changed" delta type. =account.Snapshot=
+(ADR-019) is already an immutable, internally consistent whole-state
+value; inventing a second, partial accounting payload type would let
+the two disagree about what "current" balances are. A consumer that
+wants to know specifically what changed can diff two received
+Snapshots itself.
+
+=EventKindStatus= reports broker/session operational status via
+=Status{State AccountStatus, BrokerCode string, Message string}=.
+=State= is Trader's broker-neutral classification (Unknown, Active,
+Degraded, Disconnected) — distinct from =order.Status= and from
+live-session guard state (the future =live= package's own, broader
+concept). A deterministic simulator, having no network to lose, is not
+expected to ever report =AccountStatusDisconnected=; this value exists
+for future real broker adapters.
+
+=Status= is a small value struct, not a bare =AccountStatus=, so that
+=BrokerCode=/=Message= can independently preserve whatever raw status
+detail a real adapter received — the same pattern =order.Rejection=
+already established (ADR-017/ADR-018): =order.RejectReason= classifies
+while =order.Rejection.BrokerCode= independently preserves the
+broker's original text. Without this, an adapter encountering a status
+it cannot classify would have to collapse the entire event to
+=AccountStatusUnknown= and discard the provider's own diagnostic
+detail — exactly the failure mode ADR-017 already avoided for order
+rejections. =BrokerCode=/=Message= are optional; a deterministic
+simulator, which has no real broker status codes to report, leaves
+them empty.
+
+=EventKind='s zero value is reserved as invalid/unset, the same as
+=order.Side=/=order.Type= (ADR-017): Trader itself decides which kind
+an event is when constructing it, so — unlike =order.Status= or
+=order.RejectReason=, which are broker-reported — there is no
+"unknown kind" case to preserve. =AccountStatus=, by contrast, *is*
+broker-reported, so its zero value (=AccountStatusUnknown=) is a legal,
+meaningful =Status.State= value under the same pattern ADR-017
+established for =order.Status=/=order.RejectReason=: an adapter that
+cannot classify a status still reports the event, with whatever raw
+detail it has, rather than dropping it.
+
+** Identity, correlation, and two distinct timestamps
+
+=Event.Metadata= reuses =id.Metadata= (already established by
+=id/metadata.go=): =EventID= identifies this event, =CorrelationID=
+should carry the workflow's shared correlation id, and =CausationID=
+should name the =EventID= of whatever directly caused this event when
+one is known — typically the originating =order.Request=,
+=CancelRequest=, or =ReplaceRequest='s own =Metadata.EventID=.
+
+=Metadata.Timestamp= is the event's *occurred* time — when the broker
+or simulator considers the event to have happened. =Event.ObservedAt=
+is a second, separate field: when Trader's own process observed or
+received it. For a deterministic simulator the two are typically
+equal; for a real broker adapter they usually are not, since network
+and processing delay separate them. This mirrors the provenance split
+the architecture document already specifies for canonical market data
+("Event time" versus "Time received or observed").
+
+Neither timestamp is required to be monotonic across events — see the
+next section for what actually is.
+
+** Deterministic ordering is Sequence, not time
+
+=Event.Sequence= is the sole ordering guarantee this package makes:
+within one Broker session's Account event stream, Sequence is assigned
+in the exact order the producer generated the events, strictly
+increasing with no gaps, starting at 1. A consumer that sorts
+delivered events by Sequence recovers the producer's exact original
+order, regardless of what =Timestamp=/=ObservedAt= say (clock skew,
+simulated latency, or real network delay can make wall-clock time
+disagree with production order). Sequence is scoped to one account's
+stream; it carries no meaning compared across different accounts or
+different Broker sessions.
+
+A deterministic simulator (ADR-008) must assign Sequence values that
+are reproducible from the same seed/inputs across separate runs, the
+same way every other simulator output must be, per the architecture
+document's determinism principles. =broker/broker_test.go='s
+=TestEventsDeliversDeterministicOrderAcrossOperations= is the
+regression proving a stream can be replayed from the beginning and
+reproduce byte-identical events in the same order.
+
+Time was rejected as the ordering key specifically because two events
+can legitimately share a timestamp (same simulated tick, same
+wall-clock millisecond) while still needing a well-defined relative
+order; a monotonic counter has no such ambiguity.
+
+** Delivery is at-least-once; consumers dedupe by EventID
+
+=EventCursor= is an opaque string (matching =account.Snapshot.Cursor=,
+ADR-019's precedent: callers carry it, never interpret it). The zero
+=EventCursor= ("") always means "start from the beginning of whatever
+backlog this Broker/Account retains" and is never an error.
+
+Event delivery is at-least-once, matching the architecture document's
+general delivery-semantics rule: a consumer resuming from a cursor
+after a disconnect may receive one or more events it already saw.
+Consumers must dedupe by =Metadata.EventID= — the same idempotency
+discipline =order.Order='s =Apply*= functions already require for
+fills and cancel/replace results (ADR-018's =AppliedFillIDs=/
+=AppliedBrokerFillIDs=/=PendingCommandID= correlation). Within one
+uninterrupted stream, an implementation must not reorder or skip
+events. Reconciling a stream that appears to have skipped Sequence
+values entirely (for example, an adapter restart with a shorter
+retention window than the gap) is explicitly left to the future
+=live= package and ADR-009, not solved by this contract.
+
+Critical events — every =EventKindOrder=, =EventKindFill=, and
+=EventKindAccount= event — are never silently dropped or coalesced by
+a conforming implementation, per the architecture document's
+concurrency-ownership rule that only high-frequency, quote-like data
+may ever use a documented coalescing policy. =EventKindStatus= events
+are likewise never dropped, though a producer may coalesce a rapid run
+of identical consecutive status values into one event if it documents
+that choice — status is inherently a level, not an edge, so collapsing
+repeated identical levels loses nothing a consumer needs.
+
+** EventReader: a concrete typed reader, caller-owned, blocking, not generic
+
+=broker.EventReader= is a concrete interface — =Next(ctx) (Event,
+error)= and =Close() error= — following the architecture document's
+=Reader[T]= sketch's shape without the generic parameter, since only
+one concrete event-stream shape exists in this package (unlike
+=marketdata=, which reads several distinct canonical types through
+different queries). This also matches =marketdata.BarReader='s own
+choice of a concrete, non-generic reader type over the sketch's
+generic form.
+
+=Next= blocks until an =Event= is available, =ctx= is canceled or
+expires, or the stream ends; it never busy-polls. It returns =io.EOF=
+once the producer has delivered every event it currently expects to
+produce (for example, a finished, bounded backtest run) — not merely
+"no new event right now." A live or paper broker's stream is expected
+to keep blocking on =ctx= instead of returning =io.EOF= for that case;
+=io.EOF= from such a stream specifically means the producer itself has
+ended (for example, =Broker.Close= was called).
+
+The caller that obtains an =EventReader= from =Account.Events= owns
+closing it. =Close= is safe to call more than once and safe to call
+concurrently with a blocked =Next=, which must then return promptly
+with an error rather than block indefinitely — the explicit
+cancellation/close-ownership contract this issue's scope calls for.
+This package does not impose a buffer size; an implementation
+documents its own buffering/blocking behavior when full, consistent
+with the architecture document's concurrency-ownership rules.
+
+** Account.Events joins the core Account contract
+
+=broker.Account= (ADR-007/ADR-008, issue #145) gains one new method:
+=Events(ctx context.Context, cursor EventCursor) (EventReader, error)=.
+This is additive to the interface issue #145 shipped — #145's own
+=broker/doc.go= explicitly named event streaming as deferred to this
+issue rather than solved speculatively there.
+
+* Consequences
+
+- A consumer can always recover the producer's exact original event
+  order by sorting on =Sequence= alone, independent of any clock.
+- Every broker adapter (the simulator, and future real adapters) must
+  assign =Sequence= per its own account stream, gap-free and strictly
+  increasing, and must never reorder within one uninterrupted stream.
+- Consumers are responsible for deduplicating by =Metadata.EventID=;
+  this package's contract does not promise exactly-once delivery, only
+  at-least-once, matching the architecture document's general
+  assumption.
+- =EventKindAccount= events carry a full =account.Snapshot=, which is
+  simpler to keep consistent than a parallel delta type, at the cost of
+  a larger payload per balance-changing event than a minimal delta
+  would be — accepted as the right tradeoff given ADR-019's existing
+  whole-state design.
+- Real broker adapters that cannot report =ObservedAt= distinctly from
+  provider-reported time must still populate it (for example, with
+  their own receipt time), since =NewEvent= requires it non-zero.
+- Gap detection/reconciliation across a broken stream remains
+  unimplemented until the future =live= package and ADR-009 address it;
+  this ADR defines the contract boundary, not that implementation.
+
+* Alternatives Considered
+
+- *One =order.Status=-shaped event kind per lifecycle transition*
+  (=OrderAccepted=, =OrderRejected=, =OrderWorking=, ...).  Rejected:
+  =order.Order= already carries its full lifecycle state via =Status=
+  (ADR-017/ADR-018), so this would only duplicate information a
+  consumer already receives in full, for no additional expressiveness.
+- *A partial "balance/margin changed" delta payload type instead of a
+  full =account.Snapshot=.*  Rejected: it would create a second,
+  independent representation of account state that could drift from
+  =account.Snapshot='s own whole-state value, undermining ADR-019's
+  "one authoritative, internally consistent Snapshot" design.
+- *Timestamp (occurred time) as the ordering key.*  Rejected: two
+  events can legitimately share a timestamp (same simulated tick, same
+  wall-clock millisecond) while still needing a well-defined relative
+  order, which a plain timestamp comparison cannot resolve
+  unambiguously. A monotonic =Sequence= has no such ambiguity.
+- *A generic =EventReader[T]=, mirroring the architecture document's
+  =Reader[T]= sketch literally.*  Rejected for the same reason
+  =marketdata.BarReader= is concrete rather than generic: only one
+  event-stream shape exists in this package, so a type parameter would
+  add ceremony without a second use.
+- *Exactly-once delivery as this package's promise.*  Rejected as
+  overclaiming per the architecture document's own guidance ("Exactly
+  once" should not be a casual API promise); at-least-once plus
+  consumer-side deduplication by =EventID= is the same discipline
+  ADR-018 already required for fills and cancel/replace results.

@@ -44,4 +44,12 @@ type Account interface {
 	// errors.Is(err, ErrOrderNotFound) if req.OrderID does not name an
 	// order this account knows about.
 	Replace(ctx context.Context, req order.ReplaceRequest) (order.ReplaceResult, error)
+
+	// Events streams this account's order, fill, balance/margin, and
+	// status events in ascending Event.Sequence order, resuming after
+	// cursor. The zero EventCursor starts from the beginning of
+	// whatever backlog this Broker/Account retains. See Event and
+	// EventReader for the full ordering, delivery, and lifecycle
+	// contract (ADR-024).
+	Events(ctx context.Context, cursor EventCursor) (EventReader, error)
 }
