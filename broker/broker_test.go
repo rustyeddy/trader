@@ -314,7 +314,7 @@ func TestEventsDeliversDeterministicOrderAcrossOperations(t *testing.T) {
 
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	events := drainEvents(t, reader)
 	require.Len(t, events, 2)
@@ -331,7 +331,7 @@ func TestEventsDeliversDeterministicOrderAcrossOperations(t *testing.T) {
 	// requires.
 	reader2, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	defer reader2.Close()
+	defer func() { _ = reader2.Close() }()
 	replay := drainEvents(t, reader2)
 	assert.Equal(t, events, replay)
 }
@@ -351,7 +351,7 @@ func TestEventsResumeFromCursorSkipsAlreadyDeliveredEvents(t *testing.T) {
 	require.NoError(t, err)
 	first := drainEvents(t, reader)
 	require.Len(t, first, 1)
-	reader.Close()
+	_ = reader.Close()
 
 	cancelReq, err := order.NewCancelRequest(order.CancelRequest{
 		OrderID:  req.OrderID,
@@ -363,7 +363,7 @@ func TestEventsResumeFromCursorSkipsAlreadyDeliveredEvents(t *testing.T) {
 
 	resumed, err := acc.Events(ctx, encodeCursor(first[len(first)-1].Sequence))
 	require.NoError(t, err)
-	defer resumed.Close()
+	defer func() { _ = resumed.Close() }()
 	second := drainEvents(t, resumed)
 	require.Len(t, second, 1)
 	assert.Equal(t, uint64(2), second[0].Sequence)
@@ -383,7 +383,7 @@ func TestEventsEmptyCursorReplaysFromBeginningIncludingDuplicates(t *testing.T) 
 	reader1, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	first := drainEvents(t, reader1)
-	reader1.Close()
+	_ = reader1.Close()
 
 	// A consumer that resumes from the zero cursor again (for example,
 	// after losing its own saved cursor) sees the same event a second
@@ -392,7 +392,7 @@ func TestEventsEmptyCursorReplaysFromBeginningIncludingDuplicates(t *testing.T) 
 	// Event.Metadata.EventID.
 	reader2, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	defer reader2.Close()
+	defer func() { _ = reader2.Close() }()
 	second := drainEvents(t, reader2)
 	require.Len(t, second, 1)
 	assert.Equal(t, first[0].Metadata.EventID, second[0].Metadata.EventID)
@@ -407,7 +407,7 @@ func TestEventsNextRespectsCanceledContext(t *testing.T) {
 
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	canceledCtx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -434,7 +434,7 @@ func TestEventsNextRespectsContextCanceledWhileBlockedOnMutex(t *testing.T) {
 
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	cancelCtx, cancel := context.WithCancel(ctx)
 
