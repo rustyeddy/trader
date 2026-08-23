@@ -33,12 +33,11 @@ implementing live reconciliation (that remains ADR-009 and the future
 =broker.Event= is a concrete struct carrying =Metadata id.Metadata=,
 =ObservedAt time.Time=, =Sequence uint64=, =Kind EventKind=, and four
 mutually exclusive payload pointers: =Order *order.Order=,
-=Fill *order.Fill=, =Account *account.Snapshot=, =Status
-*AccountStatus=. This follows the architecture document's own guidance
-for canonical market-data events: "A convenience union may be named
-X.Event, but the concrete event kind should remain explicit." =NewEvent=
-enforces that exactly one payload pointer is set and that it matches
-=Kind=.
+=Fill *order.Fill=, =Account *account.Snapshot=, =Status *Status=. This
+follows the architecture document's own guidance for canonical
+market-data events: "A convenience union may be named X.Event, but the
+concrete event kind should remain explicit." =NewEvent= enforces that
+exactly one payload pointer is set and that it matches =Kind=.
 
 =EventKindOrder= covers acceptance, rejection, and every other status
 change as *one* kind, not one kind per =order.Status= value:
@@ -55,13 +54,27 @@ the two disagree about what "current" balances are. A consumer that
 wants to know specifically what changed can diff two received
 Snapshots itself.
 
-=EventKindStatus= reports broker/session operational status
-(=AccountStatus=: Unknown, Active, Degraded, Disconnected) — distinct
-from =order.Status= and from live-session guard state (the future
-=live= package's own, broader concept). A deterministic simulator,
-having no network to lose, is not expected to ever report
-=AccountStatusDisconnected=; this value exists for future real broker
-adapters.
+=EventKindStatus= reports broker/session operational status via
+=Status{State AccountStatus, BrokerCode string, Message string}=.
+=State= is Trader's broker-neutral classification (Unknown, Active,
+Degraded, Disconnected) — distinct from =order.Status= and from
+live-session guard state (the future =live= package's own, broader
+concept). A deterministic simulator, having no network to lose, is not
+expected to ever report =AccountStatusDisconnected=; this value exists
+for future real broker adapters.
+
+=Status= is a small value struct, not a bare =AccountStatus=, so that
+=BrokerCode=/=Message= can independently preserve whatever raw status
+detail a real adapter received — the same pattern =order.Rejection=
+already established (ADR-017/ADR-018): =order.RejectReason= classifies
+while =order.Rejection.BrokerCode= independently preserves the
+broker's original text. Without this, an adapter encountering a status
+it cannot classify would have to collapse the entire event to
+=AccountStatusUnknown= and discard the provider's own diagnostic
+detail — exactly the failure mode ADR-017 already avoided for order
+rejections. =BrokerCode=/=Message= are optional; a deterministic
+simulator, which has no real broker status codes to report, leaves
+them empty.
 
 =EventKind='s zero value is reserved as invalid/unset, the same as
 =order.Side=/=order.Type= (ADR-017): Trader itself decides which kind
@@ -69,10 +82,10 @@ an event is when constructing it, so — unlike =order.Status= or
 =order.RejectReason=, which are broker-reported — there is no
 "unknown kind" case to preserve. =AccountStatus=, by contrast, *is*
 broker-reported, so its zero value (=AccountStatusUnknown=) is a legal,
-meaningful =Event.Status= value under the same pattern ADR-017
+meaningful =Status.State= value under the same pattern ADR-017
 established for =order.Status=/=order.RejectReason=: an adapter that
-cannot classify a status still reports the event rather than dropping
-it.
+cannot classify a status still reports the event, with whatever raw
+detail it has, rather than dropping it.
 
 ** Identity, correlation, and two distinct timestamps
 

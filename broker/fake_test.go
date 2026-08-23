@@ -291,6 +291,18 @@ func (r *fakeEventReader) Next(ctx context.Context) (broker.Event, error) {
 
 	r.account.broker.mu.Lock()
 	defer r.account.broker.mu.Unlock()
+
+	// Re-check ctx after acquiring the mutex: the pre-lock check above
+	// only catches cancellation that happened before Next was called.
+	// Without this second check, Next could block on a contended mutex
+	// past the point ctx was canceled and then report io.EOF or a stale
+	// event instead of ctx.Err() once it finally acquires the lock.
+	select {
+	case <-ctx.Done():
+		return broker.Event{}, ctx.Err()
+	default:
+	}
+
 	if r.closed {
 		return broker.Event{}, broker.ErrClosed
 	}

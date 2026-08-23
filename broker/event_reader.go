@@ -2,11 +2,16 @@ package broker
 
 import "context"
 
-// EventCursor resumes an Account's event stream from a prior position.
-// It is opaque, matching account.Snapshot.Cursor (ADR-019): callers
-// carry it but do not interpret it. The zero EventCursor ("") means
-// "start from the beginning of whatever backlog this Broker/Account
-// retains" — an empty cursor is always legal, never an error.
+// EventCursor resumes an Account's event stream strictly after the
+// event it represents: Account.Events(ctx, cursor) never redelivers an
+// Event whose Sequence is <= a correctly persisted cursor. It is
+// opaque, matching account.Snapshot.Cursor (ADR-019): callers carry it
+// but do not interpret it. The zero EventCursor ("") means "start from
+// the beginning of whatever backlog this Broker/Account retains" — an
+// empty cursor is always legal, never an error. See Event's doc comment
+// for how at-least-once delivery still arises despite this guarantee —
+// it lives in the consumer's own cursor-persistence timing, not in this
+// contract.
 type EventCursor string
 
 // EventReader streams an Account's Event values in ascending Sequence

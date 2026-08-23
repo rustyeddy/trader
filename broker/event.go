@@ -70,11 +70,11 @@ func (k EventKind) valid() bool {
 }
 
 // AccountStatus is a broker session's or account's operational status
-// as reported through an EventKindStatus Event. Unlike EventKind, this
-// value is broker-reported, not Trader-decided, so — matching
-// order.Status and order.RejectReason (ADR-017) — its zero value is
-// reserved for status an adapter cannot classify, rather than treating
-// an unrecognized value as fatal.
+// classification, carried by Status.State. Unlike EventKind, this value
+// is broker-reported, not Trader-decided, so — matching order.Status
+// and order.RejectReason (ADR-017) — its zero value is reserved for
+// status an adapter cannot classify, rather than treating an
+// unrecognized value as fatal.
 type AccountStatus uint8
 
 const (
@@ -124,6 +124,35 @@ func (s AccountStatus) valid() bool {
 	}
 }
 
+// Status is the payload of an EventKindStatus Event. State is Trader's
+// broker-neutral classification (see AccountStatus); BrokerCode and
+// Message preserve whatever raw status detail the broker itself
+// reported, even when State can only be classified as
+// AccountStatusUnknown. This follows the same pattern order.Rejection
+// established (ADR-017/ADR-018): order.RejectReason classifies while
+// order.Rejection.BrokerCode independently preserves the broker's
+// original text, so an adapter encountering a status it cannot
+// classify still reports the event with full provider diagnostic
+// detail rather than collapsing to State alone and discarding it.
+// BrokerCode and Message are both optional and may be empty — a
+// deterministic simulator, which has no real broker status codes to
+// report, is expected to leave them empty.
+type Status struct {
+	// State is this status event's broker-neutral classification.
+	State AccountStatus
+	// BrokerCode is the broker's own status code or identifier, if it
+	// reported one. Preserved independently of whether State could be
+	// classified.
+	BrokerCode string
+	// Message is the broker's own human-readable status text, if it
+	// reported one.
+	Message string
+}
+
+func (s Status) valid() bool {
+	return s.State.valid()
+}
+
 // Event is one broker-neutral occurrence delivered through an
 // Account's EventReader (ADR-024). Kind says which of Order, Fill,
 // Account, or Status is populated; the other three are nil.
@@ -163,13 +192,20 @@ func (s AccountStatus) valid() bool {
 //
 // # Duplicates, delayed, and out-of-order delivery
 //
-// Event delivery is at-least-once, matching the architecture document's
-// general delivery-semantics rule: a consumer resuming from an
-// EventCursor after a disconnect may receive one or more events it
-// already saw (Sequence <= the cursor it resumed from). Consumers must
-// dedupe by Metadata.EventID — the same idempotency discipline
+// Account.Events(ctx, cursor) resumes strictly after the last event
+// cursor represents: an implementation never redelivers an event whose
+// Sequence is <= a correctly persisted cursor. Event delivery is still
+// at-least-once overall, matching the architecture document's general
+// delivery-semantics rule, but the redelivery risk lives entirely in
+// the consumer's own cursor bookkeeping, not in this contract: a
+// consumer that crashes after processing an event but before durably
+// saving cursor for it will resume from its last *persisted* cursor and
+// legitimately see that event again. Consumers must dedupe by
+// Metadata.EventID regardless — the same idempotency discipline
 // order.Order's Apply* functions already require for fills and
-// cancel/replace results (ADR-018). Within one uninterrupted stream, an
+// cancel/replace results (ADR-018) — since a consumer can never prove
+// its own cursor persistence was perfectly synchronized with its
+// processing. Within one uninterrupted stream, an
 // implementation must not reorder or skip events; EventReader.Next
 // never returns a later Sequence before an earlier one. Reconciling a
 // stream that appears to have skipped Sequence values entirely (for
@@ -194,7 +230,7 @@ type Event struct {
 	Order   *order.Order
 	Fill    *order.Fill
 	Account *account.Snapshot
-	Status  *AccountStatus
+	Status  *Status
 }
 
 // NewEvent validates and returns an Event. Metadata.EventID must be
@@ -269,7 +305,7 @@ func NewEvent(e Event) (Event, error) {
 			return Event{}, fmt.Errorf("%w: kind status requires Status", ErrInvalidEvent)
 		}
 		if !e.Status.valid() {
-			return Event{}, fmt.Errorf("%w: invalid account status %v", ErrInvalidEvent, *e.Status)
+			return Event{}, fmt.Errorf("%w: invalid account status %v", ErrInvalidEvent, e.Status.State)
 		}
 	}
 

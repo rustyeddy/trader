@@ -81,7 +81,7 @@ func TestNewEventAccountValid(t *testing.T) {
 }
 
 func TestNewEventStatusValid(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 
 	e := baseEvent(t)
 	e.Kind = broker.EventKindStatus
@@ -91,11 +91,30 @@ func TestNewEventStatusValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, broker.EventKindStatus, got.Kind)
 	require.NotNil(t, got.Status)
-	assert.Equal(t, broker.AccountStatusActive, *got.Status)
+	assert.Equal(t, broker.AccountStatusActive, got.Status.State)
+}
+
+func TestNewEventStatusPreservesBrokerCodeAndMessageEvenWhenUnknown(t *testing.T) {
+	status := broker.Status{
+		State:      broker.AccountStatusUnknown,
+		BrokerCode: "V20-STREAM-9",
+		Message:    "unrecognized session state from provider",
+	}
+
+	e := baseEvent(t)
+	e.Kind = broker.EventKindStatus
+	e.Status = &status
+
+	got, err := broker.NewEvent(e)
+	require.NoError(t, err)
+	require.NotNil(t, got.Status)
+	assert.Equal(t, broker.AccountStatusUnknown, got.Status.State)
+	assert.Equal(t, "V20-STREAM-9", got.Status.BrokerCode)
+	assert.Equal(t, "unrecognized session state from provider", got.Status.Message)
 }
 
 func TestNewEventStatusUnknownIsLegal(t *testing.T) {
-	status := broker.AccountStatusUnknown
+	status := broker.Status{State: broker.AccountStatusUnknown}
 
 	e := baseEvent(t)
 	e.Kind = broker.EventKindStatus
@@ -106,7 +125,7 @@ func TestNewEventStatusUnknownIsLegal(t *testing.T) {
 }
 
 func TestNewEventRejectsZeroEventID(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 	e := baseEvent(t)
 	e.Metadata.EventID = id.EventID{}
 	e.Kind = broker.EventKindStatus
@@ -117,7 +136,7 @@ func TestNewEventRejectsZeroEventID(t *testing.T) {
 }
 
 func TestNewEventRejectsZeroTimestamp(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 	e := baseEvent(t)
 	e.Metadata.Timestamp = time.Time{}
 	e.Kind = broker.EventKindStatus
@@ -128,7 +147,7 @@ func TestNewEventRejectsZeroTimestamp(t *testing.T) {
 }
 
 func TestNewEventRejectsZeroObservedAt(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 	e := baseEvent(t)
 	e.ObservedAt = time.Time{}
 	e.Kind = broker.EventKindStatus
@@ -139,7 +158,7 @@ func TestNewEventRejectsZeroObservedAt(t *testing.T) {
 }
 
 func TestNewEventRejectsZeroSequence(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 	e := baseEvent(t)
 	e.Sequence = 0
 	e.Kind = broker.EventKindStatus
@@ -150,7 +169,7 @@ func TestNewEventRejectsZeroSequence(t *testing.T) {
 }
 
 func TestNewEventRejectsInvalidKind(t *testing.T) {
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 	e := baseEvent(t)
 	e.Kind = broker.EventKindUnknown
 	e.Status = &status
@@ -170,7 +189,7 @@ func TestNewEventRejectsNoPayload(t *testing.T) {
 func TestNewEventRejectsMultiplePayloads(t *testing.T) {
 	accountID := mustAccountID(t)
 	o := mustSubmittedOrder(t, accountID)
-	status := broker.AccountStatusActive
+	status := broker.Status{State: broker.AccountStatusActive}
 
 	e := baseEvent(t)
 	e.Kind = broker.EventKindOrder
@@ -194,7 +213,7 @@ func TestNewEventRejectsKindPayloadMismatch(t *testing.T) {
 }
 
 func TestNewEventRejectsOrderKindWithoutOrderPayload(t *testing.T) {
-	invalid := broker.AccountStatus(0)
+	invalid := broker.Status{}
 	e := baseEvent(t)
 	e.Kind = broker.EventKindOrder
 	e.Status = &invalid // populated == 1, but wrong field for EventKindOrder
@@ -204,7 +223,7 @@ func TestNewEventRejectsOrderKindWithoutOrderPayload(t *testing.T) {
 }
 
 func TestNewEventRejectsAccountKindWithoutAccountPayload(t *testing.T) {
-	invalid := broker.AccountStatus(0)
+	invalid := broker.Status{}
 	e := baseEvent(t)
 	e.Kind = broker.EventKindAccount
 	e.Status = &invalid // populated == 1, but wrong field for EventKindAccount
@@ -245,7 +264,7 @@ func TestNewEventRejectsInvalidFill(t *testing.T) {
 }
 
 func TestNewEventRejectsInvalidAccountStatus(t *testing.T) {
-	invalid := broker.AccountStatus(200)
+	invalid := broker.Status{State: broker.AccountStatus(200)}
 	e := baseEvent(t)
 	e.Kind = broker.EventKindStatus
 	e.Status = &invalid

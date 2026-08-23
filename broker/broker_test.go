@@ -415,6 +415,62 @@ func TestEventsNextRespectsCanceledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// TestEventsNextRespectsContextCanceledWhileBlockedOnMutex is the
+// regression for the post-lock ctx re-check in fakeEventReader.Next:
+// it holds the broker's mutex on another goroutine, cancels ctx while
+// Next is blocked waiting to acquire it, and confirms Next returns
+// ctx.Err() rather than a stale event or io.EOF once it finally
+// acquires the lock.
+func TestEventsNextRespectsContextCanceledWhileBlockedOnMutex(t *testing.T) {
+	ctx := context.Background()
+	accountID := mustAccountID(t)
+	b := newFakeBroker("sim", mustSnapshot(t, accountID, "sim"))
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer reader.Close()
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+
+	// Hold the broker's mutex on another goroutine before starting
+	// Next, so Next passes its pre-lock check (ctx not yet canceled),
+	// then genuinely blocks trying to acquire the contended mutex.
+	// fakeBroker is defined in this same package (broker_test), so its
+	// unexported mu field is directly accessible here.
+	release := make(chan struct{})
+	held := make(chan struct{})
+	b.mu.Lock()
+	go func() {
+		<-held
+		<-release
+		b.mu.Unlock()
+	}()
+	close(held)
+
+	done := make(chan struct{})
+	var nextErr error
+	go func() {
+		_, nextErr = reader.Next(cancelCtx)
+		close(done)
+	}()
+
+	// Give the Next goroutine a chance to pass its pre-lock check and
+	// start blocking on the held mutex before canceling — without this,
+	// cancel could race ahead of Next even starting.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	close(release)
+
+	<-done
+	require.ErrorIs(t, nextErr, context.Canceled)
+}
+
 func TestEventsReaderCloseThenNextReturnsClosed(t *testing.T) {
 	ctx := context.Background()
 	accountID := mustAccountID(t)
