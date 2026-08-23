@@ -19,6 +19,19 @@ import (
 // (construction, or a Submit); Snapshot reports it directly rather than
 // re-reading the clock on every query, so two Snapshot calls with no
 // intervening state change report identical AsOf values.
+//
+// closed and changed together let eventReader.Next block for a future
+// event instead of returning io.EOF merely because it has caught up
+// (ADR-024: io.EOF from a live-style stream must mean the producer
+// itself has ended, not "nothing new yet"). changed is closed and
+// replaced with a fresh channel every time events grows; a blocked
+// reader observes the close, wakes, and rechecks. closed is set true
+// exactly once, by Broker.Close, at which point changed is closed one
+// final time (and never replaced) to wake every blocked reader for
+// good. Both fields are read and written only while holding mu, which
+// is what lets Submit and Broker.Close safely race against each other
+// without ever double-closing changed — see commitOrderEvent and
+// Broker.Close.
 type accountState struct {
 	mu sync.Mutex
 
@@ -32,6 +45,9 @@ type accountState struct {
 
 	events       []brokerpkg.Event
 	nextSequence uint64
+
+	closed  bool
+	changed chan struct{}
 }
 
 // zeroMoney returns zero money denominated in currency.
@@ -109,6 +125,8 @@ func (s *accountState) buildOrderEvent(deps Deps, o order.Order, causationID id.
 func (s *accountState) commitOrderEvent(ev brokerpkg.Event) {
 	s.nextSequence = ev.Sequence
 	s.events = append(s.events, ev)
+	close(s.changed)
+	s.changed = make(chan struct{})
 }
 
 // cloneOrder returns a copy of o that shares no pointer or slice state
@@ -193,6 +211,17 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
+
+	// Re-check under state.mu: h.broker.isClosed() above is only a fast
+	// pre-check under a different mutex (Broker.mu), so Close could run
+	// between it and this point. h.state.closed is set only while
+	// holding state.mu (see Broker.Close), so this check is the
+	// authoritative one — without it, a Submit racing a concurrent
+	// Close could call commitOrderEvent after Close already closed
+	// h.state.changed, double-closing it and panicking.
+	if h.state.closed {
+		return order.Order{}, brokerpkg.ErrClosed
+	}
 
 	if existing, ok := h.state.openOrders[req.OrderID]; ok {
 		return cloneOrder(existing), nil

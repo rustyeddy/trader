@@ -76,6 +76,7 @@ func NewBroker(name string, deps Deps, configs ...AccountConfig) (*Broker, error
 			zero:       zero,
 			asOf:       now,
 			openOrders: make(map[id.OrderID]order.Order),
+			changed:    make(chan struct{}),
 		}
 	}
 
@@ -116,12 +117,32 @@ func (b *Broker) OpenAccount(ctx context.Context, accountID id.AccountID) (broke
 }
 
 // Close implements broker.Broker. It marks every account handle opened
-// from this Broker as closed too; Close itself never returns an error
-// and is safe to call more than once.
+// from this Broker as closed too, and wakes every EventReader currently
+// blocked in Next so each observes the close and returns io.EOF (see
+// accountState's doc comment and eventReader.Next) rather than blocking
+// forever. Close itself never returns an error and is safe to call more
+// than once.
 func (b *Broker) Close() error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
 	b.closed = true
+	accounts := make([]*accountState, 0, len(b.accounts))
+	for _, state := range b.accounts {
+		accounts = append(accounts, state)
+	}
+	b.mu.Unlock()
+
+	for _, state := range accounts {
+		state.mu.Lock()
+		if !state.closed {
+			state.closed = true
+			close(state.changed)
+		}
+		state.mu.Unlock()
+	}
 	return nil
 }
 

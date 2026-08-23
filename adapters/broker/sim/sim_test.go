@@ -90,18 +90,33 @@ func mustRequest(t *testing.T, gen *id.Generator, accountID id.AccountID) order.
 	return req
 }
 
-func drainEvents(t *testing.T, reader brokerpkg.EventReader) []brokerpkg.Event {
+// drainEvents reads exactly n events from reader. Next blocks rather
+// than returning io.EOF merely because it has caught up (ADR-024), so
+// callers must already know how many events to expect — there is no
+// "read whatever is currently available" call that terminates on its
+// own short of the account's owning Broker being closed.
+func drainEvents(t *testing.T, reader brokerpkg.EventReader, n int) []brokerpkg.Event {
 	t.Helper()
 	ctx := context.Background()
-	var events []brokerpkg.Event
-	for {
+	events := make([]brokerpkg.Event, 0, n)
+	for range n {
 		e, err := reader.Next(ctx)
-		if errors.Is(err, io.EOF) {
-			return events
-		}
 		require.NoError(t, err)
 		events = append(events, e)
 	}
+	return events
+}
+
+// assertNoMoreEventsSoon confirms reader does not deliver another event
+// within a short window, without asserting exactly what would happen
+// if it waited forever (which would only be resolved by a later Submit
+// or the owning Broker closing).
+func assertNoMoreEventsSoon(t *testing.T, reader brokerpkg.EventReader) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := reader.Next(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestNewBrokerRejectsEmptyName(t *testing.T) {
@@ -352,8 +367,9 @@ func TestAccountSubmitIsIdempotentOnOrderID(t *testing.T) {
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	events := drainEvents(t, reader)
-	require.Len(t, events, 1, "a resubmission of the same OrderID must not emit a second event")
+	events := drainEvents(t, reader, 1)
+	require.Len(t, events, 1)
+	assertNoMoreEventsSoon(t, reader) // a resubmission of the same OrderID must not emit a second event
 }
 
 func TestAccountSubmitRejectsInvalidRequest(t *testing.T) {
@@ -564,7 +580,7 @@ func TestAccountSubmitLeavesNoStateWhenEventGenerationFails(t *testing.T) {
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	assert.Empty(t, drainEvents(t, reader), "a failed event build must append no event")
+	assertNoMoreEventsSoon(t, reader) // a failed event build must append no event
 }
 
 func TestAccountCancelReturnsUnsupported(t *testing.T) {
@@ -625,8 +641,7 @@ func TestAccountEventsDeterministicOrderAndReplay(t *testing.T) {
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	events := drainEvents(t, reader)
-	require.Len(t, events, 2)
+	events := drainEvents(t, reader, 2)
 	assert.Equal(t, uint64(1), events[0].Sequence)
 	assert.Equal(t, uint64(2), events[1].Sequence)
 	assert.Equal(t, req1.OrderID, events[0].Order.Request.OrderID)
@@ -635,7 +650,7 @@ func TestAccountEventsDeterministicOrderAndReplay(t *testing.T) {
 	reader2, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader2.Close() }()
-	replay := drainEvents(t, reader2)
+	replay := drainEvents(t, reader2, 2)
 	assert.Equal(t, events, replay)
 }
 
@@ -654,8 +669,7 @@ func TestAccountEventsResumeFromCursorSkipsDelivered(t *testing.T) {
 
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
-	first := drainEvents(t, reader)
-	require.Len(t, first, 1)
+	first := drainEvents(t, reader, 1)
 	_ = reader.Close()
 
 	req2 := mustRequest(t, deps.IDs, accountID)
@@ -666,8 +680,7 @@ func TestAccountEventsResumeFromCursorSkipsDelivered(t *testing.T) {
 	resumed, err := acc.Events(ctx, cursor)
 	require.NoError(t, err)
 	defer func() { _ = resumed.Close() }()
-	second := drainEvents(t, resumed)
-	require.Len(t, second, 1)
+	second := drainEvents(t, resumed, 1)
 	assert.Equal(t, uint64(2), second[0].Sequence)
 }
 
@@ -708,6 +721,13 @@ func TestAccountEventsNextRespectsCanceledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// TestAccountEventsNextRespectsContextCanceledWhileBlockedOnMutex holds
+// the reader's own mutex externally, with no event yet recorded, so
+// Next must genuinely block trying to acquire it; canceling ctx while
+// blocked there must still surface as ctx.Err() once Next proceeds —
+// not a stale success — whether Next notices the cancellation while
+// still contending for the mutex or only once it reaches its final
+// blocking select.
 func TestAccountEventsNextRespectsContextCanceledWhileBlockedOnMutex(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -715,10 +735,6 @@ func TestAccountEventsNextRespectsContextCanceledWhileBlockedOnMutex(t *testing.
 	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
 	require.NoError(t, err)
 	acc, err := b.OpenAccount(ctx, accountID)
-	require.NoError(t, err)
-
-	req := mustRequest(t, deps.IDs, accountID)
-	_, err = acc.Submit(ctx, req)
 	require.NoError(t, err)
 
 	reader, err := acc.Events(ctx, "")
@@ -748,6 +764,129 @@ func TestAccountEventsNextRespectsContextCanceledWhileBlockedOnMutex(t *testing.
 
 	<-done
 	require.ErrorIs(t, nextErr, context.Canceled)
+}
+
+// TestAccountEventsNextBlocksUntilLaterSubmit is the regression for the
+// ADR-024 contract Next must honor: it must not return io.EOF merely
+// because it has caught up. It opens a reader against an account with
+// no events yet, starts Next in a goroutine, confirms Next has not
+// returned after a short wait, then Submits and confirms Next delivers
+// exactly that event rather than having already given up.
+func TestAccountEventsNextBlocksUntilLaterSubmit(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	result := make(chan struct {
+		event brokerpkg.Event
+		err   error
+	}, 1)
+	go func() {
+		e, err := reader.Next(ctx)
+		result <- struct {
+			event brokerpkg.Event
+			err   error
+		}{e, err}
+	}()
+
+	select {
+	case <-result:
+		t.Fatal("Next returned before any event existed; it must block, not return io.EOF, per ADR-024")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	req := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	select {
+	case r := <-result:
+		require.NoError(t, r.err)
+		assert.Equal(t, uint64(1), r.event.Sequence)
+		assert.Equal(t, req.OrderID, r.event.Order.Request.OrderID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not deliver the event Submit produced")
+	}
+}
+
+// TestAccountEventsNextReturnsEOFAfterBrokerClose confirms io.EOF is
+// reserved for the producer actually ending (Broker.Close), including
+// waking a reader that is already blocked in Next at the moment Close
+// is called.
+func TestAccountEventsNextReturnsEOFAfterBrokerClose(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := reader.Next(ctx)
+		done <- err
+	}()
+
+	// Give Next a moment to actually reach its blocking select before
+	// closing, so this exercises "wakes an already-blocked reader," not
+	// merely "a reader that starts after Close sees closed immediately."
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, b.Close())
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, io.EOF)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not wake up after Broker.Close")
+	}
+}
+
+// TestAccountEventsNextReturnedEventDoesNotAliasStoredLog confirms
+// mutating an Event Next returns cannot corrupt the account's own
+// recorded event log — the aliasing guarantee Copilot's review flagged
+// as missing.
+func TestAccountEventsNextReturnedEventDoesNotAliasStoredLog(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	events := drainEvents(t, reader, 1)
+	require.NotNil(t, events[0].Order.AcceptedQuantity)
+
+	mutated := num.MustParseQuantity("999999")
+	*events[0].Order.AcceptedQuantity = mutated
+
+	reader2, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader2.Close() }()
+	replay := drainEvents(t, reader2, 1)
+	require.NotNil(t, replay[0].Order.AcceptedQuantity)
+	assert.True(t, replay[0].Order.AcceptedQuantity.Equal(req.Quantity),
+		"mutating a previously delivered Event's Order must not affect what a fresh reader observes")
 }
 
 func TestCloneOrderClonesEveryPointerAndSliceField(t *testing.T) {
@@ -840,6 +979,72 @@ func TestCloneOrderClonesRejection(t *testing.T) {
 
 	clone.Rejection.Detail = "mutated"
 	assert.Equal(t, "not enough margin", original.Rejection.Detail)
+}
+
+func TestCloneEventClonesFillCommission(t *testing.T) {
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	listing := mustEurUsdListing(t)
+	commission := usd("1.50")
+
+	fill, err := order.NewFill(order.Fill{
+		FillID:     mustFillID(t, deps.IDs),
+		OrderID:    mustOrderID(t, deps.IDs),
+		AccountID:  accountID,
+		Listing:    listing,
+		Side:       order.Buy,
+		Price:      num.MustParsePrice("1.10000"),
+		Quantity:   num.MustParseQuantity("1000"),
+		Commission: &commission,
+	})
+	require.NoError(t, err)
+
+	original, err := brokerpkg.NewEvent(brokerpkg.Event{
+		Metadata:   id.Metadata{EventID: mustEventID(t, deps.IDs), Timestamp: testStart},
+		ObservedAt: testStart,
+		Sequence:   1,
+		Kind:       brokerpkg.EventKindFill,
+		Fill:       &fill,
+	})
+	require.NoError(t, err)
+
+	clone := cloneEvent(original)
+	require.NotNil(t, clone.Fill.Commission)
+	assert.True(t, clone.Fill.Commission.Equal(commission))
+
+	mutated := usd("999.99")
+	*clone.Fill.Commission = mutated
+	assert.True(t, original.Fill.Commission.Equal(commission),
+		"mutating the clone's Commission must not affect the original event's Fill")
+}
+
+func TestCloneEventClonesStatus(t *testing.T) {
+	deps := testDeps()
+	status := brokerpkg.Status{State: brokerpkg.AccountStatusActive, BrokerCode: "OK", Message: "connected"}
+
+	original, err := brokerpkg.NewEvent(brokerpkg.Event{
+		Metadata:   id.Metadata{EventID: mustEventID(t, deps.IDs), Timestamp: testStart},
+		ObservedAt: testStart,
+		Sequence:   1,
+		Kind:       brokerpkg.EventKindStatus,
+		Status:     &status,
+	})
+	require.NoError(t, err)
+
+	clone := cloneEvent(original)
+	require.NotNil(t, clone.Status)
+	assert.Equal(t, *original.Status, *clone.Status)
+
+	clone.Status.Message = "mutated"
+	assert.Equal(t, "connected", original.Status.Message,
+		"mutating the clone's Status must not affect the original event's Status")
+}
+
+func mustFillID(t *testing.T, gen *id.Generator) id.FillID {
+	t.Helper()
+	fid, err := id.GenerateFillID(gen)
+	require.NoError(t, err)
+	return fid
 }
 
 func TestDecodeCursorMalformedStringDefaultsToZero(t *testing.T) {
