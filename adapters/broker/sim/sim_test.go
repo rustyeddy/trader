@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"testing"
 	"time"
 
@@ -464,6 +465,106 @@ func TestAccountSubmitStopOrderAcceptsRequestedPrice(t *testing.T) {
 	require.NotNil(t, o.AcceptedStopPrice)
 	assert.True(t, o.AcceptedStopPrice.Equal(stopPrice))
 	assert.Nil(t, o.AcceptedLimitPrice)
+}
+
+// TestSnapshotOpenOrdersOrderingIsDeterministic submits several orders
+// and confirms repeated Snapshot calls always report them in the same
+// order. accountState.openOrders is a map; without sorting before
+// building the Snapshot, Go's randomized map iteration would let two
+// otherwise-identical runs disagree on OpenOrders order, breaking this
+// package's determinism promise.
+func TestSnapshotOpenOrdersOrderingIsDeterministic(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	const numOrders = 8
+	var orderIDs []id.OrderID
+	for range numOrders {
+		req := mustRequest(t, deps.IDs, accountID)
+		_, err := acc.Submit(ctx, req)
+		require.NoError(t, err)
+		orderIDs = append(orderIDs, req.OrderID)
+	}
+
+	var want []string
+	for _, oid := range orderIDs {
+		want = append(want, oid.String())
+	}
+	sort.Strings(want)
+
+	for range 5 {
+		snap, err := acc.Snapshot(ctx)
+		require.NoError(t, err)
+		require.Len(t, snap.OpenOrders(), numOrders)
+
+		var got []string
+		for _, o := range snap.OpenOrders() {
+			got = append(got, o.Request.OrderID.String())
+		}
+		assert.Equal(t, want, got, "OpenOrders order must be identical across repeated Snapshot calls")
+	}
+}
+
+// failingEntropySource is an id.EntropySource that always fails,
+// letting tests force id.GenerateEventID (and therefore
+// accountState.buildOrderEvent) to fail deterministically.
+type failingEntropySource struct{}
+
+func (failingEntropySource) Entropy() ([10]byte, error) {
+	return [10]byte{}, errors.New("sim_test: injected entropy failure")
+}
+
+// TestAccountSubmitLeavesNoStateWhenEventGenerationFails is the
+// regression for the atomicity issue found in review: if
+// buildOrderEvent fails (here, forced via a failing EntropySource),
+// Submit must leave the account's state completely untouched — no
+// order accepted into OpenOrders, no event appended, and sequence
+// unchanged — so a retried Submit for the same OrderID starts fresh
+// rather than idempotently "succeeding" with an order that was never
+// actually recorded with a matching event.
+func TestAccountSubmitLeavesNoStateWhenEventGenerationFails(t *testing.T) {
+	ctx := context.Background()
+	c := clock.NewSimulated(testStart)
+	failingIDs := id.NewGenerator(c, failingEntropySource{})
+	deps := Deps{Clock: c, IDs: failingIDs}
+
+	workingGen := id.NewGenerator(c, id.NewDeterministic(1, 2))
+	accountID := mustAccountID(t, workingGen)
+
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     mustEurUsdListing(t),
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        order.Market,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+		Metadata:    id.Metadata{}, // EventID left zero: does not require the failing generator
+	})
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, mustOrderID(t, workingGen))
+	require.NoError(t, err)
+
+	_, err = acc.Submit(ctx, req)
+	require.Error(t, err, "Submit must fail when the injected id.Generator cannot produce an EventID")
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snap.OpenOrders(), "a failed event build must leave no order accepted into account state")
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	assert.Empty(t, drainEvents(t, reader), "a failed event build must append no event")
 }
 
 func TestAccountCancelReturnsUnsupported(t *testing.T) {

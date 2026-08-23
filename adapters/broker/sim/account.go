@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -39,12 +40,20 @@ func zeroMoney(currency num.Currency) (num.Money, error) {
 }
 
 // snapshotLocked builds this account's current account.Snapshot. The
-// caller must already hold s.mu.
+// caller must already hold s.mu. OpenOrders is sorted by OrderID before
+// account.NewSnapshot sees it: openOrders is a map, so ranging it
+// directly would expose Go's randomized map iteration order through
+// Snapshot.OpenOrders, breaking the reproducibility this package
+// otherwise guarantees — two calls against identical state must return
+// orders in the same order, not just the same set.
 func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	openOrders := make([]order.Order, 0, len(s.openOrders))
 	for _, o := range s.openOrders {
 		openOrders = append(openOrders, o)
 	}
+	sort.Slice(openOrders, func(i, j int) bool {
+		return openOrders[i].Request.OrderID.String() < openOrders[j].Request.OrderID.String()
+	})
 
 	return account.NewSnapshot(account.SnapshotParams{
 		AccountID:       s.ref.AccountID,
@@ -64,32 +73,42 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	})
 }
 
-// appendOrderEvent records o as a deterministic EventKindOrder Event.
-// The caller must already hold s.mu.
-func (s *accountState) appendOrderEvent(deps Deps, o order.Order, causationID id.EventID) error {
+// buildOrderEvent constructs the deterministic EventKindOrder Event
+// recording o, at the sequence this account's stream would assign it
+// next. It performs no mutation of s and returns an error, with s left
+// completely untouched, if event ID generation or validation fails —
+// the caller commits the returned Event (via commitOrderEvent) only
+// once every other part of the state transition it belongs to has also
+// succeeded, so a failure here can never leave an order accepted with
+// no matching event. The caller must already hold s.mu.
+func (s *accountState) buildOrderEvent(deps Deps, o order.Order, causationID id.EventID) (brokerpkg.Event, error) {
 	eventID, err := id.GenerateEventID(deps.IDs)
 	if err != nil {
-		return err
+		return brokerpkg.Event{}, err
 	}
 	now := deps.Clock.Now()
 	orderForEvent := cloneOrder(o)
-	s.nextSequence++
-	ev, err := brokerpkg.NewEvent(brokerpkg.Event{
+	return brokerpkg.NewEvent(brokerpkg.Event{
 		Metadata: id.Metadata{
 			EventID:     eventID,
 			CausationID: causationID,
 			Timestamp:   now,
 		},
 		ObservedAt: now,
-		Sequence:   s.nextSequence,
+		Sequence:   s.nextSequence + 1,
 		Kind:       brokerpkg.EventKindOrder,
 		Order:      &orderForEvent,
 	})
-	if err != nil {
-		return err
-	}
+}
+
+// commitOrderEvent appends an Event already built by buildOrderEvent
+// and advances s.nextSequence to match. The caller must already hold
+// s.mu and must not call this with an Event that was not just built
+// against s's current nextSequence — see Submit for the only intended
+// caller.
+func (s *accountState) commitOrderEvent(ev brokerpkg.Event) {
+	s.nextSequence = ev.Sequence
 	s.events = append(s.events, ev)
-	return nil
 }
 
 // cloneOrder returns a copy of o that shares no pointer or slice state
@@ -209,11 +228,20 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 		return order.Order{}, err
 	}
 
-	h.state.openOrders[req.OrderID] = cloneOrder(o)
-	h.state.asOf = now
-	if err := h.state.appendOrderEvent(h.broker.deps, o, req.Metadata.EventID); err != nil {
+	// Build the event before mutating any state: if event ID generation
+	// or validation fails, Submit must return an error with h.state
+	// left exactly as it was — never an order accepted into openOrders
+	// with no matching event, which would also break idempotency (a
+	// retry would see the OrderID already present and report success
+	// without ever emitting the event).
+	ev, err := h.state.buildOrderEvent(h.broker.deps, o, req.Metadata.EventID)
+	if err != nil {
 		return order.Order{}, err
 	}
+
+	h.state.openOrders[req.OrderID] = cloneOrder(o)
+	h.state.asOf = now
+	h.state.commitOrderEvent(ev)
 	return o, nil
 }
 
