@@ -1,0 +1,44 @@
+#+TITLE: Strategy Emits Intents, Not Broker Orders ADR-005
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#176 (M4-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-005's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+If a strategy calls a broker directly, then swapping backtest, paper, and
+live modes requires either divergent strategy code or hidden conditional
+branches.  It also blends decision-making with execution mechanics and
+risk admission.
+
+* Decision
+
+Strategies emit typed =Intent= values describing what they want to
+accomplish (enter, exit, adjust stop, or reach a target exposure).  A
+strategy never receives a broker handle and never submits a broker order.
+An execution stage translates intents into concrete order proposals; a
+risk stage evaluates them; a broker adapter submits the approved
+requests.
+
+* Consequences
+
+- The same strategy runs in backtest, paper trading, and live trading.
+- Execution and risk stages are testable independently of any strategy.
+- Strategy authors cannot bypass risk rules by calling a broker directly.
+- The intent model must express both action and target styles clearly
+  enough for real strategies to use.
+
+* Alternatives Considered
+
+- *Strategy holds a broker handle.* Rejected because it couples strategy
+  logic to broker adapters and blocks deterministic backtests.
+- *Strategy returns raw =order.Request= values.* Rejected because it forces
+  the strategy to encode tick, quantity, bracket, and idempotency
+  concerns that belong in execution and risk.
