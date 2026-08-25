@@ -35,4 +35,30 @@
 // request/response) that it deserves its own deliberate design when a
 // real transport consumer needs it, rather than being forced into this
 // package's request/response convention now.
+//
+// # Logging and credential redaction
+//
+// Every Service operation logs exactly one structured completion or
+// failure record (log.go, ADR-023, issue #156/M3-13), scoped with the
+// canonical logging.ComponentBroker attribute and built only from
+// typed request/result fields — account, order, and instrument
+// identity, order status, a result count — never a whole request,
+// response, or config value logged wholesale. Context-propagated
+// correlation and causation (logging.WithCorrelationID/
+// WithCausationID) reach every record automatically; Service has no
+// correlation-specific code of its own.
+//
+// adapters/broker/sim (the only brokerpkg.Broker this package is
+// exercised against today) carries no credentials at all, so no
+// redaction concern exists yet in practice. A real broker adapter
+// (OANDA, Milestone 5) will hold an API token or equivalent secret;
+// when that lands, any adapter-level record that might otherwise
+// include it must wrap the value with logging.Secret before it can
+// reach a logger, exactly as ADR-023's own redaction mechanism
+// requires — Service itself must keep logging only typed
+// account/order/instrument fields, never a raw adapter config or
+// credential value, so this boundary needs no adapter-specific
+// redaction work of its own even once a real adapter exists. That
+// adapter-level redaction work is explicitly deferred to Milestone 5;
+// it is not part of this package's own scope.
 package broker
