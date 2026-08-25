@@ -18,11 +18,13 @@ import (
 // (execution planning today, a future backtest/live composition root)
 // is the same type risk evaluates.
 //
-// Risk (ADR-006) evaluates a Proposal without mutating it: nothing in
-// this package exposes a setter, so a completed Proposal is already
-// structurally read-only from risk's side — risk produces a decision
-// about a Proposal, or a request for a differently-sized one, never an
-// edited copy in place.
+// Risk evaluates a Proposal as input and returns the risk decision
+// ADR-006/the M4 risk contract defines; it does not mutate the
+// supplied Proposal in place. This is a stage contract, not something
+// the Go type itself enforces — every field is exported, so nothing
+// prevents a caller from assigning to one directly. The exact
+// approve/reject/adjust semantics of that decision are resolved by
+// #180, not decided here.
 //
 // Field ownership within a Proposal is not uniformly settled yet.
 // Execution planning clearly owns the order-mechanics fields — Listing,
