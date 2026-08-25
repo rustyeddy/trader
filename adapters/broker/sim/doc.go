@@ -29,9 +29,24 @@
 // wrong result. A fill does not yet affect account cash: issue #152
 // also explicitly owns "cash/balance effects of fills," and a naive
 // full-notional debit/credit is not broker-neutral accounting (see
-// buildFill's doc comment in account.go). Cancel and Replace return
-// broker.ErrUnsupported here; issue #151 (M3-08) implements their
-// lifecycle semantics.
+// buildFill's doc comment in account.go).
+//
+// Cancel and Replace (issue #151, M3-08) resolve synchronously within
+// one call — this simulator has no real broker latency, so
+// StatusPendingCancel/StatusPendingReplace exist only transiently
+// inside one Cancel/Replace call's own event sequence, never as
+// durable state a later call observes. Both emit two causally chained
+// EventKindOrder events (pending, then resolved) when the target order
+// is StatusWorking/StatusPartiallyFilled; an order in any other
+// terminal status declines the command (CancelResult/ReplaceResult
+// reports the order's actual status and a Rejection) without any
+// transition or event, since nothing about the order changed. Replace
+// decides accept-versus-decline by revalidating the order with the
+// requested new values applied through order.NewOrder — the same
+// tick-size/quantity-increment/filled-quantity rules every other order
+// construction obeys — rather than inventing separate replace-specific
+// validation. See cancel_replace.go for the full contract, including
+// each method's idempotency story.
 //
 // Limit and stop orders remain StatusWorking with no fill matching at
 // Submit time; Broker.Advance (issue #150, M3-07, ADR-026) is how they
