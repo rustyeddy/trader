@@ -13,20 +13,25 @@
 // StatusWorking and emits the corresponding EventKindOrder event.
 //
 // A market order additionally fills immediately and completely at the
-// price Deps.Prices reports (issue #149, M3-06): Submit emits a second
-// EventKindOrder event recording the resulting StatusFilled transition,
-// an EventKindFill event, and updates the account's cash exactly via
-// num.Price.MulQuantity (ADR-025). This package has no partial-fill or
-// order-book volume model, so a market order's fill is always for its
-// complete accepted quantity. A fill that would open a new Position
-// from flat is supported; a fill against a listing where the account
-// already holds a Position returns ErrPositionUpdateUnsupported —
-// correctly adding to, reducing, closing, or reversing a position needs
-// weighted-average cost basis and realized PnL accounting that issue
-// #152 (M3-09) owns, and this package would rather report that plainly
-// than compute a silently wrong result. Limit and stop orders remain
-// StatusWorking with no fill matching until issue #150 (M3-07) adds
-// their trigger semantics. Cancel and Replace return
+// price Deps.Prices reports (issue #149, M3-06): Submit emits the
+// order-accepted EventKindOrder event (StatusWorking), then an
+// EventKindFill event, then a second EventKindOrder event recording
+// the resulting StatusFilled transition — in that deterministic order,
+// each causally chained to the one before it. This package has no
+// partial-fill or order-book volume model, so a market order's fill is
+// always for its complete accepted quantity. A fill that would open a
+// new Position from flat is supported; a fill against a listing where
+// the account already holds a Position returns
+// ErrPositionUpdateUnsupported — correctly adding to, reducing,
+// closing, or reversing a position needs weighted-average cost basis
+// and realized PnL accounting that issue #152 (M3-09) owns, and this
+// package would rather report that plainly than compute a silently
+// wrong result. A fill does not yet affect account cash: issue #152
+// also explicitly owns "cash/balance effects of fills," and a naive
+// full-notional debit/credit is not broker-neutral accounting (see
+// buildMarketFill's doc comment in account.go). Limit and stop orders
+// remain StatusWorking with no fill matching until issue #150 (M3-07)
+// adds their trigger semantics. Cancel and Replace return
 // broker.ErrUnsupported here; issue #151 (M3-08) implements their
 // lifecycle semantics.
 //

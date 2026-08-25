@@ -91,9 +91,14 @@ func zeroMoney(currency num.Currency) (num.Money, error) {
 // breaking the reproducibility this package otherwise guarantees — two
 // calls against identical state must return both in the same order,
 // not just the same set. Equity, BuyingPower, and MarginAvailable
-// track s.cash directly; this package models no leverage, margin, or
-// mark-to-market unrealized PnL of its own (that is risk's concern,
-// M4, and — for unrealized PnL specifically — issue #152's, M3-09).
+// track s.cash directly, and s.cash itself is not yet affected by
+// fills — a market order fill opens or reports a Position, but does
+// not debit or credit cash. This package models no leverage, margin,
+// mark-to-market unrealized PnL, or cash/balance settlement of its
+// own; issue #152 (M3-09) explicitly owns "cash/balance effects of
+// fills" and realized/unrealized PnL, and risk policy proper is M4's
+// concern. See buildMarketFill's doc comment for why this package
+// deliberately does not guess at a cash rule in the meantime.
 func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	openOrders := make([]order.Order, 0, len(s.orders))
 	for _, o := range s.orders {
@@ -378,13 +383,12 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 		return o, nil
 	}
 
-	filled, fillEvent, filledEvent, cashAfter, positionAfter, err := h.state.buildMarketFill(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+	filled, fillEvent, filledEvent, positionAfter, err := h.state.buildMarketFill(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
 	if err != nil {
 		return order.Order{}, err
 	}
 
 	h.state.orders[req.OrderID] = cloneOrder(filled)
-	h.state.cash = cashAfter
 	h.state.positions[keyForListing(req.Listing)] = positionAfter
 	h.state.asOf = now
 	h.state.commitEvents(acceptEvent, fillEvent, filledEvent)
@@ -394,7 +398,7 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 // buildMarketFill constructs everything a market order's immediate,
 // complete fill needs — the resulting filled Order, the EventKindFill
 // and second EventKindOrder (status-change) events, and this account's
-// post-fill cash and Position — without mutating s. acceptEventID and
+// post-fill Position — without mutating s. acceptEventID and
 // nextSequence are the EventID and Sequence of the just-built order-
 // accepted event (see Submit): the fill event is assigned nextSequence,
 // caused by acceptEventID, and the filled-status order event is
@@ -409,7 +413,18 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 // basis and realized PnL accounting that issue #152 (M3-09) owns, and
 // this package would rather report that plainly than compute a
 // silently wrong average price or PnL.
-func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID id.EventID, nextSequence uint64) (filled order.Order, fillEvent, filledEvent brokerpkg.Event, cashAfter num.Money, positionAfter order.Position, err error) {
+//
+// buildMarketFill deliberately does not touch s.cash: issue #152
+// (M3-09) explicitly owns "cash/balance effects of fills," and a naive
+// full-notional debit/credit against Equity/BuyingPower/MarginAvailable
+// is not broker-neutral accounting — a cash purchase should leave
+// equity roughly unchanged (cash converts into a position of
+// equivalent value, it is not a loss), and a listing's settlement
+// currency is not guaranteed to match the account's home currency in
+// the first place. Getting that right (asset valuation, margin,
+// multi-currency settlement) is #152's job; this package would rather
+// leave cash alone than encode a rule known to be wrong.
+func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID id.EventID, nextSequence uint64) (filled order.Order, fillEvent, filledEvent brokerpkg.Event, positionAfter order.Position, err error) {
 	req := o.Request
 	key := keyForListing(req.Listing)
 	if existing, ok := s.positions[key]; ok && existing.Side != order.Flat {
@@ -454,27 +469,6 @@ func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID i
 	}
 
 	filledEvent, err = s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, nextSequence+1)
-	if err != nil {
-		return
-	}
-
-	notional, err := price.MulQuantity(fillQty, req.Listing.Spec().SettlementCurrency())
-	if err != nil {
-		return
-	}
-	notional, err = notional.MulRate(req.Listing.Spec().Multiplier())
-	if err != nil {
-		return
-	}
-
-	// req.Side is already one of Buy/Sell: order.NewOrder (via o's own
-	// construction in Submit) already validated it through
-	// checkProposal, so there is no third case to handle here.
-	if req.Side == order.Buy {
-		cashAfter, err = s.cash.Sub(notional)
-	} else {
-		cashAfter, err = s.cash.Add(notional)
-	}
 	if err != nil {
 		return
 	}
