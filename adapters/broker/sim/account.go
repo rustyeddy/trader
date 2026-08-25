@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -527,6 +528,19 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	req := o.Request
 	key := keyForListing(req.Listing)
 	currency := req.Listing.Spec().SettlementCurrency()
+
+	// Checked first, before any other part of the fill is built:
+	// realized/unrealized PnL, cash, and fees are all computed and
+	// accumulated in currency, and this package has no FX conversion-
+	// rate source to reconcile it with a different account currency
+	// (see ErrUnsupportedSettlementCurrency's doc comment). Every
+	// transition below — open, increase, reduce, close, reverse —
+	// needs this to hold, not only the ones that realize PnL, so it is
+	// enforced uniformly up front rather than left to surface only
+	// when arithmetic happens to combine mismatched currencies.
+	if !currency.Equal(s.currency) {
+		return fillOutcome{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
+	}
 
 	fillID, err := id.GenerateFillID(deps.IDs)
 	if err != nil {

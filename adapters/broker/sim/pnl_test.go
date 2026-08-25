@@ -123,6 +123,66 @@ func TestAdvanceDoesNotRevalueWhenNoPositionExists(t *testing.T) {
 	assert.Empty(t, snapAfter.Positions())
 }
 
+// TestSubmitRejectsMismatchedSettlementCurrency covers the review
+// finding that a fill against a listing settling in a currency
+// different from the account's own must be rejected explicitly,
+// before any position/PnL state is touched — not left to surface as a
+// num.ErrCurrencyMismatch deep inside accounting arithmetic.
+func TestSubmitRejectsMismatchedSettlementCurrency(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	deps.Prices = fixedPriceSource{"EUR_GBP": num.MustParsePrice("0.85000")}
+	accountID := mustAccountID(t, deps.IDs) // USD account
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequestFor(t, deps.IDs, accountID, mustEurGbpListing(t), order.Buy, "1000")
+	_, err = acc.Submit(ctx, req)
+	require.ErrorIs(t, err, ErrUnsupportedSettlementCurrency)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions(), "the rejected fill must never have opened a position")
+	assert.Empty(t, snap.OpenOrders(), "the rejected fill must never have been accepted, matching Submit's other atomic failure modes")
+	assert.True(t, snap.Equity().Equal(usd("10000")))
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	assertNoMoreEventsSoon(t, reader) // not even the order-accepted event survives a failed fill
+}
+
+// TestAdvanceRejectsMismatchedSettlementCurrency is
+// TestSubmitRejectsMismatchedSettlementCurrency's Advance-driven
+// counterpart: a triggered limit/stop fill is rejected the same way, and
+// the rejection surfaces through Advance's per-account error, leaving
+// the pending order untouched.
+func TestAdvanceRejectsMismatchedSettlementCurrency(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs) // USD account
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	listing := mustEurGbpListing(t)
+	req := mustLimitRequestFor(t, deps.IDs, accountID, listing, order.Buy, "1000", "0.85000")
+	_, err = acc.Submit(ctx, req)
+	require.NoError(t, err) // Limit orders accept unconditionally; only a fill checks settlement currency
+
+	obs := mustObservation(t, listing, "0.84900", "0.85100", "0.84800", "0.85000", barTime)
+	err = b.Advance(ctx, obs)
+	require.ErrorIs(t, err, ErrUnsupportedSettlementCurrency)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions())
+	require.Len(t, snap.OpenOrders(), 1, "the rejected fill must leave the order pending, not consumed")
+}
+
 // TestPositionPnLIsIsolatedAcrossAccounts confirms realized/unrealized
 // PnL accounting, like cash and positions before it, never leaks
 // between accounts.

@@ -22,3 +22,15 @@ var ErrInvalidObservation = errors.New("sim: invalid observation")
 // orders for that listing are filled; every one remains exactly as it
 // was.
 var ErrAmbiguousIntrabarOrder = errors.New("sim: observation would trigger more than one pending order for this listing within one bar")
+
+// ErrUnsupportedSettlementCurrency reports a fill attempted against a
+// listing whose settlement currency (instrument.Spec
+// .SettlementCurrency) does not match the account's own currency
+// (issue #152, M3-09). Realized/unrealized PnL, cash, and fees are all
+// computed and accumulated in a listing's settlement currency; without
+// an FX conversion-rate source — which this package deliberately does
+// not invent — that arithmetic can only ever succeed when the two
+// currencies already agree. This is checked and rejected explicitly,
+// before any other part of a fill is built, rather than left to
+// surface as a num.ErrCurrencyMismatch deep inside PnL accounting.
+var ErrUnsupportedSettlementCurrency = errors.New("sim: listing settlement currency does not match account currency")

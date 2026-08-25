@@ -116,6 +116,31 @@ func mustGbpUsdListing(t *testing.T) instrument.Listing {
 	return listing
 }
 
+// mustEurGbpListing settles in GBP, deliberately not USD — used to
+// exercise ErrUnsupportedSettlementCurrency against the USD test
+// accounts every other fixture listing uses.
+func mustEurGbpListing(t *testing.T) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("GBP"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("GBP"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   "sim",
+		Symbol:     "EUR_GBP",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
 // mustRequest builds a Limit order request: this package's generic
 // lifecycle/idempotency/event-ordering tests use it because a Limit
 // order stays StatusWorking with no fill matching (issue #150, M3-07,

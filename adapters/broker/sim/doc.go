@@ -37,6 +37,17 @@
 // loss). See buildFill's doc comment in account.go for the full
 // reasoning and the design discussion this followed on issue #152.
 //
+// Every fill is rejected outright — before any position/PnL state is
+// touched — if the listing's settlement currency does not match the
+// account's own currency (ErrUnsupportedSettlementCurrency). Cash,
+// realized/unrealized PnL, and fees all accumulate in the listing's
+// settlement currency, and this package has no FX conversion-rate
+// source to reconcile a mismatch; rather than let that surface as a
+// num.ErrCurrencyMismatch deep inside PnL arithmetic (or, worse,
+// succeed silently on the zero-PnL open case and fail unpredictably
+// later), this package rejects the whole trade explicitly and
+// consistently across every transition.
+//
 // Cancel and Replace (issue #151, M3-08) resolve synchronously within
 // one call — this simulator has no real broker latency, so
 // StatusPendingCancel/StatusPendingReplace exist only transiently

@@ -28,10 +28,13 @@ func clonePrice(p num.Price) *num.Price {
 // against existing, the account's current position for listing (the
 // zero Position if hasExisting is false). currency is the listing's
 // quote/settlement currency (instrument.Spec.SettlementCurrency) —
-// every Money value in and out of this function is denominated in it;
-// composing with an account's own home currency, when it differs, is
-// the caller's job (see accountState.snapshotLocked's Equity/RealizedPnL
-// composition, and ADR-004's Money.Convert).
+// every Money value in and out of this function is denominated in it.
+// This package has no FX conversion-rate source, so it does not
+// compose that result with a different account home currency the way
+// ADR-004's Money.Convert could — buildFill instead requires the two
+// to already match before calling this function at all
+// (ErrUnsupportedSettlementCurrency), so applyFillToPosition itself
+// never has to reconcile a mismatch.
 //
 // Five transitions, matching #152's acceptance criteria exactly:
 //
