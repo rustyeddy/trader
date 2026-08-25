@@ -494,23 +494,8 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	return
 }
 
-// Cancel implements broker.Account. Cancel/replace lifecycle behavior
-// is issue #151 (M3-08)'s scope, not this package's yet.
-func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (order.CancelResult, error) {
-	if h.broker.isClosed() {
-		return order.CancelResult{}, brokerpkg.ErrClosed
-	}
-	return order.CancelResult{}, brokerpkg.ErrUnsupported
-}
-
-// Replace implements broker.Account. Cancel/replace lifecycle behavior
-// is issue #151 (M3-08)'s scope, not this package's yet.
-func (h *accountHandle) Replace(ctx context.Context, req order.ReplaceRequest) (order.ReplaceResult, error) {
-	if h.broker.isClosed() {
-		return order.ReplaceResult{}, brokerpkg.ErrClosed
-	}
-	return order.ReplaceResult{}, brokerpkg.ErrUnsupported
-}
+// Cancel and Replace implement broker.Account; see cancel_replace.go
+// (issue #151, M3-08).
 
 // Events implements broker.Account.
 func (h *accountHandle) Events(ctx context.Context, cursor brokerpkg.EventCursor) (brokerpkg.EventReader, error) {

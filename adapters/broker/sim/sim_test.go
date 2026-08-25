@@ -972,44 +972,8 @@ func TestAccountSubmitLeavesNoStateWhenEventGenerationFails(t *testing.T) {
 	assertNoMoreEventsSoon(t, reader) // a failed event build must append no event
 }
 
-func TestAccountCancelReturnsUnsupported(t *testing.T) {
-	ctx := context.Background()
-	deps := testDeps()
-	accountID := mustAccountID(t, deps.IDs)
-	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
-	require.NoError(t, err)
-	acc, err := b.OpenAccount(ctx, accountID)
-	require.NoError(t, err)
-
-	req := mustRequest(t, deps.IDs, accountID)
-	_, err = acc.Submit(ctx, req)
-	require.NoError(t, err)
-
-	cancelReq, err := order.NewCancelRequest(order.CancelRequest{OrderID: req.OrderID, Metadata: id.Metadata{EventID: mustEventID(t, deps.IDs)}})
-	require.NoError(t, err)
-	_, err = acc.Cancel(ctx, cancelReq)
-	require.ErrorIs(t, err, brokerpkg.ErrUnsupported)
-}
-
-func TestAccountReplaceReturnsUnsupported(t *testing.T) {
-	ctx := context.Background()
-	deps := testDeps()
-	accountID := mustAccountID(t, deps.IDs)
-	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
-	require.NoError(t, err)
-	acc, err := b.OpenAccount(ctx, accountID)
-	require.NoError(t, err)
-
-	req := mustRequest(t, deps.IDs, accountID)
-	_, err = acc.Submit(ctx, req)
-	require.NoError(t, err)
-
-	qty := num.MustParseQuantity("500")
-	replaceReq, err := order.NewReplaceRequest(order.ReplaceRequest{OrderID: req.OrderID, NewQuantity: &qty, Metadata: id.Metadata{EventID: mustEventID(t, deps.IDs)}})
-	require.NoError(t, err)
-	_, err = acc.Replace(ctx, replaceReq)
-	require.ErrorIs(t, err, brokerpkg.ErrUnsupported)
-}
+// Cancel/Replace behavior (issue #151, M3-08) is covered in
+// cancel_replace_test.go.
 
 func TestAccountEventsDeterministicOrderAndReplay(t *testing.T) {
 	ctx := context.Background()
