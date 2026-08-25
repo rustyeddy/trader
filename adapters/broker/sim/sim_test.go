@@ -27,6 +27,10 @@ var testStart = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 // their own FillPriceSource instead.
 type fixedPriceSource map[string]num.Price
 
+func (f fixedPriceSource) Info() ModelInfo {
+	return ModelInfo{Name: "fixedPriceSource", Version: "test"}
+}
+
 func (f fixedPriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
 	p, ok := f[listing.Symbol()]
 	if !ok {

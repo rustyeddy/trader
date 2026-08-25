@@ -21,6 +21,10 @@ type mutablePriceSource struct {
 	prices map[string]num.Price
 }
 
+func (m *mutablePriceSource) Info() ModelInfo {
+	return ModelInfo{Name: "mutablePriceSource", Version: "test"}
+}
+
 func (m *mutablePriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
 	p, ok := m.prices[listing.Symbol()]
 	if !ok {

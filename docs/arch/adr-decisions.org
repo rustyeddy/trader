@@ -135,6 +135,7 @@ the original decided, use full supersession instead.
 | 025 | Price-by-quantity notional multiplication (in adr-025-price-quantity-notional.org) | Accepted |
 | 026 | Simulated limit/stop orders: observation advancement, trigger, gap, intrabar-ambiguity semantics (in adr-026-simulated-limit-stop-orders.org) | Accepted |
 | 027 | Money-by-quantity division to recover a weighted-average price (in adr-027-money-quantity-price-division.org) | Accepted |
+| 028 | Configurable simulator fill, fee, and slippage models (in adr-028-simulator-fill-fee-slippage-models.org) | Accepted |
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -210,6 +211,14 @@ Issue #152 (M3-09) asks for the missing =Money÷Quantity→Price=
 weighted-average-price primitive to be drafted and adopted ahead of
 implementing simulated position accounting, which needs it for the
 "increase an existing position" transition.
+
+Note: ADR-028 is likewise maintained in its own file,
+=docs/arch/adr-028-simulator-fill-fee-slippage-models.org=, rather
+than inline in this registry.  Its own Status section is authoritative.
+Issue #153 (M3-10) asks for configurable, deterministic simulator
+fill/fee/slippage models — and their reproducibility identity for a
+future backtest manifest — to be drafted and adopted before
+implementation.
 
 * ADR-001: Modular monolith before service decomposition
 

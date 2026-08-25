@@ -499,31 +499,39 @@ func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcom
 	s.fees = outcome.fees
 }
 
-// buildFill constructs everything one complete fill of o, at price,
-// needs — the resulting filled Order, the EventKindFill and second
-// EventKindOrder (status-change) events, this account's post-fill
-// Position, its new mark for o.Request.Listing, and its post-fill
-// cash/realizedPnL/fees — without mutating s (see fillOutcome and
-// commitFill). causationID and sequence are the EventID and Sequence
-// the fill event is assigned; the filled-status order event is
-// assigned sequence+1, caused by the fill event's own EventID. Two
-// callers build price and causationID differently: Submit (issue
-// #149/M3-06) uses Deps.Prices and the just-built order-accepted
-// event's EventID; accountState.advance (issue #150/M3-07, ADR-026)
-// uses a trigger/gap-derived price and a zero causationID, since a
-// market-observation-triggered fill is not caused by any preceding
-// Trader-internal event.
+// buildFill constructs everything one complete fill of o needs — the
+// resulting filled Order, the EventKindFill and second EventKindOrder
+// (status-change) events, this account's post-fill Position, its new
+// mark for o.Request.Listing, and its post-fill cash/realizedPnL/fees
+// — without mutating s (see fillOutcome and commitFill). causationID
+// and sequence are the EventID and Sequence the fill event is
+// assigned; the filled-status order event is assigned sequence+1,
+// caused by the fill event's own EventID. Two callers build price and
+// causationID differently: Submit (issue #149/M3-06) uses Deps.Prices
+// and the just-built order-accepted event's EventID; accountState
+// .advance (issue #150/M3-07, ADR-026) uses a trigger/gap-derived
+// price and a zero causationID, since a market-observation-triggered
+// fill is not caused by any preceding Trader-internal event.
+//
+// price is only the base price on entry (issue #153, M3-10): if
+// Deps.Slippage is configured and o.Request.Type is Market or Stop,
+// buildFill immediately adjusts it to the model's returned final
+// execution price before anything else — the Fill itself, position/PnL
+// accounting, and the new mark all use that adjusted price, never the
+// pre-slippage base. Deps.Commission, if configured, is then consulted
+// from that same final price, matching a percentage/notional fee
+// model's expectation of seeing what was actually paid.
 //
 // The fill is always for o's complete AcceptedQuantity — this package
 // has no partial-fill/volume model. Position accounting (issue #152,
 // M3-09) covers all five transitions — open, increase, reduce, close,
 // reverse — via applyFillToPosition; see position.go. Cash moves only
-// by realized PnL and, when o's resulting Fill reports a non-nil
-// Commission, by that commission (applyCommission) — never by a
-// universal full-notional debit/credit, which is not broker-neutral
-// accounting (a cash purchase should leave equity roughly unchanged,
-// not book the full notional as an immediate loss; see the design
-// discussion on issue #152).
+// by realized PnL and, when a fill's Commission is set, by that
+// commission (applyCommission) — never by a universal full-notional
+// debit/credit, which is not broker-neutral accounting (a cash
+// purchase should leave equity roughly unchanged, not book the full
+// notional as an immediate loss; see the design discussion on issue
+// #152).
 func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
 	req := o.Request
 	key := keyForListing(req.Listing)
@@ -542,12 +550,39 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		return fillOutcome{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
 	}
 
+	fillQty := *o.AcceptedQuantity
+
+	// Slippage (issue #153, M3-10) only ever adjusts a market-type
+	// execution's price: a plain Market order, or a Stop that has
+	// already resolved its own trigger/gap price (ADR-026) and become
+	// one. A Limit fill is a price guarantee by definition and must
+	// never be adjusted, so it is never offered to deps.Slippage at
+	// all. The pipeline is: base price (Deps.Prices, or the
+	// observation trigger/gap rules) -> slippage -> final execution
+	// price, used for everything from here on — the Fill itself,
+	// position/PnL accounting, the new mark, and (below) commission.
+	if deps.Slippage != nil && (req.Type == order.Market || req.Type == order.Stop) {
+		adjusted, err := deps.Slippage.Slippage(req.Listing, req.Side, fillQty, price)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		price = adjusted
+	}
+
+	var commission *num.Money
+	if deps.Commission != nil {
+		c, err := deps.Commission.Commission(req.Listing, req.Side, fillQty, price)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+		commission = c
+	}
+
 	fillID, err := id.GenerateFillID(deps.IDs)
 	if err != nil {
 		return fillOutcome{}, err
 	}
 
-	fillQty := *o.AcceptedQuantity
 	fill, err := order.NewFill(order.Fill{
 		FillID:        fillID,
 		OrderID:       req.OrderID,
@@ -557,6 +592,7 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		Side:          req.Side,
 		Price:         price,
 		Quantity:      fillQty,
+		Commission:    commission,
 		Timestamp:     deps.Clock.Now(),
 	})
 	if err != nil {
