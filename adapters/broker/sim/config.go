@@ -28,21 +28,51 @@ type FillPriceSource interface {
 	Price(listing instrument.Listing, side order.Side) (num.Price, error)
 }
 
-// Deps supplies Broker's injected dependencies. Every field is
-// required: Broker never falls back to a wall clock or a global random
-// source (ADR-015), so a zero Deps is never usable.
+// IntrabarPolicy selects how Broker.Advance resolves an Observation
+// that would trigger more than one of an account's pending orders for
+// the same listing within one bar — OHLC data alone cannot establish
+// which order's trigger the market actually reached first (ADR-026).
+type IntrabarPolicy uint8
+
+const (
+	// IntrabarRejectAmbiguous is IntrabarPolicy's zero value and Deps's
+	// default: Advance reports ErrAmbiguousIntrabarOrder and leaves
+	// every one of the conflicting account's orders for that listing
+	// untouched, rather than guessing which triggered first.
+	IntrabarRejectAmbiguous IntrabarPolicy = iota
+	// IntrabarPessimistic is declared but not implemented (ADR-026):
+	// Advance reports broker.ErrUnsupported if selected. No scenario
+	// in issue #150's scope forces a specific resolution algorithm;
+	// this value exists so a later issue can implement one without a
+	// further public API change.
+	IntrabarPessimistic
+)
+
+// Deps supplies Broker's injected dependencies. Clock, IDs, and Prices
+// are required: Broker never falls back to a wall clock or a global
+// random source (ADR-015), so a zero Deps is never usable.
+// IntrabarPolicy is not required — its zero value,
+// IntrabarRejectAmbiguous, is itself Deps's deliberate, safe default.
 type Deps struct {
 	// Clock supplies every timestamp Broker produces — Event.Metadata
-	// .Timestamp, Event.ObservedAt, and account.Snapshot.AsOf.
+	// .Timestamp, Event.ObservedAt, and account.Snapshot.AsOf. Advance
+	// (issue #150/M3-07) also derives every timestamp it produces from
+	// Clock, not from an Observation's own Time; a caller driving a
+	// backtest is expected to keep Clock synchronized with each
+	// Observation it advances (ADR-026).
 	Clock clock.Clock
 	// IDs supplies every identifier Broker generates — Event.Metadata
 	// .EventID and, for a market order's immediate fill, Fill.FillID.
 	IDs *id.Generator
 	// Prices supplies the fill price for every market order Submit
 	// accepts (issue #149/M3-06). Limit and stop orders do not consult
-	// it; they remain Working until issue #150 (M3-07) adds trigger
-	// semantics.
+	// it; Broker.Advance fills them instead, at a price derived from
+	// each Observation (issue #150/M3-07, ADR-026).
 	Prices FillPriceSource
+	// IntrabarPolicy selects how Broker.Advance resolves an ambiguous
+	// Observation (ADR-026). The zero value, IntrabarRejectAmbiguous,
+	// is a legitimate, safe default and requires no explicit setting.
+	IntrabarPolicy IntrabarPolicy
 }
 
 func (d Deps) validate() error {

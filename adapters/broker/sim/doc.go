@@ -29,11 +29,29 @@
 // wrong result. A fill does not yet affect account cash: issue #152
 // also explicitly owns "cash/balance effects of fills," and a naive
 // full-notional debit/credit is not broker-neutral accounting (see
-// buildMarketFill's doc comment in account.go). Limit and stop orders
-// remain StatusWorking with no fill matching until issue #150 (M3-07)
-// adds their trigger semantics. Cancel and Replace return
+// buildFill's doc comment in account.go). Cancel and Replace return
 // broker.ErrUnsupported here; issue #151 (M3-08) implements their
 // lifecycle semantics.
+//
+// Limit and stop orders remain StatusWorking with no fill matching at
+// Submit time; Broker.Advance (issue #150, M3-07, ADR-026) is how they
+// fill. Advance is not part of the public broker.Broker/broker.Account
+// ports — a real adapter has no simulation to drive — and is called
+// with a simulator-owned Observation (listing, OHLC, time), not
+// marketdata.Bar, once per market observation per listing. Advance
+// evaluates every account independently: for one account's pending
+// Limit/Stop orders on the observed listing, exactly one triggered
+// order fills per call (using the trigger/gap rules documented on
+// limitTriggerPrice/stopTriggerPrice in advance.go); more than one
+// triggering within the same bar is ambiguous and, under the default
+// IntrabarRejectAmbiguous policy, reports ErrAmbiguousIntrabarOrder
+// and fills none of them rather than guessing which triggered first.
+// IntrabarPessimistic is declared but not implemented — selecting it
+// reports broker.ErrUnsupported. StopLimit orders are not evaluated by
+// Advance at all in this package yet. A triggered fill shares Submit's
+// market-order fill mechanics exactly (same Position-opening-from-flat
+// scope boundary, same deliberate omission of cash effects), differing
+// only in how its price and event causation are derived.
 //
 // # Determinism
 //
@@ -44,6 +62,10 @@
 // derives from them. The same Deps and AccountConfig values reproduce
 // byte-identical starting Snapshots and event streams across separate
 // runs, provided the injected FillPriceSource is itself deterministic.
+// Advance derives every timestamp it produces from Deps.Clock as well,
+// not from an Observation's own Time; a caller driving a backtest is
+// expected to keep Clock synchronized with each Observation it
+// advances.
 //
 // # Account isolation
 //
