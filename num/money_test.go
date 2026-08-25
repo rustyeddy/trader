@@ -293,3 +293,92 @@ func TestMoneyDivByZero(t *testing.T) {
 	_, err := a.Div(usd("0"))
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
+
+func TestMoneyDivQuantity(t *testing.T) {
+	tests := []struct {
+		name string
+		m    string
+		q    string
+		want string
+	}{
+		{name: "exact weighted average", m: "1200", q: "1000", want: "1.2"},
+		// Inverse of Price.MulQuantity's ADR-004/ADR-025 evidence cases.
+		{name: "BRK.A block inverse", m: "7500000000", q: "10000", want: "750000"},
+		{name: "FX 1B notional inverse", m: "1084730000", q: "1000000000", want: "1.08473"},
+		{name: "zero cost basis", m: "0", q: "1000", want: "0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := usd(tt.m)
+			q := MustParseQuantity(tt.q)
+
+			got, err := m.DivQuantity(q)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+func TestMoneyDivQuantityRoundsHalfToEven(t *testing.T) {
+	// 1 / 200,000,000 = 0.000000005 exactly, the midpoint between
+	// 0.00000000 and 0.00000001; the even neighbour is 0.00000000.
+	m := usd("1")
+	q := MustParseQuantity("200000000")
+
+	got, err := m.DivQuantity(q)
+	require.NoError(t, err)
+	assert.Equal(t, "0", got.String())
+}
+
+func TestMoneyDivQuantityRejectsInvalidMoney(t *testing.T) {
+	var m Money
+	_, err := m.DivQuantity(MustParseQuantity("1"))
+	require.ErrorIs(t, err, ErrMissingCurrency)
+}
+
+func TestMoneyDivQuantityRejectsZeroQuantity(t *testing.T) {
+	m := usd("100")
+	_, err := m.DivQuantity(Quantity{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
+
+func TestMoneyDivQuantityRejectsNegativeResult(t *testing.T) {
+	negative, err := usd("100").Neg()
+	require.NoError(t, err)
+	_, err = negative.DivQuantity(MustParseQuantity("1"))
+	require.ErrorIs(t, err, ErrNegative)
+}
+
+// TestMoneyMulQuantityDivQuantityRoundTrip confirms MulQuantity and
+// DivQuantity are true inverses (up to the same rounding both already
+// apply), for a range of realistic notional sizes — the same
+// round-trip discipline num's other Mul/Div pairs already satisfy.
+func TestMoneyMulQuantityDivQuantityRoundTrip(t *testing.T) {
+	usdCode := MustParseCurrency("USD")
+	cases := []struct {
+		price string
+		qtys  []string
+	}{
+		{price: "1.08473", qtys: []string{"1", "1000", "10000000"}},
+		{price: "750000.00", qtys: []string{"1", "1000"}},
+		{price: "150000.12345678", qtys: []string{"1", "1000"}},
+	}
+
+	for _, c := range cases {
+		p := c.price
+		for _, q := range c.qtys {
+			t.Run(p+"_"+q, func(t *testing.T) {
+				price := MustParsePrice(p)
+				qty := MustParseQuantity(q)
+
+				notional, err := price.MulQuantity(qty, usdCode)
+				require.NoError(t, err)
+
+				roundTripped, err := notional.DivQuantity(qty)
+				require.NoError(t, err)
+				assert.True(t, price.Equal(roundTripped), "MulQuantity then DivQuantity must recover the original price exactly for whole-scale inputs")
+			})
+		}
+	}
+}

@@ -134,6 +134,7 @@ the original decided, use full supersession instead.
 | 024 | Broker event model and deterministic ordering (in adr-024-broker-events.org) | Accepted |
 | 025 | Price-by-quantity notional multiplication (in adr-025-price-quantity-notional.org) | Accepted |
 | 026 | Simulated limit/stop orders: observation advancement, trigger, gap, intrabar-ambiguity semantics (in adr-026-simulated-limit-stop-orders.org) | Accepted |
+| 027 | Money-by-quantity division to recover a weighted-average price (in adr-027-money-quantity-price-division.org) | Accepted |
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -201,6 +202,14 @@ mechanism, limit/stop trigger and gap-fill rules, and intrabar-
 ambiguity policy to be drafted and adopted ahead of implementation,
 since this is the first point where the simulator encodes market-
 observation and intrabar microstructure assumptions.
+
+Note: ADR-027 is likewise maintained in its own file,
+=docs/arch/adr-027-money-quantity-price-division.org=, rather than
+inline in this registry.  Its own Status section is authoritative.
+Issue #152 (M3-09) asks for the missing =Money÷Quantity→Price=
+weighted-average-price primitive to be drafted and adopted ahead of
+implementing simulated position accounting, which needs it for the
+"increase an existing position" transition.
 
 * ADR-001: Modular monolith before service decomposition
 

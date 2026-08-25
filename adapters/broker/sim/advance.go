@@ -20,9 +20,8 @@ import (
 //
 // Every account is evaluated independently, in deterministic
 // (AccountID-sorted) order; a failure for one account (for example
-// ErrAmbiguousIntrabarOrder, or a triggered fill hitting
-// ErrPositionUpdateUnsupported) does not prevent any other account
-// from advancing. Advance returns every such error joined with
+// ErrAmbiguousIntrabarOrder) does not prevent any other account from
+// advancing. Advance returns every such error joined with
 // errors.Join, or nil if every account advanced without error.
 //
 // Advance honors ctx cancellation: it is checked before any account is
@@ -97,13 +96,11 @@ type triggeredOrder struct {
 // group is reported as ErrAmbiguousIntrabarOrder (or, under
 // IntrabarPessimistic, broker.ErrUnsupported) without being filled,
 // while any at-open orders still fill normally. A later order in the
-// fill sequence that cannot be filled — most notably
-// ErrPositionUpdateUnsupported, when an earlier order in the same call
-// already opened a position — is reported as that specific error, not
-// folded into ErrAmbiguousIntrabarOrder: OHLC ordering was never the
-// uncertainty for an at-open group, so misclassifying it as intrabar
-// ambiguity would misdiagnose a real, different limitation (issue
-// #152, M3-09) as a data-ordering one.
+// fill sequence that cannot be filled for some other reason (a
+// currency mismatch surfaced from position/PnL accounting, issue
+// #152) is reported as that specific error, not folded into
+// ErrAmbiguousIntrabarOrder: OHLC ordering was never the uncertainty
+// for an at-open group.
 func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -112,6 +109,17 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	// Revalue an existing position's mark from this observation's
+	// Close, even if no pending order triggers below — unrealized PnL
+	// (issue #152, M3-09) must not go stale merely because there was
+	// nothing to fill this bar. Any fill processed below overwrites
+	// this with its own, more specific fill price.
+	key := keyForListing(obs.Listing)
+	if _, hasPosition := s.positions[key]; hasPosition {
+		s.marks[key] = obs.Close
+		s.asOf = deps.Clock.Now()
 	}
 
 	var atOpen, withinBar []triggeredOrder
@@ -175,16 +183,15 @@ func (s *accountState) advance(ctx context.Context, deps Deps, obs Observation) 
 			break
 		}
 
-		filled, fillEvent, filledEvent, positionAfter, err := s.buildFill(deps, t.order, t.price, id.EventID{}, s.nextSequence+1)
+		outcome, err := s.buildFill(deps, t.order, t.price, id.EventID{}, s.nextSequence+1)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("order %s: %w", t.order.Request.OrderID, err))
 			continue
 		}
 
-		s.orders[t.order.Request.OrderID] = cloneOrder(filled)
-		s.positions[keyForListing(t.order.Request.Listing)] = positionAfter
+		s.commitFill(t.order.Request.Listing, outcome)
 		s.asOf = deps.Clock.Now()
-		s.commitEvents(fillEvent, filledEvent)
+		s.commitEvents(outcome.fillEvent, outcome.filledEvent)
 	}
 
 	return errors.Join(errs...)

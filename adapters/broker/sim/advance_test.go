@@ -365,10 +365,10 @@ func TestAdvanceReportsUnsupportedForIntrabarPessimistic(t *testing.T) {
 // within one bar" (potentially ambiguous) and "more than one order
 // triggers at the observation's Open" (never ambiguous, since Open is
 // the bar's single known first instant). Both orders here resolve at
-// Open; the first fills and opens a Position, and the second — a Sell
-// against that new Long position — correctly fails with
-// ErrPositionUpdateUnsupported, not ErrAmbiguousIntrabarOrder: OHLC
-// ordering was never the uncertainty.
+// different points (one at Open, one later via Low), so — matching
+// #150's original scoping — this is not ambiguous. Since #152 (M3-09),
+// both fill successfully in sequence: the buy limit opens a Long
+// position, and the sell stop reduces it, producing realized PnL.
 func TestAdvanceFillsAtOpenOrdersSequentiallyNotAsAmbiguous(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -386,21 +386,33 @@ func TestAdvanceFillsAtOpenOrdersSequentiallyNotAsAmbiguous(t *testing.T) {
 	require.NoError(t, err)
 
 	// Open (1.09900) is below the buy limit (1.10000 <= condition met
-	// at open) and above the sell stop (1.09900 > 1.09800, so the stop
-	// does NOT trigger at open — it only triggers later via Low
-	// reaching 1.09700). Only the buy limit is at-open here.
+	// at open, so it fills at the better open price 1.09900) and above
+	// the sell stop (1.09900 > 1.09800, so the stop does NOT trigger at
+	// open — it only triggers later via Low reaching 1.09700, filling
+	// at the stop price 1.09800). Only the buy limit is at-open here.
 	obs := mustObservation(t, mustEurUsdListing(t), "1.09900", "1.10100", "1.09700", "1.09950", barTime)
-	err = b.Advance(ctx, obs)
-	require.ErrorIs(t, err, ErrPositionUpdateUnsupported)
-	require.NotErrorIs(t, err, ErrAmbiguousIntrabarOrder)
+	require.NoError(t, b.Advance(ctx, obs))
 
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
 	require.Len(t, snap.Positions(), 1)
-	assert.Equal(t, order.Long, snap.Positions()[0].Side)
-	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")), "the buy limit must have filled")
-	require.Len(t, snap.OpenOrders(), 1, "the sell stop remains pending, rejected only by the existing-position boundary")
-	assert.Equal(t, sellStop.OrderID, snap.OpenOrders()[0].Request.OrderID)
+	pos := snap.Positions()[0]
+	assert.Equal(t, order.Long, pos.Side)
+	assert.True(t, pos.Quantity.Equal(num.MustParseQuantity("500")), "1000 opened, then reduced by 500")
+	require.NotNil(t, pos.AvgPrice)
+	assert.True(t, pos.AvgPrice.Equal(num.MustParsePrice("1.09900")), "a reduce leaves the average price unchanged")
+	assert.Empty(t, snap.OpenOrders(), "both orders reached a terminal Filled status")
+
+	// The reduce sold 500 at 1.09800 against a 1.09900 average entry: a
+	// 0.00100/unit loss over 500 units = -0.50 USD realized. The
+	// remaining 500-unit position is still marked at that same
+	// 1.09800 fill price against its unchanged 1.09900 average, an
+	// identical -0.50 USD unrealized loss on top: equity is cash
+	// (10000 - 0.50) plus that unrealized -0.50.
+	wantRealizedPnL, err := usd("0.50").Neg()
+	require.NoError(t, err)
+	assert.True(t, snap.RealizedPnL().Equal(wantRealizedPnL))
+	assert.True(t, snap.Equity().Equal(usd("9999.00")))
 }
 
 func TestAdvanceHonorsCanceledContext(t *testing.T) {
@@ -472,7 +484,14 @@ func TestAdvanceIgnoresMarketAndStopLimitOrders(t *testing.T) {
 	assert.Empty(t, snap.Positions())
 }
 
-func TestAdvanceFillAgainstExistingPositionIsUnsupported(t *testing.T) {
+// TestAdvanceFillIncreasesExistingPositionViaTrigger covers a
+// limit/stop fill (Advance) increasing a position an earlier market
+// order (Submit) already opened — the same "increase" transition
+// TestAccountSubmitMarketOrderIncreasesExistingPosition covers for two
+// Submit-driven fills, exercised here through Advance's trigger path
+// instead, with a favorable-gap fill price so the weighted average is
+// non-trivial.
+func TestAdvanceFillIncreasesExistingPositionViaTrigger(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
 	accountID := mustAccountID(t, deps.IDs)
@@ -482,22 +501,29 @@ func TestAdvanceFillAgainstExistingPositionIsUnsupported(t *testing.T) {
 	require.NoError(t, err)
 
 	market := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
-	_, err = acc.Submit(ctx, market)
+	_, err = acc.Submit(ctx, market) // opens Long 1000 @ 1.10000
 	require.NoError(t, err)
 
 	limitReq := mustLimitRequest(t, deps.IDs, accountID, order.Buy, "500", "1.10000")
 	_, err = acc.Submit(ctx, limitReq)
 	require.NoError(t, err)
 
+	// Open (1.09500) is below the limit (1.10000), so the limit fills
+	// at the better open price 1.09500, not 1.10000: weighted average
+	// becomes (1.10000*1000 + 1.09500*500) / 1500 = 1.09833333.
 	obs := mustObservation(t, mustEurUsdListing(t), "1.09500", "1.10200", "1.09400", "1.10100", barTime)
-	err = b.Advance(ctx, obs)
-	require.ErrorIs(t, err, ErrPositionUpdateUnsupported)
+	require.NoError(t, b.Advance(ctx, obs))
 
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
 	require.Len(t, snap.Positions(), 1)
-	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")), "the rejected limit fill must not have changed the existing position")
-	require.Len(t, snap.OpenOrders(), 1, "the limit order remains pending, not consumed by the failed attempt")
+	pos := snap.Positions()[0]
+	assert.Equal(t, order.Long, pos.Side)
+	assert.True(t, pos.Quantity.Equal(num.MustParseQuantity("1500")))
+	require.NotNil(t, pos.AvgPrice)
+	assert.True(t, pos.AvgPrice.Equal(num.MustParsePrice("1.09833333")))
+	assert.True(t, snap.RealizedPnL().Equal(usd("0")), "increasing a position realizes no PnL")
+	assert.Empty(t, snap.OpenOrders())
 }
 
 func TestAdvanceRepeatedCallsDoNotRefillATerminalOrder(t *testing.T) {

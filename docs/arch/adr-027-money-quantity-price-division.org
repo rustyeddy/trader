@@ -1,0 +1,108 @@
+#+TITLE: Money-by-Quantity Division to Recover a Weighted-Average Price ADR-027
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #152 (M3-09) asks for this to be drafted and adopted
+before implementing simulated position accounting, which needs it for
+the "increase an existing position" transition.
+
+* Context
+
+#152 requires maintaining a Position's volume-weighted average entry
+price across multiple fills. Of the five position transitions #152
+names — open, increase, reduce, close, reverse — only *increase*
+(adding to an existing position on the same side) needs new exact
+arithmetic:
+
+#+begin_example
+newAvgPrice = (existingNotional + addNotional) / newQuantity
+#+end_example
+
+=existingNotional= and =addNotional= are =num.Money= (via
+=Price.MulQuantity=, ADR-025); =newQuantity= is =num.Quantity=. This is
+=Money ÷ Quantity -> Price=, which =num= does not have. Open uses the
+fill price directly; reduce, close, and reverse only need =Money.Sub=
+between two already-computed notional values (no division) to derive
+realized PnL — this was confirmed during design discussion on #152
+before this ADR, and is why this gap, unlike ADR-025's, blocks only one
+of #152's five required transitions rather than all of them.
+
+* Decision
+
+Add =Money.DivQuantity(q Quantity) (Price, error)= to =num=:
+
+#+begin_src go
+func (m Money) DivQuantity(q Quantity) (Price, error) {
+    if !m.IsValid() {
+        return Price{}, ErrMissingCurrency
+    }
+    raw, err := fixed.DivScaled(m.amount, q.raw, fixed.RoundHalfEven)
+    if err != nil {
+        return Price{}, wrapFixedErr(err)
+    }
+    if raw < 0 {
+        return Price{}, ErrNegative
+    }
+    return Price{raw: raw}, nil
+}
+#+end_src
+
+This mirrors ADR-025's =Price.MulQuantity= exactly: a method on the
+domain-shaped operand (here, =Money=, the numerator) rather than a free
+function, using the same already-existing widened 128-bit primitive
+(=num/internal/fixed.DivScaled=, in place since M1, already backing
+=Money.DivRate= and =Money.Div=) rather than inventing new low-level
+arithmetic. No currency parameter is needed on the way out — unlike
+=Price.MulQuantity=, which must be told what currency its result is
+denominated in because neither input carries one, =DivQuantity='s
+result is a bare =Price=, which is currency-less by design (ADR-004).
+=m='s own currency is not otherwise interpreted by this method; a
+caller is responsible for ensuring =m= is denominated in whatever
+currency makes the resulting =Price= meaningful — for #152, the
+listing's own quote/settlement currency, the same one
+=Price.MulQuantity= produced it in.
+
+=DivQuantity= rejects a negative result with =ErrNegative=, the same
+rule =Price.Sub= and =Price.MulQuantity= already apply: =Price= has no
+signed counterpart. In #152's actual use, =m= (a summed cost basis) and
+=q= (a summed quantity) are both always non-negative by construction, so
+this case is not expected to trigger in practice; it exists so
+=DivQuantity= is total and honest about =Price='s non-negative
+invariant rather than silently violating it for some other future
+caller.
+
+Rounding is fixed at =RoundHalfEven=, matching every other =num=
+division (=DivRate=, =Div=) and =MulQuantity=; no caller-selectable
+=Rounding= is exposed, consistent with ADR-025.
+
+* Consequences
+
+- #152 can compute a weighted-average price on a position increase as
+  =existingNotional.Add(addNotional)= then =.DivQuantity(newQuantity)=,
+  with no local division arithmetic inside =adapters/broker/sim= and no
+  risk of silently wrapping or losing precision.
+- =MulQuantity= and =DivQuantity= are true inverses for whole-scale
+  inputs (verified by a round-trip test), the same relationship
+  =MulRate=/=DivRate= and the =Div= family already satisfy elsewhere in
+  =num=.
+- No change to =num='s representation, scale, or any existing method's
+  behavior: this is a strictly additive method.
+- Reduce/close/reverse position transitions still need no new =num=
+  primitive — this ADR does not claim otherwise — they compose existing
+  =MulQuantity= and =Money.Sub=.
+
+* Alternatives Considered
+
+- *A free function, e.g. =num.WeightedAveragePrice(...)=.* Rejected for
+  the same reason ADR-025 chose a method over a free function: keeps
+  the API shape consistent, and =Money= is unambiguously the natural
+  receiver for "divide this monetary amount by a quantity."
+- *Requiring an explicit currency parameter, mirroring
+  =MulQuantity=.* Rejected: the result is a =Price=, which is
+  currency-less by design (ADR-004) — there is nothing for a currency
+  parameter to attach to on the way out. =m='s own currency is already
+  present on the input side; nothing new needs stating.
+- *Exposing a caller-selectable =Rounding=.* Rejected for the same
+  consistency reason ADR-025 gave: no current caller needs one, and
+  widening the signature now would be premature.

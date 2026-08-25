@@ -249,3 +249,31 @@ func (m Money) Div(o Money) (Rate, error) {
 	}
 	return Rate{raw: raw}, nil
 }
+
+// DivQuantity returns m/q as a Price, rounded to nearest with ties to
+// even (ADR-027) — the inverse of Price.MulQuantity. It is meaningful
+// as a weighted-average price: given a position's total cost basis
+// (m, in the listing's quote/settlement currency) and its total
+// quantity (q), DivQuantity recovers the average price per unit.
+//
+// DivQuantity reports ErrMissingCurrency if m is invalid,
+// ErrDivideByZero when q is zero, and ErrNegative if the true
+// quotient would be negative — Price has no signed counterpart, the
+// same rule Price.Sub already applies. The underlying division uses
+// the same widened 128-bit intermediate (num/internal/fixed
+// .DivScaled) that already backs DivRate and Div, so it never
+// silently overflows or loses precision the way naive scaled-int64
+// division would.
+func (m Money) DivQuantity(q Quantity) (Price, error) {
+	if !m.IsValid() {
+		return Price{}, ErrMissingCurrency
+	}
+	raw, err := fixed.DivScaled(m.amount, q.raw, fixed.RoundHalfEven)
+	if err != nil {
+		return Price{}, wrapFixedErr(err)
+	}
+	if raw < 0 {
+		return Price{}, ErrNegative
+	}
+	return Price{raw: raw}, nil
+}

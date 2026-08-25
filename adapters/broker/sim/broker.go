@@ -8,6 +8,7 @@ import (
 	"github.com/rustyeddy/trader/account"
 	brokerpkg "github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -70,14 +71,17 @@ func NewBroker(name string, deps Deps, configs ...AccountConfig) (*Broker, error
 		}
 
 		accounts[cfg.AccountID] = &accountState{
-			ref:       ref,
-			currency:  cfg.StartingCash.Currency(),
-			cash:      cfg.StartingCash,
-			zero:      zero,
-			asOf:      now,
-			orders:    make(map[id.OrderID]order.Order),
-			positions: make(map[positionKey]order.Position),
-			changed:   make(chan struct{}),
+			ref:         ref,
+			currency:    cfg.StartingCash.Currency(),
+			cash:        cfg.StartingCash,
+			zero:        zero,
+			asOf:        now,
+			orders:      make(map[id.OrderID]order.Order),
+			positions:   make(map[positionKey]order.Position),
+			marks:       make(map[positionKey]num.Price),
+			realizedPnL: zero,
+			fees:        zero,
+			changed:     make(chan struct{}),
 		}
 	}
 

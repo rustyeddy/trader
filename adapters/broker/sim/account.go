@@ -68,8 +68,34 @@ type accountState struct {
 	// Only Position values with a non-Flat Side are ever stored — a
 	// position that returns to flat is deleted rather than kept as a
 	// zero-quantity entry, matching account.Snapshot's own "Positions
-	// is simply empty" convention for a flat account.
+	// is simply empty" convention for a flat account. Use
+	// commitPosition, never a direct map write, so this invariant
+	// cannot be violated by accident.
 	positions map[positionKey]order.Position
+	// marks holds the last known price per listing (issue #152,
+	// M3-09): set from a market order's fill price (Submit), a
+	// triggered limit/stop fill's price, or — even when no order
+	// triggers — a bar Observation's Close (Broker.Advance). Snapshot
+	// computes UnrealizedPnL from these marks against each open
+	// Position's AvgPrice; it is explicitly "as of the simulator's last
+	// known market observation," not live/real-time mark-to-market —
+	// see snapshotLocked's doc comment. Entries are never deleted, even
+	// after a position closes, so the last traded price remains
+	// available for history/display.
+	marks map[positionKey]num.Price
+	// realizedPnL is this account's cumulative realized profit and
+	// loss, denominated in currency. It moves only when a fill reduces,
+	// closes, or reverses a position (see position.go); opening or
+	// increasing a position never changes it. Reported directly as
+	// account.Snapshot.RealizedPnL.
+	realizedPnL num.Money
+	// fees is this account's cumulative commission paid, denominated in
+	// currency. It moves only when a fill reports a non-nil
+	// order.Fill.Commission (issue #152, M3-09) — this package builds
+	// no commission model of its own, so it is zero unless a caller's
+	// injected dependencies eventually produce one. Reported directly
+	// as account.Snapshot.Fees.
+	fees num.Money
 
 	events       []brokerpkg.Event
 	nextSequence uint64
@@ -84,21 +110,29 @@ func zeroMoney(currency num.Currency) (num.Money, error) {
 }
 
 // snapshotLocked builds this account's current account.Snapshot. The
-// caller must already hold s.mu. OpenOrders and Positions are each
-// sorted deterministically before account.NewSnapshot sees them: both
-// are backed by maps, so ranging either directly would expose Go's
-// randomized map iteration order through the resulting Snapshot,
-// breaking the reproducibility this package otherwise guarantees — two
-// calls against identical state must return both in the same order,
-// not just the same set. Equity, BuyingPower, and MarginAvailable
-// track s.cash directly, and s.cash itself is not yet affected by
-// fills — a market order fill opens or reports a Position, but does
-// not debit or credit cash. This package models no leverage, margin,
-// mark-to-market unrealized PnL, or cash/balance settlement of its
-// own; issue #152 (M3-09) explicitly owns "cash/balance effects of
-// fills" and realized/unrealized PnL, and risk policy proper is M4's
-// concern. See buildMarketFill's doc comment for why this package
-// deliberately does not guess at a cash rule in the meantime.
+// caller must already hold s.mu; this performs no I/O and consults no
+// injected dependency — every value comes from s's own already-stored
+// fields, so Snapshot remains a pure, synchronous read (issue #152,
+// M3-09, design discussion on that issue).
+//
+// OpenOrders and Positions are each sorted deterministically before
+// account.NewSnapshot sees them: both are backed by maps, so ranging
+// either directly would expose Go's randomized map iteration order
+// through the resulting Snapshot, breaking the reproducibility this
+// package otherwise guarantees — two calls against identical state
+// must return both in the same order, not just the same set.
+//
+// UnrealizedPnL is computed from s.marks against each open Position's
+// AvgPrice (see unrealizedPnLForPosition) — explicitly "as of the
+// simulator's last known market observation" (whatever last touched
+// s.marks for that listing: a fill, or a Broker.Advance revaluation),
+// not live/real-time mark-to-market; this package has no ongoing price
+// feed to mark against between those events. Equity is s.cash plus
+// that UnrealizedPnL. BuyingPower and MarginAvailable mirror s.cash
+// directly and MarginUsed is always zero: this package still models an
+// unleveraged, fully funded account with no margin policy of its own
+// (that is M4's job) — these fields are a deliberate M3 placeholder,
+// not a claim of real margin/leverage semantics.
 func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 	openOrders := make([]order.Order, 0, len(s.orders))
 	for _, o := range s.orders {
@@ -125,23 +159,57 @@ func (s *accountState) snapshotLocked() (account.Snapshot, error) {
 		return a.Venue() < b.Venue()
 	})
 
+	unrealizedPnL := s.zero
+	for key, p := range s.positions {
+		mark, ok := s.marks[key]
+		if !ok {
+			continue // a position always has a mark from its opening fill
+		}
+		delta, err := unrealizedPnLForPosition(p, mark, p.Listing.Spec().SettlementCurrency())
+		if err != nil {
+			return account.Snapshot{}, err
+		}
+		unrealizedPnL, err = unrealizedPnL.Add(delta)
+		if err != nil {
+			return account.Snapshot{}, err
+		}
+	}
+
+	equity, err := s.cash.Add(unrealizedPnL)
+	if err != nil {
+		return account.Snapshot{}, err
+	}
+
 	return account.NewSnapshot(account.SnapshotParams{
 		AccountID:       s.ref.AccountID,
 		Broker:          s.ref.Broker,
 		Currency:        s.currency,
 		AsOf:            s.asOf,
 		CashBalances:    []num.Money{s.cash},
-		Equity:          s.cash,
+		Equity:          equity,
 		BuyingPower:     s.cash,
 		MarginUsed:      s.zero,
 		MarginAvailable: s.cash,
-		RealizedPnL:     s.zero,
-		UnrealizedPnL:   s.zero,
-		Fees:            s.zero,
+		RealizedPnL:     s.realizedPnL,
+		UnrealizedPnL:   unrealizedPnL,
+		Fees:            s.fees,
 		Financing:       s.zero,
 		Positions:       positions,
 		OpenOrders:      openOrders,
 	})
+}
+
+// commitPosition stores pos as the account's current position for
+// key, or removes any stored entry when pos is Flat — the only way
+// s.positions is ever written, so its "only non-Flat entries" invariant
+// (see accountState's doc comment) cannot be violated by a direct map
+// write at a call site. The caller must already hold s.mu.
+func (s *accountState) commitPosition(key positionKey, pos order.Position) {
+	if pos.Side == order.Flat {
+		delete(s.positions, key)
+		return
+	}
+	s.positions[key] = pos
 }
 
 // buildOrderEvent constructs the deterministic EventKindOrder Event
@@ -390,62 +458,93 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 		return order.Order{}, err
 	}
 
-	filled, fillEvent, filledEvent, positionAfter, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+	outcome, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
 	if err != nil {
 		return order.Order{}, err
 	}
 
-	h.state.orders[req.OrderID] = cloneOrder(filled)
-	h.state.positions[keyForListing(req.Listing)] = positionAfter
+	h.state.commitFill(req.Listing, outcome)
 	h.state.asOf = now
-	h.state.commitEvents(acceptEvent, fillEvent, filledEvent)
-	return filled, nil
+	h.state.commitEvents(acceptEvent, outcome.fillEvent, outcome.filledEvent)
+	return outcome.order, nil
+}
+
+// fillOutcome bundles everything one complete fill produces — built by
+// buildFill without mutating accountState, committed by the caller
+// (Submit or accountState.advance) only once every part of it has
+// succeeded, matching the atomicity discipline established in #149.
+type fillOutcome struct {
+	order       order.Order
+	fillEvent   brokerpkg.Event
+	filledEvent brokerpkg.Event
+	position    order.Position
+	mark        num.Price
+	cash        num.Money
+	realizedPnL num.Money
+	fees        num.Money
+}
+
+// commitFill applies outcome to s: stores the filled order, commits
+// the resulting Position (opening/adjusting/closing it — see
+// commitPosition), records the new mark, and updates cash/realizedPnL/
+// fees. The caller must already hold s.mu and must call commitEvents
+// separately (see Submit and accountState.advance).
+func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcome) {
+	s.orders[outcome.order.Request.OrderID] = cloneOrder(outcome.order)
+	key := keyForListing(listing)
+	s.commitPosition(key, outcome.position)
+	s.marks[key] = outcome.mark
+	s.cash = outcome.cash
+	s.realizedPnL = outcome.realizedPnL
+	s.fees = outcome.fees
 }
 
 // buildFill constructs everything one complete fill of o, at price,
 // needs — the resulting filled Order, the EventKindFill and second
-// EventKindOrder (status-change) events, and this account's post-fill
-// Position — without mutating s. causationID and sequence are the
-// EventID and Sequence the fill event is assigned; the filled-status
-// order event is assigned sequence+1, caused by the fill event's own
-// EventID. Two callers build price and causationID differently:
-// Submit (issue #149/M3-06) uses Deps.Prices and the just-built order-
-// accepted event's EventID; accountState.advance (issue #150/M3-07,
-// ADR-026) uses a trigger/gap-derived price and a zero causationID,
-// since a market-observation-triggered fill is not caused by any
-// preceding Trader-internal event.
+// EventKindOrder (status-change) events, this account's post-fill
+// Position, its new mark for o.Request.Listing, and its post-fill
+// cash/realizedPnL/fees — without mutating s (see fillOutcome and
+// commitFill). causationID and sequence are the EventID and Sequence
+// the fill event is assigned; the filled-status order event is
+// assigned sequence+1, caused by the fill event's own EventID. Two
+// callers build price and causationID differently: Submit (issue
+// #149/M3-06) uses Deps.Prices and the just-built order-accepted
+// event's EventID; accountState.advance (issue #150/M3-07, ADR-026)
+// uses a trigger/gap-derived price and a zero causationID, since a
+// market-observation-triggered fill is not caused by any preceding
+// Trader-internal event.
 //
-// Scope (issue #149, M3-06): the fill is always for o's complete
-// AcceptedQuantity — this package has no partial-fill/volume model —
-// and only opens a new Position when the listing was previously flat.
-// A fill against a listing where the account already holds a Position
-// returns ErrPositionUpdateUnsupported: correctly adding to, reducing,
-// closing, or reversing a position requires weighted-average cost
-// basis and realized PnL accounting that issue #152 (M3-09) owns, and
-// this package would rather report that plainly than compute a
-// silently wrong average price or PnL.
-//
-// buildFill deliberately does not touch s.cash: issue #152 (M3-09)
-// explicitly owns "cash/balance effects of fills," and a naive
-// full-notional debit/credit against Equity/BuyingPower/MarginAvailable
-// is not broker-neutral accounting — a cash purchase should leave
-// equity roughly unchanged (cash converts into a position of
-// equivalent value, it is not a loss), and a listing's settlement
-// currency is not guaranteed to match the account's home currency in
-// the first place. Getting that right (asset valuation, margin,
-// multi-currency settlement) is #152's job; this package would rather
-// leave cash alone than encode a rule known to be wrong.
-func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, causationID id.EventID, sequence uint64) (filled order.Order, fillEvent, filledEvent brokerpkg.Event, positionAfter order.Position, err error) {
+// The fill is always for o's complete AcceptedQuantity — this package
+// has no partial-fill/volume model. Position accounting (issue #152,
+// M3-09) covers all five transitions — open, increase, reduce, close,
+// reverse — via applyFillToPosition; see position.go. Cash moves only
+// by realized PnL and, when o's resulting Fill reports a non-nil
+// Commission, by that commission (applyCommission) — never by a
+// universal full-notional debit/credit, which is not broker-neutral
+// accounting (a cash purchase should leave equity roughly unchanged,
+// not book the full notional as an immediate loss; see the design
+// discussion on issue #152).
+func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, causationID id.EventID, sequence uint64) (fillOutcome, error) {
 	req := o.Request
 	key := keyForListing(req.Listing)
-	if existing, ok := s.positions[key]; ok && existing.Side != order.Flat {
-		err = fmt.Errorf("%w: listing %s already holds a %s position", ErrPositionUpdateUnsupported, req.Listing.Symbol(), existing.Side)
-		return
+	currency := req.Listing.Spec().SettlementCurrency()
+
+	// Checked first, before any other part of the fill is built:
+	// realized/unrealized PnL, cash, and fees are all computed and
+	// accumulated in currency, and this package has no FX conversion-
+	// rate source to reconcile it with a different account currency
+	// (see ErrUnsupportedSettlementCurrency's doc comment). Every
+	// transition below — open, increase, reduce, close, reverse —
+	// needs this to hold, not only the ones that realize PnL, so it is
+	// enforced uniformly up front rather than left to surface only
+	// when arithmetic happens to combine mismatched currencies.
+	if !currency.Equal(s.currency) {
+		return fillOutcome{}, fmt.Errorf("%w: listing %s settles in %s, account is %s", ErrUnsupportedSettlementCurrency, req.Listing.Symbol(), currency, s.currency)
 	}
 
 	fillID, err := id.GenerateFillID(deps.IDs)
 	if err != nil {
-		return
+		return fillOutcome{}, err
 	}
 
 	fillQty := *o.AcceptedQuantity
@@ -461,37 +560,57 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		Timestamp:     deps.Clock.Now(),
 	})
 	if err != nil {
-		return
+		return fillOutcome{}, err
 	}
 
-	fillEvent, err = s.buildFillEvent(deps, fill, causationID, sequence)
+	fillEvent, err := s.buildFillEvent(deps, fill, causationID, sequence)
 	if err != nil {
-		return
+		return fillOutcome{}, err
 	}
 
-	filled, err = order.ApplyFill(o, fill)
+	filled, err := order.ApplyFill(o, fill)
 	if err != nil {
-		return
+		return fillOutcome{}, err
 	}
 
-	filledEvent, err = s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, sequence+1)
+	filledEvent, err := s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, sequence+1)
 	if err != nil {
-		return
+		return fillOutcome{}, err
 	}
 
-	positionSide := order.Long
-	if req.Side == order.Sell {
-		positionSide = order.Short
+	existing, hasExisting := s.positions[key]
+	positionAfter, realizedPnLDelta, err := applyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
+	if err != nil {
+		return fillOutcome{}, err
 	}
-	avgPrice := price
-	positionAfter, err = order.NewPosition(order.Position{
-		AccountID: req.AccountID,
-		Listing:   req.Listing,
-		Side:      positionSide,
-		Quantity:  fillQty,
-		AvgPrice:  &avgPrice,
-	})
-	return
+
+	cashAfter, err := s.cash.Add(realizedPnLDelta)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	realizedPnLAfter, err := s.realizedPnL.Add(realizedPnLDelta)
+	if err != nil {
+		return fillOutcome{}, err
+	}
+	feesAfter := s.fees
+
+	if fill.Commission != nil {
+		cashAfter, feesAfter, err = applyCommission(cashAfter, feesAfter, *fill.Commission)
+		if err != nil {
+			return fillOutcome{}, err
+		}
+	}
+
+	return fillOutcome{
+		order:       filled,
+		fillEvent:   fillEvent,
+		filledEvent: filledEvent,
+		position:    positionAfter,
+		mark:        price,
+		cash:        cashAfter,
+		realizedPnL: realizedPnLAfter,
+		fees:        feesAfter,
+	}, nil
 }
 
 // Cancel and Replace implement broker.Account; see cancel_replace.go
