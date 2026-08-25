@@ -58,6 +58,42 @@ func TestCommandHandlers_NeverImportMarketdataDirectly(t *testing.T) {
 	}
 }
 
+// brokerCommandFiles are the leaf command handlers issue #155 (M3-12)
+// added: the transport adapters that must call service/broker for
+// every simulated-broker operation, never adapters/broker/sim
+// directly. brokerservice.go and brokerlisting.go are deliberately
+// excluded -- they are this command group's own composition-root code
+// (they construct *simbroker.Broker and its instrument.Listing/
+// simbroker.FillPriceSource dependencies exactly once, the same role
+// dataservice.go plays for the marketdata command group above), not
+// leaf commands.
+var brokerCommandFiles = []string{
+	"brokeraccounts.go",
+	"brokersubmit.go",
+}
+
+// TestBrokerCommandHandlers_NeverImportSimBrokerDirectly is issue
+// #155's own architectural guard, mirroring
+// TestCommandHandlers_NeverImportMarketdataDirectly above: nothing
+// prevents a broker leaf command from importing
+// github.com/rustyeddy/trader/adapters/broker/sim directly and
+// bypassing service/broker, so it is worth a real regression test
+// rather than relying on convention alone.
+func TestBrokerCommandHandlers_NeverImportSimBrokerDirectly(t *testing.T) {
+	const forbidden = `"github.com/rustyeddy/trader/adapters/broker/sim"`
+
+	fset := token.NewFileSet()
+	for _, name := range brokerCommandFiles {
+		f, err := parser.ParseFile(fset, name, nil, parser.ImportsOnly)
+		require.NoError(t, err, name)
+
+		for _, imp := range f.Imports {
+			require.NotEqual(t, forbidden, imp.Path.Value,
+				"%s must call the service layer (service/broker), not adapters/broker/sim directly", name)
+		}
+	}
+}
+
 // marketdata/internal itself is deliberately not checked by any test
 // in this package (issue #112's own "boundary/import guard exists, or
 // the completion review records why compiler enforcement is
