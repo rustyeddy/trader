@@ -27,8 +27,9 @@ type brokerAccountConfig struct {
 }
 
 // readBrokerAccountFlags reads brokerAccountFlags' values back off
-// cmd. cmd is normally a leaf subcommand (accounts.go, snapshot.go,
-// submit.go); Cobra merges an ancestor's PersistentFlags into a leaf
+// cmd. cmd is normally a leaf subcommand (brokeraccounts.go's accounts
+// and snapshot commands, brokersubmit.go's submit command); Cobra
+// merges an ancestor's PersistentFlags into a leaf
 // command's own Flags() by the time RunE executes, so
 // cmd.Flags().GetString("starting-cash") here correctly reads the
 // value newBrokerCmd registered on the parent "broker" command,

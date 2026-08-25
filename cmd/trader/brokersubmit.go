@@ -31,8 +31,9 @@ type brokerSubmitFlags struct {
 // #155, M3-12): the mutating Submit use case against the one freshly
 // built account. A Market order fills immediately, using --price as
 // its fixed fill price (this CLI has no live market data of its own);
-// Limit and Stop orders are accepted into StatusWorking and do not
-// fill within this invocation (adapters/broker/sim only fills them via
+// Limit, Stop, and Stop-Limit orders are accepted into StatusWorking
+// and do not fill within this invocation (adapters/broker/sim only
+// fills them via
 // Broker.Advance, which no CLI command here drives — see newBrokerCmd's
 // own doc comment on why cancel/replace are not exposed as normal
 // commands for the identical reason).
@@ -54,12 +55,12 @@ func newBrokerSubmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.listing.quantityIncrement, "quantity-increment", "1", "simulator quantity increment")
 	cmd.Flags().StringVar(&flags.listing.multiplier, "multiplier", "1", "simulator contract multiplier")
 	cmd.Flags().StringVar(&flags.side, "side", "", "order side: buy or sell (required)")
-	cmd.Flags().StringVar(&flags.orderType, "type", "market", "order type: market, limit, or stop")
+	cmd.Flags().StringVar(&flags.orderType, "type", "market", "order type: market, limit, stop, or stop-limit")
 	cmd.Flags().StringVar(&flags.timeInForce, "tif", "GTC", "time in force: GTC, DAY, IOC, or FOK")
 	cmd.Flags().StringVar(&flags.quantity, "quantity", "", "order quantity (required)")
 	cmd.Flags().StringVar(&flags.price, "price", "", "fill price (required for --type market)")
-	cmd.Flags().StringVar(&flags.limitPrice, "limit-price", "", "limit price (required for --type limit)")
-	cmd.Flags().StringVar(&flags.stopPrice, "stop-price", "", "stop price (required for --type stop)")
+	cmd.Flags().StringVar(&flags.limitPrice, "limit-price", "", "limit price (required for --type limit or stop-limit)")
+	cmd.Flags().StringVar(&flags.stopPrice, "stop-price", "", "stop price (required for --type stop or stop-limit)")
 	_ = cmd.MarkFlagRequired("symbol")
 	_ = cmd.MarkFlagRequired("side")
 	_ = cmd.MarkFlagRequired("quantity")
