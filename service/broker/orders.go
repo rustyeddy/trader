@@ -31,7 +31,7 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (SubmitResponse
 // Cancel implements the mutating Cancel use case: ask req.AccountID's
 // broker to cancel an existing order.
 func (s *Service) Cancel(ctx context.Context, req CancelRequest) (CancelResponse, error) {
-	if err := req.AccountRequest.Validate(); err != nil {
+	if err := req.Validate(); err != nil {
 		return CancelResponse{}, err
 	}
 
@@ -55,7 +55,7 @@ func (s *Service) Cancel(ctx context.Context, req CancelRequest) (CancelResponse
 // broker to modify an existing order's quantity and/or prices in
 // place.
 func (s *Service) Replace(ctx context.Context, req ReplaceRequest) (ReplaceResponse, error) {
-	if err := req.AccountRequest.Validate(); err != nil {
+	if err := req.Validate(); err != nil {
 		return ReplaceResponse{}, err
 	}
 
