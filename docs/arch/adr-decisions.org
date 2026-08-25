@@ -113,8 +113,8 @@ the original decided, use full supersession instead.
 | 002 | Ports and adapters dependency direction                           | Accepted   |
 | 003 | Instrument versus listing identity                                | Accepted   |
 | 004 | Exact numeric representation                                      | Accepted   |
-| 005 | Strategy emits intents, not broker orders                         | Accepted   |
-| 006 | Execution and risk are separate stages                            | Accepted   |
+| 005 | Strategy emits intents, not broker orders (in adr-005-strategy-emits-intents.org) | Accepted |
+| 006 | Execution and risk are separate stages (in adr-006-execution-risk-separate-stages.org) | Accepted |
 | 007 | Broker account handle versus account snapshot (in adr-007-broker-account-handle.org) | Accepted |
 | 008 | Simulated broker implements the public broker port (in adr-008-simulated-broker-port.org) | Accepted |
 | 009 | Journal and reconciliation model                                  | Proposed   |
@@ -136,6 +136,16 @@ the original decided, use full supersession instead.
 | 026 | Simulated limit/stop orders: observation advancement, trigger, gap, intrabar-ambiguity semantics (in adr-026-simulated-limit-stop-orders.org) | Accepted |
 | 027 | Money-by-quantity division to recover a weighted-average price (in adr-027-money-quantity-price-division.org) | Accepted |
 | 028 | Configurable simulator fill, fee, and slippage models (in adr-028-simulator-fill-fee-slippage-models.org) | Accepted |
+
+Note: ADR-005 and ADR-006 are likewise maintained in their own files
+rather than inline in this registry —
+=docs/arch/adr-005-strategy-emits-intents.org= and
+=docs/arch/adr-006-execution-risk-separate-stages.org=.  Each file's
+own Status section is authoritative; the status column above is kept
+in sync with it.  Extraction was performed by issue #176 (M4-01) to
+prepare M4's architecture baseline; it is editorial relocation of
+already-=Accepted= decisions, not a redesign — no Context, Decision,
+Consequences, or Alternatives Considered text was altered.
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -442,79 +452,19 @@ only the arithmetic — rate provenance is the caller's responsibility.
 
 * ADR-005: Strategy emits intents, not broker orders
 
-** Status
-
-Accepted
-
-** Context
-
-If a strategy calls a broker directly, then swapping backtest, paper, and
-live modes requires either divergent strategy code or hidden conditional
-branches.  It also blends decision-making with execution mechanics and
-risk admission.
-
-** Decision
-
-Strategies emit typed =Intent= values describing what they want to
-accomplish (enter, exit, adjust stop, or reach a target exposure).  A
-strategy never receives a broker handle and never submits a broker order.
-An execution stage translates intents into concrete order proposals; a
-risk stage evaluates them; a broker adapter submits the approved
-requests.
-
-** Consequences
-
-- The same strategy runs in backtest, paper trading, and live trading.
-- Execution and risk stages are testable independently of any strategy.
-- Strategy authors cannot bypass risk rules by calling a broker directly.
-- The intent model must express both action and target styles clearly
-  enough for real strategies to use.
-
-** Alternatives Considered
-
-- *Strategy holds a broker handle.* Rejected because it couples strategy
-  logic to broker adapters and blocks deterministic backtests.
-- *Strategy returns raw =order.Request= values.* Rejected because it forces
-  the strategy to encode tick, quantity, bracket, and idempotency
-  concerns that belong in execution and risk.
+ADR-005 is maintained in its own file rather than inline in this
+registry: =docs/arch/adr-005-strategy-emits-intents.org=.  It governs
+the decision that strategies emit typed =Intent= values and never
+receive a broker handle or submit orders directly.  Refer to that file
+for its current status, decisions, and consequences.
 
 * ADR-006: Execution and risk are separate stages
 
-** Status
-
-Accepted
-
-** Context
-
-"How to execute" and "whether the risk is allowed" are distinct decisions.
-Combining them produces a monolithic decision component that is hard to
-audit, hard to test, and prone to silently modifying orders.
-
-** Decision
-
-Execution planning and risk admission are separate pipeline stages.
-Execution translates strategy intents into order proposals, applying
-instrument tick and quantity rules, order-type selection, working-order
-tracking, replacement, cancellation, and reconciliation.  Risk evaluates
-proposals through composable rules and returns an auditable decision
-including violations, warnings, and rule results.
-
-** Consequences
-
-- Every rejection or modification is auditable at the rule level.
-- Sizing lives in risk; execution mechanics live in execution.  Neither
-  silently approves a trade.
-- Journals correlate =intent -> proposal -> decision -> order -> fill=.
-- Both stages must remain deterministic to preserve backtest
-  reproducibility.
-
-** Alternatives Considered
-
-- *One "trade engine" that plans and admits in a single step.* Rejected
-  because it prevents independent evolution of execution mechanics and
-  risk policy.
-- *Risk embedded inside the strategy.* Rejected because risk policy is a
-  portfolio- and account-level concern, not a strategy-local one.
+ADR-006 is maintained in its own file rather than inline in this
+registry: =docs/arch/adr-006-execution-risk-separate-stages.org=.  It
+governs the decision that execution planning and risk admission are
+separate pipeline stages.  Refer to that file for its current status,
+decisions, and consequences.
 
 * ADR-007: Broker account handle versus account snapshot
 

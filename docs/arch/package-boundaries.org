@@ -35,11 +35,11 @@ code.
         +-------------------+-------------------+
         |                   |                   |
     marketdata            order              account
-        ^                   ^                   ^
-        |                   |                   |
-    strategy              broker            portfolio
-         \                  |                  /
-          +-----------------+-----------------+
+        ^                 ^ ^ ^                  ^
+        |                /  |  \                 |
+    strategy   execution  risk  broker       portfolio
+         \        \        |        /             /
+          +--------+-------+--------+------------+
                             |
                    application services
                   (backtest, live, scanner)
@@ -47,6 +47,17 @@ code.
                             |
                   adapters and commands
 #+END_EXAMPLE
+
+=execution= and =risk= (M4, ADR-005/ADR-006) sit alongside =strategy=,
+=broker=, and =portfolio= at this tier: both depend on =order= (the
+=order.Proposal=/=order.Request= vocabulary ADR-017 already
+established), and =risk= additionally depends on =account=/=portfolio=
+to evaluate a proposal against current exposure.  Neither depends on
+=strategy= or =broker= — =strategy= never imports either (ADR-005), and
+the chain from a strategy's own =Intent= through =execution= and =risk=
+to an approved =order.Request= reaching =broker.Account.Submit= is
+wired by application services, not by a direct import between any of
+these sibling packages.
 
 Arrows point from a dependent package toward the package it depends on.
 Read upward: =strategy= may depend on =marketdata=; =marketdata= may

@@ -1,0 +1,44 @@
+#+TITLE: Execution and Risk Are Separate Stages ADR-006
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Extracted from the consolidated decision registry
+(=docs/arch/adr-decisions.org=) into this standalone file per issue
+#176 (M4-01); the decision itself is unchanged from when it was
+originally accepted inline in that document. The registry
+(=docs/arch/adr-decisions.org=) keeps a short pointer entry; this
+file is authoritative for ADR-006's Status, Context, Decision,
+Consequences, and Alternatives Considered.
+
+* Context
+
+"How to execute" and "whether the risk is allowed" are distinct decisions.
+Combining them produces a monolithic decision component that is hard to
+audit, hard to test, and prone to silently modifying orders.
+
+* Decision
+
+Execution planning and risk admission are separate pipeline stages.
+Execution translates strategy intents into order proposals, applying
+instrument tick and quantity rules, order-type selection, working-order
+tracking, replacement, cancellation, and reconciliation.  Risk evaluates
+proposals through composable rules and returns an auditable decision
+including violations, warnings, and rule results.
+
+* Consequences
+
+- Every rejection or modification is auditable at the rule level.
+- Sizing lives in risk; execution mechanics live in execution.  Neither
+  silently approves a trade.
+- Journals correlate =intent -> proposal -> decision -> order -> fill=.
+- Both stages must remain deterministic to preserve backtest
+  reproducibility.
+
+* Alternatives Considered
+
+- *One "trade engine" that plans and admits in a single step.* Rejected
+  because it prevents independent evolution of execution mechanics and
+  risk policy.
+- *Risk embedded inside the strategy.* Rejected because risk policy is a
+  portfolio- and account-level concern, not a strategy-local one.
