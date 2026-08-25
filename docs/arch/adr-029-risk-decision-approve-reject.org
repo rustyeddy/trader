@@ -1,0 +1,136 @@
+#+TITLE: Risk Decisions Are Strict Approve/Reject, Not Proposal Mutation ADR-029
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #180 (M4-05) asks for the canonical risk-evaluation
+seam and result vocabulary to be defined ahead of any concrete risk
+policy implementation (#181-#184), and explicitly calls for a new ADR
+on one specific point: whether a risk policy may only approve or
+reject a proposal, or may also modify one — rather than deciding that
+silently in code, following the same design-discussion-before-code
+pattern ADR-025 through ADR-028 already used for M3.
+
+* Context
+
+By the time a =risk.Engine= evaluates an =order.Proposal=, the M4
+pipeline #178/#179 already established looks like:
+
+#+BEGIN_EXAMPLE
+order.Intent -> execution.Planner -> order.Proposal -> risk.Engine -> order.Request -> broker.Account
+#+END_EXAMPLE
+
+Two questions were open before =risk.Decision= could be defined:
+
+1. Does risk only approve or reject the =Proposal= execution planning
+   already produced, or may a rule adjust it (for example, clamping
+   =Quantity= down to the maximum allowed rather than rejecting the
+   proposal outright)?
+2. When multiple rules evaluate one proposal, does the first violation
+   stop evaluation (fail-fast), or does every rule run so a =Decision=
+   can report everything wrong with a proposal at once?
+
+Both were designed in discussion on #180 before implementation, not
+decided ad hoc while writing =risk.Engine=.
+
+* Decision
+
+** Risk decisions are strict approve/reject; risk never mutates a Proposal
+
+=risk.Decision= carries =Allowed bool= plus aggregated =Violations=/
+=Warnings=/=RuleResults= — no adjusted or amended proposal of any
+kind. A =Rule= either finds a proposal acceptable or reports a
+violation; it never returns a different proposal for the caller to
+submit instead.
+
+This follows directly from decisions already made elsewhere in this
+same milestone, not a new judgment call invented for this ADR:
+
+- The architecture document's own risk section already separates
+  sizing ("what quantity is appropriate") from admission ("is this
+  proposed order allowed"), and #179's own resolution completed that
+  separation for this pipeline: sizing happens *before* execution
+  planning, producing =execution.PlanInput.Quantity=; admission
+  happens *after* planning, evaluating the =Proposal= planning already
+  produced. There is no remaining step in this pipeline where
+  admission itself would also need to resize or otherwise rewrite a
+  proposal.
+- #193 (order.Proposal's own doc comment, per review) already states
+  the intended contract in prose: risk evaluates a =Proposal= as input
+  and does not mutate the supplied value in place.
+- #179's own review resolution for =IntentAdjustStop= established the
+  same principle for a harder case: risk must have the opportunity to
+  approve or reject a proposed change before a broker-facing command
+  exists, not have that change silently pass through or get rewritten
+  underneath it.
+
+Keeping admission pure approve/reject keeps every =Decision= fully
+auditable against the exact =Proposal= it evaluated: there is never a
+question of "which version of the proposal actually got submitted."
+When a proposal is rejected, deciding whether to re-plan with
+different parameters and request a fresh =Decision= is an application/
+orchestration-layer choice, not something =risk= or =execution= decides
+on the caller's behalf.
+
+A future, deliberately-named adjustment capability (for example, an
+optional field a rule may populate with a suggested smaller quantity,
+evaluated through a separate interface only rules that support it
+would implement) remains additive if a concrete consumer ever needs
+it. It is not built speculatively now, consistent with this
+architecture's general "small required core plus capability
+discovery" guidance and this codebase's own restraint about building
+for hypothetical future requirements.
+
+** Every rule evaluates; violations aggregate rather than fail-fast
+
+=risk.Engine= runs its injected =[]Rule= in the exact order given —
+never re-sorted, never evaluated concurrently — and aggregates every
+rule's violations and warnings into one =Decision= rather than
+stopping at the first violation. =Decision.Allowed= is true exactly
+when the aggregated =Violations= slice is empty.
+
+This follows #180's own scope, which asks for risk evaluation to
+"preserve explanation/audit data useful for later backtest manifests
+and reports": a report or backtest manifest showing only the first
+rule a proposal happened to violate would understate how far out of
+policy the proposal actually was, and would make comparing two
+rejected proposals ("which one was closer to acceptable") impossible.
+Fixed, caller-supplied rule order — rather than the =Engine=
+re-sorting rules by name or any other internal policy — keeps
+=Decision.RuleResults= reproducible and matches the deterministic
+evaluation this issue's own acceptance criteria require.
+
+* Consequences
+
+- =risk.Decision= is safe to log, journal, or include in a backtest
+  run manifest verbatim: it never contains an alternate proposal a
+  reader might mistake for what was actually evaluated.
+- A rejected proposal always requires a new planning/sizing cycle to
+  produce a revised =Proposal=, rather than risk silently resubmitting
+  an adjusted one — slightly more round trips through the pipeline in
+  exchange for an unambiguous audit trail.
+- Every concrete risk policy issue (#181-#184) implements the =Rule=
+  interface as a pure approve/reject/warn evaluator; none may return a
+  modified proposal.
+- A future adjustment capability, if a real consumer needs one, is an
+  additive, separately-designed extension — not a retrofit of this
+  base contract's meaning.
+
+* Alternatives Considered
+
+- *Allow a =Rule= to return an adjusted =Proposal= that the caller
+  submits instead of the original.* Rejected: blurs the audit trail
+  (which proposal was actually evaluated versus actually submitted),
+  re-introduces the sizing-inside-admission conflation #179 already
+  resolved by moving sizing before planning, and has no concrete v0
+  consumer asking for it.
+- *Fail-fast rule evaluation, stopping at the first violation.*
+  Rejected: directly conflicts with #180's own "preserve explanation/
+  audit data" scope requirement, and would make two rejected proposals
+  incomparable in a report (one rule failure looks identical to ten).
+- *Engine re-sorting or parallelizing rule evaluation* (for example, by
+  rule name, or running independent rules concurrently for
+  throughput). Rejected for v0: fixed caller-supplied order is simpler
+  to reason about and already meets every current performance need: a
+  handful of pure, synchronous rules evaluating one proposal. Revisit
+  only if a real throughput requirement appears.
