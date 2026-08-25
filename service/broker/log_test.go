@@ -77,20 +77,48 @@ func TestSnapshot_LogsFailureAtErrorLevel(t *testing.T) {
 // from the order's own Listing, both on success and on a mid-pipeline
 // failure where the instrument is already known.
 func TestSubmit_LogsInstrumentAttribute(t *testing.T) {
-	logger, rec := logging.Capture()
-	b, accountID, gen := testBroker(t)
-	svc, err := New(b, logger)
-	require.NoError(t, err)
+	t.Run("success", func(t *testing.T) {
+		logger, rec := logging.Capture()
+		b, accountID, gen := testBroker(t)
+		svc, err := New(b, logger)
+		require.NoError(t, err)
 
-	req := mustMarketRequest(t, gen, accountID)
-	wantInstrument := req.Listing.InstrumentID().String()
+		req := mustMarketRequest(t, gen, accountID)
+		wantInstrument := req.Listing.InstrumentID().String()
 
-	_, err = svc.Submit(context.Background(), SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: req})
-	require.NoError(t, err)
+		_, err = svc.Submit(context.Background(), SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: req})
+		require.NoError(t, err)
 
-	records := rec.Records()
-	require.Len(t, records, 1)
-	assert.Equal(t, wantInstrument, records[0].Attrs[logging.InstrumentID])
+		records := rec.Records()
+		require.Len(t, records, 1)
+		assert.Equal(t, wantInstrument, records[0].Attrs[logging.InstrumentID])
+	})
+
+	t.Run("open account failure", func(t *testing.T) {
+		logger, rec := logging.Capture()
+		b, accountID, gen := testBroker(t)
+		svc, err := New(b, logger)
+		require.NoError(t, err)
+
+		unknownAccount, err := id.GenerateAccountID(gen)
+		require.NoError(t, err)
+		// mustMarketRequest builds a valid request for accountID; only
+		// SubmitRequest.AccountRequest.AccountID (what OpenAccount is
+		// actually asked to open) is swapped to an unknown one, so
+		// Validate still passes and the failure is the intended open
+		// account failure rather than the mismatched-ID validation error.
+		req := mustMarketRequest(t, gen, accountID)
+		req.AccountID = unknownAccount
+		wantInstrument := req.Listing.InstrumentID().String()
+
+		_, err = svc.Submit(context.Background(), SubmitRequest{AccountRequest: AccountRequest{AccountID: unknownAccount}, Order: req})
+		require.Error(t, err)
+
+		records := rec.Records()
+		require.Len(t, records, 1)
+		assert.Equal(t, "open account failed", records[0].Message)
+		assert.Equal(t, wantInstrument, records[0].Attrs[logging.InstrumentID])
+	})
 }
 
 // TestCancel_LogsOrderIDEvenWhenAccountOpenFails proves the order id
@@ -159,6 +187,8 @@ func TestService_LogsOnlyKnownAttributeKeys(t *testing.T) {
 	_, _ = svc.Submit(ctx, SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: marketReq})
 	limitReq := mustLimitRequest(t, gen, accountID)
 	_, _ = svc.Submit(ctx, SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: limitReq})
+	newQty := limitReq.Quantity
+	_, _ = svc.Replace(ctx, ReplaceRequest{AccountRequest: AccountRequest{AccountID: accountID}, Replace: order.ReplaceRequest{OrderID: limitReq.OrderID, NewQuantity: &newQty}})
 	_, _ = svc.Cancel(ctx, CancelRequest{AccountRequest: AccountRequest{AccountID: accountID}, Cancel: order.CancelRequest{OrderID: limitReq.OrderID}})
 
 	unknownAccount, err := id.GenerateAccountID(gen)
