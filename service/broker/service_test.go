@@ -96,6 +96,33 @@ func mustMarketRequest(t *testing.T, gen *id.Generator, accountID id.AccountID) 
 	return req
 }
 
+// mustLimitRequest builds a Limit order request, which stays
+// StatusWorking in sim rather than filling immediately — needed to
+// exercise a live Cancel/Replace, unlike mustMarketRequest's order,
+// which is already terminal by the time Submit returns.
+func mustLimitRequest(t *testing.T, gen *id.Generator, accountID id.AccountID) order.Request {
+	t.Helper()
+	eventID, err := id.GenerateEventID(gen)
+	require.NoError(t, err)
+	limitPrice := num.MustParsePrice("1.10000")
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     mustEurUsdListing(t),
+		AccountID:   accountID,
+		Side:        order.Buy,
+		Type:        order.Limit,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity("1000"),
+		LimitPrice:  &limitPrice,
+		Metadata:    id.Metadata{EventID: eventID},
+	})
+	require.NoError(t, err)
+	orderID, err := id.GenerateOrderID(gen)
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, orderID)
+	require.NoError(t, err)
+	return req
+}
+
 func TestNewRejectsNilBroker(t *testing.T) {
 	_, err := New(nil, nil)
 	require.ErrorIs(t, err, ErrNilBroker)
@@ -180,7 +207,33 @@ func TestServiceSubmitRejectsMismatchedAccountID(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidRequest)
 }
 
+// TestServiceCancel exercises Cancel's successful forwarding path
+// end-to-end (issue #171 review): submit a live Limit order (which
+// stays StatusWorking, unlike a market order), cancel it, and assert
+// the returned CancelResponse.Result reflects the broker's actual
+// outcome, not merely that Cancel returns no error.
 func TestServiceCancel(t *testing.T) {
+	ctx := context.Background()
+	b, accountID, gen := testBroker(t)
+	svc, err := New(b, nil)
+	require.NoError(t, err)
+
+	submitReq := mustLimitRequest(t, gen, accountID)
+	_, err = svc.Submit(ctx, SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: submitReq})
+	require.NoError(t, err)
+
+	cancelEventID, err := id.GenerateEventID(gen)
+	require.NoError(t, err)
+	cancelReq, err := order.NewCancelRequest(order.CancelRequest{OrderID: submitReq.OrderID, Metadata: id.Metadata{EventID: cancelEventID}})
+	require.NoError(t, err)
+
+	resp, err := svc.Cancel(ctx, CancelRequest{AccountRequest: AccountRequest{AccountID: accountID}, Cancel: cancelReq})
+	require.NoError(t, err)
+	assert.Equal(t, order.StatusCanceled, resp.Result.Status)
+	assert.Nil(t, resp.Result.Rejection)
+}
+
+func TestServiceCancelUnknownOrder(t *testing.T) {
 	ctx := context.Background()
 	b, accountID, gen := testBroker(t)
 	svc, err := New(b, nil)
@@ -197,7 +250,39 @@ func TestServiceCancel(t *testing.T) {
 	require.ErrorIs(t, err, brokerpkg.ErrOrderNotFound)
 }
 
+// TestServiceReplace exercises Replace's successful forwarding path
+// end-to-end (issue #171 review): submit a live Limit order, replace
+// its quantity, and assert the returned ReplaceResponse.Result
+// reflects the broker's actual outcome.
 func TestServiceReplace(t *testing.T) {
+	ctx := context.Background()
+	b, accountID, gen := testBroker(t)
+	svc, err := New(b, nil)
+	require.NoError(t, err)
+
+	submitReq := mustLimitRequest(t, gen, accountID)
+	_, err = svc.Submit(ctx, SubmitRequest{AccountRequest: AccountRequest{AccountID: accountID}, Order: submitReq})
+	require.NoError(t, err)
+
+	replaceEventID, err := id.GenerateEventID(gen)
+	require.NoError(t, err)
+	qty := num.MustParseQuantity("500")
+	replaceReq, err := order.NewReplaceRequest(order.ReplaceRequest{OrderID: submitReq.OrderID, NewQuantity: &qty, Metadata: id.Metadata{EventID: replaceEventID}})
+	require.NoError(t, err)
+
+	resp, err := svc.Replace(ctx, ReplaceRequest{AccountRequest: AccountRequest{AccountID: accountID}, Replace: replaceReq})
+	require.NoError(t, err)
+	assert.Equal(t, order.StatusWorking, resp.Result.Status)
+	assert.Nil(t, resp.Result.Rejection)
+
+	snapResp, err := svc.Snapshot(ctx, SnapshotRequest{AccountRequest: AccountRequest{AccountID: accountID}})
+	require.NoError(t, err)
+	require.Len(t, snapResp.Snapshot.OpenOrders(), 1)
+	require.NotNil(t, snapResp.Snapshot.OpenOrders()[0].AcceptedQuantity)
+	assert.True(t, snapResp.Snapshot.OpenOrders()[0].AcceptedQuantity.Equal(qty))
+}
+
+func TestServiceReplaceUnknownOrder(t *testing.T) {
 	ctx := context.Background()
 	b, accountID, gen := testBroker(t)
 	svc, err := New(b, nil)
