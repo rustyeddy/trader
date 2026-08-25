@@ -305,8 +305,9 @@ func TestAdvanceEmitsFillThenFilledOrderEventsCausedByObservation(t *testing.T) 
 
 // TestAdvanceRejectsAmbiguousIntrabarTriggerByDefault covers ADR-026's
 // default IntrabarRejectAmbiguous policy: two independent pending
-// orders on the same account/listing both trigger within one bar, so
-// neither fills.
+// orders on the same account/listing both trigger *within the bar*
+// (neither at the observation's Open, so their relative order is
+// genuinely unknown), so neither fills.
 func TestAdvanceRejectsAmbiguousIntrabarTriggerByDefault(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -323,10 +324,11 @@ func TestAdvanceRejectsAmbiguousIntrabarTriggerByDefault(t *testing.T) {
 	_, err = acc.Submit(ctx, sellStop)
 	require.NoError(t, err)
 
-	// This bar's [Low, High] range reaches both the buy limit (1.10000)
-	// and the sell stop (1.09800); OHLC alone cannot say which the
-	// market actually reached first.
-	obs := mustObservation(t, mustEurUsdListing(t), "1.09900", "1.10100", "1.09700", "1.09950", barTime)
+	// Open (1.10050) is above the buy limit and above the sell stop, so
+	// neither triggers at the open; both only trigger later, via Low
+	// (1.09700) dipping through both prices. OHLC alone cannot say
+	// which the market actually reached first within the bar.
+	obs := mustObservation(t, mustEurUsdListing(t), "1.10050", "1.10200", "1.09700", "1.09900", barTime)
 	err = b.Advance(ctx, obs)
 	require.ErrorIs(t, err, ErrAmbiguousIntrabarOrder)
 
@@ -353,9 +355,83 @@ func TestAdvanceReportsUnsupportedForIntrabarPessimistic(t *testing.T) {
 	_, err = acc.Submit(ctx, sellStop)
 	require.NoError(t, err)
 
-	obs := mustObservation(t, mustEurUsdListing(t), "1.09900", "1.10100", "1.09700", "1.09950", barTime)
+	obs := mustObservation(t, mustEurUsdListing(t), "1.10050", "1.10200", "1.09700", "1.09900", barTime)
 	err = b.Advance(ctx, obs)
 	require.ErrorIs(t, err, brokerpkg.ErrUnsupported)
+}
+
+// TestAdvanceFillsAtOpenOrdersSequentiallyNotAsAmbiguous covers the
+// distinction ADR-026 draws between "more than one order triggers
+// within one bar" (potentially ambiguous) and "more than one order
+// triggers at the observation's Open" (never ambiguous, since Open is
+// the bar's single known first instant). Both orders here resolve at
+// Open; the first fills and opens a Position, and the second — a Sell
+// against that new Long position — correctly fails with
+// ErrPositionUpdateUnsupported, not ErrAmbiguousIntrabarOrder: OHLC
+// ordering was never the uncertainty.
+func TestAdvanceFillsAtOpenOrdersSequentiallyNotAsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	buyLimit := mustLimitRequest(t, deps.IDs, accountID, order.Buy, "1000", "1.10000")
+	_, err = acc.Submit(ctx, buyLimit)
+	require.NoError(t, err)
+	sellStop := mustStopRequest(t, deps.IDs, accountID, order.Sell, "500", "1.09800")
+	_, err = acc.Submit(ctx, sellStop)
+	require.NoError(t, err)
+
+	// Open (1.09900) is below the buy limit (1.10000 <= condition met
+	// at open) and above the sell stop (1.09900 > 1.09800, so the stop
+	// does NOT trigger at open — it only triggers later via Low
+	// reaching 1.09700). Only the buy limit is at-open here.
+	obs := mustObservation(t, mustEurUsdListing(t), "1.09900", "1.10100", "1.09700", "1.09950", barTime)
+	err = b.Advance(ctx, obs)
+	require.ErrorIs(t, err, ErrPositionUpdateUnsupported)
+	require.NotErrorIs(t, err, ErrAmbiguousIntrabarOrder)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Len(t, snap.Positions(), 1)
+	assert.Equal(t, order.Long, snap.Positions()[0].Side)
+	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")), "the buy limit must have filled")
+	require.Len(t, snap.OpenOrders(), 1, "the sell stop remains pending, rejected only by the existing-position boundary")
+	assert.Equal(t, sellStop.OrderID, snap.OpenOrders()[0].Request.OrderID)
+}
+
+func TestAdvanceHonorsCanceledContext(t *testing.T) {
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(context.Background(), accountID)
+	require.NoError(t, err)
+
+	req := mustLimitRequest(t, deps.IDs, accountID, order.Buy, "1000", "1.10000")
+	_, err = acc.Submit(context.Background(), req)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	obs := mustObservation(t, mustEurUsdListing(t), "1.09000", "1.09500", "1.08800", "1.09300", barTime)
+	err = b.Advance(ctx, obs)
+	require.ErrorIs(t, err, context.Canceled)
+
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Len(t, snap.OpenOrders(), 1, "a canceled context must leave the pending order untouched")
+	assert.Empty(t, snap.Positions())
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	drainEvents(t, reader, 1)         // the Submit accept event
+	assertNoMoreEventsSoon(t, reader) // Advance must not have emitted anything
 }
 
 func TestAdvanceIgnoresMarketAndStopLimitOrders(t *testing.T) {
@@ -475,7 +551,12 @@ func TestAdvanceAcrossAccountsIsIsolatedAndOneFailureDoesNotBlockAnother(t *test
 	_, err = acc2.Submit(ctx, cleanLimit)
 	require.NoError(t, err)
 
-	obs := mustObservation(t, mustEurUsdListing(t), "1.09900", "1.10100", "1.09700", "1.09950", barTime)
+	// Same genuinely-ambiguous observation as
+	// TestAdvanceRejectsAmbiguousIntrabarTriggerByDefault: neither of
+	// account 1's two orders triggers at Open, so they conflict; account
+	// 2's single order triggers within the bar too, but with nothing
+	// else to conflict with, it is not ambiguous.
+	obs := mustObservation(t, mustEurUsdListing(t), "1.10050", "1.10200", "1.09700", "1.09900", barTime)
 	err = b.Advance(ctx, obs)
 	require.ErrorIs(t, err, ErrAmbiguousIntrabarOrder)
 

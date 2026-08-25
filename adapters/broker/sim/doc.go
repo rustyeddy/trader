@@ -40,18 +40,29 @@
 // with a simulator-owned Observation (listing, OHLC, time), not
 // marketdata.Bar, once per market observation per listing. Advance
 // evaluates every account independently: for one account's pending
-// Limit/Stop orders on the observed listing, exactly one triggered
-// order fills per call (using the trigger/gap rules documented on
-// limitTriggerPrice/stopTriggerPrice in advance.go); more than one
-// triggering within the same bar is ambiguous and, under the default
-// IntrabarRejectAmbiguous policy, reports ErrAmbiguousIntrabarOrder
-// and fills none of them rather than guessing which triggered first.
-// IntrabarPessimistic is declared but not implemented — selecting it
-// reports broker.ErrUnsupported. StopLimit orders are not evaluated by
-// Advance at all in this package yet. A triggered fill shares Submit's
-// market-order fill mechanics exactly (same Position-opening-from-flat
-// scope boundary, same deliberate omission of cash effects), differing
-// only in how its price and event causation are derived.
+// Limit/Stop orders on the observed listing, every order that triggers
+// at the observation's Open fills first (in deterministic order — the
+// open is the bar's single, known first instant, so these are never
+// ambiguous relative to each other), using the trigger/gap rules
+// documented on limitTriggerPrice/stopTriggerPrice in advance.go. At
+// most one order that triggers elsewhere within the bar fills after
+// them; more than one such within-bar trigger is genuinely ambiguous —
+// OHLC alone cannot say which the market reached first — and, under
+// the default IntrabarRejectAmbiguous policy, reports
+// ErrAmbiguousIntrabarOrder and fills none of that group (any at-open
+// orders still fill). IntrabarPessimistic is declared but not
+// implemented for that ambiguous case — selecting it reports
+// broker.ErrUnsupported. A later order in the fill sequence that fails
+// for an unrelated reason (most notably ErrPositionUpdateUnsupported,
+// when an earlier order in the same call already opened a position)
+// reports that specific error, not ambiguity. StopLimit orders are not
+// evaluated by Advance at all in this package yet. A triggered fill
+// shares Submit's market-order fill mechanics exactly (same Position-
+// opening-from-flat scope boundary, same deliberate omission of cash
+// effects), differing only in how its price and event causation are
+// derived. Advance honors context cancellation between accounts and
+// before committing each individual fill, but never rolls back a fill
+// that already committed before cancellation was observed.
 //
 // # Determinism
 //

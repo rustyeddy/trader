@@ -82,6 +82,17 @@ account's failure block every other account's otherwise-valid fills —
 the same isolation guarantee accountState's per-account mutex already
 provides for =Submit=.
 
+=Advance= accepts and honors a =context.Context=, checked before any
+account is evaluated, again before each account, and again immediately
+before committing each individual triggered fill — a design-review
+finding on the implementing PR (#167) against an earlier revision that
+accepted =ctx= but never consulted it. A canceled or expired =ctx=
+stops further work rather than walking and potentially mutating every
+remaining account; whatever fills already committed before
+cancellation was observed remain committed, since each order's fill is
+already its own atomic, independent unit of work (see buildFill) and
+rolling it back would not undo anything actually incorrect.
+
 Every timestamp =Advance= produces (=Event.Metadata.Timestamp=,
 =Event.ObservedAt=, =accountState.asOf=) still derives from
 =Deps.Clock.Now()=, exactly like =Submit=, not from =obs.Time=
@@ -161,17 +172,41 @@ const (
 unlike =Deps.Prices= (required, ADR-015), an unset =Deps.IntrabarPolicy=
 is itself a meaningful, safe choice, so no validation rejects it.
 
-When one =Observation= would trigger more than one of an account's
-pending orders for the same listing, that is treated as ambiguous
-under =IntrabarRejectAmbiguous=: OHLC data alone cannot establish which
-of several orders' trigger conditions the market actually reached
-first within the bar, and — as established in #149 — a second fill
-against a listing that already holds a Position is rejected outright
-rather than guessed at, so which order "goes first" is not a
-cosmetic detail; it changes the resulting account state. =Advance=
-reports this with a new, classifiable =ErrAmbiguousIntrabarOrder=,
-naming the conflicting orders, and leaves every one of that account's
-orders for that listing untouched — no partial resolution.
+Not every case of "more than one pending order triggers within the
+same bar" is actually ambiguous, and a design review during
+implementation (PR #167) corrected an initial version of this decision
+that treated all such cases identically. =limitTriggerPrice=/
+=stopTriggerPrice= each report, alongside the trigger price, whether
+the trigger resolved at =obs.Open= or somewhere else within the bar
+(via =Low=/=High=). An order that triggers *at* the observation's Open
+is not ambiguous relative to any other order: the open is definitionally
+the bar's first instant, so every at-open order is filled first, in
+deterministic (=OrderID=-sorted) order, followed by at most one order
+that triggered elsewhere within the bar (which, having no other
+within-bar order to be ambiguous with, is unambiguous too). Only when
+*more than one* order's trigger genuinely depends on an unknown path
+through the bar's High/Low — i.e. more than one triggers somewhere
+other than the open — does =IntrabarPolicy= actually apply. That group
+is reported as =ErrAmbiguousIntrabarOrder=, naming the conflicting
+orders, and none of it is filled; any at-open orders in the same call
+still fill normally.
+
+This distinction also fixes a related misclassification: a second
+order in the fill sequence can still fail for a reason unrelated to
+timing — most notably =ErrPositionUpdateUnsupported=, when an earlier
+order in the same call already opened a Position (as established in
+#149, a second fill against a listing that already holds a Position is
+rejected outright). Example: a buy limit at 1.10 and a sell stop at
+1.09 both resolve at the same observation's Open (both are
+unambiguously executable there), but filling the first opens a
+Position, and filling the second — a sell against that new Long
+position — is rejected as an existing-position update, not because
+OHLC ordering was ever in question. Before this correction, both
+orders would have been misreported as =ErrAmbiguousIntrabarOrder=; now
+the first fills, and the second is reported as
+=ErrPositionUpdateUnsupported= against that specific order — an
+accurate diagnosis of a real, different (and already-established)
+scope limitation, not a fabricated data-ordering one.
 
 =IntrabarPessimistic= is *declared but not implemented* by this
 decision: selecting it currently reports =broker.ErrUnsupported=. No
