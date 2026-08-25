@@ -125,6 +125,7 @@ func newRootCmd() (*cobra.Command, func() error) {
 		"log output: stderr, stdout, or a file path (default stderr)")
 
 	cmd.AddCommand(newDataCmd())
+	cmd.AddCommand(newBrokerCmd())
 
 	cleanup := func() error {
 		if closer == nil {
