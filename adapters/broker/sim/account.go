@@ -306,10 +306,12 @@ func (h *accountHandle) Snapshot(ctx context.Context) (account.Snapshot, error) 
 //
 // A market order (req.Type == order.Market) additionally fills
 // immediately and completely at the price h.broker.deps.Prices reports,
-// updating cash and, if the listing was flat, opening a Position — see
-// buildMarketFill and the package doc comment for what this does and
-// does not yet cover. Limit and stop orders remain StatusWorking with
-// no fill matching until issue #150 (M3-07).
+// transitioning the order to StatusFilled and, if the listing was flat,
+// opening a Position — see buildMarketFill and the package doc comment
+// for what this does and does not yet cover. It deliberately does not
+// touch cash/balance state; that is issue #152's (M3-09) scope. Limit
+// and stop orders remain StatusWorking with no fill matching until
+// issue #150 (M3-07).
 func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Order, error) {
 	if h.broker.isClosed() {
 		return order.Order{}, brokerpkg.ErrClosed
