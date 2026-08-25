@@ -265,6 +265,29 @@ func TestPlanRejectsListingInstrumentMismatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidPlanInput)
 }
 
+// TestPlanRejectsListingProviderAccountBrokerMismatch is a regression
+// for review feedback on PR #194: checkPlanInput matched Listing and
+// Intent by instrument identity, but did not confirm the Listing's own
+// venue actually belongs to the account being planned against — an
+// OANDA listing could otherwise be planned against an Alpaca account
+// merely because the underlying economic instrument matched.
+func TestPlanRejectsListingProviderAccountBrokerMismatch(t *testing.T) {
+	deps := testDeps()
+	p, err := NewPlanner(deps)
+	require.NoError(t, err)
+
+	simListing := mustEurUsdListingForProvider(t, "sim")
+	otherListing := mustEurUsdListingForProvider(t, "alpaca")
+	accountID := mustAccountID(t, deps.IDs)
+	snap := mustSnapshot(t, accountID, simListing) // Broker() == "sim"
+	intent := mustEnterIntent(t, deps.IDs, otherListing.InstrumentID(), order.Buy)
+
+	_, err = p.Plan(context.Background(), PlanInput{
+		Intent: intent, Listing: otherListing, Account: snap, Quantity: qty(t, "100"),
+	})
+	require.ErrorIs(t, err, ErrInvalidPlanInput)
+}
+
 func TestPlanRejectsUnconstructedAccount(t *testing.T) {
 	deps := testDeps()
 	p, err := NewPlanner(deps)

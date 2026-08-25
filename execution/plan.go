@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/instrument"
@@ -23,7 +24,10 @@ type PlanInput struct {
 	// planning targets. Intent itself never carries one — it names an
 	// instrument.ID, the canonical economic identity (#177) — so the
 	// caller supplies the Listing execution planning should use.
-	// Listing.InstrumentID() must equal Intent.Instrument.
+	// Listing.InstrumentID() must equal Intent.Instrument, and
+	// Listing.Provider() must case-insensitively equal Account.Broker()
+	// — the same provider/broker consistency account.Snapshot itself
+	// already enforces for every Position and OpenOrder it carries.
 	Listing instrument.Listing
 
 	// Account is the current, authoritative account state Plan
@@ -59,11 +63,19 @@ type PlanResult struct {
 // order.Proposal, without approving risk or submitting to a broker
 // (ADR-005/ADR-006).
 //
-// Plan must be deterministic: given the same Planner instance's own
-// injected Deps and an identical PlanInput (including an identical
-// Intent.Metadata), repeated calls must produce identical PlanResult
-// values. Plan must never consult time.Now, global randomness, or any
-// state beyond what PlanInput and Deps supply.
+// Plan must be deterministic across independent Planner instances:
+// given identical *initial* Deps state (the same starting clock time
+// and ID-generator seed) and an identical PlanInput, two separately
+// constructed Planners must produce identical PlanResult values,
+// including the generated Proposal.Metadata.EventID. This is not a
+// same-instance repeated-call guarantee — Deps.IDs is a stateful
+// id.Generator, and each successful call legitimately advances it to
+// produce a fresh EventID for a new event, the same way any other
+// event-generating stage in this codebase behaves; two calls on the
+// same Planner instance are expected to differ in EventID even for an
+// otherwise-identical PlanInput. Plan must never consult time.Now,
+// global randomness, or any state beyond what PlanInput and Deps
+// supply.
 //
 // Plan enforces the intent -> proposal correlation chain ADR-005
 // describes: the returned Proposal's Metadata.CorrelationID equals
@@ -93,6 +105,10 @@ func checkPlanInput(in PlanInput) (order.Intent, error) {
 	}
 	if in.Account.AccountID().IsZero() {
 		return order.Intent{}, fmt.Errorf("%w: account must be constructed", ErrInvalidPlanInput)
+	}
+	if !strings.EqualFold(in.Listing.Provider(), in.Account.Broker()) {
+		return order.Intent{}, fmt.Errorf("%w: listing provider %q does not match account broker %q",
+			ErrInvalidPlanInput, in.Listing.Provider(), in.Account.Broker())
 	}
 
 	requireQuantity := validIntent.Kind == order.IntentEnter

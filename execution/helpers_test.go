@@ -42,6 +42,31 @@ func mustEurUsdListing(t *testing.T) instrument.Listing {
 	return listing
 }
 
+// mustEurUsdListingForProvider is mustEurUsdListing with an overridden
+// Provider, for tests exercising the Listing.Provider()/Account.Broker()
+// consistency check.
+func mustEurUsdListingForProvider(t *testing.T, provider string) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   provider,
+		Symbol:     "EUR_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
 func mustGbpUsdInstrumentID(t *testing.T) instrument.ID {
 	t.Helper()
 	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
