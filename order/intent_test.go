@@ -15,7 +15,7 @@ func baseIntent(t *testing.T, kind IntentKind) Intent {
 		IntentID:   mustIntentID(t),
 		Kind:       kind,
 		Instrument: mustEurUsdInstrument(t),
-		Metadata:   id.Metadata{EventID: mustEventID(t)},
+		Metadata:   id.Metadata{EventID: mustEventID(t), CorrelationID: mustCorrelationID(t)},
 	}
 }
 
@@ -83,7 +83,20 @@ func TestNewIntentRejectsZeroKind(t *testing.T) {
 
 func TestNewIntentRejectsZeroMetadataEventID(t *testing.T) {
 	in := baseIntent(t, IntentExit)
-	in.Metadata = id.Metadata{}
+	in.Metadata = id.Metadata{CorrelationID: mustCorrelationID(t)}
+	_, err := NewIntent(in)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+}
+
+// TestNewIntentRejectsZeroMetadataCorrelationID is a regression for a
+// gap found in post-merge review of #191: Intent is documented as the
+// anchor for the intent -> proposal -> risk decision -> request/order
+// -> fill correlation chain, so a zero CorrelationID must be rejected
+// at construction rather than silently producing an uncorrelatable
+// Intent that enters the pipeline.
+func TestNewIntentRejectsZeroMetadataCorrelationID(t *testing.T) {
+	in := baseIntent(t, IntentExit)
+	in.Metadata = id.Metadata{EventID: mustEventID(t)}
 	_, err := NewIntent(in)
 	require.ErrorIs(t, err, ErrInvalidIntent)
 }

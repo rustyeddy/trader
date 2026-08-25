@@ -44,6 +44,13 @@ func mustAccountID(t *testing.T) id.AccountID {
 	return aid
 }
 
+func mustCorrelationID(t *testing.T) id.CorrelationID {
+	t.Helper()
+	cid, err := id.GenerateCorrelationID(testGenerator())
+	require.NoError(t, err)
+	return cid
+}
+
 func mustIntentID(t *testing.T) id.IntentID {
 	t.Helper()
 	iid, err := id.GenerateIntentID(testGenerator())
