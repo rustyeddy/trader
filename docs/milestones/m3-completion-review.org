@@ -1,0 +1,373 @@
+#+TITLE: M3 Completion Review
+#+SUBTITLE: Broker Simulation and Account State — verification-first sign-off (issue #158, M3-15)
+#+STARTUP: overview indent
+
+* Purpose
+
+This is the verification-first M3 completion review, following the
+M1 (#32), M2 (#83), M2.5 (#113), and M2.6 (#129) completion reviews'
+own precedent: prove Milestone 3 — the public broker port, the
+deterministic simulated broker, and the account-state model those
+depend on — is a coherent, correctly behaved whole by exercising it
+directly, audit it against every ADR M3 introduced and this
+milestone's own review checklist, and record what that exercise found
+before M4 (execution/risk) begins. It is not a feature-building issue;
+the two changes below exist because the exercise itself found a real,
+concrete coverage gap worth closing now rather than after M4 starts.
+
+M3's own package surface: =broker= (M3-02, #145), =adapters/broker/sim=
+(M3-05 through M3-10, #148-#153), =service/broker= (M3-11, #154), and
+one composition-root command group in =cmd/trader= (M3-12/M3-13,
+#155/#156). =account= and =order= (M1-established) are exercised
+heavily by M3 but not materially changed by it; =num= gained two new
+operations (=Price.MulQuantity=, =Money.DivQuantity=) that M3 needed
+and that M1's own numeric model had left as a documented gap.
+
+* 1. Every M3 issue is closed
+
+#+BEGIN_SRC text
+gh issue list --milestone "M3 - Broker Simulation and Account State" --state all
+#+END_SRC
+
+All sixteen issues this milestone tracked are =CLOSED=: M3-01 through
+M3-14 (#144-#157), plus #164 (the ADR-025 =num= follow-up M3-09
+needed), plus this review itself (#158). Every merged PR (#160,
+#163, #165-#174) targets the =Trader= project and this milestone,
+confirmed directly via =gh pr list --search 'milestone:"M3 - ..."'
+--state all=. No M3 issue is open, deferred without an owner, or
+missing its PR.
+
+* 2. Public broker contracts remain narrow and broker-neutral
+
+=broker.Broker= (=broker/broker.go=) is four methods: =Name=,
+=Accounts=, =OpenAccount=, =Close=. =broker.Account=
+(=broker/account.go=) is five: =Reference=, =Snapshot=, =Submit=,
+=Cancel=, =Replace=, plus =Events= for the streaming contract
+(=broker/event.go=) — six total, matching ADR-007's own recommended
+shape exactly. Neither interface names OANDA, sim, or any other
+adapter; both are read directly as part of this review, not merely
+cited from ADR-007/ADR-008's prose. =adapters/broker/sim.Broker= and
+=.accountHandle= are the only production implementations of either
+interface in the module today (=grep -rn "broker.Broker = \|broker.Account = "=
+finds exactly the =sim= package's own two =var _ = ...= assertions
+plus =broker/broker_test.go='s own test fakes).
+
+No capability-union widening was found: =Account= carries no
+OANDA-only or sim-only method, matching the architecture document's
+"small required core plus capability discovery" principle.
+
+* 3. =broker.Account= is an operational handle; =account.Snapshot= is immutable domain state
+
+Confirmed by reading both types directly. =broker.Account= is a plain
+Go interface of methods that each take a =context.Context= and return
+an error — no field, no mutable local cache of a prior =Snapshot=,
+matching ADR-007's explicit rejection of a "convenient" mutable domain
+object that hides network calls. =account.Snapshot=
+(=account/snapshot.go=) is constructed once via =account.NewSnapshot=
+from a =SnapshotParams= value and exposes only accessor methods over
+unexported fields — no setter, no mutating method of any kind
+(=grep -n "func (s Snapshot)"= shows only value-receiver readers).
+=adapters/broker/sim.accountHandle.Snapshot= builds a fresh
+=account.Snapshot= from =accountState= under lock on every call
+(=account.go:358=, =snapshotLocked= at =account.go:136=) rather than
+returning a cached, potentially stale value — confirmed directly in
+the source, not assumed.
+
+* 4. =account= and =order= do not depend on broker implementations
+
+=broker/boundary_test.go='s own =TestAccountAndOrderDoNotImportBroker=
+(pre-existing, written as part of M3-02/#145) is re-run directly as
+part of this review: passes. It parses every =account/*.go= and
+=order/*.go= file's own import block (not =go list=, which would merge
+per-file imports and lose the per-file attribution this guard needs)
+and fails if either package imports =github.com/rustyeddy/trader/broker=.
+A direct =grep -rn "rustyeddy/trader/broker\"" account/*.go order/*.go=
+independently confirms zero matches, outside the mechanical test
+itself.
+
+* 5. Simulator: deterministic order lifecycles, fills, cancel/replace, account state, event ordering
+
+Already covered extensively by =adapters/broker/sim='s own unit test
+suite (advance_test.go, cancel_replace_test.go, pnl_test.go,
+position_test.go, models_test.go, sim_test.go — over 5,400 lines) built
+across M3-05 through M3-10. This review's own contribution
+(#157/M3-14) is =vertical_slice_test.go=: one coherent, hand-computed,
+end-to-end scenario — market fill, two pending orders (limit and
+stop), a cancel, a replace, and an =Advance=-triggered within-bar stop
+fill that partially closes a position — exercised entirely through the
+public =brokerpkg.Broker=/=Account= port, with every balance, position,
+and event assertion a specific hand-computed value rather than a loose
+"the snapshot changed" check. =TestVerticalSlice_DeterministicAcrossRuns=
+proves the entire scenario — snapshots and complete event streams
+alike — is byte-for-byte reproducible (=require.Equal=, not merely
+"no error") across two independent =Broker= instances built from
+identical deterministic inputs (=clock.NewSimulated=,
+=id.NewDeterministic=, a fixed/mutable price map, literal =Observation=
+values). Re-run directly as part of this review: passes.
+
+Event ordering itself is governed by ADR-024 (deterministic sequencing,
+one =Fill= event published before its order's own terminal =Filled=
+status event) and independently exercised by =broker/broker_test.go='s
+own =TestEventsDeliversDeterministicOrderAcrossOperations=,
+=TestEventsResumeFromCursorSkipsAlreadyDeliveredEvents=, and
+=TestEventsEmptyCursorReplaysFromBeginningIncludingDuplicates= — all
+re-run directly: pass.
+
+* 6. Multiple accounts remain isolated
+
+=vertical_slice_test.go='s own account B (a second, entirely
+independent account sharing the same =Broker= as account A) proves
+isolation directly: B's snapshot carries none of A's =EUR_USD=
+position or activity, A's snapshot carries none of B's =GBP_USD=
+position, and B's realized PnL/cash/equity are untouched by A's own
+loss-making trade — asserted as specific values, not merely "not equal
+to A's values." =adapters/broker/sim.NewBroker= itself takes a variadic
+=...AccountConfig= and constructs one independent =accountState= per
+config (=broker.go:45=), confirmed by reading the constructor directly:
+no shared mutable state exists between two =accountState= values beyond
+the immutable =Deps= they both read from (clock, ID generator, price
+source), and =Deps= itself carries no per-account field.
+
+* 7. No hidden wall clock, global randomness, global logger, or global configuration in deterministic paths
+
+A direct search across every M3 production package (not test files),
+run as part of this review:
+
+#+BEGIN_SRC text
+grep -rn "time\.Now()"                    adapters/broker/sim broker account service/broker  # zero matches
+grep -rln "math/rand"                     adapters/broker/sim broker account service/broker  # zero matches
+grep -rn "slog\.Default\(\)\|slog\.SetDefault" adapters/broker/sim broker account service/broker  # zero matches
+grep -rn "os\.Getenv\|os\.Environ"        adapters/broker/sim broker account service/broker  # zero matches
+grep -rn "os\.Exit"                       adapters/broker/sim broker account service/broker  # zero matches
+#+END_SRC
+
+Every result is empty. Time comes only from the injected =Deps.Clock=
+(=clock.Clock=, itself either =clock.Real= at a composition root or
+=clock.NewSimulated= in tests/deterministic scenarios); every ID comes
+only from the injected =Deps.IDs= (=*id.Generator=, backed by
+=id.Random= at a composition root or =id.NewDeterministic= in tests).
+=cmd/trader/brokerservice.go= — the one composition root this milestone
+added — does construct =clock.Real{}= and =id.Random{}= directly, which
+is correct and expected: composition roots are exactly where a real
+clock and real randomness belong, per the architecture document's own
+"supplied at composition time" principle; it is domain and service code
+that must not do so, and none does.
+
+* 8. Service and CLI boundaries follow ADR-022; formatting remains transport-side
+
+=service/broker= (M3-11, #154) matches every other =service/*= package's
+own established shape (confirmed directly against =service/marketdata=
+and =service/boundary_test.go='s own transport-framework guard,
+extended by this milestone to cover =service/broker= as well — re-run
+directly: passes): request/response DTOs (=request.go=/=response.go=),
+a =Service= type constructed from a public port
+(=brokerpkg.Broker=) plus an injected =*slog.Logger=, no import of
+=cobra=, =net/http=, or any other transport framework anywhere in the
+package (=grep -rln "spf13/cobra\|net/http"= against
+=service/broker/*.go=: zero matches, excluding test files).
+
+=cmd/trader='s own broker command files (=broker.go=,
+=brokeraccounts.go=, =brokersubmit.go=, =brokerformat*.go=) format
+every response through =BrokerFormatter= — table and JSON — entirely
+inside =cmd/trader=; =service/broker= itself returns only typed
+=SnapshotResponse=/=SubmitResponse=/etc. values, never a formatted
+string. =cmd/trader/boundary_test.go='s own
+=TestBrokerCommandHandlers_NeverImportSimBrokerDirectly= (#155) is
+re-run directly: passes — no leaf command handler imports
+=adapters/broker/sim=; only =brokerservice.go= and =brokerlisting.go=
+(this command group's own composition-root files, by the same
+convention =dataservice.go= already established for the =data= command
+group) do.
+
+* 9. Logging follows ADR-023 without secret leakage
+
+Closed out directly by #156/M3-13 and re-verified here. Canonical
+attribute constants (=logging.AccountID=, =logging.OrderID=,
+=logging.InstrumentID=, =logging.Component=) are used throughout
+=service/broker/log.go= and =orders.go=, confirmed by direct
+=grep -rn "\"account_id\"\|\"order_id\"\|\"instrument_id\""
+service/broker/*.go= outside =_test.go=: zero raw string-literal
+matches — every one goes through the =logging= package's own named
+constant. =TestService_LogsOnlyKnownAttributeKeys= (#156, re-run
+directly as part of this review) exercises all five =Service=
+operations and asserts every logged attribute key belongs to a fixed,
+named allowlist — the concrete, mechanical form of "no secret can enter
+a structured attribute through current M3 paths," since
+=adapters/broker/sim= carries no credential field anywhere for a log
+call to accidentally reach. =service/broker/doc.go='s own "Logging and
+credential redaction" section records this scope explicitly and names
+the concrete deferral: real-adapter credential redaction (a future
+OANDA API token, etc.) is Milestone 5's own responsibility, not this
+package's, since =Service= itself never logs a whole request/response/
+config value wholesale by construction.
+
+* 10. No later-milestone concern has leaked into M3
+
+A direct search, run as part of this review:
+
+#+BEGIN_SRC text
+grep -rln "rustyeddy/trader/risk\|rustyeddy/trader/strategy\|rustyeddy/trader/execution\|rustyeddy/trader/portfolio" \
+  broker account adapters/broker/sim service/broker cmd/trader/broker*.go
+#+END_SRC
+
+Zero matches. =adapters/broker/= contains exactly one adapter package
+(=sim=) — no OANDA or other real-adapter package exists yet, matching
+the architecture document's own Phase 3 scope ("Do not add a real
+broker adapter ... merely to expand this milestone," Phase 3's own
+closing sentence). No live-session state machine, no risk engine, no
+strategy contract, and no portfolio aggregation exists anywhere in the
+packages this milestone touched.
+
+* 11. Examples/docs/ADRs and contract/integration tests match implemented behavior
+
+Every M3-introduced or M3-touched ADR is =Accepted=, confirmed by
+reading each file's own Status section directly rather than trusting
+=adr-decisions.org='s summary table alone: ADR-007, ADR-008, ADR-017,
+ADR-018, ADR-019 (all extracted from the consolidated registry ahead of
+M3 by #144/M3-01), ADR-024 (#147/M3-04), ADR-025 (#164), ADR-026
+(#150/M3-07), ADR-027 (#152/M3-09), ADR-028 (#153/M3-10). None remain
+=Proposed=.
+
+=broker/broker_test.go= is itself a contract-test-shaped suite
+(=fakeBroker=/=fakeAccount=/=fakeEventReader= exercising the public
+port's own documented behavior — idempotent client order IDs are not
+yet applicable since M3 has only one adapter, but ordering, cursor
+resume, duplicate replay, and closed-broker rejection are all covered)
+in the same spirit ADR's own "Contract Testing" section calls for, even
+though a formal =broker/contracttest= subpackage (for a future second
+adapter, per the architecture document's own M8/Alpaca validation
+phase) does not exist yet — correctly deferred, since M3 has exactly
+one adapter to test against.
+
+No M3-specific example program exists under =examples/= yet. This is a
+correct, deliberate absence rather than a gap: the architecture
+document's own "Suggested First API Review Exercise" (Example A:
+Minimal Backtest, Example B: Paper Trading Bot) names strategy,
+execution, and risk as prerequisites neither M3 nor any earlier
+milestone has built yet — an M3-only example would necessarily be a
+synthetic, out-of-context demonstration, not the real API-review
+exercise the architecture document actually asks for. =cmd/trader broker
+accounts/snapshot/submit= (#155) already serves M3's own "prove the
+public API through a real, runnable consumer" need in the meantime.
+
+* 12. Test coverage and =make check=
+
+=make check= (=gofmt -l=, =go vet ./...=, =golangci-lint run ./...=,
+=go test ./...=, =go test -race ./...=) passes across the whole
+repository, re-run directly as the final step of this review.
+
+Coverage, each re-measured directly (=go test -cover=) rather than
+cited from an earlier session:
+
+| Package               | Coverage | Note                                             |
+|------------------------+----------+---------------------------------------------------|
+| =broker=               |   100.0% |                                                   |
+| =account=              |   100.0% |                                                   |
+| =order=                |   100.0% |                                                   |
+| =service/broker=       |    94.7% |                                                   |
+| =adapters/broker/sim=  |    89.6% |                                                   |
+| =cmd/trader=           |    86.3% | see Deficiency Found below                        |
+
+** Deficiency found and fixed: three broker CLI response paths had zero test coverage
+
+=cmd/trader='s own coverage measured 82.3% before this review, below
+the 85% project target =AGENTS.md= sets — a real gap, not a rounding
+artifact. Per-function coverage (=go tool cover -func=) named the exact
+cause: #155's own =brokervertical_test.go= exercised =FormatAccounts=
+only via table output and =FormatSnapshot=/=FormatSubmit= only via
+JSON output, so the JSON =FormatAccounts= and table =FormatSnapshot=/
+=FormatSubmit= code paths had never actually run under test, and
+=noPriceSource='s own =Info=/=Price= methods (required to satisfy
+=simbroker.FillPriceSource= for the =accounts=/=snapshot= commands,
+which never call =Submit= and so never exercise them through the CLI
+at all) were entirely untested.
+
+Fixed directly as part of this review, per the same "the exercise
+itself found a real, concrete gap worth closing now" standard the
+M2.6 review established: four new subtests in
+=cmd/trader/brokervertical_test.go= (JSON =accounts=, table
+=snapshot=, table =submit=) close the format-path gaps through the
+real Cobra command tree, and a new =cmd/trader/brokerservice_test.go=
+directly unit-tests =noPriceSource=, =cliPriceSource=, and
+=resolveSubmitPriceSource= — small value types this milestone already
+owns, not new production behavior. =cmd/trader= now measures 86.3%,
+above target; every other M3 package was already above 85% with no
+zero-coverage function, confirmed by =go tool cover -func= showing no
+=0.0%= entry in =broker=, =account=, =order=, =adapters/broker/sim=, or
+=service/broker=.
+
+* Known Deferrals
+
+Recorded explicitly, per this issue's own acceptance criteria, as
+safe — not blockers, and each with a concrete owner for when it
+actually becomes relevant:
+
+- *No real broker adapter exists yet* (section 10). Correct and
+  deliberate: the architecture document's own Phase 3 explicitly
+  excludes this from M3's scope. Concrete owner: Milestone 5 (OANDA
+  broker adapter), per the architecture document's own phase sequence.
+- *Redaction denylist does not yet cover a real adapter's credential key
+  shapes* (section 9, first named by the M2.6 review's own section 7 and
+  reconfirmed unaffected by M3). Safe: no M3 code path has a credential
+  field to log in the first place. Concrete owner: Milestone 5, same as
+  the M2.6 review already recorded.
+- *No formal =broker/contracttest= subpackage exists yet* (section 11).
+  Safe: M3 has exactly one =broker.Broker= implementation
+  (=adapters/broker/sim=), and =broker/broker_test.go='s own fakes
+  already exercise the port's documented contract in the meantime.
+  Concrete owner: extract a reusable contract-test suite from
+  =broker/broker_test.go='s own fakes when Milestone 5's OANDA adapter
+  needs to be checked against the identical contract sim already
+  satisfies — the architecture document's own Phase 8 (Alpaca) makes
+  this doubly necessary once a *third* adapter exists.
+- *No M3-specific example program under =examples/=* (section 11).
+  Safe and deliberate: a real strategy/execution/risk-backed example is
+  the architecture document's own explicit ask, not an M3-scoped
+  broker-only demo. Concrete owner: the architecture document's own
+  "Example A: Minimal Backtest" review exercise, once M4-M6 exist to
+  compose it from.
+- *No CI-enforced dependency-direction or API-compatibility tooling*,
+  the same deliberately-deferred item every prior completion review has
+  already named; still not part of this sign-off, for the same reason.
+  Concrete follow-up: unchanged from the M1/M2/M2.5/M2.6 reviews' own —
+  =package-boundaries.org= is where a =depguard=- or =go list=-based
+  mechanical check, if adopted, belongs; no milestone has yet made it a
+  blocking requirement, and this review does not either.
+
+* Recommendation
+
+*M3 is ready to close. M4 (execution and risk) may begin.*
+
+Every acceptance criterion in issue #158 is satisfied: all sixteen M3
+issues are closed with merged PRs against the correct milestone
+(section 1); the public broker port remains narrow and broker-neutral,
+confirmed by direct interface inspection (section 2);
+=broker.Account=/=account.Snapshot= keep their documented operational-
+handle/immutable-state split (section 3); =account=/=order= remain free
+of any broker dependency, mechanically enforced (section 4); the
+simulator's deterministic order lifecycle, fills, cancel/replace,
+account state, and event ordering are proven end to end by this
+review's own new vertical-slice scenario and its determinism
+counterpart (section 5); multiple accounts are proven isolated with
+concrete, hand-computed assertions rather than a loose "not equal"
+check (section 6); no hidden wall clock, randomness, global logger, or
+global configuration exists anywhere in a deterministic M3 code path,
+confirmed by direct search (section 7); the service and CLI boundaries
+follow ADR-022 with formatting kept entirely transport-side (section
+8); logging follows ADR-023 with a mechanically enforced attribute
+allowlist and no credential ever reachable by a log call today (section
+9); no risk, strategy, execution, or portfolio concern has leaked into
+M3, confirmed by direct search (section 10); every M3 ADR is
+=Accepted=, contract-test-shaped coverage exists for the one adapter M3
+actually has, and the absence of an M3-only example is a deliberate,
+correctly-reasoned choice rather than a gap (section 11); and
+=make check= passes with every M3 package above the 85% coverage target
+after this review's own fix (section 12).
+
+This review's own exercise found and fixed one concrete, non-blocking
+gap — three untested broker CLI response paths, closed with four new
+CLI subtests and one new unit-test file rather than deferred — and
+found no other deficiency. The Known Deferrals above are each a
+deliberate, named, low-risk decision consistent with every prior
+milestone's own completion review, not a gap discovered too late to
+matter.
