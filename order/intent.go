@@ -122,10 +122,13 @@ type Intent struct {
 
 // NewIntent validates and returns an Intent. IntentID and Instrument
 // must be non-zero; Kind must be one of its defined values;
-// Metadata.EventID must be non-zero, so the correlation chain ADR-005
-// describes is anchored from the moment an Intent exists; and
-// Side/Quantity/StopPrice must be present or zero/nil exactly as Kind
-// requires:
+// Metadata.EventID and Metadata.CorrelationID must both be non-zero, so
+// the intent -> proposal -> risk decision -> request/order -> fill
+// correlation chain ADR-005 describes is anchored from the moment an
+// Intent exists — Intent is the first stage of that chain, so nothing
+// later can retroactively assign a CorrelationID an uncorrelatable
+// Intent never had; and Side/Quantity/StopPrice must be present or
+// zero/nil exactly as Kind requires:
 //
 //   - IntentEnter: Side required; Quantity and StopPrice forbidden.
 //   - IntentExit: Side, Quantity, and StopPrice all forbidden.
@@ -153,6 +156,9 @@ func checkIntent(in Intent) error {
 	}
 	if in.Metadata.EventID.IsZero() {
 		return fmt.Errorf("metadata event id must be set")
+	}
+	if in.Metadata.CorrelationID.IsZero() {
+		return fmt.Errorf("metadata correlation id must be set")
 	}
 	return checkIntentKindFields(in)
 }
