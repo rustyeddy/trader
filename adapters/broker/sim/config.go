@@ -26,6 +26,10 @@ type FillPriceSource interface {
 	// Submit reports it directly rather than guessing or falling back
 	// to a stale value.
 	Price(listing instrument.Listing, side order.Side) (num.Price, error)
+	// Info identifies this configured model instance (issue #153,
+	// M3-10), the same reproducibility surface SlippageModel and
+	// CommissionModel expose.
+	Info() ModelInfo
 }
 
 // IntrabarPolicy selects how Broker.Advance resolves an Observation
@@ -73,6 +77,15 @@ type Deps struct {
 	// Observation (ADR-026). The zero value, IntrabarRejectAmbiguous,
 	// is a legitimate, safe default and requires no explicit setting.
 	IntrabarPolicy IntrabarPolicy
+	// Slippage adjusts a Market/Stop fill's base price (issue #153,
+	// M3-10). Nil (the default) means no slippage — the exact base
+	// price from Prices or the observation trigger/gap rules is used
+	// unchanged. Never consulted for Limit fills.
+	Slippage SlippageModel
+	// Commission computes the commission owed for a fill (issue #153,
+	// M3-10). Nil (the default) means no commission — this package
+	// invents no fee model of its own.
+	Commission CommissionModel
 }
 
 func (d Deps) validate() error {

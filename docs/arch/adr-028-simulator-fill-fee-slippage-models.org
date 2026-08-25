@@ -1,0 +1,203 @@
+#+TITLE: Configurable Simulator Fill, Fee, and Slippage Models ADR-028
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #153 (M3-10) asks for simulator execution assumptions
+(fill price, commission, slippage) to be explicit, configurable, and
+deterministic, and for this to be drafted and adopted before
+implementation, following the same design-discussion-before-code
+pattern as ADR-026 and ADR-027 for the rest of M3.
+
+* Context
+
+=adapters/broker/sim= already has one execution-assumption model:
+=FillPriceSource= (issue #149), the sole authority for a market order's
+base fill price. #153 asks for two more — commission and slippage —
+and for all three to expose enough identity/configuration to be
+recorded in a future backtest run manifest, without inventing that
+manifest type now.
+
+Three concrete decisions were needed before implementation, worked out
+in design discussion on #153 before this ADR:
+
+1. One combined execution-model interface, or several small ones?
+2. What does "model identity/version/config" actually need to contain
+   to be useful in a future manifest — is =Name=+=Version= alone
+   sufficient?
+3. Does slippage apply to every fill, or only some order types — and
+   in what order relative to commission and to the existing gap-price
+   rules ADR-026 already established for triggered orders?
+
+* Decision
+
+** Three small interfaces, not one combined one
+
+=SlippageModel= and =CommissionModel= join =FillPriceSource= as three
+separate, small interfaces, each independently optional via =Deps=:
+
+#+begin_src go
+type SlippageModel interface {
+    Slippage(listing instrument.Listing, side order.Side, quantity num.Quantity, price num.Price) (num.Price, error)
+    Info() ModelInfo
+}
+
+type CommissionModel interface {
+    Commission(listing instrument.Listing, side order.Side, quantity num.Quantity, price num.Price) (*num.Money, error)
+    Info() ModelInfo
+}
+#+end_src
+
+A caller may want exact pricing with fees but no slippage, or the
+reverse; one combined =ExecutionModel= would force every caller to
+implement all three concerns together. This follows the architecture
+document's "small required core plus capability discovery" guidance,
+the same reasoning that already keeps =FillPriceSource= separate from
+=IntrabarPolicy=.
+
+=SlippageModel.Slippage= returns the *final executable price*, not a
+delta or offset — an explicit choice so implementations cannot
+disagree about what the return value means. The returned price is
+still validated through the normal listing tick-size/quantity rules
+=order.NewFill= already applies; =Slippage= does not bypass them.
+
+=Deps.Prices= remains required and validated non-nil (ADR-015,
+unchanged from #149). =Deps.Slippage= and =Deps.Commission= are both
+optional; =nil= means "no slippage" / "no fee" respectively — the
+deterministic exact-price/no-fee default #153 asks for, and
+backward-compatible with every existing caller and test without
+requiring a no-op implementation to be passed explicitly. This matches
+=Deps.IntrabarPolicy='s precedent (ADR-026), not =Prices='s.
+
+** ModelInfo carries canonical configuration identity, not just name/version
+
+#+begin_src go
+type ModelInfo struct {
+    Name    string
+    Version string
+    Config  string
+}
+#+end_src
+
+=Name=+=Version= alone cannot distinguish two differently configured
+instances of the same model (=FixedSlippage v1 @ 1 pip= versus
+=FixedSlippage v1 @ 5 pips=) — a real gap identified during design
+review, since a future backtest manifest must be able to tell those
+two runs apart. =Config= is a canonical, deterministic string an
+implementation is responsible for formatting itself — no
+=map[string]any= escape hatch, since reproducibility matters more than
+flexibility here, and an unordered map cannot be canonically
+stringified without also defining a canonical key order. =Config= must
+never contain a secret or credential. =FillPriceSource= gains =Info()=
+too, even though it shipped without one in #149 — no implementer
+exists outside this module, so extending it now is low-risk, and all
+three models should expose the same reproducibility surface uniformly.
+
+Nothing consumes =ModelInfo= yet — no manifest type exists in this
+milestone. It is exposed now so a future backtest-manifest consumer
+does not require another public API change to retrofit it, the same
+reasoning ADR-026 used for declaring =IntrabarPessimistic= before
+implementing it.
+
+** Slippage scope, ordering, and atomicity
+
+Slippage is consulted only for =Market= and =Stop= fills, never
+=Limit=: a limit fill is a price guarantee by definition, and slippage
+would work against that guarantee. A =Stop= has already become a
+market-type execution once triggered (ADR-026), so slippage applying
+to it after its own trigger/gap price is resolved is consistent with
+real broker behavior, not a special case.
+
+The full per-fill pipeline, in =accountState.buildFill=:
+
+#+begin_example
+base price (Deps.Prices, or the observation trigger/gap rules)
+    -> Deps.Slippage, if configured and Type is Market/Stop
+    -> validate the returned price against listing's tick size
+    -> final execution price
+    -> Deps.Commission, if configured, computed from that final price
+    -> canonical order.Fill
+    -> position/PnL accounting (issue #152)
+    -> atomic commit
+#+end_example
+
+The slippage-adjusted price is validated immediately, before
+=Deps.Commission= is ever consulted — a design-review finding on the
+implementing PR (#170): =order.NewFill='s own tick-size check happens
+later in this pipeline, which would let an invalid slippage result
+reach =Commission= first. =buildFill= instead calls
+=Listing.Spec().ValidatePrice= right after =Slippage= returns, so an
+invalid result fails before doing anything else, matching
+=SlippageModel='s own documented contract.
+
+Commission is deliberately computed from the *final*, post-slippage
+price, not the pre-slippage base: a percentage- or notional-based fee
+model must see what was actually paid. Both model calls happen inside
+=buildFill='s existing build phase, before any state mutation — a
+failing model leaves the account exactly as if the fill attempt never
+happened, the same atomicity guarantee established for every other
+failure mode in #149/#150/#152. A commission denominated in a currency
+other than the account's own fails the fill atomically through the
+same settlement-currency boundary #152 already established
+(=Money.Add=/=Sub='s currency check), rather than being silently
+converted or combined.
+
+** Determinism contract
+
+=SlippageModel= and =CommissionModel= carry the same determinism
+contract =FillPriceSource= already does (ADR-015): no wall clock,
+global random source, environment, or configuration reads inside model
+logic. A future stochastic implementation is not built here — #153
+permits one only if seed-controlled and opt-in — but the contract is
+established now so one can be added later without renegotiating it:
+any randomness such a model needs must be supplied explicitly at its
+own construction, never read from ambient state.
+
+* Consequences
+
+- Backtests can configure independent fill-price, slippage, and
+  commission assumptions without changing any broker contract, and can
+  omit any of the three for the deterministic exact-price/no-fee
+  default.
+- A future backtest-manifest type can record exactly which model,
+  version, and configuration produced a given run's executions,
+  without another public API change to =sim=.
+- =order.Fill.Commission=, which #152 already consumes
+  (=applyCommission=) but nothing previously produced, now has a real
+  producer when a =CommissionModel= is configured.
+- Every existing test and caller is unaffected: =Deps.Slippage=/
+  =Deps.Commission= default to =nil=, and =FillPriceSource='s existing
+  implementations only need one additional trivial =Info()= method.
+
+* Alternatives Considered
+
+- *One combined =ExecutionModel= interface covering price, slippage,
+  and commission together.* Rejected: forces every caller to implement
+  all three concerns even when only one or two are needed, and
+  contradicts the small-interface pattern already established by
+  =FillPriceSource=/=IntrabarPolicy=.
+- *=ModelInfo= as =Name=+=Version= only, no =Config=.* Rejected on
+  design review: two differently configured instances of the same
+  model/version would be indistinguishable in a future manifest,
+  defeating the reproducibility purpose #153's acceptance criteria
+  actually ask for.
+- *=Config= as =map[string]any=.* Rejected: reproducibility requires a
+  canonical, deterministic representation; an unordered map cannot be
+  canonically stringified without also defining and enforcing a
+  canonical key order, which is more machinery than a plain string an
+  implementation formats itself.
+- *=CommissionModel= returning =(num.Money, bool, error)= instead of
+  =(*num.Money, error)=.* Considered, since it makes "no commission"
+  explicit without pointer/option-type semantics. Kept the pointer form
+  for direct consistency with =order.Fill.Commission='s own existing
+  =*num.Money= "nil means absent" idiom, which #152 already
+  established and consumes.
+- *Applying slippage to =Limit= fills too, or making it configurable
+  per order type.* Rejected: a limit fill's defining guarantee is that
+  it never executes worse than its limit price; applying slippage
+  there would either violate that guarantee or require slippage to be
+  clamped in a way no caller asked for. Restricting slippage to
+  Market/Stop is the simpler, correct default.
+- *Computing commission from the pre-slippage base price.* Rejected: a
+  real percentage/notional fee is charged on what was actually paid,
+  not on a hypothetical unadjusted price.
