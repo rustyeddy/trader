@@ -113,12 +113,22 @@ The full per-fill pipeline, in =accountState.buildFill=:
 #+begin_example
 base price (Deps.Prices, or the observation trigger/gap rules)
     -> Deps.Slippage, if configured and Type is Market/Stop
+    -> validate the returned price against listing's tick size
     -> final execution price
     -> Deps.Commission, if configured, computed from that final price
     -> canonical order.Fill
     -> position/PnL accounting (issue #152)
     -> atomic commit
 #+end_example
+
+The slippage-adjusted price is validated immediately, before
+=Deps.Commission= is ever consulted — a design-review finding on the
+implementing PR (#170): =order.NewFill='s own tick-size check happens
+later in this pipeline, which would let an invalid slippage result
+reach =Commission= first. =buildFill= instead calls
+=Listing.Spec().ValidatePrice= right after =Slippage= returns, so an
+invalid result fails before doing anything else, matching
+=SlippageModel='s own documented contract.
 
 Commission is deliberately computed from the *final*, post-slippage
 price, not the pre-slippage base: a percentage- or notional-based fee

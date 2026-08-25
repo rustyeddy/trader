@@ -196,6 +196,42 @@ func TestBuildFillComputesCommissionFromFinalSlippedPrice(t *testing.T) {
 	assert.True(t, commission.seenPrice.Equal(num.MustParsePrice("1.10050")), "commission must see the slipped price, not the pre-slippage base 1.10000")
 }
 
+// TestBuildFillRejectsInvalidSlippageAdjustedPrice covers the review
+// finding that a SlippageModel's returned price must be validated
+// immediately — before Commission is ever consulted, and before any
+// state commits — not left to order.NewFill's later tick-size check to
+// catch after Commission has already run against an invalid price.
+func TestBuildFillRejectsInvalidSlippageAdjustedPrice(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	// mustEurUsdListing's tick size is 0.00001; this price is not an
+	// exact multiple of it.
+	deps.Slippage = fixedSlippage{price: num.MustParsePrice("1.100001")}
+	commission := &pricedCommission{}
+	deps.Commission = commission
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, req)
+	require.ErrorIs(t, err, order.ErrInvalidFill)
+	assert.Nil(t, commission.seenPrice, "commission must never be consulted with an invalid slippage-adjusted price")
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snap.Positions())
+	assert.Empty(t, snap.OpenOrders())
+	assert.True(t, snap.Equity().Equal(usd("10000")))
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	assertNoMoreEventsSoon(t, reader)
+}
+
 // TestBuildFillSlippageErrorLeavesNoState covers atomicity: a failing
 // model must leave every part of state exactly as it was, matching
 // #149/#152's established build-then-commit discipline.

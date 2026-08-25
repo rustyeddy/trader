@@ -54,10 +54,11 @@
 // which is a price guarantee) and Deps.Commission computes the fee
 // owed, both consulted from buildFill, in that order — slippage first,
 // then commission from the resulting final price. Both default to nil
-// (no slippage, no fee), matching Deps.Prices/Deps.IntrabarPolicy's
-// existing zero-value-is-a-real-default pattern rather than requiring
-// every caller to pass a no-op implementation. See models.go for the
-// full SlippageModel/CommissionModel/ModelInfo contract.
+// (no slippage, no fee), matching Deps.IntrabarPolicy's existing
+// zero-value-is-a-real-default pattern — unlike Deps.Prices, which
+// remains required and validated non-nil — rather than requiring every
+// caller to pass a no-op implementation. See models.go for the full
+// SlippageModel/CommissionModel/ModelInfo contract.
 //
 // Cancel and Replace (issue #151, M3-08) resolve synchronously within
 // one call — this simulator has no real broker latency, so

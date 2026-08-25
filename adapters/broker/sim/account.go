@@ -508,10 +508,11 @@ func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcom
 // assigned; the filled-status order event is assigned sequence+1,
 // caused by the fill event's own EventID. Two callers build price and
 // causationID differently: Submit (issue #149/M3-06) uses Deps.Prices
-// and the just-built order-accepted event's EventID; accountState
-// .advance (issue #150/M3-07, ADR-026) uses a trigger/gap-derived
-// price and a zero causationID, since a market-observation-triggered
-// fill is not caused by any preceding Trader-internal event.
+// and the just-built order-accepted event's EventID;
+// accountState.advance (issue #150/M3-07, ADR-026) uses a
+// trigger/gap-derived price and a zero causationID, since a
+// market-observation-triggered fill is not caused by any preceding
+// Trader-internal event.
 //
 // price is only the base price on entry (issue #153, M3-10): if
 // Deps.Slippage is configured and o.Request.Type is Market or Stop,
@@ -565,6 +566,15 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 		adjusted, err := deps.Slippage.Slippage(req.Listing, req.Side, fillQty, price)
 		if err != nil {
 			return fillOutcome{}, err
+		}
+		// Validated immediately, before anything downstream (most
+		// notably Commission) ever sees it: SlippageModel's own
+		// contract says the returned price is validated like any
+		// other fill price, and order.NewFill's own tick-size check
+		// happens too late in this pipeline to prevent an invalid
+		// price from reaching Commission first.
+		if err := req.Listing.Spec().ValidatePrice(adjusted); err != nil {
+			return fillOutcome{}, fmt.Errorf("%w: slippage-adjusted price: %v", order.ErrInvalidFill, err)
 		}
 		price = adjusted
 	}

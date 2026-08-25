@@ -43,8 +43,10 @@ type SlippageModel interface {
 	// quantity against listing/side, given price (the base price
 	// FillPriceSource or the observation trigger/gap rules already
 	// resolved) — not a delta or an offset. The returned price is
-	// still validated against listing's tick size like any other fill
-	// price; Slippage does not bypass that.
+	// validated against listing's tick size immediately, before it is
+	// used for anything else (including consulting CommissionModel);
+	// Slippage does not bypass that check by returning something
+	// order.NewFill would later reject.
 	Slippage(listing instrument.Listing, side order.Side, quantity num.Quantity, price num.Price) (num.Price, error)
 	// Info identifies this configured model instance.
 	Info() ModelInfo
