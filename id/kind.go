@@ -18,6 +18,7 @@ type (
 	eventKind       struct{}
 	correlationKind struct{}
 	accountKind     struct{}
+	intentKind      struct{}
 )
 
 func (runKind) Prefix() string         { return "run" }
@@ -26,16 +27,19 @@ func (fillKind) Prefix() string        { return "fil" }
 func (eventKind) Prefix() string       { return "evt" }
 func (correlationKind) Prefix() string { return "cor" }
 func (accountKind) Prefix() string     { return "acc" }
+func (intentKind) Prefix() string      { return "int" }
 
-// Trader's six identifier kinds. Each is a type alias for a distinct
+// Trader's seven identifier kinds. Each is a type alias for a distinct
 // instantiation of the generic ID type (see id.go), so RunID and OrderID
 // are fully distinct Go types at compile time — a value of one can never be
 // assigned where the other is expected — while sharing one generic
-// implementation instead of six hand-copied ones.
+// implementation instead of seven hand-copied ones.
 //
 // This is deliberately fewer kinds than issue #24 originally listed; see
 // the package doc comment's "Deferred identifiers" section for which ones
-// were cut, and why.
+// were cut, and why. IntentID was one of the originally-cut kinds,
+// reinstated by issue #177 (M4-02) once order.Intent — the first concrete
+// domain object it identifies — existed to justify it.
 type (
 	RunID         = ID[runKind]
 	OrderID       = ID[orderKind]
@@ -50,4 +54,9 @@ type (
 	// account identifier is a separate concept entirely — see the package
 	// doc comment.
 	AccountID = ID[accountKind]
+
+	// IntentID identifies one order.Intent (ADR-005), the first stage of
+	// the intent -> proposal -> risk decision -> request/order -> fill
+	// correlation chain.
+	IntentID = ID[intentKind]
 )

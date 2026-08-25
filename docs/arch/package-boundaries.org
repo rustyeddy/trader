@@ -35,17 +35,19 @@ code.
         +-------------------+-------------------+
         |                   |                   |
     marketdata            order              account
-        ^                 ^ ^ ^                  ^
-        |                /  |  \                 |
-    strategy   execution  risk  broker       portfolio
-         \        \        |        /             /
-          +--------+-------+--------+------------+
-                            |
-                   application services
-                  (backtest, live, scanner)
-                            ^
-                            |
-                  adapters and commands
+        ^  ^               ^ ^ ^                 ^
+         \  \             /  | \                 |
+          \  +-----------+   |  \                |
+           \                 |   \               |
+        strategy         execution risk       broker   portfolio
+             \                \     |             |        /
+              +--------+-------+----+-------------+-------+
+                                |
+                       application services
+                      (backtest, live, scanner)
+                                ^
+                                |
+                      adapters and commands
 #+END_EXAMPLE
 
 =execution= and =risk= (M4, ADR-005/ADR-006) sit alongside =strategy=,
@@ -54,10 +56,26 @@ code.
 established), and =risk= additionally depends on =account=/=portfolio=
 to evaluate a proposal against current exposure.  Neither depends on
 =strategy= or =broker= — =strategy= never imports either (ADR-005), and
-the chain from a strategy's own =Intent= through =execution= and =risk=
+the chain from a strategy's own intent through =execution= and =risk=
 to an approved =order.Request= reaching =broker.Account.Submit= is
 wired by application services, not by a direct import between any of
 these sibling packages.
+
+The canonical intent value itself is =order.Intent= (issue #177,
+M4-02), not a =strategy.Intent= type — a correction to an earlier
+version of this diagram, made during #177's own review. Putting the
+type =execution= consumes in a not-yet-existing =strategy= package
+would have forced =execution= to import =strategy= to use it, directly
+reversing the "neither depends on strategy" rule stated above.
+=order= already owns the neighboring =Proposal -> Request -> Order ->
+Fill= vocabulary (ADR-017), so =order.Intent= keeps the whole
+=Intent -> Proposal -> RiskDecision -> Request= chain in one
+dependency-direction-consistent package. =strategy= itself is not
+created by #177 and remains deferred to M6, when a real =Strategy=
+interface, lifecycle, and =View=/=BarEvent= types have an actual
+consumer to justify them; #177 only adds the value type a future
+=strategy= package will produce and =execution= will consume — both
+depending on =order=, per the diagram above, not on each other.
 
 Arrows point from a dependent package toward the package it depends on.
 Read upward: =strategy= may depend on =marketdata=; =marketdata= may

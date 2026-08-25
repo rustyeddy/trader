@@ -1,14 +1,14 @@
 // Package id implements Trader-owned identifiers and correlation metadata,
 // as decided by issue #24 (M1-06).
 //
-// # Six identifier kinds
+// # Seven identifier kinds
 //
-// RunID, OrderID, FillID, EventID, CorrelationID, and AccountID are each a
-// distinct Go type — a RunID can never be assigned where an OrderID is
-// expected, caught at compile time, not at runtime. Internally they share
-// one generic implementation (ID[K], in id.go) rather than six hand-copied
-// ones, but nothing about that is visible at a call site: id.RunID is used
-// exactly like any other named type.
+// RunID, OrderID, FillID, EventID, CorrelationID, AccountID, and IntentID
+// are each a distinct Go type — a RunID can never be assigned where an
+// OrderID is expected, caught at compile time, not at runtime. Internally
+// they share one generic implementation (ID[K], in id.go) rather than
+// seven hand-copied ones, but nothing about that is visible at a call
+// site: id.RunID is used exactly like any other named type.
 //
 // This is deliberately fewer kinds than issue #24 originally proposed; see
 // "Deferred identifiers" below for which ones were cut, and why.
@@ -54,15 +54,23 @@
 // # Deferred identifiers
 //
 // Issue #24 originally proposed SessionID, IntentID, ProposalID, and
-// InstrumentID alongside the six kinds this package actually exports.
+// InstrumentID alongside the six kinds this package originally exported.
 // They were cut from the initial scope on review, using this rule of
 // thumb: would two otherwise-identical instances of this thing ever need
 // to coexist and be distinguished by Trader? That is clearly true for
 // runs, orders, fills, and accounts. It was not yet true for sessions,
-// intents, and proposals — none of those have a concrete, persisted
+// intents, and proposals — none of those had a concrete, persisted
 // domain object in the codebase yet to justify a generated identity for.
-// They will be added, alongside their corresponding domain objects, when
-// that changes.
+// They were to be added, alongside their corresponding domain objects,
+// when that changed.
+//
+// IntentID was the first of the three to have that domain object appear:
+// issue #177 (M4-02) introduced order.Intent, so IntentID was reinstated
+// alongside it. SessionID and ProposalID remain deferred for the same
+// reason IntentID originally was — no concrete Session or order.Proposal
+// identity exists to distinguish yet (order.Proposal itself exists, per
+// ADR-017, but nothing has yet needed to tell two Proposals apart by a
+// generated identity rather than by the values they carry).
 //
 // InstrumentID was cut for a different reason: an instrument has a
 // natural, canonical identity (EUR/USD, an exchange/symbol/asset triple,

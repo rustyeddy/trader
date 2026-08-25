@@ -3,6 +3,10 @@ package order
 import "errors"
 
 var (
+	// ErrInvalidIntent reports an Intent constructor argument that
+	// fails validation.
+	ErrInvalidIntent = errors.New("order: invalid intent")
+
 	// ErrInvalidProposal reports a Proposal constructor argument that
 	// fails validation.
 	ErrInvalidProposal = errors.New("order: invalid proposal")

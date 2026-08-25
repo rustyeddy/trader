@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConcreteParseFunctionsMatchTheirKind exercises every one of the six
-// Parse<Kind>/MustParse<Kind> wrapper pairs against its own prefix, and
+// TestConcreteParseFunctionsMatchTheirKind exercises every one of the
+// seven Parse<Kind>/MustParse<Kind> wrapper pairs against its own prefix, and
 // confirms each rejects a different kind's prefix. This is what would catch
 // a copy-paste mistake — say, ParseOrderID wired to fillKind instead of
 // orderKind — that a test covering only one or two kinds would miss.
@@ -45,6 +45,10 @@ func TestConcreteParseFunctionsMatchTheirKind(t *testing.T) {
 			func(s string) (string, error) { v, err := ParseAccountID(s); return v.String(), err },
 			func(s string) string { return MustParseAccountID(s).String() },
 			func(s string) { MustParseAccountID(s) }},
+		{"IntentID", "int",
+			func(s string) (string, error) { v, err := ParseIntentID(s); return v.String(), err },
+			func(s string) string { return MustParseIntentID(s).String() },
+			func(s string) { MustParseIntentID(s) }},
 	}
 
 	var body [16]byte
