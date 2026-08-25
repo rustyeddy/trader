@@ -360,3 +360,149 @@ func TestCancelDoesNotAffectAdvanceOfOtherPendingOrders(t *testing.T) {
 	require.Len(t, snap.OpenOrders(), 1)
 	assert.Equal(t, toKeep.OrderID, snap.OpenOrders()[0].Request.OrderID)
 }
+
+// TestCancelResultMetadataCorrelatesEvenOnDeclineOrNoOp covers the
+// review finding that every CancelResult must correlate to its own
+// request via Metadata.CausationID, not only the normal success path.
+func TestCancelResultMetadataCorrelatesEvenOnDeclineOrNoOp(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	filled := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, filled)
+	require.NoError(t, err)
+
+	declineReq := mustCancelRequest(t, deps.IDs, filled.OrderID)
+	declineResult, err := acc.Cancel(ctx, declineReq)
+	require.NoError(t, err)
+	require.NotNil(t, declineResult.Rejection)
+	assert.Equal(t, declineReq.Metadata.EventID, declineResult.Metadata.CausationID, "a declined result must still correlate to its own request")
+	assert.False(t, declineResult.Metadata.Timestamp.IsZero())
+
+	working := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(ctx, working)
+	require.NoError(t, err)
+	firstReq := mustCancelRequest(t, deps.IDs, working.OrderID)
+	_, err = acc.Cancel(ctx, firstReq)
+	require.NoError(t, err)
+
+	secondReq := mustCancelRequest(t, deps.IDs, working.OrderID)
+	secondResult, err := acc.Cancel(ctx, secondReq)
+	require.NoError(t, err)
+	assert.Equal(t, secondReq.Metadata.EventID, secondResult.Metadata.CausationID, "an idempotent no-op must correlate to the fresh request that produced it, not the first one")
+	assert.NotEqual(t, firstReq.Metadata.EventID, secondResult.Metadata.CausationID)
+}
+
+func TestCancelRejectsZeroMetadataEventID(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	// Cover both branches Copilot's review flagged: a zero
+	// Metadata.EventID must be rejected the same way regardless of
+	// whether the target order is currently live or already terminal.
+	working := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(ctx, working)
+	require.NoError(t, err)
+	_, err = acc.Cancel(ctx, order.CancelRequest{OrderID: working.OrderID})
+	require.Error(t, err)
+
+	filled := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, filled)
+	require.NoError(t, err)
+	_, err = acc.Cancel(ctx, order.CancelRequest{OrderID: filled.OrderID})
+	require.Error(t, err)
+}
+
+func TestReplaceRejectsZeroMetadataEventID(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	qty := num.MustParseQuantity("500")
+
+	working := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(ctx, working)
+	require.NoError(t, err)
+	_, err = acc.Replace(ctx, order.ReplaceRequest{OrderID: working.OrderID, NewQuantity: &qty})
+	require.Error(t, err)
+
+	filled := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, filled)
+	require.NoError(t, err)
+	_, err = acc.Replace(ctx, order.ReplaceRequest{OrderID: filled.OrderID, NewQuantity: &qty})
+	require.Error(t, err)
+}
+
+func TestCancelHonorsCanceledContext(t *testing.T) {
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(context.Background(), accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(context.Background(), req)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = acc.Cancel(ctx, mustCancelRequest(t, deps.IDs, req.OrderID))
+	require.ErrorIs(t, err, context.Canceled)
+
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Len(t, snap.OpenOrders(), 1, "a canceled context must leave the pending order untouched")
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	drainEvents(t, reader, 1) // the Submit accept event only
+	assertNoMoreEventsSoon(t, reader)
+}
+
+func TestReplaceHonorsCanceledContext(t *testing.T) {
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(context.Background(), accountID)
+	require.NoError(t, err)
+
+	req := mustRequest(t, deps.IDs, accountID)
+	_, err = acc.Submit(context.Background(), req)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = acc.Replace(ctx, mustReplaceRequest(t, deps.IDs, req.OrderID, "500"))
+	require.ErrorIs(t, err, context.Canceled)
+
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Len(t, snap.OpenOrders(), 1)
+	require.NotNil(t, snap.OpenOrders()[0].AcceptedQuantity)
+	assert.True(t, snap.OpenOrders()[0].AcceptedQuantity.Equal(req.Quantity), "a canceled context must leave the order's accepted quantity untouched")
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	drainEvents(t, reader, 1) // the Submit accept event only
+	assertNoMoreEventsSoon(t, reader)
+}

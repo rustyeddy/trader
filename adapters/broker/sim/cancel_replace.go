@@ -20,22 +20,36 @@ import (
 // there is no separate confirmation to arrive afterward the way there
 // would be against a real broker.
 //
+// Every returned CancelResult carries Metadata correlating it to req
+// (CausationID equals req.Metadata.EventID), on every outcome below —
+// even a decline or a no-op still correlates to the specific request
+// that produced it.
+//
 // Three outcomes:
 //
 //   - o is StatusWorking/StatusPartiallyFilled: cancels normally (the
 //     two-event sequence above).
-//   - o is already StatusCanceled: idempotent no-op — returns the same
-//     CancelResult, emits no additional event. Unlike Submit's
-//     OrderID-based idempotency (ADR-017), this is not a keyed dedup:
-//     CancelRequest.Metadata.EventID is not a reusable idempotency key
-//     (see CancelRequest's doc comment), so a second Cancel of an
-//     already-canceled order is simply re-evaluated and happens to
-//     already be in its target state.
+//   - o is already StatusCanceled: idempotent no-op — the same
+//     semantic outcome (Status StatusCanceled, no Rejection), but a
+//     freshly correlated result for this specific req; emits no
+//     additional event. Unlike Submit's OrderID-based idempotency
+//     (ADR-017), this is not a keyed dedup: CancelRequest.Metadata
+//     .EventID is not a reusable idempotency key (see CancelRequest's
+//     doc comment), so a second Cancel of an already-canceled order is
+//     simply re-evaluated and happens to already be in its target
+//     state.
 //   - o is any other terminal status (Filled, Rejected, Expired): the
 //     cancel is declined. CancelResult.Status reports o's actual
 //     status and Rejection explains why; nothing about o changes, so
 //     no event is emitted — there is no transition to report.
+//
+// Cancel honors ctx cancellation: checked before validating req or
+// acquiring the account lock, and again immediately after acquiring
+// it, before any transition or state mutation.
 func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (order.CancelResult, error) {
+	if err := ctx.Err(); err != nil {
+		return order.CancelResult{}, err
+	}
 	if h.broker.isClosed() {
 		return order.CancelResult{}, brokerpkg.ErrClosed
 	}
@@ -43,11 +57,25 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 	if err != nil {
 		return order.CancelResult{}, err
 	}
+	// NewCancelRequest does not itself require a non-zero Metadata
+	// .EventID (a CancelRequest's fields alone don't demand one), but
+	// every outcome below needs it — ApplyCancelRequest requires it for
+	// a live order, and a declined/idempotent result must still
+	// correlate to a genuine command. Enforcing it uniformly here, before
+	// any status-dependent branch, means a malformed request is
+	// rejected the same way regardless of the target order's current
+	// status.
+	if req.Metadata.EventID.IsZero() {
+		return order.CancelResult{}, fmt.Errorf("%w: metadata event id must be set", order.ErrInvalidCancelRequest)
+	}
 
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
 	if h.state.closed {
 		return order.CancelResult{}, brokerpkg.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return order.CancelResult{}, err
 	}
 
 	o, ok := h.state.orders[req.OrderID]
@@ -55,8 +83,10 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 		return order.CancelResult{}, brokerpkg.ErrOrderNotFound
 	}
 
+	resultMeta := id.Metadata{CausationID: req.Metadata.EventID, Timestamp: h.broker.deps.Clock.Now()}
+
 	if o.Status == order.StatusCanceled {
-		return order.NewCancelResult(order.CancelResult{OrderID: req.OrderID, Status: order.StatusCanceled})
+		return order.NewCancelResult(order.CancelResult{OrderID: req.OrderID, Status: order.StatusCanceled, Metadata: resultMeta})
 	}
 
 	if o.Status != order.StatusWorking && o.Status != order.StatusPartiallyFilled {
@@ -67,6 +97,7 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 				Reason: order.ReasonUnknown,
 				Detail: fmt.Sprintf("order is in terminal status %s and cannot be canceled", o.Status),
 			},
+			Metadata: resultMeta,
 		})
 	}
 
@@ -86,7 +117,7 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 	result, err := order.NewCancelResult(order.CancelResult{
 		OrderID:  req.OrderID,
 		Status:   order.StatusCanceled,
-		Metadata: id.Metadata{CausationID: req.Metadata.EventID, Timestamp: h.broker.deps.Clock.Now()},
+		Metadata: resultMeta,
 	})
 	if err != nil {
 		return order.CancelResult{}, err
@@ -112,6 +143,9 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 // StatusWorking/StatusPartiallyFilled -> StatusPendingReplace -> its
 // resulting status, emitting one EventKindOrder event per transition.
 //
+// Every returned ReplaceResult carries Metadata correlating it to req
+// (CausationID equals req.Metadata.EventID), on every outcome below.
+//
 // Whether the replace is accepted or declined is decided by
 // revalidating o with req's new values applied through order.NewOrder
 // — the same tick size, quantity increment, and filled-quantity rules
@@ -131,7 +165,15 @@ func (h *accountHandle) Cancel(ctx context.Context, req order.CancelRequest) (or
 // reusable idempotency key either (see ReplaceRequest's doc comment),
 // so a repeated Replace against an already-amended, still-live order
 // is simply evaluated fresh against its current state.
+//
+// Replace honors ctx cancellation the same way Cancel does: checked
+// before validating req or acquiring the account lock, and again
+// immediately after acquiring it, before any transition or state
+// mutation.
 func (h *accountHandle) Replace(ctx context.Context, req order.ReplaceRequest) (order.ReplaceResult, error) {
+	if err := ctx.Err(); err != nil {
+		return order.ReplaceResult{}, err
+	}
 	if h.broker.isClosed() {
 		return order.ReplaceResult{}, brokerpkg.ErrClosed
 	}
@@ -139,17 +181,29 @@ func (h *accountHandle) Replace(ctx context.Context, req order.ReplaceRequest) (
 	if err != nil {
 		return order.ReplaceResult{}, err
 	}
+	// See Cancel's identical check: NewReplaceRequest does not itself
+	// require a non-zero Metadata.EventID, but every outcome below does
+	// — enforced uniformly here so a malformed request is rejected the
+	// same way regardless of the target order's current status.
+	if req.Metadata.EventID.IsZero() {
+		return order.ReplaceResult{}, fmt.Errorf("%w: metadata event id must be set", order.ErrInvalidReplaceRequest)
+	}
 
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
 	if h.state.closed {
 		return order.ReplaceResult{}, brokerpkg.ErrClosed
 	}
+	if err := ctx.Err(); err != nil {
+		return order.ReplaceResult{}, err
+	}
 
 	o, ok := h.state.orders[req.OrderID]
 	if !ok {
 		return order.ReplaceResult{}, brokerpkg.ErrOrderNotFound
 	}
+
+	resultMeta := id.Metadata{CausationID: req.Metadata.EventID, Timestamp: h.broker.deps.Clock.Now()}
 
 	if o.Status != order.StatusWorking && o.Status != order.StatusPartiallyFilled {
 		return order.NewReplaceResult(order.ReplaceResult{
@@ -159,6 +213,7 @@ func (h *accountHandle) Replace(ctx context.Context, req order.ReplaceRequest) (
 				Reason: order.ReasonUnknown,
 				Detail: fmt.Sprintf("order is in terminal status %s and cannot be replaced", o.Status),
 			},
+			Metadata: resultMeta,
 		})
 	}
 
@@ -183,7 +238,6 @@ func (h *accountHandle) Replace(ctx context.Context, req order.ReplaceRequest) (
 	}
 	_, validationErr := order.NewOrder(proposed)
 
-	resultMeta := id.Metadata{CausationID: req.Metadata.EventID, Timestamp: h.broker.deps.Clock.Now()}
 	var result order.ReplaceResult
 	if validationErr != nil {
 		result, err = order.NewReplaceResult(order.ReplaceResult{

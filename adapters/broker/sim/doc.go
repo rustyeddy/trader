@@ -45,8 +45,16 @@
 // requested new values applied through order.NewOrder — the same
 // tick-size/quantity-increment/filled-quantity rules every other order
 // construction obeys — rather than inventing separate replace-specific
-// validation. See cancel_replace.go for the full contract, including
-// each method's idempotency story.
+// validation. Both require req.Metadata.EventID to be non-zero
+// uniformly — before any status-dependent branch — so a malformed
+// request is rejected the same way regardless of whether the target
+// order happens to be live or already terminal; a returned Cancel/
+// Replace result always correlates to its own request via
+// Metadata.CausationID, on every outcome including a decline or an
+// idempotent no-op. Both honor ctx cancellation the same way Advance
+// does (checked before validating req or acquiring the account lock,
+// and again immediately after). See cancel_replace.go for the full
+// contract, including each method's idempotency story.
 //
 // Limit and stop orders remain StatusWorking with no fill matching at
 // Submit time; Broker.Advance (issue #150, M3-07, ADR-026) is how they
