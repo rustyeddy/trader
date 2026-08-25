@@ -3,6 +3,7 @@ package sim
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"testing"
@@ -21,9 +22,29 @@ import (
 
 var testStart = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// fixedPriceSource is a deterministic FillPriceSource keyed by listing
+// symbol, ignoring side: tests that need bid/ask asymmetry construct
+// their own FillPriceSource instead.
+type fixedPriceSource map[string]num.Price
+
+func (f fixedPriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
+	p, ok := f[listing.Symbol()]
+	if !ok {
+		return num.Price{}, fmt.Errorf("fixedPriceSource: no price for %s", listing.Symbol())
+	}
+	return p, nil
+}
+
 func testDeps() Deps {
 	c := clock.NewSimulated(testStart)
-	return Deps{Clock: c, IDs: id.NewGenerator(c, id.NewDeterministic(1, 2))}
+	return Deps{
+		Clock: c,
+		IDs:   id.NewGenerator(c, id.NewDeterministic(1, 2)),
+		Prices: fixedPriceSource{
+			"EUR_USD": num.MustParsePrice("1.10000"),
+			"GBP_USD": num.MustParsePrice("1.25000"),
+		},
+	}
 }
 
 func usd(s string) num.Money {
@@ -73,15 +94,69 @@ func mustEurUsdListing(t *testing.T) instrument.Listing {
 	return listing
 }
 
+func mustGbpUsdListing(t *testing.T) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   "sim",
+		Symbol:     "GBP_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
+// mustRequest builds a Limit order request: this package's generic
+// lifecycle/idempotency/event-ordering tests use it because a Limit
+// order stays StatusWorking with no fill matching (issue #150, M3-07,
+// not this package's scope yet), keeping those tests' behavior
+// unaffected by market-order fill semantics (issue #149). Tests that
+// specifically exercise market-order fills use mustMarketRequest.
 func mustRequest(t *testing.T, gen *id.Generator, accountID id.AccountID) order.Request {
 	t.Helper()
+	limitPrice := num.MustParsePrice("1.10000")
 	proposal, err := order.NewProposal(order.Proposal{
 		Listing:     mustEurUsdListing(t),
 		AccountID:   accountID,
 		Side:        order.Buy,
-		Type:        order.Market,
+		Type:        order.Limit,
 		TimeInForce: order.GTC,
 		Quantity:    num.MustParseQuantity("1000"),
+		LimitPrice:  &limitPrice,
+		Metadata:    id.Metadata{EventID: mustEventID(t, gen)},
+	})
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, mustOrderID(t, gen))
+	require.NoError(t, err)
+	return req
+}
+
+// mustMarketRequest builds a Market order request for side against
+// accountID on the standard EUR/USD test listing.
+func mustMarketRequest(t *testing.T, gen *id.Generator, accountID id.AccountID, side order.Side, quantity string) order.Request {
+	t.Helper()
+	return mustMarketRequestFor(t, gen, accountID, mustEurUsdListing(t), side, quantity)
+}
+
+func mustMarketRequestFor(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity string) order.Request {
+	t.Helper()
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        side,
+		Type:        order.Market,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity(quantity),
 		Metadata:    id.Metadata{EventID: mustEventID(t, gen)},
 	})
 	require.NoError(t, err)
@@ -135,6 +210,13 @@ func TestNewBrokerRejectsNilClock(t *testing.T) {
 func TestNewBrokerRejectsNilIDs(t *testing.T) {
 	deps := testDeps()
 	deps.IDs = nil
+	_, err := NewBroker("sim", deps)
+	require.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNewBrokerRejectsNilPrices(t *testing.T) {
+	deps := testDeps()
+	deps.Prices = nil
 	_, err := NewBroker("sim", deps)
 	require.ErrorIs(t, err, ErrInvalidConfig)
 }
@@ -322,6 +404,11 @@ func TestBrokerCloseRejectsFurtherUse(t *testing.T) {
 	require.ErrorIs(t, err, brokerpkg.ErrClosed)
 }
 
+// TestAccountSubmitAcceptsOrderIntoWorkingWithoutFill covers a Limit
+// order specifically: limit/stop trigger semantics are issue #150's
+// scope (M3-07), not this package's yet, so a Limit order always stays
+// StatusWorking with no fill matching, unlike a Market order (issue
+// #149, M3-06 — see TestAccountSubmitMarketBuyFillsImmediatelyAndOpensLongPosition).
 func TestAccountSubmitAcceptsOrderIntoWorkingWithoutFill(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
@@ -337,7 +424,7 @@ func TestAccountSubmitAcceptsOrderIntoWorkingWithoutFill(t *testing.T) {
 	assert.Equal(t, order.StatusWorking, o.Status)
 	require.NotNil(t, o.AcceptedQuantity)
 	assert.True(t, o.AcceptedQuantity.Equal(req.Quantity))
-	assert.Zero(t, o.FilledQuantity.Cmp(num.MustParseQuantity("0")), "no fill matching happens in this package yet")
+	assert.Zero(t, o.FilledQuantity.Cmp(num.MustParseQuantity("0")), "limit orders do not fill in this package yet (issue #150)")
 	assert.Equal(t, "sim-"+req.OrderID.String(), o.BrokerOrderID)
 
 	snap, err := acc.Snapshot(ctx)
@@ -483,9 +570,249 @@ func TestAccountSubmitStopOrderAcceptsRequestedPrice(t *testing.T) {
 	assert.Nil(t, o.AcceptedLimitPrice)
 }
 
+// TestAccountSubmitMarketBuyFillsImmediatelyAndOpensLongPosition covers
+// #149's core vertical slice: submit -> acknowledgement -> order/fill
+// events -> updated snapshot, for a market buy against a flat account.
+func TestAccountSubmitMarketBuyFillsImmediatelyAndOpensLongPosition(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	o, err := acc.Submit(ctx, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, order.StatusFilled, o.Status)
+	require.NotNil(t, o.AcceptedQuantity)
+	assert.True(t, o.FilledQuantity.Equal(*o.AcceptedQuantity))
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, snap.OpenOrders(), "a fully filled order is terminal and no longer open")
+	assert.True(t, snap.Equity().Equal(usd("10000")), "cash/equity effects of a fill are issue #152's scope, not this package's yet")
+
+	require.Len(t, snap.Positions(), 1)
+	pos := snap.Positions()[0]
+	assert.Equal(t, order.Long, pos.Side)
+	assert.True(t, pos.Quantity.Equal(num.MustParseQuantity("1000")))
+	require.NotNil(t, pos.AvgPrice)
+	assert.True(t, pos.AvgPrice.Equal(num.MustParsePrice("1.10000")))
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	events := drainEvents(t, reader, 3)
+
+	require.Equal(t, brokerpkg.EventKindOrder, events[0].Kind)
+	require.NotNil(t, events[0].Order)
+	assert.Equal(t, order.StatusWorking, events[0].Order.Status)
+
+	require.Equal(t, brokerpkg.EventKindFill, events[1].Kind)
+	require.NotNil(t, events[1].Fill)
+	assert.True(t, events[1].Fill.Price.Equal(num.MustParsePrice("1.10000")))
+	assert.True(t, events[1].Fill.Quantity.Equal(num.MustParseQuantity("1000")))
+	assert.Equal(t, events[0].Metadata.EventID, events[1].Metadata.CausationID, "the fill is caused by the order-accepted event")
+
+	require.Equal(t, brokerpkg.EventKindOrder, events[2].Kind)
+	require.NotNil(t, events[2].Order)
+	assert.Equal(t, order.StatusFilled, events[2].Order.Status)
+	assert.Equal(t, events[1].Metadata.EventID, events[2].Metadata.CausationID, "the filled-status event is caused by the fill event")
+
+	assert.Less(t, events[0].Sequence, events[1].Sequence)
+	assert.Less(t, events[1].Sequence, events[2].Sequence)
+}
+
+func TestAccountSubmitMarketSellOpensShortPosition(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Sell, "1000")
+	o, err := acc.Submit(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, order.StatusFilled, o.Status)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.True(t, snap.Equity().Equal(usd("10000")), "cash/equity effects of a fill are issue #152's scope, not this package's yet")
+
+	require.Len(t, snap.Positions(), 1)
+	pos := snap.Positions()[0]
+	assert.Equal(t, order.Short, pos.Side)
+	assert.True(t, pos.Quantity.Equal(num.MustParseQuantity("1000")))
+}
+
+func TestAccountSubmitMarketOrderIsIdempotentAfterFill(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	first, err := acc.Submit(ctx, req)
+	require.NoError(t, err)
+	second, err := acc.Submit(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, order.StatusFilled, second.Status)
+	assert.True(t, first.FilledQuantity.Equal(second.FilledQuantity))
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.True(t, snap.Equity().Equal(usd("10000")), "cash/equity effects of a fill are issue #152's scope, not this package's yet")
+	require.Len(t, snap.Positions(), 1)
+	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")), "resubmission must not double the position")
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	events := drainEvents(t, reader, 3)
+	assertNoMoreEventsSoon(t, reader) // resubmission must not emit a fourth event
+	assert.Len(t, events, 3)
+}
+
+// TestAccountSubmitMarketOrderAgainstExistingPositionIsUnsupported
+// covers this package's explicit M3-06 scope boundary: correctly
+// adding to, reducing, closing, or reversing a position is issue
+// #152's job, so a second fill against an already-non-flat listing is
+// rejected rather than silently computing a wrong average price.
+func TestAccountSubmitMarketOrderAgainstExistingPositionIsUnsupported(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	first := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, first)
+	require.NoError(t, err)
+
+	second := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "500")
+	_, err = acc.Submit(ctx, second)
+	require.ErrorIs(t, err, ErrPositionUpdateUnsupported)
+
+	// The rejected second fill must leave every part of state exactly
+	// as the first fill left it — no partial position or event
+	// mutation — matching the build-then-commit atomicity Submit
+	// already guarantees for single-event failures.
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.True(t, snap.Equity().Equal(usd("10000")))
+	require.Len(t, snap.Positions(), 1)
+	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")))
+	assert.Empty(t, snap.OpenOrders(), "the rejected second request must never have been accepted")
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	drainEvents(t, reader, 3) // exactly the first order's three events
+	assertNoMoreEventsSoon(t, reader)
+}
+
+func TestAccountSubmitMarketOrderPriceSourceErrorLeavesNoState(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	deps.Prices = fixedPriceSource{} // no price configured for any listing
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "1000")
+	_, err = acc.Submit(ctx, req)
+	require.Error(t, err)
+
+	snap, err := acc.Snapshot(ctx)
+	require.NoError(t, err)
+	assert.True(t, snap.Equity().Equal(usd("10000")))
+	assert.Empty(t, snap.OpenOrders())
+	assert.Empty(t, snap.Positions())
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	assertNoMoreEventsSoon(t, reader) // not even the order-accepted event survives a failed fill
+}
+
+func TestMarketOrderFillsAreIsolatedAcrossAccounts(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	a1 := mustAccountID(t, deps.IDs)
+	a2 := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps,
+		AccountConfig{AccountID: a1, StartingCash: usd("10000")},
+		AccountConfig{AccountID: a2, StartingCash: usd("5000")},
+	)
+	require.NoError(t, err)
+	acc1, err := b.OpenAccount(ctx, a1)
+	require.NoError(t, err)
+	acc2, err := b.OpenAccount(ctx, a2)
+	require.NoError(t, err)
+
+	req := mustMarketRequest(t, deps.IDs, a1, order.Buy, "1000")
+	_, err = acc1.Submit(ctx, req)
+	require.NoError(t, err)
+
+	snap1, err := acc1.Snapshot(ctx)
+	require.NoError(t, err)
+	snap2, err := acc2.Snapshot(ctx)
+	require.NoError(t, err)
+
+	assert.True(t, snap1.Equity().Equal(usd("10000")), "cash/equity effects of a fill are issue #152's scope, not this package's yet")
+	assert.Len(t, snap1.Positions(), 1)
+	assert.True(t, snap2.Equity().Equal(usd("5000")), "account 1's fill must not affect account 2's cash")
+	assert.Empty(t, snap2.Positions(), "account 1's fill must not affect account 2's positions")
+}
+
+// TestSnapshotPositionsOrderingIsDeterministic opens positions on two
+// different listings and confirms repeated Snapshot calls always
+// report them in the same order. accountState.positions is a map,
+// exactly the same determinism hazard snapshotLocked's OpenOrders
+// sorting already guards against.
+func TestSnapshotPositionsOrderingIsDeterministic(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("100000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	eurUsd := mustMarketRequestFor(t, deps.IDs, accountID, mustEurUsdListing(t), order.Buy, "1000")
+	_, err = acc.Submit(ctx, eurUsd)
+	require.NoError(t, err)
+	gbpUsd := mustMarketRequestFor(t, deps.IDs, accountID, mustGbpUsdListing(t), order.Sell, "500")
+	_, err = acc.Submit(ctx, gbpUsd)
+	require.NoError(t, err)
+
+	want := []instrument.ID{eurUsd.Listing.InstrumentID(), gbpUsd.Listing.InstrumentID()}
+	sort.Slice(want, func(i, j int) bool { return want[i].String() < want[j].String() })
+
+	for range 5 {
+		snap, err := acc.Snapshot(ctx)
+		require.NoError(t, err)
+		require.Len(t, snap.Positions(), 2)
+		got := []instrument.ID{snap.Positions()[0].Listing.InstrumentID(), snap.Positions()[1].Listing.InstrumentID()}
+		assert.Equal(t, want, got, "Positions order must be identical across repeated Snapshot calls")
+	}
+}
+
 // TestSnapshotOpenOrdersOrderingIsDeterministic submits several orders
 // and confirms repeated Snapshot calls always report them in the same
-// order. accountState.openOrders is a map; without sorting before
+// order. accountState.orders is a map; without sorting before
 // building the Snapshot, Go's randomized map iteration would let two
 // otherwise-identical runs disagree on OpenOrders order, breaking this
 // package's determinism promise.
@@ -547,7 +874,7 @@ func TestAccountSubmitLeavesNoStateWhenEventGenerationFails(t *testing.T) {
 	ctx := context.Background()
 	c := clock.NewSimulated(testStart)
 	failingIDs := id.NewGenerator(c, failingEntropySource{})
-	deps := Deps{Clock: c, IDs: failingIDs}
+	deps := Deps{Clock: c, IDs: failingIDs, Prices: fixedPriceSource{"EUR_USD": num.MustParsePrice("1.10000")}}
 
 	workingGen := id.NewGenerator(c, id.NewDeterministic(1, 2))
 	accountID := mustAccountID(t, workingGen)

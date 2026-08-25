@@ -70,13 +70,14 @@ func NewBroker(name string, deps Deps, configs ...AccountConfig) (*Broker, error
 		}
 
 		accounts[cfg.AccountID] = &accountState{
-			ref:        ref,
-			currency:   cfg.StartingCash.Currency(),
-			cash:       cfg.StartingCash,
-			zero:       zero,
-			asOf:       now,
-			openOrders: make(map[id.OrderID]order.Order),
-			changed:    make(chan struct{}),
+			ref:       ref,
+			currency:  cfg.StartingCash.Currency(),
+			cash:      cfg.StartingCash,
+			zero:      zero,
+			asOf:      now,
+			orders:    make(map[id.OrderID]order.Order),
+			positions: make(map[positionKey]order.Position),
+			changed:   make(chan struct{}),
 		}
 	}
 
