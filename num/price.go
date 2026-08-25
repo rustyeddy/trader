@@ -117,6 +117,32 @@ func (p Price) Div(o Price) (Rate, error) {
 	return Rate{raw: raw}, nil
 }
 
+// MulQuantity returns the notional value p*q, denominated in currency,
+// rounded to nearest with ties to even (ADR-025). Currency is required
+// explicitly: neither Price nor Quantity carries a currency of its own,
+// so the caller states which currency the resulting Money is
+// denominated in — typically the instrument's quote/settlement
+// currency, which is not necessarily an account's home currency;
+// converting to a different currency is a separate, later step (see
+// Money.Convert).
+//
+// The underlying multiplication uses a widened 128-bit intermediate
+// (num/internal/fixed.MulScaled), so a realistic notional value — for
+// example a large FX or equity block — never silently overflows int64
+// the way a naive scaled-int64 product would; MulQuantity reports
+// ErrOverflow instead. Because Price and Quantity are both
+// non-negative by construction, the result is always non-negative.
+func (p Price) MulQuantity(q Quantity, currency Currency) (Money, error) {
+	if !currency.IsValid() {
+		return Money{}, ErrMissingCurrency
+	}
+	raw, err := fixed.MulScaled(p.raw, q.raw, fixed.RoundHalfEven)
+	if err != nil {
+		return Money{}, wrapFixedErr(err)
+	}
+	return Money{amount: raw, currency: currency, valid: true}, nil
+}
+
 // DivisibleBy reports whether p is an exact integer multiple of step, per
 // ADR-004's price-increment rule: priceRaw % tickRaw == 0. The comparison is
 // exact scaled-integer arithmetic; no rounding is involved.

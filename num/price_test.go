@@ -120,6 +120,74 @@ func TestPriceMulRateRejectsNegativeResult(t *testing.T) {
 	require.ErrorIs(t, err, ErrNegative)
 }
 
+func TestPriceMulQuantity(t *testing.T) {
+	usd := MustParseCurrency("USD")
+
+	tests := []struct {
+		name string
+		p    string
+		q    string
+		want string
+	}{
+		{name: "zero price", p: "0", q: "10000", want: "0"},
+		{name: "zero quantity", p: "1.08473", q: "0", want: "0"},
+		{name: "typical FX lot", p: "1.08473", q: "10000", want: "10847.3"},
+		// ADR-004/ADR-025 evidence cases: naive double-scaled int64
+		// multiplication overflows at every candidate scale for these,
+		// but the widened intermediate MulQuantity uses does not.
+		{name: "BRK.A block", p: "750000.00", q: "10000", want: "7500000000"},
+		{name: "FX 10M notional", p: "1.08473", q: "10000000", want: "10847300"},
+		{name: "FX 1B notional", p: "1.08473", q: "1000000000", want: "1084730000"},
+		{name: "BTC 1k coins", p: "150000.12345678", q: "1000", want: "150000123.45678"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := MustParsePrice(tt.p)
+			q := MustParseQuantity(tt.q)
+
+			got, err := p.MulQuantity(q, usd)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want+" USD", got.String())
+			assert.True(t, got.Currency().Equal(usd))
+		})
+	}
+}
+
+func TestPriceMulQuantityRoundsHalfToEven(t *testing.T) {
+	// 0.000000005 is not representable exactly, so use a price/quantity
+	// pair whose true product lands exactly on that half-unit at the
+	// eighth decimal place: 0.00000001 * 0.5 = 0.000000005, the exact
+	// midpoint between 0.00000000 and 0.00000001. The even neighbour is
+	// 0.00000000.
+	p := MustParsePrice("0.00000001")
+	q := MustParseQuantity("0.5")
+	usd := MustParseCurrency("USD")
+
+	got, err := p.MulQuantity(q, usd)
+	require.NoError(t, err)
+	assert.Equal(t, "0 USD", got.String())
+}
+
+func TestPriceMulQuantityRejectsInvalidCurrency(t *testing.T) {
+	p := MustParsePrice("1.00")
+	q := MustParseQuantity("1")
+
+	_, err := p.MulQuantity(q, Currency{})
+	require.ErrorIs(t, err, ErrMissingCurrency)
+}
+
+func TestPriceMulQuantityReportsOverflow(t *testing.T) {
+	// Near the maximum representable value, multiplied by a quantity
+	// large enough to push the true product past it.
+	p := MustParsePrice("92233720368")
+	q := MustParseQuantity("2")
+	usd := MustParseCurrency("USD")
+
+	_, err := p.MulQuantity(q, usd)
+	require.ErrorIs(t, err, ErrOverflow)
+}
+
 func TestPriceDiv(t *testing.T) {
 	a := MustParsePrice("1.08473")
 	b := MustParsePrice("1.08000")

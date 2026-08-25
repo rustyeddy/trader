@@ -1,0 +1,160 @@
+#+TITLE: Price-by-Quantity Notional Multiplication ADR-025
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #164 asks for this to be drafted and adopted ahead of
+issue #149 (M3-06), which needs an exact Price×Quantity→Money notional
+value to update simulated cash/position/account state from a fill.
+
+* Context
+
+=num= has never had a Price-by-Quantity multiplication, and its absence
+was already identified and deliberately deferred twice:
+
+- ADR-018 (=order.ApplyFill=): =AvgFillPrice= is cleared to =nil= on
+  every fill specifically because =num= has no Price-by-Quantity
+  multiplication. Adding the minimal operation then was considered and
+  rejected as "expanding =num='s API outside this issue's scope."
+- ADR-004's own evidence section (the "Price x Quantity notional
+  intermediates" table in
+  =docs/arch/adr-004-exact-numeric-representation.org=) shows that a
+  *naive* double-scaled product — multiplying two already-scaled
+  =int64= values directly, the way =Price.raw * Quantity.raw= would
+  read if written by hand — overflows =int64= before the descaling
+  divide, at every one of the scale candidates the study evaluated
+  (1e6/1e7/1e8/1e9), for realistic notional sizes (FX 10M/1B notional,
+  BRK.A blocks, BTC blocks all show =OVERFLOW=).
+
+Discovered while starting #149: computing notional value to update
+simulated cash and PnL from a fill is exactly this operation, and #149's
+acceptance criteria require exact numeric types at that accounting
+boundary, ruling out a =float64= or ad hoc local workaround inside
+=adapters/broker/sim=.
+
+Critically, the widened-intermediate primitive that ADR-004's evidence
+section called for already exists and has existed since M1:
+=num/internal/fixed.MulScaled(a, b int64, mode Rounding) (int64, error)=
+(=num/internal/fixed/wide.go=) computes =round(a*b/scale)= using a full
+128-bit intermediate product (=math/bits.Mul64= then =bits.Div64=,
+never =int64= multiplication directly), reporting =ErrOverflow=/
+=ErrUnderflow= rather than wrapping. It already backs
+=Price.MulRate=, =Quantity.MulRate=, =Money.MulRate=, and
+=Money.Convert=. The gap this ADR closes is narrow: no =num=-level
+function calls =MulScaled= with a =Price= and a =Quantity= as the two
+operands and returns =Money=. This is not the general "expand =num='s
+representation to survive overflow" problem ADR-004's evidence section
+was scoping out scale candidates for — that problem was already solved
+by =wide.go=; it is purely a missing convenience API surface.
+
+* Decision
+
+Add =Price.MulQuantity(q Quantity, currency Currency) (Money, error)=
+to =num=. Its implementation is a thin wrapper:
+
+#+begin_src go
+func (p Price) MulQuantity(q Quantity, currency Currency) (Money, error) {
+    if !currency.IsValid() {
+        return Money{}, ErrMissingCurrency
+    }
+    raw, err := fixed.MulScaled(p.raw, q.raw, fixed.RoundHalfEven)
+    if err != nil {
+        return Money{}, wrapFixedErr(err)
+    }
+    return Money{amount: raw, currency: currency, valid: true}, nil
+}
+#+end_src
+
+=currency= is an explicit, required parameter rather than inferred:
+neither =Price= nor =Quantity= carries a currency (ADR-004 keeps them
+currency-less on purpose — a =Price= is denominated in whatever the
+caller's context already establishes), so the caller must say which
+currency the resulting notional is denominated in. This matches
+=Money.Convert='s existing pattern of taking an explicit target
+=Currency= rather than inferring one.
+
+The method lives on =Price=, matching =Price.MulRate='s existing
+"=Mul<OperandType>=" naming convention, rather than as a package-level
+function or a method on =Quantity=. =Price= is the natural receiver
+because it is the value being scaled by a size, the same relationship
+=MulRate= already expresses between a value and a proportional factor.
+
+Rounding is fixed at =RoundHalfEven=, the same default every other
+=num= multiplication (=MulRate=, =Convert=) already uses; this method
+does not expose a caller-selectable =Rounding=, consistent with
+=MulRate='s public signature.
+
+Because =Price= and =Quantity= are both non-negative by construction
+(their constructors and parsers reject negative input — ADR-004), the
+product is always non-negative; =MulQuantity= does not need an
+=ErrNegative= check the way =Price.Sub= does; a negative result is
+possible only through =fixed='s own overflow/underflow detection, which
+=wrapFixedErr= already surfaces as =ErrOverflow=/=ErrUnderflow=.
+
+=AvgFillPrice='s "cleared to =nil= on every fill" behavior (ADR-018) is
+explicitly *not* changed by this ADR. Maintaining a quantity-weighted
+average fill price is a separate, additive follow-up now that the
+underlying primitive exists — this ADR unblocks it but does not itself
+revisit =order.ApplyFill=.
+
+* Consequences
+
+- #149 (M3-06) can compute exact fill notional value — and by
+  extension update simulated cash and PnL — as
+  =fillPrice.MulQuantity(fillQuantity, quoteCurrency)=, with no
+  =float64=, no ad hoc =big.Int= arithmetic inside =adapters/broker/sim=,
+  and no risk of silently wrapping on the overflow cases ADR-004's
+  evidence already identified as dangerous. =quoteCurrency= here is the
+  instrument/listing's own quote or settlement currency — the currency
+  =fillPrice= is itself denominated in — not necessarily an account's
+  home currency: for EUR/USD, =1.10 * 10,000 EUR= is =11,000 USD=
+  regardless of whether the account itself is USD, EUR, or GBP.
+  Converting that result to an account's home currency, when it
+  differs, is a distinct later step via =Money.Convert= with an
+  explicit rate, not something =MulQuantity= does or should infer.
+  Similarly, for a derivative listing whose =instrument.Spec= carries a
+  non-1 contract multiplier, =price.MulQuantity(contracts, quoteCurrency)=
+  computes price×contracts, not the full per-contract notional; the
+  caller composes the multiplier separately (for example via
+  =Money.MulRate=, accepting that as its own explicit rounding step)
+  rather than =MulQuantity= silently absorbing instrument-specific
+  multiplier semantics it has no way to know about.
+- No change to =num='s representation, scale, or any existing method's
+  behavior: this is a strictly additive method, so every prior
+  guarantee (ADR-004) is unaffected.
+- =order.ApplyFill='s =AvgFillPrice= gap (ADR-018) remains open;
+  maintaining it is now possible but is deliberately left as a future,
+  separate change rather than folded into this ADR's scope.
+- Any future notional-shaped operation (for example, converting a
+  filled quantity's notional into a different account currency) can
+  compose =MulQuantity= with the existing =Money.Convert=, without
+  requiring further =num= API growth.
+
+* Alternatives Considered
+
+- *Add a general widened =Price×Quantity= primitive to
+  =num/internal/fixed= from scratch.* Rejected: that primitive already
+  exists (=MulScaled=, in place since M1, already exercised by
+  =MulRate=/=Convert=). Building a second one would duplicate tested,
+  reviewed 128-bit arithmetic for no benefit.
+- *Infer currency from context (for example, requiring the caller to
+  pre-convert Price into a Money-like type carrying a currency).*
+  Rejected: it would either force =Price= to carry a currency it does
+  not otherwise need (contradicting ADR-004's separate-exact-types
+  design, which keeps =Price= usable across any currency context), or
+  require inventing a new currency-bearing price type solely for this
+  one operation.
+- *Expose a caller-selectable =Rounding= parameter.* Rejected for
+  consistency with =MulRate= and =Convert=, neither of which exposes
+  one; if a real caller needs a different policy, that is an additive
+  follow-up, not a reason to widen this method's signature now.
+- *Method on =Quantity= instead of =Price= (=Quantity.MulPrice=).*
+  Considered; either reads naturally. =Price.MulQuantity= was chosen
+  to keep the "value being scaled" as the receiver, mirroring
+  =Price.MulRate='s existing shape most closely, since a fill's
+  execution price is normally the value of primary interest at the
+  call site.
+- *Do nothing and require every caller (starting with #149) to convert
+  through =float64= or hand-roll widened arithmetic locally.* Rejected
+  outright: this is precisely the unreviewed, per-adapter numeric
+  behavior at an accounting boundary ADR-004 exists to prevent.

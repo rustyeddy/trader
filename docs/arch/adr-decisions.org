@@ -132,6 +132,7 @@ the original decided, use full supersession instead.
 | 022 | CLI and application service layer (in adr-022-cli-app-service-layer.org) | Accepted |
 | 023 | Structured logging (in adr-023-structured-logging.org)            | Accepted   |
 | 024 | Broker event model and deterministic ordering (in adr-024-broker-events.org) | Accepted |
+| 025 | Price-by-quantity notional multiplication (in adr-025-price-quantity-notional.org) | Accepted |
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -182,6 +183,14 @@ registry.  Its own Status section is authoritative.  Issue #147
 deterministic-ordering/delivery guarantees to be drafted and adopted
 in the same step, ahead of the deterministic simulator (#148-#153)
 being built against =broker.Account.Events=.
+
+Note: ADR-025 is likewise maintained in its own file,
+=docs/arch/adr-025-price-quantity-notional.org=, rather than inline in
+this registry.  Its own Status section is authoritative.  Issue #164
+asks for the missing Price×Quantity→Money notional operation — already
+identified and deferred by ADR-004 and ADR-018 — to be drafted and
+adopted ahead of issue #149 (M3-06), which needs it to update simulated
+cash/PnL from a fill.
 
 * ADR-001: Modular monolith before service decomposition
 
