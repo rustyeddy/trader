@@ -11,6 +11,33 @@ import (
 // Proposal is a concrete order candidate before risk approval: what
 // execution planning wants to submit, not yet validated against risk or
 // assigned a Trader order identity. See Request for the next stage.
+//
+// Proposal is the M4/ADR-006 pipeline's canonical proposal value (issue
+// #178, M4-03) — the "OrderProposal" M4's planning documents refer to.
+// No separate M4-scoped type exists for it; a Proposal built anywhere
+// (execution planning today, a future backtest/live composition root)
+// is the same type risk evaluates.
+//
+// Risk (ADR-006) evaluates a Proposal without mutating it: nothing in
+// this package exposes a setter, so a completed Proposal is already
+// structurally read-only from risk's side — risk produces a decision
+// about a Proposal, or a request for a differently-sized one, never an
+// edited copy in place.
+//
+// Field ownership within a Proposal is not uniformly settled yet.
+// Execution planning clearly owns the order-mechanics fields — Listing,
+// Type, TimeInForce, LimitPrice/StopPrice, and ReduceOnly — the choices
+// ADR-006 assigns to execution rather than risk. AccountID is planning
+// context/routing (which account this proposal would trade against),
+// not an order-mechanics choice in that same sense. Quantity is
+// deliberately not classified as execution-owned here: ADR-005 left
+// IntentEnter unsized on purpose, and exactly which M4 component
+// (execution planning, risk, or a dedicated sizer) produces a
+// Proposal's final Quantity is an open question this issue does not
+// pre-decide — see the execution planning, risk, and sizing contract
+// issues (#179-#181). A Proposal must still carry some valid,
+// listing-conformant Quantity to be constructed at all; only *which
+// component decided that value* is left open.
 type Proposal struct {
 	// Listing is the venue-specific tradable instrument this proposal
 	// targets.
