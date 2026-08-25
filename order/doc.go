@@ -5,15 +5,41 @@
 // between them are legal; it does not implement broker I/O or an
 // execution manager.
 //
-// # The proposal-to-fill chain
+// # The intent-to-fill chain
 //
-// Proposal, Request, Order, and Fill are deliberately distinct types,
-// not variations on one struct:
+// Intent, Proposal, Request, Order, and Fill are deliberately distinct
+// types, not variations on one struct:
 //
-//	Proposal: a candidate order before risk approval
+//	Intent:   what a strategy or operator wants to accomplish (ADR-005)
+//	Proposal: a candidate order before risk approval (ADR-006)
 //	Request:  a Proposal assigned a Trader OrderID, ready for submission
 //	Order:    the broker's accepted order and its lifecycle state
 //	Fill:     one execution against an Order
+//
+// Intent is broker-ignorant and carries no order mechanics (issue #177,
+// M4-02): a strategy names an instrument and what it wants, never a
+// venue-specific Listing, quantity (except IntentTargetExposure, whose
+// whole point is stating a desired quantity directly), or order type.
+// Proposal is where those mechanics first appear — execution planning
+// (M4) is what turns an Intent into a Proposal, and Proposal is that
+// pipeline's canonical "OrderProposal" value (issue #178, M4-03): no
+// second, parallel type exists for it. See Proposal's own doc comment
+// for which of its fields execution planning decides versus which are
+// still open questions for the execution planning, risk, and sizing
+// contracts M4 has not yet defined (#179-#181).
+//
+// Correlation across every stage of this chain uses the generic
+// id.Metadata mechanism (EventID/CorrelationID/CausationID), not a
+// dedicated cross-reference field on any one stage: a later stage's
+// Metadata.CausationID is expected to equal the EventID of whichever
+// event caused it, and Metadata.CorrelationID is expected to be shared
+// across the whole chain. This package does not itself enforce that a
+// Proposal's Metadata actually correlates to the Intent that produced
+// it — Proposal has no Intent field to check it against — because
+// nothing in this package ever receives both stages together to verify
+// the relationship. The component that does receive both (the future
+// execution.Planner, M4-04/#179) is where that invariant is actually
+// checked.
 //
 // Request.OrderID (from the id package, M1-06) doubles as the
 // idempotency key for creating that order: a retried submission reuses
