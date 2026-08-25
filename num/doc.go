@@ -25,8 +25,19 @@
 // Only universally valid operations are exported here, for example
 // Price.MulRate, Quantity.MulRate, Money.Add, and Money.DivRate.
 // Context-dependent calculations that need instrument metadata, contract
-// multipliers, or lot conventions — such as deriving Money from Price and
-// Quantity — belong in their eventual domain packages, not in num.
+// multipliers, or lot conventions belong in their eventual domain packages,
+// not in num.
+//
+// Price.MulQuantity (ADR-025, docs/arch/adr-025-price-quantity-notional.org)
+// is a deliberate, narrow exception: it derives Money from Price and
+// Quantity, but the underlying widened-intermediate arithmetic is itself
+// context-free — currency is required as an explicit caller-supplied
+// argument, never inferred — and duplicating that arithmetic outside num
+// would only reintroduce the overflow risk ADR-004 already identified.
+// Composing that notional result with instrument-specific concerns —
+// contract multipliers, or converting from the quote/settlement currency
+// MulQuantity returns to an account's home currency via Money.Convert —
+// remains a domain-package responsibility, not num's.
 //
 // # Percent and Ratio
 //

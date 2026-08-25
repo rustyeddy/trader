@@ -118,10 +118,13 @@ func (p Price) Div(o Price) (Rate, error) {
 }
 
 // MulQuantity returns the notional value p*q, denominated in currency,
-// rounded to nearest with ties to even (ADR-025). currency is required
+// rounded to nearest with ties to even (ADR-025). Currency is required
 // explicitly: neither Price nor Quantity carries a currency of its own,
 // so the caller states which currency the resulting Money is
-// denominated in.
+// denominated in — typically the instrument's quote/settlement
+// currency, which is not necessarily an account's home currency;
+// converting to a different currency is a separate, later step (see
+// Money.Convert).
 //
 // The underlying multiplication uses a widened 128-bit intermediate
 // (num/internal/fixed.MulScaled), so a realistic notional value — for

@@ -155,8 +155,8 @@ func TestPriceMulQuantity(t *testing.T) {
 }
 
 func TestPriceMulQuantityRoundsHalfToEven(t *testing.T) {
-	// 1.000000005 is not representable exactly, so use a price/quantity
-	// pair whose true product lands exactly on a half-unit at the
+	// 0.000000005 is not representable exactly, so use a price/quantity
+	// pair whose true product lands exactly on that half-unit at the
 	// eighth decimal place: 0.00000001 * 0.5 = 0.000000005, the exact
 	// midpoint between 0.00000000 and 0.00000001. The even neighbour is
 	// 0.00000000.
