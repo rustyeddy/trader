@@ -165,6 +165,68 @@ func mustMarketRequestFor(t *testing.T, gen *id.Generator, accountID id.AccountI
 	return req
 }
 
+func mustLimitRequest(t *testing.T, gen *id.Generator, accountID id.AccountID, side order.Side, quantity, limitPrice string) order.Request {
+	t.Helper()
+	return mustLimitRequestFor(t, gen, accountID, mustEurUsdListing(t), side, quantity, limitPrice)
+}
+
+func mustLimitRequestFor(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, limitPrice string) order.Request {
+	t.Helper()
+	price := num.MustParsePrice(limitPrice)
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        side,
+		Type:        order.Limit,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity(quantity),
+		LimitPrice:  &price,
+		Metadata:    id.Metadata{EventID: mustEventID(t, gen)},
+	})
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, mustOrderID(t, gen))
+	require.NoError(t, err)
+	return req
+}
+
+func mustStopRequest(t *testing.T, gen *id.Generator, accountID id.AccountID, side order.Side, quantity, stopPrice string) order.Request {
+	t.Helper()
+	return mustStopRequestFor(t, gen, accountID, mustEurUsdListing(t), side, quantity, stopPrice)
+}
+
+func mustStopRequestFor(t *testing.T, gen *id.Generator, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity, stopPrice string) order.Request {
+	t.Helper()
+	price := num.MustParsePrice(stopPrice)
+	proposal, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        side,
+		Type:        order.Stop,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity(quantity),
+		StopPrice:   &price,
+		Metadata:    id.Metadata{EventID: mustEventID(t, gen)},
+	})
+	require.NoError(t, err)
+	req, err := order.NewRequest(proposal, mustOrderID(t, gen))
+	require.NoError(t, err)
+	return req
+}
+
+func mustObservation(t *testing.T, listing instrument.Listing, openS, highS, lowS, closeS string, at time.Time) Observation {
+	t.Helper()
+	obs := Observation{
+		Listing: listing,
+		Open:    num.MustParsePrice(openS),
+		High:    num.MustParsePrice(highS),
+		Low:     num.MustParsePrice(lowS),
+		Close:   num.MustParsePrice(closeS),
+		Time:    at,
+	}
+	require.NoError(t, obs.validate())
+	return obs
+}
+
 // drainEvents reads exactly n events from reader. Next blocks rather
 // than returning io.EOF merely because it has caught up (ADR-024), so
 // callers must already know how many events to expect — there is no

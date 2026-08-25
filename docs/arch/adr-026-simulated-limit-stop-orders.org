@@ -1,0 +1,285 @@
+#+TITLE: Simulated Limit/Stop Orders: Market Observation Advancement, Trigger, Gap, and Intrabar-Ambiguity Semantics ADR-026
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #150 (M3-07) asks for deterministic limit/stop order
+behavior in =adapters/broker/sim=, ahead of implementation, since this
+is the first point where the simulator encodes market-observation and
+intrabar microstructure assumptions.
+
+* Context
+
+#149 (M3-06) gave =adapters/broker/sim= a pull-based fill mechanism:
+=Deps.Prices= is queried once, synchronously, when a market order is
+submitted. Limit and stop orders need the opposite shape entirely: an
+order is accepted into =StatusWorking= and then sits, potentially
+across many subsequent bars, until a later market observation crosses
+its trigger price. Nothing in the accepted public =broker.Broker=/
+=broker.Account= ports (ADR-007) has any notion of "time advancing" or
+"a new bar arrived" — that job was never assigned anywhere.
+
+Three further questions were identified as needing an explicit answer
+before implementation, discussed on issue #150 before this ADR:
+
+1. How does the simulator receive market observations at all, without
+   widening the accepted public broker port?
+2. What determines a limit/stop order's trigger and fill price from an
+   OHLC observation, including when the observation gaps through the
+   order's price between bars?
+3. What happens when one bar's observation would trigger more than one
+   of an account's pending orders for the same listing, where OHLC
+   alone cannot establish which happened first? The architecture
+   document (docs/arch/trader-framework-architecture.org, "Bar-based
+   simulation must explicitly address ambiguous intrabar order") flags
+   this as a real, unresolved, framework-wide question, and #150's own
+   acceptance criteria require either a selectable/documented policy or
+   an explicit unsupported/ambiguous result rather than silently
+   picking one.
+
+* Decision
+
+** Market advancement is a simulator-specific extension, not a public-port change
+
+=*sim.Broker= gains an exported =Advance(ctx, obs Observation) error=
+method. It is not added to =broker.Broker= or =broker.Account=: real
+adapters (OANDA, Alpaca) have no simulation to drive, and widening an
+already-Accepted public port (ADR-007) for a capability only the
+simulator needs would force every future adapter to implement a no-op.
+A caller — eventually the backtest runner — invokes =Advance= once per
+market observation per listing, the same way a live adapter's own feed
+loop would drive its internal state, just outside the =broker.Account=
+contract entirely.
+
+=sim.Observation= is a simulator-owned value, not =marketdata.Bar=:
+
+#+begin_src go
+type Observation struct {
+    Listing instrument.Listing
+    Open, High, Low, Close num.Price
+    Time    time.Time
+}
+#+end_src
+
+=adapters/broker/sim= does not import =marketdata=. The package map
+(docs/arch/package-boundaries.org) does not strictly forbid an adapter
+from depending on more than one domain package, but doing so here would
+still be unnecessary semantic coupling: the simulator needs only a
+small execution observation (listing, OHLC, timestamp), not
+=marketdata='s full canonical representation, provenance, or storage
+concerns. A sim-owned value keeps that dependency narrow and leaves
+room for a later tick-shaped observation without touching
+=marketdata= or the public broker port at all. The name =Observation=
+(not =Bar=) is deliberate for the same reason: the first
+implementation happens to be OHLC-shaped, but the concept — "the
+simulator has been told something new about the market" — is not
+permanently bar-centric.
+
+=Advance= evaluates every account the =Broker= owns against =obs=,
+independently, in deterministic (=AccountID=-sorted) order, and joins
+any per-account errors with =errors.Join= rather than letting one
+account's failure block every other account's otherwise-valid fills —
+the same isolation guarantee accountState's per-account mutex already
+provides for =Submit=.
+
+=Advance= accepts and honors a =context.Context=, checked before any
+account is evaluated, again before each account, and again immediately
+before committing each individual triggered fill — a design-review
+finding on the implementing PR (#167) against an earlier revision that
+accepted =ctx= but never consulted it. A canceled or expired =ctx=
+stops further work rather than walking and potentially mutating every
+remaining account; whatever fills already committed before
+cancellation was observed remain committed, since each order's fill is
+already its own atomic, independent unit of work (see buildFill) and
+rolling it back would not undo anything actually incorrect.
+
+Every timestamp =Advance= produces (=Event.Metadata.Timestamp=,
+=Event.ObservedAt=, =accountState.asOf=) still derives from
+=Deps.Clock.Now()=, exactly like =Submit=, not from =obs.Time=
+directly — preserving the single-clock-source determinism invariant
+established in #148/#149. A caller driving a backtest is expected to
+advance the injected =clock.Clock= to =obs.Time= before calling
+=Advance=, so produced timestamps agree with the observation's own
+time; this is a documented caller responsibility, not something
+=Advance= cross-validates.
+
+** Trigger and gap-aware fill price rules
+
+Accepted trigger and fill-price rules, applied against an order's
+=AcceptedLimitPrice=/=AcceptedStopPrice= and =obs=:
+
+#+begin_example
+LIMIT
+  Buy:  if Open <= Limit, fill at Open
+        else if Low <= Limit, fill at Limit
+        else: no trigger
+
+  Sell: if Open >= Limit, fill at Open
+        else if High >= Limit, fill at Limit
+        else: no trigger
+
+STOP
+  Buy:  if Open >= Stop, fill at Open
+        else if High >= Stop, fill at Stop
+        else: no trigger
+
+  Sell: if Open <= Stop, fill at Open
+        else if Low <= Stop, fill at Stop
+        else: no trigger
+#+end_example
+
+Limit and stop orders deliberately use *different* gap semantics rather
+than one universal "worse of requested price and open" rule: a limit
+order is a maximum-pay/minimum-receive constraint, so a favorable gap
+(price already better than requested when the bar opens) must fill at
+the better open price — a buy limit at 100 whose bar opens at 95 fills
+at 95, not 100, because the order was willing to pay up to 100 and the
+market is already cheaper. A stop order becomes a market order once
+triggered, so an adverse gap must fill at the worse open price — a buy
+stop at 100 whose bar opens at 105 fills at 105, not 100, rather than
+pretending execution occurred at a price the market never actually
+offered. Both rules reduce to the same shape: whichever of (open, the
+order's own price) is reached first, in the direction the order type's
+economics require, determines the fill price.
+
+A market order (#149) still fills only at =Deps.Prices='s reported
+price; =Advance= is exclusively how a limit/stop order fills. A limit
+or stop order's fill is always for its complete accepted quantity, for
+the same reason #149's market fills are: this package has no partial-
+fill or order-book volume model.
+
+=Type=stop_limit= orders are not evaluated by =Advance= in this
+decision — #150's scope names limit and stop specifically, and
+=StopLimit='s two-stage (stop triggers, then behaves as a limit)
+semantics are a distinct, not-yet-specified case. A =StopLimit= order
+accepted by =Submit= remains =StatusWorking= indefinitely under this
+ADR; giving it real semantics is a future, additive change.
+
+** Intrabar ambiguity: reject by default, no speculative resolution machinery
+
+=IntrabarPolicy= is a small, closed enum on =Deps=:
+
+#+begin_src go
+type IntrabarPolicy uint8
+
+const (
+    IntrabarRejectAmbiguous IntrabarPolicy = iota
+    IntrabarPessimistic
+)
+#+end_src
+
+=IntrabarRejectAmbiguous= is the zero value and =Deps='s default:
+unlike =Deps.Prices= (required, ADR-015), an unset =Deps.IntrabarPolicy=
+is itself a meaningful, safe choice, so no validation rejects it.
+
+Not every case of "more than one pending order triggers within the
+same bar" is actually ambiguous, and a design review during
+implementation (PR #167) corrected an initial version of this decision
+that treated all such cases identically. =limitTriggerPrice=/
+=stopTriggerPrice= each report, alongside the trigger price, whether
+the trigger resolved at =obs.Open= or somewhere else within the bar
+(via =Low=/=High=). An order that triggers *at* the observation's Open
+is not ambiguous relative to any other order: the open is definitionally
+the bar's first instant, so every at-open order is filled first, in
+deterministic (=OrderID=-sorted) order, followed by at most one order
+that triggered elsewhere within the bar (which, having no other
+within-bar order to be ambiguous with, is unambiguous too). Only when
+*more than one* order's trigger genuinely depends on an unknown path
+through the bar's High/Low — i.e. more than one triggers somewhere
+other than the open — does =IntrabarPolicy= actually apply. That group
+is reported as =ErrAmbiguousIntrabarOrder=, naming the conflicting
+orders, and none of it is filled; any at-open orders in the same call
+still fill normally.
+
+This distinction also fixes a related misclassification: a second
+order in the fill sequence can still fail for a reason unrelated to
+timing — most notably =ErrPositionUpdateUnsupported=, when an earlier
+order in the same call already opened a Position (as established in
+#149, a second fill against a listing that already holds a Position is
+rejected outright). Example: a buy limit at 1.10 and a sell stop at
+1.09 both resolve at the same observation's Open (both are
+unambiguously executable there), but filling the first opens a
+Position, and filling the second — a sell against that new Long
+position — is rejected as an existing-position update, not because
+OHLC ordering was ever in question. Before this correction, both
+orders would have been misreported as =ErrAmbiguousIntrabarOrder=; now
+the first fills, and the second is reported as
+=ErrPositionUpdateUnsupported= against that specific order — an
+accurate diagnosis of a real, different (and already-established)
+scope limitation, not a fabricated data-ordering one.
+
+=IntrabarPessimistic= is *declared but not implemented* by this
+decision: selecting it currently reports =broker.ErrUnsupported=. No
+concrete scenario in #150's own scope (independent limit/stop orders,
+no bracket/OCO linkage yet) forces a specific pessimistic-resolution
+algorithm, and the design review for this ADR was explicit that
+building resolution machinery the current order model cannot yet
+exercise is worse than leaving the seam declared and unimplemented.
+=IntrabarPessimistic= exists as a named future value precisely so a
+later issue can implement real resolution — once bracket/OCO orders
+(explicitly deferred, per the architecture document) or another
+concrete forcing scenario exists — without another public API change
+or renumbering the enum.
+
+Multiple *independent* triggers across *different* listings, or across
+*different* accounts, within the same =Advance= call are never
+ambiguous under this decision: each listing is a separate =Observation=
+argument, and each account's pending orders are evaluated and
+committed completely independently (see the per-account isolation
+point above) — ambiguity is scoped strictly to "more than one pending
+order, same account, same listing, same bar."
+
+* Consequences
+
+- Backtest/paper composition roots can drive the simulator through bars
+  without =broker.Broker=/=broker.Account= ever naming a =Bar= or
+  =Advance= concept — real adapters are unaffected.
+- A future tick-level or lower-timeframe-validation simulation mode can
+  introduce a second =Observation=-like shape or a second =Advance=-like
+  entry point without deprecating this one, since neither name implies
+  "OHLC bar" specifically.
+- Gap-through-price scenarios on both limit and stop orders are
+  well-defined and testable now, rather than silently absent or
+  incorrectly modeled by one shared rule.
+- A caller that needs pessimistic (or any other) intrabar resolution
+  today gets a clear, classifiable error instead of a silently
+  incorrect fill sequence; #150 does not claim more determinism than it
+  actually has.
+- =StopLimit= orders remain inert under =Advance= until a future,
+  additive decision gives them real semantics — existing and new tests
+  must not assume otherwise.
+- Every event =Advance= produces still derives its timestamps from
+  =Deps.Clock=, not =obs.Time=; a caller integrating this into a
+  backtest runner must keep the two synchronized itself.
+
+* Alternatives Considered
+
+- *Add bar-advancement to the public =broker.Broker=/=broker.Account=
+  ports.* Rejected: forces every current and future broker adapter
+  (OANDA, Alpaca, ...) to implement a method only a simulator needs,
+  and widens an already-Accepted port (ADR-007) for a capability that
+  is legitimately adapter-specific.
+- *Consume =marketdata.Bar= directly.* Rejected: not strictly forbidden
+  by the package map, but unnecessarily couples the simulator to
+  =marketdata='s full canonical/provenance/storage-shaped type when a
+  small, sim-owned OHLC value is sufficient and keeps a future
+  tick-shaped observation easy to add later.
+- *One universal gap rule ("fill at the worse of requested price and
+  bar open") for both limit and stop.* Rejected: correct for stops, but
+  wrong for limits, which must fill at a favorable gap's actual (better)
+  open price rather than the originally requested price — the two
+  order types have different economics at a gap and deserve different,
+  explicit rules rather than one rule reused past where it's correct.
+- *Hardcode pessimistic resolution as the only, implicit intrabar
+  policy.* Rejected: the architecture document and #150's acceptance
+  criteria both call for an explicit, documented choice rather than a
+  silently assumed one; hardcoding one committed this decision to a
+  specific, unrequested resolution algorithm for a case #150's own
+  order model does not yet need to resolve.
+- *Build a full pluggable intrabar-policy framework (pessimistic,
+  optimistic, lower-timeframe validation, tick-accurate) now.*
+  Rejected as premature: no current consumer needs more than "detect
+  and reject ambiguity, or use the default"; a two-value enum with one
+  implemented case and one explicitly declared future case is the
+  smaller, sufficient change, consistent with #149's precedent of
+  deferring machinery nothing yet exercises.

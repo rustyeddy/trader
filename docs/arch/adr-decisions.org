@@ -133,6 +133,7 @@ the original decided, use full supersession instead.
 | 023 | Structured logging (in adr-023-structured-logging.org)            | Accepted   |
 | 024 | Broker event model and deterministic ordering (in adr-024-broker-events.org) | Accepted |
 | 025 | Price-by-quantity notional multiplication (in adr-025-price-quantity-notional.org) | Accepted |
+| 026 | Simulated limit/stop orders: observation advancement, trigger, gap, intrabar-ambiguity semantics (in adr-026-simulated-limit-stop-orders.org) | Accepted |
 
 Note: ADR-007, ADR-008, ADR-017, ADR-018, and ADR-019 are likewise
 maintained in their own files rather than inline in this registry —
@@ -191,6 +192,15 @@ asks for the missing Price×Quantity→Money notional operation — already
 identified and deferred by ADR-004 and ADR-018 — to be drafted and
 adopted ahead of issue #149 (M3-06), which needs it to update simulated
 cash/PnL from a fill.
+
+Note: ADR-026 is likewise maintained in its own file,
+=docs/arch/adr-026-simulated-limit-stop-orders.org=, rather than inline
+in this registry.  Its own Status section is authoritative.  Issue #150
+(M3-07) asks for the simulator's market-observation advancement
+mechanism, limit/stop trigger and gap-fill rules, and intrabar-
+ambiguity policy to be drafted and adopted ahead of implementation,
+since this is the first point where the simulator encodes market-
+observation and intrabar microstructure assumptions.
 
 * ADR-001: Modular monolith before service decomposition
 

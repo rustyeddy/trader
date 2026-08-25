@@ -385,7 +385,12 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 		return o, nil
 	}
 
-	filled, fillEvent, filledEvent, positionAfter, err := h.state.buildMarketFill(h.broker.deps, o, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
+	price, err := h.broker.deps.Prices.Price(req.Listing, req.Side)
+	if err != nil {
+		return order.Order{}, err
+	}
+
+	filled, fillEvent, filledEvent, positionAfter, err := h.state.buildFill(h.broker.deps, o, price, acceptEvent.Metadata.EventID, h.state.nextSequence+2)
 	if err != nil {
 		return order.Order{}, err
 	}
@@ -397,14 +402,18 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 	return filled, nil
 }
 
-// buildMarketFill constructs everything a market order's immediate,
-// complete fill needs — the resulting filled Order, the EventKindFill
-// and second EventKindOrder (status-change) events, and this account's
-// post-fill Position — without mutating s. acceptEventID and
-// nextSequence are the EventID and Sequence of the just-built order-
-// accepted event (see Submit): the fill event is assigned nextSequence,
-// caused by acceptEventID, and the filled-status order event is
-// assigned nextSequence+1, caused by the fill event's own EventID.
+// buildFill constructs everything one complete fill of o, at price,
+// needs — the resulting filled Order, the EventKindFill and second
+// EventKindOrder (status-change) events, and this account's post-fill
+// Position — without mutating s. causationID and sequence are the
+// EventID and Sequence the fill event is assigned; the filled-status
+// order event is assigned sequence+1, caused by the fill event's own
+// EventID. Two callers build price and causationID differently:
+// Submit (issue #149/M3-06) uses Deps.Prices and the just-built order-
+// accepted event's EventID; accountState.advance (issue #150/M3-07,
+// ADR-026) uses a trigger/gap-derived price and a zero causationID,
+// since a market-observation-triggered fill is not caused by any
+// preceding Trader-internal event.
 //
 // Scope (issue #149, M3-06): the fill is always for o's complete
 // AcceptedQuantity — this package has no partial-fill/volume model —
@@ -416,8 +425,8 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 // this package would rather report that plainly than compute a
 // silently wrong average price or PnL.
 //
-// buildMarketFill deliberately does not touch s.cash: issue #152
-// (M3-09) explicitly owns "cash/balance effects of fills," and a naive
+// buildFill deliberately does not touch s.cash: issue #152 (M3-09)
+// explicitly owns "cash/balance effects of fills," and a naive
 // full-notional debit/credit against Equity/BuyingPower/MarginAvailable
 // is not broker-neutral accounting — a cash purchase should leave
 // equity roughly unchanged (cash converts into a position of
@@ -426,16 +435,11 @@ func (h *accountHandle) Submit(ctx context.Context, req order.Request) (order.Or
 // the first place. Getting that right (asset valuation, margin,
 // multi-currency settlement) is #152's job; this package would rather
 // leave cash alone than encode a rule known to be wrong.
-func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID id.EventID, nextSequence uint64) (filled order.Order, fillEvent, filledEvent brokerpkg.Event, positionAfter order.Position, err error) {
+func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, causationID id.EventID, sequence uint64) (filled order.Order, fillEvent, filledEvent brokerpkg.Event, positionAfter order.Position, err error) {
 	req := o.Request
 	key := keyForListing(req.Listing)
 	if existing, ok := s.positions[key]; ok && existing.Side != order.Flat {
 		err = fmt.Errorf("%w: listing %s already holds a %s position", ErrPositionUpdateUnsupported, req.Listing.Symbol(), existing.Side)
-		return
-	}
-
-	price, err := deps.Prices.Price(req.Listing, req.Side)
-	if err != nil {
 		return
 	}
 
@@ -460,7 +464,7 @@ func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID i
 		return
 	}
 
-	fillEvent, err = s.buildFillEvent(deps, fill, acceptEventID, nextSequence)
+	fillEvent, err = s.buildFillEvent(deps, fill, causationID, sequence)
 	if err != nil {
 		return
 	}
@@ -470,7 +474,7 @@ func (s *accountState) buildMarketFill(deps Deps, o order.Order, acceptEventID i
 		return
 	}
 
-	filledEvent, err = s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, nextSequence+1)
+	filledEvent, err = s.buildOrderEvent(deps, filled, fillEvent.Metadata.EventID, sequence+1)
 	if err != nil {
 		return
 	}
