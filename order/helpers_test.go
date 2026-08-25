@@ -44,6 +44,20 @@ func mustAccountID(t *testing.T) id.AccountID {
 	return aid
 }
 
+func mustIntentID(t *testing.T) id.IntentID {
+	t.Helper()
+	iid, err := id.GenerateIntentID(testGenerator())
+	require.NoError(t, err)
+	return iid
+}
+
+func mustEurUsdInstrument(t *testing.T) instrument.ID {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	return inst.ID()
+}
+
 func mustEurUsdListing(t *testing.T) instrument.Listing {
 	t.Helper()
 	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))

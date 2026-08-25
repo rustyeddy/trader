@@ -1,6 +1,6 @@
 package id
 
-// Concrete Parse<Kind> and MustParse<Kind> functions for each of the six
+// Concrete Parse<Kind> and MustParse<Kind> functions for each of the seven
 // identifier kinds. These are thin wrappers over the generic Parse[K] and
 // MustParse[K], instantiated here with the unexported kind marker types
 // (runKind, orderKind, ...) that callers outside this package cannot name
@@ -44,3 +44,9 @@ func ParseAccountID(s string) (AccountID, error) { return Parse[accountKind](s) 
 
 // MustParseAccountID is like ParseAccountID but panics on error. See MustParse.
 func MustParseAccountID(s string) AccountID { return MustParse[accountKind](s) }
+
+// ParseIntentID parses s as an IntentID. See Parse.
+func ParseIntentID(s string) (IntentID, error) { return Parse[intentKind](s) }
+
+// MustParseIntentID is like ParseIntentID but panics on error. See MustParse.
+func MustParseIntentID(s string) IntentID { return MustParse[intentKind](s) }

@@ -22,6 +22,7 @@ func TestKindPrefixes(t *testing.T) {
 		{eventKind{}, "evt"},
 		{correlationKind{}, "cor"},
 		{accountKind{}, "acc"},
+		{intentKind{}, "int"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.prefix, tt.kind.Prefix())
