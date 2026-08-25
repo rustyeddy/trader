@@ -19,17 +19,23 @@
 // the resulting StatusFilled transition — in that deterministic order,
 // each causally chained to the one before it. This package has no
 // partial-fill or order-book volume model, so a market order's fill is
-// always for its complete accepted quantity. A fill that would open a
-// new Position from flat is supported; a fill against a listing where
-// the account already holds a Position returns
-// ErrPositionUpdateUnsupported — correctly adding to, reducing,
-// closing, or reversing a position needs weighted-average cost basis
-// and realized PnL accounting that issue #152 (M3-09) owns, and this
-// package would rather report that plainly than compute a silently
-// wrong result. A fill does not yet affect account cash: issue #152
-// also explicitly owns "cash/balance effects of fills," and a naive
-// full-notional debit/credit is not broker-neutral accounting (see
-// buildFill's doc comment in account.go).
+// always for its complete accepted quantity.
+//
+// Every fill — market (Submit) or triggered limit/stop (Advance) —
+// updates authoritative position and PnL state (issue #152, M3-09):
+// opening a new Position from flat, increasing an existing same-side
+// Position (recomputing its quantity-weighted AvgPrice via
+// Money.DivQuantity, ADR-027), reducing or exactly closing an opposite-
+// side Position, and reversing one (closing it, then opening a new
+// Position in the new direction for the remainder) are all supported —
+// see position.go's applyFillToPosition for the full transition table.
+// Cash moves only by realized PnL (on a reduce/close/reverse) and, when
+// a fill reports a non-nil order.Fill.Commission, by that commission —
+// never by a universal full-notional debit/credit on open/increase,
+// which is not broker-neutral accounting (a cash purchase should leave
+// equity roughly unchanged, not book the full notional as an immediate
+// loss). See buildFill's doc comment in account.go for the full
+// reasoning and the design discussion this followed on issue #152.
 //
 // Cancel and Replace (issue #151, M3-08) resolve synchronously within
 // one call — this simulator has no real broker latency, so
@@ -75,17 +81,18 @@
 // ErrAmbiguousIntrabarOrder and fills none of that group (any at-open
 // orders still fill). IntrabarPessimistic is declared but not
 // implemented for that ambiguous case — selecting it reports
-// broker.ErrUnsupported. A later order in the fill sequence that fails
-// for an unrelated reason (most notably ErrPositionUpdateUnsupported,
-// when an earlier order in the same call already opened a position)
-// reports that specific error, not ambiguity. StopLimit orders are not
-// evaluated by Advance at all in this package yet. A triggered fill
-// shares Submit's market-order fill mechanics exactly (same Position-
-// opening-from-flat scope boundary, same deliberate omission of cash
-// effects), differing only in how its price and event causation are
-// derived. Advance honors context cancellation between accounts and
-// before committing each individual fill, but never rolls back a fill
-// that already committed before cancellation was observed.
+// broker.ErrUnsupported. StopLimit orders are not evaluated by Advance
+// at all in this package yet. A triggered fill shares Submit's
+// market-order fill and position/PnL accounting mechanics exactly,
+// differing only in how its price and event causation are derived.
+//
+// Advance also revalues every open Position's mark from the
+// observation's Close whenever obs.Listing matches one, even if no
+// pending order triggers — unrealized PnL (issue #152, M3-09) must not
+// go stale merely because there was nothing to fill. Advance honors
+// context cancellation between accounts and before committing each
+// individual fill, but never rolls back a fill that already committed
+// before cancellation was observed.
 //
 // # Determinism
 //

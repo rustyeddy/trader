@@ -39,6 +39,13 @@
 // MulQuantity returns to an account's home currency via Money.Convert —
 // remains a domain-package responsibility, not num's.
 //
+// Money.DivQuantity (ADR-027,
+// docs/arch/adr-027-money-quantity-price-division.org) is MulQuantity's
+// inverse and the same kind of exception, for the same reason: recovering
+// a weighted-average price from a cost basis and a quantity is
+// context-free exact arithmetic, not a decision about what that price
+// means to any particular instrument or account.
+//
 // # Percent and Ratio
 //
 // Rate is the foundational exact dimensionless type.  Percent and Ratio are

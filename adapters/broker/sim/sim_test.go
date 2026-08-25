@@ -743,12 +743,12 @@ func TestAccountSubmitMarketOrderIsIdempotentAfterFill(t *testing.T) {
 	assert.Len(t, events, 3)
 }
 
-// TestAccountSubmitMarketOrderAgainstExistingPositionIsUnsupported
-// covers this package's explicit M3-06 scope boundary: correctly
-// adding to, reducing, closing, or reversing a position is issue
-// #152's job, so a second fill against an already-non-flat listing is
-// rejected rather than silently computing a wrong average price.
-func TestAccountSubmitMarketOrderAgainstExistingPositionIsUnsupported(t *testing.T) {
+// TestAccountSubmitMarketOrderIncreasesExistingPosition covers issue
+// #152's (M3-09) "increase" transition: a second same-side market fill
+// against an already-open position adds to it and recomputes the
+// quantity-weighted average price (ADR-027), rather than being
+// rejected the way #149/#150 originally left it.
+func TestAccountSubmitMarketOrderIncreasesExistingPosition(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()
 	accountID := mustAccountID(t, deps.IDs)
@@ -763,23 +763,28 @@ func TestAccountSubmitMarketOrderAgainstExistingPositionIsUnsupported(t *testing
 
 	second := mustMarketRequest(t, deps.IDs, accountID, order.Buy, "500")
 	_, err = acc.Submit(ctx, second)
-	require.ErrorIs(t, err, ErrPositionUpdateUnsupported)
+	require.NoError(t, err)
 
-	// The rejected second fill must leave every part of state exactly
-	// as the first fill left it — no partial position or event
-	// mutation — matching the build-then-commit atomicity Submit
-	// already guarantees for single-event failures.
+	// Both fills are at the fixed price source's single EUR_USD price
+	// (1.10000), so the weighted average is trivially still 1.10000,
+	// and equity is unchanged (mark == avg, no realized PnL from an
+	// increase).
 	snap, err := acc.Snapshot(ctx)
 	require.NoError(t, err)
 	assert.True(t, snap.Equity().Equal(usd("10000")))
+	assert.True(t, snap.RealizedPnL().Equal(usd("0")))
 	require.Len(t, snap.Positions(), 1)
-	assert.True(t, snap.Positions()[0].Quantity.Equal(num.MustParseQuantity("1000")))
-	assert.Empty(t, snap.OpenOrders(), "the rejected second request must never have been accepted")
+	pos := snap.Positions()[0]
+	assert.Equal(t, order.Long, pos.Side)
+	assert.True(t, pos.Quantity.Equal(num.MustParseQuantity("1500")))
+	require.NotNil(t, pos.AvgPrice)
+	assert.True(t, pos.AvgPrice.Equal(num.MustParsePrice("1.10000")))
+	assert.Empty(t, snap.OpenOrders())
 
 	reader, err := acc.Events(ctx, "")
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	drainEvents(t, reader, 3) // exactly the first order's three events
+	drainEvents(t, reader, 6) // three events per market order fill
 	assertNoMoreEventsSoon(t, reader)
 }
 

@@ -8,6 +8,17 @@ behavior in =adapters/broker/sim=, ahead of implementation, since this
 is the first point where the simulator encodes market-observation and
 intrabar microstructure assumptions.
 
+Editorial note (no decision below changed): the Decision section's
+examples below refer to =ErrPositionUpdateUnsupported=, the sentinel
+#150 used for any fill against a listing that already held a Position.
+Issue #152 (M3-09) later implemented full position/PnL accounting
+(open, increase, reduce, close, reverse) and removed that sentinel —
+such a fill now succeeds instead of erroring. This does not change
+ADR-026's actual decision: the at-open/within-bar intrabar-ambiguity
+distinction, and "a later order in the fill sequence can still fail
+for an unrelated reason" principle, both remain exactly as decided;
+only the specific example error name is now historical.
+
 * Context
 
 #149 (M3-06) gave =adapters/broker/sim= a pull-based fill mechanism:
