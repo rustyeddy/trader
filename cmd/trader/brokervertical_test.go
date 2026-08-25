@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,6 +60,31 @@ func TestBrokerVerticalSlice(t *testing.T) {
 		require.Empty(t, decoded.Positions)
 	})
 
+	t.Run("accounts renders as JSON", func(t *testing.T) {
+		out, err := runBroker(t, "accounts",
+			"--starting-cash", "10000", "--currency", "USD", "--format", "json")
+		require.NoError(t, err)
+
+		var decoded struct {
+			Accounts []struct {
+				AccountID string `json:"account_id"`
+				Broker    string `json:"broker"`
+			} `json:"accounts"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &decoded))
+		require.Len(t, decoded.Accounts, 1)
+		assert.Equal(t, "sim", decoded.Accounts[0].Broker)
+	})
+
+	t.Run("snapshot renders as a table", func(t *testing.T) {
+		out, err := runBroker(t, "snapshot",
+			"--starting-cash", "10000", "--currency", "USD", "--format", "table")
+		require.NoError(t, err)
+		assert.Contains(t, out, "equity=10000 USD")
+		assert.Contains(t, out, "positions: (none)")
+		assert.Contains(t, out, "open orders: (none)")
+	})
+
 	t.Run("submit fills a market order and reports it filled", func(t *testing.T) {
 		out, err := runBroker(t, "submit",
 			"--symbol", "EURUSD", "--side", "buy", "--quantity", "1000",
@@ -72,6 +98,15 @@ func TestBrokerVerticalSlice(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(out), &decoded))
 		require.Equal(t, "filled", decoded.Status)
 		require.Equal(t, "1000", decoded.FilledQty)
+	})
+
+	t.Run("submit renders a filled market order as a table", func(t *testing.T) {
+		out, err := runBroker(t, "submit",
+			"--symbol", "EURUSD", "--side", "buy", "--quantity", "1000",
+			"--price", "1.10000", "--format", "table")
+		require.NoError(t, err)
+		assert.Contains(t, out, "status=filled")
+		assert.Contains(t, out, "symbol=EURUSD  side=buy  filled_qty=1000")
 	})
 
 	t.Run("submit accepts a limit order as working, without filling it", func(t *testing.T) {
