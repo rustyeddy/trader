@@ -47,6 +47,39 @@ func mustAccountID(t *testing.T) id.AccountID {
 	return aid
 }
 
+func mustOtherAccountID(t *testing.T) id.AccountID {
+	t.Helper()
+	gen := id.NewGenerator(testClock, id.NewDeterministic(5, 6))
+	aid, err := id.GenerateAccountID(gen)
+	require.NoError(t, err)
+	return aid
+}
+
+// mustEurUsdListingForProvider is mustEurUsdListing with an overridden
+// Provider, for tests exercising the Listing.Provider()/Account.Broker()
+// consistency check.
+func mustEurUsdListingForProvider(t *testing.T, provider string) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   provider,
+		Symbol:     "EUR_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
 func mustSnapshot(t *testing.T, accountID id.AccountID, listing instrument.Listing) account.Snapshot {
 	t.Helper()
 	usd := num.MustParseCurrency("USD")

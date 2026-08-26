@@ -20,7 +20,8 @@ func testInput(t *testing.T) Input {
 }
 
 func TestEngineNoRulesAlwaysAllows(t *testing.T) {
-	e := NewEngine()
+	e, err := NewEngine()
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.True(t, decision.Allowed)
@@ -28,8 +29,56 @@ func TestEngineNoRulesAlwaysAllows(t *testing.T) {
 	assert.Empty(t, decision.RuleResults)
 }
 
+// TestEngineRejectsMalformedInputEvenWithNoRules is a regression for
+// review feedback on PR #195: with zero rules, Evaluate previously
+// returned Allowed: true for any Input, including a structurally
+// invalid Proposal or an Account/Proposal mismatch, since nothing ever
+// checked Input itself. Malformed input is not a policy violation and
+// must be rejected before rule evaluation, independent of how many
+// rules are configured.
+func TestEngineRejectsMalformedInputEvenWithNoRules(t *testing.T) {
+	e, err := NewEngine()
+	require.NoError(t, err)
+
+	_, err = e.Evaluate(context.Background(), Input{})
+	require.ErrorIs(t, err, ErrInvalidInput)
+}
+
+func TestEngineRejectsAccountIDMismatch(t *testing.T) {
+	e, err := NewEngine()
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	proposalAccount := mustAccountID(t)
+	otherAccount := mustOtherAccountID(t)
+
+	in := Input{
+		Proposal: mustProposal(t, proposalAccount, listing),
+		Account:  mustSnapshot(t, otherAccount, listing),
+	}
+	_, err = e.Evaluate(context.Background(), in)
+	require.ErrorIs(t, err, ErrInvalidInput)
+}
+
+func TestEngineRejectsListingProviderAccountBrokerMismatch(t *testing.T) {
+	e, err := NewEngine()
+	require.NoError(t, err)
+
+	accountID := mustAccountID(t)
+	simListing := mustEurUsdListingForProvider(t, "sim")
+	otherListing := mustEurUsdListingForProvider(t, "alpaca")
+
+	in := Input{
+		Proposal: mustProposal(t, accountID, otherListing),
+		Account:  mustSnapshot(t, accountID, simListing),
+	}
+	_, err = e.Evaluate(context.Background(), in)
+	require.ErrorIs(t, err, ErrInvalidInput)
+}
+
 func TestEngineAllRulesPassAllows(t *testing.T) {
-	e := NewEngine(passingRule("a"), passingRule("b"))
+	e, err := NewEngine(passingRule("a"), passingRule("b"))
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.True(t, decision.Allowed)
@@ -37,7 +86,8 @@ func TestEngineAllRulesPassAllows(t *testing.T) {
 }
 
 func TestEngineOneViolationRejects(t *testing.T) {
-	e := NewEngine(passingRule("a"), violatingRule("b", "exceeds limit"))
+	e, err := NewEngine(passingRule("a"), violatingRule("b", "exceeds limit"))
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.False(t, decision.Allowed)
@@ -59,7 +109,8 @@ func TestEngineEvaluatesEveryRuleNotFailFast(t *testing.T) {
 	c := passingRule("c")
 	c.calls = &calls
 
-	e := NewEngine(a, b, c)
+	e, err := NewEngine(a, b, c)
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 
@@ -69,7 +120,8 @@ func TestEngineEvaluatesEveryRuleNotFailFast(t *testing.T) {
 }
 
 func TestEngineAggregatesWarningsEvenWhenAllowed(t *testing.T) {
-	e := NewEngine(passingRule("a"), warningRule("b", "close to limit"))
+	e, err := NewEngine(passingRule("a"), warningRule("b", "close to limit"))
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.True(t, decision.Allowed, "a warning alone must not reject")
@@ -78,7 +130,8 @@ func TestEngineAggregatesWarningsEvenWhenAllowed(t *testing.T) {
 }
 
 func TestEngineRuleResultsPreserveOrderAndIdentity(t *testing.T) {
-	e := NewEngine(passingRule("first"), violatingRule("second", "bad"), passingRule("third"))
+	e, err := NewEngine(passingRule("first"), violatingRule("second", "bad"), passingRule("third"))
+	require.NoError(t, err)
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 
@@ -98,16 +151,18 @@ func TestEngineRulesEvaluatedInGivenOrder(t *testing.T) {
 	b := passingRule("a")
 	b.calls = &calls
 
-	e := NewEngine(a, b)
-	_, err := e.Evaluate(context.Background(), testInput(t))
+	e, err := NewEngine(a, b)
+	require.NoError(t, err)
+	_, err = e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"z", "a"}, calls, "Engine must not re-sort rules, e.g. alphabetically")
 }
 
 func TestEngineRulePropagatesEvaluationError(t *testing.T) {
 	boom := errors.New("boom")
-	e := NewEngine(passingRule("a"), &fakeRule{name: "broken", err: boom})
-	_, err := e.Evaluate(context.Background(), testInput(t))
+	e, err := NewEngine(passingRule("a"), &fakeRule{name: "broken", err: boom})
+	require.NoError(t, err)
+	_, err = e.Evaluate(context.Background(), testInput(t))
 	require.ErrorIs(t, err, boom)
 }
 
@@ -117,18 +172,20 @@ func TestEngineStopsAtEvaluationError(t *testing.T) {
 	after := passingRule("after")
 	after.calls = &calls
 
-	e := NewEngine(broken, after)
-	_, err := e.Evaluate(context.Background(), testInput(t))
+	e, err := NewEngine(broken, after)
+	require.NoError(t, err)
+	_, err = e.Evaluate(context.Background(), testInput(t))
 	require.Error(t, err)
 	assert.Empty(t, calls, "a rule after one that errors must not run — an evaluation error is not a domain outcome to aggregate past")
 }
 
 func TestEnginePropagatesCancelledContext(t *testing.T) {
-	e := NewEngine(passingRule("a"))
+	e, err := NewEngine(passingRule("a"))
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := e.Evaluate(ctx, testInput(t))
+	_, err = e.Evaluate(ctx, testInput(t))
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -137,11 +194,56 @@ func TestEnginePropagatesCancelledContext(t *testing.T) {
 // construction must not change what a later Evaluate call sees.
 func TestNewEngineCopiesRulesDefensively(t *testing.T) {
 	rules := []Rule{passingRule("a")}
-	e := NewEngine(rules...)
+	e, err := NewEngine(rules...)
+	require.NoError(t, err)
 
 	rules[0] = violatingRule("a", "mutated after construction")
 
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.True(t, decision.Allowed, "Engine must evaluate the rule it was constructed with, not a later mutation of the caller's slice")
+}
+
+// TestNewEngineRejectsNilRule and TestNewEngineRejectsEmptyRuleName
+// are regressions for review feedback (Copilot + Rusty) on PR #195:
+// NewEngine previously accepted a nil Rule, which would panic the
+// first time Evaluate called Name()/Evaluate() on it, and accepted a
+// Rule with an empty Name(), which would silently produce
+// unattributable findings.
+func TestNewEngineRejectsNilRule(t *testing.T) {
+	_, err := NewEngine(passingRule("a"), nil)
+	require.ErrorIs(t, err, ErrInvalidRule)
+}
+
+func TestNewEngineRejectsEmptyRuleName(t *testing.T) {
+	_, err := NewEngine(passingRule(""))
+	require.ErrorIs(t, err, ErrInvalidRule)
+}
+
+// TestEngineNormalizesRuleAttribution proves Engine, not the concrete
+// Rule, is authoritative for RuleResult/Violation/Warning.Rule: even a
+// Rule that reports the wrong name (or none) for its own findings has
+// its output corrected to match Rule.Name() (review feedback on PR
+// #195).
+func TestEngineNormalizesRuleAttribution(t *testing.T) {
+	misattributed := &fakeRule{
+		name: "real-name",
+		result: RuleResult{
+			Rule:       "wrong-name",
+			Violations: []Violation{{Rule: "wrong-name", Message: "bad"}},
+			Warnings:   []Warning{{Rule: "wrong-name", Message: "heads up"}},
+		},
+	}
+	e, err := NewEngine(misattributed)
+	require.NoError(t, err)
+
+	decision, err := e.Evaluate(context.Background(), testInput(t))
+	require.NoError(t, err)
+
+	require.Len(t, decision.RuleResults, 1)
+	assert.Equal(t, "real-name", decision.RuleResults[0].Rule)
+	require.Len(t, decision.Violations, 1)
+	assert.Equal(t, "real-name", decision.Violations[0].Rule)
+	require.Len(t, decision.Warnings, 1)
+	assert.Equal(t, "real-name", decision.Warnings[0].Rule)
 }
