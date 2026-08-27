@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/execution"
@@ -115,6 +116,10 @@ func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 	validIntent, err := order.NewIntent(in.Intent)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: intent: %v", ErrInvalidInput, err)
+	}
+	if !strings.EqualFold(p.deps.Broker.Name(), in.Account.Broker()) {
+		return Result{}, fmt.Errorf("%w: broker %q does not match account broker %q (Pipeline must never submit against a different broker than the account was sized/planned/risk-evaluated for)",
+			ErrInvalidInput, p.deps.Broker.Name(), in.Account.Broker())
 	}
 
 	var qty *num.Quantity

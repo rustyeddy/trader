@@ -7,13 +7,22 @@ var (
 	// a required dependency.
 	ErrInvalidDeps = errors.New("pipeline: invalid deps")
 
-	// ErrInvalidInput reports an Input that fails validation before
-	// sizing or planning is attempted: an invalid Intent, an
-	// unconstructed Listing/Account, or an order.IntentEnter with no
-	// AdverseDistance for Sizer to size against. This is distinct from
-	// a sizing, planning, or risk-evaluation failure — those propagate
-	// as their own package's classifiable errors (ErrInvalidSizeInput,
-	// ErrUnsupportedIntentKind, ErrInvalidInput from risk, and so on),
+	// ErrInvalidInput reports an Input that fails the structural checks
+	// Pipeline itself performs before sizing or planning is attempted:
+	// an invalid Intent (order.NewIntent's own validation), a
+	// deps.Broker whose Name() does not case-insensitively match
+	// in.Account.Broker() (Pipeline must never submit against a
+	// different broker than the account was sized/planned/
+	// risk-evaluated for), or an order.IntentEnter with no
+	// AdverseDistance for Sizer to size against.
+	//
+	// Pipeline deliberately does not duplicate every structural check
+	// its own Sizer/Planner/Engine dependencies already perform: an
+	// unconstructed Listing/Account, for example, is instead reported
+	// by the underlying risk.ErrInvalidSizeInput or
+	// execution.ErrInvalidPlanInput once sizing or planning runs. Those
+	// — along with any other sizing, planning, or risk-evaluation
+	// failure — propagate as their own package's classifiable errors,
 	// wrapped but never collapsed into this sentinel, per this issue's
 	// own "explicit propagation of planning/risk failures" acceptance
 	// criterion.

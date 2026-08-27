@@ -384,6 +384,47 @@ func TestNewPipelineRejectsIncompleteDeps(t *testing.T) {
 
 var _ brokerpkg.Broker = (*sim.Broker)(nil)
 
+func TestPipelineSubmit_BrokerAccountMismatchIsInvalidInputAndBrokerUntouched(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clock, IDs: h.ids})
+	require.NoError(t, err)
+	engine, err := risk.NewEngine()
+	require.NoError(t, err)
+
+	// deps.Broker.Name() ("other") deliberately does not match
+	// in.Account.Broker() ("sim", from newHarness's sim.NewBroker) —
+	// Submit must reject this before ever calling OpenAccount/Submit,
+	// even though openErr/submitErr are both nil and would otherwise
+	// succeed silently (review feedback on PR #200).
+	mismatched := failingBroker{name: "other"}
+	p, err := pipeline.NewPipeline(pipeline.Deps{
+		Sizer:   risk.NewFixedFractionSizer(),
+		Planner: planner,
+		Engine:  engine,
+		Broker:  mismatched,
+		IDs:     h.ids,
+	})
+	require.NoError(t, err)
+
+	before := h.snapshot(t, ctx)
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Submit(ctx, pipeline.Input{
+		Intent:          intent,
+		Listing:         h.listing,
+		Account:         before,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.ErrorIs(t, err, pipeline.ErrInvalidInput)
+	assert.Equal(t, pipeline.Result{}, result)
+
+	after := h.snapshot(t, ctx)
+	assert.Empty(t, after.Positions(), "broker must never be opened/submitted to on a broker/account identity mismatch")
+}
+
 func TestPipelineSubmit_OpenAccountErrorPropagates(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, "10000")

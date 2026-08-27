@@ -16,11 +16,17 @@ import (
 // two calls — a real sim.Broker has no way to fail either
 // deterministically for a structurally valid request.
 type failingBroker struct {
+	name      string
 	openErr   error
 	submitErr error
 }
 
-func (b failingBroker) Name() string { return "failing" }
+func (b failingBroker) Name() string {
+	if b.name == "" {
+		return "sim"
+	}
+	return b.name
+}
 
 func (b failingBroker) Accounts(ctx context.Context) ([]account.Reference, error) {
 	return nil, nil
