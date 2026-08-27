@@ -23,6 +23,12 @@ const maxInstrumentExposureName = "max_instrument_exposure"
 // historical AvgPrice for the already-held portion, which would blend
 // two different valuation bases into one meaningless figure (review
 // feedback on #183).
+//
+// It also exempts any de-risking proposal from the cap outright (issue
+// #207), the same principle MaxPositionLeverageRule established
+// (#184/PR #199) and ADR-034 records: an account already over this cap
+// must always have a path back into compliance, never be trapped by
+// the very rule a risk-reducing proposal would satisfy.
 type maxInstrumentExposureRule struct {
 	max num.Money
 }
@@ -58,11 +64,25 @@ func (r *maxInstrumentExposureRule) Evaluate(ctx context.Context, in Input) (Rul
 		return RuleResult{}, err
 	}
 
+	pos, hasPosition := findPosition(in.Account, in.Proposal.Listing)
+	currentQty := num.Quantity{}
+	if hasPosition {
+		currentQty = pos.Quantity
+	}
+
 	resultSide, resultQty, err := resultingPosition(in.Account, in.Proposal)
 	if err != nil {
 		return RuleResult{}, fmt.Errorf("max instrument exposure: %w", err)
 	}
 	if resultSide == order.Flat || resultQty.IsZero() {
+		return RuleResult{}, nil
+	}
+
+	// De-risking is exempt from the cap: see this rule's own doc
+	// comment and ADR-034. Comparing magnitude directly (never the
+	// current position's own AvgPrice) matches MaxPositionLeverageRule's
+	// established comparison exactly.
+	if resultQty.Cmp(currentQty) <= 0 {
 		return RuleResult{}, nil
 	}
 

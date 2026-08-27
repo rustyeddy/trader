@@ -15,7 +15,12 @@ const maxPositionQuantityName = "max_position_quantity"
 // instrument after a proposal (issue #183, M4-08): it evaluates
 // resultingPosition, not the proposal's own gross quantity, so a
 // reduce-only/closing proposal — whose resulting quantity is always
-// smaller — passes without special-casing.
+// smaller — passes without special-casing. It also exempts any
+// de-risking proposal from the cap outright (issue #207), the same
+// principle MaxPositionLeverageRule established (#184/PR #199) and
+// ADR-034 records: an account already over this cap must always have
+// a path back into compliance, never be trapped by the very rule a
+// risk-reducing proposal would satisfy.
 type maxPositionQuantityRule struct {
 	max num.Quantity
 }
@@ -39,9 +44,23 @@ func (r *maxPositionQuantityRule) Evaluate(ctx context.Context, in Input) (RuleR
 		return RuleResult{}, err
 	}
 
+	pos, hasPosition := findPosition(in.Account, in.Proposal.Listing)
+	currentQty := num.Quantity{}
+	if hasPosition {
+		currentQty = pos.Quantity
+	}
+
 	_, qty, err := resultingPosition(in.Account, in.Proposal)
 	if err != nil {
 		return RuleResult{}, fmt.Errorf("max position quantity: %w", err)
+	}
+
+	// De-risking is exempt from the cap: see this rule's own doc
+	// comment and ADR-034. Comparing magnitude directly (never the
+	// current position's own AvgPrice) matches MaxPositionLeverageRule's
+	// established comparison exactly.
+	if qty.Cmp(currentQty) <= 0 {
+		return RuleResult{}, nil
 	}
 
 	if qty.Cmp(r.max) <= 0 {
