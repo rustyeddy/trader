@@ -84,12 +84,15 @@ type verticalSliceResult struct {
 
 // runExecutionVerticalSliceScenario is issue #188's own primary
 // deliverable: one deterministic, end-to-end scenario proving M4 as a
-// complete capability integrated with the M3 simulator, exercised
-// entirely through public/service boundaries (service/execution.
-// Service and broker.Broker/Account) — never pipeline, execution,
-// risk, or adapters/broker/sim internals directly, per this issue's
-// own "exercise public/service boundaries rather than simulator
-// internals" acceptance criterion.
+// complete capability integrated with the M3 simulator. It constructs
+// the full stack via each lower package's own public constructors
+// (sim.NewBroker, execution.NewPlanner, risk.NewEngine,
+// pipeline.NewPipeline) — the same composition a real composition root
+// performs — then exercises the scenario itself entirely through
+// service/execution.Service and broker.Broker/Account, never reaching
+// into any package's unexported internals, per this issue's own
+// "exercise public/service boundaries rather than simulator internals"
+// acceptance criterion.
 //
 // The scenario covers, on one shared deterministic simulated Broker
 // and a risk.Engine composed of two real, configured M4 policies
@@ -241,8 +244,15 @@ func runExecutionVerticalSliceScenario(t *testing.T) verticalSliceResult {
 	assertNoMoreVSEventsSoon(t, readerA)
 
 	// Account B: an entirely independent approved scenario on a
-	// different instrument, proving account isolation — never touches
-	// account A's own risk state, position, or event stream.
+	// different instrument. Proving isolation requires showing both
+	// directions: B's own final state below is untouched by everything
+	// already done on A (asserted in the "account B" subtest), and —
+	// just as importantly — A's own state, re-read after B's submit,
+	// must still be byte-identical to what it was before B ever
+	// existed. A regression where submitting on B accidentally mutated
+	// A's snapshot or appended to A's event stream would pass a
+	// one-directional check but must fail this one (review feedback on
+	// PR #205).
 	accountBApprove, err := svc.Submit(ctx, SubmitRequest{
 		AccountID:       accountB,
 		Intent:          buildIntent(gbpUsd.InstrumentID()),
@@ -263,6 +273,20 @@ func runExecutionVerticalSliceScenario(t *testing.T) verticalSliceResult {
 	defer func() { _ = readerB.Close() }()
 	eventsB := drainVSEvents(t, readerB, 3)
 	assertNoMoreVSEventsSoon(t, readerB)
+
+	// Re-read account A after B's submission: its snapshot and its
+	// complete event stream (read again from the beginning) must be
+	// byte-identical to what was captured before B ever submitted.
+	snapAAfterB, err := accA.Snapshot(ctx)
+	require.NoError(t, err)
+	require.Equal(t, snapA, snapAAfterB, "account B's submission must never mutate account A's snapshot")
+
+	readerAAfterB, err := accA.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = readerAAfterB.Close() }()
+	eventsAAfterB := drainVSEvents(t, readerAAfterB, 3)
+	assertNoMoreVSEventsSoon(t, readerAAfterB)
+	require.Equal(t, eventsA, eventsAAfterB, "account B's submission must never append to account A's event stream")
 
 	return verticalSliceResult{
 		FirstEvaluate:   firstEvaluate,
@@ -310,6 +334,7 @@ func TestExecutionVerticalSlice_FullScenarioProducesExpectedState(t *testing.T) 
 		// A market fill carries no realized PnL/fees (no CommissionModel
 		// configured): cash stays exactly the starting balance.
 		assert.True(t, result.SnapA.RealizedPnL().Equal(usd("0")), "realized PnL: %s", result.SnapA.RealizedPnL())
+		require.NotEmpty(t, result.SnapA.CashBalances(), "a regression here must fail this assertion, not panic on [0]")
 		assert.True(t, result.SnapA.CashBalances()[0].Equal(usd("10000")), "cash: %s", result.SnapA.CashBalances()[0])
 	})
 
@@ -341,6 +366,7 @@ func TestExecutionVerticalSlice_FullScenarioProducesExpectedState(t *testing.T) 
 
 		snap := result.SnapB
 		assert.True(t, snap.RealizedPnL().Equal(usd("0")))
+		require.NotEmpty(t, snap.CashBalances(), "a regression here must fail this assertion, not panic on [0]")
 		assert.True(t, snap.CashBalances()[0].Equal(usd("5000")), "B's starting cash is untouched by A's activity")
 
 		require.Len(t, snap.Positions(), 1)
