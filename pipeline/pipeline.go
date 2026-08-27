@@ -59,15 +59,21 @@ type Input struct {
 	ReferencePrice *num.Price
 }
 
-// Result is what Pipeline.Submit produces for one Input. Proposal is
-// populated once planning succeeds, even if risk later rejects it or
-// the broker submission fails. Decision is populated once risk
-// evaluation completes, even on rejection. Order is populated only
-// after a successful broker submission — never on rejection, and never
-// on a planning, sizing, or risk-evaluation failure.
+// Result is what Pipeline.Evaluate/Submit produce for one Input.
+// Proposal is populated once planning succeeds, even if risk later
+// rejects it or the broker submission fails. Decision is populated
+// once risk evaluation completes, even on rejection. Request is
+// populated only once risk approves (Decision.Allowed) — the
+// broker-neutral order.Request that would be, or was, submitted;
+// building it is still deterministic orchestration, not a broker
+// write, so Evaluate produces it too, not just Submit (#187 design
+// discussion). Order is populated only after a successful broker
+// submission — never on rejection, and never on a planning, sizing, or
+// risk-evaluation failure.
 type Result struct {
 	Proposal order.Proposal
 	Decision risk.Decision
+	Request  order.Request
 	Order    order.Order
 }
 
@@ -88,27 +94,32 @@ func NewPipeline(deps Deps) (*Pipeline, error) {
 	return &Pipeline{deps: deps}, nil
 }
 
-// Submit carries in's Intent through the full canonical path: sizing
-// (for an unsized order.IntentEnter), execution planning, risk
-// admission, and — only on approval — broker submission via
-// deps.Broker.OpenAccount(in.Account.AccountID()).Submit.
+// Evaluate carries in's Intent through the read-only canonical path:
+// sizing (for an unsized order.IntentEnter), execution planning, risk
+// admission, and — only on approval — assigning an order.OrderID and
+// building the approved, broker-neutral order.Request that would be
+// submitted. Evaluate never calls the broker (no OpenAccount, no
+// Submit): every stage up to and including order.NewRequest is
+// deterministic orchestration over Input and Deps, not a broker write,
+// so it belongs on the read-only path a diagnostic/evaluation caller
+// can safely run (#187 design discussion). Result.Order is always the
+// zero value on return from Evaluate.
 //
-// Submit must be deterministic across independent Pipeline instances
+// Evaluate must be deterministic across independent Pipeline instances
 // the same way execution.Planner.Plan and risk.Sizer.Size already are:
 // given identical *initial* Deps state and an identical Input, two
 // separately constructed Pipelines must produce identical Result
-// values wherever the underlying Sizer/Planner/Engine/Broker
-// implementations are themselves deterministic — Submit itself
-// consults no clock, global randomness, or state beyond Input and
-// Deps.
+// values wherever the underlying Sizer/Planner/Engine implementations
+// are themselves deterministic — Evaluate itself consults no clock,
+// global randomness, or state beyond Input and Deps.
 //
 // A sizing, planning, or risk-evaluation error propagates wrapped but
 // unwrapped-checkable (errors.Is) against its own package's
 // classifiable sentinel — it is never collapsed into a generic
 // pipeline error. A risk rejection is reported as ErrRejected, with
 // Result.Proposal and Result.Decision populated so a caller can
-// inspect exactly why; the broker is never called in that case.
-func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
+// inspect exactly why.
+func (p *Pipeline) Evaluate(ctx context.Context, in Input) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -118,7 +129,7 @@ func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 		return Result{}, fmt.Errorf("%w: intent: %v", ErrInvalidInput, err)
 	}
 	if !strings.EqualFold(p.deps.Broker.Name(), in.Account.Broker()) {
-		return Result{}, fmt.Errorf("%w: broker %q does not match account broker %q (Pipeline must never submit against a different broker than the account was sized/planned/risk-evaluated for)",
+		return Result{}, fmt.Errorf("%w: broker %q does not match account broker %q (Pipeline must never evaluate or submit against a different broker than the account was sized/planned/risk-evaluated for)",
 			ErrInvalidInput, p.deps.Broker.Name(), in.Account.Broker())
 	}
 
@@ -171,14 +182,38 @@ func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
 		return Result{Proposal: planResult.Proposal, Decision: decision}, fmt.Errorf("pipeline: building request: %w", err)
 	}
 
-	acc, err := p.deps.Broker.OpenAccount(ctx, in.Account.AccountID())
+	return Result{Proposal: planResult.Proposal, Decision: decision, Request: req}, nil
+}
+
+// Submit is Evaluate's thin mutating continuation: it runs the
+// identical read-only preparation Evaluate does, and — only when
+// Decision.Allowed — submits the already-built Result.Request via
+// deps.Broker.OpenAccount(in.Account.AccountID()).Submit. Submit never
+// re-derives its own OrderID/Request independently of Evaluate, so
+// there is exactly one implementation of the sizing/planning/risk/
+// request-construction sequence, not two (#187 design discussion).
+//
+// A risk rejection is reported as ErrRejected, with Result.Proposal
+// and Result.Decision populated (Result.Request and Result.Order both
+// remain zero) so a caller can inspect exactly why; the broker is
+// never called in that case. See Evaluate's own doc comment for the
+// determinism and error-propagation guarantees Submit inherits from
+// it.
+func (p *Pipeline) Submit(ctx context.Context, in Input) (Result, error) {
+	result, err := p.Evaluate(ctx, in)
 	if err != nil {
-		return Result{Proposal: planResult.Proposal, Decision: decision}, fmt.Errorf("pipeline: opening broker account: %w", err)
-	}
-	o, err := acc.Submit(ctx, req)
-	if err != nil {
-		return Result{Proposal: planResult.Proposal, Decision: decision}, fmt.Errorf("pipeline: submitting order: %w", err)
+		return result, err
 	}
 
-	return Result{Proposal: planResult.Proposal, Decision: decision, Order: o}, nil
+	acc, err := p.deps.Broker.OpenAccount(ctx, in.Account.AccountID())
+	if err != nil {
+		return result, fmt.Errorf("pipeline: opening broker account: %w", err)
+	}
+	o, err := acc.Submit(ctx, result.Request)
+	if err != nil {
+		return result, fmt.Errorf("pipeline: submitting order: %w", err)
+	}
+
+	result.Order = o
+	return result, nil
 }

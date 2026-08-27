@@ -4,11 +4,16 @@
 // Service wraps a broker.Broker (github.com/rustyeddy/trader/broker)
 // and a *pipeline.Pipeline (github.com/rustyeddy/trader/pipeline,
 // issue #185/M4-10) and exposes the complete sizing -> planning ->
-// risk -> broker-submission use case as one transport-neutral
-// operation. A caller (the CLI today, a future REST/WebSocket/SSE
-// adapter) constructs a Service over whichever broker.Broker and
-// *pipeline.Pipeline the composition root chose; Service itself never
-// imports or names a specific broker adapter.
+// risk -> broker-submission use case as two transport-neutral
+// operations: Evaluate (read-only: sizing through the approved
+// order.Request, never mutating or submitting to the broker — it does
+// still read a fresh account.Snapshot, see "Snapshot freshness, not
+// atomicity" below) and Submit (Evaluate plus broker submission, issue
+// #187's design discussion). A caller (the
+// CLI today, a future REST/WebSocket/SSE adapter) constructs a Service
+// over whichever broker.Broker and *pipeline.Pipeline the composition
+// root chose; Service itself never imports or names a specific broker
+// adapter.
 //
 // # Why two separately injected dependencies
 //
@@ -39,14 +44,14 @@
 //
 // # Snapshot freshness, not atomicity
 //
-// Submit's OpenAccount -> Snapshot -> Pipeline.Submit sequence gives
-// sizing, planning, and risk evaluation a fresh authoritative snapshot
-// for each call, but it is still a point-in-time read, never an atomic
-// snapshot-and-submit transaction: live broker state can change
-// between the Snapshot call and the eventual broker.Account.Submit
-// call inside Pipeline. Reconciling against that possibility is
-// explicitly out of M4's scope (live-session guards and reconciliation
-// are Milestone 7 concerns).
+// Evaluate/Submit's shared OpenAccount -> Snapshot -> Pipeline.
+// Evaluate/Submit sequence gives sizing, planning, and risk evaluation
+// a fresh authoritative snapshot for each call, but it is still a
+// point-in-time read, never an atomic snapshot-and-submit transaction:
+// live broker state can change between the Snapshot call and the
+// eventual broker.Account.Submit call inside Pipeline.Submit.
+// Reconciling against that possibility is explicitly out of M4's scope
+// (live-session guards and reconciliation are Milestone 7 concerns).
 //
 // # Scope
 //

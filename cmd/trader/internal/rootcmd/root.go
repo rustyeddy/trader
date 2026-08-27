@@ -32,6 +32,7 @@ import (
 
 	"github.com/rustyeddy/trader/cmd/trader/broker"
 	"github.com/rustyeddy/trader/cmd/trader/data"
+	"github.com/rustyeddy/trader/cmd/trader/execution"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/logging"
@@ -148,6 +149,7 @@ func New() (*cobra.Command, func() error) {
 
 	cmd.AddCommand(data.New())
 	cmd.AddCommand(broker.New())
+	cmd.AddCommand(execution.New())
 
 	cleanup := func() error {
 		if closer == nil {

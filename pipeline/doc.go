@@ -7,6 +7,14 @@
 //	order.Proposal -> risk.Engine -> approved order.Request ->
 //	broker.Account.Submit
 //
+// Evaluate (issue #187's design discussion) is the read-only prefix of
+// that same path: it runs every stage through building the approved
+// order.Request, but never calls the broker. Submit is its thin
+// mutating continuation — it calls Evaluate, then submits the exact
+// Request Evaluate already built when risk approves — so there is
+// exactly one implementation of the sizing/planning/risk/request-
+// construction sequence, not two.
+//
 // # Why this package exists
 //
 // execution and risk are deliberately independent siblings (ADR-006):
@@ -30,11 +38,11 @@
 // (RiskFraction, AdverseDistance, ReferencePrice) a concrete Sizer or
 // Rule might need; Pipeline resolves everything after that.
 //
-// Risk rejection never reaches the broker: Submit returns before
-// generating an order.OrderID or calling broker.Account.Submit when
-// risk.Decision.Allowed is false, satisfying "risk rejection prevents
-// broker mutation/events" by construction, not by a caller checking a
-// flag afterward.
+// Risk rejection never reaches the broker: Evaluate (and therefore
+// Submit, which calls it) returns before generating an order.OrderID
+// or building an order.Request when risk.Decision.Allowed is false,
+// satisfying "risk rejection prevents broker mutation/events" by
+// construction, not by a caller checking a flag afterward.
 //
 // This package does not implement a CLI, transport-neutral
 // request/response DTOs, or service-layer error mapping — that is the
