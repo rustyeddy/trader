@@ -11,10 +11,8 @@ import (
 // any. Position matching is by instrument identity, not exact Listing
 // equality — the same convention execution.findPosition uses (#179) —
 // but reimplemented locally here rather than imported: risk must never
-// import execution (ADR-006, package-boundaries.org). Identical to
-// pertradeloss.go's own copy; kept small enough that sharing it across
-// files in this package is simpler than extracting a third home for
-// one six-line loop.
+// import execution (ADR-006, package-boundaries.org). Shared by every
+// rule in this package that needs it (pertradeloss.go included, #182).
 func findPosition(acc account.Snapshot, listing instrument.Listing) (order.Position, bool) {
 	for _, p := range acc.Positions() {
 		if p.Listing.InstrumentID().Equal(listing.InstrumentID()) {
@@ -99,9 +97,19 @@ func positionSideFor(s order.Side) order.PositionSide {
 }
 
 // oppositeSide returns the opposite of a non-Flat order.PositionSide.
+// s is only ever called here with Long or Short (resultingPosition's
+// own reversal branch is unreachable when curSide is Flat — the
+// preceding branch already handles that case), but Flat is still
+// handled explicitly, returning Flat, so this helper never silently
+// mismatches its own documented contract if a future caller ever did
+// pass one.
 func oppositeSide(s order.PositionSide) order.PositionSide {
-	if s == order.Long {
+	switch s {
+	case order.Long:
 		return order.Short
+	case order.Short:
+		return order.Long
+	default:
+		return order.Flat
 	}
-	return order.Long
 }

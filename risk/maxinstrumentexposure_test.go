@@ -25,6 +25,17 @@ func TestNewMaxInstrumentExposureRuleRejectsZero(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidRule)
 }
 
+// TestNewMaxInstrumentExposureRuleRejectsNegative is a regression for
+// Copilot's review on PR #198: num.Money is signed, so the prior
+// !IsZero() check alone let a negative max through, silently causing
+// every non-flat resulting position to violate the rule.
+func TestNewMaxInstrumentExposureRuleRejectsNegative(t *testing.T) {
+	neg, err := usd(t, "100").Neg()
+	require.NoError(t, err)
+	_, err = NewMaxInstrumentExposureRule(neg)
+	require.ErrorIs(t, err, ErrInvalidRule)
+}
+
 func TestMaxInstrumentExposureRuleName(t *testing.T) {
 	r, err := NewMaxInstrumentExposureRule(usd(t, "10000"))
 	require.NoError(t, err)
@@ -156,6 +167,27 @@ func TestMaxInstrumentExposureRuleRejectsSettlementCurrencyMismatch(t *testing.T
 	accountID := mustAccountID(t)
 	acc := mustSnapshotWithEquity(t, accountID, "sim", "USD", "10000")
 	proposal := mustProposalWith(t, accountID, eurSettled, order.Buy, "1000", false)
+	ref := num.MustParsePrice("1.1")
+
+	_, err = r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.ErrorIs(t, err, ErrInsufficientRuleInput)
+}
+
+// TestMaxInstrumentExposureRuleRejectsConfiguredLimitCurrencyMismatch
+// is a regression for Rusty's review on PR #198: a rule configured
+// with a EUR limit but evaluated against a USD account/listing (both
+// internally consistent with each other) previously reached
+// exposure.Cmp(r.max) and surfaced a raw num currency-mismatch
+// arithmetic error instead of a classifiable rule-input error.
+func TestMaxInstrumentExposureRuleRejectsConfiguredLimitCurrencyMismatch(t *testing.T) {
+	eurLimit := num.MustParseMoney("1000", num.MustParseCurrency("EUR"))
+	r, err := NewMaxInstrumentExposureRule(eurLimit)
+	require.NoError(t, err)
+
+	listing := mustListingWithSpec(t, "sim", "0.00001", "1", "1", "USD")
+	accountID := mustAccountID(t)
+	acc := mustSnapshotWithEquity(t, accountID, "sim", "USD", "10000")
+	proposal := mustProposalWith(t, accountID, listing, order.Buy, "1000", false)
 	ref := num.MustParsePrice("1.1")
 
 	_, err = r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})

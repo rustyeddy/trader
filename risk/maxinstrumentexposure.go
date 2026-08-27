@@ -35,7 +35,15 @@ func NewMaxInstrumentExposureRule(max num.Money) (Rule, error) {
 	if !max.IsValid() {
 		return nil, fmt.Errorf("%w: max exposure must have a valid currency", ErrInvalidRule)
 	}
-	if max.IsZero() {
+	zero, err := num.ParseMoney("0", max.Currency())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRule, err)
+	}
+	cmp, err := max.Cmp(zero)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRule, err)
+	}
+	if cmp <= 0 {
 		return nil, fmt.Errorf("%w: max exposure must be positive", ErrInvalidRule)
 	}
 	return &maxInstrumentExposureRule{max: max}, nil
@@ -64,6 +72,10 @@ func (r *maxInstrumentExposureRule) Evaluate(ctx context.Context, in Input) (Rul
 	if !in.Proposal.Listing.Spec().SettlementCurrency().Equal(in.Account.Equity().Currency()) {
 		return RuleResult{}, fmt.Errorf("%w: max instrument exposure: listing settlement currency %s does not match account equity currency %s",
 			ErrInsufficientRuleInput, in.Proposal.Listing.Spec().SettlementCurrency(), in.Account.Equity().Currency())
+	}
+	if !r.max.Currency().Equal(in.Account.Equity().Currency()) {
+		return RuleResult{}, fmt.Errorf("%w: max instrument exposure: configured limit currency %s does not match account equity currency %s",
+			ErrInsufficientRuleInput, r.max.Currency(), in.Account.Equity().Currency())
 	}
 
 	valuePerUnit, err := in.ReferencePrice.MulRate(in.Proposal.Listing.Spec().Multiplier())
