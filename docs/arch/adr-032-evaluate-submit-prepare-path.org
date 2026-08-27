@@ -1,0 +1,113 @@
+#+TITLE: Evaluate as the Canonical Prepare-Through-Request Path; Submit as Its Mutating Continuation ADR-032
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Discovered as an undocumented gap during the M4 completion
+review (issue #189, M4-14): issue #187's own design-notes discussion
+and review settled this decision before implementation, but it was
+never captured as a standalone ADR, only as PR #204's own commit
+history and doc comments.
+
+* Context
+
+Issue #187 (M4-12, a thin CLI for execution/risk inspection) needed a
+read-only command that runs sizing, planning, and risk admission and
+shows the result, without ever submitting to the broker — its own
+acceptance criteria require that "read-only planning/evaluation
+commands cause no broker writes unless explicitly invoking a submit
+use case."
+
+At that point =pipeline.Pipeline= (#185) and =service/execution.Service=
+(#186) each exposed exactly one operation, =Submit=, which always calls
+=broker.Account.Submit= once risk approves. There was no way to run
+sizing/planning/risk and stop there. Two implementation shapes were
+considered during #187's design review:
+
+1. Add a second, independent read-only method that reimplements
+   sizing/planning/risk itself, stopping before the broker call.
+2. Restructure so the existing read-only prefix of =Submit= becomes its
+   own method, and =Submit= calls it.
+
+Option 1 would have created a second implementation of the sizing ->
+planning -> risk sequence to keep in sync with =Submit='s own copy —
+exactly the "second orchestration implementation" risk ADR-031's own
+Alternatives Considered section already rejected once for why
+=pipeline= exists as a single shared package at all.
+
+A further question, raised in review, was where the read-only path
+should stop: after the risk =Decision=, or after also assigning an
+=order.OrderID= and building the approved =order.Request=. The CLI's own
+acceptance criteria required showing the "approved broker request" for
+diagnostics, which the =Decision= alone does not provide.
+
+* Decision
+
+=pipeline.Pipeline.Evaluate= is the canonical read-only path: sizing
+(for an unsized =order.IntentEnter=) -> execution planning -> risk
+admission ->, only on approval, =order.OrderID= assignment and
+=order.Request= construction. =Evaluate= never calls
+=broker.Account.Submit=, and never calls =broker.Broker.OpenAccount= for
+a write of any kind.
+
+=pipeline.Pipeline.Submit= is =Evaluate='s thin mutating continuation:
+it calls =Evaluate=, and — only when =Decision.Allowed= — submits the
+exact =order.Request= =Evaluate= already built via
+=deps.Broker.OpenAccount(...).Submit=. =Submit= never independently
+generates a second =OrderID= or builds a second =Request=.
+
+=pipeline.Result= carries a =Request= field (populated only on
+approval, alongside the existing =Proposal=/=Decision=/=Order=) so both
+=Evaluate= and =Submit= return the same result shape; =Order= remains
+the zero value whenever =Evaluate= is what actually ran.
+
+=service/execution.Service= mirrors this one level up: =Service.Evaluate=
+does the identical =OpenAccount= -> =Snapshot= read every use case
+needs (a read, not a broker write — see ADR-007/ADR-008's own account-
+handle-versus-snapshot distinction) and then calls
+=pipeline.Pipeline.Evaluate=, never =Submit=.
+
+Building the approved =order.Request= — including =OrderID= assignment
+— is classified as deterministic orchestration, not a broker
+mutation, and therefore belongs on the read-only path: it consults
+only =Deps.IDs= and the already-computed =Proposal=, never the broker
+itself.
+
+* Consequences
+
+- There is exactly one implementation of the sizing/planning/risk/
+  request-construction sequence in the entire M4 path; =Submit= cannot
+  drift out of sync with =Evaluate= because it does not duplicate any
+  of that logic.
+- A risk rejection is identical in shape whether discovered via
+  =Evaluate= or =Submit=: =Result.Request= stays zero, =Result.Order=
+  stays zero, and the caller receives =ErrRejected=.
+- =cmd/trader/execution='s =evaluate= command satisfies "causes no
+  broker writes" by construction (=Service.Evaluate= never reaches
+  =broker.Account.Submit= at all), not by CLI-level discipline that a
+  future command could accidentally bypass.
+- A caller wanting to show the exact request that would be submitted —
+  for logging, operator review, or a future confirmation prompt before
+  a live-money submission — can call =Evaluate= alone and inspect
+  =Result.Request= without any risk of a side effect.
+
+* Alternatives Considered
+
+- *A second, independently implemented read-only method.* Rejected:
+  would require keeping two copies of the sizing/planning/risk
+  sequence synchronized, the exact problem =pipeline= as a single
+  package (ADR-031) exists to avoid.
+- *Stop the read-only path at the risk =Decision=, without building
+  =order.Request=.* Rejected during #187's design review: the issue's
+  own acceptance criteria require showing the approved broker request
+  for diagnostics, and constructing it (=OrderID= assignment plus
+  =order.NewRequest=) is itself deterministic, broker-free
+  orchestration — stopping one step earlier would have been an
+  arbitrary line with no correctness benefit.
+- *Give =Evaluate= and =Submit= genuinely independent =Result= shapes*
+  (for example, no =Request= field on an "evaluate result" type).
+  Rejected: forces every caller wrapping both (=service/execution=, the
+  CLI) to maintain two response shapes for what is otherwise the same
+  data, and prevents the CLI from proving — as its own vertical-slice
+  test does — that =Submit= reuses the exact =Request= =Evaluate= would
+  have produced.

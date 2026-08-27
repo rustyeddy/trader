@@ -1,0 +1,89 @@
+#+TITLE: The pipeline Package as the M4 Orchestration Seam ADR-031
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Discovered as an undocumented gap during the M4 completion
+review (issue #189, M4-14): issue #185 (M4-10) built the =pipeline=
+package and #186-#188 depend on its existence, but no ADR records the
+decision that this composition had to live in a new top-level package
+rather than inside =execution=, =risk=, or =broker=.
+
+* Context
+
+By the time issue #185 needed to compose sizing, execution planning,
+risk admission, order-identity assignment, and broker submission into
+one callable path, the following boundaries were already =Accepted=:
+
+- ADR-006: execution and risk are separate pipeline stages.
+- =execution/boundary_test.go= and =risk/boundary_test.go= (issue #179,
+  #180): both packages mechanically forbid importing =broker= or each
+  other.
+
+Something has to call =risk.Sizer=, =execution.Planner=, =risk.Engine=,
+and =broker.Account.Submit= in sequence, assign the resulting
+=order.OrderID=, and build the =order.Request= — but that composition
+cannot live inside =execution= or =risk= without reversing one of the
+boundaries above, and =broker= itself is a port definition, not an
+orchestration layer.
+
+* Decision
+
+Composition of the sizing -> planning -> risk -> broker-submission
+path lives in a new top-level package, =pipeline=, sitting one tier
+above =execution=/=risk=/=broker= in the dependency graph — the first
+concrete package at the "application orchestration" tier the
+architecture document's own dependency-direction diagram already
+anticipated. =service/execution= (#186) is its first consumer; future
+=backtest=/=live=/=scanner= packages are expected to become consumers
+too, once they exist.
+
+=pipeline.Pipeline= depends on =execution=, =risk=, =broker=, =order=,
+=account=, =instrument=, =num=, and =id=; nothing in =execution= or
+=risk= imports =pipeline= back — enforced by construction, since either
+would be a compile-time import cycle Go itself rejects, the same
+reasoning already used elsewhere in this codebase (=service/doc.go=)
+for compiler-enforced boundaries that need no hand-written guard test.
+
+=pipeline= is not named =execution.Manager= or folded into an existing
+package, even though the original architecture document's own sketch
+used that name: =Manager= is flagged as "vague in domain packages" by
+the architecture document's own Appendix C naming guidance, and a
+dedicated package name makes the orchestration tier's own existence
+and boundary explicit rather than implicit inside a package that would
+otherwise still look purely domain-scoped.
+
+* Consequences
+
+- =pipeline= is the one place =broker.Account.Submit= is called from
+  the M4 path; every other package downstream of an =order.Intent=
+  reaches the broker only through it.
+- =service/execution= (#186) wraps =pipeline.Pipeline= rather than
+  reimplementing its own copy of the sizing/planning/risk sequence —
+  see ADR-032 for the =Evaluate=/=Submit= shape that wrapping exposes.
+- A future =backtest= or =live= package is expected to depend on
+  =pipeline= directly, or on a service wrapping it, rather than
+  re-deriving this composition itself.
+- No hand-written boundary test enforces "execution/risk never import
+  pipeline": the import cycle the compiler would produce is already a
+  stronger guarantee than a parseable-import-list test could add.
+
+* Alternatives Considered
+
+- *Fold this composition into =execution= as an =execution.Manager=
+  type, per the original architecture document's own sketch.*
+  Rejected: would require =execution= to import =broker= and =risk=,
+  reversing both of ADR-006's own accepted boundaries.
+- *Fold this composition into =broker= itself.* Rejected: =broker=
+  defines the port every adapter implements; it should not also own
+  policy about when sizing/planning/risk run relative to submission,
+  which is a domain-orchestration concern, not a broker-adapter
+  concern.
+- *Skip a dedicated package and let each caller (CLI, future backtest
+  runner) compose =execution.Planner=/=risk.Engine=/=broker.Account=
+  itself.* Rejected during the #185 design discussion: this was
+  explicitly identified as reintroducing the same "second orchestration
+  implementation" risk a single shared =pipeline= package avoids —
+  confirmed necessary when #187's own design review required exactly
+  one implementation of the sizing/planning/risk/request-construction
+  sequence (ADR-032).
