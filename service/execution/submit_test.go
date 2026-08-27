@@ -351,6 +351,9 @@ func TestSubmit_MismatchedBrokerWiringRejectedByPipeline(t *testing.T) {
 
 	afterA := hA.snapshot(t, ctx)
 	assert.Empty(t, afterA.Positions(), "broker A must never be mutated by a mismatched-wiring submission")
+
+	afterB := hB.snapshot(t, ctx)
+	assert.Empty(t, afterB.Positions(), "broker B must never be opened/submitted to either — the mismatch is rejected before any broker call")
 }
 
 func TestSubmit_PropagatesCancelledContext(t *testing.T) {

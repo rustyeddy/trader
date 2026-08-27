@@ -13,11 +13,14 @@ import (
 // approval — broker submission) via the injected *pipeline.Pipeline.
 //
 // A risk rejection (errors.Is(err, pipeline.ErrRejected)) returns a
-// SubmitResponse with Proposal and Decision populated and a nil Order
-// — the broker is never called for a rejected proposal, matching
-// Pipeline's own guarantee. Every other error (OpenAccount, Snapshot,
-// sizing, planning, or broker submission) propagates wrapped but
-// errors.Is-checkable against its own package's sentinel.
+// SubmitResponse with Proposal and Decision populated and Order left
+// at its zero value (order.Order is a struct, never a pointer) — the
+// broker is never called for a rejected proposal, matching Pipeline's
+// own guarantee. A sizing, planning, or broker-submission error
+// propagates from pipeline.Pipeline.Submit already wrapped but
+// errors.Is-checkable against its own package's sentinel; an
+// OpenAccount or Snapshot error is returned as-is, since this layer
+// does no wrapping of its own.
 func (s *Service) Submit(ctx context.Context, req SubmitRequest) (SubmitResponse, error) {
 	if err := req.Validate(); err != nil {
 		return SubmitResponse{}, err
