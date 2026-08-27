@@ -343,6 +343,56 @@ func TestMoneyDivQuantityRejectsZeroQuantity(t *testing.T) {
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
 
+func TestMoneyDivPrice(t *testing.T) {
+	tests := []struct {
+		name string
+		m    string
+		p    string
+		want string
+	}{
+		{name: "budget buys a round number of units", m: "1000", p: "10", want: "100"},
+		{name: "fractional units, exact", m: "150", p: "1.5", want: "100"},
+		{name: "sub-tick price distance", m: "1", p: "0.00001", want: "100000"},
+		{name: "zero budget", m: "0", p: "10", want: "0"},
+		// Inverse of Price.MulQuantity's own evidence case.
+		{name: "notional inverse", m: "7500000000", p: "750000", want: "10000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := usd(tt.m)
+			p := MustParsePrice(tt.p)
+
+			got, err := m.DivPrice(p)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+func TestMoneyDivPriceRoundsHalfToEven(t *testing.T) {
+	// 1 / 200,000,000 = 0.000000005 exactly, the midpoint between
+	// 0.00000000 and 0.00000001; the even neighbour is 0.00000000.
+	m := usd("1")
+	p := MustParsePrice("200000000")
+
+	got, err := m.DivPrice(p)
+	require.NoError(t, err)
+	assert.Equal(t, "0", got.String())
+}
+
+func TestMoneyDivPriceRejectsInvalidMoney(t *testing.T) {
+	var m Money
+	_, err := m.DivPrice(MustParsePrice("1"))
+	require.ErrorIs(t, err, ErrMissingCurrency)
+}
+
+func TestMoneyDivPriceRejectsZeroPrice(t *testing.T) {
+	m := usd("100")
+	_, err := m.DivPrice(Price{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
+
 func TestMoneyDivQuantityRejectsNegativeResult(t *testing.T) {
 	negative, err := usd("100").Neg()
 	require.NoError(t, err)

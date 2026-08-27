@@ -82,24 +82,58 @@ func mustEurUsdListingForProvider(t *testing.T, provider string) instrument.List
 
 func mustSnapshot(t *testing.T, accountID id.AccountID, listing instrument.Listing) account.Snapshot {
 	t.Helper()
-	usd := num.MustParseCurrency("USD")
+	return mustSnapshotWithEquity(t, accountID, listing.Provider(), "USD", "10000")
+}
+
+// mustSnapshotWithEquity builds a minimal, valid account.Snapshot with
+// an explicit broker, equity currency, and equity amount — for sizing
+// tests that need to control account size or currency independent of
+// mustEurUsdListing's own fixed USD/10000 defaults.
+func mustSnapshotWithEquity(t *testing.T, accountID id.AccountID, broker, currency, equity string) account.Snapshot {
+	t.Helper()
+	cur := num.MustParseCurrency(currency)
 	snap, err := account.NewSnapshot(account.SnapshotParams{
 		AccountID:       accountID,
-		Broker:          listing.Provider(),
-		Currency:        usd,
+		Broker:          broker,
+		Currency:        cur,
 		AsOf:            testStart,
-		CashBalances:    []num.Money{num.MustParseMoney("10000", usd)},
-		Equity:          num.MustParseMoney("10000", usd),
-		BuyingPower:     num.MustParseMoney("10000", usd),
-		MarginUsed:      num.MustParseMoney("0", usd),
-		MarginAvailable: num.MustParseMoney("10000", usd),
-		RealizedPnL:     num.MustParseMoney("0", usd),
-		UnrealizedPnL:   num.MustParseMoney("0", usd),
-		Fees:            num.MustParseMoney("0", usd),
-		Financing:       num.MustParseMoney("0", usd),
+		CashBalances:    []num.Money{num.MustParseMoney(equity, cur)},
+		Equity:          num.MustParseMoney(equity, cur),
+		BuyingPower:     num.MustParseMoney(equity, cur),
+		MarginUsed:      num.MustParseMoney("0", cur),
+		MarginAvailable: num.MustParseMoney(equity, cur),
+		RealizedPnL:     num.MustParseMoney("0", cur),
+		UnrealizedPnL:   num.MustParseMoney("0", cur),
+		Fees:            num.MustParseMoney("0", cur),
+		Financing:       num.MustParseMoney("0", cur),
 	})
 	require.NoError(t, err)
 	return snap
+}
+
+// mustListingWithSpec builds an EUR/USD instrument.Listing with a
+// fully parameterized Spec, for sizing tests exercising the contract
+// multiplier, quantity increment, and settlement currency.
+func mustListingWithSpec(t *testing.T, provider, tickSize, quantityIncrement, multiplier, settlementCurrency string) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice(tickSize),
+		num.MustParseQuantity(quantityIncrement),
+		num.MustParseRate(multiplier),
+		num.MustParseCurrency(settlementCurrency),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   provider,
+		Symbol:     "EUR_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
 }
 
 func mustProposal(t *testing.T, accountID id.AccountID, listing instrument.Listing) order.Proposal {

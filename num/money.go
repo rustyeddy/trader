@@ -277,3 +277,36 @@ func (m Money) DivQuantity(q Quantity) (Price, error) {
 	}
 	return Price{raw: raw}, nil
 }
+
+// DivPrice returns m/p as a Quantity, rounded to nearest with ties to
+// even (ADR-030) — the inverse of Price.MulQuantity's own dimension,
+// arranged the other way around from DivQuantity: given a budget (m,
+// for example a risk budget) and a price-per-unit distance (p), how
+// many units does that budget correspond to.
+//
+// DivPrice is pure numeric dimensional arithmetic only: neither Money
+// nor Price carries enough information for DivPrice to confirm p is
+// actually denominated in m's own currency — Price carries no currency
+// at all. Confirming that is the caller's responsibility (see
+// risk.FixedFractionSizer, which owns exactly this check before
+// calling DivPrice).
+//
+// DivPrice reports ErrMissingCurrency if m is invalid, ErrDivideByZero
+// when p is zero, and ErrNegative if the true quotient would be
+// negative — Quantity has no signed counterpart, the same rule
+// DivQuantity already applies. The underlying division uses the same
+// widened 128-bit intermediate (num/internal/fixed.DivScaled) that
+// already backs DivQuantity, DivRate, and Div.
+func (m Money) DivPrice(p Price) (Quantity, error) {
+	if !m.IsValid() {
+		return Quantity{}, ErrMissingCurrency
+	}
+	raw, err := fixed.DivScaled(m.amount, p.raw, fixed.RoundHalfEven)
+	if err != nil {
+		return Quantity{}, wrapFixedErr(err)
+	}
+	if raw < 0 {
+		return Quantity{}, ErrNegative
+	}
+	return Quantity{raw: raw}, nil
+}

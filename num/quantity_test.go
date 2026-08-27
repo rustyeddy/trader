@@ -165,3 +165,62 @@ func TestQuantityDivisibleByZeroStep(t *testing.T) {
 	_, err := q.DivisibleBy(Quantity{})
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
+
+func TestQuantityRoundDown(t *testing.T) {
+	tests := []struct {
+		name string
+		q    string
+		step string
+		want string
+	}{
+		{name: "already an exact multiple", q: "100", step: "5", want: "100"},
+		{name: "rounds down to the nearest multiple", q: "101", step: "5", want: "100"},
+		{name: "just below the next multiple", q: "104.99999999", step: "5", want: "100"},
+		{name: "smaller than one whole step rounds to zero", q: "0.5", step: "1", want: "0"},
+		{name: "step of one is a no-op floor to whole units", q: "123.456", step: "1", want: "123"},
+		{name: "q already zero", q: "0", step: "1", want: "0"},
+		{name: "fractional step", q: "1.00000009", step: "0.00000010", want: "1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := MustParseQuantity(tt.q)
+			step := MustParseQuantity(tt.step)
+
+			got, err := q.RoundDown(step)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
+// TestQuantityRoundDownNeverExceedsInput is the property ADR-030 and
+// issue #181's own acceptance criteria actually depend on: the result
+// is never greater than q, for a range of q/step combinations that are
+// not exact multiples of one another.
+func TestQuantityRoundDownNeverExceedsInput(t *testing.T) {
+	cases := []struct{ q, step string }{
+		{"1000", "3"},
+		{"0.1", "0.03"},
+		{"999999999", "7"},
+		{"1", "0.99999999"},
+	}
+	for _, c := range cases {
+		q := MustParseQuantity(c.q)
+		step := MustParseQuantity(c.step)
+
+		got, err := q.RoundDown(step)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, got.Cmp(q), 0, "RoundDown(%s, %s) = %s must not exceed %s", c.q, c.step, got, q)
+
+		divisible, err := got.DivisibleBy(step)
+		require.NoError(t, err)
+		assert.True(t, divisible, "RoundDown(%s, %s) = %s must be an exact multiple of %s", c.q, c.step, got, step)
+	}
+}
+
+func TestQuantityRoundDownRejectsZeroStep(t *testing.T) {
+	q := MustParseQuantity("1")
+	_, err := q.RoundDown(Quantity{})
+	require.ErrorIs(t, err, ErrDivideByZero)
+}
