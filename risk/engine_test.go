@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/rustyeddy/trader/num"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -202,6 +203,48 @@ func TestNewEngineCopiesRulesDefensively(t *testing.T) {
 	decision, err := e.Evaluate(context.Background(), testInput(t))
 	require.NoError(t, err)
 	assert.True(t, decision.Allowed, "Engine must evaluate the rule it was constructed with, not a later mutation of the caller's slice")
+}
+
+// TestEnginePreservesAdverseDistanceThroughValidation is a regression
+// found while implementing #182 (per-trade loss): Engine.Evaluate
+// rebuilds a validated Input from checkInput's own revalidated
+// Proposal, and an earlier version of that rebuild
+// (Input{Proposal: validProposal, Account: in.Account}) silently
+// dropped every other Input field, including AdverseDistance, before
+// any Rule ever saw it.
+func TestEnginePreservesAdverseDistanceThroughValidation(t *testing.T) {
+	seen := make(chan *num.Price, 1)
+
+	e, err := NewEngine(captureAdverseDistanceRule{seen: seen})
+	require.NoError(t, err)
+
+	dist := num.MustParsePrice("0.005")
+	in := testInput(t)
+	in.AdverseDistance = &dist
+
+	_, err = e.Evaluate(context.Background(), in)
+	require.NoError(t, err)
+
+	select {
+	case got := <-seen:
+		require.NotNil(t, got, "AdverseDistance must reach the Rule, not be silently dropped by Engine's own input revalidation")
+		assert.True(t, got.Equal(dist))
+	default:
+		t.Fatal("rule was never invoked")
+	}
+}
+
+// captureAdverseDistanceRule records the Input.AdverseDistance it was
+// actually called with, for TestEnginePreservesAdverseDistanceThroughValidation.
+type captureAdverseDistanceRule struct {
+	seen chan *num.Price
+}
+
+func (captureAdverseDistanceRule) Name() string { return "capture" }
+
+func (r captureAdverseDistanceRule) Evaluate(ctx context.Context, in Input) (RuleResult, error) {
+	r.seen <- in.AdverseDistance
+	return RuleResult{}, nil
 }
 
 // TestNewEngineRejectsNilRule and TestNewEngineRejectsEmptyRuleName
