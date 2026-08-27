@@ -34,8 +34,9 @@ path lives in a new top-level package, =pipeline=, sitting one tier
 above =execution=/=risk=/=broker= in the dependency graph — the first
 concrete package at the "application orchestration" tier the
 architecture document's own dependency-direction diagram already
-anticipated, ahead of =backtest=/=live=/=scanner= (M6+), which will
-become its own consumers alongside =service/execution=.
+anticipated. =service/execution= (#186) is its first consumer; future
+=backtest=/=live=/=scanner= packages are expected to become consumers
+too, once they exist.
 
 =pipeline.Pipeline= depends on =execution=, =risk=, =broker=, =order=,
 =account=, =instrument=, =num=, and =id=; nothing in =execution= or
@@ -60,7 +61,7 @@ otherwise still look purely domain-scoped.
 - =service/execution= (#186) wraps =pipeline.Pipeline= rather than
   reimplementing its own copy of the sizing/planning/risk sequence —
   see ADR-032 for the =Evaluate=/=Submit= shape that wrapping exposes.
-- A future =backtest= or =live= package (M6+) is expected to depend on
+- A future =backtest= or =live= package is expected to depend on
   =pipeline= directly, or on a service wrapping it, rather than
   re-deriving this composition itself.
 - No hand-written boundary test enforces "execution/risk never import

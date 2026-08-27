@@ -5,9 +5,18 @@
 
 Accepted. Discovered as an undocumented gap during the M4 completion
 review (issue #189, M4-14): issue #184's own PR #199 review established
-this principle during implementation, and it is now repeated across
-multiple risk rules, but it was never captured as a standalone ADR —
-only as inline doc comments on each rule that applies it.
+this principle during implementation, but it was never captured as a
+standalone ADR — only as inline doc comments on =MaxPositionLeverageRule=,
+the one rule that currently applies it.
+
+PR #206's own review corrected an inaccuracy in an earlier draft of
+this ADR, which claimed the exemption was already applied by
+=MaxPositionQuantityRule= and =MaxInstrumentExposureRule= too. It is
+not: as of this writing, only =MaxPositionLeverageRule= implements it.
+This ADR therefore records the principle as a decision this codebase
+has made and put into force for that one rule, and names propagating
+it to the other two position/exposure-limit rules as explicit,
+tracked follow-up work (issue #207), not as already-shipped behavior.
 
 * Context
 
@@ -39,6 +48,15 @@ changes the position's side (a reversal whose resulting magnitude is
 smaller than the current one is still de-risking), and regardless of
 whether =order.Proposal.ReduceOnly= is set.
 
+This is a general principle every current and future position/
+exposure-limit rule is expected to apply, not one specific to leverage.
+=MaxPositionLeverageRule= is where it is actually implemented today;
+=MaxPositionQuantityRule= and =MaxInstrumentExposureRule= have the
+identical latent defect PR #199 found and fixed for leverage — each
+compares only the resulting magnitude against its own configured cap,
+with no exemption for a de-risking proposal — and are tracked to
+receive the same fix in issue #207.
+
 The comparison uses quantity magnitude alone, computed by the shared
 =resultingPosition=/=findPosition= helpers (=risk/exposure.go=,
 established by issue #183) — it never mixes the current position's own
@@ -53,14 +71,16 @@ de-risking and is still evaluated against the cap normally.
 
 * Consequences
 
-- =MaxPositionQuantityRule=, =MaxInstrumentExposureRule=, and
-  =MaxPositionLeverageRule= each apply this exemption; a future
-  position/exposure-limit rule is expected to apply it too, using the
-  same shared helpers rather than reimplementing the comparison.
-- An account already over a configured cap (whether from a tightened
-  policy or a market move) always has a path back into compliance:
-  any risk-reducing proposal is admitted regardless of how far over
-  the cap the account currently is.
+- =MaxPositionLeverageRule= applies this exemption today. Until issue
+  #207 lands, =MaxPositionQuantityRule= and =MaxInstrumentExposureRule=
+  do not: an account already over either of those two caps can still
+  be trapped by the same defect PR #199 fixed for leverage. This is a
+  known, tracked gap, not an accepted permanent difference between the
+  rules.
+- Once #207 lands, an account already over any of the three configured
+  caps (whether from a tightened policy or a market move) always has a
+  path back into compliance: any risk-reducing proposal is admitted
+  regardless of how far over the cap the account currently is.
 - =MaxAggregateExposureRule= and true account-wide leverage/available-
   margin admission (both explicitly deferred per #183/#184's own PR
   descriptions, pending a deterministic current mark for every open
@@ -87,5 +107,5 @@ de-risking and is still evaluated against the cap normally.
   Rejected: blending two different valuation bases into one comparison
   was already identified and rejected as meaningless by #183's own
   review; comparing quantity magnitude alone avoids the problem
-  entirely and is sufficient for every rule that currently needs this
-  exemption.
+  entirely and is sufficient for every rule this exemption applies to,
+  present or planned (issue #207).
