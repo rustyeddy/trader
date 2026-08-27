@@ -24,6 +24,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/rustyeddy/trader/cmd/trader/internal/rootcmd"
 )
 
 func main() {
@@ -38,7 +40,7 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cmd, cleanup := newRootCmd()
+	cmd, cleanup := rootcmd.New()
 	defer func() { _ = cleanup() }()
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
