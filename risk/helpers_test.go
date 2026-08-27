@@ -47,6 +47,32 @@ func mustAccountID(t *testing.T) id.AccountID {
 	return aid
 }
 
+// mustGbpUsdListing builds a GBP/USD instrument.Listing — a distinct
+// instrument from mustEurUsdListing, for tests exercising multiple
+// positions/instruments (unlike mustListingWithSpec, which always
+// builds a EUR/USD instrument regardless of its own parameters).
+func mustGbpUsdListing(t *testing.T) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   "sim",
+		Symbol:     "GBP_USD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
 func mustOtherAccountID(t *testing.T) id.AccountID {
 	t.Helper()
 	gen := id.NewGenerator(testClock, id.NewDeterministic(5, 6))

@@ -36,6 +36,25 @@ type Input struct {
 	// finds it nil or non-positive, returns a classifiable evaluation
 	// error rather than treating a missing assumption as "no risk."
 	AdverseDistance *num.Price
+
+	// ReferencePrice is the valuation price a value-based rule uses to
+	// price a resulting position's notional exposure (for example
+	// MaxInstrumentExposureRule, #183) — an absolute price level, not a
+	// distance like AdverseDistance. order.Proposal carries no price
+	// for a Market order (execution.Planner's own v0 output, #179), so
+	// a rule that needs to value the proposal's own quantity has
+	// nowhere else to find one. When present, a value-based rule uses
+	// ReferencePrice to value a resulting position's *entire* quantity
+	// — never a mix of ReferencePrice for the proposed delta and a
+	// Position's own historical AvgPrice for the already-held portion,
+	// which would blend two different valuation bases into one
+	// meaningless figure (review feedback on #183).
+	//
+	// ReferencePrice is optional at this Input level for the same
+	// reason AdverseDistance is: most rules don't need one, and a rule
+	// that does and finds it nil or non-positive returns a
+	// classifiable ErrInsufficientRuleInput.
+	ReferencePrice *num.Price
 }
 
 // Violation reports one Rule's finding that a Proposal is not

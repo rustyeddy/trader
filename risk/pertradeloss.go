@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
-	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
@@ -137,16 +136,5 @@ func newRiskQuantity(acc account.Snapshot, proposal order.Proposal) (num.Quantit
 	return proposal.Quantity.Sub(pos.Quantity)
 }
 
-// findPosition returns acc's open position in listing's instrument, if
-// any. Position matching is by instrument identity, not exact Listing
-// equality — the same convention execution.findPosition uses (#179) —
-// but reimplemented locally here rather than imported: risk must never
-// import execution (ADR-006, package-boundaries.org).
-func findPosition(acc account.Snapshot, listing instrument.Listing) (order.Position, bool) {
-	for _, p := range acc.Positions() {
-		if p.Listing.InstrumentID().Equal(listing.InstrumentID()) {
-			return p, true
-		}
-	}
-	return order.Position{}, false
-}
+// findPosition is defined in exposure.go and shared by every rule in
+// this package.
