@@ -57,11 +57,34 @@ func (r *maxPositionLeverageRule) Evaluate(ctx context.Context, in Input) (RuleR
 		return RuleResult{}, err
 	}
 
+	pos, hasPosition := findPosition(in.Account, in.Proposal.Listing)
+	currentQty := num.Quantity{}
+	if hasPosition {
+		currentQty = pos.Quantity
+	}
+
 	resultSide, resultQty, err := resultingPosition(in.Account, in.Proposal)
 	if err != nil {
 		return RuleResult{}, fmt.Errorf("max position leverage: %w", err)
 	}
 	if resultSide == order.Flat || resultQty.IsZero() {
+		return RuleResult{}, nil
+	}
+
+	// De-risking is exempt from the cap: if the resulting position's
+	// magnitude does not exceed the current position's own magnitude,
+	// this proposal reduces (or leaves unchanged) absolute exposure —
+	// and therefore required margin, since both are valued at the same
+	// price/multiplier within one Evaluate call — regardless of
+	// whether it also changed side. Comparing magnitude directly
+	// (never touching the current position's own AvgPrice, per #183's
+	// established valuation-basis rule) avoids trapping an account
+	// that is already over this cap by rejecting the very moves that
+	// would bring it back into compliance (review feedback on #199).
+	// An add, a fresh position from Flat, or a reversal whose resulting
+	// magnitude exceeds the current position's is still evaluated
+	// against the cap normally below.
+	if resultQty.Cmp(currentQty) <= 0 {
 		return RuleResult{}, nil
 	}
 

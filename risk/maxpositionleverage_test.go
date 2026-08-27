@@ -99,25 +99,73 @@ func TestMaxPositionLeverageRuleAppliesContractMultiplier(t *testing.T) {
 	require.Len(t, result.Violations, 1)
 }
 
-// TestMaxPositionLeverageRuleReduceNeverBlocked proves a ReduceOnly
-// proposal that shrinks a much larger existing position passes: the
-// resulting position's own required margin is what's evaluated, not
-// the existing position's (which may have been entered under a
-// different or since-changed configuration).
-func TestMaxPositionLeverageRuleReduceNeverBlocked(t *testing.T) {
+// TestMaxPositionLeverageRuleReduceOnlyDeRiskingAlwaysPasses is the
+// correction from review on #199: an account already over the
+// configured cap (perhaps entered under a different or since-changed
+// configuration) must not be trapped there by having a genuinely
+// risk-reducing move rejected merely because the *resulting* position
+// is still over the cap. Existing 600000 requires 12000 margin (over
+// the 10000 equity cap already); reducing by 50000 to 550000 still
+// requires 11000 -- still over the cap in isolation -- but the
+// reduction itself must be allowed, since it strictly decreases
+// exposure.
+func TestMaxPositionLeverageRuleReduceOnlyDeRiskingAlwaysPasses(t *testing.T) {
 	r, err := NewMaxPositionLeverageRule(num.MustParseRate("50"))
 	require.NoError(t, err)
 
 	listing := leverageListing(t)
 	accountID := mustAccountID(t)
-	pos := mustPosition(t, accountID, listing, order.Long, "1000000")
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
 	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
-	proposal := mustProposalWith(t, accountID, listing, order.Sell, "500000", true)
-	ref := num.MustParsePrice("1") // resulting qty 500000; required margin 10000 == equity
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "50000", true)
+	ref := num.MustParsePrice("1") // resulting qty 550000; required margin 11000, still > equity
+
+	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.NoError(t, err)
+	assert.Empty(t, result.Violations, "a de-risking move must never be blocked, even if the resulting position remains over the cap")
+}
+
+// TestMaxPositionLeverageRuleNonReduceOnlyPartialDeRiskingAlwaysPasses
+// is the same invariant as the ReduceOnly case above, for a
+// non-ReduceOnly proposal that is still a strict partial reduction
+// (opposite side, smaller quantity than the current position) --
+// resultingPosition treats it identically either way.
+func TestMaxPositionLeverageRuleNonReduceOnlyPartialDeRiskingAlwaysPasses(t *testing.T) {
+	r, err := NewMaxPositionLeverageRule(num.MustParseRate("50"))
+	require.NoError(t, err)
+
+	listing := leverageListing(t)
+	accountID := mustAccountID(t)
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "50000", false)
+	ref := num.MustParsePrice("1")
 
 	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
 	require.NoError(t, err)
 	assert.Empty(t, result.Violations)
+}
+
+// TestMaxPositionLeverageRuleReversalPastCurrentMagnitudeIsEvaluatedNormally
+// covers the boundary of the de-risking exemption itself: starting
+// from an already over-limit position, a reversal whose *resulting*
+// magnitude exceeds the current position's is not de-risking -- it is
+// evaluated against the cap exactly as any other increase would be,
+// and correctly rejected here.
+func TestMaxPositionLeverageRuleReversalPastCurrentMagnitudeIsEvaluatedNormally(t *testing.T) {
+	r, err := NewMaxPositionLeverageRule(num.MustParseRate("50"))
+	require.NoError(t, err)
+
+	listing := leverageListing(t)
+	accountID := mustAccountID(t)
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "1300000", false)
+	ref := num.MustParsePrice("1") // excess 700000 > current 600000; required margin 14000 > equity
+
+	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.NoError(t, err)
+	require.Len(t, result.Violations, 1, "resulting magnitude exceeds the current position's, so this is not de-risking")
 }
 
 // TestMaxPositionLeverageRuleFullCloseRequiresNoReferencePrice proves
