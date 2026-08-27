@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -482,4 +483,19 @@ func TestNew_RejectsNilDeps(t *testing.T) {
 
 	_, err = New(h.broker, nil, nil)
 	require.ErrorIs(t, err, ErrNilPipeline)
+}
+
+// TestErrRejected_IsPipelineErrRejected proves ErrRejected really is
+// pipeline.ErrRejected, not a lookalike sentinel — a caller using
+// errors.Is(err, execution.ErrRejected) against an error this package
+// actually returns (via pipeline.Pipeline.Evaluate/Submit) must match.
+func TestErrRejected_IsPipelineErrRejected(t *testing.T) {
+	require.Same(t, pipeline.ErrRejected, ErrRejected)
+}
+
+func TestIsRejected(t *testing.T) {
+	require.True(t, IsRejected(pipeline.ErrRejected))
+	require.True(t, IsRejected(fmt.Errorf("wrapped: %w", pipeline.ErrRejected)))
+	require.False(t, IsRejected(errors.New("some other error")))
+	require.False(t, IsRejected(nil))
 }

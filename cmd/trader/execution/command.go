@@ -19,17 +19,19 @@ type accountFlags struct {
 // Every subcommand builds its own fresh, in-memory simulated Broker
 // plus execution.Planner/risk.Engine/risk.Sizer/pipeline.Pipeline
 // stack from --starting-cash/--currency/--account-id (see service.go's
-// buildStack) — the same ephemeral, no-persistence-between-invocations
+// buildService) — the same ephemeral, no-persistence-between-invocations
 // scope cmd/trader/broker's own New already documents, for the
 // identical reason: adapters/broker/sim has no persistence layer.
 //
-// evaluate never mutates the broker: it runs sizing, planning, and
-// risk admission and shows the resulting Proposal/Decision/approved
-// Request, but never calls OpenAccount for a write or Submit (#187's
-// own "read-only planning/evaluation commands cause no broker writes"
-// acceptance criterion, satisfied by service/execution.Service.
-// Evaluate never reaching the broker at all — not by CLI-level
-// discipline). submit runs the identical preparation and then
+// evaluate never mutates or submits to the broker: it runs sizing,
+// planning, and risk admission and shows the resulting Proposal/
+// Decision/approved Request, but never calls broker.Account.Submit
+// (#187's own "read-only planning/evaluation commands cause no broker
+// writes" acceptance criterion, satisfied by service/execution.Service.
+// Evaluate never reaching that call — not by CLI-level discipline).
+// Evaluate does still call OpenAccount and Snapshot, the same read
+// every use case needs for a fresh, authoritative account state — a
+// read, not a write. submit runs the identical preparation and then
 // actually submits the prepared request.
 func New() *cobra.Command {
 	var flags accountFlags

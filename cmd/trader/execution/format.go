@@ -1,31 +1,34 @@
 package execution
 
 import (
-	"errors"
 	"fmt"
 	"io"
 
-	"github.com/rustyeddy/trader/pipeline"
 	svcexecution "github.com/rustyeddy/trader/service/execution"
 )
 
-// Supported --format values, duplicated from cmd/trader/data/broker's
-// own format.go rather than shared: each CLI command family package
-// is deliberately independent (issue #201).
+// Supported --format values, duplicated from cmd/trader/data's and
+// cmd/trader/broker's own format.go rather than shared: each CLI
+// command family package is deliberately independent (issue #201).
 const (
 	formatTable = "table"
 	formatJSON  = "json"
 )
 
-// isRejected reports whether err is a risk rejection
-// (errors.Is(err, pipeline.ErrRejected)) rather than an operational
-// failure. evaluate/submit both still want to render the structured
-// SubmitResponse a rejection carries (Proposal/Decision) instead of
-// treating it as a command failure — a rejection is a normal,
-// expected admission outcome (service/execution's own doc comment),
-// not something Cobra should report as an error exit.
+// isRejected reports whether err is a risk rejection rather than an
+// operational failure, via svcexecution.IsRejected — never
+// errors.Is(err, pipeline.ErrRejected) directly: this command-family
+// package must be able to implement the full evaluate/submit use case
+// depending only on service/execution (plus presentation/domain value
+// types it receives), never on the lower pipeline orchestration
+// package service/execution itself wraps (#204 review). evaluate/
+// submit both still want to render the structured SubmitResponse a
+// rejection carries (Proposal/Decision) instead of treating it as a
+// command failure — a rejection is a normal, expected admission
+// outcome (service/execution's own doc comment), not something Cobra
+// should report as an error exit.
 func isRejected(err error) bool {
-	return errors.Is(err, pipeline.ErrRejected)
+	return svcexecution.IsRejected(err)
 }
 
 // Formatter renders one execution CLI response to w in some

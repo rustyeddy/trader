@@ -6,8 +6,10 @@
 // issue #185/M4-10) and exposes the complete sizing -> planning ->
 // risk -> broker-submission use case as two transport-neutral
 // operations: Evaluate (read-only: sizing through the approved
-// order.Request, never touching the broker) and Submit (Evaluate plus
-// broker submission, issue #187's design discussion). A caller (the
+// order.Request, never mutating or submitting to the broker — it does
+// still read a fresh account.Snapshot, see "Snapshot freshness, not
+// atomicity" below) and Submit (Evaluate plus broker submission, issue
+// #187's design discussion). A caller (the
 // CLI today, a future REST/WebSocket/SSE adapter) constructs a Service
 // over whichever broker.Broker and *pipeline.Pipeline the composition
 // root chose; Service itself never imports or names a specific broker

@@ -56,8 +56,9 @@ func toResponse(result pipeline.Result) SubmitResponse {
 // the read-only canonical M4 path (sizing, execution planning, risk
 // admission, and — only on approval — building the approved
 // order.Request) via the injected *pipeline.Pipeline.Evaluate. The
-// broker is never mutated: Evaluate makes no OpenAccount/Submit call
-// of its own beyond the read-only Snapshot every use case needs.
+// broker is never mutated or submitted to: Evaluate's own OpenAccount
+// call is the read-only Snapshot fetch every use case needs (see
+// snapshot), and it never calls broker.Account.Submit.
 //
 // A risk rejection (errors.Is(err, pipeline.ErrRejected)) returns a
 // SubmitResponse with Proposal and Decision populated and Request left
