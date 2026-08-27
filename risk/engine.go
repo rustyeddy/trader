@@ -78,7 +78,12 @@ func (e *engine) Evaluate(ctx context.Context, in Input) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	validInput := Input{Proposal: validProposal, Account: in.Account}
+	// Preserve every field of in beyond Proposal (Account,
+	// AdverseDistance, and any future addition to Input) — only
+	// Proposal itself is replaced, with the fully revalidated value
+	// checkInput returned.
+	validInput := in
+	validInput.Proposal = validProposal
 
 	decision := Decision{
 		Allowed:     true,

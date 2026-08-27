@@ -2,6 +2,7 @@ package risk
 
 import (
 	"github.com/rustyeddy/trader/account"
+	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
 
@@ -18,6 +19,23 @@ type Input struct {
 	// Account is the authoritative account state Proposal would trade
 	// against.
 	Account account.Snapshot
+
+	// AdverseDistance is the adverse price-distance assumption this
+	// proposal is being sized/admitted against — the same value
+	// supplied to risk.Sizer at planning time (#181). It is an
+	// assumption, not proof that a real broker stop order exists or
+	// will ever be submitted: order.Proposal itself carries no
+	// StopPrice for a Market order (execution.Planner's own v0 output,
+	// #179), so a rule needing an adverse-price distance to compute
+	// planned loss (for example PerTradeLossRule, #182) has nowhere
+	// else to find one.
+	//
+	// AdverseDistance is optional at this Input level — Engine's own
+	// checkInput does not require it, since most rules (#183, #184)
+	// don't need one at all. A concrete rule that does need it, and
+	// finds it nil or non-positive, returns a classifiable evaluation
+	// error rather than treating a missing assumption as "no risk."
+	AdverseDistance *num.Price
 }
 
 // Violation reports one Rule's finding that a Proposal is not

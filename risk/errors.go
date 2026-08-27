@@ -29,4 +29,17 @@ var (
 	// one increment of this listing. This is a classifiable outcome,
 	// never a silent zero-quantity Proposal.
 	ErrSizeRoundsToZero = errors.New("risk: sizing rounds down to zero at this listing's quantity increment")
+
+	// ErrInsufficientRuleInput reports that a Rule could not evaluate
+	// Input because it required contextual data Input did not carry —
+	// a missing/non-positive AdverseDistance, or a Proposal.Listing
+	// settlement currency that does not match Account.Equity()'s
+	// currency (no implicit conversion, matching ErrInvalidSizeInput's
+	// own rule). This is distinct from ErrInvalidInput: Engine's own
+	// checkInput deliberately does not require every field every Rule
+	// might need (most rules need no AdverseDistance at all), so a
+	// rule-specific requirement not being met is this rule's own
+	// classification, not a structural Input defect Engine itself
+	// should have caught.
+	ErrInsufficientRuleInput = errors.New("risk: rule requires contextual input this Input does not carry")
 )

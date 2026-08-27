@@ -111,6 +111,46 @@ func mustSnapshotWithEquity(t *testing.T, accountID id.AccountID, broker, curren
 	return snap
 }
 
+// mustSnapshotWithPositions is mustSnapshotWithEquity plus open
+// positions, for per-trade-loss tests exercising existing exposure.
+func mustSnapshotWithPositions(t *testing.T, accountID id.AccountID, broker, currency, equity string, positions ...order.Position) account.Snapshot {
+	t.Helper()
+	cur := num.MustParseCurrency(currency)
+	snap, err := account.NewSnapshot(account.SnapshotParams{
+		AccountID:       accountID,
+		Broker:          broker,
+		Currency:        cur,
+		AsOf:            testStart,
+		CashBalances:    []num.Money{num.MustParseMoney(equity, cur)},
+		Equity:          num.MustParseMoney(equity, cur),
+		BuyingPower:     num.MustParseMoney(equity, cur),
+		MarginUsed:      num.MustParseMoney("0", cur),
+		MarginAvailable: num.MustParseMoney(equity, cur),
+		RealizedPnL:     num.MustParseMoney("0", cur),
+		UnrealizedPnL:   num.MustParseMoney("0", cur),
+		Fees:            num.MustParseMoney("0", cur),
+		Financing:       num.MustParseMoney("0", cur),
+		Positions:       positions,
+	})
+	require.NoError(t, err)
+	return snap
+}
+
+func mustPosition(t *testing.T, accountID id.AccountID, listing instrument.Listing, side order.PositionSide, quantity string) order.Position {
+	t.Helper()
+	q := num.MustParseQuantity(quantity)
+	avg := num.MustParsePrice("1.10000")
+	p, err := order.NewPosition(order.Position{
+		AccountID: accountID,
+		Listing:   listing,
+		Side:      side,
+		Quantity:  q,
+		AvgPrice:  &avg,
+	})
+	require.NoError(t, err)
+	return p
+}
+
 // mustListingWithSpec builds an EUR/USD instrument.Listing with a
 // fully parameterized Spec, for sizing tests exercising the contract
 // multiplier, quantity increment, and settlement currency.
@@ -145,6 +185,26 @@ func mustProposal(t *testing.T, accountID id.AccountID, listing instrument.Listi
 		Type:        order.Market,
 		TimeInForce: order.GTC,
 		Quantity:    num.MustParseQuantity("1000"),
+		Metadata:    id.Metadata{EventID: mustEventID(t)},
+	})
+	require.NoError(t, err)
+	return p
+}
+
+// mustProposalWith builds a Market/GTC Proposal with an explicit
+// Side/Quantity/ReduceOnly, for per-trade-loss tests exercising
+// existing-position scenarios mustProposal's fixed Buy/1000/false
+// defaults can't express.
+func mustProposalWith(t *testing.T, accountID id.AccountID, listing instrument.Listing, side order.Side, quantity string, reduceOnly bool) order.Proposal {
+	t.Helper()
+	p, err := order.NewProposal(order.Proposal{
+		Listing:     listing,
+		AccountID:   accountID,
+		Side:        side,
+		Type:        order.Market,
+		TimeInForce: order.GTC,
+		Quantity:    num.MustParseQuantity(quantity),
+		ReduceOnly:  reduceOnly,
 		Metadata:    id.Metadata{EventID: mustEventID(t)},
 	})
 	require.NoError(t, err)
