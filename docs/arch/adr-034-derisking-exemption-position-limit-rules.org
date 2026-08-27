@@ -1,0 +1,91 @@
+#+TITLE: De-Risking Exemption in Position/Exposure-Limit Risk Rules ADR-034
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Discovered as an undocumented gap during the M4 completion
+review (issue #189, M4-14): issue #184's own PR #199 review established
+this principle during implementation, and it is now repeated across
+multiple risk rules, but it was never captured as a standalone ADR —
+only as inline doc comments on each rule that applies it.
+
+* Context
+
+Several M4 position/exposure-limit risk rules (=MaxPositionQuantityRule=,
+=MaxInstrumentExposureRule=, =MaxPositionLeverageRule= — issues #183,
+#184) each compute the position a proposal would *result in* and
+compare its magnitude against a configured cap. Issue #184's own PR
+#199 review found a real bug in the original =MaxPositionLeverageRule=
+implementation: it compared only the *resulting* position's magnitude
+against the cap, with no comparison to the *current* position.
+
+This meant an account that was already over its configured leverage
+limit — for example because the cap was tightened after the position
+was opened, or because a prior fill happened to breach it — could have
+a legitimate, risk-*reducing* proposal rejected merely because the
+smaller resulting position was still over the limit. The rule would
+have permanently trapped such an account: every proposal that would
+have brought it back into compliance was itself rejected by the very
+rule it would have satisfied.
+
+* Decision
+
+A position/exposure-limit risk rule that compares a resulting
+exposure magnitude against a configured cap must exempt a proposal
+from that cap when the proposal is *de-risking* — that is, when the
+resulting position's magnitude does not exceed the current position's
+own magnitude. De-risking is exempt regardless of whether it also
+changes the position's side (a reversal whose resulting magnitude is
+smaller than the current one is still de-risking), and regardless of
+whether =order.Proposal.ReduceOnly= is set.
+
+The comparison uses quantity magnitude alone, computed by the shared
+=resultingPosition=/=findPosition= helpers (=risk/exposure.go=,
+established by issue #183) — it never mixes the current position's own
+historical =AvgPrice= with a live =ReferencePrice= when deciding
+whether a proposal is de-risking, matching the established "never
+blend two valuation bases" rule those same helpers already enforce for
+computing exposure values.
+
+An add, a fresh position opened from flat, or a reversal whose
+resulting magnitude *exceeds* the current position's magnitude is not
+de-risking and is still evaluated against the cap normally.
+
+* Consequences
+
+- =MaxPositionQuantityRule=, =MaxInstrumentExposureRule=, and
+  =MaxPositionLeverageRule= each apply this exemption; a future
+  position/exposure-limit rule is expected to apply it too, using the
+  same shared helpers rather than reimplementing the comparison.
+- An account already over a configured cap (whether from a tightened
+  policy or a market move) always has a path back into compliance:
+  any risk-reducing proposal is admitted regardless of how far over
+  the cap the account currently is.
+- =MaxAggregateExposureRule= and true account-wide leverage/available-
+  margin admission (both explicitly deferred per #183/#184's own PR
+  descriptions, pending a deterministic current mark for every open
+  listing simultaneously) will need to apply the identical exemption
+  when they are eventually built.
+
+* Alternatives Considered
+
+- *No exemption; every proposal is evaluated against the cap
+  uniformly.* Rejected: this is the exact bug PR #199's review found —
+  it permanently traps an already-over-limit account by rejecting the
+  moves that would fix it.
+- *Exempt only when =order.Proposal.ReduceOnly= is explicitly set,
+  rather than computing de-risking from the resulting magnitude.*
+  Rejected: =ReduceOnly= is the caller's own stated intent, not a
+  reliable signal of the proposal's actual effect — a non-=ReduceOnly=
+  proposal that happens to still reduce magnitude (a partial reversal
+  smaller than the current position) is just as legitimately
+  de-risking, and requiring the caller to also set =ReduceOnly= to
+  benefit from the exemption would be an arbitrary additional
+  requirement with no safety benefit.
+- *Exempt based on comparing valuation-basis money amounts (mixing
+  =AvgPrice= and =ReferencePrice=) rather than raw quantity magnitude.*
+  Rejected: blending two different valuation bases into one comparison
+  was already identified and rejected as meaningless by #183's own
+  review; comparing quantity magnitude alone avoids the problem
+  entirely and is sufficient for every rule that currently needs this
+  exemption.

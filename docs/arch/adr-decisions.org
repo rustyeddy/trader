@@ -138,6 +138,10 @@ the original decided, use full supersession instead.
 | 028 | Configurable simulator fill, fee, and slippage models (in adr-028-simulator-fill-fee-slippage-models.org) | Accepted |
 | 029 | Risk decisions are strict approve/reject, not proposal mutation (in adr-029-risk-decision-approve-reject.org) | Accepted |
 | 030 | Money-by-Price division and quantity-increment flooring for position sizing (in adr-030-money-price-division-quantity-rounddown.org) | Accepted |
+| 031 | The pipeline package as the M4 orchestration seam (in adr-031-pipeline-orchestration-package.org) | Accepted |
+| 032 | Evaluate as the canonical prepare-through-Request path; Submit as its mutating continuation (in adr-032-evaluate-submit-prepare-path.org) | Accepted |
+| 033 | Pipeline verifies broker/account identity before any broker mutation (in adr-033-pipeline-broker-account-identity-check.org) | Accepted |
+| 034 | De-risking exemption in position/exposure-limit risk rules (in adr-034-derisking-exemption-position-limit-rules.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -249,6 +253,20 @@ authoritative.  Issue #181 (M4-06) needs two missing =num= primitives
 sizing; this ADR drafts and adopts both ahead of that implementation,
 following the same pattern ADR-025 and ADR-027 already established for
 missing numeric primitives discovered by a consuming M3/M4 issue.
+
+Note: ADR-031 through ADR-034 are likewise maintained in their own
+files rather than inline in this registry —
+=docs/arch/adr-031-pipeline-orchestration-package.org=,
+=docs/arch/adr-032-evaluate-submit-prepare-path.org=,
+=docs/arch/adr-033-pipeline-broker-account-identity-check.org=, and
+=docs/arch/adr-034-derisking-exemption-position-limit-rules.org=.
+Each file's own Status section is authoritative.  All four record
+decisions actually made during M4 implementation (issues #184-#187 and
+their PR reviews) that were never captured as standalone ADRs at the
+time; the M4 completion review (issue #189, M4-14) found the gap and
+wrote them retroactively so the decisions have a durable record before
+the milestone closes, rather than existing only as PR discussion and
+inline code comments.
 
 * ADR-001: Modular monolith before service decomposition
 

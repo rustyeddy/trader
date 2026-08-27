@@ -1,0 +1,94 @@
+#+TITLE: Pipeline Verifies Broker/Account Identity Before Any Broker Mutation ADR-033
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Discovered as an undocumented gap during the M4 completion
+review (issue #189, M4-14): PR #200's own review established this
+invariant during #185's (M4-10) implementation, but it was never
+captured as a standalone ADR, only as inline code comments and a
+regression test.
+
+* Context
+
+=pipeline.Pipeline= (ADR-031) is injected with one =broker.Broker= and
+called with an =Input= carrying an =account.Snapshot=. Nothing at the
+type level prevents a composition root from wiring a =Pipeline= backed
+by one broker while supplying a snapshot that actually belongs to a
+*different* broker's account — for example, a snapshot fetched from
+broker A passed into a =Pipeline= whose own =Deps.Broker= is broker B.
+
+This is not a hypothetical: issue #186's own design discussion
+identified that =service/execution.Service= itself would hold *two*
+separately injected dependencies (a =broker.Broker= for its own
+=OpenAccount=/=Snapshot= reads, and a =*pipeline.Pipeline= for the
+sizing/planning/risk/submit sequence) — precisely the shape that makes
+a mismatched pairing a real configuration mistake, not merely a
+type-safety edge case. Review on PR #200 asked whether =Pipeline= should
+rely on the composition root always wiring both from the same
+underlying broker instance, or whether =Pipeline= itself should verify
+that invariant.
+
+* Decision
+
+=Pipeline.Evaluate= (and therefore =Submit=, which calls it) checks
+=strings.EqualFold(p.deps.Broker.Name(), in.Account.Broker())= before
+any sizing, planning, or broker interaction begins, and returns a
+wrapped =ErrInvalidInput= on mismatch.
+
+Correctness does not rely on the composition root always wiring a
+=Pipeline= and its callers' own broker references from the same
+underlying instance — that remains the normal, expected path, but
+=Pipeline= verifies it independently rather than trusting it. This
+means a service or CLI accidentally wired with a mismatched
+broker/=Pipeline= pairing (as issue #186's own review anticipated,
+given =service/execution.Service='s two-dependency shape) fails safely:
+the mismatch is rejected before =OpenAccount= or =Submit= is ever
+called, not merely assumed to never happen.
+
+The check is case-insensitive (matching =account.Snapshot.Broker()='s
+own established convention elsewhere in the codebase) and runs as part
+of =Evaluate='s existing structural-input validation, alongside the
+=order.NewIntent= revalidation already performed there — not as a
+separate, optional guard a caller could skip.
+
+* Consequences
+
+- =service/execution.Service= (and any future caller holding a
+  separately injected =broker.Broker= alongside a =*pipeline.Pipeline=)
+  gets this safety property for free, verified by
+  =TestSubmit_MismatchedBrokerWiringRejectedByPipeline= (#186) and
+  =pipeline='s own
+  =TestPipelineSubmit_BrokerAccountMismatchIsInvalidInputAndBrokerUntouched=
+  (#185).
+- The check is cheap (a =Name()= string comparison, no I/O) and runs on
+  every =Evaluate=/=Submit= call, not only in a debug or test-only
+  build.
+- A composition root still should wire a =Pipeline= and its callers'
+  own broker references from the same instance as the normal, correct
+  practice; this ADR does not relax that expectation, it only ensures
+  a violation of it fails safely instead of silently misrouting a
+  submission.
+
+* Alternatives Considered
+
+- *Rely entirely on composition-root discipline; document the
+  requirement but do not check it in code.* Rejected on PR #200's
+  review: given =service/execution.Service='s own two-dependency shape
+  makes this exact mistake constructible, an undetected mismatch would
+  silently submit a proposal sized/planned/risk-evaluated against one
+  account's state through a different broker entirely — a severe,
+  silent correctness failure with no compiler or type-system signal.
+- *Compare object identity (the same =broker.Broker= Go value) instead
+  of =Name()=.* Rejected: =broker.Broker= is an interface, and nothing
+  requires a composition root to reuse the literal same Go value for
+  both dependencies (for example, two separately constructed handles
+  to the same underlying OANDA account in a future adapter); comparing
+  the domain-level broker identity (=Name()=) rather than Go object
+  identity is both sufficient and does not overconstrain valid wiring.
+- *Perform the check only inside =Submit=, not =Evaluate=.* Rejected:
+  =Evaluate='s own =Result= is meant to represent "what would happen if
+  this were submitted," so a caller evaluating with mismatched wiring
+  should see the same rejection at evaluation time it would see at
+  submission time, not be misled by an apparently-successful =Evaluate=
+  that would then fail if it ever proceeded to =Submit=.
