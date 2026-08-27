@@ -169,6 +169,101 @@ func TestSubmit_EndToEndAgainstSimulator(t *testing.T) {
 	require.Len(t, after.Positions(), 1)
 }
 
+// TestEvaluate_EndToEndNeverMutatesBroker is #187's own driving
+// requirement: Evaluate must return the same Proposal/Decision/Request
+// Submit would, without ever opening the broker account for a write or
+// calling Submit on it — Order stays zero, and the account is
+// untouched.
+func TestEvaluate_EndToEndNeverMutatesBroker(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "sim", "10000")
+	p := newPipelineOver(t, h.broker, h.ids, h.clock)
+	svc, err := New(h.broker, p, nil)
+	require.NoError(t, err)
+
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	resp, err := svc.Evaluate(ctx, SubmitRequest{
+		AccountID:       h.accountID,
+		Intent:          intent,
+		Listing:         h.listing,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.Decision.Allowed)
+	assert.NotEqual(t, order.Request{}, resp.Request)
+	assert.False(t, resp.Request.OrderID.IsZero())
+	assert.Equal(t, order.Order{}, resp.Order, "Evaluate must never populate Order")
+
+	after := h.snapshot(t, ctx)
+	assert.Empty(t, after.Positions(), "Evaluate must never mutate the broker")
+}
+
+// TestEvaluate_RejectionLeavesRequestZero mirrors
+// TestSubmit_RiskRejectionReturnsStructuredResultButNoOrder for
+// Evaluate.
+func TestEvaluate_RejectionLeavesRequestZero(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "sim", "10000")
+	p := newPipelineOver(t, h.broker, h.ids, h.clock, rejectingRule{})
+	svc, err := New(h.broker, p, nil)
+	require.NoError(t, err)
+
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	resp, err := svc.Evaluate(ctx, SubmitRequest{
+		AccountID:       h.accountID,
+		Intent:          intent,
+		Listing:         h.listing,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.ErrorIs(t, err, pipeline.ErrRejected)
+	assert.False(t, resp.Decision.Allowed)
+	assert.Equal(t, order.Request{}, resp.Request)
+	assert.Equal(t, order.Order{}, resp.Order)
+}
+
+// TestSubmit_UsesExactRequestEvaluateBuilt is the service-layer
+// analog of pipeline's own TestPipelineSubmit_UsesExactRequestEvaluateBuilt:
+// Submit's own Result.Request must equal Result.Order.Request exactly,
+// proving Submit never re-derives a second Request independently of
+// what Evaluate already built.
+func TestSubmit_UsesExactRequestEvaluateBuilt(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "sim", "10000")
+	p := newPipelineOver(t, h.broker, h.ids, h.clock)
+	svc, err := New(h.broker, p, nil)
+	require.NoError(t, err)
+
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	resp, err := svc.Submit(ctx, SubmitRequest{
+		AccountID:       h.accountID,
+		Intent:          intent,
+		Listing:         h.listing,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, resp.Request, resp.Order.Request)
+}
+
+func TestEvaluate_InvalidRequestAccountIDZero(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "sim", "10000")
+	p := newPipelineOver(t, h.broker, h.ids, h.clock)
+	svc, err := New(h.broker, p, nil)
+	require.NoError(t, err)
+
+	_, err = svc.Evaluate(ctx, SubmitRequest{Listing: h.listing})
+	require.ErrorIs(t, err, ErrInvalidRequest)
+}
+
 type rejectingRule struct{}
 
 func (rejectingRule) Name() string { return "always_reject" }

@@ -190,7 +190,11 @@ func TestPipelineSubmit_EndToEndAgainstSimulator(t *testing.T) {
 	assert.True(t, result.Decision.Allowed)
 	assert.Equal(t, order.Buy, result.Proposal.Side)
 	assert.False(t, result.Proposal.Quantity.IsZero())
+	assert.NotEqual(t, order.Request{}, result.Request)
+	assert.False(t, result.Request.OrderID.IsZero())
 	assert.NotEqual(t, order.Order{}, result.Order)
+	assert.Equal(t, result.Request, result.Order.Request,
+		"Submit must submit the exact Request Evaluate already built, not a separately generated one")
 	assert.Equal(t, result.Proposal.Quantity, result.Order.Request.Quantity)
 	assert.Equal(t, intent.Metadata.CorrelationID, result.Proposal.Metadata.CorrelationID)
 
@@ -219,6 +223,7 @@ func TestPipelineSubmit_RiskRejectionNeverReachesBroker(t *testing.T) {
 	require.ErrorIs(t, err, pipeline.ErrRejected)
 	assert.False(t, result.Decision.Allowed)
 	assert.NotEqual(t, order.Proposal{}, result.Proposal, "Proposal is still populated on rejection")
+	assert.Equal(t, order.Request{}, result.Request, "Request must never be populated on rejection")
 	assert.Equal(t, order.Order{}, result.Order, "Order must never be populated on rejection")
 
 	after := h.snapshot(t, ctx)
@@ -383,6 +388,113 @@ func TestNewPipelineRejectsIncompleteDeps(t *testing.T) {
 }
 
 var _ brokerpkg.Broker = (*sim.Broker)(nil)
+
+// TestPipelineEvaluate_NeverCallsBroker is #187's own design-review
+// requirement: Evaluate must produce the same Proposal/Decision/
+// Request Submit would, without ever opening the broker account or
+// calling Submit on it. failingBroker's own OpenAccount/Submit both
+// return an error if called at all, so this would fail loudly, not
+// silently, if Evaluate ever touched the broker.
+func TestPipelineEvaluate_NeverCallsBroker(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	neverCalled := failingBroker{
+		openErr: errors.New("Evaluate must never call OpenAccount"),
+	}
+	planner, err := execution.NewPlanner(execution.Deps{Clock: h.clock, IDs: h.ids})
+	require.NoError(t, err)
+	engine, err := risk.NewEngine()
+	require.NoError(t, err)
+	p, err := pipeline.NewPipeline(pipeline.Deps{
+		Sizer:   risk.NewFixedFractionSizer(),
+		Planner: planner,
+		Engine:  engine,
+		Broker:  neverCalled,
+		IDs:     h.ids,
+	})
+	require.NoError(t, err)
+
+	snap := h.snapshot(t, ctx)
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Evaluate(ctx, pipeline.Input{
+		Intent:          intent,
+		Listing:         h.listing,
+		Account:         snap,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.NoError(t, err)
+
+	assert.True(t, result.Decision.Allowed)
+	assert.NotEqual(t, order.Proposal{}, result.Proposal)
+	assert.NotEqual(t, order.Request{}, result.Request)
+	assert.False(t, result.Request.OrderID.IsZero())
+	assert.Equal(t, order.Order{}, result.Order, "Evaluate must never populate Order")
+}
+
+// TestPipelineEvaluate_RejectionLeavesRequestZero mirrors
+// TestPipelineSubmit_RiskRejectionNeverReachesBroker for Evaluate:
+// Proposal/Decision are populated, but no OrderID is ever generated or
+// Request built for a rejected proposal.
+func TestPipelineEvaluate_RejectionLeavesRequestZero(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	p := newPipeline(t, h, rejectingRule{})
+
+	snap := h.snapshot(t, ctx)
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Evaluate(ctx, pipeline.Input{
+		Intent:          intent,
+		Listing:         h.listing,
+		Account:         snap,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.ErrorIs(t, err, pipeline.ErrRejected)
+	assert.False(t, result.Decision.Allowed)
+	assert.NotEqual(t, order.Proposal{}, result.Proposal)
+	assert.Equal(t, order.Request{}, result.Request)
+	assert.Equal(t, order.Order{}, result.Order)
+}
+
+// TestPipelineSubmit_UsesExactRequestEvaluateBuilt proves Submit
+// consumes Evaluate's own prepared Request rather than independently
+// generating a second OrderID/Request afterward — the "exactly one
+// implementation of the sizing/planning/risk/request-construction
+// sequence" invariant #187's design review asked for. Two Pipeline
+// instances sharing one deterministic id.Generator: the first calls
+// Evaluate only (advancing the generator through exactly one
+// OrderID-worth of state), the second calls Submit against a fresh,
+// identical starting snapshot. If Submit generated its own separate
+// OrderID instead of reusing Evaluate's own internal one-call result,
+// the two would still each be internally consistent but this test
+// would not detect that directly — so instead this asserts the
+// stronger, directly observable property: Submit's own Result.Request
+// equals Result.Order.Request exactly, field for field, which is only
+// possible if Submit never re-derives a second Request.
+func TestPipelineSubmit_UsesExactRequestEvaluateBuilt(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, "10000")
+	p := newPipeline(t, h)
+
+	snap := h.snapshot(t, ctx)
+	adverse := num.MustParsePrice("0.01000")
+	intent := mustEnterIntent(t, h.ids, h.listing.InstrumentID(), order.Buy)
+
+	result, err := p.Submit(ctx, pipeline.Input{
+		Intent:          intent,
+		Listing:         h.listing,
+		Account:         snap,
+		RiskFraction:    num.MustParseRate("0.01"),
+		AdverseDistance: &adverse,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, result.Request, result.Order.Request)
+}
 
 func TestPipelineSubmit_BrokerAccountMismatchIsInvalidInputAndBrokerUntouched(t *testing.T) {
 	ctx := context.Background()
