@@ -132,6 +132,70 @@ func TestMaxInstrumentExposureRuleReduceOnlyToFlatRequiresNoReferencePrice(t *te
 	assert.Empty(t, result.Violations)
 }
 
+// TestMaxInstrumentExposureRuleReduceOnlyDeRiskingAlwaysPasses is
+// issue #207's own regression, mirroring MaxPositionLeverageRule's
+// identical fix (#184/PR #199, ADR-034): an account already over the
+// configured cap must not be trapped there by having a genuinely
+// risk-reducing move rejected merely because the *resulting* exposure
+// is still over the cap. Existing 600000 at ReferencePrice 1 already
+// exceeds the 100 cap; reducing by 50000 to 550000 is still over the
+// cap in isolation, but the reduction itself must be allowed.
+func TestMaxInstrumentExposureRuleReduceOnlyDeRiskingAlwaysPasses(t *testing.T) {
+	r, err := NewMaxInstrumentExposureRule(usd(t, "100"))
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t)
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "50000", true)
+	ref := num.MustParsePrice("1") // resulting qty 550000; exposure 550000, still > 100 cap
+
+	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.NoError(t, err)
+	assert.Empty(t, result.Violations, "a de-risking move must never be blocked, even if the resulting exposure remains over the cap")
+}
+
+// TestMaxInstrumentExposureRuleNonReduceOnlyPartialDeRiskingAlwaysPasses
+// is the same invariant as the ReduceOnly case above, for a
+// non-ReduceOnly proposal that is still a strict partial reduction.
+func TestMaxInstrumentExposureRuleNonReduceOnlyPartialDeRiskingAlwaysPasses(t *testing.T) {
+	r, err := NewMaxInstrumentExposureRule(usd(t, "100"))
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t)
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "50000", false)
+	ref := num.MustParsePrice("1")
+
+	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.NoError(t, err)
+	assert.Empty(t, result.Violations)
+}
+
+// TestMaxInstrumentExposureRuleReversalPastCurrentMagnitudeIsEvaluatedNormally
+// covers the boundary of the de-risking exemption itself: starting
+// from an already over-limit position, a reversal whose *resulting*
+// magnitude exceeds the current position's is not de-risking — it is
+// evaluated against the cap exactly as any other increase would be.
+func TestMaxInstrumentExposureRuleReversalPastCurrentMagnitudeIsEvaluatedNormally(t *testing.T) {
+	r, err := NewMaxInstrumentExposureRule(usd(t, "100"))
+	require.NoError(t, err)
+
+	listing := mustEurUsdListing(t)
+	accountID := mustAccountID(t)
+	pos := mustPosition(t, accountID, listing, order.Long, "600000")
+	acc := mustSnapshotWithPositions(t, accountID, "sim", "USD", "10000", pos)
+	proposal := mustProposalWith(t, accountID, listing, order.Sell, "1300000", false) // excess 700000 > current 600000
+	ref := num.MustParsePrice("1")
+
+	result, err := r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, ReferencePrice: &ref})
+	require.NoError(t, err)
+	require.Len(t, result.Violations, 1, "resulting magnitude exceeds the current position's, so this is not de-risking")
+}
+
 func TestMaxInstrumentExposureRuleRequiresReferencePriceForOpenExposure(t *testing.T) {
 	r, err := NewMaxInstrumentExposureRule(usd(t, "1000"))
 	require.NoError(t, err)
