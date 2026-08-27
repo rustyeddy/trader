@@ -141,7 +141,7 @@ func (c oandaTokenCredential) Token(context.Context) (string, error) {
 // actually run.
 //
 // The Service is given the same logger root.go's own PersistentPreRunE
-// already built and placed on cmd.Context() (loggerFromContext) — not
+// already built and placed on cmd.Context() (clictx.LoggerFromContext) — not
 // a second, independently constructed one — so every structured record
 // a data subcommand's use case emits (issue #128) shares this
 // invocation's own level/format/output configuration.

@@ -2,6 +2,7 @@ package clictx
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestLoggerFromContext_DefaultsWhenUnset(t *testing.T) {
 }
 
 func TestWithLogger_RoundTrips(t *testing.T) {
-	want := slog.New(slog.NewTextHandler(nil, nil))
+	want := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := WithLogger(context.Background(), want)
 	got := LoggerFromContext(ctx)
 	assert.Same(t, want, got)

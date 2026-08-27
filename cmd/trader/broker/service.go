@@ -174,7 +174,8 @@ func buildSimBroker(cfg accountConfig, prices simbroker.FillPriceSource) (*simbr
 // buildService is buildSimBroker plus wrapping the result in a
 // service/broker.Service, using the same logger root.go's own
 // PersistentPreRunE already built and placed on cmd.Context()
-// (loggerFromContext) — matching service.go's buildDataContext.
+// (clictx.LoggerFromContext) — matching cmd/trader/data's own
+// service.go buildDataContext.
 func buildService(cmd *cobra.Command, cfg accountConfig, prices simbroker.FillPriceSource) (*svcbroker.Service, id.AccountID, error) {
 	b, accountID, err := buildSimBroker(cfg, prices)
 	if err != nil {
