@@ -223,7 +223,7 @@ func TestPerTradeLossRuleRequiresAdverseDistanceForNewExposure(t *testing.T) {
 	proposal := mustProposalWith(t, accountID, listing, order.Buy, "1000", false)
 
 	_, err = r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInsufficientRuleInput)
 }
 
 func TestPerTradeLossRuleRejectsZeroAdverseDistance(t *testing.T) {
@@ -237,7 +237,7 @@ func TestPerTradeLossRuleRejectsZeroAdverseDistance(t *testing.T) {
 	zero := num.Price{}
 
 	_, err = r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, AdverseDistance: &zero})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInsufficientRuleInput)
 }
 
 func TestPerTradeLossRuleRejectsSettlementCurrencyMismatch(t *testing.T) {
@@ -251,7 +251,7 @@ func TestPerTradeLossRuleRejectsSettlementCurrencyMismatch(t *testing.T) {
 	dist := num.MustParsePrice("0.005")
 
 	_, err = r.Evaluate(context.Background(), Input{Proposal: proposal, Account: acc, AdverseDistance: &dist})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInsufficientRuleInput)
 }
 
 func TestPerTradeLossRulePropagatesCancelledContext(t *testing.T) {

@@ -61,11 +61,11 @@ func (r *perTradeLossRule) Evaluate(ctx context.Context, in Input) (RuleResult, 
 	}
 
 	if in.AdverseDistance == nil || in.AdverseDistance.IsZero() {
-		return RuleResult{}, fmt.Errorf("per-trade loss: a positive Input.AdverseDistance is required for a proposal that opens new exposure")
+		return RuleResult{}, fmt.Errorf("%w: per-trade loss requires a positive Input.AdverseDistance for a proposal that opens new exposure", ErrInsufficientRuleInput)
 	}
 	if !in.Proposal.Listing.Spec().SettlementCurrency().Equal(in.Account.Equity().Currency()) {
-		return RuleResult{}, fmt.Errorf("per-trade loss: listing settlement currency %s does not match account equity currency %s",
-			in.Proposal.Listing.Spec().SettlementCurrency(), in.Account.Equity().Currency())
+		return RuleResult{}, fmt.Errorf("%w: per-trade loss: listing settlement currency %s does not match account equity currency %s",
+			ErrInsufficientRuleInput, in.Proposal.Listing.Spec().SettlementCurrency(), in.Account.Equity().Currency())
 	}
 	distance := *in.AdverseDistance
 
