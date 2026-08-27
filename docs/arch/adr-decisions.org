@@ -137,6 +137,7 @@ the original decided, use full supersession instead.
 | 027 | Money-by-quantity division to recover a weighted-average price (in adr-027-money-quantity-price-division.org) | Accepted |
 | 028 | Configurable simulator fill, fee, and slippage models (in adr-028-simulator-fill-fee-slippage-models.org) | Accepted |
 | 029 | Risk decisions are strict approve/reject, not proposal mutation (in adr-029-risk-decision-approve-reject.org) | Accepted |
+| 030 | Money-by-Price division and quantity-increment flooring for position sizing (in adr-030-money-price-division-quantity-rounddown.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -239,6 +240,15 @@ result vocabulary to be defined ahead of any concrete risk policy
 implementation, and explicitly calls for this ADR to record whether
 risk decisions are strict approve/reject or may adjust a proposal,
 rather than deciding that silently in code.
+
+Note: ADR-030 is likewise maintained in its own file,
+=docs/arch/adr-030-money-price-division-quantity-rounddown.org=,
+rather than inline in this registry.  Its own Status section is
+authoritative.  Issue #181 (M4-06) needs two missing =num= primitives
+(=Money.DivPrice=, =Quantity.RoundDown=) for fixed-fraction position
+sizing; this ADR drafts and adopts both ahead of that implementation,
+following the same pattern ADR-025 and ADR-027 already established for
+missing numeric primitives discovered by a consuming M3/M4 issue.
 
 * ADR-001: Modular monolith before service decomposition
 

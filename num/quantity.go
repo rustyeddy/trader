@@ -134,3 +134,26 @@ func (q Quantity) DivisibleBy(step Quantity) (bool, error) {
 	}
 	return q.raw%step.raw == 0, nil
 }
+
+// RoundDown returns the largest multiple of step that is <= q:
+// floor(q/step) x step (ADR-030). Because q.raw and step.raw already
+// share the same fixed-point scale, their plain integer quotient is
+// already the exact, dimensionless multiple count — no rescaling or
+// rounding-mode decision is needed the way num/internal/fixed.DivScaled
+// requires for a ratio expressed in a different type's scale (compare
+// Money.DivQuantity/DivPrice). Go's integer division truncates toward
+// zero, which equals floor for the non-negative values Quantity always
+// holds.
+//
+// RoundDown reports ErrDivideByZero when step is zero, matching
+// DivisibleBy's own existing convention exactly. The result may
+// legitimately be zero, when q is smaller than one whole step;
+// RoundDown itself does not decide whether that is acceptable — that
+// is entirely a caller concern.
+func (q Quantity) RoundDown(step Quantity) (Quantity, error) {
+	if step.raw == 0 {
+		return Quantity{}, ErrDivideByZero
+	}
+	count := q.raw / step.raw
+	return Quantity{raw: count * step.raw}, nil
+}

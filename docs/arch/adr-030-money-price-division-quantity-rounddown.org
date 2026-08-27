@@ -1,0 +1,175 @@
+#+TITLE: Money-by-Price Division and Quantity-Increment Flooring for Position Sizing ADR-030
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #181 (M4-06) asks for the first useful deterministic
+position-sizing policy, which needs two exact =num= primitives that do
+not yet exist. Following ADR-025 (#164) and ADR-027 (#152)'s own
+precedent — draft and adopt the missing primitive ahead of the
+consuming feature, in its own small ADR, rather than inventing it
+silently while implementing that feature — both primitives are decided
+here together, the same way ADR-028 bundled fill/fee/slippage into one
+ADR because all three were needed by one consuming issue.
+
+* Context
+
+Fixed-fraction position sizing computes, exactly:
+
+#+BEGIN_EXAMPLE
+risk budget (Money)  =  account equity (Money) × risk fraction (Rate)
+loss per unit (Price) =  stop distance (Price) × contract multiplier (Rate)
+raw quantity (Quantity) =  risk budget (Money) ÷ loss per unit (Price)
+final quantity (Quantity) =  raw quantity rounded down to the listing's
+                              quantity increment
+#+END_EXAMPLE
+
+=Money.MulRate= and =Price.MulRate= already exist and cover the first
+two lines. The last two lines each need a primitive that does not:
+
+1. =Money ÷ Price -> Quantity=. =Money.DivQuantity= (ADR-027) already
+   covers =Money ÷ Quantity -> Price= — the same three types, arranged
+   for a different question ("what average price produced this total
+   value over this many units" versus "how many units does this budget
+   buy at this price"). Confirmed missing by direct search
+   (=grep -rn DivPrice num/=: zero matches).
+2. Rounding a =Quantity= *down* to the nearest multiple of another
+   =Quantity= (the listing's increment). =Quantity.DivisibleBy=
+   (already public) only answers whether a value is already aligned; it
+   does not produce an aligned value. Rounding must be strictly
+   downward here — issue #181's own acceptance criteria require that
+   quantity rounding never cause sizing to exceed its configured risk
+   budget, and any of =num='s existing public division operations that
+   round to nearest (=RoundHalfEven=) can round *up*, exactly the
+   direction this must never take.
+
+A design review on #181 additionally identified two dimensional/
+accounting gaps in the naive two-line formula above (before either
+primitive's own shape was finalized): the contract multiplier term,
+and a currency-compatibility question =Money.DivPrice= itself cannot
+answer.
+
+* Decision
+
+** =Money.DivPrice(Price) (Quantity, error)=
+
+Exact division: budget (Money) ÷ price-distance-per-unit (Price) →
+Quantity, using the same convention =Money.DivQuantity= already
+established — =fixed.DivScaled= with =RoundHalfEven=, reporting
+=ErrDivideByZero= for a zero =Price= divisor and =ErrNegative= if the
+true quotient would be negative (Quantity has no negative
+representation, the same rule =Money.DivQuantity= already applies).
+
+=DivPrice= is *pure numeric dimensional arithmetic only*. Neither
+=Money= nor the resulting =Quantity= carries information proving the
+=Price= divisor is denominated in the same currency the =Money=
+dividend is — =Price= carries no currency at all. =DivPrice= cannot
+detect a caller dividing USD risk dollars by a GBP price distance and
+producing a plausible-looking but dimensionally meaningless quantity.
+This is deliberately the caller's responsibility, not this primitive's
+— see =risk.FixedFractionSizer='s own currency-consistency check
+below, the same boundary M3's own single-currency accounting already
+established (ADR-004's =Money.Convert= is the one sanctioned,
+explicit, opt-in currency-crossing operation; nothing here performs
+implicit conversion).
+
+** =Quantity.RoundDown(step Quantity) (Quantity, error)=
+
+Returns the largest multiple of =step= that is =<= q=: =floor(q/step) ×
+step=, using plain scaled-integer division on the two raw values —
+=q.raw / step.raw= — rather than routing through
+=num/internal/fixed.DivScaled=. =DivScaled= exists to compute a *ratio
+rescaled back into a fixed-point representation* (=round(a × scale ÷
+b)=), which is what =Money.DivQuantity=/=DivPrice= need; =RoundDown=
+needs the opposite: since =q.raw= and =step.raw= already share the
+same scale, their plain integer quotient is already the exact,
+dimensionless multiple count, with no rescaling step involved. Go's
+integer division truncates toward zero, which equals floor for the
+non-negative values =Quantity= always holds, so no explicit rounding
+mode or call into =num/internal/fixed= is needed at all — a smaller,
+more directly-correct implementation than the ADR's own first draft
+proposed. =step= must be non-zero — =RoundDown= reports
+=ErrDivideByZero= for a zero =step=, matching =DivisibleBy='s own
+existing convention exactly (=step.raw == 0= is already its zero-value
+check). The result may legitimately be zero (a =q= smaller than one
+whole =step=); whether a zero result is acceptable is entirely a
+caller concern, not this primitive's — =RoundDown= itself imposes no
+floor above zero.
+
+=RoundDown= is a general, sizing-independent =Quantity= operation, not
+sizing-specific: any future caller needing to align a computed
+quantity down to a listing's increment (or any other quantity step)
+can use it directly.
+
+** Sizing accounts for the contract multiplier
+
+=risk.FixedFractionSizer= (issue #181's own implementation, not part of
+this ADR's own primitive scope) multiplies =StopDistance= by
+=Listing.Spec().Multiplier()= — via the already-existing
+=Price.MulRate= — before dividing, rather than assuming every listing's
+multiplier is =1=. A spot FX or simple equity listing's multiplier is
+=1= and this step is a no-op for those cases, but treating it as a
+formula constant would have quietly produced wrong sizing for any
+future listing (a future/derivative-shaped instrument) whose multiplier
+is not =1=, contradicting =instrument.Spec='s own documented meaning of
+=Multiplier=.
+
+** Sizing requires matching settlement/account currency
+
+=risk.FixedFractionSizer= requires
+=Account.Equity().Currency().Equal(Listing.Spec().SettlementCurrency())=
+before performing any division, and rejects a mismatch explicitly
+rather than performing implicit conversion — =DivPrice='s own inability
+to check this (above) is exactly why the sizer, not the primitive, owns
+the check. This matches the single-currency accounting boundary already
+established for M3's own account/position model; cross-currency sizing
+remains out of scope until Trader has an explicit, rate-provenanced
+conversion capability a sizer could use deliberately (ADR-004's
+=Money.Convert=, currently =portfolio='s own concern).
+
+* Consequences
+
+- =num= gains two small, general-purpose, sizing-independent
+  primitives; neither is a special case carved out only for
+  =risk.FixedFractionSizer=.
+- =DivPrice='s lack of currency validation means every future caller —
+  not only =risk= — must supply a =Price= actually denominated in the
+  same currency as the =Money= dividend; this is a documented
+  precondition, not something the type system enforces, the same
+  documented-precondition pattern =Price.MulQuantity= already uses for
+  its own currency parameter.
+- =RoundDown='s "result may be zero" behavior means every caller must
+  decide for itself whether a zero result is acceptable; =num= imposes
+  no opinion.
+- Any future multi-currency or multi-listing sizing capability must
+  make its own currency-conversion and multiplier decisions explicitly
+  — neither is silently handled by a =num= primitive.
+
+* Alternatives Considered
+
+- *A single combined =Money.DivPriceRoundedTo(price, step)= helper*
+  bundling division and increment flooring into one call. Rejected:
+  conflates two independent, separately reusable operations into one
+  sizing-shaped helper, exactly the kind of premature, single-purpose
+  API =num='s own existing small-primitive convention (=MulQuantity=,
+  =DivQuantity=, =MulRate=, ...) avoids.
+- *Rounding half-even or up when flooring to the quantity increment.*
+  Rejected outright: issue #181's own acceptance criteria require
+  rounding to never cause sizing to exceed its configured risk budget,
+  which only downward rounding guarantees.
+- *=Money.DivPrice= validating or converting currency itself*, for
+  example by requiring a =Currency= parameter analogous to
+  =Price.MulQuantity=. Rejected: =Price= itself carries no currency for
+  =DivPrice= to check against, and inventing an out-of-band currency
+  parameter on a pure arithmetic primitive would misrepresent what the
+  primitive can actually verify — the currency-consistency check
+  belongs at the domain boundary (=risk.FixedFractionSizer=) where both
+  the =Money= and the =Listing= are actually available together.
+- *Ignoring the contract multiplier for v0*, deliberately supporting
+  only =Multiplier == 1= listings and rejecting anything else outright.
+  Considered during #181's own design review and rejected in favor of
+  incorporating =Multiplier= now: the value is already canonical
+  =Listing= state, the required arithmetic (=Price.MulRate=) already
+  exists, and skipping it would bake an accidental equity/spot-FX-only
+  assumption into the sizer rather than keeping it broker/instrument-
+  neutral.
