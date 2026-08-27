@@ -136,6 +136,7 @@ the original decided, use full supersession instead.
 | 026 | Simulated limit/stop orders: observation advancement, trigger, gap, intrabar-ambiguity semantics (in adr-026-simulated-limit-stop-orders.org) | Accepted |
 | 027 | Money-by-quantity division to recover a weighted-average price (in adr-027-money-quantity-price-division.org) | Accepted |
 | 028 | Configurable simulator fill, fee, and slippage models (in adr-028-simulator-fill-fee-slippage-models.org) | Accepted |
+| 029 | Risk decisions are strict approve/reject, not proposal mutation (in adr-029-risk-decision-approve-reject.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -229,6 +230,15 @@ Issue #153 (M3-10) asks for configurable, deterministic simulator
 fill/fee/slippage models — and their reproducibility identity for a
 future backtest manifest — to be drafted and adopted before
 implementation.
+
+Note: ADR-029 is likewise maintained in its own file,
+=docs/arch/adr-029-risk-decision-approve-reject.org=, rather than
+inline in this registry.  Its own Status section is authoritative.
+Issue #180 (M4-05) asks for the canonical risk-evaluation seam and
+result vocabulary to be defined ahead of any concrete risk policy
+implementation, and explicitly calls for this ADR to record whether
+risk decisions are strict approve/reject or may adjust a proposal,
+rather than deciding that silently in code.
 
 * ADR-001: Modular monolith before service decomposition
 
