@@ -187,6 +187,59 @@ func TestFixedFractionSizerRejectsSettlementCurrencyMismatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidSizeInput)
 }
 
+// TestFixedFractionSizerRejectsListingProviderAccountBrokerMismatch is
+// a regression for review feedback on PR #196: even when settlement
+// and account currencies match, sizing a venue listing against an
+// account at a *different* broker is a domain-invalid pairing, the
+// same check execution.Planner and risk.Engine already enforce.
+func TestFixedFractionSizerRejectsListingProviderAccountBrokerMismatch(t *testing.T) {
+	s := NewFixedFractionSizer()
+	otherBrokerListing := mustListingWithSpec(t, "alpaca", "0.00001", "1", "1", "USD")
+	accountID := mustAccountID(t)
+	acc := mustSnapshotWithEquity(t, accountID, "sim", "USD", "10000")
+
+	_, err := s.Size(context.Background(), SizeInput{
+		Account:      acc,
+		Listing:      otherBrokerListing,
+		RiskFraction: num.MustParseRate("0.01"),
+		StopDistance: num.MustParsePrice("0.005"),
+	})
+	require.ErrorIs(t, err, ErrInvalidSizeInput)
+}
+
+// TestFixedFractionSizerRoundingNeverExceedsBudgetAtRoundingMidpoint
+// is Copilot's own regression from review on PR #196: Money.DivPrice
+// rounds to nearest (ties-to-even) at Quantity's smallest
+// representable step before RoundDown ever runs. Budget 0.00000003 /
+// lossPerUnit 2 = 0.000000015 exactly, the midpoint between
+// 0.00000001 and 0.00000002; the even neighbour is 0.00000002, so
+// DivPrice rounds up. At a 0.00000001 quantity increment, that value
+// is already an exact multiple, so naive RoundDown alone would return
+// it unchanged -- implying risk (2 x 0.00000002 = 0.00000004) greater
+// than the 0.00000003 budget. Size must correct for this.
+func TestFixedFractionSizerRoundingNeverExceedsBudgetAtRoundingMidpoint(t *testing.T) {
+	s := NewFixedFractionSizer()
+	listing := mustListingWithSpec(t, "sim", "0.00000001", "0.00000001", "1", "USD")
+	accountID := mustAccountID(t)
+	acc := mustSnapshotWithEquity(t, accountID, "sim", "USD", "0.00000003")
+
+	got, err := s.Size(context.Background(), SizeInput{
+		Account:      acc,
+		Listing:      listing,
+		RiskFraction: num.MustParseRate("1"),
+		StopDistance: num.MustParsePrice("2"),
+	})
+	require.NoError(t, err)
+
+	impliedRisk, err := num.MustParsePrice("2").MulQuantity(got, num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	budget := acc.Equity()
+	cmp, err := impliedRisk.Cmp(budget)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, cmp, 0, "implied risk %s must not exceed budget %s (got quantity %s)", impliedRisk, budget, got)
+	assert.True(t, got.Equal(num.MustParseQuantity("0.00000001")), "got %s", got)
+}
+
 func TestFixedFractionSizerPropagatesCancelledContext(t *testing.T) {
 	s := NewFixedFractionSizer()
 	listing := mustEurUsdListing(t)

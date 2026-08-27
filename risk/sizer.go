@@ -3,6 +3,7 @@ package risk
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/instrument"
@@ -46,6 +47,10 @@ func checkSizeInput(in SizeInput) error {
 	}
 	if in.Listing.InstrumentID().IsZero() {
 		return fmt.Errorf("%w: listing must be constructed", ErrInvalidSizeInput)
+	}
+	if !strings.EqualFold(in.Listing.Provider(), in.Account.Broker()) {
+		return fmt.Errorf("%w: listing provider %q does not match account broker %q",
+			ErrInvalidSizeInput, in.Listing.Provider(), in.Account.Broker())
 	}
 	if in.RiskFraction.Sign() <= 0 {
 		return fmt.Errorf("%w: risk fraction must be positive", ErrInvalidSizeInput)
@@ -98,9 +103,43 @@ func (fixedFractionSizer) Size(ctx context.Context, in SizeInput) (num.Quantity,
 		return num.Quantity{}, fmt.Errorf("risk: computing raw quantity: %w", err)
 	}
 
-	rounded, err := raw.RoundDown(in.Listing.Spec().QuantityIncrement())
+	increment := in.Listing.Spec().QuantityIncrement()
+	rounded, err := raw.RoundDown(increment)
 	if err != nil {
 		return num.Quantity{}, fmt.Errorf("risk: rounding to quantity increment: %w", err)
+	}
+
+	// raw itself is already rounded to nearest (RoundHalfEven) at
+	// Quantity's own smallest representable step, inside DivPrice —
+	// not the true, unrounded mathematical quotient. If that nearest-
+	// rounding pushed raw up across an increment boundary, RoundDown
+	// preserves the higher multiple, and the implied risk of the
+	// resulting quantity can still exceed riskBudget even though the
+	// quantity itself is a valid increment multiple (review feedback
+	// on PR #196). Step back down by one increment at a time until the
+	// implied risk no longer exceeds the budget. DivPrice's own
+	// rounding error is bounded to at most half of Quantity's smallest
+	// representable step, so in practice this never needs more than
+	// one correction; the loop is written generally rather than
+	// assuming that bound.
+	for !rounded.IsZero() {
+		impliedRisk, err := lossPerUnit.MulQuantity(rounded, riskBudget.Currency())
+		if err != nil {
+			return num.Quantity{}, fmt.Errorf("risk: computing implied risk: %w", err)
+		}
+		cmp, err := impliedRisk.Cmp(riskBudget)
+		if err != nil {
+			return num.Quantity{}, fmt.Errorf("risk: comparing implied risk to budget: %w", err)
+		}
+		if cmp <= 0 {
+			break
+		}
+		next, err := rounded.Sub(increment)
+		if err != nil {
+			rounded = num.Quantity{}
+			break
+		}
+		rounded = next
 	}
 	if rounded.IsZero() {
 		return num.Quantity{}, ErrSizeRoundsToZero
