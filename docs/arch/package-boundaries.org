@@ -104,7 +104,7 @@ subpackage wraps one =pipeline=-adjacent domain concern as a
 transport-neutral use case for an external caller (the CLI today, a
 future REST/WebSocket/SSE adapter). =journal= and =report= (M5) sit
 alongside =service/*= at the same tier rather than under it — both are
-reusable by a future =live= session (M7), not backtest-specific, so
+reusable by a future =live= session, not backtest-specific, so
 neither lives under =backtest/= despite =backtest= being their first
 concrete consumer. Application orchestration packages
 (=backtest=, and eventually =live=/=scanner=) depend on =pipeline=

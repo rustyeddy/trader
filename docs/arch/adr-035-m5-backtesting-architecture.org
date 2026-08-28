@@ -27,10 +27,12 @@ reusable:
 - =clock.Simulated= (pre-M3): a deterministic clock with
   =Advance(d time.Duration) error=, already the sole time source
   throughout the module, mechanically enforced by
-  =clock/boundary_test.go='s =TestDomainCodeDoesNotCallTimeDirectly=
+  =clock/arch_test.go='s =TestDomainCodeDoesNotCallTimeDirectly=
   (a whole-module AST scan for direct =time.Now=/=NewTimer=/=After=/
   =Sleep= calls, excluding =clock=/=cmd=/=adapters=).
-- =id.RunID= (an existing, previously unused =id= kind).
+- =id.RunID= (already an existing =id= kind, with its own
+  =GenerateRunID=/=ParseRunID= support and a =logging.RunID= attribute —
+  the appropriate run identity type for M5, not something new).
 
 None of =strategy=, =journal=, =report=, or =backtest= existed yet.
 =docs/arch/package-boundaries.org='s own preliminary map had deferred
@@ -206,7 +208,7 @@ issue.
   =cmd/trader/execution/boundary_test.go= is expected once =backtest=
   has leaf files to scan.
 - =journal= and =report= are reusable outside backtesting from day
-  one — a future =live= package (M7) is expected to depend on both
+  one — a future =live= package is expected to depend on both
   directly, not on backtest-specific types.
 - ADR-009 remains =Proposed= until #218 gives it a concrete answer;
   this ADR does not promote it.
