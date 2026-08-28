@@ -1,0 +1,280 @@
+#+TITLE: M5 Backtesting Architecture and Package Boundaries ADR-035
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #209 (M5-01) asks for the M5 backtesting architecture
+and package boundaries to be settled before implementation hardens
+accidental boundaries, following the same design-notes-then-review
+pattern issue #176 (M4-01) used to extract ADR-005/ADR-006 ahead of
+M4.
+
+* Context
+
+By the start of M5, the following was already =Accepted= and directly
+reusable:
+
+- =marketdata.Manager= (M2): the sole access point for canonical
+  historical data, returning a typed =Reader[Bar]= (=*BarReader=) via
+  =Manager.Bars(ctx, BarQuery)=.
+- =adapters/broker/sim.Broker= (M3): a deterministic simulated broker
+  implementing the public =broker.Broker=/=broker.Account= port.
+- =order=, =execution=, =risk=, =pipeline=, =service/execution=,
+  =cmd/trader/execution= (M4): the complete
+  =Intent -> Proposal -> RiskDecision -> Request -> broker submission=
+  path, with =pipeline.Pipeline= as the orchestration seam (ADR-031)
+  and =Evaluate=/=Submit= as its read-only/mutating split (ADR-032).
+- =clock.Simulated= (pre-M3): a deterministic clock with
+  =Advance(d time.Duration) error=, already the sole time source
+  throughout the module, mechanically enforced by
+  =clock/arch_test.go='s =TestDomainCodeDoesNotCallTimeDirectly=
+  (a whole-module AST scan for direct =time.Now=/=NewTimer=/=After=/
+  =Sleep= calls, excluding =clock=/=cmd=/=adapters=).
+- =id.RunID= (already an existing =id= kind, with its own
+  =GenerateRunID=/=ParseRunID= support and a =logging.RunID= attribute —
+  the appropriate run identity type for M5, not something new).
+
+None of =strategy=, =journal=, =report=, or =backtest= existed yet.
+=docs/arch/package-boundaries.org='s own preliminary map had deferred
+=strategy= to "M6" — stale relative to M5 actually building it — and
+did not mention =pipeline= or the =service/*= tier at all, both added
+during M4 without a corresponding documentation update.
+
+Design notes were posted on #209 proposing a package split and
+dependency graph; review identified four refinements and one
+additional boundary before treating the architecture as settled.
+
+* Decision
+
+** Package boundaries
+
+#+BEGIN_EXAMPLE
+strategy/             strategy contract (#210 owns the actual design).
+                       Depends on order, marketdata, instrument, account.
+                       No broker/execution/risk import (ADR-005).
+
+journal/               durable event/decision record (ADR-009, Proposed).
+                       Reusable by a future live session, not backtest-only
+                       -- does not live under backtest/. #218 revisits
+                       ADR-009 based on this concrete consumer rather than
+                       accepting its old sketch mechanically.
+
+report/                rendering only (Org first-class). Never computes a
+                       metric -- see "Metrics versus rendering" below.
+
+backtest/               orchestration only: simulation-clock driving,
+                       historical bar replay/merge, scheduler (the per-bar
+                       loop), run manifest, runner lifecycle
+                       (Runner.Run(ctx, Request) (Result, error)), deriving
+                       completed-trade/accounting views from the
+                       broker.Account's own snapshot/event stream, and the
+                       transport-neutral result/performance-metrics model
+                       (#219). Depends on strategy, order, execution, risk,
+                       pipeline, broker, account, marketdata, journal,
+                       clock, id, num, instrument -- never on report or a
+                       transport, and never on adapters/broker/sim (see
+                       "Runtime dependencies" below).
+
+service/backtest/      ADR-022 wrapper, mirroring service/execution's shape.
+
+cmd/trader/backtest/   thin CLI command family, mirroring
+                       cmd/trader/execution's shape (#201/#204).
+#+END_EXAMPLE
+
+=pipeline= and the =service/*= tier (both already built in M4 without
+a =package-boundaries.org= update) are added to that document's own
+preliminary map as part of this decision — see the "Documentation"
+section below.
+
+** Reuse of the M4 pipeline, not service/execution
+
+=backtest='s scheduler calls =pipeline.Pipeline.Evaluate=/=Submit=
+directly, never =service/execution.Service=. =service/execution= is
+the ADR-022 transport-facing wrapper for an external caller (CLI, a
+future REST adapter) that needs its own fresh account-snapshot read
+per request; =backtest= is itself an application-orchestration
+package that depends on =pipeline= directly, at the same dependency
+tier =service/execution= itself occupies relative to =pipeline= — not
+a consumer *of* =service/execution= (per ADR-031's own placement of
+=pipeline= as the seam both =service/execution= and future
+=backtest=/=live= consume independently, each on their own dependency
+line down to =pipeline=, never through each other). =service/backtest=
+(the ADR-022 wrapper *around* =backtest=, symmetric with how
+=service/execution= wraps =pipeline=) is a separate, higher tier again
+— see "Runtime dependencies" below for the full chain. Routing
+=backtest= through =service/execution= would add a layer serving a
+different concern for no benefit to an in-process caller that already
+knows precisely when a fresh snapshot is needed, because it drives the
+clock itself.
+
+** Runtime dependencies: no adapter construction inside backtest or service/backtest
+
+=backtest= must not construct =adapters/broker/sim.Broker= (or any
+concrete adapter) internally. This is a direct application of
+=package-boundaries.org= rule 1 ("domain packages must not import
+adapters") to the new package: =backtest.Runner= depends on
+=broker.Broker= and =*pipeline.Pipeline= as constructor-injected
+values, the same way =service/execution.Service= already does (issue
+#186).
+
+Concrete adapter construction belongs only to the outermost
+composition root, =cmd/trader/backtest= — never =service/backtest=.
+The dependency chain is =cmd/trader/backtest -> service/backtest ->
+backtest -> pipeline=: =cmd/trader/backtest= constructs
+=adapters/broker/sim.Broker=, =pipeline.Pipeline=, and an
+=instrument.Resolver=, and injects only the =broker.Broker= *port*
+(plus the already-built =*pipeline.Pipeline= and resolver) into
+=service/backtest=, which in turn builds/holds a =*backtest.Runner=
+from those same injected values — =service/backtest= itself never
+imports =adapters/broker/sim=. This exactly mirrors how
+=cmd/trader/execution/service.go= builds =sim.Broker= today and hands
+only the =broker.Broker= interface (plus an already-built
+=*pipeline.Pipeline=) to =service/execution.New=, which likewise never
+imports =adapters/broker/sim=. This keeps every future alternate
+simulation implementation, and every test of =backtest= or
+=service/backtest=, free of a concrete adapter dependency.
+
+** No-lookahead is a layered invariant, not one package's job
+
+No-lookahead is enforced across three cooperating layers, not
+concentrated in the replay source alone:
+
+1. *Replay* (the historical bar source, #212) guarantees strictly
+   ordered observations across however many instruments are merged —
+   it is a pure, deterministic ordering guarantee, nothing more.
+2. *Scheduler* (#213) owns /when/ an observation becomes visible
+   relative to simulated time and strategy invocation — it is the
+   layer that actually advances =clock.Simulated= and decides the
+   moment a replayed bar is eligible to reach a strategy.
+3. *Strategy =View=* (#210) owns /what/ historical state is
+   accessible to a strategy at that moment — it is built only from
+   data the scheduler has already deemed visible, never from the full
+   replay stream directly.
+
+A perfectly-ordered replay reader consumed by orchestration that
+ignores visibility timing could still leak lookahead; stating this as
+one property of the replay source alone would have been incomplete.
+
+** The scheduler is not a policy owner
+
+The scheduler owns temporal/event ordering and coordinates calls
+between layers; it does not own strategy, execution, or risk business
+policy. Concretely: strategy emits intent (=order.Intent=), =pipeline=
+owns execution/risk semantics (sizing, planning, admission), the
+injected =broker.Broker= owns authoritative fills and account state,
+=journal= observes and records what happened, and =backtest='s own
+metrics derive from those authoritative outcomes after the fact — the
+scheduler never evaluates risk, never decides a fill price, and never
+decides what is loggable.
+
+** Metrics versus rendering
+
+=report= is rendering-only. The transport-neutral backtest result and
+performance-metrics model (drawdown, Sharpe/Sortino, profit factor,
+and so on — #219) lives in =backtest= itself, not in =report=: a
+package named for presentation must not become the owner of
+financial/statistical computation merely because it also renders that
+computation's output. The dependency is strictly
+=backtest (result/metrics) -> report (renderer)=; =report= never
+computes a metric, and =backtest= never imports =report=. If a
+genuine reuse case for the metrics model outside =backtest= later
+emerges (for example a future =live= session wanting the identical
+calculations), extracting a small, separately named =analysis=-style
+package is the additive move at that time — not speculated into M5
+now.
+
+** Listing resolution is a dependency, not run input
+
+A resolved =instrument.Listing='s mechanical characteristics (tick
+size, quantity increment, contract multiplier, settlement currency,
+provider/listing identity) are runtime infrastructure, not immutable
+run input, and must not be embedded directly in =backtest.Request=.
+=backtest.Runner= receives an =instrument.Resolver= (or a narrower
+listing-resolving capability) through construction/composition — the
+same "runtime capability injected, not baked into a value request"
+pattern =broker.Broker= and =*pipeline.Pipeline= already follow above.
+The specific resolved listing characteristics that affect
+reproducibility are then captured in the run manifest (#215), so a
+manifest fully describes what was actually simulated without the
+=Request= value itself holding a service object.
+
+** v0 scope: one account, one broker, portfolio deferred
+
+The base =Runner=/=Request= shape targets exactly one account on one
+injected =broker.Broker=, with one or a few instruments merged
+chronologically by the replay layer. =portfolio.Portfolio= aggregation
+is not introduced into the base shape; #224 ("multi-instrument and
+portfolio backtesting") is the explicit, later, additive extension
+that proves multi-instrument/account-wide behavior, rather than
+forcing a speculative portfolio abstraction into every earlier M5
+issue.
+
+* Consequences
+
+- =backtest=, =service/backtest=, and =cmd/trader/backtest= mirror the
+  exact layering M4 already proved out for =pipeline=/=service/execution=/
+  =cmd/trader/execution=, so every M4 reviewer-facing convention
+  (constructor-injected ports, no adapter imports outside a
+  composition root, ADR-022 service shape, thin CLI leaf commands)
+  transfers directly rather than being re-derived.
+- =backtest= itself never imports =adapters/broker/sim=; only
+  =service/backtest= and/or =cmd/trader/backtest= do, exactly
+  mirroring =service/execution=/=cmd/trader/execution='s own existing
+  boundary. A boundary test analogous to
+  =cmd/trader/execution/boundary_test.go= is expected once =backtest=
+  has leaf files to scan.
+- =journal= and =report= are reusable outside backtesting from day
+  one — a future =live= package is expected to depend on both
+  directly, not on backtest-specific types.
+- ADR-009 remains =Proposed= until #218 gives it a concrete answer;
+  this ADR does not promote it.
+- =strategy='s deferred-to-M6 status in =package-boundaries.org= is
+  corrected: it is built in M5 (#210), not M6.
+
+* Documentation
+
+=docs/arch/package-boundaries.org='s preliminary package map is
+updated alongside this ADR to add =pipeline= and the =service/*= tier
+(both introduced in M4 without a corresponding update) and to correct
+the stale "=strategy= deferred to M6" note. See that document's own
+revision history for the specific diagram change.
+
+* Alternatives Considered
+
+- *Route backtest's own execution path through service/execution
+  rather than pipeline directly.* Rejected: adds a layer built for a
+  different concern (transport-neutral request/response shaping for
+  an external caller) with no benefit to an in-process orchestration
+  package, and would make =backtest= depend on a package whose own
+  job — coordinating a fresh account-snapshot read for a caller that
+  does not otherwise know when one is needed — =backtest='s own
+  scheduler already does more precisely.
+- *Let backtest construct adapters/broker/sim.Broker directly, since
+  it is "just a test double anyway."* Rejected on review: this is
+  exactly the =package-boundaries.org= rule 1 violation the module has
+  avoided everywhere else, and would make a future alternate
+  simulation implementation, or a unit test of =backtest= itself,
+  need to route through or stub a concrete adapter rather than a
+  narrow port.
+- *Concentrate no-lookahead enforcement entirely in the replay
+  source.* Rejected: a replay source can guarantee ordering without
+  the scheduler and =View= also respecting *when* and *what* becomes
+  visible; stating the invariant as replay-only would have left a real
+  lookahead channel through orchestration that ignores visibility
+  timing.
+- *Fold result/metrics computation into report, since report is where
+  the numbers are ultimately displayed.* Rejected: conflates
+  computation with presentation, and would make a future non-rendering
+  consumer of the same metrics (for example a golden-suite comparison,
+  #223) depend on a rendering package to get a number.
+- *Embed a resolved instrument.Listing (or the full Resolver) directly
+  in backtest.Request.* Rejected: a resolver is a runtime capability,
+  not run input; embedding it in the immutable request/manifest value
+  would put a service object where reproducible, loggable data
+  belongs. The resolved listing's own reproducibility-relevant fields
+  belong in the run manifest instead.
+- *Introduce portfolio.Portfolio into the base Runner now, anticipating
+  #224.* Rejected: no concrete v0 consumer needs it yet, and #224 is
+  explicitly scoped to prove the multi-instrument/portfolio case
+  itself — consistent with this codebase's established restraint
+  against building for hypothetical future requirements.

@@ -43,11 +43,35 @@ code.
              \                \     |             |        /
               +--------+-------+----+-------------+-------+
                                 |
-                       application services
-                      (backtest, live, scanner)
+                            pipeline
                                 ^
-                                |
-                      adapters and commands
+                    +-----------+-----------+
+                    |                       |
+                backtest                journal, report
+         (application orchestration,   (reusable by backtest
+          also depends on strategy,     and a future live
+          the broker port, and          session, not
+          marketdata directly)          backtest-specific)
+                    ^
+                    |
+              service/backtest
+         (ADR-022 wrapper; siblings
+          service/broker, service/execution
+          each wrap one domain package the
+          same way — service/* depends
+          "downward" on the domain package
+          it wraps, never the reverse)
+                    ^
+                    |
+              adapters and commands
+         (cmd/trader/backtest: the outer
+          composition root that constructs
+          adapters/broker/sim.Broker,
+          pipeline.Pipeline, and an
+          instrument.Resolver, then injects
+          the broker.Broker *port* — never
+          the concrete adapter — into
+          service/backtest)
 #+END_EXAMPLE
 
 =execution= and =risk= (M4, ADR-005/ADR-006) sit alongside =strategy=,
@@ -70,12 +94,50 @@ reversing the "neither depends on strategy" rule stated above.
 =order= already owns the neighboring =Proposal -> Request -> Order ->
 Fill= vocabulary (ADR-017), so =order.Intent= keeps the whole
 =Intent -> Proposal -> RiskDecision -> Request= chain in one
-dependency-direction-consistent package. =strategy= itself is not
-created by #177 and remains deferred to M6, when a real =Strategy=
+dependency-direction-consistent package. =strategy= itself was not
+created by #177; it is built in M5 (#210), when a real =Strategy=
 interface, lifecycle, and =View=/=BarEvent= types have an actual
-consumer to justify them; #177 only adds the value type a future
-=strategy= package will produce and =execution= will consume — both
-depending on =order=, per the diagram above, not on each other.
+consumer (=backtest=) to justify them — #177 only added the value type
+=strategy= produces and =execution= consumes, both depending on
+=order=, per the diagram above, not on each other.
+
+=pipeline= (M4, ADR-031) is the orchestration seam sitting one tier
+above =execution=/=risk=/=broker=: it composes =risk.Sizer=,
+=execution.Planner=, =risk.Engine=, and =broker.Account.Submit= into
+one callable path (=Evaluate=/=Submit=, ADR-032), because that
+composition cannot live inside =execution= or =risk= without reversing
+the "neither depends on broker" rule those packages already enforce.
+Neither =execution= nor =risk= imports =pipeline= back — enforced by
+construction, since either would be a compile-time import cycle.
+
+The =service/*= tier (=service/broker=, =service/execution=,
+=service/backtest=, and their own siblings) is the ADR-022
+application/service layer: each subpackage wraps *one* domain package
+as a transport-neutral use case for an external caller (the CLI today,
+a future REST/WebSocket/SSE adapter) — =service/broker= wraps
+=broker.Broker=, =service/execution= wraps =pipeline.Pipeline=
+directly, and =service/backtest= wraps =backtest.Runner=. A =service/*=
+subpackage depends "downward" on the domain package it wraps; the
+domain package never depends back on its own =service/*= wrapper — the
+same rule =service/doc.go= already states for every =service/*=
+subpackage, unchanged by M5 adding a new one. =journal= and =report=
+(M5) sit alongside =pipeline=/=backtest= at the domain tier rather than
+under =service/*= — both are reusable by a future =live= session, not
+backtest-specific, so neither lives under =backtest/= despite
+=backtest= being their first concrete consumer.
+
+Application orchestration packages (=backtest=, and eventually
+=live=/=scanner=) depend on =pipeline= directly for their own
+in-process execution/risk needs — never on =service/execution=, which
+exists to serve an external caller's transport-neutral request/
+response shape, not another orchestration package's own synchronous
+call (ADR-035). Concrete adapter construction (=adapters/broker/sim=
+today, a real broker adapter later) belongs only to the outermost
+composition root — =cmd/trader/backtest=, mirroring
+=cmd/trader/execution/service.go='s own existing role — which injects
+the =broker.Broker= *port* into =service/backtest= and, through it,
+=backtest.Runner=. =service/backtest= itself never imports a concrete
+adapter package, exactly like =service/execution= today.
 
 Arrows point from a dependent package toward the package it depends on.
 Read upward: =strategy= may depend on =marketdata=; =marketdata= may
