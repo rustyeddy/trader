@@ -142,6 +142,7 @@ the original decided, use full supersession instead.
 | 032 | Evaluate as the canonical prepare-through-Request path; Submit as its mutating continuation (in adr-032-evaluate-submit-prepare-path.org) | Accepted |
 | 033 | Pipeline verifies broker/account identity before any broker mutation (in adr-033-pipeline-broker-account-identity-check.org) | Accepted |
 | 034 | De-risking exemption in position/exposure-limit risk rules (in adr-034-derisking-exemption-position-limit-rules.org) | Accepted |
+| 035 | M5 backtesting architecture and package boundaries (in adr-035-m5-backtesting-architecture.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -267,6 +268,19 @@ time; the M4 completion review (issue #189, M4-14) found the gap and
 wrote them retroactively so the decisions have a durable record before
 the milestone closes, rather than existing only as PR discussion and
 inline code comments.
+
+Note: ADR-035 is likewise maintained in its own file,
+=docs/arch/adr-035-m5-backtesting-architecture.org=, rather than
+inline in this registry.  Its own Status section is authoritative.
+Issue #209 (M5-01) asks for M5's backtesting architecture and package
+boundaries to be settled before implementation, following the same
+design-notes-then-review pattern issue #176 (M4-01) used for
+ADR-005/ADR-006; this ADR records the resulting decision, including
+four refinements from review (runtime-injected broker/pipeline rather
+than backtest constructing an adapter itself, layered no-lookahead
+ownership across replay/scheduler/View, metrics-versus-rendering
+separation between =backtest= and =report=, and listing resolution as
+an injected dependency rather than run input).
 
 * ADR-001: Modular monolith before service decomposition
 
