@@ -27,14 +27,24 @@ type FailedRequirement struct {
 }
 
 // CoverageError reports that one or more DataRequirements could not be
-// satisfied over Replay's requested span. It carries every failing
+// satisfied over Replay's requested span because Manager.Bars reported
+// marketdata.ErrDataUnavailable for them. It carries every such failing
 // requirement NewReplay found, not merely the first, so a caller (and
 // a future run manifest) can see the complete picture in one pass
 // rather than discovering failures one NewReplay retry at a time.
 //
-// errors.Is(err, marketdata.ErrDataUnavailable) reports true for a
-// *CoverageError (see Is below), so a caller checking for that
-// sentinel does not need to know about backtest's own wrapper type.
+// Every contained FailedRequirement.Err is guaranteed to wrap
+// marketdata.ErrDataUnavailable — see NewReplay's classification rule.
+// Any other kind of Bars failure (invalid query, listing-resolution
+// failure, marketdata.ErrInconsistentData, and so on) aborts NewReplay
+// immediately instead of being accumulated here, so a *CoverageError
+// never blurs "data not available" together with a configuration or
+// data-integrity problem (issue #212 review).
+//
+// CoverageError implements Unwrap() []error over its contained causes,
+// so errors.Is(err, marketdata.ErrDataUnavailable) and similar checks
+// against a *CoverageError use Go's normal multi-error traversal rather
+// than a hand-rolled, unconditional match.
 type CoverageError struct {
 	Failures []FailedRequirement
 }
@@ -49,11 +59,15 @@ func (e *CoverageError) Error() string {
 	return fmt.Sprintf("backtest: replay: coverage unavailable for %d requirement(s)", len(e.Failures))
 }
 
-// Is reports true for marketdata.ErrDataUnavailable, so
-// errors.Is(err, marketdata.ErrDataUnavailable) succeeds against a
-// *CoverageError without a caller needing to type-assert it directly.
-func (e *CoverageError) Is(target error) bool {
-	return target == marketdata.ErrDataUnavailable
+// Unwrap returns every contained failure's error, letting errors.Is and
+// errors.As traverse into the real causes instead of a manufactured
+// sentinel.
+func (e *CoverageError) Unwrap() []error {
+	errs := make([]error, len(e.Failures))
+	for i, f := range e.Failures {
+		errs[i] = f.Err
+	}
+	return errs
 }
 
 // Replay merges the canonical bar history for a set of
@@ -111,9 +125,15 @@ type requirementKey struct {
 // being replayed. See issue #212's review.
 //
 // NewReplay opens every requirement's reader before deciding success
-// or failure, so a *CoverageError names every failing requirement —
-// never only the first. If any requirement fails, every reader already
-// successfully opened is closed before NewReplay returns the error, so
+// or failure, so a *CoverageError names every requirement that failed
+// with marketdata.ErrDataUnavailable — never only the first. Any
+// requirement that fails with a different kind of error (an invalid
+// query, a listing-resolution failure, marketdata.ErrInconsistentData,
+// and so on) aborts NewReplay immediately with that error, unwrapped —
+// such a failure is a configuration or data-integrity problem, not a
+// "coverage unavailable" condition, and must not be blurred together
+// with one (issue #212 review). Either way, every reader already
+// successfully opened is closed before NewReplay returns an error, so
 // a failed call never leaks an open reader.
 func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []strategy.DataRequirement, span marketdata.TimeRange) (*Replay, error) {
 	if err := ctx.Err(); err != nil {
@@ -138,11 +158,11 @@ func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []
 			Range:      span,
 		})
 		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
+			if !errors.Is(err, marketdata.ErrDataUnavailable) {
 				for _, s := range streams {
 					s.reader.Close()
 				}
-				return nil, ctxErr
+				return nil, fmt.Errorf("backtest: replay: %s %s: %w", req.Instrument, req.Interval, err)
 			}
 			failures = append(failures, FailedRequirement{Requirement: req, Err: err})
 			continue

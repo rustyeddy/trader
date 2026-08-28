@@ -1,7 +1,7 @@
 package backtest
 
 import (
-	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,15 +63,36 @@ func TestLessStreamTieBreaksByInstrumentThenInterval(t *testing.T) {
 
 // TestCoverageErrorSingleFailureMessage covers the singular branch of
 // CoverageError.Error, which a multi-failure fixture test cannot reach.
+// The contained error wraps marketdata.ErrDataUnavailable, matching
+// NewReplay's own classification rule (issue #212 review): only
+// ErrDataUnavailable failures are ever accumulated into a
+// CoverageError, so errors.Is(err, marketdata.ErrDataUnavailable) is
+// expected to succeed via CoverageError's Unwrap() []error rather than
+// an unconditional Is method.
 func TestCoverageErrorSingleFailureMessage(t *testing.T) {
 	err := &CoverageError{
 		Failures: []FailedRequirement{
 			{
 				Requirement: strategy.DataRequirement{Instrument: eurusdIDForTest(t), Interval: marketdata.H1},
-				Err:         errors.New("no coverage for [2024-01-16T22:00:00Z, 2024-01-17T22:00:00Z)"),
+				Err:         fmt.Errorf("%w: no coverage for [2024-01-16T22:00:00Z, 2024-01-17T22:00:00Z)", marketdata.ErrDataUnavailable),
 			},
 		},
 	}
 	assert.Contains(t, err.Error(), "no coverage for")
 	assert.ErrorIs(t, err, marketdata.ErrDataUnavailable)
+}
+
+// TestCoverageErrorUnwrapDoesNotMatchUnrelatedErrors proves
+// CoverageError's Unwrap-based Is behavior is not an unconditional
+// match: an error it does not contain must not be reported present.
+func TestCoverageErrorUnwrapDoesNotMatchUnrelatedErrors(t *testing.T) {
+	err := &CoverageError{
+		Failures: []FailedRequirement{
+			{
+				Requirement: strategy.DataRequirement{Instrument: eurusdIDForTest(t), Interval: marketdata.H1},
+				Err:         fmt.Errorf("%w: gap", marketdata.ErrDataUnavailable),
+			},
+		},
+	}
+	assert.NotErrorIs(t, err, marketdata.ErrInconsistentData)
 }

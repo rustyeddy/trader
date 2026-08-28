@@ -309,6 +309,28 @@ func TestNewReplay_PartialCoverageFailsTheWholeRequirement(t *testing.T) {
 	require.Equal(t, marketdata.D1, covErr.Failures[0].Requirement.Interval)
 }
 
+// TestNewReplay_NonDataUnavailableFailureAbortsImmediately is issue
+// #212's own review finding: a Bars failure that is not
+// marketdata.ErrDataUnavailable — here, a listing-resolution failure
+// for an instrument the resolver never registered — must abort
+// NewReplay directly rather than being accumulated into a
+// *CoverageError alongside genuine coverage-unavailable failures.
+func TestNewReplay_NonDataUnavailableFailureAbortsImmediately(t *testing.T) {
+	mgr := newTestManager(t)
+	span := narrowSpan(t)
+	publishFixture(t, mgr, marketdata.H1, span)
+
+	unregistered := instrument.CurrencyPairID(num.MustParseCurrency("GBP"), num.MustParseCurrency("USD"))
+	req := strategy.DataRequirement{Instrument: unregistered, Interval: marketdata.H1}
+
+	_, err := backtest.NewReplay(context.Background(), mgr, []strategy.DataRequirement{h1Requirement(t), req}, span)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, marketdata.ErrDataUnavailable)
+
+	var covErr *backtest.CoverageError
+	require.False(t, errors.As(err, &covErr), "a resolution failure must not be wrapped in CoverageError")
+}
+
 func TestReplay_NextReturnsIOEOFRepeatedlyAfterExhaustion(t *testing.T) {
 	mgr := newTestManager(t)
 	span := narrowSpan(t)
