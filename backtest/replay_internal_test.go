@@ -1,6 +1,7 @@
 package backtest
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -26,8 +27,11 @@ func gbpusdIDForTest(t *testing.T) instrument.ID {
 }
 
 // TestLessStreamTieBreaksByInstrumentThenInterval is a white-box test
-// for the canonical merge tie-break, covering the instrument-ID branch
-// that a single-instrument fixture in replay_test.go cannot reach.
+// for the canonical merge tie-break, covering the instrument-ID and
+// interval branches that a single-instrument fixture in replay_test.go
+// cannot reach. The interval comparison uses Interval's intrinsic
+// Unit()/Count(), not its display-only String() (issue #212 review):
+// UnitHour < UnitDay, so H1 sorts before D1 at an instrument tie.
 func TestLessStreamTieBreaksByInstrumentThenInterval(t *testing.T) {
 	when := time.Date(2024, time.January, 8, 0, 0, 0, 0, time.UTC)
 
@@ -47,7 +51,8 @@ func TestLessStreamTieBreaksByInstrumentThenInterval(t *testing.T) {
 		req:    strategy.DataRequirement{Instrument: eurusdIDForTest(t), Interval: marketdata.D1},
 		peeked: &marketdata.Bar{Time: when},
 	}
-	assert.True(t, lessStream(sameInstD1, eur), "D1 sorts before H1 lexically at an instrument tie")
+	assert.True(t, lessStream(eur, sameInstD1), "UnitHour < UnitDay: H1 sorts before D1 at an instrument tie")
+	assert.False(t, lessStream(sameInstD1, eur))
 
 	earlier := &replayStream{
 		req:    strategy.DataRequirement{Instrument: gbpusdIDForTest(t), Interval: marketdata.H1},
@@ -56,42 +61,17 @@ func TestLessStreamTieBreaksByInstrumentThenInterval(t *testing.T) {
 	assert.True(t, lessStream(earlier, eur), "an earlier timestamp always sorts first, regardless of instrument/interval")
 }
 
-// TestCoverageCompleteRejectsNonCurrentPartitionEvenWithoutGaps covers
-// coverageComplete's partition-status branch directly: a partition
-// that is Missing, Invalid, or Stale contributes no Gaps of its own
-// (Coverage's own doc comment), so a real fixture that only exercises
-// the Gaps branch cannot reach this one.
-func TestCoverageCompleteRejectsNonCurrentPartitionEvenWithoutGaps(t *testing.T) {
-	cov := marketdata.Coverage{
-		Partitions: []marketdata.PartitionCoverage{
-			{Year: 2024, Month: time.January, Status: marketdata.PartitionCoverageMissing},
-		},
-	}
-	assert.False(t, coverageComplete(cov))
-}
-
-func TestCoverageCompleteAcceptsCurrentPartitionsWithNoGaps(t *testing.T) {
-	cov := marketdata.Coverage{
-		Partitions: []marketdata.PartitionCoverage{
-			{Year: 2024, Month: time.January, Status: marketdata.PartitionCoverageCurrent},
-		},
-	}
-	assert.True(t, coverageComplete(cov))
-}
-
 // TestCoverageErrorSingleFailureMessage covers the singular branch of
 // CoverageError.Error, which a multi-failure fixture test cannot reach.
 func TestCoverageErrorSingleFailureMessage(t *testing.T) {
 	err := &CoverageError{
-		Failures: []RequirementCoverage{
+		Failures: []FailedRequirement{
 			{
 				Requirement: strategy.DataRequirement{Instrument: eurusdIDForTest(t), Interval: marketdata.H1},
-				Coverage: marketdata.Coverage{
-					Gaps: []marketdata.Gap{{}},
-				},
+				Err:         errors.New("no coverage for [2024-01-16T22:00:00Z, 2024-01-17T22:00:00Z)"),
 			},
 		},
 	}
-	assert.Contains(t, err.Error(), "1 gap(s)")
+	assert.Contains(t, err.Error(), "no coverage for")
 	assert.ErrorIs(t, err, marketdata.ErrDataUnavailable)
 }

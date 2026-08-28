@@ -19,34 +19,32 @@ import (
 // the other's.
 var ErrDuplicateRequirement = errors.New("backtest: duplicate data requirement")
 
-// RequirementCoverage pairs one DataRequirement that failed NewReplay's
-// coverage preflight with the marketdata.Coverage analysis explaining
-// why.
-type RequirementCoverage struct {
+// FailedRequirement pairs one DataRequirement that NewReplay could not
+// open with the error marketdata.Manager.Bars itself returned for it.
+type FailedRequirement struct {
 	Requirement strategy.DataRequirement
-	Coverage    marketdata.Coverage
+	Err         error
 }
 
 // CoverageError reports that one or more DataRequirements could not be
 // satisfied over Replay's requested span. It carries every failing
-// requirement NewReplay's preflight found, not merely the first, so a
-// caller (and a future run manifest) can see the complete picture in
-// one pass rather than discovering failures one NewReplay retry at a
-// time.
+// requirement NewReplay found, not merely the first, so a caller (and
+// a future run manifest) can see the complete picture in one pass
+// rather than discovering failures one NewReplay retry at a time.
 //
 // errors.Is(err, marketdata.ErrDataUnavailable) reports true for a
 // *CoverageError (see Is below), so a caller checking for that
 // sentinel does not need to know about backtest's own wrapper type.
 type CoverageError struct {
-	Failures []RequirementCoverage
+	Failures []FailedRequirement
 }
 
 // Error summarizes every failing requirement.
 func (e *CoverageError) Error() string {
 	if len(e.Failures) == 1 {
 		f := e.Failures[0]
-		return fmt.Sprintf("backtest: replay: coverage unavailable for %s %s: %d gap(s)",
-			f.Requirement.Instrument, f.Requirement.Interval, len(f.Coverage.Gaps))
+		return fmt.Sprintf("backtest: replay: %s %s: %s",
+			f.Requirement.Instrument, f.Requirement.Interval, f.Err)
 	}
 	return fmt.Sprintf("backtest: replay: coverage unavailable for %d requirement(s)", len(e.Failures))
 }
@@ -90,23 +88,33 @@ type requirementKey struct {
 	interval   marketdata.Interval
 }
 
-// NewReplay validates requirements, performs a full coverage preflight
-// against manager for every requirement over span, and — only if every
-// requirement is fully covered — opens one marketdata.BarReader per
-// requirement.
+// NewReplay validates requirements and opens one marketdata.BarReader
+// per requirement, over span, via manager.Bars — the same call Replay
+// itself later drains through Next.
 //
 // Requirements naming the same (Instrument, Interval) pair are
-// rejected with a wrapped ErrDuplicateRequirement before any coverage
-// check or reader is opened.
+// rejected with a wrapped ErrDuplicateRequirement before any reader is
+// opened.
 //
-// If coverage is incomplete for one or more requirements, NewReplay
-// returns a *CoverageError naming every failing requirement — never
-// only the first — and opens no readers at all.
+// NewReplay uses manager.Bars itself, rather than manager.Coverage, as
+// the authority for whether a requirement is replayable. Bars' own
+// contract is strictly canonical-store-only: it proves complete
+// coverage of the requested range from persisted canonical partition
+// Manifest.Span data alone and returns a wrapped
+// marketdata.ErrDataUnavailable with no reader if it cannot. Coverage,
+// by contrast, additionally inspects the raw provider archive (it
+// requires marketdata.Config.RawRoot and classifies a canonical
+// partition "stale" against the raw archive's current fingerprint) —
+// signals a data-maintenance question, not "is this persisted
+// canonical revision complete and replayable," and would make replay
+// depend on raw-archive state outside the canonical input actually
+// being replayed. See issue #212's review.
 //
-// If every requirement's coverage is complete but opening one of the
-// resulting readers still fails, NewReplay closes every reader it had
-// already opened before returning the error, so a failed NewReplay
-// call never leaks an open reader.
+// NewReplay opens every requirement's reader before deciding success
+// or failure, so a *CoverageError names every failing requirement —
+// never only the first. If any requirement fails, every reader already
+// successfully opened is closed before NewReplay returns the error, so
+// a failed call never leaks an open reader.
 func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []strategy.DataRequirement, span marketdata.TimeRange) (*Replay, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -121,25 +129,8 @@ func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []
 		seen[key] = struct{}{}
 	}
 
-	var failures []RequirementCoverage
-	for _, req := range requirements {
-		cov, err := manager.Coverage(ctx, marketdata.BarQuery{
-			Instrument: req.Instrument,
-			Interval:   req.Interval,
-			Range:      span,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("backtest: replay: coverage: %w", err)
-		}
-		if !coverageComplete(cov) {
-			failures = append(failures, RequirementCoverage{Requirement: req, Coverage: cov})
-		}
-	}
-	if len(failures) > 0 {
-		return nil, &CoverageError{Failures: failures}
-	}
-
 	streams := make([]*replayStream, 0, len(requirements))
+	var failures []FailedRequirement
 	for _, req := range requirements {
 		reader, err := manager.Bars(ctx, marketdata.BarQuery{
 			Instrument: req.Instrument,
@@ -147,33 +138,26 @@ func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []
 			Range:      span,
 		})
 		if err != nil {
-			for _, s := range streams {
-				s.reader.Close()
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				for _, s := range streams {
+					s.reader.Close()
+				}
+				return nil, ctxErr
 			}
-			return nil, fmt.Errorf("backtest: replay: %w", err)
+			failures = append(failures, FailedRequirement{Requirement: req, Err: err})
+			continue
 		}
 		streams = append(streams, &replayStream{req: req, reader: reader})
 	}
 
-	return &Replay{streams: streams}, nil
-}
-
-// coverageComplete mirrors marketdata's own d1Complete convention
-// (marketdata/plan.go): coverage is complete only when there are no
-// Gaps and every touched partition loaded as
-// marketdata.PartitionCoverageCurrent. Coverage's own doc comment
-// states the rule directly (a Missing/Invalid/Stale partition
-// contributes no Gaps of its own), so both checks are required.
-func coverageComplete(cov marketdata.Coverage) bool {
-	if len(cov.Gaps) > 0 {
-		return false
-	}
-	for _, pc := range cov.Partitions {
-		if pc.Status != marketdata.PartitionCoverageCurrent {
-			return false
+	if len(failures) > 0 {
+		for _, s := range streams {
+			s.reader.Close()
 		}
+		return nil, &CoverageError{Failures: failures}
 	}
-	return true
+
+	return &Replay{streams: streams}, nil
 }
 
 // Next returns the next bar event in the merged stream, in canonical
@@ -240,7 +224,10 @@ func (s *replayStream) fill(ctx context.Context) error {
 
 // lessStream reports whether a's peeked bar sorts before b's, under the
 // canonical (timestamp, instrument ID, interval) tie-break. Both a and
-// b must have a non-nil peeked bar.
+// b must have a non-nil peeked bar. The interval component compares
+// Unit() then Count() — Interval's intrinsic fields — never String(),
+// which is documented as display-only and carries no stability
+// obligation (issue #212 review).
 func lessStream(a, b *replayStream) bool {
 	if !a.peeked.Time.Equal(b.peeked.Time) {
 		return a.peeked.Time.Before(b.peeked.Time)
@@ -248,7 +235,10 @@ func lessStream(a, b *replayStream) bool {
 	if ai, bi := a.req.Instrument.String(), b.req.Instrument.String(); ai != bi {
 		return ai < bi
 	}
-	return a.req.Interval.String() < b.req.Interval.String()
+	if au, bu := a.req.Interval.Unit(), b.req.Interval.Unit(); au != bu {
+		return au < bu
+	}
+	return a.req.Interval.Count() < b.req.Interval.Count()
 }
 
 // Close releases every reader Replay opened. It is idempotent: a

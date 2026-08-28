@@ -187,15 +187,26 @@ func TestNewReplay_MergesMultipleRequirementsInCanonicalOrder(t *testing.T) {
 		prev, cur := events[i-1], events[i]
 		require.False(t, cur.Bar.Time.Before(prev.Bar.Time), "events must never move backward in time")
 		if cur.Bar.Time.Equal(prev.Bar.Time) {
-			// Same-timestamp tie-break: instrument ID, then interval,
-			// both compared as strings — never input order.
+			// Same-timestamp tie-break: instrument ID, then interval's
+			// intrinsic Unit()/Count() — never input order, and never
+			// Interval.String(), which is display-only.
 			if prev.Instrument.Equal(cur.Instrument) {
-				require.Less(t, prev.Interval.String(), cur.Interval.String())
+				require.True(t, intervalLess(prev.Interval, cur.Interval))
 			} else {
 				require.Less(t, prev.Instrument.String(), cur.Instrument.String())
 			}
 		}
 	}
+}
+
+// intervalLess reports whether a sorts before b under the same
+// intrinsic Unit()-then-Count() ordering Replay's own merge tie-break
+// uses.
+func intervalLess(a, b marketdata.Interval) bool {
+	if a.Unit() != b.Unit() {
+		return a.Unit() < b.Unit()
+	}
+	return a.Count() < b.Count()
 }
 
 // TestNewReplay_OrderIsIndependentOfRequirementInputOrder is issue
