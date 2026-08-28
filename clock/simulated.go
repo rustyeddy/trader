@@ -82,13 +82,41 @@ func (s *Simulated) NewTimer(d time.Duration) Timer {
 // whose deadline is now due. Advance never waits on wall-clock time and
 // returns ErrNegativeAdvance without changing the clock if d is negative.
 func (s *Simulated) Advance(d time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.advanceBy(d)
+}
+
+// AdvanceTo moves the clock's current time forward to exactly t, firing
+// every timer due at or before t — the primitive a historical-timestamp-
+// driven backtest scheduler needs (issue #211, M5-03), so it never has to
+// compute t.Sub(Now()) itself at every call site. t is canonicalized to
+// UTC with any monotonic reading stripped (matching NewSimulated's own
+// canonicalization) before comparison, so equivalent instants expressed
+// in different locations or carrying monotonic metadata never produce
+// different clock state. AdvanceTo rejects a t before the clock's
+// current time with ErrNegativeAdvance, leaving both time and timer
+// state unchanged, the same way Advance itself rejects a negative
+// duration; t equal to the current time is a valid no-op. AdvanceTo takes
+// no context.Context: like Advance, it is a synchronous, bounded state
+// mutation with no blocking work, and cancellation policy for a
+// potentially long-running replay loop belongs to the caller driving
+// that loop (the scheduler, #213), not to this primitive.
+func (s *Simulated) AdvanceTo(t time.Time) error {
+	target := t.UTC().Round(0)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.advanceBy(target.Sub(s.now))
+}
+
+// advanceBy must be called with s.mu held. It applies duration d,
+// rejecting a negative one without changing state — the shared core
+// both Advance and AdvanceTo delegate to, so the two can never
+// disagree about what "advance" means.
+func (s *Simulated) advanceBy(d time.Duration) error {
 	if d < 0 {
 		return ErrNegativeAdvance
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.now = s.now.Add(d)
 	s.fireDue()
 	return nil
