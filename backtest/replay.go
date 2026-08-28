@@ -160,7 +160,7 @@ func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []
 		if err != nil {
 			if !errors.Is(err, marketdata.ErrDataUnavailable) {
 				for _, s := range streams {
-					s.reader.Close()
+					_ = s.reader.Close()
 				}
 				return nil, fmt.Errorf("backtest: replay: %s %s: %w", req.Instrument, req.Interval, err)
 			}
@@ -172,7 +172,7 @@ func NewReplay(ctx context.Context, manager *marketdata.Manager, requirements []
 
 	if len(failures) > 0 {
 		for _, s := range streams {
-			s.reader.Close()
+			_ = s.reader.Close()
 		}
 		return nil, &CoverageError{Failures: failures}
 	}
