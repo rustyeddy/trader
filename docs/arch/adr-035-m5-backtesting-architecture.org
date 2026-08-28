@@ -93,15 +93,21 @@ directly, never =service/execution.Service=. =service/execution= is
 the ADR-022 transport-facing wrapper for an external caller (CLI, a
 future REST adapter) that needs its own fresh account-snapshot read
 per request; =backtest= is itself an application-orchestration
-package at the same tier as =service/*= in the dependency graph (per
-ADR-031's own placement of =pipeline= as the seam both
-=service/execution= and future =backtest=/=live= consume directly).
-Routing through =service/execution= would add a layer serving a
+package that depends on =pipeline= directly, at the same dependency
+tier =service/execution= itself occupies relative to =pipeline= — not
+a consumer *of* =service/execution= (per ADR-031's own placement of
+=pipeline= as the seam both =service/execution= and future
+=backtest=/=live= consume independently, each on their own dependency
+line down to =pipeline=, never through each other). =service/backtest=
+(the ADR-022 wrapper *around* =backtest=, symmetric with how
+=service/execution= wraps =pipeline=) is a separate, higher tier again
+— see "Runtime dependencies" below for the full chain. Routing
+=backtest= through =service/execution= would add a layer serving a
 different concern for no benefit to an in-process caller that already
 knows precisely when a fresh snapshot is needed, because it drives the
 clock itself.
 
-** Runtime dependencies: no adapter construction inside backtest
+** Runtime dependencies: no adapter construction inside backtest or service/backtest
 
 =backtest= must not construct =adapters/broker/sim.Broker= (or any
 concrete adapter) internally. This is a direct application of
@@ -109,14 +115,24 @@ concrete adapter) internally. This is a direct application of
 adapters") to the new package: =backtest.Runner= depends on
 =broker.Broker= and =*pipeline.Pipeline= as constructor-injected
 values, the same way =service/execution.Service= already does (issue
-#186). The composition root — =service/backtest= or
-=cmd/trader/backtest= — constructs the concrete simulated broker
-(fresh per run, which remains correct) and hands the port/pipeline to
-=Runner=, exactly mirroring how =cmd/trader/execution/service.go=
-builds =sim.Broker= today and hands only the =broker.Broker= interface
-to =service/execution.New=. This keeps every future alternate
-simulation implementation, and every test of =backtest= itself, free
-of a concrete adapter dependency.
+#186).
+
+Concrete adapter construction belongs only to the outermost
+composition root, =cmd/trader/backtest= — never =service/backtest=.
+The dependency chain is =cmd/trader/backtest -> service/backtest ->
+backtest -> pipeline=: =cmd/trader/backtest= constructs
+=adapters/broker/sim.Broker=, =pipeline.Pipeline=, and an
+=instrument.Resolver=, and injects only the =broker.Broker= *port*
+(plus the already-built =*pipeline.Pipeline= and resolver) into
+=service/backtest=, which in turn builds/holds a =*backtest.Runner=
+from those same injected values — =service/backtest= itself never
+imports =adapters/broker/sim=. This exactly mirrors how
+=cmd/trader/execution/service.go= builds =sim.Broker= today and hands
+only the =broker.Broker= interface (plus an already-built
+=*pipeline.Pipeline=) to =service/execution.New=, which likewise never
+imports =adapters/broker/sim=. This keeps every future alternate
+simulation implementation, and every test of =backtest= or
+=service/backtest=, free of a concrete adapter dependency.
 
 ** No-lookahead is a layered invariant, not one package's job
 
