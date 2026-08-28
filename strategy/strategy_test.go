@@ -52,7 +52,7 @@ func mustSnapshot(t *testing.T) account.Snapshot {
 	return snap
 }
 
-func mustEurUsdListing(t *testing.T) instrument.ID {
+func mustEurUsdInstrumentID(t *testing.T) instrument.ID {
 	t.Helper()
 	inst, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
 	require.NoError(t, err)
@@ -67,10 +67,17 @@ func mustEurUsdListing(t *testing.T) instrument.ID {
 // sees, and does nothing on every bar after — enough to exercise
 // Describe/Start/OnBar and IntentFactory together without inventing
 // real trading logic this issue does not need.
+//
+// It retains the IntentFactory Start receives via env and calls it
+// from OnBar — the same lifecycle contract a real strategy follows:
+// the runtime injects capabilities once, in Start, and strategy logic
+// uses those retained capabilities across every later OnBar call,
+// since OnBar itself never receives an Environment (review feedback
+// on PR #228).
 type buyOnFirstBarStrategy struct {
-	instID   instrument.ID
-	entered  bool
-	startCtx bool
+	instID  instrument.ID
+	intents IntentFactory
+	entered bool
 }
 
 func (s *buyOnFirstBarStrategy) Describe() Descriptor {
@@ -84,7 +91,7 @@ func (s *buyOnFirstBarStrategy) Describe() Descriptor {
 }
 
 func (s *buyOnFirstBarStrategy) Start(ctx context.Context, env Environment) error {
-	s.startCtx = true
+	s.intents = env.Intents
 	return nil
 }
 
@@ -93,19 +100,23 @@ func (s *buyOnFirstBarStrategy) OnBar(ctx context.Context, event BarEvent, view 
 		return nil, nil
 	}
 	s.entered = true
-	return nil, nil // real intent construction is exercised via env.Intents below
+	in, err := s.intents.Enter(s.instID, order.Buy)
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
 }
 
 var _ Strategy = (*buyOnFirstBarStrategy)(nil)
 
 // TestStrategy_RepresentativeInvocation drives a Strategy through the
 // real contract end to end: Describe, Start with an Environment, and
-// OnBar with a View — using Environment.Intents to build a real
-// order.Intent, proving the contract is usable exactly as a runner
-// would use it.
+// OnBar with a View — proving a strategy can retain Start's injected
+// IntentFactory and use it from OnBar to actually emit an
+// order.Intent, the way a runner would exercise it.
 func TestStrategy_RepresentativeInvocation(t *testing.T) {
 	ctx := context.Background()
-	instID := mustEurUsdListing(t)
+	instID := mustEurUsdInstrumentID(t)
 	s := &buyOnFirstBarStrategy{instID: instID}
 
 	desc := s.Describe()
@@ -121,7 +132,6 @@ func TestStrategy_RepresentativeInvocation(t *testing.T) {
 		Logger:  logging.Discard(),
 	}
 	require.NoError(t, s.Start(ctx, env))
-	assert.True(t, s.startCtx)
 
 	bar := marketdata.Bar{
 		Time:  testStart,
@@ -135,15 +145,11 @@ func TestStrategy_RepresentativeInvocation(t *testing.T) {
 
 	intents, err := s.OnBar(ctx, event, view)
 	require.NoError(t, err)
-	assert.Empty(t, intents, "this fixture's own OnBar returns no intents directly")
-
-	// Prove env.Intents (what a real strategy would call from inside
-	// OnBar) actually builds a valid, canonical order.Intent.
-	in, err := env.Intents.Enter(instID, order.Buy)
-	require.NoError(t, err)
-	assert.Equal(t, order.IntentEnter, in.Kind)
-	assert.Equal(t, instID, in.Instrument)
-	assert.False(t, in.IntentID.IsZero())
+	require.Len(t, intents, 1, "the first bar must emit exactly the one Enter intent this fixture describes")
+	assert.Equal(t, order.IntentEnter, intents[0].Kind)
+	assert.Equal(t, instID, intents[0].Instrument)
+	assert.Equal(t, order.Buy, intents[0].Side)
+	assert.False(t, intents[0].IntentID.IsZero())
 
 	// A second OnBar call on the same strategy instance is a no-op,
 	// proving state carries across calls the way a real strategy's

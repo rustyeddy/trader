@@ -27,13 +27,17 @@ type Strategy interface {
 
 	// Start is called once, before any OnBar call, with this run's own
 	// Environment. A strategy performs one-time setup here — it does
-	// not yet have a View, since no bar has been replayed.
+	// not yet have a View, since no bar has been replayed. OnBar itself
+	// never receives an Environment: a strategy that needs Environment
+	// or any of its capabilities (in particular Intents, to build the
+	// order.Intent values OnBar returns) must retain what it needs from
+	// env here, typically by storing it on the Strategy's own value.
 	Start(ctx context.Context, env Environment) error
 
 	// OnBar is called once per completed bar this strategy required
 	// (Descriptor.Requirements), after any configured warm-up period
-	// has elapsed. It returns zero or more order.Intent values built
-	// via Environment.Intents — never a broker call, never a direct
-	// order submission.
+	// has elapsed. It returns zero or more order.Intent values, built
+	// via the IntentFactory Start's own Environment.Intents provided —
+	// never a broker call, never a direct order submission.
 	OnBar(ctx context.Context, event BarEvent, view View) ([]order.Intent, error)
 }
