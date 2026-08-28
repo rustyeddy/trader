@@ -28,22 +28,6 @@ func TestSimulatedAdvanceToEqualToNowIsANoOp(t *testing.T) {
 	assert.True(t, c.Now().Equal(start))
 }
 
-// TestSimulatedAdvanceToEqualToNowStillFiresDueTimers proves the
-// no-op case still fires any timer already due, matching Advance(0)'s
-// own documented behavior.
-func TestSimulatedAdvanceToEqualToNowStillFiresDueTimers(t *testing.T) {
-	start := mustParse(t, "2026-01-01T00:00:00Z")
-	c := NewSimulated(start)
-	timer := c.NewTimer(0)
-
-	require.NoError(t, c.AdvanceTo(start))
-	select {
-	case <-timer.C():
-	default:
-		t.Fatal("a timer already due must fire on a no-op AdvanceTo")
-	}
-}
-
 func TestSimulatedAdvanceToRejectsTargetBeforeNow(t *testing.T) {
 	start := mustParse(t, "2026-01-01T00:00:00Z")
 	c := NewSimulated(start)

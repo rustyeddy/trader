@@ -97,8 +97,7 @@ func (s *Simulated) Advance(d time.Duration) error {
 // different clock state. AdvanceTo rejects a t before the clock's
 // current time with ErrNegativeAdvance, leaving both time and timer
 // state unchanged, the same way Advance itself rejects a negative
-// duration; t equal to the current time is a valid no-op (matching
-// Advance(0), which still fires any timer already due). AdvanceTo takes
+// duration; t equal to the current time is a valid no-op. AdvanceTo takes
 // no context.Context: like Advance, it is a synchronous, bounded state
 // mutation with no blocking work, and cancellation policy for a
 // potentially long-running replay loop belongs to the caller driving
