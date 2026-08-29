@@ -14,11 +14,14 @@
 // document's own "small required core plus capability discovery"
 // guidance).
 //
-// View is similarly minimal: Account() account.Snapshot is the one
-// read it exposes today. A historical-bar lookup method is
-// deliberately deferred until the replay/scheduler work (#212/#213)
-// proves the access pattern a real backtest run needs — freezing it
-// now risked designing against the wrong shape.
+// View's required surface is similarly minimal: Account()
+// account.Snapshot is the one read every View exposes. Historical-bar
+// lookup is History, an optional capability (#214, M5-06) a runtime's
+// concrete View additionally implements — kept a capability rather
+// than a required View method for the same "small required core plus
+// capability discovery" reason, and because #212/#213's replay/
+// scheduler work needed to land first to prove the access pattern a
+// real backtest run needs before freezing History's shape.
 //
 // # Dependency direction
 //

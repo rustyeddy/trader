@@ -9,27 +9,41 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/pipeline"
 	"github.com/rustyeddy/trader/strategy"
 )
 
 // ErrInvalidSchedulerDeps marks a SchedulerDeps missing a required
-// field.
+// field, a Strategy declaring a duplicate DataRequirement, or (at Run
+// time) Replay producing an event for an (instrument, interval)
+// Strategy never declared.
 var ErrInvalidSchedulerDeps = errors.New("backtest: invalid scheduler dependencies")
 
 // InputBuilder turns one order.Intent a Strategy emitted — together
-// with the strategy.BarEvent that triggered it and the account
-// snapshot Scheduler is about to submit against — into the canonical
-// pipeline.Input the M4 pipeline needs.
+// with the strategy.BarEvent it is now eligible against and the
+// account snapshot Scheduler is about to submit with — into the
+// canonical pipeline.Input the M4 pipeline needs.
+//
+// event is the bar that made intent eligible to submit, per
+// Scheduler's own next-bar-open fill-eligibility rule (issue #214
+// review) — not necessarily the bar whose OnBar call emitted intent.
+// A market order decided from a closed bar T is queued, not
+// submitted, until that same DataRequirement's own next bar T+1
+// arrives; Build then receives T+1 as event, since T+1 (specifically
+// its Open) is the honest reference/fill-eligibility observation for
+// that order, not T's own already-priced-in Close. See Scheduler's own
+// doc comment for the full rule and why.
 //
 // This is a seam Scheduler injects rather than owns (issue #213
-// review). Listing resolution and a triggering/reference price are
-// mechanical runtime concerns, but RiskFraction and AdverseDistance
-// are execution/risk *policy* — they belong to the concrete M5 run
+// review). Listing resolution and a reference price are mechanical
+// runtime concerns, but RiskFraction and AdverseDistance are
+// execution/risk *policy* — they belong to the concrete M5 run
 // composition (and #215's run manifest) to configure, not to
 // Scheduler's own public API. Scheduler asks Build to turn a valid
-// emitted Intent plus its triggering observation into the canonical
+// emitted Intent plus its eligibility observation into the canonical
 // M4 input; the resulting pipeline.Input still goes through the
 // unchanged pipeline.Pipeline — Build is not a second execution/risk
 // path.
@@ -51,6 +65,8 @@ type SchedulerDeps struct {
 	// whatever composed these deps (constructing Strategy's own
 	// Environment — Clock, IntentFactory, Logger — is a run-composition
 	// concern, not Scheduler's); Scheduler itself never calls Start.
+	// NewScheduler calls Strategy.Describe() once, to learn the
+	// declared DataRequirements warm-up and History gating need.
 	Strategy strategy.Strategy
 	// Clock is the simulation clock Scheduler advances via AdvanceTo
 	// as replayed bars are processed. It is normally the same
@@ -95,7 +111,7 @@ func (d SchedulerDeps) validate() error {
 
 // Scheduler is the deterministic event scheduler coordinating
 // historical replay, strategy evaluation, and M4 execution/risk
-// submission (issue #213, M5-05, ADR-035).
+// submission (issue #213, M5-05; issue #214, M5-06; ADR-035).
 //
 // # Same-timestamp batching
 //
@@ -104,39 +120,109 @@ func (d SchedulerDeps) validate() error {
 // market-time precedence: two bars sharing one timestamp are logically
 // simultaneous. Scheduler therefore groups every consecutive event
 // Replay yields for one identical bar timestamp T into a single
-// simulation step:
+// simulation step — see runBatch's own doc comment for the exact
+// phase order (fill eligibility, then strategy evaluation, then
+// history growth).
 //
-//  1. clock.AdvanceTo(T) once for the whole batch.
-//  2. Capture one account snapshot — frozen for the whole batch.
-//  3. Call Strategy.OnBar once per event in the batch, in Replay's own
-//     canonical order, but every call sees the same frozen View: all
-//     of T's bars are genuinely visible to every call in the batch —
-//     not only the one bar that triggered it — via View's optional
-//     BatchBars capability (Bars() []strategy.BarEvent), which returns
-//     every event in the current batch regardless of which one is
-//     "this" call's own BarEvent. What no call's View reflects is any
-//     other T-batch call's account/execution effects. This is what
-//     keeps Replay's incidental instrument-ID ordering from silently
-//     becoming trading semantics: EURUSD sorting before GBPUSD at the
-//     same T must never change GBPUSD's own strategy decision, while
-//     GBPUSD's strategy can still see EURUSD's T bar if it needs to.
-//  4. Only after every event in the batch has been evaluated are the
-//     collected intents translated (via InputBuilder) and submitted
-//     through Pipeline, in the same deterministic order the intents
-//     were emitted in.
+// Every OnBar call within one T batch sees the same frozen View: all
+// of T's bars are genuinely visible to every call in the batch — not
+// only the one bar that triggered it — via View's optional BatchBars
+// capability (Bars() []strategy.BarEvent). What no call's View
+// reflects is any other T-batch call's account/execution effects, nor
+// any bar at or after T (see History below). This is what keeps
+// Replay's incidental instrument-ID ordering from silently becoming
+// trading semantics: EURUSD sorting before GBPUSD at the same T must
+// never change GBPUSD's own strategy decision, while GBPUSD's strategy
+// can still see EURUSD's T bar if it needs to.
 //
 // BatchBars is intentionally not part of the base strategy.View
-// contract: #214 (M5-06) owns defining the fuller no-lookahead/
-// historical-bar-visibility API. BatchBars is the narrow, Scheduler-
-// owned seam that makes true T-batch visibility real now, without
-// Scheduler guessing at #214's eventual View method shape.
+// contract — it is a narrow, Scheduler-owned seam (issue #213). One
+// exception to View's own freeze: if Strategy itself mutates its own
+// internal state during one OnBar call, a later call within the same
+// batch can observe that strategy-local state change — Scheduler does
+// not, and cannot, isolate a Strategy value's own fields. What
+// Scheduler guarantees is narrower and specific: account/execution
+// state does not flow forward within a T batch.
 //
-// One exception: if Strategy itself mutates its own internal state
-// during one OnBar call, a later call within the same batch can
-// observe that strategy-local state change — Scheduler does not, and
-// cannot, isolate a Strategy value's own fields. What Scheduler
-// guarantees is narrower and specific: account/execution state does
-// not flow forward within a T batch.
+// # Historical visibility (History)
+//
+// strategy.History is the optional View capability (issue #214)
+// exposing bars strictly before the current batch's own timestamp, for
+// each of Strategy's own declared DataRequirements. Scheduler backs it
+// with one append-only bar buffer per DataRequirement, growing by
+// exactly one bar per requirement per batch that contains an event for
+// it. Crucially, a batch's own bars are appended to these buffers only
+// after every OnBar call in that batch has completed (runBatch phase
+// 3) — so History can never expose the very batch currently being
+// evaluated, only strictly earlier ones. BatchBars (== T) and History
+// (< T) are deliberately disjoint: nothing > T is ever reachable
+// through either.
+//
+// Because the buffers are append-only and every previously-written
+// bar is never mutated in place, a View may safely read from them
+// after Scheduler has appended more — the risk is not stale data, it
+// is over-exposure. frozenView therefore captures, at construction
+// time, each requirement's own buffer length as of just before this
+// batch (its "cutoff"), and HistoryBars only ever reads
+// buffer[:cutoff], returning a defensive copy. A View retained across
+// batches and queried later is therefore permanently frozen at the
+// cutoff it was built with — exactly the "immutable with respect to
+// market-time visibility" invariant strategy.History's own doc comment
+// requires, even though the buffer keeps growing underneath it.
+//
+// # Warm-up
+//
+// Descriptor.Requirements' own WarmupBars documents that warm-up bars
+// are "replayed but not decided on." Scheduler implements this
+// literally: OnBar is called for every bar from the very start of
+// each requirement's own data, so a strategy's own indicator state
+// accumulates normally throughout warm-up — but any intents OnBar
+// returns are silently discarded (never queued, never submitted) until
+// every one of Strategy's own declared DataRequirements has itself
+// observed strictly more than WarmupBars closed bars — the
+// (WarmupBars+1)th bar is the first one whose intents are honored.
+// This is run-wide, not per-triggering-requirement (issue #214
+// review): a strategy's own
+// declared requirement set is what it says it needs to make a sound
+// decision, so one requirement warming up before another does not
+// entitle its own bar's intents through early — every declared
+// requirement must be ready before any intent is honored. Warm-up
+// readiness is monotonic and, once reached, never revisited.
+//
+// # Fill eligibility: next-bar-open, not same-bar-close
+//
+// A strategy decides at bar T's own close (T is already a complete
+// OHLC record by the time OnBar sees it — Scheduler never exposes an
+// open-only partial bar). Submitting a market order that fills at T's
+// own close price would give the strategy an execution opportunity
+// that does not causally exist: you cannot submit and fill inside the
+// zero-duration instant a bar closes. Scheduler therefore treats every
+// intent OnBar returns (once warm-up has cleared) as eligible only
+// once its own DataRequirement's *next* bar arrives — not the next
+// Scheduler batch generally, since different requirements advance at
+// different rates, but specifically the next bar for that exact
+// (instrument, interval).
+//
+// Mechanically: intents are queued per DataRequirement rather than
+// submitted immediately. At the start of processing a new batch,
+// before any OnBar call in it, Scheduler flushes every requirement
+// whose next bar has just arrived — submitting each of that
+// requirement's queued intents through InputBuilder/Pipeline using the
+// newly arrived bar (specifically intended to represent its Open) as
+// the eligibility event. Only after flushing does Scheduler evaluate
+// the new batch's own OnBar calls.
+//
+// One consequence: intents emitted from the very last bar of a
+// requirement's replayed data have no next bar to become eligible
+// against, and are never submitted — a documented boundary of
+// next-bar-open semantics, not a bug. A caller that needs to know
+// about unrealized end-of-run intents is a journaling concern (a later
+// issue), not Scheduler's.
+//
+// Building the *price* InputBuilder derives from the eligibility event
+// (the wiring connecting a bar's Open to the broker's own
+// FillPriceSource) is a run-composition concern, not Scheduler's own —
+// see InputBuilder's doc comment.
 //
 // # Market-order-only execution
 //
@@ -155,23 +241,58 @@ func (d SchedulerDeps) validate() error {
 //
 // # Cancellation
 //
-// ctx is checked at the start of every batch, before each OnBar call,
-// and before each pipeline submission. A cancellation observed mid-
-// batch stops before the next step; whatever was already submitted
-// remains committed — a canceled Run is a defined partial run, not a
-// rollback.
+// ctx is checked at the start of every batch, before each flush/OnBar/
+// submit step. A cancellation observed mid-batch stops before the next
+// step; whatever was already submitted (including any flush already
+// performed) remains committed — a canceled Run is a defined partial
+// run, not a rollback.
 type Scheduler struct {
-	deps    SchedulerDeps
-	pending *strategy.BarEvent
+	deps         SchedulerDeps
+	bufferedNext *strategy.BarEvent
+
+	// warmupRequired and barsSeen are keyed by every DataRequirement
+	// Strategy.Describe() declared, captured once in NewScheduler.
+	// warmupRequired also doubles as the "declared" set History
+	// consults to answer HistoryBars' ok return.
+	warmupRequired map[requirementKey]int
+	barsSeen       map[requirementKey]int
+	warmedUp       bool
+
+	// history holds one append-only bar buffer per declared
+	// requirement, grown only after a batch's OnBar calls complete.
+	history map[requirementKey][]marketdata.Bar
+
+	// queued holds intents awaiting their own requirement's next bar,
+	// keyed the same way.
+	queued map[requirementKey][]order.Intent
 }
 
 // NewScheduler returns a Scheduler over deps. Every field of deps must
-// be set.
+// be set. NewScheduler calls deps.Strategy.Describe() once to learn
+// the DataRequirements warm-up and History gating are evaluated
+// against.
 func NewScheduler(deps SchedulerDeps) (*Scheduler, error) {
 	if err := deps.validate(); err != nil {
 		return nil, err
 	}
-	return &Scheduler{deps: deps}, nil
+
+	requirements := deps.Strategy.Describe().Requirements
+	warmupRequired := make(map[requirementKey]int, len(requirements))
+	for _, req := range requirements {
+		key := requirementKey{instrument: req.Instrument, interval: req.Interval}
+		if _, ok := warmupRequired[key]; ok {
+			return nil, fmt.Errorf("%w: strategy declared duplicate requirement %s %s", ErrInvalidSchedulerDeps, req.Instrument, req.Interval)
+		}
+		warmupRequired[key] = req.WarmupBars
+	}
+
+	return &Scheduler{
+		deps:           deps,
+		warmupRequired: warmupRequired,
+		barsSeen:       make(map[requirementKey]int, len(requirements)),
+		history:        make(map[requirementKey][]marketdata.Bar, len(requirements)),
+		queued:         make(map[requirementKey][]order.Intent),
+	}, nil
 }
 
 // Run drains Replay to completion, driving Strategy and Pipeline as
@@ -203,12 +324,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 
 // nextBatch returns every consecutive strategy.BarEvent Replay yields
 // sharing one identical Bar.Time, buffering the first event of the
-// next batch (if any) in s.pending for the following call. It returns
-// a nil, nil-error batch once Replay is exhausted with nothing
+// next batch (if any) in s.bufferedNext for the following call. It
+// returns a nil, nil-error batch once Replay is exhausted with nothing
 // buffered.
 func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) {
-	first := s.pending
-	s.pending = nil
+	first := s.bufferedNext
+	s.bufferedNext = nil
 	if first == nil {
 		ev, err := s.deps.Replay.Next(ctx)
 		if err != nil {
@@ -230,7 +351,7 @@ func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) 
 			return nil, fmt.Errorf("backtest: scheduler: replay: %w", err)
 		}
 		if !ev.Bar.Time.Equal(first.Bar.Time) {
-			s.pending = &ev
+			s.bufferedNext = &ev
 			break
 		}
 		batch = append(batch, ev)
@@ -238,72 +359,184 @@ func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) 
 	return batch, nil
 }
 
-// emittedIntent pairs one order.Intent a Strategy emitted with the
-// BarEvent that triggered it, so InputBuilder.Build knows what
-// observation produced it.
-type emittedIntent struct {
-	intent order.Intent
-	event  strategy.BarEvent
-}
-
 // runBatch executes one simulation step for every event sharing one
-// timestamp: advance the clock once, evaluate the whole batch against
-// one frozen account snapshot, then submit every collected intent, in
-// order, each freshly snapshotted so risk admission reflects any prior
-// submission within this same batch (submission ordering is not
-// subject to the same no-lookahead concern the View freeze exists
-// for — Pipeline's own risk admission is meant to see real, current
-// account state, mirroring how a live session's account is always
-// authoritative).
+// timestamp T, in five phases:
+//
+//  0. Validate: every event's own (instrument, interval) must be one
+//     of Strategy's own declared DataRequirements — see
+//     ErrInvalidSchedulerDeps's own doc comment for why.
+//  1. Advance: clock.AdvanceTo(T) once. This happens before anything
+//     else in the batch, including the flush below, so every clock
+//     read during T's own execution (InputBuilder, Pipeline, the
+//     broker/account) observes T, not the previous batch's time —
+//     T-open execution and T-close strategy decisions must agree on
+//     what time it now is.
+//  2. Flush: for every event in the batch whose own requirement has
+//     intents queued from an earlier bar, submit them now — this new
+//     bar is that requirement's own next bar, satisfying next-bar-open
+//     eligibility. Flushing happens before any OnBar call in this
+//     batch, since a fill becoming eligible at T's open logically
+//     precedes T's own strategy decisions.
+//  3. Evaluate: capture one frozen account snapshot (post-flush, so
+//     it reflects whatever this batch's own flush just committed) and
+//     one frozen History cutoff per requirement, then call OnBar once
+//     per event in the batch against that one frozen View, collecting
+//     every requirement's own bars-seen increment and any emitted
+//     intents. Warm-up readiness is decided exactly once for the
+//     whole batch, after every event's own bars-seen increment has
+//     already been applied — never per-event mid-batch, which would
+//     make warm-up depend on Replay's own canonical ordering within
+//     the batch. Once every declared requirement has cleared warm-up,
+//     every collected intent from this batch is queued under its own
+//     requirement key; before that, all of them are discarded.
+//  4. Grow history: append this batch's own bars into the per-
+//     requirement history buffers, now that every OnBar call in this
+//     batch has completed — never before, so History can never expose
+//     the batch currently being evaluated.
 func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	// Phase 0: every event's own (instrument, interval) must be one of
+	// Strategy's own declared DataRequirements (issue #214 review). An
+	// undeclared stream would be invisible to History/warm-up
+	// bookkeeping (which key strictly off the declared set) while
+	// still reaching OnBar and being able to emit tradable intents —
+	// exactly the gap warm-up's "run-wide across declared
+	// requirements" guarantee exists to close. Replay producing more
+	// data than Strategy declared is a configuration mismatch between
+	// SchedulerDeps.Replay and SchedulerDeps.Strategy, not a runtime
+	// condition Scheduler should absorb silently.
+	for _, ev := range batch {
+		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+		if _, ok := s.warmupRequired[key]; !ok {
+			return fmt.Errorf("%w: replay produced an event for %s %s, which Strategy.Describe().Requirements never declared",
+				ErrInvalidSchedulerDeps, ev.Instrument, ev.Interval)
+		}
+	}
+
+	// Phase 1: advance the clock to T before anything else observes it.
 	t := batch[0].Bar.Time
 	if err := s.deps.Clock.AdvanceTo(t); err != nil {
 		return fmt.Errorf("backtest: scheduler: advancing clock to %s: %w", t, err)
 	}
 
-	frozen, err := s.deps.Account.Snapshot(ctx)
-	if err != nil {
-		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
-	}
-	view := frozenView{snapshot: frozen, batch: batch}
-
-	var toSubmit []emittedIntent
+	// Phase 2: flush intents that are eligible now.
 	for _, ev := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+		intents := s.queued[key]
+		if len(intents) == 0 {
+			continue
+		}
+		delete(s.queued, key)
+		for _, in := range intents {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := s.submit(ctx, in, ev); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Phase 3: evaluate the batch against one frozen snapshot/history.
+	frozen, err := s.deps.Account.Snapshot(ctx)
+	if err != nil {
+		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
+	}
+	cutoffs := make(map[requirementKey]int, len(s.warmupRequired))
+	for key := range s.warmupRequired {
+		cutoffs[key] = len(s.history[key])
+	}
+	view := frozenView{
+		snapshot: frozen,
+		batch:    batch,
+		history: historyView{
+			buffers:  s.history,
+			cutoffs:  cutoffs,
+			declared: s.warmupRequired,
+		},
+	}
+
+	type collected struct {
+		key     requirementKey
+		intents []order.Intent
+	}
+	var emitted []collected
+	for _, ev := range batch {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+		s.barsSeen[key]++
+
 		intents, err := s.deps.Strategy.OnBar(ctx, ev, view)
 		if err != nil {
 			return fmt.Errorf("backtest: scheduler: OnBar for %s %s at %s: %w", ev.Instrument, ev.Interval, t, err)
 		}
-		for _, in := range intents {
-			toSubmit = append(toSubmit, emittedIntent{intent: in, event: ev})
+		if len(intents) > 0 {
+			emitted = append(emitted, collected{key: key, intents: intents})
 		}
 	}
 
-	for _, e := range toSubmit {
-		if err := ctx.Err(); err != nil {
-			return err
+	if s.allWarm() {
+		for _, c := range emitted {
+			s.queued[c.key] = append(s.queued[c.key], c.intents...)
 		}
+	} // else: warm-up — this whole batch was replayed, not decided on.
 
-		snap, err := s.deps.Account.Snapshot(ctx)
-		if err != nil {
-			return fmt.Errorf("backtest: scheduler: snapshotting account before submitting intent %s: %w", e.intent.IntentID, err)
+	// Phase 4: grow history only now that this batch is fully evaluated.
+	for _, ev := range batch {
+		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+		s.history[key] = append(s.history[key], ev.Bar)
+	}
+
+	return nil
+}
+
+// allWarm reports whether every one of Strategy's own declared
+// DataRequirements has observed strictly more than its own WarmupBars
+// closed bars — the (WarmupBars+1)th bar for a requirement is its
+// first tradable one. It is monotonic — once true, it is cached and
+// never recomputed. Callers must call allWarm only after every event
+// in the current batch has already had its own bars-seen count
+// incremented, so warm-up readiness never depends on which event
+// within a batch happens to be evaluated first.
+func (s *Scheduler) allWarm() bool {
+	if s.warmedUp {
+		return true
+	}
+	for key, need := range s.warmupRequired {
+		if s.barsSeen[key] <= need {
+			return false
 		}
-		in, err := s.deps.Builder.Build(ctx, e.intent, e.event, snap)
-		if err != nil {
-			return fmt.Errorf("backtest: scheduler: building pipeline input for intent %s: %w", e.intent.IntentID, err)
+	}
+	s.warmedUp = true
+	return true
+}
+
+// submit builds and submits one intent via InputBuilder/Pipeline,
+// using event as the eligibility observation (see InputBuilder's own
+// doc comment). A risk rejection is not an error: Pipeline.ErrRejected
+// is an expected outcome, not a Scheduler failure.
+func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strategy.BarEvent) error {
+	snap, err := s.deps.Account.Snapshot(ctx)
+	if err != nil {
+		return fmt.Errorf("backtest: scheduler: snapshotting account before submitting intent %s: %w", intent.IntentID, err)
+	}
+	in, err := s.deps.Builder.Build(ctx, intent, event, snap)
+	if err != nil {
+		return fmt.Errorf("backtest: scheduler: building pipeline input for intent %s: %w", intent.IntentID, err)
+	}
+	if _, err := s.deps.Pipeline.Submit(ctx, in); err != nil {
+		if errors.Is(err, pipeline.ErrRejected) {
+			return nil
 		}
-		if _, err := s.deps.Pipeline.Submit(ctx, in); err != nil {
-			if errors.Is(err, pipeline.ErrRejected) {
-				continue
-			}
-			return fmt.Errorf("backtest: scheduler: submitting intent %s: %w", e.intent.IntentID, err)
-		}
+		return fmt.Errorf("backtest: scheduler: submitting intent %s: %w", intent.IntentID, err)
 	}
 	return nil
 }
@@ -311,13 +544,7 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 // BatchBars is an optional capability a strategy.View handed to OnBar
 // during a Scheduler-driven run implements: every strategy.BarEvent in
 // the current same-timestamp batch, not only the one that triggered
-// this particular OnBar call. This is what makes "all observations at
-// T are visible before any T callback" (issue #213 review) real rather
-// than only documented, without pulling #214's own historical-bar
-// lookup API into Scheduler: a strategy that wants T's other
-// instruments' bars type-asserts its View against BatchBars; a
-// strategy that only needs its own triggering bar (View.Account plus
-// the BarEvent OnBar already received) never needs to.
+// this particular OnBar call. See Scheduler's own doc comment.
 type BatchBars interface {
 	// Bars returns every bar in the current batch, in the same
 	// canonical order Replay yielded them — a defensive copy the
@@ -325,14 +552,45 @@ type BatchBars interface {
 	Bars() []strategy.BarEvent
 }
 
-// frozenView is a strategy.View backed by one fixed account.Snapshot
-// and one fixed batch of BarEvents, both captured once per Scheduler
-// batch — see Scheduler's own doc comment for why account state must
-// not flow forward within a same-timestamp batch. frozenView also
-// implements BatchBars.
+// historyView is frozenView's strategy.History implementation. buffers
+// is shared, mutable, append-only state owned by Scheduler; cutoffs
+// and declared are frozen at construction time, which is what makes a
+// retained View's visibility permanent regardless of how much buffers
+// grows afterward.
+type historyView struct {
+	buffers  map[requirementKey][]marketdata.Bar
+	cutoffs  map[requirementKey]int
+	declared map[requirementKey]int
+}
+
+func (h historyView) HistoryBars(instID instrument.ID, interval marketdata.Interval, n int) ([]marketdata.Bar, bool) {
+	key := requirementKey{instrument: instID, interval: interval}
+	if _, ok := h.declared[key]; !ok {
+		return nil, false
+	}
+	if n <= 0 {
+		return []marketdata.Bar{}, true
+	}
+
+	cutoff := min(h.cutoffs[key], len(h.buffers[key]))
+	full := h.buffers[key]
+	start := max(cutoff-n, 0)
+
+	out := make([]marketdata.Bar, cutoff-start)
+	copy(out, full[start:cutoff])
+	return out, true
+}
+
+// frozenView is a strategy.View backed by one fixed account.Snapshot,
+// one fixed batch of BarEvents, and one fixed historyView — all
+// captured once per Scheduler batch. See Scheduler's own doc comment
+// for why account/history state must not flow forward within, or
+// after, a same-timestamp batch. frozenView implements BatchBars and
+// strategy.History.
 type frozenView struct {
 	snapshot account.Snapshot
 	batch    []strategy.BarEvent
+	history  historyView
 }
 
 func (v frozenView) Account() account.Snapshot { return v.snapshot }
@@ -341,6 +599,10 @@ func (v frozenView) Bars() []strategy.BarEvent {
 	return append([]strategy.BarEvent(nil), v.batch...)
 }
 
-var _ BatchBars = frozenView{}
+func (v frozenView) HistoryBars(instID instrument.ID, interval marketdata.Interval, n int) ([]marketdata.Bar, bool) {
+	return v.history.HistoryBars(instID, interval, n)
+}
 
+var _ BatchBars = frozenView{}
+var _ strategy.History = frozenView{}
 var _ strategy.View = frozenView{}

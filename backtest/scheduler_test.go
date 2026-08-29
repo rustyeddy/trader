@@ -219,7 +219,11 @@ func (b fixedInputBuilder) Build(ctx context.Context, intent order.Intent, event
 		return pipeline.Input{}, fmt.Errorf("fixedInputBuilder: no listing for %s", intent.Instrument)
 	}
 	adverse := b.adverseDistance
-	ref := event.Bar.Close
+	// event is the bar that made intent eligible (its own requirement's
+	// next bar after the one that triggered it), per Scheduler's
+	// next-bar-open fill semantics — Open is the honest reference price
+	// here, not Close.
+	ref := event.Bar.Open
 	return pipeline.Input{
 		Intent:          intent,
 		Listing:         listing,
@@ -236,15 +240,16 @@ func (b fixedInputBuilder) Build(ctx context.Context, intent order.Intent, event
 // after recording each call — tests use it to cancel a context mid-run
 // to exercise Scheduler's cancellation behavior.
 type recordingStrategy struct {
-	mu      sync.Mutex
-	calls   []strategy.BarEvent
-	intents strategy.IntentFactory
-	emit    func(strategy.IntentFactory, strategy.BarEvent) ([]order.Intent, error)
-	onEach  func(strategy.BarEvent)
+	mu           sync.Mutex
+	calls        []strategy.BarEvent
+	intents      strategy.IntentFactory
+	emit         func(strategy.IntentFactory, strategy.BarEvent) ([]order.Intent, error)
+	onEach       func(strategy.BarEvent)
+	requirements []strategy.DataRequirement
 }
 
 func (s *recordingStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{Name: "recording", Version: "test"}
+	return strategy.Descriptor{Name: "recording", Version: "test", Requirements: s.requirements}
 }
 
 func (s *recordingStrategy) Start(ctx context.Context, env strategy.Environment) error {
@@ -277,6 +282,7 @@ func mustEnterOnFirstBarStrategy(t *testing.T) *recordingStrategy {
 	entered := make(map[string]bool)
 	var mu sync.Mutex
 	return &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
 		emit: func(f strategy.IntentFactory, ev strategy.BarEvent) ([]order.Intent, error) {
 			mu.Lock()
 			already := entered[ev.Instrument.String()]
@@ -325,6 +331,19 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 	}
 }
 
+// bothInstrumentsRequirements returns the EUR/USD H1 + GBP/USD H1
+// DataRequirement pair matching newTwoInstrumentReplay's own Replay
+// construction — the declared set most scheduler tests give their
+// strategy fake's Describe(), now that Scheduler validates every
+// Replay event's own (instrument, interval) against it.
+func bothInstrumentsRequirements(t *testing.T) []strategy.DataRequirement {
+	t.Helper()
+	return []strategy.DataRequirement{
+		{Instrument: eurusdID(t), Interval: marketdata.H1},
+		{Instrument: gbpusdID(t), Interval: marketdata.H1},
+	}
+}
+
 func newTwoInstrumentReplay(t *testing.T, mgr *marketdata.Manager) *backtest.Replay {
 	t.Helper()
 	span := schedulerSpan(t)
@@ -351,7 +370,7 @@ func TestScheduler_SameTimestampMultiInstrumentOrdering(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &recordingStrategy{}
+	strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -381,7 +400,7 @@ func TestScheduler_DeterministicAcrossIndependentInstances(t *testing.T) {
 		t.Cleanup(func() { _ = replay.Close() })
 
 		h := newSchedulerHarness(t, schedulerSpan(t).Start())
-		strat := &recordingStrategy{}
+		strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 		deps := newSchedulerDeps(t, replay, strat, h)
 
 		sched, err := backtest.NewScheduler(deps)
@@ -399,15 +418,16 @@ func TestScheduler_DeterministicAcrossIndependentInstances(t *testing.T) {
 // at the moment each OnBar call runs, alongside the triggering
 // instrument.
 type viewObservingStrategy struct {
-	mu          sync.Mutex
-	positions   []int
-	instruments []instrument.ID
-	intents     strategy.IntentFactory
-	enterOnce   map[string]bool
+	mu           sync.Mutex
+	positions    []int
+	instruments  []instrument.ID
+	intents      strategy.IntentFactory
+	enterOnce    map[string]bool
+	requirements []strategy.DataRequirement
 }
 
 func (s *viewObservingStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{Name: "view-observing", Version: "test"}
+	return strategy.Descriptor{Name: "view-observing", Version: "test", Requirements: s.requirements}
 }
 
 func (s *viewObservingStrategy) Start(ctx context.Context, env strategy.Environment) error {
@@ -435,17 +455,19 @@ func (s *viewObservingStrategy) OnBar(ctx context.Context, ev strategy.BarEvent,
 }
 
 // TestScheduler_ViewIsFrozenWithinABatch is the sharp version of the
-// batching-semantics guarantee: EUR/USD's own Enter fill at T0 (it is
-// evaluated and submitted first, per canonical order) must not be
-// visible to GBP/USD's View at the very same T0 — both calls in the
-// first batch must observe zero positions.
+// batching-semantics guarantee: both EUR/USD's and GBP/USD's own View
+// at the very first batch (T0) must observe zero positions — no fill
+// from either instrument's own intent has happened yet (next-bar-open
+// eligibility means nothing fills until T1 in any case), and no T0
+// call's View reflects another T0 call's account effects even once
+// fills do start happening at later batches.
 func TestScheduler_ViewIsFrozenWithinABatch(t *testing.T) {
 	mgr := newSchedulerTestManager(t)
 	replay := newTwoInstrumentReplay(t, mgr)
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &viewObservingStrategy{}
+	strat := &viewObservingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -468,6 +490,7 @@ func TestScheduler_RunPropagatesCancellation(t *testing.T) {
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
 	ctx, cancel := context.WithCancel(context.Background())
 	strat := &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
 		onEach: func(ev strategy.BarEvent) {
 			cancel()
 		},
@@ -490,7 +513,7 @@ func TestScheduler_AlreadyCancelledContextStopsImmediately(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &recordingStrategy{}
+	strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -623,14 +646,15 @@ func TestScheduler_BuilderErrorAbortsRun(t *testing.T) {
 // View exposes the backtest.BatchBars capability and, if so, how many
 // bars and which instruments are visible in the current batch.
 type batchBarsObservingStrategy struct {
-	mu          sync.Mutex
-	sawCapable  []bool
-	batchSizes  []int
-	instruments [][]string
+	mu           sync.Mutex
+	sawCapable   []bool
+	batchSizes   []int
+	instruments  [][]string
+	requirements []strategy.DataRequirement
 }
 
 func (s *batchBarsObservingStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{Name: "batch-bars-observing", Version: "test"}
+	return strategy.Descriptor{Name: "batch-bars-observing", Version: "test", Requirements: s.requirements}
 }
 
 func (s *batchBarsObservingStrategy) Start(ctx context.Context, env strategy.Environment) error {
@@ -670,7 +694,7 @@ func TestScheduler_BatchBarsMakesCrossInstrumentVisibilityReal(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &batchBarsObservingStrategy{}
+	strat := &batchBarsObservingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -684,4 +708,412 @@ func TestScheduler_BatchBarsMakesCrossInstrumentVisibilityReal(t *testing.T) {
 		require.Contains(t, strat.instruments[i], eurusdID(t).String())
 		require.Contains(t, strat.instruments[i], gbpusdID(t).String())
 	}
+}
+
+// enterIfFlatStrategy emits an Enter intent for its own event's
+// instrument on every call where View.Account() shows no existing
+// position for it — so, unlike recordingStrategy's one-shot emit
+// fixtures, it keeps retrying every bar until a fill has actually
+// landed, making it suitable for testing how long that takes to
+// happen under warm-up gating and next-bar-open fill eligibility.
+type enterIfFlatStrategy struct {
+	requirements []strategy.DataRequirement
+	intents      strategy.IntentFactory
+}
+
+func (s *enterIfFlatStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "enter-if-flat", Version: "test", Requirements: s.requirements}
+}
+
+func (s *enterIfFlatStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	s.intents = env.Intents
+	return nil
+}
+
+func (s *enterIfFlatStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	for _, p := range view.Account().Positions() {
+		if p.Listing.InstrumentID().Equal(ev.Instrument) {
+			return nil, nil
+		}
+	}
+	in, err := s.intents.Enter(ev.Instrument, order.Buy)
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
+}
+
+// TestScheduler_NextBarOpenFillEligibility proves #214's fill-timing
+// rule directly: an intent emitted from bar N is not submitted during
+// bar N's own batch — it is only submitted once bar N+1 (the same
+// requirement's own next bar) begins processing, before that bar's own
+// OnBar calls run.
+func TestScheduler_NextBarOpenFillEligibility(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &viewObservingStrategy{requirements: bothInstrumentsRequirements(t)}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Len(t, strat.positions, 8)
+	// Batch 0 (calls 0,1): EUR/USD then GBP/USD, both still flat —
+	// their own bar-0 intents were only just queued, not yet eligible.
+	require.Equal(t, 0, strat.positions[0])
+	require.Equal(t, 0, strat.positions[1])
+	// Batch 1 (calls 2,3): bar 0's queued intents for both instruments
+	// were flushed at the start of batch 1, before any batch-1 OnBar
+	// call — so both calls in batch 1 already see both fills.
+	require.Equal(t, 2, strat.positions[2])
+	require.Equal(t, 2, strat.positions[3])
+}
+
+// enterOnNthCallStrategy emits an Enter intent for its own event's
+// instrument only on that instrument's Nth OnBar call (1-indexed),
+// letting a test target, for example, the very last bar of a fixture's
+// replayed data.
+type enterOnNthCallStrategy struct {
+	mu           sync.Mutex
+	n            int
+	counts       map[string]int
+	requirements []strategy.DataRequirement
+	intents      strategy.IntentFactory
+}
+
+func (s *enterOnNthCallStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "enter-on-nth-call", Version: "test", Requirements: s.requirements}
+}
+
+func (s *enterOnNthCallStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	s.intents = env.Intents
+	s.counts = make(map[string]int)
+	return nil
+}
+
+func (s *enterOnNthCallStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	s.mu.Lock()
+	s.counts[ev.Instrument.String()]++
+	count := s.counts[ev.Instrument.String()]
+	s.mu.Unlock()
+
+	if count != s.n {
+		return nil, nil
+	}
+	in, err := s.intents.Enter(ev.Instrument, order.Buy)
+	if err != nil {
+		return nil, err
+	}
+	return []order.Intent{in}, nil
+}
+
+// TestScheduler_LastBarIntentsAreNeverSubmitted proves the documented
+// boundary consequence of next-bar-open semantics: an intent emitted
+// from the very last bar of a requirement's replayed data has no next
+// bar to become eligible against, and Run completes having never
+// submitted it.
+func TestScheduler_LastBarIntentsAreNeverSubmitted(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &enterOnNthCallStrategy{n: 4, requirements: bothInstrumentsRequirements(t)} // schedulerSpan yields exactly 4 H1 bars per instrument
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	acc, err := h.broker.OpenAccount(context.Background(), h.accountID)
+	require.NoError(t, err)
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, snap.Positions(), "an intent from the last bar has no next bar to become eligible against")
+}
+
+// recordingInputBuilder wraps another InputBuilder, recording the
+// event.Bar.Time each Build call received.
+type recordingInputBuilder struct {
+	inner     backtest.InputBuilder
+	clock     clock.Clock
+	mu        sync.Mutex
+	eventTime []time.Time
+	clockNow  []time.Time
+}
+
+func (b *recordingInputBuilder) Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snap account.Snapshot) (pipeline.Input, error) {
+	b.mu.Lock()
+	b.eventTime = append(b.eventTime, event.Bar.Time)
+	if b.clock != nil {
+		b.clockNow = append(b.clockNow, b.clock.Now())
+	}
+	b.mu.Unlock()
+	return b.inner.Build(ctx, intent, event, snap)
+}
+
+// TestScheduler_InputBuilderReceivesEligibilityEventNotTriggeringEvent
+// proves InputBuilder.Build's event parameter is the bar that made the
+// intent eligible (the triggering requirement's own next bar), not the
+// bar whose OnBar call actually emitted the intent.
+func TestScheduler_InputBuilderReceivesEligibilityEventNotTriggeringEvent(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t) // triggers on each instrument's own bar 0
+	deps := newSchedulerDeps(t, replay, strat, h)
+	rec := &recordingInputBuilder{inner: deps.Builder}
+	deps.Builder = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Len(t, rec.eventTime, 2, "one Build call per instrument, once each queued intent is flushed")
+	triggeringBarTime := schedulerSpan(t).Start()
+	for _, et := range rec.eventTime {
+		require.False(t, et.Equal(triggeringBarTime),
+			"Build must receive the eligibility bar (bar 1), not the triggering bar (bar 0)")
+	}
+}
+
+// TestScheduler_ClockReflectsEligibilityBatchDuringFlush is the
+// regression Rusty's #214 review asked for: flushing (submitting)
+// intents that just became eligible at T's open must happen *after*
+// clock.AdvanceTo(T), not before — so InputBuilder, Pipeline, and the
+// broker/account all observe T, the batch whose open just made the
+// submission eligible, not the previous batch's own time.
+func TestScheduler_ClockReflectsEligibilityBatchDuringFlush(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t) // triggers on each instrument's own bar 0
+	deps := newSchedulerDeps(t, replay, strat, h)
+	rec := &recordingInputBuilder{inner: deps.Builder, clock: h.clockObj}
+	deps.Builder = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Len(t, rec.clockNow, 2, "one flush-time Build call per instrument")
+	bar1Time := schedulerSpan(t).Start().Add(time.Hour) // the eligibility batch (bar 1), not bar 0
+	for i, now := range rec.clockNow {
+		require.True(t, now.Equal(bar1Time),
+			"Clock.Now() during flush must equal the eligibility batch's own timestamp (%s), got %s at call %d", bar1Time, now, i)
+		require.True(t, now.Equal(rec.eventTime[i]), "Clock.Now() during flush must agree with the eligibility event's own Bar.Time")
+	}
+}
+
+// TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements proves #214's
+// run-wide warm-up rule: EUR/USD's own WarmupBars is satisfied first
+// (WarmupBars: 0), but its intents must still be discarded until
+// GBP/USD's own higher WarmupBars also clears — one declared
+// requirement warming up first does not entitle its own intents
+// through early, and warm-up readiness applies uniformly to the whole
+// batch that clears it, not just the event that happened to clear it.
+// See the assertion below for the exact resulting fill count this
+// fixture produces once warm-up and next-bar-open eligibility are both
+// accounted for.
+func TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &enterIfFlatStrategy{
+		requirements: []strategy.DataRequirement{
+			{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 0},
+			{Instrument: gbpusdID(t), Interval: marketdata.H1, WarmupBars: 2},
+		},
+	}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	// GBP/USD needs barsSeen > 2: bar 3 is the first bar where every
+	// declared requirement's own bars-seen count exceeds its own
+	// WarmupBars (EUR/USD's own WarmupBars of 0 was already satisfied
+	// from bar 1 onward). Warm-up readiness is decided once for the
+	// whole bar-3 batch, after both instruments' own bars-seen counts
+	// for bar 3 have been incremented — so both EUR/USD's and GBP/USD's
+	// own bar-3 intents are queued together, uniformly, not just
+	// GBP/USD's. Both are then flushed at bar 4 (each requirement's own
+	// next bar) — exactly one fill each.
+	acc, err := h.broker.OpenAccount(context.Background(), h.accountID)
+	require.NoError(t, err)
+	snap, err := acc.Snapshot(context.Background())
+	require.NoError(t, err)
+
+	positions := snap.Positions()
+	require.Len(t, positions, 2, "bar 3 is the first batch where run-wide warm-up clears, and it clears uniformly for the whole batch")
+	instIDs := []string{positions[0].Listing.InstrumentID().String(), positions[1].Listing.InstrumentID().String()}
+	require.Contains(t, instIDs, eurusdID(t).String())
+	require.Contains(t, instIDs, gbpusdID(t).String())
+}
+
+// historyProbeStrategy records, for its own tracked (instID, interval),
+// how many bars strategy.History exposes on each call, and stashes the
+// View received on its second call for a later, out-of-band re-query.
+type historyProbeStrategy struct {
+	instID   instrument.ID
+	interval marketdata.Interval
+	// otherRequirements declares any additional DataRequirements
+	// Replay will produce events for, beyond (instID, interval) — every
+	// such event must still be declared for Scheduler's own
+	// undeclared-event validation to pass.
+	otherRequirements []strategy.DataRequirement
+
+	mu       sync.Mutex
+	calls    int
+	counts   []int
+	oks      []bool
+	retained strategy.View
+}
+
+func (s *historyProbeStrategy) Describe() strategy.Descriptor {
+	reqs := append([]strategy.DataRequirement{{Instrument: s.instID, Interval: s.interval}}, s.otherRequirements...)
+	return strategy.Descriptor{Name: "history-probe", Version: "test", Requirements: reqs}
+}
+
+func (s *historyProbeStrategy) Start(ctx context.Context, env strategy.Environment) error { return nil }
+
+func (s *historyProbeStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	if !ev.Instrument.Equal(s.instID) || ev.Interval != s.interval {
+		return nil, nil
+	}
+
+	hv, ok := view.(strategy.History)
+	var bars []marketdata.Bar
+	var hok bool
+	if ok {
+		bars, hok = hv.HistoryBars(s.instID, s.interval, 10)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	s.counts = append(s.counts, len(bars))
+	s.oks = append(s.oks, hok)
+	if s.calls == 2 {
+		s.retained = view
+	}
+	return nil, nil
+}
+
+// TestScheduler_HistoryExcludesCurrentBatchAndGrowsEachBar proves
+// History returns strictly-prior bars only, growing by exactly one per
+// call, and that a View retained from an earlier call never gains
+// visibility into bars that arrived after it was constructed — even
+// though the underlying buffer keeps growing.
+func TestScheduler_HistoryExcludesCurrentBatchAndGrowsEachBar(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1, otherRequirements: []strategy.DataRequirement{{Instrument: gbpusdID(t), Interval: marketdata.H1}}}
+	deps := newSchedulerDeps(t, replay, probe, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Equal(t, []int{0, 1, 2, 3}, probe.counts)
+	for _, ok := range probe.oks {
+		require.True(t, ok, "EUR/USD H1 is a declared requirement")
+	}
+
+	require.NotNil(t, probe.retained)
+	hv, ok := probe.retained.(strategy.History)
+	require.True(t, ok)
+	bars, ok := hv.HistoryBars(eurusdID(t), marketdata.H1, 10)
+	require.True(t, ok)
+	require.Len(t, bars, 1, "a retained View's own visibility cutoff is permanent, regardless of replay having since advanced")
+}
+
+// TestScheduler_HistoryReportsFalseForUndeclaredRequirement proves
+// History never makes arbitrary replayed data queryable merely because
+// the runtime happens to have it — only a strategy's own declared
+// DataRequirements are answerable.
+func TestScheduler_HistoryReportsFalseForUndeclaredRequirement(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	// otherRequirements must match what Replay actually produces
+	// (GBP/USD H1), since Scheduler now rejects any replayed event for
+	// an undeclared requirement outright. The "undeclared" case this
+	// test targets is therefore a pair neither declared nor ever
+	// replayed — EUR/USD D1 — not GBP/USD H1.
+	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1, otherRequirements: []strategy.DataRequirement{{Instrument: gbpusdID(t), Interval: marketdata.H1}}}
+	deps := newSchedulerDeps(t, replay, probe, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.NotNil(t, probe.retained)
+	hv, ok := probe.retained.(strategy.History)
+	require.True(t, ok)
+
+	_, ok = hv.HistoryBars(eurusdID(t), marketdata.D1, 5)
+	require.False(t, ok, "EUR/USD D1 was never declared by history-probe's own Descriptor.Requirements")
+}
+
+// TestNewScheduler_RejectsDuplicateDeclaredRequirement proves
+// NewScheduler validates Strategy.Describe().Requirements rather than
+// silently letting a duplicate (instrument, interval) pair produce an
+// ambiguous warm-up/History key.
+func TestNewScheduler_RejectsDuplicateDeclaredRequirement(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &recordingStrategy{
+		requirements: []strategy.DataRequirement{
+			{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 0},
+			{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 1},
+		},
+	}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	_, err := backtest.NewScheduler(deps)
+	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
+}
+
+// TestScheduler_RunRejectsEventForUndeclaredRequirement is Rusty's own
+// #214 review follow-up: Replay producing an event for an
+// (instrument, interval) Strategy never declared must fail Run
+// outright — such an event would otherwise reach OnBar and be able to
+// emit tradable intents while remaining invisible to History/warm-up
+// bookkeeping, which key strictly off the declared set.
+func TestScheduler_RunRejectsEventForUndeclaredRequirement(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr) // produces EUR/USD H1 and GBP/USD H1
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	// Declares nothing at all — every replayed event is undeclared.
+	strat := &recordingStrategy{}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err, "NewScheduler itself does not cross-validate against Replay")
+
+	err = sched.Run(context.Background())
+	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
+	require.Equal(t, 0, strat.callCount(), "an undeclared event must be rejected before OnBar is ever called for it")
 }
