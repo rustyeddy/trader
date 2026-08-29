@@ -8,14 +8,15 @@ import "github.com/rustyeddy/trader/account"
 //
 // View is deliberately minimal for v0 (issue #210's own review):
 // Account is backed directly by the canonical account.Snapshot value
-// (no parallel type needed), while a historical-bar lookup method is
-// intentionally not added here yet — see the package doc comment for
-// why. A View implementation is expected to expose only data the
-// owning runner has already made visible as of the current simulated
-// or live time, which is what makes it the layer that owns *what*
-// historical state is accessible (ADR-035's own "no-lookahead is a
-// layered invariant" decision — View is one of three cooperating
-// layers, not the only one).
+// (no parallel type needed). Historical-bar lookup is History, an
+// optional capability (issue #214) a runtime's concrete View
+// additionally implements rather than a required View method — see
+// the package doc comment for why. A View implementation is expected
+// to expose only data the owning runner has already made visible as
+// of the current simulated or live time, which is what makes it the
+// layer that owns *what* historical state is accessible (ADR-035's
+// own "no-lookahead is a layered invariant" decision — View is one of
+// three cooperating layers, not the only one).
 type View interface {
 	// Account returns the current, authoritative account snapshot.
 	Account() account.Snapshot
