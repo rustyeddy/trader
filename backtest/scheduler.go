@@ -177,8 +177,10 @@ func (d SchedulerDeps) validate() error {
 // accumulates normally throughout warm-up — but any intents OnBar
 // returns are silently discarded (never queued, never submitted) until
 // every one of Strategy's own declared DataRequirements has itself
-// observed at least WarmupBars closed bars. This is run-wide, not
-// per-triggering-requirement (issue #214 review): a strategy's own
+// observed strictly more than WarmupBars closed bars — the
+// (WarmupBars+1)th bar is the first one whose intents are honored.
+// This is run-wide, not per-triggering-requirement (issue #214
+// review): a strategy's own
 // declared requirement set is what it says it needs to make a sound
 // decision, so one requirement warming up before another does not
 // entitle its own bar's intents through early — every declared
@@ -276,6 +278,9 @@ func NewScheduler(deps SchedulerDeps) (*Scheduler, error) {
 	warmupRequired := make(map[requirementKey]int, len(requirements))
 	for _, req := range requirements {
 		key := requirementKey{instrument: req.Instrument, interval: req.Interval}
+		if _, ok := warmupRequired[key]; ok {
+			return nil, fmt.Errorf("%w: strategy declared duplicate requirement %s %s", ErrInvalidSchedulerDeps, req.Instrument, req.Interval)
+		}
 		warmupRequired[key] = req.WarmupBars
 	}
 
@@ -353,22 +358,33 @@ func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) 
 }
 
 // runBatch executes one simulation step for every event sharing one
-// timestamp T, in three phases:
+// timestamp T, in four phases:
 //
-//  1. Flush: for every event in the batch whose own requirement has
+//  1. Advance: clock.AdvanceTo(T) once. This happens before anything
+//     else in the batch, including the flush below, so every clock
+//     read during T's own execution (InputBuilder, Pipeline, the
+//     broker/account) observes T, not the previous batch's time —
+//     T-open execution and T-close strategy decisions must agree on
+//     what time it now is.
+//  2. Flush: for every event in the batch whose own requirement has
 //     intents queued from an earlier bar, submit them now — this new
 //     bar is that requirement's own next bar, satisfying next-bar-open
 //     eligibility. Flushing happens before any OnBar call in this
 //     batch, since a fill becoming eligible at T's open logically
 //     precedes T's own strategy decisions.
-//  2. Evaluate: advance the clock to T, capture one frozen account
-//     snapshot and one frozen History cutoff per requirement, then
-//     call OnBar once per event in the batch against that one frozen
-//     View. Increment each requirement's own bars-seen counter as its
-//     event is processed. Once every declared requirement has cleared
-//     warm-up, queue the returned intents under their own requirement
-//     key; before that, discard them.
-//  3. Grow history: append this batch's own bars into the per-
+//  3. Evaluate: capture one frozen account snapshot (post-flush, so
+//     it reflects whatever this batch's own flush just committed) and
+//     one frozen History cutoff per requirement, then call OnBar once
+//     per event in the batch against that one frozen View, collecting
+//     every requirement's own bars-seen increment and any emitted
+//     intents. Warm-up readiness is decided exactly once for the
+//     whole batch, after every event's own bars-seen increment has
+//     already been applied — never per-event mid-batch, which would
+//     make warm-up depend on Replay's own canonical ordering within
+//     the batch. Once every declared requirement has cleared warm-up,
+//     every collected intent from this batch is queued under its own
+//     requirement key; before that, all of them are discarded.
+//  4. Grow history: append this batch's own bars into the per-
 //     requirement history buffers, now that every OnBar call in this
 //     batch has completed — never before, so History can never expose
 //     the batch currently being evaluated.
@@ -377,7 +393,13 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		return err
 	}
 
-	// Phase 1: flush intents that are eligible now.
+	// Phase 1: advance the clock to T before anything else observes it.
+	t := batch[0].Bar.Time
+	if err := s.deps.Clock.AdvanceTo(t); err != nil {
+		return fmt.Errorf("backtest: scheduler: advancing clock to %s: %w", t, err)
+	}
+
+	// Phase 2: flush intents that are eligible now.
 	for _, ev := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -398,12 +420,7 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		}
 	}
 
-	// Phase 2: evaluate the batch against one frozen snapshot/history.
-	t := batch[0].Bar.Time
-	if err := s.deps.Clock.AdvanceTo(t); err != nil {
-		return fmt.Errorf("backtest: scheduler: advancing clock to %s: %w", t, err)
-	}
-
+	// Phase 3: evaluate the batch against one frozen snapshot/history.
 	frozen, err := s.deps.Account.Snapshot(ctx)
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
@@ -422,6 +439,11 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		},
 	}
 
+	type collected struct {
+		key     requirementKey
+		intents []order.Intent
+	}
+	var emitted []collected
 	for _, ev := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -433,16 +455,18 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		if err != nil {
 			return fmt.Errorf("backtest: scheduler: OnBar for %s %s at %s: %w", ev.Instrument, ev.Interval, t, err)
 		}
-		if len(intents) == 0 {
-			continue
+		if len(intents) > 0 {
+			emitted = append(emitted, collected{key: key, intents: intents})
 		}
-		if !s.allWarm() {
-			continue // warm-up: replayed, not decided on
-		}
-		s.queued[key] = append(s.queued[key], intents...)
 	}
 
-	// Phase 3: grow history only now that this batch is fully evaluated.
+	if s.allWarm() {
+		for _, c := range emitted {
+			s.queued[c.key] = append(s.queued[c.key], c.intents...)
+		}
+	} // else: warm-up — this whole batch was replayed, not decided on.
+
+	// Phase 4: grow history only now that this batch is fully evaluated.
 	for _, ev := range batch {
 		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
 		s.history[key] = append(s.history[key], ev.Bar)
@@ -452,9 +476,13 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 }
 
 // allWarm reports whether every one of Strategy's own declared
-// DataRequirements has observed at least its own WarmupBars closed
-// bars. It is monotonic — once true, it is cached and never
-// recomputed.
+// DataRequirements has observed strictly more than its own WarmupBars
+// closed bars — the (WarmupBars+1)th bar for a requirement is its
+// first tradable one. It is monotonic — once true, it is cached and
+// never recomputed. Callers must call allWarm only after every event
+// in the current batch has already had its own bars-seen count
+// incremented, so warm-up readiness never depends on which event
+// within a batch happens to be evaluated first.
 func (s *Scheduler) allWarm() bool {
 	if s.warmedUp {
 		return true

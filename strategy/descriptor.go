@@ -38,6 +38,14 @@ type DataRequirement struct {
 	Interval marketdata.Interval
 	// WarmupBars is how many bars of history before the run's own
 	// start time this requirement needs replayed (but not decided on)
-	// before OnBar is first called for real.
+	// before this strategy's intents are honored. A runtime (for
+	// example backtest.Scheduler, issue #214) still calls OnBar for
+	// every one of these bars, so indicator state accumulates
+	// normally — it is any intent OnBar returns during warm-up that is
+	// discarded, not the OnBar call itself. Warm-up is evaluated
+	// run-wide, across every one of Descriptor.Requirements, not per
+	// requirement in isolation: one requirement warming up first does
+	// not entitle its own intents through before every declared
+	// requirement has cleared its own WarmupBars.
 	WarmupBars int
 }

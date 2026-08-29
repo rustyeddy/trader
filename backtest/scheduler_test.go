@@ -823,13 +823,18 @@ func TestScheduler_LastBarIntentsAreNeverSubmitted(t *testing.T) {
 // event.Bar.Time each Build call received.
 type recordingInputBuilder struct {
 	inner     backtest.InputBuilder
+	clock     clock.Clock
 	mu        sync.Mutex
 	eventTime []time.Time
+	clockNow  []time.Time
 }
 
 func (b *recordingInputBuilder) Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snap account.Snapshot) (pipeline.Input, error) {
 	b.mu.Lock()
 	b.eventTime = append(b.eventTime, event.Bar.Time)
+	if b.clock != nil {
+		b.clockNow = append(b.clockNow, b.clock.Now())
+	}
 	b.mu.Unlock()
 	return b.inner.Build(ctx, intent, event, snap)
 }
@@ -861,14 +866,46 @@ func TestScheduler_InputBuilderReceivesEligibilityEventNotTriggeringEvent(t *tes
 	}
 }
 
+// TestScheduler_ClockReflectsEligibilityBatchDuringFlush is the
+// regression Rusty's #214 review asked for: flushing (submitting)
+// intents that just became eligible at T's open must happen *after*
+// clock.AdvanceTo(T), not before — so InputBuilder, Pipeline, and the
+// broker/account all observe T, the batch whose open just made the
+// submission eligible, not the previous batch's own time.
+func TestScheduler_ClockReflectsEligibilityBatchDuringFlush(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t) // triggers on each instrument's own bar 0
+	deps := newSchedulerDeps(t, replay, strat, h)
+	rec := &recordingInputBuilder{inner: deps.Builder, clock: h.clockObj}
+	deps.Builder = rec
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Len(t, rec.clockNow, 2, "one flush-time Build call per instrument")
+	bar1Time := schedulerSpan(t).Start().Add(time.Hour) // the eligibility batch (bar 1), not bar 0
+	for i, now := range rec.clockNow {
+		require.True(t, now.Equal(bar1Time),
+			"Clock.Now() during flush must equal the eligibility batch's own timestamp (%s), got %s at call %d", bar1Time, now, i)
+		require.True(t, now.Equal(rec.eventTime[i]), "Clock.Now() during flush must agree with the eligibility event's own Bar.Time")
+	}
+}
+
 // TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements proves #214's
 // run-wide warm-up rule: EUR/USD's own WarmupBars is satisfied first
 // (WarmupBars: 0), but its intents must still be discarded until
 // GBP/USD's own higher WarmupBars also clears — one declared
 // requirement warming up first does not entitle its own intents
-// through early. See the assertion below for the exact resulting fill
-// count this fixture produces once warm-up and next-bar-open
-// eligibility are both accounted for.
+// through early, and warm-up readiness applies uniformly to the whole
+// batch that clears it, not just the event that happened to clear it.
+// See the assertion below for the exact resulting fill count this
+// fixture produces once warm-up and next-bar-open eligibility are both
+// accounted for.
 func TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements(t *testing.T) {
 	mgr := newSchedulerTestManager(t)
 	replay := newTwoInstrumentReplay(t, mgr)
@@ -887,23 +924,25 @@ func TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sched.Run(context.Background()))
 
-	// GBP/USD needs barsSeen > 2: its own 3rd bar's OnBar call (bar 3)
-	// is the first point where run-wide warm-up is satisfied (EUR/USD's
-	// own WarmupBars of 0 was already satisfied on bar 1). GBP/USD's
-	// bar-3 intent is therefore queued, and flushed at bar 4 (its own
-	// next bar) — exactly one GBP/USD fill. EUR/USD's own WarmupBars
-	// was ready the whole time, but every one of its intents before
-	// warm-up cleared was discarded (run-wide gate), and its first
-	// queued intent (bar 4, the run's last bar) has no bar 5 to become
-	// eligible against — so EUR/USD never fills.
+	// GBP/USD needs barsSeen > 2: bar 3 is the first bar where every
+	// declared requirement's own bars-seen count exceeds its own
+	// WarmupBars (EUR/USD's own WarmupBars of 0 was already satisfied
+	// from bar 1 onward). Warm-up readiness is decided once for the
+	// whole bar-3 batch, after both instruments' own bars-seen counts
+	// for bar 3 have been incremented — so both EUR/USD's and GBP/USD's
+	// own bar-3 intents are queued together, uniformly, not just
+	// GBP/USD's. Both are then flushed at bar 4 (each requirement's own
+	// next bar) — exactly one fill each.
 	acc, err := h.broker.OpenAccount(context.Background(), h.accountID)
 	require.NoError(t, err)
 	snap, err := acc.Snapshot(context.Background())
 	require.NoError(t, err)
 
 	positions := snap.Positions()
-	require.Len(t, positions, 1, "only GBP/USD's bar-3 intent had both a chance to queue and a next bar to flush against")
-	require.True(t, positions[0].Listing.InstrumentID().Equal(gbpusdID(t)))
+	require.Len(t, positions, 2, "bar 3 is the first batch where run-wide warm-up clears, and it clears uniformly for the whole batch")
+	instIDs := []string{positions[0].Listing.InstrumentID().String(), positions[1].Listing.InstrumentID().String()}
+	require.Contains(t, instIDs, eurusdID(t).String())
+	require.Contains(t, instIDs, gbpusdID(t).String())
 }
 
 // historyProbeStrategy records, for its own tracked (instID, interval),
@@ -1006,4 +1045,26 @@ func TestScheduler_HistoryReportsFalseForUndeclaredRequirement(t *testing.T) {
 
 	_, ok = hv.HistoryBars(gbpusdID(t), marketdata.H1, 5)
 	require.False(t, ok, "GBP/USD was never declared by history-probe's own Descriptor.Requirements")
+}
+
+// TestNewScheduler_RejectsDuplicateDeclaredRequirement proves
+// NewScheduler validates Strategy.Describe().Requirements rather than
+// silently letting a duplicate (instrument, interval) pair produce an
+// ambiguous warm-up/History key.
+func TestNewScheduler_RejectsDuplicateDeclaredRequirement(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &recordingStrategy{
+		requirements: []strategy.DataRequirement{
+			{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 0},
+			{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 1},
+		},
+	}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	_, err := backtest.NewScheduler(deps)
+	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
 }
