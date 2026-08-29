@@ -17,7 +17,9 @@ import (
 )
 
 // ErrInvalidSchedulerDeps marks a SchedulerDeps missing a required
-// field.
+// field, a Strategy declaring a duplicate DataRequirement, or (at Run
+// time) Replay producing an event for an (instrument, interval)
+// Strategy never declared.
 var ErrInvalidSchedulerDeps = errors.New("backtest: invalid scheduler dependencies")
 
 // InputBuilder turns one order.Intent a Strategy emitted — together
@@ -358,8 +360,11 @@ func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) 
 }
 
 // runBatch executes one simulation step for every event sharing one
-// timestamp T, in four phases:
+// timestamp T, in five phases:
 //
+//  0. Validate: every event's own (instrument, interval) must be one
+//     of Strategy's own declared DataRequirements — see
+//     ErrInvalidSchedulerDeps's own doc comment for why.
 //  1. Advance: clock.AdvanceTo(T) once. This happens before anything
 //     else in the batch, including the flush below, so every clock
 //     read during T's own execution (InputBuilder, Pipeline, the
@@ -391,6 +396,24 @@ func (s *Scheduler) nextBatch(ctx context.Context) ([]strategy.BarEvent, error) 
 func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	// Phase 0: every event's own (instrument, interval) must be one of
+	// Strategy's own declared DataRequirements (issue #214 review). An
+	// undeclared stream would be invisible to History/warm-up
+	// bookkeeping (which key strictly off the declared set) while
+	// still reaching OnBar and being able to emit tradable intents —
+	// exactly the gap warm-up's "run-wide across declared
+	// requirements" guarantee exists to close. Replay producing more
+	// data than Strategy declared is a configuration mismatch between
+	// SchedulerDeps.Replay and SchedulerDeps.Strategy, not a runtime
+	// condition Scheduler should absorb silently.
+	for _, ev := range batch {
+		key := requirementKey{instrument: ev.Instrument, interval: ev.Interval}
+		if _, ok := s.warmupRequired[key]; !ok {
+			return fmt.Errorf("%w: replay produced an event for %s %s, which Strategy.Describe().Requirements never declared",
+				ErrInvalidSchedulerDeps, ev.Instrument, ev.Interval)
+		}
 	}
 
 	// Phase 1: advance the clock to T before anything else observes it.

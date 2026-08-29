@@ -282,6 +282,7 @@ func mustEnterOnFirstBarStrategy(t *testing.T) *recordingStrategy {
 	entered := make(map[string]bool)
 	var mu sync.Mutex
 	return &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
 		emit: func(f strategy.IntentFactory, ev strategy.BarEvent) ([]order.Intent, error) {
 			mu.Lock()
 			already := entered[ev.Instrument.String()]
@@ -330,6 +331,19 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 	}
 }
 
+// bothInstrumentsRequirements returns the EUR/USD H1 + GBP/USD H1
+// DataRequirement pair matching newTwoInstrumentReplay's own Replay
+// construction — the declared set most scheduler tests give their
+// strategy fake's Describe(), now that Scheduler validates every
+// Replay event's own (instrument, interval) against it.
+func bothInstrumentsRequirements(t *testing.T) []strategy.DataRequirement {
+	t.Helper()
+	return []strategy.DataRequirement{
+		{Instrument: eurusdID(t), Interval: marketdata.H1},
+		{Instrument: gbpusdID(t), Interval: marketdata.H1},
+	}
+}
+
 func newTwoInstrumentReplay(t *testing.T, mgr *marketdata.Manager) *backtest.Replay {
 	t.Helper()
 	span := schedulerSpan(t)
@@ -356,7 +370,7 @@ func TestScheduler_SameTimestampMultiInstrumentOrdering(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &recordingStrategy{}
+	strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -386,7 +400,7 @@ func TestScheduler_DeterministicAcrossIndependentInstances(t *testing.T) {
 		t.Cleanup(func() { _ = replay.Close() })
 
 		h := newSchedulerHarness(t, schedulerSpan(t).Start())
-		strat := &recordingStrategy{}
+		strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 		deps := newSchedulerDeps(t, replay, strat, h)
 
 		sched, err := backtest.NewScheduler(deps)
@@ -404,15 +418,16 @@ func TestScheduler_DeterministicAcrossIndependentInstances(t *testing.T) {
 // at the moment each OnBar call runs, alongside the triggering
 // instrument.
 type viewObservingStrategy struct {
-	mu          sync.Mutex
-	positions   []int
-	instruments []instrument.ID
-	intents     strategy.IntentFactory
-	enterOnce   map[string]bool
+	mu           sync.Mutex
+	positions    []int
+	instruments  []instrument.ID
+	intents      strategy.IntentFactory
+	enterOnce    map[string]bool
+	requirements []strategy.DataRequirement
 }
 
 func (s *viewObservingStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{Name: "view-observing", Version: "test"}
+	return strategy.Descriptor{Name: "view-observing", Version: "test", Requirements: s.requirements}
 }
 
 func (s *viewObservingStrategy) Start(ctx context.Context, env strategy.Environment) error {
@@ -452,7 +467,7 @@ func TestScheduler_ViewIsFrozenWithinABatch(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &viewObservingStrategy{}
+	strat := &viewObservingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -475,6 +490,7 @@ func TestScheduler_RunPropagatesCancellation(t *testing.T) {
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
 	ctx, cancel := context.WithCancel(context.Background())
 	strat := &recordingStrategy{
+		requirements: bothInstrumentsRequirements(t),
 		onEach: func(ev strategy.BarEvent) {
 			cancel()
 		},
@@ -497,7 +513,7 @@ func TestScheduler_AlreadyCancelledContextStopsImmediately(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &recordingStrategy{}
+	strat := &recordingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -630,14 +646,15 @@ func TestScheduler_BuilderErrorAbortsRun(t *testing.T) {
 // View exposes the backtest.BatchBars capability and, if so, how many
 // bars and which instruments are visible in the current batch.
 type batchBarsObservingStrategy struct {
-	mu          sync.Mutex
-	sawCapable  []bool
-	batchSizes  []int
-	instruments [][]string
+	mu           sync.Mutex
+	sawCapable   []bool
+	batchSizes   []int
+	instruments  [][]string
+	requirements []strategy.DataRequirement
 }
 
 func (s *batchBarsObservingStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{Name: "batch-bars-observing", Version: "test"}
+	return strategy.Descriptor{Name: "batch-bars-observing", Version: "test", Requirements: s.requirements}
 }
 
 func (s *batchBarsObservingStrategy) Start(ctx context.Context, env strategy.Environment) error {
@@ -677,7 +694,7 @@ func TestScheduler_BatchBarsMakesCrossInstrumentVisibilityReal(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &batchBarsObservingStrategy{}
+	strat := &batchBarsObservingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -737,7 +754,7 @@ func TestScheduler_NextBarOpenFillEligibility(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &viewObservingStrategy{}
+	strat := &viewObservingStrategy{requirements: bothInstrumentsRequirements(t)}
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -805,7 +822,7 @@ func TestScheduler_LastBarIntentsAreNeverSubmitted(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	strat := &enterOnNthCallStrategy{n: 4} // schedulerSpan yields exactly 4 H1 bars per instrument
+	strat := &enterOnNthCallStrategy{n: 4, requirements: bothInstrumentsRequirements(t)} // schedulerSpan yields exactly 4 H1 bars per instrument
 	deps := newSchedulerDeps(t, replay, strat, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -951,6 +968,11 @@ func TestScheduler_WarmupIsRunWideAcrossDeclaredRequirements(t *testing.T) {
 type historyProbeStrategy struct {
 	instID   instrument.ID
 	interval marketdata.Interval
+	// otherRequirements declares any additional DataRequirements
+	// Replay will produce events for, beyond (instID, interval) — every
+	// such event must still be declared for Scheduler's own
+	// undeclared-event validation to pass.
+	otherRequirements []strategy.DataRequirement
 
 	mu       sync.Mutex
 	calls    int
@@ -960,10 +982,8 @@ type historyProbeStrategy struct {
 }
 
 func (s *historyProbeStrategy) Describe() strategy.Descriptor {
-	return strategy.Descriptor{
-		Name: "history-probe", Version: "test",
-		Requirements: []strategy.DataRequirement{{Instrument: s.instID, Interval: s.interval}},
-	}
+	reqs := append([]strategy.DataRequirement{{Instrument: s.instID, Interval: s.interval}}, s.otherRequirements...)
+	return strategy.Descriptor{Name: "history-probe", Version: "test", Requirements: reqs}
 }
 
 func (s *historyProbeStrategy) Start(ctx context.Context, env strategy.Environment) error { return nil }
@@ -1002,7 +1022,7 @@ func TestScheduler_HistoryExcludesCurrentBatchAndGrowsEachBar(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1}
+	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1, otherRequirements: []strategy.DataRequirement{{Instrument: gbpusdID(t), Interval: marketdata.H1}}}
 	deps := newSchedulerDeps(t, replay, probe, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -1032,7 +1052,12 @@ func TestScheduler_HistoryReportsFalseForUndeclaredRequirement(t *testing.T) {
 	t.Cleanup(func() { _ = replay.Close() })
 
 	h := newSchedulerHarness(t, schedulerSpan(t).Start())
-	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1}
+	// otherRequirements must match what Replay actually produces
+	// (GBP/USD H1), since Scheduler now rejects any replayed event for
+	// an undeclared requirement outright. The "undeclared" case this
+	// test targets is therefore a pair neither declared nor ever
+	// replayed — EUR/USD D1 — not GBP/USD H1.
+	probe := &historyProbeStrategy{instID: eurusdID(t), interval: marketdata.H1, otherRequirements: []strategy.DataRequirement{{Instrument: gbpusdID(t), Interval: marketdata.H1}}}
 	deps := newSchedulerDeps(t, replay, probe, h)
 
 	sched, err := backtest.NewScheduler(deps)
@@ -1043,8 +1068,8 @@ func TestScheduler_HistoryReportsFalseForUndeclaredRequirement(t *testing.T) {
 	hv, ok := probe.retained.(strategy.History)
 	require.True(t, ok)
 
-	_, ok = hv.HistoryBars(gbpusdID(t), marketdata.H1, 5)
-	require.False(t, ok, "GBP/USD was never declared by history-probe's own Descriptor.Requirements")
+	_, ok = hv.HistoryBars(eurusdID(t), marketdata.D1, 5)
+	require.False(t, ok, "EUR/USD D1 was never declared by history-probe's own Descriptor.Requirements")
 }
 
 // TestNewScheduler_RejectsDuplicateDeclaredRequirement proves
@@ -1067,4 +1092,28 @@ func TestNewScheduler_RejectsDuplicateDeclaredRequirement(t *testing.T) {
 
 	_, err := backtest.NewScheduler(deps)
 	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
+}
+
+// TestScheduler_RunRejectsEventForUndeclaredRequirement is Rusty's own
+// #214 review follow-up: Replay producing an event for an
+// (instrument, interval) Strategy never declared must fail Run
+// outright — such an event would otherwise reach OnBar and be able to
+// emit tradable intents while remaining invisible to History/warm-up
+// bookkeeping, which key strictly off the declared set.
+func TestScheduler_RunRejectsEventForUndeclaredRequirement(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr) // produces EUR/USD H1 and GBP/USD H1
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	// Declares nothing at all — every replayed event is undeclared.
+	strat := &recordingStrategy{}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err, "NewScheduler itself does not cross-validate against Replay")
+
+	err = sched.Run(context.Background())
+	require.ErrorIs(t, err, backtest.ErrInvalidSchedulerDeps)
+	require.Equal(t, 0, strat.callCount(), "an undeclared event must be rejected before OnBar is ever called for it")
 }
