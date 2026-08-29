@@ -618,3 +618,70 @@ func TestScheduler_BuilderErrorAbortsRun(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "erroringInputBuilder")
 }
+
+// batchBarsObservingStrategy records, for each OnBar call, whether its
+// View exposes the backtest.BatchBars capability and, if so, how many
+// bars and which instruments are visible in the current batch.
+type batchBarsObservingStrategy struct {
+	mu          sync.Mutex
+	sawCapable  []bool
+	batchSizes  []int
+	instruments [][]string
+}
+
+func (s *batchBarsObservingStrategy) Describe() strategy.Descriptor {
+	return strategy.Descriptor{Name: "batch-bars-observing", Version: "test"}
+}
+
+func (s *batchBarsObservingStrategy) Start(ctx context.Context, env strategy.Environment) error {
+	return nil
+}
+
+func (s *batchBarsObservingStrategy) OnBar(ctx context.Context, ev strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
+	bb, ok := view.(backtest.BatchBars)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sawCapable = append(s.sawCapable, ok)
+	if ok {
+		bars := bb.Bars()
+		s.batchSizes = append(s.batchSizes, len(bars))
+		var insts []string
+		for _, b := range bars {
+			insts = append(insts, b.Instrument.String())
+		}
+		s.instruments = append(s.instruments, insts)
+	} else {
+		s.batchSizes = append(s.batchSizes, 0)
+		s.instruments = append(s.instruments, nil)
+	}
+	return nil, nil
+}
+
+// TestScheduler_BatchBarsMakesCrossInstrumentVisibilityReal is issue
+// #213's second review round: View must expose every bar in the
+// current same-timestamp batch, not only the one that triggered a
+// given OnBar call — so EURUSD's own callback can see GBPUSD's bar at
+// the identical T, and vice versa, even though only one of them
+// triggered any particular call.
+func TestScheduler_BatchBarsMakesCrossInstrumentVisibilityReal(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := &batchBarsObservingStrategy{}
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	require.Len(t, strat.sawCapable, 8)
+	for i, capable := range strat.sawCapable {
+		require.True(t, capable, "View must implement backtest.BatchBars")
+		require.Equal(t, 2, strat.batchSizes[i], "both instruments' bars at this timestamp must be visible")
+		require.Contains(t, strat.instruments[i], eurusdID(t).String())
+		require.Contains(t, strat.instruments[i], gbpusdID(t).String())
+	}
+}

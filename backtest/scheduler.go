@@ -110,17 +110,26 @@ func (d SchedulerDeps) validate() error {
 //  2. Capture one account snapshot — frozen for the whole batch.
 //  3. Call Strategy.OnBar once per event in the batch, in Replay's own
 //     canonical order, but every call sees the same frozen View: all
-//     of T's bars are "visible" (each OnBar call is for a different
-//     bar, so cross-instrument bar data at T is not literally handed
-//     to every call, but no call's View reflects any other T-batch
-//     call's account/execution effects). This is what keeps Replay's
-//     incidental instrument-ID ordering from silently becoming
-//     trading semantics: EURUSD sorting before GBPUSD at the same T
-//     must never change GBPUSD's own strategy decision.
+//     of T's bars are genuinely visible to every call in the batch —
+//     not only the one bar that triggered it — via View's optional
+//     BatchBars capability (Bars() []strategy.BarEvent), which returns
+//     every event in the current batch regardless of which one is
+//     "this" call's own BarEvent. What no call's View reflects is any
+//     other T-batch call's account/execution effects. This is what
+//     keeps Replay's incidental instrument-ID ordering from silently
+//     becoming trading semantics: EURUSD sorting before GBPUSD at the
+//     same T must never change GBPUSD's own strategy decision, while
+//     GBPUSD's strategy can still see EURUSD's T bar if it needs to.
 //  4. Only after every event in the batch has been evaluated are the
 //     collected intents translated (via InputBuilder) and submitted
 //     through Pipeline, in the same deterministic order the intents
 //     were emitted in.
+//
+// BatchBars is intentionally not part of the base strategy.View
+// contract: #214 (M5-06) owns defining the fuller no-lookahead/
+// historical-bar-visibility API. BatchBars is the narrow, Scheduler-
+// owned seam that makes true T-batch visibility real now, without
+// Scheduler guessing at #214's eventual View method shape.
 //
 // One exception: if Strategy itself mutates its own internal state
 // during one OnBar call, a later call within the same batch can
@@ -260,7 +269,7 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
 	}
-	view := frozenView{snapshot: frozen}
+	view := frozenView{snapshot: frozen, batch: batch}
 
 	var toSubmit []emittedIntent
 	for _, ev := range batch {
@@ -299,14 +308,39 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	return nil
 }
 
-// frozenView is a strategy.View backed by one fixed account.Snapshot,
-// captured once per Scheduler batch — see Scheduler's own doc comment
-// for why account state must not flow forward within a same-timestamp
-// batch.
+// BatchBars is an optional capability a strategy.View handed to OnBar
+// during a Scheduler-driven run implements: every strategy.BarEvent in
+// the current same-timestamp batch, not only the one that triggered
+// this particular OnBar call. This is what makes "all observations at
+// T are visible before any T callback" (issue #213 review) real rather
+// than only documented, without pulling #214's own historical-bar
+// lookup API into Scheduler: a strategy that wants T's other
+// instruments' bars type-asserts its View against BatchBars; a
+// strategy that only needs its own triggering bar (View.Account plus
+// the BarEvent OnBar already received) never needs to.
+type BatchBars interface {
+	// Bars returns every bar in the current batch, in the same
+	// canonical order Replay yielded them — a defensive copy the
+	// caller may freely retain or mutate.
+	Bars() []strategy.BarEvent
+}
+
+// frozenView is a strategy.View backed by one fixed account.Snapshot
+// and one fixed batch of BarEvents, both captured once per Scheduler
+// batch — see Scheduler's own doc comment for why account state must
+// not flow forward within a same-timestamp batch. frozenView also
+// implements BatchBars.
 type frozenView struct {
 	snapshot account.Snapshot
+	batch    []strategy.BarEvent
 }
 
 func (v frozenView) Account() account.Snapshot { return v.snapshot }
+
+func (v frozenView) Bars() []strategy.BarEvent {
+	return append([]strategy.BarEvent(nil), v.batch...)
+}
+
+var _ BatchBars = frozenView{}
 
 var _ strategy.View = frozenView{}
