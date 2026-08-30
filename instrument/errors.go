@@ -38,4 +38,11 @@ var (
 	// context: ResolveSymbol requires a non-empty provider and symbol
 	// (venue alone may be left unconstrained).
 	ErrInvalidResolution = errors.New("instrument: invalid resolution query")
+
+	// ErrInvalidID reports JSON input to ID.UnmarshalJSON that either is
+	// not a JSON string, or is a non-empty string not prefixed by one
+	// of the recognized instrument ID kind prefixes ("fx:", "eq:",
+	// "etf:", "fut:", "cont:", "idx:") — see ID.UnmarshalJSON's own doc
+	// comment for the full contract.
+	ErrInvalidID = errors.New("instrument: invalid id")
 )
