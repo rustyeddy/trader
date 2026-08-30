@@ -289,14 +289,16 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 	return Result{Manifest: manifest, Account: finalSnapshot, Trades: trades.Closed, OpenTrades: trades.Open}, nil
 }
 
-// deriveTrades obtains this run's complete fill history from account's
-// own authoritative event stream and derives TradeSet from it (issue
-// #217, M5-09). It is only called once Scheduler.Run has already
-// returned successfully — see drainFills' own doc comment for why that
-// ordering matters — and it keeps "obtain the authoritative events"
-// (this method) and "derive trades from a fill stream" (DeriveTrades,
-// a pure function) as separate concerns: DeriveTrades is independently
-// testable without any Account handle at all.
+// deriveTrades obtains this run's complete fill history from acct's
+// own authoritative event stream, deterministically (see drainFills'
+// own doc comment — it drains via broker.FiniteEventReader.AtEnd, not
+// a timing assumption), and derives TradeSet from it (issue #217,
+// M5-09). It is only called once Scheduler.Run has already returned
+// successfully, so acct's event log holds exactly this run's own
+// events. It keeps "obtain the authoritative events" (this method) and
+// "derive trades from a fill stream" (DeriveTrades, a pure function)
+// as separate concerns: DeriveTrades is independently testable without
+// any Account handle at all.
 func (r *Runner) deriveTrades(ctx context.Context, acct broker.Account) (trades TradeSet, err error) {
 	reader, err := acct.Events(ctx, "")
 	if err != nil {

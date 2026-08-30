@@ -51,6 +51,19 @@ func TestNewTradeRejectsInvalidRealizedPnL(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidTrade)
 }
 
+func TestNewTradeRejectsRealizedPnLCostsCurrencyMismatch(t *testing.T) {
+	_, err := NewTrade(Trade{
+		AccountID:    mustAccountID(t),
+		Listing:      mustEurUsdListing(t),
+		Side:         Long,
+		EntryFillIDs: []id.FillID{mustFillID(t)},
+		OpenedAt:     time.Now(),
+		RealizedPnL:  num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Costs:        num.MustParseMoney("0", num.MustParseCurrency("EUR")),
+	})
+	assert.ErrorIs(t, err, ErrInvalidTrade)
+}
+
 func TestNewTradeRejectsInvalidCosts(t *testing.T) {
 	_, err := NewTrade(Trade{
 		AccountID:    mustAccountID(t),

@@ -26,6 +26,7 @@ type eventReader struct {
 }
 
 var _ brokerpkg.EventReader = (*eventReader)(nil)
+var _ brokerpkg.FiniteEventReader = (*eventReader)(nil)
 
 // Next implements broker.EventReader.
 func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
@@ -68,6 +69,23 @@ func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
 			// loop back and re-check both under the lock.
 		}
 	}
+}
+
+// AtEnd implements broker.FiniteEventReader: it reports whether every
+// currently recorded event has already been delivered, without
+// consuming one or blocking. It peeks the same underlying slice Next
+// itself walks (from r.idx onward, skipping anything at or before
+// r.after) but never advances r.idx, so it never changes what a
+// subsequent Next call returns.
+func (r *eventReader) AtEnd() bool {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	for i := r.idx; i < len(r.state.events); i++ {
+		if r.state.events[i].Sequence > r.after {
+			return false
+		}
+	}
+	return true
 }
 
 // Close implements broker.EventReader. It is safe to call more than

@@ -41,27 +41,55 @@ func fillsTestListing(t *testing.T) instrument.Listing {
 	return listing
 }
 
-// fakeEventReader is a minimal broker.EventReader over a fixed slice
-// of events, returning errAfter once exhausted instead of blocking —
-// drainFills only needs to observe an error other than
-// context.DeadlineExceeded to propagate it, so this fake does not need
-// to reproduce EventReader's real blocking contract.
-type fakeEventReader struct {
-	events   []broker.Event
-	idx      int
-	errAfter error
+// fakeFiniteEventReader is a broker.FiniteEventReader over a fixed
+// slice of events. AtEnd reports idx >= len(events) unless
+// forceNotAtEnd overrides it — used to exercise drainFills' behavior
+// when Next itself fails or blocks on a genuinely canceled ctx, cases
+// AtEnd's real definition would never actually produce on its own.
+type fakeFiniteEventReader struct {
+	events        []broker.Event
+	idx           int
+	nextErr       error
+	forceNotAtEnd bool
 }
 
-func (r *fakeEventReader) Next(ctx context.Context) (broker.Event, error) {
+func (r *fakeFiniteEventReader) Next(ctx context.Context) (broker.Event, error) {
+	select {
+	case <-ctx.Done():
+		return broker.Event{}, ctx.Err()
+	default:
+	}
 	if r.idx < len(r.events) {
 		e := r.events[r.idx]
 		r.idx++
 		return e, nil
 	}
-	return broker.Event{}, r.errAfter
+	return broker.Event{}, r.nextErr
 }
 
-func (r *fakeEventReader) Close() error { return nil }
+func (r *fakeFiniteEventReader) Close() error { return nil }
+
+func (r *fakeFiniteEventReader) AtEnd() bool {
+	if r.forceNotAtEnd {
+		return false
+	}
+	return r.idx >= len(r.events)
+}
+
+var _ broker.FiniteEventReader = (*fakeFiniteEventReader)(nil)
+
+// nonFiniteEventReader implements only broker.EventReader, not
+// broker.FiniteEventReader — used to prove drainFills rejects a reader
+// that cannot support deterministic draining rather than silently
+// falling back to a timing guess.
+type nonFiniteEventReader struct{}
+
+func (nonFiniteEventReader) Next(ctx context.Context) (broker.Event, error) {
+	return broker.Event{}, errors.New("nonFiniteEventReader: Next should never be called")
+}
+func (nonFiniteEventReader) Close() error { return nil }
+
+var _ broker.EventReader = nonFiniteEventReader{}
 
 func fillEvent(t *testing.T, seq uint64) broker.Event {
 	t.Helper()
@@ -97,24 +125,29 @@ func fillEvent(t *testing.T, seq uint64) broker.Event {
 	return event
 }
 
-func TestDrainFills_StopsOnDeadlineExceeded(t *testing.T) {
-	reader := &fakeEventReader{events: []broker.Event{fillEvent(t, 1), fillEvent(t, 2)}, errAfter: context.DeadlineExceeded}
+func TestDrainFills_StopsAtEnd(t *testing.T) {
+	reader := &fakeFiniteEventReader{events: []broker.Event{fillEvent(t, 1), fillEvent(t, 2)}}
 
 	fills, err := drainFills(context.Background(), reader)
 	require.NoError(t, err)
 	assert.Len(t, fills, 2)
 }
 
-func TestDrainFills_PropagatesNonDeadlineError(t *testing.T) {
+func TestDrainFills_RejectsNonFiniteReader(t *testing.T) {
+	_, err := drainFills(context.Background(), nonFiniteEventReader{})
+	require.ErrorIs(t, err, ErrEventReaderNotFinite)
+}
+
+func TestDrainFills_PropagatesNextError(t *testing.T) {
 	wantErr := errors.New("fills_internal_test: injected reader failure")
-	reader := &fakeEventReader{errAfter: wantErr}
+	reader := &fakeFiniteEventReader{forceNotAtEnd: true, nextErr: wantErr}
 
 	_, err := drainFills(context.Background(), reader)
 	require.ErrorIs(t, err, wantErr)
 }
 
-func TestDrainFills_StopsOnAlreadyCanceledContext(t *testing.T) {
-	reader := &fakeEventReader{events: []broker.Event{fillEvent(t, 1)}, errAfter: context.DeadlineExceeded}
+func TestDrainFills_PropagatesContextCancellation(t *testing.T) {
+	reader := &fakeFiniteEventReader{forceNotAtEnd: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

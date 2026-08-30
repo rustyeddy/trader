@@ -208,6 +208,35 @@ func TestDeriveTrades_StillOpenAtEndOfStream(t *testing.T) {
 	assert.True(t, set.Open[0].RealizedPnL.IsZero())
 }
 
+// TestDeriveTrades_OpenOrderingIsDeterministicForSameTimestamp proves
+// TradeSet.Open has a total, deterministic order even when multiple
+// instruments open on the exact same bar/timestamp — a common case map
+// iteration order alone would otherwise make nondeterministic.
+func TestDeriveTrades_OpenOrderingIsDeterministicForSameTimestamp(t *testing.T) {
+	f := newTradesFixture(t, 80)
+	eurusd := simListing(t, "EUR", "USD", "EUR_USD")
+	gbpusd := simListing(t, "GBP", "USD", "GBP_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	gOpen := f.fill(t, gbpusd, order.Sell, "1.30000", "1000", "", t0)
+	eOpen := f.fill(t, eurusd, order.Buy, "1.10000", "1000", "", t0)
+
+	var want []string
+	for range 20 {
+		set, err := backtest.DeriveTrades([]order.Fill{gOpen, eOpen})
+		require.NoError(t, err)
+		require.Len(t, set.Open, 2)
+		require.True(t, set.Open[0].OpenedAt.Equal(set.Open[1].OpenedAt), "both open at the same timestamp by construction")
+
+		got := []string{set.Open[0].Listing.Symbol(), set.Open[1].Listing.Symbol()}
+		if want == nil {
+			want = got
+			continue
+		}
+		assert.Equal(t, want, got, "ordering among same-timestamp open trades must be stable across repeated derivations")
+	}
+}
+
 func TestDeriveTrades_RejectsMixedAccounts(t *testing.T) {
 	f1 := newTradesFixture(t, 70)
 	f2 := newTradesFixture(t, 71)

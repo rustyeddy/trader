@@ -67,13 +67,17 @@ type runningPosition struct {
 // order — see Runner's own doc comment for how it obtains that order),
 // into completed and still-open order.Trade values (issue #217,
 // M5-09). It replays each fill's effect on a running per-listing
-// Position via order.ApplyFillToPosition — the exact same broker-
-// neutral position/PnL math whichever broker produced these fills used
-// itself to update its own authoritative account state — so a derived
-// trade's RealizedPnL can never diverge from what actually happened to
-// the account; DeriveTrades computes no financial arithmetic of its
-// own beyond grouping and summing values order.ApplyFillToPosition
-// already produced.
+// Position via order.ApplyFillToPosition — the same broker-neutral
+// position/PnL math the sim broker adapter itself uses to update its
+// own authoritative account state — so for any Trader component built
+// on that shared function, a derived trade's RealizedPnL cannot
+// diverge from it by construction; DeriveTrades computes no financial
+// arithmetic of its own beyond grouping and summing values
+// order.ApplyFillToPosition already produced. This is not itself a
+// claim about an external broker's own accounting rules, which may
+// differ — reconciling derived trades against that broker's own
+// account snapshots/events remains the actual proof of authority in
+// that case, exactly as it would for any other derived view.
 //
 // DeriveTrades is a pure function over fills: it performs no I/O and
 // consults no broker/account state beyond what the fills themselves
@@ -250,9 +254,37 @@ func DeriveTrades(fills []order.Fill) (TradeSet, error) {
 		}
 		open = append(open, finalized)
 	}
-	sort.Slice(open, func(i, j int) bool { return open[i].OpenedAt.Before(open[j].OpenedAt) })
+	sort.Slice(open, func(i, j int) bool { return lessOpenTrade(open[i], open[j]) })
 
 	return TradeSet{Closed: closed, Open: open}, nil
+}
+
+// lessOpenTrade gives TradeSet.Open a total, deterministic order. Map
+// iteration order (openTrades, above) is not otherwise stable, and
+// OpenedAt alone is not a total order: multiple instruments commonly
+// open on the same bar and therefore share an identical timestamp.
+// Listing identity breaks that tie; EntryFillIDs[0] — guaranteed
+// non-empty and unique per order.NewTrade's own validation — is the
+// final, absolute tiebreak for the case two trades share both a
+// timestamp and a listing, which cannot happen for two *simultaneously
+// open* trades on one listing (only one can be open at a time) but is
+// kept for defensiveness rather than assumed impossible by this
+// function itself.
+func lessOpenTrade(a, b order.Trade) bool {
+	if !a.OpenedAt.Equal(b.OpenedAt) {
+		return a.OpenedAt.Before(b.OpenedAt)
+	}
+	al, bl := a.Listing, b.Listing
+	if al.InstrumentID() != bl.InstrumentID() {
+		return al.InstrumentID().String() < bl.InstrumentID().String()
+	}
+	if al.Provider() != bl.Provider() {
+		return al.Provider() < bl.Provider()
+	}
+	if al.Venue() != bl.Venue() {
+		return al.Venue() < bl.Venue()
+	}
+	return a.EntryFillIDs[0].String() < b.EntryFillIDs[0].String()
 }
 
 // splitCommission divides commission pro-rata by quantity between the

@@ -54,3 +54,31 @@ type EventReader interface {
 	// requirements.
 	Close() error
 }
+
+// FiniteEventReader is an optional capability an EventReader may
+// implement when its underlying stream is backed by a bounded,
+// currently-finished producer — a completed backtest run, for
+// example — rather than a live/paper feed that can always receive
+// more events later. A caller that needs to drain exactly what has
+// been recorded so far, without racing Next's ordinary live-stream
+// blocking behavior, type-asserts for this capability first.
+//
+// This is deliberately a narrow, additive capability (matching the
+// architecture document's "small required core plus capability
+// discovery" guidance) rather than a change to EventReader's own
+// Next/Close contract: an implementation backing a genuinely live or
+// paper session simply does not implement it, and every existing
+// EventReader consumer is unaffected.
+type FiniteEventReader interface {
+	EventReader
+
+	// AtEnd reports whether every event this reader's producer has
+	// recorded so far has already been delivered by Next. It performs
+	// no blocking I/O and does not advance the reader's own position:
+	// it is safe to call repeatedly, including between calls to Next.
+	// AtEnd returning true is not a permanent guarantee for a producer
+	// that could still record more later (see FiniteEventReader's own
+	// doc comment) — it answers "is there anything to read right now,"
+	// not "will there ever be more."
+	AtEnd() bool
+}

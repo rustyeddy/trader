@@ -90,5 +90,8 @@ func NewTrade(t Trade) (Trade, error) {
 	if !t.Costs.IsValid() {
 		return Trade{}, fmt.Errorf("%w: costs must be valid money", ErrInvalidTrade)
 	}
+	if !t.RealizedPnL.Currency().Equal(t.Costs.Currency()) {
+		return Trade{}, fmt.Errorf("%w: realized pnl currency %s does not match costs currency %s", ErrInvalidTrade, t.RealizedPnL.Currency(), t.Costs.Currency())
+	}
 	return t, nil
 }

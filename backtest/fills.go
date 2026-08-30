@@ -3,64 +3,49 @@ package backtest
 import (
 	"context"
 	"errors"
-	"time"
+	"fmt"
 
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/order"
 )
 
-// eventDrainTimeout bounds each individual read from the account's
-// event stream while drainFills drains it for one run's fills (see
-// drainFills' own doc comment for why). It is not a real wait: every
-// already-produced event returns from EventReader.Next immediately,
-// since Next only blocks once its internal buffer is exhausted (see
-// broker.EventReader's own doc comment) — so this timeout only ever
-// elapses on the one call that confirms the stream has caught up,
-// never as a race against genuine event delivery.
-const eventDrainTimeout = 50 * time.Millisecond
+// ErrEventReaderNotFinite reports that an Account's EventReader does
+// not implement broker.FiniteEventReader — Runner requires it, since
+// a backtest run's trade derivation needs to drain exactly what the
+// run produced, deterministically, without racing the reader's
+// ordinary live-stream blocking behavior (see drainFills' own doc
+// comment).
+var ErrEventReaderNotFinite = errors.New("backtest: event reader does not support finite draining")
 
-// drainFills reads every order.Fill event reader has buffered, in
-// delivery (Sequence) order, and returns their order.Fill payloads.
-//
-// It is only safe to call once no further event-producing activity
-// will occur on the underlying Account — Runner guarantees this by
-// calling it only after Scheduler.Run has already returned, and a
-// backtest's synchronous, single-goroutine execution model (Scheduler
-// drives every Pipeline.Submit call directly, with no asynchronous
-// broker round-trip) guarantees every event this run will ever produce
-// is already present in the account's own log by that point.
+// drainFills reads every order.Fill event reader has recorded so far,
+// in delivery (Sequence) order, and returns their order.Fill payloads.
 //
 // broker.EventReader.Next blocks indefinitely waiting for a future
 // event rather than returning io.EOF merely because it has caught up
-// (ADR-024) — that behavior is correct for a live/paper stream, but
-// Runner does not own the Account's underlying broker.Broker to close
-// it and trigger a real io.EOF the way a finished session normally
-// would. drainFills instead detects "nothing more is coming" by giving
-// each Next call its own short, fixed deadline, deliberately
-// independent of ctx's own deadline (see the loop body): a genuinely
-// buffered event is always returned well within that deadline, so it
-// only ever elapses on the one call made once the stream is caught up.
-// ctx's own cancellation/expiry is still checked explicitly on every
-// iteration and returned as a real error, never mistaken for "caught
-// up."
+// (ADR-024) — correct for a live/paper stream, but Runner needs a
+// deterministic way to know it has drained exactly this run's own
+// fills, not a timing-dependent guess. drainFills therefore requires
+// reader to implement broker.FiniteEventReader and uses AtEnd to
+// decide when to stop: AtEnd is checked before every Next call, so the
+// loop only ever calls Next when a buffered event is already known to
+// be waiting, and never blocks. This makes drainFills' termination a
+// property of the account's own recorded state, not of wall-clock
+// timing or Runner's own execution model.
 func drainFills(ctx context.Context, reader broker.EventReader) ([]order.Fill, error) {
-	var fills []order.Fill
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	finite, ok := reader.(broker.FiniteEventReader)
+	if !ok {
+		return nil, fmt.Errorf("%w: %T", ErrEventReaderNotFinite, reader)
+	}
 
-		callCtx, cancel := context.WithTimeout(context.Background(), eventDrainTimeout)
-		event, err := reader.Next(callCtx)
-		cancel()
+	var fills []order.Fill
+	for !finite.AtEnd() {
+		event, err := reader.Next(ctx)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return fills, nil
-			}
 			return nil, err
 		}
 		if event.Kind == broker.EventKindFill && event.Fill != nil {
 			fills = append(fills, *event.Fill)
 		}
 	}
+	return fills, nil
 }
