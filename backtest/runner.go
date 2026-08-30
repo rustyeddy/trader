@@ -297,19 +297,24 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 // (this method) and "derive trades from a fill stream" (DeriveTrades,
 // a pure function) as separate concerns: DeriveTrades is independently
 // testable without any Account handle at all.
-func (r *Runner) deriveTrades(ctx context.Context, acct broker.Account) (TradeSet, error) {
+func (r *Runner) deriveTrades(ctx context.Context, acct broker.Account) (trades TradeSet, err error) {
 	reader, err := acct.Events(ctx, "")
 	if err != nil {
 		return TradeSet{}, fmt.Errorf("opening event stream: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if cerr := reader.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing event stream: %w", cerr)
+			trades = TradeSet{}
+		}
+	}()
 
 	fills, err := drainFills(ctx, reader)
 	if err != nil {
 		return TradeSet{}, fmt.Errorf("draining fills: %w", err)
 	}
 
-	trades, err := DeriveTrades(fills)
+	trades, err = DeriveTrades(fills)
 	if err != nil {
 		return TradeSet{}, err
 	}
