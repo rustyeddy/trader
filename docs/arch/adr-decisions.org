@@ -143,6 +143,7 @@ the original decided, use full supersession instead.
 | 033 | Pipeline verifies broker/account identity before any broker mutation (in adr-033-pipeline-broker-account-identity-check.org) | Accepted |
 | 034 | De-risking exemption in position/exposure-limit risk rules (in adr-034-derisking-exemption-position-limit-rules.org) | Accepted |
 | 035 | M5 backtesting architecture and package boundaries (in adr-035-m5-backtesting-architecture.org) | Accepted |
+| 036 | Backtest journal contract and JSONL format (in adr-036-backtest-journal.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -281,6 +282,20 @@ than backtest constructing an adapter itself, layered no-lookahead
 ownership across replay/scheduler/View, metrics-versus-rendering
 separation between =backtest= and =report=, and listing resolution as
 an injected dependency rather than run input).
+
+Note: ADR-036 is likewise maintained in its own file,
+=docs/arch/adr-036-backtest-journal.org=, rather than inline in this
+registry.  Its own Status section is authoritative.  Issue #218
+(M5-10) asks for a durable, replayable backtest run record — the
+concrete answer ADR-035 already said this issue would give ADR-009 —
+to be drafted and adopted; this ADR records the resulting decision,
+including the =journal=/=adapters/journal/jsonl= contract-versus-
+adapter split, true causal interleaving via incremental per-submit
+draining in =Scheduler= (reusing issue #217's =FiniteEventReader=
+fixed high-water-mark contract), Record/Entry sequence-ownership
+split, explicit run-completion markers, journal failure/ownership
+semantics, and a root-cause =id.Metadata= JSON-marshaling fix
+discovered while implementing the JSONL wire format.
 
 * ADR-001: Modular monolith before service decomposition
 

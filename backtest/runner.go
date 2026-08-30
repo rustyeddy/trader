@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -115,6 +117,19 @@ type RunnerParams struct {
 	// is replaced with logging.Discard(), matching every other Trader
 	// composition-root convention.
 	Logger *slog.Logger
+
+	// Journal receives a durable, replayable record of this run (issue
+	// #218, M5-10; ADR-036): every strategy intent, proposal, risk
+	// decision, request, order, fill, account event, and derived trade,
+	// in true execution order. A nil Journal is replaced with
+	// journal.Discard(), matching Logger's own convention — Runner
+	// never requires a caller to configure a real journal.
+	//
+	// Runner never closes an externally supplied Journal: it is an
+	// injected dependency like Account or Pipeline, and the composition
+	// root that constructed it owns its lifecycle, exactly as for every
+	// other RunnerParams dependency Runner does not itself construct.
+	Journal journal.Recorder
 }
 
 func (p RunnerParams) validate() error {
@@ -176,6 +191,9 @@ func NewRunner(params RunnerParams) (*Runner, error) {
 	}
 	if params.Logger == nil {
 		params.Logger = logging.Discard()
+	}
+	if params.Journal == nil {
+		params.Journal = journal.Discard()
 	}
 	return &Runner{params: params}, nil
 }
@@ -248,6 +266,20 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: building manifest: %w", err)
 	}
 
+	jrnl := newCountingRecorder(p.Journal)
+	header, err := json.Marshal(manifest)
+	if err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: encoding run-started header: %w", err)
+	}
+	if err := jrnl.Record(ctx, journal.Record{
+		RunID:      runID,
+		Metadata:   id.Metadata{Timestamp: p.Clock.Now()},
+		Kind:       journal.KindRunStarted,
+		RunStarted: &journal.RunStarted{RunID: runID, Header: header},
+	}); err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: journaling run start: %w", err)
+	}
+
 	env := strategy.Environment{
 		Clock:   p.Clock,
 		Intents: strategy.NewIntentFactory(p.Clock, p.IDs, runnerIDSource),
@@ -268,6 +300,8 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		Pipeline: p.Pipeline,
 		Account:  p.Account,
 		Builder:  builder,
+		Journal:  jrnl,
+		RunID:    runID,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("backtest: runner: constructing scheduler: %w", err)
@@ -281,46 +315,55 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: snapshotting final account state: %w", err)
 	}
 
-	trades, err := r.deriveTrades(ctx, p.Account)
+	trades, err := DeriveTrades(sched.Fills())
 	if err != nil {
 		return Result{}, fmt.Errorf("backtest: runner: deriving trades: %w", err)
+	}
+	if err := journalTrades(ctx, jrnl, runID, trades); err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: journaling trades: %w", err)
+	}
+
+	if err := jrnl.Record(ctx, journal.Record{
+		RunID:        runID,
+		Metadata:     id.Metadata{Timestamp: p.Clock.Now()},
+		Kind:         journal.KindRunCompleted,
+		RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: jrnl.count},
+	}); err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: journaling run completion: %w", err)
 	}
 
 	return Result{Manifest: manifest, Account: finalSnapshot, Trades: trades.Closed, OpenTrades: trades.Open}, nil
 }
 
-// deriveTrades obtains this run's complete fill history from acct's
-// own authoritative event stream, deterministically (see drainFills'
-// own doc comment — it drains via broker.FiniteEventReader.AtEnd, not
-// a timing assumption), and derives TradeSet from it (issue #217,
-// M5-09). It is only called once Scheduler.Run has already returned
-// successfully, so acct's event log holds exactly this run's own
-// events. It keeps "obtain the authoritative events" (this method) and
-// "derive trades from a fill stream" (DeriveTrades, a pure function)
-// as separate concerns: DeriveTrades is independently testable without
-// any Account handle at all.
-func (r *Runner) deriveTrades(ctx context.Context, acct broker.Account) (trades TradeSet, err error) {
-	reader, err := acct.Events(ctx, "")
-	if err != nil {
-		return TradeSet{}, fmt.Errorf("opening event stream: %w", err)
-	}
-	defer func() {
-		if cerr := reader.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf("closing event stream: %w", cerr)
-			trades = TradeSet{}
+// journalTrades records every derived trade — closed and still open —
+// as its own journal.KindTrade entry (issue #218, M5-10): "derived
+// trades where appropriate" per #218's own scope, using each Trade's
+// own OpenedAt/ClosedAt as the record's timestamp since a derived
+// trade carries no Metadata of its own to reuse.
+func journalTrades(ctx context.Context, j journal.Recorder, runID id.RunID, trades TradeSet) error {
+	record := func(t order.Trade) error {
+		ts := t.ClosedAt
+		if ts.IsZero() {
+			ts = t.OpenedAt
 		}
-	}()
-
-	fills, err := drainFills(ctx, reader)
-	if err != nil {
-		return TradeSet{}, fmt.Errorf("draining fills: %w", err)
+		return j.Record(ctx, journal.Record{
+			RunID:    runID,
+			Metadata: id.Metadata{Timestamp: ts},
+			Kind:     journal.KindTrade,
+			Trade:    &t,
+		})
 	}
-
-	trades, err = DeriveTrades(fills)
-	if err != nil {
-		return TradeSet{}, err
+	for _, t := range trades.Closed {
+		if err := record(t); err != nil {
+			return err
+		}
 	}
-	return trades, nil
+	for _, t := range trades.Open {
+		if err := record(t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Result is what a successful Run produces: the immutable Manifest

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/account"
@@ -16,6 +17,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -328,7 +330,16 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 			riskFraction:    num.MustParseRate("0.01"),
 			adverseDistance: num.MustParsePrice("0.01000"),
 		},
+		Journal: journal.Discard(),
+		RunID:   mustSchedulerRunID(t, ids2),
 	}
+}
+
+func mustSchedulerRunID(t *testing.T, gen *id.Generator) id.RunID {
+	t.Helper()
+	runID, err := id.GenerateRunID(gen)
+	require.NoError(t, err)
+	return runID
 }
 
 // bothInstrumentsRequirements returns the EUR/USD H1 + GBP/USD H1
@@ -615,6 +626,48 @@ func TestNewScheduler_RequiresEveryDep(t *testing.T) {
 
 // erroringInputBuilder always fails, to exercise Scheduler's handling
 // of an InputBuilder.Build failure.
+// failOnKindRecorder wraps journal.Discard(), failing only the first
+// Record call for the given Kind and succeeding for everything else —
+// used to prove a mid-drain journal failure does not leave Scheduler's
+// own watermark/fill bookkeeping claiming an event was recorded when
+// it was not (issue #236 review).
+type failOnKindRecorder struct {
+	journal.Recorder
+	failOn journal.Kind
+	failed bool
+}
+
+func (f *failOnKindRecorder) Record(ctx context.Context, rec journal.Record) error {
+	if !f.failed && rec.Kind == f.failOn {
+		f.failed = true
+		return errIntentional
+	}
+	return f.Recorder.Record(ctx, rec)
+}
+
+// TestScheduler_JournalFailureDuringDrainDoesNotAdvanceWatermarkOrFills
+// proves drainAndJournal only commits an event to lastBrokerSeq/fills
+// once it has actually been journaled successfully: if the Fill entry
+// itself fails to record, Run aborts and Fills() must not report a
+// fill Scheduler never durably recorded.
+func TestScheduler_JournalFailureDuringDrainDoesNotAdvanceWatermarkOrFills(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t)
+	deps := newSchedulerDeps(t, replay, strat, h)
+	deps.Journal = &failOnKindRecorder{Recorder: journal.Discard(), failOn: journal.KindFill}
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+
+	err = sched.Run(context.Background())
+	require.ErrorIs(t, err, errIntentional)
+	assert.Empty(t, sched.Fills(), "a fill must not be collected unless its journal record succeeded")
+}
+
 type erroringInputBuilder struct{}
 
 func (erroringInputBuilder) Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snap account.Snapshot) (pipeline.Input, error) {
