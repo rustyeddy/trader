@@ -78,6 +78,30 @@ func TestNewRecordRejectsKindPayloadMismatch(t *testing.T) {
 	assert.ErrorIs(t, err, journal.ErrInvalidRecord)
 }
 
+func TestNewRecordRejectsRunStartedRunIDMismatch(t *testing.T) {
+	runID := mustRunID(t)
+	other := mustRunID(t)
+	_, err := journal.NewRecord(journal.Record{
+		RunID:      runID,
+		Metadata:   id.Metadata{Timestamp: time.Now()},
+		Kind:       journal.KindRunStarted,
+		RunStarted: &journal.RunStarted{RunID: other},
+	})
+	assert.ErrorIs(t, err, journal.ErrInvalidRecord)
+}
+
+func TestNewRecordRejectsRunCompletedRunIDMismatch(t *testing.T) {
+	runID := mustRunID(t)
+	other := mustRunID(t)
+	_, err := journal.NewRecord(journal.Record{
+		RunID:        runID,
+		Metadata:     id.Metadata{Timestamp: time.Now()},
+		Kind:         journal.KindRunCompleted,
+		RunCompleted: &journal.RunCompleted{RunID: other, EntryCount: 1},
+	})
+	assert.ErrorIs(t, err, journal.ErrInvalidRecord)
+}
+
 func TestNewRecordValidRunStartedAndCompleted(t *testing.T) {
 	runID := mustRunID(t)
 	started, err := journal.NewRecord(journal.Record{

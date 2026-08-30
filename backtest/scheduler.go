@@ -680,7 +680,6 @@ func (s *Scheduler) drainAndJournal(ctx context.Context) error {
 		if event.Sequence <= s.lastBrokerSeq {
 			continue
 		}
-		s.lastBrokerSeq = event.Sequence
 
 		rec := journal.Record{RunID: s.deps.RunID, Metadata: event.Metadata}
 		switch event.Kind {
@@ -688,16 +687,34 @@ func (s *Scheduler) drainAndJournal(ctx context.Context) error {
 			rec.Kind, rec.Order = journal.KindOrder, event.Order
 		case broker.EventKindFill:
 			rec.Kind, rec.Fill = journal.KindFill, event.Fill
-			s.fills = append(s.fills, *event.Fill)
 		case broker.EventKindAccount:
 			rec.Kind, rec.Account = journal.KindAccount, event.Account
 		case broker.EventKindStatus:
 			rec.Kind, rec.Status = journal.KindStatus, event.Status
 		default:
+			// An event kind this journal has no representation for.
+			// Still advance the watermark past it — there is nothing
+			// to journal or collect, so there is nothing left pending
+			// that a later retry could need to redo.
+			s.lastBrokerSeq = event.Sequence
 			continue
 		}
+
+		// Journal first; only advance the watermark and collect the
+		// fill once that succeeds (issue #236 review). Committing
+		// lastBrokerSeq/fills before the journal write is durable would
+		// let Scheduler's own state claim an event was recorded when it
+		// was not — harmless today because a journal failure aborts
+		// Run immediately, but the invariant lastBrokerSeq documents
+		// ("the highest event already journaled/collected") must stay
+		// true regardless of what a future caller does with a partially
+		// run Scheduler.
 		if err := s.journalRecord(ctx, rec); err != nil {
 			return err
+		}
+		s.lastBrokerSeq = event.Sequence
+		if event.Kind == broker.EventKindFill {
+			s.fills = append(s.fills, *event.Fill)
 		}
 	}
 	return nil

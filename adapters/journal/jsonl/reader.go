@@ -59,7 +59,12 @@ func (r *Reader) Next(ctx context.Context) (journal.Entry, error) {
 
 	if !r.scanner.Scan() {
 		if err := r.scanner.Err(); err != nil {
-			return journal.Entry{}, fmt.Errorf("jsonl: reading line %d: %w", r.line+1, err)
+			// A scan failure (for example bufio.ErrTooLong on an
+			// oversized line) is exactly the kind of malformed-file
+			// condition ErrCorruptEntry exists to classify — a caller
+			// checking errors.Is(err, ErrCorruptEntry) must not have to
+			// separately handle bufio's own error types.
+			return journal.Entry{}, fmt.Errorf("%w: line %d: %v", ErrCorruptEntry, r.line+1, err)
 		}
 		return journal.Entry{}, io.EOF
 	}

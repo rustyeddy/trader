@@ -159,6 +159,28 @@ func TestWriterRecordAfterCloseFails(t *testing.T) {
 	require.ErrorIs(t, err, journal.ErrClosed)
 }
 
+func TestNewWriterRejectsExistingPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.jsonl")
+	w, err := jsonl.NewWriter(path)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	_, err = jsonl.NewWriter(path)
+	require.Error(t, err, "NewWriter must not silently append to an existing journal file")
+}
+
+func TestReaderRejectsZeroSequence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.jsonl")
+	appendRaw(t, path, `{"run_id":"x","sequence":0,"metadata":{"timestamp":"2024-01-01T00:00:00Z"},"kind":"run-started","run_started":{"run_id":"x"}}`)
+
+	r, err := jsonl.OpenReader(path)
+	require.NoError(t, err)
+	defer func() { _ = r.Close() }()
+
+	_, err = r.Next(context.Background())
+	require.ErrorIs(t, err, jsonl.ErrCorruptEntry)
+}
+
 func TestWriterCloseIsIdempotent(t *testing.T) {
 	w, _ := mustWriter(t)
 	require.NoError(t, w.Close())

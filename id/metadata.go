@@ -51,6 +51,13 @@ type Metadata struct {
 // type's own doc comment). Marshaling Metadata directly via reflection
 // would therefore fail on exactly the common case of an event nothing
 // caused, rather than merely omitting the field that doesn't apply.
+//
+// This is Metadata's first JSON encoding: before this, nothing in the
+// module serialized it, so there is no prior wire format (default
+// reflection or otherwise) this could break compatibility with. The
+// snake_case field names are a deliberate wire convention (matching
+// backtest/manifest.go's own wire structs and issue #218's journal
+// wire format), not an incidental byproduct of adding these methods.
 type metadataWire struct {
 	EventID       *EventID       `json:"event_id,omitempty"`
 	CorrelationID *CorrelationID `json:"correlation_id,omitempty"`

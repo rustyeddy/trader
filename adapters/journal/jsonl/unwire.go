@@ -313,6 +313,10 @@ func fromTradeWire(w tradeWire) (order.Trade, error) {
 // domain payload — a malformed or hand-edited journal line surfaces
 // here, not as a panic or a silently wrong value.
 func fromEntryWire(w entryWire) (journal.Entry, error) {
+	if w.Sequence == 0 {
+		return journal.Entry{}, fmt.Errorf("%w: sequence must be at least 1, got 0", ErrCorruptEntry)
+	}
+
 	kind, err := parseKind(w.Kind)
 	if err != nil {
 		return journal.Entry{}, err

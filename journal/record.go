@@ -140,5 +140,17 @@ func NewRecord(r Record) (Record, error) {
 		return Record{}, fmt.Errorf("%w: kind %s does not match the populated payload", ErrInvalidRecord, r.Kind)
 	}
 
+	// RunStarted/RunCompleted each carry their own RunID field,
+	// duplicating the envelope's — they are the journal's own
+	// integrity/completion markers, so a mismatch here would produce an
+	// internally contradictory but otherwise valid-looking entry rather
+	// than a detectable error.
+	if r.RunStarted != nil && !r.RunStarted.RunID.Equal(r.RunID) {
+		return Record{}, fmt.Errorf("%w: run_started run id %s does not match record run id %s", ErrInvalidRecord, r.RunStarted.RunID, r.RunID)
+	}
+	if r.RunCompleted != nil && !r.RunCompleted.RunID.Equal(r.RunID) {
+		return Record{}, fmt.Errorf("%w: run_completed run id %s does not match record run id %s", ErrInvalidRecord, r.RunCompleted.RunID, r.RunID)
+	}
+
 	return r, nil
 }

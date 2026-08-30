@@ -45,14 +45,16 @@ type Writer struct {
 	closed bool
 }
 
-// NewWriter opens (creating if necessary) path for append and returns
-// a Writer over it. Existing content, if any, is preserved and
-// appended after — NewWriter does not reset seq to reflect any
-// existing content; a caller resuming a partially written journal
-// under the exact same path is not a supported use case for this
-// issue (each run gets its own fresh path).
+// NewWriter creates path and returns a Writer over it. path must not
+// already exist: NewWriter always starts Sequence at 1, so silently
+// appending to an existing file would either duplicate sequence
+// numbers already present in it or mix two runs into one journal,
+// either way producing a file that looks well-formed but is not a
+// faithful record of any single run. A caller that wants to journal
+// another run gives it a fresh path — resuming or extending an
+// existing journal file is not a supported use case for this issue.
 func NewWriter(path string) (*Writer, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("jsonl: opening %s: %w", path, err)
 	}
