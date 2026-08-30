@@ -46,3 +46,26 @@ func TestIDMarshalJSONDeterministic(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, a, b)
 }
+
+func TestIDUnmarshalJSONRejectsUnrecognizedKindPrefix(t *testing.T) {
+	var id instrument.ID
+	err := json.Unmarshal([]byte(`"bogus:whatever"`), &id)
+	require.ErrorIs(t, err, instrument.ErrInvalidID)
+}
+
+func TestIDUnmarshalJSONAcceptsEveryConstructorPrefix(t *testing.T) {
+	for _, s := range []string{
+		"fx:EUR/USD",
+		"eq:NASDAQ:AAPL",
+		"etf:NYSE:SPY",
+		"fut:ES:2026-12",
+		"cont:ES",
+		"idx:SPX",
+	} {
+		var id instrument.ID
+		data, err := json.Marshal(s)
+		require.NoError(t, err, s)
+		require.NoError(t, json.Unmarshal(data, &id), s)
+		assert.Equal(t, s, id.String(), s)
+	}
+}

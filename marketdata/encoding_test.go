@@ -102,3 +102,10 @@ func TestTimeRangeUnmarshalJSONRejectsMalformed(t *testing.T) {
 	err := json.Unmarshal([]byte(`not json`), &r)
 	require.Error(t, err)
 }
+
+func TestIntervalMarshalJSONRejectsInvalidInterval(t *testing.T) {
+	var iv Interval // zero value: UnitMinute, count 0 — invalid
+	_, err := json.Marshal(iv)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidIntervalJSON)
+}

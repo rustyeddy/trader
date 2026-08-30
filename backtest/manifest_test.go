@@ -26,6 +26,37 @@ func mustRunID(t *testing.T, seed uint64) id.RunID {
 	return runID
 }
 
+// mustDatasetManifest returns a well-formed marketdata.Manifest for
+// eurusdID/H1 over mustManifestSpan, suitable as Manifest's own
+// required Dataset provenance entry in tests.
+func mustDatasetManifest(t *testing.T) marketdata.Manifest {
+	t.Helper()
+	return mustDatasetManifestFor(t, marketdata.H1, mustManifestSpan(t))
+}
+
+// mustDatasetManifestFor is mustDatasetManifest generalized over
+// interval/span, for tests that need multiple distinct, individually
+// well-formed dataset entries (canonical-ordering tie-break tests).
+func mustDatasetManifestFor(t *testing.T, interval marketdata.Interval, span marketdata.TimeRange) marketdata.Manifest {
+	t.Helper()
+	m := marketdata.Manifest{
+		Provider:         "oanda",
+		Instrument:       eurusdID(t),
+		Interval:         interval,
+		Span:             span,
+		Basis:            marketdata.BasisBid,
+		SchemaVersion:    1,
+		RawFingerprint:   "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+		BuilderVersion:   "test-builder-v1",
+		ValidatorVersion: "test-validator-v1",
+		ResamplerVersion: "none",
+		CalendarVersion:  "test-calendar-v1",
+		BuiltAt:          time.Date(2024, time.January, 3, 0, 0, 0, 0, time.UTC),
+	}
+	require.NoError(t, m.Validate())
+	return m
+}
+
 func mustManifestSpan(t *testing.T) marketdata.TimeRange {
 	t.Helper()
 	span, err := marketdata.NewTimeRange(
@@ -70,6 +101,7 @@ func baseManifestParams(t *testing.T) backtest.ManifestParams {
 		FillModel:       fillModel,
 		SlippageModel:   slippageModel,
 		CommissionModel: commissionModel,
+		Dataset:         []marketdata.Manifest{mustDatasetManifest(t)},
 	}
 }
 
@@ -255,12 +287,7 @@ func TestComponentInfo_ParametersReturnsDefensiveCopy(t *testing.T) {
 func TestManifest_RemainingAccessors(t *testing.T) {
 	p := baseManifestParams(t)
 	p.RiskRules = []backtest.ComponentInfo{p.FillModel} // reuse a valid ComponentInfo as a stand-in rule
-	p.Dataset = []marketdata.Manifest{{
-		Provider:   "oanda",
-		Instrument: eurusdID(t),
-		Interval:   marketdata.H1,
-		Span:       mustManifestSpan(t),
-	}}
+	p.Dataset = []marketdata.Manifest{mustDatasetManifest(t)}
 	p.TraderVersion = "v0.1.0-test"
 
 	m, err := backtest.NewManifest(p)
@@ -304,8 +331,8 @@ func TestManifest_UniverseSortsByIntervalThenComponentsSortByVersion(t *testing.
 	}
 	p.RiskRules = []backtest.ComponentInfo{d1, h1}
 	p.Dataset = []marketdata.Manifest{
-		{Provider: "oanda", Instrument: eurusdID(t), Interval: marketdata.H1, Span: laterSpan},
-		{Provider: "oanda", Instrument: eurusdID(t), Interval: marketdata.H1, Span: earlierSpan},
+		mustDatasetManifestFor(t, marketdata.H1, laterSpan),
+		mustDatasetManifestFor(t, marketdata.H1, earlierSpan),
 	}
 
 	m, err := backtest.NewManifest(p)
@@ -325,4 +352,94 @@ func TestManifest_UniverseSortsByIntervalThenComponentsSortByVersion(t *testing.
 	require.Len(t, dataset, 2)
 	assert.True(t, dataset[0].Span.Start().Equal(earlierSpan.Start()), "same instrument/interval: sorted by span start")
 	assert.True(t, dataset[1].Span.Start().Equal(laterSpan.Start()))
+}
+
+// TestManifest_RiskRuleParametersAreFinalTieBreak proves two risk
+// rules sharing name/version but differing parameters produce
+// identical canonical ordering (and therefore identical serialization/
+// digest) regardless of caller input order — the specific gap #215's
+// review found in componentInfoLess.
+func TestManifest_RiskRuleParametersAreFinalTieBreak(t *testing.T) {
+	a, err := backtest.NewComponentInfo("shared", "v1", map[string]int{"limit": 1})
+	require.NoError(t, err)
+	b, err := backtest.NewComponentInfo("shared", "v1", map[string]int{"limit": 2})
+	require.NoError(t, err)
+
+	p1 := baseManifestParams(t)
+	p1.RiskRules = []backtest.ComponentInfo{a, b}
+	p2 := baseManifestParams(t)
+	p2.RunID = p1.RunID
+	p2.RiskRules = []backtest.ComponentInfo{b, a}
+
+	m1, err := backtest.NewManifest(p1)
+	require.NoError(t, err)
+	m2, err := backtest.NewManifest(p2)
+	require.NoError(t, err)
+
+	require.Len(t, m1.RiskRules(), 2)
+	require.Len(t, m2.RiskRules(), 2)
+	assert.JSONEq(t, string(m1.RiskRules()[0].Parameters()), string(m2.RiskRules()[0].Parameters()))
+	assert.JSONEq(t, string(m1.RiskRules()[1].Parameters()), string(m2.RiskRules()[1].Parameters()))
+	assert.Equal(t, m1.ConfigDigest(), m2.ConfigDigest())
+
+	data1, err := json.Marshal(m1)
+	require.NoError(t, err)
+	data2, err := json.Marshal(m2)
+	require.NoError(t, err)
+	assert.Equal(t, data1, data2)
+}
+
+// TestNewManifest_RejectsDuplicateUniverseRequirement proves a
+// duplicate (instrument, interval) pair in Universe is rejected
+// outright rather than left for the canonical sort to disambiguate.
+func TestNewManifest_RejectsDuplicateUniverseRequirement(t *testing.T) {
+	p := baseManifestParams(t)
+	p.Universe = []strategy.DataRequirement{
+		{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 0},
+		{Instrument: eurusdID(t), Interval: marketdata.H1, WarmupBars: 10},
+	}
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrDuplicateRequirement)
+}
+
+func TestNewManifest_RequiresFillModel(t *testing.T) {
+	p := baseManifestParams(t)
+	p.FillModel = backtest.ComponentInfo{}
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
+}
+
+func TestNewManifest_RequiresSlippageModel(t *testing.T) {
+	p := baseManifestParams(t)
+	p.SlippageModel = backtest.ComponentInfo{}
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
+}
+
+func TestNewManifest_RequiresCommissionModel(t *testing.T) {
+	p := baseManifestParams(t)
+	p.CommissionModel = backtest.ComponentInfo{}
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
+}
+
+func TestNewManifest_RequiresNonEmptyDataset(t *testing.T) {
+	p := baseManifestParams(t)
+	p.Dataset = nil
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
+}
+
+func TestNewManifest_RejectsInvalidDatasetEntry(t *testing.T) {
+	p := baseManifestParams(t)
+	p.Dataset = []marketdata.Manifest{{}} // zero value fails Validate
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
+}
+
+func TestNewManifest_RejectsUnnamedRiskRule(t *testing.T) {
+	p := baseManifestParams(t)
+	p.RiskRules = []backtest.ComponentInfo{{}}
+	_, err := backtest.NewManifest(p)
+	require.ErrorIs(t, err, backtest.ErrInvalidManifest)
 }

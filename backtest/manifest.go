@@ -103,6 +103,43 @@ func NewManifest(p ManifestParams) (Manifest, error) {
 	if !p.StartingCapital.IsValid() {
 		return Manifest{}, fmt.Errorf("%w: starting capital must be valid", ErrInvalidManifest)
 	}
+	if p.FillModel.name == "" {
+		return Manifest{}, fmt.Errorf("%w: fill model must be set", ErrInvalidManifest)
+	}
+	if p.SlippageModel.name == "" {
+		return Manifest{}, fmt.Errorf("%w: slippage model must be set", ErrInvalidManifest)
+	}
+	if p.CommissionModel.name == "" {
+		return Manifest{}, fmt.Errorf("%w: commission model must be set", ErrInvalidManifest)
+	}
+	if len(p.Dataset) == 0 {
+		return Manifest{}, fmt.Errorf("%w: dataset must not be empty", ErrInvalidManifest)
+	}
+	for _, d := range p.Dataset {
+		if err := d.Validate(); err != nil {
+			return Manifest{}, fmt.Errorf("%w: dataset entry: %v", ErrInvalidManifest, err)
+		}
+	}
+	for _, r := range p.RiskRules {
+		if r.name == "" {
+			return Manifest{}, fmt.Errorf("%w: risk rule must have a name", ErrInvalidManifest)
+		}
+	}
+
+	// (instrument, interval) is the requirement's own identity
+	// elsewhere (Replay, Scheduler both reject a duplicate the same
+	// way) — reject it here too, rather than trying to make WarmupBars
+	// part of the sort's tie-break, so canonical ordering never has to
+	// disambiguate two requirements claiming the same identity with a
+	// different WarmupBars (issue #215 review).
+	seen := make(map[requirementKey]struct{}, len(p.Universe))
+	for _, req := range p.Universe {
+		key := requirementKey{instrument: req.Instrument, interval: req.Interval}
+		if _, ok := seen[key]; ok {
+			return Manifest{}, fmt.Errorf("%w: %s %s", ErrDuplicateRequirement, req.Instrument, req.Interval)
+		}
+		seen[key] = struct{}{}
+	}
 
 	params, err := json.Marshal(p.StrategyParameters)
 	if err != nil {
@@ -147,13 +184,29 @@ func dataRequirementLess(a, b strategy.DataRequirement) bool {
 	return a.Interval.Count() < b.Interval.Count()
 }
 
+// componentInfoLess orders by (name, version, parameters) — a total
+// order over every field ComponentInfo.Equal itself compares, so two
+// ComponentInfo values sort.Slice cannot distinguish are genuinely
+// equal, never merely tied on the fields this comparator happened to
+// check (issue #215 review: sort.Slice is not stable, so a partial
+// comparator can leave canonical order depending on caller input
+// order for two same-name/version, different-parameters components).
 func componentInfoLess(a, b ComponentInfo) bool {
 	if a.name != b.name {
 		return a.name < b.name
 	}
-	return a.version < b.version
+	if a.version != b.version {
+		return a.version < b.version
+	}
+	return string(a.parameters) < string(b.parameters)
 }
 
+// datasetManifestLess orders by (instrument, interval, provider, span
+// start, span end, revision) — Revision is marketdata.Manifest's own
+// content fingerprint (issue #79/#81), so it is the final tie-breaker
+// that makes this a total order over every field that can distinguish
+// two dataset Manifests describing the same instrument/interval/span
+// (issue #215 review).
 func datasetManifestLess(a, b marketdata.Manifest) bool {
 	ai, bi := a.Instrument.String(), b.Instrument.String()
 	if ai != bi {
@@ -165,7 +218,16 @@ func datasetManifestLess(a, b marketdata.Manifest) bool {
 	if a.Interval.Count() != b.Interval.Count() {
 		return a.Interval.Count() < b.Interval.Count()
 	}
-	return a.Span.Start().Before(b.Span.Start())
+	if a.Provider != b.Provider {
+		return a.Provider < b.Provider
+	}
+	if !a.Span.Start().Equal(b.Span.Start()) {
+		return a.Span.Start().Before(b.Span.Start())
+	}
+	if !a.Span.End().Equal(b.Span.End()) {
+		return a.Span.End().Before(b.Span.End())
+	}
+	return a.Revision() < b.Revision()
 }
 
 // RunID returns this manifest's own run identity.

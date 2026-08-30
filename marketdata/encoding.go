@@ -43,6 +43,9 @@ func parseUnitName(s string) (Unit, bool) {
 // MarshalJSON implements json.Marshaler, encoding i as {"unit":
 // "<name>","count":<n>}.
 func (i Interval) MarshalJSON() ([]byte, error) {
+	if err := i.validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidIntervalJSON, err)
+	}
 	name, ok := unitNames[i.unit]
 	if !ok {
 		return nil, fmt.Errorf("%w: unit %v has no wire name", ErrInvalidIntervalJSON, i.unit)
