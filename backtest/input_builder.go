@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/rustyeddy/trader/account"
@@ -11,6 +12,10 @@ import (
 	"github.com/rustyeddy/trader/pipeline"
 	"github.com/rustyeddy/trader/strategy"
 )
+
+// ErrInvalidInputBuilder marks a NewResolverInputBuilder call missing
+// a required dependency.
+var ErrInvalidInputBuilder = errors.New("backtest: invalid input builder")
 
 // resolverInputBuilder is the standard InputBuilder implementation
 // (issue #216, M5-08 review): the mechanical translation from an
@@ -34,9 +39,15 @@ type resolverInputBuilder struct {
 // resolves each intent's own instrument to a Listing via resolver, and
 // applies one fixed riskFraction/adverseDistance policy to every
 // sized intent, matching RunnerParams' own "one fixed policy per run"
-// scope.
-func NewResolverInputBuilder(resolver instrument.Resolver, riskFraction num.Rate, adverseDistance num.Price) InputBuilder {
-	return resolverInputBuilder{resolver: resolver, riskFraction: riskFraction, adverseDistance: adverseDistance}
+// scope. resolver must be non-nil; NewResolverInputBuilder rejects a
+// nil resolver here, at construction, rather than leaving Build to
+// discover it (and panic on a nil interface method call) on its first
+// invocation.
+func NewResolverInputBuilder(resolver instrument.Resolver, riskFraction num.Rate, adverseDistance num.Price) (InputBuilder, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("%w: resolver must be set", ErrInvalidInputBuilder)
+	}
+	return resolverInputBuilder{resolver: resolver, riskFraction: riskFraction, adverseDistance: adverseDistance}, nil
 }
 
 func (b resolverInputBuilder) Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snapshot account.Snapshot) (pipeline.Input, error) {

@@ -256,7 +256,10 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: starting strategy: %w", err)
 	}
 
-	builder := NewResolverInputBuilder(p.Resolver, p.RiskFraction, p.AdverseDistance)
+	builder, err := NewResolverInputBuilder(p.Resolver, p.RiskFraction, p.AdverseDistance)
+	if err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: constructing input builder: %w", err)
+	}
 	sched, err := NewScheduler(SchedulerDeps{
 		Replay:   replay,
 		Strategy: p.Strategy,

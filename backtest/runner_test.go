@@ -141,6 +141,13 @@ func TestRunner_AlreadyCancelledContextReturnsImmediately(t *testing.T) {
 	snap, err := params.Account.Snapshot(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, snap.Positions())
+
+	// Because the pre-canceled call never claimed the one-shot slot, a
+	// second call with a live context must still be allowed to run
+	// normally — a harmless caller-side cancellation must not
+	// permanently burn an otherwise untouched Runner.
+	_, err = runner.Run(context.Background())
+	require.NoError(t, err)
 }
 
 func TestNewRunner_RequiresEveryParam(t *testing.T) {
@@ -264,6 +271,15 @@ func TestRunner_DeterministicAcrossIndependentRunners(t *testing.T) {
 	assert.Equal(t, result1.Manifest.ConfigDigest(), result2.Manifest.ConfigDigest())
 }
 
+// TestNewResolverInputBuilder_RejectsNilResolver proves the
+// constructor rejects a nil resolver at construction time, rather
+// than letting Build discover it later and panic on a nil interface
+// method call.
+func TestNewResolverInputBuilder_RejectsNilResolver(t *testing.T) {
+	_, err := backtest.NewResolverInputBuilder(nil, num.MustParseRate("0.01"), num.MustParsePrice("0.01"))
+	require.ErrorIs(t, err, backtest.ErrInvalidInputBuilder)
+}
+
 // TestResolverInputBuilder_Build_UnresolvableInstrumentFails proves
 // Build reports a clear error when the intent's own instrument has no
 // Listing registered under the account's own broker — rather than
@@ -274,7 +290,8 @@ func TestResolverInputBuilder_Build_UnresolvableInstrumentFails(t *testing.T) {
 
 	// A resolver with nothing registered at all.
 	empty := instrument.NewMemoryResolver()
-	builder := backtest.NewResolverInputBuilder(empty, num.MustParseRate("0.01"), num.MustParsePrice("0.01"))
+	builder, err := backtest.NewResolverInputBuilder(empty, num.MustParseRate("0.01"), num.MustParsePrice("0.01"))
+	require.NoError(t, err)
 
 	snap, err := params.Account.Snapshot(context.Background())
 	require.NoError(t, err)
