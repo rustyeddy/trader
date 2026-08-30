@@ -18,6 +18,7 @@ func TestNewTradeValidOpen(t *testing.T) {
 		EntryFillIDs: []id.FillID{mustFillID(t)},
 		OpenedAt:     time.Now(),
 		RealizedPnL:  num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Costs:        num.MustParseMoney("0", num.MustParseCurrency("USD")),
 	})
 	require.NoError(t, err)
 	assert.True(t, tr.ClosedAt.IsZero(), "still open")
@@ -33,8 +34,33 @@ func TestNewTradeValidClosed(t *testing.T) {
 		OpenedAt:     time.Now(),
 		ClosedAt:     time.Now(),
 		RealizedPnL:  num.MustParseMoney("125.50", num.MustParseCurrency("USD")),
+		Costs:        num.MustParseMoney("2.50", num.MustParseCurrency("USD")),
 	})
 	require.NoError(t, err)
+}
+
+func TestNewTradeRejectsInvalidRealizedPnL(t *testing.T) {
+	_, err := NewTrade(Trade{
+		AccountID:    mustAccountID(t),
+		Listing:      mustEurUsdListing(t),
+		Side:         Long,
+		EntryFillIDs: []id.FillID{mustFillID(t)},
+		OpenedAt:     time.Now(),
+		Costs:        num.MustParseMoney("0", num.MustParseCurrency("USD")),
+	})
+	assert.ErrorIs(t, err, ErrInvalidTrade)
+}
+
+func TestNewTradeRejectsInvalidCosts(t *testing.T) {
+	_, err := NewTrade(Trade{
+		AccountID:    mustAccountID(t),
+		Listing:      mustEurUsdListing(t),
+		Side:         Long,
+		EntryFillIDs: []id.FillID{mustFillID(t)},
+		OpenedAt:     time.Now(),
+		RealizedPnL:  num.MustParseMoney("0", num.MustParseCurrency("USD")),
+	})
+	assert.ErrorIs(t, err, ErrInvalidTrade)
 }
 
 func TestNewTradeRejectsZeroAccountID(t *testing.T) {
@@ -122,6 +148,8 @@ func TestNewTradeAllowsOpenTradeWithPartialExitFillsAndNoClosedAt(t *testing.T) 
 		EntryFillIDs: []id.FillID{mustFillID(t)},
 		ExitFillIDs:  []id.FillID{mustFillID(t)},
 		OpenedAt:     time.Now(),
+		RealizedPnL:  num.MustParseMoney("0", num.MustParseCurrency("USD")),
+		Costs:        num.MustParseMoney("0", num.MustParseCurrency("USD")),
 	})
 	require.NoError(t, err)
 }

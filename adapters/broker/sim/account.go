@@ -526,7 +526,10 @@ func (s *accountState) commitFill(listing instrument.Listing, outcome fillOutcom
 // The fill is always for o's complete AcceptedQuantity — this package
 // has no partial-fill/volume model. Position accounting (issue #152,
 // M3-09) covers all five transitions — open, increase, reduce, close,
-// reverse — via applyFillToPosition; see position.go. Cash moves only
+// reverse — via order.ApplyFillToPosition (issue #217, M5-09, extracted
+// from this package's own former private helper into broker-neutral
+// position accounting shared with backtest trade derivation). Cash
+// moves only
 // by realized PnL and, when a fill's Commission is set, by that
 // commission (applyCommission) — never by a universal full-notional
 // debit/credit, which is not broker-neutral accounting (a cash
@@ -625,10 +628,11 @@ func (s *accountState) buildFill(deps Deps, o order.Order, price num.Price, caus
 	}
 
 	existing, hasExisting := s.positions[key]
-	positionAfter, realizedPnLDelta, err := applyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
+	transition, err := order.ApplyFillToPosition(existing, hasExisting, req.AccountID, req.Listing, currency, req.Side, price, fillQty)
 	if err != nil {
 		return fillOutcome{}, err
 	}
+	positionAfter, realizedPnLDelta := transition.Position, transition.RealizedPnL
 
 	cashAfter, err := s.cash.Add(realizedPnLDelta)
 	if err != nil {
