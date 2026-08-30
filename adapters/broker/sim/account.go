@@ -671,5 +671,8 @@ func (h *accountHandle) Events(ctx context.Context, cursor brokerpkg.EventCursor
 	if h.broker.isClosed() {
 		return nil, brokerpkg.ErrClosed
 	}
-	return &eventReader{state: h.state, after: decodeCursor(cursor)}, nil
+	h.state.mu.Lock()
+	endSequence := h.state.nextSequence
+	h.state.mu.Unlock()
+	return &eventReader{state: h.state, after: decodeCursor(cursor), endSequence: endSequence}, nil
 }

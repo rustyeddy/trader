@@ -56,12 +56,35 @@ type EventReader interface {
 }
 
 // FiniteEventReader is an optional capability an EventReader may
-// implement when its underlying stream is backed by a bounded,
-// currently-finished producer — a completed backtest run, for
-// example — rather than a live/paper feed that can always receive
-// more events later. A caller that needs to drain exactly what has
-// been recorded so far, without racing Next's ordinary live-stream
-// blocking behavior, type-asserts for this capability first.
+// implement, giving a caller a deterministic way to drain exactly the
+// events its producer had already recorded when the reader was
+// created — a completed backtest run, for example — without racing
+// Next's ordinary live-stream blocking behavior or guessing "caught
+// up" from elapsed time.
+//
+// The capability's contract is a fixed high-water mark, not a live
+// "anything queued right now" check: an implementation captures, at
+// the moment the reader is created (Account.Events(ctx, cursor)
+// returns it), the highest Sequence its producer has recorded so far.
+// AtEnd reports whether every event up to and including that captured
+// boundary has been delivered by Next. Once AtEnd reports true, it
+// stays true for the remaining lifetime of that reader, regardless of
+// anything the producer records afterward — those later events are
+// simply outside the boundary this reader captured at creation, not
+// events this reader claims don't exist. This is what makes AtEnd
+// usable as a real completeness proof rather than merely today's
+// snapshot of an empty buffer: a caller draining until AtEnd is true
+// is guaranteed to have seen every event recorded as of the moment it
+// opened the reader, never a partial view that depends on how quickly
+// it happened to drain relative to the producer.
+//
+// Next's own behavior is unchanged by a reader also implementing this
+// capability: it keeps serving events indefinitely, live, exactly as
+// an ordinary EventReader does — a caller that keeps calling Next past
+// the point AtEnd first reported true still receives any event the
+// producer records later. FiniteEventReader only adds a way to ask
+// "have I seen everything from before I started," not a way to stop
+// the underlying stream from producing more.
 //
 // This is deliberately a narrow, additive capability (matching the
 // architecture document's "small required core plus capability
@@ -72,13 +95,12 @@ type EventReader interface {
 type FiniteEventReader interface {
 	EventReader
 
-	// AtEnd reports whether every event this reader's producer has
-	// recorded so far has already been delivered by Next. It performs
-	// no blocking I/O and does not advance the reader's own position:
-	// it is safe to call repeatedly, including between calls to Next.
-	// AtEnd returning true is not a permanent guarantee for a producer
-	// that could still record more later (see FiniteEventReader's own
-	// doc comment) — it answers "is there anything to read right now,"
-	// not "will there ever be more."
+	// AtEnd reports whether every event recorded by this reader's
+	// producer as of this reader's own creation has already been
+	// delivered by Next. It performs no blocking I/O and does not
+	// advance the reader's own position: it is safe to call repeatedly,
+	// including between calls to Next. See FiniteEventReader's own doc
+	// comment for why this is a fixed boundary captured at creation,
+	// not a live re-evaluation of the producer's current backlog.
 	AtEnd() bool
 }
