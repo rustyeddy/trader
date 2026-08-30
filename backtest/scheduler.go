@@ -9,7 +9,9 @@ import (
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/clock"
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/pipeline"
@@ -21,6 +23,14 @@ import (
 // time) Replay producing an event for an (instrument, interval)
 // Strategy never declared.
 var ErrInvalidSchedulerDeps = errors.New("backtest: invalid scheduler dependencies")
+
+// ErrEventReaderNotFinite reports that an Account's EventReader does
+// not implement broker.FiniteEventReader — Scheduler requires it,
+// since journaling this run's broker events deterministically needs a
+// fixed, drainable boundary rather than racing the reader's ordinary
+// live-stream blocking behavior (see drainAndJournal's own doc
+// comment).
+var ErrEventReaderNotFinite = errors.New("backtest: event reader does not support finite draining")
 
 // InputBuilder turns one order.Intent a Strategy emitted — together
 // with the strategy.BarEvent it is now eligible against and the
@@ -85,6 +95,15 @@ type SchedulerDeps struct {
 	// Builder turns an emitted Intent into a pipeline.Input. See
 	// InputBuilder's own doc comment.
 	Builder InputBuilder
+	// Journal receives every intent/proposal/decision/request Scheduler
+	// submits, and every order/fill/account/status event the broker
+	// produces in response, interleaved in true execution order (issue
+	// #218, M5-10; ADR-036). Runner supplies journal.Discard() when the
+	// caller configured no real journal — Journal is never nil here.
+	Journal journal.Recorder
+	// RunID identifies the run every Record Scheduler journals belongs
+	// to.
+	RunID id.RunID
 }
 
 func (d SchedulerDeps) validate() error {
@@ -105,6 +124,12 @@ func (d SchedulerDeps) validate() error {
 	}
 	if d.Builder == nil {
 		return fmt.Errorf("%w: builder must be set", ErrInvalidSchedulerDeps)
+	}
+	if d.Journal == nil {
+		return fmt.Errorf("%w: journal must be set", ErrInvalidSchedulerDeps)
+	}
+	if d.RunID.IsZero() {
+		return fmt.Errorf("%w: run id must be set", ErrInvalidSchedulerDeps)
 	}
 	return nil
 }
@@ -265,6 +290,15 @@ type Scheduler struct {
 	// queued holds intents awaiting their own requirement's next bar,
 	// keyed the same way.
 	queued map[requirementKey][]order.Intent
+
+	// lastBrokerSeq is the highest broker.Event.Sequence already
+	// journaled/collected, across the account's whole event stream —
+	// see drainAndJournal's own doc comment.
+	lastBrokerSeq uint64
+	// fills accumulates every order.Fill observed via drainAndJournal,
+	// in delivery order, for Fills' own caller (Runner) to hand to
+	// DeriveTrades once Run completes.
+	fills []order.Fill
 }
 
 // NewScheduler returns a Scheduler over deps. Every field of deps must
@@ -523,7 +557,29 @@ func (s *Scheduler) allWarm() bool {
 // using event as the eligibility observation (see InputBuilder's own
 // doc comment). A risk rejection is not an error: Pipeline.ErrRejected
 // is an expected outcome, not a Scheduler failure.
+//
+// Every stage of this one intent's lifecycle is journaled, in true
+// causal order (issue #218, M5-10; ADR-036): Intent first, then
+// Proposal and Decision — both populated whether or not risk allowed
+// it, per pipeline.Result's own doc comment — and, only on approval,
+// Request. The authoritative Order/Fill/Account/Status entries a
+// successful submission produces are journaled by drainAndJournal
+// immediately afterward, from the broker's own event stream, never
+// reconstructed from pipeline.Result.Order — see drainAndJournal's own
+// doc comment for why that is the sole authoritative source. A journal
+// failure at any step aborts the run immediately, exactly like any
+// other Scheduler failure: Runner never returns a successful Result
+// alongside a silently incomplete journal.
 func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strategy.BarEvent) error {
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: intent.Metadata.CorrelationID, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindIntent,
+		Intent:   &intent,
+	}); err != nil {
+		return err
+	}
+
 	snap, err := s.deps.Account.Snapshot(ctx)
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: snapshotting account before submitting intent %s: %w", intent.IntentID, err)
@@ -532,13 +588,126 @@ func (s *Scheduler) submit(ctx context.Context, intent order.Intent, event strat
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: building pipeline input for intent %s: %w", intent.IntentID, err)
 	}
-	if _, err := s.deps.Pipeline.Submit(ctx, in); err != nil {
-		if errors.Is(err, pipeline.ErrRejected) {
-			return nil
-		}
-		return fmt.Errorf("backtest: scheduler: submitting intent %s: %w", intent.IntentID, err)
+
+	result, submitErr := s.deps.Pipeline.Submit(ctx, in)
+	rejected := errors.Is(submitErr, pipeline.ErrRejected)
+	if submitErr != nil && !rejected {
+		return fmt.Errorf("backtest: scheduler: submitting intent %s: %w", intent.IntentID, submitErr)
+	}
+
+	corr := intent.Metadata.CorrelationID
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindProposal,
+		Proposal: &result.Proposal,
+	}); err != nil {
+		return err
+	}
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindDecision,
+		Decision: &result.Decision,
+	}); err != nil {
+		return err
+	}
+	if rejected {
+		return nil
+	}
+
+	if err := s.journalRecord(ctx, journal.Record{
+		RunID:    s.deps.RunID,
+		Metadata: id.Metadata{CorrelationID: corr, Timestamp: s.deps.Clock.Now()},
+		Kind:     journal.KindRequest,
+		Request:  &result.Request,
+	}); err != nil {
+		return err
+	}
+
+	return s.drainAndJournal(ctx)
+}
+
+// journalRecord validates and records rec, wrapping any failure as a
+// Scheduler-level error so it aborts Run exactly like any other
+// failure — see submit's own doc comment for why a journal failure is
+// never silently absorbed.
+func (s *Scheduler) journalRecord(ctx context.Context, rec journal.Record) error {
+	if err := s.deps.Journal.Record(ctx, rec); err != nil {
+		return fmt.Errorf("backtest: scheduler: journaling %s: %w", rec.Kind, err)
 	}
 	return nil
+}
+
+// drainAndJournal journals every broker.Event this run has produced
+// since the last call, in delivery (Sequence) order, and accumulates
+// each event's Fill payload into s.fills for DeriveTrades. It is the
+// sole source of Order/Fill/Account/Status journal entries — never
+// pipeline.Result.Order, which is only ever a mirror of the broker's
+// own synchronous acceptance and would otherwise be journaled twice
+// for the same underlying event.
+//
+// Called once per submit (so broker-side entries interleave with the
+// Intent/Proposal/Decision/Request that caused them in true execution
+// order, not batched at the end of the run), it reuses the same
+// broker.FiniteEventReader capability Runner's trade derivation relies
+// on elsewhere, opening a fresh reader from the beginning of the
+// account's log every time and skipping anything at or below
+// s.lastBrokerSeq — Sequence is public, non-opaque API (unlike
+// EventCursor), so comparing against a remembered watermark is not
+// interpreting broker-internal state. Re-scanning from the start on
+// every call is O(n) per call given sim's lack of a real resumable
+// cursor (account.Snapshot.Cursor is never set), so O(n^2) over a full
+// run in the worst case — acceptable for realistic backtest sizes
+// (hundreds of intents), not fixed in this issue.
+func (s *Scheduler) drainAndJournal(ctx context.Context) error {
+	reader, err := s.deps.Account.Events(ctx, "")
+	if err != nil {
+		return fmt.Errorf("backtest: scheduler: opening event stream: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	finite, ok := reader.(broker.FiniteEventReader)
+	if !ok {
+		return fmt.Errorf("backtest: scheduler: %w: %T", ErrEventReaderNotFinite, reader)
+	}
+
+	for !finite.AtEnd() {
+		event, err := reader.Next(ctx)
+		if err != nil {
+			return fmt.Errorf("backtest: scheduler: draining event stream: %w", err)
+		}
+		if event.Sequence <= s.lastBrokerSeq {
+			continue
+		}
+		s.lastBrokerSeq = event.Sequence
+
+		rec := journal.Record{RunID: s.deps.RunID, Metadata: event.Metadata}
+		switch event.Kind {
+		case broker.EventKindOrder:
+			rec.Kind, rec.Order = journal.KindOrder, event.Order
+		case broker.EventKindFill:
+			rec.Kind, rec.Fill = journal.KindFill, event.Fill
+			s.fills = append(s.fills, *event.Fill)
+		case broker.EventKindAccount:
+			rec.Kind, rec.Account = journal.KindAccount, event.Account
+		case broker.EventKindStatus:
+			rec.Kind, rec.Status = journal.KindStatus, event.Status
+		default:
+			continue
+		}
+		if err := s.journalRecord(ctx, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Fills returns every order.Fill observed over the course of Run, in
+// delivery order — the input DeriveTrades needs. Call only after Run
+// has returned successfully.
+func (s *Scheduler) Fills() []order.Fill {
+	return append([]order.Fill(nil), s.fills...)
 }
 
 // BatchBars is an optional capability a strategy.View handed to OnBar

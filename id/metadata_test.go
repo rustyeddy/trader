@@ -1,6 +1,7 @@
 package id
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -80,6 +81,59 @@ func TestMetadataRepresentsMultiStageWorkflow(t *testing.T) {
 		assert.False(t, seen[ev.String()], "duplicate EventID in workflow chain")
 		seen[ev.String()] = true
 	}
+}
+
+// TestMetadataMarshalJSONHandlesZeroCausationID proves Metadata can be
+// marshaled even when CausationID is legitimately zero (the first
+// event in a workflow) — a bare reflection-based json.Marshal would
+// fail here, since EventID[K].MarshalJSON itself errors on a zero ID.
+func TestMetadataMarshalJSONHandlesZeroCausationID(t *testing.T) {
+	c := clock.NewSimulated(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	g := NewGenerator(c, NewDeterministic(1, 2))
+	eventID, err := GenerateEventID(g)
+	require.NoError(t, err)
+	correlationID, err := GenerateCorrelationID(g)
+	require.NoError(t, err)
+
+	m := Metadata{EventID: eventID, CorrelationID: correlationID, Timestamp: c.Now(), Source: "strategy.macd_cross"}
+	require.True(t, m.CausationID.IsZero())
+
+	data, err := json.Marshal(m)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), `"causation_id"`)
+
+	var round Metadata
+	require.NoError(t, json.Unmarshal(data, &round))
+	assert.True(t, round.EventID.Equal(m.EventID))
+	assert.True(t, round.CorrelationID.Equal(m.CorrelationID))
+	assert.True(t, round.CausationID.IsZero())
+	assert.True(t, round.Timestamp.Equal(m.Timestamp))
+	assert.Equal(t, m.Source, round.Source)
+}
+
+// TestMetadataMarshalJSONRoundTripsFullyPopulated proves the normal
+// case (every ID field set) round-trips exactly too.
+func TestMetadataMarshalJSONRoundTripsFullyPopulated(t *testing.T) {
+	c := clock.NewSimulated(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	g := NewGenerator(c, NewDeterministic(1, 2))
+	eventID, err := GenerateEventID(g)
+	require.NoError(t, err)
+	correlationID, err := GenerateCorrelationID(g)
+	require.NoError(t, err)
+	causationID, err := GenerateEventID(g)
+	require.NoError(t, err)
+
+	m := Metadata{EventID: eventID, CorrelationID: correlationID, CausationID: causationID, Timestamp: c.Now(), Source: "execution.planner"}
+
+	data, err := json.Marshal(m)
+	require.NoError(t, err)
+	var round Metadata
+	require.NoError(t, json.Unmarshal(data, &round))
+	assert.True(t, round.EventID.Equal(m.EventID))
+	assert.True(t, round.CorrelationID.Equal(m.CorrelationID))
+	assert.True(t, round.CausationID.Equal(m.CausationID))
+	assert.True(t, round.Timestamp.Equal(m.Timestamp))
+	assert.Equal(t, m.Source, round.Source)
 }
 
 func TestMetadataZeroValueFieldsAreZero(t *testing.T) {

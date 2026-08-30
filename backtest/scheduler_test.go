@@ -16,6 +16,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -328,7 +329,16 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 			riskFraction:    num.MustParseRate("0.01"),
 			adverseDistance: num.MustParsePrice("0.01000"),
 		},
+		Journal: journal.Discard(),
+		RunID:   mustSchedulerRunID(t, ids2),
 	}
+}
+
+func mustSchedulerRunID(t *testing.T, gen *id.Generator) id.RunID {
+	t.Helper()
+	runID, err := id.GenerateRunID(gen)
+	require.NoError(t, err)
+	return runID
 }
 
 // bothInstrumentsRequirements returns the EUR/USD H1 + GBP/USD H1

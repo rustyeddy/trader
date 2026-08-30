@@ -1,0 +1,242 @@
+#+TITLE: Backtest Journal Contract and JSONL Format ADR-036
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #218 (M5-10) asks for a durable, replayable record of
+what happened during a backtest run, and ADR-035 explicitly named this
+issue as the one that "revisits ADR-009 based on this concrete
+consumer rather than accepting its old sketch mechanically." This ADR
+records the concrete decisions #218's design review actually settled,
+following the same design-notes-then-review pattern ADR-005/ADR-006/
+ADR-035 already used.
+
+ADR-009 itself remains =Proposed=: it also covers live-session
+reconciliation, which this issue does not address. This ADR narrows
+and concretizes only the journal half of ADR-009's scope for backtest
+runs.
+
+* Context
+
+#218's acceptance criteria required: a completed run auditable from
+its journal; deterministic journal ordering; a storage format
+replaceable behind the journal contract; explicit failure/corruption
+detection; and tests covering write/read/replay ordering and
+representative event types. ADR-035 had already placed =journal= as a
+sibling package to =backtest=/=pipeline=, reusable by a future =live=
+session, never living under =backtest/=.
+
+Design review surfaced four issues with the first proposal that this
+ADR resolves:
+
+1. Batch-draining broker events after the whole run, while journaling
+   intent/proposal/decision/request during the run, would produce a
+   deterministic *file* but not a deterministic *chronology* — a fill
+   from the first submission could appear in the journal after every
+   later intent already had been recorded.
+2. Journaling both =pipeline.Result.Order= (at submission) and the
+   broker's own =EventKindOrder= event (from the event stream) would
+   record the same underlying broker acceptance twice under two
+   different names.
+3. A caller-constructed =Record= carrying its own =Sequence= would let
+   different callers, or different Recorder implementations, disagree
+   about what "the sequence" means for the same entry.
+4. The original proposal did not say what happens when a journal write
+   fails mid-run, or who owns closing an externally-injected journal.
+
+A fifth, load-bearing implementation gap surfaced only once wire
+encoding was attempted: =id.Metadata='s =CausationID= is legitimately
+the zero value for the first event in a workflow (see =id=' own doc
+comment), but =id.ID[K].MarshalJSON= deliberately errors on a zero ID.
+Marshaling =Metadata= via bare reflection therefore fails on exactly
+the common case of an event nothing caused, not merely omits the field
+that does not apply.
+
+* Decision
+
+** Package boundary: contract versus adapter
+
+=journal= owns only the storage-neutral contract: =Kind=, =Record=
+(the unsequenced payload a caller submits), =Entry= (=Record= plus the
+=Sequence= a =Recorder= assigned it), the =Recorder=/=Reader=
+interfaces, =NewRecord= validation, and =Discard()=. It depends only on
+=id=, =num=, =instrument=, =order=, =risk=, =broker=, and =account= —
+never on =pipeline= or =backtest= — so it stays reusable by a future
+=live= session exactly as ADR-035 anticipated.
+
+=adapters/journal/jsonl= is the one concrete implementation this issue
+ships: a newline-delimited-JSON =Writer=/=Reader= pair, living beside
+=adapters/broker/sim= rather than inside =journal= itself. A future
+SQLite/Postgres/etc. adapter is a peer of =jsonl=, not an addition to
+the domain-facing package.
+
+** Sequence ownership: Record versus Entry
+
+=journal.Record= carries no =Sequence= field. =Recorder.Record(ctx,
+Record) error= is the write call; the concrete =Recorder=
+implementation assigns the next =Sequence= itself, atomically, in call
+order, starting at 1. =Reader.Next= is the only thing that ever
+produces an =Entry= (=Record= plus its assigned =Sequence=) — there is
+no representation in which a caller could supply or disagree with the
+canonical sequence.
+
+** True causal interleaving via incremental per-submit draining
+
+=Scheduler.submit= — the one place in the codebase with simultaneous
+visibility into an emitted =order.Intent= and its resulting
+=pipeline.Result= — now drains the account's own broker-event stream
+immediately after every =Pipeline.Submit= call, not once at the end of
+the run. It reuses the =broker.FiniteEventReader= capability ADR from
+issue #217 (the fixed high-water-mark =AtEnd= contract), opening a
+fresh reader from the beginning of the account's log on every call and
+skipping anything at or below a remembered =lastBrokerSeq= watermark —
+comparing =broker.Event.Sequence= this way is comparing public,
+non-opaque API, not interpreting the opaque =EventCursor=. This makes
+broker-side entries interleave with the intent/proposal/decision/
+request that caused them in true execution order, because a backtest's
+synchronous, single-goroutine execution model means nothing else can
+append to the account's log between two =submit= calls.
+
+Re-scanning from the beginning on every call is O(n) per call, given
+sim's lack of a real resumable cursor (=account.Snapshot.Cursor= is
+never set) — O(n^2) over a full run in the worst case. This is
+acceptable for realistic backtest sizes (hundreds of intents) and not
+fixed in this issue; a real cursor implementation in =sim= is a
+future, additive improvement if it ever becomes a measured problem.
+
+One consequence: =Runner='s own former post-hoc trade-derivation drain
+(issue #217's =drainFills=/=deriveTrades=) is removed. =Scheduler=
+already observes every fill as it happens via the same incremental
+drain, and accumulates them; =Scheduler.Fills()= exposes them to
+=Runner= once =Run= returns successfully, which passes them directly to
+=DeriveTrades=. This is one pass over the account's event stream
+instead of two, and =Scheduler.Run='s own signature is unchanged — no
+audit-structure return type was added merely to avoid this seam.
+
+** Broker events are the sole source of Order/Fill/Account/Status entries
+
+=pipeline.Result.Order= is never journaled as its own entry. It is
+only ever a mirror of the broker's own synchronous acceptance, and the
+authoritative =EventKindOrder=/=EventKindFill=/=EventKindAccount=/
+=EventKindStatus= events the incremental drain observes moments later
+are the sole source of =KindOrder=/=KindFill=/=KindAccount=/
+=KindStatus= journal entries. =submit= itself only ever journals
+=KindIntent=, then =KindProposal= and =KindDecision= (both populated
+whether or not risk allowed the intent, per =pipeline.Result='s own
+doc comment), then — only on approval — =KindRequest=.
+
+** Explicit run-completion markers
+
+Two additional =Kind= values bracket every run's journal:
+=KindRunStarted= (the first entry, carrying an opaque =Header=
+=json.RawMessage= — in practice the already-=MarshalJSON=-able
+=backtest.Manifest=, reusing #215's own serialization rather than
+inventing a second header schema) and =KindRunCompleted= (the last
+entry, carrying the total entry count written before it). A reader can
+now distinguish "valid JSONL, but the run never finished" from "the
+run genuinely completed," which a trailing well-formed line alone
+cannot express. =Runner= tracks the total via a small internal
+=countingRecorder= decorator wrapping whichever =Recorder= the caller
+supplied, since both =Scheduler= and =Runner= record to the same
+journal and the count is naturally shared state across both callers.
+
+** Failure semantics and ownership
+
+A =Recorder.Record= failure aborts the run immediately — wrapped
+classifiably, exactly like any other =Scheduler=/=Runner= stage
+failure — never absorbed into a "successful" =Result= alongside a
+silently incomplete journal. =Runner= never calls =Close= on an
+externally supplied =Journal=: it is an injected dependency like
+=Account= or =Pipeline=, and the composition root that constructed it
+owns its lifecycle, matching how =Runner= already treats every other
+injected dependency it did not itself construct (the one thing
+=Runner= does construct and close is =Replay=).
+
+=RunnerParams.Journal= is optional: a =nil= value is replaced with
+=journal.Discard()=, matching =Logger='s own =logging.Discard()=
+convention.
+
+** Durability: audit trail, not crash-consistency log
+
+=jsonl.Writer= flushes its buffered writer to the OS after every
+successful =Record=, so a crash of the Trader process itself loses
+nothing already recorded, but calls =fsync= only in =Close=, not per
+record. This is deliberately an audit trail for a normally completed
+run, not a crash-consistency log for a live trading session; an
+OS-level crash or power loss between two =Record= calls could still
+lose the tail of buffered-but-unsynced data. A future live-session
+journal adapter may need a stronger, slower per-record =fsync= policy —
+that is an explicit non-goal here, not an oversight.
+
+** =id.Metadata= gains real JSON marshaling
+
+=id.Metadata= now implements =MarshalJSON=/=UnmarshalJSON=, omitting
+any of =EventID=/=CorrelationID=/=CausationID= that are the zero value
+instead of erroring on them — the root-cause fix for the =CausationID=
+gap above, rather than working around it separately in every payload
+type's own wire struct. This is a small, additive, backward-compatible
+change to an already-=Accepted= package (=id=): nothing previously
+marshaled =Metadata= via a custom method, so no existing behavior
+changes.
+
+** Listing reconstruction is FX-only for now
+
+=instrument.Listing='s only public constructor, =NewListing=, requires
+a full =instrument.Instrument=, not merely its =ID= — an arbitrary
+=Instrument= cannot be reconstructed purely from its serialized =ID=
+string without a per-=Kind= parser. =jsonl='s read path supports
+reconstructing an FX currency pair specifically (parsing the documented
+"fx:BASE/QUOTE" text form =instrument.ID.String()= itself demonstrates)
+and returns =ErrCorruptEntry= for any other =Kind= prefix. Every
+fixture and test in this codebase through M5 uses currency pairs
+exclusively; lifting this limitation for a non-FX =Kind= is additive
+future work, not a currently-needed capability.
+
+* Consequences
+
+- =journal= and =adapters/journal/jsonl= are new packages; =id=,
+  =broker= (=FiniteEventReader=, already added by #217), =backtest=
+  (=SchedulerDeps=, =RunnerParams=, =Scheduler.submit=/=Fills=,
+  =Runner.Run=) are all touched.
+- =backtest.Runner='s own event-stream reading is simpler than before
+  #218: it no longer opens a second =FiniteEventReader= pass after
+  =Scheduler.Run= returns — =Scheduler= now owns the single pass, live.
+- A non-FX instrument reaching the journal's read path today reports
+  =ErrCorruptEntry= rather than silently fabricating a wrong Listing —
+  a future issue introducing a second instrument =Kind= into any
+  journaled scenario must extend =jsonl='s reconstruction, not merely
+  its own domain package.
+- =sim= still never emits =EventKindAccount= — the journal correctly
+  reflects that as an absence of =KindAccount= entries, not a
+  journaling defect; a future issue teaching =sim= to emit account
+  change events will make them appear here for free, with no journal
+  changes required.
+
+* Alternatives Considered
+
+- *Batch-drain broker events once at the end of the run.* Rejected:
+  produces a deterministic file but not a deterministic chronology,
+  and was the design review's primary objection.
+- *Let =FiniteEventReader.AtEnd= mean "nothing queued right now,"
+  re-checked live.* This remains correct and unchanged for its own
+  post-hoc-drain use case (see issue #217's own ADR discussion); this
+  issue's incremental per-submit draining reuses the *fixed
+  high-water-mark* contract issue #217 already strengthened it to,
+  rather than needing a second capability.
+- *A caller-assigned Sequence on Record.* Rejected: different callers
+  or Recorder implementations could disagree about its meaning; only
+  the Recorder that durably persists an entry can authoritatively
+  number it.
+- *Journal =pipeline.Result.Order= directly, skip the broker-event
+  drain for orders.* Rejected: would either duplicate the same
+  acceptance under two entries, or miss later broker-side lifecycle
+  changes (fills, status changes) the pipeline result alone cannot see.
+- *Per-record fsync.* Rejected for this issue's actual need (a
+  completed-run audit trail) as an unnecessary durability/performance
+  tradeoff; flagged explicitly as a decision a future live-session
+  adapter may need to revisit, not silently inherited.
+- *Reconstruct arbitrary Instrument kinds on read via a general
+  =instrument.ID= string parser.* Rejected as disproportionate to what
+  this issue, or any current test/fixture, actually needs; FX-only
+  reconstruction with an explicit error for anything else is honest
+  about the limitation rather than guessing.
