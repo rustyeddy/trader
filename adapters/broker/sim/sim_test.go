@@ -1208,6 +1208,55 @@ func TestAccountEventsNextBlocksUntilLaterSubmit(t *testing.T) {
 // reserved for the producer actually ending (Broker.Close), including
 // waking a reader that is already blocked in Next at the moment Close
 // is called.
+// TestAccountEventsAtEndIsAFixedHighWaterMark proves broker.
+// FiniteEventReader.AtEnd captures its boundary at reader-creation
+// time (issue #217/#235 review), not "is anything queued right now":
+// a reader opened after one Submit reports AtEnd true once that one
+// event is drained, and keeps reporting true even after a second
+// Submit appends more events to the account afterward — those later
+// events are outside the boundary this reader captured, not evidence
+// that AtEnd's earlier true reading was wrong. A caller relying on
+// AtEnd to know it has drained a complete, fixed view (backtest.
+// Runner's drainFills) must be able to trust the first true reading
+// permanently, not merely "as of an instant that already passed."
+func TestAccountEventsAtEndIsAFixedHighWaterMark(t *testing.T) {
+	ctx := context.Background()
+	deps := testDeps()
+	accountID := mustAccountID(t, deps.IDs)
+	b, err := NewBroker("sim", deps, AccountConfig{AccountID: accountID, StartingCash: usd("10000")})
+	require.NoError(t, err)
+	acc, err := b.OpenAccount(ctx, accountID)
+	require.NoError(t, err)
+
+	_, err = acc.Submit(ctx, mustRequest(t, deps.IDs, accountID))
+	require.NoError(t, err)
+
+	reader, err := acc.Events(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	finite, ok := reader.(brokerpkg.FiniteEventReader)
+	require.True(t, ok, "sim's eventReader must implement broker.FiniteEventReader")
+
+	// mustRequest builds a Limit order, which Submit accepts with
+	// exactly one event (no immediate fill); drain exactly that one and
+	// confirm the boundary is reached.
+	drainEvents(t, reader, 1)
+	assert.True(t, finite.AtEnd(), "every event recorded before this reader was created has been delivered")
+
+	// A second Submit, after the reader was created, appends more
+	// events to the account — but this reader's own captured boundary
+	// must not move.
+	_, err = acc.Submit(ctx, mustRequest(t, deps.IDs, accountID))
+	require.NoError(t, err)
+	assert.True(t, finite.AtEnd(), "AtEnd must stay true: the boundary was fixed at creation, not re-evaluated against the account's current backlog")
+
+	// Next still works exactly like an ordinary live EventReader for a
+	// caller that keeps reading past AtEnd's first true reading — the
+	// capability adds a query, it does not truncate the stream.
+	more := drainEvents(t, reader, 1)
+	assert.Equal(t, uint64(2), more[0].Sequence, "the second Submit's event remains reachable via Next")
+}
+
 func TestAccountEventsNextReturnsEOFAfterBrokerClose(t *testing.T) {
 	ctx := context.Background()
 	deps := testDeps()

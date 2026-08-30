@@ -28,7 +28,10 @@
 // Money.DivQuantity, ADR-027), reducing or exactly closing an opposite-
 // side Position, and reversing one (closing it, then opening a new
 // Position in the new direction for the remainder) are all supported —
-// see position.go's applyFillToPosition for the full transition table.
+// see order.ApplyFillToPosition for the full transition table (moved
+// out of this package into broker-neutral position accounting by
+// issue #217, M5-09, so backtest trade derivation can share the exact
+// same math).
 // Cash moves only by realized PnL (on a reduce/close/reverse) and, when
 // a fill reports a non-nil order.Fill.Commission, by that commission —
 // never by a universal full-notional debit/credit on open/increase,

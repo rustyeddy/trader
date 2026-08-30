@@ -16,9 +16,19 @@ import (
 // only once the owning Broker has been closed and every already-
 // recorded event has been delivered — the producer itself has ended,
 // matching Account.Events's documented contract.
+//
+// eventReader also implements broker.FiniteEventReader: endSequence is
+// captured once, at construction (see accountHandle.Events), as the
+// highest Sequence already recorded at that moment. AtEnd checks
+// against that fixed value, never against the live length of
+// state.events, so it remains a real high-water-mark boundary even if
+// more events are appended to the account afterward — see
+// FiniteEventReader's own doc comment for why that fixed-at-creation
+// property is what makes AtEnd usable as a completeness proof.
 type eventReader struct {
-	state *accountState
-	after uint64
+	state       *accountState
+	after       uint64
+	endSequence uint64
 
 	mu     sync.Mutex
 	idx    int
@@ -26,6 +36,7 @@ type eventReader struct {
 }
 
 var _ brokerpkg.EventReader = (*eventReader)(nil)
+var _ brokerpkg.FiniteEventReader = (*eventReader)(nil)
 
 // Next implements broker.EventReader.
 func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
@@ -68,6 +79,31 @@ func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
 			// loop back and re-check both under the lock.
 		}
 	}
+}
+
+// AtEnd implements broker.FiniteEventReader: it reports whether every
+// event up to and including endSequence — the fixed high-water mark
+// captured when this reader was created — has already been delivered,
+// without consuming one or blocking. It peeks the same underlying
+// slice Next itself walks (from r.idx onward, skipping anything at or
+// before r.after) but never advances r.idx, so it never changes what a
+// subsequent Next call returns. Once every event at or below
+// endSequence has been delivered, AtEnd keeps reporting true
+// regardless of anything appended to state.events afterward: r.idx
+// only ever advances forward, and any newly appended event necessarily
+// has a Sequence greater than endSequence (Sequence is strictly
+// increasing), so it can never make the loop below find another
+// qualifying event at or below the frozen boundary.
+func (r *eventReader) AtEnd() bool {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	for i := r.idx; i < len(r.state.events); i++ {
+		seq := r.state.events[i].Sequence
+		if seq > r.after && seq <= r.endSequence {
+			return false
+		}
+	}
+	return true
 }
 
 // Close implements broker.EventReader. It is safe to call more than

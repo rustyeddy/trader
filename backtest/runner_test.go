@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
@@ -107,6 +108,24 @@ func TestRunner_SuccessfulRun(t *testing.T) {
 	// own first bar; next-bar-open eligibility fills both by the end
 	// of a 4-bar run.
 	assert.Len(t, result.Account.Positions(), 2)
+
+	// Neither position ever exits, so DeriveTrades must report both as
+	// still open (Trades holds only fully closed round trips) and their
+	// RealizedPnL must reconcile with the account's own cumulative
+	// RealizedPnL (zero here, since opening a position realizes none).
+	assert.Empty(t, result.Trades, "nothing closed")
+	require.Len(t, result.OpenTrades, 2)
+	total := result.Account.RealizedPnL()
+	for _, tr := range result.OpenTrades {
+		assert.True(t, tr.ClosedAt.IsZero())
+		assert.NotEmpty(t, tr.EntryFillIDs)
+		var err error
+		total, err = total.Sub(tr.RealizedPnL)
+		require.NoError(t, err)
+	}
+	zero, err := num.ParseMoney("0", total.Currency())
+	require.NoError(t, err)
+	assert.True(t, total.Equal(zero), "sum of derived trades' RealizedPnL must reconcile with the account's own RealizedPnL")
 }
 
 func TestRunner_RejectsSecondRunCall(t *testing.T) {
@@ -232,6 +251,31 @@ func (s *alwaysErrorOnBarStrategy) OnBar(ctx context.Context, ev strategy.BarEve
 }
 
 var errIntentional = errors.New("runner_test: intentional OnBar failure")
+
+// eventsErrorAccount wraps a broker.Account, injecting a failure from
+// Events while delegating every other method — used to exercise
+// Runner's own deriveTrades error-propagation path, which every other
+// component-failure test in this file already covers for its own
+// stage.
+type eventsErrorAccount struct {
+	broker.Account
+}
+
+func (a eventsErrorAccount) Events(ctx context.Context, cursor broker.EventCursor) (broker.EventReader, error) {
+	return nil, errIntentional
+}
+
+func TestRunner_PropagatesTradeDerivationErrors(t *testing.T) {
+	strat := mustEnterOnFirstBarStrategy(t)
+	params := mustRunnerParams(t, strat)
+	params.Account = eventsErrorAccount{Account: params.Account}
+
+	runner, err := backtest.NewRunner(params)
+	require.NoError(t, err)
+
+	_, err = runner.Run(context.Background())
+	require.ErrorIs(t, err, errIntentional)
+}
 
 func TestRunner_PropagatesSchedulerErrors(t *testing.T) {
 	strat := &alwaysErrorOnBarStrategy{requirements: bothInstrumentsRequirements(t)}

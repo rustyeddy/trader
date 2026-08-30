@@ -15,6 +15,7 @@ import (
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/pipeline"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -280,13 +281,59 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: snapshotting final account state: %w", err)
 	}
 
-	return Result{Manifest: manifest, Account: finalSnapshot}, nil
+	trades, err := r.deriveTrades(ctx, p.Account)
+	if err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: deriving trades: %w", err)
+	}
+
+	return Result{Manifest: manifest, Account: finalSnapshot, Trades: trades.Closed, OpenTrades: trades.Open}, nil
+}
+
+// deriveTrades obtains this run's complete fill history from acct's
+// own authoritative event stream, deterministically (see drainFills'
+// own doc comment — it drains via broker.FiniteEventReader.AtEnd, not
+// a timing assumption), and derives TradeSet from it (issue #217,
+// M5-09). It is only called once Scheduler.Run has already returned
+// successfully, so acct's event log holds exactly this run's own
+// events. It keeps "obtain the authoritative events" (this method) and
+// "derive trades from a fill stream" (DeriveTrades, a pure function)
+// as separate concerns: DeriveTrades is independently testable without
+// any Account handle at all.
+func (r *Runner) deriveTrades(ctx context.Context, acct broker.Account) (trades TradeSet, err error) {
+	reader, err := acct.Events(ctx, "")
+	if err != nil {
+		return TradeSet{}, fmt.Errorf("opening event stream: %w", err)
+	}
+	defer func() {
+		if cerr := reader.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing event stream: %w", cerr)
+			trades = TradeSet{}
+		}
+	}()
+
+	fills, err := drainFills(ctx, reader)
+	if err != nil {
+		return TradeSet{}, fmt.Errorf("draining fills: %w", err)
+	}
+
+	trades, err = DeriveTrades(fills)
+	if err != nil {
+		return TradeSet{}, err
+	}
+	return trades, nil
 }
 
 // Result is what a successful Run produces: the immutable Manifest
-// describing exactly what ran, and the account's final state once the
-// run completed.
+// describing exactly what ran, the account's final state once the run
+// completed, and the trades derived from that run's own fills (issue
+// #217, M5-09). Trades holds only fully closed round trips; OpenTrades
+// holds any position still open when the run ended, kept separate so a
+// caller iterating Trades never has to remember that some entries are
+// not actually completed — see DeriveTrades' own doc comment for the
+// full grouping and cost-attribution rules.
 type Result struct {
-	Manifest Manifest
-	Account  account.Snapshot
+	Manifest   Manifest
+	Account    account.Snapshot
+	Trades     []order.Trade
+	OpenTrades []order.Trade
 }
