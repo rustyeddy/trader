@@ -403,3 +403,42 @@ func TestNewReplay_NeverReturnsReplayAlongsideAnError(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, r)
 }
+
+// TestReplay_ManifestsReturnsProvenanceForEveryRequirement proves
+// Replay.Manifests aggregates every requirement's own canonical
+// provenance, independent of how much (if any) of the stream has been
+// consumed, and in Replay's own requirement order — the run-manifest
+// dataset-provenance surface issue #215 needs.
+func TestReplay_ManifestsReturnsProvenanceForEveryRequirement(t *testing.T) {
+	mgr := newTestManager(t)
+	span := narrowSpan(t)
+	publishFixture(t, mgr, marketdata.H1, span)
+	publishFixture(t, mgr, marketdata.D1, span)
+
+	r, err := backtest.NewReplay(context.Background(), mgr, []strategy.DataRequirement{h1Requirement(t), d1Requirement(t)}, span)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	manifests := r.Manifests()
+	require.NotEmpty(t, manifests)
+
+	var sawH1, sawD1 bool
+	for _, m := range manifests {
+		require.True(t, m.Instrument.Equal(eurusdID(t)))
+		switch m.Interval {
+		case marketdata.H1:
+			sawH1 = true
+		case marketdata.D1:
+			sawD1 = true
+		}
+	}
+	require.True(t, sawH1, "H1 requirement's own provenance must be present")
+	require.True(t, sawD1, "D1 requirement's own provenance must be present")
+
+	// Manifests does not depend on consumption progress: identical
+	// before and after fully draining Next.
+	before := r.Manifests()
+	_ = drainReplay(t, r)
+	after := r.Manifests()
+	require.Equal(t, before, after)
+}

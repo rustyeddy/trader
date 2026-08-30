@@ -279,3 +279,24 @@ func (r *Replay) Close() error {
 	}
 	return errors.Join(errs...)
 }
+
+// Manifests returns the marketdata.Manifest provenance for every
+// requirement's canonical data — one BarReader.Manifests() call per
+// requirement, concatenated in Replay's own canonical requirement
+// order (the same order NewReplay opened readers in). This does not
+// require Next or Close to have been called first, and does not
+// change with how much of the stream has been consumed: BarReader's
+// own Manifests reflects the data it was constructed with, not how far
+// it has been read (issue #215, M5-07 — a run manifest needs the
+// dataset provenance a Replay was actually built from).
+//
+// Each returned Manifest is independent (BarReader.Manifests already
+// clones); the returned slice itself is Replay's own fresh copy, never
+// aliasing internal state.
+func (r *Replay) Manifests() []marketdata.Manifest {
+	var out []marketdata.Manifest
+	for _, s := range r.streams {
+		out = append(out, s.reader.Manifests()...)
+	}
+	return out
+}
