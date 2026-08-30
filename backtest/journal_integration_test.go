@@ -136,6 +136,6 @@ func TestRunner_JournalFailureAbortsRun(t *testing.T) {
 type failingRecorder struct{}
 
 func (failingRecorder) Record(ctx context.Context, rec journal.Record) error { return errIntentional }
-func (failingRecorder) Close() error                                        { return nil }
+func (failingRecorder) Close() error                                         { return nil }
 
 var _ journal.Recorder = failingRecorder{}

@@ -37,7 +37,7 @@ func requestPtr(v order.Request) *order.Request       { return &v }
 func orderPtr(v order.Order) *order.Order             { return &v }
 func fillPtr(v order.Fill) *order.Fill                { return &v }
 func accountPtr(v account.Snapshot) *account.Snapshot { return &v }
-func statusPtr(v broker.Status) *broker.Status         { return &v }
+func statusPtr(v broker.Status) *broker.Status        { return &v }
 func tradePtr(v order.Trade) *order.Trade             { return &v }
 
 func mustWriter(t *testing.T) (*jsonl.Writer, string) {
