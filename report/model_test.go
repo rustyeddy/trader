@@ -11,7 +11,7 @@ import (
 
 func TestNewBacktestReport_RepresentativeResult(t *testing.T) {
 	result := newRepresentativeResult(t)
-	rep := report.NewBacktestReport(result)
+	rep := report.NewBacktestReport(report.BacktestInputFromResult(result))
 
 	assert.Equal(t, result.Manifest.RunID().String(), rep.Run.RunID)
 	assert.Equal(t, result.Manifest.StrategyName(), rep.Run.StrategyName)
@@ -49,7 +49,7 @@ func TestNewBacktestReport_RepresentativeResult(t *testing.T) {
 
 func TestNewBacktestReport_ZeroTradeResult(t *testing.T) {
 	result := newZeroTradeResult(t)
-	rep := report.NewBacktestReport(result)
+	rep := report.NewBacktestReport(report.BacktestInputFromResult(result))
 
 	assert.Equal(t, 0, rep.TradeStats.TradeCount)
 	assert.Nil(t, rep.TradeStats.WinRate)
@@ -61,4 +61,26 @@ func TestNewBacktestReport_ZeroTradeResult(t *testing.T) {
 	assert.Empty(t, rep.ClosedTrades)
 	assert.Empty(t, rep.OpenTrades)
 	assert.Empty(t, rep.Account.OpenPositions)
+}
+
+// TestNewBacktestReport_AcceptsInputWithoutABacktestResult proves the
+// primary NewBacktestReport(BacktestInput) API works from data that
+// never passed through a backtest.Result — the shape a persisted
+// report snapshot deserializes into (issue #222), or a service/
+// backtest.RunResponse a caller copies field-for-field, both of which
+// have no backtest.Result value to call BacktestInputFromResult on.
+func TestNewBacktestReport_AcceptsInputWithoutABacktestResult(t *testing.T) {
+	result := newZeroTradeResult(t)
+	in := report.BacktestInput{
+		Manifest:    result.Manifest,
+		Account:     result.Account,
+		Trades:      result.Trades,
+		OpenTrades:  result.OpenTrades,
+		EquityCurve: result.EquityCurve,
+		Metrics:     result.Metrics,
+	}
+
+	rep := report.NewBacktestReport(in)
+	assert.Equal(t, result.Manifest.RunID().String(), rep.Run.RunID)
+	assert.Equal(t, 0, rep.TradeStats.TradeCount)
 }

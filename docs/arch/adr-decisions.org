@@ -147,6 +147,7 @@ the original decided, use full supersession instead.
 | 037 | Backtest result and performance metrics model (in adr-037-backtest-metrics-model.org) | Accepted |
 | 038 | Backtest report renderers (in adr-038-backtest-report-renderers.org) | Accepted |
 | 039 | Backtest application service EnvironmentFactory (in adr-039-backtest-service-environment-factory.org) | Accepted |
+| 040 | Thin backtest CLI (in adr-040-backtest-cli.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -344,6 +345,20 @@ other =service/*= package), a per-run =Journal= instead of a
 =Environment= validation at the service boundary, and a =RunResponse=
 that mirrors =backtest.Result= the same way =service/execution.
 SubmitResponse= already mirrors =pipeline.Result=.
+
+Note: ADR-040 is likewise maintained in its own file,
+=docs/arch/adr-040-backtest-cli.org=, rather than inline in this
+registry.  Its own Status section is authoritative.  Issue #222
+(M5-14) asks for a thin "trader backtest" CLI over =service/backtest=
+and settles three design questions its own plan/review comment thread
+raised: a provisional, composition-side =demoStrategy= stands in for
+the strategy registry M5 explicitly defers; "show" reads a persisted,
+schema-versioned =report.BacktestReport= snapshot =run= already wrote
+(never the journal, never recomputing =Metrics=); and
+=report.NewBacktestReport= now takes a new =report.BacktestInput=
+value type instead of =backtest.Result= directly, so =service/
+backtest.RunResponse= and a deserialized snapshot can each build one
+without depending on =backtest.Result= or on each other.
 
 * ADR-001: Modular monolith before service decomposition
 
