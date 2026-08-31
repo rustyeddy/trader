@@ -1,0 +1,273 @@
+#+TITLE: Backtest Result and Performance Metrics Model ADR-037
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #219 (M5-11) asks for the transport-neutral backtest
+result and performance-metrics model ADR-035 already named and
+boundary-scoped ("lives in `backtest` itself, not in `report`...
+`report` never computes a metric") but did not itself work out. This
+ADR records the concrete decisions #219's design review settled,
+following the same pattern ADR-036 used for the journal.
+
+* Context
+
+#219's own scope asked for starting/final equity, net return, max
+drawdown, trade count/win-loss/win-rate/average-win-loss, expectancy,
+profit factor, cost breakdowns, per-instrument breakdowns, and an
+equity curve "as data, not presentation." The architecture document's
+broader "Metrics should include" wishlist (annualized return,
+volatility, Sharpe/Sortino, drawdown duration, exposure/turnover,
+regime breakdown, tail-loss/consecutive-loss stats) is wider than
+#219's own scope; this ADR does not adopt those — a later issue can.
+
+Design review surfaced one substantive disagreement, resolved in favor
+of the reviewer's position: the initial proposal derived a "trade-level"
+equity curve purely from closed trades' own `RealizedPnL`/`Costs`
+(reflecting only realized equity changes at trade-close events,
+systematically hiding intra-trade mark-to-market drawdowns). The
+reviewer required a true mark-to-market curve instead, observed
+authoritatively during the run.
+
+* Decision
+
+** A true mark-to-market equity curve, via a new `MarketObserver` capability
+
+The first pass simply retained `Scheduler.runBatch`'s existing
+post-flush `account.Snapshot` per batch. Review caught that this was
+*not* actually mark-to-market: `sim`'s unrealized P&L is computed from
+stored `marks` that only move on a fill or on the simulator-specific
+`Broker.Advance` call — which `Scheduler` deliberately never makes
+(that capability also evaluates resting Limit/Stop order triggers,
+ADR-026, a distinct and still-deferred concern). Retaining a snapshot
+alone therefore reused stale marks for any open position between
+fills, understating drawdown exactly the way the original trade-level
+proposal did — the same bug the review had already rejected once.
+
+The fix is a new, required capability, `backtest.MarketObserver`:
+
+#+BEGIN_SRC go
+type MarketObserver interface {
+    ObserveMark(ctx context.Context, instrumentID instrument.ID, close num.Price, at time.Time) error
+}
+#+END_SRC
+
+- It does *only* mark revaluation — extracted from `sim`'s own
+  `accountState.advance`, whose mark-update step (`s.marks[key] =
+  obs.Close`) already ran unconditionally, before any trigger
+  evaluation. The new `accountState.observeMark` keeps exactly that
+  step and nothing else; `accountHandle.ObserveMark` exposes it.
+  Resting-order triggering is untouched, still only reachable through
+  `Advance`, still not called by `Scheduler`.
+- The signature deliberately uses only already-shared primitive types
+  (`instrument.ID`, `num.Price`, `time.Time`), not a `backtest`-defined
+  struct — this is what lets `sim`'s account handle satisfy the
+  interface structurally without `adapters/broker/sim` importing
+  `backtest`, which would invert the module's dependency direction.
+- `Scheduler.runBatch` calls `ObserveMark` once per bar in the batch,
+  after Phase 2's flush and before the Phase 3 snapshot, so the
+  snapshot's own `Equity()` reflects this batch's actual price action.
+- It is *required*, not optional: `SchedulerDeps.MarketObserver` and
+  `RunnerParams.Account` (type-asserted to `MarketObserver` in
+  `RunnerParams.validate`) both fail construction outright if absent,
+  rather than silently falling back to a stale-mark curve — review was
+  explicit that an optional, silently-skipped capability would let a
+  future simulator recreate the exact bug being fixed here.
+- A failure from `ObserveMark` aborts `Run`, exactly like any other
+  `Scheduler`-stage failure.
+
+`Runner` prepends the run's own starting observation
+(`EquityPoint{Span.Start(), startSnapshot.Equity()}`, using the
+`startSnapshot` `Run` already took for `Manifest.StartingCapital` and
+had previously discarded) so the curve always has a baseline point
+before the first bar.
+
+`Metrics` still performs zero snapshotting, event-stream reading, mark
+revaluation, or trade derivation of its own: `MetricsParams.EquityCurve`
+is an authoritative input it validates (non-decreasing timestamps, one
+shared currency) and consumes, never reconstructs. This preserves the
+same authority chain #218 already established for the journal:
+`Scheduler`/`Runner` collect observations, `Metrics` only computes from
+them.
+
+** `Result` gains `EquityCurve` directly, alongside `Metrics`
+
+`backtest.Result` now carries `EquityCurve []EquityPoint` as its own
+top-level field, not only reachable through `Metrics.EquityCurve()` —
+a caller that only wants the raw series does not need to go through
+the metrics model to get it.
+
+** Closed trades only feed `Metrics`; `OpenTrades` do not
+
+`MetricsParams` accepts `Trades` (closed round trips) but not
+`OpenTrades`. Every closed-trade-derived figure — `GrossPnL`,
+`ClosedTradeCosts`, `NetPnL`, win/loss counts, expectancy, profit
+factor, and the per-instrument breakdown — is computed from exactly the
+`Trades` population, so the triple `NetPnL = GrossPnL -
+ClosedTradeCosts` is always internally consistent and per-instrument
+sub-totals always reconcile against the aggregate. Account-level
+figures (`FinalEquity`, `NetReturn`, `MaxDrawdown`) are independent of
+this and already reflect `OpenTrades`' unrealized contribution through
+the authoritative `EquityCurve`/`FinalEquity` — the model does not force
+these two views
+to reconcile with each other when open positions remain, since they
+answer different questions (realized trading performance versus
+current account state).
+
+** `ClosedTradeCosts` versus `AccountFees`
+
+The first pass exposed a single `TotalCosts()`, summing `Costs` over
+`Trades` only. Review pointed out the name overpromised: an entry
+commission already paid on a still-open position is present in
+`Account.Fees()` but invisible to a closed-trades-only total, so a
+caller reading "total costs for the run" would get a number that
+silently excludes real, already-incurred cost. The model now exposes
+both, explicitly:
+
+- `ClosedTradeCosts()` — the original figure, renamed, still summed
+  over `Trades` only, still the one `GrossPnL`/`NetPnL` reconcile
+  against internally.
+- `AccountFees()` — `MetricsParams.AccountFees` (`Result.Account.Fees()`),
+  the run's authoritative, account-level cumulative fee total,
+  including whatever `OpenTrades` have already incurred. It is not
+  required to equal `ClosedTradeCosts` when positions remain open.
+
+`InstrumentMetrics.Costs` keeps its name: it is already scoped inside a
+per-instrument *closed-trade* breakdown struct, so it was never
+ambiguous the way the top-level accessor was.
+
+** `Trades` validation matches its own documented precondition
+
+`NewMetrics` now rejects any `Trade` with an invalid `RealizedPnL`/
+`Costs` (not merely a currency mismatch) or a zero `ClosedAt` —
+`MetricsParams.Trades` is documented as "fully closed round trips
+only," and a bare currency check let a caller violate that
+undetected. This matches the codebase's standing convention of
+revalidating a nested value at every boundary rather than merely
+trusting its provenance (the same discipline `order.NewRequest` already
+applies to a supplied `Proposal`).
+
+** Optional-value convention for statistics undefined at zero trades
+
+`WinRate`, `Expectancy`, `AverageWin`, `AverageLoss`, and
+`ProfitFactor` are all `*num.Rate`/`*num.Money`, nil exactly when their
+defining ratio has a zero or otherwise absent denominator (zero trades
+for `WinRate`/`Expectancy`; zero wins for `AverageWin`; zero losses for
+`AverageLoss`; zero gross loss — including zero losing trades — for
+`ProfitFactor`). This is a deliberate, uniform convention: `0/0` is
+mathematically undefined, and reporting a bare `0` risks being misread
+as "traded and never won" rather than "never traded." `GrossPnL`,
+`ClosedTradeCosts`, `AccountFees`, and `NetPnL` remain plain `num.Money`
+(never nil) since summing an empty population is legitimately zero,
+not undefined.
+
+** `MaxDrawdown` on a non-positive peak
+
+A running peak that reaches zero or negative equity (a blown or
+negative account — pathological but representable) cannot be divided
+into a meaningful fraction. That observation's drawdown is defined as
+`1` (100%) rather than dividing by a non-positive number, keeping
+`MaxDrawdown` total over any representable curve rather than erroring.
+
+** `StartingCapital` must be positive
+
+`NewMetrics` rejects a zero or negative `StartingCapital` outright,
+since it is `NetReturn`'s denominator. A real account is never opened
+at zero or negative equity, so this is a defensive, not a reachable,
+v0 case — but it keeps `NetReturn` total once `Metrics` is
+successfully constructed, rather than leaving a divide-by-zero as a
+field-access-time surprise.
+
+** Single currency, validated
+
+Every `EquityCurve` point and every `Trade`'s `RealizedPnL`/`Costs`
+must share `StartingCapital`'s currency, or `NewMetrics` rejects the
+whole construction. Matches ADR-035's v0 single-account/single-currency
+scope; `num` has no automatic FX conversion, so silently mixing
+currencies is not an option this model takes.
+
+** R-multiple/expectancy-in-R: omitted, not a permanently-nil field
+
+Same decision as #217 (`order.Trade` itself): Trader has no genuine
+per-trade initial-risk figure yet, only one fixed run-wide
+`AdverseDistance`. Rather than add a field that could never be
+non-nil today, R-multiple metrics are left out of `Metrics`' shape
+entirely until that real input exists — purely additive later, not a
+half-finished surface now.
+
+** No JSON/wire methods on `Metrics`
+
+Unlike `Manifest` (which needs a canonical `ConfigDigest`), `Metrics`
+has no digest/identity concept requiring canonical JSON. Adding
+`MarshalJSON` would be a step toward a wire format, which is exactly
+the "no CLI/report formatting leaks into the model" #219 asks to
+avoid. A future `report` renderer builds its own view/wire types from
+`Metrics`' accessors, matching the existing `cmd/trader/*/format_json.go`
+convention.
+
+* Consequences
+
+- `Scheduler` gains its third small addition in as many M5-1x issues
+  (#217's `Fills()`, #218's journal draining, now `EquityCurve()` plus
+  the `MarketObserver` call) — all additive, none changing
+  `Scheduler.Run`'s own signature.
+- `adapters/broker/sim` gains one new exported capability
+  (`accountHandle.ObserveMark`/`accountState.observeMark`), extracted
+  from `advance.go`'s existing mark-update step with no change to
+  `Advance`'s own behavior — every existing `Advance`/trigger-evaluation
+  test is unaffected.
+- `RunnerParams.Account` and `SchedulerDeps.MarketObserver` are now a
+  required capability, not merely a `broker.Account`: any future
+  broker adapter used with `backtest.Runner` must implement
+  `MarketObserver` (a compile-time-unenforced, runtime-checked
+  requirement — `NewRunner`/`NewScheduler` reject a non-conforming
+  account outright rather than degrading silently).
+- `backtest.Result` grows two fields (`EquityCurve`, `Metrics`);
+  existing callers of `Result{Manifest, Account, Trades, OpenTrades}`
+  struct literals are unaffected (Go zero-values the new fields), but
+  any exhaustive-field construction elsewhere would need updating —
+  none currently exists outside `backtest`'s own tests.
+- A future annualized-return/volatility/Sharpe/Sortino/drawdown-
+  duration/regime-breakdown/tail-statistics issue now has the correct
+  underlying mark-to-market series to build on, rather than needing to
+  redesign the equity curve a second time.
+- Resting Limit/Stop orders still never trigger against a subsequent
+  bar during a `Scheduler`-driven run — that gap (ADR-026, `Scheduler`'s
+  own "market-order-only execution" doc comment) is unchanged and
+  remains a distinct, still-deferred follow-up issue, deliberately not
+  folded into this one.
+
+* Alternatives Considered
+
+- *A trade-level equity curve derived from closed trades' own realized
+  P&L, avoiding any `Scheduler` change.* Rejected in review: understates
+  true drawdown by construction (misses intra-trade mark-to-market
+  swings), and "equity curve as data" plus "max drawdown" as explicit
+  scope items make that understatement a real defect, not an acceptable
+  simplification, especially for swing strategies.
+- *Feeding `OpenTrades` into `Metrics` alongside `Trades` for a
+  "complete" cost/PnL picture.* Rejected: mixes a population with a
+  final win/loss outcome (`Trades`) with one that does not have one
+  yet (`OpenTrades`), breaking the `GrossPnL - ClosedTradeCosts =
+  NetPnL` identity's internal consistency for no compensating benefit
+  — `AccountFees` (below) covers the run-level total instead.
+- *Calling the real `sim.Broker.Advance` from `Scheduler` to get
+  genuine marks.* Rejected: `Advance` bundles mark revaluation together
+  with resting Limit/Stop order trigger evaluation, so calling it would
+  silently enable trigger-based fills as a side effect of fixing a
+  metrics/reporting bug — a much larger, unrelated behavior change to
+  core order-execution semantics that ADR-026/`Scheduler`'s own doc
+  comment already treat as a distinct, deliberately deferred concern.
+  Extracting a mark-only capability keeps the two decoupled.
+- *An optional `MarketObserver`, type-asserted and silently skipped
+  when absent.* Rejected in review: once `EquityCurve`/`MaxDrawdown`
+  are documented as authoritative mark-to-market results, a broker
+  adapter that happens not to implement the capability would silently
+  reintroduce the exact stale-mark bug this ADR exists to fix. Made
+  required instead, failing `NewRunner`/`NewScheduler` outright.
+- *Zero instead of nil for `WinRate`/`Expectancy` at zero trades.*
+  Considered (it was the original proposal) and rejected in review for
+  consistency with the model's own optional-value convention already
+  used for `AverageWin`/`AverageLoss`/`ProfitFactor`, and because `0%`
+  is a legitimate-looking but wrong answer to "what fraction of trades
+  won" when the true answer is "there were no trades."

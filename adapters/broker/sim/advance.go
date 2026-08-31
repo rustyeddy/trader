@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	brokerpkg "github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 )
@@ -67,6 +69,54 @@ func (b *Broker) Advance(ctx context.Context, obs Observation) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// ObserveMark implements backtest.MarketObserver (issue #219, M5-11) —
+// satisfied structurally, without this package importing backtest: see
+// that interface's own doc comment for why its signature deliberately
+// uses only already-shared primitive types. This is a deliberately
+// narrow extraction from accountState.advance's own mark-revaluation
+// step (see its doc comment below): it revalues every open position
+// for instrumentID with close, exactly as advance already does
+// unconditionally at the top of its own body, but it never evaluates
+// resting Limit/Stop order triggers — that remains Advance's own,
+// separate, still-deferred responsibility (ADR-026).
+func (h *accountHandle) ObserveMark(ctx context.Context, instrumentID instrument.ID, close num.Price, at time.Time) error {
+	if h.broker.isClosed() {
+		return brokerpkg.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.state.observeMark(instrumentID, close, h.broker.deps)
+	return nil
+}
+
+// observeMark revalues every position s holds for instrumentID
+// (regardless of provider/venue — s is already scoped to one account,
+// and this package's own convention, matching InputBuilder's default
+// resolution elsewhere, is one provider per account) to close. A
+// listing with no open position is a no-op: there is nothing to
+// revalue, matching advance's own "even if no pending order triggers
+// below" guard.
+func (s *accountState) observeMark(instrumentID instrument.ID, close num.Price, deps Deps) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+
+	changed := false
+	for key := range s.positions {
+		if key.instrumentID != instrumentID {
+			continue
+		}
+		s.marks[key] = close
+		changed = true
+	}
+	if changed {
+		s.asOf = deps.Clock.Now()
+	}
 }
 
 // triggeredOrder pairs a pending order with the price it would fill at

@@ -307,6 +307,8 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 	ctx := context.Background()
 	acc, err := h.broker.OpenAccount(ctx, h.accountID)
 	require.NoError(t, err)
+	marketObserver, ok := acc.(backtest.MarketObserver)
+	require.True(t, ok, "sim account must implement backtest.MarketObserver")
 
 	ids2 := id.NewGenerator(h.clockObj, id.NewDeterministic(3, 4))
 	factory := strategy.NewIntentFactory(h.clockObj, ids2, id.Source("scheduler-test"))
@@ -330,8 +332,9 @@ func newSchedulerDeps(t *testing.T, replay *backtest.Replay, strat strategy.Stra
 			riskFraction:    num.MustParseRate("0.01"),
 			adverseDistance: num.MustParsePrice("0.01000"),
 		},
-		Journal: journal.Discard(),
-		RunID:   mustSchedulerRunID(t, ids2),
+		Journal:        journal.Discard(),
+		RunID:          mustSchedulerRunID(t, ids2),
+		MarketObserver: marketObserver,
 	}
 }
 
@@ -666,6 +669,79 @@ func TestScheduler_JournalFailureDuringDrainDoesNotAdvanceWatermarkOrFills(t *te
 	err = sched.Run(context.Background())
 	require.ErrorIs(t, err, errIntentional)
 	assert.Empty(t, sched.Fills(), "a fill must not be collected unless its journal record succeeded")
+}
+
+// TestScheduler_EquityCurveOnePointPerBatchInChronologicalOrder proves
+// EquityCurve retains exactly one authoritative, mark-to-market
+// observation per batch, in the same chronological order Replay itself
+// yields batches (issue #219, M5-11), and that the final observation
+// matches the account's own final snapshot — the same post-flush
+// snapshot Phase 3 already takes for the strategy's own View, not a
+// second one.
+func TestScheduler_EquityCurveOnePointPerBatchInChronologicalOrder(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t)
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	curve := sched.EquityCurve()
+	require.Len(t, curve, 4, "one point per batch: the fixture's 4 shared hourly timestamps")
+
+	for i := 1; i < len(curve); i++ {
+		assert.True(t, curve[i].Timestamp.After(curve[i-1].Timestamp))
+	}
+
+	finalSnap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.True(t, curve[len(curve)-1].Equity.Equal(finalSnap.Equity()))
+}
+
+// TestScheduler_EquityCurveIsGenuinelyMarkToMarketBetweenFills proves
+// ObserveMark actually revalues open positions from each batch's own
+// bar close, not merely retains whatever mark a fill last set (issue
+// #219 review): mustEnterOnFirstBarStrategy fills both instruments at
+// batch 1 (next-bar-open eligibility) and never trades again, yet the
+// fixture's own EUR/USD and GBP/USD closes keep rising through batches
+// 2 and 3 with no further fills — so if marks were stale, equity would
+// stay flat from batch 1 onward. It must not.
+func TestScheduler_EquityCurveIsGenuinelyMarkToMarketBetweenFills(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t)
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	curve := sched.EquityCurve()
+	require.Len(t, curve, 4)
+
+	// Batch 0: both positions still flat (queued, not yet eligible) —
+	// no unrealized P&L to speak of.
+	// Batches 1-3: both fills already happened by batch 1's own flush;
+	// EUR/USD and GBP/USD both keep rising through batch 3 with no
+	// further fills, so equity must strictly increase each batch as
+	// ObserveMark revalues the open positions from each new bar close.
+	for i := 2; i <= 3; i++ {
+		cmp, err := curve[i].Equity.Cmp(curve[i-1].Equity)
+		require.NoError(t, err)
+		assert.Greater(t, cmp, 0, "batch %d equity must exceed batch %d: marks must move with the fixture's own rising closes even without a new fill", i, i-1)
+	}
+
+	finalSnap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, finalSnap.Positions(), 2, "no further fills occurred after batch 1 — the equity change is from revaluation alone")
 }
 
 type erroringInputBuilder struct{}

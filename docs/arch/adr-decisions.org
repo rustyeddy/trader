@@ -144,6 +144,7 @@ the original decided, use full supersession instead.
 | 034 | De-risking exemption in position/exposure-limit risk rules (in adr-034-derisking-exemption-position-limit-rules.org) | Accepted |
 | 035 | M5 backtesting architecture and package boundaries (in adr-035-m5-backtesting-architecture.org) | Accepted |
 | 036 | Backtest journal contract and JSONL format (in adr-036-backtest-journal.org) | Accepted |
+| 037 | Backtest result and performance metrics model (in adr-037-backtest-metrics-model.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -296,6 +297,20 @@ fixed high-water-mark contract), Record/Entry sequence-ownership
 split, explicit run-completion markers, journal failure/ownership
 semantics, and a root-cause =id.Metadata= JSON-marshaling fix
 discovered while implementing the JSONL wire format.
+
+Note: ADR-037 is likewise maintained in its own file,
+=docs/arch/adr-037-backtest-metrics-model.org=, rather than inline in
+this registry.  Its own Status section is authoritative.  Issue #219
+(M5-11) asks for the transport-neutral backtest result/performance-
+metrics model ADR-035 already boundary-scoped but did not itself work
+out; this ADR records the resulting decision, including a true
+mark-to-market equity curve captured by =Scheduler= (not derived from
+trades by =Metrics=), closed-trades-only inputs to =Metrics= keeping
+=GrossPnL=/=ClosedTradeCosts=/=NetPnL= internally consistent (with a
+separate authoritative =AccountFees= for the run-level total), a uniform
+nil-at-zero-trades optional-value convention for undefined statistics,
+and R-multiple deferred exactly as issue #217 already decided for
+=order.Trade= itself.
 
 * ADR-001: Modular monolith before service decomposition
 
