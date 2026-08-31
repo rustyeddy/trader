@@ -306,7 +306,8 @@ metrics model ADR-035 already boundary-scoped but did not itself work
 out; this ADR records the resulting decision, including a true
 mark-to-market equity curve captured by =Scheduler= (not derived from
 trades by =Metrics=), closed-trades-only inputs to =Metrics= keeping
-=GrossPnL=/=TotalCosts=/=NetPnL= internally consistent, a uniform
+=GrossPnL=/=ClosedTradeCosts=/=NetPnL= internally consistent (with a
+separate authoritative =AccountFees= for the run-level total), a uniform
 nil-at-zero-trades optional-value convention for undefined statistics,
 and R-multiple deferred exactly as issue #217 already decided for
 =order.Trade= itself.
