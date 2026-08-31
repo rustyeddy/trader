@@ -2,6 +2,7 @@ package backtest_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -487,10 +488,14 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 	case journal.KindDecision:
 		d1, d2 := r1.Decision, r2.Decision
 		assert.Equalf(t, d1.Allowed, d2.Allowed, "record[%d]/decision: allowed mismatch", i)
-		assert.Equalf(t, len(d1.Violations), len(d2.Violations), "record[%d]/decision: violation count mismatch", i)
-		assert.Equalf(t, len(d1.RuleResults), len(d2.RuleResults), "record[%d]/decision: rule result count mismatch", i)
+		compareViolations(t, i, "decision", d1.Violations, d2.Violations)
+		compareWarnings(t, i, "decision", d1.Warnings, d2.Warnings)
+		require.Equalf(t, len(d1.RuleResults), len(d2.RuleResults), "record[%d]/decision: rule result count mismatch", i)
 		for j := range d1.RuleResults {
-			assert.Equalf(t, d1.RuleResults[j].Rule, d2.RuleResults[j].Rule, "record[%d]/decision: rule_results[%d] name mismatch", i, j)
+			rr1, rr2 := d1.RuleResults[j], d2.RuleResults[j]
+			assert.Equalf(t, rr1.Rule, rr2.Rule, "record[%d]/decision: rule_results[%d] name mismatch", i, j)
+			compareViolations(t, i, fmt.Sprintf("decision.rule_results[%d]", j), rr1.Violations, rr2.Violations)
+			compareWarnings(t, i, fmt.Sprintf("decision.rule_results[%d]", j), rr1.Warnings, rr2.Warnings)
 		}
 	case journal.KindRequest:
 		req1, req2 := r1.Request, r2.Request
@@ -503,6 +508,9 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Equalf(t, o1.Status, o2.Status, "record[%d]/order: status mismatch", i)
 		assert.Equalf(t, n1.order(o1.Request.OrderID), n2.order(o2.Request.OrderID), "record[%d]/order: order id shape mismatch", i)
 		assert.Equalf(t, n1.brokerOrderID(o1.BrokerOrderID), n2.brokerOrderID(o2.BrokerOrderID), "record[%d]/order: broker order id shape mismatch", i)
+		comparePrice(t, i, "order.accepted_limit_price", o1.AcceptedLimitPrice, o2.AcceptedLimitPrice)
+		comparePrice(t, i, "order.accepted_stop_price", o1.AcceptedStopPrice, o2.AcceptedStopPrice)
+		assert.Truef(t, o1.FilledQuantity.Equal(o2.FilledQuantity), "record[%d]/order: filled quantity mismatch: got %s want %s", i, o2.FilledQuantity, o1.FilledQuantity)
 		if o1.AcceptedQuantity != nil && o2.AcceptedQuantity != nil {
 			assert.Truef(t, o1.AcceptedQuantity.Equal(*o2.AcceptedQuantity), "record[%d]/order: accepted quantity mismatch", i)
 		} else {
@@ -514,9 +522,17 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		assert.Equalf(t, f1.Side, f2.Side, "record[%d]/fill: side mismatch", i)
 		assert.Truef(t, f1.Price.Equal(f2.Price), "record[%d]/fill: price mismatch: got %s want %s", i, f2.Price, f1.Price)
 		assert.Truef(t, f1.Quantity.Equal(f2.Quantity), "record[%d]/fill: quantity mismatch", i)
+		assert.Truef(t, f1.Timestamp.Equal(f2.Timestamp), "record[%d]/fill: timestamp mismatch: got %s want %s", i, f2.Timestamp, f1.Timestamp)
+		compareMoney(t, i, "fill.commission", f1.Commission, f2.Commission)
 		assert.Equalf(t, n1.fill(f1.FillID), n2.fill(f2.FillID), "record[%d]/fill: fill id shape mismatch", i)
 		assert.Equalf(t, n1.order(f1.OrderID), n2.order(f2.OrderID), "record[%d]/fill: order id shape mismatch", i)
+		assert.Equalf(t, n1.brokerOrderID(f1.BrokerOrderID), n2.brokerOrderID(f2.BrokerOrderID), "record[%d]/fill: broker order id shape mismatch", i)
 		assert.Equalf(t, n1.account(f1.AccountID), n2.account(f2.AccountID), "record[%d]/fill: account id shape mismatch", i)
+		fe1, fc1, fcause1 := n1.metadata(f1.Metadata)
+		fe2, fc2, fcause2 := n2.metadata(f2.Metadata)
+		assert.Equalf(t, fe1, fe2, "record[%d]/fill: metadata event id shape mismatch", i)
+		assert.Equalf(t, fc1, fc2, "record[%d]/fill: metadata correlation id shape mismatch", i)
+		assert.Equalf(t, fcause1, fcause2, "record[%d]/fill: metadata causation id shape mismatch", i)
 	case journal.KindAccount:
 		a1, a2 := r1.Account, r2.Account
 		assert.Truef(t, a1.Equity().Equal(a2.Equity()), "record[%d]/account: equity mismatch: got %s want %s", i, a2.Equity(), a1.Equity())
@@ -525,7 +541,60 @@ func compareRecordSemantics(t *testing.T, i int, r1, r2 journal.Record, n1, n2 *
 		compareTrades(t, i, *r1.Trade, *r2.Trade, n1, n2)
 	case journal.KindRunCompleted:
 		assert.Equalf(t, r1.RunCompleted.EntryCount, r2.RunCompleted.EntryCount, "record[%d]/run_completed: entry count mismatch", i)
+	default:
+		// A newly introduced journal.Kind must not silently pass this
+		// completion gate with no payload comparison at all (issue #241
+		// review): adding one forces an explicit decision here about how
+		// its semantics participate in determinism, rather than letting
+		// "the Kind values matched" stand in for "the payloads matched."
+		t.Fatalf("record[%d]: unhandled journal.Kind %s — add a semantic comparison case for it in compareRecordSemantics", i, r1.Kind)
 	}
+}
+
+// compareViolations compares two []risk.Violation slices field-by-field
+// with a named index/field on mismatch.
+func compareViolations(t *testing.T, i int, label string, v1, v2 []risk.Violation) {
+	t.Helper()
+	require.Equalf(t, len(v1), len(v2), "record[%d]/%s: violation count mismatch", i, label)
+	for j := range v1 {
+		assert.Equalf(t, v1[j].Rule, v2[j].Rule, "record[%d]/%s: violations[%d].rule mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Message, v2[j].Message, "record[%d]/%s: violations[%d].message mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Measured, v2[j].Measured, "record[%d]/%s: violations[%d].measured mismatch", i, label, j)
+		assert.Equalf(t, v1[j].Limit, v2[j].Limit, "record[%d]/%s: violations[%d].limit mismatch", i, label, j)
+	}
+}
+
+// compareWarnings compares two []risk.Warning slices field-by-field
+// with a named index/field on mismatch.
+func compareWarnings(t *testing.T, i int, label string, w1, w2 []risk.Warning) {
+	t.Helper()
+	require.Equalf(t, len(w1), len(w2), "record[%d]/%s: warning count mismatch", i, label)
+	for j := range w1 {
+		assert.Equalf(t, w1[j].Rule, w2[j].Rule, "record[%d]/%s: warnings[%d].rule mismatch", i, label, j)
+		assert.Equalf(t, w1[j].Message, w2[j].Message, "record[%d]/%s: warnings[%d].message mismatch", i, label, j)
+	}
+}
+
+// comparePrice compares two optional *num.Price values, matching
+// nilness before comparing value.
+func comparePrice(t *testing.T, i int, label string, p1, p2 *num.Price) {
+	t.Helper()
+	if p1 == nil || p2 == nil {
+		assert.Equalf(t, p1 == nil, p2 == nil, "record[%d]/%s: nilness mismatch", i, label)
+		return
+	}
+	assert.Truef(t, p1.Equal(*p2), "record[%d]/%s: mismatch: got %s want %s", i, label, *p2, *p1)
+}
+
+// compareMoney compares two optional *num.Money values, matching
+// nilness before comparing value.
+func compareMoney(t *testing.T, i int, label string, m1, m2 *num.Money) {
+	t.Helper()
+	if m1 == nil || m2 == nil {
+		assert.Equalf(t, m1 == nil, m2 == nil, "record[%d]/%s: nilness mismatch", i, label)
+		return
+	}
+	assert.Truef(t, m1.Equal(*m2), "record[%d]/%s: mismatch: got %s want %s", i, label, *m2, *m1)
 }
 
 // compareTrades compares two order.Trade values (either two closed

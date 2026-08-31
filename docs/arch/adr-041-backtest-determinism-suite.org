@@ -95,6 +95,32 @@ every semantically meaningful field directly (instrument, side,
 quantity, price, allowed/violations, status, ...), substituting each
 normalized-token pair for every raw ID field.
 
+A second review round (PR #241) found the first cut of this
+comparator too shallow to actually back the "complete observable
+outputs" promise: =KindDecision= compared only violation/rule-result
+*counts* and rule names, not their content; =KindOrder= omitted
+=AcceptedLimitPrice=/=AcceptedStopPrice=/=FilledQuantity=; =KindFill=
+omitted its own =Timestamp=, =Commission=, =BrokerOrderID=, and its
+own =Metadata= (a fill carries a *second*, independent =id.Metadata=
+distinct from the journal envelope's own). Each was filled in:
+=compareViolations=/=compareWarnings= compare every =risk.Violation=/
+=risk.Warning= field (all plain strings, no ID normalization needed)
+at every nesting level (aggregate =Decision.Violations=/=Warnings= and
+each =RuleResult='s own); =comparePrice=/=compareMoney= handle the
+optional (=*num.Price=/=*num.Money=) accepted-price and commission
+fields, matching nilness before comparing value; and =KindFill= gained
+its missing =Timestamp=/=Commission=/normalized =BrokerOrderID=/own
+=Metadata= comparisons.
+
+Finally, =compareRecordSemantics='s =switch= gained an explicit
+=default= case that calls =t.Fatalf=: a =journal.Kind= this suite does
+not yet know how to compare must stop the test outright, not silently
+report "the two Kind values matched" as if that were sufficient. This
+is deliberate for a completion gate specifically — a future new
+=journal.Kind= is exactly the kind of change that should force an
+explicit decision about how its semantics participate in determinism,
+not slip through unexercised.
+
 ** Required-kind coverage, evidence-driven rather than assumed
 
 Before comparing the two normalized streams, =assertRequiredKindsPresent=
@@ -246,6 +272,20 @@ goroutines).
   changes. Exact ordered equality plus a per-field named comparison
   (provider, instrument, interval, span, basis, fingerprint) gives a
   failure that names exactly what diverged.
+- *Comparing =KindDecision=/=KindOrder=/=KindFill= by count/name/a
+  handful of fields only, deferring the rest to =ConfigDigest= or the
+  aggregate result-level comparisons to catch.* Rejected (PR #241
+  second review round): #223 explicitly promises comparison of
+  complete observable decisions/orders/fills, and a shallow comparator
+  could let a real divergence in violation content, accepted prices,
+  filled quantity, fill timestamp, commission, or a fill's own
+  metadata pass silently. Every field participating in each kind's own
+  semantic identity is now compared by name.
+- *A =switch= with no =default= case for unhandled =journal.Kind=
+  values.* Rejected (PR #241 second review round): would let a future
+  new =Kind= appear identically in both streams (same =Kind= value)
+  while receiving zero payload comparison, silently weakening the gate
+  exactly when it should instead force a decision.
 - *A zero-rule risk.Engine and an enter-only fixture strategy*
   (matching most pre-existing =backtest= test fixtures). Rejected
   (issue #223 review, points 3-4): would leave the risk-decision and
