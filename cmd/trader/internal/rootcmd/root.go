@@ -30,6 +30,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
 	"github.com/rustyeddy/trader/cmd/trader/broker"
 	"github.com/rustyeddy/trader/cmd/trader/data"
 	"github.com/rustyeddy/trader/cmd/trader/execution"
@@ -150,6 +151,7 @@ func New() (*cobra.Command, func() error) {
 	cmd.AddCommand(data.New())
 	cmd.AddCommand(broker.New())
 	cmd.AddCommand(execution.New())
+	cmd.AddCommand(cmdbacktest.New())
 
 	cleanup := func() error {
 		if closer == nil {

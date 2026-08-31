@@ -7,11 +7,11 @@ import (
 )
 
 func TestTextRenderer_Golden_Representative(t *testing.T) {
-	bt := report.NewBacktestReport(newRepresentativeResult(t))
+	bt := report.NewBacktestReport(report.BacktestInputFromResult(newRepresentativeResult(t)))
 	assertGolden(t, "representative.txt", report.TextRenderer{}, bt)
 }
 
 func TestTextRenderer_Golden_ZeroTrade(t *testing.T) {
-	bt := report.NewBacktestReport(newZeroTradeResult(t))
+	bt := report.NewBacktestReport(report.BacktestInputFromResult(newZeroTradeResult(t)))
 	assertGolden(t, "zero_trade.txt", report.TextRenderer{}, bt)
 }

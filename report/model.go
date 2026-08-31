@@ -151,12 +151,46 @@ type EquityPointReport struct {
 	Equity    num.Money `json:"equity"`
 }
 
-// NewBacktestReport projects result into a BacktestReport. It performs
-// no computation: every field is either copied directly from an
-// existing accessor or converted to its canonical string/UTC form.
-func NewBacktestReport(result backtest.Result) BacktestReport {
-	m := result.Manifest
-	metrics := result.Metrics
+// BacktestInput is everything NewBacktestReport needs, named as its
+// own report-owned type rather than backtest.Result (issue #222
+// review): backtest.Result is backtest.Runner's own return shape, and
+// a second caller producing the identical set of values through a
+// different path (service/backtest.RunResponse, or a persisted report
+// snapshot deserialized by a "show" command) should not have to
+// construct a backtest.Result just to call NewBacktestReport.
+// backtest.Result's own fields convert to a BacktestInput with a pure
+// field-for-field copy at whichever boundary holds one.
+type BacktestInput struct {
+	Manifest    backtest.Manifest
+	Account     account.Snapshot
+	Trades      []order.Trade
+	OpenTrades  []order.Trade
+	EquityCurve []backtest.EquityPoint
+	Metrics     backtest.Metrics
+}
+
+// BacktestInputFromResult converts result into a BacktestInput by pure
+// field copy — the one place a caller holding an actual backtest.
+// Result (backtest.Runner's own return type) bridges to
+// NewBacktestReport's own report-owned input type.
+func BacktestInputFromResult(result backtest.Result) BacktestInput {
+	return BacktestInput{
+		Manifest:    result.Manifest,
+		Account:     result.Account,
+		Trades:      result.Trades,
+		OpenTrades:  result.OpenTrades,
+		EquityCurve: result.EquityCurve,
+		Metrics:     result.Metrics,
+	}
+}
+
+// NewBacktestReport projects the given BacktestInput into a
+// BacktestReport. It performs no
+// computation: every field is either copied directly from an existing
+// accessor or converted to its canonical string/UTC form.
+func NewBacktestReport(in BacktestInput) BacktestReport {
+	m := in.Manifest
+	metrics := in.Metrics
 
 	perInstrumentMetrics := metrics.PerInstrument()
 	perInstrument := make([]InstrumentReport, len(perInstrumentMetrics))
@@ -164,17 +198,17 @@ func NewBacktestReport(result backtest.Result) BacktestReport {
 		perInstrument[i] = toInstrumentReport(im)
 	}
 
-	closed := make([]TradeReport, len(result.Trades))
-	for i, t := range result.Trades {
+	closed := make([]TradeReport, len(in.Trades))
+	for i, t := range in.Trades {
 		closed[i] = toTradeReport(t)
 	}
-	open := make([]TradeReport, len(result.OpenTrades))
-	for i, t := range result.OpenTrades {
+	open := make([]TradeReport, len(in.OpenTrades))
+	for i, t := range in.OpenTrades {
 		open[i] = toTradeReport(t)
 	}
 
-	curve := make([]EquityPointReport, len(result.EquityCurve))
-	for i, p := range result.EquityCurve {
+	curve := make([]EquityPointReport, len(in.EquityCurve))
+	for i, p := range in.EquityCurve {
 		curve[i] = EquityPointReport{Timestamp: p.Timestamp.UTC(), Equity: p.Equity}
 	}
 
@@ -211,7 +245,7 @@ func NewBacktestReport(result backtest.Result) BacktestReport {
 		PerInstrument: perInstrument,
 		ClosedTrades:  closed,
 		OpenTrades:    open,
-		Account:       toAccountReport(result.Account),
+		Account:       toAccountReport(in.Account),
 		EquityCurve:   curve,
 	}
 }

@@ -1,0 +1,335 @@
+#+TITLE: Thin Backtest CLI ADR-040
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #222 (M5-14) asks for a minimal "trader backtest" CLI
+over the M5 application service (#221), and settles three design
+questions the plan/review comment thread raised: what strategy a
+production CLI invocation actually runs when no strategy registry
+exists, how "trader backtest show <run-id>" can render a completed
+run without turning the CLI into a second backtest orchestrator, and
+how the resulting persisted artifact stays decoupled from both
+=backtest.Result= and =service/backtest.RunResponse=.
+
+* Context
+
+#220 (=report=) and #221 (=service/backtest=) give this issue
+everything it needs except three things no earlier M5 issue had to
+decide:
+
+1. Every =strategy.Strategy= implementation in the repository outside
+   the =strategy= package's own tests is an unexported =_test.go=
+   fixture. =service/backtest.RunRequest.Strategy= (#221) deliberately
+   deferred a strategy registry as out of scope. A CLI =run= command
+   nonetheless needs a real, live =strategy.Strategy= value to hand
+   the service.
+2. Every existing =cmd/trader= command group is explicitly ephemeral
+   (=cmd/trader/execution=: "state does not persist between separate
+   trader commands"). A =show <run-id>= command needs *something* to
+   read a prior run's result back from. The durable journal
+   (=adapters/journal/jsonl=) records intents/proposals/decisions/
+   orders/fills/account snapshots/trades and the manifest, but not the
+   equity curve or =backtest.Metrics= in any reconstructable shape —
+   reconstructing them from a journal replay would mean re-deriving
+   =Metrics= inside the CLI, exactly the "second backtest orchestrator"
+   this issue's acceptance criteria forbids.
+3. =report.NewBacktestReport= (#220) took =backtest.Result= as its
+   only input. Neither =service/backtest.RunResponse= (#221's own,
+   deliberately distinct mirror of =backtest.Result=) nor a
+   deserialized persisted snapshot *is* a =backtest.Result=, so
+   =show='s own read-path had no way to call it without either adding
+   JSON (de)serialization to =RunResponse= (recreating the
+   =backtest.Result=-versus-report wire-coupling #220 already avoided)
+   or growing =NewBacktestReport= into an unwieldy multi-argument
+   constructor.
+
+Design review (issue #222 comment) resolved all three explicitly.
+
+* Decision
+
+** No real strategy, no registry — a provisional, composition-side demo strategy
+
+=cmd/trader/backtest= defines one unexported =demoStrategy=
+(=demo_strategy.go=): it enters long once, on the requested
+instrument's own first bar, and never trades again. It is documented,
+in both its own doc comment and the package doc comment, as existing
+solely to make "trader backtest run" genuinely executable — not a real
+trading strategy, not the beginning of a strategy library, and not a
+registry. =service/backtest.RunRequest.Strategy= remains the real
+application contract; strategy discovery/naming (mapping a CLI
+=--strategy= name to a constructor) is an explicitly deferred,
+later transport/composition concern, matching ADR-039's own
+"strategy stays a caller-supplied runtime value for M5" note. =run='s
+own =--strategy= flag does not exist in this first cut: there is
+exactly one strategy this build can run, and pretending otherwise with
+a flag that only accepts one value would be a misleading permanent-
+looking contract for something explicitly provisional.
+
+** Persisted, versioned report snapshots — not journal replay, not a RunResponse wire format
+
+"trader backtest run" computes a =report.BacktestReport= exactly once
+(via =report.NewBacktestReport=) and persists that *same projection*
+as a small JSON artifact under =--output-dir/<run-id>.json=
+(=store.go='s =runSnapshot=/=saveSnapshot=/=loadSnapshot=). "trader
+backtest show <run-id>" reads that one file back and renders it —
+deserialize, validate, render; zero backtest orchestration and zero
+metric recomputation. The durable journal remains a separate,
+lower-level audit trail this command group never reads from.
+
+=runSnapshot= carries its own =schema_version= field
+(=snapshotSchemaVersion=, currently =1=), so this convenient CLI
+artifact has an explicit evolution mechanism from day one rather than
+becoming an accidental forever-format (issue #222 review, point 4).
+=loadSnapshot= rejects a mismatched schema version
+(=ErrSnapshotVersionMismatch=) and, separately, verifies the
+snapshot's own embedded =Report.Run.RunID= equals the requested
+run-id (=ErrSnapshotRunIDMismatch=) — a renamed or copied file must
+never silently render as a different run than the one asked for.
+=saveSnapshot= writes to a temporary file in the target directory and
+renames it into place, so a crash mid-write can never leave a
+syntactically plausible partial artifact at the final path (issue
+#222 review, point 5) — =show= only ever observes a complete file or
+no file at all.
+
+** =report.BacktestInput= replaces =backtest.Result= as =NewBacktestReport='s parameter
+
+#220's =NewBacktestReport(result backtest.Result) BacktestReport=
+became =NewBacktestReport(in BacktestInput) BacktestReport=, where:
+
+#+BEGIN_SRC go
+type BacktestInput struct {
+    Manifest    backtest.Manifest
+    Account     account.Snapshot
+    Trades      []order.Trade
+    OpenTrades  []order.Trade
+    EquityCurve []backtest.EquityPoint
+    Metrics     backtest.Metrics
+}
+#+END_SRC
+
+=BacktestInput= is report-owned and structurally identical to
+=backtest.Result=, but is not =backtest.Result=: any caller producing
+the same six values through a different path — =service/backtest.
+RunResponse= (a plain field-for-field copy, done in =run.go=) or a
+deserialized =runSnapshot.Report= (already a =BacktestReport=, never
+re-entering =NewBacktestReport= at all) — builds a =BacktestInput=
+directly, without constructing a =backtest.Result= it does not
+otherwise have or importing =service/backtest= into =report= to
+accept its type instead. A new =report.BacktestInputFromResult(result
+backtest.Result) BacktestInput= pure-copy convenience function keeps
+every existing caller that *does* hold a real =backtest.Result=
+(=report='s own tests) unchanged in spirit, adapting to the new
+primary constructor internally exactly as review suggested ("if
+retaining the existing =NewBacktestReport(backtest.Result)= is
+useful, it can simply adapt to this constructor internally").
+
+This was chosen over a =NewBacktestReportFrom(manifest, account,
+trades, openTrades, equityCurve, metrics)=-shaped six-argument
+constructor (the plan's own first draft): a named struct input scales
+to a future seventh field without an API break, and self-documents
+each field at the call site.
+
+** Filesystem ownership stays in the CLI; =report= knows nothing about paths
+
+=report= gained a new input type, not a new capability: it still never
+touches =io.Writer= selection, file paths, or persistence — =store.go=
+(this package) owns directory creation, atomic writes, and the
+schema/identity validation on read (issue #222 review, point 5).
+=report.Renderer[T].Render(io.Writer, T)= is unchanged; =run.go=/
+=show.go= call it against =os.Stdout= (via =cmd.OutOrStdout()=) exactly
+like every other =cmd/trader= command's own leaf commands do.
+
+** Composition-root wiring mirrors every other command family
+
+=cmd/trader/backtest/service.go='s =environmentFactory= is this CLI's
+own concrete =svcbacktest.EnvironmentFactory= (ADR-039): a fresh
+=sim.Broker=/=execution.Planner=/=risk.Engine=/=pipeline.Pipeline=
+stack built per invocation, the identical shape
+=cmd/trader/execution/service.go='s own =buildService= already
+establishes for its own use case. =sim.Broker='s own
+=FillPriceSource= is fixed at construction to a single, analytically
+precomputed value: the *fill bar's own Open*, not the entry bar's
+Close (see "Fill price must follow next-bar-open, not the entry bar's
+Close" below) — read via a plain =*marketdata.Manager.Bars= call
+before =Service.Run=, since =demoStrategy= only ever places its one
+order on a known, fixed bar and =backtest.Runner= drives the whole
+replay internally with no per-bar hook a composition root could
+otherwise update a live price source from. =environmentFactory= also
+leaves =simbroker.Deps.Slippage=/=Commission= both nil (no slippage,
+no commission model configured), and derives the resulting
+=Environment.FillModel= from =simPriceSource.Info()= itself rather
+than a hardcoded literal, so the =Manifest= this run produces can
+never claim a fill/slippage/commission model other than the one that
+actually ran.
+
+** Fill price must follow next-bar-open, not the entry bar's Close
+
+PR #240 review found a correctness bug in the first cut of this
+design: =run.go= read the requested span's *first bar's Close* and
+fixed =simPriceSource= to it for the entire run. But Scheduler's own
+next-bar-open fill-eligibility rule (issue #214) queues an intent
+emitted from bar T until requirement T's *next* bar, T+1, arrives, and
+executes it using T+1's own Open — never T's Close. Fixing the price
+to the entry bar's Close silently reintroduced the exact causal
+pricing mismatch #214 was designed to remove. The bug was invisible in
+the original vertical-slice fixture only because that fixture's bars
+happen to form a continuous series where each bar's Close numerically
+equals the next bar's Open — the fixture never actually distinguished
+the two.
+
+The fix: =run.go='s =nextBarOpenAfterEntry= reads and discards exactly
+=warmupBars + 1= bars (the warm-up bars plus the entry bar itself,
+since =demoStrategy= enters on the first bar it is actually delivered
+via =OnBar=, which is index =warmupBars=) and returns the *following*
+bar's Open — the same bar and the same field Scheduler's own
+=resolverInputBuilder= would use as its execution reference. Because
+=demoStrategy= places exactly one, fully deterministic order for the
+whole run, a single precomputed fixed price is sufficient and
+correct; no live per-bar feed is needed. A new committed fixture
+(=testdata/raw/oanda/EURUSD/2024/02=) is deliberately gapped — its
+first bar's Close differs from its second bar's Open — specifically so
+=TestNextBarOpenAfterEntry_UsesFollowingBarOpenNotEntryBarClose= can
+distinguish the correct value from the reintroduced bug; the original,
+non-gapped fixture could not.
+
+** =demoStrategy= must not spend its one entry on a warm-up bar
+
+A second review pass (PR #240) found a related bug in =demoStrategy=
+itself, once =--warmup-bars= is actually exercised: Scheduler calls
+=Strategy.OnBar= for *every* bar, including each of a requirement's own
+declared =WarmupBars= warm-up bars — it discards whatever intents
+=OnBar= returns during warm-up itself; it never suppresses the call
+(=scheduler.go='s own "OnBar accumulates normally throughout warm-up —
+but any intents OnBar returns [before warm-up clears] are discarded"
+doc comment). The first =demoStrategy= set its own =entered= flag on
+its very *first* =OnBar= callback — bar index 0 — so with
+=--warmup-bars > 0= that first, discarded intent was the strategy's
+only one; it never traded again, and the run silently produced zero
+trades.
+
+The fix: =demoStrategy= now tracks how many =OnBar= calls it has
+already seen (=seen=) and only builds/emits its one =Enter= intent — and
+only then sets =entered= — on the call where =seen == warmupBars=: the
+=(warmupBars+1)=th call, exactly the one =Scheduler.allWarm='s own
+"strictly more than =WarmupBars= closed bars" rule first honors.
+=nextBarOpenAfterEntry='s own indexing already matched this rule (it
+discards =warmupBars= bars, then the entry bar itself, at index
+=warmupBars=, before reading the fill bar) — only =demoStrategy='s own
+entry-timing was wrong.
+=TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar=
+runs the full CLI with =--warmup-bars 1= against the gapped fixture and
+independently re-reads the expected fill bar via its own
+=*marketdata.Manager= call (not by trusting anything =run.go= itself
+computed), asserting both the fill's timestamp and its exact Open
+price.
+
+** Boundary enforcement
+
+=cmd/trader/backtest/boundary_test.go= mechanically checks (via
+=go/ast=, mirroring =backtest=/=report=/=service/backtest='s own
+parse-each-file-import boundary tests, but at the call-expression
+level rather than the import level) that no non-test file in this
+package calls =backtest.NewRunner=, =backtest.NewScheduler=, or
+=backtest.NewReplay= directly. Importing =backtest= itself is *not*
+restricted — =backtest.NewComponentInfo=/=ComponentInfo= are
+legitimately needed value types for the =Environment= this package's
+own =environmentFactory= builds, the same way =service/backtest='s own
+test fixtures already use them — only calling the orchestration entry
+points that would make this CLI a second backtest engine is what the
+test guards against (issue #222 review, point 7).
+
+** Vertical test proves the full acceptance criterion
+
+=vertical_slice_test.go= drives the real, fully-wired Cobra command
+tree (=cmdbacktest.New()=, =cmd.SetArgs=/=cmd.Execute=) against the
+committed EUR/USD H1 fixture, running =demoStrategy= end to end and
+asserting the rendered JSON output contains a non-empty open trade —
+a consequence that can only exist if sizing, execution planning, risk
+admission, simulated order submission, and a simulated fill all
+actually happened (issue #222 review, point 6: assert something
+stronger than "stdout contains a summary"). A second assertion runs
+=show= against the same =--output-dir= and requires byte-for-byte
+identical JSON output to =run='s own, proving zero recomputation
+occurred on the read path.
+
+* Consequences
+
+- =report.NewBacktestReport='s signature changed from #220's shipped
+  =(backtest.Result)= to =(BacktestInput)=; every caller updated in
+  this same change (only =report='s own tests existed before this
+  issue). =report= remains =v0=, so this is treated as an in-flight
+  API refinement rather than a breaking-change/deprecation event.
+- A future =cmd/trader/backtest --strategy <name>= flag, and whatever
+  strategy registry backs it, remains entirely additive: nothing in
+  this design blocks it, and =service/backtest.RunRequest.Strategy=
+  needs no change to support it.
+- =runSnapshot='s =schema_version= gives a concrete, tested mechanism
+  for evolving the persisted-artifact shape later without silently
+  breaking an operator's existing =--output-dir= of prior runs.
+- =show='s own data source is strictly the persisted snapshot, not the
+  journal — an operator who deletes =--output-dir= (or ran without one
+  configured, and later cleared the default) cannot recover a prior
+  run's report through =show=; the journal remains available as a
+  lower-level, separate audit trail for that case, at the cost of
+  reconstructing a report from it manually rather than through this
+  command.
+
+* Alternatives Considered
+
+- *Ship a real, minimal strategy (EMA-cross or similar) as part of
+  #222.* Rejected (issue #222 review, point 1): immediately raises
+  where built-in strategies live, how they are named/versioned, and
+  how external/private strategies are eventually selected — none of
+  which belongs in a CLI-transport milestone item.
+- *A =--strategy demo= flag accepting exactly one named value.*
+  Rejected in favor of no flag at all: a flag that only ever accepts
+  one value looks like a permanent contract even when explicitly
+  documented as provisional; omitting it entirely is a more honest
+  signal that strategy selection does not exist yet.
+- *=show= replays the journal to reconstruct a report.* Rejected
+  (issue #222 review, point 2): the journal does not record the
+  equity curve or =Metrics= in a reconstructable shape, so this would
+  require re-deriving =Metrics= in the CLI — the "second backtest
+  orchestrator" the acceptance criteria explicitly warns against.
+- *Persist =service/backtest.RunResponse= directly (JSON tags added to
+  it).* Rejected (issue #222 review, point 2): recreates the exact
+  wire-contract coupling #220 already avoided for =backtest.Result=,
+  and would force =service/backtest= — a transport-neutral application
+  layer — to carry serialization concerns it should not own.
+- *=report.NewBacktestReportFrom(manifest, account, trades,
+  openTrades, equityCurve, metrics)= with a long parameter list.*
+  Rejected (issue #222 review, point 3) in favor of the named
+  =BacktestInput= struct: a struct input self-documents each field and
+  survives a future additional field without an API break; a long
+  positional parameter list does neither.
+- *Write =<run-id>.json= directly, without a temp-file-plus-rename
+  step.* Rejected (issue #222 review, point 5): a crash or interrupted
+  write could leave a syntactically valid but truncated/incomplete
+  file at the final path, which =show= could then misinterpret as a
+  genuinely completed run.
+- *Keep =NewBacktestReport(backtest.Result)= as the primary,
+  back-compatible signature and add a separate
+  =NewBacktestReportFromInput(BacktestInput)= for the new callers.*
+  Considered (PR #240 review, non-blocking): raised as a way to avoid
+  an unnecessary source break on an already-public function. Not
+  adopted: =report= is still =v0= with exactly one real consumer
+  (=cmd/trader/backtest=, added in this same change) and =report='s
+  own tests, so there is no external caller to actually break; making
+  =BacktestInput= the canonical, primary parameter type (with
+  =BacktestInputFromResult= as the one-line adapter for a caller that
+  already holds a =backtest.Result=) was judged clearer going forward
+  than carrying two differently-shaped entry points for the same
+  projection.
+- *Price the demo strategy's one fill from a live, per-bar-updated
+  price source instead of a single precomputed value.* Considered
+  (PR #240 review's own suggested "clean composition-side solution").
+  Not adopted: =backtest.Runner= exposes no per-bar hook a composition
+  root could use to update a price source as the replay advances, and
+  =demoStrategy= places exactly one, fully deterministic order for the
+  entire run — a single, correctly computed fixed price (the fill
+  bar's own Open, per "Fill price must follow next-bar-open" above) is
+  both sufficient and exactly as correct as a live feed would be for
+  this specific, single-order strategy. A live per-bar price source
+  remains available as a future, additive change if a less
+  deterministic demo/reference strategy is ever introduced.
