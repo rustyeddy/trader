@@ -56,8 +56,11 @@ type MetricsParams struct {
 	// Runner with the run's starting observation). NetReturn and
 	// MaxDrawdown never reconstruct this from Trades.
 	EquityCurve []EquityPoint
-	// Trades are the run's fully closed round trips (Result.Trades).
-	// Every closed-trade statistic below — GrossPnL, TotalCosts,
+	// Trades are the run's fully closed round trips (Result.Trades) —
+	// every entry must have ClosedAt set and valid RealizedPnL/Costs;
+	// NewMetrics rejects any that don't, since this population is only
+	// ever meant to be closed round trips, not a caller-supplied mix.
+	// Every closed-trade statistic below — GrossPnL, ClosedTradeCosts,
 	// NetPnL, win/loss counts, expectancy, profit factor, and the
 	// per-instrument breakdown — is computed from this population
 	// only. Still-open positions have no final win/loss outcome yet,
@@ -66,6 +69,13 @@ type MetricsParams struct {
 	// unrealized contribution through the authoritative EquityCurve/
 	// FinalEquity instead.
 	Trades []order.Trade
+	// AccountFees is the run's authoritative, account-level cumulative
+	// fee total (Result.Account.Fees()) — the run-level cost figure,
+	// as opposed to ClosedTradeCosts' closed-trades-only one. It is
+	// not required to reconcile against ClosedTradeCosts when
+	// OpenTrades remain, since it also includes their already-
+	// incurred entry costs.
+	AccountFees num.Money
 }
 
 // Metrics is the transport-neutral backtest result and performance-
@@ -79,13 +89,14 @@ type Metrics struct {
 	maxDrawdown     num.Rate
 	equityCurve     []EquityPoint
 
-	tradeCount                   int
-	wins, losses                 int
-	winRate                      *num.Rate
-	averageWin, averageLoss      *num.Money
-	grossPnL, totalCosts, netPnL num.Money
-	expectancy                   *num.Money
-	profitFactor                 *num.Rate
+	tradeCount                         int
+	wins, losses                       int
+	winRate                            *num.Rate
+	averageWin, averageLoss            *num.Money
+	grossPnL, closedTradeCosts, netPnL num.Money
+	accountFees                        num.Money
+	expectancy                         *num.Money
+	profitFactor                       *num.Rate
 
 	perInstrument []InstrumentMetrics
 }
@@ -111,6 +122,9 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 	if !params.FinalEquity.IsValid() || !params.FinalEquity.Currency().Equal(currency) {
 		return Metrics{}, fmt.Errorf("%w: final equity must be valid money in %s", ErrInvalidMetrics, currency)
 	}
+	if !params.AccountFees.IsValid() || !params.AccountFees.Currency().Equal(currency) {
+		return Metrics{}, fmt.Errorf("%w: account fees must be valid money in %s", ErrInvalidMetrics, currency)
+	}
 
 	var lastTS time.Time
 	for i, p := range params.EquityCurve {
@@ -123,8 +137,14 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		lastTS = p.Timestamp
 	}
 	for i, t := range params.Trades {
+		if !t.RealizedPnL.IsValid() || !t.Costs.IsValid() {
+			return Metrics{}, fmt.Errorf("%w: trade %d has invalid realized pnl or costs", ErrInvalidMetrics, i)
+		}
 		if !t.RealizedPnL.Currency().Equal(currency) || !t.Costs.Currency().Equal(currency) {
 			return Metrics{}, fmt.Errorf("%w: trade %d is denominated in a different currency than %s", ErrInvalidMetrics, i, currency)
+		}
+		if t.ClosedAt.IsZero() {
+			return Metrics{}, fmt.Errorf("%w: trade %d has no ClosedAt — MetricsParams.Trades must be fully closed round trips", ErrInvalidMetrics, i)
 		}
 	}
 
@@ -143,6 +163,7 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		netReturn:       netReturnRate,
 		equityCurve:     append([]EquityPoint(nil), params.EquityCurve...),
 		tradeCount:      len(params.Trades),
+		accountFees:     params.AccountFees,
 	}
 
 	m.maxDrawdown, err = maxDrawdown(params.EquityCurve, currency)
@@ -266,7 +287,7 @@ func (m *Metrics) computeTradeStats(trades []order.Trade, currency num.Currency)
 	}
 
 	m.wins, m.losses = wins, losses
-	m.grossPnL, m.totalCosts, m.netPnL = grossPnL, totalCosts, netPnL
+	m.grossPnL, m.closedTradeCosts, m.netPnL = grossPnL, totalCosts, netPnL
 
 	if m.tradeCount > 0 {
 		avg, err := netPnL.DivRate(mustRateFromInt(m.tradeCount))
@@ -450,10 +471,19 @@ func (m Metrics) AverageLoss() *num.Money { return m.averageLoss }
 // costs.
 func (m Metrics) GrossPnL() num.Money { return m.grossPnL }
 
-// TotalCosts is the sum of Costs across every closed trade.
-func (m Metrics) TotalCosts() num.Money { return m.totalCosts }
+// ClosedTradeCosts is the sum of Costs across every closed trade —
+// not the run's total incurred costs, which also includes entry
+// commission already paid on any still-open position. See
+// AccountFees for that authoritative, run-level figure.
+func (m Metrics) ClosedTradeCosts() num.Money { return m.closedTradeCosts }
 
-// NetPnL is GrossPnL minus TotalCosts.
+// AccountFees is the run's authoritative, account-level cumulative
+// fee total (Result.Account.Fees()) — unlike ClosedTradeCosts, it
+// includes costs already incurred on any position still open when
+// the run ended.
+func (m Metrics) AccountFees() num.Money { return m.accountFees }
+
+// NetPnL is GrossPnL minus ClosedTradeCosts.
 func (m Metrics) NetPnL() num.Money { return m.netPnL }
 
 // Expectancy is the mean net result per closed trade (NetPnL /

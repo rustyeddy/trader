@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/rustyeddy/trader/account"
 	"github.com/rustyeddy/trader/broker"
@@ -13,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/pipeline"
 	"github.com/rustyeddy/trader/strategy"
@@ -64,6 +66,37 @@ type InputBuilder interface {
 	Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snapshot account.Snapshot) (pipeline.Input, error)
 }
 
+// MarketObserver is a required backtest-runtime capability that lets
+// Scheduler revalue open positions' marks from each bar's own close
+// price between fills, keeping the equity curve genuinely mark-to-
+// market (issue #219 follow-up) — #213/M5-05's own design note already
+// anticipated this as "a simulation-facing capability owned by
+// backtest... not by widening broker.Broker."
+//
+// ObserveMark deliberately does only this: it never evaluates resting
+// Limit/Stop order triggers. That remains ADR-026's own separate,
+// still-deferred concern (a broker-side Advance-shaped operation, not
+// this one) — conflating the two here would silently change order-
+// fill behavior as a side effect of fixing an equity-curve bug.
+//
+// Every RunnerParams.Account/SchedulerDeps.MarketObserver is required,
+// never optional: silently degrading to a stale-mark equity curve when
+// the capability happens to be absent would recreate the exact
+// correctness bug this interface exists to prevent, so NewRunner and
+// NewScheduler both reject a missing one rather than treating it as
+// optional. An ObserveMark failure aborts Run, exactly like any other
+// Scheduler-stage failure.
+//
+// The signature deliberately uses only already-shared primitive types
+// (instrument.ID, num.Price, time.Time) rather than a backtest-defined
+// struct: this lets a broker adapter's own account handle (see
+// adapters/broker/sim) satisfy this interface structurally, without
+// importing backtest — an adapter must never depend on an
+// orchestration package.
+type MarketObserver interface {
+	ObserveMark(ctx context.Context, instrumentID instrument.ID, close num.Price, at time.Time) error
+}
+
 // SchedulerDeps are a Scheduler's injected dependencies. Every field
 // is required.
 type SchedulerDeps struct {
@@ -104,6 +137,11 @@ type SchedulerDeps struct {
 	// RunID identifies the run every Record Scheduler journals belongs
 	// to.
 	RunID id.RunID
+	// MarketObserver revalues open positions' marks from each batch's
+	// own bars, keeping the equity curve mark-to-market between fills.
+	// See MarketObserver's own doc comment for why this is required,
+	// not optional.
+	MarketObserver MarketObserver
 }
 
 func (d SchedulerDeps) validate() error {
@@ -130,6 +168,9 @@ func (d SchedulerDeps) validate() error {
 	}
 	if d.RunID.IsZero() {
 		return fmt.Errorf("%w: run id must be set", ErrInvalidSchedulerDeps)
+	}
+	if d.MarketObserver == nil {
+		return fmt.Errorf("%w: market observer must be set", ErrInvalidSchedulerDeps)
 	}
 	return nil
 }
@@ -482,17 +523,31 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 		}
 	}
 
-	// Phase 3: evaluate the batch against one frozen snapshot/history.
+	// Phase 3: revalue marks from this batch's own bars, then evaluate
+	// against one frozen snapshot/history. Revaluation happens before
+	// the snapshot so the snapshot's own Equity() reflects this batch's
+	// price action, not last batch's stale marks — see MarketObserver's
+	// own doc comment for why this is a required, mark-only step,
+	// deliberately not evaluating resting-order triggers.
+	for _, ev := range batch {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.deps.MarketObserver.ObserveMark(ctx, ev.Instrument, ev.Bar.Close, t); err != nil {
+			return fmt.Errorf("backtest: scheduler: observing market for %s at %s: %w", ev.Instrument, t, err)
+		}
+	}
+
 	frozen, err := s.deps.Account.Snapshot(ctx)
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
 	}
 	// Record one authoritative, mark-to-market equity observation per
 	// batch (issue #219, M5-11): frozen is already the account's own
-	// post-flush snapshot for this exact batch timestamp — the honest
-	// "equity as of right now" this batch's strategy decisions are also
-	// based on — so this is retention of an existing observation, not a
-	// second snapshot call.
+	// post-flush, post-revaluation snapshot for this exact batch
+	// timestamp — the honest "equity as of right now" this batch's
+	// strategy decisions are also based on — so this is retention of an
+	// existing observation, not a second snapshot call.
 	s.equityCurve = append(s.equityCurve, EquityPoint{Timestamp: t, Equity: frozen.Equity()})
 
 	cutoffs := make(map[requirementKey]int, len(s.warmupRequired))

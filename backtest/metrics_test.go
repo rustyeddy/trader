@@ -55,6 +55,7 @@ func TestNewMetrics_ZeroTrades(t *testing.T) {
 	m, err := backtest.NewMetrics(backtest.MetricsParams{
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10000"),
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 
@@ -67,7 +68,7 @@ func TestNewMetrics_ZeroTrades(t *testing.T) {
 	assert.Nil(t, m.Expectancy())
 	assert.Nil(t, m.ProfitFactor())
 	assert.True(t, m.GrossPnL().IsZero())
-	assert.True(t, m.TotalCosts().IsZero())
+	assert.True(t, m.ClosedTradeCosts().IsZero())
 	assert.True(t, m.NetPnL().IsZero())
 	assert.True(t, m.NetReturn().IsZero())
 	assert.True(t, m.MaxDrawdown().IsZero())
@@ -85,6 +86,7 @@ func TestNewMetrics_AllWins(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10148"),
 		Trades:          trades,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 
@@ -100,7 +102,7 @@ func TestNewMetrics_AllWins(t *testing.T) {
 	require.NotNil(t, m.Expectancy())
 	assert.True(t, m.Expectancy().Equal(metricsUSD("74")))
 	assert.True(t, m.GrossPnL().Equal(metricsUSD("150")))
-	assert.True(t, m.TotalCosts().Equal(metricsUSD("2")))
+	assert.True(t, m.ClosedTradeCosts().Equal(metricsUSD("2")))
 	assert.True(t, m.NetPnL().Equal(metricsUSD("148")))
 }
 
@@ -114,6 +116,7 @@ func TestNewMetrics_AllLosses(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("9899"),
 		Trades:          trades,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 
@@ -141,6 +144,7 @@ func TestNewMetrics_MixedWithScratch(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10120"),
 		Trades:          trades,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 
@@ -176,10 +180,54 @@ func TestNewMetrics_RejectsCurrencyMismatch(t *testing.T) {
 	require.ErrorIs(t, err, backtest.ErrInvalidMetrics)
 }
 
+func TestNewMetrics_AccountFeesIsDistinctFromClosedTradeCosts(t *testing.T) {
+	listing := simListing(t, "EUR", "USD", "EUR_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	trades := []order.Trade{metricsTrade(t, listing, "100", "1", t0)}
+
+	m, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10099"),
+		Trades:          trades,
+		// An open position's own already-incurred entry commission
+		// (2) is reflected in AccountFees but not in ClosedTradeCosts,
+		// which only ever sees Trades (closed round trips).
+		AccountFees: metricsUSD("3"),
+	})
+	require.NoError(t, err)
+
+	assert.True(t, m.ClosedTradeCosts().Equal(metricsUSD("1")))
+	assert.True(t, m.AccountFees().Equal(metricsUSD("3")))
+}
+
+func TestNewMetrics_RejectsTradeWithZeroClosedAt(t *testing.T) {
+	listing := simListing(t, "EUR", "USD", "EUR_USD")
+	stillOpen, err := order.NewTrade(order.Trade{
+		AccountID:    mustMetricsAccountID(t),
+		Listing:      listing,
+		Side:         order.Long,
+		EntryFillIDs: []id.FillID{mustMetricsFillID(t)},
+		OpenedAt:     time.Now(),
+		RealizedPnL:  metricsUSD("0"),
+		Costs:        metricsUSD("0"),
+	})
+	require.NoError(t, err)
+	require.True(t, stillOpen.ClosedAt.IsZero())
+
+	_, err = backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10000"),
+		Trades:          []order.Trade{stillOpen},
+		AccountFees:     metricsUSD("0"),
+	})
+	require.ErrorIs(t, err, backtest.ErrInvalidMetrics)
+}
+
 func TestNewMetrics_RejectsZeroStartingCapital(t *testing.T) {
 	_, err := backtest.NewMetrics(backtest.MetricsParams{
 		StartingCapital: metricsUSD("0"),
 		FinalEquity:     metricsUSD("0"),
+		AccountFees:     metricsUSD("0"),
 	})
 	require.ErrorIs(t, err, backtest.ErrInvalidMetrics)
 }
@@ -209,6 +257,7 @@ func TestNewMetrics_NetReturnAndDrawdown(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10500"),
 		EquityCurve:     curve,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 
@@ -221,6 +270,7 @@ func TestNewMetrics_DrawdownEmptyOrSinglePointCurveIsZero(t *testing.T) {
 	m, err := backtest.NewMetrics(backtest.MetricsParams{
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10000"),
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 	assert.True(t, m.MaxDrawdown().IsZero())
@@ -229,6 +279,7 @@ func TestNewMetrics_DrawdownEmptyOrSinglePointCurveIsZero(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10000"),
 		EquityCurve:     []backtest.EquityPoint{{Timestamp: time.Now(), Equity: metricsUSD("10000")}},
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 	assert.True(t, m2.MaxDrawdown().IsZero())
@@ -244,6 +295,7 @@ func TestNewMetrics_DrawdownNonPositivePeakIsFullDrawdown(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("-50"),
 		EquityCurve:     curve,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 	assert.True(t, m.MaxDrawdown().Equal(num.MustParseRate("1")))
@@ -263,6 +315,7 @@ func TestNewMetrics_PerInstrumentBreakdown(t *testing.T) {
 		StartingCapital: metricsUSD("10000"),
 		FinalEquity:     metricsUSD("10079"),
 		Trades:          trades,
+		AccountFees:     metricsUSD("0"),
 	})
 	require.NoError(t, err)
 

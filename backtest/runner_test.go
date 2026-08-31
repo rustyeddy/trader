@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,6 +132,7 @@ func TestRunner_SuccessfulRun(t *testing.T) {
 	// the same authoritative Manifest/Account data checked above.
 	assert.True(t, result.Metrics.StartingCapital().Equal(result.Manifest.StartingCapital()))
 	assert.True(t, result.Metrics.FinalEquity().Equal(result.Account.Equity()))
+	assert.True(t, result.Metrics.AccountFees().Equal(result.Account.Fees()))
 	assert.Equal(t, len(result.Trades), result.Metrics.TradeCount())
 	require.NotEmpty(t, result.EquityCurve, "at least the run's own starting observation")
 	assert.True(t, result.EquityCurve[0].Equity.Equal(startBalance.Equity()))
@@ -275,6 +277,14 @@ type eventsErrorAccount struct {
 
 func (a eventsErrorAccount) Events(ctx context.Context, cursor broker.EventCursor) (broker.EventReader, error) {
 	return nil, errIntentional
+}
+
+// ObserveMark delegates to the wrapped Account, which must itself
+// implement backtest.MarketObserver — RunnerParams.validate requires
+// it, so eventsErrorAccount (used only to inject a failure elsewhere)
+// must not break that contract merely by embedding broker.Account.
+func (a eventsErrorAccount) ObserveMark(ctx context.Context, instrumentID instrument.ID, close num.Price, at time.Time) error {
+	return a.Account.(backtest.MarketObserver).ObserveMark(ctx, instrumentID, close, at)
 }
 
 func TestRunner_PropagatesTradeDerivationErrors(t *testing.T) {
