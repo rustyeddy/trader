@@ -146,6 +146,7 @@ the original decided, use full supersession instead.
 | 036 | Backtest journal contract and JSONL format (in adr-036-backtest-journal.org) | Accepted |
 | 037 | Backtest result and performance metrics model (in adr-037-backtest-metrics-model.org) | Accepted |
 | 038 | Backtest report renderers (in adr-038-backtest-report-renderers.org) | Accepted |
+| 039 | Backtest application service EnvironmentFactory (in adr-039-backtest-service-environment-factory.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -327,6 +328,22 @@ for, a text renderer that deliberately omits the full trade list and
 equity curve, and a golden-test regeneration procedure adapted to
 =config/arch_test.go='s existing prohibition on =flag=/=os.Getenv= in
 non-=config=/=cmd=/=test= packages.
+
+Note: ADR-039 is likewise maintained in its own file,
+=docs/arch/adr-039-backtest-service-environment-factory.org=, rather
+than inline in this registry.  Its own Status section is
+authoritative.  Issue #221 (M5-13) asks for a transport-neutral
+=service/backtest= application service (ADR-022's general pattern)
+and settles the one genuinely new design question it did not already
+answer: =backtest.Runner= needs a fresh, mutually consistent
+=Clock=/=IDs=/=Account=/=Pipeline= bundle per call, so this ADR
+records the resulting =EnvironmentFactory= injection point (keeping
+=service/backtest= free of concrete adapter imports, matching every
+other =service/*= package), a per-run =Journal= instead of a
+=Service=-level singleton, an explicit pre-factory cancellation check,
+=Environment= validation at the service boundary, and a =RunResponse=
+that mirrors =backtest.Result= the same way =service/execution.
+SubmitResponse= already mirrors =pipeline.Result=.
 
 * ADR-001: Modular monolith before service decomposition
 
