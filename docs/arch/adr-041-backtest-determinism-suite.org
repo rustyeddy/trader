@@ -52,6 +52,27 @@ This is a strictly stronger test than the identical-seed alternative:
 it cannot pass merely because both runs coincidentally produced the
 same literal IDs.
 
+** Fully independent Managers, not one shared across both runs
+
+The first cut of this test built one =*marketdata.Manager=, published
+the fixture into it once, and passed that same object to both runs.
+PR #241 review caught this as a real independence gap: sharing one
+Manager instance leaves the door open for any Manager-level cached/
+mutable state, reader bookkeeping, or future stateful behavior to leak
+from run 1 into run 2 — weakening the exact property this suite exists
+to lock down.
+
+=runDeterminismCase= now owns its own =*marketdata.Manager= per call
+(=newSchedulerTestManager='s own =t.TempDir()=/=copyFixtureRaw(t)=
+already give each call a fresh temporary canonical store and its own
+copy of the raw fixture bytes), so the two runs never share any
+run-scoped in-memory object at all. Building each run's own canonical
+store from the same underlying raw fixture, rather than two Managers
+reading one pre-built shared store, is a strictly stronger
+independence property: it additionally proves the canonical-build step
+itself is deterministic across independent =Manager= instances, not
+merely that reading a shared store is.
+
 ** A per-run idNormalizer replaces raw ID/journal-record equality
 
 Journal records legitimately carry run-local, generated identity:
@@ -127,6 +148,18 @@ deliberately introduced mismatch (temporarily corrupting the dataset-
 revision contrapositive test's own input) reproduces exactly the
 named failure message the code documents, not a generic diff.
 
+Within the manifest sub-test itself, =Universe()=/=Dataset()= are
+compared by exact ordered equality — not =assert.ElementsMatch= — per
+a second PR #241 review point: both accessors are documented as
+canonically ordered (=NewManifest='s own sort), so ordering is itself
+part of the deterministic contract, and an unordered comparison would
+not catch a build that silently reordered either slice. Each dataset
+entry's own semantic identity (=Provider=, =Instrument=, =Interval=,
+=Span= start/end, =Basis=, =RawFingerprint=, and finally =Revision()=
+as a rollup) is compared field-by-field with its own named assertion,
+rather than relying on =ConfigDigest= alone to catch a divergence
+somewhere in the dataset with no indication of which field caused it.
+
 ** Dataset/manifest identity participates in reproducibility — two contrapositives, not one
 
 =TestManifest_ConfigDigestChangesWhenDatasetRevisionDiffers= and
@@ -198,6 +231,21 @@ goroutines).
   different seeds, since records legitimately carry run-local opaque
   identity. The per-run =idNormalizer= projection is what makes the
   comparison meaningful without requiring identical seeds.
+- *One shared =*marketdata.Manager= published once, passed to both
+  runs.* Rejected (PR #241 review): leaves any Manager-level cached/
+  mutable state, reader bookkeeping, or future stateful behavior free
+  to leak from one run into the other, weakening the exact
+  independence property this suite exists to prove. Each run now
+  builds its own Manager over its own freshly copied raw fixture and
+  its own temporary canonical store.
+- *=assert.ElementsMatch= for =Universe()=/=Dataset()=, or relying on
+  =ConfigDigest=/=Revision()= alone to catch a dataset divergence.*
+  Rejected (PR #241 review): both accessors are canonically ordered by
+  contract, so an unordered comparison would miss a silently reordered
+  build; and a single rollup digest names no specific field when it
+  changes. Exact ordered equality plus a per-field named comparison
+  (provider, instrument, interval, span, basis, fingerprint) gives a
+  failure that names exactly what diverged.
 - *A zero-rule risk.Engine and an enter-only fixture strategy*
   (matching most pre-existing =backtest= test fixtures). Rejected
   (issue #223 review, points 3-4): would leave the risk-decision and

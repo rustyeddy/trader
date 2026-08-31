@@ -301,8 +301,24 @@ func newDeterminismRunnerParams(t *testing.T, mgr *marketdata.Manager, seed1, se
 // runDeterminismCase runs one independent backtest end to end, seeded
 // from (seed1, seed2), returning its captured journal and result
 // alongside a fresh idNormalizer for it.
-func runDeterminismCase(t *testing.T, mgr *marketdata.Manager, seed1, seed2 uint64) determinismRun {
+// runDeterminismCase owns every run-local construction itself,
+// including its own *marketdata.Manager — deliberately not a Manager
+// shared with any other run (PR #241 review): each call builds a
+// fresh Manager over its own freshly copied raw fixture and its own
+// temporary canonical store (newSchedulerTestManager's own
+// t.TempDir()/copyFixtureRaw(t) already do this per call), so there is
+// no Manager-level cached/mutable state, reader bookkeeping, or any
+// other in-memory object a run could leak into another. Building each
+// run's own canonical store from the same underlying raw fixture bytes
+// is a strictly stronger independence property than two Managers
+// sharing one pre-built canonical store would be: it also proves the
+// canonical-build step itself is deterministic across independent
+// Manager instances, not merely that reading a shared store is.
+func runDeterminismCase(t *testing.T, seed1, seed2 uint64) determinismRun {
 	t.Helper()
+	mgr := newSchedulerTestManager(t)
+	publishBothInstrumentsFixture(t, mgr)
+
 	strat := &enterThenExitStrategy{requirements: bothInstrumentsRequirements(t)}
 	params, rec := newDeterminismRunnerParams(t, mgr, seed1, seed2, strat)
 
@@ -322,11 +338,8 @@ func runDeterminismCase(t *testing.T, mgr *marketdata.Manager, seed1, seed2 uint
 // identities (RunID, AccountID, every generated ID) ever needing to
 // match.
 func TestBacktest_DeterministicAcrossIndependentRuns(t *testing.T) {
-	mgr := newSchedulerTestManager(t)
-	publishBothInstrumentsFixture(t, mgr)
-
-	run1 := runDeterminismCase(t, mgr, 1, 2)
-	run2 := runDeterminismCase(t, mgr, 101, 202)
+	run1 := runDeterminismCase(t, 1, 2)
+	run2 := runDeterminismCase(t, 101, 202)
 
 	t.Run("execution identity differs, configuration identity does not", func(t *testing.T) {
 		assert.False(t, run1.result.Manifest.RunID().Equal(run2.result.Manifest.RunID()),
@@ -334,13 +347,36 @@ func TestBacktest_DeterministicAcrossIndependentRuns(t *testing.T) {
 		assert.Equal(t, run1.result.Manifest.ConfigDigest(), run2.result.Manifest.ConfigDigest(),
 			"identical configuration must produce identical ConfigDigest regardless of execution identity")
 		assert.Equal(t, run1.result.Manifest.StrategyName(), run2.result.Manifest.StrategyName())
-		assert.ElementsMatch(t, run1.result.Manifest.Universe(), run2.result.Manifest.Universe())
-		assert.Equal(t, len(run1.result.Manifest.Dataset()), len(run2.result.Manifest.Dataset()))
-		for i := range run1.result.Manifest.Dataset() {
-			assert.Truef(t, run1.result.Manifest.Dataset()[i].Instrument.Equal(run2.result.Manifest.Dataset()[i].Instrument),
-				"dataset[%d]: instrument mismatch", i)
-			assert.Equalf(t, run1.result.Manifest.Dataset()[i].Revision(), run2.result.Manifest.Dataset()[i].Revision(),
-				"dataset[%d]: revision mismatch", i)
+
+		// Universe() is documented as canonically ordered (NewManifest's
+		// own sort), so exact ordered equality — not ElementsMatch — is
+		// itself part of the deterministic contract this suite protects
+		// (PR #241 review): a build that silently reordered the universe
+		// would still pass an unordered comparison.
+		u1, u2 := run1.result.Manifest.Universe(), run2.result.Manifest.Universe()
+		require.Equalf(t, len(u1), len(u2), "universe length mismatch")
+		for i := range u1 {
+			assert.Truef(t, u1[i].Instrument.Equal(u2[i].Instrument), "universe[%d]: instrument mismatch", i)
+			assert.Equalf(t, u1[i].Interval, u2[i].Interval, "universe[%d]: interval mismatch", i)
+			assert.Equalf(t, u1[i].WarmupBars, u2[i].WarmupBars, "universe[%d]: warmup bars mismatch", i)
+		}
+
+		// Dataset() is likewise canonically ordered; compare every field
+		// that participates in a dataset entry's own semantic identity
+		// by name, rather than relying on ConfigDigest/Revision to catch
+		// a divergence with no indication of which field caused it (PR
+		// #241 review).
+		d1, d2 := run1.result.Manifest.Dataset(), run2.result.Manifest.Dataset()
+		require.Equalf(t, len(d1), len(d2), "dataset length mismatch")
+		for i := range d1 {
+			assert.Equalf(t, d1[i].Provider, d2[i].Provider, "dataset[%d]: provider mismatch", i)
+			assert.Truef(t, d1[i].Instrument.Equal(d2[i].Instrument), "dataset[%d]: instrument mismatch", i)
+			assert.Equalf(t, d1[i].Interval, d2[i].Interval, "dataset[%d]: interval mismatch", i)
+			assert.Truef(t, d1[i].Span.Start().Equal(d2[i].Span.Start()), "dataset[%d]: span start mismatch: got %s want %s", i, d2[i].Span.Start(), d1[i].Span.Start())
+			assert.Truef(t, d1[i].Span.End().Equal(d2[i].Span.End()), "dataset[%d]: span end mismatch: got %s want %s", i, d2[i].Span.End(), d1[i].Span.End())
+			assert.Equalf(t, d1[i].Basis, d2[i].Basis, "dataset[%d]: basis mismatch", i)
+			assert.Equalf(t, d1[i].RawFingerprint, d2[i].RawFingerprint, "dataset[%d]: raw fingerprint mismatch", i)
+			assert.Equalf(t, d1[i].Revision(), d2[i].Revision(), "dataset[%d]: revision mismatch", i)
 		}
 	})
 
