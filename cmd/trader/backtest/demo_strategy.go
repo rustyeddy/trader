@@ -27,6 +27,7 @@ type demoStrategy struct {
 	warmupBars   int
 
 	intents strategy.IntentFactory
+	seen    int
 	entered bool
 }
 
@@ -49,8 +50,24 @@ func (s *demoStrategy) Start(ctx context.Context, env strategy.Environment) erro
 	return nil
 }
 
+// OnBar is called once per closed bar, including every one of
+// Scheduler's own WarmupBars warm-up bars — Scheduler discards
+// whatever intents it returns during warm-up itself; OnBar is never
+// suppressed (issue #240 review: an earlier version of this method
+// set entered=true on its very first callback, spending its one entry
+// on a warm-up bar whose intent Scheduler would discard, so with
+// --warmup-bars > 0 the strategy silently never traded again). The
+// (warmupBars+1)th call — s.seen == s.warmupBars, 0-indexed — is the
+// first one whose intents Scheduler actually honors (allWarm's own
+// "strictly more than WarmupBars closed bars" rule), so that is
+// exactly when this strategy enters. nextBarOpenAfterEntry (run.go)
+// must stay aligned with this same rule.
 func (s *demoStrategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
 	if s.entered {
+		return nil, nil
+	}
+	if s.seen < s.warmupBars {
+		s.seen++
 		return nil, nil
 	}
 	s.entered = true

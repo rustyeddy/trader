@@ -193,6 +193,37 @@ first bar's Close differs from its second bar's Open — specifically so
 distinguish the correct value from the reintroduced bug; the original,
 non-gapped fixture could not.
 
+** =demoStrategy= must not spend its one entry on a warm-up bar
+
+A second review pass (PR #240) found a related bug in =demoStrategy=
+itself, once =--warmup-bars= is actually exercised: Scheduler calls
+=Strategy.OnBar= for *every* bar, including each of a requirement's own
+declared =WarmupBars= warm-up bars — it discards whatever intents
+=OnBar= returns during warm-up itself; it never suppresses the call
+(=scheduler.go='s own "OnBar accumulates normally throughout warm-up —
+but any intents OnBar returns [before warm-up clears] are discarded"
+doc comment). The first =demoStrategy= set its own =entered= flag on
+its very *first* =OnBar= callback — bar index 0 — so with
+=--warmup-bars > 0= that first, discarded intent was the strategy's
+only one; it never traded again, and the run silently produced zero
+trades.
+
+The fix: =demoStrategy= now tracks how many =OnBar= calls it has
+already seen (=seen=) and only builds/emits its one =Enter= intent — and
+only then sets =entered= — on the call where =seen == warmupBars=: the
+=(warmupBars+1)=th call, exactly the one =Scheduler.allWarm='s own
+"strictly more than =WarmupBars= closed bars" rule first honors.
+=nextBarOpenAfterEntry='s own indexing already matched this rule (it
+discards =warmupBars= bars, then the entry bar itself, at index
+=warmupBars=, before reading the fill bar) — only =demoStrategy='s own
+entry-timing was wrong.
+=TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar=
+runs the full CLI with =--warmup-bars 1= against the gapped fixture and
+independently re-reads the expected fill bar via its own
+=*marketdata.Manager= call (not by trusting anything =run.go= itself
+computed), asserting both the fill's timestamp and its exact Open
+price.
+
 ** Boundary enforcement
 
 =cmd/trader/backtest/boundary_test.go= mechanically checks (via

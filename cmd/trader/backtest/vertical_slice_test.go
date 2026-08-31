@@ -2,13 +2,19 @@ package backtest_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/clock"
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
+	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata"
+	"github.com/rustyeddy/trader/num"
 )
 
 // extractRunID pulls report.run.run_id out of a JSON-rendered
@@ -90,6 +96,126 @@ func TestVerticalSlice_RunThenShow(t *testing.T) {
 	// produce byte-for-byte the same encoding run did (issue #240
 	// review).
 	assert.Equal(t, runOutput, showOut.String(), "show must render byte-for-byte the same output run produced, with no recomputation")
+}
+
+// TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar
+// is the PR #240 second-review regression: Scheduler calls Strategy.
+// OnBar during every one of its declared WarmupBars warm-up bars too,
+// discarding whatever intents it returns rather than suppressing the
+// call itself — an earlier version of demoStrategy set its own
+// "entered" flag on its very first OnBar callback, so with
+// --warmup-bars > 0 it spent its one entry on a warm-up bar whose
+// intent Scheduler silently discarded, and the run showed zero trades.
+// This test uses the deliberately gapped February fixture
+// (run_test.go's own newGappedFixtureManager fixture data) with
+// --warmup-bars 1: the strategy's first *honored* OnBar is bar index
+// 1 (2024-02-01T01:00), so its fill must land on bar index 2
+// (2024-02-01T02:00) at that bar's own Open — read independently here
+// via *marketdata.Manager, the same way run_test.go's unit tests
+// establish ground truth, so this assertion cannot pass merely because
+// a wrong bar's price happens to coincide.
+func TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar(t *testing.T) {
+	outputDir := t.TempDir()
+
+	runCmd := cmdbacktest.New()
+	var runOut bytes.Buffer
+	runCmd.SetOut(&runOut)
+	runCmd.SetArgs([]string{
+		"run",
+		"--symbol", "EURUSD",
+		"--interval", "H1",
+		"--from", "2024-02-01T00:00:00Z",
+		"--to", "2024-02-01T03:00:00Z",
+		"--starting-cash", "10000",
+		"--currency", "USD",
+		"--risk-fraction", "0.01",
+		"--adverse-distance", "0.01000",
+		"--warmup-bars", "1",
+		"--data-raw-root", "testdata/raw/oanda",
+		"--output-dir", outputDir,
+		"--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		OpenTrades []struct {
+			OpenedAt time.Time `json:"opened_at"`
+		} `json:"open_trades"`
+		Account struct {
+			OpenPositions []struct {
+				AvgPrice string `json:"avg_price"`
+			} `json:"open_positions"`
+		} `json:"account"`
+	}
+	require.NoError(t, json.Unmarshal(runOut.Bytes(), &doc))
+	require.Len(t, doc.OpenTrades, 1, "the demo strategy must still trade once warm-up has cleared:\n%s", runOut.String())
+	require.Len(t, doc.Account.OpenPositions, 1)
+
+	expectedFillBar := fillBarFor(t, "testdata/raw/oanda", "2024-02-01T02:00:00Z")
+
+	assert.True(t, doc.OpenTrades[0].OpenedAt.Equal(expectedFillBar.Time),
+		"expected the fill to be timestamped at bar index 2 (%s), got %s", expectedFillBar.Time, doc.OpenTrades[0].OpenedAt)
+	assert.Equal(t, expectedFillBar.Open.String(), doc.Account.OpenPositions[0].AvgPrice,
+		"expected the fill price to be bar index 2's own Open (%s)", expectedFillBar.Open)
+}
+
+// fillBarFor reads back the canonical H1 bar at exactly barTime from
+// rawRoot's own EUR/USD fixture, independent of anything run.go
+// itself computes, so tests asserting against it cannot pass merely by
+// agreeing with a shared bug.
+func fillBarFor(t *testing.T, rawRoot, barTime string) marketdata.Bar {
+	t.Helper()
+
+	eurusd, err := instrument.NewCurrencyPair(num.MustParseCurrency("EUR"), num.MustParseCurrency("USD"))
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.00001"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: eurusd,
+		Provider:   "oanda",
+		Symbol:     "EURUSD",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+
+	resolver := instrument.NewMemoryResolver()
+	require.NoError(t, resolver.Register(listing))
+
+	manager, err := marketdata.New(marketdata.Config{
+		Clock:        clock.NewSimulated(time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC)),
+		StoreRoot:    t.TempDir(),
+		RawRoot:      rawRoot,
+		Resolver:     resolver,
+		ProviderName: "oanda",
+	})
+	require.NoError(t, err)
+
+	target, err := time.Parse(time.RFC3339, barTime)
+	require.NoError(t, err)
+	span, err := marketdata.NewTimeRange(target, target.Add(time.Hour))
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	if len(plan.Actions) > 0 {
+		_, err = manager.Build(ctx, plan)
+		require.NoError(t, err)
+	}
+
+	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: listing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	bar, err := reader.Next(ctx)
+	require.NoError(t, err)
+	return bar
 }
 
 // TestVerticalSlice_ShowRejectsUnknownRunID proves show fails clearly
