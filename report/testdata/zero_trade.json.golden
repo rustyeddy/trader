@@ -1,0 +1,107 @@
+{
+  "run": {
+    "run_id": "run_01HK153X003DMSTAVHVKTAA8HF",
+    "strategy_name": "ema-cross",
+    "strategy_version": "1.0.0",
+    "span_start": "2024-01-01T00:00:00Z",
+    "span_end": "2024-01-03T00:00:00Z",
+    "trader_version": "test-v0",
+    "config_digest": "sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78"
+  },
+  "performance": {
+    "starting_capital": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "final_equity": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "net_return": "0",
+    "max_drawdown": "0"
+  },
+  "trade_stats": {
+    "trade_count": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": null,
+    "average_win": null,
+    "average_loss": null,
+    "gross_pnl": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "closed_trade_costs": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "account_fees": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "net_pnl": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "expectancy": null,
+    "profit_factor": null
+  },
+  "per_instrument": [],
+  "closed_trades": [],
+  "open_trades": [],
+  "account": {
+    "account_id": "acc_01HK153X003DMSTAVHVKTAA8HG",
+    "broker": "OANDA",
+    "currency": "USD",
+    "as_of": "2024-01-01T00:00:00Z",
+    "equity": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "cash_balances": [
+      {
+        "amount": "10000",
+        "currency": "USD"
+      }
+    ],
+    "buying_power": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "margin_used": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "margin_available": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "realized_pnl": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "unrealized_pnl": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "fees": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "financing": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "open_positions": [],
+    "open_order_count": 0
+  },
+  "equity_curve": [
+    {
+      "timestamp": "2024-01-01T00:00:00Z",
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      }
+    }
+  ]
+}

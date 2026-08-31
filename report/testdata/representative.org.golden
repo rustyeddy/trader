@@ -1,0 +1,81 @@
+#+TITLE: Backtest Report: ema-cross 1.0.0
+:PROPERTIES:
+:RUN_ID: run_01HK153X003DMSTAVHVKTAA8HG
+:CONFIG_DIGEST: sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5
+:SPAN_START: 2024-01-01T00:00:00Z
+:SPAN_END: 2024-01-03T00:00:00Z
+:TRADER_VERSION: test-v0
+:END:
+
+* Performance Summary
+| Metric | Value |
+|--------+-------|
+| Starting Capital | 10000 USD |
+| Final Equity | 10267 USD |
+| Net Return | 0.0267 |
+| Max Drawdown | 0.00827994 |
+
+* Trade Statistics
+| Metric | Value |
+|--------+-------|
+| Trade Count | 3 |
+| Wins | 2 |
+| Losses | 1 |
+| Win Rate | 0.66666667 |
+| Average Win | 169.5 USD |
+| Average Loss | -84 USD |
+| Gross PnL | 270 USD |
+| Closed Trade Costs | 15 USD |
+| Account Fees | 18 USD |
+| Net PnL | 255 USD |
+| Expectancy | 85 USD |
+| Profit Factor | 4.03571429 |
+
+* Per-Instrument Results
+| Instrument | Provider | Venue | Count | Wins | Losses | Gross PnL | Costs | Net PnL |
+|------------+----------+-------+-------+------+--------+-----------+-------+---------|
+| fx:EUR/USD | OANDA |  | 2 | 1 | 1 | 70 USD | 9 USD | 61 USD |
+| fx:GBP/USD | OANDA |  | 1 | 1 | 0 | 200 USD | 6 USD | 194 USD |
+
+* Completed Trades
+| Instrument | Provider | Venue | Side | Opened At | Closed At | Realized PnL | Costs |
+|------------+----------+-------+------+-----------+-----------+--------------+-------|
+| fx:EUR/USD | OANDA |  | long | 2024-01-01T09:00:00Z | 2024-01-01T10:00:00Z | 150 USD | 5 USD |
+| fx:EUR/USD | OANDA |  | short | 2024-01-01T13:00:00Z | 2024-01-01T14:00:00Z | -80 USD | 4 USD |
+| fx:GBP/USD | OANDA |  | long | 2024-01-02T08:00:00Z | 2024-01-02T09:00:00Z | 200 USD | 6 USD |
+
+* Open Trades
+| Instrument | Provider | Venue | Side | Opened At | Closed At | Realized PnL | Costs |
+|------------+----------+-------+------+-----------+-----------+--------------+-------|
+| fx:GBP/USD | OANDA |  | long | 2024-01-02T12:00:00Z | n/a | 0 USD | 3 USD |
+
+* Final Account State
+| Metric | Value |
+|--------+-------|
+| Account ID | acc_01HK153X003DMSTAVHVKTAA8HF |
+| Broker | OANDA |
+| Currency | USD |
+| As Of | 2024-01-02T12:00:00Z |
+| Equity | 10267 USD |
+| Buying Power | 10067 USD |
+| Margin Used | 200 USD |
+| Margin Available | 10267 USD |
+| Realized PnL | 270 USD |
+| Unrealized PnL | 12 USD |
+| Fees | 18 USD |
+| Financing | 0 USD |
+| Open Order Count | 0 |
+
+** Open Positions
+| Instrument | Provider | Venue | Side | Quantity | Avg Price |
+|------------+----------+-------+------+----------+-----------|
+| fx:GBP/USD | OANDA |  | long | 10000 | 1.265 |
+
+* Equity Curve
+| Timestamp | Equity |
+|-----------+--------|
+| 2024-01-01T00:00:00Z | 10000 USD |
+| 2024-01-01T10:00:00Z | 10145 USD |
+| 2024-01-01T14:00:00Z | 10061 USD |
+| 2024-01-02T09:00:00Z | 10255 USD |
+| 2024-01-02T12:00:00Z | 10267 USD |

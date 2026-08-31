@@ -145,6 +145,7 @@ the original decided, use full supersession instead.
 | 035 | M5 backtesting architecture and package boundaries (in adr-035-m5-backtesting-architecture.org) | Accepted |
 | 036 | Backtest journal contract and JSONL format (in adr-036-backtest-journal.org) | Accepted |
 | 037 | Backtest result and performance metrics model (in adr-037-backtest-metrics-model.org) | Accepted |
+| 038 | Backtest report renderers (in adr-038-backtest-report-renderers.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -311,6 +312,21 @@ separate authoritative =AccountFees= for the run-level total), a uniform
 nil-at-zero-trades optional-value convention for undefined statistics,
 and R-multiple deferred exactly as issue #217 already decided for
 =order.Trade= itself.
+
+Note: ADR-038 is likewise maintained in its own file,
+=docs/arch/adr-038-backtest-report-renderers.org=, rather than inline
+in this registry.  Its own Status section is authoritative.  Issue
+#220 (M5-12) asks for Org, text/table, and JSON renderers over the
+backtest result model ADR-035/ADR-037 already boundary-scoped but did
+not itself design; this ADR records the resulting decision, including
+a new top-level =report= package holding a report-owned
+=BacktestReport= projection (never =json.Marshal(backtest.Result)=
+directly), the architecture document's own =Renderer[T any]=
+interface, an Org renderer covering every section design review asked
+for, a text renderer that deliberately omits the full trade list and
+equity curve, and a golden-test regeneration procedure adapted to
+=config/arch_test.go='s existing prohibition on =flag=/=os.Getenv= in
+non-=config=/=cmd=/=test= packages.
 
 * ADR-001: Modular monolith before service decomposition
 

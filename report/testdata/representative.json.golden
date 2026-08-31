@@ -1,0 +1,252 @@
+{
+  "run": {
+    "run_id": "run_01HK153X003DMSTAVHVKTAA8HG",
+    "strategy_name": "ema-cross",
+    "strategy_version": "1.0.0",
+    "span_start": "2024-01-01T00:00:00Z",
+    "span_end": "2024-01-03T00:00:00Z",
+    "trader_version": "test-v0",
+    "config_digest": "sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5"
+  },
+  "performance": {
+    "starting_capital": {
+      "amount": "10000",
+      "currency": "USD"
+    },
+    "final_equity": {
+      "amount": "10267",
+      "currency": "USD"
+    },
+    "net_return": "0.0267",
+    "max_drawdown": "0.00827994"
+  },
+  "trade_stats": {
+    "trade_count": 3,
+    "wins": 2,
+    "losses": 1,
+    "win_rate": "0.66666667",
+    "average_win": {
+      "amount": "169.5",
+      "currency": "USD"
+    },
+    "average_loss": {
+      "amount": "-84",
+      "currency": "USD"
+    },
+    "gross_pnl": {
+      "amount": "270",
+      "currency": "USD"
+    },
+    "closed_trade_costs": {
+      "amount": "15",
+      "currency": "USD"
+    },
+    "account_fees": {
+      "amount": "18",
+      "currency": "USD"
+    },
+    "net_pnl": {
+      "amount": "255",
+      "currency": "USD"
+    },
+    "expectancy": {
+      "amount": "85",
+      "currency": "USD"
+    },
+    "profit_factor": "4.03571429"
+  },
+  "per_instrument": [
+    {
+      "instrument": "fx:EUR/USD",
+      "provider": "OANDA",
+      "count": 2,
+      "wins": 1,
+      "losses": 1,
+      "gross_pnl": {
+        "amount": "70",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "9",
+        "currency": "USD"
+      },
+      "net_pnl": {
+        "amount": "61",
+        "currency": "USD"
+      }
+    },
+    {
+      "instrument": "fx:GBP/USD",
+      "provider": "OANDA",
+      "count": 1,
+      "wins": 1,
+      "losses": 0,
+      "gross_pnl": {
+        "amount": "200",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "6",
+        "currency": "USD"
+      },
+      "net_pnl": {
+        "amount": "194",
+        "currency": "USD"
+      }
+    }
+  ],
+  "closed_trades": [
+    {
+      "instrument": "fx:EUR/USD",
+      "provider": "OANDA",
+      "side": "long",
+      "opened_at": "2024-01-01T09:00:00Z",
+      "closed_at": "2024-01-01T10:00:00Z",
+      "realized_pnl": {
+        "amount": "150",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "5",
+        "currency": "USD"
+      }
+    },
+    {
+      "instrument": "fx:EUR/USD",
+      "provider": "OANDA",
+      "side": "short",
+      "opened_at": "2024-01-01T13:00:00Z",
+      "closed_at": "2024-01-01T14:00:00Z",
+      "realized_pnl": {
+        "amount": "-80",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "4",
+        "currency": "USD"
+      }
+    },
+    {
+      "instrument": "fx:GBP/USD",
+      "provider": "OANDA",
+      "side": "long",
+      "opened_at": "2024-01-02T08:00:00Z",
+      "closed_at": "2024-01-02T09:00:00Z",
+      "realized_pnl": {
+        "amount": "200",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "6",
+        "currency": "USD"
+      }
+    }
+  ],
+  "open_trades": [
+    {
+      "instrument": "fx:GBP/USD",
+      "provider": "OANDA",
+      "side": "long",
+      "opened_at": "2024-01-02T12:00:00Z",
+      "realized_pnl": {
+        "amount": "0",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "3",
+        "currency": "USD"
+      }
+    }
+  ],
+  "account": {
+    "account_id": "acc_01HK153X003DMSTAVHVKTAA8HF",
+    "broker": "OANDA",
+    "currency": "USD",
+    "as_of": "2024-01-02T12:00:00Z",
+    "equity": {
+      "amount": "10267",
+      "currency": "USD"
+    },
+    "cash_balances": [
+      {
+        "amount": "10267",
+        "currency": "USD"
+      }
+    ],
+    "buying_power": {
+      "amount": "10067",
+      "currency": "USD"
+    },
+    "margin_used": {
+      "amount": "200",
+      "currency": "USD"
+    },
+    "margin_available": {
+      "amount": "10267",
+      "currency": "USD"
+    },
+    "realized_pnl": {
+      "amount": "270",
+      "currency": "USD"
+    },
+    "unrealized_pnl": {
+      "amount": "12",
+      "currency": "USD"
+    },
+    "fees": {
+      "amount": "18",
+      "currency": "USD"
+    },
+    "financing": {
+      "amount": "0",
+      "currency": "USD"
+    },
+    "open_positions": [
+      {
+        "instrument": "fx:GBP/USD",
+        "provider": "OANDA",
+        "side": "long",
+        "quantity": "10000",
+        "avg_price": "1.265"
+      }
+    ],
+    "open_order_count": 0
+  },
+  "equity_curve": [
+    {
+      "timestamp": "2024-01-01T00:00:00Z",
+      "equity": {
+        "amount": "10000",
+        "currency": "USD"
+      }
+    },
+    {
+      "timestamp": "2024-01-01T10:00:00Z",
+      "equity": {
+        "amount": "10145",
+        "currency": "USD"
+      }
+    },
+    {
+      "timestamp": "2024-01-01T14:00:00Z",
+      "equity": {
+        "amount": "10061",
+        "currency": "USD"
+      }
+    },
+    {
+      "timestamp": "2024-01-02T09:00:00Z",
+      "equity": {
+        "amount": "10255",
+        "currency": "USD"
+      }
+    },
+    {
+      "timestamp": "2024-01-02T12:00:00Z",
+      "equity": {
+        "amount": "10267",
+        "currency": "USD"
+      }
+    }
+  ]
+}

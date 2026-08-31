@@ -1,0 +1,227 @@
+#+TITLE: Backtest Report Renderers ADR-038
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #220 (M5-12) asks for Org, text/table, and JSON
+renderers over the backtest result model ADR-035/ADR-037 already
+boundary-scoped ("`report` is rendering-only... `report` never
+computes a metric") but did not itself design. This ADR records the
+concrete package, model, and renderer decisions #220's design review
+settled.
+
+* Context
+
+#219/ADR-037 produced a transport-neutral `backtest.Result`/
+`backtest.Metrics` model. #220's own scope is to render that model as
+Org (first-class, per the architecture document), a compact
+terminal-friendly text/table form, and JSON — "without coupling
+presentation to backtest computation."
+
+Design review (issue #220 comment) raised ten points before
+implementation began, the architecturally significant ones being:
+
+- Project `backtest.Result` into a report-owned view model once,
+  rather than have three renderers each re-derive nil-metric handling
+  and iteration order independently.
+- JSON must be a report-owned export shape with its own tags, never
+  `json.Marshal(backtest.Result)` or `backtest.Metrics` directly — a
+  future backtest-internal rename must not silently change report's
+  wire contract.
+- Org should be a complete, auditable research artifact (run/manifest
+  summary, performance, trade statistics, per-instrument results,
+  completed trades, open trades, final account state, equity curve),
+  not merely the text renderer with Org punctuation.
+- Text/table should omit the full trade list and equity curve
+  (thousands of rows is plausible) and stay dependency-light; Org and
+  JSON keep the full series.
+- Formatting must be explicitly deterministic: canonical UTC
+  timestamps, no map iteration, `num` types' own string/JSON
+  representation rather than `%v`, and an explicit undefined-value
+  convention (`n/a` for human formats, JSON `null` for a nil metric
+  pointer).
+- `Render(io.Writer, Model)` only — no file-writing, output selection,
+  or CLI wiring inside `report`.
+- Golden coverage should include wins/losses, an undefined optional
+  metric, multiple instruments, an open trade whose entry cost makes
+  `AccountFees != ClosedTradeCosts`, and genuine mark-to-market
+  drawdown — not just a happy-path snapshot.
+
+A second, unplanned constraint surfaced during implementation:
+`config/arch_test.go`'s `TestDomainPackagesDoNotReadEnvOrFlags` forbids
+any package outside `config`/`cmd`/`test` from importing `"flag"` or
+calling `os.Getenv`/`LookupEnv`/`Environ` — including in `_test.go`
+files, which that check does not exempt. The idiomatic Go golden-test
+`-update` flag pattern is therefore unavailable to `report`'s own
+tests.
+
+* Decision
+
+** Package location and dependency direction
+
+`report` is a new top-level package (`report/`, not `backtest/report/`)
+per `package-boundaries.org`'s placement of `journal`/`report` at the
+domain tier alongside `backtest`, reusable by a future `live` session.
+`report` imports `backtest` (for `Result`/`Metrics`/`Manifest`
+accessors), plus `account`, `order`, and `num`; `backtest` gains no new
+imports. `report/boundary_test.go` mechanically enforces this,
+mirroring `backtest/boundary_test.go`: `report` must never import
+`adapters`, `service`, `cmd`, `pipeline`, `broker`, `marketdata`,
+`strategy`, `risk`, `execution`, or `journal`.
+
+** `Renderer[T any]` — the architecture document's own sketch, unchanged
+
+#+BEGIN_SRC go
+type Renderer[T any] interface {
+    Render(w io.Writer, report T) error
+}
+#+END_SRC
+
+No file naming, output selection, or opening/closing of `w` happens
+inside a `Renderer` — that is a caller's concern (review point 7),
+which also makes every renderer trivially golden-testable against an
+`io.Writer`.
+
+** `report.BacktestReport` — a projected, report-owned view model
+
+`NewBacktestReport(result backtest.Result) BacktestReport` builds the
+model once, by copying existing accessor values and normalizing
+presentation-only concerns — never by computing a new figure:
+
+- Every timestamp is converted to UTC (`time.Time.UTC()`) — a
+  re-expression of the same instant, not a computed value — satisfying
+  review point 6's canonical-timestamp requirement uniformly across
+  Org, text, and JSON.
+- Every `instrument.ID` is carried as its `.String()` form, matching
+  the wire-struct convention `marketdata.Manifest`'s own JSON output
+  already uses (`instrument.ID` has no `MarshalJSON` of its own).
+- `num.Money`/`num.Rate`/`*num.Money`/`*num.Rate` fields are kept as
+  native `num` types, not pre-formatted strings: JSON gets `num`'s own
+  deterministic `MarshalJSON`, and Org/text call `.String()`
+  explicitly through small `format.go` helpers
+  (`formatMoney`/`formatRate`/`formatOptionalMoney`/`formatOptionalRate`),
+  never `%v`.
+- A nil `*num.Money`/`*num.Rate` field (backtest.Metrics' own
+  nil-at-undefined convention) marshals as JSON `null` automatically
+  (Go's `encoding/json` never calls a nil pointer's `MarshalJSON`) and
+  renders as the literal string `"n/a"` in Org/text.
+- No per-trade `NetPnL` field exists on `TradeReport`: `backtest`
+  itself never exposes one, and computing `RealizedPnL - Costs` in
+  `report` would be `report` re-deriving a value rather than
+  projecting one, which review point 1/3 explicitly rules out. Only
+  the aggregate `Metrics.NetPnL()` and each `InstrumentReport.NetPnL`
+  (copied straight from `backtest.InstrumentMetrics`, which already
+  computed it) are shown.
+- `AccountReport` projects `account.Snapshot` field-for-field,
+  including realized/unrealized PnL, fees, financing, and open
+  positions (`Side != order.Flat` only) — the "final account state"
+  section review point 4 asked for. `OpenOrderCount` is a count, not
+  full order detail: a completed backtest run does not normally end
+  with working orders, and full order detail is outside #220's
+  acceptance criteria.
+
+** Three sibling renderers, one model
+
+- `report.JSONRenderer` — `json.NewEncoder(w).SetIndent("", "  ")`
+  encoding `BacktestReport` directly; its own `json:"..."` tags are the
+  wire contract, not `backtest`'s field names.
+- `report.OrgRenderer` — first-class per the architecture document.
+  Emits `#+TITLE`/`:PROPERTIES:` run identity, then one `*` section per
+  review point 4's list (Performance Summary, Trade Statistics,
+  Per-Instrument Results, Completed Trades, Open Trades, Final Account
+  State with a nested Open Positions table, Equity Curve), each as an
+  Org pipe table. Every list renders `(none)`/`(no closed trades)`
+  rather than an empty table when empty.
+- `report.TextRenderer` — a compact terminal summary (run identity,
+  Performance, Trade Statistics, Per-Instrument Results, Final Account
+  State) using `text/tabwriter` for column alignment (introduced here;
+  not used elsewhere in the repo, but standard library and a better
+  fit for a headered table than the existing `key=value` cmd/trader
+  convention). It deliberately omits the closed/open trade lists and
+  full equity curve, ending with an explicit one-line note pointing to
+  JSON/Org for the complete series (review point 8).
+
+Both `OrgRenderer` and `TextRenderer` use the same sticky-error
+`errWriter` idiom `cmd/trader/execution/format_table.go` already
+established (first write error remembered, later writes no-op),
+duplicated rather than shared per that package's own "each formatter
+family is deliberately independent" note (issue #201).
+
+** Golden tests without a `-update` flag
+
+`config/arch_test.go` blocks `"flag"` and `os.Getenv`/`LookupEnv`/
+`Environ` outside `config`/`cmd`/`test`, with no `_test.go` exemption,
+so `report`'s golden tests cannot use the conventional Go `-update`
+flag pattern. `report/golden_test.go`'s `assertGolden` reads and
+compares `testdata/*.golden` unconditionally; its doc comment
+describes the manual regeneration procedure (temporarily swap the
+`os.ReadFile` for `os.WriteFile`, run once, revert) instead. Golden
+fixtures live in `report/fixtures_test.go`, covering the representative
+scenario review point 9 asked for (two instruments, two wins, one
+loss, an open trade whose entry cost makes `AccountFees` (18 USD)
+differ from `ClosedTradeCosts` (15 USD), and a five-point equity curve
+with a genuine intra-run drawdown) and a zero-trade scenario (every
+optional metric nil, empty per-instrument/trade/position lists).
+
+Each fixture-building function constructs its own local
+`id.NewGenerator(...)` rather than sharing one package-level generator:
+a shared generator's counter advances differently depending on test
+execution order and `-count`, which would make golden output (RunID,
+AccountID, and FillID are all embedded in it) nondeterministic across
+otherwise-identical runs — caught during implementation when `go test
+-count=5` produced a different RunID on the third repetition than the
+golden file recorded.
+
+* Consequences
+
+- A future backtest-domain rename is isolated from `report`'s wire
+  format: only `NewBacktestReport`'s conversion functions need to
+  change, not three renderers.
+- Golden tests prove determinism only through manual regeneration
+  discipline (no `-update` convenience) — a direct, load-bearing
+  consequence of `config/arch_test.go`'s existing repo-wide
+  domain-purity rule, not a `report`-specific choice.
+- `text/tabwriter` is now used somewhere in the repo for the first
+  time; any future terminal-table renderer can reuse the same idiom
+  rather than reinventing manual column padding.
+- No CLI command wires these renderers to `cmd/trader` yet (review
+  point 10: resisted for this issue) — that remains a later,
+  additive change once a concrete transport need exists.
+- `report` has no service layer of its own; a caller obtains a
+  `backtest.Result`, calls `report.NewBacktestReport`, and picks a
+  renderer directly — matching review point 10's "resist
+  `service/backtest.RenderOrg()`-style methods."
+
+* Alternatives Considered
+
+- *Renderers consuming `backtest.Result`/`backtest.Metrics` directly,
+  with no intermediate model.* Rejected per review point 1: three
+  renderers would each have to independently get nil-metric handling,
+  ordering, and timestamp normalization right, with no single place to
+  verify it once.
+- *`json.Marshal(backtest.Result)` or `json.Marshal(backtest.Metrics)`
+  directly.* Rejected per review point 3 and ADR-037's own precedent
+  (deliberately keeping JSON/wire methods off `Metrics`): a
+  backtest-internal field rename would silently become a breaking wire
+  change.
+- *Full trade list and equity curve in the text/table renderer too.*
+  Rejected per review point 8: a run can produce thousands of trades
+  or equity points, which defeats a terminal glance-review renderer;
+  Org and JSON already carry the complete series.
+- *A generic templating abstraction (e.g. `text/template`-driven
+  renderers) instead of three explicit `Renderer` implementations.*
+  Rejected per review point 2: with exactly three known formats and no
+  evidence of a fourth, explicit renderers are simpler to reason about
+  and golden-test than a templating layer would be.
+- *An `-update` flag or `UPDATE_GOLDEN` environment variable for
+  `report`'s golden tests*, matching the idiomatic Go pattern. Rejected
+  because `config/arch_test.go`'s `TestDomainPackagesDoNotReadEnvOrFlags`
+  forbids both outside `config`/`cmd`/`test`, with no `_test.go`
+  exemption; a manual regeneration procedure was adopted instead rather
+  than special-casing `report` in that architecture test.
+- *A shared package-level `id.Generator` across all of `report`'s test
+  fixtures.* Rejected after `go test -count=5` demonstrated it produces
+  a different RunID/AccountID/FillID sequence depending on prior test
+  execution within the same process — exactly the golden-test
+  nondeterminism review point 6 warned against. Each fixture-building
+  function now constructs its own generator instance.

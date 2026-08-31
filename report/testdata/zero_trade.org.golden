@@ -1,0 +1,66 @@
+#+TITLE: Backtest Report: ema-cross 1.0.0
+:PROPERTIES:
+:RUN_ID: run_01HK153X003DMSTAVHVKTAA8HF
+:CONFIG_DIGEST: sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78
+:SPAN_START: 2024-01-01T00:00:00Z
+:SPAN_END: 2024-01-03T00:00:00Z
+:TRADER_VERSION: test-v0
+:END:
+
+* Performance Summary
+| Metric | Value |
+|--------+-------|
+| Starting Capital | 10000 USD |
+| Final Equity | 10000 USD |
+| Net Return | 0 |
+| Max Drawdown | 0 |
+
+* Trade Statistics
+| Metric | Value |
+|--------+-------|
+| Trade Count | 0 |
+| Wins | 0 |
+| Losses | 0 |
+| Win Rate | n/a |
+| Average Win | n/a |
+| Average Loss | n/a |
+| Gross PnL | 0 USD |
+| Closed Trade Costs | 0 USD |
+| Account Fees | 0 USD |
+| Net PnL | 0 USD |
+| Expectancy | n/a |
+| Profit Factor | n/a |
+
+* Per-Instrument Results
+(no closed trades)
+
+* Completed Trades
+(none)
+
+* Open Trades
+(none)
+
+* Final Account State
+| Metric | Value |
+|--------+-------|
+| Account ID | acc_01HK153X003DMSTAVHVKTAA8HG |
+| Broker | OANDA |
+| Currency | USD |
+| As Of | 2024-01-01T00:00:00Z |
+| Equity | 10000 USD |
+| Buying Power | 10000 USD |
+| Margin Used | 0 USD |
+| Margin Available | 10000 USD |
+| Realized PnL | 0 USD |
+| Unrealized PnL | 0 USD |
+| Fees | 0 USD |
+| Financing | 0 USD |
+| Open Order Count | 0 |
+
+** Open Positions
+(none)
+
+* Equity Curve
+| Timestamp | Equity |
+|-----------+--------|
+| 2024-01-01T00:00:00Z | 10000 USD |
