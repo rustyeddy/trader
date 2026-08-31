@@ -1,0 +1,37 @@
+Backtest Report: ema-cross 1.0.0
+Run ID:         run_01HK153X003DMSTAVHVKTAA8HG
+Span:           2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z
+Config Digest:  sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5
+
+Performance
+  Starting Capital:  10000 USD
+  Final Equity:      10267 USD
+  Net Return:        0.0267
+  Max Drawdown:      0.00827994
+
+Trade Statistics
+  Trades:              3
+  Wins / Losses:       2 / 1
+  Win Rate:            0.66666667
+  Average Win:         169.5 USD
+  Average Loss:        -84 USD
+  Gross PnL:           270 USD
+  Closed Trade Costs:  15 USD
+  Account Fees:        18 USD
+  Net PnL:             255 USD
+  Expectancy:          85 USD
+  Profit Factor:       4.03571429
+
+Per-Instrument Results
+  Instrument  Provider  Venue  Count  Wins  Losses  Gross PnL  Costs  Net PnL
+  fx:EUR/USD  OANDA            2      1     1       70 USD     9 USD  61 USD
+  fx:GBP/USD  OANDA            1      1     0       200 USD    6 USD  194 USD
+
+Final Account State
+  Equity:          10267 USD
+  Realized PnL:    270 USD
+  Unrealized PnL:  12 USD
+  Open Positions:  1
+  Open Orders:     0
+
+(full trade list and equity curve omitted — see JSON or Org export)

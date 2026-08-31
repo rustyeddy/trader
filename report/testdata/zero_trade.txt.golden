@@ -1,0 +1,35 @@
+Backtest Report: ema-cross 1.0.0
+Run ID:         run_01HK153X003DMSTAVHVKTAA8HF
+Span:           2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z
+Config Digest:  sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78
+
+Performance
+  Starting Capital:  10000 USD
+  Final Equity:      10000 USD
+  Net Return:        0
+  Max Drawdown:      0
+
+Trade Statistics
+  Trades:              0
+  Wins / Losses:       0 / 0
+  Win Rate:            n/a
+  Average Win:         n/a
+  Average Loss:        n/a
+  Gross PnL:           0 USD
+  Closed Trade Costs:  0 USD
+  Account Fees:        0 USD
+  Net PnL:             0 USD
+  Expectancy:          n/a
+  Profit Factor:       n/a
+
+Per-Instrument Results
+  (no closed trades)
+
+Final Account State
+  Equity:          10000 USD
+  Realized PnL:    0 USD
+  Unrealized PnL:  0 USD
+  Open Positions:  0
+  Open Orders:     0
+
+(full trade list and equity curve omitted — see JSON or Org export)
