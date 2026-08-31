@@ -18,21 +18,28 @@ import (
 )
 
 // simPriceSource is the simbroker.FillPriceSource "trader backtest
-// run" uses: demoStrategy places its one market order on the
-// requested span's own first bar, so the fill price is fixed at
-// construction time to that same first bar's close (run.go reads it
-// via Manager.Bars before calling Service.Run) — the identical
-// reference-price convention backtest's own test fixtures use
-// (a fixed price, not a live per-bar feed), since backtest.Runner
-// drives the full replay internally and exposes no per-bar hook a
-// composition root could otherwise update a price source from.
+// run" uses. demoStrategy emits its one Enter intent on the
+// requirement's own first eligible bar, and Scheduler's next-bar-open
+// fill-eligibility rule (issue #214) means that intent is not
+// submitted until the *following* bar arrives, filling at that bar's
+// own Open — never the entry bar's Close (PR #240 review: an earlier
+// version of this file fixed the price to the entry bar's Close,
+// silently reintroducing the exact causal pricing mismatch #214 was
+// designed to remove). run.go computes that one, analytically known
+// fill price before calling Service.Run (see nextBarOpenAfterEntry)
+// and configures it here as a fixed value — not a live per-bar feed,
+// since backtest.Runner drives the full replay internally and exposes
+// no per-bar hook a composition root could otherwise update a price
+// source from, and demoStrategy's own single, deterministic entry
+// means exactly one fill ever needs a price, so a single precomputed
+// value is both sufficient and correct.
 type simPriceSource struct {
 	symbol string
 	price  num.Price
 }
 
 func (s *simPriceSource) Info() simbroker.ModelInfo {
-	return simbroker.ModelInfo{Name: "cli-first-bar-close", Version: "v0"}
+	return simbroker.ModelInfo{Name: "cli-demo-next-bar-open", Version: "v1"}
 }
 
 func (s *simPriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
@@ -96,7 +103,18 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		return svcbacktest.Environment{}, err
 	}
 
-	fill, err := backtest.NewComponentInfo("bar-close", "v1", nil)
+	// FillModel describes f.prices itself — the actual configured fill-
+	// price authority — rather than a hardcoded literal, so the
+	// resulting Manifest can never claim a fill model other than the
+	// one that actually ran (PR #240 review, matching #215/#216's own
+	// "descriptors travel with the actual configured environment"
+	// principle). SlippageModel/CommissionModel are both "none": this
+	// environment's simbroker.Deps sets neither Slippage nor
+	// Commission, and simbroker.Deps' own doc comment is explicit that
+	// leaving either nil means exactly that — no slippage, no
+	// commission — not a "fixed" fee model this CLI never configured.
+	priceInfo := f.prices.Info()
+	fill, err := backtest.NewComponentInfo(priceInfo.Name, priceInfo.Version, nil)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
@@ -104,7 +122,7 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
-	commission, err := backtest.NewComponentInfo("fixed", "v1", nil)
+	commission, err := backtest.NewComponentInfo("none", "", nil)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}

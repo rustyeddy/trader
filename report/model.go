@@ -184,7 +184,8 @@ func BacktestInputFromResult(result backtest.Result) BacktestInput {
 	}
 }
 
-// NewBacktestReport projects in into a BacktestReport. It performs no
+// NewBacktestReport projects the given BacktestInput into a
+// BacktestReport. It performs no
 // computation: every field is either copied directly from an existing
 // accessor or converted to its canonical string/UTC form.
 func NewBacktestReport(in BacktestInput) BacktestReport {

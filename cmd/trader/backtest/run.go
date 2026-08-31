@@ -85,10 +85,10 @@ func newRunCmd() *cobra.Command {
 
 // runBacktest is newRunCmd's own RunE, split out so its own control
 // flow is easy to read top to bottom: parse flags -> resolve
-// instrument/data -> publish canonical data if needed -> read the
-// first bar's close as the demo strategy's fixed fill price -> build
-// the concrete EnvironmentFactory -> call service/backtest.Run ->
-// project into a report.BacktestReport once -> persist that same
+// instrument/data -> publish canonical data if needed -> compute the
+// demo strategy's one, analytically known next-bar-open fill price ->
+// build the concrete EnvironmentFactory -> call service/backtest.Run
+// -> project into a report.BacktestReport once -> persist that same
 // projection -> render it. No backtest orchestration happens here:
 // service/backtest.Service.Run is the only thing that drives a replay.
 func runBacktest(cmd *cobra.Command, flags runFlags) error {
@@ -134,6 +134,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		if err != nil {
 			return fmt.Errorf("creating temporary data store: %w", err)
 		}
+		defer func() { _ = os.RemoveAll(dir) }()
 		storeRoot = dir
 	}
 
@@ -177,14 +178,14 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		}
 	}
 
-	firstClose, err := firstBarClose(ctx, manager, instrumentID, interval, span)
+	fillPrice, err := nextBarOpenAfterEntry(ctx, manager, instrumentID, interval, span, flags.warmupBars)
 	if err != nil {
-		return fmt.Errorf("reading first bar to price the demo strategy's fill: %w", err)
+		return fmt.Errorf("computing the demo strategy's next-bar-open fill price: %w", err)
 	}
 
 	factory := environmentFactory{
 		listing: simListing,
-		prices:  &simPriceSource{symbol: simListing.Symbol(), price: firstClose},
+		prices:  &simPriceSource{symbol: simListing.Symbol(), price: fillPrice},
 	}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, clictx.LoggerFromContext(ctx))
@@ -219,19 +220,35 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	return render(cmd.OutOrStdout(), flags.format, rep)
 }
 
-// firstBarClose reads the span's own first bar and returns its Close —
-// the fixed fill price simPriceSource uses, since demoStrategy always
-// enters on that same first bar.
-func firstBarClose(ctx context.Context, manager *marketdata.Manager, instrumentID instrument.ID, interval marketdata.Interval, span marketdata.TimeRange) (num.Price, error) {
+// nextBarOpenAfterEntry returns the Open of the bar immediately
+// following demoStrategy's own entry bar — the exact price Scheduler's
+// next-bar-open fill-eligibility rule (issue #214) actually fills a
+// market order at, never the entry bar's own Close (PR #240 review).
+// demoStrategy receives OnBar starting at bar index warmupBars (the
+// first warmupBars bars are consumed as warm-up and never delivered to
+// OnBar) and enters on that very first delivered bar, so the entry bar
+// is index warmupBars and the fill bar is the one immediately after
+// it, index warmupBars+1 — this function reads and discards exactly
+// that many bars before returning the following bar's Open.
+func nextBarOpenAfterEntry(ctx context.Context, manager *marketdata.Manager, instrumentID instrument.ID, interval marketdata.Interval, span marketdata.TimeRange, warmupBars int) (num.Price, error) {
 	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
 	if err != nil {
 		return num.Price{}, err
 	}
 	defer func() { _ = reader.Close() }()
 
-	bar, err := reader.Next(ctx)
-	if err != nil {
-		return num.Price{}, fmt.Errorf("no bars available in the requested range: %w", err)
+	// Discard the warmupBars warm-up bars plus the entry bar itself
+	// (warmupBars + 1 bars total), then the next Next() call returns
+	// the fill bar.
+	for i := 0; i < warmupBars+1; i++ {
+		if _, err := reader.Next(ctx); err != nil {
+			return num.Price{}, fmt.Errorf("not enough bars in the requested range for the demo strategy to enter (need at least %d before its fill bar): %w", warmupBars+1, err)
+		}
 	}
-	return bar.Close, nil
+
+	fillBar, err := reader.Next(ctx)
+	if err != nil {
+		return num.Price{}, fmt.Errorf("not enough bars in the requested range for the demo strategy's entry to fill on the following bar: %w", err)
+	}
+	return fillBar.Open, nil
 }

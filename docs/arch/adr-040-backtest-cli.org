@@ -148,13 +148,50 @@ own concrete =svcbacktest.EnvironmentFactory= (ADR-039): a fresh
 stack built per invocation, the identical shape
 =cmd/trader/execution/service.go='s own =buildService= already
 establishes for its own use case. =sim.Broker='s own
-=FillPriceSource= is fixed at construction to the requested span's own
-first bar close (read via a plain =*marketdata.Manager.Bars= call
-before =Service.Run=, since =demoStrategy= only ever enters on that
-bar and =backtest.Runner= drives the whole replay internally with no
-per-bar hook a composition root could otherwise update a live price
-source from) — matching the same fixed-price convention backtest's
-own test fixtures already use, not a live per-bar feed.
+=FillPriceSource= is fixed at construction to a single, analytically
+precomputed value: the *fill bar's own Open*, not the entry bar's
+Close (see "Fill price must follow next-bar-open, not the entry bar's
+Close" below) — read via a plain =*marketdata.Manager.Bars= call
+before =Service.Run=, since =demoStrategy= only ever places its one
+order on a known, fixed bar and =backtest.Runner= drives the whole
+replay internally with no per-bar hook a composition root could
+otherwise update a live price source from. =environmentFactory= also
+leaves =simbroker.Deps.Slippage=/=Commission= both nil (no slippage,
+no commission model configured), and derives the resulting
+=Environment.FillModel= from =simPriceSource.Info()= itself rather
+than a hardcoded literal, so the =Manifest= this run produces can
+never claim a fill/slippage/commission model other than the one that
+actually ran.
+
+** Fill price must follow next-bar-open, not the entry bar's Close
+
+PR #240 review found a correctness bug in the first cut of this
+design: =run.go= read the requested span's *first bar's Close* and
+fixed =simPriceSource= to it for the entire run. But Scheduler's own
+next-bar-open fill-eligibility rule (issue #214) queues an intent
+emitted from bar T until requirement T's *next* bar, T+1, arrives, and
+executes it using T+1's own Open — never T's Close. Fixing the price
+to the entry bar's Close silently reintroduced the exact causal
+pricing mismatch #214 was designed to remove. The bug was invisible in
+the original vertical-slice fixture only because that fixture's bars
+happen to form a continuous series where each bar's Close numerically
+equals the next bar's Open — the fixture never actually distinguished
+the two.
+
+The fix: =run.go='s =nextBarOpenAfterEntry= reads and discards exactly
+=warmupBars + 1= bars (the warm-up bars plus the entry bar itself,
+since =demoStrategy= enters on the first bar it is actually delivered
+via =OnBar=, which is index =warmupBars=) and returns the *following*
+bar's Open — the same bar and the same field Scheduler's own
+=resolverInputBuilder= would use as its execution reference. Because
+=demoStrategy= places exactly one, fully deterministic order for the
+whole run, a single precomputed fixed price is sufficient and
+correct; no live per-bar feed is needed. A new committed fixture
+(=testdata/raw/oanda/EURUSD/2024/02=) is deliberately gapped — its
+first bar's Close differs from its second bar's Open — specifically so
+=TestNextBarOpenAfterEntry_UsesFollowingBarOpenNotEntryBarClose= can
+distinguish the correct value from the reintroduced bug; the original,
+non-gapped fixture could not.
 
 ** Boundary enforcement
 
@@ -240,3 +277,28 @@ occurred on the read path.
   write could leave a syntactically valid but truncated/incomplete
   file at the final path, which =show= could then misinterpret as a
   genuinely completed run.
+- *Keep =NewBacktestReport(backtest.Result)= as the primary,
+  back-compatible signature and add a separate
+  =NewBacktestReportFromInput(BacktestInput)= for the new callers.*
+  Considered (PR #240 review, non-blocking): raised as a way to avoid
+  an unnecessary source break on an already-public function. Not
+  adopted: =report= is still =v0= with exactly one real consumer
+  (=cmd/trader/backtest=, added in this same change) and =report='s
+  own tests, so there is no external caller to actually break; making
+  =BacktestInput= the canonical, primary parameter type (with
+  =BacktestInputFromResult= as the one-line adapter for a caller that
+  already holds a =backtest.Result=) was judged clearer going forward
+  than carrying two differently-shaped entry points for the same
+  projection.
+- *Price the demo strategy's one fill from a live, per-bar-updated
+  price source instead of a single precomputed value.* Considered
+  (PR #240 review's own suggested "clean composition-side solution").
+  Not adopted: =backtest.Runner= exposes no per-bar hook a composition
+  root could use to update a price source as the replay advances, and
+  =demoStrategy= places exactly one, fully deterministic order for the
+  entire run — a single, correctly computed fixed price (the fill
+  bar's own Open, per "Fill price must follow next-bar-open" above) is
+  both sufficient and exactly as correct as a live feed would be for
+  this specific, single-order strategy. A live per-bar price source
+  remains available as a future, additive change if a less
+  deterministic demo/reference strategy is ever introduced.

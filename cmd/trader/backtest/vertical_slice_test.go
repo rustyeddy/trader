@@ -83,7 +83,13 @@ func TestVerticalSlice_RunThenShow(t *testing.T) {
 	})
 	require.NoError(t, showCmd.Execute())
 
-	assert.JSONEq(t, runOutput, showOut.String(), "show must render the exact same persisted report run produced, with no recomputation")
+	// A raw string comparison, not assert.JSONEq: JSONEq only checks
+	// semantic equality (whitespace/field-order differences would still
+	// pass), but the point of this assertion is that show performs
+	// literally zero rendering-affecting recomputation — it must
+	// produce byte-for-byte the same encoding run did (issue #240
+	// review).
+	assert.Equal(t, runOutput, showOut.String(), "show must render byte-for-byte the same output run produced, with no recomputation")
 }
 
 // TestVerticalSlice_ShowRejectsUnknownRunID proves show fails clearly
