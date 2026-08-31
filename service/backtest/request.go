@@ -56,5 +56,12 @@ func (r RunRequest) Validate() error {
 	if !r.StartingCapital.IsValid() {
 		return fmt.Errorf("%w: starting capital must be valid", ErrInvalidRequest)
 	}
+	zero, err := num.ParseMoney("0", r.StartingCapital.Currency())
+	if err != nil {
+		return fmt.Errorf("%w: starting capital currency: %v", ErrInvalidRequest, err)
+	}
+	if sign, err := r.StartingCapital.Cmp(zero); err != nil || sign <= 0 {
+		return fmt.Errorf("%w: starting capital must be positive", ErrInvalidRequest)
+	}
 	return nil
 }

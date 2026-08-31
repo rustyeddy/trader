@@ -81,6 +81,9 @@ func (env Environment) validate() error {
 	if env.Account == nil {
 		return fmt.Errorf("%w: account must be set", ErrInvalidEnvironment)
 	}
+	if _, ok := env.Account.(backtest.MarketObserver); !ok {
+		return fmt.Errorf("%w: account must implement backtest.MarketObserver for a mark-to-market equity curve", ErrInvalidEnvironment)
+	}
 	if env.Pipeline == nil {
 		return fmt.Errorf("%w: pipeline must be set", ErrInvalidEnvironment)
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/backtest"
+	"github.com/rustyeddy/trader/broker"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 )
 
@@ -38,6 +39,27 @@ func TestService_Run_RejectsEnvironmentMissingFillModel(t *testing.T) {
 	env := validEnvironment(t)
 	env.FillModel = backtest.ComponentInfo{}
 	assertRunRejectsEnvironment(t, env)
+}
+
+// TestService_Run_RejectsAccountNotImplementingMarketObserver is the
+// issue #239 review regression: backtest.RunnerParams.validate()
+// itself requires Account to implement backtest.MarketObserver for a
+// mark-to-market equity curve, so Environment.validate() must catch
+// the same composition bug at the service boundary
+// (ErrInvalidEnvironment), not let it escape as the less-local
+// backtest.ErrInvalidRunnerParams.
+func TestService_Run_RejectsAccountNotImplementingMarketObserver(t *testing.T) {
+	env := validEnvironment(t)
+	env.Account = nonObservingAccount{Account: env.Account}
+	assertRunRejectsEnvironment(t, env)
+}
+
+// nonObservingAccount wraps a real broker.Account but, by embedding
+// the interface rather than the concrete type, exposes only broker.
+// Account's own method set — backtest.MarketObserver's ObserveMark is
+// not promoted, even though the wrapped sim account implements it.
+type nonObservingAccount struct {
+	broker.Account
 }
 
 // validEnvironment returns a well-formed Environment by delegating to

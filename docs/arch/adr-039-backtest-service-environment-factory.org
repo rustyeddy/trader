@@ -113,8 +113,13 @@ it).
 4. =Environment.validate()= (unexported) — every field
    =backtest.RunnerParams= itself requires (=Clock=, =IDs=, =Account=,
    =Pipeline=, and each =ComponentInfo='s =Name()= non-empty),
-   returning =ErrInvalidEnvironment= for the first problem found. This
-   is a composition-seam failure, reported here rather than left for
+   including =Account='s own =backtest.MarketObserver= capability
+   requirement (PR #239 review: the first cut of this check omitted
+   it, letting that specific composition bug escape as the less-local
+   =backtest.ErrInvalidRunnerParams= instead of =ErrInvalidEnvironment=
+   — fixed before merge), returning =ErrInvalidEnvironment= for the
+   first problem found. This is a composition-seam failure, reported
+   here rather than left for
    =backtest.NewRunner= to surface less locally (issue #221 review,
    point 3).
 5. =backtest.NewRunner(...)= + =Runner.Run(ctx)=.

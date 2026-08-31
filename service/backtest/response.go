@@ -12,9 +12,9 @@ import (
 // (issue #221 review) rather than returning backtest.Result directly,
 // so this service's public response shape does not change merely
 // because backtest.Result's own internal shape does. These are Trader
-// domain values, not a CLI- or JSON-specific DTO shape: report.
-// NewBacktestReport (issue #220) remains the presentation boundary
-// over a RunResponse's fields.
+// domain values, not a CLI- or JSON-specific DTO shape:
+// report.NewBacktestReport (issue #220) remains the presentation
+// boundary over a RunResponse's fields.
 type RunResponse struct {
 	Manifest    backtest.Manifest
 	Account     account.Snapshot

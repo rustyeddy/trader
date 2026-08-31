@@ -40,7 +40,7 @@
 // backtest.Result's meaningful fields (matching
 // service/execution.SubmitResponse's own "mirror the domain result"
 // convention) rather than returning backtest.Result directly, and
-// carries no reporting or serialization concerns — report.
-// NewBacktestReport (issue #220) remains the presentation boundary
-// over whichever Result-shaped value a caller obtains.
+// carries no reporting or serialization concerns —
+// report.NewBacktestReport (issue #220) remains the presentation
+// boundary over whichever Result-shaped value a caller obtains.
 package backtest
