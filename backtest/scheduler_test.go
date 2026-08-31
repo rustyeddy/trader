@@ -668,6 +668,38 @@ func TestScheduler_JournalFailureDuringDrainDoesNotAdvanceWatermarkOrFills(t *te
 	assert.Empty(t, sched.Fills(), "a fill must not be collected unless its journal record succeeded")
 }
 
+// TestScheduler_EquityCurveOnePointPerBatchInChronologicalOrder proves
+// EquityCurve retains exactly one authoritative, mark-to-market
+// observation per batch, in the same chronological order Replay itself
+// yields batches (issue #219, M5-11), and that the final observation
+// matches the account's own final snapshot — the same post-flush
+// snapshot Phase 3 already takes for the strategy's own View, not a
+// second one.
+func TestScheduler_EquityCurveOnePointPerBatchInChronologicalOrder(t *testing.T) {
+	mgr := newSchedulerTestManager(t)
+	replay := newTwoInstrumentReplay(t, mgr)
+	t.Cleanup(func() { _ = replay.Close() })
+
+	h := newSchedulerHarness(t, schedulerSpan(t).Start())
+	strat := mustEnterOnFirstBarStrategy(t)
+	deps := newSchedulerDeps(t, replay, strat, h)
+
+	sched, err := backtest.NewScheduler(deps)
+	require.NoError(t, err)
+	require.NoError(t, sched.Run(context.Background()))
+
+	curve := sched.EquityCurve()
+	require.Len(t, curve, 4, "one point per batch: the fixture's 4 shared hourly timestamps")
+
+	for i := 1; i < len(curve); i++ {
+		assert.True(t, curve[i].Timestamp.After(curve[i-1].Timestamp))
+	}
+
+	finalSnap, err := deps.Account.Snapshot(context.Background())
+	require.NoError(t, err)
+	assert.True(t, curve[len(curve)-1].Equity.Equal(finalSnap.Equity()))
+}
+
 type erroringInputBuilder struct{}
 
 func (erroringInputBuilder) Build(ctx context.Context, intent order.Intent, event strategy.BarEvent, snap account.Snapshot) (pipeline.Input, error) {

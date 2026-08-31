@@ -1,0 +1,174 @@
+#+TITLE: Backtest Result and Performance Metrics Model ADR-037
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #219 (M5-11) asks for the transport-neutral backtest
+result and performance-metrics model ADR-035 already named and
+boundary-scoped ("lives in `backtest` itself, not in `report`...
+`report` never computes a metric") but did not itself work out. This
+ADR records the concrete decisions #219's design review settled,
+following the same pattern ADR-036 used for the journal.
+
+* Context
+
+#219's own scope asked for starting/final equity, net return, max
+drawdown, trade count/win-loss/win-rate/average-win-loss, expectancy,
+profit factor, cost breakdowns, per-instrument breakdowns, and an
+equity curve "as data, not presentation." The architecture document's
+broader "Metrics should include" wishlist (annualized return,
+volatility, Sharpe/Sortino, drawdown duration, exposure/turnover,
+regime breakdown, tail-loss/consecutive-loss stats) is wider than
+#219's own scope; this ADR does not adopt those — a later issue can.
+
+Design review surfaced one substantive disagreement, resolved in favor
+of the reviewer's position: the initial proposal derived a "trade-level"
+equity curve purely from closed trades' own `RealizedPnL`/`Costs`
+(reflecting only realized equity changes at trade-close events,
+systematically hiding intra-trade mark-to-market drawdowns). The
+reviewer required a true mark-to-market curve instead, observed
+authoritatively during the run.
+
+* Decision
+
+** A true mark-to-market equity curve, captured by `Scheduler`, not derived by `Metrics`
+
+`Scheduler.runBatch`'s Phase 3 already takes one authoritative,
+post-flush `account.Snapshot` per batch — solely to build that batch's
+frozen `strategy.View`. That snapshot is now also retained as one
+`EquityPoint{Timestamp, Equity}` per batch, in a new `Scheduler`-owned
+slice, exposed via `Scheduler.EquityCurve()` (mirroring `Fills()`,
+added by #217/#218). This is retention of an existing observation, not
+a second snapshot call, and needed no change to what Phase 3 already
+computes.
+
+`Runner` prepends the run's own starting observation
+(`EquityPoint{Span.Start(), startSnapshot.Equity()}`, using the
+`startSnapshot` `Run` already took for `Manifest.StartingCapital` and
+had previously discarded) so the curve always has a baseline point
+before the first bar.
+
+`Metrics` performs zero snapshotting, event-stream reading, or trade
+derivation of its own: `MetricsParams.EquityCurve` is an authoritative
+input it validates (non-decreasing timestamps, one shared currency)
+and consumes, never reconstructs. This preserves the same authority
+chain #218 already established for the journal: `Scheduler`/`Runner`
+collect observations, `Metrics` only computes from them.
+
+** `Result` gains `EquityCurve` directly, alongside `Metrics`
+
+`backtest.Result` now carries `EquityCurve []EquityPoint` as its own
+top-level field, not only reachable through `Metrics.EquityCurve()` —
+a caller that only wants the raw series does not need to go through
+the metrics model to get it.
+
+** Closed trades only feed `Metrics`; `OpenTrades` do not
+
+`MetricsParams` accepts `Trades` (closed round trips) but not
+`OpenTrades`. Every closed-trade-derived figure — `GrossPnL`,
+`TotalCosts`, `NetPnL`, win/loss counts, expectancy, profit factor, and
+the per-instrument breakdown — is computed from exactly the `Trades`
+population, so the triple `NetPnL = GrossPnL - TotalCosts` is always
+internally consistent and per-instrument sub-totals always reconcile
+against the aggregate. Account-level figures (`FinalEquity`,
+`NetReturn`, `MaxDrawdown`) are independent of this and already reflect
+`OpenTrades`' unrealized contribution through the authoritative
+`EquityCurve`/`FinalEquity` — the model does not force these two views
+to reconcile with each other when open positions remain, since they
+answer different questions (realized trading performance versus
+current account state).
+
+** Optional-value convention for statistics undefined at zero trades
+
+`WinRate`, `Expectancy`, `AverageWin`, `AverageLoss`, and
+`ProfitFactor` are all `*num.Rate`/`*num.Money`, nil exactly when their
+defining ratio has a zero or otherwise absent denominator (zero trades
+for `WinRate`/`Expectancy`; zero wins for `AverageWin`; zero losses for
+`AverageLoss`; zero gross loss — including zero losing trades — for
+`ProfitFactor`). This is a deliberate, uniform convention: `0/0` is
+mathematically undefined, and reporting a bare `0` risks being misread
+as "traded and never won" rather than "never traded." `GrossPnL`,
+`TotalCosts`, and `NetPnL` remain plain `num.Money` (never nil) since
+summing an empty population is legitimately zero, not undefined.
+
+** `MaxDrawdown` on a non-positive peak
+
+A running peak that reaches zero or negative equity (a blown or
+negative account — pathological but representable) cannot be divided
+into a meaningful fraction. That observation's drawdown is defined as
+`1` (100%) rather than dividing by a non-positive number, keeping
+`MaxDrawdown` total over any representable curve rather than erroring.
+
+** `StartingCapital` must be positive
+
+`NewMetrics` rejects a zero or negative `StartingCapital` outright,
+since it is `NetReturn`'s denominator. A real account is never opened
+at zero or negative equity, so this is a defensive, not a reachable,
+v0 case — but it keeps `NetReturn` total once `Metrics` is
+successfully constructed, rather than leaving a divide-by-zero as a
+field-access-time surprise.
+
+** Single currency, validated
+
+Every `EquityCurve` point and every `Trade`'s `RealizedPnL`/`Costs`
+must share `StartingCapital`'s currency, or `NewMetrics` rejects the
+whole construction. Matches ADR-035's v0 single-account/single-currency
+scope; `num` has no automatic FX conversion, so silently mixing
+currencies is not an option this model takes.
+
+** R-multiple/expectancy-in-R: omitted, not a permanently-nil field
+
+Same decision as #217 (`order.Trade` itself): Trader has no genuine
+per-trade initial-risk figure yet, only one fixed run-wide
+`AdverseDistance`. Rather than add a field that could never be
+non-nil today, R-multiple metrics are left out of `Metrics`' shape
+entirely until that real input exists — purely additive later, not a
+half-finished surface now.
+
+** No JSON/wire methods on `Metrics`
+
+Unlike `Manifest` (which needs a canonical `ConfigDigest`), `Metrics`
+has no digest/identity concept requiring canonical JSON. Adding
+`MarshalJSON` would be a step toward a wire format, which is exactly
+the "no CLI/report formatting leaks into the model" #219 asks to
+avoid. A future `report` renderer builds its own view/wire types from
+`Metrics`' accessors, matching the existing `cmd/trader/*/format_json.go`
+convention.
+
+* Consequences
+
+- `Scheduler` gains its third small addition in as many M5-1x issues
+  (#217's `Fills()`, #218's journal draining, now `EquityCurve()`) —
+  all additive, all reusing data Phase 3 already computed for another
+  purpose, none changing `Scheduler.Run`'s own signature.
+- `backtest.Result` grows two fields (`EquityCurve`, `Metrics`);
+  existing callers of `Result{Manifest, Account, Trades, OpenTrades}`
+  struct literals are unaffected (Go zero-values the new fields), but
+  any exhaustive-field construction elsewhere would need updating —
+  none currently exists outside `backtest`'s own tests.
+- A future annualized-return/volatility/Sharpe/Sortino/drawdown-
+  duration/regime-breakdown/tail-statistics issue now has the correct
+  underlying mark-to-market series to build on, rather than needing to
+  redesign the equity curve a second time.
+
+* Alternatives Considered
+
+- *A trade-level equity curve derived from closed trades' own realized
+  P&L, avoiding any `Scheduler` change.* Rejected in review: understates
+  true drawdown by construction (misses intra-trade mark-to-market
+  swings), and "equity curve as data" plus "max drawdown" as explicit
+  scope items make that understatement a real defect, not an acceptable
+  simplification, especially for swing strategies.
+- *Feeding `OpenTrades` into `Metrics` alongside `Trades` for a
+  "complete" cost/PnL picture.* Rejected: mixes a population with a
+  final win/loss outcome (`Trades`) with one that does not have one
+  yet (`OpenTrades`), breaking the `GrossPnL - TotalCosts = NetPnL`
+  identity's internal consistency for no compensating benefit — the
+  authoritative `EquityCurve`/`FinalEquity` already carries open
+  positions' unrealized contribution.
+- *Zero instead of nil for `WinRate`/`Expectancy` at zero trades.*
+  Considered (it was the original proposal) and rejected in review for
+  consistency with the model's own optional-value convention already
+  used for `AverageWin`/`AverageLoss`/`ProfitFactor`, and because `0%`
+  is a legitimate-looking but wrong answer to "what fraction of trades
+  won" when the true answer is "there were no trades."

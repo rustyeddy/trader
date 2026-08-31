@@ -299,6 +299,11 @@ type Scheduler struct {
 	// in delivery order, for Fills' own caller (Runner) to hand to
 	// DeriveTrades once Run completes.
 	fills []order.Fill
+
+	// equityCurve is one authoritative, mark-to-market EquityPoint per
+	// batch — see runBatch's own Phase 3 for exactly when it is
+	// appended (issue #219, M5-11).
+	equityCurve []EquityPoint
 }
 
 // NewScheduler returns a Scheduler over deps. Every field of deps must
@@ -482,6 +487,14 @@ func (s *Scheduler) runBatch(ctx context.Context, batch []strategy.BarEvent) err
 	if err != nil {
 		return fmt.Errorf("backtest: scheduler: snapshotting account before %s: %w", t, err)
 	}
+	// Record one authoritative, mark-to-market equity observation per
+	// batch (issue #219, M5-11): frozen is already the account's own
+	// post-flush snapshot for this exact batch timestamp — the honest
+	// "equity as of right now" this batch's strategy decisions are also
+	// based on — so this is retention of an existing observation, not a
+	// second snapshot call.
+	s.equityCurve = append(s.equityCurve, EquityPoint{Timestamp: t, Equity: frozen.Equity()})
+
 	cutoffs := make(map[requirementKey]int, len(s.warmupRequired))
 	for key := range s.warmupRequired {
 		cutoffs[key] = len(s.history[key])
@@ -725,6 +738,14 @@ func (s *Scheduler) drainAndJournal(ctx context.Context) error {
 // has returned successfully.
 func (s *Scheduler) Fills() []order.Fill {
 	return append([]order.Fill(nil), s.fills...)
+}
+
+// EquityCurve returns one authoritative, mark-to-market EquityPoint
+// per batch observed over the course of Run, in chronological order —
+// the input Runner passes to NewMetrics (issue #219, M5-11). Call only
+// after Run has returned successfully.
+func (s *Scheduler) EquityCurve() []EquityPoint {
+	return append([]EquityPoint(nil), s.equityCurve...)
 }
 
 // BatchBars is an optional capability a strategy.View handed to OnBar

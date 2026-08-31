@@ -126,6 +126,18 @@ func TestRunner_SuccessfulRun(t *testing.T) {
 	zero, err := num.ParseMoney("0", total.Currency())
 	require.NoError(t, err)
 	assert.True(t, total.Equal(zero), "sum of derived trades' RealizedPnL must reconcile with the account's own RealizedPnL")
+
+	// Result.Metrics/EquityCurve (issue #219, M5-11) must reconcile with
+	// the same authoritative Manifest/Account data checked above.
+	assert.True(t, result.Metrics.StartingCapital().Equal(result.Manifest.StartingCapital()))
+	assert.True(t, result.Metrics.FinalEquity().Equal(result.Account.Equity()))
+	assert.Equal(t, len(result.Trades), result.Metrics.TradeCount())
+	require.NotEmpty(t, result.EquityCurve, "at least the run's own starting observation")
+	assert.True(t, result.EquityCurve[0].Equity.Equal(startBalance.Equity()))
+	assert.Equal(t, result.EquityCurve, result.Metrics.EquityCurve())
+	for i := 1; i < len(result.EquityCurve); i++ {
+		assert.False(t, result.EquityCurve[i].Timestamp.Before(result.EquityCurve[i-1].Timestamp))
+	}
 }
 
 func TestRunner_RejectsSecondRunCall(t *testing.T) {

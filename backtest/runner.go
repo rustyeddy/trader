@@ -332,7 +332,31 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		return Result{}, fmt.Errorf("backtest: runner: journaling run completion: %w", err)
 	}
 
-	return Result{Manifest: manifest, Account: finalSnapshot, Trades: trades.Closed, OpenTrades: trades.Open}, nil
+	// The equity curve's own baseline observation (issue #219, M5-11):
+	// Scheduler's own per-batch points start at the first bar, so this
+	// prepends the run's actual starting state, taken from the same
+	// startSnapshot already used for Manifest.StartingCapital — no
+	// second snapshot call.
+	curve := append([]EquityPoint{{Timestamp: p.Span.Start(), Equity: startSnapshot.Equity()}}, sched.EquityCurve()...)
+
+	metrics, err := NewMetrics(MetricsParams{
+		StartingCapital: manifest.StartingCapital(),
+		FinalEquity:     finalSnapshot.Equity(),
+		EquityCurve:     curve,
+		Trades:          trades.Closed,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("backtest: runner: computing metrics: %w", err)
+	}
+
+	return Result{
+		Manifest:    manifest,
+		Account:     finalSnapshot,
+		Trades:      trades.Closed,
+		OpenTrades:  trades.Open,
+		EquityCurve: curve,
+		Metrics:     metrics,
+	}, nil
 }
 
 // journalTrades records every derived trade — closed and still open —
@@ -373,10 +397,17 @@ func journalTrades(ctx context.Context, j journal.Recorder, runID id.RunID, trad
 // holds any position still open when the run ended, kept separate so a
 // caller iterating Trades never has to remember that some entries are
 // not actually completed — see DeriveTrades' own doc comment for the
-// full grouping and cost-attribution rules.
+// full grouping and cost-attribution rules. EquityCurve and Metrics
+// (issue #219, M5-11) are the run's transport-neutral performance
+// record: EquityCurve is the raw authoritative mark-to-market
+// observation series Metrics was computed from, exposed directly so a
+// caller needing only the series does not have to go through Metrics
+// to get it.
 type Result struct {
-	Manifest   Manifest
-	Account    account.Snapshot
-	Trades     []order.Trade
-	OpenTrades []order.Trade
+	Manifest    Manifest
+	Account     account.Snapshot
+	Trades      []order.Trade
+	OpenTrades  []order.Trade
+	EquityCurve []EquityPoint
+	Metrics     Metrics
 }
