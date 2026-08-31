@@ -158,8 +158,9 @@ func NewBacktestReport(result backtest.Result) BacktestReport {
 	m := result.Manifest
 	metrics := result.Metrics
 
-	perInstrument := make([]InstrumentReport, len(metrics.PerInstrument()))
-	for i, im := range metrics.PerInstrument() {
+	perInstrumentMetrics := metrics.PerInstrument()
+	perInstrument := make([]InstrumentReport, len(perInstrumentMetrics))
+	for i, im := range perInstrumentMetrics {
 		perInstrument[i] = toInstrumentReport(im)
 	}
 

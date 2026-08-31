@@ -39,10 +39,10 @@ func TestReportNeverImportsOrchestrationOrAdapters(t *testing.T) {
 	fset := token.NewFileSet()
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || len(name) < 3 || name[len(name)-3:] != ".go" {
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
-		if len(name) > 8 && name[len(name)-8:] == "_test.go" {
+		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 
