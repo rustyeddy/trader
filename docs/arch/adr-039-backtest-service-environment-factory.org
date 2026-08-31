@@ -1,0 +1,215 @@
+#+TITLE: Backtest Application Service EnvironmentFactory ADR-039
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #221 (M5-13) asks for a transport-neutral application
+service exposing the M5 backtest use case (ADR-022's general CLI/
+application-service-layer pattern), and settles the one genuinely new
+design question that pattern did not already answer: how does a
+service that must construct a *fresh* stateful dependency bundle on
+every call stay consistent with every other =service/*= package's
+"never import a concrete adapter" rule.
+
+* Context
+
+=backtest.Runner= is single-use: =RunnerParams= bundles a freshly
+constructed =Clock=, =IDs=, =Account=, and =Pipeline= for exactly one
+run, and =Runner='s own doc comment says building that fresh,
+mutually consistent bundle "belongs to a factory one tier up
+(=service/backtest= or =cmd/trader/backtest=), not to =Runner=
+itself." No non-test code called =NewRunner= before this issue.
+
+Every existing =service/*= package (=service/execution=,
+=service/broker=) takes an already-constructed =broker.Broker=/
+=*pipeline.Pipeline= from its own caller and never imports a concrete
+adapter (=adapters/broker/sim=) itself — but those services reuse
+*one* long-lived broker/pipeline across many calls. A backtest run
+needs a *brand-new* broker, account, and pipeline every single call,
+since simulated state (positions, fills, the simulated clock) must
+never leak between runs, and =pipeline.Pipeline= verifies its own
+injected =broker.Broker.Name()= matches =Account.Broker()= before any
+mutation (ADR-033) — so =Account= and =Pipeline= must always be built
+from the same underlying broker construction, not wired independently.
+
+Design review (issue #221 comment) confirmed the proposed split and
+added three refinements before implementation: check context
+cancellation *before* the factory is ever called (not merely rely on
+=Runner.Run='s own check), make the per-run journal part of the
+factory-returned bundle rather than a =Service=-level singleton, and
+validate the factory's returned bundle at the service boundary rather
+than letting a missing field surface as a less-local
+=backtest.NewRunner= error.
+
+* Decision
+
+** =EnvironmentFactory= — the composition seam for one run's stateful bundle
+
+=service/backtest= defines, but does not implement,
+=EnvironmentFactory=:
+
+#+BEGIN_SRC go
+type EnvironmentRequest struct {
+    StartingCapital num.Money
+    Span            marketdata.TimeRange
+}
+
+type Environment struct {
+    Clock           *clock.Simulated
+    IDs             *id.Generator
+    Account         broker.Account
+    Pipeline        *pipeline.Pipeline
+    RiskRules       []backtest.ComponentInfo
+    FillModel       backtest.ComponentInfo
+    SlippageModel   backtest.ComponentInfo
+    CommissionModel backtest.ComponentInfo
+    Journal         journal.Recorder
+}
+
+type EnvironmentFactory interface {
+    NewEnvironment(ctx context.Context, req EnvironmentRequest) (Environment, error)
+}
+#+END_SRC
+
+A composition root injects an =EnvironmentFactory= implementation into
+=New=; the concrete choice of simulated broker, risk engine, and
+execution planner lives entirely behind it. =Service='s own import
+graph therefore stays identical in shape to every other =service/*=
+package (=backtest=, =broker=, =pipeline=, =clock=, =id=,
+=marketdata=, =instrument=, =strategy=, =num=, =journal= — no
+=adapters=, no =cmd=), mechanically enforced by
+=service/backtest/boundary_test.go=. Where the concrete
+=EnvironmentFactory= implementation itself lives is *not* constrained
+to =cmd/trader/backtest= — a reusable simulator-environment factory
+may live on the adapter/composition side later; =cmd= only needs to
+select/configure it (issue #221 review, point 6).
+
+** Journal is part of Environment, not a Service-level singleton
+
+=Environment.Journal= travels with the rest of the per-run bundle
+rather than being a fixed constructor dependency on =Service=: a real
+journal adapter normally has a run-specific destination and sequence,
+and =Runner= never closes an externally supplied =journal.Recorder=
+(the same "injected dependency, caller owns its lifecycle" convention
+as =Account=/=Pipeline=), so whichever component constructs
+=Environment= owns =Journal='s lifecycle too. =Logger=, by contrast,
+is naturally long-lived and stays a fixed =Service= constructor
+dependency (it scopes every record with the canonical
+=logging.ComponentBacktest= attribute regardless of which run produced
+it).
+
+** Cancellation is checked before the factory runs
+
+=Service.Run= sequences exactly as review requested:
+
+1. =req.Validate()= — service-level required-field check.
+2. =ctx.Err()= — explicit, before =EnvironmentFactory.NewEnvironment=
+   is ever called. A pre-canceled request must not construct or open a
+   broker/account it will never use; if the check lived only inside
+   =backtest.Runner.Run= (which does check =ctx.Err()= before any
+   work), a canceled request would still have already paid the cost of
+   building a fresh simulated broker for nothing.
+3. =EnvironmentFactory.NewEnvironment(ctx, ...)=.
+4. =Environment.validate()= (unexported) — every field
+   =backtest.RunnerParams= itself requires (=Clock=, =IDs=, =Account=,
+   =Pipeline=, and each =ComponentInfo='s =Name()= non-empty),
+   including =Account='s own =backtest.MarketObserver= capability
+   requirement (PR #239 review: the first cut of this check omitted
+   it, letting that specific composition bug escape as the less-local
+   =backtest.ErrInvalidRunnerParams= instead of =ErrInvalidEnvironment=
+   — fixed before merge), returning =ErrInvalidEnvironment= for the
+   first problem found. This is a composition-seam failure, reported
+   here rather than left for
+   =backtest.NewRunner= to surface less locally (issue #221 review,
+   point 3).
+5. =backtest.NewRunner(...)= + =Runner.Run(ctx)=.
+
+=TestService_Run_NeverCallsFactoryOnPreCanceledContext= is the
+regression proving step 2 actually happens before step 3, not merely
+that the final error is =context.Canceled=.
+
+** =RunResponse= mirrors =backtest.Result=, matching =service/execution='s own convention
+
+#+BEGIN_SRC go
+type RunResponse struct {
+    Manifest    backtest.Manifest
+    Account     account.Snapshot
+    Trades      []order.Trade
+    OpenTrades  []order.Trade
+    EquityCurve []backtest.EquityPoint
+    Metrics     backtest.Metrics
+}
+#+END_SRC
+
+=RunResponse= copies =backtest.Result='s meaningful fields rather than
+returning =backtest.Result= directly — the same "mirror the domain
+result" convention =service/execution.SubmitResponse= already
+established for =pipeline.Result= — so this service's own public
+response shape does not change merely because =backtest.Result='s
+internal shape does. =RunResponse= carries no reporting or
+serialization concerns; =report.NewBacktestReport= (issue #220)
+remains the presentation boundary over whichever =Result=-shaped value
+a caller obtains.
+
+** =Strategy= stays a caller-supplied runtime value for M5
+
+=RunRequest.Strategy= is a live =strategy.Strategy= value the caller
+constructs fresh for this one run — not a "strategy name plus
+parameters" descriptor resolved through a registry. Issue #221 review,
+point 5, explicitly deferred a strategy registry/factory to whatever
+later issue actually owns exposing backtests through a
+name-plus-parameters transport (a REST or CLI adapter); inventing one
+now would be speculative.
+
+* Consequences
+
+- =service/backtest= is usable by in-process composition today (a test
+  or a future =cmd/trader/backtest= constructs a concrete
+  =EnvironmentFactory= and calls =Service.Run= directly); no transport
+  adapter exists yet, matching this issue's own scope.
+- Every =service/backtest= test that needs a successful run constructs
+  a real =sim.Broker=/=pipeline.Pipeline= pair through a test-local
+  =EnvironmentFactory= implementation (=simEnvironmentFactory= in
+  =service/backtest='s own =_test.go= files) — exempt from the
+  boundary test the same way every other package's boundary test
+  exempts =_test.go= files, and structurally identical to what a real
+  composition root will eventually do.
+- A future =cmd/trader/backtest= (or an adapter package) implementing
+  =EnvironmentFactory= is the next concrete step toward an actual
+  =trader backtest= CLI command, but is out of this issue's scope.
+- If a genuine second =EnvironmentFactory= implementation (a
+  different simulated-broker configuration, or eventually paper/live
+  wiring reusing the same interface shape) emerges, the interface
+  already accommodates it without a =Service= API change.
+
+* Alternatives Considered
+
+- *=service/backtest= constructs =sim.Broker=/=risk.Engine=/
+  =execution.Planner= directly, as a one-off exception to the "services
+  never import adapters" convention.* Rejected (issue #221 review):
+  the per-run environment is a composition concern, not something the
+  application-service layer should own directly, and an injected
+  factory keeps the boundary consistent with ADR-022 while still
+  satisfying =Runner='s requirement that =Clock=/=IDs=/=Account=/
+  =Pipeline= be fresh and mutually consistent for every call.
+- *A fixed, =Service=-level =journal.Recorder= (matching =Runner='s
+  own single =Journal= field shape) instead of a per-=Environment=
+  one.* Rejected: a real journal adapter is normally run-scoped
+  (destination, sequence), and a single shared recorder risks
+  interleaving concurrent runs or forcing every run into one sink.
+- *Rely on =backtest.Runner.Run='s own =ctx.Err()= check alone,
+  without an explicit pre-factory check in =Service.Run=.* Rejected:
+  =EnvironmentFactory.NewEnvironment= runs before =Runner= exists, so a
+  pre-canceled request would still construct/open a broker/account it
+  will never use unless =Service= checks cancellation first.
+- *Let a missing =Environment= field surface only once
+  =backtest.NewRunner= validates =RunnerParams=.* Rejected: the
+  composition seam (=EnvironmentFactory=) is exactly where such a bug
+  would originate, so failing there with =ErrInvalidEnvironment= is
+  more local and easier to diagnose than a =backtest.
+  ErrInvalidRunnerParams= surfacing one layer further from its cause.
+- *A strategy name/parameter registry so =RunRequest= carries no live
+  =strategy.Strategy= value.* Deferred, not rejected outright: no
+  transport needing that indirection exists yet (issue #221 review,
+  point 5); the application service remains usable by in-process
+  composition without it.
