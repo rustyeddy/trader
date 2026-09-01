@@ -55,9 +55,45 @@ All commands run from the repository root against the reviewed tree.
 | Vet | =go vet ./...= | clean, no output |
 | Full test suite, race detector | =go test ./... -race= | all packages =ok= |
 | Lint | =make lint= (golangci-lint v2.13.0) | =0 issues.= |
-| Determinism suite, repeated | =go test ./backtest/... -run 'TestManifest_ConfigDigest\|TestBacktest_SharedRiskBindsAcrossInstruments' -v -count=5= | all 5 repeats pass, including the pinned EUR/USD winner assertion (ADR-042) |
-| CLI vertical slice, repeated | =go test ./cmd/trader/backtest/... -run 'TestMultiInstrument\|TestVerticalSlice' -v -count=3= | all 3 repeats pass, including order-independent =ConfigDigest= (ADR-042) and post-warm-up entry timing (PR #240) |
 | Import-boundary tests, per package | see table below | every boundary test passes on the current tree |
+
+Two gates use shell alternation and are shown as their own commands
+rather than inside a table cell, since Org tables have no escape for a
+literal =|= within a cell — writing one there earlier (=\|=) silently
+changed the recorded command from "alternation" to "match a literal
+backslash-pipe," which is not what was actually run. Both were re-run
+directly, with the corrected unescaped =|=, to produce the counts
+below:
+
+#+BEGIN_EXAMPLE
+$ go test ./backtest/... -run 'TestManifest_ConfigDigest|TestBacktest_SharedRiskBindsAcrossInstruments' -v -count=5
+5 distinct tests x 5 repeats = 25 "--- PASS" lines, 0 "FAIL", ok
+  TestBacktest_SharedRiskBindsAcrossInstruments
+  TestManifest_ConfigDigestChangesWhenDatasetInstrumentDiffers
+  TestManifest_ConfigDigestChangesWhenDatasetRevisionDiffers
+  TestManifest_ConfigDigestChangesWithConfiguration
+  TestManifest_ConfigDigestIgnoresRunID
+
+$ go test ./cmd/trader/backtest/... -run 'TestMultiInstrument|TestVerticalSlice' -v -count=3
+7 distinct tests x 3 repeats = 21 "--- PASS" lines, 0 "FAIL", ok
+  TestVerticalSlice_MultiInstrumentRun
+  TestVerticalSlice_MultiInstrumentRun_ConfigDigestIsOrderIndependent
+  TestVerticalSlice_MultiInstrumentRun_RejectsCaseInsensitiveDuplicate
+  TestVerticalSlice_MultiInstrumentRun_RejectsDuplicateSymbol
+  TestVerticalSlice_RunThenShow
+  TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar
+  TestVerticalSlice_ShowRejectsUnknownRunID
+#+END_EXAMPLE
+
+The determinism run includes the pinned EUR/USD winner assertion
+(ADR-042); the CLI run includes order-independent =ConfigDigest=
+(ADR-042) and post-warm-up entry timing (PR #240). Both were confirmed
+to genuinely execute every named test — not merely to exit 0 — by
+grepping =--- RUN=/=--- PASS=/=FAIL= lines directly from =-v= output,
+which is exactly the check that would have caught the earlier escaped-
+=|= documentation error if it had also affected execution (it did not:
+the commands actually run during this review always used a plain =|=;
+only the recorded text in this document had the stray backslash).
 
 Import-boundary tests, run individually so each package's own guard is
 named and confirmed on the *current* tree (per review point 2: audit
@@ -90,8 +126,9 @@ demonstration below: the dataset manifest's =Revision()= and
 
 =strategy.Strategy= depends only on =order=, =marketdata=,
 =instrument=, =account=, =clock=, =id=, =num=, and =log/slog=
-(ADR-005; =strategy/doc.go='s own "Dependency direction" section).
-=strategy/boundary_test.go='s =TestStrategyNeverImportsRuntimeApplicationOrTransportPackages=
+(ADR-005; the "Dependency direction" section of =strategy/doc.go=).
+The test in =strategy/boundary_test.go=,
+=TestStrategyNeverImportsRuntimeApplicationOrTransportPackages=,
 mechanically forbids =broker=, =execution=, =risk=, =pipeline=,
 =backtest=, =service=, =cmd=, and =adapters= (widened by ADR-043/#225).
 Confirmed PASS above.
@@ -136,10 +173,10 @@ account state -> =Metrics= -> rendered report), not just a citation of
 
 ADR-042: =backtest=/=service/backtest= are multi-instrument by
 construction (=Strategy.Describe().Requirements= is the universe
-boundary); =backtest/portfolio_test.go='s
-=TestBacktest_SharedRiskBindsAcrossInstruments= pins EUR/USD as the
+boundary); =backtest/portfolio_test.go= own test,
+=TestBacktest_SharedRiskBindsAcrossInstruments=, pins EUR/USD as the
 deterministic winner under a binding =MaxOpenPositionsRule(1)=,
-confirmed stable across 5 repeats above; =cmd/trader/backtest='s own
+confirmed stable across 5 repeats above; the =cmd/trader/backtest= package's own
 order-independent =ConfigDigest= regression confirmed stable across 3
 repeats.
 
@@ -182,12 +219,12 @@ committed to the repository) built directly against the packages this
 review is auditing; every value shown below is a direct, unedited
 capture of its output.
 
-An enter-then-exit strategy (mirroring =backtest/determinism_test.go='s
-own =enterThenExitStrategy= fixture) was used instead of the CLI's
+An enter-then-exit strategy (mirroring the =enterThenExitStrategy=
+fixture in =backtest/determinism_test.go=) was used instead of the CLI's
 =demoStrategy= specifically so the run produces one genuine *closed*
 round trip with non-zero realized PnL — =demoStrategy= only enters and
 never exits, so a CLI-only run cannot exercise the exit side of
-=KindOrder=/=KindFill= or =order.Trade='s closed-trade fields. Two
+=KindOrder=/=KindFill= or the closed-trade fields of =order.Trade=. Two
 distinct configured fill prices (entry vs. exit) were used for the
 same reason: a same-price round trip would net to zero at every stage
 regardless of whether reconciliation logic is actually correct.
@@ -300,7 +337,7 @@ projection with no independent computation of its own (ADR-038).
 One additional observation, noted rather than treated as a defect: the
 equity curve's intermediate point at =2024-01-08T01:00:00Z= shows
 100,045 USD, an unrealized mark distinct from either configured fill
-price. =Scheduler='s own mark-to-market uses the bar-observed market
+price. The =Scheduler= type's own mark-to-market uses the bar-observed market
 price for open-position valuation, independent of whatever
 =simbroker.FillPriceSource= a composition root configured for order
 execution (ADR-028) — expected behavior for this demonstration's

@@ -74,7 +74,7 @@ contract change.
 
 ** =strategy/boundary_test.go= extended to the full forbidden set
 
-=strategy/boundary_test.go='s own boundary test now also forbids
+The boundary test in =strategy/boundary_test.go= now also forbids
 =backtest=, =service=, =cmd=, and =adapters= (previously only
 =broker=/=execution=/=risk=/=pipeline=). It was renamed from
 =TestStrategyNeverImportsBrokerExecutionRiskOrPipeline= to
