@@ -148,6 +148,7 @@ the original decided, use full supersession instead.
 | 038 | Backtest report renderers (in adr-038-backtest-report-renderers.org) | Accepted |
 | 039 | Backtest application service EnvironmentFactory (in adr-039-backtest-service-environment-factory.org) | Accepted |
 | 040 | Thin backtest CLI (in adr-040-backtest-cli.org) | Accepted |
+| 041 | Deterministic backtest regression/golden suite (in adr-041-backtest-determinism-suite.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -359,6 +360,25 @@ schema-versioned =report.BacktestReport= snapshot =run= already wrote
 value type instead of =backtest.Result= directly, so =service/
 backtest.RunResponse= and a deserialized snapshot can each build one
 without depending on =backtest.Result= or on each other.
+
+Note: ADR-041 is likewise maintained in its own file,
+=docs/arch/adr-041-backtest-determinism-suite.org=, rather than inline
+in this registry.  Its own Status section is authoritative.  Issue
+#223 (M5-15) asks for a hard M5 completion gate proving full
+observable-output reproducibility across independent runs, and
+settles the plan/review thread's own correction of the initial
+approach: two runs use *different* deterministic ID-generator seeds
+(so =RunID= legitimately differs while =ConfigDigest= must not),
+opaque run-local identifiers (=EventID=/=CorrelationID=/=IntentID=/
+=OrderID=/=FillID=/=AccountID=) are compared through a per-run
+=idNormalizer= projection rather than raw ULID equality, a real
+=risk.Rule= and an enter-then-exit fixture exercise the canonical risk
+and closed-trade/exit-fill paths a zero-rule/enter-only fixture would
+have left untested, and named per-category sub-tests replace one
+blanket diff. Also records the evidence-driven discovery that
+=journal.KindAccount= is architecturally unreachable from
+=adapters/broker/sim= today, and two new dataset-identity
+=ConfigDigest= contrapositives (revision/fingerprint, instrument).
 
 * ADR-001: Modular monolith before service decomposition
 

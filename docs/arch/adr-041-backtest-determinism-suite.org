@@ -1,0 +1,310 @@
+#+TITLE: Deterministic Backtest Regression/Golden Suite ADR-041
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #223 (M5-15) asks for a hard M5 completion gate:
+given identical data, strategy, parameters, risk rules, broker
+config, and initial account, two independent runs must produce
+identical observable outputs across every M4/M5 stage. This ADR
+records the design settled in the issue's plan/review comment thread.
+
+* Context
+
+Before this issue, determinism coverage was shallow:
+=TestRunner_DeterministicAcrossIndependentRunners= (backtest/
+runner_test.go) only compared =RunID= and =ConfigDigest=;
+=TestScheduler_DeterministicAcrossIndependentInstances= (backtest/
+scheduler_test.go) only compared =OnBar= call ordering. Nothing
+compared intents, proposals, risk decisions, requests, orders, fills,
+account state, derived trades, metrics, or journal ordering across two
+runs — and =backtest.Result= itself does not expose most of those at
+all; the journal (=journal.Record=) is the only place they are
+observable, and every existing test wired =journal.Discard()=.
+
+My first draft plan proposed making the primary two-run comparison use
+*identical* deterministic ID-generator seeds for both runs, then
+asserting the two runs' complete outputs — including =RunID= — are
+identical. Design review corrected this as a conceptual error before
+implementation: identical seeds can accidentally hide a real
+dependency on generated IDs, and =RunID= identifies one *execution*,
+not a *configuration* — two independent runs of the same experiment
+are legitimately different executions and should not be expected to
+share one.
+
+* Decision
+
+** Two differently-seeded runs; RunID must differ, ConfigDigest must not
+
+=TestBacktest_DeterministicAcrossIndependentRuns= (=backtest/
+determinism_test.go=) builds two completely independent
+=backtest.RunnerParams= — fresh =Clock=, =id.Generator=,
+=sim.Broker=/account, =pipeline.Pipeline=, and journal each — seeded
+from *different* =id.NewDeterministic= seed pairs. The test asserts:
+
+- =RunID1 != RunID2= (execution identity legitimately differs).
+- =ConfigDigest1 == ConfigDigest2= (configuration identity does not).
+- Every other observable output is equal, once opaque run-local
+  identifiers are normalized (see below) — not merely "equal because
+  both runs happened to generate the same ULID."
+
+This is a strictly stronger test than the identical-seed alternative:
+it cannot pass merely because both runs coincidentally produced the
+same literal IDs.
+
+** Fully independent Managers, not one shared across both runs
+
+The first cut of this test built one =*marketdata.Manager=, published
+the fixture into it once, and passed that same object to both runs.
+PR #241 review caught this as a real independence gap: sharing one
+Manager instance leaves the door open for any Manager-level cached/
+mutable state, reader bookkeeping, or future stateful behavior to leak
+from run 1 into run 2 — weakening the exact property this suite exists
+to lock down.
+
+=runDeterminismCase= now owns its own =*marketdata.Manager= per call
+(=newSchedulerTestManager='s own =t.TempDir()=/=copyFixtureRaw(t)=
+already give each call a fresh temporary canonical store and its own
+copy of the raw fixture bytes), so the two runs never share any
+run-scoped in-memory object at all. Building each run's own canonical
+store from the same underlying raw fixture, rather than two Managers
+reading one pre-built shared store, is a strictly stronger
+independence property: it additionally proves the canonical-build step
+itself is deterministic across independent =Manager= instances, not
+merely that reading a shared store is.
+
+** A per-run idNormalizer replaces raw ID/journal-record equality
+
+Journal records legitimately carry run-local, generated identity:
+=RunID=, =EventID=/=CorrelationID=/=CausationID=, =IntentID=,
+=OrderID=, =FillID=, =AccountID=, and (via =sim='s own =BrokerOrderID=
+= ="sim-" + OrderID=) a derived broker-native string. Comparing
+=[]journal.Record= values directly would fail even between two
+perfectly reproducible runs the moment they use different seeds.
+
+=idNormalizer= (one instance per run) maps every opaque ID it sees, in
+first-seen order, to a stable =\"<kind>-<n>\"= token (=intent-1=,
+=order-1=, =fill-1=, =account-1=, =run-1=, ...). Two independently
+constructed but causally identical runs assign their own opaque
+identifiers in the identical *relative* order, so comparing each run's
+own normalized token stream — never the literal ULIDs — is what
+actually proves "same causal graph," without requiring "same
+execution identity." =compareRecordSemantics= dispatches on each
+record's =Kind= (already asserted equal at that index) and compares
+every semantically meaningful field directly (instrument, side,
+quantity, price, allowed/violations, status, ...), substituting each
+normalized-token pair for every raw ID field.
+
+A second review round (PR #241) found the first cut of this
+comparator too shallow to actually back the "complete observable
+outputs" promise: =KindDecision= compared only violation/rule-result
+*counts* and rule names, not their content; =KindOrder= omitted
+=AcceptedLimitPrice=/=AcceptedStopPrice=/=FilledQuantity=; =KindFill=
+omitted its own =Timestamp=, =Commission=, =BrokerOrderID=, and its
+own =Metadata= (a fill carries a *second*, independent =id.Metadata=
+distinct from the journal envelope's own). Each was filled in:
+=compareViolations=/=compareWarnings= compare every =risk.Violation=/
+=risk.Warning= field (all plain strings, no ID normalization needed)
+at every nesting level (aggregate =Decision.Violations=/=Warnings= and
+each =RuleResult='s own); =comparePrice=/=compareMoney= handle the
+optional (=*num.Price=/=*num.Money=) accepted-price and commission
+fields, matching nilness before comparing value; and =KindFill= gained
+its missing =Timestamp=/=Commission=/normalized =BrokerOrderID=/own
+=Metadata= comparisons.
+
+Finally, =compareRecordSemantics='s =switch= gained an explicit
+=default= case that calls =t.Fatalf=: a =journal.Kind= this suite does
+not yet know how to compare must stop the test outright, not silently
+report "the two Kind values matched" as if that were sufficient. This
+is deliberate for a completion gate specifically — a future new
+=journal.Kind= is exactly the kind of change that should force an
+explicit decision about how its semantics participate in determinism,
+not slip through unexercised.
+
+** Required-kind coverage, evidence-driven rather than assumed
+
+Before comparing the two normalized streams, =assertRequiredKindsPresent=
+checks that the representative run actually produced at least one
+record of every acceptance-criterion-named kind this fixture can
+reach — otherwise a comparison of two *empty* streams for a whole
+category would trivially "pass" while protecting nothing.
+
+=journal.KindAccount= is deliberately *excluded* from that required
+set: while implementing this test, I confirmed by reading
+=backtest/scheduler.go='s own event-kind switch that Scheduler only
+ever journals =KindAccount= when the broker's own event stream emits a
+=broker.EventKindAccount= event, and =adapters/broker/sim= never emits
+one anywhere in its own source — every simulated account-state change
+is observed only through the =EventKindOrder=/=EventKindFill= events
+that caused it. =KindAccount= is therefore architecturally
+unreachable from any =sim.Broker=-backed run today. Asserting its
+presence would force an artificial event =sim= never produces, or
+silently mislabel a genuine platform gap as this fixture's fault; the
+required-kind list reflects what a =sim=-backed run can actually
+prove, not the full abstract vocabulary =journal.Kind= defines.
+
+** A real risk rule and a genuine closed round trip, not an empty engine / enter-only fixture
+
+The environment configures =risk.NewMaxOpenPositionsRule(5)= (a real,
+deterministic M4 rule, satisfied but genuinely evaluated) rather than
+a zero-rule =risk.Engine=, so the captured =KindDecision= records
+exercise the canonical risk-evaluation path, not an always-trivially-
+allow stub.
+
+The fixture strategy, =enterThenExitStrategy=, enters long on the
+first bar it observes for each instrument and exits on the second —
+producing one genuine closed round trip per instrument (two, since the
+shared two-instrument fixture data already used by other =backtest=
+tests covers EUR/USD and GBP/USD). This exercises =KindTrade='s closed-
+trade shape, realized P&L, and the exit side of
+=KindOrder=/=KindFill=, none of which the pre-existing enter-only
+fixture (=mustEnterOnFirstBarStrategy=) ever reaches.
+
+** Named per-category assertions, not one blanket diff
+
+Per the acceptance criteria's "golden tests fail at specific named
+mismatches," the test is structured as one =t.Run= sub-test per
+observable category (journal, trades, equity curve, metrics, account,
+plus the manifest/config-identity checks), each using indexed
+=require.Equalf=/=assert.Equalf= calls naming the exact record/trade/
+field index and what mismatched (for example =\"record[7]/fill: price
+mismatch: got ... want ...\"=) rather than one =require.Equal(result1,
+result2)= producing an unreadable struct dump. Verified directly: a
+deliberately introduced mismatch (temporarily corrupting the dataset-
+revision contrapositive test's own input) reproduces exactly the
+named failure message the code documents, not a generic diff.
+
+Within the manifest sub-test itself, =Universe()=/=Dataset()= are
+compared by exact ordered equality — not =assert.ElementsMatch= — per
+a second PR #241 review point: both accessors are documented as
+canonically ordered (=NewManifest='s own sort), so ordering is itself
+part of the deterministic contract, and an unordered comparison would
+not catch a build that silently reordered either slice. Each dataset
+entry's own semantic identity (=Provider=, =Instrument=, =Interval=,
+=Span= start/end, =Basis=, =RawFingerprint=, and finally =Revision()=
+as a rollup) is compared field-by-field with its own named assertion,
+rather than relying on =ConfigDigest= alone to catch a divergence
+somewhere in the dataset with no indication of which field caused it.
+
+** Dataset/manifest identity participates in reproducibility — two contrapositives, not one
+
+=TestManifest_ConfigDigestChangesWhenDatasetRevisionDiffers= and
+=TestManifest_ConfigDigestChangesWhenDatasetInstrumentDiffers= are the
+contrapositive checks the acceptance criteria's "dataset/manifest
+identity participates in reproducibility checks" line calls for:
+changing a dataset entry's own =Revision=/=RawFingerprint=, or which
+instrument a dataset entry describes, must each independently change
+=ConfigDigest= — proving =ConfigDigest= actually incorporates dataset
+identity along more than one axis, rather than merely happening to
+pass because a fixture never varies either. =ConfigDigest='s
+independence from =RunID= was already covered by the pre-existing
+=TestManifest_ConfigDigestIgnoresRunID= (manifest_test.go) and is not
+duplicated here. Both new tests build =Manifest= directly through
+=backtest.NewManifest=/=ManifestParams= — no production code was
+touched to facilitate them.
+
+** No checked-in golden file
+
+"Golden" in #223 is read as *the reproducibility gate itself*, not a
+literal checked-in snapshot: two independently constructed runs plus
+named semantic comparisons are less brittle (no serialization-format
+churn to maintain) and more meaningful (they actually re-derive the
+causal graph rather than diffing against a frozen blob) than a giant
+JSON/journal golden file would be. #220's report-renderer goldens
+already protect presentation formatting; this suite protects
+deterministic domain *behavior*, a different concern.
+
+** Race cleanliness
+
+No production code changed. =go test ./backtest/... -race -count=3=
+and the full =go test ./... -race= both pass; the repeated-count run
+specifically exercises whether the new capturing recorder or
+normalizer hides any map-iteration-order dependence (maps are used
+internally by =idNormalizer= and =enterThenExitStrategy='s own
+per-instrument state, both scoped per-run and never shared across
+goroutines).
+
+* Consequences
+
+- A future change that alters M4/M5 event ordering, ID-generation
+  causality, journal payload shape, trade derivation, or metrics
+  computation now has one comprehensive, named-failure regression to
+  fail against, rather than relying on the shallow =RunID=/
+  =ConfigDigest=-only check that existed before.
+- =idNormalizer= and =compareRecordSemantics= are test-only utilities
+  (=backtest/determinism_test.go=); no production API changed.
+- =journal.KindAccount='s current unreachability from =sim.Broker= is
+  now a documented, evidenced fact (this ADR and the test's own
+  comment) rather than an unstated gap — a future live-broker adapter
+  that does emit standalone account-changed events would need its own
+  determinism coverage for that kind, since this suite cannot exercise
+  it today.
+- The dataset-identity contrapositives give =ConfigDigest= two concrete,
+  independently-tested proof points (revision/fingerprint and
+  instrument) beyond the pre-existing risk-fraction-only
+  =TestManifest_ConfigDigestChangesWithConfiguration=.
+
+* Alternatives Considered
+
+- *Identical ID-generator seeds for both runs, comparing every field
+  including RunID.* Rejected (issue #223 review, point 1): conflates
+  execution identity with configuration identity, and identical seeds
+  can accidentally hide a real dependency on generated IDs that
+  differently-seeded runs would expose.
+- *Comparing raw =[]journal.Record= values directly (byte- or
+  struct-equality).* Rejected (issue #223 review, point 2): would fail
+  between two perfectly reproducible runs the moment they use
+  different seeds, since records legitimately carry run-local opaque
+  identity. The per-run =idNormalizer= projection is what makes the
+  comparison meaningful without requiring identical seeds.
+- *One shared =*marketdata.Manager= published once, passed to both
+  runs.* Rejected (PR #241 review): leaves any Manager-level cached/
+  mutable state, reader bookkeeping, or future stateful behavior free
+  to leak from one run into the other, weakening the exact
+  independence property this suite exists to prove. Each run now
+  builds its own Manager over its own freshly copied raw fixture and
+  its own temporary canonical store.
+- *=assert.ElementsMatch= for =Universe()=/=Dataset()=, or relying on
+  =ConfigDigest=/=Revision()= alone to catch a dataset divergence.*
+  Rejected (PR #241 review): both accessors are canonically ordered by
+  contract, so an unordered comparison would miss a silently reordered
+  build; and a single rollup digest names no specific field when it
+  changes. Exact ordered equality plus a per-field named comparison
+  (provider, instrument, interval, span, basis, fingerprint) gives a
+  failure that names exactly what diverged.
+- *Comparing =KindDecision=/=KindOrder=/=KindFill= by count/name/a
+  handful of fields only, deferring the rest to =ConfigDigest= or the
+  aggregate result-level comparisons to catch.* Rejected (PR #241
+  second review round): #223 explicitly promises comparison of
+  complete observable decisions/orders/fills, and a shallow comparator
+  could let a real divergence in violation content, accepted prices,
+  filled quantity, fill timestamp, commission, or a fill's own
+  metadata pass silently. Every field participating in each kind's own
+  semantic identity is now compared by name.
+- *A =switch= with no =default= case for unhandled =journal.Kind=
+  values.* Rejected (PR #241 second review round): would let a future
+  new =Kind= appear identically in both streams (same =Kind= value)
+  while receiving zero payload comparison, silently weakening the gate
+  exactly when it should instead force a decision.
+- *A zero-rule risk.Engine and an enter-only fixture strategy*
+  (matching most pre-existing =backtest= test fixtures). Rejected
+  (issue #223 review, points 3-4): would leave the risk-decision and
+  closed-trade/exit-fill surfaces of this specific golden effectively
+  untested, even though the acceptance criteria names them explicitly.
+- *One =require.Equal(result1, result2)= (or similar) blanket
+  comparison.* Rejected (issue #223 review, point 5): produces an
+  unreadable struct diff on failure instead of naming the exact
+  record/field that diverged, defeating the "fail at specific named
+  mismatches" acceptance criterion.
+- *A checked-in golden JSON/journal snapshot file.* Rejected (issue
+  #223 review, point 7): #223's own scope is reproducibility between
+  independent runs, not presentation-format regression (already
+  covered by #220's report goldens); a raw journal snapshot would also
+  either leak incidental IDs or require its own normalization
+  machinery duplicating =idNormalizer= for no additional protection.
+- *Asserting =journal.KindAccount= is present, matching the acceptance
+  criteria's literal event-kind list.* Rejected once investigation
+  showed =adapters/broker/sim= never emits a =broker.EventKindAccount=
+  event under any circumstance: asserting it would either require
+  fabricating an artificial event path solely for this test or
+  misreport a real, evidenced platform gap as a fixture defect.
