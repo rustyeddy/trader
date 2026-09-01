@@ -6,8 +6,9 @@
 // proof, and keeping it in-tree lets boundary_test.go and
 // privatestrategy_test.go mechanically verify the property rather than
 // merely assert it), but its own imports are deliberately restricted
-// to exactly the public contract strategy/doc.go documents:
-// order, marketdata, instrument, num, and strategy itself. It never
+// to exactly the public contract strategy/doc.go documents, plus the
+// standard library's context: context, order, marketdata, instrument,
+// and strategy itself. It never
 // imports backtest, service, cmd, or adapters — see boundary_test.go
 // for the mechanical guard, and privatestrategy_test.go for the
 // composition-root glue (which legitimately does import those

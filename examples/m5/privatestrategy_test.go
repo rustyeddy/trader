@@ -126,7 +126,18 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		return svcbacktest.Environment{}, err
 	}
 
+	// FillModel describes f.prices itself — the actual configured fill-
+	// price authority. SlippageModel/CommissionModel are both "none":
+	// this Deps leaves Slippage/Commission nil, and simbroker.Deps' own
+	// doc comment is explicit that nil means exactly that — no
+	// slippage, no commission — not "fixed" (issue #243 review: the
+	// manifest must describe the actual configured environment, not a
+	// convenient shared placeholder).
 	fill, err := backtest.NewComponentInfo("fixed", "test", nil)
+	if err != nil {
+		return svcbacktest.Environment{}, err
+	}
+	none, err := backtest.NewComponentInfo("none", "", nil)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
@@ -137,8 +148,8 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		Account:         account,
 		Pipeline:        pl,
 		FillModel:       fill,
-		SlippageModel:   fill,
-		CommissionModel: fill,
+		SlippageModel:   none,
+		CommissionModel: none,
 	}, nil
 }
 
@@ -200,4 +211,12 @@ func TestPrivateStrategy_RunsThroughPublicBacktestService(t *testing.T) {
 	assert.Equal(t, "private-example", resp.Manifest.StrategyName())
 	assert.NotEmpty(t, resp.OpenTrades, "the private strategy must have actually entered a position through the real M4 pipeline and simulator")
 	assert.Len(t, resp.Account.Positions(), 1)
+
+	// The manifest must describe the environment actually configured
+	// (issue #243 review): this environment never sets Slippage or
+	// Commission, so the recorded models must say "none", not the same
+	// "fixed" descriptor FillModel legitimately uses.
+	assert.Equal(t, "fixed", resp.Manifest.FillModel().Name())
+	assert.Equal(t, "none", resp.Manifest.SlippageModel().Name())
+	assert.Equal(t, "none", resp.Manifest.CommissionModel().Name())
 }

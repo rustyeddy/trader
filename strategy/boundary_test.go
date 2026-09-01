@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStrategyNeverImportsBrokerExecutionRiskOrPipeline is issue #210
+// TestStrategyNeverImportsRuntimeApplicationOrTransportPackages is issue #210
 // (M5-02)'s own architectural guard, mirroring execution/
 // boundary_test.go's and risk/boundary_test.go's own: strategy must
 // never import broker, execution, risk, or pipeline (ADR-005: a
@@ -42,7 +42,7 @@ import (
 // "github.com/rustyeddy/trader/pipeline/internal/...") is caught too —
 // the same fix review feedback on PR #194 established for execution's
 // own guard, and #210's own review asked to carry forward here.
-func TestStrategyNeverImportsBrokerExecutionRiskOrPipeline(t *testing.T) {
+func TestStrategyNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T) {
 	forbiddenRoots := []string{
 		"github.com/rustyeddy/trader/broker",
 		"github.com/rustyeddy/trader/execution",
