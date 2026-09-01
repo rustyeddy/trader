@@ -2,6 +2,7 @@ package backtest_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,7 +53,7 @@ func newBindingRiskRunnerParams(t *testing.T, max int, strat strategy.Strategy, 
 	require.NoError(t, err)
 
 	fill, slippage, commission := mustRunnerModels(t)
-	ruleInfo, err := backtest.NewComponentInfo("max_open_positions", "v1", map[string]string{"max": "1"})
+	ruleInfo, err := backtest.NewComponentInfo("max_open_positions", "v1", map[string]string{"max": fmt.Sprintf("%d", max)})
 	require.NoError(t, err)
 
 	return backtest.RunnerParams{
@@ -105,6 +106,17 @@ func TestBacktest_SharedRiskBindsAcrossInstruments(t *testing.T) {
 	// actually bound.
 	require.Len(t, result.Account.Positions(), 1,
 		"risk.MaxOpenPositionsRule(1) must have allowed exactly one of the two simultaneous entries across the shared account")
+
+	// Pin the winner, not just "exactly one won" (issue #242 review):
+	// Scheduler's own canonical same-timestamp tie-break is
+	// deterministic, so which instrument's intent is submitted first
+	// (and therefore wins the account's one permitted position) is not
+	// arbitrary — it must always be EUR/USD, confirmed empirically
+	// stable across five repeated runs. Pinning it here means this
+	// test itself protects that tie-break rule, rather than only
+	// observing "deterministic" outside the assertion.
+	assert.True(t, result.Account.Positions()[0].Listing.InstrumentID().Equal(eurusdID(t)),
+		"expected EUR/USD to deterministically win Scheduler's same-timestamp tie-break, got %s", result.Account.Positions()[0].Listing.InstrumentID())
 
 	decisions := decisionsFromJournal(t, rec.all())
 	require.Len(t, decisions, 2, "both instruments' Enter intents must have reached a risk decision")

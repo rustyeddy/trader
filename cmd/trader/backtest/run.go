@@ -122,7 +122,7 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 		oandaListing: make(map[string]instrument.Listing, len(symbols)),
 		simListing:   make(map[string]instrument.Listing, len(symbols)),
 	}
-	seen := make(map[string]string, len(symbols)) // instrument.ID.String() -> the --symbol that first claimed it
+	seen := make(map[string]string, len(symbols)) // normalized symbol -> itself, recorded once seen so a duplicate can report it
 
 	for _, raw := range symbols {
 		symbol := strings.ToUpper(strings.TrimSpace(raw))
@@ -307,12 +307,16 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 // following demoStrategy's own entry bar for instrumentID — the exact
 // price Scheduler's next-bar-open fill-eligibility rule (issue #214)
 // actually fills a market order at, never the entry bar's own Close
-// (PR #240 review). demoStrategy receives OnBar starting at bar index
-// warmupBars (the first warmupBars bars are consumed as warm-up and
-// never delivered to OnBar) and enters on that very first delivered
-// bar, so the entry bar is index warmupBars and the fill bar is the
-// one immediately after it, index warmupBars+1 — this function reads
-// and discards exactly that many bars before returning the following
+// (PR #240 review). Scheduler calls Strategy.OnBar for every bar,
+// including each of the first warmupBars warm-up bars — it discards
+// whatever intent OnBar returns during warm-up itself, it does not
+// suppress the call (PR #240 second-review correction; demo_strategy.go's
+// own doc comment records the same rule). demoStrategy tracks these
+// callbacks itself and deliberately withholds its Enter intent until
+// callback/bar index warmupBars — the first one Scheduler actually
+// honors — so that bar is the entry bar, and the fill bar is the one
+// immediately after it, index warmupBars+1. This function reads and
+// discards exactly warmupBars+1 bars before returning the following
 // bar's Open. Each instrument's own entry/fill bar is computed
 // independently, since demoStrategy enters each instrument on that
 // instrument's own first bar, not a shared portfolio-wide bar index.
