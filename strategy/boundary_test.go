@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStrategyNeverImportsBrokerExecutionRiskOrPipeline is issue #210
+// TestStrategyNeverImportsRuntimeApplicationOrTransportPackages is issue #210
 // (M5-02)'s own architectural guard, mirroring execution/
 // boundary_test.go's and risk/boundary_test.go's own: strategy must
 // never import broker, execution, risk, or pipeline (ADR-005: a
@@ -22,18 +22,36 @@ import (
 // rather than a package-level `go list` that would merge every file's
 // imports together.
 //
+// Issue #225 (M5-17) extended the forbidden set to backtest, service,
+// cmd, and adapters: the strategy *contract* must remain implementable
+// by a completely external consumer (a private strategy repository
+// importing Trader as an ordinary dependency, per examples/m5's own
+// boundary test) without ever needing to reach into a concrete
+// runtime, application-service, transport, or adapter package —
+// exactly the property that keeps a future out-of-process strategy
+// host viable without redesigning this contract. marketdata/internal
+// and any provider/storage internals are not listed separately: Go's
+// own internal/ visibility rule already makes them a compile error
+// for any package outside their own subtree, the same reasoning
+// package-boundaries.org applies to every other internal/ boundary in
+// this module.
+//
 // A forbidden root is matched exact-or-prefix-with-"/", not by exact
 // string equality, so a future subpackage import (e.g.
 // "github.com/rustyeddy/trader/broker/foo" or
 // "github.com/rustyeddy/trader/pipeline/internal/...") is caught too —
 // the same fix review feedback on PR #194 established for execution's
 // own guard, and #210's own review asked to carry forward here.
-func TestStrategyNeverImportsBrokerExecutionRiskOrPipeline(t *testing.T) {
+func TestStrategyNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T) {
 	forbiddenRoots := []string{
 		"github.com/rustyeddy/trader/broker",
 		"github.com/rustyeddy/trader/execution",
 		"github.com/rustyeddy/trader/risk",
 		"github.com/rustyeddy/trader/pipeline",
+		"github.com/rustyeddy/trader/backtest",
+		"github.com/rustyeddy/trader/service",
+		"github.com/rustyeddy/trader/cmd",
+		"github.com/rustyeddy/trader/adapters",
 	}
 
 	entries, err := os.ReadDir(".")

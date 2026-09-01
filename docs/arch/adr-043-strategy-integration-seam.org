@@ -1,0 +1,229 @@
+#+TITLE: External/Private Strategy Integration Seam ADR-043
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #225 (M5-17) asks M5 to prove Trader does not
+permanently require strategies to be compiled into the Trader binary,
+and to document what would need to cross a future out-of-process
+strategy boundary — without building that transport now. This ADR
+records the verification performed, the new evidence added, and the
+documented future-boundary analysis, per the issue's plan/review
+thread.
+
+* Context
+
+Before implementation, I confirmed most of #225's acceptance criteria
+already held by construction: =strategy.Strategy=/=Environment=/
+=View=/=IntentFactory= depend only on =order=, =marketdata=,
+=instrument=, =account=, =clock=, =id=, =num=, and =log/slog=
+(=strategy/doc.go='s own "Dependency direction" section,
+=strategy/boundary_test.go= enforcing it against =broker=/=execution=/
+=risk=/=pipeline=); =backtest.RunnerParams.Strategy= is typed to the
+interface with no concrete strategy package for it to depend on
+instead; and =cmd/trader/backtest='s own =demoStrategy= (#222/#224)
+already is a real external implementation, successfully driven
+end-to-end.
+
+Design review (issue #225 comment) accepted this and gave seven
+concrete requirements plus one explicit non-goal:
+
+1. =strategy.Strategy= remains the *only* strategy runtime contract —
+   no backtest-specific DTO, registry, plugin API, or concrete
+   in-process base class.
+2. Add an external-consumer-style test: a package that imports Trader
+   the way a private strategy repository would (public packages only),
+   implements =strategy.Strategy=, and is driven through the public
+   backtest/application boundary without importing =backtest=
+   internals or any =cmd/...= package.
+3. Be explicit that *today's* answer to "private strategy source need
+   not be committed to Trader" is already solved: a private strategy
+   stays in its own repository, imports Trader as an ordinary Go
+   dependency, and compiles into the user's own binary. A literally
+   out-of-process strategy (a future gRPC/MQTT/JSON adapter that
+   itself implements =strategy.Strategy= locally and proxies calls
+   across a socket) is a later, separate adapter problem — do not make
+   the core interface itself transport-shaped to anticipate it.
+4. Document the *minimum* future process-boundary messages the
+   *current* contract actually implies — not a speculative protocol.
+5. Call out =strategy.View= as the hardest part explicitly, and defer
+   its redesign rather than attempting one now.
+6. Preserve deterministic semantics across any future seam: intents
+   stay canonical =order.Intent= values built through the existing
+   ID/correlation machinery; a future wire DTO is an adapter-side
+   mapping, never a new domain contract.
+7. Add import-direction protection covering the full set (=backtest=,
+   =service=, =cmd=, =adapters=, in addition to the pre-existing
+   =broker=/=execution=/=risk=/=pipeline= check), and make the
+   representative external strategy fixture itself compile without
+   importing any of them.
+
+Non-goal, stated explicitly by review: do not add a new public
+=ExternalStrategy= interface. That would fork the strategy abstraction
+into in-process/out-of-process variants; the architectural win is that
+a future transport adapter itself satisfies the *existing*
+=strategy.Strategy= interface.
+
+* Decision
+
+** =strategy.Strategy= remains the sole contract — verified, not changed
+
+No new type, DTO, registry, or base class was added to =strategy= or
+=backtest=. This ADR is a verification-and-documentation record, not a
+contract change.
+
+** =strategy/boundary_test.go= extended to the full forbidden set
+
+=TestStrategyNeverImportsBrokerExecutionRiskOrPipeline= now also
+forbids =backtest=, =service=, =cmd=, and =adapters= (previously only
+=broker=/=execution=/=risk=/=pipeline=). =marketdata/internal= and any
+provider/storage internals are not listed separately: Go's own
+=internal/= visibility rule already makes them a compile error for any
+package outside their own subtree, the same reasoning
+=package-boundaries.org= applies to every other =internal/= boundary
+in this module.
+
+** =examples/m5=: a representative external/private strategy, mechanically verified
+
+Two new files, mirroring =examples/m1='s own "external consumer of
+Trader's public API" convention (issue #32):
+
+- =examples/m5/privatestrategy.go= (=package m5=): =PrivateStrategy=,
+  an exported =strategy.Strategy= implementation whose own imports are
+  restricted to =context=, =instrument=, =marketdata=, =order=, and
+  =strategy= — exactly the public contract set. It is deliberately as
+  simple as =cmd/trader/backtest='s own =demoStrategy= (enter once, on
+  the instrument's first bar, never trade again): the property this
+  package exists to prove is the *boundary*, not trading logic.
+- =examples/m5/boundary_test.go=: parses =privatestrategy.go='s own
+  import block directly and fails on any of =backtest=, =service=,
+  =cmd=, =adapters=, =broker=, =execution=, =risk=, or =pipeline= —
+  the mechanical proof that the representative fixture itself compiles
+  using only the public contract (review point 2/7).
+- =examples/m5/privatestrategy_test.go= (=package m5_test=): plays the
+  role of a real application built on top of a private strategy. It
+  legitimately imports =backtest= (for =NewComponentInfo=),
+  =service/backtest=, =adapters/broker/sim=, =execution=, =risk=, and
+  =pipeline= — the same composition-root role =cmd/trader/backtest='s
+  own =environmentFactory= plays for the CLI (ADR-039) — to build a
+  concrete =svcbacktest.EnvironmentFactory= and drive
+  =m5.NewPrivateStrategy= through =service/backtest.Service.Run= to a
+  real, filled position. This demonstrates the answer to review point
+  3 concretely: a private strategy's own source never needs to enter
+  this repository or import anything beyond the public contract, while
+  the surrounding composition code (which any real application needs
+  regardless of where its strategy lives) is unrestricted.
+
+** Documented: what the current contract implies for a future out-of-process boundary
+
+Per review point 4 (minimum messages the *current* contract implies,
+not a speculative protocol) and point 5 (=View= called out
+explicitly):
+
+- *Already plain data today*: =strategy.Descriptor= (name/version/
+  =[]DataRequirement=), =strategy.BarEvent= (instrument/interval/bar),
+  and the =[]order.Intent= a strategy returns from =OnBar= are already
+  shaped like values a wire message could carry without modification.
+- *Lifecycle/start context*: =Start='s own =Environment= carries
+  =Clock=, =Intents= (an =IntentFactory=), and =Logger= — none of
+  which is itself a wire value (see below); what a future adapter
+  needs to convey at start time is the *information* those provide
+  (current time, and enough identity/correlation context to build
+  intents), not the Go interfaces themselves.
+- *=IntentFactory= is runtime infrastructure, not adapter-transportable
+  as-is, by design*: =strategy/doc.go= already states this design
+  intent in one sentence ("keeps deterministic ID generation as
+  runtime infrastructure that can later be represented cleanly across
+  an out-of-process strategy protocol boundary"); this ADR makes it a
+  first-class, checkable decision. =IntentFactory.Enter=/=Exit=/
+  =AdjustStop=/=TargetExposure= are local method calls that mint real
+  =IntentID=/=EventID=/=CorrelationID= values via a host-side
+  =id.Generator=. A remote strategy cannot call these directly across
+  a process boundary; the minimum message it would need to send
+  instead is a *description* of the desired intent (kind, instrument,
+  side, quantity/stop as applicable, and an adapter-chosen correlation
+  token grouping multiple intents from one callback) — the host-side
+  adapter then mints the real identifiers and constructs the canonical
+  =order.Intent= exactly as =IntentFactory= does today. This preserves
+  ADR-005's own "strategy emits intents through runtime-owned identity
+  semantics" invariant across the boundary rather than letting a
+  remote strategy invent its own parallel ID scheme (review point 6).
+- *=strategy.View= is the hardest part, explicitly deferred*: =View=
+  is a Go interface (=Account() account.Snapshot=, plus the optional
+  =History= capability) that a runtime hands a strategy fresh per
+  callback, frozen to that callback's own no-lookahead visibility
+  cutoff (=backtest.Scheduler='s own =frozenView=, ADR-035's "no-
+  lookahead is a layered invariant"). A future out-of-process adapter
+  cannot literally ship a Go interface across a socket; it would need
+  a snapshot/query representation of the *same permitted information*
+  (the account snapshot's own already-plain-value fields, and a
+  request/response shape for =HistoryBars= scoped to only the
+  instruments/intervals that strategy already declared) while
+  preserving the identical frozen-visibility guarantee. This ADR does
+  not design that representation now — doing so without a concrete
+  out-of-process consumer would be exactly the "widen for a speculative
+  future adapter" #225's own review warned against. The one invariant
+  recorded here as load-bearing for that future work: an external
+  adapter must never gain access to future bars, providers, storage,
+  or broker internals, or mutable account state, that an in-process
+  =Strategy= cannot already see.
+- *No fill/tick/state messages*: the current v0 =Strategy= contract
+  exposes none of these (=strategy/doc.go='s own "Scope" section:
+  =TickHandler=/=FillHandler=/=AccountEventHandler=/=StateManager= are
+  deliberately unpublished, additive-later capability interfaces), so
+  no corresponding wire message is documented here either — inventing
+  one now would describe a protocol for a capability that does not yet
+  exist.
+
+** Deliberate non-goals (unchanged from review)
+
+No Go =plugin= package, no requirement that a strategy and Trader
+share a compiler/build, no gRPC/MQTT host, no remote lifecycle
+management, no strategy discovery/registry, and no network
+reliability/retry semantics — all explicitly out of scope for M5, and
+none introduced here. No new public =ExternalStrategy= interface was
+added; a future transport adapter is expected to itself satisfy the
+existing =strategy.Strategy= interface, exactly as =examples/m5= itself
+does today, in-process.
+
+* Consequences
+
+- =strategy/boundary_test.go='s widened forbidden-import set is now
+  the mechanical guarantee that a future accidental dependency from
+  =strategy= toward any runtime/application/transport/adapter package
+  is caught immediately, not just toward the four packages the
+  original #210 guard covered.
+- =examples/m5= is now the concrete, compiling proof-of-concept a
+  reviewer or future contributor can point to for "can a private
+  strategy really live outside this repository" — not merely an
+  assertion in a doc comment.
+- The out-of-process boundary analysis in this ADR is documentation
+  only; no code was written toward an actual wire protocol. The next
+  concrete step toward real out-of-process hosting (a wire schema for
+  =IntentFactory='s described-intent shape and a =View= snapshot/query
+  representation) remains M8's own future work ("Research and External
+  Strategy Extensions"), informed by this ADR rather than started by
+  it.
+
+* Alternatives Considered
+
+- *A new public =ExternalStrategy= interface distinguishing in-process
+  from out-of-process strategies.* Rejected (issue #225 review's own
+  explicit non-goal): would fork the strategy abstraction for no
+  present consumer; the existing =strategy.Strategy= interface is
+  exactly what a future transport adapter should itself implement.
+- *Designing a concrete wire protocol/schema for =IntentFactory=/=View=
+  now.* Rejected (review points 4-5): #225's own scope explicitly
+  excludes building transport now, and no concrete out-of-process
+  consumer exists yet to validate a real design against — the
+  architecture document's own "Strategy Process Contract" section
+  already sketches this at a higher level; this ADR grounds the
+  analysis in the actual M5 types without freezing a protocol no
+  adapter yet needs.
+- *Treating =cmd/trader/backtest='s existing =demoStrategy= as
+  sufficient proof, with no new dedicated fixture.* Rejected (review
+  point 2): =demoStrategy= is unexported and was written for #222's
+  CLI-demo purpose, not framed or mechanically verified as the M5-17
+  boundary proof; =examples/m5= gives this issue (and #226's later
+  audit) a dedicated, explicitly-named, mechanically-checked artifact
+  to point to instead of "reuse of a CLI fixture."
