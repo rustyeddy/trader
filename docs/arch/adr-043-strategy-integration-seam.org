@@ -74,9 +74,13 @@ contract change.
 
 ** =strategy/boundary_test.go= extended to the full forbidden set
 
-=TestStrategyNeverImportsBrokerExecutionRiskOrPipeline= now also
-forbids =backtest=, =service=, =cmd=, and =adapters= (previously only
-=broker=/=execution=/=risk=/=pipeline=). =marketdata/internal= and any
+The boundary test in =strategy/boundary_test.go= now also forbids
+=backtest=, =service=, =cmd=, and =adapters= (previously only
+=broker=/=execution=/=risk=/=pipeline=). It was renamed from
+=TestStrategyNeverImportsBrokerExecutionRiskOrPipeline= to
+=TestStrategyNeverImportsRuntimeApplicationOrTransportPackages= during
+PR #243 review, since the old name no longer described the widened
+forbidden set. =marketdata/internal= and any
 provider/storage internals are not listed separately: Go's own
 =internal/= visibility rule already makes them a compile error for any
 package outside their own subtree, the same reasoning
