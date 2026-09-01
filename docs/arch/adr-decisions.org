@@ -150,6 +150,7 @@ the original decided, use full supersession instead.
 | 040 | Thin backtest CLI (in adr-040-backtest-cli.org) | Accepted |
 | 041 | Deterministic backtest regression/golden suite (in adr-041-backtest-determinism-suite.org) | Accepted |
 | 042 | Multi-instrument and portfolio backtesting (in adr-042-multi-instrument-backtesting.org) | Accepted |
+| 043 | External/private strategy integration seam (in adr-043-strategy-integration-seam.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -399,6 +400,25 @@ shared account/risk state genuinely crosses instrument boundaries
 real, pre-existing =backtest.Manifest.ConfigDigest= gap (it embeds
 each dataset's =BuiltAt= wall-clock timestamp) found and worked
 around in the test rather than fixed as an out-of-scope side effect.
+
+Note: ADR-043 is likewise maintained in its own file,
+=docs/arch/adr-043-strategy-integration-seam.org=, rather than inline
+in this registry.  Its own Status section is authoritative.  Issue
+#225 (M5-17) asks M5 to prove strategies need not be permanently
+compiled into the Trader binary; this ADR records that
+=strategy.Strategy= already satisfied most of that by construction,
+widens =strategy/boundary_test.go='s forbidden-import set to
+=backtest=/=service=/=cmd=/=adapters= (previously only =broker=/
+=execution=/=risk=/=pipeline=), adds =examples/m5= as a mechanically-
+verified representative external/private strategy driven through
+=service/backtest= without importing any runtime/transport/adapter
+package itself, and documents (without designing) what a future
+out-of-process strategy boundary would need: =Descriptor=/=BarEvent=/
+=[]order.Intent= are already plain data, =IntentFactory= is
+deliberately runtime-owned identity infrastructure whose minimum wire
+shape would be a described-intent request rather than direct remote
+method calls, and =strategy.View= is called out explicitly as the
+hardest, deliberately-deferred part.
 
 * ADR-001: Modular monolith before service decomposition
 

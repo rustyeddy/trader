@@ -22,6 +22,20 @@ import (
 // rather than a package-level `go list` that would merge every file's
 // imports together.
 //
+// Issue #225 (M5-17) extended the forbidden set to backtest, service,
+// cmd, and adapters: the strategy *contract* must remain implementable
+// by a completely external consumer (a private strategy repository
+// importing Trader as an ordinary dependency, per examples/m5's own
+// boundary test) without ever needing to reach into a concrete
+// runtime, application-service, transport, or adapter package —
+// exactly the property that keeps a future out-of-process strategy
+// host viable without redesigning this contract. marketdata/internal
+// and any provider/storage internals are not listed separately: Go's
+// own internal/ visibility rule already makes them a compile error
+// for any package outside their own subtree, the same reasoning
+// package-boundaries.org applies to every other internal/ boundary in
+// this module.
+//
 // A forbidden root is matched exact-or-prefix-with-"/", not by exact
 // string equality, so a future subpackage import (e.g.
 // "github.com/rustyeddy/trader/broker/foo" or
@@ -34,6 +48,10 @@ func TestStrategyNeverImportsBrokerExecutionRiskOrPipeline(t *testing.T) {
 		"github.com/rustyeddy/trader/execution",
 		"github.com/rustyeddy/trader/risk",
 		"github.com/rustyeddy/trader/pipeline",
+		"github.com/rustyeddy/trader/backtest",
+		"github.com/rustyeddy/trader/service",
+		"github.com/rustyeddy/trader/cmd",
+		"github.com/rustyeddy/trader/adapters",
 	}
 
 	entries, err := os.ReadDir(".")
