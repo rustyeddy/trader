@@ -12,14 +12,18 @@
 // # The provisional demo strategy
 //
 // "trader backtest run" accepts exactly one strategy today: an
-// unexported demoStrategy (demo_strategy.go) that enters long once, on
-// the requested instrument's own first bar, and never trades again.
-// It exists solely so this command is genuinely executable end to end
-// — it is not a real trading strategy, not the beginning of a strategy
-// library, and not a registry. service/backtest.RunRequest.Strategy
-// remains the real application contract; strategy discovery/naming is
-// an explicitly deferred, later transport/composition concern (see
-// ADR-039's own note and this issue's plan/review comments).
+// unexported demoStrategy (demo_strategy.go) that enters long once per
+// requested instrument, on that instrument's own first bar, and never
+// trades that instrument again. --symbol may be repeated (issue #224,
+// M5-16) to run a multi-instrument portfolio backtest — one Scheduler
+// and one shared account/pipeline still replay every requested
+// instrument, never a per-symbol engine. demoStrategy exists solely so
+// this command is genuinely executable end to end — it is not a real
+// trading strategy, not the beginning of a strategy library, and not a
+// registry. service/backtest.RunRequest.Strategy remains the real
+// application contract; strategy discovery/naming is an explicitly
+// deferred, later transport/composition concern (see ADR-039's own
+// note and this issue's plan/review comments).
 //
 // # Persisted run snapshots, not journal replay
 //

@@ -18,35 +18,47 @@ import (
 )
 
 // simPriceSource is the simbroker.FillPriceSource "trader backtest
-// run" uses. demoStrategy emits its one Enter intent on the
-// requirement's own first eligible bar, and Scheduler's next-bar-open
+// run" uses, keyed by listing symbol — one entry per requested
+// instrument (issue #224 extended this from a single symbol/price
+// pair to a map so a multi-instrument run can configure each
+// instrument's own price independently, matching the shape
+// backtest's own test-only fixedPriceSource fixture already uses).
+//
+// demoStrategy emits its one Enter intent per instrument on that
+// instrument's own first eligible bar, and Scheduler's next-bar-open
 // fill-eligibility rule (issue #214) means that intent is not
 // submitted until the *following* bar arrives, filling at that bar's
 // own Open — never the entry bar's Close (PR #240 review: an earlier
 // version of this file fixed the price to the entry bar's Close,
 // silently reintroducing the exact causal pricing mismatch #214 was
-// designed to remove). run.go computes that one, analytically known
-// fill price before calling Service.Run (see nextBarOpenAfterEntry)
-// and configures it here as a fixed value — not a live per-bar feed,
-// since backtest.Runner drives the full replay internally and exposes
-// no per-bar hook a composition root could otherwise update a price
-// source from, and demoStrategy's own single, deterministic entry
-// means exactly one fill ever needs a price, so a single precomputed
-// value is both sufficient and correct.
-type simPriceSource struct {
-	symbol string
-	price  num.Price
-}
+// designed to remove). run.go computes each instrument's one,
+// analytically known fill price before calling Service.Run (see
+// nextBarOpenAfterEntry) and configures them all here as fixed
+// values — not a live per-bar feed, since backtest.Runner drives the
+// full replay internally and exposes no per-bar hook a composition
+// root could otherwise update a price source from, and demoStrategy's
+// own single, deterministic entry per instrument means exactly one
+// fill per instrument ever needs a price, so one precomputed value
+// each is both sufficient and correct.
+//
+// This is deliberately narrow: it is one precomputed next-bar-open
+// fill price per instrument for this provisional single-entry demo
+// strategy specifically, never a general multi-bar portfolio fill
+// model (issue #224 review, point 4). A future, less trivial CLI
+// strategy needing a genuine per-bar price feed should get its own
+// FillPriceSource, not a stretched version of this one.
+type simPriceSource map[string]num.Price
 
-func (s *simPriceSource) Info() simbroker.ModelInfo {
+func (s simPriceSource) Info() simbroker.ModelInfo {
 	return simbroker.ModelInfo{Name: "cli-demo-next-bar-open", Version: "v1"}
 }
 
-func (s *simPriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
-	if listing.Symbol() != s.symbol {
+func (s simPriceSource) Price(listing instrument.Listing, side order.Side) (num.Price, error) {
+	p, ok := s[listing.Symbol()]
+	if !ok {
 		return num.Price{}, fmt.Errorf("no price configured for %s", listing.Symbol())
 	}
-	return s.price, nil
+	return p, nil
 }
 
 // environmentFactory is this CLI's own concrete svcbacktest.
@@ -58,8 +70,7 @@ func (s *simPriceSource) Price(listing instrument.Listing, side order.Side) (num
 // construction into the injected-factory seam service/backtest
 // defines rather than calling a service constructor directly.
 type environmentFactory struct {
-	listing instrument.Listing
-	prices  *simPriceSource
+	prices simPriceSource
 }
 
 func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.EnvironmentRequest) (svcbacktest.Environment, error) {

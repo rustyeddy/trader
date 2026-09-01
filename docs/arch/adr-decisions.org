@@ -149,6 +149,7 @@ the original decided, use full supersession instead.
 | 039 | Backtest application service EnvironmentFactory (in adr-039-backtest-service-environment-factory.org) | Accepted |
 | 040 | Thin backtest CLI (in adr-040-backtest-cli.org) | Accepted |
 | 041 | Deterministic backtest regression/golden suite (in adr-041-backtest-determinism-suite.org) | Accepted |
+| 042 | Multi-instrument and portfolio backtesting (in adr-042-multi-instrument-backtesting.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -379,6 +380,25 @@ blanket diff. Also records the evidence-driven discovery that
 =journal.KindAccount= is architecturally unreachable from
 =adapters/broker/sim= today, and two new dataset-identity
 =ConfigDigest= contrapositives (revision/fingerprint, instrument).
+
+Note: ADR-042 is likewise maintained in its own file,
+=docs/arch/adr-042-multi-instrument-backtesting.org=, rather than
+inline in this registry.  Its own Status section is authoritative.
+Issue #224 (M5-16) asks M5 to prove itself on realistic
+multi-instrument portfolios; this ADR records the finding that
+=backtest=/=service/backtest= were already fully multi-instrument by
+construction (=Strategy.Describe().Requirements= is the universe
+boundary) and the actual gap was =cmd/trader/backtest run='s
+single-symbol CLI, plus the resulting design: repeatable =--symbol=
+with order-independent canonical resolution and clear duplicate
+rejection, a generalized =demoStrategy=/=simPriceSource= (documented
+as still only a per-instrument precomputed price, never a general fill
+model), a binding =risk.MaxOpenPositionsRule(1)= regression proving
+shared account/risk state genuinely crosses instrument boundaries
+(unlike #223's own non-binding =MaxOpenPositionsRule(5)=), and a
+real, pre-existing =backtest.Manifest.ConfigDigest= gap (it embeds
+each dataset's =BuiltAt= wall-clock timestamp) found and worked
+around in the test rather than fixed as an out-of-scope side effect.
 
 * ADR-001: Modular monolith before service decomposition
 
