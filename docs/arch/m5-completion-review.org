@@ -1,0 +1,411 @@
+#+TITLE: M5 Completion Review — Deterministic Backtesting and Org Reports
+#+STARTUP: overview indent
+
+* Purpose
+
+This document is the M5 closeout review (issue #226, M5-18). It is a
+plain audit/evidence record, not an ADR: it records decisions already
+made and cites the current code/test state that proves them, rather
+than proposing a new architectural decision. If auditing surfaces a
+genuinely new decision, that decision gets its own ADR separately (none
+were needed here beyond the one documentation-drift fix recorded
+below).
+
+Reviewed tree: commit =c3734519e0afe1f3c6ac4d7f3e94642bbd5893e2= (main,
+immediately after #243/M5-17 merged — the last M5 issue before this
+one). This document and its own small fix (see "Documentation drift
+found and fixed" below) land in the same PR as issue #226.
+
+* Prerequisite: all M5 issues complete
+
+#+BEGIN_EXAMPLE
+#209  M5-01  Define backtesting architecture and package boundaries     closed
+#210  M5-02  Define strategy runtime contract                           closed
+#211  M5-03  Implement deterministic simulation clock for backtests     closed
+#212  M5-04  Implement deterministic historical bar replay source       closed
+#213  M5-05  Implement deterministic backtest scheduler                 closed
+#214  M5-06  Define and enforce no-lookahead and warm-up semantics      closed
+#215  M5-07  Define immutable backtest run manifest                     closed
+#216  M5-08  Implement backtest runner lifecycle                        closed
+#217  M5-09  Derive completed trades and backtest accounting views      closed
+#218  M5-10  Implement durable backtest journal/event record            closed
+#219  M5-11  Define backtest result and performance metrics model       closed
+#220  M5-12  Implement backtest report renderers                        closed
+#221  M5-13  Add backtest application service                          closed
+#222  M5-14  Add thin backtest CLI                                      closed
+#223  M5-15  Add deterministic backtest regression/golden suite         closed
+#224  M5-16  Add multi-instrument and portfolio backtesting             closed
+#225  M5-17  Preserve external/private strategy integration seam       closed (#243)
+#226  M5-18  Perform M5 backtesting completion review                  this issue
+#+END_EXAMPLE
+
+Every M5 issue except this one (#226, the review itself) is closed.
+Per the sequencing agreed on #226's own thread, #225 was finished and
+merged (PR #243) before this audit began, so this review runs against
+the actual final M5 tree rather than carrying #225 forward as a
+deferred item.
+
+* Mechanical gates (reviewed commit, plus the drift fix in this PR)
+
+All commands run from the repository root against the reviewed tree.
+
+| Gate | Command | Result |
+|------+---------+--------|
+| Build | =go build ./...= | clean, no output |
+| Vet | =go vet ./...= | clean, no output |
+| Full test suite, race detector | =go test ./... -race= | all packages =ok= |
+| Lint | =make lint= (golangci-lint v2.13.0) | =0 issues.= |
+| Determinism suite, repeated | =go test ./backtest/... -run 'TestManifest_ConfigDigest\|TestBacktest_SharedRiskBindsAcrossInstruments' -v -count=5= | all 5 repeats pass, including the pinned EUR/USD winner assertion (ADR-042) |
+| CLI vertical slice, repeated | =go test ./cmd/trader/backtest/... -run 'TestMultiInstrument\|TestVerticalSlice' -v -count=3= | all 3 repeats pass, including order-independent =ConfigDigest= (ADR-042) and post-warm-up entry timing (PR #240) |
+| Import-boundary tests, per package | see table below | every boundary test passes on the current tree |
+
+Import-boundary tests, run individually so each package's own guard is
+named and confirmed on the *current* tree (per review point 2: audit
+current code/test boundaries, not just issue history):
+
+| Package | Test | Result |
+|---------+------+--------|
+| =backtest= | =TestBacktestNeverImportsConcreteAdapters= | PASS |
+| =examples/m5= | =TestPrivateStrategyNeverImportsRuntimeOrTransportPackages= | PASS |
+| =execution= | =TestExecutionNeverImportsBrokerOrRisk= | PASS |
+| =report= | =TestReportNeverImportsOrchestrationOrAdapters= | PASS |
+| =risk= | =TestRiskNeverImportsBrokerOrExecution= | PASS |
+| =service/backtest= | =TestServiceBacktestNeverImportsAdaptersOrCmd= | PASS |
+| =strategy= | =TestStrategyNeverImportsRuntimeApplicationOrTransportPackages= | PASS |
+
+* Checklist-by-checklist evidence, verified against the current tree
+
+** Backtests consume canonical M2 data and record dataset revision/provenance
+
+=backtest.Runner= takes a =*marketdata.Manager= and resolves its
+replay source through it (ADR-035); =backtest.Manifest.Dataset()=
+returns =[]marketdata.Manifest=, each carrying =Provider=,
+=Instrument=, =Interval=, =Span=, and a computed =Revision()=/
+=RawFingerprint= (ADR-020, ADR-036). Confirmed live in the worked
+demonstration below: the dataset manifest's =Revision()= and
+=RawFingerprint= are printed and carried through to the final
+=backtest.Manifest.Dataset()=.
+
+** Strategy runtime is broker-neutral and usable by future live execution
+
+=strategy.Strategy= depends only on =order=, =marketdata=,
+=instrument=, =account=, =clock=, =id=, =num=, and =log/slog=
+(ADR-005; =strategy/doc.go='s own "Dependency direction" section).
+=strategy/boundary_test.go='s =TestStrategyNeverImportsRuntimeApplicationOrTransportPackages=
+mechanically forbids =broker=, =execution=, =risk=, =pipeline=,
+=backtest=, =service=, =cmd=, and =adapters= (widened by ADR-043/#225).
+Confirmed PASS above.
+
+** No-lookahead and warm-up semantics are explicit and tested
+
+ADR-012/014/021 (calendar/session semantics), ADR-035 (layered
+no-lookahead ownership across =Replay=/=Scheduler=/=View=). PR #240's
+regression (=TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar=)
+proves =Scheduler= calls =OnBar= during every warm-up bar and discards
+the resulting intent rather than suppressing the call, and that the
+strategy's own warm-up bookkeeping must therefore track this itself —
+confirmed passing (=count=3=, above).
+
+** M4 execution/risk and M3 simulator remain the authoritative trading path
+
+ADR-006 (execution/risk separate stages), ADR-008 (simulated broker
+implements the public =broker= port). The worked demonstration below
+drives a real =pipeline.Pipeline= (=execution.Planner= +
+=risk.Engine= with a real =risk.NewMaxOpenPositionsRule=, not a
+zero-rule stub) and a real =adapters/broker/sim= broker — the journal
+shows =intent -> proposal -> decision -> request -> order -> fill=
+for both the entry and exit, proving no shortcut path exists around M4/M3.
+
+** Backtest manifests/journals/results are reproducible and auditable
+
+ADR-035-037 (manifest/journal/metrics model), ADR-041's determinism
+suite (=TestManifest_ConfigDigest*=, =TestBacktest_SharedRiskBindsAcrossInstruments=,
+re-run 5x above with no variation). One known, explicitly tracked
+qualification: see "ConfigDigest/BuiltAt: accepted limitation" below —
+reproducibility holds for a run against an already-persisted canonical
+dataset, not yet across independent canonical rebuilds.
+
+** Performance metrics reconcile with authoritative fills/accounting
+
+See "Worked end-to-end demonstration" below for a live numeric
+reconciliation (sizing -> fill quantity -> trade realized PnL ->
+account state -> =Metrics= -> rendered report), not just a citation of
+=metrics_test.go=, per review point 4.
+
+** Multi-instrument behavior is deterministic
+
+ADR-042: =backtest=/=service/backtest= are multi-instrument by
+construction (=Strategy.Describe().Requirements= is the universe
+boundary); =backtest/portfolio_test.go='s
+=TestBacktest_SharedRiskBindsAcrossInstruments= pins EUR/USD as the
+deterministic winner under a binding =MaxOpenPositionsRule(1)=,
+confirmed stable across 5 repeats above; =cmd/trader/backtest='s own
+order-independent =ConfigDigest= regression confirmed stable across 3
+repeats.
+
+** Service/CLI follow ADR-022 and formatting remains transport-side
+
+ADR-039 (=service/backtest.EnvironmentFactory= injection seam keeps
+=service/backtest= adapter-free), ADR-040 (thin CLI, =report= package
+owns rendering — =cmd/trader/backtest= never formats a table/JSON/Org
+string itself). =TestServiceBacktestNeverImportsAdaptersOrCmd= confirmed
+PASS above.
+
+** External/private strategy seam is preserved
+
+ADR-043/#225: =examples/m5= is a mechanically-verified representative
+external strategy (=TestPrivateStrategyNeverImportsRuntimeOrTransportPackages=,
+confirmed PASS above) driven through the public
+=service/backtest.Service.Run= boundary in
+=TestPrivateStrategy_RunsThroughPublicBacktestService=, including its
+own manifest-accuracy assertions (FillModel/SlippageModel/CommissionModel)
+added during #243's review cycle.
+
+** Architecture/ADR registry reflects decisions discovered during M5
+
+ADR-031 through ADR-043 are all indexed and all =Accepted=, confirmed
+directly against each file's own Status section (not merely the index
+table) during this review — see "Documentation drift found and fixed"
+below for the one discrepancy found and corrected.
+
+* Worked end-to-end demonstration
+
+Per the acceptance criterion and review point 3 (prove causal stages
+via journal evidence, not merely a final report), this section is a
+real run against the committed =cmd/trader/backtest/testdata= EURUSD
+H1 fixture (real OANDA-shaped canonical data, built through
+=marketdata.Manager= exactly as =cmd/trader/backtest= itself does),
+driving a real =pipeline.Pipeline= and =adapters/broker/sim= broker
+through =backtest.Runner=, with a real =jsonl.Writer= journal read
+back afterward. The driving program is throwaway audit tooling (not
+committed to the repository) built directly against the packages this
+review is auditing; every value shown below is a direct, unedited
+capture of its output.
+
+An enter-then-exit strategy (mirroring =backtest/determinism_test.go='s
+own =enterThenExitStrategy= fixture) was used instead of the CLI's
+=demoStrategy= specifically so the run produces one genuine *closed*
+round trip with non-zero realized PnL — =demoStrategy= only enters and
+never exits, so a CLI-only run cannot exercise the exit side of
+=KindOrder=/=KindFill= or =order.Trade='s closed-trade fields. Two
+distinct configured fill prices (entry vs. exit) were used for the
+same reason: a same-price round trip would net to zero at every stage
+regardless of whether reconciliation logic is actually correct.
+
+** Stage 1: canonical M2 data
+
+#+BEGIN_EXAMPLE
+Plan actions: 1
+dataset provider=oanda instrument=fx:EUR/USD interval=H1
+  revision=58d996e9b45695417b234d5de9976fa59dc10f25ee7fd9e132457d9d276c10c1
+  rawFingerprint=sha256:244b0ad17b5069b34281731b8805fd9a184bf00e0daf8ec5516526e5d6e5efa5
+  bars=216
+coverage partition status=current
+  revision=58d996e9b45695417b234d5de9976fa59dc10f25ee7fd9e132457d9d276c10c1
+#+END_EXAMPLE
+
+The raw fixture is built into canonical form through the real
+=marketdata.Manager.Plan=/=Build= path (never read or parsed
+directly), and =Coverage= confirms the built partition's revision
+matches what was just published.
+
+** Stages 2-6: strategy -> intent -> M4 execution/risk -> M3 simulator -> journal
+
+#+BEGIN_EXAMPLE
+RunID=run_01HKK5WY00E95X5CAFDZP77GTT
+ConfigDigest=sha256:198a65cf50f55b31c7dfaa5b3ce2b3ef7c2109d969ce237870f39e577742df7c
+ClosedTrades=1 OpenTrades=0
+Journal entries (17), in order:
+  [001] run-started
+  [002] intent
+  [003] proposal
+  [004] decision
+  [005] request
+  [006] order
+  [007] fill
+  [008] order
+  [009] intent
+  [010] proposal
+  [011] decision
+  [012] request
+  [013] order
+  [014] fill
+  [015] order
+  [016] trade
+  [017] run-completed
+#+END_EXAMPLE
+
+The journal — read back from a real =jsonl.Writer= file, not held only
+in memory — shows the complete causal chain twice (once for entry,
+once for exit): =intent -> proposal -> decision -> request -> order ->
+fill=, each entry's =decision= produced by a real =risk.Engine=
+carrying a real =risk.NewMaxOpenPositionsRule(5)= (not a zero-rule
+stub), followed by a single =trade= entry once the position closes,
+and bracketed by =run-started=/=run-completed= lifecycle markers
+(ADR-036). This is the middle-stage evidence a final report alone
+cannot provide (review point 3): the canonical M4/M3 path was
+genuinely exercised, not bypassed.
+
+** Stage 7: numerical reconciliation
+
+Position sizing: =RiskFraction 0.01 x StartingCapital 100000 USD =
+1000 USD risk-amount=; =1000 USD / AdverseDistance 0.01000 = 100000=
+units — the fixed-fraction sizer's own documented rule (ADR-030).
+
+#+BEGIN_EXAMPLE
+Closed trade: side=long realizedPnL=500 USD costs=0 USD
+  opened=2024-01-08 01:00:00 +0000 UTC closed=2024-01-08 02:00:00 +0000 UTC
+Account snapshot: equity=100500 USD realizedPnL=500 USD unrealizedPnL=0 USD
+Metrics: NetPnL=500 USD GrossPnL=500 USD ClosedTradeCosts=0 USD
+  AccountFees=0 USD StartingCapital=100000 USD FinalEquity=100500 USD
+#+END_EXAMPLE
+
+Reconciliation, stage by stage:
+
+- Entry fill price 1.10015, exit fill price 1.10515 (both configured,
+  both actually used — confirmed by the two distinct =fill= journal
+  entries above), price difference 0.00500.
+- Quantity 100,000 (from sizing, above) x price difference 0.00500 =
+  *500 USD* — exactly =order.Trade.RealizedPnL= for the one closed
+  trade.
+- =account.Snapshot.RealizedPnL= (500 USD) equals the trade's own
+  =RealizedPnL=: the broker-authoritative account state and the
+  derived trade view agree (ADR-007's "broker state is authoritative,
+  trade views are derived" invariant, confirmed numerically rather
+  than merely asserted).
+- =backtest.Metrics.GrossPnL= (500 USD) equals =NetPnL= (500 USD)
+  because =ClosedTradeCosts= and =AccountFees= are both 0 USD in this
+  environment (=SlippageModel=/=CommissionModel= both configured as
+  =none=, matching the no-slippage/no-commission =simbroker.Deps= this
+  run actually used) — =NetPnL = GrossPnL - ClosedTradeCosts=,
+  confirmed to hold exactly (ADR-037).
+- =Metrics.FinalEquity= (100,500 USD) equals =StartingCapital=
+  (100,000 USD) plus =NetPnL= (500 USD), and matches
+  =account.Snapshot.Equity= exactly.
+
+Every one of these five relationships was computed independently from
+the raw run output above, not asserted a priori — this is the
+"explicit numerical assertions" review point 4 asked for.
+
+** Stage 8: report rendering
+
+The same result, projected through =report.NewBacktestReport= /
+=report.OrgRenderer= (the identical code path =cmd/trader/backtest
+run= uses) and rendered to Org, reproduces the same five reconciled
+numbers in its own "Trade Statistics," "Completed Trades," and "Final
+Account State" tables — Net PnL 500 USD, Final Equity 100500 USD,
+Realized PnL 500 USD — confirming =report= is a pure presentation
+projection with no independent computation of its own (ADR-038).
+
+One additional observation, noted rather than treated as a defect: the
+equity curve's intermediate point at =2024-01-08T01:00:00Z= shows
+100,045 USD, an unrealized mark distinct from either configured fill
+price. =Scheduler='s own mark-to-market uses the bar-observed market
+price for open-position valuation, independent of whatever
+=simbroker.FillPriceSource= a composition root configured for order
+execution (ADR-028) — expected behavior for this demonstration's
+deliberately simplified, non-market-linked fill-price source, not a
+reconciliation gap in the final closed-trade numbers above.
+
+* ConfigDigest/BuiltAt: accepted limitation, tracked
+
+Discovered during #224 (M5-16) and re-confirmed here:
+=backtest.Manifest.ConfigDigest()= embeds each dataset's full
+=marketdata.Manifest= (including =BuiltAt=, the wall-clock time of that
+specific =Manager.Build= call) with no =MarshalJSON= excluding it the
+way =Revision()= already does. Two runs against the *same persisted
+canonical dataset* produce identical =ConfigDigest= (confirmed by
+ADR-042's own regression and re-confirmed in the mechanical-gates table
+above); two runs that each *independently rebuild* byte-identical
+canonical data from the same raw archive do not, purely because of
+=BuiltAt=.
+
+**Classification: accepted limitation, not a blocker.** What remains
+reproducible today — a run against a specific, already-persisted
+canonical dataset — is exactly the case a real research or paper
+trading workflow uses (data is built once, then backtested against
+repeatedly); dataset identity/provenance (=Revision()=,
+=RawFingerprint=) and deterministic execution are both still fully
+auditable regardless of this gap.
+
+**Ownership:** issue #244, filed as part of this review, with the
+suggested fix shape (a digest-safe =marketdata.Manifest= representation
+excluding =BuiltAt=) and the exact regression it needs. Not assigned a
+milestone yet; candidate for whichever milestone next touches
+=marketdata.Manifest= or =backtest.Manifest=.
+
+* Documentation drift found and fixed
+
+Per review point 7 (do not credit ADR-031 through ADR-042 — or 043 —
+as complete evidence merely because they are indexed; check for stale
+wording): ADR-043's own Decision section quoted the boundary test's
+*prior* name,
+=TestStrategyNeverImportsBrokerExecutionRiskOrPipeline=, which was
+renamed to =TestStrategyNeverImportsRuntimeApplicationOrTransportPackages=
+during PR #243's own review cycle (Copilot review, fixed in commit
+=bf127cd=) — after ADR-043's text was originally written but before it
+merged. This is exactly the class of drift #224's own review comment
+thread warned about recurring. Fixed in this same PR by correcting
+ADR-043's wording to name the current test function and record why it
+was renamed; no decision in ADR-043 changed, only the test-name
+citation.
+
+A targeted spot-check of other test/type-name citations across
+ADR-035 through ADR-043 (=TestBacktest_SharedRiskBindsAcrossInstruments=,
+=TestManifest_ConfigDigest*=, =demoStrategy=, =simPriceSource=,
+=environmentFactory=) found every other citation still accurate against
+the current tree — no further drift found.
+
+* Recommendation
+
+** M5 blockers (must be zero to close): none found
+
+Every checklist item above has current, passing, mechanically-checked
+evidence on the reviewed tree. All M5 issues (#209-#225) are closed;
+this issue (#226) is the last remaining item and closes with this
+document.
+
+** Accepted limitations / follow-ups (do not block M5 close)
+
+- =ConfigDigest=/=BuiltAt= cross-rebuild reproducibility gap — issue
+  #244 (see above).
+
+** Prerequisites and recommendations for future milestones
+
+For *M5.5 (walkforward, sweeps)*:
+
+- Any parameter-sweep or walkforward runner comparing many runs against
+  the same dataset should be built assuming today's =ConfigDigest=
+  guarantee (same persisted dataset -> same digest), and should itself
+  ensure all compared runs share one canonical store rather than each
+  independently rebuilding data, until issue #244 is resolved.
+- =backtest.Metrics.PerInstrument()= and the =report= package's
+  per-instrument tables are already multi-instrument-shaped (ADR-042);
+  a sweep/comparison service can likely build directly on
+  =service/backtest.RunResponse= without new backtest-side plumbing.
+
+For *M6 (OANDA paper trading, live safety)*:
+
+- =strategy.Strategy= itself needs no change to run under a live
+  =broker.Account= implementation in place of =adapters/broker/sim=
+  (ADR-005/ADR-008's own invariant, exercised concretely by this
+  review's worked demonstration using the real =pipeline.Pipeline=/
+  =broker.Account= interfaces).
+- ADR-043's documented (not designed) out-of-process boundary analysis
+  — =IntentFactory= as runtime-owned identity infrastructure, and
+  =strategy.View= as the hardest, deliberately deferred part — is the
+  right starting point if M6 or a later milestone needs an
+  out-of-process strategy host; it is not required for M6's own
+  in-process live trading scope.
+- Live guards, reconciliation, and durable checkpoints (architecture
+  document's =live= package responsibilities) are entirely new scope
+  M5 does not touch; M5's journal (ADR-036) and manifest (ADR-035)
+  models are reusable as-is for a live session's own durable record,
+  but live-specific guard/reconciliation state is not yet designed.
+
+** Overall recommendation: close M5
+
+M5 delivers a trustworthy, deterministic, reproducible backtesting
+capability as scoped: canonical-data-in, broker-neutral-strategy,
+M4/M3-authoritative, durable-journal-out, with one clearly tracked and
+appropriately-scoped accepted limitation (#244) and no open blockers.
