@@ -1,0 +1,225 @@
+#+TITLE: Multi-Instrument and Portfolio Backtesting ADR-042
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #224 (M5-16) asks M5 to prove itself on realistic
+multi-instrument portfolios, not only single-symbol toy runs. This
+ADR records the scope-narrowing finding from the plan/review thread
+and the resulting design.
+
+* Context
+
+Before implementation began, I surveyed what already existed:
+=backtest.Scheduler=/=Runner= have been multi-instrument since M5's
+foundations — =bothInstrumentsRequirements=/=instrumentResolverFor=
+(used throughout =backtest='s own test suite since #213/#214) already
+replay EUR/USD + GBP/USD through *one* =Scheduler=, with one shared
+=Account=/=Pipeline=, deterministic same-timestamp ordering already
+tested, and #223's own determinism suite already runs a genuine
+two-instrument, shared-account scenario end to end.
+=backtest.Metrics.PerInstrument()= (#219) and =report.BacktestReport.
+PerInstrument=/its Org table (#220) already exist and already work for
+N instruments. Critically, =service/backtest.RunRequest= (#221)
+carries no instrument field at all — the replayed universe is
+entirely determined by =Strategy.Describe().Requirements=, already a
+=[]strategy.DataRequirement=. =service/backtest= is therefore already
+instrument-count-agnostic by construction.
+
+The actual gap was =cmd/trader/backtest run= (#222): hard-coded to
+exactly one =--symbol=, one-instrument =demoStrategy=, a
+single-symbol =simPriceSource=, and an =environmentFactory= built
+around one =instrument.Listing= field that (on inspection) was never
+even read by =NewEnvironment=.
+
+This reframed #224 into: *prove and expose the existing multi-
+instrument capability through the CLI/vertical-test surface*, not
+build new backtest engine capability — which is also what makes "no
+per-symbol backtest engine fork" trivially true: no
+=backtest=/=service/backtest= code changed at all.
+
+Design review (issue #224 comment) accepted this reframing and added
+four corrections before implementation:
+
+1. #223's own =MaxOpenPositionsRule(5)= with two instruments never
+   actually bound (five is never reached by two entries), so it could
+   not by itself prove shared risk state crosses instrument
+   boundaries — #224 needed one scenario where the second instrument's
+   outcome *depends on* state the first instrument created.
+2. The new vertical test should prove the *newly exposed composition
+   path* (CLI -> N requirements -> one shared Runner/account), not
+   duplicate scheduler-level determinism/ordering tests #223 already
+   owns.
+3. A duplicate =--symbol= must be a clear CLI validation error,
+   normalized (case/whitespace) before comparing, and the resulting
+   requirement/price ordering must not depend on flag order.
+4. =simPriceSource='s per-instrument map is fine for the provisional
+   demo strategy specifically, but must be documented as exactly that
+   — one precomputed next-bar-open price per instrument, never a
+   general multi-bar fill model.
+
+* Decision
+
+** CLI-only production change: repeatable =--symbol=, generalized demo strategy and price source
+
+=cmd/trader/backtest run='s =--symbol= flag became repeatable
+(=StringArrayVar=). =resolveInstrumentSet= (=run.go=) normalizes each
+symbol (upper-case, trimmed), rejects an exact duplicate immediately
+with a CLI-facing error (=duplicate --symbol "EURUSD": already
+requested as "EURUSD"=) *before* touching either resolver — not via
+=instrument.MemoryResolver.Register='s own duplicate-registration
+error, which is worded for a resolver-internal audience and would
+additionally leave a partially-registered sim-side resolver from the
+first of the two colliding calls — and sorts the resulting
+=[]instrument.ID= by canonical string, so =--symbol GBPUSD --symbol
+EURUSD= and =--symbol EURUSD --symbol GBPUSD= build the identical
+=[]strategy.DataRequirement= order regardless of flag order.
+
+=demoStrategy= (=demo_strategy.go=) now takes =[]instrument.ID=
+instead of one, and tracks each instrument's own warm-up/entry state
+independently by =instrument.ID= string in two maps
+(=seen=/=entered=) — the identical per-instrument-keyed pattern
+=backtest='s own =enterThenExitStrategy= test fixture (#223) already
+established as correct. One instrument reaching its own entry bar
+never affects another's state.
+
+=simPriceSource= (=service.go=) changed from a single =(symbol,
+price)= pair to =map[string]num.Price=, matching the shape
+=backtest='s own test-only =fixedPriceSource= fixture already uses.
+Its doc comment is explicit about scope (issue #224 review, point 4):
+one precomputed next-bar-open fill price per instrument, for this
+provisional single-entry demo strategy specifically — never a general
+multi-bar portfolio fill model. =environmentFactory= dropped its
+unused =listing= field.
+
+** New CLI vertical tests prove the newly exposed composition path only
+
+=cmd/trader/backtest/multi_instrument_test.go= adds:
+
+- =TestVerticalSlice_MultiInstrumentRun=: two =--symbol= values produce
+  two open positions in the *one* shared =account.open_positions=
+  list from one =Run= call — proving CLI -> N requirements -> one
+  service =Run= -> one shared account, not scheduler-level ordering
+  (#223 already owns that).
+- =TestVerticalSlice_MultiInstrumentRun_ConfigDigestIsOrderIndependent=:
+  requesting the same two instruments in reversed =--symbol= order
+  produces the identical =ConfigDigest=. Both invocations deliberately
+  share one =--data-store-root= — see the "real, pre-existing gap"
+  note below for why a shared store was necessary for this test to be
+  meaningful.
+- =TestVerticalSlice_MultiInstrumentRun_RejectsDuplicateSymbol= and its
+  case/whitespace-insensitive counterpart.
+
+Deeper per-instrument P&L reconciliation and same-timestamp
+determinism are deliberately *not* re-tested here: #223's own journal/
+trades/metrics sub-tests already assert per-instrument equality across
+two independent runs, a strictly stronger check than a single-run
+reconciliation would add, and scheduler-level same-timestamp ordering
+already has its own dedicated tests. Each test in the suite now has a
+distinct reason to exist (issue #224 review, point 2).
+
+** New backtest-level test: a genuinely *binding* shared-risk scenario
+
+=backtest/portfolio_test.go= adds
+=TestBacktest_SharedRiskBindsAcrossInstruments=, using existing public
+components exactly as review suggested ("the binding shared-risk
+scenario can live at the backtest/vertical-test composition level...
+keep the production CLI change small"): a real
+=risk.NewMaxOpenPositionsRule(1)= engine, one shared =Account=/
+=Pipeline= (=newBindingRiskRunnerParams=, shaped like =runner_test.go='s
+own =mustRunnerParams= but with this one rule instead of a zero-rule
+=Engine=), and the pre-existing =mustEnterOnFirstBarStrategy=
+(=scheduler_test.go=) — which already enters both EUR/USD and GBP/USD
+on their shared first bar, at the same timestamp.
+
+Both intents are evaluated against the same frozen per-batch account
+state, then submitted in Scheduler's own canonical deterministic
+order; the first to submit opens the account's one permitted position,
+and the second is rejected because the shared account already holds
+it. The test captures the journal (the same =capturingRecorder= #223
+introduced) and asserts, by name: exactly one =KindDecision= is
+=Allowed=true=, exactly one is =Allowed=false= with a violation naming
+=max_open_positions=, and the account holds exactly one position
+overall — not one per instrument. This is the "second instrument's
+outcome depends on state the first created" property #223's own
+=MaxOpenPositionsRule(5)= could not demonstrate (five is never reached
+by two simultaneous entries), proving one =Scheduler=, one =Account=,
+shared risk state, same-timestamp deterministic submission order, and
+no per-symbol engine fork, all at once. Verified stable across five
+repeated runs (deterministic — the same instrument wins every time, as
+expected from Scheduler's own deterministic tie-break).
+
+** A real, pre-existing =backtest.Manifest.ConfigDigest= gap, found and worked around, not fixed here
+
+While developing the order-independence test, two CLI invocations
+requesting the *same* two instruments in the *same* order — each with
+its own freshly built canonical store — produced *different*
+=ConfigDigest= values. Investigation traced this to
+=backtest.Manifest.ConfigDigest= embedding each dataset's complete
+=marketdata.Manifest= (via =configWire.Dataset []marketdata.Manifest=,
+marshaled with Go's default struct encoding) — including =BuiltAt=,
+the wall-clock time a specific =Manager.Build= call stamped that
+partition. =marketdata.Manifest= has no =MarshalJSON= of its own that
+excludes =BuiltAt= the way its own =Revision()=/=RawFingerprint=
+digest already does (that exclusion is documented on =Manifest= itself
+but only applies to that narrower fingerprint, not to a full JSON
+marshal of the struct). Two independently-built canonical stores for
+byte-identical raw input therefore produce two different
+=ConfigDigest= values regardless of instrument order — a real
+reproducibility gap in =backtest.Manifest=, orthogonal to instrument
+ordering and to #224's own scope.
+
+This is *not* fixed in this change: it is a =backtest=-package
+concern unrelated to the CLI/multi-instrument work #224 asked for, and
+touches =Manifest='s own established reproducibility contract (ADR-015/
+ADR-020) — exactly the kind of change CONTRIBUTING's "do not fix
+pre-existing issues unrelated to the current task" guidance reserves
+for its own issue. Instead, the order-independence test shares one
+=--data-store-root= across both invocations: the second invocation's
+own =Manager.Plan= finds the data already built and never re-stamps
+=BuiltAt=, isolating the test to what it actually intends to prove
+(order-independence of the requested instrument set) rather than an
+unrelated, already-broken property (reproducibility of =Manager.
+Build='s own timestamp). This gap is worth its own future issue.
+
+* Consequences
+
+- =cmd/trader/backtest run= can now execute genuine multi-instrument
+  portfolio backtests; =cmd/trader/backtest show= needed no changes,
+  since it only ever re-renders whatever =report.BacktestReport= =run=
+  already persisted.
+- =backtest.Manifest.ConfigDigest='s =BuiltAt= inclusion is now a
+  documented, evidenced gap (this ADR and the affected test's own
+  comment) rather than a silent one — a candidate for its own future
+  M5 (or later) issue.
+- Every new test's own reason to exist is distinct from what #222/#223
+  already prove, keeping this suite additive rather than duplicative.
+
+* Alternatives Considered
+
+- *A new =service/backtest.RunRequest.Symbols=/portfolio DTO, or a
+  per-symbol =Runner=/=Scheduler=.* Rejected (issue #224 review, point
+  7, "explicitly agreed" scope boundary): =Strategy.Describe().
+  Requirements= is already the correct, sufficient universe boundary;
+  either alternative would be a design regression back toward a
+  per-symbol engine.
+- *Treating #223's =MaxOpenPositionsRule(5)= as sufficient proof of
+  shared risk.* Rejected (issue #224 review, point 1): a rule that
+  never binds cannot distinguish "shared account state" from "two
+  independent per-symbol accounts that happen to produce the same
+  observable result."
+- *Re-deriving portfolio equity by summing per-instrument views in a
+  test.* Rejected (issue #224 review, point 5): would blur ADR-037's
+  own split between trade-derived per-instrument metrics and
+  authoritative account-level state; every test here reads final
+  account state directly instead.
+- *Coupling the multi-instrument test's isolation assertions to
+  =DeriveTrades='s internal grouping key.* Not done (issue #224 review,
+  point 6): the CLI-level tests assert only externally visible
+  semantics (which instrument each open position/trade belongs to),
+  never an implementation-technique detail.
+- *Silently fixing =backtest.Manifest.ConfigDigest='s =BuiltAt=
+  inclusion as part of this change.* Rejected: unrelated to #224's own
+  scope and a big enough behavior change to =Manifest= (an M5
+  foundational, already-=Accepted= type) to deserve its own ADR/issue
+  rather than a side effect of a CLI multi-instrument change.
