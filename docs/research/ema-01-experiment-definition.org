@@ -3,28 +3,29 @@
 
 * Purpose
 
-This document is the precise specification for Trader's first hypothesis-
-driven research experiment (issue #246, EMA-01). It exists so later
-milestone issues (EMA-03 through EMA-11) can implement and test against
-exact, agreed semantics instead of each independently inventing behavior.
+This document is the precise specification for Trader's first
+hypothesis- driven research experiment (issue #246, EMA-01). It exists
+so later milestone issues (EMA-03 through EMA-11) can implement and
+test against exact, agreed semantics instead of each independently
+inventing behavior.
 
-This is a strategy-experiment specification, not a durable architecture
-decision, so it does not claim an ADR number (see
-=docs/arch/adr-decisions.org=). It lives in its own =docs/research/= area,
-which becomes the canonical human-readable home for this and future
-strategy experiments, each linking to its own eventual run/result (EMA-11,
-issue #256).
+This is a strategy-experiment specification, not a durable
+architecture decision, so it does not claim an ADR number (see
+=docs/arch/adr-decisions.org=). It lives in its own =docs/research/=
+area, which becomes the canonical human-readable home for this and
+future strategy experiments, each linking to its own eventual
+run/result (EMA-11, issue #256).
 
 * Research Hypothesis
 
-A fast EMA crossing a slow EMA identifies trend changes that, when traded
-long/short with opposite-cross exits, may produce positive expectancy on
-EUR/USD H1.
+A fast EMA crossing a slow EMA identifies trend changes that, when
+traded long/short with opposite-cross exits, may produce positive
+expectancy on EUR/USD H1.
 
 The experiment (EMA-11) can conclude *Promising*, *Inconclusive*, or
-*Rejected* against this hypothesis without that implying anything about
-whether the implementation itself is correct — those are judged separately
-against the deterministic tests this document enables.
+*Rejected* against this hypothesis without that implying anything
+about whether the implementation itself is correct — those are judged
+separately against the deterministic tests this document enables.
 
 * Reference Strategy
 
