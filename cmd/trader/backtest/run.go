@@ -32,6 +32,11 @@ type runFlags struct {
 	adverse      string
 	warmupBars   int
 
+	config       string
+	strategyName string
+	fastPeriod   int
+	slowPeriod   int
+
 	dataStoreRoot string
 	dataRawRoot   string
 	provider      string
@@ -56,7 +61,10 @@ func newRunCmd() *cobra.Command {
 			"--symbol may be repeated to run a multi-instrument portfolio\n" +
 			"backtest (issue #224): one Scheduler and one shared account/\n" +
 			"pipeline still replay every requested instrument — this is not a\n" +
-			"per-symbol engine.",
+			"per-symbol engine.\n\n" +
+			"--config supplies backtest/strategy parameters from a YAML file\n" +
+			"(issue #247), for a single instrument; any explicit flag above\n" +
+			"still overrides its value.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBacktest(cmd, flags)
 		},
@@ -70,8 +78,13 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.startingCash, "starting-cash", "10000", "starting account cash amount")
 	cmd.Flags().StringVar(&flags.currency, "currency", "USD", "account currency")
 	cmd.Flags().StringVar(&flags.riskFraction, "risk-fraction", "0.01", "fraction of account equity to risk, e.g. 0.01 for 1%")
-	cmd.Flags().StringVar(&flags.adverse, "adverse-distance", "", "adverse price distance used for sizing (required)")
+	cmd.Flags().StringVar(&flags.adverse, "adverse-distance", "", "adverse price distance used for sizing (required, unless supplied by --config)")
 	cmd.Flags().IntVar(&flags.warmupBars, "warmup-bars", 0, "warm-up bars required before the demo strategy may trade, per instrument")
+
+	cmd.Flags().StringVar(&flags.config, "config", "", "YAML config file supplying backtest/strategy parameters (issue #247); explicit flags above always override it")
+	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "strategy name recorded in the run manifest (informational only until EMA-04/EMA-07 wire a real strategy in)")
+	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period recorded in the run manifest")
+	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period recorded in the run manifest")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: a fresh temporary directory)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
@@ -80,10 +93,11 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "./backtest-runs", "directory run snapshots are written to and 'show' reads from")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
 
-	_ = cmd.MarkFlagRequired("symbol")
-	_ = cmd.MarkFlagRequired("from")
-	_ = cmd.MarkFlagRequired("to")
-	_ = cmd.MarkFlagRequired("adverse-distance")
+	// --symbol/--from/--to/--adverse-distance are no longer cobra-required:
+	// each is also satisfiable from --config (issue #247), so their
+	// presence is instead enforced uniformly by buildRunConfig's
+	// config.Load call, which aggregates every missing/invalid field into
+	// one error rather than cobra stopping at the first missing flag.
 	_ = cmd.MarkFlagRequired("data-raw-root")
 
 	return cmd
@@ -102,6 +116,22 @@ type instrumentSet struct {
 	ids          []instrument.ID
 	oandaListing map[string]instrument.Listing // keyed by instrument.ID.String()
 	simListing   map[string]instrument.Listing
+}
+
+// effectiveSymbols reconciles --symbol (repeatable, multi-instrument,
+// issue #224) with backtest.symbol from --config (single-instrument,
+// issue #247): explicit --symbol flags always win when present (any
+// combination with more than one --symbol was already rejected by
+// buildRunConfig before this point), and configSymbol is used only as
+// a fallback when no --symbol flag was given at all.
+func effectiveSymbols(flagSymbols []string, configSymbol string) ([]string, error) {
+	if len(flagSymbols) > 0 {
+		return flagSymbols, nil
+	}
+	if configSymbol != "" {
+		return []string{configSymbol}, nil
+	}
+	return nil, fmt.Errorf("at least one --symbol, or backtest.symbol in --config, is required")
 }
 
 // resolveInstrumentSet parses flags.symbols into a canonical
@@ -167,8 +197,9 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 }
 
 // runBacktest is newRunCmd's own RunE, split out so its own control
-// flow is easy to read top to bottom: parse flags -> resolve every
-// requested instrument (canonically, order-independently) -> publish
+// flow is easy to read top to bottom: resolve effective configuration
+// (flags/--config/defaults, issue #247) -> resolve every requested
+// instrument (canonically, order-independently) -> publish
 // canonical data for each if needed -> compute the demo strategy's
 // own, analytically known next-bar-open fill price per instrument ->
 // build the concrete EnvironmentFactory -> call service/backtest.Run
@@ -181,39 +212,43 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	ctx := cmd.Context()
 
-	interval, err := parseInterval(flags.interval)
+	cfg, err := buildRunConfig(cmd, flags)
 	if err != nil {
 		return err
 	}
-	from, err := parseDate(flags.from)
+
+	symbols, err := effectiveSymbols(flags.symbols, cfg.Backtest.Symbol)
 	if err != nil {
 		return err
 	}
-	to, err := parseDate(flags.to)
+
+	interval, err := parseInterval(cfg.Backtest.Interval)
+	if err != nil {
+		return err
+	}
+	from, err := parseDate(cfg.Backtest.From)
+	if err != nil {
+		return err
+	}
+	to, err := parseDate(cfg.Backtest.To)
 	if err != nil {
 		return err
 	}
 	span, err := marketdata.NewTimeRange(from, to)
 	if err != nil {
-		return fmt.Errorf("invalid --from/--to range: %w", err)
+		return fmt.Errorf("invalid backtest.from/backtest.to range: %w", err)
 	}
 
-	currency, err := num.ParseCurrency(flags.currency)
+	currency, err := num.ParseCurrency(cfg.Backtest.Currency)
 	if err != nil {
-		return fmt.Errorf("invalid --currency: %w", err)
+		return fmt.Errorf("invalid backtest.currency: %w", err)
 	}
-	startingCash, err := num.ParseMoney(flags.startingCash, currency)
+	startingCash, err := num.ParseMoney(cfg.Backtest.StartingCapital, currency)
 	if err != nil {
-		return fmt.Errorf("invalid --starting-cash: %w", err)
+		return fmt.Errorf("invalid backtest.starting_capital: %w", err)
 	}
-	riskFraction, err := num.ParseRate(flags.riskFraction)
-	if err != nil {
-		return fmt.Errorf("invalid --risk-fraction: %w", err)
-	}
-	adverseDistance, err := num.ParsePrice(flags.adverse)
-	if err != nil {
-		return fmt.Errorf("invalid --adverse-distance: %w", err)
-	}
+	riskFraction := cfg.Backtest.RiskFraction
+	adverseDistance := cfg.Backtest.AdverseDistance
 
 	storeRoot := flags.dataStoreRoot
 	if storeRoot == "" {
@@ -227,7 +262,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 
 	oandaResolver := instrument.NewMemoryResolver()
 	simResolver := instrument.NewMemoryResolver()
-	instruments, err := resolveInstrumentSet(flags.symbols, flags.provider, oandaResolver, simResolver)
+	instruments, err := resolveInstrumentSet(symbols, flags.provider, oandaResolver, simResolver)
 	if err != nil {
 		return err
 	}
@@ -277,11 +312,12 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	}
 
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
-		Strategy:        newDemoStrategy(instruments.ids, interval, flags.warmupBars),
-		Span:            span,
-		StartingCapital: startingCash,
-		RiskFraction:    riskFraction,
-		AdverseDistance: adverseDistance,
+		Strategy:           newDemoStrategy(instruments.ids, interval, flags.warmupBars),
+		StrategyParameters: cfg.Strategy,
+		Span:               span,
+		StartingCapital:    startingCash,
+		RiskFraction:       riskFraction,
+		AdverseDistance:    adverseDistance,
 	})
 	if err != nil {
 		return err
