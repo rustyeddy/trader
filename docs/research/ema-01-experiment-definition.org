@@ -43,16 +43,37 @@ against the deterministic tests this document enables.
 
 ** 1. Crossover Semantics
 
-The strategy retains the previous bar's fast/slow EMA relation and compares
-it against the current bar's relation:
+Each bar (once both EMAs are ready) has a *raw relation*: ~Above~
+(~fast > slow~), ~Below~ (~fast < slow~), or ~Tie~ (~fast == slow~).
 
-- *Bullish/long cross*: ~previous.fast <= previous.slow && current.fast > current.slow~
-- *Bearish/short cross*: ~previous.fast >= previous.slow && current.fast < current.slow~
+A single previous-bar/current-bar comparison is not sufficient, because a
+tie must neither trigger a crossover nor erase which side price was
+already on. The strategy instead tracks its *last non-tie relation*
+(~Above~, ~Below~, or undefined before either EMA has ever produced a
+non-tie relation), updated only when the current bar's raw relation is not
+~Tie~ — a ~Tie~ bar leaves the tracked value unchanged. A crossover is then
+detected by comparing the *current bar's raw relation* against the *last
+non-tie relation as it stood before this bar's update*:
 
-An exact tie (~fast == slow~) counts as "not yet crossed" on either side. It
-neither triggers a cross nor resets a pending one. These two conditions are
-collectively exhaustive and mutually exclusive: for any (previous, current)
-pair with both relations defined, at most one fires.
+- *Bullish/long cross*: current raw relation is ~Above~ and the last
+  non-tie relation (before this bar) was ~Below~.
+- *Bearish/short cross*: current raw relation is ~Below~ and the last
+  non-tie relation (before this bar) was ~Above~.
+- A current raw relation of ~Tie~ never triggers a cross, and a sequence
+  such as ~Above, Tie, Above~ never appears to cross: the tracked last
+  non-tie relation stays ~Above~ across the ~Tie~ bar, so the following
+  ~Above~ bar compares against ~Above~, not against ~Tie~.
+
+Before any non-tie relation has ever been observed, the last-non-tie state
+is undefined and no crossover can be detected — see Decision 3, where this
+coincides with warm-up in practice. These rules are exhaustive and mutually
+exclusive: for any bar with a defined last-non-tie state, at most one of
+the two cases above fires.
+
+See the "Tie Handling" worked example below, which traces exactly the
+~Above, Tie, Above~ (no cross) and ~Above, Tie, Below~ (cross detected
+against the pre-tie relation) cases this replaces a naive previous/current
+bar comparison for.
 
 ** 2. Warm-up Requirement
 
@@ -75,15 +96,15 @@ this reason; see Decision 3.
 Only afterward — the earliest possible signal is bar 51, not the bar that
 completes warm-up (bar 50).
 
-Detecting a cross requires *two* consecutive defined relations (a previous
-one and a current one to compare). Bar 50 is the first bar at which both
-EMAs are ready, so it is the first bar with *any* defined relation — it has
-no "previous" relation to compare against, so no cross can be detected
-there regardless of warm-up. This falls out mechanically from Decision 2's
-=WarmupBars= value and needs no separate strategy-side special case: the
-strategy simply tracks "do I have a previous relation yet," and the first
-bar that can answer yes to both "I have a previous relation" and "I am
-past warm-up" is bar 51.
+Detecting a cross requires the *last non-tie relation* (Decision 1) to
+already be defined *before* this bar is evaluated. Bar 50 is the first bar
+at which both EMAs are ready, so it is the first bar with any raw relation
+at all — there is no last-non-tie state recorded from any earlier bar yet,
+so no crossover can be detected there regardless of warm-up. This falls
+out mechanically from Decision 2's =WarmupBars= value and needs no
+separate strategy-side special case: the strategy simply tracks "has a
+non-tie relation ever been recorded yet," and the first bar that can
+answer yes to both that and "I am past warm-up" is bar 51.
 
 ** 4. Position Transition Semantics
 
@@ -157,7 +178,7 @@ model is expected once this reference case has a result.
 - From: 2015-01-01
 - To: 2025-01-01
 
-Per =marketdata.BarQuery='s existing half-open range contract (~[Start,
+Per the existing half-open range contract of =marketdata.BarQuery= (~[Start,
 End)~), this means bars from 2015-01-01 00:00 up to but *excluding*
 2025-01-01 00:00 — the last calendar day included is 2024-12-31. This
 range sits well inside the real OANDA raw archive's coverage (2005-01
@@ -171,7 +192,7 @@ small enough to trace and check by hand. It is meant to become the literal
 contract EMA-04's and EMA-10's tests are built from, rather than each
 issue inventing its own dataset.
 
-Warm-up (Decision 2, generalized to =WarmupBars = slowPeriod = 5~): bars
+Warm-up (Decision 2, generalized to ~WarmupBars = slowPeriod = 5~): bars
 1-5 are warm-up. Bar 6 is the first non-warm-up bar but has no signal
 (nothing to compare against a relation that only just became fully defined
 at bar 5, per Decision 3, generalized). SMA seeding: EMA(3) seeds at bar 3
@@ -179,8 +200,13 @@ from the mean of closes 1-3; EMA(5) seeds at bar 5 from the mean of closes
 1-5. Both then update by the standard EMA recurrence
 ~EMA_t = close_t * k + EMA_{t-1} * (1 - k)~, ~k = 2/(period+1)~.
 
-| Bar | Close |    Fast EMA(3) |    Slow EMA(5) | Prev relation | Curr relation | Warm-up? | Intent               |
-|-----+-------+----------------+----------------+----------------+----------------+----------+----------------------|
+This fixture never hits an exact tie, so here "last non-tie relation
+(before)" coincides with the literal previous bar's own relation; the
+separate "Tie Handling" example below is what actually exercises the
+tie-preserving state machine from Decision 1.
+
+| Bar | Close |    Fast EMA(3) |    Slow EMA(5) | Last non-tie (before) | Curr relation | Warm-up? | Intent               |
+|-----+-------+----------------+----------------+------------------------+----------------+----------+----------------------|
 |   1 |   104 |              - |              - |              - |              - | yes      | (none)               |
 |   2 |   103 |              - |              - |              - |              - | yes      | (none)               |
 |   3 |   102 |        103.000 |              - |              - |              - | yes      | (none)               |
@@ -199,14 +225,14 @@ from the mean of closes 1-3; EMA(5) seeds at bar 5 from the mean of closes
 Bar 5 is the first bar at which both EMAs are ready (relation =Below= first
 becomes defined), but it is still within the declared =WarmupBars= (1-5),
 so any intent from it is discarded by the runtime regardless — consistent
-with Decision 3's general reasoning ("no previous relation exists at the
-first-ready bar anyway, so nothing would be emitted even without warm-up
-discard").
+with Decision 3's general reasoning ("no last-non-tie state exists before
+the first-ready bar anyway, so nothing would be emitted even without
+warm-up discard").
 
-Bar 6 is the first non-warm-up bar; its relation (=Below=) equals the
-previous bar's relation (=Below=), so no crossover is detected and no
-intent is emitted — this is the case Decision 1 rules out by design ("do
-not emit repeated same-direction intents merely because fast remains
+Bar 6 is the first non-warm-up bar; its relation (=Below=) equals the last
+non-tie relation recorded at bar 5 (=Below=), so no crossover is detected
+and no intent is emitted — this is the case Decision 1 rules out by design
+("do not emit repeated same-direction intents merely because fast remains
 above/below slow," EMA-04's own acceptance criterion).
 
 Bar 7 is the first actionable signal: relation flips =Below -> Above=,
@@ -215,6 +241,37 @@ producing the bullish cross's =Enter(Buy)= (flat -> long).
 Bar 12 is the only other signal: relation flips =Above -> Below= while the
 strategy is long, producing the reversal's =Exit(inst)= + =Enter(inst,
 Sell)=, both under one shared correlation ID per Decision 4.
+
+* Tie Handling
+
+The main fixture above never produces an exact ~fast == slow~ tie, so it
+cannot by itself prove Decision 1's tie-preserving state machine is
+implemented correctly rather than a naive previous-bar/current-bar
+comparison (the defect an earlier draft of this document had: see PR #257
+review). This example traces the state machine directly, abstractly, on a
+short relation sequence — it deliberately does not derive the relations
+from real EMA arithmetic, since the point is to pin down the state
+transitions themselves, which EMA-04's tests must reproduce regardless of
+which concrete prices produce a tie:
+
+| Step | Raw relation | Last non-tie (before this step) | Cross detected?             | Last non-tie (after this step) |
+|------+--------------+----------------------------------+------------------------------+---------------------------------|
+|    1 | Above        | Above (already established)     | no                           | Above                          |
+|    2 | Tie          | Above                            | no (Tie never crosses)       | Above (unchanged)               |
+|    3 | Above        | Above                            | no (same side as step 1/2)   | Above                          |
+|    4 | Tie          | Above                            | no                           | Above (unchanged)               |
+|    5 | Below        | Above                             | yes — bearish/short cross    | Below                          |
+
+Step 2 proves ~Above, Tie, Above~ never appears to cross: the tracked
+last-non-tie relation stays ~Above~ straight through the tie, so step 3
+correctly sees "no change." Step 5 proves the reverse case a naive
+previous-bar comparison would get wrong: even though the *immediately
+preceding* raw relation (step 4) was ~Tie~, the crossover still fires,
+because it compares against the *last non-tie* relation (~Above~, last set
+at step 3), not against step 4's ~Tie~. EMA-04's own unit tests must
+include at least one case shaped like this — a tie bar immediately
+followed by a reversal — so this exact defect cannot silently reappear in
+the implementation.
 
 * Out of Scope for EMA-01
 
