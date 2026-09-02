@@ -292,9 +292,10 @@ func (f *erroringIntentFactory) NewCorrelationID() (id.CorrelationID, error) {
 
 func (f *erroringIntentFactory) WithCorrelation(corr id.CorrelationID) strategy.IntentFactory {
 	return &erroringIntentFactory{
-		IntentFactory: f.IntentFactory.WithCorrelation(corr),
-		failEnter:     f.failEnter,
-		failExit:      f.failExit,
+		IntentFactory:   f.IntentFactory.WithCorrelation(corr),
+		failEnter:       f.failEnter,
+		failExit:        f.failExit,
+		failCorrelation: f.failCorrelation,
 	}
 }
 

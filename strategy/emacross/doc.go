@@ -3,9 +3,11 @@
 // public strategy.Strategy contract, exactly as specified by
 // docs/research/ema-01-experiment-definition.org.
 //
-// emacross owns its own indicator.EMA state, declares its H1 data
-// requirement (with WarmupBars equal to the slow period, per the
-// experiment definition's Decision 2), and emits order.Intent values
+// emacross owns its own indicator.EMA state, declares a data
+// requirement for whatever instrument/interval New was given (H1 for
+// the reference experiment, but New does not itself enforce that —
+// WarmupBars equals the slow period regardless, per the experiment
+// definition's Decision 2), and emits order.Intent values
 // through the strategy.IntentFactory its Environment provides. It
 // never imports broker, execution, risk, pipeline, backtest, service,
 // cmd, or adapters — enforced mechanically by boundary_test.go, the
