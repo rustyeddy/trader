@@ -68,3 +68,20 @@ func TestIndicatorNeverImportsRuntimeApplicationOrTransportPackages(t *testing.T
 func isForbiddenImport(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+"/")
 }
+
+func TestIsForbiddenImport(t *testing.T) {
+	const root = "github.com/rustyeddy/trader/broker"
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"github.com/rustyeddy/trader/broker", true},
+		{"github.com/rustyeddy/trader/broker/foo", true},
+		{"github.com/rustyeddy/trader/order", false},
+		{"github.com/rustyeddy/trader/brokerage", false},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.want, isForbiddenImport(tt.path, root), tt.path)
+	}
+}

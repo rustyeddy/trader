@@ -1,6 +1,7 @@
 package indicator
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,11 +31,11 @@ func TestEMA_NotReadyBeforeSeedComplete(t *testing.T) {
 	assert.False(t, ema.Ready())
 	assert.Zero(t, ema.Value())
 
-	ema.Update(104)
+	require.NoError(t, ema.Update(104))
 	assert.False(t, ema.Ready())
 	assert.Zero(t, ema.Value())
 
-	ema.Update(103)
+	require.NoError(t, ema.Update(103))
 	assert.False(t, ema.Ready())
 	assert.Zero(t, ema.Value())
 }
@@ -47,12 +48,61 @@ func TestEMA_SMASeeding(t *testing.T) {
 	ema, err := NewEMA(3)
 	require.NoError(t, err)
 
-	ema.Update(104)
-	ema.Update(103)
-	ema.Update(102) // the 3rd sample: seeding completes here
+	require.NoError(t, ema.Update(104))
+	require.NoError(t, ema.Update(103))
+	require.NoError(t, ema.Update(102)) // the 3rd sample: seeding completes here
 
 	require.True(t, ema.Ready())
 	assert.InDelta(t, 103.0, ema.Value(), 1e-12)
+}
+
+// TestEMA_UpdateRejectsNonFiniteSample proves Update rejects NaN/+-Inf
+// outright, both while still seeding and once already Ready, and
+// leaves e's state completely unchanged rather than permanently
+// poisoning seedSum/value (PR #259 review).
+func TestEMA_UpdateRejectsNonFiniteSample(t *testing.T) {
+	nonFinite := []float64{math.NaN(), math.Inf(1), math.Inf(-1)}
+
+	t.Run("while seeding", func(t *testing.T) {
+		for _, sample := range nonFinite {
+			ema, err := NewEMA(3)
+			require.NoError(t, err)
+			require.NoError(t, ema.Update(104))
+
+			err = ema.Update(sample)
+			require.ErrorIs(t, err, ErrNonFiniteSample)
+			assert.False(t, ema.Ready())
+			assert.Zero(t, ema.Value())
+
+			// State is otherwise unaffected: seeding can still
+			// complete normally on the following finite samples.
+			require.NoError(t, ema.Update(103))
+			require.NoError(t, ema.Update(102))
+			require.True(t, ema.Ready())
+			assert.InDelta(t, 103.0, ema.Value(), 1e-12)
+		}
+	})
+
+	t.Run("once ready", func(t *testing.T) {
+		for _, sample := range nonFinite {
+			ema, err := NewEMA(3)
+			require.NoError(t, err)
+			require.NoError(t, ema.Update(104))
+			require.NoError(t, ema.Update(103))
+			require.NoError(t, ema.Update(102))
+			require.True(t, ema.Ready())
+
+			err = ema.Update(sample)
+			require.ErrorIs(t, err, ErrNonFiniteSample)
+			assert.InDelta(t, 103.0, ema.Value(), 1e-12, "a rejected sample must not change the prior value")
+
+			// State is otherwise unaffected: a further finite sample
+			// still applies the ordinary recurrence against the
+			// unpoisoned prior value.
+			require.NoError(t, ema.Update(101))
+			assert.InDelta(t, 102.0, ema.Value(), 1e-12)
+		}
+	})
 }
 
 // TestEMA_MatchesHandVerifiedFixture replays
@@ -66,8 +116,9 @@ func TestEMA_MatchesHandVerifiedFixture(t *testing.T) {
 	closes := []float64{104, 103, 102, 101, 100, 101, 104, 108, 112, 110, 105, 100, 95, 90}
 
 	// index i holds the expected value after closes[i] is applied;
-	// NaN marks "not ready yet," matched by asserting !Ready() instead
-	// of comparing Value().
+	// notReady (-1, never a genuine EMA value in this fixture) marks
+	// "not ready yet," matched by asserting !Ready() instead of
+	// comparing Value().
 	const notReady = -1
 	wantFast := []float64{notReady, notReady, 103.0, 102.0, 101.0, 101.0, 102.5, 105.25, 108.625, 109.3125, 107.15625, 103.578125, 99.2890625, 94.64453125}
 	wantSlow := []float64{notReady, notReady, notReady, notReady, 102.0, 101.66666666666669, 102.44444444444446, 104.29629629629632, 106.86419753086422, 107.90946502057616, 106.93964334705079, 104.62642889803386, 101.41761926535591, 97.61174617690395}
@@ -78,8 +129,8 @@ func TestEMA_MatchesHandVerifiedFixture(t *testing.T) {
 	require.NoError(t, err)
 
 	for i, c := range closes {
-		fast.Update(c)
-		slow.Update(c)
+		require.NoError(t, fast.Update(c))
+		require.NoError(t, slow.Update(c))
 
 		if wantFast[i] == notReady {
 			assert.Falsef(t, fast.Ready(), "bar %d: fast EMA should not be ready yet", i+1)
@@ -108,7 +159,7 @@ func TestEMA_DeterministicAcrossRepeatedRuns(t *testing.T) {
 		require.NoError(t, err)
 		var values []float64
 		for _, c := range closes {
-			ema.Update(c)
+			require.NoError(t, ema.Update(c))
 			values = append(values, ema.Value())
 		}
 		return values
