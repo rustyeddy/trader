@@ -1,0 +1,235 @@
+#+TITLE: EMA-01: First EMA Crossover Research Experiment Definition
+#+STARTUP: overview indent
+
+* Purpose
+
+This document is the precise specification for Trader's first hypothesis-
+driven research experiment (issue #246, EMA-01). It exists so later
+milestone issues (EMA-03 through EMA-11) can implement and test against
+exact, agreed semantics instead of each independently inventing behavior.
+
+This is a strategy-experiment specification, not a durable architecture
+decision, so it does not claim an ADR number (see
+=docs/arch/adr-decisions.org=). It lives in its own =docs/research/= area,
+which becomes the canonical human-readable home for this and future
+strategy experiments, each linking to its own eventual run/result (EMA-11,
+issue #256).
+
+* Research Hypothesis
+
+A fast EMA crossing a slow EMA identifies trend changes that, when traded
+long/short with opposite-cross exits, may produce positive expectancy on
+EUR/USD H1.
+
+The experiment (EMA-11) can conclude *Promising*, *Inconclusive*, or
+*Rejected* against this hypothesis without that implying anything about
+whether the implementation itself is correct — those are judged separately
+against the deterministic tests this document enables.
+
+* Reference Strategy
+
+- Instrument: EUR/USD
+- Bar interval: H1
+- Fast EMA period: 20
+- Slow EMA period: 50
+- Long on fast crossing above slow
+- Short on fast crossing below slow
+- Exit/reverse on the opposite crossover
+- Existing fixed-fraction sizing (=risk.NewFixedFractionSizer=) and existing
+  M4 risk/execution pipeline
+- Existing simulator next-bar-open fill semantics
+
+* Decisions
+
+** 1. Crossover Semantics
+
+The strategy retains the previous bar's fast/slow EMA relation and compares
+it against the current bar's relation:
+
+- *Bullish/long cross*: ~previous.fast <= previous.slow && current.fast > current.slow~
+- *Bearish/short cross*: ~previous.fast >= previous.slow && current.fast < current.slow~
+
+An exact tie (~fast == slow~) counts as "not yet crossed" on either side. It
+neither triggers a cross nor resets a pending one. These two conditions are
+collectively exhaustive and mutually exclusive: for any (previous, current)
+pair with both relations defined, at most one fires.
+
+** 2. Warm-up Requirement
+
+~Descriptor.Requirements[0].WarmupBars = slowPeriod~ (50 for the reference
+run). Both EMAs use SMA seeding (EMA-03's own scope): the fast EMA becomes
+ready at bar 20, the slow EMA at bar 50. Declaring warm-up as the slow
+period causes the runtime to uniformly discard any intent emitted for bars
+1 through 50.
+
+The strategy still receives an =OnBar= call for every one of these 50
+warm-up bars and updates its indicator state on every call, exactly as it
+would for any other bar (=strategy.DataRequirement.WarmupBars= doc comment:
+"a runtime still calls =OnBar= for every one of these bars ... it is any
+intent =OnBar= returns during warm-up that is discarded, not the =OnBar=
+call itself"). The strategy does not need its own separate warm-up gate for
+this reason; see Decision 3.
+
+** 3. First Valid Signal Timing
+
+Only afterward — the earliest possible signal is bar 51, not the bar that
+completes warm-up (bar 50).
+
+Detecting a cross requires *two* consecutive defined relations (a previous
+one and a current one to compare). Bar 50 is the first bar at which both
+EMAs are ready, so it is the first bar with *any* defined relation — it has
+no "previous" relation to compare against, so no cross can be detected
+there regardless of warm-up. This falls out mechanically from Decision 2's
+=WarmupBars= value and needs no separate strategy-side special case: the
+strategy simply tracks "do I have a previous relation yet," and the first
+bar that can answer yes to both "I have a previous relation" and "I am
+past warm-up" is bar 51.
+
+** 4. Position Transition Semantics
+
+The strategy determines its current side each bar by reading
+~view.Account().Positions()~ for its own instrument (flat, long, or short)
+— it does not maintain a separate local ~positionSide~ field. This keeps
+the strategy correct after a risk rejection, a partial fill, or any other
+outcome where the strategy's own guess could otherwise drift from
+authoritative account state.
+
+- flat -> long (bullish cross while flat): ~Enter(inst, Buy)~
+- flat -> short (bearish cross while flat): ~Enter(inst, Sell)~
+- long -> short (bearish cross while long): ~Exit(inst)~ followed by
+  ~Enter(inst, Sell)~, both built under one shared correlation ID via
+  ~IntentFactory.WithCorrelation~ — one causally-related reversal, not two
+  independent decisions
+- short -> long (bullish cross while short): ~Exit(inst)~ followed by
+  ~Enter(inst, Buy)~, same correlation treatment
+
+*Correlation is not a guarantee of atomic execution.* ~WithCorrelation~
+marks the exit and re-entry as causally related for journaling/analysis
+(EMA-08); it does not promise both legs are accepted or filled together.
+The existing pipeline/risk/broker semantics remain fully authoritative for
+each leg independently. If the exit succeeds but the re-entry is rejected
+(for example by a risk rule), the strategy must remain correct on the next
+bar: because Decision 4 already derives position side from
+~view.Account().Positions()~ rather than an assumption about what the
+strategy itself asked for, the next ~OnBar~ call simply observes "flat" and
+acts on the next real crossover — no special reconciliation logic is
+invented or required for this case.
+
+** 5. Starting Capital, Risk, and Sizing
+
+- Starting capital: 100,000 USD
+- Risk fraction: 0.01 (1% of account equity per fixed-fraction sizing)
+- Adverse distance (sizing input): 0.0050 (50 pips) for EUR/USD H1
+
+~risk.SizeInput.StopDistance~ (surfaced at the run level as
+=backtest.Manifest.AdverseDistance=) is a sizing input the existing
+fixed-fraction sizer requires to convert a risk budget into a quantity —
+it is *not* a broker-side protective stop order, and this strategy does
+not place one. 0.0050 is recorded here as an explicit, deliberately fixed
+placeholder sizing assumption for this first experiment, not as part of
+the EMA trading hypothesis itself. It is a neutral round number for
+EUR/USD H1, not derived from volatility analysis. ATR-based dynamic sizing
+is an explicit, named follow-on, not something this experiment decides.
+
+The eventual research report/conclusion (EMA-09/EMA-11) must restate this
+assumption plainly, so a positive or negative result is never mistaken for
+evidence about a fully specified risk model — only about the crossover
+entry/exit logic under one fixed, simplified sizing policy.
+
+** 6. Transaction Cost Assumptions
+
+This reference run uses the simulator's existing zero-cost defaults,
+matching =cmd/trader/backtest/service.go='s own current environment
+construction:
+
+- Slippage model: none (=SlippageModel: none=, no price adjustment)
+- Commission model: none (=CommissionModel: none=, no per-trade fee)
+- Fill price: the configured historical bar's own open price, per existing
+  next-bar-open fill semantics; no separate bid/ask spread is modeled
+
+This is a known idealization, stated explicitly for reproducibility and so
+the eventual result is not misread as "results including realistic trading
+costs." A follow-on experiment introducing a fixed spread and/or commission
+model is expected once this reference case has a result.
+
+** 7. Date Range
+
+- From: 2015-01-01
+- To: 2025-01-01
+
+Per =marketdata.BarQuery='s existing half-open range contract (~[Start,
+End)~), this means bars from 2015-01-01 00:00 up to but *excluding*
+2025-01-01 00:00 — the last calendar day included is 2024-12-31. This
+range sits well inside the real OANDA raw archive's coverage (2005-01
+through the present), so no data-availability gap is expected.
+
+* Worked Fixture
+
+The following toy fixture uses illustrative periods *distinct from the
+real reference strategy* (fast EMA(3) / slow EMA(5), not 20/50) so it stays
+small enough to trace and check by hand. It is meant to become the literal
+contract EMA-04's and EMA-10's tests are built from, rather than each
+issue inventing its own dataset.
+
+Warm-up (Decision 2, generalized to =WarmupBars = slowPeriod = 5~): bars
+1-5 are warm-up. Bar 6 is the first non-warm-up bar but has no signal
+(nothing to compare against a relation that only just became fully defined
+at bar 5, per Decision 3, generalized). SMA seeding: EMA(3) seeds at bar 3
+from the mean of closes 1-3; EMA(5) seeds at bar 5 from the mean of closes
+1-5. Both then update by the standard EMA recurrence
+~EMA_t = close_t * k + EMA_{t-1} * (1 - k)~, ~k = 2/(period+1)~.
+
+| Bar | Close |    Fast EMA(3) |    Slow EMA(5) | Prev relation | Curr relation | Warm-up? | Intent               |
+|-----+-------+----------------+----------------+----------------+----------------+----------+----------------------|
+|   1 |   104 |              - |              - |              - |              - | yes      | (none)               |
+|   2 |   103 |              - |              - |              - |              - | yes      | (none)               |
+|   3 |   102 |        103.000 |              - |              - |              - | yes      | (none)               |
+|   4 |   101 |        102.000 |              - |              - |              - | yes      | (none)               |
+|   5 |   100 |        101.000 |        102.000 |              - |          Below | yes      | (none, discarded)    |
+|   6 |   101 |        101.000 |        101.667 |          Below |          Below | no       | (none)               |
+|   7 |   104 |        102.500 |        102.444 |          Below |          Above | no       | Enter(Buy) — flat->long |
+|   8 |   108 |        105.250 |        104.296 |          Above |          Above | no       | (none)               |
+|   9 |   112 |        108.625 |        106.864 |          Above |          Above | no       | (none)               |
+|  10 |   110 |        109.312 |        107.909 |          Above |          Above | no       | (none)               |
+|  11 |   105 |        107.156 |        106.940 |          Above |          Above | no       | (none)               |
+|  12 |   100 |        103.578 |        104.626 |          Above |          Below | no       | Exit + Enter(Sell) — long->short (correlated) |
+|  13 |    95 |         99.289 |        101.418 |          Below |          Below | no       | (none)               |
+|  14 |    90 |         94.645 |         97.612 |          Below |          Below | no       | (none)               |
+
+Bar 5 is the first bar at which both EMAs are ready (relation =Below= first
+becomes defined), but it is still within the declared =WarmupBars= (1-5),
+so any intent from it is discarded by the runtime regardless — consistent
+with Decision 3's general reasoning ("no previous relation exists at the
+first-ready bar anyway, so nothing would be emitted even without warm-up
+discard").
+
+Bar 6 is the first non-warm-up bar; its relation (=Below=) equals the
+previous bar's relation (=Below=), so no crossover is detected and no
+intent is emitted — this is the case Decision 1 rules out by design ("do
+not emit repeated same-direction intents merely because fast remains
+above/below slow," EMA-04's own acceptance criterion).
+
+Bar 7 is the first actionable signal: relation flips =Below -> Above=,
+producing the bullish cross's =Enter(Buy)= (flat -> long).
+
+Bar 12 is the only other signal: relation flips =Above -> Below= while the
+strategy is long, producing the reversal's =Exit(inst)= + =Enter(inst,
+Sell)=, both under one shared correlation ID per Decision 4.
+
+* Out of Scope for EMA-01
+
+The following are deliberately deferred to later issues in this milestone
+and are not decided by this document:
+
+- Indicator implementation itself (EMA-03, issue #248)
+- Strategy package implementation (EMA-04, issue #249)
+- Config file loading and CLI precedence rules (EMA-02/EMA-07, issues
+  #247/#252)
+- Wiring intents through execution/risk/simulator (EMA-06, issue #251)
+- Decision-evidence/research journaling (EMA-08, issue #253)
+- Report content beyond what EMA-09 (issue #254) adds
+- The actual historical run and its research conclusion (EMA-11, issue
+  #256)
+- Any optimizer, walk-forward framework, or strategy registry work
+
+No unrelated indicators are introduced by this document.
