@@ -121,7 +121,7 @@ func TestRunConfig_ValidateRejectsInvalidRelationships(t *testing.T) {
 		{
 			name:      "invalid interval",
 			overrides: base(map[string]string{"interval": "H2"}),
-			wantErr:   "invalid --interval",
+			wantErr:   "backtest.interval",
 		},
 	}
 

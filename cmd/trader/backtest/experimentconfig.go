@@ -28,11 +28,14 @@ import (
 // at the point of use, so duplicating a second, case-sensitive
 // validation here would only be able to disagree with it.
 //
-// StrategyParameters is not yet consumed by any real strategy — this
-// command still only runs demoStrategy (see run.go's own doc comment)
-// — but is threaded into the run's Manifest.StrategyParameters
-// regardless, so effective strategy configuration already participates
-// in ConfigDigest ahead of EMA-04/EMA-07 wiring in a real consumer.
+// Strategy is parsed and validated here but deliberately not yet
+// passed to Manifest.StrategyParameters: this command still only ever
+// runs demoStrategy (see run.go's own doc comment), which does not
+// consume it, and recording it in the manifest anyway would make the
+// manifest claim EMA parameters that had no effect on the run that
+// actually occurred, while also perturbing ConfigDigest on values the
+// run never used (PR #258 review). That wiring belongs with EMA-04/
+// EMA-07, once a real EMA strategy is the one actually running.
 type runConfig struct {
 	Backtest backtestSection
 	Strategy strategySection
@@ -68,10 +71,15 @@ type backtestSection struct {
 // required: an invocation that never mentions the EMA strategy at all
 // (today's only real strategy is demoStrategy, which ignores this
 // section) must keep working unchanged.
+// JSON tags follow the snake_case convention backtest/manifest_test.go
+// already establishes for strategy parameters, so a future consumer
+// that does marshal this section into Manifest.StrategyParameters
+// (EMA-04/EMA-07) produces a manifest consistent with that convention
+// rather than Go's default "Name"/"FastPeriod"/"SlowPeriod" keys.
 type strategySection struct {
-	Name       string `config:"name" flag:"strategy-name" default:"ema-cross"`
-	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20"`
-	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50"`
+	Name       string `config:"name" flag:"strategy-name" default:"ema-cross" json:"name"`
+	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20" json:"fast_period"`
+	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50" json:"slow_period"`
 }
 
 // Validate implements config's validator hook, checked after every
@@ -100,7 +108,7 @@ func (c runConfig) Validate() error {
 	}
 
 	if _, err := parseInterval(c.Backtest.Interval); err != nil {
-		return err
+		return fmt.Errorf("backtest.interval: %w", err)
 	}
 
 	return nil

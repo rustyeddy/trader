@@ -2,6 +2,7 @@ package backtest_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,7 +87,18 @@ backtest:
 	})
 	require.NoError(t, runCmd.Execute())
 	assert.Contains(t, out.String(), `"run_id"`)
-	assert.NotContains(t, out.String(), `"starting_capital":"1 USD"`)
+
+	var doc struct {
+		Performance struct {
+			StartingCapital struct {
+				Amount   string `json:"amount"`
+				Currency string `json:"currency"`
+			} `json:"starting_capital"`
+		} `json:"performance"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
+	assert.Equal(t, "10000", doc.Performance.StartingCapital.Amount, "expected --starting-cash to override the config file's starting_capital: 1")
+	assert.Equal(t, "USD", doc.Performance.StartingCapital.Currency)
 }
 
 // TestRunCLI_ConfigFileValidationFailsBeforeRun proves invalid

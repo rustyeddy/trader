@@ -120,10 +120,11 @@ type instrumentSet struct {
 
 // effectiveSymbols reconciles --symbol (repeatable, multi-instrument,
 // issue #224) with backtest.symbol from --config (single-instrument,
-// issue #247): explicit --symbol flags always win when present (any
-// combination with more than one --symbol was already rejected by
-// buildRunConfig before this point), and configSymbol is used only as
-// a fallback when no --symbol flag was given at all.
+// issue #247): explicit --symbol flags always win when present (a
+// --config combined with more than one --symbol was already rejected
+// by buildRunConfig before this point; --symbol without --config is
+// never restricted to one value), and configSymbol is used only as a
+// fallback when no --symbol flag was given at all.
 func effectiveSymbols(flagSymbols []string, configSymbol string) ([]string, error) {
 	if len(flagSymbols) > 0 {
 		return flagSymbols, nil
@@ -311,13 +312,20 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
+	// StrategyParameters is deliberately left nil: cfg.Strategy is parsed
+	// and validated (issue #247), but this command still only ever runs
+	// demoStrategy, which does not consume it. Recording cfg.Strategy in
+	// the manifest here would make it claim EMA parameters that had no
+	// effect on the run that actually occurred while also skewing
+	// ConfigDigest on values the run never used (PR #258 review). This
+	// wiring belongs with EMA-04/EMA-07, once a real EMA strategy is the
+	// one actually running.
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
-		Strategy:           newDemoStrategy(instruments.ids, interval, flags.warmupBars),
-		StrategyParameters: cfg.Strategy,
-		Span:               span,
-		StartingCapital:    startingCash,
-		RiskFraction:       riskFraction,
-		AdverseDistance:    adverseDistance,
+		Strategy:        newDemoStrategy(instruments.ids, interval, flags.warmupBars),
+		Span:            span,
+		StartingCapital: startingCash,
+		RiskFraction:    riskFraction,
+		AdverseDistance: adverseDistance,
 	})
 	if err != nil {
 		return err
