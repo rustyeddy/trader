@@ -10,9 +10,11 @@ import (
 	"github.com/spf13/cobra"
 
 	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
+	"github.com/rustyeddy/trader/adapters/journal/jsonl"
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/report"
@@ -46,6 +48,7 @@ type runFlags struct {
 
 	outputDir string
 	format    string
+	journal   string
 }
 
 func newRunCmd() *cobra.Command {
@@ -68,7 +71,10 @@ func newRunCmd() *cobra.Command {
 			"--config supplies backtest/strategy parameters from a YAML file\n" +
 			"(issue #247) and runs the real EMA crossover strategy\n" +
 			"(issue #252) instead of the demo strategy, for a single\n" +
-			"instrument; any explicit flag above still overrides its value.",
+			"instrument; any explicit flag above still overrides its value.\n\n" +
+			"--journal optionally writes a durable JSONL audit trail of\n" +
+			"the run (adapters/journal/jsonl); off by default, and never\n" +
+			"read back by 'show' (see the package doc comment).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBacktest(cmd, flags)
 		},
@@ -96,6 +102,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "./backtest-runs", "directory run snapshots are written to and 'show' reads from")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
+	cmd.Flags().StringVar(&flags.journal, "journal", "", "optional path to write a durable JSONL journal of this run (adapters/journal/jsonl); path must not already exist")
 
 	// --symbol/--from/--to/--adverse-distance are no longer cobra-required:
 	// each is also satisfiable from --config (issue #247), so their
@@ -360,7 +367,17 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		prices = simPriceSource(precomputed)
 	}
 
-	factory := environmentFactory{prices: prices}
+	var jrnl journal.Recorder
+	if flags.journal != "" {
+		w, err := jsonl.NewWriter(flags.journal)
+		if err != nil {
+			return fmt.Errorf("opening --journal: %w", err)
+		}
+		defer func() { _ = w.Close() }()
+		jrnl = w
+	}
+
+	factory := environmentFactory{prices: prices, journal: jrnl}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, clictx.LoggerFromContext(ctx))
 	if err != nil {

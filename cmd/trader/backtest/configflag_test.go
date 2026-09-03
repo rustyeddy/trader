@@ -2,7 +2,10 @@ package backtest_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rustyeddy/trader/adapters/journal/jsonl"
 	cmdbacktest "github.com/rustyeddy/trader/cmd/trader/backtest"
+	"github.com/rustyeddy/trader/journal"
 )
 
 // writeConfigFile writes contents to a fresh temp file and returns its
@@ -242,4 +247,60 @@ strategy:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "some-other-strategy")
 	assert.Contains(t, err.Error(), "ema-cross")
+}
+
+// TestRunCLI_JournalWritesDurableJSONLRecord proves --journal (added
+// for issue #256, EMA-11's own "journal/report artifact references"
+// requirement) actually writes a valid, readable JSONL journal for the
+// run, bracketed by KindRunStarted and KindRunCompleted — not merely
+// that the flag is accepted. --journal is off by default; this test
+// exists specifically to prove the opt-in path works, since no other
+// "trader backtest run" test exercises it.
+func TestRunCLI_JournalWritesDurableJSONLRecord(t *testing.T) {
+	configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.01000
+`)
+
+	outputDir := t.TempDir()
+	journalPath := filepath.Join(t.TempDir(), "run.jsonl")
+
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run",
+		"--config", configPath,
+		"--data-raw-root", "testdata/raw/oanda",
+		"--output-dir", outputDir,
+		"--format", "json",
+		"--journal", journalPath,
+	})
+	require.NoError(t, runCmd.Execute())
+	assert.Contains(t, out.String(), `"run_id"`)
+
+	reader, err := jsonl.OpenReader(journalPath)
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	var kinds []journal.Kind
+	ctx := context.Background()
+	for {
+		entry, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		kinds = append(kinds, entry.Record.Kind)
+	}
+
+	require.NotEmpty(t, kinds, "the journal must contain at least the run-bracketing records")
+	assert.Equal(t, journal.KindRunStarted, kinds[0], "the journal's first record must be KindRunStarted")
+	assert.Equal(t, journal.KindRunCompleted, kinds[len(kinds)-1], "the journal's last record must be KindRunCompleted")
 }

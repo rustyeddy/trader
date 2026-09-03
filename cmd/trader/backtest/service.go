@@ -13,6 +13,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
@@ -150,6 +151,12 @@ func (s *nextBarOpenPriceSource) load(ctx context.Context, manager *marketdata.M
 // defines rather than calling a service constructor directly.
 type environmentFactory struct {
 	prices simbroker.FillPriceSource
+	// journal is an optional durable record destination for this run
+	// (--journal), passed straight through to svcbacktest.Environment.
+	// A nil journal is accepted and treated as journal.Discard by
+	// backtest.Runner (backtest/runner.go) — the common case, since
+	// most invocations do not pass --journal.
+	journal journal.Recorder
 }
 
 func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.EnvironmentRequest) (svcbacktest.Environment, error) {
@@ -229,6 +236,7 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 		IDs:             ids,
 		Account:         account,
 		Pipeline:        pl,
+		Journal:         f.journal,
 		FillModel:       fill,
 		SlippageModel:   slippage,
 		CommissionModel: commission,
