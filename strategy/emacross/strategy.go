@@ -161,11 +161,22 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 // action label recordSignal journals alongside them. want is the side
 // this crossover favors (Buy for a bullish cross, Sell for a bearish
 // one).
+//
+// Config.AllowedSide (issue #273) restricts entering the disallowed
+// side: a flat->disallowed-side crossover is a no-op, and a would-be
+// reversal into the disallowed side instead exits to flat only
+// ("exit"), never opening the new, disallowed position. The
+// unrestricted SideBoth case (the zero value) is textually unchanged
+// from before this option existed.
 func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) (string, []order.Intent, error) {
 	wantsLong := want == order.Buy
+	allowed := wantsLong && s.config.AllowedSide.allowsLong() || !wantsLong && s.config.AllowedSide.allowsShort()
 
 	switch side {
 	case order.Flat:
+		if !allowed {
+			return "none", nil, nil
+		}
 		in, err := s.intents.Enter(s.instrumentID, want)
 		if err != nil {
 			return "none", nil, err
@@ -185,6 +196,9 @@ func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) (string,
 			// invariant holds.
 			return "none", nil, nil
 		}
+		if !allowed {
+			return s.exitOnly()
+		}
 		intents, err := s.reverse(want)
 		return "reverse", intents, err
 
@@ -192,12 +206,26 @@ func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) (string,
 		if !wantsLong {
 			return "none", nil, nil
 		}
+		if !allowed {
+			return s.exitOnly()
+		}
 		intents, err := s.reverse(want)
 		return "reverse", intents, err
 
 	default:
 		return "none", nil, fmt.Errorf("emacross: unrecognized position side %v", side)
 	}
+}
+
+// exitOnly builds a single Exit intent — the AllowedSide-restricted
+// counterpart to reverse (issue #273): the current position closes to
+// flat, but no new position on the now-disallowed side opens.
+func (s *Strategy) exitOnly() (string, []order.Intent, error) {
+	in, err := s.intents.Exit(s.instrumentID)
+	if err != nil {
+		return "none", nil, err
+	}
+	return "exit", []order.Intent{in}, nil
 }
 
 // recordSignal journals one KindSignal decision-evidence record for

@@ -9,6 +9,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/num"
+	"github.com/rustyeddy/trader/strategy/emacross"
 )
 
 // runConfig is the typed configuration "trader backtest run" resolves
@@ -96,6 +97,12 @@ type strategySection struct {
 	Name       string `config:"name" flag:"strategy-name" default:"ema-cross" json:"name"`
 	FastPeriod int    `config:"fast_period" flag:"fast-period" default:"20" json:"fast_period"`
 	SlowPeriod int    `config:"slow_period" flag:"slow-period" default:"50" json:"slow_period"`
+	// AllowedSide restricts which position direction the strategy may
+	// hold (issue #273): "both" (default), "long-only", or
+	// "short-only". emacross.Side implements encoding.TextUnmarshaler,
+	// so config.Load decodes it directly, the same way num.Rate/
+	// num.Price already do.
+	AllowedSide emacross.Side `config:"allowed_side" flag:"allowed-side" default:"both" json:"allowed_side"`
 }
 
 // Validate implements config's validator hook, checked after every
@@ -181,6 +188,9 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	}
 	if cmd.Flags().Changed("slow-period") {
 		overrides["slow-period"] = fmt.Sprintf("%d", flags.slowPeriod)
+	}
+	if cmd.Flags().Changed("allowed-side") {
+		overrides["allowed-side"] = flags.allowedSide
 	}
 	if cmd.Flags().Changed("data-store-root") {
 		overrides["data-store-root"] = flags.dataStoreRoot
