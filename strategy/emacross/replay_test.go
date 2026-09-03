@@ -301,7 +301,17 @@ func TestEmacross_UncoveredRangeFailsClearly(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, err = manager.Bars(context.Background(), marketdata.BarQuery{Instrument: instID, Interval: marketdata.H1, Range: span})
+	ctx := context.Background()
+	query := marketdata.BarQuery{Instrument: instID, Interval: marketdata.H1, Range: span}
+
+	plan, err := manager.Plan(ctx, query)
+	require.NoError(t, err, "planning a would-need-fetching action is not itself a failure")
+	require.Len(t, plan.Coverage.Partitions, 1)
+	assert.Equal(t, marketdata.PartitionCoverageMissing, plan.Coverage.Partitions[0].Status)
+	require.Len(t, plan.Actions, 1)
+	assert.Equal(t, marketdata.ActionDownloadRaw, plan.Actions[0].Kind)
+
+	_, err = manager.Bars(ctx, query)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no coverage")
 }
