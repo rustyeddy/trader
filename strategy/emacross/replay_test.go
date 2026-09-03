@@ -13,6 +13,7 @@ package emacross_test
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -164,8 +165,15 @@ func (f environmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.
 // reference periods (20/50, docs/research/ema-01-experiment-
 // definition.org), and asserts on exactly what EMA-05 requires: every
 // bar the fixture covers reaches OnBar exactly once, in strictly
-// increasing time order, and no intent is ever returned for any of
-// the declared SlowPeriod warm-up bars.
+// increasing time order. It proves "every bar exactly once" by
+// comparing the full recorded timestamp sequence against an
+// independent Manager.Bars read of the identical query — not a
+// hardcoded count, since the fixture's own bar count depends on
+// session-calendar gaps this test should not have to duplicate — so a
+// dropped or duplicated bar in the middle of the run cannot pass
+// unnoticed. Strategy-level warm-up/readiness (no intent returned
+// before SlowPeriod bars) is EMA-04's own scope, already covered
+// there; this test does not re-assert it.
 func TestEmacross_RunsThroughCanonicalMarketdataReplay(t *testing.T) {
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
@@ -234,6 +242,32 @@ func TestEmacross_RunsThroughCanonicalMarketdataReplay(t *testing.T) {
 
 	assert.True(t, recorder.events[0].Bar.Time.Equal(time.Date(2024, time.January, 7, 22, 0, 0, 0, time.UTC)))
 	assert.True(t, recorder.events[len(recorder.events)-1].Bar.Time.Equal(time.Date(2024, time.January, 19, 21, 0, 0, 0, time.UTC)))
+
+	// "Every bar exactly once": compare the full recorded sequence
+	// against an independent Manager.Bars read of the identical query,
+	// rather than a hardcoded count — a bar dropped or duplicated
+	// anywhere in the middle would change strictly-increasing ordering
+	// only if it also reordered timestamps, but a straight count/
+	// sequence mismatch catches it unconditionally.
+	reader, err := manager.Bars(ctx, marketdata.BarQuery{Instrument: simListing.InstrumentID(), Interval: marketdata.H1, Range: span})
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+
+	var expected []time.Time
+	for {
+		bar, err := reader.Next(ctx)
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		expected = append(expected, bar.Time)
+	}
+
+	var recorded []time.Time
+	for _, event := range recorder.events {
+		recorded = append(recorded, event.Bar.Time)
+	}
+	assert.Equal(t, expected, recorded, "every canonical bar must reach OnBar exactly once, in order")
 }
 
 // TestEmacross_UncoveredRangeFailsClearly proves requesting a range
