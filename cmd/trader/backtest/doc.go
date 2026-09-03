@@ -9,21 +9,35 @@
 // logic of its own, and never calls backtest.NewRunner/NewScheduler/
 // NewReplay directly (boundary_test.go enforces this mechanically).
 //
-// # The provisional demo strategy
+// # Two strategy paths, no registry
 //
-// "trader backtest run" accepts exactly one strategy today: an
-// unexported demoStrategy (demo_strategy.go) that enters long once per
-// requested instrument, on that instrument's own first bar, and never
-// trades that instrument again. --symbol may be repeated (issue #224,
-// M5-16) to run a multi-instrument portfolio backtest — one Scheduler
-// and one shared account/pipeline still replay every requested
-// instrument, never a per-symbol engine. demoStrategy exists solely so
-// this command is genuinely executable end to end — it is not a real
-// trading strategy, not the beginning of a strategy library, and not a
-// registry. service/backtest.RunRequest.Strategy remains the real
-// application contract; strategy discovery/naming is an explicitly
-// deferred, later transport/composition concern (see ADR-039's own
-// note and this issue's plan/review comments).
+// "trader backtest run" selects between exactly two strategies by
+// whether --config is given — there is no strategy registry or
+// name-based lookup (ADR-039's own note on deferring strategy
+// discovery still applies beyond these two):
+//
+//   - Without --config: an unexported demoStrategy (demo_strategy.go)
+//     that enters long once per requested instrument, on that
+//     instrument's own first bar, and never trades that instrument
+//     again. --symbol may be repeated (issue #224, M5-16) to run a
+//     multi-instrument portfolio backtest with it — one Scheduler and
+//     one shared account/pipeline still replay every requested
+//     instrument, never a per-symbol engine. demoStrategy exists
+//     solely so this command is genuinely executable end to end
+//     without any real strategy configured; it is not a real trading
+//     strategy.
+//   - With --config (issue #252, EMA-07): the real strategy/emacross
+//     EMA crossover strategy, configured from the YAML file's own
+//     strategy.fast_period/slow_period (issue #247), for exactly one
+//     instrument. Its FillPriceSource (nextBarOpenPriceSource,
+//     service.go) is a general per-bar-lookup implementation, unlike
+//     demoStrategy's precomputed single-fill price, because a
+//     crossover strategy enters, exits, and re-enters at run-dependent
+//     bars.
+//
+// service/backtest.RunRequest.Strategy remains the real application
+// contract either way; this command constructs a concrete value for
+// it, never a second orchestration path.
 //
 // # Persisted run snapshots, not journal replay
 //
