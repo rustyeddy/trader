@@ -297,7 +297,7 @@ backtest:
 			break
 		}
 		require.NoError(t, err)
-		kinds = append(kinds, entry.Record.Kind)
+		kinds = append(kinds, entry.Kind)
 	}
 
 	require.NotEmpty(t, kinds, "the journal must contain at least the run-bracketing records")

@@ -368,12 +368,25 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	}
 
 	var jrnl journal.Recorder
+	var journalWriter *jsonl.Writer
 	if flags.journal != "" {
 		w, err := jsonl.NewWriter(flags.journal)
 		if err != nil {
 			return fmt.Errorf("opening --journal: %w", err)
 		}
+		// jsonl.Writer.Close is idempotent (its own doc comment: a
+		// second Close call returns nil rather than re-syncing/
+		// re-closing), so this deferred call is safe whether or not
+		// the explicit Close below on the success path already ran —
+		// it only ever does real work on an early-return path (svc
+		// construction or svc.Run failing). The explicit Close below,
+		// not this deferred one, is what propagates a Close failure:
+		// jsonl.Writer only fsyncs in Close (its own doc comment), so
+		// silently discarding its error here would let this command
+		// report success while --journal's own advertised durability
+		// guarantee silently did not hold (PR #267 review).
 		defer func() { _ = w.Close() }()
+		journalWriter = w
 		jrnl = w
 	}
 
@@ -394,6 +407,12 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if journalWriter != nil {
+		if err := journalWriter.Close(); err != nil {
+			return fmt.Errorf("closing --journal: %w", err)
+		}
 	}
 
 	rep := report.NewBacktestReport(report.BacktestInput{
