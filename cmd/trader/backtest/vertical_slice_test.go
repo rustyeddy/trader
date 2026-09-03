@@ -59,6 +59,7 @@ func TestVerticalSlice_RunThenShow(t *testing.T) {
 		"--risk-fraction", "0.01",
 		"--adverse-distance", "0.01000",
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 	})
@@ -132,6 +133,7 @@ func TestVerticalSlice_RunWithWarmupBars_EntersAfterWarmupAndFillsAtCorrectBar(t
 		"--adverse-distance", "0.01000",
 		"--warmup-bars", "1",
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 	})

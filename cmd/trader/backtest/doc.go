@@ -55,4 +55,20 @@
 // acceptance criteria says to avoid. --journal is off by default (a
 // nil Environment.Journal is accepted and treated as journal.Discard
 // by backtest.Runner), so ordinary runs pay no cost for it.
+//
+// # Persistent canonical data store by default
+//
+// --data-store-root (issue #268) defaults to /srv/trading/data/
+// canonical — a real, opinionated local path, not a research-neutral
+// placeholder — so canonical market data built from --data-raw-root
+// survives across invocations instead of being rebuilt from the raw
+// archive into a fresh temporary directory every run. This default is
+// resolved through the same runConfig/backtestSection config-loading
+// path (experimentconfig.go) as every other backtest setting, so an
+// explicit --data-store-root flag, a --config file value, or a
+// TRADER_BACKTEST_DATA_STORE_ROOT environment variable all still take
+// precedence over it in that order. An explicit empty value at any of
+// those layers opts back into runBacktest's original fresh-temporary-
+// directory behavior — what every test in this package that must not
+// share store state across runs relies on.
 package backtest
