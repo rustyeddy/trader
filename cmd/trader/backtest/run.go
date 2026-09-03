@@ -86,7 +86,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.warmupBars, "warmup-bars", 0, "warm-up bars required before the demo strategy may trade, per instrument")
 
 	cmd.Flags().StringVar(&flags.config, "config", "", "YAML config file supplying backtest/strategy parameters (issue #247); explicit flags above always override it")
-	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "strategy name recorded in the run manifest (descriptive only: --config always runs the EMA crossover strategy, there is no strategy registry to select from)")
+	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "must equal \"ema-cross\" when --config is used (there is no strategy registry to select from; any other value is rejected)")
 	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; only used when --config is also given")
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
 
@@ -305,6 +305,17 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	var prices simbroker.FillPriceSource
 
 	if flags.config != "" {
+		// There is no strategy registry: strategy.name (--strategy-name)
+		// does not select anything, since this path only ever
+		// constructs strategy/emacross. Rejecting any other name here
+		// (rather than silently running EMA crossover under an
+		// unrelated label) keeps the manifest's StrategyName truthful
+		// against what the config actually claimed (PR #263 review).
+		if cfg.Strategy.Name != emacross.Name {
+			return fmt.Errorf("strategy.name %q is not supported: --config only runs %q (there is no strategy registry)",
+				cfg.Strategy.Name, emacross.Name)
+		}
+
 		// --config describes a single-instrument EMA crossover
 		// experiment (buildRunConfig already rejected combining it
 		// with more than one --symbol), so instruments.ids has exactly

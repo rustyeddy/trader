@@ -214,3 +214,32 @@ strategy:
 	require.Len(t, doc.OpenTrades, 1, "the bar-12 reversal's re-entry must remain open")
 	assert.Equal(t, "short", doc.OpenTrades[0].Side)
 }
+
+// TestRunCLI_UnsupportedStrategyNameRejected proves strategy.name is
+// a truthful, validated claim rather than an ignored label: there is
+// no strategy registry, so a name other than "ema-cross" must fail
+// loudly instead of silently running EMA crossover anyway (PR #263
+// review).
+func TestRunCLI_UnsupportedStrategyNameRejected(t *testing.T) {
+	configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  adverse_distance: 0.01000
+
+strategy:
+  name: some-other-strategy
+`)
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetArgs([]string{
+		"run",
+		"--config", configPath,
+		"--data-raw-root", "testdata/raw/oanda",
+	})
+	err := runCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "some-other-strategy")
+	assert.Contains(t, err.Error(), "ema-cross")
+}
