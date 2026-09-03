@@ -3,12 +3,14 @@
 // canonical bars -> EMA calculation -> crossover detection ->
 // order.Intent -> M4 execution/risk -> simulated fill -> journal ->
 // trades/account -> metrics/report — works together, through the real
-// public composition path (svcbacktest.Service, the same seam EMA-05/
-// EMA-06 already exercise), not a mock that bypasses M3/M4/M5.
+// public composition path (service/backtest.Service, the same seam
+// EMA-05/EMA-06 already exercise), not a mock that bypasses M3/M4/M5.
 package emacross_test
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,24 +33,99 @@ import (
 func TestEmacross_EndToEndRegression(t *testing.T) {
 	resp, rec := runEMACrossoverFixture(t)
 
+	// The fixture's own known, fixed instants: the bar-6 crossover
+	// detection instant (the bar whose close makes EMA(3) cross
+	// EMA(5)), its bar-7 next-bar-open fill instant, the bar-11
+	// reversal detection instant, and its bar-12 next-bar-open fill
+	// instant. These are the same instants
+	// TestEmacross_EntryExitReversalThroughRealPipeline already names
+	// as bar7/bar8/bar12/bar13 open by clock hour; named here again so
+	// this test is a complete, self-contained regression that does not
+	// depend on another test file continuing to exist unchanged.
+	bar6Close := time.Date(2024, time.March, 4, 6, 0, 0, 0, time.UTC)
+	bar7Fill := time.Date(2024, time.March, 4, 7, 0, 0, 0, time.UTC)
+	bar11Close := time.Date(2024, time.March, 4, 11, 0, 0, 0, time.UTC)
+	bar12Fill := time.Date(2024, time.March, 4, 12, 0, 0, 0, time.UTC)
+
+	usd := num.MustParseCurrency("USD")
+
 	// Causal path proof: the exact bar-7 bullish cross and bar-12
 	// bearish reversal, their fills at the fixture's own known next-
 	// bar-open prices, and the resulting trade/account state — the
 	// same assertions TestEmacross_EntryExitReversalThroughRealPipeline
-	// already makes; repeated here so this one test is a complete,
-	// self-contained regression that does not depend on another test
-	// file continuing to exist unchanged.
+	// already makes, now pinned to exact fixed values (not merely a
+	// negative-PnL/side shape) per PR #266 review.
 	require.Len(t, resp.Trades, 1, "the bar-12 reversal must have closed the bar-7 long as one realized trade")
 	closed := resp.Trades[0]
 	assert.Equal(t, order.Long, closed.Side)
-	sign, err := closed.RealizedPnL.Cmp(num.MustParseMoney("0", num.MustParseCurrency("USD")))
-	require.NoError(t, err)
-	assert.Negative(t, sign, "a completed round trip with realized PnL, per issue #255's own requirement")
+	assert.True(t, closed.OpenedAt.Equal(bar7Fill), "the long must open at bar 7's own next-bar-open time, got %s", closed.OpenedAt)
+	assert.True(t, closed.ClosedAt.Equal(bar12Fill), "the long must close at bar 12's own next-bar-open time, got %s", closed.ClosedAt)
+	assert.Len(t, closed.EntryFillIDs, 1, "one entry fill: the bar-7 crossover's single Enter")
+	assert.Len(t, closed.ExitFillIDs, 1, "one exit fill: the bar-12 reversal's Exit")
+	assert.True(t, closed.RealizedPnL.Equal(num.MustParseMoney("-4", usd)),
+		"the long entered at 1.10040 and exited at 1.10000 on 9996 units: a fixed, known loss, got %s", closed.RealizedPnL)
 
 	require.Len(t, resp.OpenTrades, 1)
-	assert.Equal(t, order.Short, resp.OpenTrades[0].Side)
+	open := resp.OpenTrades[0]
+	assert.Equal(t, order.Short, open.Side)
+	assert.True(t, open.OpenedAt.Equal(bar12Fill), "the re-entry must open at bar 12's own next-bar-open time, got %s", open.OpenedAt)
+	assert.Len(t, open.EntryFillIDs, 1, "one entry fill: the bar-12 reversal's Enter")
+
 	require.Len(t, resp.Account.Positions(), 1)
-	assert.Equal(t, order.Short, resp.Account.Positions()[0].Side)
+	position := resp.Account.Positions()[0]
+	assert.Equal(t, order.Short, position.Side)
+	assert.True(t, position.Quantity.Equal(num.MustParseQuantity("9996")), "got quantity %s", position.Quantity)
+	require.NotNil(t, position.AvgPrice)
+	assert.True(t, position.AvgPrice.Equal(num.MustParsePrice("1.10000")), "got avg price %s", position.AvgPrice)
+	assert.True(t, resp.Account.Equity().Equal(num.MustParseMoney("10005.996", usd)), "got equity %s", resp.Account.Equity())
+
+	// Decision-evidence proof (EMA-08/ADR-044): the exact Signal
+	// payloads for both crossovers, correlated with the exact Intents
+	// they produced — not merely "a Signal exists" and "an Intent
+	// exists" independently.
+	signals := rec.kinds(journal.KindSignal)
+	require.Len(t, signals, 2)
+	bullish, bearish := signals[0], signals[1]
+
+	assert.True(t, bullish.Metadata.Timestamp.Equal(bar6Close), "got %s", bullish.Metadata.Timestamp)
+	assert.Equal(t, map[string]string{
+		"fast_ema":      "1.10025",
+		"slow_ema":      "1.1002444444444448",
+		"prev_relation": "below",
+		"curr_relation": "above",
+		"cross":         "bullish",
+		"action":        "enter-long",
+	}, bullish.Signal.Values)
+
+	assert.True(t, bearish.Metadata.Timestamp.Equal(bar11Close), "got %s", bearish.Metadata.Timestamp)
+	assert.Equal(t, map[string]string{
+		"fast_ema":      "1.1003578125",
+		"slow_ema":      "1.1004626428898034",
+		"prev_relation": "above",
+		"curr_relation": "below",
+		"cross":         "bearish",
+		"action":        "reverse",
+	}, bearish.Signal.Values)
+
+	intents := rec.kinds(journal.KindIntent)
+	require.Len(t, intents, 3, "one Enter for the bar-6 cross, one Exit and one Enter for the bar-11 reversal")
+	enterLong, exitLong, enterShort := intents[0], intents[1], intents[2]
+
+	require.NotNil(t, enterLong.Intent)
+	assert.Equal(t, order.IntentEnter, enterLong.Intent.Kind)
+	assert.Equal(t, order.Buy, enterLong.Intent.Side)
+	assert.Equal(t, bullish.Metadata.CorrelationID, enterLong.Metadata.CorrelationID,
+		"the Enter intent must correlate with the Signal that produced it")
+
+	require.NotNil(t, exitLong.Intent)
+	assert.Equal(t, order.IntentExit, exitLong.Intent.Kind)
+	require.NotNil(t, enterShort.Intent)
+	assert.Equal(t, order.IntentEnter, enterShort.Intent.Kind)
+	assert.Equal(t, order.Sell, enterShort.Intent.Side)
+	assert.Equal(t, bearish.Metadata.CorrelationID, exitLong.Metadata.CorrelationID,
+		"the reversal's Exit intent must correlate with the bearish Signal")
+	assert.Equal(t, exitLong.Metadata.CorrelationID, enterShort.Metadata.CorrelationID,
+		"the reversal's Exit and Enter intents must share one correlation, per ADR-005's correlated-pair intent style")
 
 	// The exact, fully-ordered journal Kind sequence for the whole run
 	// — issue #255's own "expected journal sequence ... asserted"
@@ -115,7 +192,7 @@ func TestEmacross_EndToEndRegression(t *testing.T) {
 	for i, r := range rec.records {
 		gotKinds[i] = r.Kind
 	}
-	assert.Equal(t, wantKinds, gotKinds, "the journal's exact causal record order must match the real intent -> proposal -> decision -> request -> order -> fill -> account -> trade path")
+	assert.Equal(t, wantKinds, gotKinds, "the journal's exact causal record order must match the real signal -> intent -> proposal -> decision -> request -> order -> fill -> order -> trade path")
 
 	// Report/metrics projection: the same public consumer a real CLI
 	// run feeds (report.NewBacktestReport), reconciling with the
@@ -134,11 +211,12 @@ func TestEmacross_EndToEndRegression(t *testing.T) {
 	require.Equal(t, 1, rep.TradeStats.TradeCount)
 	assert.Equal(t, 0, rep.TradeStats.Wins)
 	assert.Equal(t, 1, rep.TradeStats.Losses, "the closed long realized a loss, per the fixture's own known prices")
-	wantNetPnL, err := closed.RealizedPnL.Sub(closed.Costs)
-	require.NoError(t, err)
-	assert.True(t, rep.TradeStats.NetPnL.Equal(wantNetPnL))
+	assert.True(t, rep.TradeStats.NetPnL.Equal(num.MustParseMoney("-4", usd)), "got %s", rep.TradeStats.NetPnL)
 	require.Len(t, rep.BySide, 1, "only the closed long has a final win/loss outcome; the still-open short is excluded (backtest.Metrics' own documented scope)")
 	assert.Equal(t, "long", rep.BySide[0].Side)
+	assert.Equal(t, 1, rep.BySide[0].Count)
+	assert.Equal(t, 0, rep.BySide[0].Wins)
+	assert.Equal(t, 1, rep.BySide[0].Losses)
 }
 
 // TestEmacross_EndToEndRegression_Deterministic proves repeated runs of
@@ -149,19 +227,36 @@ func TestEmacross_EndToEndRegression(t *testing.T) {
 // exactly the way backtest's own ADR-041 determinism suite already
 // established for this same class of comparison.
 func TestEmacross_EndToEndRegression_Deterministic(t *testing.T) {
-	run := func() (int, string, string) {
-		resp, rec := runEMACrossoverFixture(t)
-		var kinds []journal.Kind
+	// signature captures the run's causal shape (kind + timestamp per
+	// record, plus every Signal's own semantic payload) without opaque
+	// run-local identifiers (RunID, event/correlation/order/fill IDs),
+	// which are expected to differ run to run — the same normalization
+	// backtest's own ADR-041 determinism suite established.
+	signature := func(rec *memoryRecorder) string {
+		var sb []byte
 		for _, r := range rec.records {
-			kinds = append(kinds, r.Kind)
+			sb = fmt.Appendf(sb, "%s@%s", r.Kind, r.Metadata.Timestamp)
+			if r.Kind == journal.KindSignal {
+				sb = fmt.Appendf(sb, " strategy=%s fast_ema=%s slow_ema=%s prev_relation=%s curr_relation=%s cross=%s action=%s",
+					r.Signal.Strategy,
+					r.Signal.Values["fast_ema"], r.Signal.Values["slow_ema"],
+					r.Signal.Values["prev_relation"], r.Signal.Values["curr_relation"],
+					r.Signal.Values["cross"], r.Signal.Values["action"])
+			}
+			sb = append(sb, '\n')
 		}
-		return len(kinds), resp.Manifest.ConfigDigest(), resp.Trades[0].RealizedPnL.String()
+		return string(sb)
 	}
 
-	wantLen, wantDigest, wantPnL := run()
+	run := func() (string, string, string) {
+		resp, rec := runEMACrossoverFixture(t)
+		return signature(rec), resp.Manifest.ConfigDigest(), resp.Trades[0].RealizedPnL.String()
+	}
+
+	wantSignature, wantDigest, wantPnL := run()
 	for i := range 3 {
-		gotLen, gotDigest, gotPnL := run()
-		assert.Equal(t, wantLen, gotLen, "run %d: journal record count diverged", i+2)
+		gotSignature, gotDigest, gotPnL := run()
+		assert.Equal(t, wantSignature, gotSignature, "run %d: journal causal signature diverged", i+2)
 		assert.Equal(t, wantDigest, gotDigest, "run %d: ConfigDigest diverged", i+2)
 		assert.Equal(t, wantPnL, gotPnL, "run %d: realized PnL diverged", i+2)
 	}
