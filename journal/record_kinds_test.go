@@ -88,6 +88,7 @@ func TestNewRecordValidEveryKind(t *testing.T) {
 	require.NoError(t, err)
 	status := broker.Status{State: broker.AccountStatusActive}
 	decision := risk.Decision{Allowed: true}
+	signal := journal.Signal{Strategy: "ema-cross", Values: map[string]string{"action": "none"}}
 
 	cases := []journal.Record{
 		func() journal.Record { r := base(); r.Kind, r.Proposal = journal.KindProposal, &proposal; return r }(),
@@ -98,9 +99,21 @@ func TestNewRecordValidEveryKind(t *testing.T) {
 		func() journal.Record { r := base(); r.Kind, r.Account = journal.KindAccount, &snap; return r }(),
 		func() journal.Record { r := base(); r.Kind, r.Status = journal.KindStatus, &status; return r }(),
 		func() journal.Record { r := base(); r.Kind, r.Trade = journal.KindTrade, &trade; return r }(),
+		func() journal.Record { r := base(); r.Kind, r.Signal = journal.KindSignal, &signal; return r }(),
 	}
 	for _, rec := range cases {
 		_, err := journal.NewRecord(rec)
 		require.NoError(t, err, "kind %s", rec.Kind)
 	}
+}
+
+func TestNewRecordRejectsSignalWithEmptyStrategy(t *testing.T) {
+	rec := journal.Record{
+		RunID:    mustRunID(t),
+		Metadata: id.Metadata{Timestamp: time.Now()},
+		Kind:     journal.KindSignal,
+		Signal:   &journal.Signal{Values: map[string]string{"action": "none"}},
+	}
+	_, err := journal.NewRecord(rec)
+	require.ErrorIs(t, err, journal.ErrInvalidRecord)
 }

@@ -46,6 +46,14 @@ const (
 	// KindTrade reports one derived order.Trade (backtest.DeriveTrades).
 	// Record.Trade is populated.
 	KindTrade
+	// KindSignal reports one strategy-emitted research-side decision
+	// record: an optional trace of why a strategy did or did not act on
+	// one bar, distinct from the authoritative order/fill/account
+	// lifecycle records above (ADR-044, issue #253, EMA-08). Values is a
+	// deliberately generic string-keyed evidence bag — journal stays
+	// strategy-agnostic; it is Values' own keys that carry
+	// strategy-specific meaning. Record.Signal is populated.
+	KindSignal
 	// KindRunCompleted marks the last record of a run's journal,
 	// written only once the run finished successfully.
 	// Record.RunCompleted is populated.
@@ -75,6 +83,8 @@ func (k Kind) String() string {
 		return "status"
 	case KindTrade:
 		return "trade"
+	case KindSignal:
+		return "signal"
 	case KindRunCompleted:
 		return "run-completed"
 	default:
@@ -85,7 +95,7 @@ func (k Kind) String() string {
 func (k Kind) valid() bool {
 	switch k {
 	case KindRunStarted, KindIntent, KindProposal, KindDecision, KindRequest,
-		KindOrder, KindFill, KindAccount, KindStatus, KindTrade, KindRunCompleted:
+		KindOrder, KindFill, KindAccount, KindStatus, KindTrade, KindSignal, KindRunCompleted:
 		return true
 	default:
 		return false

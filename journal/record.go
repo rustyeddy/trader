@@ -56,6 +56,7 @@ type Record struct {
 	Account      *account.Snapshot
 	Status       *broker.Status
 	Trade        *order.Trade
+	Signal       *Signal
 	RunCompleted *RunCompleted
 }
 
@@ -104,6 +105,9 @@ func NewRecord(r Record) (Record, error) {
 	if r.Trade != nil {
 		populated++
 	}
+	if r.Signal != nil {
+		populated++
+	}
 	if r.RunCompleted != nil {
 		populated++
 	}
@@ -133,6 +137,8 @@ func NewRecord(r Record) (Record, error) {
 		ok = r.Status != nil
 	case KindTrade:
 		ok = r.Trade != nil
+	case KindSignal:
+		ok = r.Signal != nil
 	case KindRunCompleted:
 		ok = r.RunCompleted != nil
 	}
@@ -150,6 +156,9 @@ func NewRecord(r Record) (Record, error) {
 	}
 	if r.RunCompleted != nil && !r.RunCompleted.RunID.Equal(r.RunID) {
 		return Record{}, fmt.Errorf("%w: run_completed run id %s does not match record run id %s", ErrInvalidRecord, r.RunCompleted.RunID, r.RunID)
+	}
+	if r.Signal != nil && r.Signal.Strategy == "" {
+		return Record{}, fmt.Errorf("%w: signal strategy must be set", ErrInvalidRecord)
 	}
 
 	return r, nil

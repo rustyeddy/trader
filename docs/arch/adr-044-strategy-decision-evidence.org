@@ -1,0 +1,207 @@
+#+TITLE: Strategy Decision Evidence ADR-044
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #253 (EMA-08) asks for the minimum research-side
+decision evidence needed to explain why the EMA crossover strategy did
+or did not act on a given bar, and explicitly poses the open design
+question this ADR resolves: does that evidence belong in the existing
+journal, or in a sibling research-trace artifact?
+
+* Context
+
+=strategy/emacross= (ADR-043's own EMA-04/EMA-05/EMA-06 work) already
+proves entry/exit/reversal behavior through the real M4 pipeline and
+simulator, and its own unit tests already assert the exact intents a
+given crossover produces. What remains missing is the ability for a
+reviewer, given a generated trade, to trace it back to the fast/slow
+EMA values and relation transition that caused it — issue #253's own
+acceptance criterion — without duplicating the authoritative order/
+fill/trade accounting the journal (ADR-036) already records.
+
+Two placements were considered:
+
+1. A generic =journal.KindSignal= record, correlated with the
+   intent(s) it caused via the existing =id.Metadata.CorrelationID=
+   mechanism every other =Kind= already uses, requiring
+   =strategy.Environment= to gain an optional =Journal=/=RunID=
+   capability so a strategy can record through it.
+2. A strategy-owned, parallel recording mechanism (an injected
+   =DecisionRecorder= interface at construction time), touching no
+   shared package at all.
+
+Option 1 was chosen. It reuses the journal's already-proven
+determinism, ordering, and correlation guarantees instead of building
+a second, less-mature mechanism, and keeps a single, canonical
+"what happened and why" record for a run rather than two parallel
+logs a reader must reconcile by timestamp. The cost is real but
+bounded: =strategy.Environment= gains two additive fields, and
+=journal= gains one new =Kind= whose payload is deliberately generic
+(a string-keyed evidence bag), so the shared packages gain no
+EMA-specific — or even indicator-specific — vocabulary.
+
+* Decision
+
+** journal: a new, generic =KindSignal=
+
+=journal.Signal= is a new payload type:
+
+#+BEGIN_SRC go
+type Signal struct {
+    Strategy string
+    Values   map[string]string
+}
+#+END_SRC
+
+=Values= is deliberately untyped and string-keyed rather than a set of
+typed fields: =journal= depends only on =id=, =num=, =instrument=,
+=order=, =risk=, =broker=, and =account= (its own doc comment), and
+must not gain a notion of "EMA," "fast/slow," or any other single
+strategy's vocabulary merely to accommodate this one. A strategy
+defines and documents its own key vocabulary (=strategy/emacross= uses
+=fast_ema=, =slow_ema=, =prev_relation=, =curr_relation=, =cross=,
+=action=); =journal.NewRecord= validates only that =Signal.Strategy= is
+non-empty and that exactly one payload field is set, matching every
+other =Kind=. =KindSignal= is added to =journal.Kind='s closed
+vocabulary, =Kind.String()/valid()=, and both the JSONL adapter's
+wire/unwire switches and its own "round-trips every kind" test.
+
+Correlation and ordering need no new mechanism: =Record.Metadata= (the
+same =id.Metadata= every other =Kind= already carries) already has
+=CorrelationID=, and a =Recorder= already assigns strictly increasing
+=Sequence= in call order. A signal record for a bar that produced an
+intent carries that intent's own =CorrelationID=; a signal record for
+a bar with no action carries a zero =CorrelationID= — there being
+nothing to correlate with is itself meaningful, not an omission.
+
+** strategy: two additive =Environment= fields
+
+#+BEGIN_SRC go
+type Environment struct {
+    Clock   clock.Clock
+    Intents IntentFactory
+    Logger  *slog.Logger
+    RunID   id.RunID          // NEW
+    Journal journal.Recorder  // NEW, may be nil
+}
+#+END_SRC
+
+Unlike =Clock=/=Intents=, =Journal= may be =nil=: a directly
+constructed =Environment= (most existing unit tests) that never sets
+it is not thereby invalid, and a strategy that chooses not to record
+decision evidence never needs to set it up. A strategy that does use
+it must nil-check before calling =Record= — =strategy/emacross= does
+exactly this. This mirrors =Logger='s own "capabilities, never
+configuration" framing (issue #210's original review): =Environment=
+still carries no strategy-specific parameters, only capabilities a
+strategy may or may not exercise.
+
+=backtest.Runner= is the one place that constructs a real
+=strategy.Environment= (=runner.go=): it now passes the run's own
+=runID= and the same wrapped, counting =journal.Recorder= (=jrnl=)
+Scheduler itself journals intent/proposal/decision/order/fill records
+through, so a strategy's signal records interleave into one correctly
+sequenced, single journal alongside every other record kind for the
+same run — not a second file or a second sequence counter to
+reconcile. =service/backtest.Environment.Journal= already flowed
+through to =RunnerParams.Journal= before this decision (ADR-036); no
+further plumbing was required beyond this one =Runner= call site.
+
+** strategy/emacross: recording cadence and content
+
+A signal is recorded only at a genuine decision boundary — a detected
+crossover (=crossState.update= reporting =bullish= or =bearish=) —
+never on every ready bar and never per indicator update or intrabar
+sample (issue #253's own "avoid blindly journaling every indicator
+sample" requirement, PR #264 review: an earlier draft of this ADR and
+implementation recorded once per ready bar, which for a multi-year H1
+run would have added tens of thousands of mostly =cross=none= records
+without improving trade explainability — the acceptance criterion only
+needs a generated trade traceable to the crossover that caused it). A
+crossover firing while the account is already correctly positioned
+(=actOnCross='s own defensive "already positioned" no-op branch, which
+=crossState='s invariants should prevent but does not assume) is still
+recorded, with =action=none=: it is itself a genuine decision boundary
+a reviewer might need to explain, distinct from an ordinary
+no-crossover bar that is never recorded at all.
+
+=Values= records: =fast_ema=, =slow_ema= (canonical decimal text),
+=prev_relation= (the crossover state machine's own "last non-tie
+relation" before this bar, ADR-035's Decision 1 vocabulary — "none"
+before one has ever been observed), =curr_relation= (this bar's raw
+relation; always =above= or =below= here, since =Values= is only ever
+written when a crossover — never a tie — is detected), =cross=
+(=bullish=/=bearish=; never =none=, since a =Values= record only ever
+exists for a detected crossover), and =action=
+(=none=/=enter-long=/=enter-short=/=reverse=, reporting what
+=actOnCross= actually did).
+
+=exit= alone (without an immediate re-entry) is not a distinct
+=action= value: this strategy's own Decision 4 transition table
+(ADR-035-adjacent, EMA-04) never exits without also reversing into the
+opposite side, so that value cannot occur here; a future strategy with
+a bare-exit transition would introduce it into its own =Values=
+vocabulary without needing any change to =journal= itself.
+
+=Values='s key vocabulary is versioned by =Signal.Strategy= together
+with the strategy's own =Descriptor.Version= (=emacross.Name=/
+=emacross.Version=, currently ="ema-cross"=/="v0"=): once persisted,
+=ema-cross/v0='s six keys and their meanings are fixed. A future change
+to what they mean (not merely an additional key) must bump
+=emacross.Version=, exactly as a Go strategy's own accounting/manifest
+identity already requires (=strategy.Descriptor='s own doc comment) —
+=journal= itself enforces none of this; it is a convention the
+recording strategy must honor.
+
+* Consequences
+
+- A reviewer can now take any closed or open =order.Trade= and its
+  entry intent's own =CorrelationID=, find the =KindSignal= record
+  sharing it, and read the exact EMA values and relation transition
+  that produced it — issue #253's own acceptance criterion, proven
+  directly by =strategy/emacross/decision_evidence_test.go= (calling
+  =OnBar= directly) and by =TestEmacross_EntryExitReversalThroughRealPipeline=
+  (through the real =Runner= wiring, confirming the two are not merely
+  parallel-but-disconnected mechanisms).
+- Repeated identical runs produce identical =Values= text and
+  correlation ids apart from intentionally opaque run identifiers
+  (=RunID=, event/correlation ids themselves) — the same determinism
+  guarantee every other journal record already provides, inherited for
+  free rather than re-proven.
+- =journal= and =strategy= both remain reusable by a future strategy or
+  a future live session: neither gained a concept scoped to EMA or to
+  backtesting specifically.
+- =cmd/trader/backtest= is not required to change for this ADR:
+  =backtest.Runner= always supplies a real (possibly discarding)
+  journal, so =strategy.Environment.Journal= is never actually =nil=
+  when driven through it; the CLI simply does not yet surface signal
+  records anywhere a user reads (EMA-09's own scope).
+- A future strategy wanting decision evidence follows the same
+  pattern: define its own =Values= vocabulary, nil-check
+  =env.Journal=, and record at its own natural decision boundary — no
+  further shared-package change is anticipated for that alone.
+
+* Alternatives Considered
+
+- *Strategy-owned parallel recorder (no shared-package change).*
+  Rejected: it would work, but produces two logs a reader must
+  reconcile by timestamp instead of one, re-implements ordering/
+  determinism guarantees the journal already has, and does not scale
+  to a second strategy without either duplicating the mechanism or
+  retrofitting it into something journal-shaped anyway.
+- *Typed EMA-specific fields on a new journal payload
+  (=FastEMA num.Rate=, etc.) instead of a generic string-keyed bag.*
+  Rejected: it would require =journal= to grow a new payload type per
+  strategy family, exactly the coupling this package's own doc comment
+  already forbids ("journal depends only on id, num, instrument,
+  order, risk, broker, and account").
+- *One signal per ready bar, including every ordinary "no crossover"
+  bar.* This was this ADR's own original decision, corrected during
+  review (PR #264): it satisfies "why didn't it trade *right here*"
+  for any single bar, but at the cost of journaling a
+  =cross=none=/=action=none= record for nearly every bar of a real
+  multi-year run — exactly the "blindly journaling every indicator
+  sample" issue #253 asks to avoid, for a question ("why didn't it
+  trade") the crossover-only record already answers by omission: no
+  signal between two crossovers means nothing changed.

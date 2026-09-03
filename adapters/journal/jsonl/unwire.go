@@ -407,6 +407,11 @@ func fromEntryWire(w entryWire) (journal.Entry, error) {
 			return journal.Entry{}, err
 		}
 		rec.Trade = &v
+	case journal.KindSignal:
+		if w.Signal == nil {
+			return journal.Entry{}, fmt.Errorf("%w: kind signal missing signal payload", ErrCorruptEntry)
+		}
+		rec.Signal = &journal.Signal{Strategy: w.Signal.Strategy, Values: w.Signal.Values}
 	case journal.KindRunCompleted:
 		if w.RunCompleted == nil {
 			return journal.Entry{}, fmt.Errorf("%w: kind run-completed missing run_completed payload", ErrCorruptEntry)
@@ -444,6 +449,8 @@ func parseKind(s string) (journal.Kind, error) {
 		return journal.KindStatus, nil
 	case "trade":
 		return journal.KindTrade, nil
+	case "signal":
+		return journal.KindSignal, nil
 	case "run-completed":
 		return journal.KindRunCompleted, nil
 	default:

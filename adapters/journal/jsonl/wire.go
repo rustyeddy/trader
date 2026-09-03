@@ -338,6 +338,11 @@ type runCompletedWire struct {
 	EntryCount uint64   `json:"entry_count"`
 }
 
+type signalWire struct {
+	Strategy string            `json:"strategy"`
+	Values   map[string]string `json:"values,omitempty"`
+}
+
 // entryWire is the full JSONL wire record: one line, one Entry. Kind
 // is written as its string name for human readability; decoding
 // parses it back via parseKind.
@@ -357,6 +362,7 @@ type entryWire struct {
 	Account      *accountWire      `json:"account,omitempty"`
 	Status       *statusWire       `json:"status,omitempty"`
 	Trade        *tradeWire        `json:"trade,omitempty"`
+	Signal       *signalWire       `json:"signal,omitempty"`
 	RunCompleted *runCompletedWire `json:"run_completed,omitempty"`
 }
 
@@ -395,6 +401,8 @@ func toEntryWire(e journal.Entry) entryWire {
 	case journal.KindTrade:
 		v := toTradeWire(*e.Trade)
 		w.Trade = &v
+	case journal.KindSignal:
+		w.Signal = &signalWire{Strategy: e.Signal.Strategy, Values: e.Signal.Values}
 	case journal.KindRunCompleted:
 		w.RunCompleted = &runCompletedWire{RunID: e.RunCompleted.RunID, EntryCount: e.RunCompleted.EntryCount}
 	}

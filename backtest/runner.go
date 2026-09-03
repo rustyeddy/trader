@@ -287,6 +287,8 @@ func (r *Runner) Run(ctx context.Context) (result Result, err error) {
 		Clock:   p.Clock,
 		Intents: strategy.NewIntentFactory(p.Clock, p.IDs, runnerIDSource),
 		Logger:  p.Logger,
+		RunID:   runID,
+		Journal: jrnl,
 	}
 	if err := p.Strategy.Start(ctx, env); err != nil {
 		return Result{}, fmt.Errorf("backtest: runner: starting strategy: %w", err)
