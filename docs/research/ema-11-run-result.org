@@ -1,0 +1,318 @@
+#+TITLE: EMA-11: First EMA Crossover Research Experiment Result
+#+STARTUP: overview indent
+
+* Purpose
+
+This document records the first real historical run of the EMA
+crossover strategy (issue #256, EMA-11) against the reference
+configuration =docs/research/ema-01-experiment-definition.org=
+(EMA-01) specified, and states an explicit research conclusion. It is
+a results record, not a durable architecture decision — it carries no
+ADR number (see =docs/arch/adr-decisions.org=).
+
+Trader's own CLI (=trader backtest run --config=) produced this run
+end to end, through the real =service/backtest=/=backtest.Runner=/M4
+pipeline/simulator path (the same path EMA-05 through EMA-10 already
+proved deterministic and correct at the unit/regression level) — no
+special research-only code path exists or was added for this
+experiment. The one code change this issue did add,
+=cmd/trader/backtest= gaining an optional =--journal= flag, is pure
+CLI plumbing (an opt-in destination for an already-existing journal
+capability); it does not touch strategy, execution, risk, or simulator
+behavior.
+
+* Reproduction
+
+** Git commit / Trader version
+
+Commit ~3bafa1f70ade27f676bea06ff5bca3c9c8322660~ on branch
+=feature/256-emacross-ema11-experiment= (=strategy_version: v0=, per
+the run's own =run.strategy_version=). This is the exact commit the
+reported binary was built from (~go build ./cmd/trader~).
+
+** Config
+
+=research-runs/ema-11/ema01-reference.yaml= (gitignored alongside the
+rest of =research-runs/=; reproduced verbatim below since it is small
+and this document is the durable reference for it):
+
+#+BEGIN_SRC yaml
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2015-01-01T00:00:00Z
+  to: 2025-01-01T00:00:00Z
+  currency: USD
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.0050
+
+strategy:
+  name: ema-cross
+  fast_period: 20
+  slow_period: 50
+#+END_SRC
+
+Every value matches EMA-01's Decisions 5 and 7 exactly: 10,000 USD
+starting capital, 1% fixed-fraction risk, 0.0050 adverse distance
+(sizing input, not a broker-side stop — EMA-01 Decision 5), and the
+half-open =[2015-01-01, 2025-01-01)= range (last calendar day included
+is 2024-12-31).
+
+** Command
+
+#+BEGIN_SRC sh
+trader backtest run \
+  --config research-runs/ema-11/ema01-reference.yaml \
+  --data-raw-root /srv/trading/data/raw/oanda \
+  --data-store-root <fresh-directory> \
+  --output-dir research-runs/ema-11/runs \
+  --journal research-runs/ema-11/run.jsonl \
+  --format json
+#+END_SRC
+
+=--data-raw-root= points at the real OANDA raw archive
+(=PAIR-YYYY-MM-<tf>.csv= partitions, schema =raw-v1=; see the
+=project_m2_marketdata_layering= memory note for the general layout).
+=--data-store-root= should be a fresh directory: the canonical EUR/USD
+H1 store is rebuilt from raw on every run of this exact command
+regardless, so a stale store only wastes disk, it never changes the
+result (canonical data is content-addressed by revision — see below).
+
+** Determinism check performed
+
+Two independent runs of the exact command above (one before, one after
+the =--journal= commit landed — the second is the officially recorded
+run below) produced *byte-identical* trade/account/performance figures:
+identical 1175 trade count, identical -1510.02803 USD net PnL,
+identical final equity, identical win/loss/side breakdowns. The two
+runs' =ConfigDigest= values differ (~77728a8...~ vs ~b9a5c2f...~) —
+this is =backtest.Manifest.ConfigDigest='s already-documented,
+already-known gap (ADR-042's own finding: each dataset's =BuiltAt=
+wall-clock timestamp is embedded in the digest), not a reproducibility
+failure of the actual trading result. Every trading-relevant field
+reproduced exactly; only the incidental build-timestamp-derived digest
+differed, exactly as ADR-042 already predicts for any two independent
+canonical-store builds.
+
+** Dataset manifest / revision
+
+120 monthly EUR/USD H1 canonical datasets (2015-01 through 2024-12),
+each independently content-addressed. First and last:
+
+| Span                                | Revision (sha256, truncated)      |
+|--------------------------------------+-----------------------------------|
+| 2015-01-01T00:00:00Z .. 2015-02-01Z | 13983cc79a757b5828ccd9f8562ae5a... |
+| 2024-12-01T00:00:00Z .. 2025-01-01Z | 552bda796bf76ad71944248675296394... |
+
+All 120 revisions are recorded verbatim in
+=research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.report.json='s
+own ~dataset~ array and in the Org export's "Dataset Provenance"
+section — not reproduced in full here since they are mechanically
+regenerable from the archive and add no information beyond "this
+exact 120-month EUR/USD H1 series was used."
+
+** Config digest and run ID (officially recorded run)
+
+- Run ID: ~run_019AHCNC00MHC9NGVP4DXC7W3G~
+- Config digest: ~sha256:b9a5c2fb769e3aa05dc2f9022369397b3beeb586df07c5f56d81a9d38b11e656~
+
+** Artifact references
+
+Generated, regenerable artifacts are gitignored (=/research-runs/=,
+see =.gitignore=) rather than committed — they total roughly 24 MB,
+dominated by a 62,191-point equity curve and an 18,811-record journal,
+and are exactly reproducible from the commit/config/dataset identity
+recorded above. They exist locally at:
+
+- Report snapshot (JSON, byte-identical to what "show" reads back):
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.report.json=
+- Durable journal (JSONL, =adapters/journal/jsonl=, 18,811 records —
+  1176 =KindSignal=/1176 =KindTrade=/2351 each of
+  =KindIntent=/=KindProposal=/=KindDecision=/=KindRequest=/=KindFill=,
+  4702 =KindOrder=, bracketed by one =KindRunStarted=/=KindRunCompleted=
+  pair — the same causal shape EMA-10's regression proved at small
+  scale, here at full 10-year scale):
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.journal.jsonl=
+- Compact table render:
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.table.txt=
+- Full Org report (complete trade list and equity curve):
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.org=
+
+* Result
+
+** Instrument / interval / date range
+
+EUR/USD, H1, 2015-01-01 through 2024-12-31 (half-open end at
+2025-01-01), 10 calendar years.
+
+** Strategy parameters
+
+Fast EMA period 20, slow EMA period 50 (EMA-01's own reference
+values), SMA-seeded, next-bar-open fills, zero slippage/commission
+(EMA-01 Decision 6's stated idealization).
+
+** Starting capital and risk configuration
+
+10,000 USD starting capital; 1% fixed-fraction risk per entry; 0.0050
+adverse-distance sizing input (EUR/USD H1, a neutral placeholder per
+EMA-01 Decision 5 — not derived from volatility analysis, and not a
+broker-side protective stop).
+
+** Trade count
+
+1175 closed trades, plus 1 still-open position at the end of the
+range (a short, 16,979 units @ 1.03851 average price).
+
+** Final equity / net PnL / return
+
+| Metric          | Value           |
+|-----------------+-----------------|
+| Starting Capital | 10,000.00 USD  |
+| Final Equity     | 8,545.83288 USD |
+| Net PnL (closed) | -1,510.02803 USD |
+| Net Return       | -14.541671%    |
+| Unrealized PnL   | +55.86091 USD (the one open short) |
+
+** Drawdown and other performance metrics
+
+| Metric         | Value        |
+|-----------------+--------------|
+| Max Drawdown    | 43.086189%  |
+| Profit Factor   | 0.97147804  |
+| Expectancy      | -1.28513024 USD/trade |
+| Closed Trade Costs | 0 USD (zero-cost model, EMA-01 Decision 6) |
+
+A profit factor below 1.0 and a max drawdown exceeding 43% of peak
+equity are both, independently, strong negative signals for this
+exact configuration — see Research Conclusion.
+
+** Win/loss characteristics
+
+| Metric        | Value            |
+|---------------+------------------|
+| Wins          | 385              |
+| Losses        | 789              |
+| Win Rate      | 32.765957%      |
+| Average Win   | 133.59121803 USD |
+| Average Loss  | -67.10094673 USD |
+
+The win rate is well below 50%, partially offset by an average win
+roughly double the average loss (a "let winners run, cut losses"
+shape consistent with a trend-following crossover exiting only on the
+opposite signal) — but not enough to overcome the loss frequency: 385
+x 133.59 = 51,432 USD gross wins against 789 x 67.10 = 52,942 USD
+gross losses, a -1,510 USD net (matches Gross PnL above exactly).
+
+** Long/short breakdown
+
+| Side  | Count | Wins | Losses | Net PnL         |
+|-------+-------+------+--------+-----------------|
+| Long  |   588 |  195 |    393 | -2,139.83369 USD |
+| Short |   587 |  190 |    396 |   629.80566 USD  |
+
+The long side accounts for the entire loss and then some; the short
+side was mildly profitable in isolation. Both sides individually have
+a losing trade count roughly double their winning count (393 vs 195,
+396 vs 190) — the losing-trade-frequency pattern is symmetric across
+side, so this is not a long-only or short-only defect in the crossover
+logic itself (EMA-01 Decision 1's tie-preserving state machine treats
+both directions identically by construction).
+
+** Anomalies discovered while reviewing trades
+
+- *Worst single trade*: -536.31084 USD, a long opened 2016-06-22T20:00Z
+  and closed 2016-06-24T03:00Z — the Brexit referendum result (declared
+  the morning of 2016-06-24 UTC). This is a real, known historical
+  volatility event coinciding exactly with the worst trade in the
+  entire 10-year run, not a data or simulation defect; it is recorded
+  here specifically so a future reviewer does not mistake it for a bug
+  and re-investigate it.
+- *Best single trade*: +1,115.5807 USD, a short held 2015-02-26 through
+  2015-03-17 (roughly 19 days) — the early-2015 dollar-strength/EUR
+  weakness trend, also a known historical period, not an anomaly.
+- *Trade duration spread is wide*: minimum 1 hour, maximum 502 hours
+  (~21 days), median 45 hours, mean ~74.4 hours. 54 of 1175 trades
+  (4.6%) closed within the very next bar after opening (a same-session
+  whipsaw reversal) — expected from a crossover strategy with no
+  minimum-hold or noise filter, not itself evidence of a defect, but a
+  concrete number worth carrying into any follow-on experiment that
+  adds a noise/whipsaw filter.
+- *Year-by-year PnL is highly uneven*: 2020 alone contributed +2,977.08
+  USD (the single best year, in a year of unusually strong, sustained
+  FX trends during the COVID volatility regime); 2016, 2017, 2021, and
+  2024 were the worst years (-1,846.59, -1,254.36, -1,196.49, and
+  -1,800.53 USD respectively). No single year's result is required to
+  explain the aggregate — the aggregate is genuinely a 10-year sum, not
+  dominated by one outlier year — but the concentration of the one
+  clearly good year (2020) alongside four clearly bad years is worth
+  carrying forward: a regime-dependent crossover edge (trending vs.
+  ranging markets) is a plausible next hypothesis, consistent with the
+  =project_regime_filter_design= work already scoped in a prior legacy
+  system.
+- No data-integrity anomaly (out-of-order bars, gaps, duplicate
+  fills, or a =KindSignal=/=KindFill=/=KindTrade= count mismatch) was
+  found while reviewing the journal, and the counts reconcile exactly:
+  1176 =KindSignal= records (one per detected crossover, EMA-08's own
+  cadence — never one per bar) against 2351 =KindFill= records solves
+  to exactly one flat->direction signal (a single Enter fill) and
+  1175 reversal signals (an Exit + Enter fill pair each): 1 + 1175 =
+  1176 signals, 1x1 + 1175x2 = 2351 fills, both exact. This is the
+  expected shape given EMA-01 Decision 4: only the very first
+  crossover of the entire run can find the strategy flat: every
+  crossover after that finds it already long or short (it never exits
+  without immediately reversing), so 1175 of the 1176 signals are
+  necessarily reversals. 1175 closed trades + 1 still-open trade at
+  the end of the range also reconciles with 1176 total positions
+  opened across the run.
+
+* Research Conclusion
+
+*Rejected — move to next experiment.*
+
+The reference hypothesis (docs/research/ema-01-experiment-definition.org's
+own framing: "A fast EMA crossing a slow EMA identifies trend changes
+that, when traded long/short with opposite-cross exits, may produce
+positive expectancy on EUR/USD H1") is not supported by this run.
+Every headline metric points the same direction: negative net PnL
+(-1,510.03 USD, -14.54% return over 10 years), a profit factor below
+1.0 (0.971), negative per-trade expectancy (-1.29 USD), and a 43.09%
+maximum drawdown — a drawdown of that magnitude would be operationally
+unacceptable even if the sign of expectancy were reversed. This
+conclusion concerns the crossover entry/exit hypothesis and this
+specific fixed, simplified sizing/cost model together (EMA-01 Decision
+5's own explicit caveat) — it is not a statement that the
+implementation is incorrect. The implementation's correctness is
+judged separately, by the deterministic unit/regression tests EMA-03
+through EMA-10 already established and which this run's own
+determinism check (above) reconfirms at full scale.
+
+** Obvious next experiment
+
+Two follow-on directions are both directly motivated by this result,
+in order of how directly they attack what the anomaly review above
+found:
+
+1. *Add a realistic cost model.* EMA-01 Decision 6's zero-cost
+   idealization is a known, stated simplification; a fixed spread
+   and/or commission model (already an explicit "expected follow-on"
+   per that decision) can only make this specific negative result
+   worse, not better, since 1175 trades at any nonzero per-trade cost
+   subtracts further from an already-negative net PnL. This is worth
+   running once, briefly, specifically to confirm the rejection is not
+   an artifact of an unrealistically generous zero-cost assumption
+   understating how bad a live version would be — not because it could
+   plausibly flip the conclusion to Promising.
+2. *Introduce a regime or trend-strength filter before trusting a
+   crossover signal* — motivated directly by the year-by-year anomaly
+   above (one strongly trending year, several weak/ranging years) and
+   by the 4.6% same-bar whipsaw-reversal rate. A crossover signal
+   filtered by a volatility/regime gate (for example, only trading
+   crossovers when a longer-window trend-strength or ATR-percentile
+   measure exceeds a threshold) is the most direct hypothesis this
+   specific evidence supports, and is a smaller, cheaper change to test
+   than redesigning the entry/exit logic itself.
+
+Both are new experiments, not a revision of this one: per EMA-01's own
+framing, this document's role is to record this hypothesis's result
+and conclusion, not to iterate on it in place.
