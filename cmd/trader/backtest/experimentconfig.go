@@ -61,6 +61,21 @@ type backtestSection struct {
 	StartingCapital string    `config:"starting_capital" flag:"starting-cash" default:"10000"`
 	RiskFraction    num.Rate  `config:"risk_fraction" flag:"risk-fraction" default:"0.01"`
 	AdverseDistance num.Price `config:"adverse_distance" flag:"adverse-distance" required:"true"`
+
+	// DataStoreRoot is the canonical data store's persistent home
+	// (issue #268): unlike every other field here, its default is not
+	// a research-neutral placeholder but a real, opinionated local
+	// path — /srv/trading/data/canonical, chosen to sit next to the
+	// raw archive at /srv/trading/data/raw/oanda and kept distinct
+	// from the legacy trader-first-try system's own
+	// /srv/trading/data/candles cache, which this default must never
+	// collide with. An explicit --data-store-root "" (or
+	// TRADER_BACKTEST_DATA_STORE_ROOT="") still opts back into a
+	// fresh, ephemeral temporary directory per run (runBacktest's own
+	// storeRoot resolution) — this is what every test that must not
+	// share state across runs relies on, so this default only ever
+	// takes effect when nothing more specific overrides it.
+	DataStoreRoot string `config:"data_store_root" flag:"data-store-root" default:"/srv/trading/data/canonical"`
 }
 
 // strategySection is the EMA crossover strategy's own configuration —
@@ -166,6 +181,9 @@ func buildRunConfig(cmd *cobra.Command, flags runFlags) (runConfig, error) {
 	}
 	if cmd.Flags().Changed("slow-period") {
 		overrides["slow-period"] = fmt.Sprintf("%d", flags.slowPeriod)
+	}
+	if cmd.Flags().Changed("data-store-root") {
+		overrides["data-store-root"] = flags.dataStoreRoot
 	}
 
 	return config.Load[runConfig](config.Options{

@@ -52,6 +52,7 @@ backtest:
 		"run",
 		"--config", configPath,
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 	})
@@ -87,6 +88,7 @@ backtest:
 		"--config", configPath,
 		"--starting-cash", "10000", // overrides the file's starting_capital: 1
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 	})
@@ -130,6 +132,7 @@ strategy:
 		"run",
 		"--config", configPath,
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
@@ -154,6 +157,7 @@ backtest:
 		"--symbol", "EURUSD",
 		"--symbol", "GBPUSD",
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
@@ -193,6 +197,7 @@ strategy:
 		"run",
 		"--config", configPath,
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 	})
@@ -242,6 +247,7 @@ strategy:
 		"run",
 		"--config", configPath,
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 	})
 	err := runCmd.Execute()
 	require.Error(t, err)
@@ -278,6 +284,7 @@ backtest:
 		"run",
 		"--config", configPath,
 		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
 		"--output-dir", outputDir,
 		"--format", "json",
 		"--journal", journalPath,

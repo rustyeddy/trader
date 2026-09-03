@@ -72,6 +72,28 @@ backtest:
 	assert.Equal(t, "ema-cross", cfg.Strategy.Name)
 	assert.Equal(t, 20, cfg.Strategy.FastPeriod)
 	assert.Equal(t, 50, cfg.Strategy.SlowPeriod)
+	assert.Equal(t, "/srv/trading/data/canonical", cfg.Backtest.DataStoreRoot,
+		"issue #268: canonical data persists by default rather than rebuilding into a fresh temporary directory every run")
+}
+
+// TestRunConfig_DataStoreRootExplicitEmptyOverridesDefault proves an
+// explicit empty --data-store-root (what every hermetic test in this
+// package relies on) actually reaches runConfig as "", not the
+// default: config.Load's override lookup is a map "found" check, not
+// an emptiness check, so an explicitly-supplied empty string must
+// still count as an override rather than falling through to
+// DataStoreRoot's own default tag (issue #268).
+func TestRunConfig_DataStoreRootExplicitEmptyOverridesDefault(t *testing.T) {
+	const minimal = `
+backtest:
+  symbol: EURUSD
+  from: 2015-01-01
+  to: 2025-01-01
+  adverse_distance: 0.0050
+`
+	cfg, err := loadRunConfig(t, minimal, map[string]string{"data-store-root": ""})
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Backtest.DataStoreRoot)
 }
 
 func TestRunConfig_MissingRequiredFieldFails(t *testing.T) {

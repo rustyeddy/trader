@@ -96,7 +96,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; only used when --config is also given")
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
 
-	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: a fresh temporary directory)")
+	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
 	cmd.Flags().StringVar(&flags.provider, "provider", "oanda", "market data provider name")
 
@@ -265,7 +265,7 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	riskFraction := cfg.Backtest.RiskFraction
 	adverseDistance := cfg.Backtest.AdverseDistance
 
-	storeRoot := flags.dataStoreRoot
+	storeRoot := cfg.Backtest.DataStoreRoot
 	if storeRoot == "" {
 		dir, err := os.MkdirTemp("", "trader-backtest-store-")
 		if err != nil {
