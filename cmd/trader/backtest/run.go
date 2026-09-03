@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
@@ -17,6 +18,8 @@ import (
 	"github.com/rustyeddy/trader/report"
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 	svcmarketdata "github.com/rustyeddy/trader/service/marketdata"
+	"github.com/rustyeddy/trader/strategy"
+	"github.com/rustyeddy/trader/strategy/emacross"
 )
 
 // runFlags holds "trader backtest run"'s own flag values.
@@ -52,19 +55,20 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run a backtest and render/persist its result.",
 		Long: "Run a backtest over the M5 application service and render its result.\n\n" +
-			"This build accepts only one, provisional demo strategy (a single\n" +
-			"buy-and-hold entry per instrument's own first bar) — see the\n" +
-			"package doc comment. Canonical market data must already be\n" +
-			"available under --data-store-root/--data-raw-root (published via\n" +
-			"'trader data build'/'trader data sync'); this command never syncs\n" +
-			"from a live provider itself.\n\n" +
+			"Without --config, this command runs a provisional demo strategy\n" +
+			"(a single buy-and-hold entry per instrument's own first bar) —\n" +
+			"see the package doc comment. Canonical market data must already\n" +
+			"be available under --data-store-root/--data-raw-root (published\n" +
+			"via 'trader data build'/'trader data sync'); this command never\n" +
+			"syncs from a live provider itself.\n\n" +
 			"--symbol may be repeated to run a multi-instrument portfolio\n" +
-			"backtest (issue #224): one Scheduler and one shared account/\n" +
-			"pipeline still replay every requested instrument — this is not a\n" +
-			"per-symbol engine.\n\n" +
+			"backtest (issue #224) with the demo strategy: one Scheduler and\n" +
+			"one shared account/pipeline still replay every requested\n" +
+			"instrument — this is not a per-symbol engine.\n\n" +
 			"--config supplies backtest/strategy parameters from a YAML file\n" +
-			"(issue #247), for a single instrument; any explicit flag above\n" +
-			"still overrides its value.",
+			"(issue #247) and runs the real EMA crossover strategy\n" +
+			"(issue #252) instead of the demo strategy, for a single\n" +
+			"instrument; any explicit flag above still overrides its value.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBacktest(cmd, flags)
 		},
@@ -82,9 +86,9 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flags.warmupBars, "warmup-bars", 0, "warm-up bars required before the demo strategy may trade, per instrument")
 
 	cmd.Flags().StringVar(&flags.config, "config", "", "YAML config file supplying backtest/strategy parameters (issue #247); explicit flags above always override it")
-	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "strategy name recorded in the run manifest (informational only until EMA-04/EMA-07 wire a real strategy in)")
-	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period recorded in the run manifest")
-	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period recorded in the run manifest")
+	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "must equal \"ema-cross\" when --config is used (there is no strategy registry to select from; any other value is rejected)")
+	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; only used when --config is also given")
+	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: a fresh temporary directory)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
@@ -200,16 +204,19 @@ func resolveInstrumentSet(symbols []string, provider string, oandaResolver, simR
 // runBacktest is newRunCmd's own RunE, split out so its own control
 // flow is easy to read top to bottom: resolve effective configuration
 // (flags/--config/defaults, issue #247) -> resolve every requested
-// instrument (canonically, order-independently) -> publish
-// canonical data for each if needed -> compute the demo strategy's
-// own, analytically known next-bar-open fill price per instrument ->
-// build the concrete EnvironmentFactory -> call service/backtest.Run
-// -> project into a report.BacktestReport once -> persist that same
-// projection -> render it. No backtest orchestration happens here:
-// service/backtest.Service.Run is the only thing that drives a
-// replay, and it drives exactly one Scheduler/account/pipeline
-// regardless of how many instruments were requested (issue #224's own
-// "no per-symbol backtest engine fork" acceptance criterion).
+// instrument (canonically, order-independently) -> publish canonical
+// data for each if needed -> select and configure a strategy and its
+// matching FillPriceSource (the EMA crossover strategy plus a general
+// per-bar-lookup price source when --config is given, issue #252;
+// otherwise the demo strategy plus its precomputed one-shot price, as
+// before) -> build the concrete EnvironmentFactory -> call
+// service/backtest.Run -> project into a report.BacktestReport once ->
+// persist that same projection -> render it. No backtest orchestration
+// happens here: service/backtest.Service.Run is the only thing that
+// drives a replay, and it drives exactly one Scheduler/account/
+// pipeline regardless of how many instruments were requested (issue
+// #224's own "no per-symbol backtest engine fork" acceptance
+// criterion).
 func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	ctx := cmd.Context()
 
@@ -279,13 +286,8 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		return err
 	}
 
-	// prices accumulates one precomputed next-bar-open fill price per
-	// instrument (never a live per-bar feed — see simPriceSource's own
-	// doc comment for why that is sufficient and correct for this
-	// provisional demo strategy specifically, and why it must not be
-	// mistaken for a general multi-bar portfolio fill model).
-	prices := make(map[string]num.Price, len(instruments.ids))
-
+	// Ensure canonical data is published for every requested instrument
+	// before either strategy path below reads it.
 	for _, instrumentID := range instruments.ids {
 		plan, err := manager.Plan(ctx, marketdata.BarQuery{Instrument: instrumentID, Interval: interval, Range: span})
 		if err != nil {
@@ -296,36 +298,82 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 				return err
 			}
 		}
-
-		fillPrice, err := nextBarOpenAfterEntry(ctx, manager, instrumentID, interval, span, flags.warmupBars)
-		if err != nil {
-			return fmt.Errorf("computing %s's next-bar-open fill price: %w", instrumentID, err)
-		}
-		listing := instruments.simListing[instrumentID.String()]
-		prices[listing.Symbol()] = fillPrice
 	}
 
-	factory := environmentFactory{prices: simPriceSource(prices)}
+	var strat strategy.Strategy
+	var strategyParams any
+	var prices simbroker.FillPriceSource
+
+	if flags.config != "" {
+		// There is no strategy registry: strategy.name (--strategy-name)
+		// does not select anything, since this path only ever
+		// constructs strategy/emacross. Rejecting any other name here
+		// (rather than silently running EMA crossover under an
+		// unrelated label) keeps the manifest's StrategyName truthful
+		// against what the config actually claimed (PR #263 review).
+		if cfg.Strategy.Name != emacross.Name {
+			return fmt.Errorf("strategy.name %q is not supported: --config only runs %q (there is no strategy registry)",
+				cfg.Strategy.Name, emacross.Name)
+		}
+
+		// --config describes a single-instrument EMA crossover
+		// experiment (buildRunConfig already rejected combining it
+		// with more than one --symbol), so instruments.ids has exactly
+		// one entry here.
+		instID := instruments.ids[0]
+		listing := instruments.simListing[instID.String()]
+
+		emaStrategy, err := emacross.New(instID, interval, emacross.Config{
+			FastPeriod: cfg.Strategy.FastPeriod,
+			SlowPeriod: cfg.Strategy.SlowPeriod,
+		})
+		if err != nil {
+			return err
+		}
+
+		src := newNextBarOpenPriceSource()
+		if err := src.load(ctx, manager, listing.Symbol(), marketdata.BarQuery{Instrument: instID, Interval: interval, Range: span}); err != nil {
+			return fmt.Errorf("loading canonical prices for %s: %w", instID, err)
+		}
+
+		strat = emaStrategy
+		strategyParams = emaStrategy.Config()
+		prices = src
+	} else {
+		// prices accumulates one precomputed next-bar-open fill price
+		// per instrument (never a live per-bar feed — see
+		// simPriceSource's own doc comment for why that is sufficient
+		// and correct for this provisional demo strategy specifically,
+		// and why it must not be mistaken for a general multi-bar
+		// portfolio fill model).
+		precomputed := make(map[string]num.Price, len(instruments.ids))
+		for _, instrumentID := range instruments.ids {
+			fillPrice, err := nextBarOpenAfterEntry(ctx, manager, instrumentID, interval, span, flags.warmupBars)
+			if err != nil {
+				return fmt.Errorf("computing %s's next-bar-open fill price: %w", instrumentID, err)
+			}
+			listing := instruments.simListing[instrumentID.String()]
+			precomputed[listing.Symbol()] = fillPrice
+		}
+
+		strat = newDemoStrategy(instruments.ids, interval, flags.warmupBars)
+		prices = simPriceSource(precomputed)
+	}
+
+	factory := environmentFactory{prices: prices}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, clictx.LoggerFromContext(ctx))
 	if err != nil {
 		return err
 	}
 
-	// StrategyParameters is deliberately left nil: cfg.Strategy is parsed
-	// and validated (issue #247), but this command still only ever runs
-	// demoStrategy, which does not consume it. Recording cfg.Strategy in
-	// the manifest here would make it claim EMA parameters that had no
-	// effect on the run that actually occurred while also skewing
-	// ConfigDigest on values the run never used (PR #258 review). This
-	// wiring belongs with EMA-04/EMA-07, once a real EMA strategy is the
-	// one actually running.
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{
-		Strategy:        newDemoStrategy(instruments.ids, interval, flags.warmupBars),
-		Span:            span,
-		StartingCapital: startingCash,
-		RiskFraction:    riskFraction,
-		AdverseDistance: adverseDistance,
+		Strategy:           strat,
+		StrategyParameters: strategyParams,
+		Span:               span,
+		StartingCapital:    startingCash,
+		RiskFraction:       riskFraction,
+		AdverseDistance:    adverseDistance,
 	})
 	if err != nil {
 		return err

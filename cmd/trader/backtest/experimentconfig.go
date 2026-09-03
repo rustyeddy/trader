@@ -14,8 +14,9 @@ import (
 // runConfig is the typed configuration "trader backtest run" resolves
 // via --config (issue #247, EMA-02): the backtest composition inputs
 // this command already accepts as individual flags, plus a strategy
-// section for the not-yet-implemented EMA crossover strategy (EMA-03/
-// EMA-04, issues #248/#249). config.Load applies its own
+// section for the real EMA crossover strategy (strategy/emacross,
+// issues #248/#249) run.go constructs whenever --config is given
+// (issue #252, EMA-07). config.Load applies its own
 // defaults-then-file-then-environment-then-overrides precedence
 // (config/doc.go); buildRunConfig below only ever places an explicitly
 // Changed flag's value into Overrides, so an unset flag never masks a
@@ -28,14 +29,14 @@ import (
 // at the point of use, so duplicating a second, case-sensitive
 // validation here would only be able to disagree with it.
 //
-// Strategy is parsed and validated here but deliberately not yet
-// passed to Manifest.StrategyParameters: this command still only ever
-// runs demoStrategy (see run.go's own doc comment), which does not
-// consume it, and recording it in the manifest anyway would make the
-// manifest claim EMA parameters that had no effect on the run that
-// actually occurred, while also perturbing ConfigDigest on values the
-// run never used (PR #258 review). That wiring belongs with EMA-04/
-// EMA-07, once a real EMA strategy is the one actually running.
+// Strategy is parsed and validated here; run.go additionally rejects
+// any Strategy.Name other than emacross.Name before constructing a
+// strategy at all (PR #263 review) — there is no strategy registry, so
+// an unsupported or misspelled name must fail loudly rather than
+// silently running EMA crossover under a different label. Strategy is
+// then passed to Manifest.StrategyParameters via the constructed
+// emacross.Strategy's own Config(), so the manifest only ever claims
+// parameters that actually governed the run that occurred.
 type runConfig struct {
 	Backtest backtestSection
 	Strategy strategySection

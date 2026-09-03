@@ -154,3 +154,92 @@ backtest:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "single-instrument")
 }
+
+// TestRunCLI_ConfigDrivesRealEMACrossoverStrategy proves issue #252's
+// own central requirement: --config runs the real EMA crossover
+// strategy (strategy/emacross), not the demo strategy, and it actually
+// trades — this fixture (shared with strategy/emacross's own EMA-06
+// tests) is engineered so a fast=3/slow=5 EMA produces one bullish
+// cross (bar 7) and one bearish reversal (bar 12). Confirming a real,
+// data-dependent trade occurred (not merely that the command exited 0)
+// is what distinguishes this from a wiring smoke test.
+func TestRunCLI_ConfigDrivesRealEMACrossoverStrategy(t *testing.T) {
+	configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2024-03-04T00:00:00Z
+  to: 2024-03-04T14:00:00Z
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.01000
+
+strategy:
+  name: ema-cross
+  fast_period: 3
+  slow_period: 5
+`)
+
+	outputDir := t.TempDir()
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run",
+		"--config", configPath,
+		"--data-raw-root", "testdata/raw/oanda",
+		"--output-dir", outputDir,
+		"--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		Run struct {
+			StrategyName string `json:"strategy_name"`
+			ConfigDigest string `json:"config_digest"`
+		} `json:"run"`
+		ClosedTrades []struct {
+			Side string `json:"side"`
+		} `json:"closed_trades"`
+		OpenTrades []struct {
+			Side string `json:"side"`
+		} `json:"open_trades"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
+
+	assert.Equal(t, "ema-cross", doc.Run.StrategyName)
+	assert.NotEmpty(t, doc.Run.ConfigDigest)
+	require.Len(t, doc.ClosedTrades, 1, "the bar-12 reversal must have closed the bar-7 long")
+	assert.Equal(t, "long", doc.ClosedTrades[0].Side)
+	require.Len(t, doc.OpenTrades, 1, "the bar-12 reversal's re-entry must remain open")
+	assert.Equal(t, "short", doc.OpenTrades[0].Side)
+}
+
+// TestRunCLI_UnsupportedStrategyNameRejected proves strategy.name is
+// a truthful, validated claim rather than an ignored label: there is
+// no strategy registry, so a name other than "ema-cross" must fail
+// loudly instead of silently running EMA crossover anyway (PR #263
+// review).
+func TestRunCLI_UnsupportedStrategyNameRejected(t *testing.T) {
+	configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  from: 2024-01-08T00:00:00Z
+  to: 2024-01-08T04:00:00Z
+  adverse_distance: 0.01000
+
+strategy:
+  name: some-other-strategy
+`)
+
+	runCmd := cmdbacktest.New()
+	runCmd.SetArgs([]string{
+		"run",
+		"--config", configPath,
+		"--data-raw-root", "testdata/raw/oanda",
+	})
+	err := runCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "some-other-strategy")
+	assert.Contains(t, err.Error(), "ema-cross")
+}
