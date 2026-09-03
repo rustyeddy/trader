@@ -94,6 +94,9 @@ func (s *Strategy) Describe() strategy.Descriptor {
 
 // Start implements strategy.Strategy.
 func (s *Strategy) Start(ctx context.Context, env strategy.Environment) error {
+	if env.Journal != nil && env.RunID.IsZero() {
+		return fmt.Errorf("emacross: env.Journal is set but env.RunID is zero: every recorded signal needs a run id")
+	}
 	s.intents = env.Intents
 	s.journal = env.Journal
 	s.runID = env.RunID
@@ -127,21 +130,24 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 	current := classifyRelation(s.fast.Value(), s.slow.Value())
 	bullish, bearish := s.cross.update(current)
 
-	cross := "none"
-	action := "none"
-	var intents []order.Intent
-	if bullish || bearish {
-		want := order.Sell
-		if bullish {
-			cross, want = "bullish", order.Buy
-		} else {
-			cross = "bearish"
-		}
-		side := currentPositionSide(view, s.instrumentID)
-		action, intents, err = s.actOnCross(side, want)
-		if err != nil {
-			return nil, err
-		}
+	// A signal is recorded only at a genuine decision boundary — a
+	// detected crossover — never for every ready bar (PR #264 review):
+	// with no crossover, there is no new evidence beyond what the last
+	// recorded signal already established, and recording one anyway
+	// would journal little more than "still nothing happened" on every
+	// one of a run's bars.
+	if !bullish && !bearish {
+		return nil, nil
+	}
+
+	cross, want := "bearish", order.Sell
+	if bullish {
+		cross, want = "bullish", order.Buy
+	}
+	side := currentPositionSide(view, s.instrumentID)
+	action, intents, err := s.actOnCross(side, want)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.recordSignal(ctx, event, prevRelation, havePrev, current, cross, action, intents); err != nil {

@@ -86,4 +86,5 @@ func TestRelation_String(t *testing.T) {
 	assert.Equal(t, "above", relationAbove.String())
 	assert.Equal(t, "below", relationBelow.String())
 	assert.Equal(t, "tie", relationTie.String())
+	assert.Equal(t, "unknown", relation(99).String(), "an invalid relation must never be misreported as a real tie")
 }

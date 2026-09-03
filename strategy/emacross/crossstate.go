@@ -17,12 +17,17 @@ const (
 // EMA-08), so it must stay stable once used in a real journal.
 func (r relation) String() string {
 	switch r {
+	case relationTie:
+		return "tie"
 	case relationAbove:
 		return "above"
 	case relationBelow:
 		return "below"
 	default:
-		return "tie"
+		// Never a real relation value; distinct from "tie" so corrupted
+		// or otherwise invalid state is never silently misreported as a
+		// real tie in persisted journal evidence (PR #264 review).
+		return "unknown"
 	}
 }
 

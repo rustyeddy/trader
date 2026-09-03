@@ -47,12 +47,13 @@ func TestStrategy_RecordsNoSignalsWithoutJournal(t *testing.T) {
 // TestStrategy_RecordsDecisionEvidence replays the same worked fixture
 // TestStrategy_FullFixtureMatchesEMA01WorkedExample already proves the
 // exact intents for, and additionally asserts the journaled
-// decision-evidence trail: no signal before both EMAs are ready (bars
-// 1-4), one signal per bar from bar 5 on, "none"/"none" on every bar
-// without a crossover, and the exact cross/action/correlation on bars
-// 7 and 12 — proving a reviewer can trace the bar-7 and bar-12
-// intents back to the exact crossover condition that caused them
-// (issue #253's own acceptance criterion).
+// decision-evidence trail: a signal is recorded only at a genuine
+// decision boundary (a detected crossover), never on a bar with no
+// crossover (PR #264 review) — exactly two signals for this fixture,
+// bars 7 and 12 — each with the exact cross/action/correlation
+// matching the intent(s) it caused, proving a reviewer can trace the
+// bar-7 and bar-12 intents back to the exact crossover condition that
+// caused them (issue #253's own acceptance criterion).
 func TestStrategy_RecordsDecisionEvidence(t *testing.T) {
 	runID := mustRunID(t)
 	rec := &memoryRecorder{}
@@ -70,10 +71,7 @@ func TestStrategy_RecordsDecisionEvidence(t *testing.T) {
 		}
 	}
 
-	// Bars 1-4: fast is ready (period 3) but slow (period 5) is not —
-	// no decision evidence is recorded before both are ready.
-	require.Len(t, rec.records, 10, "one signal per bar from bar 5 (both EMAs ready) through bar 14")
-
+	require.Len(t, rec.records, 2, "a signal is recorded only on a detected crossover, bars 7 and 12")
 	for _, r := range rec.records {
 		require.Equal(t, journal.KindSignal, r.Kind)
 		require.NotNil(t, r.Signal)
@@ -81,14 +79,7 @@ func TestStrategy_RecordsDecisionEvidence(t *testing.T) {
 		assert.Equal(t, Name, r.Signal.Strategy)
 	}
 
-	// bar 5 (rec.records[0]): the first bar with a defined relation at
-	// all — Decision 3 says no crossover can be detected here.
-	assert.Equal(t, "none", rec.records[0].Signal.Values["cross"])
-	assert.Equal(t, "none", rec.records[0].Signal.Values["action"])
-	assert.Equal(t, "none", rec.records[0].Signal.Values["prev_relation"], "bar 5 has no prior relation to compare against")
-
-	// bar 7 is rec.records[2] (bars 5,6,7,...): the bullish cross.
-	bar7 := rec.records[2]
+	bar7 := rec.records[0]
 	assert.Equal(t, "bullish", bar7.Signal.Values["cross"])
 	assert.Equal(t, "enter-long", bar7.Signal.Values["action"])
 	assert.Equal(t, "below", bar7.Signal.Values["prev_relation"])
@@ -97,8 +88,7 @@ func TestStrategy_RecordsDecisionEvidence(t *testing.T) {
 	assert.Equal(t, allIntents[0].Metadata.CorrelationID, bar7.Metadata.CorrelationID,
 		"the signal must correlate with the exact intent it caused")
 
-	// bar 12 is rec.records[7]: the bearish reversal.
-	bar12 := rec.records[7]
+	bar12 := rec.records[1]
 	assert.Equal(t, "bearish", bar12.Signal.Values["cross"])
 	assert.Equal(t, "reverse", bar12.Signal.Values["action"])
 	assert.Equal(t, "above", bar12.Signal.Values["prev_relation"])
@@ -106,17 +96,32 @@ func TestStrategy_RecordsDecisionEvidence(t *testing.T) {
 	assert.Equal(t, allIntents[1].Metadata.CorrelationID, bar12.Metadata.CorrelationID)
 	assert.Equal(t, allIntents[2].Metadata.CorrelationID, bar12.Metadata.CorrelationID,
 		"both legs of the reversal must share the signal's own correlation id")
+}
 
-	// Every other bar: no cross, no action, zero correlation id (no
-	// execution-side counterpart exists to correlate with).
-	for i, r := range rec.records {
-		if r.Signal == bar7.Signal || r.Signal == bar12.Signal {
-			continue
-		}
-		assert.Equalf(t, "none", r.Signal.Values["cross"], "record %d", i)
-		assert.Equalf(t, "none", r.Signal.Values["action"], "record %d", i)
-		assert.Truef(t, r.Metadata.CorrelationID.IsZero(), "record %d: no-action bar must have a zero correlation id", i)
+// TestStrategy_RecordsDefensiveNoOpCross proves a crossover that fires
+// while the account is already correctly positioned (actOnCross's own
+// defensive no-op case, which crossState's own invariants should
+// prevent but does not assume) is still recorded — action=none, but
+// cross is not — since it is itself a genuine decision boundary a
+// reviewer might need to explain, distinct from an ordinary no-
+// crossover bar.
+func TestStrategy_RecordsDefensiveNoOpCross(t *testing.T) {
+	rec := &memoryRecorder{}
+	h := newTestHarnessWithJournal(t, Config{FastPeriod: 3, SlowPeriod: 5}, rec, mustRunID(t))
+
+	// Bar 7 crosses bullish; force the account to already report Long
+	// (as if the entry had somehow already been applied) so actOnCross
+	// takes its defensive "already positioned" branch instead of
+	// entering.
+	h.setPosition(order.Long)
+	for i, close := range emaFixtureCloses[:7] {
+		h.onBar(i+1, close)
 	}
+
+	require.Len(t, rec.records, 1)
+	assert.Equal(t, "bullish", rec.records[0].Signal.Values["cross"])
+	assert.Equal(t, "none", rec.records[0].Signal.Values["action"])
+	assert.True(t, rec.records[0].Metadata.CorrelationID.IsZero(), "no intent was built, so there is nothing to correlate with")
 }
 
 func mustRunID(t *testing.T) id.RunID {
@@ -142,14 +147,17 @@ func (erroringRecorder) Close() error { return nil }
 func TestStrategy_RecordSignalFailurePropagates(t *testing.T) {
 	h := newTestHarnessWithJournal(t, Config{FastPeriod: 3, SlowPeriod: 5}, erroringRecorder{}, mustRunID(t))
 
-	// Bars 1-4 (not yet ready) never reach recordSignal at all.
-	for i, close := range emaFixtureCloses[:4] {
+	// Bars 1-6 never reach recordSignal at all: bars 1-4 aren't ready,
+	// and bars 5-6 are ready but have no crossover to record.
+	for i, close := range emaFixtureCloses[:6] {
 		event, view, _ := h.buildBar(i+1, close)
 		_, err := h.strategy.OnBar(context.Background(), event, view)
 		require.NoError(t, err)
 	}
 
-	event, view, _ := h.buildBar(5, emaFixtureCloses[4])
+	// Bar 7 is the fixture's first crossover — the first bar that
+	// actually calls recordSignal.
+	event, view, _ := h.buildBar(7, emaFixtureCloses[6])
 	_, err := h.strategy.OnBar(context.Background(), event, view)
 	require.ErrorIs(t, err, errBoom)
 }

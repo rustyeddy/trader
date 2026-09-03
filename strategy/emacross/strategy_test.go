@@ -169,6 +169,28 @@ func TestNew_RejectsInvalidConfig(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestStrategy_StartRejectsJournalWithoutRunID proves this fails
+// loudly and immediately at Start, not only later — and confusingly —
+// from journal.NewRecord's own "run id must be set" error the first
+// time a crossover actually tries to record a signal (PR #264 review).
+func TestStrategy_StartRejectsJournalWithoutRunID(t *testing.T) {
+	listing := mustListing(t)
+	s, err := New(listing.InstrumentID(), marketdata.H1, Config{FastPeriod: 3, SlowPeriod: 5})
+	require.NoError(t, err)
+
+	c := clock.NewSimulated(testStart)
+	ids := id.NewGenerator(c, id.NewDeterministic(1, 2))
+
+	err = s.Start(context.Background(), strategy.Environment{
+		Clock:   c,
+		Intents: strategy.NewIntentFactory(c, ids, id.Source(Name)),
+		Logger:  logging.Discard(),
+		Journal: &memoryRecorder{},
+		// RunID intentionally left zero.
+	})
+	require.Error(t, err)
+}
+
 func TestStrategy_Describe(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
 	desc := h.strategy.Describe()

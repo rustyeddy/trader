@@ -288,10 +288,12 @@ func TestEmacross_EntryExitReversalThroughRealPipeline(t *testing.T) {
 	// Decision evidence (issue #253, EMA-08) reaches the very same
 	// journal, via the real backtest.Runner -> strategy.Environment
 	// wiring — not just the strategy-level unit tests in
-	// decision_evidence_test.go, which call OnBar directly. One signal
-	// per bar from bar 5 (both EMAs ready) through bar 14.
+	// decision_evidence_test.go, which call OnBar directly. Exactly two
+	// signals: one per crossover (bar 7, bar 12) — a signal is recorded
+	// only at a decision boundary, never on an ordinary no-crossover
+	// bar.
 	signals := rec.kinds(journal.KindSignal)
-	require.Len(t, signals, 10)
+	require.Len(t, signals, 2)
 	var sawBullish, sawBearish bool
 	for _, s := range signals {
 		switch s.Signal.Values["cross"] {

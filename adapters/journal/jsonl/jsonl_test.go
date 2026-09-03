@@ -86,7 +86,7 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 			Strategy: "ema-cross",
 			Values:   map[string]string{"fast_ema": "1.10245", "slow_ema": "1.10198", "cross": "bullish", "action": "enter-long"},
 		}},
-		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRunCompleted, RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: 10}},
+		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRunCompleted, RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: 11}},
 	}
 
 	for _, rec := range records {

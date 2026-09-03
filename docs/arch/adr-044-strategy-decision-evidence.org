@@ -110,21 +110,32 @@ further plumbing was required beyond this one =Runner= call site.
 
 ** strategy/emacross: recording cadence and content
 
-A signal is recorded once per bar, starting the first bar both EMAs
-are ready (matching every bar the strategy could possibly act on), not
-per indicator update or per intrabar sample — issue #253's own "avoid
-blindly journaling every indicator sample" requirement. =Values=
-records: =fast_ema=, =slow_ema= (canonical decimal text), =prev_relation=
-(the crossover state machine's own "last non-tie relation" before this
-bar, ADR-035's Decision 1 vocabulary — "none" before one has ever been
-observed), =curr_relation= (this bar's raw relation, including "tie"),
-=cross= (=none=/=bullish=/=bearish=), and =action=
-(=none=/=enter-long=/=enter-short=/=reverse=). =action= reports what
-=actOnCross= actually did (including its own defensive "already
-positioned" no-op case), not merely that a cross was detected — the
-two can differ if a crossover fires while the account is already
-correctly positioned, which the strategy treats as a safe no-op rather
-than an assumed-impossible state.
+A signal is recorded only at a genuine decision boundary — a detected
+crossover (=crossState.update= reporting =bullish= or =bearish=) —
+never on every ready bar and never per indicator update or intrabar
+sample (issue #253's own "avoid blindly journaling every indicator
+sample" requirement, PR #264 review: an earlier draft of this ADR and
+implementation recorded once per ready bar, which for a multi-year H1
+run would have added tens of thousands of mostly =cross=none= records
+without improving trade explainability — the acceptance criterion only
+needs a generated trade traceable to the crossover that caused it). A
+crossover firing while the account is already correctly positioned
+(=actOnCross='s own defensive "already positioned" no-op branch, which
+=crossState='s invariants should prevent but does not assume) is still
+recorded, with =action=none=: it is itself a genuine decision boundary
+a reviewer might need to explain, distinct from an ordinary
+no-crossover bar that is never recorded at all.
+
+=Values= records: =fast_ema=, =slow_ema= (canonical decimal text),
+=prev_relation= (the crossover state machine's own "last non-tie
+relation" before this bar, ADR-035's Decision 1 vocabulary — "none"
+before one has ever been observed), =curr_relation= (this bar's raw
+relation; always =above= or =below= here, since =Values= is only ever
+written when a crossover — never a tie — is detected), =cross=
+(=bullish=/=bearish=; never =none=, since a =Values= record only ever
+exists for a detected crossover), and =action=
+(=none=/=enter-long=/=enter-short=/=reverse=, reporting what
+=actOnCross= actually did).
 
 =exit= alone (without an immediate re-entry) is not a distinct
 =action= value: this strategy's own Decision 4 transition table
@@ -132,6 +143,16 @@ than an assumed-impossible state.
 opposite side, so that value cannot occur here; a future strategy with
 a bare-exit transition would introduce it into its own =Values=
 vocabulary without needing any change to =journal= itself.
+
+=Values='s key vocabulary is versioned by =Signal.Strategy= together
+with the strategy's own =Descriptor.Version= (=emacross.Name=/
+=emacross.Version=, currently ="ema-cross"=/="v0"=): once persisted,
+=ema-cross/v0='s six keys and their meanings are fixed. A future change
+to what they mean (not merely an additional key) must bump
+=emacross.Version=, exactly as a Go strategy's own accounting/manifest
+identity already requires (=strategy.Descriptor='s own doc comment) —
+=journal= itself enforces none of this; it is a convention the
+recording strategy must honor.
 
 * Consequences
 
@@ -175,8 +196,12 @@ vocabulary without needing any change to =journal= itself.
   strategy family, exactly the coupling this package's own doc comment
   already forbids ("journal depends only on id, num, instrument,
   order, risk, broker, and account").
-- *Recording only on an actual crossover, never on a "no action"
-  bar.* Considered, and rejected: a reviewer asking "why didn't it
-  trade here" needs the no-action bars' own EMA values and relation
-  state too, and one compact record per bar (not per sample) already
-  satisfies "avoid blindly journaling every indicator sample."
+- *One signal per ready bar, including every ordinary "no crossover"
+  bar.* This was this ADR's own original decision, corrected during
+  review (PR #264): it satisfies "why didn't it trade *right here*"
+  for any single bar, but at the cost of journaling a
+  =cross=none=/=action=none= record for nearly every bar of a real
+  multi-year run — exactly the "blindly journaling every indicator
+  sample" issue #253 asks to avoid, for a question ("why didn't it
+  trade") the crossover-only record already answers by omission: no
+  signal between two crossovers means nothing changed.
