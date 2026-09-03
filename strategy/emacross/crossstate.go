@@ -12,6 +12,20 @@ const (
 	relationBelow
 )
 
+// String returns relation's canonical, deterministic text — the exact
+// vocabulary journal.Signal.Values records it under (issue #253,
+// EMA-08), so it must stay stable once used in a real journal.
+func (r relation) String() string {
+	switch r {
+	case relationAbove:
+		return "above"
+	case relationBelow:
+		return "below"
+	default:
+		return "tie"
+	}
+}
+
 // classifyRelation returns fast's raw relation to slow.
 func classifyRelation(fast, slow float64) relation {
 	switch {

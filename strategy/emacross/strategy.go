@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/indicator"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
@@ -40,6 +42,8 @@ type Strategy struct {
 	cross crossState
 
 	intents strategy.IntentFactory
+	journal journal.Recorder // nil unless env.Journal was set (issue #253, EMA-08)
+	runID   id.RunID
 }
 
 // New returns a Strategy trading instrumentID on interval, configured
@@ -91,6 +95,8 @@ func (s *Strategy) Describe() strategy.Descriptor {
 // Start implements strategy.Strategy.
 func (s *Strategy) Start(ctx context.Context, env strategy.Environment) error {
 	s.intents = env.Intents
+	s.journal = env.Journal
+	s.runID = env.RunID
 	return nil
 }
 
@@ -112,32 +118,56 @@ func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view stra
 		return nil, nil
 	}
 
+	// prevRelation/havePrev capture crossState's own "last non-tie
+	// relation" *before* this bar's update, purely so recordSignal can
+	// report the exact evidence Decision 1's state machine actually
+	// compared against — not the more confusing (and sometimes
+	// unavailable, pre-Tie) raw previous bar relation.
+	prevRelation, havePrev := s.cross.last, s.cross.have
 	current := classifyRelation(s.fast.Value(), s.slow.Value())
 	bullish, bearish := s.cross.update(current)
-	if !bullish && !bearish {
-		return nil, nil
+
+	cross := "none"
+	action := "none"
+	var intents []order.Intent
+	if bullish || bearish {
+		want := order.Sell
+		if bullish {
+			cross, want = "bullish", order.Buy
+		} else {
+			cross = "bearish"
+		}
+		side := currentPositionSide(view, s.instrumentID)
+		action, intents, err = s.actOnCross(side, want)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	side := currentPositionSide(view, s.instrumentID)
-	if bullish {
-		return s.actOnCross(side, order.Buy)
+	if err := s.recordSignal(ctx, event, prevRelation, havePrev, current, cross, action, intents); err != nil {
+		return nil, err
 	}
-	return s.actOnCross(side, order.Sell)
+	return intents, nil
 }
 
 // actOnCross builds the intents for one detected crossover, per
-// Decision 4's flat/long/short transition table. want is the side this
-// crossover favors (Buy for a bullish cross, Sell for a bearish one).
-func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) ([]order.Intent, error) {
+// Decision 4's flat/long/short transition table, and returns the
+// action label recordSignal journals alongside them. want is the side
+// this crossover favors (Buy for a bullish cross, Sell for a bearish
+// one).
+func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) (string, []order.Intent, error) {
 	wantsLong := want == order.Buy
 
 	switch side {
 	case order.Flat:
 		in, err := s.intents.Enter(s.instrumentID, want)
 		if err != nil {
-			return nil, err
+			return "none", nil, err
 		}
-		return []order.Intent{in}, nil
+		if wantsLong {
+			return "enter-long", []order.Intent{in}, nil
+		}
+		return "enter-short", []order.Intent{in}, nil
 
 	case order.Long:
 		if wantsLong {
@@ -147,19 +177,66 @@ func (s *Strategy) actOnCross(side order.PositionSide, want order.Side) ([]order
 			// transition), but returning no intent here is still the
 			// correct, safe response rather than assuming that
 			// invariant holds.
-			return nil, nil
+			return "none", nil, nil
 		}
-		return s.reverse(want)
+		intents, err := s.reverse(want)
+		return "reverse", intents, err
 
 	case order.Short:
 		if !wantsLong {
-			return nil, nil
+			return "none", nil, nil
 		}
-		return s.reverse(want)
+		intents, err := s.reverse(want)
+		return "reverse", intents, err
 
 	default:
-		return nil, fmt.Errorf("emacross: unrecognized position side %v", side)
+		return "none", nil, fmt.Errorf("emacross: unrecognized position side %v", side)
 	}
+}
+
+// recordSignal journals one KindSignal decision-evidence record for
+// this bar (issue #253, EMA-08), if a Journal was configured (an
+// Environment built for a test that doesn't need decision evidence may
+// leave it nil). CorrelationID is the emitted intents' own — zero when
+// no action was taken, since there is then no execution-side record to
+// correlate with.
+func (s *Strategy) recordSignal(ctx context.Context, event strategy.BarEvent, prevRelation relation, havePrev bool, current relation, cross, action string, intents []order.Intent) error {
+	if s.journal == nil {
+		return nil
+	}
+
+	prevStr := "none"
+	if havePrev {
+		prevStr = prevRelation.String()
+	}
+	var corr id.CorrelationID
+	if len(intents) > 0 {
+		corr = intents[0].Metadata.CorrelationID
+	}
+
+	rec, err := journal.NewRecord(journal.Record{
+		RunID: s.runID,
+		Metadata: id.Metadata{
+			CorrelationID: corr,
+			Timestamp:     event.Bar.Time,
+		},
+		Kind: journal.KindSignal,
+		Signal: &journal.Signal{
+			Strategy: Name,
+			Values: map[string]string{
+				"fast_ema":      strconv.FormatFloat(s.fast.Value(), 'f', -1, 64),
+				"slow_ema":      strconv.FormatFloat(s.slow.Value(), 'f', -1, 64),
+				"prev_relation": prevStr,
+				"curr_relation": current.String(),
+				"cross":         cross,
+				"action":        action,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("emacross: building signal record: %w", err)
+	}
+	return s.journal.Record(ctx, rec)
 }
 
 // reverse builds the Exit+Enter intent pair for a long<->short

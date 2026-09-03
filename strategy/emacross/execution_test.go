@@ -285,6 +285,28 @@ func TestEmacross_EntryExitReversalThroughRealPipeline(t *testing.T) {
 	fills := rec.kinds(journal.KindFill)
 	require.Len(t, fills, 3, "three fills are expected: the bar-7 entry, the bar-12 exit, and the bar-12 re-entry")
 
+	// Decision evidence (issue #253, EMA-08) reaches the very same
+	// journal, via the real backtest.Runner -> strategy.Environment
+	// wiring — not just the strategy-level unit tests in
+	// decision_evidence_test.go, which call OnBar directly. One signal
+	// per bar from bar 5 (both EMAs ready) through bar 14.
+	signals := rec.kinds(journal.KindSignal)
+	require.Len(t, signals, 10)
+	var sawBullish, sawBearish bool
+	for _, s := range signals {
+		switch s.Signal.Values["cross"] {
+		case "bullish":
+			sawBullish = true
+			assert.Equal(t, "enter-long", s.Signal.Values["action"])
+		case "bearish":
+			sawBearish = true
+			assert.Equal(t, "reverse", s.Signal.Values["action"])
+		}
+		assert.Equal(t, emacross.Name, s.Signal.Strategy)
+	}
+	assert.True(t, sawBullish, "the bar-7 bullish cross must have been journaled")
+	assert.True(t, sawBearish, "the bar-12 bearish cross must have been journaled")
+
 	bar8Open := time.Date(2024, time.March, 4, 7, 0, 0, 0, time.UTC)   // the bar after the bar-7 crossover
 	bar13Open := time.Date(2024, time.March, 4, 12, 0, 0, 0, time.UTC) // the bar after the bar-12 crossover
 

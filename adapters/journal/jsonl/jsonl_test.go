@@ -82,6 +82,10 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindAccount, Account: accountPtr(mustSnapshot(t))},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindStatus, Status: statusPtr(mustStatus())},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindTrade, Trade: tradePtr(mustTrade(t))},
+		{RunID: runID, Metadata: id.Metadata{CorrelationID: mustCorrelationID(t), Timestamp: now}, Kind: journal.KindSignal, Signal: &journal.Signal{
+			Strategy: "ema-cross",
+			Values:   map[string]string{"fast_ema": "1.10245", "slow_ema": "1.10198", "cross": "bullish", "action": "enter-long"},
+		}},
 		{RunID: runID, Metadata: id.Metadata{Timestamp: now}, Kind: journal.KindRunCompleted, RunCompleted: &journal.RunCompleted{RunID: runID, EntryCount: 10}},
 	}
 
@@ -106,6 +110,9 @@ func TestWriterReaderRoundTripsEveryKind(t *testing.T) {
 	assert.True(t, records[7].Account.Equity().Equal(entries[7].Account.Equity()))
 	assert.Equal(t, records[8].Status.State, entries[8].Status.State)
 	assert.Equal(t, records[9].Trade.Listing.InstrumentID().String(), entries[9].Trade.Listing.InstrumentID().String())
+	assert.Equal(t, records[10].Signal.Strategy, entries[10].Signal.Strategy)
+	assert.Equal(t, records[10].Signal.Values, entries[10].Signal.Values)
+	assert.Equal(t, records[10].Metadata.CorrelationID, entries[10].Metadata.CorrelationID)
 }
 
 func TestWriterReaderRoundTripsRejectedOrder(t *testing.T) {

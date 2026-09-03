@@ -81,3 +81,9 @@ func TestCrossState_BullishThenBearish(t *testing.T) {
 	assert.False(t, bullish)
 	assert.True(t, bearish)
 }
+
+func TestRelation_String(t *testing.T) {
+	assert.Equal(t, "above", relationAbove.String())
+	assert.Equal(t, "below", relationBelow.String())
+	assert.Equal(t, "tie", relationTie.String())
+}

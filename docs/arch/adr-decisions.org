@@ -151,6 +151,7 @@ the original decided, use full supersession instead.
 | 041 | Deterministic backtest regression/golden suite (in adr-041-backtest-determinism-suite.org) | Accepted |
 | 042 | Multi-instrument and portfolio backtesting (in adr-042-multi-instrument-backtesting.org) | Accepted |
 | 043 | External/private strategy integration seam (in adr-043-strategy-integration-seam.org) | Accepted |
+| 044 | Strategy decision evidence (in adr-044-strategy-decision-evidence.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -419,6 +420,19 @@ deliberately runtime-owned identity infrastructure whose minimum wire
 shape would be a described-intent request rather than direct remote
 method calls, and =strategy.View= is called out explicitly as the
 hardest, deliberately-deferred part.
+
+Note: ADR-044 is likewise maintained in its own file,
+=docs/arch/adr-044-strategy-decision-evidence.org=, rather than inline
+in this registry.  Its own Status section is authoritative.  Issue
+#253 (EMA-08) asks for the minimum research-side decision evidence
+needed to explain an EMA crossover trade, and explicitly poses the
+open question this ADR resolves — journal record or sibling artifact —
+recording the decision to extend =journal= with a new, generic
+=KindSignal= (a string-keyed evidence bag, not an EMA-specific payload)
+correlated via the existing =id.Metadata.CorrelationID= mechanism,
+plus two additive =strategy.Environment= fields (=RunID=, optional
+=Journal=) so a strategy can record through the run's own real,
+already-sequenced journal rather than a second, parallel mechanism.
 
 * ADR-001: Modular monolith before service decomposition
 

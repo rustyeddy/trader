@@ -20,6 +20,7 @@ func TestKindStringNamesEveryDefinedValue(t *testing.T) {
 		journal.KindAccount:      "account",
 		journal.KindStatus:       "status",
 		journal.KindTrade:        "trade",
+		journal.KindSignal:       "signal",
 		journal.KindRunCompleted: "run-completed",
 	}
 	for k, want := range cases {

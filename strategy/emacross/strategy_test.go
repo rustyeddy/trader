@@ -14,6 +14,7 @@ import (
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/logging"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
@@ -78,6 +79,14 @@ type testHarness struct {
 
 func newTestHarness(t *testing.T, config Config) *testHarness {
 	t.Helper()
+	return newTestHarnessWithJournal(t, config, nil, id.RunID{})
+}
+
+// newTestHarnessWithJournal is newTestHarness plus an Environment.Journal/
+// RunID (issue #253, EMA-08's decision-evidence capability) — rec may
+// be nil, matching a Strategy that never records anything.
+func newTestHarnessWithJournal(t *testing.T, config Config, rec journal.Recorder, runID id.RunID) *testHarness {
+	t.Helper()
 	listing := mustListing(t)
 	instID := listing.InstrumentID()
 
@@ -92,6 +101,8 @@ func newTestHarness(t *testing.T, config Config) *testHarness {
 		Clock:   c,
 		Intents: strategy.NewIntentFactory(c, ids, id.Source(Name)),
 		Logger:  logging.Discard(),
+		Journal: rec,
+		RunID:   runID,
 	}))
 
 	return &testHarness{t: t, strategy: s, instID: instID, listing: listing, clock: c, ids: ids, accountID: accountID}
@@ -109,7 +120,13 @@ func (h *testHarness) setPosition(side order.PositionSide) {
 // one H1 interval apart from testStart) and calls OnBar with a bar
 // whose Close is close, against a View reflecting the harness's
 // current position.
-func (h *testHarness) onBar(barNum int, close float64) ([]order.Intent, time.Time) {
+// buildBar constructs bar barNum's own BarEvent/View pair (bars are
+// spaced one H1 interval apart from testStart), reflecting the
+// harness's current position, and advances h's clock to that bar's
+// own time — the shared setup onBar and any test that needs to call
+// OnBar itself (to inspect an error onBar's own require.NoError would
+// otherwise hide) both use.
+func (h *testHarness) buildBar(barNum int, close float64) (strategy.BarEvent, strategy.View, time.Time) {
 	h.t.Helper()
 	barTime := testStart.Add(time.Duration(barNum-1) * time.Hour)
 	require.NoError(h.t, h.clock.AdvanceTo(barTime))
@@ -135,7 +152,12 @@ func (h *testHarness) onBar(barNum int, close float64) ([]order.Intent, time.Tim
 	}
 	event := strategy.BarEvent{Instrument: h.instID, Interval: marketdata.H1, Bar: bar}
 	view := fakeView{snap: mustSnapshot(h.t, h.accountID, position)}
+	return event, view, barTime
+}
 
+func (h *testHarness) onBar(barNum int, close float64) ([]order.Intent, time.Time) {
+	h.t.Helper()
+	event, view, barTime := h.buildBar(barNum, close)
 	intents, err := h.strategy.OnBar(context.Background(), event, view)
 	require.NoError(h.t, err)
 	return intents, barTime
@@ -302,14 +324,16 @@ func (f *erroringIntentFactory) WithCorrelation(corr id.CorrelationID) strategy.
 func TestStrategy_ActOnCross_FlatEntersOnEitherSide(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
 
-	intents, err := h.strategy.actOnCross(order.Flat, order.Buy)
+	action, intents, err := h.strategy.actOnCross(order.Flat, order.Buy)
 	require.NoError(t, err)
+	assert.Equal(t, "enter-long", action)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.IntentEnter, intents[0].Kind)
 	assert.Equal(t, order.Buy, intents[0].Side)
 
-	intents, err = h.strategy.actOnCross(order.Flat, order.Sell)
+	action, intents, err = h.strategy.actOnCross(order.Flat, order.Sell)
 	require.NoError(t, err)
+	assert.Equal(t, "enter-short", action)
 	require.Len(t, intents, 1)
 	assert.Equal(t, order.Sell, intents[0].Side)
 }
@@ -317,26 +341,30 @@ func TestStrategy_ActOnCross_FlatEntersOnEitherSide(t *testing.T) {
 func TestStrategy_ActOnCross_SameSideRepeatIsNoOp(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
 
-	intents, err := h.strategy.actOnCross(order.Long, order.Buy)
+	action, intents, err := h.strategy.actOnCross(order.Long, order.Buy)
 	require.NoError(t, err)
+	assert.Equal(t, "none", action)
 	assert.Empty(t, intents, "a bullish cross while already long must not re-enter")
 
-	intents, err = h.strategy.actOnCross(order.Short, order.Sell)
+	action, intents, err = h.strategy.actOnCross(order.Short, order.Sell)
 	require.NoError(t, err)
+	assert.Equal(t, "none", action)
 	assert.Empty(t, intents, "a bearish cross while already short must not re-enter")
 }
 
 func TestStrategy_ActOnCross_OppositeSideReverses(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
 
-	intents, err := h.strategy.actOnCross(order.Long, order.Sell)
+	action, intents, err := h.strategy.actOnCross(order.Long, order.Sell)
 	require.NoError(t, err)
+	assert.Equal(t, "reverse", action)
 	require.Len(t, intents, 2)
 	assert.Equal(t, order.IntentExit, intents[0].Kind)
 	assert.Equal(t, order.IntentEnter, intents[1].Kind)
 
-	intents, err = h.strategy.actOnCross(order.Short, order.Buy)
+	action, intents, err = h.strategy.actOnCross(order.Short, order.Buy)
 	require.NoError(t, err)
+	assert.Equal(t, "reverse", action)
 	require.Len(t, intents, 2)
 	assert.Equal(t, order.IntentExit, intents[0].Kind)
 	assert.Equal(t, order.IntentEnter, intents[1].Kind)
@@ -344,7 +372,7 @@ func TestStrategy_ActOnCross_OppositeSideReverses(t *testing.T) {
 
 func TestStrategy_ActOnCross_UnrecognizedSideReturnsError(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
-	_, err := h.strategy.actOnCross(order.PositionSide(99), order.Buy)
+	_, _, err := h.strategy.actOnCross(order.PositionSide(99), order.Buy)
 	assert.Error(t, err)
 }
 
@@ -352,7 +380,7 @@ func TestStrategy_ActOnCross_EnterFailurePropagates(t *testing.T) {
 	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5})
 	h.strategy.intents = &erroringIntentFactory{IntentFactory: h.strategy.intents, failEnter: true}
 
-	_, err := h.strategy.actOnCross(order.Flat, order.Buy)
+	_, _, err := h.strategy.actOnCross(order.Flat, order.Buy)
 	require.ErrorIs(t, err, errBoom)
 }
 
