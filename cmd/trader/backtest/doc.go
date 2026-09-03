@@ -45,11 +45,14 @@
 // report.NewBacktestReport) and persists that same projection as a
 // small, schema-versioned JSON artifact under --output-dir
 // (store.go). "show <run-id>" reads that artifact back and renders it
-// — zero backtest orchestration, zero metric recomputation. The
-// durable journal (adapters/journal/jsonl) remains a separate,
-// lower-level audit trail this command group does not read from: it
-// does not record the equity curve or backtest.Metrics in a
-// reconstructable shape, so replaying it to answer "show" would mean
-// re-deriving Metrics here — exactly the "second backtest
-// orchestrator" this issue's own acceptance criteria says to avoid.
+// — zero backtest orchestration, zero metric recomputation. An
+// optional durable journal (adapters/journal/jsonl, --journal) may
+// additionally be written during "run" as a lower-level audit trail,
+// but this command group never reads from it: it does not record the
+// equity curve or backtest.Metrics in a reconstructable shape, so
+// replaying it to answer "show" would mean re-deriving Metrics here —
+// exactly the "second backtest orchestrator" this issue's own
+// acceptance criteria says to avoid. --journal is off by default (a
+// nil Environment.Journal is accepted and treated as journal.Discard
+// by backtest.Runner), so ordinary runs pay no cost for it.
 package backtest

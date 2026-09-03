@@ -10,9 +10,11 @@ import (
 	"github.com/spf13/cobra"
 
 	simbroker "github.com/rustyeddy/trader/adapters/broker/sim"
+	"github.com/rustyeddy/trader/adapters/journal/jsonl"
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/report"
@@ -46,6 +48,7 @@ type runFlags struct {
 
 	outputDir string
 	format    string
+	journal   string
 }
 
 func newRunCmd() *cobra.Command {
@@ -68,7 +71,10 @@ func newRunCmd() *cobra.Command {
 			"--config supplies backtest/strategy parameters from a YAML file\n" +
 			"(issue #247) and runs the real EMA crossover strategy\n" +
 			"(issue #252) instead of the demo strategy, for a single\n" +
-			"instrument; any explicit flag above still overrides its value.",
+			"instrument; any explicit flag above still overrides its value.\n\n" +
+			"--journal optionally writes a durable JSONL audit trail of\n" +
+			"the run (adapters/journal/jsonl); off by default, and never\n" +
+			"read back by 'show' (see the package doc comment).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBacktest(cmd, flags)
 		},
@@ -96,6 +102,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "./backtest-runs", "directory run snapshots are written to and 'show' reads from")
 	cmd.Flags().StringVar(&flags.format, "format", formatTable, "output format: "+formatTable+", "+formatJSON+", or "+formatOrg)
+	cmd.Flags().StringVar(&flags.journal, "journal", "", "optional path to write a durable JSONL journal of this run (adapters/journal/jsonl); path must not already exist")
 
 	// --symbol/--from/--to/--adverse-distance are no longer cobra-required:
 	// each is also satisfiable from --config (issue #247), so their
@@ -360,7 +367,30 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		prices = simPriceSource(precomputed)
 	}
 
-	factory := environmentFactory{prices: prices}
+	var jrnl journal.Recorder
+	var journalWriter *jsonl.Writer
+	if flags.journal != "" {
+		w, err := jsonl.NewWriter(flags.journal)
+		if err != nil {
+			return fmt.Errorf("opening --journal: %w", err)
+		}
+		// jsonl.Writer.Close is idempotent (its own doc comment: a
+		// second Close call returns nil rather than re-syncing/
+		// re-closing), so this deferred call is safe whether or not
+		// the explicit Close below on the success path already ran —
+		// it only ever does real work on an early-return path (svc
+		// construction or svc.Run failing). The explicit Close below,
+		// not this deferred one, is what propagates a Close failure:
+		// jsonl.Writer only fsyncs in Close (its own doc comment), so
+		// silently discarding its error here would let this command
+		// report success while --journal's own advertised durability
+		// guarantee silently did not hold (PR #267 review).
+		defer func() { _ = w.Close() }()
+		journalWriter = w
+		jrnl = w
+	}
+
+	factory := environmentFactory{prices: prices, journal: jrnl}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, clictx.LoggerFromContext(ctx))
 	if err != nil {
@@ -377,6 +407,12 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if journalWriter != nil {
+		if err := journalWriter.Close(); err != nil {
+			return fmt.Errorf("closing --journal: %w", err)
+		}
 	}
 
 	rep := report.NewBacktestReport(report.BacktestInput{

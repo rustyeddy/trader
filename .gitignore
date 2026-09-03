@@ -34,3 +34,10 @@ go.work.sum
 # .idea/
 # .vscode/
 *.log
+
+# Generated backtest run artifacts (report JSON/Org, journal JSONL):
+# large, regenerable from a config + git commit + dataset revision, so
+# they are not committed. Research docs under docs/research/ reference
+# these by path/commit/digest instead of embedding them (issue #256).
+/backtest-runs/
+/research-runs/

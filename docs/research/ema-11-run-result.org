@@ -1,0 +1,468 @@
+#+TITLE: EMA-11: First EMA Crossover Research Experiment Result
+#+STARTUP: overview indent
+
+* Purpose
+
+This document records the first real historical run of the EMA
+crossover strategy (issue #256, EMA-11) against the reference
+configuration =docs/research/ema-01-experiment-definition.org=
+(EMA-01) specified, and states an explicit research conclusion. It is
+a results record, not a durable architecture decision — it carries no
+ADR number (see =docs/arch/adr-decisions.org=).
+
+Trader's own CLI (=trader backtest run --config=) produced this run
+end to end, through the real =service/backtest=/=backtest.Runner=/M4
+pipeline/simulator path (the same path EMA-05 through EMA-10 already
+proved deterministic and correct at the unit/regression level) — no
+special research-only code path exists or was added for this
+experiment. The one code change this issue did add,
+=cmd/trader/backtest= gaining an optional =--journal= flag, is pure
+CLI plumbing (an opt-in destination for an already-existing journal
+capability); it does not touch strategy, execution, risk, or simulator
+behavior.
+
+* Reproduction
+
+** Git commit / Trader version
+
+Commit ~3bafa1f70ade27f676bea06ff5bca3c9c8322660~ on branch
+=feature/256-emacross-ema11-experiment= (=strategy_version: v0=, per
+the run's own =run.strategy_version=). This is the exact commit the
+reported binary was built from (~go build ./cmd/trader~).
+
+** Config
+
+=research-runs/ema-11/ema01-reference.yaml= (gitignored alongside the
+rest of =research-runs/=; reproduced verbatim below since it is small
+and this document is the durable reference for it):
+
+#+BEGIN_SRC yaml
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2015-01-01T00:00:00Z
+  to: 2025-01-01T00:00:00Z
+  currency: USD
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.0050
+
+strategy:
+  name: ema-cross
+  fast_period: 20
+  slow_period: 50
+#+END_SRC
+
+Every value matches EMA-01's Decisions 5 and 7 exactly: 10,000 USD
+starting capital, 1% fixed-fraction risk, 0.0050 adverse distance
+(sizing input, not a broker-side stop — EMA-01 Decision 5), and the
+half-open =[2015-01-01, 2025-01-01)= range (last calendar day included
+is 2024-12-31).
+
+** Command
+
+#+BEGIN_SRC sh
+trader backtest run \
+  --config research-runs/ema-11/ema01-reference.yaml \
+  --data-raw-root /srv/trading/data/raw/oanda \
+  --data-store-root <fresh-directory> \
+  --output-dir research-runs/ema-11/runs \
+  --journal research-runs/ema-11/run.jsonl \
+  --format json
+#+END_SRC
+
+=--data-raw-root= points at the real OANDA raw archive
+(=PAIR-YYYY-MM-<tf>.csv= partitions; see
+=marketdata/internal/provider/oanda/doc.go='s own "Archive shape"
+section for the exact layout and schema this run's raw source
+follows).
+=--data-store-root= should be a fresh directory: the canonical EUR/USD
+H1 store is rebuilt from raw on every run of this exact command
+regardless, so a stale store only wastes disk, it never changes the
+result (canonical data is content-addressed by revision — see below).
+
+** Determinism check performed
+
+Two independent runs of the exact command above (one before, one after
+the =--journal= commit landed — the second is the officially recorded
+run below) produced *byte-identical* trade/account/performance figures:
+identical 1175 trade count, identical -1510.02803 USD net PnL,
+identical final equity, identical win/loss/side breakdowns. The two
+runs' =ConfigDigest= values differ (~77728a8...~ vs ~b9a5c2f...~) —
+this is =backtest.Manifest.ConfigDigest='s already-documented,
+already-known gap (ADR-042's own finding: each dataset's =BuiltAt=
+wall-clock timestamp is embedded in the digest), not a reproducibility
+failure of the actual trading result. Every trading-relevant field
+reproduced exactly; only the incidental build-timestamp-derived digest
+differed, exactly as ADR-042 already predicts for any two independent
+canonical-store builds.
+
+** Dataset manifest / revision
+
+120 monthly EUR/USD H1 canonical datasets (2015-01 through 2024-12),
+each independently content-addressed. Because =ConfigDigest= is
+already acknowledged above as unstable across independent rebuilds
+(it embeds each dataset's own =BuiltAt= wall-clock timestamp, per
+ADR-042), it cannot serve as the durable dataset-identity fingerprint
+this section needs, and the generated 24 MB run artifacts that carry
+the full manifest are intentionally gitignored (see Artifact
+references below) — so the complete, ordered list is recorded here,
+in the one place guaranteed to survive alongside this document:
+
+#+BEGIN_SRC text
+| # | Span Start | Span End | Revision |
+|---+------------+----------+----------|
+| 1 | 2015-01-01T00:00:00Z | 2015-02-01T00:00:00Z | 13983cc79a757b5828ccd9f8562ae5afd68e97fa7d40be98efb8b41ca2f7166c |
+| 2 | 2015-02-01T00:00:00Z | 2015-03-01T00:00:00Z | 32bc13b35b3a0d93ce978022c071497c23e24b9f29deb610bc334f58cf528297 |
+| 3 | 2015-03-01T00:00:00Z | 2015-04-01T00:00:00Z | 1bf43e41b2395b12afd74676347c9cf3f567c15b7b4e7c4720f93ca40dd15a67 |
+| 4 | 2015-04-01T00:00:00Z | 2015-05-01T00:00:00Z | 77fabcd68a8d49ecb17f86f494031248465052a17b5a31cda01c484b0d4bd348 |
+| 5 | 2015-05-01T00:00:00Z | 2015-06-01T00:00:00Z | 36195a0518ebb01a0ce51060e1c10dc2c38e7af2f3ae26ab285e5bc5454cf05b |
+| 6 | 2015-06-01T00:00:00Z | 2015-07-01T00:00:00Z | c2d3138b6d9c5cc49b535c327eea87ba4c2dfdda6725285a6efe046abaee52f5 |
+| 7 | 2015-07-01T00:00:00Z | 2015-08-01T00:00:00Z | 30369876aa06c6752213752c183e2ecabafded34e81f5014d7de9105895aaa10 |
+| 8 | 2015-08-01T00:00:00Z | 2015-09-01T00:00:00Z | a1b3a0b409f9a7423afea933697c3280e5e7037bc274ab6325017eb94e86bfdd |
+| 9 | 2015-09-01T00:00:00Z | 2015-10-01T00:00:00Z | 9549132ff286e3cb150d170253290193e04078f26c88b4573bd815fdbaa18f55 |
+| 10 | 2015-10-01T00:00:00Z | 2015-11-01T00:00:00Z | c40c69989891319f83935ab1b2334445dd52151595dcdef50192b802f4fe8e3c |
+| 11 | 2015-11-01T00:00:00Z | 2015-12-01T00:00:00Z | 0ab2387a84ed00e385de6b791bc1aa1f342c83c342b70d46c12f573e3280854e |
+| 12 | 2015-12-01T00:00:00Z | 2016-01-01T00:00:00Z | 33f07e0483d017a0cc8ffb788fe2d2b10a1e41b652ae1b64bd53584f8b8bc6d3 |
+| 13 | 2016-01-01T00:00:00Z | 2016-02-01T00:00:00Z | b615fe050627c187482da5bd02b4dc8984ed3ba4ad24f58f7d9060dcb2479e2c |
+| 14 | 2016-02-01T00:00:00Z | 2016-03-01T00:00:00Z | da72a363d298005651b5592f6ad90746b14c004d6f5e7795d62bdbd1ccb903a3 |
+| 15 | 2016-03-01T00:00:00Z | 2016-04-01T00:00:00Z | 99869099bfc7329cb29045c2da5e76f183511990fc10d28051b48b90d4f11ddb |
+| 16 | 2016-04-01T00:00:00Z | 2016-05-01T00:00:00Z | eaf9d41cedac8c01fcaa46d0abfb773edbf29e3e47b9777714a100d87a2fd8a2 |
+| 17 | 2016-05-01T00:00:00Z | 2016-06-01T00:00:00Z | b8a42dc425010fe02f8145b1eff002067d7aafd7377c7dad98f7db502b9761db |
+| 18 | 2016-06-01T00:00:00Z | 2016-07-01T00:00:00Z | 6e314dc667d67567963439821038fae43c7f498234cb9c96b603ad7b5a0dfcf8 |
+| 19 | 2016-07-01T00:00:00Z | 2016-08-01T00:00:00Z | 130c8c801edce29b5044c06ef5c1db5df6b9c76a0ce4da5608fecd37609deffa |
+| 20 | 2016-08-01T00:00:00Z | 2016-09-01T00:00:00Z | 2aa0edaed073641edc7bd3af2f816c759b9422d291b11e8b138ebdaaf9e4821d |
+| 21 | 2016-09-01T00:00:00Z | 2016-10-01T00:00:00Z | b929c4ebdbf8fb0a2664e15ac6cd590b4c1969fe1b9a8d906d3ef154200ac9e0 |
+| 22 | 2016-10-01T00:00:00Z | 2016-11-01T00:00:00Z | aa916642336d3a28c7495bdec536aba09936f9151fc8a91cc0281d6ad32a29fd |
+| 23 | 2016-11-01T00:00:00Z | 2016-12-01T00:00:00Z | 0efd5d509db01475c05219c3cba388cf027d28bf8145fa04b4b10f4edc7c239a |
+| 24 | 2016-12-01T00:00:00Z | 2017-01-01T00:00:00Z | e2827e92d45a61546e9e445730869a16f56eed24d2444287f4a1d94fc96e396e |
+| 25 | 2017-01-01T00:00:00Z | 2017-02-01T00:00:00Z | edcd8fed74f92a8bce13f1d3cf46f53a1c0af5c2b230f6a7ba375a8f433319df |
+| 26 | 2017-02-01T00:00:00Z | 2017-03-01T00:00:00Z | a1f398d3f076156ca767cb17263ce014fcaef2ced2d55429c01c834b41931eaa |
+| 27 | 2017-03-01T00:00:00Z | 2017-04-01T00:00:00Z | bd0c60fc1bf9a942a0b48ae1369ac0e041134b09f7b474480fed9d7c066a716d |
+| 28 | 2017-04-01T00:00:00Z | 2017-05-01T00:00:00Z | 5c1aa2c217449f4e3da33105a0869f4ac1d9ea1bd073496a017f948d7e3bfddf |
+| 29 | 2017-05-01T00:00:00Z | 2017-06-01T00:00:00Z | bde96cbd4dd129e32218ab0d697badd138ef94afa6da04fca4a76510bb4084c5 |
+| 30 | 2017-06-01T00:00:00Z | 2017-07-01T00:00:00Z | b8073a15289b9ae5128099b915de81f17252062d9ac384170487f973800e313a |
+| 31 | 2017-07-01T00:00:00Z | 2017-08-01T00:00:00Z | afe8e9bc6fd6dca52bbd7a5c00409904f11e74f109052527f8564ecd4e7a3547 |
+| 32 | 2017-08-01T00:00:00Z | 2017-09-01T00:00:00Z | 8c1900ea61c32361cba472bcb36e3c28800dca0152a85e7f345ff9239806547d |
+| 33 | 2017-09-01T00:00:00Z | 2017-10-01T00:00:00Z | 719f9172d31f1f2732173220654fc2f94c9312176c492be47813d81036da00e7 |
+| 34 | 2017-10-01T00:00:00Z | 2017-11-01T00:00:00Z | d1365ad6bab4cbd7be53df3c3ac5027349db972ed50a91c0c230a425732ac9a7 |
+| 35 | 2017-11-01T00:00:00Z | 2017-12-01T00:00:00Z | 290c1ff24992165f526b6aaede85068b63239043ea1a6ceda3f03cd5513173f2 |
+| 36 | 2017-12-01T00:00:00Z | 2018-01-01T00:00:00Z | f8858c8eb52e656d51cbbae25ef18425d1ebd3ca78a5f7734f51b6f1c9a01b9c |
+| 37 | 2018-01-01T00:00:00Z | 2018-02-01T00:00:00Z | 5bddfafc55e0bc079010bdaf5c3c82a7d98822c50c9d642366f8c0b596d9ca38 |
+| 38 | 2018-02-01T00:00:00Z | 2018-03-01T00:00:00Z | c05f10f9408cf200b31ea3161864175f83d87ad48111eb4812d60089b9adf9d6 |
+| 39 | 2018-03-01T00:00:00Z | 2018-04-01T00:00:00Z | 34aadd48d0a6a21b879311f742d25786409b778665e80c31168bcd25f6c12b02 |
+| 40 | 2018-04-01T00:00:00Z | 2018-05-01T00:00:00Z | d1cf61e9daaff97634d6fc688be95d2357cd6d95f889fe7ec9a23f24ea9680ee |
+| 41 | 2018-05-01T00:00:00Z | 2018-06-01T00:00:00Z | e8dba8a099931ec031353effda0aeccd47319f0324a497fb8316864f12a34619 |
+| 42 | 2018-06-01T00:00:00Z | 2018-07-01T00:00:00Z | c94f2b3f044d1a504695b71b48d33d8787c72b426f5eb70c919684837f4c8f7d |
+| 43 | 2018-07-01T00:00:00Z | 2018-08-01T00:00:00Z | 905e9b476f721c3b231b9d5e35af1a121a9e1440c443cf23c5aa78f08eeb6998 |
+| 44 | 2018-08-01T00:00:00Z | 2018-09-01T00:00:00Z | f7acc454363a13060012177b2908bd5b6aa9f5725e854030fe087b4ef596a832 |
+| 45 | 2018-09-01T00:00:00Z | 2018-10-01T00:00:00Z | fe53b5a6876aaf05d3ecd3b090599bcda9e1c6c4b45611df8bcd1fd9c317f233 |
+| 46 | 2018-10-01T00:00:00Z | 2018-11-01T00:00:00Z | e5c3cfeffb1e1a5e422c7d21f31e14886d8d912df97d9babbef4654165c09cc0 |
+| 47 | 2018-11-01T00:00:00Z | 2018-12-01T00:00:00Z | ee8a36929ef3c0ce8be20b64cb427a5bf2fdca266aa0a429b6c9cfe2889cbc84 |
+| 48 | 2018-12-01T00:00:00Z | 2019-01-01T00:00:00Z | 0f1d4683d5c777e53bb9f0e07a9e2586e36c765926aa1002b131b630cc5852ec |
+| 49 | 2019-01-01T00:00:00Z | 2019-02-01T00:00:00Z | 124707a55390cc800ee1b2aa2ec1b5420f91991b79380e800686dee7b25cbd1f |
+| 50 | 2019-02-01T00:00:00Z | 2019-03-01T00:00:00Z | cad81d9a1d352f3779641b8b358b6b2c7a30cd9f4141b1eeb377169151e39aea |
+| 51 | 2019-03-01T00:00:00Z | 2019-04-01T00:00:00Z | 064ddd393466fc06c51c7b73badf26dc6ad48258960d068212180ad741349c01 |
+| 52 | 2019-04-01T00:00:00Z | 2019-05-01T00:00:00Z | d1bd900bec588a71a265ff9621f6630e57e8c1f905e6d6046094828d82a190e9 |
+| 53 | 2019-05-01T00:00:00Z | 2019-06-01T00:00:00Z | 8b0dad6704506717d6aa1d40a948ee9f80431cf236764fec2d07694b165729c0 |
+| 54 | 2019-06-01T00:00:00Z | 2019-07-01T00:00:00Z | bdde59bd9b8736ba5601acbe6b8dde42c58eec38aa4839e9cec47343a493d972 |
+| 55 | 2019-07-01T00:00:00Z | 2019-08-01T00:00:00Z | 03d3507fb454cc876ce2c4b82fc329c0723239549e5f380a366dd63584f22a92 |
+| 56 | 2019-08-01T00:00:00Z | 2019-09-01T00:00:00Z | 2bea5594313103f8f1e78984c358f99bd0accc3baed19b130c883a973b2a452a |
+| 57 | 2019-09-01T00:00:00Z | 2019-10-01T00:00:00Z | d5a0c82cc8c4ebf35d790de741f9d3c184a49ae0b7a713db17916c3847b2e2c0 |
+| 58 | 2019-10-01T00:00:00Z | 2019-11-01T00:00:00Z | c3a22117c74109f0752232afcba6815fc3a51961ad802760bee7a27fcfc6a0a3 |
+| 59 | 2019-11-01T00:00:00Z | 2019-12-01T00:00:00Z | a110da3cd445c18d92d59e9c7f77ccdb984ab0bc11518db5bbf0955bfd5393f4 |
+| 60 | 2019-12-01T00:00:00Z | 2020-01-01T00:00:00Z | f0ed99531f2529ac3bd21f32c86eb5acb1b321dba8f5b05204a22db48daf09b3 |
+| 61 | 2020-01-01T00:00:00Z | 2020-02-01T00:00:00Z | 863cda74183417bc45299031404b72d054650a48117b3ae7509cdee74ca5ddd1 |
+| 62 | 2020-02-01T00:00:00Z | 2020-03-01T00:00:00Z | 69064f4446d0b26ad86be89294bc488c6b844433033e2bb26080faff400c9aa3 |
+| 63 | 2020-03-01T00:00:00Z | 2020-04-01T00:00:00Z | 17887c44ad4196980feea06a6f3e6d5e792f8a1e95a96936739876db50684d8f |
+| 64 | 2020-04-01T00:00:00Z | 2020-05-01T00:00:00Z | 8f27b1d1e227e8d773aadde82382cdc85678282d266e10b0cf59a18c4d68ce6f |
+| 65 | 2020-05-01T00:00:00Z | 2020-06-01T00:00:00Z | 6e5674ddb638d2f67040f8ff07097f5ac25a15ce5f23f3d90ffd605c4b31f3c0 |
+| 66 | 2020-06-01T00:00:00Z | 2020-07-01T00:00:00Z | e752f9b2aa695c3b5460660cb0ff041abe69e3484a4b86566cc34dcc4d69d279 |
+| 67 | 2020-07-01T00:00:00Z | 2020-08-01T00:00:00Z | 5711cc1a464f26c5188982c4320666fcabced978f599ceaa32bf63eaa34d4f49 |
+| 68 | 2020-08-01T00:00:00Z | 2020-09-01T00:00:00Z | 2cdd19d37f7c1fdc5407df0a2611c8c924fc212dd8e81592b3b79c9fbfbfce28 |
+| 69 | 2020-09-01T00:00:00Z | 2020-10-01T00:00:00Z | 639e4eee099ed97405a9aa53841ed41ff02ec8a1078aef26849725583c212228 |
+| 70 | 2020-10-01T00:00:00Z | 2020-11-01T00:00:00Z | 19d059c2ffaf1a92a9b4f46c5870d1693d1e7fe021aedda1d4ba0228d9d7a7fd |
+| 71 | 2020-11-01T00:00:00Z | 2020-12-01T00:00:00Z | 608e5465a0e9280e488c284a18d4a68e6679a0244ff621f6223a07abf5b37fb6 |
+| 72 | 2020-12-01T00:00:00Z | 2021-01-01T00:00:00Z | 03a6de74f041b3fb4e65062b9cb1ba1c0f2623774e0884a072486a7014267ea7 |
+| 73 | 2021-01-01T00:00:00Z | 2021-02-01T00:00:00Z | 2cda7b1959f8c53305c39d6f58b22b8032895bd98faf1f8d76cc28de52f60dbe |
+| 74 | 2021-02-01T00:00:00Z | 2021-03-01T00:00:00Z | 3e64826da18cafc140ad28c359a14dc725e21706f7100abfc3aa5075ac3fa91b |
+| 75 | 2021-03-01T00:00:00Z | 2021-04-01T00:00:00Z | 3badf35ab0a4eedbdebf5dcd65bc275472b8aa2159982a26e00c4f9127cf01ee |
+| 76 | 2021-04-01T00:00:00Z | 2021-05-01T00:00:00Z | 267fd4fcc1bf7feabcc1d7fe8bc91852b175544d066a7c0679c3af83858c7a48 |
+| 77 | 2021-05-01T00:00:00Z | 2021-06-01T00:00:00Z | 9a7b2c44ae234e254edd847a18d8b1c901200b817db650535332eb5371df2319 |
+| 78 | 2021-06-01T00:00:00Z | 2021-07-01T00:00:00Z | 47badbefdc76cd5db26315066d58f6c3e248b957aed9958d481e0516098b55a0 |
+| 79 | 2021-07-01T00:00:00Z | 2021-08-01T00:00:00Z | 2b48513733c8ca6511b8272abf826f4d8a01f5a927cb8194b809d4081736c06c |
+| 80 | 2021-08-01T00:00:00Z | 2021-09-01T00:00:00Z | 51e1acb929ddf789d624fffa7ccec06ea4fb5c21fdc4a0af084be2bfb4e1a190 |
+| 81 | 2021-09-01T00:00:00Z | 2021-10-01T00:00:00Z | 5e36b70cb85a361cbd93b08476d4390200ee2c535ff4e63a16cf050aa8909d63 |
+| 82 | 2021-10-01T00:00:00Z | 2021-11-01T00:00:00Z | 4e26c826d7bb41b2620c19d09632c1acae9bdf9bffda5f0d8becd8b8681368eb |
+| 83 | 2021-11-01T00:00:00Z | 2021-12-01T00:00:00Z | 875e6f62731a3c9626136fc4cf39144ad665b04578405063803bac6a557e8a67 |
+| 84 | 2021-12-01T00:00:00Z | 2022-01-01T00:00:00Z | fe3a17efffdb27f3fc629954720b1dab850a81e0da132ffb52b7ab454da51273 |
+| 85 | 2022-01-01T00:00:00Z | 2022-02-01T00:00:00Z | ff319460939352c061e7e5e80071b3e9ea78e704582a7b03e4cb4c4cd4a0df58 |
+| 86 | 2022-02-01T00:00:00Z | 2022-03-01T00:00:00Z | 1623aa2ce639232dd298a53b6c3540fb00c8725dbc1631b7aa7863e87d821d79 |
+| 87 | 2022-03-01T00:00:00Z | 2022-04-01T00:00:00Z | 7a8f6362d01d44bc817a3e9e1a8cf646007505f065aba3aa90401aae9958d9fe |
+| 88 | 2022-04-01T00:00:00Z | 2022-05-01T00:00:00Z | f15afb430ba147d55758ec00b9d2c1135c3248a349d9ad1e0ed7bed816b95500 |
+| 89 | 2022-05-01T00:00:00Z | 2022-06-01T00:00:00Z | dde4ba15f0e0e8b6f5fa5856e4906810cb3a95448cad086a6e499967361932a7 |
+| 90 | 2022-06-01T00:00:00Z | 2022-07-01T00:00:00Z | 76fdab3d48911afbcba6329d57a56c9562e4f0b5381120534f5e3f2dde236fa5 |
+| 91 | 2022-07-01T00:00:00Z | 2022-08-01T00:00:00Z | caf17a3c7a64da5a14161dcd40e195cbebbbafbb29b356c177d8f9f88772bfc6 |
+| 92 | 2022-08-01T00:00:00Z | 2022-09-01T00:00:00Z | c7a38dfe92d5b9e5a973beac5d73a79a40f88727813fb6fe08ec9f9841ce10a5 |
+| 93 | 2022-09-01T00:00:00Z | 2022-10-01T00:00:00Z | 873e8fbe9b733c53beacfa45fe7c24471c0e0ee1fea65ac5d0472b132679a3ca |
+| 94 | 2022-10-01T00:00:00Z | 2022-11-01T00:00:00Z | 2aa89e124f4d1b4cfad11741c7c45bfa054f39c12d06381710383ce7e5d6d2ea |
+| 95 | 2022-11-01T00:00:00Z | 2022-12-01T00:00:00Z | 9e94edd8baa75940e80c80ec9eed321b68a1075ae95f8a6df2466896550e9009 |
+| 96 | 2022-12-01T00:00:00Z | 2023-01-01T00:00:00Z | c10c3bc82524d760e718112fd924a9ece6e7c0316b354b849aa05bac7ca12d17 |
+| 97 | 2023-01-01T00:00:00Z | 2023-02-01T00:00:00Z | ddd2dcb2d0b7982d1b631edf035265f9d66a97332cf7e3bc49db3fd82e3925db |
+| 98 | 2023-02-01T00:00:00Z | 2023-03-01T00:00:00Z | 76e46f3051e5357d8524bf7d9ac3b5867f647c126fe0820895dbc42934708b77 |
+| 99 | 2023-03-01T00:00:00Z | 2023-04-01T00:00:00Z | 6209565b0e12ee9e5ce29f5e585161c86e22fb328905946e81ea1c09f12e5d8b |
+| 100 | 2023-04-01T00:00:00Z | 2023-05-01T00:00:00Z | 397fab015d349bc6ba82f3e7e0e718e82e7404eccedc94b1827f09b2bd3881d6 |
+| 101 | 2023-05-01T00:00:00Z | 2023-06-01T00:00:00Z | 01018f14375c6cbfb8bc7e74a353c77b29d0c789414bb461b6f3afb0bb8da8d5 |
+| 102 | 2023-06-01T00:00:00Z | 2023-07-01T00:00:00Z | 37ad0da4ceb8e26f6105feb404a1ece3e4a931f351010bdef0c1237397facf16 |
+| 103 | 2023-07-01T00:00:00Z | 2023-08-01T00:00:00Z | 61a6d480a0c31f46db6d9e8175f7371f439fcea87795335c7e7d476677c0d9bd |
+| 104 | 2023-08-01T00:00:00Z | 2023-09-01T00:00:00Z | b91a6baa02831fe8114341797745c819137fdeec56816e8915e588ec6f60d4ac |
+| 105 | 2023-09-01T00:00:00Z | 2023-10-01T00:00:00Z | 6ccdcdce898f54dd6aecf13839714b9d2badc4d3ebe122f70185d6f936b070d4 |
+| 106 | 2023-10-01T00:00:00Z | 2023-11-01T00:00:00Z | e80e1df77f63e5c832c8f22ce45d597b5c20adab0b56748d41d3b81de16ffaa3 |
+| 107 | 2023-11-01T00:00:00Z | 2023-12-01T00:00:00Z | 3b46770c432e1d5c83d3538a61b770c51776c8436e068e0b2007e62283a0ae0a |
+| 108 | 2023-12-01T00:00:00Z | 2024-01-01T00:00:00Z | 3544c9820e25819f0eaf810223ee43b2dc4fb800ae6002b7377681744dba69b1 |
+| 109 | 2024-01-01T00:00:00Z | 2024-02-01T00:00:00Z | eed9dae0feac4cfa2826f4ff9f48ae2d05a41c3fd69207cd169dc996f8709ab9 |
+| 110 | 2024-02-01T00:00:00Z | 2024-03-01T00:00:00Z | 4945dcd31f11c4c8845c9d317fc4afdf0d328908dd456d9d1000d89151acb620 |
+| 111 | 2024-03-01T00:00:00Z | 2024-04-01T00:00:00Z | 9265c04be0d20cc83641df64197b7ac9e3e1d32b944f755a6959115baeec808b |
+| 112 | 2024-04-01T00:00:00Z | 2024-05-01T00:00:00Z | d351d2e52aac970eeaddc2185f93d9f847b028adedf8e6792d2d714bd894495e |
+| 113 | 2024-05-01T00:00:00Z | 2024-06-01T00:00:00Z | d20ba0050aa0e718438c799f52930d3fd0372106ac5d72714e1186be87bbf41c |
+| 114 | 2024-06-01T00:00:00Z | 2024-07-01T00:00:00Z | d7ba4f08531e2e95aee03a1ac8115831f76be8019c6daa74dbd4cee92873c781 |
+| 115 | 2024-07-01T00:00:00Z | 2024-08-01T00:00:00Z | e19669a00efd43ec5dd366410c0f6cb8cc6eb5e6c5187dff8c5433a828547c86 |
+| 116 | 2024-08-01T00:00:00Z | 2024-09-01T00:00:00Z | c63f04c7f3c8225ffe096f5ecaaf46a3f3e5d678f2e7b48c2f6f087f637b2a6a |
+| 117 | 2024-09-01T00:00:00Z | 2024-10-01T00:00:00Z | 042fc1cbcb0a762e457840b0eb5306f2a51001d5533997160e31253d60cfce41 |
+| 118 | 2024-10-01T00:00:00Z | 2024-11-01T00:00:00Z | 6ae4d069cbdbbe0b1faa59ffacceeab99ebf634a8e3ad3b01ae85ba0bfa042f7 |
+| 119 | 2024-11-01T00:00:00Z | 2024-12-01T00:00:00Z | 23ebe9e8439ed441e9e6b27a3d51a5aec5d7866a1137e06f44ad031a67d4aafb |
+| 120 | 2024-12-01T00:00:00Z | 2025-01-01T00:00:00Z | 552bda796bf76ad71944248675296394176cfaa4f5ceb7c90d13483673db4f9d |
+#+END_SRC
+
+*Aggregate dataset fingerprint*: computed by joining, in the exact
+order above, one line per dataset of
+~provider|instrument|interval|span_start|span_end|revision~ (pipe-
+separated, RFC3339 timestamps) with a single ~\n~ between consecutive
+lines and *no* trailing newline after the last line, then taking that
+joined text's SHA-256. This was verified by recomputing it
+independently against =run.json='s own ~dataset~ array before this
+document was finalized, not merely asserted:
+
+: 8c4ec8fc5b5af3f825b8812665b196199867a10ebd854348c8295fd8c818cd23
+
+Any future re-verification can recompute this fingerprint directly
+from the 120-row table above (or from a fresh run's own persisted
+=<run-id>.json= snapshot's ~dataset~ array, in the same order)
+without needing the gitignored artifacts at all.
+
+** Config digest and run ID (officially recorded run)
+
+- Run ID: ~run_019AHCNC00MHC9NGVP4DXC7W3G~
+- Config digest: ~sha256:b9a5c2fb769e3aa05dc2f9022369397b3beeb586df07c5f56d81a9d38b11e656~
+
+** Artifact references
+
+Generated, regenerable artifacts are gitignored (=/research-runs/=,
+see =.gitignore=) rather than committed — they total roughly 24 MB,
+dominated by a 62,191-point equity curve and an 18,811-record journal,
+and are exactly reproducible from the commit/config/dataset identity
+recorded above (the dataset manifest and its aggregate fingerprint are
+additionally preserved directly in this document, not only in these
+artifacts — see the previous section). Filenames below match exactly
+what the Reproduction section's own command produces, plus one
+follow-up "trader backtest show" invocation for the table/Org
+renders:
+
+- Report snapshot (JSON, written by "run" itself under --output-dir,
+  named =<run-id>.json= per =cmd/trader/backtest/store.go=; byte-
+  identical to what "show" reads back):
+  =research-runs/ema-11/runs/run_019AHCNC00MHC9NGVP4DXC7W3G.json=
+- Durable journal (JSONL, =adapters/journal/jsonl=, written by "run"
+  itself at exactly the --journal path given above; 18,811 records —
+  1176 =KindSignal=/1176 =KindTrade=/2351 each of
+  =KindIntent=/=KindProposal=/=KindDecision=/=KindRequest=/=KindFill=,
+  4702 =KindOrder=, bracketed by one =KindRunStarted=/=KindRunCompleted=
+  pair — the same causal shape EMA-10's regression proved at small
+  scale, here at full 10-year scale):
+  =research-runs/ema-11/run.jsonl=
+- Compact table render (via
+  ~trader backtest show run_019AHCNC00MHC9NGVP4DXC7W3G --output-dir
+  research-runs/ema-11/runs --format table~, no recomputation — see
+  the package doc comment on why "show" never re-derives Metrics):
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.table.txt=
+- Full Org report (complete trade list and equity curve; same "show"
+  invocation with --format org):
+  =research-runs/ema-11/run_019AHCNC00MHC9NGVP4DXC7W3G.org=
+
+* Result
+
+** Instrument / interval / date range
+
+EUR/USD, H1, 2015-01-01 through 2024-12-31 (half-open end at
+2025-01-01), 10 calendar years.
+
+** Strategy parameters
+
+Fast EMA period 20, slow EMA period 50 (EMA-01's own reference
+values), SMA-seeded, next-bar-open fills, zero slippage/commission
+(EMA-01 Decision 6's stated idealization).
+
+** Starting capital and risk configuration
+
+10,000 USD starting capital; 1% fixed-fraction risk per entry; 0.0050
+adverse-distance sizing input (EUR/USD H1, a neutral placeholder per
+EMA-01 Decision 5 — not derived from volatility analysis, and not a
+broker-side protective stop).
+
+** Trade count
+
+1175 closed trades, plus 1 still-open position at the end of the
+range (a short, 16,979 units @ 1.03851 average price).
+
+** Final equity / net PnL / return
+
+| Metric          | Value           |
+|-----------------+-----------------|
+| Starting Capital | 10,000.00 USD  |
+| Final Equity     | 8,545.83288 USD |
+| Net PnL (closed) | -1,510.02803 USD |
+| Net Return       | -14.541671%    |
+| Unrealized PnL   | +55.86091 USD (the one open short) |
+
+** Drawdown and other performance metrics
+
+| Metric         | Value        |
+|-----------------+--------------|
+| Max Drawdown    | 43.086189%  |
+| Profit Factor   | 0.97147804  |
+| Expectancy      | -1.28513024 USD/trade |
+| Closed Trade Costs | 0 USD (zero-cost model, EMA-01 Decision 6) |
+
+A profit factor below 1.0 and a max drawdown exceeding 43% of peak
+equity are both, independently, strong negative signals for this
+exact configuration — see Research Conclusion.
+
+** Win/loss characteristics
+
+| Metric        | Value            |
+|---------------+------------------|
+| Wins          | 385              |
+| Losses        | 789              |
+| Win Rate      | 32.765957%      |
+| Average Win   | 133.59121803 USD |
+| Average Loss  | -67.10094673 USD |
+
+The win rate is well below 50%, partially offset by an average win
+roughly double the average loss (a "let winners run, cut losses"
+shape consistent with a trend-following crossover exiting only on the
+opposite signal) — but not enough to overcome the loss frequency: 385
+x 133.59 = 51,432 USD gross wins against 789 x 67.10 = 52,942 USD
+gross losses, a -1,510 USD net (matches Gross PnL above exactly).
+
+** Long/short breakdown
+
+| Side  | Count | Wins | Losses | Net PnL         |
+|-------+-------+------+--------+-----------------|
+| Long  |   588 |  195 |    393 | -2,139.83369 USD |
+| Short |   587 |  190 |    396 |   629.80566 USD  |
+
+The long side accounts for the entire loss and then some; the short
+side was mildly profitable in isolation. Both sides individually have
+a losing trade count roughly double their winning count (393 vs 195,
+396 vs 190) — the losing-trade-frequency pattern is symmetric across
+side, so this is not a long-only or short-only defect in the crossover
+logic itself (EMA-01 Decision 1's tie-preserving state machine treats
+both directions identically by construction).
+
+** Anomalies discovered while reviewing trades
+
+- *Worst single trade*: -536.31084 USD, a long opened 2016-06-22T20:00Z
+  and closed 2016-06-24T03:00Z — the Brexit referendum result (declared
+  the morning of 2016-06-24 UTC). This is a real, known historical
+  volatility event coinciding exactly with the worst trade in the
+  entire 10-year run, not a data or simulation defect; it is recorded
+  here specifically so a future reviewer does not mistake it for a bug
+  and re-investigate it.
+- *Best single trade*: +1,115.5807 USD, a short held 2015-02-26 through
+  2015-03-17 (roughly 19 days) — the early-2015 dollar-strength/EUR
+  weakness trend, also a known historical period, not an anomaly.
+- *Trade duration spread is wide*: minimum 1 hour, maximum 502 hours
+  (~21 days), median 45 hours, mean ~74.4 hours. 54 of 1175 trades
+  (4.6%) closed within the very next bar after opening (a same-session
+  whipsaw reversal) — expected from a crossover strategy with no
+  minimum-hold or noise filter, not itself evidence of a defect, but a
+  concrete number worth carrying into any follow-on experiment that
+  adds a noise/whipsaw filter.
+- *Year-by-year PnL is highly uneven*: 2020 alone contributed +2,977.08
+  USD (the single best year, in a year of unusually strong, sustained
+  FX trends during the COVID volatility regime); 2016, 2017, 2021, and
+  2024 were the worst years (-1,846.59, -1,254.36, -1,196.49, and
+  -1,800.53 USD respectively). No single year's result is required to
+  explain the aggregate — the aggregate is genuinely a 10-year sum, not
+  dominated by one outlier year — but the concentration of the one
+  clearly good year (2020) alongside four clearly bad years is worth
+  carrying forward: a regime-dependent crossover edge (trending vs.
+  ranging markets) is a plausible next hypothesis, consistent with the
+  =project_regime_filter_design= work already scoped in a prior legacy
+  system.
+- No data-integrity anomaly (out-of-order bars, gaps, duplicate
+  fills, or a =KindSignal=/=KindFill=/=KindTrade= count mismatch) was
+  found while reviewing the journal, and the counts reconcile exactly:
+  1176 =KindSignal= records (one per detected crossover, EMA-08's own
+  cadence — never one per bar) against 2351 =KindFill= records solves
+  to exactly one flat->direction signal (a single Enter fill) and
+  1175 reversal signals (an Exit + Enter fill pair each): 1 + 1175 =
+  1176 signals, 1x1 + 1175x2 = 2351 fills, both exact. This is the
+  expected shape given EMA-01 Decision 4: only the very first
+  crossover of the entire run can find the strategy flat: every
+  crossover after that finds it already long or short (it never exits
+  without immediately reversing), so 1175 of the 1176 signals are
+  necessarily reversals. 1175 closed trades + 1 still-open trade at
+  the end of the range also reconciles with 1176 total positions
+  opened across the run.
+
+* Research Conclusion
+
+*Rejected — move to next experiment.*
+
+The reference hypothesis (docs/research/ema-01-experiment-definition.org's
+own framing: "A fast EMA crossing a slow EMA identifies trend changes
+that, when traded long/short with opposite-cross exits, may produce
+positive expectancy on EUR/USD H1") is not supported by this run.
+Every headline metric points the same direction: negative net PnL
+(-1,510.03 USD, -14.54% return over 10 years), a profit factor below
+1.0 (0.971), negative per-trade expectancy (-1.29 USD), and a 43.09%
+maximum drawdown — a drawdown of that magnitude would be operationally
+unacceptable even if the sign of expectancy were reversed. This
+conclusion concerns the crossover entry/exit hypothesis and this
+specific fixed, simplified sizing/cost model together (EMA-01 Decision
+5's own explicit caveat) — it is not a statement that the
+implementation is incorrect. The implementation's correctness is
+judged separately, by the deterministic unit/regression tests EMA-03
+through EMA-10 already established and which this run's own
+determinism check (above) reconfirms at full scale.
+
+** Obvious next experiment
+
+Two follow-on directions are both directly motivated by this result,
+in order of how directly they attack what the anomaly review above
+found:
+
+1. *Add a realistic cost model.* EMA-01 Decision 6's zero-cost
+   idealization is a known, stated simplification; a fixed spread
+   and/or commission model (already an explicit "expected follow-on"
+   per that decision) can only make this specific negative result
+   worse, not better, since 1175 trades at any nonzero per-trade cost
+   subtracts further from an already-negative net PnL. This is worth
+   running once, briefly, specifically to confirm the rejection is not
+   an artifact of an unrealistically generous zero-cost assumption
+   understating how bad a live version would be — not because it could
+   plausibly flip the conclusion to Promising.
+2. *Introduce a regime or trend-strength filter before trusting a
+   crossover signal* — motivated directly by the year-by-year anomaly
+   above (one strongly trending year, several weak/ranging years) and
+   by the 4.6% same-bar whipsaw-reversal rate. A crossover signal
+   filtered by a volatility/regime gate (for example, only trading
+   crossovers when a longer-window trend-strength or ATR-percentile
+   measure exceeds a threshold) is the most direct hypothesis this
+   specific evidence supports, and is a smaller, cheaper change to test
+   than redesigning the entry/exit logic itself.
+
+Both are new experiments, not a revision of this one: per EMA-01's own
+framing, this document's role is to record this hypothesis's result
+and conclusion, not to iterate on it in place.
