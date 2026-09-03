@@ -3,11 +3,22 @@
     "run_id": "run_01HK153X003DMSTAVHVKTAA8HF",
     "strategy_name": "ema-cross",
     "strategy_version": "1.0.0",
+    "strategy_parameters": null,
     "span_start": "2024-01-01T00:00:00Z",
     "span_end": "2024-01-03T00:00:00Z",
     "trader_version": "test-v0",
     "config_digest": "sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78"
   },
+  "dataset": [
+    {
+      "provider": "oanda",
+      "instrument": "fx:EUR/USD",
+      "interval": "H1",
+      "span_start": "2024-01-01T00:00:00Z",
+      "span_end": "2024-01-03T00:00:00Z",
+      "revision": "03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81"
+    }
+  ],
   "performance": {
     "starting_capital": {
       "amount": "10000",
@@ -47,6 +58,7 @@
     "profit_factor": null
   },
   "per_instrument": [],
+  "by_side": [],
   "closed_trades": [],
   "open_trades": [],
   "account": {

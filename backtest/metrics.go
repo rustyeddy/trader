@@ -40,6 +40,20 @@ type InstrumentMetrics struct {
 	GrossPnL, Costs, NetPnL num.Money
 }
 
+// SideMetrics is one Trade-derived holding direction's (Long or Short)
+// own slice of the aggregate closed-trade figures, computed the same
+// way InstrumentMetrics is — GrossPnL/Costs/NetPnL here always sum
+// back to the corresponding aggregate Metrics accessor across the (at
+// most two) SideMetrics entries, since both are computed from the
+// exact same Trades population. Side is never order.Flat: a Trade with
+// no direction has nothing to report (order.NewTrade's own invariant).
+type SideMetrics struct {
+	Side order.PositionSide
+
+	Count, Wins, Losses     int
+	GrossPnL, Costs, NetPnL num.Money
+}
+
 // MetricsParams is NewMetrics' input. Every value here is an
 // authoritative observation Runner/Scheduler already collected —
 // Metrics itself performs no snapshotting, no event-stream reading,
@@ -99,6 +113,7 @@ type Metrics struct {
 	profitFactor                       *num.Rate
 
 	perInstrument []InstrumentMetrics
+	bySide        []SideMetrics
 }
 
 // NewMetrics validates params and computes Metrics. StartingCapital
@@ -175,6 +190,10 @@ func NewMetrics(params MetricsParams) (Metrics, error) {
 		return Metrics{}, err
 	}
 	m.perInstrument, err = perInstrumentMetrics(params.Trades, currency)
+	if err != nil {
+		return Metrics{}, err
+	}
+	m.bySide, err = sideMetrics(params.Trades, currency)
 	if err != nil {
 		return Metrics{}, err
 	}
@@ -409,6 +428,65 @@ func perInstrumentMetrics(trades []order.Trade, currency num.Currency) ([]Instru
 	return out, nil
 }
 
+// sideMetrics groups trades by their own Side (Long or Short — never
+// Flat, order.NewTrade's own invariant), computing each group's own
+// GrossPnL/Costs/NetPnL/win-loss counts exactly as perInstrumentMetrics
+// does for instruments. The result is ordered Long before Short (never
+// map iteration order), and a side with no trades is omitted entirely
+// rather than reported as an explicit zero — the same "absence means
+// none" convention perInstrumentMetrics already uses for an instrument
+// that was never traded.
+func sideMetrics(trades []order.Trade, currency num.Currency) ([]SideMetrics, error) {
+	zero := zeroMoneyMust(currency)
+	groups := map[order.PositionSide]*SideMetrics{}
+
+	for _, t := range trades {
+		g, ok := groups[t.Side]
+		if !ok {
+			g = &SideMetrics{Side: t.Side, GrossPnL: zero, Costs: zero, NetPnL: zero}
+			groups[t.Side] = g
+		}
+
+		g.Count++
+		var err error
+		g.GrossPnL, err = g.GrossPnL.Add(t.RealizedPnL)
+		if err != nil {
+			return nil, fmt.Errorf("%w: accumulating per-side gross pnl: %v", ErrInvalidMetrics, err)
+		}
+		g.Costs, err = g.Costs.Add(t.Costs)
+		if err != nil {
+			return nil, fmt.Errorf("%w: accumulating per-side costs: %v", ErrInvalidMetrics, err)
+		}
+		net, err := t.RealizedPnL.Sub(t.Costs)
+		if err != nil {
+			return nil, fmt.Errorf("%w: computing per-side net result: %v", ErrInvalidMetrics, err)
+		}
+		g.NetPnL, err = g.NetPnL.Add(net)
+		if err != nil {
+			return nil, fmt.Errorf("%w: accumulating per-side net pnl: %v", ErrInvalidMetrics, err)
+		}
+		sign, err := net.Cmp(zero)
+		if err != nil {
+			return nil, fmt.Errorf("%w: comparing per-side net result: %v", ErrInvalidMetrics, err)
+		}
+		switch {
+		case sign > 0:
+			g.Wins++
+		case sign < 0:
+			g.Losses++
+		}
+	}
+
+	var out []SideMetrics
+	if g, ok := groups[order.Long]; ok {
+		out = append(out, *g)
+	}
+	if g, ok := groups[order.Short]; ok {
+		out = append(out, *g)
+	}
+	return out, nil
+}
+
 // lessTradeKey gives a deterministic total order over tradeKey values,
 // matching the same (instrument, provider, venue) precedence
 // trades.go's own lessOpenTrade already established.
@@ -502,4 +580,14 @@ func (m Metrics) ProfitFactor() *num.Rate { return m.profitFactor }
 // entry, since both are computed from the same Trades population.
 func (m Metrics) PerInstrument() []InstrumentMetrics {
 	return append([]InstrumentMetrics(nil), m.perInstrument...)
+}
+
+// BySide returns a defensive copy of the run's own per-side (Long/
+// Short) closed-trade breakdown, ordered Long before Short — issue
+// #254 (EMA-09)'s own "long/short breakdown" requirement, computed
+// here (not in report) so report can remain a pure projection over an
+// existing accessor, matching every other TradeStats/InstrumentReport
+// field's own convention.
+func (m Metrics) BySide() []SideMetrics {
+	return append([]SideMetrics(nil), m.bySide...)
 }

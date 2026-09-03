@@ -2,6 +2,8 @@ Backtest Report: ema-cross 1.0.0
 Run ID:         run_01HK153X003DMSTAVHVKTAA8HG
 Span:           2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z
 Config Digest:  sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5
+Dataset:        oanda fx:EUR/USD H1 rev=03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81
+Dataset:        oanda fx:GBP/USD H1 rev=78b739e227b00ccadee4a2425ee16de7ceffa42189b8d28311d6c6f749e37490
 
 Performance
   Starting Capital:  10000 USD
@@ -26,6 +28,11 @@ Per-Instrument Results
   Instrument  Provider  Venue  Count  Wins  Losses  Gross PnL  Costs  Net PnL
   fx:EUR/USD  OANDA            2      1     1       70 USD     9 USD  61 USD
   fx:GBP/USD  OANDA            1      1     0       200 USD    6 USD  194 USD
+
+Long/Short Breakdown
+  Side   Count  Wins  Losses  Gross PnL  Costs   Net PnL
+  long   2      2     0       350 USD    11 USD  339 USD
+  short  1      0     1       -80 USD    4 USD   -84 USD
 
 Final Account State
   Equity:          10267 USD

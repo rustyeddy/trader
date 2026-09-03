@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/rustyeddy/trader/id"
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/strategy"
@@ -285,6 +287,39 @@ func (m Manifest) CommissionModel() ComponentInfo { return m.commissionModel }
 // from, in canonical (instrument, interval, span start) order.
 func (m Manifest) Dataset() []marketdata.Manifest {
 	return append([]marketdata.Manifest(nil), m.dataset...)
+}
+
+// DatasetSummary is one dataset partition's provenance/revision
+// identity, projected out of marketdata.Manifest into plain built-in
+// types and instrument.ID (issue #254, EMA-09) — report must not
+// import marketdata itself (ADR-035/ADR-038's own boundary), so this
+// is the backtest-owned surface it projects instead, the same role
+// InstrumentMetrics/SideMetrics already play for per-instrument/
+// per-side breakdowns.
+type DatasetSummary struct {
+	Provider   string
+	Instrument instrument.ID
+	Interval   string
+	SpanStart  time.Time
+	SpanEnd    time.Time
+	Revision   string
+}
+
+// DatasetSummaries returns Dataset() projected into DatasetSummary,
+// preserving the same canonical order.
+func (m Manifest) DatasetSummaries() []DatasetSummary {
+	out := make([]DatasetSummary, len(m.dataset))
+	for i, dm := range m.dataset {
+		out[i] = DatasetSummary{
+			Provider:   dm.Provider,
+			Instrument: dm.Instrument,
+			Interval:   dm.Interval.String(),
+			SpanStart:  dm.Span.Start(),
+			SpanEnd:    dm.Span.End(),
+			Revision:   dm.Revision(),
+		}
+	}
+	return out
 }
 
 // TraderVersion returns the caller-supplied Trader build/version

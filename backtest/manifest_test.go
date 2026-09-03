@@ -352,6 +352,17 @@ func TestManifest_UniverseSortsByIntervalThenComponentsSortByVersion(t *testing.
 	require.Len(t, dataset, 2)
 	assert.True(t, dataset[0].Span.Start().Equal(earlierSpan.Start()), "same instrument/interval: sorted by span start")
 	assert.True(t, dataset[1].Span.Start().Equal(laterSpan.Start()))
+
+	summaries := m.DatasetSummaries()
+	require.Len(t, summaries, len(dataset))
+	for i, ds := range dataset {
+		assert.Equal(t, ds.Provider, summaries[i].Provider)
+		assert.Equal(t, ds.Instrument, summaries[i].Instrument)
+		assert.Equal(t, ds.Interval.String(), summaries[i].Interval)
+		assert.True(t, ds.Span.Start().Equal(summaries[i].SpanStart))
+		assert.True(t, ds.Span.End().Equal(summaries[i].SpanEnd))
+		assert.Equal(t, ds.Revision(), summaries[i].Revision)
+	}
 }
 
 // TestManifest_RiskRuleParametersAreFinalTieBreak proves two risk

@@ -18,6 +18,14 @@ func TestNewBacktestReport_RepresentativeResult(t *testing.T) {
 	assert.Equal(t, result.Manifest.ConfigDigest(), rep.Run.ConfigDigest)
 	assert.True(t, rep.Run.SpanStart.Equal(result.Manifest.Span().Start()))
 	assert.Equal(t, "UTC", rep.Run.SpanStart.Location().String())
+	assert.JSONEq(t, string(result.Manifest.StrategyParameters()), string(rep.Run.StrategyParameters))
+
+	wantDataset := result.Manifest.DatasetSummaries()
+	require.Len(t, rep.Dataset, len(wantDataset))
+	require.NotEmpty(t, wantDataset, "fixture must exercise at least one dataset entry")
+	assert.Equal(t, wantDataset[0].Provider, rep.Dataset[0].Provider)
+	assert.Equal(t, wantDataset[0].Instrument.String(), rep.Dataset[0].Instrument)
+	assert.Equal(t, wantDataset[0].Revision, rep.Dataset[0].Revision)
 
 	assert.Equal(t, result.Metrics.StartingCapital(), rep.Performance.StartingCapital)
 	assert.Equal(t, result.Metrics.FinalEquity(), rep.Performance.FinalEquity)
@@ -35,6 +43,10 @@ func TestNewBacktestReport_RepresentativeResult(t *testing.T) {
 		"fixture must exercise AccountFees != ClosedTradeCosts (issue #220 review, point 9)")
 
 	require.Len(t, rep.PerInstrument, len(result.Metrics.PerInstrument()))
+	require.Len(t, rep.BySide, len(result.Metrics.BySide()))
+	require.NotEmpty(t, rep.BySide, "fixture must exercise at least one side")
+	assert.Equal(t, result.Metrics.BySide()[0].Side.String(), rep.BySide[0].Side)
+	assert.Equal(t, result.Metrics.BySide()[0].Count, rep.BySide[0].Count)
 	require.Len(t, rep.ClosedTrades, len(result.Trades))
 	require.Len(t, rep.OpenTrades, len(result.OpenTrades))
 	assert.True(t, rep.OpenTrades[0].ClosedAt.IsZero(), "an open trade's ClosedAt must remain zero, not a fabricated timestamp")

@@ -2,6 +2,7 @@ Backtest Report: ema-cross 1.0.0
 Run ID:         run_01HK153X003DMSTAVHVKTAA8HF
 Span:           2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z
 Config Digest:  sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78
+Dataset:        oanda fx:EUR/USD H1 rev=03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81
 
 Performance
   Starting Capital:  10000 USD
@@ -23,6 +24,9 @@ Trade Statistics
   Profit Factor:       n/a
 
 Per-Instrument Results
+  (no closed trades)
+
+Long/Short Breakdown
   (no closed trades)
 
 Final Account State
