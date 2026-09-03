@@ -10,6 +10,7 @@ package emacross_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/rustyeddy/trader/execution"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
 	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
@@ -30,6 +32,32 @@ import (
 	svcbacktest "github.com/rustyeddy/trader/service/backtest"
 	"github.com/rustyeddy/trader/strategy/emacross"
 )
+
+// memoryRecorder is a minimal in-memory journal.Recorder: it exists
+// only so this test can assert on the actual intent -> proposal ->
+// decision -> request -> order -> fill sequence Scheduler/Pipeline
+// produce, rather than inferring that chain occurred from final
+// account state alone (PR #262 review).
+type memoryRecorder struct {
+	records []journal.Record
+}
+
+func (r *memoryRecorder) Record(ctx context.Context, rec journal.Record) error {
+	r.records = append(r.records, rec)
+	return nil
+}
+
+func (r *memoryRecorder) Close() error { return nil }
+
+func (r *memoryRecorder) kinds(kind journal.Kind) []journal.Record {
+	var out []journal.Record
+	for _, rec := range r.records {
+		if rec.Kind == kind {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
 
 // barLookupPriceSource is a real (not fixed-value) simbroker.
 // FillPriceSource: it returns, for whatever instant clock currently
@@ -74,6 +102,7 @@ func loadBarLookupPriceSource(t *testing.T, ctx context.Context, manager *market
 	for {
 		bar, err := reader.Next(ctx)
 		if err != nil {
+			require.ErrorIs(t, err, io.EOF, "canonical read must fail clearly, not be silently treated as end of stream")
 			break
 		}
 		byTime[bar.Time] = bar
@@ -87,8 +116,9 @@ func loadBarLookupPriceSource(t *testing.T, ctx context.Context, manager *market
 // other strategy uses — no EMA-specific execution wiring exists or is
 // added here.
 type execEnvironmentFactory struct {
-	prices *barLookupPriceSource
-	rules  []risk.Rule
+	prices  *barLookupPriceSource
+	rules   []risk.Rule
+	journal *memoryRecorder
 }
 
 func (f execEnvironmentFactory) NewEnvironment(ctx context.Context, req svcbacktest.EnvironmentRequest) (svcbacktest.Environment, error) {
@@ -146,6 +176,7 @@ func (f execEnvironmentFactory) NewEnvironment(ctx context.Context, req svcbackt
 		IDs:             ids,
 		Account:         acct,
 		Pipeline:        pl,
+		Journal:         f.journal,
 		FillModel:       fill,
 		SlippageModel:   none,
 		CommissionModel: none,
@@ -171,7 +202,7 @@ func emaCrossoverFixtureSpan(t *testing.T) marketdata.TimeRange {
 	return span
 }
 
-func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) svcbacktest.RunResponse {
+func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) (svcbacktest.RunResponse, *memoryRecorder) {
 	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
@@ -202,7 +233,8 @@ func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) svcbacktest.RunRes
 	}
 
 	prices := loadBarLookupPriceSource(t, ctx, manager, c, "EURUSD", query)
-	factory := execEnvironmentFactory{prices: prices, rules: rules}
+	rec := &memoryRecorder{}
+	factory := execEnvironmentFactory{prices: prices, rules: rules, journal: rec}
 
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
@@ -218,7 +250,7 @@ func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) svcbacktest.RunRes
 		AdverseDistance: num.MustParsePrice("0.01000"),
 	})
 	require.NoError(t, err, "a risk rejection must never abort the run")
-	return resp
+	return resp, rec
 }
 
 // TestEmacross_EntryExitReversalThroughRealPipeline is EMA-06's own
@@ -229,15 +261,41 @@ func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) svcbacktest.RunRes
 // long->short at the bearish reversal (bar 12), both filled at the
 // real next-bar-open price the canonical fixture actually contains.
 func TestEmacross_EntryExitReversalThroughRealPipeline(t *testing.T) {
-	resp := runEMACrossoverFixture(t)
+	resp, rec := runEMACrossoverFixture(t)
+
+	// The actual intent -> proposal -> decision -> request -> order ->
+	// fill chain, not inferred from final account state: every stage
+	// must have produced at least one record, and at least one
+	// Decision must have actually been Allowed (a Decision record
+	// exists for every proposal regardless of outcome, per
+	// journal.KindDecision's own doc comment).
+	require.NotEmpty(t, rec.kinds(journal.KindIntent), "no Intent was journaled")
+	require.NotEmpty(t, rec.kinds(journal.KindProposal), "no Proposal was journaled")
+	decisions := rec.kinds(journal.KindDecision)
+	require.NotEmpty(t, decisions, "no Decision was journaled")
+	var sawAllowed bool
+	for _, d := range decisions {
+		if d.Decision.Allowed {
+			sawAllowed = true
+		}
+	}
+	assert.True(t, sawAllowed, "at least one Decision must have been Allowed")
+	require.NotEmpty(t, rec.kinds(journal.KindRequest), "no Request was journaled")
+	require.NotEmpty(t, rec.kinds(journal.KindOrder), "no Order was journaled")
+	fills := rec.kinds(journal.KindFill)
+	require.Len(t, fills, 3, "three fills are expected: the bar-7 entry, the bar-12 exit, and the bar-12 re-entry")
+
+	bar8Open := time.Date(2024, time.March, 4, 7, 0, 0, 0, time.UTC)   // the bar after the bar-7 crossover
+	bar13Open := time.Date(2024, time.March, 4, 12, 0, 0, 0, time.UTC) // the bar after the bar-12 crossover
 
 	require.Len(t, resp.Trades, 1, "the bar-12 reversal must have closed the bar-7 long as one realized trade")
 	closed := resp.Trades[0]
 	assert.Equal(t, order.Long, closed.Side)
-	// The long entered at bar 8's open (1.10040, the bar after the
-	// bar-7 crossover) and exited at bar 13's open (1.10000, the bar
-	// after the bar-12 crossover) — a lower exit than entry on a long
-	// realizes a loss.
+	assert.True(t, closed.OpenedAt.Equal(bar8Open), "the long must have opened at bar 8's own next-bar-open time, got %s", closed.OpenedAt)
+	assert.True(t, closed.ClosedAt.Equal(bar13Open), "the long must have closed at bar 13's own next-bar-open time, got %s", closed.ClosedAt)
+	// The long entered at bar 8's open (1.10040) and exited at bar
+	// 13's open (1.10000) — a lower exit than entry on a long realizes
+	// a loss.
 	sign, err := closed.RealizedPnL.Cmp(num.MustParseMoney("0", num.MustParseCurrency("USD")))
 	require.NoError(t, err)
 	assert.Negative(t, sign, "a long that exits lower than it entered must realize a loss, got %s", closed.RealizedPnL)
@@ -245,6 +303,7 @@ func TestEmacross_EntryExitReversalThroughRealPipeline(t *testing.T) {
 	require.Len(t, resp.OpenTrades, 1, "the bar-12 reversal's re-entry must remain open through the end of the fixture")
 	open := resp.OpenTrades[0]
 	assert.Equal(t, order.Short, open.Side)
+	assert.True(t, open.OpenedAt.Equal(bar13Open), "the re-entry must have opened at bar 13's own next-bar-open time, got %s", open.OpenedAt)
 
 	require.Len(t, resp.Account.Positions(), 1)
 	position := resp.Account.Positions()[0]
@@ -265,14 +324,33 @@ func TestEmacross_RiskRejectionIsObservableAndDeterministic(t *testing.T) {
 	tooSmall, err := risk.NewMaxPositionQuantityRule(num.MustParseQuantity("1"))
 	require.NoError(t, err)
 
-	resp := runEMACrossoverFixture(t, tooSmall)
+	resp, rec := runEMACrossoverFixture(t, tooSmall)
 
 	assert.Empty(t, resp.Trades)
 	assert.Empty(t, resp.OpenTrades)
 	assert.Empty(t, resp.Account.Positions(), "every entry attempt must have been rejected, leaving the account flat")
+	assert.Empty(t, rec.kinds(journal.KindFill), "a rejected proposal must never reach a fill")
+
+	// Prove the account stayed flat *because* max_position_quantity
+	// actually rejected every entry attempt, not merely because no
+	// entry was ever submitted.
+	decisions := rec.kinds(journal.KindDecision)
+	require.NotEmpty(t, decisions, "no Decision was journaled")
+	var rejectedByRule int
+	for _, d := range decisions {
+		if d.Decision.Allowed {
+			continue
+		}
+		for _, v := range d.Decision.Violations {
+			if v.Rule == "max_position_quantity" {
+				rejectedByRule++
+			}
+		}
+	}
+	assert.Equal(t, 2, rejectedByRule, "both the bar-7 entry and the bar-12 entry attempt must have been rejected by max_position_quantity")
 
 	// Determinism: repeating the identical run reaches the identical
 	// (rejected, flat) outcome again.
-	again := runEMACrossoverFixture(t, tooSmall)
+	again, _ := runEMACrossoverFixture(t, tooSmall)
 	assert.Empty(t, again.Account.Positions())
 }
