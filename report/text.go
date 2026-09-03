@@ -28,8 +28,19 @@ func (TextRenderer) Render(w io.Writer, report BacktestReport) error {
 	_, _ = fmt.Fprintf(ew, "Run ID:         %s\n", run.RunID)
 	_, _ = fmt.Fprintf(ew, "Span:           %s to %s\n", formatTime(run.SpanStart), formatTime(run.SpanEnd))
 	_, _ = fmt.Fprintf(ew, "Config Digest:  %s\n", run.ConfigDigest)
-	for _, d := range report.Dataset {
-		_, _ = fmt.Fprintf(ew, "Dataset:        %s %s %s rev=%s\n", d.Provider, d.Instrument, d.Interval, d.Revision)
+	if hasStrategyParameters(run.StrategyParameters) {
+		// The canonical opaque JSON blob, verbatim — never decoded or
+		// reformatted into an EMA-specific (or any strategy-specific)
+		// structure, so the visible report always agrees exactly with
+		// what Manifest/ConfigDigest recorded (PR #265 review).
+		_, _ = fmt.Fprintf(ew, "Strategy Params: %s\n", string(run.StrategyParameters))
+	}
+	if len(report.Dataset) == 0 {
+		_, _ = fmt.Fprintln(ew, "Dataset:        (no dataset recorded)")
+	} else {
+		for _, d := range report.Dataset {
+			_, _ = fmt.Fprintf(ew, "Dataset:        %s %s %s rev=%s\n", d.Provider, d.Instrument, d.Interval, d.Revision)
+		}
 	}
 	_, _ = fmt.Fprintln(ew)
 

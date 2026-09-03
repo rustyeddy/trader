@@ -436,11 +436,21 @@ func perInstrumentMetrics(trades []order.Trade, currency num.Currency) ([]Instru
 // rather than reported as an explicit zero — the same "absence means
 // none" convention perInstrumentMetrics already uses for an instrument
 // that was never traded.
+//
+// Any trade whose Side is not Long or Short is rejected outright (PR
+// #265 review) rather than silently grouped and then dropped from the
+// returned slice: this function's own documented sum-to-aggregate
+// invariant depends on every trade landing in exactly one reported
+// group, and a normal order.NewTrade-constructed population should
+// never reach this branch in practice.
 func sideMetrics(trades []order.Trade, currency num.Currency) ([]SideMetrics, error) {
 	zero := zeroMoneyMust(currency)
 	groups := map[order.PositionSide]*SideMetrics{}
 
-	for _, t := range trades {
+	for i, t := range trades {
+		if t.Side != order.Long && t.Side != order.Short {
+			return nil, fmt.Errorf("%w: trade %d has side %s, want Long or Short", ErrInvalidMetrics, i, t.Side)
+		}
 		g, ok := groups[t.Side]
 		if !ok {
 			g = &SideMetrics{Side: t.Side, GrossPnL: zero, Costs: zero, NetPnL: zero}

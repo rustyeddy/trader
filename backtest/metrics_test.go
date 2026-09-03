@@ -419,3 +419,31 @@ func TestNewMetrics_ZeroTradesHasEmptyBySide(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, m.BySide())
 }
+
+func TestNewMetrics_RejectsTradeWithFlatSide(t *testing.T) {
+	listing := simListing(t, "EUR", "USD", "EUR_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// order.NewTrade itself rejects Side: Flat, so this constructs the
+	// literal directly — the same "bypass the constructor" scenario
+	// sideMetrics' own doc comment names as the reason it validates Side
+	// itself rather than trusting every caller went through NewTrade.
+	flatTrade := order.Trade{
+		AccountID:    mustMetricsAccountID(t),
+		Listing:      listing,
+		Side:         order.Flat,
+		EntryFillIDs: []id.FillID{mustMetricsFillID(t)},
+		OpenedAt:     t0.Add(-time.Hour),
+		ClosedAt:     t0,
+		RealizedPnL:  metricsUSD("10"),
+		Costs:        metricsUSD("0"),
+	}
+
+	_, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10010"),
+		Trades:          []order.Trade{flatTrade},
+		AccountFees:     metricsUSD("0"),
+	})
+	require.ErrorIs(t, err, backtest.ErrInvalidMetrics)
+}

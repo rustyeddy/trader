@@ -32,7 +32,7 @@ func (OrgRenderer) Render(w io.Writer, report BacktestReport) error {
 	if run.TraderVersion != "" {
 		_, _ = fmt.Fprintf(ew, ":TRADER_VERSION: %s\n", run.TraderVersion)
 	}
-	if len(run.StrategyParameters) > 0 && string(run.StrategyParameters) != "null" {
+	if hasStrategyParameters(run.StrategyParameters) {
 		_, _ = fmt.Fprintf(ew, ":STRATEGY_PARAMETERS: %s\n", string(run.StrategyParameters))
 	}
 	_, _ = fmt.Fprintln(ew, ":END:")
