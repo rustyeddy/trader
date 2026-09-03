@@ -429,3 +429,89 @@ func TestStrategy_Reverse_EnterFailurePropagates(t *testing.T) {
 	_, err := h.strategy.reverse(order.Buy)
 	require.ErrorIs(t, err, errBoom)
 }
+
+// TestStrategy_ActOnCross_AllowedSideShortOnly covers issue #273's
+// full short-only transition table: a bullish cross while flat never
+// enters (long is disallowed), a bullish cross while short exits to
+// flat only (never reverses into a disallowed long), and a bearish
+// cross behaves exactly as SideBoth (short is always allowed).
+func TestStrategy_ActOnCross_AllowedSideShortOnly(t *testing.T) {
+	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5, AllowedSide: SideShortOnly})
+
+	action, intents, err := h.strategy.actOnCross(order.Flat, order.Buy)
+	require.NoError(t, err)
+	assert.Equal(t, "none", action)
+	assert.Empty(t, intents, "flat + bullish cross must never enter long under short-only")
+
+	action, intents, err = h.strategy.actOnCross(order.Flat, order.Sell)
+	require.NoError(t, err)
+	assert.Equal(t, "enter-short", action)
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.Sell, intents[0].Side)
+
+	action, intents, err = h.strategy.actOnCross(order.Short, order.Buy)
+	require.NoError(t, err)
+	assert.Equal(t, "exit", action, "a bullish cross while short must close to flat, not reverse into a disallowed long")
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentExit, intents[0].Kind)
+
+	action, intents, err = h.strategy.actOnCross(order.Short, order.Sell)
+	require.NoError(t, err)
+	assert.Equal(t, "none", action)
+	assert.Empty(t, intents, "a bearish cross while already short must not re-enter")
+}
+
+// TestStrategy_ActOnCross_AllowedSideLongOnly is the long-only mirror
+// of TestStrategy_ActOnCross_AllowedSideShortOnly.
+func TestStrategy_ActOnCross_AllowedSideLongOnly(t *testing.T) {
+	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5, AllowedSide: SideLongOnly})
+
+	action, intents, err := h.strategy.actOnCross(order.Flat, order.Sell)
+	require.NoError(t, err)
+	assert.Equal(t, "none", action)
+	assert.Empty(t, intents, "flat + bearish cross must never enter short under long-only")
+
+	action, intents, err = h.strategy.actOnCross(order.Flat, order.Buy)
+	require.NoError(t, err)
+	assert.Equal(t, "enter-long", action)
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.Buy, intents[0].Side)
+
+	action, intents, err = h.strategy.actOnCross(order.Long, order.Sell)
+	require.NoError(t, err)
+	assert.Equal(t, "exit", action, "a bearish cross while long must close to flat, not reverse into a disallowed short")
+	require.Len(t, intents, 1)
+	assert.Equal(t, order.IntentExit, intents[0].Kind)
+
+	action, intents, err = h.strategy.actOnCross(order.Long, order.Buy)
+	require.NoError(t, err)
+	assert.Equal(t, "none", action)
+	assert.Empty(t, intents, "a bullish cross while already long must not re-enter")
+}
+
+// TestStrategy_ActOnCross_AllowedSideBothUnchanged proves the default
+// (SideBoth, the zero value) reproduces exactly
+// TestStrategy_ActOnCross_OppositeSideReverses's own reversal
+// behavior — issue #273 must not change any existing SideBoth-mode
+// caller's observable behavior.
+func TestStrategy_ActOnCross_AllowedSideBothUnchanged(t *testing.T) {
+	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5, AllowedSide: SideBoth})
+
+	action, intents, err := h.strategy.actOnCross(order.Long, order.Sell)
+	require.NoError(t, err)
+	assert.Equal(t, "reverse", action)
+	require.Len(t, intents, 2)
+
+	action, intents, err = h.strategy.actOnCross(order.Short, order.Buy)
+	require.NoError(t, err)
+	assert.Equal(t, "reverse", action)
+	require.Len(t, intents, 2)
+}
+
+func TestStrategy_ExitOnly_ExitFailurePropagates(t *testing.T) {
+	h := newTestHarness(t, Config{FastPeriod: 3, SlowPeriod: 5, AllowedSide: SideShortOnly})
+	h.strategy.intents = &erroringIntentFactory{IntentFactory: h.strategy.intents, failExit: true}
+
+	_, _, err := h.strategy.actOnCross(order.Short, order.Buy)
+	require.ErrorIs(t, err, errBoom)
+}

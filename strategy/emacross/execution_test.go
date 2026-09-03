@@ -204,6 +204,16 @@ func emaCrossoverFixtureSpan(t *testing.T) marketdata.TimeRange {
 
 func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) (svcbacktest.RunResponse, *memoryRecorder) {
 	t.Helper()
+	return runEMACrossoverFixtureWithStrategyConfig(t, emacross.Config{FastPeriod: 3, SlowPeriod: 5}, rules...)
+}
+
+// runEMACrossoverFixtureWithStrategyConfig is runEMACrossoverFixture
+// plus an explicit emacross.Config, so a test that needs a non-default
+// strategy configuration (for example AllowedSide, issue #273) can
+// still run the shared fixture through the real service/backtest
+// composition path without duplicating this setup.
+func runEMACrossoverFixtureWithStrategyConfig(t *testing.T, cfg emacross.Config, rules ...risk.Rule) (svcbacktest.RunResponse, *memoryRecorder) {
+	t.Helper()
 	resolver := instrument.NewMemoryResolver()
 	require.NoError(t, resolver.Register(eurusdListing(t, "oanda")))
 
@@ -239,7 +249,7 @@ func runEMACrossoverFixture(t *testing.T, rules ...risk.Rule) (svcbacktest.RunRe
 	svc, err := svcbacktest.New(manager, simResolver, factory, nil)
 	require.NoError(t, err)
 
-	real, err := emacross.New(simListing.InstrumentID(), marketdata.H1, emacross.Config{FastPeriod: 3, SlowPeriod: 5})
+	real, err := emacross.New(simListing.InstrumentID(), marketdata.H1, cfg)
 	require.NoError(t, err)
 
 	resp, err := svc.Run(ctx, svcbacktest.RunRequest{

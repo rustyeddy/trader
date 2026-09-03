@@ -21,6 +21,10 @@ func TestConfig_Validate(t *testing.T) {
 		{"slow period negative", Config{FastPeriod: 20, SlowPeriod: -1}, true},
 		{"slow equal to fast", Config{FastPeriod: 20, SlowPeriod: 20}, true},
 		{"slow less than fast", Config{FastPeriod: 50, SlowPeriod: 20}, true},
+		{"allowed side both", Config{FastPeriod: 20, SlowPeriod: 50, AllowedSide: SideBoth}, false},
+		{"allowed side long-only", Config{FastPeriod: 20, SlowPeriod: 50, AllowedSide: SideLongOnly}, false},
+		{"allowed side short-only", Config{FastPeriod: 20, SlowPeriod: 50, AllowedSide: SideShortOnly}, false},
+		{"allowed side invalid", Config{FastPeriod: 20, SlowPeriod: 50, AllowedSide: Side(99)}, true},
 	}
 
 	for _, tc := range cases {
@@ -42,5 +46,56 @@ func TestConfig_Validate(t *testing.T) {
 func TestConfig_JSONEncodesSnakeCase(t *testing.T) {
 	b, err := json.Marshal(Config{FastPeriod: 20, SlowPeriod: 50})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"fast_period":20,"slow_period":50}`, string(b))
+	assert.JSONEq(t, `{"fast_period":20,"slow_period":50,"allowed_side":"both"}`, string(b))
+}
+
+func TestSide_String(t *testing.T) {
+	assert.Equal(t, "both", SideBoth.String())
+	assert.Equal(t, "long-only", SideLongOnly.String())
+	assert.Equal(t, "short-only", SideShortOnly.String())
+	assert.Equal(t, "Side(99)", Side(99).String())
+}
+
+func TestSide_MarshalText(t *testing.T) {
+	for _, s := range []Side{SideBoth, SideLongOnly, SideShortOnly} {
+		text, err := s.MarshalText()
+		require.NoError(t, err)
+		assert.Equal(t, s.String(), string(text))
+	}
+
+	_, err := Side(99).MarshalText()
+	assert.Error(t, err)
+}
+
+func TestSide_UnmarshalText(t *testing.T) {
+	cases := map[string]Side{
+		"both":       SideBoth,
+		"":           SideBoth,
+		"long-only":  SideLongOnly,
+		"short-only": SideShortOnly,
+	}
+	for text, want := range cases {
+		var s Side
+		require.NoError(t, s.UnmarshalText([]byte(text)))
+		assert.Equal(t, want, s)
+	}
+
+	var s Side
+	assert.Error(t, s.UnmarshalText([]byte("sideways")))
+}
+
+// TestConfig_JSONEncodesAllowedSideByMode proves AllowedSide serializes
+// as a readable string in every mode, not just the zero-value default
+// TestConfig_JSONEncodesSnakeCase already covers.
+func TestConfig_JSONEncodesAllowedSideByMode(t *testing.T) {
+	cases := map[Side]string{
+		SideBoth:      "both",
+		SideLongOnly:  "long-only",
+		SideShortOnly: "short-only",
+	}
+	for side, want := range cases {
+		b, err := json.Marshal(Config{FastPeriod: 20, SlowPeriod: 50, AllowedSide: side})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"fast_period":20,"slow_period":50,"allowed_side":"`+want+`"}`, string(b))
+	}
 }

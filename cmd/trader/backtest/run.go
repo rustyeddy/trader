@@ -41,6 +41,7 @@ type runFlags struct {
 	strategyName string
 	fastPeriod   int
 	slowPeriod   int
+	allowedSide  string
 
 	dataStoreRoot string
 	dataRawRoot   string
@@ -95,6 +96,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.strategyName, "strategy-name", "", "must equal \"ema-cross\" when --config is used (there is no strategy registry to select from; any other value is rejected)")
 	cmd.Flags().IntVar(&flags.fastPeriod, "fast-period", 0, "EMA fast period; only used when --config is also given")
 	cmd.Flags().IntVar(&flags.slowPeriod, "slow-period", 0, "EMA slow period; only used when --config is also given")
+	cmd.Flags().StringVar(&flags.allowedSide, "allowed-side", "", "restrict the EMA strategy to one position direction: both (default), long-only, or short-only; only used when --config is also given")
 
 	cmd.Flags().StringVar(&flags.dataStoreRoot, "data-store-root", "", "canonical data store root (default: /srv/trading/data/canonical, per --config/config-file/env precedence; an explicit empty value opts back into a fresh temporary directory per run)")
 	cmd.Flags().StringVar(&flags.dataRawRoot, "data-raw-root", "", "raw archive root (required)")
@@ -331,8 +333,9 @@ func runBacktest(cmd *cobra.Command, flags runFlags) error {
 		listing := instruments.simListing[instID.String()]
 
 		emaStrategy, err := emacross.New(instID, interval, emacross.Config{
-			FastPeriod: cfg.Strategy.FastPeriod,
-			SlowPeriod: cfg.Strategy.SlowPeriod,
+			FastPeriod:  cfg.Strategy.FastPeriod,
+			SlowPeriod:  cfg.Strategy.SlowPeriod,
+			AllowedSide: cfg.Strategy.AllowedSide,
 		})
 		if err != nil {
 			return err

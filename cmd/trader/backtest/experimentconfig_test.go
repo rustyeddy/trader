@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/config"
+	"github.com/rustyeddy/trader/strategy/emacross"
 )
 
 // issue247CandidateYAML is #247's own candidate YAML, verbatim.
@@ -74,6 +75,8 @@ backtest:
 	assert.Equal(t, 50, cfg.Strategy.SlowPeriod)
 	assert.Equal(t, "/srv/trading/data/canonical", cfg.Backtest.DataStoreRoot,
 		"issue #268: canonical data persists by default rather than rebuilding into a fresh temporary directory every run")
+	assert.Equal(t, emacross.SideBoth, cfg.Strategy.AllowedSide,
+		"issue #273: default must reproduce EMA-01's own unrestricted reference behavior")
 }
 
 // TestRunConfig_DataStoreRootExplicitEmptyOverridesDefault proves an

@@ -311,3 +311,57 @@ backtest:
 	assert.Equal(t, journal.KindRunStarted, kinds[0], "the journal's first record must be KindRunStarted")
 	assert.Equal(t, journal.KindRunCompleted, kinds[len(kinds)-1], "the journal's last record must be KindRunCompleted")
 }
+
+// TestRunCLI_AllowedSideShortOnlyNeverOpensLong proves --allowed-side/
+// strategy.allowed_side (issue #273) reaches the real strategy through
+// the CLI's config-loading path: the same bar-7 bullish-cross fixture
+// TestRunCLI_ConfigDrivesRealEMACrossoverStrategy already proves opens
+// a long under the default (both) mode must instead never open a
+// position at all here, and the bar-12 bearish cross must still open
+// the (allowed) short.
+func TestRunCLI_AllowedSideShortOnlyNeverOpensLong(t *testing.T) {
+	configPath := writeConfigFile(t, `
+backtest:
+  symbol: EURUSD
+  interval: H1
+  from: 2024-03-04T00:00:00Z
+  to: 2024-03-04T14:00:00Z
+  starting_capital: 10000
+  risk_fraction: 0.01
+  adverse_distance: 0.01000
+
+strategy:
+  name: ema-cross
+  fast_period: 3
+  slow_period: 5
+  allowed_side: short-only
+`)
+
+	outputDir := t.TempDir()
+	runCmd := cmdbacktest.New()
+	var out bytes.Buffer
+	runCmd.SetOut(&out)
+	runCmd.SetArgs([]string{
+		"run",
+		"--config", configPath,
+		"--data-raw-root", "testdata/raw/oanda",
+		"--data-store-root", t.TempDir(),
+		"--output-dir", outputDir,
+		"--format", "json",
+	})
+	require.NoError(t, runCmd.Execute())
+
+	var doc struct {
+		ClosedTrades []struct {
+			Side string `json:"side"`
+		} `json:"closed_trades"`
+		OpenTrades []struct {
+			Side string `json:"side"`
+		} `json:"open_trades"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &doc))
+
+	assert.Empty(t, doc.ClosedTrades, "no long was ever opened, so no trade can have closed")
+	require.Len(t, doc.OpenTrades, 1, "the bar-12 bearish cross must still open the allowed short")
+	assert.Equal(t, "short", doc.OpenTrades[0].Side)
+}
