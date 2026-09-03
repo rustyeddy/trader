@@ -7,6 +7,11 @@
 :TRADER_VERSION: test-v0
 :END:
 
+* Dataset Provenance
+| Instrument | Provider | Interval | Span Start | Span End | Revision |
+|------------+----------+----------+------------+----------+----------|
+| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81 |
+
 * Performance Summary
 | Metric | Value |
 |--------+-------|
@@ -32,6 +37,9 @@
 | Profit Factor | n/a |
 
 * Per-Instrument Results
+(no closed trades)
+
+* Long/Short Breakdown
 (no closed trades)
 
 * Completed Trades

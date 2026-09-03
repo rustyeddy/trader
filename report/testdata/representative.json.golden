@@ -3,11 +3,30 @@
     "run_id": "run_01HK153X003DMSTAVHVKTAA8HG",
     "strategy_name": "ema-cross",
     "strategy_version": "1.0.0",
+    "strategy_parameters": null,
     "span_start": "2024-01-01T00:00:00Z",
     "span_end": "2024-01-03T00:00:00Z",
     "trader_version": "test-v0",
     "config_digest": "sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5"
   },
+  "dataset": [
+    {
+      "provider": "oanda",
+      "instrument": "fx:EUR/USD",
+      "interval": "H1",
+      "span_start": "2024-01-01T00:00:00Z",
+      "span_end": "2024-01-03T00:00:00Z",
+      "revision": "03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81"
+    },
+    {
+      "provider": "oanda",
+      "instrument": "fx:GBP/USD",
+      "interval": "H1",
+      "span_start": "2024-01-01T00:00:00Z",
+      "span_end": "2024-01-03T00:00:00Z",
+      "revision": "78b739e227b00ccadee4a2425ee16de7ceffa42189b8d28311d6c6f749e37490"
+    }
+  ],
   "performance": {
     "starting_capital": {
       "amount": "10000",
@@ -91,6 +110,44 @@
       },
       "net_pnl": {
         "amount": "194",
+        "currency": "USD"
+      }
+    }
+  ],
+  "by_side": [
+    {
+      "side": "long",
+      "count": 2,
+      "wins": 2,
+      "losses": 0,
+      "gross_pnl": {
+        "amount": "350",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "11",
+        "currency": "USD"
+      },
+      "net_pnl": {
+        "amount": "339",
+        "currency": "USD"
+      }
+    },
+    {
+      "side": "short",
+      "count": 1,
+      "wins": 0,
+      "losses": 1,
+      "gross_pnl": {
+        "amount": "-80",
+        "currency": "USD"
+      },
+      "costs": {
+        "amount": "4",
+        "currency": "USD"
+      },
+      "net_pnl": {
+        "amount": "-84",
         "currency": "USD"
       }
     }

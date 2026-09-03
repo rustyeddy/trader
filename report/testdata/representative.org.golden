@@ -7,6 +7,12 @@
 :TRADER_VERSION: test-v0
 :END:
 
+* Dataset Provenance
+| Instrument | Provider | Interval | Span Start | Span End | Revision |
+|------------+----------+----------+------------+----------+----------|
+| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81 |
+| fx:GBP/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 78b739e227b00ccadee4a2425ee16de7ceffa42189b8d28311d6c6f749e37490 |
+
 * Performance Summary
 | Metric | Value |
 |--------+-------|
@@ -36,6 +42,12 @@
 |------------+----------+-------+-------+------+--------+-----------+-------+---------|
 | fx:EUR/USD | OANDA |  | 2 | 1 | 1 | 70 USD | 9 USD | 61 USD |
 | fx:GBP/USD | OANDA |  | 1 | 1 | 0 | 200 USD | 6 USD | 194 USD |
+
+* Long/Short Breakdown
+| Side | Count | Wins | Losses | Gross PnL | Costs | Net PnL |
+|------+-------+------+--------+-----------+-------+---------|
+| long | 2 | 2 | 0 | 350 USD | 11 USD | 339 USD |
+| short | 1 | 0 | 1 | -80 USD | 4 USD | -84 USD |
 
 * Completed Trades
 | Instrument | Provider | Venue | Side | Opened At | Closed At | Realized PnL | Costs |

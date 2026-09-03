@@ -28,6 +28,20 @@ func (TextRenderer) Render(w io.Writer, report BacktestReport) error {
 	_, _ = fmt.Fprintf(ew, "Run ID:         %s\n", run.RunID)
 	_, _ = fmt.Fprintf(ew, "Span:           %s to %s\n", formatTime(run.SpanStart), formatTime(run.SpanEnd))
 	_, _ = fmt.Fprintf(ew, "Config Digest:  %s\n", run.ConfigDigest)
+	if hasStrategyParameters(run.StrategyParameters) {
+		// The canonical opaque JSON blob, verbatim — never decoded or
+		// reformatted into an EMA-specific (or any strategy-specific)
+		// structure, so the visible report always agrees exactly with
+		// what Manifest/ConfigDigest recorded (PR #265 review).
+		_, _ = fmt.Fprintf(ew, "Strategy Params: %s\n", string(run.StrategyParameters))
+	}
+	if len(report.Dataset) == 0 {
+		_, _ = fmt.Fprintln(ew, "Dataset:        (no dataset recorded)")
+	} else {
+		for _, d := range report.Dataset {
+			_, _ = fmt.Fprintf(ew, "Dataset:        %s %s %s rev=%s\n", d.Provider, d.Instrument, d.Interval, d.Revision)
+		}
+	}
 	_, _ = fmt.Fprintln(ew)
 
 	perf := report.Performance
@@ -67,6 +81,20 @@ func (TextRenderer) Render(w io.Writer, report BacktestReport) error {
 			_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
 				im.Instrument, im.Provider, im.Venue, im.Count, im.Wins, im.Losses,
 				formatMoney(im.GrossPnL), formatMoney(im.Costs), formatMoney(im.NetPnL))
+		}
+		_ = tw.Flush()
+	}
+	_, _ = fmt.Fprintln(ew)
+
+	_, _ = fmt.Fprintln(ew, "Long/Short Breakdown")
+	if len(report.BySide) == 0 {
+		_, _ = fmt.Fprintln(ew, "  (no closed trades)")
+	} else {
+		tw = tabwriter.NewWriter(ew, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "  Side\tCount\tWins\tLosses\tGross PnL\tCosts\tNet PnL")
+		for _, s := range report.BySide {
+			_, _ = fmt.Fprintf(tw, "  %s\t%d\t%d\t%d\t%s\t%s\t%s\n",
+				s.Side, s.Count, s.Wins, s.Losses, formatMoney(s.GrossPnL), formatMoney(s.Costs), formatMoney(s.NetPnL))
 		}
 		_ = tw.Flush()
 	}

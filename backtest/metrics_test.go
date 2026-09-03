@@ -23,10 +23,15 @@ func metricsUSD(s string) num.Money {
 
 func metricsTrade(t *testing.T, listing instrument.Listing, realizedPnL, costs string, closedAt time.Time) order.Trade {
 	t.Helper()
+	return metricsTradeSide(t, listing, order.Long, realizedPnL, costs, closedAt)
+}
+
+func metricsTradeSide(t *testing.T, listing instrument.Listing, side order.PositionSide, realizedPnL, costs string, closedAt time.Time) order.Trade {
+	t.Helper()
 	tr, err := order.NewTrade(order.Trade{
 		AccountID:    mustMetricsAccountID(t),
 		Listing:      listing,
-		Side:         order.Long,
+		Side:         side,
 		EntryFillIDs: []id.FillID{mustMetricsFillID(t)},
 		OpenedAt:     closedAt.Add(-time.Hour),
 		ClosedAt:     closedAt,
@@ -348,4 +353,97 @@ func TestNewMetrics_PerInstrumentBreakdown(t *testing.T) {
 	sumNet, err := eurGroup.NetPnL.Add(gbpGroup.NetPnL)
 	require.NoError(t, err)
 	assert.True(t, sumNet.Equal(m.NetPnL()))
+}
+
+func TestNewMetrics_BySideBreakdown(t *testing.T) {
+	eurusd := simListing(t, "EUR", "USD", "EUR_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	trades := []order.Trade{
+		metricsTradeSide(t, eurusd, order.Long, "100", "1", t0),
+		metricsTradeSide(t, eurusd, order.Long, "-40", "1", t0.Add(time.Hour)),
+		metricsTradeSide(t, eurusd, order.Short, "20", "0", t0.Add(2*time.Hour)),
+	}
+	m, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10079"),
+		Trades:          trades,
+		AccountFees:     metricsUSD("0"),
+	})
+	require.NoError(t, err)
+
+	bySide := m.BySide()
+	require.Len(t, bySide, 2)
+	assert.Equal(t, order.Long, bySide[0].Side, "Long is always ordered before Short")
+	assert.Equal(t, order.Short, bySide[1].Side)
+
+	longGroup := bySide[0]
+	assert.Equal(t, 2, longGroup.Count)
+	assert.Equal(t, 1, longGroup.Wins)
+	assert.Equal(t, 1, longGroup.Losses)
+	assert.True(t, longGroup.GrossPnL.Equal(metricsUSD("60")))
+	assert.True(t, longGroup.Costs.Equal(metricsUSD("2")))
+	assert.True(t, longGroup.NetPnL.Equal(metricsUSD("58")))
+
+	shortGroup := bySide[1]
+	assert.Equal(t, 1, shortGroup.Count)
+	assert.Equal(t, 1, shortGroup.Wins)
+	assert.Equal(t, 0, shortGroup.Losses)
+	assert.True(t, shortGroup.GrossPnL.Equal(metricsUSD("20")))
+	assert.True(t, shortGroup.NetPnL.Equal(metricsUSD("20")))
+}
+
+func TestNewMetrics_BySideOmitsAbsentSide(t *testing.T) {
+	eurusd := simListing(t, "EUR", "USD", "EUR_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	m, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10100"),
+		Trades:          []order.Trade{metricsTradeSide(t, eurusd, order.Long, "100", "0", t0)},
+		AccountFees:     metricsUSD("0"),
+	})
+	require.NoError(t, err)
+
+	bySide := m.BySide()
+	require.Len(t, bySide, 1, "a side with no trades is omitted, not reported as an explicit zero")
+	assert.Equal(t, order.Long, bySide[0].Side)
+}
+
+func TestNewMetrics_ZeroTradesHasEmptyBySide(t *testing.T) {
+	m, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10000"),
+		AccountFees:     metricsUSD("0"),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, m.BySide())
+}
+
+func TestNewMetrics_RejectsTradeWithFlatSide(t *testing.T) {
+	listing := simListing(t, "EUR", "USD", "EUR_USD")
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// order.NewTrade itself rejects Side: Flat, so this constructs the
+	// literal directly — the same "bypass the constructor" scenario
+	// sideMetrics' own doc comment names as the reason it validates Side
+	// itself rather than trusting every caller went through NewTrade.
+	flatTrade := order.Trade{
+		AccountID:    mustMetricsAccountID(t),
+		Listing:      listing,
+		Side:         order.Flat,
+		EntryFillIDs: []id.FillID{mustMetricsFillID(t)},
+		OpenedAt:     t0.Add(-time.Hour),
+		ClosedAt:     t0,
+		RealizedPnL:  metricsUSD("10"),
+		Costs:        metricsUSD("0"),
+	}
+
+	_, err := backtest.NewMetrics(backtest.MetricsParams{
+		StartingCapital: metricsUSD("10000"),
+		FinalEquity:     metricsUSD("10010"),
+		Trades:          []order.Trade{flatTrade},
+		AccountFees:     metricsUSD("0"),
+	})
+	require.ErrorIs(t, err, backtest.ErrInvalidMetrics)
 }

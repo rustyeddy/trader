@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/rustyeddy/trader/account"
@@ -27,9 +28,11 @@ import (
 // instrument.ID has no JSON representation of its own.
 type BacktestReport struct {
 	Run           RunInfo             `json:"run"`
+	Dataset       []DatasetReport     `json:"dataset"`
 	Performance   Performance         `json:"performance"`
 	TradeStats    TradeStats          `json:"trade_stats"`
 	PerInstrument []InstrumentReport  `json:"per_instrument"`
+	BySide        []SideReport        `json:"by_side"`
 	ClosedTrades  []TradeReport       `json:"closed_trades"`
 	OpenTrades    []TradeReport       `json:"open_trades"`
 	Account       AccountReport       `json:"account"`
@@ -37,14 +40,35 @@ type BacktestReport struct {
 }
 
 // RunInfo identifies and dates the run this report describes.
+// StrategyParameters is the strategy's own effective configuration
+// exactly as Manifest.StrategyParameters() recorded it (issue #254,
+// EMA-09) — an opaque, strategy-defined JSON blob report never
+// interprets, matching journal.RunStarted.Header's identical
+// "opaque, caller-supplied blob" convention. Empty/null for a
+// strategy with no parameters.
 type RunInfo struct {
-	RunID           string    `json:"run_id"`
-	StrategyName    string    `json:"strategy_name"`
-	StrategyVersion string    `json:"strategy_version,omitempty"`
-	SpanStart       time.Time `json:"span_start"`
-	SpanEnd         time.Time `json:"span_end"`
-	TraderVersion   string    `json:"trader_version,omitempty"`
-	ConfigDigest    string    `json:"config_digest"`
+	RunID              string          `json:"run_id"`
+	StrategyName       string          `json:"strategy_name"`
+	StrategyVersion    string          `json:"strategy_version,omitempty"`
+	StrategyParameters json.RawMessage `json:"strategy_parameters,omitempty"`
+	SpanStart          time.Time       `json:"span_start"`
+	SpanEnd            time.Time       `json:"span_end"`
+	TraderVersion      string          `json:"trader_version,omitempty"`
+	ConfigDigest       string          `json:"config_digest"`
+}
+
+// DatasetReport is one marketdata.Manifest's own provenance/revision
+// identity, copied field-for-field (issue #254, EMA-09's own "dataset
+// provenance/revision" requirement) — report never re-derives a
+// dataset's Revision, it only projects the one Manifest.Dataset()
+// already computed.
+type DatasetReport struct {
+	Provider   string    `json:"provider"`
+	Instrument string    `json:"instrument"`
+	Interval   string    `json:"interval"`
+	SpanStart  time.Time `json:"span_start"`
+	SpanEnd    time.Time `json:"span_end"`
+	Revision   string    `json:"revision"`
 }
 
 // Performance is the run's account-level bookend figures — exactly
@@ -89,6 +113,19 @@ type InstrumentReport struct {
 	GrossPnL   num.Money `json:"gross_pnl"`
 	Costs      num.Money `json:"costs"`
 	NetPnL     num.Money `json:"net_pnl"`
+}
+
+// SideReport is one holding direction's (long or short) slice of
+// TradeStats, copied field-for-field from backtest.SideMetrics (issue
+// #254, EMA-09's own "long/short breakdown" requirement).
+type SideReport struct {
+	Side     string    `json:"side"`
+	Count    int       `json:"count"`
+	Wins     int       `json:"wins"`
+	Losses   int       `json:"losses"`
+	GrossPnL num.Money `json:"gross_pnl"`
+	Costs    num.Money `json:"costs"`
+	NetPnL   num.Money `json:"net_pnl"`
 }
 
 // TradeReport is one order.Trade, copied field-for-field. ClosedAt is
@@ -198,6 +235,18 @@ func NewBacktestReport(in BacktestInput) BacktestReport {
 		perInstrument[i] = toInstrumentReport(im)
 	}
 
+	sideMetrics := metrics.BySide()
+	bySide := make([]SideReport, len(sideMetrics))
+	for i, sm := range sideMetrics {
+		bySide[i] = toSideReport(sm)
+	}
+
+	datasetSummaries := m.DatasetSummaries()
+	dataset := make([]DatasetReport, len(datasetSummaries))
+	for i, ds := range datasetSummaries {
+		dataset[i] = toDatasetReport(ds)
+	}
+
 	closed := make([]TradeReport, len(in.Trades))
 	for i, t := range in.Trades {
 		closed[i] = toTradeReport(t)
@@ -214,14 +263,16 @@ func NewBacktestReport(in BacktestInput) BacktestReport {
 
 	return BacktestReport{
 		Run: RunInfo{
-			RunID:           m.RunID().String(),
-			StrategyName:    m.StrategyName(),
-			StrategyVersion: m.StrategyVersion(),
-			SpanStart:       m.Span().Start().UTC(),
-			SpanEnd:         m.Span().End().UTC(),
-			TraderVersion:   m.TraderVersion(),
-			ConfigDigest:    m.ConfigDigest(),
+			RunID:              m.RunID().String(),
+			StrategyName:       m.StrategyName(),
+			StrategyVersion:    m.StrategyVersion(),
+			StrategyParameters: m.StrategyParameters(),
+			SpanStart:          m.Span().Start().UTC(),
+			SpanEnd:            m.Span().End().UTC(),
+			TraderVersion:      m.TraderVersion(),
+			ConfigDigest:       m.ConfigDigest(),
 		},
+		Dataset: dataset,
 		Performance: Performance{
 			StartingCapital: metrics.StartingCapital(),
 			FinalEquity:     metrics.FinalEquity(),
@@ -243,6 +294,7 @@ func NewBacktestReport(in BacktestInput) BacktestReport {
 			ProfitFactor:     metrics.ProfitFactor(),
 		},
 		PerInstrument: perInstrument,
+		BySide:        bySide,
 		ClosedTrades:  closed,
 		OpenTrades:    open,
 		Account:       toAccountReport(in.Account),
@@ -261,6 +313,29 @@ func toInstrumentReport(im backtest.InstrumentMetrics) InstrumentReport {
 		GrossPnL:   im.GrossPnL,
 		Costs:      im.Costs,
 		NetPnL:     im.NetPnL,
+	}
+}
+
+func toSideReport(sm backtest.SideMetrics) SideReport {
+	return SideReport{
+		Side:     sm.Side.String(),
+		Count:    sm.Count,
+		Wins:     sm.Wins,
+		Losses:   sm.Losses,
+		GrossPnL: sm.GrossPnL,
+		Costs:    sm.Costs,
+		NetPnL:   sm.NetPnL,
+	}
+}
+
+func toDatasetReport(ds backtest.DatasetSummary) DatasetReport {
+	return DatasetReport{
+		Provider:   ds.Provider,
+		Instrument: ds.Instrument.String(),
+		Interval:   ds.Interval,
+		SpanStart:  ds.SpanStart.UTC(),
+		SpanEnd:    ds.SpanEnd.UTC(),
+		Revision:   ds.Revision,
 	}
 }
 

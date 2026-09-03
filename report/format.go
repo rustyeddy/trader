@@ -49,6 +49,16 @@ func formatOptionalRate(r *num.Rate) string {
 	return r.String()
 }
 
+// hasStrategyParameters reports whether raw holds a real strategy-
+// parameter payload worth rendering — not absent (empty) and not the
+// literal JSON "null" a strategy with no parameters marshals to
+// (Manifest.StrategyParameters()'s own documented "pass nil for a
+// strategy with no parameters" convention). Shared by OrgRenderer and
+// TextRenderer so both apply the identical rule.
+func hasStrategyParameters(raw []byte) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
 // errWriter wraps an io.Writer and remembers the first error any Write
 // call returns, turning every write after that into a no-op — the same
 // sticky-error idiom cmd/trader/execution's own errWriter establishes

@@ -32,18 +32,55 @@ func (OrgRenderer) Render(w io.Writer, report BacktestReport) error {
 	if run.TraderVersion != "" {
 		_, _ = fmt.Fprintf(ew, ":TRADER_VERSION: %s\n", run.TraderVersion)
 	}
+	if hasStrategyParameters(run.StrategyParameters) {
+		_, _ = fmt.Fprintf(ew, ":STRATEGY_PARAMETERS: %s\n", string(run.StrategyParameters))
+	}
 	_, _ = fmt.Fprintln(ew, ":END:")
 	_, _ = fmt.Fprintln(ew)
 
+	orgDatasetSection(ew, report.Dataset)
 	orgPerformanceSection(ew, report.Performance)
 	orgTradeStatsSection(ew, report.TradeStats)
 	orgPerInstrumentSection(ew, report.PerInstrument)
+	orgBySideSection(ew, report.BySide)
 	orgTradesSection(ew, "Completed Trades", report.ClosedTrades)
 	orgTradesSection(ew, "Open Trades", report.OpenTrades)
 	orgAccountSection(ew, report.Account)
 	orgEquityCurveSection(ew, report.EquityCurve)
 
 	return ew.err
+}
+
+func orgDatasetSection(ew *errWriter, rows []DatasetReport) {
+	_, _ = fmt.Fprintln(ew, "* Dataset Provenance")
+	if len(rows) == 0 {
+		_, _ = fmt.Fprintln(ew, "(no dataset recorded)")
+		_, _ = fmt.Fprintln(ew)
+		return
+	}
+	_, _ = fmt.Fprintln(ew, "| Instrument | Provider | Interval | Span Start | Span End | Revision |")
+	_, _ = fmt.Fprintln(ew, "|------------+----------+----------+------------+----------+----------|")
+	for _, d := range rows {
+		_, _ = fmt.Fprintf(ew, "| %s | %s | %s | %s | %s | %s |\n",
+			d.Instrument, d.Provider, d.Interval, formatTime(d.SpanStart), formatTime(d.SpanEnd), d.Revision)
+	}
+	_, _ = fmt.Fprintln(ew)
+}
+
+func orgBySideSection(ew *errWriter, rows []SideReport) {
+	_, _ = fmt.Fprintln(ew, "* Long/Short Breakdown")
+	if len(rows) == 0 {
+		_, _ = fmt.Fprintln(ew, "(no closed trades)")
+		_, _ = fmt.Fprintln(ew)
+		return
+	}
+	_, _ = fmt.Fprintln(ew, "| Side | Count | Wins | Losses | Gross PnL | Costs | Net PnL |")
+	_, _ = fmt.Fprintln(ew, "|------+-------+------+--------+-----------+-------+---------|")
+	for _, s := range rows {
+		_, _ = fmt.Fprintf(ew, "| %s | %d | %d | %d | %s | %s | %s |\n",
+			s.Side, s.Count, s.Wins, s.Losses, formatMoney(s.GrossPnL), formatMoney(s.Costs), formatMoney(s.NetPnL))
+	}
+	_, _ = fmt.Fprintln(ew)
 }
 
 func orgPerformanceSection(ew *errWriter, perf Performance) {
