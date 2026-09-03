@@ -127,6 +127,35 @@ func TestEmacross_EndToEndRegression(t *testing.T) {
 	assert.Equal(t, exitLong.Metadata.CorrelationID, enterShort.Metadata.CorrelationID,
 		"the reversal's Exit and Enter intents must share one correlation, per ADR-005's correlated-pair intent style")
 
+	// The three authoritative KindFill records themselves — the
+	// simulated-fill stage #255 explicitly calls out — asserted
+	// directly rather than only indirectly constrained through
+	// OpenedAt/ClosedAt/PnL/AvgPrice (PR #266 re-review).
+	fills := rec.kinds(journal.KindFill)
+	require.Len(t, fills, 3, "the bar-7 entry, the bar-12 exit, and the bar-12 re-entry")
+	entryFill, exitFill, reentryFill := fills[0], fills[1], fills[2]
+
+	require.NotNil(t, entryFill.Fill)
+	assert.True(t, entryFill.Fill.Timestamp.Equal(bar7Fill), "got %s", entryFill.Fill.Timestamp)
+	assert.Equal(t, order.Buy, entryFill.Fill.Side)
+	assert.True(t, entryFill.Fill.Price.Equal(num.MustParsePrice("1.10040")), "got %s", entryFill.Fill.Price)
+	assert.True(t, entryFill.Fill.Quantity.Equal(num.MustParseQuantity("10000")),
+		"the bar-7 entry sizes off the fixture's starting 10000 USD capital, got %s", entryFill.Fill.Quantity)
+
+	require.NotNil(t, exitFill.Fill)
+	assert.True(t, exitFill.Fill.Timestamp.Equal(bar12Fill), "got %s", exitFill.Fill.Timestamp)
+	assert.Equal(t, order.Sell, exitFill.Fill.Side)
+	assert.True(t, exitFill.Fill.Price.Equal(num.MustParsePrice("1.10000")), "got %s", exitFill.Fill.Price)
+	assert.True(t, exitFill.Fill.Quantity.Equal(num.MustParseQuantity("10000")),
+		"the exit closes the entire entered position, got %s", exitFill.Fill.Quantity)
+
+	require.NotNil(t, reentryFill.Fill)
+	assert.True(t, reentryFill.Fill.Timestamp.Equal(bar12Fill), "got %s", reentryFill.Fill.Timestamp)
+	assert.Equal(t, order.Sell, reentryFill.Fill.Side)
+	assert.True(t, reentryFill.Fill.Price.Equal(num.MustParsePrice("1.10000")), "got %s", reentryFill.Fill.Price)
+	assert.True(t, reentryFill.Fill.Quantity.Equal(num.MustParseQuantity("9996")),
+		"the re-entry re-sizes off equity after the exit's realized loss (10000 - 4 realized PnL), got %s", reentryFill.Fill.Quantity)
+
 	// The exact, fully-ordered journal Kind sequence for the whole run
 	// — issue #255's own "expected journal sequence ... asserted"
 	// acceptance criterion. Built once, empirically, from a real run
