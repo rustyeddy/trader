@@ -2559,19 +2559,20 @@ The implementation project should use these milestones.  Detailed issues and
 acceptance criteria are maintained in the companion document
 =Trader-GitHub-Project-Plan.org=.
 
-| ID   | Milestone                              | Usable outcome                                                                                                                  |
-|------+----------------------------------------+---------------------------------------------------------------------------------------------------------------------------------|
-| M0   | Repository Foundation and Guardrails   | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                                                  |
-| M1   | Domain Foundation and Test Kit         | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers                                        |
-| M2   | Market Data Vertical Slice             | Acquire, normalize, validate, store, query, resample, and report coverage for one data path                                     |
-| M2.5 | CLI and Application Service Layer      | Thin CLI transport over reusable, transport-neutral application services                                                        |
-| M2.6 | Structured Logging                     | Production structured logging conventions, lifecycle ownership, correlation, and service events                                |
-| M3   | Broker Simulation and Account State    | Public broker port, deterministic simulated broker, orders, fills, events, and account state                                    |
-| M4   | Execution and Risk                     | Intent/proposal execution planning, position sizing, risk admission, and approved broker requests                               |
-| M5   | OANDA Broker Adapter                   | First real broker adapter, authoritative account truth, reconciliation, and demo/paper integration                              |
-| M6   | Strategy and Deterministic Backtesting | Strategy execution through execution/risk and simulator, deterministic runs, run manifests, journal, metrics, CLI, and Org reports |
-| M7   | Paper/Live Session Management          | Long-running paper/live orchestration, recovery, reconciliation, guards, and operational safety                                 |
-| M8   | Alpaca and Multi-Broker Validation     | Second materially different broker adapter validates broker/account/execution abstractions                                      |
+| ID   | Milestone                              | Usable outcome                                                                                                                     |   |   |   |
+|------+----------------------------------------+------------------------------------------------------------------------------------------------------------------------------------+---+---+---|
+| M0   | Repository Foundation and Guardrails   | New repository, CI, docs, ADRs, dependency rules, and legacy transplant policy                                                     |   |   |   |
+| M1   | Domain Foundation and Test Kit         | Exact values, identity, instruments, time, orders, snapshots, and public testing helpers                                           |   |   |   |
+| M2   | Market Data Vertical Slice             | Acquire, normalize, validate, store, query, resample, and report coverage for one data path                                        |   |   |   |
+| M2.5 | CLI and Application Service Layer      | Thin CLI transport over reusable, transport-neutral application services                                                           |   |   |   |
+| M2.6 | Structured Logging                     | Production structured logging conventions, lifecycle ownership, correlation, and service events                                    |   |   |   |
+| M3   | Broker Simulation and Account State    | Public broker port, deterministic simulated broker, orders, fills, events, and account state                                       |   |   |   |
+| M4   | Execution and Risk                     | Intent/proposal execution planning, position sizing, risk admission, and approved broker requests                                  |   |   |   |
+| M5   | Strategy and Deterministic Backtesting | Strategy execution through execution/risk and simulator, deterministic runs, run manifests, journal, metrics, CLI, and Org reports |   |   |   |
+| M6   | Inicators                              |                                                                                                                                    |   |   |   |
+| M7   | OANDA Broker Adapter                   | First real broker adapter, authoritative account truth, reconciliation, and demo/paper integration                                 |   |   |   |
+| M8   | Paper/Live Session Management          | Long-running paper/live orchestration, recovery, reconciliation, guards, and operational safety                                    |   |   |   |
+| M9   | Alpaca and Multi-Broker Validation     | Second materially different broker adapter validates broker/account/execution abstractions                                         |   |   |   |
 
 Scanner/operator workflow, external strategy protocols, and broader research
 extensions remain planned work after the core trading path above has been

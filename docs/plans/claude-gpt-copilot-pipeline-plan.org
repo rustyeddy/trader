@@ -1,0 +1,189 @@
+#+TITLE: Automated issue-to-merge pipeline (Claude Code + GPT-5 + Copilot)
+#+AUTHOR: Rusty Eddy
+#+DATE: 2026-09-04
+#+STARTUP: overview
+
+* Goal
+
+Replace the manual relay (tell Claude, tell GPT-5, tell Claude again...)
+with an event-driven GitHub Actions pipeline. I label an issue, GitHub
+events carry it through implementation, review, fixes, and merge on
+their own, and I get notified when it lands.
+
+* Architecture overview
+
+1. Issue labeled =ready-for-claude= -> triggers implementation
+2. Claude Code implements the issue, pushes a branch, opens a PR
+3. Review gate runs in parallel: GPT-5 (custom check) + Copilot (native)
+4. If either requests changes -> Claude Code fixes and pushes -> re-triggers review (loop)
+5. Once both approve, branch protection is satisfied -> GitHub auto-merges
+6. On merge -> notification fires (Slack / ntfy / GitHub native)
+
+* Prerequisites
+
+- [ ] Install the Claude GitHub App (=/install-github-app= from Claude Code)
+- [ ] Confirm =ANTHROPIC_API_KEY= (or =CLAUDE_CODE_OAUTH_TOKEN=) is stored as a repo/org secret
+- [ ] Decide how GPT-5 review will authenticate (API key as a repo secret)
+- [ ] Enable "Automatically request Copilot review of all pull requests" (repo settings)
+- [ ] Enable "Allow auto-merge" (Settings -> General -> Pull Requests)
+- [ ] Configure branch protection: require GPT-5's check + Copilot's review approval before merge
+- [ ] Pick a target repo to pilot this on before rolling out further (Trader is the obvious first candidate)
+
+* Implementation tasks
+
+** TODO Stage 1 -- issue trigger
+- [ ] Confirm GPT-5's architecture step applies the =ready-for-claude= label when it opens issues
+- [ ] Decide whether the label is applied at issue creation or after a manual sanity check
+
+** TODO Stage 2 -- implement workflow
+File: =.github/workflows/claude-implement.yml=
+
+#+BEGIN_SRC yaml
+name: Claude Code — Implement Issue
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    if: github.event.label.name == 'ready-for-claude'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+
+            Implement the issue above. Read it carefully, write the code
+            and tests, and run the test suite until it passes before
+            pushing anything.
+
+            When done:
+            1. Push your work to branch claude/issue-${{ github.event.issue.number }}.
+            2. Open a PR against the default branch. Include
+               "Closes #${{ github.event.issue.number }}" in the PR body.
+            3. Enable auto-merge with squash merging so it merges once
+               required reviews and checks pass:
+               gh pr merge --auto --squash <PR number>
+
+            Do not merge it yourself — only enable auto-merge.
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Bash(git:*),Bash(go test:*),Bash(gh pr create:*),Bash(gh pr merge:*),mcp__github__create_pull_request,Edit,Write,Read,Glob,Grep"
+#+END_SRC
+
+- [ ] Test against a throwaway issue in a scratch repo first
+- [ ] Tune =--max-turns= and =--allowedTools= once real usage shows what's needed
+- [ ] Swap =go test= for the right suite per repo (Trader / OttO / etc.)
+
+** TODO Stage 3 -- review gate
+
+*** Copilot
+- [ ] Flip on auto-request review in repo settings (no workflow needed)
+
+*** GPT-5
+- [ ] Build the Action step / script that calls the GPT-5 API with the PR diff
+- [ ] Decide output shape: inline PR review comments vs. a Check Run
+- [ ] Store its findings in a form branch protection can require (a named check)
+- [ ] NOTE: this is the one piece with no Anthropic documentation to lean on --
+      needs its own research pass on GPT-5's current API/tooling
+
+** TODO Stage 4 -- fix loop
+File: =.github/workflows/claude-fix-review.yml=
+
+#+BEGIN_SRC yaml
+name: Claude Code — Address Review Feedback
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  fix:
+    if: github.event.review.state == 'changes_requested'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Read the latest review comments on this PR (from GPT-5 and/or
+            Copilot) and address them. Push fixes to the existing PR
+            branch — do not open a new PR.
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(go test:*),Edit,Write,Read,Glob,Grep"
+#+END_SRC
+
+- [ ] Confirm pushing new commits fires =pull_request: synchronize= and
+      re-runs the review workflow automatically (should need no extra wiring)
+- [ ] Decide whether new PR review *comments* (not just changes_requested
+      reviews) should also trigger this
+
+** TODO Stage 5 -- merge gate
+- [ ] Branch protection rule requires: GPT-5 check passing + Copilot approval
+- [ ] Confirm =gh pr merge --auto= genuinely waits on those required checks
+      (it silently merges immediately if nothing is marked required)
+- [ ] Decide squash vs. merge commit vs. rebase
+
+** TODO Stage 6 -- notify on merge
+File: =.github/workflows/claude-notify.yml=
+
+#+BEGIN_SRC yaml
+name: Notify on Merge
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send notification
+        run: |
+          curl -d "PR #${{ github.event.pull_request.number }} merged: ${{ github.event.pull_request.title }}" \
+            ntfy.sh/YOUR_TOPIC_HERE
+#+END_SRC
+
+- [ ] Pick the channel: GitHub's own notifications (zero setup) vs.
+      Slack webhook vs. ntfy.sh vs. Pushover
+- [ ] Test end-to-end once, watching for the notification to actually land
+
+* Open questions / risks
+
+- [ ] Auto-chaining straight to the next issue: easy to add, but risks
+      several unattended merges compounding a bad architectural call
+      before a human looks. Decide whether to keep a periodic manual
+      checkpoint even after this is automated.
+- [ ] Token/Action-minutes cost at scale -- worth checking usage after
+      the pilot repo runs for a week
+- [ ] What happens on repos with fork PRs (secrets are withheld from
+      fork-triggered runs on public repos)
+
+* Reference
+
+- Claude Code GitHub Actions docs: https://code.claude.com/docs/en/github-actions
+- Claude Code Action repo: https://github.com/anthropics/claude-code-action

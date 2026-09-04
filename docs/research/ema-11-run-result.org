@@ -316,21 +316,21 @@ range (a short, 16,979 units @ 1.03851 average price).
 
 ** Final equity / net PnL / return
 
-| Metric          | Value           |
-|-----------------+-----------------|
-| Starting Capital | 10,000.00 USD  |
-| Final Equity     | 8,545.83288 USD |
-| Net PnL (closed) | -1,510.02803 USD |
-| Net Return       | -14.541671%    |
+| Metric           | Value                              |
+|------------------+------------------------------------|
+| Starting Capital | 10,000.00 USD                      |
+| Final Equity     | 8,545.83288 USD                    |
+| Net PnL (closed) | -1,510.02803 USD                   |
+| Net Return       | -14.541671%                        |
 | Unrealized PnL   | +55.86091 USD (the one open short) |
 
 ** Drawdown and other performance metrics
 
-| Metric         | Value        |
-|-----------------+--------------|
-| Max Drawdown    | 43.086189%  |
-| Profit Factor   | 0.97147804  |
-| Expectancy      | -1.28513024 USD/trade |
+| Metric             | Value                                      |
+|--------------------+--------------------------------------------|
+| Max Drawdown       | 43.086189%                                 |
+| Profit Factor      | 0.97147804                                 |
+| Expectancy         | -1.28513024 USD/trade                      |
 | Closed Trade Costs | 0 USD (zero-cost model, EMA-01 Decision 6) |
 
 A profit factor below 1.0 and a max drawdown exceeding 43% of peak
@@ -339,13 +339,13 @@ exact configuration — see Research Conclusion.
 
 ** Win/loss characteristics
 
-| Metric        | Value            |
-|---------------+------------------|
-| Wins          | 385              |
-| Losses        | 789              |
-| Win Rate      | 32.765957%      |
-| Average Win   | 133.59121803 USD |
-| Average Loss  | -67.10094673 USD |
+| Metric       |            Value |
+|--------------+------------------|
+| Wins         |              385 |
+| Losses       |              789 |
+| Win Rate     |       32.765957% |
+| Average Win  | 133.59121803 USD |
+| Average Loss | -67.10094673 USD |
 
 The win rate is well below 50%, partially offset by an average win
 roughly double the average loss (a "let winners run, cut losses"

@@ -139,7 +139,7 @@ invented or required for this case.
 
 ** 5. Starting Capital, Risk, and Sizing
 
-- Starting capital: 100,000 USD
+- Starting capital: 10,000 USD
 - Risk fraction: 0.01 (1% of account equity per fixed-fraction sizing)
 - Adverse distance (sizing input): 0.0050 (50 pips) for EUR/USD H1
 
