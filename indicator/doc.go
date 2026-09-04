@@ -24,7 +24,11 @@
 // precision. A caller converting a canonical num.Price close into the
 // float64 sample EMA consumes is performing an analytical conversion,
 // not an accounting one, and is responsible for that conversion itself
-// — indicator never imports num.
+// — indicator never imports num. That conversion is num.Price's own
+// Float64 method (ADR-045,
+// docs/arch/adr-045-analytical-float64-conversion-boundary.org): a
+// direct numeric conversion, never a String()/strconv.ParseFloat()
+// round-trip through decimal text.
 //
 // This is deterministic: Go's float64 arithmetic is fully specified and
 // reproducible for a given, fixed sequence of operations, so replaying

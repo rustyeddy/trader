@@ -50,6 +50,42 @@ func (p Price) String() string {
 	return fixed.Format(p.raw)
 }
 
+// Float64 returns p as a float64, for crossing into Trader's analytical
+// domain — indicators and other float64-based calculations (ADR-045,
+// docs/arch/adr-045-analytical-float64-conversion-boundary.org).
+//
+// This is a direct numeric conversion (raw scaled int64 divided by the
+// common scale), never a serialize/reparse round-trip through String
+// and strconv.ParseFloat: the two are not equivalent in general, and
+// ADR-045 explicitly rejects the round-trip form as an implementation
+// smell. float64 cannot represent every value Price can exactly (IEEE
+// 754 double precision gives roughly 15-17 significant decimal digits,
+// against Price's exact 1e8 scale), so this conversion is lossy in the
+// same way any exact-to-float64 conversion is. This method itself adds
+// no unquantized path back into the exact domain — there is no
+// Price-from-float64 constructor here — but ADR-004 already permits a
+// strategy's analytical float64 result to become authoritative again
+// through the normal checked, quantized, semantically-validated
+// construction path (for example rounding to the listing's tick size
+// and constructing via ParsePrice/NewPrice), the same as any other
+// externally-derived value. ADR-045 does not add that conversion; it
+// only adds this one, exact-to-analytical direction.
+func (p Price) Float64() float64 {
+	scale := fixed.Scale()
+	// Split into whole and fractional scaled parts before converting,
+	// rather than converting the full raw int64 and dividing: raw can
+	// exceed float64's 53-bit exact-integer range (Price's representable
+	// range goes well beyond 2^53), and float64(p.raw) alone would round
+	// once there, before the division rounds a second time. whole and
+	// frac are each always well within 53 bits (frac has at most 8
+	// decimal digits by construction), so this decomposition converts
+	// each part exactly and only rounds once, at the final addition —
+	// the closest float64 to the true decimal value (PR #275 review).
+	whole := p.raw / scale
+	frac := p.raw % scale
+	return float64(whole) + float64(frac)/float64(scale)
+}
+
 // IsZero reports whether p is exactly zero.
 func (p Price) IsZero() bool {
 	return p.raw == 0

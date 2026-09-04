@@ -16,7 +16,12 @@ import (
 // This file enforces, mechanically, the two structural rules ADR-004 and the
 // package boundary depend on:
 //
-//   - no float32/float64 anywhere in num or num/internal/fixed;
+//   - no float32/float64 anywhere in num/internal/fixed, ever; no float32/
+//     float64 anywhere else in num either, with exactly one narrow exception:
+//     a method literally named Float64 (ADR-045's explicit exact-to-
+//     analytical conversion boundary, e.g. Price.Float64) may use float64 in
+//     its own signature and body. Every other declaration in num remains as
+//     float-free as it always has been.
 //   - no package outside num importing num/internal/fixed.
 //
 // The import rule is already guaranteed by Go's internal/ package visibility
@@ -31,7 +36,15 @@ const fixedImportPath = "github.com/rustyeddy/trader/num/internal/fixed"
 
 // TestNoFloatingPoint enforces the ADR-004 float containment policy within
 // num's own implementation: no float32 or float64 identifier or literal may
-// appear anywhere under num, including num/internal/fixed.
+// appear anywhere under num, including num/internal/fixed — except inside a
+// method literally named Float64, ADR-045's one explicit, narrow exact-to-
+// analytical conversion boundary (e.g. Price.Float64). num/internal/fixed
+// itself has no such exception: the representation-mechanics package
+// remains absolutely float-free, exactly as before ADR-045. _test.go files
+// are excluded from this scan entirely (see findFloatUsage): they are
+// verification code, not the package's implementation, and a test
+// asserting on Float64's own output legitimately needs float64
+// literals/locals to compare against.
 //
 // Source is parsed rather than scanned as text, so identifiers and literals
 // appearing only in comments or string literals do not register.
@@ -50,6 +63,14 @@ type floatUse struct {
 	what string
 }
 
+// isFixedPath reports whether path lies under num/internal/fixed, where the
+// Float64-method exception below never applies: that package remains
+// absolutely float-free.
+func isFixedPath(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+"fixed"+sep) || strings.HasSuffix(path, sep+"fixed")
+}
+
 func findFloatUsage(t *testing.T, root string) []floatUse {
 	t.Helper()
 
@@ -58,7 +79,12 @@ func findFloatUsage(t *testing.T, root string) []floatUse {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".go") {
+		// _test.go files are verification code, not "this package's
+		// implementation" the rule above governs — a test asserting on
+		// Float64's own output (ADR-045) legitimately needs float64
+		// literals/locals to compare against, without weakening the
+		// production-code guarantee this test exists to enforce.
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
 			return nil
 		}
 
@@ -68,7 +94,14 @@ func findFloatUsage(t *testing.T, root string) []floatUse {
 			return err
 		}
 
+		exemptFuncBodies := !isFixedPath(filepath.Dir(path))
+
 		ast.Inspect(file, func(n ast.Node) bool {
+			if exemptFuncBodies {
+				if fn, ok := n.(*ast.FuncDecl); ok && fn.Name.Name == "Float64" {
+					return false // ADR-045's own conversion boundary; do not descend
+				}
+			}
 			switch v := n.(type) {
 			case *ast.Ident:
 				if v.Name == "float64" || v.Name == "float32" {
