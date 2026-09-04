@@ -50,6 +50,7 @@ comments and ADRs behind each boundary.
 
 ## Documentation
 
+- [User's Guide](docs/UsersGuide.md)
 - [Developer's Guide](docs/DevelopersGuide.md)
 - [Framework requirements](docs/arch/trader-framework-requirements.org)
 - [Framework architecture](docs/arch/trader-framework-architecture.org)
