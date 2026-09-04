@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
+	"github.com/rustyeddy/trader/cmd/trader/internal/version"
 )
 
 func TestNewRootCmd_HelpSucceeds(t *testing.T) {
@@ -24,6 +25,25 @@ func TestNewRootCmd_HelpSucceeds(t *testing.T) {
 
 	err := root.ExecuteContext(context.Background())
 	require.NoError(t, err)
+}
+
+// TestNewRootCmd_VersionFlagReportsVersion proves issue #288's own
+// acceptance criterion: --version reports Trader's semantic version.
+// Cobra's built-in --version support (enabled by setting cmd.Version)
+// prints via a fixed template this test does not re-verify verbatim —
+// only that the version string itself (cmd/trader/internal/version's
+// own Version const) appears in the output.
+func TestNewRootCmd_VersionFlagReportsVersion(t *testing.T) {
+	root, cleanup := New()
+	defer func() { _ = cleanup() }()
+	var out strings.Builder
+	root.SetArgs([]string{"--version"})
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	err := root.ExecuteContext(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, out.String(), version.Version)
 }
 
 func TestNewRootCmd_DataGroupExists(t *testing.T) {

@@ -1,0 +1,138 @@
+#+TITLE: Semantic Versioning, Version Reporting, and Release Process ADR-046
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #288 asks Trader to begin real semantic versioning at
+=v0.0.1=, with a mechanism for tagging and releasing. ADR-011
+(docs/arch/adr-decisions.org) already commits Trader to semver while
+remaining at =v0=, but explicitly defers "exact deprecation,
+changelog, and API-diff enforcement rules" to a later ADR and says
+nothing about the concrete tagging/release/version-reporting
+mechanism. This ADR settles that mechanism; ADR-011's own still-open
+items (deprecation policy, changelog format, API-diff enforcement)
+remain open and are not addressed here — ADR-011 keeps its =Proposed=
+status.
+
+* Context
+
+Before this issue, Trader had no version identifier anywhere: no git
+tags, no =--version= flag, no released artifact. Go's own module
+system already gives every commit an implicit pseudo-version, but
+nothing in the repository connected that to a human-meaningful
+semantic version, and =cmd/trader= had no way to report what version
+of itself was running — a real gap once the CLI is something someone
+other than a repository contributor might install and run.
+
+* Decision
+
+** Git tags are the release mechanism
+
+A release is a git tag of the form =vMAJOR.MINOR.PATCH= (matching
+=cmd/trader/internal/version.Version= exactly, no =v= prefix inside
+the Go const) plus a corresponding GitHub release. This is standard
+Go module versioning — =go install
+github.com/rustyeddy/trader/cmd/trader@v0.0.1= resolves directly
+against the tag, no separate module-proxy configuration needed. No
+other release artifact (binary distribution, package manager entry)
+is introduced by this ADR.
+
+** One source of truth: a Go const, bumped manually
+
+=cmd/trader/internal/version.Version= is a plain =const= string
+(=version.go='s own package doc comment documents it as "the one
+source of truth"). It is bumped by hand, in its own commit, immediately
+before creating
+the matching tag — never generated from the tag, never duplicated
+into a second file (no top-level =VERSION= file, no ldflags-injected
+value). A single hand-maintained constant is simple enough to review
+in a diff and eliminates any risk of the binary and the tag disagreeing
+by construction, since the same commit that bumps the constant is
+what gets tagged.
+
+** VCS metadata via runtime/debug, not ldflags
+
+=cmd/trader/internal/version.String()= combines =Version= with the
+short commit revision and dirty-working-tree state, read from
+=runtime/debug.ReadBuildInfo()='s =Settings= (=vcs.revision=,
+=vcs.modified=) rather than injected via =-ldflags -X= at build time.
+Go 1.18+ stamps this information automatically for =go build=/=go
+install= when the main package is built directly from a git working
+tree — =make build=, =make install=, and a bare =go build
+./cmd/trader= run from a checkout of this repository all get accurate
+revision/dirty info with zero Makefile or CI plumbing required. This
+does *not* extend to a version-qualified module install (=go install
+github.com/rustyeddy/trader/cmd/trader@v0.0.1=): that builds from
+downloaded module content rather than a local VCS checkout, so Go does
+not stamp =vcs.revision=/=vcs.modified= for it — a documented property
+of =go install ...@version=, not a limitation of this design. A binary
+built any other way outside a git tree, or with =-buildvcs=false=,
+degrades the same way: reporting =Version= alone rather than failing.
+
+** =cmd.Version=, not a separate subcommand
+
+=cmd/trader/internal/rootcmd= sets Cobra's built-in =Version= field on
+the root command (=cmd.Version = version.String()=), which enables
+Cobra's own =--version=/=-v= flag support and default template
+("=trader version 0.0.1 (abc123def456)="). No separate =trader
+version= subcommand is added: one reporting mechanism is enough for a
+=v0= CLI, and Cobra's flag is the more conventional Go-CLI pattern
+(=go version=, =docker --version= both use a flag).
+
+** Release process
+
+Documented in CONTRIBUTING.org's own "Releasing" section (not
+duplicated here, so there is exactly one place to keep it current):
+bump the =Version= const in its own commit, merge it, tag the
+resulting commit =vMAJOR.MINOR.PATCH=, push the tag, then create a
+GitHub release from it. This ADR names the steps; CONTRIBUTING.org
+owns the authoritative, maintained instructions.
+
+* Consequences
+
+- =trader --version= reports a real, accurate version — including
+  commit/dirty state for any build made from a local git checkout
+  (=make build=, =make install=, or a bare =go build=/=go install=),
+  with no CI or Makefile changes required to keep it accurate. A
+  version-qualified module install (=go install .../trader@vX.Y.Z=)
+  reports =Version= alone, with no commit/dirty state, since Go does
+  not stamp VCS metadata for that install form.
+- A future release only ever requires one intentional, reviewable
+  code change (the =Version= const bump) before tagging; there is no
+  second file or generated value that could drift from it.
+- ADR-011's own deferred items (deprecation policy, changelog format,
+  API-diff enforcement) remain genuinely open — this ADR does not
+  claim to resolve them, and a future ADR ratifying those still needs
+  to be written before Trader can responsibly promise API stability at
+  any tag.
+- Should Trader ever need ldflags-injected build metadata beyond what
+  VCS stamping provides (for example, a CI build number, or a
+  release built from a tarball outside a git working tree where VCS
+  stamping is unavailable), that is a future, additive change to
+  =version.go= — this ADR does not foreclose it, it just does not
+  need it yet.
+
+* Alternatives Considered
+
+- *Ldflags-injected version/commit/date, set by the Makefile.* Common
+  in many Go CLIs, but strictly more moving parts than
+  =runtime/debug.ReadBuildInfo()= for the same information, and only
+  works when a build actually goes through the Makefile target that
+  sets the flags — a bare =go build ./cmd/trader= would silently lose
+  version info. Rejected in favor of the toolchain's own automatic VCS
+  stamping, which has neither gap.
+- *A top-level =VERSION= file as the source of truth, read by both the
+  Makefile and a Go =//go:embed=.* Rejected as an unnecessary second
+  place to keep synchronized with the Go const it would just
+  duplicate, for no benefit over the const alone once ldflags are not
+  needed.
+- *A =trader version= subcommand instead of (or in addition to) the
+  =--version= flag.* Rejected as redundant for a =v0= CLI with only
+  one thing to report; Cobra's built-in flag is sufficient and matches
+  common Go-CLI convention.
+- *Deriving Version itself from =git describe= at build time instead
+  of a hand-maintained const.* Rejected: it would make the "current
+  version" depend on local tag state at build time rather than being
+  reviewable in the source itself, and would produce a different,
+  non-clean-semver string (=v0.0.1-3-gabc1234=) for every commit past
+  a tag rather than a stable released number.
