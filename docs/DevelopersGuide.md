@@ -213,11 +213,14 @@ semantics.
 
 ### indicator
 
-`indicator` owns mathematical transforms over price series — currently
-just the streaming exponential moving average the EMA crossover strategy
-needs, not a general indicator framework. Indicator arithmetic is
-`float64` throughout (the architecture's sanctioned analytical domain);
-`indicator` never imports `num` or decides whether to buy or sell:
+`indicator` owns mathematical transforms over price series — streaming
+primitives added one milestone-scoped capability at a time, not a
+general indicator framework: the EMA crossover strategy's exponential
+moving average, and the SMA / rolling standard deviation / Z-score
+primitives the mean-reversion research track needs. Indicator
+arithmetic is `float64` throughout (the architecture's sanctioned
+analytical domain); `indicator` never imports `num` or decides whether
+to buy or sell:
 
 ```go
 ema, err := indicator.NewEMA(20) // SMA-seeded warm-up
@@ -225,10 +228,61 @@ err = ema.Update(price.Float64())
 if ema.Ready() {
     value := ema.Value()
 }
+
+z, err := indicator.NewZScore(20) // shared sliding-window accumulator
+err = z.Update(price.Float64())
+if score, ok := z.Value(); ok { // ok is false on a zero-variance window
+    _ = score
+}
 ```
+
+`SMA`, `RollingStdDev`, and `ZScore` share one unexported sliding-window
+accumulator built on Welford's online mean/variance algorithm, adapted
+to support removing the outgoing sample as well as adding a new one —
+numerically stable for FX-close-price-shaped input, and inclusive of
+the sample just supplied (the window ending at time t includes t
+itself).
 
 See the [package doc comment](../indicator/doc.go) for warm-up/readiness
 semantics and the deterministic-replay guarantee.
+
+### analysis
+
+`analysis` owns observations derived from prices and indicators that
+are not themselves orders or broker actions — currently the Z-score
+forward-return event study the FX mean-reversion research track
+(`docs/research/mr-01-experiment-definition.org`) needs to measure
+whether large normalized price deviations tend to revert, not a
+general analysis framework. `analysis` may depend on `marketdata` and
+`indicator`, but never on `strategy`, `broker`, `execution`, `risk`,
+`pipeline`, `backtest`, `service`, `cmd`, `adapters`, or `journal` — it
+produces statistical evidence, never trading decisions:
+
+```go
+result, err := analysis.RunEventStudy(bars, analysis.EventStudyConfig{
+    Instrument:   eurusd, // required provenance, not inferred from bars
+    Interval:     marketdata.H1,
+    ZScorePeriod: 20,
+    Horizons:     analysis.MR01Horizons(), // 4h/12h/24h/48h against H1 bars
+})
+for _, s := range result.Stats {
+    // s.Bucket, s.Horizon, s.Count, s.MeanReturn, s.MedianReturn,
+    // s.StdDevReturn, s.FractionTowardMean
+}
+```
+
+`Instrument` and `Interval` are required, validated fields, not mere
+documentation: an hour-labeled horizon (as `MR01Horizons` produces) is
+checked against `Interval` whenever `Interval` has a fixed,
+calendar-independent bar duration, so a "4h" horizon accidentally run
+against D1 or H4 bars fails fast instead of silently mislabeling the
+result's cadence.
+
+Each observation at bar index `i` is built from only `bars[0:i+1]`;
+later bars are used solely to label that observation's forward return
+at each configured horizon, never to influence the observation itself.
+See the [package doc comment](../analysis/doc.go) for the no-lookahead
+guarantee and its regression test.
 
 ### order
 
