@@ -235,26 +235,42 @@ func TestPriceDivisibleByZeroStep(t *testing.T) {
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
 
-// TestPriceFloat64 proves Float64 (ADR-045) is a direct numeric
-// conversion agreeing with the price's own decimal text, for values
-// float64 can represent exactly at Price's own 1e8 scale.
+// TestPriceFloat64 proves Float64 (ADR-045) converts to the same
+// float64 value Go's own compiler produces for the identical decimal
+// literal — the correctly-rounded float64 nearest that decimal value,
+// not merely "close" to it. want is deliberately an exact Go float64
+// literal (not a re-parsed string), so the compiler performs the same
+// decimal-to-binary rounding a caller comparing against a literal
+// constant would see, and assert.Equal checks bit-for-bit equality,
+// not an approximate delta: several of these inputs (1.1004, the
+// 1e-8 case) are not exactly representable in binary float64 at all,
+// so the property under test is "correctly rounded to the nearest
+// representable value," not "exact" (PR #275 review).
 func TestPriceFloat64(t *testing.T) {
 	tests := []struct {
+		name string
 		in   string
 		want float64
 	}{
-		{"0", 0},
-		{"1", 1},
-		{"1.5", 1.5},
-		{"1.10040", 1.1004},
-		{"0.00000001", 0.00000001},
-		{"92233720368.54775807", 92233720368.54775807},
+		{"zero", "0", 0},
+		{"whole number", "1", 1},
+		{"half", "1.5", 1.5},
+		{"typical FX price", "1.10040", 1.1004},
+		{"smallest representable increment", "0.00000001", 0.00000001},
+		{"largest representable value", "92233720368.54775807", 92233720368.54775807},
+		// raw = 4888940765280053789, well above 2^53 (~9.007e15): the
+		// naive float64(raw)/float64(scale) conversion rounds the raw
+		// int64 once before dividing, then rounds again, and for this
+		// exact value that lands on 48889407652.800545 — one ULP away
+		// from 48889407652.80054, the correctly-rounded result the
+		// whole/frac decomposition (and Go's own decimal-literal
+		// rounding) produce. This is the PR #275 review's own example.
+		{"large value above the float64 exact-integer range (2^53)", "48889407652.80053789", 48889407652.80054},
 	}
 	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			p := MustParsePrice(tt.in)
-			got := p.Float64()
-			assert.InDelta(t, tt.want, got, 1e-9)
+			assert.Equal(t, tt.want, p.Float64())
 		})
 	}
 }

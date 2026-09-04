@@ -61,13 +61,29 @@ func (p Price) String() string {
 // smell. float64 cannot represent every value Price can exactly (IEEE
 // 754 double precision gives roughly 15-17 significant decimal digits,
 // against Price's exact 1e8 scale), so this conversion is lossy in the
-// same way any exact-to-float64 conversion is; that loss is acceptable
-// for analytical use and is exactly why a value must never re-enter
-// Trader's exact domain by parsing a float64 back into a Price —
-// construct a new Price from a validated decimal/order-derived source
-// instead.
+// same way any exact-to-float64 conversion is. This method itself adds
+// no unquantized path back into the exact domain — there is no
+// Price-from-float64 constructor here — but ADR-004 already permits a
+// strategy's analytical float64 result to become authoritative again
+// through the normal checked, quantized, semantically-validated
+// construction path (for example rounding to the listing's tick size
+// and constructing via ParsePrice/NewPrice), the same as any other
+// externally-derived value. ADR-045 does not add that conversion; it
+// only adds this one, exact-to-analytical direction.
 func (p Price) Float64() float64 {
-	return float64(p.raw) / float64(fixed.Scale())
+	scale := fixed.Scale()
+	// Split into whole and fractional scaled parts before converting,
+	// rather than converting the full raw int64 and dividing: raw can
+	// exceed float64's 53-bit exact-integer range (Price's representable
+	// range goes well beyond 2^53), and float64(p.raw) alone would round
+	// once there, before the division rounds a second time. whole and
+	// frac are each always well within 53 bits (frac has at most 8
+	// decimal digits by construction), so this decomposition converts
+	// each part exactly and only rounds once, at the final addition —
+	// the closest float64 to the true decimal value (PR #275 review).
+	whole := p.raw / scale
+	frac := p.raw % scale
+	return float64(whole) + float64(frac)/float64(scale)
 }
 
 // IsZero reports whether p is exactly zero.

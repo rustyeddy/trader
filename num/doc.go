@@ -70,12 +70,16 @@
 // must never perform float64 arithmetic. An architecture test enforces both
 // rules by parsing package source.
 //
-// A value that crosses this boundary into float64 for an analytical
-// calculation (indicators, statistics, and similar; see the architecture
-// document's "Exact Values Versus Analytical Values" section) must never
-// re-enter Trader's exact domain by parsing the float64 back into a
-// semantic type. Construct a fresh exact value from a validated decimal or
-// order-derived source instead.
+// This is a one-directional conversion in the sense that num itself adds
+// no float64-to-exact constructor: there is no ParsePrice-from-float64 or
+// equivalent here. That does not forbid a value ever coming back — ADR-004
+// already permits an analytical float64 result to become authoritative
+// again through the normal checked, quantized, semantically-validated
+// construction path (rounding to the listing's tick size and constructing
+// via ParsePrice/NewPrice, exactly as any other externally-derived value
+// would). What is prohibited is an *implicit or unquantized* re-entry —
+// silently propagating a raw float64 into an order or accounting value
+// without going through that validation.
 //
 // # Construction
 //

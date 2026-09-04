@@ -100,18 +100,27 @@ consumer ever need one) is automatically covered without editing this
 test again, while an accidental =float64= creeping into ordinary
 arithmetic anywhere else in =num= still fails loudly.
 
-** No re-entry path from float64 back into the exact domain
+** This ADR adds no float64-to-exact constructor, but does not forbid re-entry
 
-This ADR adds a one-directional conversion only. A =float64= produced
-by crossing this boundary must never be parsed back into a =Price= (or
-any other exact type) to re-enter Trader's authoritative domain — a
-strategy that produces a new authoritative trading value (an order
-price, a stop, a quantity) must construct it from a validated decimal
-or order-derived source through the type's own constructor, not by
-round-tripping an analytical =float64= result. This ADR does not add,
-and issue #269 does not ask for, a =Price=-from-=float64= constructor;
-introducing one would reopen exactly the float-into-accounting risk
-ADR-004 exists to prevent.
+This ADR adds a conversion in one direction only: exact to analytical.
+It does not add a =Price=-from-=float64= constructor or any other
+float64-to-exact conversion — issue #269 does not ask for one, and
+=num= gains no such API here.
+
+That is a narrower claim than "an analytical float64 must never become
+authoritative again," and this ADR does not make the broader claim:
+ADR-004's own Decision already permits exactly that, provided it goes
+through the normal checked, quantized, semantically-validated
+construction path — a strategy that derives a stop or target from an
+EMA, a volatility measure, or a regression may round that result to
+the listing's tick size and construct a =Price= via =ParsePrice=/
+=NewPrice=, the same as any other externally-derived value. What
+remains prohibited, unchanged from ADR-004, is *implicit or unquantized*
+re-entry: silently propagating a raw =float64= into an order or
+accounting value without going through that validation. A future
+issue may introduce a dedicated checked/quantized conversion helper
+for that path if a real consumer needs one; this ADR neither adds nor
+forecloses that helper, it only declines to build it now.
 
 * Consequences
 
