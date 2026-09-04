@@ -1,194 +1,286 @@
-#+TITLE: MR-01: First Mean-Reversion Research Experiment Definition (DRAFT)
+#+TITLE: MR-01 FX Mean-Reversion Research Specification
 #+STARTUP: overview indent
 
 * Status
 
-DRAFT — not yet reviewed or committed. This mirrors the role
-docs/research/ema-01-experiment-definition.org played for the EMA
-crossover milestone: settle exact, agreed semantics before any
-implementation issue is filed, so later issues implement against a
-fixed spec instead of each inventing behavior.
+Proposed canonical specification for issue #278.
 
-* Purpose
+This document defines Trader's first FX mean-reversion research
+experiment before implementation or examination of the resulting
+MR-01 event-study output.
 
-Define Trader's first hypothesis-driven mean-reversion research
-experiment, grounded in evidence already gathered this session rather
-than assumption. This document exists to be argued with and edited
-before anything gets built.
+The purpose is to test whether a statistical mean-reversion phenomenon
+exists. It does not define a trading strategy.
 
-* What We Already Know (the evidence this experiment is grounded in)
+* Research Question
 
-Two exploratory analyses were run directly against the real OANDA
-archive (2015-2025, D1 bars, 24 pairs), ad hoc, no framework code:
+Do unusually large normalized deviations of an FX pair's H1 closing
+price from its recent mean predict subsequent movement back toward
+that mean?
 
-1. *Hurst exponent + lag-1/5 autocorrelation* (whole-decade, daily
-   closes): almost every pair sits at H < 0.5 (mean-reverting lean) or
-   ~0.5 (random walk); none showed H clearly above 0.53 (sustained
-   daily-scale trending). Autocorrelations were uniformly tiny
-   (<0.05 in magnitude) — not distinguishable from noise without a
-   real significance test. This is a *global, unconditional* measure:
-   it says the average day carries near-zero linear information about
-   the next day, not that no exploitable structure exists anywhere in
-   the data.
+The primary hypothesis is:
 
-2. *Conditional forward-return test after >=2-sigma moves* (daily,
-   vol-normalized via a 20-day rolling std, horizons 1/3/5 days): most
-   pairs leaned toward continuation after down-shocks (weak momentum,
-   not reversion) and mild reversion after up-shocks. Two pairs stood
-   out: *CHF/JPY* (real reversion after down-shocks, t=2.32 at h=3,
-   t=2.87 at h=5) and *AUD/CAD* (real reversion after up-shocks,
-   t=-2.46 at h=3, t=-2.72 at h=5). Important caveat: 144 tests were
-   run (24 pairs x 2 directions x 3 horizons); at the usual |t|>1.96
-   threshold, pure chance alone predicts ~7 "significant" hits, and
-   ~4-5 were found — within noise. Neither CHF/JPY nor AUD/CAD clears
-   a proper Bonferroni-corrected bar (~|t|>3.7 for 144 comparisons).
-   Candidates, not confirmed edges.
+- large negative normalized deviations should be followed, on average,
+  by positive forward returns;
+- large positive normalized deviations should be followed, on average,
+  by negative forward returns;
+- the tendency toward the mean should become stronger as the magnitude
+  of the deviation increases.
 
-Conclusion this document starts from: there is no free, obvious
-mean-reversion edge sitting in daily FX closes. If one exists, it is
-either pair-specific and weak (as the two candidates above suggest),
-conditional on something the blunt tests above didn't check (regime,
-session, spread-based rather than single-instrument), or absent. The
-job of this experiment is to find out which, not to assume the answer
-either way.
+A failure to observe this pattern is a valid research result.
 
-* Research Hypothesis
+* Observation Definition
 
-A price extension beyond its own recent statistical range (measured by
-a rolling mean/std band or equivalent) tends to partially revert
-toward that range, producing positive expectancy for a
-fade-the-extreme entry with a mean-ward exit — on some pairs, at some
-timeframe, not necessarily universally across FX.
+For each closed H1 bar at time t:
 
-The experiment can conclude *Promising*, *Inconclusive*, or *Rejected*
-per pair/configuration tested, exactly as EMA-11 did for the crossover
-strategy. A negative result on one pair does not settle the hypothesis
-for all pairs; a positive result on one pair does not imply it
-generalizes.
+  M[t] = rolling arithmetic mean of Close over the previous N bars
 
-* Open Decisions (need your input before any of this is final)
+  S[t] = rolling standard deviation of Close over the same N bars
 
-** 1. Entry signal — not yet chosen
+  Z[t] = (Close[t] - M[t]) / S[t]
 
-Three real candidates, each buildable on top of the existing
-=indicator= package's pattern (=indicator.EMA= is the only indicator
-that exists today; this needs a new one regardless of which is
-chosen):
+The current bar is included only according to the exact rolling-window
+semantics established by MR-02. MR-02 must make those semantics
+deterministic and explicit.
 
-- *Bollinger-Band style*: rolling mean (SMA or EMA) +/- k * rolling
-  std. Entry when price crosses outside the band; the band width
-  itself is the tunable parameter (k, and the rolling window length).
-  Standard, well-understood, directly matches the "extension beyond
-  recent range" framing above.
-- *Z-score threshold*: mathematically the same rolling mean/std
-  machinery as Bollinger, but the tradable/loggable signal is the raw
-  z-score rather than band prices — marginally cleaner for research
-  reporting (one number to threshold and journal, not two band
-  prices), same underlying computation.
-- *RSI extreme*: a genuinely different indicator (Wilder's smoothing
-  of average gains/losses, not a rolling mean/std at all) — classic
-  momentum-oscillator mean reversion (RSI > 70 / < 30). Would need its
-  own =indicator.RSI= built from scratch, unrelated machinery to
-  Bollinger/Z-score.
+No observation is emitted until the rolling window is ready.
 
-Bollinger/Z-score share one implementation; RSI is a separate one. Not
-deciding here — this is the first thing to settle.
+If rolling standard deviation is zero, the observation is invalid and
+is excluded rather than producing NaN or infinity.
 
-** 2. Exit rule — not yet chosen
+* Initial Parameters
 
-The EMA crossover strategy's own MFE analysis (this session, EMA-11
-follow-up) found the "wait for the opposite signal" exit style gives
-back roughly half of every winning trade's peak favorable move on
-average. A mean-reversion strategy's natural exit ("revert to the
-mean, then exit") has the same shape of problem — worth deciding
-up front rather than discovering after the fact:
+These values are fixed for the first experiment and are not optimized.
 
-- Exit at the mean (band midline / z-score back to 0): the textbook
-  mean-reversion exit, simple, but exactly the "wait for the target
-  to be reached" pattern that gave back profit in the EMA case.
-- Exit at the *opposite* band (targeting an overshoot the other way):
-  more aggressive, higher variance, fewer round trips.
-- Time-based exit (fixed N bars after entry, regardless of price):
-  simplest to reason about, decouples the exit decision from the
-  entry signal entirely.
-- Trailing stop from entry: the improvement idea already documented
-  as an open thread from the EMA work — could be tested here instead
-  of retrofitted onto EMA crossover, since this strategy is being
-  built fresh.
+** Bar interval
 
-** 3. Timeframe — not yet chosen
+H1.
 
-Both exploratory analyses above used *daily* bars. The EMA crossover
-strategy trades *H1*. Two considerations pull in different
-directions: reusing H1 keeps the existing pipeline/fixture patterns
-directly reusable, but the actual evidence for reversion (the N-sigma
-test) was measured at daily resolution — an H1 mean-reversion signal
-is a different, untested claim, not a smaller version of the same
-one. Needs an explicit choice, not an assumption that H1 "should"
-work because EMA crossover happened to use it.
+** Rolling window
 
-** 4. Instrument universe — expanding, per your direction
+N = 20 H1 bars.
 
-Not a single reference pair this time. Proposed two-phase approach:
+This is a starting research assumption, not a claim that 20 is optimal.
 
-*** Phase A: cheap multi-pair screen
+No alternate lookback is tested in MR-01 through MR-04.
 
-Reuse the two exploratory scripts already built this session (Hurst/
-autocorrelation, N-sigma conditional reversion) as a real, repeatable
-screening step across all 24 archive pairs — formalized enough to
-rerun on demand, not necessarily promoted into the Go codebase itself.
-Rank/shortlist candidates by conditional-reversion t-stat (with the
-multiple-comparison correction properly applied this time — a stricter
-bar than the exploratory pass used), not by Hurst alone (Hurst's
-whole-decade estimate is a much blunter signal, as EUR/CHF's SNB-shock
-distortion already demonstrated).
+** Z-score buckets
 
-*** Phase B: full backtest on the shortlist
+Each valid observation belongs to exactly one bucket:
 
-Once the strategy (signal + exit, per Decisions 1-2) is actually
-built, run it for real — through the actual pipeline/risk/simulator,
-not the exploratory scripts — against every pair that survived Phase
-A's screen, at the timeframe decided in Decision 3. This is where
-CHF/JPY and AUD/CAD specifically get a real answer, alongside whatever
-else the corrected screen surfaces.
+- Extreme negative: Z < -2.0
+- Moderate negative: -2.0 <= Z < -1.0
+- Neutral:          -1.0 <= Z <= 1.0
+- Moderate positive: 1.0 < Z <= 2.0
+- Extreme positive: Z > 2.0
 
-** 5. Starting capital, risk, and sizing
+The bucket boundaries are fixed before results are examined.
 
-Proposed: reuse EMA-01's own values unless there's a reason not to —
-10,000 USD starting capital, 1% fixed-fraction risk per entry. The
-existing =risk.NewFixedFractionSizer= needs no change to serve a
-different strategy. Adverse-distance (sizing input) would need its
-own value per instrument, the same "neutral placeholder, not derived
-from volatility analysis" caveat EMA-01 recorded — or could finally be
-made ATR-based now that this experiment already needs a rolling
-std/range calculation for the entry signal itself (Decision 1), which
-is most of what an ATR-based stop distance would need anyway. Worth
-deciding together rather than defaulting silently.
+** Forward-return horizons
 
-** 6. Transaction cost assumptions
+Measure forward close-to-close return at:
 
-Proposed: same zero-cost idealization EMA-01 used (simulator's
-existing zero-slippage/zero-commission defaults), for the same
-reason — isolate whether the entry/exit logic has any edge before
-asking whether realistic costs survive it. Revisit only after a
-Phase B result exists.
+- 4 hours
+- 12 hours
+- 24 hours
+- 48 hours
 
-** 7. Date range
+For an observation at t:
 
-Proposed: same 2015-01-01 to 2025-01-01 window already used throughout
-this session's exploratory work, for direct comparability with the
-Hurst/N-sigma findings above and with EMA-11's own result.
+  R[h] = (Close[t+h] - Close[t]) / Close[t]
 
-* Out of Scope for This Document
+MR-03 must use only information available at t to construct the
+observation. Future prices are labels used only to measure the outcome.
 
-- Which specific indicator/exit/timeframe/pair set is *actually*
-  chosen (Decisions 1-4 above) — that's the point of discussing this
-  draft.
-- Implementation itself: no indicator, strategy, or CLI code should
-  be written against this document until it stops being a draft.
-- ATR-based dynamic sizing as a fully worked-out policy (Decision 5
-  raises it as a live option, doesn't commit to it).
-- Spread/pairs-trading-style mean reversion (two-instrument
-  cointegration/spread strategies) — single-instrument mean reversion
-  only, for this first experiment. A pairs-trading variant is a
-  natural, separate follow-on if this one is Rejected.
+* Instrument Set
+
+The first instrument is:
+
+- EUR/USD
+
+The same experiment will then be run without parameter changes across
+a small predeclared representative basket:
+
+- EUR/USD
+- GBP/USD
+- USD/JPY
+- USD/CHF
+- AUD/USD
+- NZD/USD
+- USD/CAD
+- EUR/GBP
+- EUR/CHF
+- AUD/NZD
+
+The basket is fixed before results are examined.
+
+Pairs are not removed because they perform poorly, and parameters are
+not changed per pair.
+
+CHF/JPY and AUD/CAD may be reported separately as previously observed
+exploratory candidates, but they must not be treated as independent
+confirmation because prior exploratory analysis already identified
+them.
+
+* Historical Periods and Prior Exploration
+
+Exploratory work has already examined approximately 2015-2025 data.
+
+Therefore that period must not be represented as untouched
+out-of-sample evidence.
+
+The final MR-01 run configuration must distinguish:
+
+1. data already examined during exploratory work; and
+2. data that has not previously been inspected for this hypothesis.
+
+If sufficient pre-2015 canonical H1 history is available, an untouched
+pre-2015 period should be reserved as the initial holdout set.
+
+The exact date boundaries must be recorded in this document before
+MR-04 examines the event-study results.
+
+If a genuinely untouched period cannot be obtained, MR-04 must label
+the study developmental rather than claiming out-of-sample
+confirmation.
+
+* Required Measurements
+
+For every:
+
+- instrument;
+- Z-score bucket; and
+- forward horizon;
+
+record at minimum:
+
+- observation count;
+- mean forward return;
+- median forward return;
+- standard deviation or comparable dispersion measure;
+- fraction of observations whose return moved toward the rolling mean.
+
+Results must retain instrument-level detail as well as any aggregate
+summary.
+
+Failures and contradictory results remain in the report.
+
+* Expected Direction
+
+Before observing results, the expected signs are:
+
+| Bucket            | Expected forward-return sign |
+|-------------------+------------------------------|
+| Extreme negative  | Positive                     |
+| Moderate negative | Weakly positive              |
+| Neutral           | No directional expectation   |
+| Moderate positive | Weakly negative              |
+| Extreme positive  | Negative                     |
+
+Evidence is stronger if the effect increases with |Z|.
+
+For example:
+
+  mean return(Z < -2) > mean return(-2 <= Z < -1)
+
+and:
+
+  mean return(Z > 2) < mean return(1 < Z <= 2)
+
+This monotonic relationship is more meaningful than one isolated
+profitable-looking bucket.
+
+* Minimum Evidence Requirements
+
+No conclusion is drawn from an extreme bucket with fewer than 30
+observations for a given instrument and horizon.
+
+Counts below that level are reported as insufficient evidence rather
+than positive or negative evidence.
+
+The primary conclusion should be based on the overall pattern across:
+
+- both positive and negative extremes;
+- multiple forward horizons;
+- development and holdout periods; and
+- multiple instruments.
+
+A single statistically unusual pair/horizon combination is not enough
+to establish a general FX mean-reversion effect.
+
+Multiple comparisons must be acknowledged when many
+instrument/bucket/horizon combinations are examined.
+
+* Interpretation
+
+MR-04 may classify the hypothesis as:
+
+** Supported
+
+A coherent tendency toward the mean appears across multiple
+instruments and/or periods, has the expected sign, and generally
+strengthens with deviation magnitude.
+
+** Weak / Inconclusive
+
+Some expected behavior is present, but it is inconsistent across
+instruments, horizons, directions, or periods, or sample counts are
+too small.
+
+** Not Supported
+
+Extreme deviations show no consistent tendency to revert, show
+roughly random subsequent returns, or show continuation often enough
+to contradict the stated hypothesis.
+
+"Not Supported" is a successful research result. It does not trigger
+parameter optimization.
+
+* Explicit Non-Goals
+
+MR-01 through MR-04 do not include:
+
+- Bollinger-band strategy rules;
+- RSI;
+- ADX;
+- ATR filters;
+- trend/regime filters;
+- entry or exit rules;
+- stop-loss rules;
+- trailing stops;
+- position sizing;
+- starting capital;
+- transaction-cost modeling;
+- broker simulation;
+- parameter sweeps;
+- optimization;
+- machine learning;
+- pair-specific parameter tuning;
+- selection of only the best-performing instruments.
+
+Those belong to later hypotheses or MR-05 and beyond if the raw
+phenomenon provides sufficient evidence.
+
+* Relationship to Later Issues
+
+MR-02 implements only the analytical primitives required to construct
+the observations defined here.
+
+MR-03 implements the deterministic forward-return event study.
+
+MR-04 executes this specification and records the evidence.
+
+MR-05 is conditional on MR-04 finding enough evidence to justify
+turning the statistical phenomenon into a trading strategy.
+
+* Completion Criteria for Issue #278
+
+Issue #278 is complete when:
+
+- this specification is reviewed and accepted;
+- the lookback, buckets, horizons, universe, and historical periods are
+  frozen;
+- expected signs are declared before execution;
+- minimum evidence and no-evidence criteria are declared;
+- previously explored data is identified honestly;
+- no trading-strategy implementation has been introduced.

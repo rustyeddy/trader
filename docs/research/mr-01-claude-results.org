@@ -1,0 +1,194 @@
+#+TITLE: MR-01: First Mean-Reversion Research Experiment Definition (DRAFT)
+#+STARTUP: overview indent
+
+* Status
+
+DRAFT — not yet reviewed or committed. This mirrors the role
+docs/research/ema-01-experiment-definition.org played for the EMA
+crossover milestone: settle exact, agreed semantics before any
+implementation issue is filed, so later issues implement against a
+fixed spec instead of each inventing behavior.
+
+* Purpose
+
+Define Trader's first hypothesis-driven mean-reversion research
+experiment, grounded in evidence already gathered this session rather
+than assumption. This document exists to be argued with and edited
+before anything gets built.
+
+* What We Already Know (the evidence this experiment is grounded in)
+
+Two exploratory analyses were run directly against the real OANDA
+archive (2015-2025, D1 bars, 24 pairs), ad hoc, no framework code:
+
+1. *Hurst exponent + lag-1/5 autocorrelation* (whole-decade, daily
+   closes): almost every pair sits at H < 0.5 (mean-reverting lean) or
+   ~0.5 (random walk); none showed H clearly above 0.53 (sustained
+   daily-scale trending). Autocorrelations were uniformly tiny
+   (<0.05 in magnitude) — not distinguishable from noise without a
+   real significance test. This is a *global, unconditional* measure:
+   it says the average day carries near-zero linear information about
+   the next day, not that no exploitable structure exists anywhere in
+   the data.
+
+2. *Conditional forward-return test after >=2-sigma moves* (daily,
+   vol-normalized via a 20-day rolling std, horizons 1/3/5 days): most
+   pairs leaned toward continuation after down-shocks (weak momentum,
+   not reversion) and mild reversion after up-shocks. Two pairs stood
+   out: *CHF/JPY* (real reversion after down-shocks, t=2.32 at h=3,
+   t=2.87 at h=5) and *AUD/CAD* (real reversion after up-shocks,
+   t=-2.46 at h=3, t=-2.72 at h=5). Important caveat: 144 tests were
+   run (24 pairs x 2 directions x 3 horizons); at the usual |t|>1.96
+   threshold, pure chance alone predicts ~7 "significant" hits, and
+   ~4-5 were found — within noise. Neither CHF/JPY nor AUD/CAD clears
+   a proper Bonferroni-corrected bar (~|t|>3.7 for 144 comparisons).
+   Candidates, not confirmed edges.
+
+Conclusion this document starts from: there is no free, obvious
+mean-reversion edge sitting in daily FX closes. If one exists, it is
+either pair-specific and weak (as the two candidates above suggest),
+conditional on something the blunt tests above didn't check (regime,
+session, spread-based rather than single-instrument), or absent. The
+job of this experiment is to find out which, not to assume the answer
+either way.
+
+* Research Hypothesis
+
+A price extension beyond its own recent statistical range (measured by
+a rolling mean/std band or equivalent) tends to partially revert
+toward that range, producing positive expectancy for a
+fade-the-extreme entry with a mean-ward exit — on some pairs, at some
+timeframe, not necessarily universally across FX.
+
+The experiment can conclude *Promising*, *Inconclusive*, or *Rejected*
+per pair/configuration tested, exactly as EMA-11 did for the crossover
+strategy. A negative result on one pair does not settle the hypothesis
+for all pairs; a positive result on one pair does not imply it
+generalizes.
+
+* Open Decisions (need your input before any of this is final)
+
+** 1. Entry signal — not yet chosen
+
+Three real candidates, each buildable on top of the existing
+=indicator= package's pattern (=indicator.EMA= is the only indicator
+that exists today; this needs a new one regardless of which is
+chosen):
+
+- *Bollinger-Band style*: rolling mean (SMA or EMA) +/- k * rolling
+  std. Entry when price crosses outside the band; the band width
+  itself is the tunable parameter (k, and the rolling window length).
+  Standard, well-understood, directly matches the "extension beyond
+  recent range" framing above.
+- *Z-score threshold*: mathematically the same rolling mean/std
+  machinery as Bollinger, but the tradable/loggable signal is the raw
+  z-score rather than band prices — marginally cleaner for research
+  reporting (one number to threshold and journal, not two band
+  prices), same underlying computation.
+- *RSI extreme*: a genuinely different indicator (Wilder's smoothing
+  of average gains/losses, not a rolling mean/std at all) — classic
+  momentum-oscillator mean reversion (RSI > 70 / < 30). Would need its
+  own =indicator.RSI= built from scratch, unrelated machinery to
+  Bollinger/Z-score.
+
+Bollinger/Z-score share one implementation; RSI is a separate one. Not
+deciding here — this is the first thing to settle.
+
+** 2. Exit rule — not yet chosen
+
+The EMA crossover strategy's own MFE analysis (this session, EMA-11
+follow-up) found the "wait for the opposite signal" exit style gives
+back roughly half of every winning trade's peak favorable move on
+average. A mean-reversion strategy's natural exit ("revert to the
+mean, then exit") has the same shape of problem — worth deciding
+up front rather than discovering after the fact:
+
+- Exit at the mean (band midline / z-score back to 0): the textbook
+  mean-reversion exit, simple, but exactly the "wait for the target
+  to be reached" pattern that gave back profit in the EMA case.
+- Exit at the *opposite* band (targeting an overshoot the other way):
+  more aggressive, higher variance, fewer round trips.
+- Time-based exit (fixed N bars after entry, regardless of price):
+  simplest to reason about, decouples the exit decision from the
+  entry signal entirely.
+- Trailing stop from entry: the improvement idea already documented
+  as an open thread from the EMA work — could be tested here instead
+  of retrofitted onto EMA crossover, since this strategy is being
+  built fresh.
+
+** 3. Timeframe — not yet chosen
+
+Both exploratory analyses above used *daily* bars. The EMA crossover
+strategy trades *H1*. Two considerations pull in different
+directions: reusing H1 keeps the existing pipeline/fixture patterns
+directly reusable, but the actual evidence for reversion (the N-sigma
+test) was measured at daily resolution — an H1 mean-reversion signal
+is a different, untested claim, not a smaller version of the same
+one. Needs an explicit choice, not an assumption that H1 "should"
+work because EMA crossover happened to use it.
+
+** 4. Instrument universe — expanding, per your direction
+
+Not a single reference pair this time. Proposed two-phase approach:
+
+*** Phase A: cheap multi-pair screen
+
+Reuse the two exploratory scripts already built this session (Hurst/
+autocorrelation, N-sigma conditional reversion) as a real, repeatable
+screening step across all 24 archive pairs — formalized enough to
+rerun on demand, not necessarily promoted into the Go codebase itself.
+Rank/shortlist candidates by conditional-reversion t-stat (with the
+multiple-comparison correction properly applied this time — a stricter
+bar than the exploratory pass used), not by Hurst alone (Hurst's
+whole-decade estimate is a much blunter signal, as EUR/CHF's SNB-shock
+distortion already demonstrated).
+
+*** Phase B: full backtest on the shortlist
+
+Once the strategy (signal + exit, per Decisions 1-2) is actually
+built, run it for real — through the actual pipeline/risk/simulator,
+not the exploratory scripts — against every pair that survived Phase
+A's screen, at the timeframe decided in Decision 3. This is where
+CHF/JPY and AUD/CAD specifically get a real answer, alongside whatever
+else the corrected screen surfaces.
+
+** 5. Starting capital, risk, and sizing
+
+Proposed: reuse EMA-01's own values unless there's a reason not to —
+10,000 USD starting capital, 1% fixed-fraction risk per entry. The
+existing =risk.NewFixedFractionSizer= needs no change to serve a
+different strategy. Adverse-distance (sizing input) would need its
+own value per instrument, the same "neutral placeholder, not derived
+from volatility analysis" caveat EMA-01 recorded — or could finally be
+made ATR-based now that this experiment already needs a rolling
+std/range calculation for the entry signal itself (Decision 1), which
+is most of what an ATR-based stop distance would need anyway. Worth
+deciding together rather than defaulting silently.
+
+** 6. Transaction cost assumptions
+
+Proposed: same zero-cost idealization EMA-01 used (simulator's
+existing zero-slippage/zero-commission defaults), for the same
+reason — isolate whether the entry/exit logic has any edge before
+asking whether realistic costs survive it. Revisit only after a
+Phase B result exists.
+
+** 7. Date range
+
+Proposed: same 2015-01-01 to 2025-01-01 window already used throughout
+this session's exploratory work, for direct comparability with the
+Hurst/N-sigma findings above and with EMA-11's own result.
+
+* Out of Scope for This Document
+
+- Which specific indicator/exit/timeframe/pair set is *actually*
+  chosen (Decisions 1-4 above) — that's the point of discussing this
+  draft.
+- Implementation itself: no indicator, strategy, or CLI code should
+  be written against this document until it stops being a draft.
+- ATR-based dynamic sizing as a fully worked-out policy (Decision 5
+  raises it as a live option, doesn't commit to it).
+- Spread/pairs-trading-style mean reversion (two-instrument
+  cointegration/spread strategies) — single-instrument mean reversion
+  only, for this first experiment. A pairs-trading variant is a
+  natural, separate follow-on if this one is Rejected.
