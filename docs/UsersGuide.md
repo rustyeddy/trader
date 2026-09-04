@@ -18,11 +18,11 @@ go build -o trader ./cmd/trader
 
 Every command accepts these, inherited from the root command:
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--log-format` | `text` | `text` or `json` |
-| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARN`, or `ERROR` |
-| `--log-output` | `stderr` | `stderr`, `stdout`, or a file path |
+| Flag           | Default  | Meaning                             |
+|----------------|----------|-------------------------------------|
+| `--log-format` | `text`   | `text` or `json`                    |
+| `--log-level`  | `INFO`   | `DEBUG`, `INFO`, `WARN`, or `ERROR` |
+| `--log-output` | `stderr` | `stderr`, `stdout`, or a file path  |
 
 ## Command Overview
 
@@ -65,15 +65,15 @@ listed under `backtest run` below.
 
 ### Shared `data` flags
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--from` | — | range start (`YYYY-MM-DD` or RFC3339), **required** |
-| `--to` | — | range end (`YYYY-MM-DD` or RFC3339), **required** |
-| `--format` | `table` | `table` or `json` |
-| `--provider` | `oanda` | canonical dataset provider name |
-| `--raw-root` | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root |
-| `--store-root` | `$XDG_DATA_HOME/trader/data` | canonical data store root |
-| `--oanda-base-url` | — | OANDA API base URL; required only for `sync`/`update` |
+| Flag               | Default                                | Meaning                                               |
+|--------------------|----------------------------------------|-------------------------------------------------------|
+| `--from`           | —                                      | range start (`YYYY-MM-DD` or RFC3339), **required**   |
+| `--to`             | —                                      | range end (`YYYY-MM-DD` or RFC3339), **required**     |
+| `--format`         | `table`                                | `table` or `json`                                     |
+| `--provider`       | `oanda`                                | canonical dataset provider name                       |
+| `--raw-root`       | `$XDG_DATA_HOME/trader/raw/<provider>` | raw provider archive root                             |
+| `--store-root`     | `$XDG_DATA_HOME/trader/data`           | canonical data store root                             |
+| `--oanda-base-url` | —                                      | OANDA API base URL; required only for `sync`/`update` |
 
 The OANDA API token itself is never a flag — set the `TRADER_OANDA_TOKEN`
 environment variable instead.
@@ -121,11 +121,11 @@ separate `trader` invocations.**
 
 ### Shared `broker` flags
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--account-id` | freshly generated | account id to use |
-| `--currency` | `USD` | account currency |
-| `--starting-cash` | `10000` | starting account cash amount |
+| Flag              | Default           | Meaning                      |
+|-------------------|-------------------|------------------------------|
+| `--account-id`    | freshly generated | account id to use            |
+| `--currency`      | `USD`             | account currency             |
+| `--starting-cash` | `10000`           | starting account cash amount |
 
 ### `trader broker accounts`
 
@@ -141,20 +141,20 @@ orders). `--format table\|json`.
 Submits one order directly to the simulated broker (no sizing or risk
 evaluation — see `trader execution submit` for that).
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--symbol` | — | instrument symbol, e.g. `EURUSD`, **required** |
-| `--side` | — | `buy` or `sell`, **required** |
-| `--quantity` | — | order quantity, **required** |
-| `--type` | `market` | `market`, `limit`, `stop`, or `stop-limit` |
-| `--price` | — | fill price, required for `--type market` |
-| `--limit-price` | — | required for `--type limit` or `stop-limit` |
-| `--stop-price` | — | required for `--type stop` or `stop-limit` |
-| `--tif` | `GTC` | time in force: `GTC`, `DAY`, `IOC`, or `FOK` |
-| `--tick-size` | `0.00001` | simulator tick size |
-| `--quantity-increment` | `1` | simulator quantity increment |
-| `--multiplier` | `1` | simulator contract multiplier |
-| `--format` | `table` | `table` or `json` |
+| Flag                   | Default   | Meaning                                        |
+|------------------------|-----------|------------------------------------------------|
+| `--symbol`             | —         | instrument symbol, e.g. `EURUSD`, **required** |
+| `--side`               | —         | `buy` or `sell`, **required**                  |
+| `--quantity`           | —         | order quantity, **required**                   |
+| `--type`               | `market`  | `market`, `limit`, `stop`, or `stop-limit`     |
+| `--price`              | —         | fill price, required for `--type market`       |
+| `--limit-price`        | —         | required for `--type limit` or `stop-limit`    |
+| `--stop-price`         | —         | required for `--type stop` or `stop-limit`     |
+| `--tif`                | `GTC`     | time in force: `GTC`, `DAY`, `IOC`, or `FOK`   |
+| `--tick-size`          | `0.00001` | simulator tick size                            |
+| `--quantity-increment` | `1`       | simulator quantity increment                   |
+| `--multiplier`         | `1`       | simulator contract multiplier                  |
+| `--format`             | `table`   | `table` or `json`                              |
 
 ```sh
 trader broker submit --symbol EURUSD --side buy --quantity 1000 \
@@ -174,25 +174,25 @@ Shares `broker`'s `--account-id`/`--currency`/`--starting-cash` flags.
 
 Sizes, plans, and risk-evaluates an intent **without** submitting it.
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--symbol` | — | instrument symbol, **required** |
-| `--side` | — | `buy` or `sell`, **required** |
-| `--adverse-distance` | — | adverse price distance used for sizing, **required** |
-| `--risk-fraction` | `0.01` | fraction of account equity to risk (1%) |
-| `--reference-price` | — | valuation price for value-based risk rules (optional) |
-| `--tick-size` | `0.00001` | simulator tick size |
-| `--quantity-increment` | `1` | simulator quantity increment |
-| `--multiplier` | `1` | simulator contract multiplier |
-| `--format` | `table` | `table` or `json` |
+| Flag                   | Default   | Meaning                                               |
+|------------------------|-----------|-------------------------------------------------------|
+| `--symbol`             | —         | instrument symbol, **required**                       |
+| `--side`               | —         | `buy` or `sell`, **required**                         |
+| `--adverse-distance`   | —         | adverse price distance used for sizing, **required**  |
+| `--risk-fraction`      | `0.01`    | fraction of account equity to risk (1%)               |
+| `--reference-price`    | —         | valuation price for value-based risk rules (optional) |
+| `--tick-size`          | `0.00001` | simulator tick size                                   |
+| `--quantity-increment` | `1`       | simulator quantity increment                          |
+| `--multiplier`         | `1`       | simulator contract multiplier                         |
+| `--format`             | `table`   | `table` or `json`                                     |
 
 ### `trader execution submit`
 
 Same as `evaluate`, plus an actual submission if risk approves. Adds:
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--price` | — | fill price for the resulting market order, **required** |
+| Flag      | Default | Meaning                                                 |
+|-----------|---------|---------------------------------------------------------|
+| `--price` | —       | fill price for the resulting market order, **required** |
 
 ```sh
 trader execution submit --symbol EURUSD --side buy \
@@ -220,28 +220,28 @@ There are two strategy paths:
   for exactly one instrument, configured from a YAML file (see below). Any
   explicit flag still overrides its corresponding config-file value.
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--symbol` | — | instrument symbol, repeatable, **required** (or via `--config`) |
-| `--interval` | `H1` | `M1`, `H1`, `H4`, `D1`, or `W1` |
-| `--from` | — | replay range start, **required** (or via `--config`) |
-| `--to` | — | replay range end, **required** (or via `--config`) |
-| `--currency` | `USD` | account currency |
-| `--starting-cash` | `10000` | starting account cash amount |
-| `--risk-fraction` | `0.01` | fraction of account equity to risk |
-| `--adverse-distance` | — | adverse price distance for sizing, **required** (or via `--config`) |
-| `--warmup-bars` | `0` | warm-up bars before the **demo** strategy may trade (ignored with `--config`) |
-| `--data-raw-root` | — | raw archive root, **required** |
-| `--data-store-root` | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run |
-| `--provider` | `oanda` | market data provider name |
-| `--config` | — | YAML file supplying backtest/strategy parameters (see below) |
-| `--strategy-name` | — | must equal `ema-cross` when `--config` is used |
-| `--fast-period` | — | EMA fast period (only with `--config`) |
-| `--slow-period` | — | EMA slow period (only with `--config`) |
-| `--allowed-side` | `both` | restrict the EMA strategy: `both`, `long-only`, or `short-only` (only with `--config`) |
-| `--journal` | — | optional path to write a durable JSONL audit trail; path must not already exist |
-| `--output-dir` | `./backtest-runs` | where run snapshots are written / `show` reads from |
-| `--format` | `table` | `table`, `json`, or `org` |
+| Flag                 | Default                         | Meaning                                                                                |
+|----------------------|---------------------------------|----------------------------------------------------------------------------------------|
+| `--symbol`           | —                               | instrument symbol, repeatable, **required** (or via `--config`)                        |
+| `--interval`         | `H1`                            | `M1`, `H1`, `H4`, `D1`, or `W1`                                                        |
+| `--from`             | —                               | replay range start, **required** (or via `--config`)                                   |
+| `--to`               | —                               | replay range end, **required** (or via `--config`)                                     |
+| `--currency`         | `USD`                           | account currency                                                                       |
+| `--starting-cash`    | `10000`                         | starting account cash amount                                                           |
+| `--risk-fraction`    | `0.01`                          | fraction of account equity to risk                                                     |
+| `--adverse-distance` | —                               | adverse price distance for sizing, **required** (or via `--config`)                    |
+| `--warmup-bars`      | `0`                             | warm-up bars before the **demo** strategy may trade (ignored with `--config`)          |
+| `--data-raw-root`    | —                               | raw archive root, **required**                                                         |
+| `--data-store-root`  | `/srv/trading/data/canonical`\* | canonical data store root; an explicit empty value opts into a fresh temp dir per run  |
+| `--provider`         | `oanda`                         | market data provider name                                                              |
+| `--config`           | —                               | YAML file supplying backtest/strategy parameters (see below)                           |
+| `--strategy-name`    | —                               | must equal `ema-cross` when `--config` is used                                         |
+| `--fast-period`      | —                               | EMA fast period (only with `--config`)                                                 |
+| `--slow-period`      | —                               | EMA slow period (only with `--config`)                                                 |
+| `--allowed-side`     | `both`                          | restrict the EMA strategy: `both`, `long-only`, or `short-only` (only with `--config`) |
+| `--journal`          | —                               | optional path to write a durable JSONL audit trail; path must not already exist        |
+| `--output-dir`       | `./backtest-runs`               | where run snapshots are written / `show` reads from                                    |
+| `--format`           | `table`                         | `table`, `json`, or `org`                                                              |
 
 \* The `/srv/trading/data/canonical` default is this repository's own local
 operational choice (issue #268) — a fresh clone on another machine should
@@ -276,19 +276,23 @@ strategy:
   allowed_side: both           # default both; or long-only / short-only
 ```
 
-Precedence for every field is: explicit CLI flag > `--config` file value >
-`TRADER_BACKTEST_*`/`TRADER_STRATEGY_*` environment variable > the default
-shown above.
+Precedence for each of the fields shown above (the ones with a `config:`
+tag backing them — see [Environment Variables](#environment-variables))
+is: explicit CLI flag > `--config` file value > `TRADER_BACKTEST_*`/
+`TRADER_STRATEGY_*` environment variable > the default shown above.
+`--data-raw-root`, `--provider`, `--journal`, `--output-dir`, `--format`,
+and `--warmup-bars` are plain CLI flags with no `--config`/environment-
+variable backing at all — see the flag table above for which is which.
 
 ### `trader backtest show <run-id>`
 
 Renders a persisted run snapshot written by a prior `run` — no
 recomputation, byte-identical to what `run` itself rendered.
 
-| Flag | Default | Meaning |
-|---|---|---|
+| Flag           | Default           | Meaning                                     |
+|----------------|-------------------|---------------------------------------------|
 | `--output-dir` | `./backtest-runs` | directory the run's snapshot was written to |
-| `--format` | `table` | `table`, `json`, or `org` |
+| `--format`     | `table`           | `table`, `json`, or `org`                   |
 
 ```sh
 trader backtest show run_01HKK5WY00D5982ACAHT01Q80K --format org
@@ -298,14 +302,39 @@ trader backtest show run_01HKK5WY00D5982ACAHT01Q80K --format org
 
 ## Environment Variables
 
-Every flag documented above is also settable as an environment variable,
-following `config`'s naming convention: prefix `TRADER_`, then the
-dotted config path, uppercased with `.` replaced by `_`. For example,
-`backtest.risk_fraction` becomes `TRADER_BACKTEST_RISK_FRACTION`. See the
+**Not every flag documented above is settable as an environment
+variable.** Only fields actually loaded through `config.Load` (visible
+by their own `config:` struct tag in the command's source) get an
+environment-variable form; every other flag is a plain Cobra flag with
+no config-file or environment-variable backing at all, no matter how
+important it looks. Where a field *is* config-backed, the variable name
+follows `config`'s naming convention: prefix `TRADER_`, then the dotted
+config path, uppercased with `.` replaced by `_` — see the
 [`config` package doc comment](../config/doc.go) for the full rule.
+
+Concretely, per command:
+
+- **`trader backtest run`** — only the fields shown in the `--config`
+  YAML reference above are env-backed: `TRADER_BACKTEST_SYMBOL`,
+  `_INTERVAL`, `_FROM`, `_TO`, `_CURRENCY`, `_STARTING_CAPITAL`,
+  `_RISK_FRACTION`, `_ADVERSE_DISTANCE`, `_DATA_STORE_ROOT`, and
+  `TRADER_STRATEGY_NAME`, `_FAST_PERIOD`, `_SLOW_PERIOD`,
+  `_ALLOWED_SIDE`. `--data-raw-root`, `--provider`, `--journal`,
+  `--output-dir`, `--format`, and `--warmup-bars` are **not**
+  env-backed — flag only.
+- **`trader data`** (all subcommands) — only the parent command's
+  persistent flags are env-backed: `TRADER_STORE_ROOT`,
+  `TRADER_RAW_ROOT`, `TRADER_PROVIDER`, `TRADER_OANDA_BASE_URL`. Each
+  leaf subcommand's own `--from`/`--to`/`--format` are flag only.
+- **`trader broker`** / **`trader execution`** — only the shared
+  `--starting-cash`/`--currency`/`--account-id` flags are env-backed
+  (`TRADER_STARTING_CASH`, `TRADER_CURRENCY`, `TRADER_ACCOUNT_ID`).
+  Every leaf-specific flag (`--symbol`, `--side`, `--quantity`,
+  `--type`, `--price`, `--adverse-distance`, `--format`, ...) is flag
+  only.
 
 One credential is environment-only and has no flag at all:
 
-| Variable | Meaning |
-|---|---|
+| Variable             | Meaning                                                   |
+|----------------------|-----------------------------------------------------------|
 | `TRADER_OANDA_TOKEN` | OANDA API token, required for `trader data sync`/`update` |
