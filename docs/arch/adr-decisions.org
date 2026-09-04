@@ -153,6 +153,7 @@ the original decided, use full supersession instead.
 | 043 | External/private strategy integration seam (in adr-043-strategy-integration-seam.org) | Accepted |
 | 044 | Strategy decision evidence (in adr-044-strategy-decision-evidence.org) | Accepted |
 | 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
+| 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -455,6 +456,21 @@ again through the normal checked, quantized, validated construction
 path; what remains prohibited, unchanged from ADR-004, is implicit or
 unquantized re-entry — without reopening or contradicting ADR-004's
 own accepted decision.
+
+Note: ADR-046 is likewise maintained in its own file,
+=docs/arch/adr-046-semantic-versioning-release-process.org=, rather
+than inline in this registry.  Its own Status section is authoritative.
+Issue #288 asks Trader to begin real semantic versioning at =v0.0.1=
+with a tag-and-release mechanism; ADR-011 already commits Trader to
+semver at =v0= but explicitly defers "exact deprecation, changelog,
+and API-diff enforcement rules" to a later ADR and settles no concrete
+mechanism of its own.  ADR-046 records that mechanism — git tags as
+the release artifact, a single hand-maintained =Version= const as the
+one source of truth, VCS metadata via =runtime/debug.ReadBuildInfo()=
+rather than ldflags, and Cobra's built-in =--version= flag — without
+resolving ADR-011's own still-open items, which is why ADR-011 keeps
+its =Proposed= status rather than being marked =Accepted= by this
+work.
 
 * ADR-001: Modular monolith before service decomposition
 

@@ -18,11 +18,23 @@ go build -o trader ./cmd/trader
 
 Every command accepts these, inherited from the root command:
 
-| Flag           | Default  | Meaning                             |
-|----------------|----------|-------------------------------------|
-| `--log-format` | `text`   | `text` or `json`                    |
-| `--log-level`  | `INFO`   | `DEBUG`, `INFO`, `WARN`, or `ERROR` |
-| `--log-output` | `stderr` | `stderr`, `stdout`, or a file path  |
+| Flag              | Default  | Meaning                             |
+|-------------------|----------|--------------------------------------|
+| `--log-format`    | `text`   | `text` or `json`                    |
+| `--log-level`     | `INFO`   | `DEBUG`, `INFO`, `WARN`, or `ERROR` |
+| `--log-output`    | `stderr` | `stderr`, `stdout`, or a file path  |
+| `--version`, `-v` | —        | print the version and exit (see [Versioning](#versioning) below) |
+
+## Versioning
+
+`trader --version` prints Trader's current semantic version plus the
+commit it was built from, e.g. `trader version 0.0.1 (a1b2c3d4e5f6)`,
+or `... (a1b2c3d4e5f6, dirty)` if built from a working tree with
+uncommitted changes. Trader follows semantic versioning while
+remaining at `v0` (ADR-011, ADR-046 in
+[`docs/arch/adr-decisions.org`](arch/adr-decisions.org)); see
+[`CONTRIBUTING.org`](../CONTRIBUTING.org)'s "Releasing" section for how
+a version is tagged and released.
 
 ## Command Overview
 

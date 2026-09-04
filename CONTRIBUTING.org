@@ -102,6 +102,34 @@ A change is complete only when all of the following are true:
   - How it was tested.
   - Which documentation changed.
 
+* Releasing
+
+Trader follows semantic versioning while remaining at =v0=
+(=docs/arch/adr-decisions.org= ADR-011, ADR-046). A release is a git
+tag plus a GitHub release; there is no other distribution artifact.
+
+To cut a release:
+
+1. Bump =cmd/trader/internal/version.Version= to the new
+   =MAJOR.MINOR.PATCH= value, in its own commit/PR, following the same
+   issue-branch-PR workflow as any other change. This is the *one*
+   source of truth for Trader's version — do not introduce a second
+   file or an ldflags-injected value (see ADR-046 for why).
+2. Once that PR merges, tag the resulting commit on =main=:
+   #+BEGIN_SRC sh
+   git checkout main && git pull
+   git tag v0.0.1        # must exactly match the Version const, with a leading "v"
+   git push origin v0.0.1
+   #+END_SRC
+3. Create the GitHub release from that tag:
+   #+BEGIN_SRC sh
+   gh release create v0.0.1 --title v0.0.1 --generate-notes
+   #+END_SRC
+
+=trader --version= reports the released version plus the commit it was
+built from automatically (via =runtime/debug.ReadBuildInfo()=, ADR-046)
+— no build-time flags are required for this to be accurate.
+
 * Agent-Specific Notes
 
 Agent contributors follow the same workflow and Definition of Done as

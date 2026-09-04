@@ -35,6 +35,7 @@ import (
 	"github.com/rustyeddy/trader/cmd/trader/data"
 	"github.com/rustyeddy/trader/cmd/trader/execution"
 	"github.com/rustyeddy/trader/cmd/trader/internal/clictx"
+	"github.com/rustyeddy/trader/cmd/trader/internal/version"
 	"github.com/rustyeddy/trader/config"
 	"github.com/rustyeddy/trader/logging"
 )
@@ -104,6 +105,11 @@ func New() (*cobra.Command, func() error) {
 	cmd := &cobra.Command{
 		Use:   "trader",
 		Short: "Trader is a framework for testing and executing algorithmic trading.",
+		// Version enables Cobra's own built-in --version flag; the
+		// printed template is "trader version {{.Version}}" (issue
+		// #288). See cmd/trader/internal/version's own doc comment for
+		// why this needs no ldflags/build-time injection.
+		Version: version.String(),
 		// SilenceUsage/SilenceErrors: trader prints its own error (see
 		// main.run), so Cobra's default double-printing (usage banner
 		// plus a second "Error:" line) is suppressed here.
