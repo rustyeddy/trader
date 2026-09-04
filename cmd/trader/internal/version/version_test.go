@@ -1,6 +1,7 @@
 package version
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,16 +14,20 @@ import (
 // settings the same way `go build`/`go install` do — see vcsInfo's
 // own doc comment) — String must never omit Version itself.
 func TestString_ContainsVersion(t *testing.T) {
-	assert.True(t, strings.Contains(String(), Version), "String() = %q must contain Version %q", String(), Version)
+	got := String()
+	assert.True(t, strings.Contains(got, Version), "String() = %q must contain Version %q", got, Version)
 }
 
-// TestVersionConst_IsSemVer proves Version parses as MAJOR.MINOR.PATCH,
-// catching a typo'd bump (e.g. "0.0" or "0.0.1.0") before it ships.
+// TestVersionConst_IsSemVer proves Version parses as MAJOR.MINOR.PATCH
+// with every component a non-negative integer, catching a typo'd bump
+// (e.g. "0.0", "0.0.1.0", or "0.0.beta") before it ships.
 func TestVersionConst_IsSemVer(t *testing.T) {
 	parts := strings.Split(Version, ".")
 	require := assert.New(t)
 	require.Len(parts, 3, "Version %q must be MAJOR.MINOR.PATCH", Version)
 	for _, p := range parts {
-		require.NotEmpty(p, "Version %q has an empty component", Version)
+		n, err := strconv.Atoi(p)
+		require.NoErrorf(err, "Version %q component %q is not a non-negative integer", Version, p)
+		require.GreaterOrEqual(n, 0, "Version %q component %q must be non-negative", Version, p)
 	}
 }

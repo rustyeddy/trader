@@ -6,11 +6,17 @@
 // dirty-working-tree state), via runtime/debug.ReadBuildInfo.
 //
 // No ldflags or other build-time injection is required: VCS stamping
-// happens automatically for any `go build`/`go install` invocation run
-// from within a git working tree (Go 1.18+), so String's output is
-// accurate whether the binary was built by `make build`, a bare `go
-// build ./cmd/trader`, or `go install
-// github.com/rustyeddy/trader/cmd/trader@v0.0.1`.
+// happens automatically for `go build`/`go install` when the main
+// package is built directly from a git working tree (Go 1.18+) — so
+// `make build`, `make install`, or a bare `go build ./cmd/trader` run
+// from a checkout of this repository all get accurate commit/dirty
+// info with no extra effort. A version-qualified module install (`go
+// install github.com/rustyeddy/trader/cmd/trader@v0.0.1`) is built
+// from downloaded module content rather than a local VCS checkout, so
+// Go does not stamp vcs.revision/vcs.modified for it (this is a
+// documented property of `go install ...@version`, not a bug here);
+// String degrades to Version alone in that case, per its own doc
+// comment below.
 package version
 
 import (
@@ -45,9 +51,12 @@ func String() string {
 // vcsInfo extracts the short commit revision and dirty-working-tree
 // state from the running binary's own build info, if the Go toolchain
 // embedded VCS settings when it was built. ok is false when build info
-// is unavailable at all (for example, a binary built with
-// GOFLAGS=-trimpath in a way that strips it) or when no vcs.revision
-// setting was found.
+// is unavailable at all, when it was built with -buildvcs=false (the
+// flag that actually disables VCS stamping — not -trimpath, which
+// strips file-system paths but leaves VCS settings alone), when built
+// from a version-qualified module install rather than a local VCS
+// checkout (see this package's own doc comment), or when no
+// vcs.revision setting was found for any other reason.
 func vcsInfo() (revision string, dirty bool, ok bool) {
 	info, available := debug.ReadBuildInfo()
 	if !available {

@@ -115,20 +115,26 @@ To cut a release:
    issue-branch-PR workflow as any other change. This is the *one*
    source of truth for Trader's version — do not introduce a second
    file or an ldflags-injected value (see ADR-046 for why).
-2. Once that PR merges, tag the resulting commit on =main=:
+2. Once that PR merges, tag the resulting commit on =main= with
+   =vMAJOR.MINOR.PATCH= — matching the bumped =Version= const exactly,
+   with a leading =v=. For example, if =Version = "0.1.0"=:
    #+BEGIN_SRC sh
    git checkout main && git pull
-   git tag v0.0.1        # must exactly match the Version const, with a leading "v"
-   git push origin v0.0.1
+   git tag v0.1.0
+   git push origin v0.1.0
    #+END_SRC
 3. Create the GitHub release from that tag:
    #+BEGIN_SRC sh
-   gh release create v0.0.1 --title v0.0.1 --generate-notes
+   gh release create v0.1.0 --title v0.1.0 --generate-notes
    #+END_SRC
 
 =trader --version= reports the released version plus the commit it was
 built from automatically (via =runtime/debug.ReadBuildInfo()=, ADR-046)
-— no build-time flags are required for this to be accurate.
+for any build made from a local git checkout (=make build=, =go
+build=/=go install= run from a clone of this repository) — no
+build-time flags required. A version-qualified module install (=go
+install .../trader@vX.Y.Z=) reports the version alone, with no commit
+info, since Go does not stamp VCS metadata for that install form.
 
 * Agent-Specific Notes
 

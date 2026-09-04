@@ -27,11 +27,16 @@ Every command accepts these, inherited from the root command:
 
 ## Versioning
 
-`trader --version` prints Trader's current semantic version plus the
-commit it was built from, e.g. `trader version 0.0.1 (a1b2c3d4e5f6)`,
-or `... (a1b2c3d4e5f6, dirty)` if built from a working tree with
-uncommitted changes. Trader follows semantic versioning while
-remaining at `v0` (ADR-011, ADR-046 in
+`trader --version` prints Trader's current semantic version, e.g.
+`trader version 0.0.1`. When built from a local git checkout (`make
+build`, or a bare `go build`/`go install` run from a clone of this
+repository) it also includes the commit it was built from, e.g.
+`trader version 0.0.1 (a1b2c3d4e5f6)`, or `... (a1b2c3d4e5f6, dirty)`
+if the working tree had uncommitted changes. A version-qualified
+module install (`go install .../trader@v0.0.1`) reports the version
+alone, with no commit info — Go does not stamp VCS metadata for that
+install form. Trader follows semantic versioning while remaining at
+`v0` (ADR-011, ADR-046 in
 [`docs/arch/adr-decisions.org`](arch/adr-decisions.org)); see
 [`CONTRIBUTING.org`](../CONTRIBUTING.org)'s "Releasing" section for how
 a version is tagged and released.

@@ -40,8 +40,9 @@ is introduced by this ADR.
 ** One source of truth: a Go const, bumped manually
 
 =cmd/trader/internal/version.Version= is a plain =const= string
-(=doc.go='s own comment documents it as "the one source of truth").
-It is bumped by hand, in its own commit, immediately before creating
+(=version.go='s own package doc comment documents it as "the one
+source of truth"). It is bumped by hand, in its own commit, immediately
+before creating
 the matching tag — never generated from the tag, never duplicated
 into a second file (no top-level =VERSION= file, no ldflags-injected
 value). A single hand-maintained constant is simple enough to review
@@ -55,12 +56,18 @@ what gets tagged.
 short commit revision and dirty-working-tree state, read from
 =runtime/debug.ReadBuildInfo()='s =Settings= (=vcs.revision=,
 =vcs.modified=) rather than injected via =-ldflags -X= at build time.
-Go 1.18+ stamps this information automatically for any build run from
-within a git working tree — =go build=, =go install=, and =make
-build=/=make install= all get accurate revision/dirty info with zero
-Makefile or CI plumbing required, and a binary built outside a git
-tree (or with VCS stamping stripped) degrades to reporting =Version=
-alone rather than failing.
+Go 1.18+ stamps this information automatically for =go build=/=go
+install= when the main package is built directly from a git working
+tree — =make build=, =make install=, and a bare =go build
+./cmd/trader= run from a checkout of this repository all get accurate
+revision/dirty info with zero Makefile or CI plumbing required. This
+does *not* extend to a version-qualified module install (=go install
+github.com/rustyeddy/trader/cmd/trader@v0.0.1=): that builds from
+downloaded module content rather than a local VCS checkout, so Go does
+not stamp =vcs.revision=/=vcs.modified= for it — a documented property
+of =go install ...@version=, not a limitation of this design. A binary
+built any other way outside a git tree, or with =-buildvcs=false=,
+degrades the same way: reporting =Version= alone rather than failing.
 
 ** =cmd.Version=, not a separate subcommand
 
@@ -84,8 +91,12 @@ owns the authoritative, maintained instructions.
 * Consequences
 
 - =trader --version= reports a real, accurate version — including
-  commit/dirty state — for any build method, with no CI or Makefile
-  changes required to keep it accurate.
+  commit/dirty state for any build made from a local git checkout
+  (=make build=, =make install=, or a bare =go build=/=go install=),
+  with no CI or Makefile changes required to keep it accurate. A
+  version-qualified module install (=go install .../trader@vX.Y.Z=)
+  reports =Version= alone, with no commit/dirty state, since Go does
+  not stamp VCS metadata for that install form.
 - A future release only ever requires one intentional, reviewable
   code change (the =Version= const bump) before tagging; there is no
   second file or generated value that could drift from it.
