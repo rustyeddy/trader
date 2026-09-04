@@ -10,7 +10,6 @@ import (
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/journal"
 	"github.com/rustyeddy/trader/marketdata"
-	"github.com/rustyeddy/trader/num"
 	"github.com/rustyeddy/trader/order"
 	"github.com/rustyeddy/trader/strategy"
 )
@@ -105,10 +104,10 @@ func (s *Strategy) Start(ctx context.Context, env strategy.Environment) error {
 
 // OnBar implements strategy.Strategy.
 func (s *Strategy) OnBar(ctx context.Context, event strategy.BarEvent, view strategy.View) ([]order.Intent, error) {
-	sample, err := priceToFloat64(event.Bar.Close)
-	if err != nil {
-		return nil, fmt.Errorf("emacross: converting bar close to float64: %w", err)
-	}
+	// event.Bar.Close.Float64() is ADR-045's explicit exact-to-analytical
+	// conversion boundary: a direct numeric conversion, never a
+	// String()/strconv.ParseFloat() round-trip.
+	sample := event.Bar.Close.Float64()
 
 	if err := s.fast.Update(sample); err != nil {
 		return nil, fmt.Errorf("emacross: updating fast EMA: %w", err)
@@ -308,15 +307,4 @@ func currentPositionSide(view strategy.View, instID instrument.ID) order.Positio
 		}
 	}
 	return order.Flat
-}
-
-// priceToFloat64 converts a canonical, exact num.Price into the
-// float64 sample indicator.EMA consumes — an analytical conversion,
-// not an accounting one (package doc comment). num.Price.String
-// always produces plain decimal text, never scientific notation, so
-// strconv.ParseFloat cannot fail for any value num.Price itself can
-// represent; the error return exists only because ParseFloat's own
-// signature has one, not because a real failure is expected here.
-func priceToFloat64(p num.Price) (float64, error) {
-	return strconv.ParseFloat(p.String(), 64)
 }

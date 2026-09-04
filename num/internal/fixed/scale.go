@@ -30,10 +30,19 @@ const places = 8
 //
 // ADR-004 fixes this at 1e8.  The scale is an internal representation detail:
 // it is not an instrument tick size, a display precision, a wire-format scale,
-// or a provider quotation convention. Nothing outside this package needs the
-// raw scale factor itself — num's semantic types never expose it, so there is
-// no cross-package caller for this constant to serve.
+// or a provider quotation convention.
 const scale int64 = 100_000_000
+
+// Scale returns the common scaling factor (see scale above) as an int64.
+//
+// This exists solely so num can implement an explicit, direct numeric
+// conversion from a raw scaled value to float64 (num.Price.Float64,
+// ADR-045) without num/internal/fixed itself performing any float64
+// arithmetic — the float-free rule above binds this package's own code,
+// not a caller that takes the scale and leaves this package to convert
+// into an entirely different numeric domain. This is the only exported
+// use the raw scale factor has outside this package.
+func Scale() int64 { return scale }
 
 // Representable bounds of the scaled representation, expressed as decimal
 // values rather than raw integers:

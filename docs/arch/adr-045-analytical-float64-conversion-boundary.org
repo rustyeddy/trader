@@ -1,0 +1,169 @@
+#+TITLE: Direct Price-to-float64 Analytical Conversion Boundary ADR-045
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #269 asks Trader's numeric architecture to be
+clarified rather than tightened: preserve exact semantic types for
+authoritative trading/accounting values, while making explicit that
+analytical code (indicators and similar) may use =float64=, and that
+the conversion between the two domains must be a direct numeric
+conversion rather than a decimal-text round-trip. This settles the
+specific API shape ADR-004 left unspecified, the same way ADR-025,
+ADR-027, and ADR-030 each settled one missing numeric primitive ahead
+of (or discovered by) a consuming feature, without reopening ADR-004's
+own accepted decision.
+
+* Context
+
+ADR-004 already decided the high-level rule: exact semantic types
+(=Price=, =Quantity=, =Money=, =Rate=, =Currency=) back every
+authoritative trading value, and "analytical code may use =float64=
+internally and convert to exact values only at order or accounting
+boundaries." That sentence permits exactly what this ADR formalizes —
+it never specified *how* a caller should perform that conversion, and
+the =num= package's own implementation (=num/doc.go=, before this ADR)
+was stricter than ADR-004 itself required: "float32 and float64 are
+prohibited from this package's implementation and from its public
+API: no field, parameter, return value, or internal arithmetic may use
+them," mechanically enforced by =num/arch_test.go='s =TestNoFloatingPoint=
+across the entire =num= tree with no exception at all.
+
+=strategy/emacross= (issue #249, EMA-04) needed to cross from
+=num.Price= into the =float64= sample =indicator.EMA= consumes, and
+with no sanctioned direct conversion available, did the only thing
+=num='s public API allowed:
+
+#+BEGIN_SRC go
+func priceToFloat64(p num.Price) (float64, error) {
+	return strconv.ParseFloat(p.String(), 64)
+}
+#+END_SRC
+
+=Price.String()= formats to canonical decimal text; =strconv.ParseFloat=
+then reparses that text back into a =float64=. This works today only
+because =num.Price.String= never produces scientific notation, but it
+is a serialize/reparse round-trip standing in for what should be one
+in-package numeric division — an implementation smell issue #269 asks
+to remove, not merely tolerate. It is also gratuitously indirect: two
+full numeric-to-text and text-to-numeric conversions, and an error
+return that can never actually fire for any value =Price= itself can
+represent, forcing every caller to handle an error that does not
+correspond to a reachable failure.
+
+* Decision
+
+** =Price.Float64() float64=
+
+=num.Price= gains one method, =Float64=, performing the conversion
+directly from the exact scaled representation:
+
+#+BEGIN_SRC go
+func (p Price) Float64() float64 {
+	return float64(p.raw) / float64(fixed.Scale())
+}
+#+END_SRC
+
+=fixed.Scale()= is a small new exported accessor in
+=num/internal/fixed= returning the package's existing private =scale=
+constant as an =int64= — =num/internal/fixed= itself still performs no
+float64 arithmetic whatsoever; only the caller in the outer =num=
+package, which is not subject to that package's internal
+representation-mechanics constraint, divides in =float64= space. This
+is the only exported use the raw scale factor has outside
+=num/internal/fixed=, and it exists solely to serve this one
+conversion.
+
+=Float64= never returns an error: dividing two finite, in-range int64
+values as float64 cannot fail the way =strconv.ParseFloat= nominally
+can, so the old, unreachable error return is gone along with the
+round-trip it protected.
+
+=strategy/emacross= now calls =event.Bar.Close.Float64()= directly in
+=OnBar=, replacing the removed =priceToFloat64= helper.
+
+** =num/arch_test.go='s float-containment rule gains one named exception
+
+=TestNoFloatingPoint= previously rejected any =float32=/=float64=
+identifier or literal anywhere under =num=, with no exception. It now
+skips exactly one shape: a method literally named =Float64=, anywhere
+outside =num/internal/fixed=, is permitted to use =float64= in its own
+signature and body. =num/internal/fixed= itself keeps the original,
+unconditional rule — the representation-mechanics package remains
+absolutely float-free, exactly as ADR-004 established; only the outer
+=num= package gains the named exception, and only for a method named
+exactly =Float64=. Every other declaration anywhere in =num= remains as
+float-free as it was before this ADR. This is deliberately a narrow,
+name-matched exception rather than a path-based or file-based one, so
+a future =Quantity.Float64= or =Money.Float64= (should a real
+consumer ever need one) is automatically covered without editing this
+test again, while an accidental =float64= creeping into ordinary
+arithmetic anywhere else in =num= still fails loudly.
+
+** No re-entry path from float64 back into the exact domain
+
+This ADR adds a one-directional conversion only. A =float64= produced
+by crossing this boundary must never be parsed back into a =Price= (or
+any other exact type) to re-enter Trader's authoritative domain — a
+strategy that produces a new authoritative trading value (an order
+price, a stop, a quantity) must construct it from a validated decimal
+or order-derived source through the type's own constructor, not by
+round-tripping an analytical =float64= result. This ADR does not add,
+and issue #269 does not ask for, a =Price=-from-=float64= constructor;
+introducing one would reopen exactly the float-into-accounting risk
+ADR-004 exists to prevent.
+
+* Consequences
+
+- =strategy/emacross= no longer performs a decimal-text round-trip to
+  enter the analytical domain, and its one call site is now
+  error-free, matching the fact that no real failure was ever
+  reachable there.
+- =num='s public API gains exactly one =float64=-returning method
+  system-wide (=Price.Float64=), mechanically distinguishable from
+  every other declaration by name, not by convention alone.
+- =num/internal/fixed= is unchanged in substance: it remains
+  absolutely float-free, and its one new export (=Scale=) returns an
+  =int64=, not a float, so the package's own no-float rule is untouched.
+- A future semantic type that needs the same analytical boundary
+  (=Quantity=, =Money=, should a real analytical consumer ever need
+  one) can add its own =Float64= method and inherits the same
+  architecture-test exception automatically, without a further ADR
+  for the mechanism itself — though introducing one for =Money= in
+  particular should be weighed carefully, since money entering an
+  analytical, precision-lossy domain is a materially different risk
+  than a price sample feeding an indicator.
+- ADR-004 itself is unchanged: its Decision section already permitted
+  analytical =float64= at a conversion boundary; this ADR settles the
+  concrete shape of that boundary and corrects the =num= package's own
+  implementation, which had been stricter than ADR-004 required.
+
+* Alternatives Considered
+
+- *Leave the =String()=/=ParseFloat= round-trip in place.* Rejected:
+  issue #269 explicitly identifies it as an implementation smell, and
+  it forces callers to handle an error that can never actually occur
+  for any value =num.Price= can represent.
+- *Add a package-level exported function (=num.PriceToFloat64(Price)
+  float64=) instead of a method.* Rejected as needlessly indirect: a
+  method matches every other =Price= conversion/formatting operation
+  (=String=, =Cmp=, =Equal=) and keeps the call site
+  (=event.Bar.Close.Float64()=) as a natural chained expression at the
+  point of use.
+- *Exempt an entire file (for example a new =num/float.go=) from the
+  architecture test instead of matching on function name.* Rejected:
+  a file-based exemption would silently permit unrelated float64 code
+  to accumulate in that file over time with no further signal, where
+  a name-matched exception keeps the mechanical check meaningful for
+  every other declaration in the same file.
+- *Widen the exception to match any method whose name merely contains
+  "Float" or "Analytical".* Rejected as unnecessarily loose; matching
+  the exact, single name =Float64= keeps the exception's surface as
+  narrow as the capability it grants.
+- *Relax =num/internal/fixed='s own float ban too, so the division
+  could happen inside that package instead of exporting =Scale=.*
+  Rejected: that package's absolute float-freedom is the specific
+  guarantee ADR-004 cares most about — it is the representation-
+  mechanics layer, not a conversion boundary — and exporting one
+  =int64= accessor is a smaller, more precisely scoped change than
+  relaxing that package's own invariant.

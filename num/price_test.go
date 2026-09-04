@@ -234,3 +234,35 @@ func TestPriceDivisibleByZeroStep(t *testing.T) {
 	_, err := p.DivisibleBy(Price{})
 	require.ErrorIs(t, err, ErrDivideByZero)
 }
+
+// TestPriceFloat64 proves Float64 (ADR-045) is a direct numeric
+// conversion agreeing with the price's own decimal text, for values
+// float64 can represent exactly at Price's own 1e8 scale.
+func TestPriceFloat64(t *testing.T) {
+	tests := []struct {
+		in   string
+		want float64
+	}{
+		{"0", 0},
+		{"1", 1},
+		{"1.5", 1.5},
+		{"1.10040", 1.1004},
+		{"0.00000001", 0.00000001},
+		{"92233720368.54775807", 92233720368.54775807},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			p := MustParsePrice(tt.in)
+			got := p.Float64()
+			assert.InDelta(t, tt.want, got, 1e-9)
+		})
+	}
+}
+
+// TestPriceFloat64ZeroValue proves the zero value converts to exactly
+// 0, matching Price's own documented "zero value is the exact value 0
+// and is valid" contract.
+func TestPriceFloat64ZeroValue(t *testing.T) {
+	var p Price
+	assert.Equal(t, float64(0), p.Float64())
+}

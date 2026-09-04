@@ -58,9 +58,24 @@
 // # Floating point
 //
 // float32 and float64 are prohibited from this package's implementation and
-// from its public API: no field, parameter, return value, or internal
-// arithmetic may use them.  An architecture test enforces this by parsing
-// package source.
+// from its public API, with exactly one narrow, explicit exception (ADR-045,
+// docs/arch/adr-045-analytical-float64-conversion-boundary.org): a method
+// literally named Float64 (for example Price.Float64) is Trader's one
+// sanctioned exact-to-analytical conversion boundary, a direct numeric
+// conversion from a semantic type's exact representation to float64 — never
+// a serialize/reparse round-trip through decimal text (Price.String()
+// followed by strconv.ParseFloat). Every other declaration in num remains as
+// float-free as before ADR-045, and num/internal/fixed remains absolutely
+// float-free without exception: the representation-mechanics package itself
+// must never perform float64 arithmetic. An architecture test enforces both
+// rules by parsing package source.
+//
+// A value that crosses this boundary into float64 for an analytical
+// calculation (indicators, statistics, and similar; see the architecture
+// document's "Exact Values Versus Analytical Values" section) must never
+// re-enter Trader's exact domain by parsing the float64 back into a
+// semantic type. Construct a fresh exact value from a validated decimal or
+// order-derived source instead.
 //
 // # Construction
 //

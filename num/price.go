@@ -50,6 +50,26 @@ func (p Price) String() string {
 	return fixed.Format(p.raw)
 }
 
+// Float64 returns p as a float64, for crossing into Trader's analytical
+// domain — indicators and other float64-based calculations (ADR-045,
+// docs/arch/adr-045-analytical-float64-conversion-boundary.org).
+//
+// This is a direct numeric conversion (raw scaled int64 divided by the
+// common scale), never a serialize/reparse round-trip through String
+// and strconv.ParseFloat: the two are not equivalent in general, and
+// ADR-045 explicitly rejects the round-trip form as an implementation
+// smell. float64 cannot represent every value Price can exactly (IEEE
+// 754 double precision gives roughly 15-17 significant decimal digits,
+// against Price's exact 1e8 scale), so this conversion is lossy in the
+// same way any exact-to-float64 conversion is; that loss is acceptable
+// for analytical use and is exactly why a value must never re-enter
+// Trader's exact domain by parsing a float64 back into a Price —
+// construct a new Price from a validated decimal/order-derived source
+// instead.
+func (p Price) Float64() float64 {
+	return float64(p.raw) / float64(fixed.Scale())
+}
+
 // IsZero reports whether p is exactly zero.
 func (p Price) IsZero() bool {
 	return p.raw == 0

@@ -152,6 +152,7 @@ the original decided, use full supersession instead.
 | 042 | Multi-instrument and portfolio backtesting (in adr-042-multi-instrument-backtesting.org) | Accepted |
 | 043 | External/private strategy integration seam (in adr-043-strategy-integration-seam.org) | Accepted |
 | 044 | Strategy decision evidence (in adr-044-strategy-decision-evidence.org) | Accepted |
+| 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -433,6 +434,21 @@ correlated via the existing =id.Metadata.CorrelationID= mechanism,
 plus two additive =strategy.Environment= fields (=RunID=, optional
 =Journal=) so a strategy can record through the run's own real,
 already-sequenced journal rather than a second, parallel mechanism.
+
+Note: ADR-045 is likewise maintained in its own file,
+=docs/arch/adr-045-analytical-float64-conversion-boundary.org=, rather
+than inline in this registry.  Its own Status section is authoritative.
+Issue #269 asks for Trader's numeric architecture to be clarified
+rather than tightened after =strategy/emacross= (EMA-04) needed to
+cross from exact =num.Price= into the =float64= domain
+=indicator.EMA= consumes and, finding no sanctioned direct conversion,
+used a =Price.String()=/=strconv.ParseFloat= round-trip instead; this
+ADR settles the concrete conversion API ADR-004's own "analytical code
+may use =float64= ... and convert to exact values only at ... boundaries"
+language left unspecified — a new =Price.Float64()= method, a matching
+named exception in =num/arch_test.go='s float-containment check, and
+no re-entry path back into the exact domain — without reopening or
+contradicting ADR-004's own accepted decision.
 
 * ADR-001: Modular monolith before service decomposition
 

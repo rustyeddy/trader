@@ -444,6 +444,15 @@ Recommended approach:
 Do not put all numeric values into one generic decimal type.  Separate types
 prevent accidental use of a price as a quantity or a percentage as money.
 
+The reverse crossing — an exact value entering the analytical domain, for
+example a canonical =Price= becoming the =float64= sample an indicator
+consumes — must be an explicit, direct numeric conversion, never a
+serialize/reparse round-trip through decimal text (=Price.String()= followed
+by parsing that text back into =float64=).  ADR-045 settles the concrete
+API for this one sanctioned boundary (=Price.Float64()=); the crossing is
+one-directional, and a value must never re-enter Trader's exact domain by
+parsing an analytical =float64= result back into a semantic type.
+
 ** Orders, Fills, Positions, and Trades
 
 These terms should remain distinct:
