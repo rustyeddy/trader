@@ -445,10 +445,16 @@ cross from exact =num.Price= into the =float64= domain
 used a =Price.String()=/=strconv.ParseFloat= round-trip instead; this
 ADR settles the concrete conversion API ADR-004's own "analytical code
 may use =float64= ... and convert to exact values only at ... boundaries"
-language left unspecified — a new =Price.Float64()= method, a matching
-named exception in =num/arch_test.go='s float-containment check, and
-no re-entry path back into the exact domain — without reopening or
-contradicting ADR-004's own accepted decision.
+language left unspecified — a new =Price.Float64()= method (using a
+whole/fraction decomposition rather than a naive single division, to
+avoid double-rounding large valid =Price= values) and a matching named
+exception in =num/arch_test.go='s float-containment check. It adds no
+float64-to-exact constructor itself, but does not forbid one: ADR-004
+already permits an analytical =float64= result to become authoritative
+again through the normal checked, quantized, validated construction
+path; what remains prohibited, unchanged from ADR-004, is implicit or
+unquantized re-entry — without reopening or contradicting ADR-004's
+own accepted decision.
 
 * ADR-001: Modular monolith before service decomposition
 

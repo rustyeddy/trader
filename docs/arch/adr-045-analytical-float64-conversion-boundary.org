@@ -60,16 +60,32 @@ directly from the exact scaled representation:
 
 #+BEGIN_SRC go
 func (p Price) Float64() float64 {
-	return float64(p.raw) / float64(fixed.Scale())
+	scale := fixed.Scale()
+	whole := p.raw / scale
+	frac := p.raw % scale
+	return float64(whole) + float64(frac)/float64(scale)
 }
 #+END_SRC
+
+Converting the raw scaled =int64= to =float64= and dividing by the
+scale in one step — =float64(p.raw) / float64(fixed.Scale())= — was
+the first version of this method, and is wrong for large valid
+=Price= values: =Price='s representable range extends well past
+=float64='s 53-bit exact-integer range, so =float64(p.raw)= alone
+already rounds once, before the division rounds a second time,
+occasionally landing one ULP away from the correctly-rounded result
+(caught in review: raw =4888940765280053789= produced
+=48889407652.800545= instead of the correct
+=48889407652.80054=). Splitting into whole and fractional scaled
+parts first keeps each intermediate value well within 53 bits, so
+only the final addition rounds.
 
 =fixed.Scale()= is a small new exported accessor in
 =num/internal/fixed= returning the package's existing private =scale=
 constant as an =int64= — =num/internal/fixed= itself still performs no
 float64 arithmetic whatsoever; only the caller in the outer =num=
 package, which is not subject to that package's internal
-representation-mechanics constraint, divides in =float64= space. This
+representation-mechanics constraint, computes in =float64= space. This
 is the only exported use the raw scale factor has outside
 =num/internal/fixed=, and it exists solely to serve this one
 conversion.
