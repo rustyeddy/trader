@@ -24,8 +24,8 @@ found.
 
 ** Git commit
 
-Commit ~c777b25~ on ~main~ (the tip after PR #291 merged), Go
-~go1.25.1 linux/amd64~.
+Commit ~c777b25a85bb6556260cf30cf3fdb13ee810bf50~ on ~main~ (the tip
+after PR #291 merged), Go ~go1.25.1 linux/amd64~.
 
 ** Runner
 
@@ -120,9 +120,16 @@ return moved toward the rolling mean):
 | Moderate positive |    126532 | -0.004 |    126517 | -0.002 |    126496 | -0.000 |    126451 | -0.002 | 0.520/0.498  |
 | Extreme positive  |     42906 | -0.006 |     42900 | -0.009 |     42898 | +0.001 |     42884 | +0.003 | 0.525/0.500  |
 
-Full per-cell counts, means, medians, and standard deviations for both
-periods are in =research-runs/mr-04/results.json= (gitignored,
-regenerable from this document's own recorded commit/config).
+Full per-*instrument* (not merely pooled) counts, means, medians,
+standard deviations, and fraction-toward-mean for every (pair, period,
+bucket, horizon) cell — 400 rows: 10 pairs x 2 periods x 5 buckets x 4
+horizons — are checked into
+=docs/research/mr-04-per-instrument-results.csv=, the durable record
+issue #281 asks for. (The full raw =analysis.Result= per pair,
+including every individual =Observation= and =ForwardReturn=, remains
+in =research-runs/mr-04/results.json=, gitignored and regenerable from
+this document's own recorded commit/config — the CSV is the durable,
+reviewable summary; the JSON is the disposable intermediate.)
 
 ** Cross-sectional consistency (per pair, extreme buckets only)
 
@@ -151,26 +158,35 @@ basket majority in every one of the eight extreme-positive cells (both
 periods, all four horizons) — continuation rather than reversion after
 an upside extreme.
 
-** Statistical magnitude (extreme-positive cell, both periods)
+** Signal-to-noise diagnostic (extreme-positive cell, both periods)
 
-A rough single-sample t-statistic (mean / (stddev / sqrt(n)), no
-multiple-comparisons correction) for the extreme-positive bucket,
-which produced this study's largest and most horizon-consistent
-effect:
+A simple mean / (stddev / sqrt(n)) ratio for the extreme-positive
+bucket, which produced this study's largest and most
+horizon-consistent effect, purely as a descriptive signal-to-noise
+diagnostic — *not* a hypothesis-test statistic. Overlapping horizon
+windows (a 12h forward return and a 24h forward return from adjacent
+observations share most of their underlying bars) and FX's own serial
+dependence both violate the independent-observations assumption a real
+t-test on this quantity would need, so no significance claim is drawn
+from these numbers; they are reported only as a relative sense of
+scale across horizons/periods, not a p-value proxy. A dependence-aware
+method (non-overlapping sampling, HAC/Newey-West standard errors, or a
+block bootstrap) would be required before this study's numbers could
+support an actual significance claim, and building that is out of
+scope for MR-04.
 
 | Period      | 4h    | 12h   | 24h   | 48h  |
 |-------------+-------+-------+-------+------|
 | Development |  -4.9 |  -8.6 |  -5.6 | -6.3 |
 | Holdout     |  -4.1 |  -4.3 |  +0.2 | +0.7 |
 
-Development shows a consistently significant negative drift at every
-horizon. Holdout shows a comparably significant negative drift at 4h
-and 12h, but the effect is statistically indistinguishable from zero
-— and nominally reverses sign — at 24h and 48h.
+Development's ratio stays large and negative at every horizon.
+Holdout's ratio is comparably large and negative at 4h and 12h, but
+shrinks to near zero — and nominally flips sign — at 24h and 48h.
 
 * Required Measurements
 
-** Does the effect strengthen with |Z|| (monotonicity)?
+** Does the effect strengthen with |Z| (monotonicity)?
 
 Inconsistently. On the positive-Z side, extreme deviations show a
 larger-magnitude subsequent negative return than moderate deviations
@@ -187,16 +203,23 @@ The one horizon-consistent, cross-sectionally broad effect found
 (extreme-positive short-horizon reversion) is present in both periods
 at 4h and 12h, but its magnitude is smaller in holdout, and it does
 not survive to 24h/48h in holdout — where development shows its
-*strongest* effect (largest magnitude, highest |t|). This is the
-opposite of what growing confidence in a real phenomenon would look
+*strongest* effect (largest magnitude, largest signal-to-noise ratio).
+This is the opposite of what growing confidence in a real phenomenon
+would look
 like: the holdout period does not confirm development's own strongest
 result.
 
 ** Asymmetry between positive and negative deviations
 
 Clear and consistent across both periods: downside (negative-Z)
-deviations show at most a weak, inconsistent, largely
-statistically-insignificant tendency to revert. Upside (positive-Z)
+deviations show a weaker, less horizon-consistent tendency to revert —
+the same signal-to-noise diagnostic applied to the extreme-negative
+cell ranges roughly +1.0 to +3.5 across the eight (period, horizon)
+combinations, versus the extreme-positive cell's -4.1 to -8.6, and
+unlike the positive side it does not decay toward zero in an orderly
+way from short to long horizons (development: 2.3, 3.2, 1.8, 1.0;
+holdout: 3.5, 0.4, -1.3, -0.0 — the sign even flips at the longer
+holdout horizons). Upside (positive-Z)
 deviations show a real, cross-sectionally broad (7-9 of 10 pairs),
 short-horizon (4h-12h) negative drift in both periods — the single
 most substantive finding of this study, though not one MR-01's
