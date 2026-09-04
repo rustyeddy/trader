@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyZScore(t *testing.T) {
@@ -51,6 +52,23 @@ func TestBucket_MarshalText(t *testing.T) {
 	text, err := BucketModerateNegative.MarshalText()
 	assert.NoError(t, err)
 	assert.Equal(t, "moderate_negative", string(text))
+}
+
+func TestBucket_UnmarshalText(t *testing.T) {
+	for _, want := range Buckets {
+		text, err := want.MarshalText()
+		require.NoError(t, err)
+
+		var got Bucket
+		require.NoError(t, got.UnmarshalText(text))
+		assert.Equal(t, want, got)
+	}
+}
+
+func TestBucket_UnmarshalText_RejectsUnknownLabel(t *testing.T) {
+	var b Bucket
+	err := b.UnmarshalText([]byte("not_a_real_bucket"))
+	assert.ErrorIs(t, err, ErrUnknownBucket)
 }
 
 func TestBuckets_CanonicalOrder(t *testing.T) {

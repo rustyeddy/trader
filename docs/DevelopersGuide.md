@@ -260,6 +260,8 @@ produces statistical evidence, never trading decisions:
 
 ```go
 result, err := analysis.RunEventStudy(bars, analysis.EventStudyConfig{
+    Instrument:   eurusd, // required provenance, not inferred from bars
+    Interval:     marketdata.H1,
     ZScorePeriod: 20,
     Horizons:     analysis.MR01Horizons(), // 4h/12h/24h/48h against H1 bars
 })
@@ -268,6 +270,13 @@ for _, s := range result.Stats {
     // s.StdDevReturn, s.FractionTowardMean
 }
 ```
+
+`Instrument` and `Interval` are required, validated fields, not mere
+documentation: an hour-labeled horizon (as `MR01Horizons` produces) is
+checked against `Interval` whenever `Interval` has a fixed,
+calendar-independent bar duration, so a "4h" horizon accidentally run
+against D1 or H4 bars fails fast instead of silently mislabeling the
+result's cadence.
 
 Each observation at bar index `i` is built from only `bars[0:i+1]`;
 later bars are used solely to label that observation's forward return

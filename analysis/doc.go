@@ -15,12 +15,26 @@
 //
 // analysis sits between marketdata/indicator and strategy in the
 // architecture document's dependency graph: it may depend on
-// marketdata (canonical bars) and indicator (ZScore), but must never
-// import strategy, broker, execution, risk, pipeline, backtest,
-// service, cmd, adapters, or journal — enforced mechanically by
-// boundary_test.go. analysis produces statistical observations, never
-// order intents: EventStudy reports what happened after a deviation,
-// it does not decide whether to trade one.
+// instrument (identity), marketdata (canonical bars), and indicator
+// (ZScore), but must never import strategy, broker, execution, risk,
+// pipeline, backtest, service, cmd, adapters, or journal — enforced
+// mechanically by boundary_test.go. analysis produces statistical
+// observations, never order intents: EventStudy reports what happened
+// after a deviation, it does not decide whether to trade one.
+//
+// # Provenance
+//
+// Issue #280's own acceptance criteria requires a Result to carry
+// enough provenance to reproduce the run: instrument, interval, span,
+// and parameters. EventStudyConfig.Instrument and .Interval are
+// required fields (validated, not merely documented), so a Result is
+// self-describing about what it was computed from — and, since an
+// hour-labeled Horizon like "4h" only means four hours at an actual
+// hourly cadence, EventStudyConfig.validate cross-checks such a
+// Horizon against Interval whenever Interval has a fixed,
+// calendar-independent bar duration, catching a mislabeled-cadence run
+// at construction rather than letting it silently mislead a reader of
+// the results.
 //
 // # No lookahead
 //

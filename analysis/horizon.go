@@ -8,11 +8,14 @@ import "fmt"
 // docs/research/mr-01-experiment-definition.org pins its four
 // horizons (4h, 12h, 24h, 48h) against H1 bars, where one bar equals
 // one hour, so a horizon's Bars count and its intended hour count
-// coincide. RunEventStudy itself is interval-agnostic — it only ever
-// advances Bars positions through whatever bar slice it is given — so
-// this coincidence is the caller's responsibility, not something
-// Horizon or RunEventStudy enforce. NewH1Horizon exists specifically
-// to make that assumption explicit at the call site rather than
+// coincide. RunEventStudy itself only ever advances Bars positions
+// through whatever bar slice it is given, regardless of the actual
+// bar cadence — but EventStudyConfig.validate checks an hour-labeled
+// Horizon (as NewH1Horizon produces) against EventStudyConfig.Interval
+// whenever Interval has a fixed, calendar-independent bar duration, so
+// an "Nh" horizon built assuming H1 bars cannot silently be run
+// against a different cadence undetected. NewH1Horizon exists to make
+// that assumption explicit and checkable at the call site rather than
 // leaving it implicit.
 type Horizon struct {
 	// Label is a short, stable, human- and machine-readable name for

@@ -1,19 +1,40 @@
 package analysis
 
 import (
+	"fmt"
 	"math"
+	"regexp"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/rustyeddy/trader/indicator"
+	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata"
 )
 
 // EventStudyConfig groups the pinned MR-01 parameters an event study
-// runs against. Every field here is a frozen research parameter (see
-// docs/research/mr-01-experiment-definition.org), not a value tuned by
-// this package.
+// runs against, plus the run provenance issue #280's acceptance
+// criteria requires (instrument, interval, span, parameters): a
+// Result must be self-describing enough that a caller cannot silently
+// mislabel which instrument or bar cadence it came from. Every field
+// here is a frozen research parameter (see
+// docs/research/mr-01-experiment-definition.org) or run identity, not
+// a value RunEventStudy itself tunes.
 type EventStudyConfig struct {
+	// Instrument identifies which instrument bars were sourced from.
+	// Required (must be non-zero) — RunEventStudy never inspects bars
+	// to infer instrument identity itself.
+	Instrument instrument.ID
+	// Interval is the bar cadence bars are in (for example
+	// marketdata.H1). Required (must be Valid()). RunEventStudy is
+	// itself interval-agnostic — it only ever advances Horizon.Bars
+	// positions through bars, whatever their actual cadence — but
+	// Interval is validated against any horizon whose Label claims an
+	// hour count (see validateHorizonLabel), so an hour-labeled
+	// horizon built for H1 bars cannot silently be run against a
+	// different cadence without detection.
+	Interval marketdata.Interval
 	// ZScorePeriod is N, the rolling window length (in bars) the
 	// underlying indicator.ZScore uses. MR-01 pins N = 20.
 	ZScorePeriod int
@@ -22,8 +43,18 @@ type EventStudyConfig struct {
 	Horizons []Horizon
 }
 
+// horizonHourLabel matches a Horizon.Label of the form "<N>h", the
+// shape NewH1Horizon/MR01Horizons produce.
+var horizonHourLabel = regexp.MustCompile(`^([0-9]+)h$`)
+
 // validate reports whether cfg is well-formed.
 func (cfg EventStudyConfig) validate() error {
+	if cfg.Instrument.IsZero() {
+		return ErrMissingInstrument
+	}
+	if !cfg.Interval.Valid() {
+		return ErrMissingInterval
+	}
 	if cfg.ZScorePeriod <= 0 {
 		return ErrInvalidZScorePeriod
 	}
@@ -34,6 +65,51 @@ func (cfg EventStudyConfig) validate() error {
 		if h.Bars <= 0 {
 			return ErrInvalidHorizon
 		}
+		if err := validateHorizonLabel(h, cfg.Interval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateHorizonLabel checks an hour-labeled Horizon (Label matching
+// "<N>h") against Interval when Interval has a fixed,
+// calendar-independent bar duration — UnitMinute or UnitHour. A
+// mismatch (for example a "4h" horizon whose Bars, at Interval's
+// actual per-bar duration, do not total 4 hours) is exactly the
+// silent-cadence-mislabeling bug this validation exists to catch —
+// see EventStudyConfig's own doc comment and issue #280's provenance
+// requirement.
+//
+// UnitDay and UnitWeek bars have calendar-dependent, non-fixed
+// duration (ADR-012, ADR-021: an FX daily bar spans 23h-25h across a
+// DST transition), so this check is deliberately narrow and does not
+// attempt to validate an hour label against them — nor does it check
+// a Label that does not claim an hour count at all.
+func validateHorizonLabel(h Horizon, interval marketdata.Interval) error {
+	m := horizonHourLabel.FindStringSubmatch(h.Label)
+	if m == nil {
+		return nil
+	}
+
+	var barHours float64
+	switch interval.Unit() {
+	case marketdata.UnitHour:
+		barHours = float64(interval.Count())
+	case marketdata.UnitMinute:
+		barHours = float64(interval.Count()) / 60
+	default:
+		return nil
+	}
+
+	claimedHours, err := strconv.Atoi(m[1])
+	if err != nil {
+		return nil // regexp already guarantees digits; unreachable.
+	}
+	gotHours := float64(h.Bars) * barHours
+	if gotHours != float64(claimedHours) {
+		return fmt.Errorf("%w: horizon %q claims %dh but %d bars at %s totals %vh",
+			ErrHorizonIntervalMismatch, h.Label, claimedHours, h.Bars, interval, gotHours)
 	}
 	return nil
 }
@@ -140,8 +216,11 @@ type Result struct {
 // only bars[0:i+1]. Bars after i are used only to compute that
 // observation's ForwardReturn at each configured Horizon — never to
 // influence the observation itself. Truncating bars after some index k
-// therefore leaves every Observation with Index <= k-max(Horizons)
-// unchanged (see TestRunEventStudy_ObservationsAreLookaheadFree).
+// therefore leaves every Observation with Index <= k-1 unchanged — Z
+// and Bucket do not depend on Horizons at all — though it does reduce
+// how many ForwardReturns those observations end up with, since a
+// horizon whose future bar was truncated away no longer has one to
+// measure (see TestRunEventStudy_ObservationsAreLookaheadFree).
 //
 // RunEventStudy returns an error if cfg is malformed. An empty or
 // too-short bars slice is not an error: it simply produces a Result
@@ -188,6 +267,18 @@ func RunEventStudy(bars []marketdata.Bar, cfg EventStudyConfig) (Result, error) 
 		}
 		result.Observations = append(result.Observations, obs)
 
+		// A zero observation close cannot label a meaningful forward
+		// return (it would divide by zero, producing +Inf/-Inf/NaN and
+		// poisoning every downstream statistic) — marketdata.Bar.Validate
+		// does not itself reject a zero Close, so this is a real,
+		// reachable input, not a hypothetical. Skip every horizon for
+		// this observation rather than fabricating a value; the
+		// observation itself (Z, Bucket) is unaffected and still
+		// recorded above.
+		if closePrice == 0 {
+			continue
+		}
+
 		for _, h := range cfg.Horizons {
 			future := i + h.Bars
 			if future >= len(closes) {
@@ -210,15 +301,19 @@ func RunEventStudy(bars []marketdata.Bar, cfg EventStudyConfig) (Result, error) 
 // BucketHorizonStats for every combination that has at least one
 // observation, in Buckets order then horizons order.
 func aggregate(frs []ForwardReturn, horizons []Horizon) []BucketHorizonStats {
+	// horizon is keyed by the full Horizon value (Label and Bars), not
+	// Label alone: two distinct horizons that happened to share a
+	// label (or both had an empty label) would otherwise be merged
+	// into one cell, silently combining unrelated forward returns.
 	type key struct {
 		bucket  Bucket
-		horizon string
+		horizon Horizon
 	}
 	groups := make(map[key][]float64)
 	zByGroup := make(map[key][]float64)
 
 	for _, fr := range frs {
-		k := key{bucket: fr.Observation.Bucket, horizon: fr.Horizon.Label}
+		k := key{bucket: fr.Observation.Bucket, horizon: fr.Horizon}
 		groups[k] = append(groups[k], fr.Return)
 		zByGroup[k] = append(zByGroup[k], fr.Observation.Z)
 	}
@@ -226,7 +321,7 @@ func aggregate(frs []ForwardReturn, horizons []Horizon) []BucketHorizonStats {
 	var stats []BucketHorizonStats
 	for _, bucket := range Buckets {
 		for _, h := range horizons {
-			k := key{bucket: bucket, horizon: h.Label}
+			k := key{bucket: bucket, horizon: h}
 			returns, ok := groups[k]
 			if !ok {
 				continue

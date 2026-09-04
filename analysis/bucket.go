@@ -47,6 +47,28 @@ func (b Bucket) MarshalText() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// UnmarshalText implements encoding.TextUnmarshaler, the inverse of
+// MarshalText, so a Bucket serialized by this package round-trips
+// through JSON/YAML unchanged. It returns ErrUnknownBucket for any
+// text other than one of String's five labels.
+func (b *Bucket) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "extreme_negative":
+		*b = BucketExtremeNegative
+	case "moderate_negative":
+		*b = BucketModerateNegative
+	case "neutral":
+		*b = BucketNeutral
+	case "moderate_positive":
+		*b = BucketModeratePositive
+	case "extreme_positive":
+		*b = BucketExtremePositive
+	default:
+		return ErrUnknownBucket
+	}
+	return nil
+}
+
 // Buckets lists every Bucket value in canonical, most-negative-first
 // order — the order results should be reported in.
 var Buckets = []Bucket{
