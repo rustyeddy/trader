@@ -36,7 +36,8 @@ fee, err := price.MulRate(num.MustParseRate("0.001"))
 Analytical code (indicators, statistics) that needs `float64` crosses through
 one sanctioned, direct conversion — `Price.Float64()` — never a
 serialize/reparse round-trip through decimal text; see
-[ADR-045](arch/adr-045-analytical-float64-conversion-boundary.org). See
+[ADR-045](arch/adr-045-analytical-float64-conversion-boundary.org). See the
+[package doc comment](../num/doc.go) and
 [ADR-004](arch/adr-004-exact-numeric-representation.org) for the full exact
 numeric design rationale.
 
@@ -76,7 +77,8 @@ c.Advance(10 * time.Second)
 deadline := <-timer.C() // ready immediately, no sleep
 ```
 
-See [ADR-015](arch/adr-015-deterministic-time-and-clock-abstraction.org)
+See the [package doc comment](../clock/doc.go) and
+[ADR-015](arch/adr-015-deterministic-time-and-clock-abstraction.org)
 for the full design rationale, including the precise equal-deadline
 ordering and UTC/monotonic-metadata guarantees.
 
