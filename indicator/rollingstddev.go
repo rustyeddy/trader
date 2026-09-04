@@ -51,5 +51,8 @@ func (r *RollingStdDev) Ready() bool {
 // 0, which is otherwise indistinguishable from a genuine zero-variance
 // window (every sample in the window identical).
 func (r *RollingStdDev) Value() float64 {
+	if !r.w.ready() {
+		return 0
+	}
 	return r.w.stddev()
 }

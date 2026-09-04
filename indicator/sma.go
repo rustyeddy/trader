@@ -56,5 +56,8 @@ func (s *SMA) Ready() bool {
 // only once Ready reports true; before then it returns 0, which is
 // otherwise indistinguishable from a genuine zero-valued average.
 func (s *SMA) Value() float64 {
+	if !s.w.ready() {
+		return 0
+	}
 	return s.w.mean
 }

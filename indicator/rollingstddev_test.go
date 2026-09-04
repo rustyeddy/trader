@@ -61,6 +61,19 @@ func TestRollingStdDev_RejectsNonFiniteSample(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNonFiniteSample)
 }
 
+func TestRollingStdDev_ValueIsZeroBeforeReady(t *testing.T) {
+	r, err := NewRollingStdDev(3)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0.0, r.Value())
+	require.NoError(t, r.Update(1))
+	require.NoError(t, r.Update(100))
+	assert.False(t, r.Ready())
+	// A partial window of [1,100] has substantial spread — confirm
+	// Value stays gated on Ready rather than exposing it.
+	assert.Equal(t, 0.0, r.Value())
+}
+
 func TestRollingStdDev_Period(t *testing.T) {
 	r, err := NewRollingStdDev(9)
 	require.NoError(t, err)

@@ -66,6 +66,20 @@ func TestSMA_RejectsNonFiniteSample(t *testing.T) {
 	assert.InDelta(t, 2.0, s.Value(), 1e-12)
 }
 
+func TestSMA_ValueIsZeroBeforeReady(t *testing.T) {
+	s, err := NewSMA(3)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0.0, s.Value())
+	require.NoError(t, s.Update(100))
+	assert.False(t, s.Ready())
+	// Partial-window mean would be 100, not 0 — confirm Value stays
+	// gated on Ready rather than exposing a partially-warmed average.
+	assert.Equal(t, 0.0, s.Value())
+	require.NoError(t, s.Update(100))
+	assert.Equal(t, 0.0, s.Value())
+}
+
 func TestSMA_Period(t *testing.T) {
 	s, err := NewSMA(7)
 	require.NoError(t, err)

@@ -97,12 +97,34 @@ func (w *window) ready() bool {
 // choice for a rolling/Bollinger-style indicator, which describes the
 // dispersion of the window's own contents rather than estimating a
 // wider population's variance from a sample of it.
+//
+// True variance can never be negative, but a long sliding replay
+// accumulates floating-point roundoff in m2 through remove's repeated
+// subtraction, which can in principle leave m2 very slightly negative
+// even though the window's real variance is (at or near) zero. Passing
+// that straight to stddev's math.Sqrt would produce NaN — exactly the
+// silent NaN/Inf issue #279 requires research code never emit — so a
+// negative m2 within roundoffEpsilon of zero is treated as zero. A
+// negative m2 beyond that tolerance is not roundoff; it indicates a
+// real accumulator bug, and is deliberately left unclamped so it
+// surfaces as a visible NaN rather than being silently masked.
 func (w *window) variance() float64 {
 	if w.n == 0 {
 		return 0
 	}
-	return w.m2 / float64(w.n)
+	m2 := w.m2
+	if m2 < 0 && m2 > -roundoffEpsilon {
+		m2 = 0
+	}
+	return m2 / float64(w.n)
 }
+
+// roundoffEpsilon bounds the magnitude of negative m2 treated as
+// floating-point roundoff rather than a real accumulator bug. It is
+// deliberately tiny relative to the scale of real FX price data (a
+// squared-deviation term near 1.0), leaving genuine bugs visible as
+// NaN rather than silently masked.
+const roundoffEpsilon = 1e-9
 
 func (w *window) stddev() float64 {
 	return math.Sqrt(w.variance())
