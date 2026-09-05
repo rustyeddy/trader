@@ -1,0 +1,169 @@
+#+TITLE: MR-08: Mean-Reversion Research Conclusion
+#+STARTUP: overview indent
+
+* Status
+
+Closes the "Mean Reversion Research" milestone (issue #285, MR-08).
+This document is a results/decision record, not a durable architecture
+decision — it carries no ADR number.
+
+* Chain of Evidence: MR-01 through MR-04
+
+| Issue | Title                                                        | Outcome |
+|-------+---------------------------------------------------------------+---------|
+| MR-01 (#278) | Freeze the experiment definition                        | Done — =docs/research/mr-01-experiment-definition.org= |
+| MR-02 (#279) | Build SMA/RollingStdDev/ZScore analytical primitives      | Done — merged, =indicator= package |
+| MR-03 (#280) | Build the Z-score forward-return event-study analyzer     | Done — merged, =analysis= package |
+| MR-04 (#281) | Run the baseline study and record evidence                | Done — =docs/research/mr-04-baseline-study-results.org=, classified *Weak / Inconclusive* |
+
+MR-05 through MR-07 (#282, #283, #284 — implement the minimal
+strategy, measure transaction-cost sensitivity, and test cross-pair/
+time-period robustness) were never executed. They are being closed
+without implementation, as a direct consequence of the decision this
+document records: MR-04's own result did not clear the bar those three
+issues assumed a baseline strategy would need to clear before it was
+worth building, cost-testing, and robustness-testing. Building MR-05
+would have meant implementing and optimizing a strategy against
+evidence MR-04 already showed does not reliably hold out of sample —
+exactly what MR-01's own non-goals and MR-04's own recommendation
+warned against.
+
+* Summary of MR-04's Findings
+
+Full detail, per-instrument data, and reproduction steps are in
+=docs/research/mr-04-baseline-study-results.org= and
+=docs/research/mr-04-per-instrument-results.csv=. Summarized here
+against MR-08's own required questions:
+
+** Did normalized price deviations exhibit measurable mean reversion?
+
+Asymmetrically and inconsistently, not the clean symmetric effect
+MR-01's hypothesis predicted:
+
+- *Negative-Z side (price below its rolling mean)*: no reliable
+  reversion in either period. Monotonicity failed outright — moderate
+  deviations frequently showed as large or larger a subsequent
+  return as extreme deviations, the opposite of what "stronger
+  reversion at greater deviation" predicts.
+- *Positive-Z side (price above its rolling mean)*: a real,
+  cross-sectionally broad (7-9 of 10 pairs) short-horizon (4h-12h)
+  negative-drift effect, monotonic within the development period
+  (extreme stronger than moderate).
+
+** Did the effect persist out of sample?
+
+Not reliably. The one effect worth naming (positive-Z, short-horizon)
+was present in both the 2015-2025 development period and the
+genuinely untouched 2005-2015 holdout period at 4h/12h, but its
+magnitude shrank in holdout, and it did not survive to 24h/48h in
+holdout — precisely where the development period showed its
+*strongest* result. A pattern strongest exactly where it was least
+tested and weakest exactly where it was genuinely out-of-sample is the
+signature of overfitting to already-explored data, not of a robust,
+persistent phenomenon.
+
+** Did a minimal strategy capture the effect without parameter tuning?
+
+Not tested — MR-05 was never built. This question does not apply: per
+MR-01's own explicit non-goal ("no trading-strategy implementation")
+and MR-04's own recommendation, no strategy was implemented against a
+phenomenon whose own baseline study had already returned
+Weak/Inconclusive.
+
+** Did realistic costs leave a usable edge?
+
+Not formally measured — MR-06 was never built, and no spread/slippage/
+fee model was ever applied to these returns (explicitly out of scope
+for MR-01 through MR-04). It is still worth recording the qualitative
+scale for context: the pooled mean forward returns MR-04 found ranged
+roughly 0.001%-0.024% per horizon. Typical realistic round-trip FX
+transaction costs (spread plus any commission) for the more liquid
+pairs in this basket are commonly quoted on a similar or larger order
+of magnitude for a single trade, before any consideration of slippage.
+This is a rough scale comparison, not a costed backtest, but it is
+consistent with — not a refutation of — MR-04's own conclusion that
+the phenomenon is too weak to build on.
+
+*Statistical edge vs. tradeable edge*, per MR-08's own required
+distinction:
+
+- *Statistical edge*: a real, descriptive signal-to-noise ratio was
+  observed on the positive-Z side at short horizons (roughly -4 to -9
+  on the simple mean/(stddev/sqrt(n)) diagnostic MR-04 used — itself
+  explicitly not a valid significance test, since overlapping horizons
+  and FX's serial dependence violate that test's independence
+  assumption). Even taken at face value, "distinguishable from pure
+  noise by a simple diagnostic" is the weakest of the three tiers.
+- *Tradeable pre-cost edge*: not established. The effect's own
+  magnitude is small enough, relative to plausible transaction costs,
+  that a costed backtest was not judged worth building — this is a
+  documented reason for not proceeding, not a claim that pre-cost
+  profitability was tested and failed.
+- *Tradeable post-cost edge*: not established, and not expected to be
+  positive given the pre-cost magnitude above; never formally tested.
+
+** Did behavior generalize across pairs and periods?
+
+Partially and unevenly. The positive-Z short-horizon effect was broad
+across the basket (7-9 of 10 pairs agreeing in sign), but one pair —
+USD/JPY — consistently ran in the *opposite* direction in every one of
+the eight extreme-positive (period x horizon) cells, plausibly related
+to JPY's own well-documented carry-trade/trend character. A basket-wide
+rule would need to either accept that one pair actively works against
+it or exclude it outright — itself evidence the phenomenon is not
+uniform across instruments.
+
+** Major failure modes observed
+
+- No reversion signal at all on the negative-Z side, in either period.
+- Monotonicity (stronger deviation -> stronger reversion) held on the
+  positive side in development but failed entirely on the negative
+  side in both periods.
+- The positive-side effect's strength was inversely related to how
+  genuinely out-of-sample the data was — strongest in the
+  already-explored period, weakest/reversed in the untouched holdout
+  at longer horizons. This is the clearest single failure mode: it is
+  the textbook shape of a result that reflects fitting to
+  already-examined data rather than a real, stable market phenomenon.
+- Persistent single-instrument asymmetry (USD/JPY) that a
+  basket-uniform rule cannot accommodate without an explicit exclusion.
+
+* Decision
+
+Per MR-08's own three-way decision framework:
+
+** Reject / move on.
+
+The baseline phenomenon is too weak, inconsistent, and
+out-of-sample-fragile to justify a second mean-reversion research
+phase on the current hypothesis. MR-05 (minimal strategy), MR-06
+(transaction-cost sensitivity), and MR-07 (cross-pair/period
+robustness) are closed without implementation as a direct consequence
+of this decision — closing them is not scope-cutting or abandonment,
+it is the correct response to MR-04's own evidence, exactly as MR-01's
+own "Not Supported/Weak is a successful research result; it does not
+trigger parameter optimization" principle requires.
+
+This is a *reject the current hypothesis* decision, not a *refine with
+exactly one new hypothesis* decision. MR-04 already named the one
+narrow candidate this study's own data suggests — a short-horizon
+(4h-12h), upside-only (positive-Z), ex-JPY variant — and deliberately
+did not schedule it as follow-on work, per MR-01/MR-04's shared
+discipline against tuning the scope after seeing results. This
+document does not change that: the candidate remains documented, not
+scheduled. If it is pursued later, it must begin as its own new,
+separately specified hypothesis and experiment definition, following
+MR-01's own template (frozen parameters, predeclared buckets/horizons,
+an honest development/holdout split, explicit non-goals) — not as a
+continuation or re-opening of MR-01 through MR-04's already-closed
+scope.
+
+* What Closes With This Issue
+
+- MR-05 (#282), MR-06 (#283), MR-07 (#284): closed with a comment
+  referencing this document and the Reject/move on decision above —
+  not implemented, and not carried over in modified form.
+- MR-08 (#285): closed by this document providing the durable
+  research report and explicit decision its own acceptance criteria
+  requires.
+- The "Mean Reversion Research" milestone is complete.
