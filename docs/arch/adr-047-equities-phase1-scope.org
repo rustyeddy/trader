@@ -1,0 +1,294 @@
+#+TITLE: Equities Phase 1 Domain Semantics and Scope ADR-047
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #294 (EQ-01) asks for the architectural and product
+boundary of Trader's first equities support to be settled before any
+provider-specific implementation begins, the same
+design-notes-then-review pattern issue #209 (M5-01) used for ADR-035
+ahead of M5.
+
+* Context
+
+Trader's domain model was designed asset-neutral from the start
+(architecture document, ADR-003), and a survey of the current
+codebase confirms most of that promise already holds for equities
+without change:
+
+- =instrument.NewEquity=/=NewETF= (=instrument/instrument.go=) are
+  fully implemented, not stubs — exchange+ticker identity, normalized
+  and validated, with =EquityID=/=ETFID= giving each Kind its own
+  namespace so an ETF can never collide with an equity of the same
+  exchange/ticker (ADR-003, already =Accepted=, already explicitly
+  provisional about this identity choice — this document does not
+  reopen that).
+- =instrument.Spec= (tick size, quantity increment, multiplier,
+  settlement currency) is already fully generic: its own doc comment
+  already documents "instruments with no meaningful contract
+  multiplier, such as equities and currency pairs, pass
+  =num.MustParseRate("1")=." Nothing FX-specific is baked in.
+- =num= (Price/Quantity/Money/Rate/Currency) is asset-class-agnostic
+  by construction, and =test/internal/numericstudy='s own
+  representative asset matrix (issue #33) already includes SPY
+  (~$700), BRK.A (~$750,000, "sets the practical range floor"), and a
+  sub-penny equity case specifically to prove the chosen fixed-point
+  scale already covers equity price ranges. This is a validation
+  fixture, not production equity-awareness, but it means no =num=
+  change is anticipated.
+- =order.Side= (Buy/Sell) is a plain transaction direction, and
+  =order.PositionSide= (Flat/Long/Short) already represents a short
+  position structurally, independent of Side. =account.Snapshot=
+  already exposes =MarginUsed=/=MarginAvailable=/=BuyingPower=, and
+  =risk.MaxPositionLeverageRule= already computes required margin from
+  notional and a leverage limit. None of this is FX-specific in its
+  types.
+- =marketdata.Calendar= is already an interface, not a concrete type,
+  specifically because its own doc comment anticipates "exchange-traded
+  asset classes will eventually need session, holiday, and early-close
+  calendars of their own" — =FXCalendar= is its only implementation
+  today, but =marketdata.Config.Calendar= is already an optional,
+  injectable field, not hardcoded inside =Manager=.
+
+Two real gaps exist, and this document's central purpose is deciding
+how Phase 1 addresses them without building a parallel
+equities-specific architecture:
+
+1. *=marketdata.Manager= is not actually provider-generic today*,
+   despite =Config.ProviderName= existing as a field. Every real
+   operation (=coverage.go=, =plan.go=, =sync.go=,
+   =build_normalize.go=) calls the =oanda= internal package's types
+   and functions directly by name — =oanda.Inspect=,
+   =oanda.Partition=, =oanda.ReadPartitionRecords=,
+   =normalizeOANDARecord(rec oanda.Record)=, and so on — and
+   =Manager= holds a concrete =oandaClient *oanda.Client= field
+   constructed directly from =Config.OANDACredential=/
+   =Config.OANDABaseURL=. =ProviderName= today is only an opaque
+   label stamped into the resolver call and the manifest/partition
+   keys; it selects nothing. =docs/arch/adr-020-historic-data.org=
+   already states the intended policy — a consumer selects a provider
+   "only by an opaque logical name... never a provider interface,
+   concrete provider type, credentials model, transport, or
+   construction mechanism" — but the code does not yet honor that
+   for anything beyond the label string, because only one provider has
+   ever existed to test it against.
+2. *=AdjustmentMode= does not exist anywhere in the codebase.* The
+   architecture document sketches it (Raw/SplitAdjusted/
+   TotalReturnAdjusted/BackAdjusted, selected at query time and
+   recorded in the run manifest, never destructively replacing source
+   data), but no type, field, or logic implementing any part of that
+   sketch has been built. FX never needed it; equities do, because of
+   stock splits.
+
+The initial reference dataset is already on disk:
+=/srv/trading/data/raw/stooq/spy_us_d.csv= (2005-02-25 through
+2026-09-04, 5,415 daily rows, columns
+=Date,Open,High,Low,Close,Volume=, no adjusted-close column) and a
+QQQ file with the same schema back to 1999. This is native Stooq
+format — plain OHLCV, comma-delimited, =YYYY-MM-DD= dates — nothing
+like OANDA's bid/ask raw schema.
+
+* Decision
+
+** Instrument identity: reuse as-is
+
+=instrument.KindEquity=/=KindETF=, exchange+ticker identity, and
+=instrument.Spec= require no change for Phase 1. A Phase 1
+=instrument.Resolver= registration for SPY/AAPL/QQQ on a =NYSE=/
+=NASDAQ= exchange string and a =stooq=/=alpaca= provider/venue is
+implementation, not design — the existing =MemoryResolver=
+(=ResolveSymbol=/=ResolveInstrument=, ADR-016) already handles it.
+
+** Provider boundary: introduce a real internal provider seam now, not a second hardcoded branch
+
+=Manager='s direct, hardcoded coupling to =oanda.*= throughout
+=coverage.go=/=plan.go=/=sync.go=/=build_normalize.go= is real,
+pre-existing technical debt, not a Phase 1 invention. Phase 1 forces a
+decision on it because it plans two new providers in sequence (Stooq,
+then Alpaca), not one: writing a second hardcoded
+=if m.providerName == "stooq" { ... } else { ... oanda ... }= branch
+through every one of those files would create the exact multi-way
+branching ADR-020's "opaque provider name" policy was written to
+prevent, and would only get worse when Alpaca is added on top.
+
+This document decides that implementing Stooq is the point at which a
+genuine internal provider abstraction (acquisition + raw-inventory
+inspection + raw-to-canonical normalization, scoped to
+=marketdata/internal/= exactly like =oanda= is today) replaces the
+direct =oanda.*= call sites inside =Manager=, with =oanda= itself
+becoming the first implementation behind that seam rather than a
+special case in front of it. This is additive to ADR-020, not a
+reopening of it: ADR-020 already decided providers are internal and
+opaque to consumers; this document decides *when* that promise starts
+being mechanically true inside =Manager= rather than only in the
+public =BarQuery=/=Manager= surface.
+
+The exact interface shape (what a provider must implement for
+inventory inspection, acquisition, and OHLCV-vs-bid/ask normalization)
+is deliberately left to the implementing issue, not fixed here — the
+one hard constraint this document does fix is that a Stooq provider
+must not require =oanda='s bid/ask-specific fields
+(=spreadSummary=-style logic has no equivalent for single-price OHLCV
+data) to be threaded through a shared normalization path that assumes
+they exist.
+
+** Canonical bars carry no meaningful spread for equity data
+
+Stooq (and, for historical bars, Alpaca) supply single-price OHLCV,
+not bid/ask. Canonical =marketdata.Bar.AvgSpread=/=MaxSpread= will be
+the zero =num.Price= for every equity-sourced bar. This must not be
+silently read downstream as "confirmed zero spread" — any FX-era fill/
+slippage model that was tuned assuming populated spread data must not
+be pointed at equity bars without review. Building an equity-specific
+slippage/spread model is explicitly deferred; Phase 1's target is
+correct representation and backtesting, not execution-quality
+modeling.
+
+** Trading calendar: a new, daily-only equity Calendar; intraday deferred
+
+Phase 1's reference dataset is exclusively daily (Stooq has no
+intraday history), so the equity =Calendar= this document scopes needs
+only =Status= and D1 =Session=/=Bar= correctness — U.S. market
+holidays and regular NYSE/NASDAQ trading days, in =America/New_York=
+civil time, the same =time.Date=-in-=*time.Location=- DST-correctness
+approach =FXCalendar= already established (ADR-012). Early closes
+(half days) only matter for intraday bar boundaries and are
+deliberately out of scope until Alpaca's intraday data motivates a
+real intraday equity calendar — a D1 bar's boundary is the same
+trading day regardless of an early close within it. This calendar is
+a new, second =Calendar= implementation, not a change to =FXCalendar=
+or the =Calendar= interface itself, which already generalizes
+correctly (see Context).
+
+** Corporate actions and price adjustment: provenance now, selectable adjustment later
+
+Implementing the architecture document's full =AdjustmentMode= sketch
+(four modes, query-time selection, run-manifest recording) is
+explicitly out of scope for Phase 1 — issue #294's own non-goals
+exclude "full corporate-action event processing." Building that
+machinery now, before a second real adjustment-aware provider or a
+concrete consumer exists, would be exactly the kind of speculative
+generality this codebase has consistently avoided elsewhere (compare
+ADR-035's own "portfolio deferred" and "synthetic instruments deferred"
+precedents).
+
+Phase 1's minimum obligation is honesty, not adjustment: canonical
+equity bars are stored exactly as the source provider delivers them,
+and the run/build manifest records which provider and convention
+produced them (the same provenance discipline ADR-020 already applies
+to raw OANDA partitions). Whether Stooq's own SPY/QQQ daily closes are
+already split-adjusted, dividend-adjusted, both, or neither is *not
+yet verified* — the raw CSV carries no adjusted-close column at all,
+so this must be checked (against Stooq's own documented convention,
+or by finding a known historical split and inspecting the data around
+it) before AAPL is relied on as the split-exercising instrument #294
+itself proposes. If Stooq's data turns out to already be
+split-adjusted in place, AAPL is usable for Phase 1's "exercise a
+split" goal without any adjustment code being written at all; if it
+is raw, that goal is deferred until real adjustment logic exists.
+Either way, no =AdjustmentMode= type is introduced by Phase 1 — a
+single implicit "whatever the provider gave us" convention, recorded
+in the manifest, is sufficient until a second differently-adjusted
+source or a real multi-mode consumer exists.
+
+** Quantity and price semantics
+
+Equity =Spec= defaults to whole-share quantities (=QuantityIncrement=
+of =1=) and cent tick size (=TickSize= =0.01=) for Phase 1 — matching
+every US equity/ETF this phase targets. Fractional-share trading
+(an increment below 1, an Alpaca-specific capability) is not needed
+by anything in Phase 1's target (SPY/QQQ/AAPL backtesting and paper
+trading round-lot orders) and is deferred rather than built
+speculatively. No lot-size concept (in the futures-contract sense) is
+needed for equities.
+
+** Short-selling and margin: already representable, no new domain types
+
+=order.PositionSide.Short= and the existing =account=/=risk= margin
+primitives (=MarginUsed=, =MarginAvailable=, =BuyingPower=,
+=MaxPositionLeverageRule=) already model what Phase 1 needs at the
+domain level. Concrete equity margin *policy* (Reg-T initial/
+maintenance requirements, pattern-day-trader rules) is broker-adapter
+behavior, not a domain-model gap, and belongs to whichever future
+issue actually implements the Alpaca broker adapter — it is not
+addressed by this document and is not required for the offline
+Stooq-only backtesting path Phase 1 starts with.
+
+** Paper trading via Alpaca: no anticipated domain changes
+
+=broker.Broker=/=broker.Account= are already asset-neutral ports (per
+the architecture document and ADR-007/ADR-008). An
+=adapters/broker/alpaca= package is new adapter-layer work, added
+after the offline Stooq ingestion/canonicalization/backtesting path is
+proven, exactly as issue #294 itself sequences it. No change to the
+broker port or any domain package is anticipated to support it.
+
+** What stays unchanged
+
+=instrument= (identity/=Spec=/=Resolver=), =num= (exact numeric
+types), =order=/=execution=/=risk=/=broker=/=account=/=portfolio=
+(ports and value types), and =backtest=/=report=/=journal= are all
+already asset-neutral and require no Phase 1 change. Phase 1 does not
+introduce an equities-specific backtester, strategy API, or market
+data manager, per issue #294's own acceptance criteria — every new
+piece of code this phase adds is either an internal =marketdata=
+provider/calendar implementation or adapter-layer broker work, never
+a second copy of an already-generic package.
+
+* Consequences
+
+- The Stooq provider implementation issue inherits a real design
+  obligation this document creates: introduce the internal provider
+  seam (acquisition/inventory/normalization) as part of adding Stooq,
+  not after, and migrate =oanda= behind it rather than leaving two
+  divergent code shapes (one seam-based, one hardcoded) side by side.
+- A new =NYSECalendar= (or equivalently named) =Calendar=
+  implementation is needed before Phase 1's D1 backtests can run
+  against real session boundaries; =FXCalendar= is not reused or
+  extended for this.
+- No =AdjustmentMode= type exists after Phase 1 either — this remains
+  a deliberate, named gap for a future phase (or an Alpaca-driven
+  corporate-actions issue) once a concrete need (a second
+  differently-adjusted provider, or a strategy that needs to select
+  raw vs. adjusted) actually exists.
+- Equity bars' zero =AvgSpread=/=MaxSpread= is a known, documented
+  limitation that must be called out explicitly in any Phase 1
+  backtest/report output that surfaces spread-derived figures, so it
+  is not mistaken for a measured zero.
+- Whether AAPL can serve as Phase 1's split-exercising instrument is
+  contingent on verifying Stooq's own adjustment convention — an
+  open item for the implementing issue, not resolved by this document.
+
+* Alternatives Considered
+
+- *Add Stooq as a second hardcoded branch inside Manager's existing
+  oanda-coupled files, deferring a real provider seam until Alpaca
+  forces the issue.* Rejected: Phase 1 already names Alpaca as its
+  second provider in the same milestone, so deferring the seam would
+  guarantee doing this exact refactor twice, once under more
+  time-pressure than now.
+- *Design and implement the full architecture-document AdjustmentMode
+  sketch as part of Phase 1's scope document, since equities are the
+  first asset class that actually needs it.* Rejected: no concrete
+  consumer needs more than "record what the provider gave us" yet, and
+  ADR-020's own raw-provenance discipline already covers the honesty
+  requirement without inventing selectable-adjustment machinery against
+  a single data source.
+- *Build an intraday-aware equity Calendar (early closes, session
+  open/close times) now, anticipating Alpaca's intraday data.*
+  Rejected: Stooq (Phase 1's only data source so far) is daily-only, so
+  an intraday calendar would be exercised by nothing; the D1-only scope
+  is sufficient and avoids speculative generality, consistent with this
+  codebase's established restraint elsewhere (ADR-035's portfolio/
+  synthetic-instrument deferrals).
+- *Model fractional-share quantity increments now, since Alpaca
+  supports them.* Rejected: nothing in Phase 1's actual target (SPY/
+  QQQ/AAPL whole-share backtesting and paper trading) needs it; whole
+  shares are the correct default until a concrete fractional-share use
+  case exists.
+- *Treat AAPL's split history as Phase 1's proof that adjustment
+  handling works, without first checking whether Stooq's own data is
+  already adjusted.* Rejected: asserting either way without checking
+  would either quietly build unneeded adjustment code or quietly ship
+  wrong split-era prices; the implementing issue must verify this
+  first, not assume it.
