@@ -154,6 +154,7 @@ the original decided, use full supersession instead.
 | 044 | Strategy decision evidence (in adr-044-strategy-decision-evidence.org) | Accepted |
 | 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
 | 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Accepted |
+| 047 | Equities Phase 1 domain semantics and scope (in adr-047-equities-phase1-scope.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -471,6 +472,22 @@ rather than ldflags, and Cobra's built-in =--version= flag — without
 resolving ADR-011's own still-open items, which is why ADR-011 keeps
 its =Proposed= status rather than being marked =Accepted= by this
 work.
+
+Note: ADR-047 is likewise maintained in its own file,
+=docs/arch/adr-047-equities-phase1-scope.org=, rather than inline in
+this registry. Its own Status section is authoritative. Issue #294
+(EQ-01) asks for the architectural and product boundary of Trader's
+first equities support to be settled before provider-specific
+implementation begins; this ADR records that most of the domain model
+(instrument identity, =Spec=, =num=, order/position/margin types) was
+already asset-neutral and needs no change, identifies the two real
+gaps (=Manager='s hardcoded, non-generic coupling to the =oanda=
+internal package, and the complete absence of any =AdjustmentMode=
+implementation), and decides Phase 1's response to each: introduce a
+genuine internal provider seam when Stooq is implemented rather than a
+second hardcoded branch, and record adjustment provenance only
+(deferring the architecture document's full selectable-=AdjustmentMode=
+sketch) until a concrete need for it exists.
 
 * ADR-001: Modular monolith before service decomposition
 
