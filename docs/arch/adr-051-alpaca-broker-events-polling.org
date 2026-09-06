@@ -1,0 +1,159 @@
+#+title: ADR-051: Alpaca paper broker adapter: REST-polling Account.Events for Phase 1
+#+startup: overview
+
+* Status
+
+Accepted
+
+* Context
+
+Issue #301 (EQ-08) asks for the minimum Alpaca paper =broker.Broker=/
+=broker.Account= adapter needed for Phase 1 — the first equity
+brokerage implementation using Trader's existing broker/account/order
+abstractions (=docs/arch/adr-007-broker-account-handle.org=,
+=docs/arch/adr-017-order-execution-vocabulary.org=,
+=docs/arch/adr-018-order-lifecycle-transitions.org=,
+=docs/arch/adr-024-broker-events.org=). Every other required method —
+=Reference=, =Snapshot=, =Submit=, =Cancel=, =Replace= — has an
+obvious, direct translation against Alpaca's REST Trading API.
+=Account.Events= does not: Alpaca offers a real-time order-update
+websocket (=wss://paper-api.alpaca.markets/stream=), but nothing in
+this codebase has a streaming client of any kind yet, and building one
+(reconnect/backoff, an authentication handshake carried over the
+socket itself, message framing) is materially more design and
+implementation work than issue #301's own "start with the smallest
+order-type set required for the end-to-end Phase 1 smoke test"
+instruction calls for. This is the first =Account.Events=
+implementation against a real, non-simulated broker in this codebase —
+=adapters/broker/sim= is the only existing implementation, and it
+needs no network client at all, since it is the event producer itself.
+
+The only existing precedent for "acquire real broker state without a
+persistent connection" is REST polling, matching how
+=marketdata.Manager='s own historical acquisition works. LIVE-01 (#311,
+open) is the natural home for a first real streaming market/event
+consumer in this codebase; no code anywhere currently depends on
+sub-second event latency from a broker adapter.
+
+* Decision
+
+=alpaca.accountHandle.Events= returns a REST-polling
+=broker.EventReader= (=event_reader.go=). It:
+
+1. Delivers whatever its account's shared =correlator= (a small,
+   in-memory, per-account log — this adapter's counterpart to
+   =adapters/broker/sim.accountState='s own event log) already has
+   buffered above the caller's cursor.
+2. Once caught up, calls =GET /v2/orders?status=all= (Alpaca's real,
+   documented endpoint) and diffs every returned order's (status,
+   filled quantity) against what the correlator last observed for that
+   Alpaca order id, synthesizing an =EventKindOrder= event for any
+   change and an =EventKindFill= event for any filled-quantity
+   increase.
+3. Blocks between polls on whichever of three things happens first:
+   the correlator's =changed= signal (another call — =Submit=,
+   =Cancel=, =Replace= — against the same account observed something
+   first), the caller's own context, or a configurable poll interval
+   (=Deps.PollInterval=, default 2s) — never busy-polling.
+
+This adapter, like =sim=, is the sole authority for =Sequence=
+assignment on its own account's stream (ADR-024): Alpaca reports no
+concept resembling it. =Sequence= is owned by the account's shared
+=correlator=, not by any one =eventReader= instance, so two readers
+opened against the same account (or a =Submit= call recording its own
+synchronous accept event) share one strictly-increasing, gap-free
+sequence — the same "scoped to one Account's stream" contract
+=adapters/broker/sim= already establishes. This state is entirely
+in-memory and does not survive a process restart; that limitation is
+identical to =sim='s own, and reconciling a stream that appears to
+have skipped a range of =Sequence= values remains, per ADR-024's own
+scope, a live-session concern (ADR-009) this adapter does not attempt
+to solve.
+
+=EventKindAccount= (balance/margin/PnL changes) and =EventKindStatus=
+(session health) are not emitted by this polling reader: every
+order/fill event already lets a consumer re-=Snapshot= for current
+balances, Alpaca has no lightweight incremental "balance changed"
+endpoint to poll cheaply, and there is no persistent connection in
+Phase 1 whose health =EventKindStatus= would report on.
+
+** Consequence: an approximated synthesized fill price
+
+Alpaca's order-list response reports only a cumulative
+=filled_avg_price= per order, not a per-execution price — there is no
+lightweight per-fill endpoint this adapter polls. =emitFillIfIncreased=
+therefore uses that cumulative average as the price for the
+newly-observed filled-quantity increment. This is exact when an order
+fills via exactly one execution — the ordinary case for a small
+paper-trading market order, and what EQ-09's end-to-end smoke test
+exercises — and only an approximation for an order that fills across
+several partial executions observed between two polls.
+=order.NewFill='s own tick-size validation may reject such an
+approximated, non-tick-aligned average price on a rare multi-fill case;
+=Next= surfaces that as an error rather than silently dropping the
+fill, matching this package's "never silently discard a critical
+event" discipline (the architecture document's concurrency-ownership
+rules). Deriving true per-execution fills from Alpaca's
+activities/fills endpoint is a documented, deferred improvement, not
+solved here.
+
+** Consequence: a synthesized, non-correlating PendingCommandID
+
+=order.NewOrder= requires a non-zero =PendingCommandID= whenever
+=Status= is =StatusPendingCancel= or =StatusPendingReplace=
+(ADR-018) — the =EventID= of whichever =CancelRequest=/=ReplaceRequest=
+put the order in that state. Alpaca's wire order carries no such
+identity at all, and a pending cancel/replace this adapter observes
+(through =Snapshot= or the polling =EventReader=) is not guaranteed to
+be one this process itself issued — an operator could cancel an order
+directly through Alpaca's own dashboard. =wireOrderToOrder= therefore
+synthesizes a fresh, adapter-local =EventID= purely to satisfy
+=order.Order='s structural invariant when translating such a wire
+order; it correlates to nothing real and must not be treated as
+identifying an actual command. This is a narrow, explicitly documented
+limitation of translating externally-observed state into a vocabulary
+designed around commands this process itself issues, not a general
+weakening of ADR-018's own correlation guarantee for commands =Cancel=/
+=Replace= issue directly.
+
+* Consequences
+
+- =Account.Events= behaves correctly for Phase 1's own scope (a
+  smoke-test-scale number of orders, EQ-09) without the cost of a
+  websocket client.
+- Event latency is bounded by =Deps.PollInterval=, not sub-second —
+  acceptable for paper-trading validation, not for latency-sensitive
+  live use. A future streaming implementation is purely additive: it
+  would replace this file's internals behind the same
+  =broker.EventReader= contract, changing no caller.
+- =GET /v2/orders?status=all= is re-fetched in full on every poll that
+  finds nothing already buffered, rather than tracked incrementally
+  from a wall-clock baseline — =O(open-account-orders)= work per poll,
+  an acceptable, explicitly documented Phase 1 tradeoff given paper
+  trading's small order counts.
+- A future live (non-paper) Alpaca account, or any workload issuing
+  many orders per minute, should reassess this tradeoff before reuse;
+  neither is in scope for Phase 1.
+
+* Alternatives Considered
+
+- *Build the websocket streaming client now.* More correct long-term,
+  but substantially more work (reconnect/backoff, an in-band auth
+  handshake, message framing) for a first Alpaca-specific streaming
+  client, when LIVE-01 (#311) already plans a general canonical
+  streaming capability this codebase currently has none of at all.
+  Rejected as expanding EQ-08's scope well beyond "the smallest adapter
+  behavior needed for the end-to-end Phase 1 smoke test."
+- *Track a wall-clock polling baseline (Alpaca's own =after= query
+  parameter) instead of re-listing every order each poll.* Considered
+  as the more scalable long-term approach. Rejected for Phase 1 as
+  premature optimization: paper-trading order counts are small enough
+  that the simpler, harder-to-get-wrong "list everything, diff against
+  last-observed state" approach is preferable, and switching later is
+  a private, internal change to =poll= with no contract impact.
+- *Require every synthesized event to carry a real, correlating
+  identity, refusing to translate a pending cancel/replace this
+  process didn't itself issue.* Rejected: it would make =Snapshot= and
+  the polling reader unable to represent legitimate broker-observed
+  state (an order canceled through Alpaca's own UI), which is strictly
+  worse than a documented, narrow synthesized-identity limitation.
