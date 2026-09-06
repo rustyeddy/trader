@@ -84,8 +84,18 @@ func TestService_Run_SPYEquityBacktest(t *testing.T) {
 
 	// PnL/equity is denominated in SPY's own settlement currency (USD)
 	// throughout — nothing in the pipeline hardcodes EUR/USD's own
-	// quote currency.
+	// quote currency. This is also the exact-arithmetic proof issue
+	// #300's own acceptance criterion asks for ("PnL and position
+	// quantities are correct"), not merely a currency/denomination
+	// check: the position is marked at the second (and last) bar's
+	// Close ($285.34), $5.00/share above the $280.34 fill price, so
+	// 100 shares produces exactly $500 unrealized profit and $10,500
+	// equity from $10,000 starting capital — hand-checked, not just
+	// asserted against the implementation's own output.
 	assert.Equal(t, "USD", resp.Account.Equity().Currency().String())
+	assert.Equal(t, "10500 USD", resp.Account.Equity().String())
+	assert.Equal(t, "0 USD", resp.Account.RealizedPnL().String())
+	assert.Equal(t, "500 USD", resp.Account.UnrealizedPnL().String())
 	require.NotEmpty(t, resp.EquityCurve)
 }
 
@@ -234,10 +244,11 @@ func (simEquityEnvironmentFactory) NewEnvironment(ctx context.Context, req svcba
 		return svcbacktest.Environment{}, err
 	}
 
+	prices := spyFixedPriceSource{"SPY": num.MustParsePrice("280.34")}
 	b, err := sim.NewBroker("sim", sim.Deps{
 		Clock:  c,
 		IDs:    ids,
-		Prices: spyFixedPriceSource{"SPY": num.MustParsePrice("280.34")},
+		Prices: prices,
 	}, sim.AccountConfig{AccountID: accountID, StartingCash: req.StartingCapital})
 	if err != nil {
 		return svcbacktest.Environment{}, err
@@ -267,7 +278,17 @@ func (simEquityEnvironmentFactory) NewEnvironment(ctx context.Context, req svcba
 		return svcbacktest.Environment{}, err
 	}
 
-	fill, err := backtest.NewComponentInfo("bar-close", "v1", nil)
+	// FillModel is derived from the sim.Deps.Prices source actually
+	// configured above, not a hardcoded label unrelated to what ran —
+	// Deps.Prices is spyFixedPriceSource, not a real bar-close model,
+	// so the manifest must say so (Copilot's and Rusty's PR #309
+	// review). Deps.Commission is left nil (no commission model
+	// configured), so CommissionModel records "none", the same
+	// convention SlippageModel already uses for "not configured" —
+	// claiming "fixed" here would describe a commission model that
+	// never actually ran.
+	priceInfo := prices.Info()
+	fill, err := backtest.NewComponentInfo(priceInfo.Name, priceInfo.Version, nil)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
@@ -275,7 +296,7 @@ func (simEquityEnvironmentFactory) NewEnvironment(ctx context.Context, req svcba
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
-	commission, err := backtest.NewComponentInfo("fixed", "v1", nil)
+	commission, err := backtest.NewComponentInfo("none", "", nil)
 	if err != nil {
 		return svcbacktest.Environment{}, err
 	}
