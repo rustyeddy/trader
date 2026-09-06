@@ -50,10 +50,14 @@ func (s PartitionStatus) String() string {
 // Partition is one inspected monthly raw partition file — stooq.Partition's
 // own counterpart. LastComplete is always true when Status is
 // PartitionStatusOK and RowCount > 0: every Record this package's
-// client writes already represents a fully closed trading day (see the
-// package doc comment's Phase 1 simplification note — a still-forming
-// "today" bar is not a case Phase 1's historical-backfill use actually
-// exercises).
+// client writes already represents a fully closed trading day. This is
+// not merely an assumption about what Phase 1 happens to exercise — the
+// caller (marketdata.Manager.Sync's syncOneAlpaca) actively excludes the
+// current, still-forming trading day from every fetch range until
+// USEquityCalendar.RegularSessionEnd reports that day's regular session
+// (including a configured half day) has actually closed, so a
+// provisional/incomplete bar is never fetched or written in the first
+// place (PR #312 review).
 type Partition struct {
 	Symbol string
 	Year   int

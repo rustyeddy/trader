@@ -550,8 +550,9 @@ unconditionally, with OANDA's own behavior left byte-for-byte
 unchanged), a two-secret =alpaca.CredentialProvider= distinct from
 OANDA's single bearer token, reuse of =USEquityCalendar= and the
 existing =AdjustmentSplitAdjusted= policy value, a timestamp
-re-anchoring step correcting Alpaca's assumed session-open UTC
-timestamps to =USEquityCalendar='s midnight-UTC D1 boundary, an
+re-anchoring step correcting Alpaca's assumed midnight-America/New_York
+timestamps (expressed in UTC) to =USEquityCalendar='s midnight-UTC D1
+boundary, an
 explicitly and prominently flagged unverified assumption about
 Alpaca's real wire shape (isolated to one file, =wireshape.go=), and
 a new =alpacasmoke= build-tag-gated opt-in smoke test using local,
