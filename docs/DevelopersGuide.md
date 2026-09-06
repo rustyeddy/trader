@@ -184,11 +184,15 @@ access point for canonical bars/quotes/trades, acquisition from provider
 raw archives, canonical storage, and coverage tracking. `Manager` is the
 only exported entry point — providers, storage, and normalization live
 under `marketdata/internal/` and are unreachable from outside the package.
-Two internal providers exist today: `oanda` (FX, bid/ask, a live sync
-client) and `stooq` (equities, single-price OHLCV, an offline CSV
-importer — issue #303, ADR-047), dispatched internally by
-`Config.ProviderName`; `Manager`'s own public surface never differs
-between them.
+Three internal providers exist today: `oanda` (FX, bid/ask, a live sync
+client), `stooq` (equities, single-price OHLCV, an offline CSV
+importer — issue #303, ADR-047), and `alpaca` (equities, single-price
+OHLCV, a live sync client — issue #297, ADR-050), dispatched internally
+by `Config.ProviderName`; `Manager`'s own public surface never differs
+between them. Alpaca's response shape is an unverified design
+assumption (isolated to one file,
+`marketdata/internal/provider/alpaca/wireshape.go`) since this
+environment had no network access to confirm it — see ADR-050.
 
 ```go
 mgr, err := marketdata.New(marketdata.Config{
@@ -230,8 +234,9 @@ exists. What *is* implemented is `marketdata.AdjustmentPolicy`, a
 narrower, recorded-not-selected concept: every canonical `Manifest`
 names the one adjustment convention its source actually delivered —
 `AdjustmentNotApplicable` for FX, `AdjustmentSplitAdjusted` for Stooq
-equity data, confirmed empirically against AAPL's own historical
-splits — see [ADR-048](arch/adr-048-equity-bar-adjustment-semantics.org).)
+and Alpaca equity data, confirmed empirically against AAPL's own
+historical splits — see
+[ADR-048](arch/adr-048-equity-bar-adjustment-semantics.org).)
 
 ### indicator
 

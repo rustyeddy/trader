@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata/internal/provider/alpaca"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/stooq"
 )
@@ -97,6 +98,19 @@ func stooqStatusToRaw(s stooq.PartitionStatus) rawPartitionStatus {
 	}
 }
 
+func alpacaStatusToRaw(s alpaca.PartitionStatus) rawPartitionStatus {
+	switch s {
+	case alpaca.PartitionStatusOK:
+		return rawPartitionOK
+	case alpaca.PartitionStatusUnreadable:
+		return rawPartitionUnreadable
+	case alpaca.PartitionStatusMalformed:
+		return rawPartitionMalformed
+	default:
+		return rawPartitionUnknown
+	}
+}
+
 // allowsLiveExtend reports whether Plan should consider scheduling an
 // ActionDownloadRaw "extend" for m's provider's most recently touched
 // month (plan.go's needsExtend). OANDA has a live feed and legitimately
@@ -150,6 +164,23 @@ func (m *Manager) rawInventoryLookup(ctx context.Context, interval Interval) (ma
 			lookup[rawPartitionKey{p.Symbol, rawInterval, p.Year, p.Month}] = rawPartitionInfo{
 				year: p.Year, month: p.Month,
 				status: stooqStatusToRaw(p.Status), rowCount: p.RowCount,
+				lastComplete: p.LastComplete, lastTime: p.LastTime, fingerprint: p.Fingerprint,
+			}
+		}
+		return lookup, nil
+	case "alpaca":
+		if rawInterval != string(alpaca.RawD1) {
+			return nil, fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", D1, interval)
+		}
+		inv, err := alpaca.Inspect(ctx, m.rawRoot)
+		if err != nil {
+			return nil, fmt.Errorf("inspect raw archive: %w", err)
+		}
+		lookup := make(map[rawPartitionKey]rawPartitionInfo, len(inv.Partitions))
+		for _, p := range inv.Partitions {
+			lookup[rawPartitionKey{p.Symbol, rawInterval, p.Year, p.Month}] = rawPartitionInfo{
+				year: p.Year, month: p.Month,
+				status: alpacaStatusToRaw(p.Status), rowCount: p.RowCount,
 				lastComplete: p.LastComplete, lastTime: p.LastTime, fingerprint: p.Fingerprint,
 			}
 		}

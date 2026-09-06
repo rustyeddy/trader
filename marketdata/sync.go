@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata/internal/provider/alpaca"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 )
 
@@ -90,8 +91,8 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 	if !m.configured() {
 		return SyncResult{}, fmt.Errorf("marketdata: sync: %w: manager is not configured", ErrInvalidConfig)
 	}
-	if m.oandaClient == nil {
-		return SyncResult{}, fmt.Errorf("marketdata: sync: %w: OANDA credential/base URL is not configured", ErrInvalidConfig)
+	if err := m.requireSyncClient(); err != nil {
+		return SyncResult{}, err
 	}
 	if m.rawRoot == "" {
 		return SyncResult{}, fmt.Errorf("marketdata: sync: %w: raw root is not configured", ErrInvalidConfig)
@@ -122,9 +123,49 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 	return result, nil
 }
 
-// syncOne executes a single ActionDownloadRaw entry, per Sync's own
-// "missing versus extend, decided operationally" rule.
+// requireSyncClient reports a clear, wrapped ErrInvalidConfig if this
+// Manager's provider (m.providerName) has no acquisition client
+// configured to execute an ActionDownloadRaw entry — dispatched by
+// provider, the same seam ADR-047 already established for
+// rawInventoryLookup/readAndNormalizeRaw, now extended to Sync, which
+// previously checked m.oandaClient unconditionally regardless of
+// provider. OANDA's own error text and behavior are unchanged.
+func (m *Manager) requireSyncClient() error {
+	switch m.providerName {
+	case "alpaca":
+		if m.alpacaClient == nil {
+			return fmt.Errorf("marketdata: sync: %w: Alpaca credential/base URL is not configured", ErrInvalidConfig)
+		}
+	case "stooq":
+		// Stooq is a one-shot offline import (stooq.Import) with no live
+		// acquisition client at all — the same fact allowsLiveExtend
+		// already records for Plan. Sync has nothing it could call to
+		// execute an ActionDownloadRaw entry for this provider, so it
+		// fails clearly here rather than misreporting a missing OANDA/
+		// Alpaca credential that was never relevant.
+		return fmt.Errorf("marketdata: sync: %w: provider \"stooq\" has no live acquisition client; use stooq.Import to add raw history", ErrInvalidConfig)
+	default:
+		if m.oandaClient == nil {
+			return fmt.Errorf("marketdata: sync: %w: OANDA credential/base URL is not configured", ErrInvalidConfig)
+		}
+	}
+	return nil
+}
+
+// syncOne executes a single ActionDownloadRaw entry, dispatched to the
+// concrete provider implementation named by m.providerName (ADR-047's
+// internal provider seam, extended to Sync). OANDA's own syncOneOANDA
+// is byte-for-byte the previous syncOne body, entirely unchanged.
 func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, error) {
+	if m.providerName == "alpaca" {
+		return m.syncOneAlpaca(ctx, action)
+	}
+	return m.syncOneOANDA(ctx, action)
+}
+
+// syncOneOANDA executes a single ActionDownloadRaw entry against OANDA,
+// per Sync's own "missing versus extend, decided operationally" rule.
+func (m *Manager) syncOneOANDA(ctx context.Context, action Action) (DownloadResult, error) {
 	rawIntervalToken, ok := intervalToRawInterval(action.Interval)
 	if !ok {
 		return DownloadResult{}, fmt.Errorf("interval %s has no raw partition", action.Interval)
@@ -212,6 +253,86 @@ func mergeRecordsByTime(existing, fetched []oanda.Record) []oanda.Record {
 		byTime[r.Time.UTC().UnixNano()] = r
 	}
 	out := make([]oanda.Record, 0, len(byTime))
+	for _, r := range byTime {
+		out = append(out, r)
+	}
+	return out
+}
+
+// syncOneAlpaca executes a single ActionDownloadRaw entry against
+// Alpaca, mirroring syncOneOANDA's own "missing versus extend" logic.
+// It differs from syncOneOANDA in one respect: every alpaca.Record
+// already represents a fully closed trading day (see
+// alpaca.Partition.LastComplete's own doc comment) — there is no
+// provisional/incomplete tail record analogous to an OANDA candle
+// whose Complete flag might still be false, so there is no
+// incomplete-tail re-fetch case to handle; advancing strictly past the
+// last existing record's own Time is always correct.
+func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadResult, error) {
+	rawIntervalToken, ok := intervalToRawInterval(action.Interval)
+	if !ok {
+		return DownloadResult{}, fmt.Errorf("interval %s has no raw partition", action.Interval)
+	}
+	if rawIntervalToken != string(alpaca.RawD1) {
+		return DownloadResult{}, fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", D1, action.Interval)
+	}
+	symbol, err := m.resolveRawSymbol(action.Instrument)
+	if err != nil {
+		return DownloadResult{}, err
+	}
+
+	monthStart := time.Date(action.Year, action.Month, 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, 0)
+	upper := monthEnd
+	if now := m.clock.Now(); now.Before(upper) {
+		upper = now
+	}
+
+	existing, err := alpaca.ReadPartitionRecords(ctx, m.rawRoot, symbol, action.Year, action.Month)
+	mustNotExist := false
+	from := monthStart
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		mustNotExist = true
+	case err != nil:
+		return DownloadResult{}, fmt.Errorf("read existing raw partition: %w", err)
+	default:
+		sort.Slice(existing, func(i, j int) bool { return existing[i].Time.Before(existing[j].Time) })
+		if n := len(existing); n > 0 {
+			from = existing[n-1].Time.Add(time.Nanosecond)
+		}
+	}
+
+	merged := existing
+	if upper.After(from) {
+		fetched, err := m.alpacaClient.FetchBars(ctx, alpaca.BarRequest{Symbol: symbol, From: from, To: upper})
+		if err != nil {
+			return DownloadResult{}, fmt.Errorf("fetch bars: %w", err)
+		}
+		if len(fetched) > 0 || mustNotExist {
+			merged = mergeAlpacaRecordsByTime(existing, fetched)
+			if err := alpaca.WritePartition(ctx, m.rawRoot, symbol, action.Year, action.Month, merged, mustNotExist); err != nil {
+				return DownloadResult{}, fmt.Errorf("write partition: %w", err)
+			}
+		}
+	}
+
+	return DownloadResult{Action: action, RecordsWritten: len(merged)}, nil
+}
+
+// mergeAlpacaRecordsByTime is mergeRecordsByTime's alpaca.Record
+// counterpart: at most one Record per distinct Time, with fetched
+// always winning a collision. The result is unsorted; WritePartition
+// sorts before writing.
+func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) []alpaca.Record {
+	byTime := make(map[int64]alpaca.Record, len(existing)+len(fetched))
+	for _, r := range existing {
+		byTime[r.Time.UTC().UnixNano()] = r
+	}
+	for _, r := range fetched {
+		byTime[r.Time.UTC().UnixNano()] = r
+	}
+	out := make([]alpaca.Record, 0, len(byTime))
 	for _, r := range byTime {
 		out = append(out, r)
 	}

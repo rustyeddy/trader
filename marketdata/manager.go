@@ -7,6 +7,7 @@ import (
 
 	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
+	"github.com/rustyeddy/trader/marketdata/internal/provider/alpaca"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 )
 
@@ -79,6 +80,14 @@ type Manager struct {
 	// dereference — since most Manager uses (queries, coverage,
 	// planning) never need it.
 	oandaClient *oanda.Client
+
+	// alpacaClient is Manager's own Alpaca synchronization client (issue
+	// #297, EQ-04), built at construction from Config.AlpacaCredential/
+	// Config.AlpacaBaseURL when both are supplied. It is nil otherwise,
+	// mirroring oandaClient's own contract exactly — Sync reports a
+	// clear configuration error rather than a nil dereference when a
+	// "alpaca"-provider Manager needs it but it is unset.
+	alpacaClient *alpaca.Client
 
 	// Collaborator seams. These are interfaces owned by this package so the
 	// real provider, storage, normalization, and resampling
@@ -178,19 +187,38 @@ type Config struct {
 	OANDACredential oanda.CredentialProvider
 	OANDABaseURL    string
 
-	// provider, store, and oandaClient are optional internal
-	// collaborators. They remain unexported so no external package can
-	// supply provider, storage, or an OANDA client implementation
-	// through Config. They exist only for in-package tests: real
-	// construction always builds its own canonicalCSVStore from
-	// StoreRoot, and its own *oanda.Client from OANDACredential/
-	// OANDABaseURL when set (see New). oandaClient specifically lets
-	// this package's own Sync tests inject a Client built with a fake
-	// oanda.HTTPDoer (oanda's own exported test seam), without
+	// AlpacaCredential and AlpacaBaseURL configure Manager's Alpaca
+	// synchronization client (issue #297, EQ-04) — the same optional,
+	// both-or-neither contract OANDACredential/OANDABaseURL already
+	// establish above, for the identical reasons.
+	//
+	// AlpacaCredential resolves Alpaca's two secrets (a key ID and a
+	// secret key, unlike OANDA's single bearer token) fresh per request
+	// — see alpaca.CredentialProvider — so Config itself never holds
+	// either secret in a form that could be logged or serialized by
+	// accident.
+	//
+	// AlpacaBaseURL is a full URL (for example
+	// "https://data.alpaca.markets"), not an environment enum Manager
+	// would parse itself, matching OANDABaseURL's own convention.
+	AlpacaCredential alpaca.CredentialProvider
+	AlpacaBaseURL    string
+
+	// provider, store, oandaClient, and alpacaClient are optional
+	// internal collaborators. They remain unexported so no external
+	// package can supply provider, storage, or an HTTP client
+	// implementation through Config. They exist only for in-package
+	// tests: real construction always builds its own canonicalCSVStore
+	// from StoreRoot, and its own *oanda.Client/*alpaca.Client from the
+	// matching credential/base-URL pair when set (see New). oandaClient
+	// and alpacaClient specifically let this package's own Sync tests
+	// inject a Client built with a fake HTTP transport (oanda.HTTPDoer/
+	// alpaca.HTTPDoer, each package's own exported test seam), without
 	// widening Config's public surface to expose an HTTP transport.
-	provider    provider
-	store       barStore
-	oandaClient *oanda.Client
+	provider     provider
+	store        barStore
+	oandaClient  *oanda.Client
+	alpacaClient *alpaca.Client
 }
 
 // provider was the narrow internal contract this skeleton originally
@@ -258,6 +286,9 @@ func New(cfg Config) (*Manager, error) {
 	if (cfg.OANDACredential == nil) != (cfg.OANDABaseURL == "") {
 		return nil, fmt.Errorf("marketdata: new manager: %w: OANDA credential and base URL must be supplied together", ErrInvalidConfig)
 	}
+	if (cfg.AlpacaCredential == nil) != (cfg.AlpacaBaseURL == "") {
+		return nil, fmt.Errorf("marketdata: new manager: %w: Alpaca credential and base URL must be supplied together", ErrInvalidConfig)
+	}
 
 	store := cfg.store
 	if store == nil {
@@ -280,6 +311,18 @@ func New(cfg Config) (*Manager, error) {
 		}
 	}
 
+	alpacaClient := cfg.alpacaClient
+	if alpacaClient == nil && cfg.AlpacaCredential != nil {
+		var err error
+		alpacaClient, err = alpaca.NewClient(alpaca.ClientConfig{
+			BaseURL:    cfg.AlpacaBaseURL,
+			Credential: cfg.AlpacaCredential,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marketdata: new manager: %w: %v", ErrInvalidConfig, err)
+		}
+	}
+
 	return &Manager{
 		clock:        cfg.Clock,
 		storeRoot:    cfg.StoreRoot,
@@ -288,6 +331,7 @@ func New(cfg Config) (*Manager, error) {
 		providerName: cfg.ProviderName,
 		calendar:     cal,
 		oandaClient:  oandaClient,
+		alpacaClient: alpacaClient,
 		provider:     cfg.provider,
 		store:        store,
 		cache:        newBarCache(cfg.CacheCapacity),
