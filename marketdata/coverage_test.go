@@ -124,6 +124,7 @@ func publishCanonicalMonth(t *testing.T, mgr *Manager, interval Interval, year i
 		Interval:         interval,
 		Span:             span,
 		Basis:            BasisBid,
+		AdjustmentPolicy: AdjustmentNotApplicable,
 		SchemaVersion:    1,
 		RawFingerprint:   fingerprint,
 		BuilderVersion:   "builder-v1",

@@ -45,6 +45,7 @@ func mustDatasetManifestFor(t *testing.T, interval marketdata.Interval, span mar
 		Interval:         interval,
 		Span:             span,
 		Basis:            marketdata.BasisBid,
+		AdjustmentPolicy: marketdata.AdjustmentNotApplicable,
 		SchemaVersion:    1,
 		RawFingerprint:   "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
 		BuilderVersion:   "test-builder-v1",

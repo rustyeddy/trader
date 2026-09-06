@@ -1,9 +1,9 @@
 Backtest Report: ema-cross 1.0.0
 Run ID:         run_01HK153X003DMSTAVHVKTAA8HG
 Span:           2024-01-01T00:00:00Z to 2024-01-03T00:00:00Z
-Config Digest:  sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5
-Dataset:        oanda fx:EUR/USD H1 rev=03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81
-Dataset:        oanda fx:GBP/USD H1 rev=78b739e227b00ccadee4a2425ee16de7ceffa42189b8d28311d6c6f749e37490
+Config Digest:  sha256:c47503ab5f83f891644beddd46be0fadbd78c91507e8d4a5cb4bc0f99d3992e8
+Dataset:        oanda fx:EUR/USD H1 rev=8ad96ce51057945ae9f1d9a2d8e1aa3ae7482bc6f2e866d23d72a5e0f5d061fe
+Dataset:        oanda fx:GBP/USD H1 rev=3863b9ad46908377e0cc3e0688838c139534779a9285201dabb98ac5a9109662
 
 Performance
   Starting Capital:  10000 USD

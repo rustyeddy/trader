@@ -377,24 +377,25 @@ func writeFileAtomic(ctx context.Context, finalPath string, encode func(*bufio.W
 // Manifest.Revision (#73) already hashes a JSON-encoded struct rather
 // than a delimited string.
 type manifestJSON struct {
-	Provider         string      `json:"provider"`
-	Instrument       string      `json:"instrument"`
-	IntervalUnit     Unit        `json:"interval_unit"`
-	IntervalCount    int         `json:"interval_count"`
-	SpanStart        string      `json:"span_start"`
-	SpanEnd          string      `json:"span_end"`
-	Basis            PriceBasis  `json:"basis"`
-	SchemaVersion    int         `json:"schema_version"`
-	RawFingerprint   string      `json:"raw_fingerprint"`
-	BuilderVersion   string      `json:"builder_version"`
-	ValidatorVersion string      `json:"validator_version"`
-	ResamplerVersion string      `json:"resampler_version"`
-	CalendarVersion  string      `json:"calendar_version"`
-	BuiltAt          string      `json:"built_at"`
-	BarCount         int         `json:"bar_count"`
-	FirstBar         string      `json:"first_bar,omitempty"`
-	LastBar          string      `json:"last_bar,omitempty"`
-	Parent           *parentJSON `json:"parent,omitempty"`
+	Provider         string           `json:"provider"`
+	Instrument       string           `json:"instrument"`
+	IntervalUnit     Unit             `json:"interval_unit"`
+	IntervalCount    int              `json:"interval_count"`
+	SpanStart        string           `json:"span_start"`
+	SpanEnd          string           `json:"span_end"`
+	Basis            PriceBasis       `json:"basis"`
+	AdjustmentPolicy AdjustmentPolicy `json:"adjustment_policy"`
+	SchemaVersion    int              `json:"schema_version"`
+	RawFingerprint   string           `json:"raw_fingerprint"`
+	BuilderVersion   string           `json:"builder_version"`
+	ValidatorVersion string           `json:"validator_version"`
+	ResamplerVersion string           `json:"resampler_version"`
+	CalendarVersion  string           `json:"calendar_version"`
+	BuiltAt          string           `json:"built_at"`
+	BarCount         int              `json:"bar_count"`
+	FirstBar         string           `json:"first_bar,omitempty"`
+	LastBar          string           `json:"last_bar,omitempty"`
+	Parent           *parentJSON      `json:"parent,omitempty"`
 	// Revision is m.Revision() at encode time. load recomputes it from
 	// the decoded Manifest and rejects the file if the two disagree —
 	// the cheapest possible defense against a hand-edited or partially
@@ -465,6 +466,7 @@ func manifestToJSON(m Manifest) manifestJSON {
 		SpanStart:        m.Span.Start().Format(time.RFC3339Nano),
 		SpanEnd:          m.Span.End().Format(time.RFC3339Nano),
 		Basis:            m.Basis,
+		AdjustmentPolicy: m.AdjustmentPolicy,
 		SchemaVersion:    m.SchemaVersion,
 		RawFingerprint:   m.RawFingerprint,
 		BuilderVersion:   m.BuilderVersion,
@@ -670,6 +672,7 @@ func decodeManifestJSON(line, path string, expectedInstrument instrument.ID) (Ma
 		Interval:         interval,
 		Span:             span,
 		Basis:            h.Basis,
+		AdjustmentPolicy: h.AdjustmentPolicy,
 		SchemaVersion:    h.SchemaVersion,
 		RawFingerprint:   h.RawFingerprint,
 		BuilderVersion:   h.BuilderVersion,

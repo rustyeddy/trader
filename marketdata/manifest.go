@@ -27,6 +27,9 @@ var (
 	ErrManifestSpan = errors.New("marketdata: manifest span is invalid")
 	// ErrManifestBasis marks a Manifest with an unknown price basis.
 	ErrManifestBasis = errors.New("marketdata: manifest price basis is unknown")
+	// ErrManifestAdjustment marks a Manifest with an unknown
+	// AdjustmentPolicy.
+	ErrManifestAdjustment = errors.New("marketdata: manifest adjustment policy is unknown")
 	// ErrManifestSchemaVersion marks a Manifest whose SchemaVersion is
 	// not positive.
 	ErrManifestSchemaVersion = errors.New("marketdata: manifest schema version must be positive")
@@ -141,6 +144,12 @@ type Manifest struct {
 	// Basis records what this dataset's OHLC prices represent. It
 	// mirrors BarSet.Basis and must agree with it (see Matches).
 	Basis PriceBasis
+	// AdjustmentPolicy records what corporate-action adjustment
+	// convention this dataset's prices already reflect (issue #298,
+	// EQ-05) — see AdjustmentPolicy's own doc comment. Unlike Basis,
+	// there is no corresponding BarSet field to agree with: adjustment
+	// convention is dataset-level provenance, not a per-bar property.
+	AdjustmentPolicy AdjustmentPolicy
 
 	// SchemaVersion identifies the canonical Bar/BarSet field layout this
 	// dataset was built against. It is bumped when that layout changes in
@@ -232,6 +241,9 @@ func (m Manifest) Validate() error {
 	}
 	if !m.Basis.valid() {
 		return fmt.Errorf("marketdata: manifest validate: basis %s: %w", m.Basis, ErrManifestBasis)
+	}
+	if !m.AdjustmentPolicy.valid() {
+		return fmt.Errorf("marketdata: manifest validate: adjustment policy %s: %w", m.AdjustmentPolicy, ErrManifestAdjustment)
 	}
 	if m.SchemaVersion <= 0 {
 		return fmt.Errorf("marketdata: manifest validate: schema version %d: %w", m.SchemaVersion, ErrManifestSchemaVersion)
@@ -390,8 +402,11 @@ func (m Manifest) Matches(bs BarSet) error {
 
 // manifestRevisionVersion tags the encoding Revision hashes, so a future
 // change to that encoding is an explicit, versioned break rather than a
-// silent reinterpretation of old bytes.
-const manifestRevisionVersion = "manifest-revision-v1"
+// silent reinterpretation of old bytes. Bumped to v2 when
+// AdjustmentPolicy was added to revisionInput (issue #298, EQ-05):
+// two manifests differing only in adjustment convention must not
+// share a Revision.
+const manifestRevisionVersion = "manifest-revision-v2"
 
 // revisionInput is the exact, unambiguous structure Revision hashes.
 // Using encoding/json rather than a hand-built delimited string removes
@@ -411,6 +426,7 @@ type revisionInput struct {
 	SpanStart        int64              `json:"span_start"`
 	SpanEnd          int64              `json:"span_end"`
 	Basis            PriceBasis         `json:"basis"`
+	AdjustmentPolicy AdjustmentPolicy   `json:"adjustment_policy"`
 	SchemaVersion    int                `json:"schema_version"`
 	RawFingerprint   string             `json:"raw_fingerprint"`
 	BuilderVersion   string             `json:"builder_version"`
@@ -460,6 +476,7 @@ func (m Manifest) Revision() string {
 		SpanStart:        m.Span.start.UnixNano(),
 		SpanEnd:          m.Span.end.UnixNano(),
 		Basis:            m.Basis,
+		AdjustmentPolicy: m.AdjustmentPolicy,
 		SchemaVersion:    m.SchemaVersion,
 		RawFingerprint:   m.RawFingerprint,
 		BuilderVersion:   m.BuilderVersion,

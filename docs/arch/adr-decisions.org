@@ -155,6 +155,7 @@ the original decided, use full supersession instead.
 | 045 | Direct Price-to-float64 analytical conversion boundary (in adr-045-analytical-float64-conversion-boundary.org) | Accepted |
 | 046 | Semantic versioning, version reporting, and release process (in adr-046-semantic-versioning-release-process.org) | Accepted |
 | 047 | Equities Phase 1 domain semantics and scope (in adr-047-equities-phase1-scope.org) | Accepted |
+| 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -488,6 +489,22 @@ genuine internal provider seam when Stooq is implemented rather than a
 second hardcoded branch, and record adjustment provenance only
 (deferring the architecture document's full selectable-=AdjustmentMode=
 sketch) until a concrete need for it exists.
+
+Note: ADR-048 is likewise maintained in its own file,
+=docs/arch/adr-048-equity-bar-adjustment-semantics.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #298 (EQ-05) asks for explicit, reproducible corporate-action
+adjustment semantics for equity bars, resolving the specific open
+question ADR-047 left unverified (whether Stooq's data is
+split-adjusted or raw) once a real AAPL Stooq export was added
+alongside SPY/QQQ; this ADR records that empirical finding
+(split-adjusted, confirmed against both of AAPL's real historical
+splits), a new =marketdata.AdjustmentPolicy= type recorded on
+=Manifest=, and the finding that dataset-identity collision
+prevention needed no new wiring in =backtest.Manifest.ConfigDigest=
+(which already embeds the whole =marketdata.Manifest=) but did require
+=Manifest.Revision='s own explicit field list and version tag to be
+updated directly.
 
 * ADR-001: Modular monolith before service decomposition
 

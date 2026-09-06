@@ -69,6 +69,55 @@ func newStooqTestManager(t *testing.T, rawRoot string) *Manager {
 	return m
 }
 
+// aaplListing returns a tradable AAPL equity Listing under provider
+// "stooq" — same shape as spyListing, for issue #298 (EQ-05)'s split-
+// adjustment demonstration, which specifically needs a real
+// known-split instrument (SPY and QQQ have never split).
+func aaplListing(t *testing.T) instrument.Listing {
+	t.Helper()
+	inst, err := instrument.NewEquity("NASDAQ", "AAPL")
+	require.NoError(t, err)
+	spec, err := instrument.NewSpec(
+		num.MustParsePrice("0.01"),
+		num.MustParseQuantity("1"),
+		num.MustParseRate("1"),
+		num.MustParseCurrency("USD"),
+	)
+	require.NoError(t, err)
+	listing, err := instrument.NewListing(instrument.ListingParams{
+		Instrument: inst,
+		Provider:   "stooq",
+		Venue:      "NASDAQ",
+		Symbol:     "AAPL",
+		Spec:       spec,
+		Tradable:   true,
+	})
+	require.NoError(t, err)
+	return listing
+}
+
+func aaplID(t *testing.T) instrument.ID {
+	t.Helper()
+	inst, err := instrument.NewEquity("NASDAQ", "AAPL")
+	require.NoError(t, err)
+	return inst.ID()
+}
+
+func newStooqAAPLTestManager(t *testing.T, rawRoot string) *Manager {
+	t.Helper()
+	r := instrument.NewMemoryResolver()
+	require.NoError(t, r.Register(aaplListing(t)))
+	m, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    t.TempDir(),
+		RawRoot:      rawRoot,
+		Resolver:     r,
+		ProviderName: "stooq",
+	})
+	require.NoError(t, err)
+	return m
+}
+
 // TestStooqEndToEnd_PlanBuildBars is issue #303 (EQ-03A)'s central
 // acceptance criterion, exercised directly: a small Stooq CSV fixture
 // imported into the raw archive, run through the exact same
@@ -230,4 +279,60 @@ func TestStooqEndToEnd_RejectsOutOfOrderRawData(t *testing.T) {
 	// No canonical partition was published for the aborted month.
 	_, err = mgr.Bars(ctx, query)
 	assert.ErrorIs(t, err, ErrDataUnavailable)
+}
+
+// TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy is issue #298
+// (EQ-05)'s real-data demonstration in miniature: a small excerpt of
+// AAPL's actual real Stooq daily history spanning its real 2020-08-31
+// 4-for-1 split (2020-08-28 through 2020-09-01) shows continuous
+// pricing across the split date — no ~4x jump — and the resulting
+// canonical Manifest records AdjustmentSplitAdjusted, not
+// AdjustmentUnadjusted. TestStooqAAPLFullArchive (gated, real local
+// archive) is the full-history version of this same proof; this test
+// keeps a deterministic, CI-committed regression for it using a real
+// (not synthetic) 3-row excerpt.
+func TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	_, err := stooq.Import(ctx, filepath.Join("internal", "provider", "stooq", "testdata", "aapl_us_d_sample.csv"), rawRoot, "AAPL")
+	require.NoError(t, err)
+
+	mgr := newStooqAAPLTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2020, 8, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 10, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: aaplID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	buildResult, err := mgr.Build(ctx, plan)
+	require.NoError(t, err)
+	require.NotEmpty(t, buildResult.Published)
+	for _, pr := range buildResult.Published {
+		assert.Equal(t, AdjustmentSplitAdjusted, pr.Manifest.AdjustmentPolicy)
+	}
+
+	reader, err := mgr.Bars(ctx, query)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	var bars []Bar
+	for {
+		b, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		bars = append(bars, b)
+	}
+	require.Len(t, bars, 3)
+
+	// The real split date (2020-08-31) sits between bars[0] (08-28) and
+	// bars[1] (08-31): a ~4x-unadjusted jump would put the ratio near 4
+	// or 0.25; split-adjusted data keeps it close to 1.
+	ratio := bars[1].Close.Float64() / bars[0].Close.Float64()
+	assert.InDelta(t, 1.0, ratio, 0.2, "close-to-close ratio across the split date = %v, want ~1 (split-adjusted), not ~4 or ~0.25 (unadjusted)", ratio)
 }
