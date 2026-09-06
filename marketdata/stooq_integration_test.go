@@ -336,3 +336,109 @@ func TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy(t *testing.T) {
 	ratio := bars[1].Close.Float64() / bars[0].Close.Float64()
 	assert.InDelta(t, 1.0, ratio, 0.2, "close-to-close ratio across the split date = %v, want ~1 (split-adjusted), not ~4 or ~0.25 (unadjusted)", ratio)
 }
+
+// TestStooqEndToEnd_HolidayGapReadsCorrectly is issue #299 (EQ-06)'s
+// weekend/holiday/session-gap requirement: a real SPY excerpt spanning
+// New Year's Day 2020 (2020-01-01, a genuine NYSE closure with no row
+// in Stooq's own source file at all — not merely a weekend) proves
+// Manager.Bars returns exactly the real trading days on either side,
+// with no error and no fabricated bar for the closed day. Reading
+// canonical data does not need a trading calendar to behave correctly
+// here: it returns whatever is actually stored, nothing more.
+func TestStooqEndToEnd_HolidayGapReadsCorrectly(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	_, err := stooq.Import(ctx, filepath.Join("internal", "provider", "stooq", "testdata", "spy_us_d_holiday_sample.csv"), rawRoot, "SPY")
+	require.NoError(t, err)
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2019, 12, 30, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 1, 4, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	_, err = mgr.Build(ctx, plan)
+	require.NoError(t, err)
+
+	reader, err := mgr.Bars(ctx, query)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+
+	var bars []Bar
+	for {
+		b, err := reader.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		bars = append(bars, b)
+	}
+
+	require.Len(t, bars, 4, "expected exactly the 4 real trading days; New Year's Day must not appear as a bar")
+	wantDates := []time.Time{
+		time.Date(2019, 12, 30, 0, 0, 0, 0, time.UTC),
+		time.Date(2019, 12, 31, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC),
+	}
+	for i, want := range wantDates {
+		assert.True(t, bars[i].Time.Equal(want), "bar[%d].Time = %v, want %v", i, bars[i].Time, want)
+	}
+}
+
+// TestStooqCoverage_HolidayGapNotYetCalendarAware documents a real,
+// known Phase 1 limitation issue #299 (EQ-06) asks to be tested, not
+// silently left implicit: Manager.Coverage's gap classification walks
+// bar boundaries via the configured Calendar (coverage.go), and no
+// equity-aware Calendar exists yet — ADR-047 defers a real
+// USEquityCalendar to future intraday-driven work, since Phase 1's
+// Stooq data is daily-only. The default FXCalendar has no concept of
+// a U.S. market holiday (or, for that matter, a Monday-Friday-only
+// trading week distinct from FX's own Sunday-open week), so it reports
+// every non-trading calendar day in the queried span — including the
+// ordinary weekend already present in this fixture, not just the
+// holiday — as a "missing" Gap, even though the underlying data is
+// fully built and correct.
+//
+// This test exists so that landing a real equity Calendar later is a
+// deliberate, visible change to this assertion, not a silent behavior
+// shift nobody noticed.
+func TestStooqCoverage_HolidayGapNotYetCalendarAware(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	_, err := stooq.Import(ctx, filepath.Join("internal", "provider", "stooq", "testdata", "spy_us_d_holiday_sample.csv"), rawRoot, "SPY")
+	require.NoError(t, err)
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2019, 12, 30, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 1, 4, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	_, err = mgr.Build(ctx, plan)
+	require.NoError(t, err)
+
+	cov, err := mgr.Coverage(ctx, query)
+	require.NoError(t, err)
+
+	// Both partitions are fully built ("current") despite the reported
+	// gaps below — the gaps are a Calendar-awareness limitation in
+	// Coverage's reporting, not a real hole in the canonical data
+	// (TestStooqEndToEnd_HolidayGapReadsCorrectly already proves Bars
+	// itself reads correctly).
+	for _, pc := range cov.Partitions {
+		assert.Equal(t, PartitionCoverageCurrent, pc.Status, "%04d-%02d", pc.Year, pc.Month)
+	}
+	assert.NotEmpty(t, cov.Gaps,
+		"FXCalendar-based Coverage is expected to (incorrectly) report the New Year's/weekend non-trading days as gaps until a real equity Calendar exists")
+}
