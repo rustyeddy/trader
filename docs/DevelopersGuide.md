@@ -211,9 +211,14 @@ minute and hour bars align to the daily FX rollover (not UTC midnight
 — see ADR-021 in [the ADR registry](arch/adr-decisions.org)), while day
 and week bars align to the Sunday 17:00 New York session open, with
 `time.Date`-based arithmetic so daylight-saving transitions resolve
-correctly; and `USEquityCalendar` (D1 only, anchored to midnight UTC
-to agree with Stooq's own equity bars, with `Session` deliberately
-equal to the whole day — see
+correctly; and `USEquityCalendar` (`Bar` supports D1 only, anchored to
+midnight UTC to agree with Stooq's own equity bars, while `Status`/
+`Session` honestly compute the real 9:30-16:00 America/New_York
+regular session — including half-day truncation — decoupled from
+`Bar`'s own midnight-UTC label via a small optional `Calendar`
+capability, `BarSpanClassifier`, that answers "is this whole labeled
+trading day open" without sampling `Status` at the bar's own
+out-of-session literal endpoints — see
 [ADR-049](arch/adr-049-us-equity-market-calendar.org)). See
 [ADR-012](arch/adr-decisions.org),
 [ADR-020](arch/adr-020-historic-data.org), and the

@@ -9,9 +9,13 @@ import "time"
 // Day, Juneteenth National Independence Day, Independence Day, Labor
 // Day, Thanksgiving Day, and Christmas Day), each shifted per the
 // standard "observed" rule (a holiday falling on Saturday is observed
-// the preceding Friday; falling on Sunday, the following Monday), plus
-// one representative half day (the day after Thanksgiving) — issue
-// #296's own "at least representative early-close dates" requirement.
+// the preceding Friday; falling on Sunday, the following Monday) —
+// except New Year's Day, which NYSE does not observe on the preceding
+// Friday when it falls on a Saturday, so as not to close the exchange
+// on the year's last trading day (see observed's own doc comment) —
+// plus one representative half day (the day after Thanksgiving) —
+// issue #296's own "at least representative early-close dates"
+// requirement.
 //
 // Juneteenth is included only for years >= 2022, the first year NYSE
 // actually observed it as a market holiday — it must not be backdated
@@ -68,10 +72,30 @@ func civilUTC(year int, month time.Month, day int) time.Time {
 // "observed" rule: a date falling on Saturday is observed the
 // preceding Friday, and one falling on Sunday is observed the
 // following Monday.
+//
+// New Year's Day is a real, NYSE-specific exception to the Saturday
+// half of this rule (PR #310 review): when January 1 falls on a
+// Saturday, NYSE does *not* observe it on the preceding Friday
+// (December 31) the way every other holiday would shift — moving New
+// Year's would close the exchange on the last trading day of the
+// calendar year, disrupting year-end accounting/settlement. observed
+// returns the Saturday date itself in that one case (already an
+// ordinary weekend closure via the Status/ClassifyBarSpan weekday
+// check, so this changes nothing about January 1 itself — it only
+// stops December 31 from being added to the holiday list at all). A
+// Sunday New Year's Day is unaffected and still shifts forward to
+// Monday, per the ordinary rule; only the Saturday case is special.
+//
+// Confirmed against real NYSE history: January 1, 2022 fell on a
+// Saturday, and NYSE traded normally on Friday, December 31, 2021 — it
+// was not observed as a holiday that year.
 func observed(year int, month time.Month, day int) time.Time {
 	d := civilUTC(year, month, day)
 	switch d.Weekday() {
 	case time.Saturday:
+		if month == time.January && day == 1 {
+			return d
+		}
 		return d.AddDate(0, 0, -1)
 	case time.Sunday:
 		return d.AddDate(0, 0, 1)

@@ -142,6 +142,49 @@ func newStooqAAPLTestManager(t *testing.T, rawRoot string) *Manager {
 	return m
 }
 
+// TestStooqEndToEnd_RejectsWrongCalendarType confirms a Manager
+// configured for the "stooq" provider with anything other than a
+// *USEquityCalendar fails explicitly and clearly at build time,
+// instead of either (a) silently recording a Manifest CalendarVersion
+// that names USEquityCalendar when some other Calendar actually ran,
+// or (b) failing later with a confusing per-record misalignment error
+// whose real cause (a misconfigured Manager, not bad data) is not
+// obvious (PR #310 review, Copilot's CalendarVersion finding).
+func TestStooqEndToEnd_RejectsWrongCalendarType(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	_, err := stooq.Import(ctx, filepath.Join("internal", "provider", "stooq", "testdata", "spy_us_d_sample.csv"), rawRoot, "SPY")
+	require.NoError(t, err)
+
+	resolver := instrument.NewMemoryResolver()
+	require.NoError(t, resolver.Register(spyListing(t)))
+	mgr, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    t.TempDir(),
+		RawRoot:      rawRoot,
+		Resolver:     resolver,
+		ProviderName: "stooq",
+		// Deliberately not a *USEquityCalendar: the default
+		// FXCalendar, wrong for this provider.
+	})
+	require.NoError(t, err)
+
+	span, err := NewTimeRange(
+		time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 7, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+
+	_, err = mgr.Build(ctx, plan)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
 // TestStooqEndToEnd_PlanBuildBars is issue #303 (EQ-03A)'s central
 // acceptance criterion, exercised directly: a small Stooq CSV fixture
 // imported into the raw archive, run through the exact same

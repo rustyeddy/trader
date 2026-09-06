@@ -165,6 +165,22 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if rawInterval != string(stooq.RawD1) {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
 		}
+		// The recorded CalendarVersion below (calendarVersionUSEquityV1)
+		// is a specific claim about which Calendar implementation
+		// actually validated this dataset's alignment — not merely that
+		// *some* midnight-UTC-aligned Calendar was configured. Verify
+		// that claim directly rather than recording it unconditionally:
+		// a Manager left at the default FXCalendar (or supplied some
+		// other Calendar) must fail clearly here, not either produce a
+		// confusing per-record misalignment rejection with no obvious
+		// cause, or — worse, for some other calendar that happened to
+		// also anchor to midnight UTC — a Manifest that names the wrong
+		// Calendar (PR #310 review).
+		if _, ok := m.calendar.(*USEquityCalendar); !ok {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf(
+				"marketdata: stooq: %w: provider \"stooq\" requires Config.Calendar to be a *USEquityCalendar, got %T",
+				ErrInvalidConfig, m.calendar)
+		}
 		snapshot, err := stooq.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 		if err != nil {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)

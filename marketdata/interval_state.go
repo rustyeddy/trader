@@ -148,11 +148,40 @@ func ClassifyInterval(cal Calendar, span TimeRange, now time.Time, present, prov
 	return IntervalStatePresent, nil
 }
 
+// BarSpanClassifier is an optional Calendar capability (PR #310,
+// issue #296) for a Calendar whose Bar() boundaries are a
+// storage/label convention rather than a literal continuously-open
+// session window — USEquityCalendar's midnight-UTC D1 label for a
+// 9:30-16:00 America/New_York session is the motivating case: the
+// bar's own literal endpoints fall outside real trading hours by
+// construction, so sampling Status/Session at them (the way
+// uniformStatus does for a Calendar like FXCalendar, whose Bar
+// boundaries do coincide with real session-open/close instants) would
+// misclassify every single labeled trading day.
+//
+// A Calendar implementing this interface answers, in its own terms,
+// which Status applies to a whole Bar-returned span as a single
+// labeled period. uniformStatus prefers this interface when present;
+// a Calendar that does not implement it (FXCalendar) is classified
+// exactly as before, via literal endpoint sampling — this is a purely
+// additive capability, not a change to any existing Calendar's
+// observable behavior.
+type BarSpanClassifier interface {
+	ClassifyBarSpan(span TimeRange) (Status, error)
+}
+
 // uniformStatus returns cal's Status throughout span, and an error
 // wrapping ErrIntervalStraddlesBoundary if span is not uniformly one
 // Status. See ClassifyInterval's "Straddling a calendar boundary"
-// section for exactly what is checked and why.
+// section for exactly what is checked and why, and BarSpanClassifier's
+// own doc comment for the one case (a Calendar implementing that
+// optional interface) where this generic endpoint-sampling algorithm
+// is bypassed entirely in favor of the Calendar's own, more accurate
+// answer.
 func uniformStatus(cal Calendar, span TimeRange) (Status, error) {
+	if bsc, ok := cal.(BarSpanClassifier); ok {
+		return bsc.ClassifyBarSpan(span)
+	}
 	start := cal.Status(span.Start())
 	end := cal.Status(span.End().Add(-time.Nanosecond))
 	if start != end {

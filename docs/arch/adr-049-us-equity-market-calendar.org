@@ -58,38 +58,85 @@ boundary be timezone-authentic when the entire point, for now, is
 agreeing with what is actually stored. =FXCalendar= itself is
 unchanged; =USEquityCalendar= is purely additive.
 
-** Session equals the whole day, not real trading-session clock hours
+** Status/Session are honest about real trading-session clock hours; a new BarSpanClassifier capability answers the D1-label question instead
 
-=Session(t)= for an open day returns the identical =[midnight UTC, next
-midnight UTC)= span =Bar(t, D1)= does, not the real 9:30-16:00
-America/New_York regular session. This satisfies =ClassifyInterval='s
-containment requirement by construction (a span always contains
-itself) rather than by coincidence. "Session," at this calendar's
-current D1-only granularity, means "the trading day as a whole," not
-"opening bell to closing bell." Real intraday session-hours accuracy
-(9:30 open, 16:00 close, a truncated close on a half day) is a named,
-deferred refinement for when equity M1/H1 support (Alpaca-driven)
-actually needs to distinguish pre-market, regular, and after-hours data
-at sub-day granularity — consistent with ADR-047's own "D1-only,
-intraday deferred" scoping and with issue #296's own "extended-hours
-trading remains deferred" acceptance criterion. =Bar= itself supports
-only =D1= today for the identical reason; other units return an error.
+An earlier draft of this decision made =Session(t)= return the whole
+=[midnight UTC, next midnight UTC)= day =Bar(t, D1)= does, reasoning
+that this satisfied =ClassifyInterval='s containment requirement "by
+construction." Review (PR #310) correctly rejected this: issue #296
+explicitly requires that Trader can determine whether a timestamp
+belongs to the *actual* regular session, and a design where 3:00 AM or
+10:00 PM America/New_York reports =StatusOpen= — merely because their
+calendar date happens to be a trading day — does not satisfy that, no
+matter how convenient it is for the coverage-classification plumbing.
+=Calendar.Session= must remain semantically truthful.
 
-** Half days are tracked as data, not yet acted on
+=Status(t)=/=Session(t)= now compute in America/New_York civil time,
+exactly like =FXCalendar='s own =classify= method: open only during the
+real regular session (9:30-16:00, truncated by a configured =HalfDay=)
+on a weekday that is not a holiday; closed at every other instant,
+including the overnight hours on an otherwise-open trading day. This
+is a straightforward wall-clock answer with no connection to =Bar='s
+own midnight-UTC label.
+
+That reopened the actual problem the earlier draft was working around:
+=Bar(t, D1)='s span (midnight UTC, ~24h) starts and ends at instants
+that are honestly *closed* under this definition (roughly 7-8pm the
+previous evening in New York), so =ClassifyInterval='s shared
+=uniformStatus= helper — which samples =Status= at a bar span's own
+literal endpoints, and, when that reports Open, requires
+=Session(span.Start())= to contain the whole span — would now
+classify every single real, present daily bar as
+=IntervalStateUnexpected= ("present but calendar says closed"). That
+is a *worse* regression than the original bug (a universal false
+"unexpected" instead of a universal false "missing").
+
+The actual fix is a small, additive, optional =Calendar= capability
+(=interval_state.go=):
+
+#+BEGIN_SRC go
+type BarSpanClassifier interface {
+    ClassifyBarSpan(span TimeRange) (Status, error)
+}
+#+END_SRC
+
+=uniformStatus= prefers this interface when a =Calendar= implements it,
+falling back to its original literal-endpoint-sampling algorithm
+otherwise. =USEquityCalendar= implements it: =ClassifyBarSpan= answers
+a genuinely different question than =Status= — not "is this literal
+instant within the regular session," but "does this whole labeled UTC
+calendar date represent an open trading day, a holiday, or a weekend
+closure" — using the same weekday/holiday determination =classify=
+uses, without the regular-session clock-hour gate. =FXCalendar= does
+not implement =BarSpanClassifier=, so it is classified exactly as
+before; this is a purely additive capability, verified by re-running
+the complete, unmodified FX calendar/coverage test suite after this
+change, not by inspection alone.
+
+Real intraday session-hours precision beyond what =classify= already
+computes (for example a genuine minute-level open/close boundary
+check) remains future, Alpaca-driven work; =Bar= itself still supports
+only =D1= today, per ADR-047's own "D1-only, intraday deferred"
+scoping and issue #296's own "extended-hours trading remains deferred"
+acceptance criterion.
+
+** Half days genuinely truncate Status/Session
 
 =HalfDay= (a date plus a local close-time offset, mirroring
-=FXCalendar='s own =PartialClosure= shape) and =USEquityCalendar.IsHalfDay=
-expose which dates close early — =StandardUSEquityHolidays= configures
-the day after Thanksgiving as Trader's one shipped, unconditional half
-day — without =Status= or =Session= changing behavior for one yet, per
-the D1-granularity simplification above. This satisfies issue #296's
-"early-close/half-day behavior" and "at least representative early-close
-dates are tested" requirements honestly: half days are distinguishable
-from both ordinary trading days and full closures, even though nothing
-downstream consumes that distinction until intraday support needs it.
-Christmas Eve and July 3rd early closes are a named, deferred
-refinement — their historical application has varied by year, unlike
-the day after Thanksgiving's unconditional rule.
+=FXCalendar='s own =PartialClosure= shape) is no longer merely
+informational: since =Status=/=Session= now compute real
+America/New_York clock hours anyway (see above), honoring a
+=HalfDay='s early close is a direct, small extension of that same
+logic, not a separate deferred concern — =classify= substitutes the
+configured close time for the ordinary 16:00 close when a date is
+flagged. =StandardUSEquityHolidays= configures the day after
+Thanksgiving as Trader's one shipped, unconditional half day.
+=USEquityCalendar.IsHalfDay= remains available as a direct accessor.
+=ClassifyBarSpan= (the D1-label question) is unaffected by a half day
+either way: it is still one ordinary open labeled trading day with one
+ordinary Stooq D1 bar. Christmas Eve and July 3rd early closes are a
+named, deferred refinement — their historical application has varied
+by year, unlike the day after Thanksgiving's unconditional rule.
 
 ** A real, dated US holiday rule set
 
@@ -100,9 +147,21 @@ Birthday, Good Friday (via the standard Meeus/Jones/Butcher Gregorian
 Easter algorithm), Memorial Day, Juneteenth National Independence Day,
 Independence Day, Labor Day, Thanksgiving Day, and Christmas Day — each
 shifted by the standard weekend-observed rule (Saturday shifts to the
-preceding Friday, Sunday to the following Monday). Juneteenth is
-included only for years 2022 and later, the first year NYSE actually
-observed it; it is not backdated. =USEquityCalendar= itself carries no
+preceding Friday, Sunday to the following Monday) — *except* New
+Year's Day, which is a real, NYSE-specific exception review (PR #310)
+found the initial implementation got wrong: when January 1 falls on a
+Saturday, NYSE does *not* observe it on the preceding Friday
+(December 31) the way every other holiday would shift, since moving
+New Year's would close the exchange on the last trading day of the
+calendar year, disrupting year-end accounting/settlement. Confirmed
+against real history: January 1, 2022 fell on a Saturday, and NYSE
+traded normally on Friday, December 31, 2021. The exception is
+encoded narrowly (a =month == January && day == 1= check inside
+=observed=), and is verified not to disturb the ordinary Saturday
+shift for any other holiday (Independence Day 2020, also a Saturday,
+still shifts to Friday, July 3). Juneteenth is included only for years
+2022 and later, the first year NYSE actually observed it; it is not
+backdated. =USEquityCalendar= itself carries no
 built-in holiday data (mirroring =FXCalendar=/=StandardFXHolidays='s own
 split) — a caller needing a different or extended rule set can build
 =USEquityCalendarParams= directly.
@@ -134,6 +193,19 @@ negative "stooq-unaligned-v1" name is retired in favor of
 Calendar a Stooq-sourced dataset was actually validated against, the
 same way =calendarVersionCurrent= names =FXCalendar='s own version for
 oanda-sourced datasets.
+
+Recording that specific name is itself a claim, and review (Copilot,
+PR #310) correctly found the initial implementation did not verify it:
+=readAndNormalizeRaw='s "stooq" branch accepted *any* configured
+=Calendar= and unconditionally recorded =calendarVersionUSEquityV1=
+regardless, so a =Manager= misconfigured with the default =FXCalendar=
+(or some other midnight-UTC-aligned =Calendar=) would either fail with
+a confusing per-record misalignment error with no obvious cause, or —
+worse — succeed while its Manifest falsely named =USEquityCalendar= as
+what actually validated it. The "stooq" branch now type-asserts
+=m.calendar= to =*USEquityCalendar= explicitly and returns a wrapped
+=ErrInvalidConfig= naming the actual configured type when it is not,
+before ever reading or normalizing a record.
 
 ** The regression test this issue exists to flip
 
@@ -173,10 +245,11 @@ not only through =USEquityCalendar='s own unit tests.
 - Extended-hours (pre-market/after-hours) trading remains entirely
   unaddressed, per this issue's own acceptance criterion — nothing here
   represents, permits, or tests it.
-- A real M1/H1 equity session-hours implementation (true 9:30-16:00
-  open/close, half-day truncation actually changing =Session=) remains
-  future, Alpaca-driven work; =USEquityCalendar.Bar= rejects any unit
-  other than =D1= today rather than guessing at one.
+- =Status=/=Session= already compute true 9:30-16:00 America/New_York
+  open/close, including half-day truncation — only =Bar='s own
+  intraday-interval alignment (M1/H1) remains future, Alpaca-driven
+  work; =USEquityCalendar.Bar= rejects any unit other than =D1= today
+  rather than guessing at one.
 
 * Alternatives Considered
 
@@ -187,13 +260,18 @@ not only through =USEquityCalendar='s own unit tests.
   them; a "more authentic" exchange-local anchor would make every real
   Stooq bar misaligned by construction, reproducing the exact bug this
   issue exists to fix.
-- *Make =Session= return real 9:30-16:00 America/New_York trading
-  hours now.* Rejected: this would violate =ClassifyInterval='s own
-  containment requirement for every D1 span (a ~6.5h session cannot
-  contain a ~24h bar), turning every single D1 coverage classification
-  into an =ErrIntervalStraddlesBoundary= error — strictly worse than
-  the bug being fixed. Deferred until intraday equity support actually
-  needs sub-day session boundaries.
+- *Make =Session= return the whole =[midnight UTC, next midnight UTC)=
+  day, so it trivially contains =Bar='s own D1 span.* This was the
+  initial design, and review (PR #310) correctly rejected it: issue
+  #296 explicitly requires =Session= to answer "does this timestamp
+  belong to the regular session," and a design where an overnight
+  instant reports =StatusOpen= merely because its calendar date is a
+  trading day does not satisfy that — solving the D1 boundary problem
+  by weakening =Session='s own honesty is not a clean fix. The actual
+  fix is the =BarSpanClassifier= capability described above: it
+  answers the D1-label question =ClassifyInterval= needs without
+  requiring =Session= to mean anything other than the real regular
+  session.
 - *Make =Manager= provider-aware, defaulting to =USEquityCalendar= when
   =ProviderName= names a known equity provider.* Rejected: violates
   ADR-020's "opaque provider name" precedent, under which =Manager=
