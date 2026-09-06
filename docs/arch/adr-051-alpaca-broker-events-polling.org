@@ -51,9 +51,12 @@ sub-second event latency from a broker adapter.
    change and an =EventKindFill= event for any filled-quantity
    increase.
 3. Blocks between polls on whichever of three things happens first:
-   the correlator's =changed= signal (another call — =Submit=,
-   =Cancel=, =Replace= — against the same account observed something
-   first), the caller's own context, or a configurable poll interval
+   the correlator's =changed= signal (raised only when an event is
+   actually appended — =Submit='s own synchronous accept event, or a
+   synthesized event from another reader's poll against the same
+   account; =Cancel= and =Replace= do not themselves raise it, see the
+   Consequences section below), this reader's own =Close=, the
+   caller's own context, or a configurable poll interval
    (=Deps.PollInterval=, default 2s) — never busy-polling.
 
 This adapter, like =sim=, is the sole authority for =Sequence=
