@@ -1,0 +1,4 @@
+# schema=raw-v1 source=stooq instrument=SPY tf=d1 year=2020 month=05
+date,open,high,low,close,volume
+2020-05-01,282.80,283.19,278.85,282.79,74424000
+2020-05-04,280.34,286.44,278.83,285.34,68472600

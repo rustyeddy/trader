@@ -1,0 +1,114 @@
+#+TITLE: EQ-07: Backtest Pipeline Works Correctly With Equities
+#+STARTUP: overview indent
+
+* Status
+
+Records the result of issue #300 (EQ-07): running a real equity
+instrument (SPY) end to end through Trader's existing
+=service/backtest.Service -> backtest.Runner -> pipeline -> simulator=
+path, and the per-risk-area findings the issue asked for. This is a
+results record, not a durable architecture decision — it carries no
+ADR number.
+
+* What was run
+
+=service/backtest/equity_test.go='s =TestService_Run_SPYEquityBacktest=
+runs a minimal deterministic strategy (=spyEnterOnceStrategy=, the same
+"enter once, on the first bar" shape as =cmd/trader/backtest='s own
+=demoStrategy=) against two real SPY D1 bars (2020-05-01, 2020-05-04 —
+the same real excerpt already used elsewhere this milestone) through
+the exact same =Service=/=Runner=/=pipeline=/=sim.Broker= construction
+=TestService_Run_SuccessfulRun= already proves for EUR/USD — same
+=execution.Planner=, same =risk.Engine=/=risk.FixedFractionSizer=, same
+=pipeline.Pipeline=. No new orchestration type, strategy interface, or
+duplicate pipeline was introduced; =simEquityEnvironmentFactory= is
+=simEnvironmentFactory='s own code, generalized only in which listing's
+price it seeds the simulator with.
+
+Result: the strategy's Enter intent, emitted on the first bar
+(2020-05-01), is sized, planned, risk-admitted, submitted, and filled
+at the second bar's Open (2020-05-04, $280.34) — Scheduler's
+next-bar-open fill-eligibility rule, unchanged from FX. The resulting
+position is 100 whole shares at avg price $280.34, and account equity
+is denominated in USD throughout.
+
+* Per-risk-area findings
+
+** Pair/base/quote representation
+
+*Checked; found nothing.* A repo-wide grep for
+=KindCurrencyPair=/=.Base()=/=.Quote()= usage found no package outside
+=instrument= itself branching on instrument =Kind= (already confirmed
+during EQ-02, #295, and reconfirmed here). =demoStrategy= and
+=spyEnterOnceStrategy= both key all internal state by
+=instrument.ID= alone; neither knows or cares whether that ID names a
+currency pair or an ETF.
+
+** Pip sizing
+
+*Checked; found nothing.* =instrument.Spec.TickSize= is a plain
+=num.Price=; nothing in =execution=, =risk=, =pipeline=, or the
+simulator assumes a specific tick magnitude (a 0.00001 FX pip vs. SPY's
+0.01 cent tick). The test's =AdverseDistance= (a $1.00 dollar amount,
+not a pip count) sized identically to how an FX run's own pip-valued
+=AdverseDistance= would.
+
+** 24-hour/24x5 sessions
+
+*Checked; found a real, already-tracked limitation — it does not block
+backtesting.* =backtest.NewReplay= (=backtest/replay.go=) deliberately
+uses =Manager.Bars= as its sole authority for whether a requirement is
+replayable, never =Manager.Coverage= — its own doc comment explains why
+(Coverage additionally inspects raw-archive staleness, "a
+data-maintenance question, not 'is this persisted canonical revision
+complete and replayable'"). =Manager.Coverage='s gap classification is
+not equity-calendar-aware yet (issue #296, EQ-03, still open in this
+milestone — see =TestStooqCoverage_HolidayGapPendingEquityCalendar=,
+issue #299), but because replay never calls =Coverage= at all, that
+limitation cannot leak a false "missing data" abort into a backtest
+run. This was confirmed by reading =NewReplay='s own documented
+contract, not assumed.
+
+** Continuous bars
+
+*Checked; found nothing.* Neither =Replay= nor =Scheduler= assumes a
+fixed bar cadence or that every calendar day has a bar: both simply
+iterate whatever canonical bars =Manager.Bars= actually returns. The
+test's own two-bar SPY fixture already skips a weekend (Friday
+2020-05-01 to Monday 2020-05-04) exactly like every other equity
+fixture this milestone (EQ-06, #299) — no bogus bar was fabricated for
+the closed days, and the run produced no error.
+
+** Quantity/position sizing
+
+*Checked; found nothing.* =risk.FixedFractionSizer= produced a
+whole-share integer quantity (100) from ordinary
+=RiskFraction=/=AdverseDistance= inputs, honoring SPY's own
+=Spec.QuantityIncrement= (1 share) with no FX-lot-size assumption
+anywhere in the sizing path.
+
+** Currency/PnL calculations
+
+*Checked; found nothing.* =account.Snapshot.Equity()= and the
+resulting position's avg price are denominated in SPY's own settlement
+currency (USD) throughout, derived entirely from the injected
+=Listing=/=StartingCapital= — nothing in =account=, =execution=,
+=risk=, or the simulator hardcodes EUR/USD's own quote currency.
+
+** Order/fill price precision
+
+*Checked; found nothing.* =num.Price= handled a $280.34 (two-decimal)
+fill identically to how it handles a five-decimal FX price — the exact
+same generic exact-decimal type, with no assumed scale, is used
+throughout =order=/=execution=/=risk=/the simulator.
+
+* Conclusion
+
+No FX-specific assumption was found anywhere in
+=execution=/=risk=/=pipeline=/=backtest=/=order=/=account=/=portfolio=
+that needed generalizing to make this SPY backtest work — the M4/M5
+pipeline was already fully instrument-generic. The one real, equity-
+specific gap in the broader system (=Manager.Coverage='s calendar
+awareness) is already tracked as its own issue (#296) and does not
+affect backtesting, because =backtest.NewReplay= was already designed
+(issue #212) to depend only on =Manager.Bars=, not =Coverage=.
