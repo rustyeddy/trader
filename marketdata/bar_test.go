@@ -150,7 +150,12 @@ func TestPriceBasisString(t *testing.T) {
 	assert.Equal(t, "bid", BasisBid.String())
 	assert.Equal(t, "mid", BasisMid.String())
 	assert.Equal(t, "ask", BasisAsk.String())
+	assert.Equal(t, "trade", BasisTrade.String())
 	assert.Equal(t, "PriceBasis(9)", PriceBasis(9).String())
+}
+
+func TestPriceBasisValid_AcceptsTrade(t *testing.T) {
+	assert.True(t, BasisTrade.valid())
 }
 
 func TestBarValidate_ErrorMessagePrefixed(t *testing.T) {

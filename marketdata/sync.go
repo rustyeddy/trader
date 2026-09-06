@@ -125,7 +125,7 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 // syncOne executes a single ActionDownloadRaw entry, per Sync's own
 // "missing versus extend, decided operationally" rule.
 func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, error) {
-	rawInterval, ok := intervalToRawInterval(action.Interval)
+	rawIntervalToken, ok := intervalToRawInterval(action.Interval)
 	if !ok {
 		return DownloadResult{}, fmt.Errorf("interval %s has no raw partition", action.Interval)
 	}
@@ -141,6 +141,7 @@ func (m *Manager) syncOne(ctx context.Context, action Action) (DownloadResult, e
 		upper = now
 	}
 
+	rawInterval := oanda.RawInterval(rawIntervalToken)
 	existing, err := oanda.ReadPartitionRecords(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month)
 	mustNotExist := false
 	from := monthStart

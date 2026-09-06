@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 )
 
 // ActionKind names one unit of required work a Plan describes.
@@ -167,7 +166,7 @@ func (m *Manager) Plan(ctx context.Context, query BarQuery) (Plan, error) {
 // calendar reports open intervals past its last record. A canonical
 // partition that is Missing, Invalid, or Stale schedules
 // ActionNormalizeCanonical once its raw is confirmed OK.
-func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol string, rawByKey map[rawPartitionKey]oanda.Partition) ([]Action, error) {
+func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol string, rawByKey map[rawPartitionKey]rawPartitionInfo) ([]Action, error) {
 	rawInterval, ok := intervalToRawInterval(query.Interval)
 	if !ok {
 		return nil, fmt.Errorf("marketdata: plan: %w: interval %s has no raw partition", ErrInvalidQuery, query.Interval)
@@ -183,7 +182,7 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 				Year: pc.Year, Month: pc.Month, Reason: "missing",
 			})
 			continue // gated: nothing downstream can run without raw
-		case p.Status != oanda.PartitionStatusOK:
+		case p.status != rawPartitionOK:
 			// A distinct Kind, not ActionDownloadRaw with a different
 			// Reason: this raw file exists but cannot be trusted, so
 			// nothing can extend or merge with it — only an explicitly
@@ -191,7 +190,7 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 			// own doc comment.
 			rawActions = append(rawActions, Action{
 				Kind: ActionRepairRaw, Instrument: query.Instrument, Interval: query.Interval,
-				Year: pc.Year, Month: pc.Month, Reason: fmt.Sprintf("raw partition %s", p.Status),
+				Year: pc.Year, Month: pc.Month, Reason: fmt.Sprintf("raw partition %s", p.status),
 			})
 			continue
 		}
@@ -241,8 +240,11 @@ func (m *Manager) deriveActionsRawBuilt(query BarQuery, cov Coverage, symbol str
 // a provisional OHLC/volume in place permanently. See
 // marketdata.Manager.Sync's own from-selection for the matching
 // re-fetch-not-skip behavior once an extend is actually scheduled.
-func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval Interval) (bool, error) {
-	if p.RowCount > 0 && !p.LastComplete {
+func (m *Manager) needsExtend(p rawPartitionInfo, queryRange TimeRange, interval Interval) (bool, error) {
+	if !m.allowsLiveExtend() {
+		return false, nil
+	}
+	if p.rowCount > 0 && !p.lastComplete {
 		return true, nil
 	}
 
@@ -251,14 +253,14 @@ func (m *Manager) needsExtend(p oanda.Partition, queryRange TimeRange, interval 
 		upper = now
 	}
 
-	cursor := p.LastTime
+	cursor := p.lastTime
 	if cursor.IsZero() {
 		// An OK but empty raw partition (RowCount 0): there is no
 		// recorded bound to walk forward from, so fall back to the
 		// start of the partition's own filed month rather than an
 		// arbitrarily distant past instant — bounding the walk below to
 		// at most one month's worth of boundaries.
-		cursor = time.Date(p.Year, p.Month, 1, 0, 0, 0, 0, time.UTC)
+		cursor = time.Date(p.year, p.month, 1, 0, 0, 0, 0, time.UTC)
 	}
 	span, err := m.calendar.Bar(cursor, interval)
 	if err != nil {

@@ -184,6 +184,11 @@ access point for canonical bars/quotes/trades, acquisition from provider
 raw archives, canonical storage, and coverage tracking. `Manager` is the
 only exported entry point — providers, storage, and normalization live
 under `marketdata/internal/` and are unreachable from outside the package.
+Two internal providers exist today: `oanda` (FX, bid/ask, a live sync
+client) and `stooq` (equities, single-price OHLCV, an offline CSV
+importer — issue #303, ADR-047), dispatched internally by
+`Config.ProviderName`; `Manager`'s own public surface never differs
+between them.
 
 ```go
 mgr, err := marketdata.New(marketdata.Config{
@@ -208,8 +213,9 @@ with `time.Date`-based arithmetic so daylight-saving transitions resolve
 correctly. See [ADR-012](arch/adr-decisions.org),
 [ADR-020](arch/adr-020-historic-data.org), and the
 [package doc comment](../marketdata/doc.go) for the full half-open range
-convention, coverage/gap model, and `AdjustmentMode`/`FetchPolicy`
-semantics.
+convention and coverage/gap model. (The architecture document sketches a
+future selectable `AdjustmentMode`/`FetchPolicy`; neither is implemented
+today — ADR-047 defers `AdjustmentMode` until a concrete need exists.)
 
 ### indicator
 
