@@ -58,7 +58,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		return PublishResult{}, err
 	}
 
-	normalized, fingerprint, basis, calendarVersion, err := m.readAndNormalizeRaw(ctx, rawInterval, symbol, action)
+	normalized, fingerprint, basis, adjustmentPolicy, calendarVersion, err := m.readAndNormalizeRaw(ctx, rawInterval, symbol, action)
 	if err != nil {
 		return PublishResult{}, err
 	}
@@ -90,6 +90,7 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		Interval:         action.Interval,
 		Span:             span,
 		Basis:            basis,
+		AdjustmentPolicy: adjustmentPolicy,
 		SchemaVersion:    canonicalSchemaVersion,
 		RawFingerprint:   fingerprint,
 		BuilderVersion:   builderVersion,
@@ -151,28 +152,33 @@ const calendarVersionStooqV1 = "stooq-unaligned-v1"
 // action.Year, action.Month) and normalizes it, dispatched to the
 // concrete provider implementation named by m.providerName (ADR-047's
 // internal provider seam). It returns the normalized records, the raw
-// partition's content fingerprint, and the PriceBasis/CalendarVersion
-// the resulting canonical dataset should record — oanda's own bid-basis,
-// FXCalendar-aligned build is entirely unchanged from before this seam
-// existed; stooq is the second, natively-written implementation.
-func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, PriceBasis, string, error) {
+// partition's content fingerprint, and the PriceBasis/AdjustmentPolicy/
+// CalendarVersion the resulting canonical dataset should record —
+// oanda's own bid-basis, FXCalendar-aligned build is entirely unchanged
+// from before this seam existed; stooq is the second, natively-written
+// implementation.
+func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, PriceBasis, AdjustmentPolicy, string, error) {
 	switch m.providerName {
 	case "stooq":
 		if rawInterval != string(stooq.RawD1) {
-			return nil, "", BasisUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
 		}
 		snapshot, err := stooq.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 		if err != nil {
-			return nil, "", BasisUnknown, "", fmt.Errorf("read raw partition: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, "", BasisUnknown, "", err
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
 		}
 		normalized, err := normalizeStooqSequence(snapshot.Records)
 		if err != nil {
-			return nil, "", BasisUnknown, "", fmt.Errorf("normalize: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
 		}
-		return normalized, snapshot.Fingerprint, BasisTrade, calendarVersionStooqV1, nil
+		// AdjustmentSplitAdjusted: Stooq's own daily equity history is
+		// split-adjusted (confirmed empirically against AAPL's real
+		// splits, issue #298) but not dividend-adjusted — see
+		// AdjustmentSplitAdjusted's own doc comment.
+		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionStooqV1, nil
 
 	default:
 		// ReadPartitionSnapshot, not separate ReadPartitionRecords/
@@ -186,15 +192,15 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		oandaInterval := oanda.RawInterval(rawInterval)
 		snapshot, err := oanda.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, oandaInterval, action.Year, action.Month)
 		if err != nil {
-			return nil, "", BasisUnknown, "", fmt.Errorf("read raw partition: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, "", BasisUnknown, "", err
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
 		}
 		normalized, err := normalizeOANDASequence(oandaInterval, m.calendar, snapshot.Records)
 		if err != nil {
-			return nil, "", BasisUnknown, "", fmt.Errorf("normalize: %w", err)
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
 		}
-		return normalized, snapshot.Fingerprint, BasisBid, calendarVersionCurrent, nil
+		return normalized, snapshot.Fingerprint, BasisBid, AdjustmentNotApplicable, calendarVersionCurrent, nil
 	}
 }

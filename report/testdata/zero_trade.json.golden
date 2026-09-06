@@ -7,7 +7,7 @@
     "span_start": "2024-01-01T00:00:00Z",
     "span_end": "2024-01-03T00:00:00Z",
     "trader_version": "test-v0",
-    "config_digest": "sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78"
+    "config_digest": "sha256:d1d9f6d7ec8b82c69fe05d852f6c054073d71d95f29b8089664f8d974e98f3f1"
   },
   "dataset": [
     {
@@ -16,7 +16,7 @@
       "interval": "H1",
       "span_start": "2024-01-01T00:00:00Z",
       "span_end": "2024-01-03T00:00:00Z",
-      "revision": "03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81"
+      "revision": "8ad96ce51057945ae9f1d9a2d8e1aa3ae7482bc6f2e866d23d72a5e0f5d061fe"
     }
   ],
   "performance": {

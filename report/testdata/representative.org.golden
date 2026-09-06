@@ -1,7 +1,7 @@
 #+TITLE: Backtest Report: ema-cross 1.0.0
 :PROPERTIES:
 :RUN_ID: run_01HK153X003DMSTAVHVKTAA8HG
-:CONFIG_DIGEST: sha256:fc21b3768bb483f0004cc82048e50adcf951d22d38a2b72f32cca6a48a6f6fb5
+:CONFIG_DIGEST: sha256:c47503ab5f83f891644beddd46be0fadbd78c91507e8d4a5cb4bc0f99d3992e8
 :SPAN_START: 2024-01-01T00:00:00Z
 :SPAN_END: 2024-01-03T00:00:00Z
 :TRADER_VERSION: test-v0
@@ -10,8 +10,8 @@
 * Dataset Provenance
 | Instrument | Provider | Interval | Span Start | Span End | Revision |
 |------------+----------+----------+------------+----------+----------|
-| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81 |
-| fx:GBP/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 78b739e227b00ccadee4a2425ee16de7ceffa42189b8d28311d6c6f749e37490 |
+| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 8ad96ce51057945ae9f1d9a2d8e1aa3ae7482bc6f2e866d23d72a5e0f5d061fe |
+| fx:GBP/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 3863b9ad46908377e0cc3e0688838c139534779a9285201dabb98ac5a9109662 |
 
 * Performance Summary
 | Metric | Value |

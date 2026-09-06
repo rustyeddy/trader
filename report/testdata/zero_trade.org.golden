@@ -1,7 +1,7 @@
 #+TITLE: Backtest Report: ema-cross 1.0.0
 :PROPERTIES:
 :RUN_ID: run_01HK153X003DMSTAVHVKTAA8HF
-:CONFIG_DIGEST: sha256:ac6b459ba38879e3ad87fc68739006865b97c5b19a1232a3e420c33fd329ac78
+:CONFIG_DIGEST: sha256:d1d9f6d7ec8b82c69fe05d852f6c054073d71d95f29b8089664f8d974e98f3f1
 :SPAN_START: 2024-01-01T00:00:00Z
 :SPAN_END: 2024-01-03T00:00:00Z
 :TRADER_VERSION: test-v0
@@ -10,7 +10,7 @@
 * Dataset Provenance
 | Instrument | Provider | Interval | Span Start | Span End | Revision |
 |------------+----------+----------+------------+----------+----------|
-| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 03a5dcfbb44bb0be79b7d7c47a186e335b9aee9711228935723a31cf60464b81 |
+| fx:EUR/USD | oanda | H1 | 2024-01-01T00:00:00Z | 2024-01-03T00:00:00Z | 8ad96ce51057945ae9f1d9a2d8e1aa3ae7482bc6f2e866d23d72a5e0f5d061fe |
 
 * Performance Summary
 | Metric | Value |

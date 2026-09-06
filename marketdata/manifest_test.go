@@ -35,6 +35,7 @@ func validManifest(t *testing.T) Manifest {
 		Interval:         H1,
 		Span:             span,
 		Basis:            BasisBid,
+		AdjustmentPolicy: AdjustmentNotApplicable,
 		SchemaVersion:    1,
 		RawFingerprint:   validRawFingerprint,
 		BuilderVersion:   "builder-v1",
@@ -132,6 +133,12 @@ func TestManifestValidate_UnknownBasis(t *testing.T) {
 	m := validManifest(t)
 	m.Basis = BasisUnknown
 	assert.ErrorIs(t, m.Validate(), ErrManifestBasis)
+}
+
+func TestManifestValidate_UnknownAdjustmentPolicy(t *testing.T) {
+	m := validManifest(t)
+	m.AdjustmentPolicy = AdjustmentUnknown
+	assert.ErrorIs(t, m.Validate(), ErrManifestAdjustment)
 }
 
 func TestManifestValidate_SchemaVersionZero(t *testing.T) {

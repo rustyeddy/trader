@@ -214,8 +214,14 @@ correctly. See [ADR-012](arch/adr-decisions.org),
 [ADR-020](arch/adr-020-historic-data.org), and the
 [package doc comment](../marketdata/doc.go) for the full half-open range
 convention and coverage/gap model. (The architecture document sketches a
-future selectable `AdjustmentMode`/`FetchPolicy`; neither is implemented
-today — ADR-047 defers `AdjustmentMode` until a concrete need exists.)
+future selectable, query-time `AdjustmentMode`/`FetchPolicy`; neither is
+implemented today — ADR-047/ADR-048 defer that until a concrete need
+exists. What *is* implemented is `marketdata.AdjustmentPolicy`, a
+narrower, recorded-not-selected concept: every canonical `Manifest`
+names the one adjustment convention its source actually delivered —
+`AdjustmentNotApplicable` for FX, `AdjustmentSplitAdjusted` for Stooq
+equity data, confirmed empirically against AAPL's own historical
+splits — see [ADR-048](arch/adr-048-equity-bar-adjustment-semantics.org).)
 
 ### indicator
 

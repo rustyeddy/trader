@@ -164,12 +164,16 @@ func (m *Manager) deriveAndPublish(ctx context.Context, action Action) (PublishR
 	parentRevision, rawFingerprint := combineParentLineage(contributing)
 
 	manifest := Manifest{
-		Provider:      m.providerName,
-		Instrument:    action.Instrument,
-		Interval:      W1,
-		Span:          monthSpan,
-		Basis:         BasisBid,
-		SchemaVersion: canonicalSchemaVersion,
+		Provider:   m.providerName,
+		Instrument: action.Instrument,
+		Interval:   W1,
+		Span:       monthSpan,
+		Basis:      BasisBid,
+		// AdjustmentNotApplicable: W1 resampling exists only for FX
+		// (oanda) data today — the same "hardcoded, not per-parent"
+		// choice already made for Basis above.
+		AdjustmentPolicy: AdjustmentNotApplicable,
+		SchemaVersion:    canonicalSchemaVersion,
 		// RawFingerprint is the (possibly composite, see above) parent
 		// D1 fingerprint(s): W1 has no raw source of its own, and this
 		// is what lets a caller trace a derived dataset back to its

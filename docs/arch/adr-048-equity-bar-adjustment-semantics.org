@@ -1,0 +1,192 @@
+#+TITLE: Canonical Equity Bar Adjustment Semantics ADR-048
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #298 (EQ-05) asks for explicit, reproducible
+corporate-action adjustment semantics for historical equity bars,
+resolving the open question ADR-047 explicitly left unverified:
+whether Stooq's own SPY/AAPL/QQQ daily closes are already
+split-adjusted or raw.
+
+* Context
+
+ADR-047 (Equities Phase 1 scope) decided Phase 1 would "record
+adjustment provenance only... rather than building the architecture
+document's full selectable-adjustment sketch," and explicitly flagged
+as unresolved whether Stooq's data is already split-adjusted — the raw
+CSV carries no adjusted-close column, so this could not be determined
+from the SPY/QQQ data alone (neither instrument has ever split).
+
+That blocked EQ-05's own acceptance criterion ("AAPL or another known
+split example demonstrates that historical bars behave according to
+the documented policy"): no split-containing dataset existed in the
+local archive. This was raised as an open question on issue #298; the
+resolution was to add a real AAPL Stooq daily export
+(=/srv/trading/data/raw/stooq/aapl_us_d.csv=, 1984-09-07 through
+2026-09-04, 10,580 rows) alongside the existing SPY/QQQ files.
+
+Inspecting that file directly against AAPL's two real historical
+splits settles the question empirically:
+
+- *2014-06-09, 7-for-1*: close moves from 20.2379 (2014-06-06) to
+  20.5596 (2014-06-09) — a +1.6% ordinary daily move, not a ~7x/~0.14x
+  discontinuity.
+- *2020-08-31, 4-for-1*: close moves from 121.171 (2020-08-28) to
+  125.283 (2020-08-31) — a +3.4% ordinary daily move, not a ~4x/~0.25x
+  discontinuity.
+- 1984-era closes (around $0.10) are far below AAPL's actual 1984 IPO
+  price (~$22), consistent with the cumulative effect of every later
+  split already being applied throughout the whole history, not just
+  around the two spot-checked dates.
+
+Stooq's daily equity history is therefore *split-adjusted*, not raw.
+Dividend/total-return adjustment status was not separately
+investigated (no adjusted-close or dividend column exists in the
+source to check against), and is recorded as a distinct, still-open
+question rather than assumed either way — see Consequences.
+
+* Decision
+
+** A new AdjustmentPolicy type, recorded in Manifest, not selected at query time
+
+=marketdata.AdjustmentPolicy= (=marketdata/adjustment.go=) is a new
+small enum mirroring =PriceBasis='s own shape (=String=/=valid=, zero
+value reserved as unset): =AdjustmentNotApplicable= (FX — no
+corporate-action concept exists), =AdjustmentUnadjusted=,
+=AdjustmentSplitAdjusted=, and =AdjustmentTotalReturn= (reserved,
+unused — no provider Trader ingests today delivers total-return data).
+
+=Manifest= gains an =AdjustmentPolicy= field, validated
+(=Manifest.Validate= rejects the zero value via a new
+=ErrManifestAdjustment=) exactly like =Basis=. =readAndNormalizeRaw=
+(=build_normalize.go=) now returns the policy alongside
+=PriceBasis=/=CalendarVersion=, dispatched per provider: the =oanda=
+branch (default case in the seam's dispatch) always returns
+=AdjustmentNotApplicable=; the =stooq= branch returns
+=AdjustmentSplitAdjusted=, per the empirical finding above. W1
+resampling (=resample.go=, FX-only today) hardcodes
+=AdjustmentNotApplicable=, the same "hardcoded, not per-parent" choice
+already made there for =Basis=.
+
+This is recording, not selecting: consistent with ADR-047, Trader does
+not compute or offer query-time adjustment. A canonical dataset
+carries exactly the one convention its source provider delivered.
+
+** Dataset identity: no new wiring needed, only the field itself
+
+Issue #298's acceptance criterion — "two datasets with materially
+different adjustment semantics cannot silently collide in canonical
+storage/cache identity" — turned out to require no new plumbing.
+=backtest.Manifest='s own =dataset []marketdata.Manifest= field already
+embeds the *entire* =marketdata.Manifest= value (not a hand-picked
+subset) into =ConfigDigest='s JSON-then-SHA256 computation. Adding
+=AdjustmentPolicy= as an ordinary exported field on =marketdata.Manifest=
+was therefore sufficient by construction: any two runs whose datasets
+differ in adjustment convention now produce different
+=backtest.Manifest.ConfigDigest= values automatically, the same way
+they already would for a different =RawFingerprint= or
+=CalendarVersion=.
+
+=Manifest.Revision()= is a second, narrower reproducibility hash (used
+for parent-lineage tracking and dataset-level identity independent of
+any backtest) that hashes a fixed, explicit field list
+(=revisionInput=) rather than embedding the whole struct — this one
+*did* need updating directly, or two manifests differing only in
+adjustment policy would have silently shared one =Revision=.
+=AdjustmentPolicy= was added to =revisionInput=, and
+=manifestRevisionVersion= was bumped from =manifest-revision-v1= to
+=manifest-revision-v2= (the field's own doc comment already commits to
+exactly this "explicit, versioned break" discipline for any encoding
+change).
+
+** Volume under split adjustment
+
+Trader does not independently adjust volume (or price): it records
+whatever a provider's Bar delivers, and correspondingly does not
+implement volume-specific split-adjustment logic. If a provider's
+prices are split-adjusted, any historical volume figures it also
+reports are that provider's own responsibility to have adjusted (or
+not) consistently with its own stated convention — Trader's
+=AdjustmentPolicy= describes what convention the provider's *prices*
+follow and makes no independent claim about volume. This matches
+issue #298's own "do not build a general corporate-action event
+engine" constraint: verifying or re-deriving a provider's volume
+convention independently is exactly that kind of engine, and nothing
+in Phase 1 needs it.
+
+** No general marketdata.Bar extension needed
+
+=Bar.Validate= checks only per-bar OHLC-relationship invariants (High
+>= Low, Open/Close within [Low, High], and so on); it has no
+cross-bar/sequence check, so a large day-over-day price change from a
+real split passes unmodified — confirmed directly by
+=TestStooqAAPLFullArchive= building real canonical bars across both of
+AAPL's real split dates without any validation change. No field,
+method, or invariant on =Bar= itself needed to change for equities
+beyond what EQ-03A (=BasisTrade=, issue #303) already added.
+
+** Real-data demonstration, plus a durable regression
+
+=TestStooqAAPLFullArchive= (=marketdata/stooq_aapl_fullarchive_test.go=,
+=fullarchive=-tagged, mirroring every other real-archive test's
+edit-the-constant-locally convention) imports AAPL's complete real
+history and confirms both =AdjustmentSplitAdjusted= on every published
+month and continuous pricing across both real split dates — the
+primary, real-data proof EQ-05's acceptance criterion asks for.
+
+=TestStooqEndToEnd_AAPLRecordsSplitAdjustedPolicy=
+(=marketdata/stooq_integration_test.go=) is the CI-committed regression:
+a small, real (not synthetic) three-row excerpt of the actual AAPL
+history spanning the 2020-08-31 split, checked in as
+=marketdata/internal/provider/stooq/testdata/aapl_us_d_sample.csv=,
+proving the same continuity and =AdjustmentPolicy= result
+deterministically in every test run.
+
+* Consequences
+
+- Every canonical =Manifest= — FX and equity alike — now requires a
+  valid =AdjustmentPolicy= to pass =Validate=. All existing hand-built
+  test fixtures and one checked-in canonical CSV fixture
+  (=marketdata/testdata/oanda/EURUSD/2020/03/EURUSD-2020-03-h1.csv=)
+  were updated accordingly, including that fixture's own =revision=
+  hash (recomputed for =manifest-revision-v2=).
+- =manifestRevisionVersion='s bump changes every =Manifest.Revision()=
+  value going forward, including for FX data whose =AdjustmentPolicy=
+  is simply =AdjustmentNotApplicable= — an expected, explicit,
+  versioned break per that constant's own documented purpose, not a
+  behavior change to FX data itself.
+- =report='s golden fixtures (=Org=/=text=/=JSON= renderers) embed
+  =ConfigDigest=/=Revision= values and were regenerated via the
+  package's own documented manual procedure
+  (=report/golden_test.go='s doc comment) — no renderer logic changed.
+- Whether Stooq's data is also dividend/total-return adjusted remains
+  genuinely unverified and is not claimed either way; if a future
+  issue needs to know, it requires its own investigation (for example
+  checking price behavior around a known large ex-dividend date),
+  not an assumption drawn from this ADR.
+- =AdjustmentTotalReturn= exists but is unused by any current provider;
+  it is reserved so a future total-return-adjusted source does not
+  require another =AdjustmentPolicy= redesign.
+
+* Alternatives Considered
+
+- *Implement the architecture document's full, query-time-selectable
+  =AdjustmentMode= now, since equities are the first asset class that
+  actually needs adjustment semantics.* Rejected, per ADR-047's own
+  already-accepted reasoning: no concrete consumer needs more than "one
+  recorded, identity-bearing convention per dataset" yet, and building
+  selectable multi-mode adjustment against a single data source would
+  be exactly the speculative generality this codebase avoids elsewhere.
+- *Independently verify or recompute Stooq's volume-adjustment
+  convention.* Rejected: issue #298 explicitly excludes a general
+  corporate-action engine, and Trader's own position — record what the
+  provider delivers, make no independent claim — needs no such
+  verification to be honest about what it does and does not check.
+- *Leave =Manifest.Revision= unchanged and rely on =ConfigDigest='s
+  whole-struct embedding alone for identity separation.* Rejected:
+  =Revision= is used independently of =ConfigDigest= (parent-lineage
+  tracking, dataset-level identity outside any backtest run), and
+  leaving it unaware of =AdjustmentPolicy= would let two
+  differently-adjusted datasets silently share one revision in exactly
+  the context =ConfigDigest='s own fix does not reach.
