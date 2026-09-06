@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/instrument"
-	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 )
 
 // PartitionCoverageStatus classifies one canonical partition file's own
@@ -74,7 +73,8 @@ type PartitionCoverage struct {
 	Manifest *Manifest
 	// RawIncompleteCount is the number of raw records in the
 	// corresponding raw partition whose provider "complete" flag was
-	// false (oanda.Partition.IncompleteCount). It is always 0 for the
+	// false (the provider's own IncompleteCount, oanda.Partition's only
+	// today — see rawPartitionInfo). It is always 0 for the
 	// derived W1 interval, which has no raw partition of its own, and
 	// for a month with no raw partition on disk at all.
 	//
@@ -99,8 +99,9 @@ type Gap struct {
 // Coverage is Manager's read-only analysis of what canonical data exists
 // for one instrument/interval/range, and why any of it is absent
 // (issue #79, ADR-020). It performs no write or network side effects:
-// Coverage only reads the raw archive (oanda.Inspect) and the canonical
-// store (through Manager's own cache), exactly like Bars.
+// Coverage only reads the raw archive (via rawInventoryLookup's provider
+// dispatch) and the canonical store (through Manager's own cache),
+// exactly like Bars.
 type Coverage struct {
 	Instrument instrument.ID
 	Interval   Interval
@@ -116,11 +117,15 @@ type Coverage struct {
 	Gaps []Gap
 }
 
-// rawPartitionKey indexes a raw-archive inventory lookup by exactly the
-// fields oanda.Partition and marketdata's own partitionKey share.
+// rawPartitionKey indexes a raw-archive inventory lookup. interval is a
+// provider-neutral raw interval token ("m1", "h1", "h4", or "d1" —
+// deliberately a plain string, not either oanda.RawInterval or
+// stooq.RawInterval, since a shared marketdata-level key must not
+// couple itself to one specific provider's own type, per ADR-047's
+// internal provider seam).
 type rawPartitionKey struct {
 	symbol   string
-	interval oanda.RawInterval
+	interval string
 	year     int
 	month    time.Month
 }
@@ -129,63 +134,22 @@ type rawPartitionKey struct {
 // interval token it is built directly from. It reports ok=false for W1,
 // which has no raw-native partition (ADR-012: W1 is derived from
 // canonical D1), and for any other interval this package does not
-// support.
-func intervalToRawInterval(i Interval) (oanda.RawInterval, bool) {
+// support. The returned token is provider-neutral; rawInventoryLookup
+// and normalizeAndPublish convert it to whichever concrete provider's
+// own typed constant they need.
+func intervalToRawInterval(i Interval) (string, bool) {
 	switch i {
 	case M1:
-		return oanda.RawM1, true
+		return "m1", true
 	case H1:
-		return oanda.RawH1, true
+		return "h1", true
 	case H4:
-		return oanda.RawH4, true
+		return "h4", true
 	case D1:
-		return oanda.RawD1, true
+		return "d1", true
 	default:
 		return "", false
 	}
-}
-
-// rawInventoryLookup returns a lookup map of every raw partition
-// Inspect finds under m.rawRoot, keyed for direct use by Coverage/Plan.
-// It returns a nil map with no error for W1, since raw inspection does
-// not apply to a derived interval, and a wrapped ErrInvalidConfig if
-// m.rawRoot is empty for any interval that does need it.
-//
-// A configured m.rawRoot that does not exist on disk at all is treated
-// as an empty archive (an empty lookup, no error) rather than
-// propagating Inspect's own ENOENT failure: nothing has ever been
-// synced there yet, which is exactly what an empty raw archive means,
-// and Coverage/Plan are read-only operations that must never create a
-// directory themselves to make Inspect succeed (that would violate the
-// no-hidden-writes invariant read-only operations are held to — see
-// datacmd_test.go's own no-hidden-write assertions). Sync creates
-// m.rawRoot itself, on demand, the moment it actually needs to write a
-// partition there (oanda.WritePartition's own os.MkdirAll) — by the
-// time Coverage/Plan next run against the same rawRoot, the directory
-// legitimately exists and is inspected normally. Any other failure to
-// list rawRoot (permission denied, a path that exists but is not a
-// directory, and so on) still propagates unchanged: those are real
-// configuration problems Coverage/Plan should surface, not silently
-// paper over as "nothing here yet."
-func (m *Manager) rawInventoryLookup(ctx context.Context, interval Interval) (map[rawPartitionKey]oanda.Partition, error) {
-	if _, ok := intervalToRawInterval(interval); !ok {
-		return nil, nil
-	}
-	if m.rawRoot == "" {
-		return nil, fmt.Errorf("%w: raw root is not configured", ErrInvalidConfig)
-	}
-	if _, statErr := os.Stat(m.rawRoot); errors.Is(statErr, os.ErrNotExist) {
-		return map[rawPartitionKey]oanda.Partition{}, nil
-	}
-	inv, err := oanda.Inspect(ctx, m.rawRoot)
-	if err != nil {
-		return nil, fmt.Errorf("inspect raw archive: %w", err)
-	}
-	lookup := make(map[rawPartitionKey]oanda.Partition, len(inv.Partitions))
-	for _, p := range inv.Partitions {
-		lookup[rawPartitionKey{p.Symbol, p.Interval, p.Year, p.Month}] = p
-	}
-	return lookup, nil
 }
 
 // Coverage analyzes query against the raw archive and canonical store,
@@ -220,7 +184,7 @@ func (m *Manager) Coverage(ctx context.Context, query BarQuery) (Coverage, error
 // coverage is Coverage's implementation, factored out so Plan can reuse
 // it with a raw inventory lookup it already computed once, rather than
 // walking the raw archive a second time.
-func (m *Manager) coverage(ctx context.Context, query BarQuery, symbol string, rawByKey map[rawPartitionKey]oanda.Partition) (Coverage, error) {
+func (m *Manager) coverage(ctx context.Context, query BarQuery, symbol string, rawByKey map[rawPartitionKey]rawPartitionInfo) (Coverage, error) {
 	rawInterval, rawApplicable := intervalToRawInterval(query.Interval)
 	keys := monthPartitionKeys(m.providerName, symbol, query.Instrument, query.Interval, query.Range)
 	cov := Coverage{Instrument: query.Instrument, Interval: query.Interval, Range: query.Range}
@@ -257,7 +221,7 @@ func (m *Manager) coverage(ctx context.Context, query BarQuery, symbol string, r
 
 		if rawApplicable {
 			if p, found := rawByKey[rawPartitionKey{symbol, rawInterval, key.year, key.month}]; found {
-				pc.RawIncompleteCount = p.IncompleteCount
+				pc.RawIncompleteCount = p.incompleteCount
 			}
 		}
 
@@ -283,7 +247,7 @@ func (m *Manager) coverage(ctx context.Context, query BarQuery, symbol string, r
 // surfaced through the raw partition's own status (RawIncompleteCount
 // and, for the raw-built case, a Plan action) or, for the derived case,
 // through the child's own D1-completeness gating in Plan.
-func (m *Manager) isStale(ctx context.Context, key partitionKey, man Manifest, symbol string, rawByKey map[rawPartitionKey]oanda.Partition, rawInterval oanda.RawInterval, rawApplicable bool) (bool, error) {
+func (m *Manager) isStale(ctx context.Context, key partitionKey, man Manifest, symbol string, rawByKey map[rawPartitionKey]rawPartitionInfo, rawInterval string, rawApplicable bool) (bool, error) {
 	if key.interval == W1 {
 		parentKey := key
 		parentKey.interval = D1
@@ -338,10 +302,10 @@ func (m *Manager) isStale(ctx context.Context, key partitionKey, man Manifest, s
 		return false, nil
 	}
 	p, found := rawByKey[rawPartitionKey{symbol, rawInterval, key.year, key.month}]
-	if !found || p.Status != oanda.PartitionStatusOK {
+	if !found || p.status != rawPartitionOK {
 		return false, nil
 	}
-	return man.RawFingerprint != p.Fingerprint, nil
+	return man.RawFingerprint != p.fingerprint, nil
 }
 
 // gapAccumulator merges consecutive same-IntervalState, contiguous

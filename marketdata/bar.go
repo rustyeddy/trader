@@ -11,7 +11,10 @@ import (
 // PriceBasis records what a BarSet's OHLC prices represent. FX providers
 // quote a bid and an ask; a canonical BarSet records one basis for all its
 // bars so a consumer is never left guessing whether Close is a bid, an
-// ask, or a mid. M2's canonical FX bars use BasisBid (see ADR-020).
+// ask, a mid, or an actual traded price. M2's canonical FX bars use
+// BasisBid (see ADR-020); exchange-traded instruments such as equities
+// use BasisTrade (issue #303, ADR-047), since their providers report
+// single-price OHLCV with no bid/ask history to derive a spread from.
 type PriceBasis uint8
 
 const (
@@ -28,6 +31,12 @@ const (
 	BasisMid
 	// BasisAsk means OHLC are ask prices.
 	BasisAsk
+	// BasisTrade means OHLC are actual traded (last-price) values, not
+	// derived from a bid/ask spread — the natural basis for
+	// exchange-traded instruments such as equities and ETFs, whose
+	// providers (for example Stooq) report single-price OHLCV with no
+	// separate bid/ask history at all (issue #303, EQ-03A; ADR-047).
+	BasisTrade
 )
 
 // String returns a human-readable PriceBasis name.
@@ -41,6 +50,8 @@ func (b PriceBasis) String() string {
 		return "mid"
 	case BasisAsk:
 		return "ask"
+	case BasisTrade:
+		return "trade"
 	default:
 		return fmt.Sprintf("PriceBasis(%d)", uint8(b))
 	}
@@ -50,7 +61,7 @@ func (b PriceBasis) String() string {
 // value).
 func (b PriceBasis) valid() bool {
 	switch b {
-	case BasisBid, BasisMid, BasisAsk:
+	case BasisBid, BasisMid, BasisAsk, BasisTrade:
 		return true
 	default:
 		return false
@@ -77,7 +88,7 @@ var (
 	ErrBarTicks = errors.New("marketdata: bar ticks negative")
 )
 
-// Bar is one canonical, observed FX bar for a single instrument and
+// Bar is one canonical, observed market bar for a single instrument and
 // interval. It is the per-observation half of the market-data model; the
 // homogeneous metadata that applies to a whole range of bars (instrument,
 // interval, span, price basis) lives on BarSet, not repeated on every Bar.
@@ -90,17 +101,22 @@ var (
 // a Bar that exists always represents an observation that happened. A
 // missing interval is an absent Bar, described by coverage, not a zero row.
 //
-// OHLC are bid-basis in M2; BarSet.Basis records the basis for a whole
-// collection. AvgSpread and MaxSpread are the mean and maximum of
+// OHLC are bid-basis for FX in M2; BarSet.Basis records the basis for a
+// whole collection, including BasisTrade for exchange-traded instruments
+// (issue #303). AvgSpread and MaxSpread are the mean and maximum of
 // (ask - bid) taken at the open, high, low, and close — the only spread
 // summary reconstructible from OANDA's bid/ask OHLC, since no per-tick
 // spread stream is preserved. What that spread means for a simulated fill
-// is deferred to M5.
+// is deferred to M5. A BasisTrade bar has no such spread to reconstruct:
+// AvgSpread and MaxSpread are both the zero num.Price, a known limitation
+// (ADR-047) rather than a claim of zero spread.
 //
 // Ticks is OANDA's per-bar tick count (its "volume" column, which is a
-// tick count, not traded volume). It is a plain int64, not num.Quantity:
-// a tick count is a dimensionless count, not an exact tradable quantity,
-// and ADR-004 defines no count type.
+// tick count, not traded volume) for FX data; for a BasisTrade bar it
+// instead holds the provider's own share-volume figure (issue #303). It
+// is a plain int64, not num.Quantity, either way: a count is a
+// dimensionless quantity, not an exact tradable one, and ADR-004 defines
+// no count type.
 type Bar struct {
 	// Time is the bar's authoritative observed and session-aligned open,
 	// stored verbatim. It is never reconstructed from array position or

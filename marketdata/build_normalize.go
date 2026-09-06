@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
+	"github.com/rustyeddy/trader/marketdata/internal/provider/stooq"
 )
 
 // normalizeAndPublish executes one ActionNormalizeCanonical entry: reads
@@ -57,25 +58,9 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		return PublishResult{}, err
 	}
 
-	// ReadPartitionSnapshot, not separate ReadPartitionRecords/
-	// FingerprintPartition calls: those would open the raw file twice,
-	// admitting a window in which Sync atomically replaces it in
-	// between, so the records normalized below and the fingerprint
-	// recorded on the published Manifest could end up describing two
-	// different revisions of the raw file (see ReadPartitionSnapshot's
-	// own doc comment). One read guarantees they always describe the
-	// same bytes.
-	snapshot, err := oanda.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, rawInterval, action.Year, action.Month)
+	normalized, fingerprint, basis, calendarVersion, err := m.readAndNormalizeRaw(ctx, rawInterval, symbol, action)
 	if err != nil {
-		return PublishResult{}, fmt.Errorf("read raw partition: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
 		return PublishResult{}, err
-	}
-
-	normalized, err := normalizeOANDASequence(rawInterval, m.calendar, snapshot.Records)
-	if err != nil {
-		return PublishResult{}, fmt.Errorf("normalize: %w", err)
 	}
 
 	if badErr := firstBadOutcomeError(normalized); badErr != nil {
@@ -89,14 +74,12 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		}
 	}
 
-	fingerprint := snapshot.Fingerprint
-
 	monthStart := time.Date(action.Year, action.Month, 1, 0, 0, 0, 0, time.UTC)
 	span, err := NewTimeRange(monthStart, monthStart.AddDate(0, 1, 0))
 	if err != nil {
 		return PublishResult{}, fmt.Errorf("marketdata: build: %w", err)
 	}
-	bs := BarSet{Instrument: action.Instrument, Interval: action.Interval, Span: span, Basis: BasisBid, Bars: bars}
+	bs := BarSet{Instrument: action.Instrument, Interval: action.Interval, Span: span, Basis: basis, Bars: bars}
 	if err := bs.Validate(); err != nil {
 		return PublishResult{}, fmt.Errorf("marketdata: build: assembled bar set: %w", err)
 	}
@@ -106,13 +89,13 @@ func (m *Manager) normalizeAndPublish(ctx context.Context, action Action) (Publi
 		Instrument:       action.Instrument,
 		Interval:         action.Interval,
 		Span:             span,
-		Basis:            BasisBid,
+		Basis:            basis,
 		SchemaVersion:    canonicalSchemaVersion,
 		RawFingerprint:   fingerprint,
 		BuilderVersion:   builderVersion,
 		ValidatorVersion: validatorVersion,
 		ResamplerVersion: noResampler,
-		CalendarVersion:  calendarVersionCurrent,
+		CalendarVersion:  calendarVersion,
 		BuiltAt:          m.clock.Now(),
 		BarCount:         len(bars),
 	}
@@ -155,4 +138,63 @@ func firstBadOutcomeError(normalized []normalizedRecord) error {
 		err = fmt.Errorf("%w; %s at %s: %v", err, nr.outcome, nr.time, nr.err)
 	}
 	return err
+}
+
+// calendarVersionStooqV1 is the CalendarVersion a Stooq-sourced build
+// records: no trading-calendar alignment was actually applied (see
+// normalizeStooqSequence's own doc comment for why), so this names that
+// fact honestly rather than claiming calendarVersionCurrent's FXCalendar
+// alignment, which was never checked against equity data at all.
+const calendarVersionStooqV1 = "stooq-unaligned-v1"
+
+// readAndNormalizeRaw reads the raw partition for (rawInterval, symbol,
+// action.Year, action.Month) and normalizes it, dispatched to the
+// concrete provider implementation named by m.providerName (ADR-047's
+// internal provider seam). It returns the normalized records, the raw
+// partition's content fingerprint, and the PriceBasis/CalendarVersion
+// the resulting canonical dataset should record — oanda's own bid-basis,
+// FXCalendar-aligned build is entirely unchanged from before this seam
+// existed; stooq is the second, natively-written implementation.
+func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol string, action Action) ([]normalizedRecord, string, PriceBasis, string, error) {
+	switch m.providerName {
+	case "stooq":
+		if rawInterval != string(stooq.RawD1) {
+			return nil, "", BasisUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
+		}
+		snapshot, err := stooq.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
+		if err != nil {
+			return nil, "", BasisUnknown, "", fmt.Errorf("read raw partition: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, "", BasisUnknown, "", err
+		}
+		normalized, err := normalizeStooqSequence(snapshot.Records)
+		if err != nil {
+			return nil, "", BasisUnknown, "", fmt.Errorf("normalize: %w", err)
+		}
+		return normalized, snapshot.Fingerprint, BasisTrade, calendarVersionStooqV1, nil
+
+	default:
+		// ReadPartitionSnapshot, not separate ReadPartitionRecords/
+		// FingerprintPartition calls: those would open the raw file
+		// twice, admitting a window in which Sync atomically replaces
+		// it in between, so the records normalized below and the
+		// fingerprint recorded on the published Manifest could end up
+		// describing two different revisions of the raw file (see
+		// ReadPartitionSnapshot's own doc comment). One read guarantees
+		// they always describe the same bytes.
+		oandaInterval := oanda.RawInterval(rawInterval)
+		snapshot, err := oanda.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, oandaInterval, action.Year, action.Month)
+		if err != nil {
+			return nil, "", BasisUnknown, "", fmt.Errorf("read raw partition: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, "", BasisUnknown, "", err
+		}
+		normalized, err := normalizeOANDASequence(oandaInterval, m.calendar, snapshot.Records)
+		if err != nil {
+			return nil, "", BasisUnknown, "", fmt.Errorf("normalize: %w", err)
+		}
+		return normalized, snapshot.Fingerprint, BasisBid, calendarVersionCurrent, nil
+	}
 }
