@@ -135,6 +135,30 @@ func TestRegisterEquityInstrument_RejectsInvalidExchangeOrTicker(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestRegisterEquityInstrument_SetsVenueForExchangeDisambiguation
+// confirms the registered Listing's Venue is the instrument's actual
+// exchange, not left empty the way RegisterFXInstrument leaves it for
+// spot FX (which has no meaningful centralized venue). Venue matters
+// for equities specifically because a resolver query can constrain by
+// venue (ADR-016) to disambiguate same-symbol tickers listed on
+// different exchanges.
+func TestRegisterEquityInstrument_SetsVenueForExchangeDisambiguation(t *testing.T) {
+	resolver := instrument.NewMemoryResolver()
+
+	id, err := svc.RegisterEquityInstrument(resolver, svc.EquityRegistration{
+		Provider: "alpaca", Exchange: "NASDAQ", Ticker: "AAPL",
+		Currency: num.MustParseCurrency("USD"),
+	})
+	require.NoError(t, err)
+
+	listing, err := resolver.ResolveInstrument(id, "alpaca", "NASDAQ")
+	require.NoError(t, err)
+	require.Equal(t, "NASDAQ", listing.Venue())
+
+	_, err = resolver.ResolveInstrument(id, "alpaca", "NYSE")
+	require.ErrorIs(t, err, instrument.ErrUnknownSymbol)
+}
+
 func TestRegisterEquityInstrument_RejectsInvalidCurrency(t *testing.T) {
 	resolver := instrument.NewMemoryResolver()
 

@@ -108,9 +108,17 @@ func registerEquityLikeListing(resolver *instrument.MemoryResolver, reg EquityRe
 	listing, err := instrument.NewListing(instrument.ListingParams{
 		Instrument: inst,
 		Provider:   reg.Provider,
-		Symbol:     providerSymbol,
-		Spec:       spec,
-		Tradable:   true,
+		// Venue is meaningful for equities/ETFs (unlike spot FX, which
+		// RegisterFXInstrument leaves empty per Venue's own doc
+		// comment): it is the exchange itself, exactly the value
+		// already validated into inst.Exchange() above. Leaving it
+		// empty would let two same-symbol listings on different
+		// exchanges either collide or become impossible for a caller
+		// to disambiguate via venue during resolution.
+		Venue:    reg.Exchange,
+		Symbol:   providerSymbol,
+		Spec:     spec,
+		Tradable: true,
 	})
 	if err != nil {
 		return instrument.ID{}, fmt.Errorf("invalid equity registration %s:%s: %w", reg.Exchange, reg.Ticker, err)
