@@ -517,11 +517,23 @@ resolving a gap ADR-047/ADR-048 deliberately left open: no equity-aware
 days, regression-locked by issue #299's own
 =TestStooqCoverage_HolidayGapPendingEquityCalendar=. This ADR records
 the new =USEquityCalendar= (D1-only, midnight-UTC-anchored to agree
-with Stooq's own bars, =Session= deliberately equal to the whole day to
-satisfy =ClassifyInterval='s containment requirement), a real dated US
-holiday rule set, real calendar-alignment validation in
-=normalize_stooq.go= (the exact follow-up that function's own doc
-comment already named), and the resulting fixed regression test.
+with Stooq's own bars), a real dated US holiday rule set, real
+calendar-alignment validation in =normalize_stooq.go= (the exact
+follow-up that function's own doc comment already named), and the
+resulting fixed regression test. =Status=/=Session= honestly model the
+real 09:30-16:00 America/New_York regular session (including half-day
+truncation) rather than treating the whole labeled day as "session" —
+a first draft of this ADR took that shortcut to satisfy
+=ClassifyInterval='s containment requirement, which review correctly
+rejected as weakening =Session='s own meaning. The actual fix is the
+new, purely additive optional =BarSpanClassifier= =Calendar=
+capability (=marketdata/interval_state.go=): a =Calendar= may answer
+whether a whole =Bar=-returned span represents one labeled open
+trading day directly, decoupled from literal endpoint-sampling of
+=Status=/=Session=. =FXCalendar= does not implement it and is
+classified exactly as before — this is a zero-behavior-change,
+backward-compatible generalization of the shared classification path,
+not a redesign of it.
 
 * ADR-001: Modular monolith before service decomposition
 

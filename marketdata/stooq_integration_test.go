@@ -508,12 +508,17 @@ func TestStooqCoverage_HolidayGapCorrectlyClosedNotMissing(t *testing.T) {
 
 // TestStooqCoverage_HalfDayDoesNotStraddleError confirms a query
 // spanning a real half day (the day after Thanksgiving) never trips
-// ErrIntervalStraddlesBoundary — the failure mode that would result
-// if Session ever returned a narrower window than Bar's own D1 span
-// for that date (see USEquityCalendar's own doc comment for why
-// Session deliberately returns the whole day rather than truncating at
-// the half day's actual 1:00pm close). This is checked through a real
-// Manager.Coverage call, not only USEquityCalendar's own unit tests.
+// ErrIntervalStraddlesBoundary. Session/Status now honestly report the
+// real, truncated half-day trading hours (a genuinely narrower window
+// than Bar's own midnight-to-midnight D1 span) — but ClassifyInterval
+// never actually samples Session/Status against Bar's own span for
+// USEquityCalendar at all: uniformStatus (interval_state.go) prefers
+// the optional BarSpanClassifier capability, which answers "is this
+// whole labeled UTC day an open trading day" directly, decoupled from
+// literal endpoint sampling, so the half day's shorter real session
+// window never has a chance to fail a containment check that no longer
+// applies to it. This is checked through a real Manager.Coverage call,
+// not only USEquityCalendar's own unit tests.
 func TestStooqCoverage_HalfDayDoesNotStraddleError(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
