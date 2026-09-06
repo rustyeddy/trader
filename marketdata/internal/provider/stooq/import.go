@@ -113,10 +113,17 @@ func Import(ctx context.Context, csvPath, rawRoot, symbol string) (ImportResult,
 		byMonth[key] = append(byMonth[key], rec)
 
 		result.RowsImported++
-		if result.FirstDate.IsZero() {
+		// Computed as an actual min/max over every parsed row, not
+		// scan order: a reverse-sorted or otherwise unsorted native
+		// export must not silently invert FirstDate/LastDate for a
+		// caller that builds a query span from this result (Copilot's
+		// PR #306 review).
+		if result.FirstDate.IsZero() || rec.Time.Before(result.FirstDate) {
 			result.FirstDate = rec.Time
 		}
-		result.LastDate = rec.Time
+		if result.LastDate.IsZero() || rec.Time.After(result.LastDate) {
+			result.LastDate = rec.Time
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return ImportResult{}, fmt.Errorf("stooq: import: %s: %w", csvPath, err)

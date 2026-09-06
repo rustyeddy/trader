@@ -39,6 +39,35 @@ func TestImport_SmallFixtureSplitsIntoMonthlyPartitions(t *testing.T) {
 	require.Len(t, snapJune.Records, 1)
 }
 
+// TestImport_FirstLastDateAreMinMaxNotScanOrder confirms
+// ImportResult.FirstDate/LastDate are computed as an actual min/max
+// over every parsed row, not derived from first-seen/last-seen scan
+// order — a reverse-sorted (or otherwise unsorted) native export must
+// not silently invert these fields for a caller that builds a query
+// span from the result (PR #306 review).
+func TestImport_FirstLastDateAreMinMaxNotScanOrder(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "reverse.csv")
+
+	// Rows deliberately out of order: newest first, and the true
+	// earliest row is in the middle, not first or last.
+	content := "Date,Open,High,Low,Close,Volume\n" +
+		"2020-06-01,301.02,303.44,300.15,303.10,52134500\n" +
+		"2020-05-01,282.80,283.19,278.85,282.79,74424000\n" +
+		"2020-05-04,280.34,286.44,278.83,285.34,68472600\n"
+	require.NoError(t, os.WriteFile(csvPath, []byte(content), 0o644))
+
+	result, err := Import(ctx, csvPath, rawRoot, "spy")
+	require.NoError(t, err)
+
+	assert.True(t, result.FirstDate.Equal(time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC)),
+		"FirstDate = %v, want 2020-05-01", result.FirstDate)
+	assert.True(t, result.LastDate.Equal(time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC)),
+		"LastDate = %v, want 2020-06-01", result.LastDate)
+}
+
 func TestImport_UppercasesSymbol(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
