@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rustyeddy/trader/marketdata/internal/provider/alpaca"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/oanda"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/stooq"
 )
@@ -196,6 +197,45 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		// split-adjusted (confirmed empirically against AAPL's real
 		// splits, issue #298) but not dividend-adjusted — see
 		// AdjustmentSplitAdjusted's own doc comment.
+		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionUSEquityV1, nil
+
+	case "alpaca":
+		if rawInterval != string(alpaca.RawD1) {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: alpaca: only %s is supported, got %s", D1, action.Interval)
+		}
+		// Same verification stooq's own case above performs, and for the
+		// identical reason (PR #310 review): a Manifest.CalendarVersion
+		// naming USEquityCalendar is a specific claim about which
+		// Calendar implementation actually validated this dataset's
+		// alignment, not merely that some midnight-UTC-aligned Calendar
+		// was configured.
+		if _, ok := m.calendar.(*USEquityCalendar); !ok {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf(
+				"marketdata: alpaca: %w: provider \"alpaca\" requires Config.Calendar to be a *USEquityCalendar, got %T",
+				ErrInvalidConfig, m.calendar)
+		}
+		snapshot, err := alpaca.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
+		if err != nil {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
+		}
+		normalized, err := normalizeAlpacaSequence(m.calendar, snapshot.Records)
+		if err != nil {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
+		}
+		// AdjustmentSplitAdjusted, matching Stooq's own choice above, for
+		// cross-provider comparability of the same instrument: Alpaca's
+		// bars endpoint is requested with adjustment=split (see
+		// alpaca.Client.doFetchPage), which is Alpaca's own
+		// split-adjusted-but-not-dividend-adjusted convention — the same
+		// shape AdjustmentSplitAdjusted's own doc comment already
+		// describes for Stooq. calendarVersionUSEquityV1 is reused
+		// unchanged: both providers validate against the exact same
+		// USEquityCalendar D1 boundary (midnight UTC), so there is no
+		// reason to mint a second, functionally-identical calendar
+		// version string.
 		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionUSEquityV1, nil
 
 	default:

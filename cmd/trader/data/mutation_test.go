@@ -172,13 +172,23 @@ func TestDataBuild_PropagatesCancelledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// TestDataSync_RequiresOANDACredentials requests March 2024 — a month
+// the fixture raw archive (testdata/raw/oanda, 2024/01 and 2024/02
+// only) has no data for at all, guaranteeing a real ActionDownloadRaw
+// and so a genuine need for a credentialed client. An earlier version
+// of this test requested 2024-01-07/08, a range the fixture already
+// fully covers with no download actually needed — which meant it was
+// only passing because Sync used to require an OANDA client
+// unconditionally, before any download's real necessity was even
+// checked (PR #312 review fixed that bug: Sync now requires a client
+// only once an ActionDownloadRaw is actually about to execute).
 func TestDataSync_RequiresOANDACredentials(t *testing.T) {
 	rawRoot := copyFixtureRaw(t)
 	storeRoot := t.TempDir()
 
 	_, err := runData(t, storeRoot, rawRoot,
-		"sync", "EURUSD", "H1", "--from", "2024-01-07", "--to", "2024-01-08")
-	require.Error(t, err, "no TRADER_OANDA_TOKEN/--oanda-base-url configured at all")
+		"sync", "EURUSD", "H1", "--from", "2024-03-01", "--to", "2024-03-02")
+	require.Error(t, err, "no TRADER_OANDA_TOKEN/--oanda-base-url configured at all, and a real download is required")
 }
 
 func TestDataSync_RejectsTokenWithoutBaseURL(t *testing.T) {

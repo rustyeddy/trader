@@ -1,0 +1,308 @@
+#+TITLE: Alpaca Historical Equity Market-Data Provider ADR-050
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #297 (EQ-04) asks for Alpaca to be implemented as
+Trader's first *live* historical equity data provider, behind the same
+=marketdata= provider boundary ADR-047/048/049 already established for
+Stooq's offline-import path.
+
+* Context
+
+ADR-047 named Alpaca as Phase 1's second provider from the start, and
+scoped exactly one hard constraint for it in advance: a Stooq/Alpaca
+provider must not be forced through =oanda='s bid/ask-specific
+normalization path. ADR-047 also predicted this exact moment: "writing
+a second hardcoded ... branch through every one of those files ...
+would only get worse when Alpaca is added on top," which is precisely
+what EQ-03A already avoided by giving =marketdata/rawprovider.go= and
+=marketdata/build_normalize.go= a =switch m.providerName= seam with a
+=case "stooq":= arm alongside OANDA's =default:= arm. This document
+records how Alpaca becomes that seam's third arm, and — the one place
+the seam did not yet reach — how =marketdata/sync.go= is generalized
+to dispatch by provider at all, since it had no such dispatch before
+this issue: it called =m.oandaClient=/=oanda.*= unconditionally,
+which was tolerable only because OANDA was Sync's sole caller-visible
+provider until now (Stooq has no live feed to sync at all, per
+ADR-047's =allowsLiveExtend= decision).
+
+** Alpaca's real wire shape: partially confirmed on review, some details still unverified in this implementation
+
+Nothing in this repository, and nothing this environment had network
+access to confirm at implementation time, documented Alpaca's actual
+Market Data API v2 response format, so the implementation was built
+against general, publicly-known knowledge of that API's shape. PR
+#312's own review (Rusty, checking against the current official Alpaca
+API docs directly) confirmed the core contract this implementation
+assumed is correct: the single-symbol bars endpoint
+(=/v2/stocks/{symbol}/bars=), =timeframe=1Day=, =start=/=end=,
+=limit=, =page_token=, =adjustment=split=, and =feed=iex= are all real,
+verified parameters/values, not guesses. What remains genuinely
+unverified in this implementation is the exact response *body* shape
+this code decodes against — field names/types beyond what review
+specifically checked, error-response body shape, and pagination
+edge-case behavior (an empty final page, a malformed token) — since no
+real request was actually issued against the live API from this
+environment. This is flagged as prominently as the implementation can
+make it:
+
+- The =alpaca= package's own doc comment (=doc.go=) states the
+  assumption and names the exact isolation strategy below.
+- Every JSON-shape-specific type and parsing function
+  (=barsResponse=, =wireBar=, =(barsResponse).records=) lives in
+  exactly one file, =wireshape.go=, isolated from
+  request/retry/pagination/credential logic in =client.go=. If the
+  real API differs, =wireshape.go= is the one file that needs
+  correcting; nothing else in this package, and nothing in
+  =marketdata=, should need to change.
+- The opt-in smoke test (see below) exists specifically to let an
+  operator with real credentials confirm or refute this assumption
+  against the live API — its own doc comment says explicitly that a
+  decoding failure there means "correct =wireshape.go=," not "the
+  client's request/retry logic is wrong."
+
+This is the same kind of explicitly-flagged, narrowly-isolated
+assumption ADR-020 already tolerates for provider-specific raw
+formats in general; the isolation is what keeps a wrong guess a
+contained, one-file fix rather than a redesign.
+
+* Decision
+
+** Third arm of the existing provider seam, not a fourth pattern
+
+=marketdata/internal/provider/alpaca= is a new internal package,
+self-contained like =oanda= and =stooq= (no cross-imports between
+provider packages), exposing =Record=/=RawInterval=/=Reader=/
+=WritePartition=/=Inspect=/=ReadPartitionSnapshot=/
+=ReadPartitionRecords= (the read-side query surface Sync's
+generalization below needs, matching =oanda.ReadPartitionRecords=)
+and, since Alpaca has a live feed unlike Stooq, an HTTP =Client=.
+=marketdata/rawprovider.go='s =rawInventoryLookup= and
+=marketdata/build_normalize.go='s =readAndNormalizeRaw= each gain a
+=case "alpaca":= arm alongside the existing =case "stooq":= arm and
+OANDA's =default:= arm — structurally identical to Stooq's own arm,
+including the same =*USEquityCalendar= type-assertion guard PR #310's
+review added for Stooq (a =Manifest.CalendarVersion= naming
+=USEquityCalendar= is a specific claim about which =Calendar=
+actually validated the dataset, not merely that some midnight-UTC-
+aligned =Calendar= was configured — verified directly rather than
+assumed for Alpaca too). =allowsLiveExtend= needed no change: it
+already returns =true= for any provider other than ="stooq"=, which
+is correct for Alpaca (it has a live feed, unlike Stooq).
+
+Raw partition persistence follows the same
+=root/PROVIDER/SYMBOL/YYYY/MM/SYMBOL-YYYY-MM-<tf>.csv= convention
+every other provider uses (ADR-020) — this is not optional for a
+"live" provider: =Coverage=/=Plan= inspect the on-disk raw archive
+directly, and =Build= reads raw partition files back, so Alpaca's raw
+history must exist on disk in the same shape for those operations to
+work at all.
+
+** Two-secret credential model, not OANDA's one-token shape
+
+Alpaca's real authentication needs two secrets (a key ID and a secret
+key delivered as two separate headers), unlike OANDA's single bearer
+token. =alpaca.CredentialProvider= is therefore its own interface —
+=Credentials(ctx) (keyID, secretKey string, err error)= — resolved
+fresh per request (never cached), the same rotation-friendly contract
+=oanda.CredentialProvider= already established, just widened to two
+values. =alpaca.StaticCredential= is the in-memory reference
+implementation, mirroring =oanda.StaticCredential=.
+
+=marketdata.Config= gains =AlpacaCredential alpaca.CredentialProvider=
+and =AlpacaBaseURL string=, validated both-or-neither exactly like
+=OANDACredential=/=OANDABaseURL= already are, and an unexported
+=alpacaClient *alpaca.Client= field for the same in-package-test
+injection seam =oandaClient= already provides. =Manager= gains a
+matching unexported =alpacaClient *alpaca.Client= field, built in
+=New= from =Config.AlpacaCredential=/=Config.AlpacaBaseURL= the same
+way =oandaClient= is built. Neither secret is ever a bare string on
+=Config=, so nothing can log or serialize either by accident.
+
+** HTTP client shape mirrors oanda.Client
+
+=alpaca.Client= mirrors =oanda.Client='s structure: an injectable
+=HTTPDoer= interface for fakeable tests, =clock.Clock=-based
+deterministic doubling backoff (never =time.Sleep=), a rate limiter,
+sentinel-error classification distinguishing permanent (401/403/400/
+404) from transient (429/5xx/network) failures, and pagination.
+Pagination itself is simpler than OANDA's time-cursor advancement:
+Alpaca's assumed API returns an explicit =next_page_token=, so
+=Client.FetchBars= loops purely on that token's presence, with no
+short-page heuristic needed.
+
+** Fixed, non-selectable adjustment and feed parameters
+
+=Client= requests =adjustment=split= (mapping to the existing
+=AdjustmentSplitAdjusted= enum value from ADR-048/EQ-05 — no new
+=AdjustmentPolicy= value is needed), matching Stooq's own choice for
+cross-provider comparability of the same instrument. =Client= also
+requests =feed=iex=, Alpaca's free-tier market data feed, pinned as a
+Phase 1 simplification rather than exposed as a caller-selectable
+parameter; a future issue can widen this if a paid feed becomes
+necessary. IEX is one specific exchange's own data, not the
+consolidated multi-exchange SIP tape (PR #312 review) — OHLC/volume
+values from this provider are not directly comparable to a
+consolidated-feed source for the same symbol/date, and this is
+provenance a future cross-provider comparison must account for, not an
+interchangeable equivalent of Stooq's own (unspecified-source)
+history. Neither =adjustment= nor =feed= is configurable through any
+public API — both are implementation details of
+=alpaca.Client.doFetchPage=.
+
+** Timestamp re-anchoring: Alpaca's midnight-America/New_York instant to midnight UTC
+
+Alpaca's real, now-confirmed API (see the Context section above)
+timestamps a daily bar at midnight =America/New_York= civil time,
+expressed in UTC — =04:00:00Z= during EDT, =05:00:00Z= during EST,
+shifting with US daylight saving time — not at the 09:30 regular-
+session open, and not at midnight UTC of the trading date either. An
+earlier draft of this document described this as the "session-open
+instant"; PR #312 review caught that as inaccurate and it is corrected
+here. =USEquityCalendar='s D1 boundary — reused unchanged from
+ADR-049, specifically because it already agrees with Stooq's own
+plain-date convention — is anchored at midnight UTC. Without
+correction, every real Alpaca bar would fail
+=normalizeAlpacaSequence='s calendar-alignment check
+(=errRecordMisaligned=) on every single record.
+
+=wireshape.go='s =(barsResponse).records= method resolves this by
+re-anchoring each fetched bar's =Record.Time= to midnight UTC of its
+own trading date, computed by first converting the literal fetched
+instant to =America/New_York= civil time (the same time zone
+=USEquityCalendar='s own holiday/session reasoning already uses) and
+taking that civil date's midnight-UTC instant. This is the one
+provider-specific timestamp transform Alpaca needs that neither OANDA
+nor Stooq requires, and it lives entirely inside the isolated
+wire-shape file alongside the other unverified-shape assumptions.
+
+** Sync generalized by provider, OANDA behavior unchanged
+
+=marketdata/sync.go= previously had no provider dispatch at all:
+=Sync= unconditionally required =m.oandaClient != nil= and =syncOne=
+unconditionally called =oanda.*=. This document generalizes both:
+
+- =Sync='s upfront check becomes =requireSyncClient=, a new method
+  dispatching on =m.providerName=: OANDA's own case is byte-identical
+  to the previous check (same error text, same condition); a new
+  Alpaca case requires =m.alpacaClient=; a new Stooq case fails
+  clearly with "no live acquisition client; use =stooq.Import=,"
+  rather than misreporting a missing OANDA/Alpaca credential that was
+  never relevant to that provider.
+- =syncOne= becomes a two-line dispatcher calling either
+  =syncOneOANDA= (the previous =syncOne= body, moved and renamed,
+  otherwise byte-for-byte unchanged) or the new =syncOneAlpaca=.
+  =syncOneAlpaca= mirrors =syncOneOANDA='s "missing versus extend,
+  decided operationally" logic exactly, with one simplification:
+  every =alpaca.Record= this package's client writes already
+  represents a fully closed trading day (Phase 1 has no concept of a
+  still-forming "today" bar the way an OANDA candle's =Complete= flag
+  can be false), so there is no incomplete-tail re-fetch case to
+  handle — advancing strictly past the last existing record's own
+  =Time= is always correct.
+
+OANDA's own =syncOne= tests, and every other existing =marketdata=
+test, are confirmed to pass unmodified after this change (see
+Consequences).
+
+** Opt-in smoke test: build-tag-gated local constants, not environment variables
+
+The issue asks for "a small opt-in integration/smoke path" using real
+credentials. The existing precedent for an opt-in, resource-gated test
+in this codebase is =stooq/import_fullarchive_test.go='s pattern: a
+=//go:build fullarchive=-gated file with a local, uncommitted constant
+an operator edits by hand, skipping when it is empty.
+
+A design was first attempted using two environment variables
+(=ALPACA_API_KEY_ID=/=ALPACA_API_SECRET_KEY=) instead, reasoning that
+encouraging an operator to paste a live credential into a tracked
+source file is worse than an environment variable. That design was
+rejected once checked against this repository's own mechanically-
+enforced architecture: =config/arch_test.go='s
+=TestDomainPackagesDoNotReadEnvOrFlags= fails the build for *any*
+=os.Getenv= call outside =config/=, =cmd/=, or =test/= — including
+test files — and Go's =internal/= import-visibility rule confines
+=marketdata/internal/provider/alpaca= to the =marketdata/= subtree, so
+this file cannot be relocated to any exempt location. Loosening that
+architectural gate to admit one file would be exactly the kind of
+unilateral architecture change =CONTRIBUTING.org= asks an agent to
+escalate rather than make.
+
+The smoke test therefore follows =import_fullarchive_test.go='s
+own pattern instead, applied to a credential pair rather than a
+filesystem path: =//go:build alpacasmoke= (a new, independent tag —
+not =fullarchive= itself, so enabling one opt-in path never silently
+enables the other), two empty-by-default constants
+(=alpacaSmokeKeyID=, =alpacaSmokeSecretKey=) an operator edits locally
+and never commits, and a runtime =t.Skip= when either is empty. This
+satisfies the issue's "opt-in... when credentials are available"
+requirement without conflicting with the existing environment-access
+architecture rule.
+
+* Consequences
+
+- Correcting =wireshape.go= against Alpaca's real API, if the
+  assumption above turns out wrong, should not require touching
+  =client.go=, =credential.go=, =record.go=, =path.go=, =writer.go=,
+  =reader.go=, =snapshot.go=, =inventory.go=, or any =marketdata=
+  package file — only the isolated wire-shape file and its own tests.
+- =marketdata.Manager='s public surface gains =AlpacaCredential=/
+  =AlpacaBaseURL= on =Config=, following the exact shape and
+  validation rule =OANDACredential=/=OANDABaseURL= already established
+  — no new concept for a =marketdata= consumer to learn.
+- =Sync= now has a real provider dispatch it did not have before; any
+  future third live-feed provider extends =requireSyncClient= and
+  =syncOne= the same way, rather than re-special-casing OANDA again.
+- SPY and AAPL register under provider ="alpaca"= using Alpaca's own
+  bare-ticker native symbol (="SPY"=/="AAPL"=, no venue suffix) via
+  the already-merged =service/marketdata.RegisterETFInstrument=/
+  =RegisterEquityInstrument= (EQ-02) — no change to that registration
+  API was needed.
+- A new =alpacasmoke= build tag exists alongside the pre-existing
+  =fullarchive= tag; both are excluded from normal `go test ./...`/
+  `make check` and are independent opt-in paths an operator enables
+  deliberately, never together by accident.
+- Until an operator actually runs the smoke test against the real
+  API, the wire-shape assumption above remains unverified. This is a
+  known, named gap this document does not close — only contains.
+
+* Alternatives Considered
+
+- *Gate the smoke test on environment variables
+  (=ALPACA_API_KEY_ID=/=ALPACA_API_SECRET_KEY=).* Rejected: conflicts
+  directly with =config/arch_test.go='s mechanically-enforced
+  "domain packages do not read the environment" rule, which admits no
+  exception for test files, and Go's =internal/= visibility rule
+  prevents relocating this file to an exempt directory.
+- *Add =marketdata/internal/provider/alpaca= (or specifically
+  =smoke_test.go=) to =config/arch_test.go='s =exemptPrefixes=.*
+  Rejected: loosening a mechanically-enforced architectural invariant
+  for one file is itself an architectural decision, and a narrower,
+  fully-compliant alternative (the build-tag/local-constant pattern
+  already used for =fullarchive=) was available without it.
+- *Reuse the existing =fullarchive= build tag for the smoke test,
+  rather than a new =alpacasmoke= tag.* Rejected: =fullarchive= gates
+  local-archive-file tests that expect no network access at all; an
+  operator who already has =fullarchive= configured for an unrelated
+  local-archive check should not have that configuration silently
+  also trigger a live network call against Alpaca.
+- *Give Alpaca its own =AdjustmentPolicy= enum value distinct from
+  Stooq's =AdjustmentSplitAdjusted=.* Rejected: both providers apply
+  the identical split-adjusted-but-not-dividend-adjusted convention by
+  deliberate choice (Alpaca via its own =adjustment=split= parameter);
+  a second, functionally-identical enum value would only fragment
+  cross-provider comparison for no benefit.
+- *Treat OANDA's =Complete=-flag incomplete-tail re-fetch logic as
+  something =syncOneAlpaca= must also implement, for parity with
+  =syncOneOANDA=.* Rejected: no such concept exists for Alpaca's
+  historical daily bars in Phase 1 scope (every fetched =Record=
+  already represents a closed trading day); implementing unreachable
+  logic would be speculative complexity with no real behavior to
+  exercise.
+- *Model Alpaca's pagination as a time-cursor advance, matching
+  OANDA's own =From=/=To= re-fetch loop shape exactly.* Rejected:
+  the assumed API already returns an explicit continuation token
+  (=next_page_token=), which is both simpler to implement correctly
+  and, if the real API confirms this shape, a more faithful
+  representation of how Alpaca's own pagination actually works.

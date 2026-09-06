@@ -157,6 +157,7 @@ the original decided, use full supersession instead.
 | 047 | Equities Phase 1 domain semantics and scope (in adr-047-equities-phase1-scope.org) | Accepted |
 | 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted |
 | 049 | US equity market calendar and trading-session semantics (in adr-049-us-equity-market-calendar.org) | Accepted |
+| 050 | Alpaca historical equity market-data provider (in adr-050-alpaca-historical-provider.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -534,6 +535,30 @@ trading day directly, decoupled from literal endpoint-sampling of
 classified exactly as before — this is a zero-behavior-change,
 backward-compatible generalization of the shared classification path,
 not a redesign of it.
+
+Note: ADR-050 is likewise maintained in its own file,
+=docs/arch/adr-050-alpaca-historical-provider.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #297 (EQ-04) asks for Alpaca to be added as Trader's first live
+historical equity provider, behind the same =marketdata= provider
+boundary ADR-047/048/049 already established for Stooq's offline
+path; this ADR records the resulting design: a third =case "alpaca":=
+arm alongside =rawInventoryLookup=/=readAndNormalizeRaw='s existing
+=case "stooq":= arm, a genuine provider dispatch added to
+=marketdata/sync.go= (which previously called =oanda.*=
+unconditionally, with OANDA's own behavior left byte-for-byte
+unchanged), a two-secret =alpaca.CredentialProvider= distinct from
+OANDA's single bearer token, reuse of =USEquityCalendar= and the
+existing =AdjustmentSplitAdjusted= policy value, a timestamp
+re-anchoring step correcting Alpaca's assumed midnight-America/New_York
+timestamps (expressed in UTC) to =USEquityCalendar='s midnight-UTC D1
+boundary, an
+explicitly and prominently flagged unverified assumption about
+Alpaca's real wire shape (isolated to one file, =wireshape.go=), and
+a new =alpacasmoke= build-tag-gated opt-in smoke test using local,
+uncommitted credential constants — deliberately not environment
+variables, once checked against =config/arch_test.go='s own
+mechanically-enforced "no =os.Getenv= outside config/cmd/test" rule.
 
 * ADR-001: Modular monolith before service decomposition
 
