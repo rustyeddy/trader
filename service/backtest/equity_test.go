@@ -186,11 +186,21 @@ func newSPYFixtureManager(t *testing.T) *marketdata.Manager {
 	require.NoError(t, resolver.Register(spyStooqListing(t)))
 
 	mgr, err := marketdata.New(marketdata.Config{
-		Clock:        clock.NewSimulated(time.Date(2020, time.June, 1, 0, 0, 0, 0, time.UTC)),
-		StoreRoot:    t.TempDir(),
-		RawRoot:      "testdata/raw/stooq",
-		Resolver:     resolver,
+		Clock:     clock.NewSimulated(time.Date(2020, time.June, 1, 0, 0, 0, 0, time.UTC)),
+		StoreRoot: t.TempDir(),
+		RawRoot:   "testdata/raw/stooq",
+		Resolver:  resolver,
+		// USEquityCalendar (issue #296, EQ-03), not the Manager default
+		// FXCalendar — this proves the equity backtest path uses a
+		// real, provider-appropriate Calendar, not merely one that
+		// happens not to be consulted by the backtest path itself (see
+		// docs/research/eq-07-backtest-pipeline-note.org's own finding
+		// that Replay never calls Manager.Coverage, so this Calendar
+		// choice does not change this test's own outcome — it is still
+		// the correct, non-default choice a real composition root must
+		// make).
 		ProviderName: "stooq",
+		Calendar:     marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(2015, 2016, 2017, 2018, 2019, 2020, 2021)),
 	})
 	require.NoError(t, err)
 

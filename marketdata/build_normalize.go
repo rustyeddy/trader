@@ -141,12 +141,14 @@ func firstBadOutcomeError(normalized []normalizedRecord) error {
 	return err
 }
 
-// calendarVersionStooqV1 is the CalendarVersion a Stooq-sourced build
-// records: no trading-calendar alignment was actually applied (see
-// normalizeStooqSequence's own doc comment for why), so this names that
-// fact honestly rather than claiming calendarVersionCurrent's FXCalendar
-// alignment, which was never checked against equity data at all.
-const calendarVersionStooqV1 = "stooq-unaligned-v1"
+// calendarVersionUSEquityV1 is the CalendarVersion a Stooq-sourced
+// build records now that USEquityCalendar (issue #296, EQ-03) performs
+// real D1 boundary-alignment validation against m.calendar — the
+// equity-side analogue of calendarVersionCurrent, naming the specific
+// Calendar implementation/version a dataset was actually validated
+// against, in place of the honest-but-negative "stooq-unaligned-v1"
+// this constant replaces.
+const calendarVersionUSEquityV1 = "usequitycalendar-v1"
 
 // readAndNormalizeRaw reads the raw partition for (rawInterval, symbol,
 // action.Year, action.Month) and normalizes it, dispatched to the
@@ -163,6 +165,22 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if rawInterval != string(stooq.RawD1) {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("marketdata: stooq: only %s is supported, got %s", D1, action.Interval)
 		}
+		// The recorded CalendarVersion below (calendarVersionUSEquityV1)
+		// is a specific claim about which Calendar implementation
+		// actually validated this dataset's alignment — not merely that
+		// *some* midnight-UTC-aligned Calendar was configured. Verify
+		// that claim directly rather than recording it unconditionally:
+		// a Manager left at the default FXCalendar (or supplied some
+		// other Calendar) must fail clearly here, not either produce a
+		// confusing per-record misalignment rejection with no obvious
+		// cause, or — worse, for some other calendar that happened to
+		// also anchor to midnight UTC — a Manifest that names the wrong
+		// Calendar (PR #310 review).
+		if _, ok := m.calendar.(*USEquityCalendar); !ok {
+			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf(
+				"marketdata: stooq: %w: provider \"stooq\" requires Config.Calendar to be a *USEquityCalendar, got %T",
+				ErrInvalidConfig, m.calendar)
+		}
 		snapshot, err := stooq.ReadPartitionSnapshot(ctx, m.rawRoot, symbol, action.Year, action.Month)
 		if err != nil {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("read raw partition: %w", err)
@@ -170,7 +188,7 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		if err := ctx.Err(); err != nil {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", err
 		}
-		normalized, err := normalizeStooqSequence(snapshot.Records)
+		normalized, err := normalizeStooqSequence(m.calendar, snapshot.Records)
 		if err != nil {
 			return nil, "", BasisUnknown, AdjustmentUnknown, "", fmt.Errorf("normalize: %w", err)
 		}
@@ -178,7 +196,7 @@ func (m *Manager) readAndNormalizeRaw(ctx context.Context, rawInterval, symbol s
 		// split-adjusted (confirmed empirically against AAPL's real
 		// splits, issue #298) but not dividend-adjusted — see
 		// AdjustmentSplitAdjusted's own doc comment.
-		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionStooqV1, nil
+		return normalized, snapshot.Fingerprint, BasisTrade, AdjustmentSplitAdjusted, calendarVersionUSEquityV1, nil
 
 	default:
 		// ReadPartitionSnapshot, not separate ReadPartitionRecords/

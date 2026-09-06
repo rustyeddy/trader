@@ -32,26 +32,34 @@ func normalizeStooqRecord(rec stooq.Record) normalizedRecord {
 }
 
 // normalizeStooqSequence normalizes and validates records — one raw
-// Stooq partition's rows, in file order — mirroring
-// normalizeOANDASequence's sequence-level checks (no duplicate or
-// out-of-order timestamps) with one deliberate omission: interval-
-// alignment validation against a Calendar.
+// Stooq partition's rows, in file order — against cal, mirroring
+// normalizeOANDASequence's sequence-level checks exactly: no duplicate
+// or out-of-order timestamps, and interval alignment against
+// cal.Bar(rec.Time, D1).
 //
-// # Why no calendar-alignment check (yet)
+// # Calendar alignment
 //
-// normalizeOANDASequence rejects a record whose Time does not fall
-// exactly on cal.Bar(rec.Time, interval)'s computed boundary. Applying
-// that same check here, against the only Calendar this package has
-// today (FXCalendar), would reject every Stooq record: FXCalendar's D1
-// boundary is the FX daily rollover (17:00 America/New_York, ADR-021),
-// which has no relationship to a NYSE/Nasdaq trading day. There is no
-// real U.S. equity trading calendar yet — ADR-047 defers it to EQ-03
-// (#296) — so this function trusts each record's own date verbatim,
-// the same documented, deliberate limitation stooq.Record.Time's own
-// doc comment states. Once a real equity Calendar exists, adding the
-// identical alignment check normalizeOANDASequence already performs is
-// the natural follow-up, not a redesign of this function's shape.
-func normalizeStooqSequence(records []stooq.Record) ([]normalizedRecord, error) {
+// Until issue #296 (EQ-03) landed, this function trusted each record's
+// own date verbatim, specifically because the only Calendar available
+// then (FXCalendar) would have rejected every real Stooq record: its
+// D1 boundary is the FX daily rollover (17:00 America/New_York,
+// ADR-021), which has no relationship to Stooq's own midnight-UTC
+// daily bars. cal is now expected to be a USEquityCalendar (or another
+// Calendar whose D1 boundary actually agrees with the provider's own
+// convention) — see USEquityCalendar's own doc comment for why its D1
+// anchor is midnight UTC specifically to agree with Stooq. A record
+// whose Time does not fall exactly on cal.Bar(rec.Time, D1)'s computed
+// boundary is recordOutcomeRejected (errRecordMisaligned), the same
+// outcome and sentinel normalizeOANDASequence already uses for the
+// identical check.
+//
+// cal must be non-nil; normalizeStooqSequence reports a wrapped
+// ErrNilCalendar otherwise.
+func normalizeStooqSequence(cal Calendar, records []stooq.Record) ([]normalizedRecord, error) {
+	if cal == nil {
+		return nil, fmt.Errorf("marketdata: normalize sequence: %w", ErrNilCalendar)
+	}
+
 	out := make([]normalizedRecord, 0, len(records))
 	seen := make(map[time.Time]struct{}, len(records))
 	var prevTime time.Time
@@ -68,6 +76,17 @@ func normalizeStooqSequence(records []stooq.Record) ([]normalizedRecord, error) 
 		case havePrev && rec.Time.Before(prevTime):
 			nr = normalizedRecord{outcome: recordOutcomeRejected, time: rec.Time,
 				err: fmt.Errorf("marketdata: normalize: %s: %w", rec.Time, errRecordOutOfOrder)}
+		}
+
+		if nr.outcome == recordOutcomeAccepted {
+			span, calErr := cal.Bar(rec.Time, D1)
+			if calErr != nil {
+				return nil, fmt.Errorf("marketdata: normalize sequence: %s: %w", rec.Time, calErr)
+			}
+			if !span.Start().Equal(rec.Time) {
+				nr = normalizedRecord{outcome: recordOutcomeRejected, time: rec.Time,
+					err: fmt.Errorf("marketdata: normalize: %s: %w", rec.Time, errRecordMisaligned)}
+			}
 		}
 
 		out = append(out, nr)

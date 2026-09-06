@@ -50,6 +50,28 @@ func spyID(t *testing.T) instrument.ID {
 	return inst.ID()
 }
 
+// testUSEquityCalendarYears spans every year this package's Stooq
+// fixtures and fullarchive tests actually touch — the real local
+// SPY/AAPL/QQQ archives run from 1984 through the present, so this
+// covers comfortably past both ends rather than being tuned to one
+// specific fixture's own narrow date range.
+func testUSEquityCalendarYears() []int {
+	years := make([]int, 0, 2030-1980+1)
+	for y := 1980; y <= 2030; y++ {
+		years = append(years, y)
+	}
+	return years
+}
+
+// testUSEquityCalendar returns a *USEquityCalendar configured with
+// StandardUSEquityHolidays for testUSEquityCalendarYears — the
+// Calendar every Stooq-provider test Manager in this file uses (issue
+// #296, EQ-03), in place of the default FXCalendar a Manager would
+// otherwise fall back to.
+func testUSEquityCalendar() *USEquityCalendar {
+	return NewUSEquityCalendar(StandardUSEquityHolidays(testUSEquityCalendarYears()...))
+}
+
 // newStooqTestManager returns a Manager rooted at t.TempDir(), wired
 // with a resolver holding spyListing, provider "stooq", and rawRoot
 // pointing at a fresh, empty directory the caller populates via
@@ -64,6 +86,7 @@ func newStooqTestManager(t *testing.T, rawRoot string) *Manager {
 		RawRoot:      rawRoot,
 		Resolver:     r,
 		ProviderName: "stooq",
+		Calendar:     testUSEquityCalendar(),
 	})
 	require.NoError(t, err)
 	return m
@@ -113,9 +136,53 @@ func newStooqAAPLTestManager(t *testing.T, rawRoot string) *Manager {
 		RawRoot:      rawRoot,
 		Resolver:     r,
 		ProviderName: "stooq",
+		Calendar:     testUSEquityCalendar(),
 	})
 	require.NoError(t, err)
 	return m
+}
+
+// TestStooqEndToEnd_RejectsWrongCalendarType confirms a Manager
+// configured for the "stooq" provider with anything other than a
+// *USEquityCalendar fails explicitly and clearly at build time,
+// instead of either (a) silently recording a Manifest CalendarVersion
+// that names USEquityCalendar when some other Calendar actually ran,
+// or (b) failing later with a confusing per-record misalignment error
+// whose real cause (a misconfigured Manager, not bad data) is not
+// obvious (PR #310 review, Copilot's CalendarVersion finding).
+func TestStooqEndToEnd_RejectsWrongCalendarType(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	_, err := stooq.Import(ctx, filepath.Join("internal", "provider", "stooq", "testdata", "spy_us_d_sample.csv"), rawRoot, "SPY")
+	require.NoError(t, err)
+
+	resolver := instrument.NewMemoryResolver()
+	require.NoError(t, resolver.Register(spyListing(t)))
+	mgr, err := New(Config{
+		Clock:        testClock(),
+		StoreRoot:    t.TempDir(),
+		RawRoot:      rawRoot,
+		Resolver:     resolver,
+		ProviderName: "stooq",
+		// Deliberately not a *USEquityCalendar: the default
+		// FXCalendar, wrong for this provider.
+	})
+	require.NoError(t, err)
+
+	span, err := NewTimeRange(
+		time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 7, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+
+	_, err = mgr.Build(ctx, plan)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidConfig)
 }
 
 // TestStooqEndToEnd_PlanBuildBars is issue #303 (EQ-03A)'s central
@@ -155,7 +222,7 @@ func TestStooqEndToEnd_PlanBuildBars(t *testing.T) {
 	require.NotEmpty(t, buildResult.Published)
 	for _, pr := range buildResult.Published {
 		assert.Equal(t, BasisTrade, pr.Manifest.Basis)
-		assert.Equal(t, calendarVersionStooqV1, pr.Manifest.CalendarVersion)
+		assert.Equal(t, calendarVersionUSEquityV1, pr.Manifest.CalendarVersion)
 		assert.Equal(t, "stooq", pr.Manifest.Provider)
 	}
 
@@ -391,31 +458,25 @@ func TestStooqEndToEnd_HolidayGapReadsCorrectly(t *testing.T) {
 	}
 }
 
-// TestStooqCoverage_HolidayGapPendingEquityCalendar documents and
-// precisely regression-locks a real, known Phase 1 limitation issue
-// #299 (EQ-06) asks to be tested, not silently left implicit:
-// Manager.Coverage's gap classification walks bar boundaries via the
-// configured Calendar (coverage.go), and no equity-aware Calendar
-// exists yet. This is a temporary limitation pending issue #296
-// (EQ-03, "Add market calendar and trading-session semantics"),
-// already open in this same Phase 1 milestone — not, as an earlier
-// draft of this test incorrectly claimed, work deferred beyond Phase 1.
+// TestStooqCoverage_HolidayGapCorrectlyClosedNotMissing is issue #296
+// (EQ-03)'s own payoff, and the direct successor to this file's former
+// TestStooqCoverage_HolidayGapPendingEquityCalendar (issue #299,
+// EQ-06), which regression-locked the *bug* this issue exists to fix:
+// with the default FXCalendar wired in, Manager.Coverage reported two
+// spurious "missing" Gaps spanning this exact fixture, each straddling
+// a mix of real trading days and the New Year's/weekend closure,
+// because FXCalendar's 17:00-America/New_York D1 boundary does not
+// align with Stooq's own midnight-UTC daily bars at all.
 //
-// The actual defect is a boundary mismatch, not merely "FXCalendar
-// doesn't know about holidays": the default FXCalendar's D1 boundary
-// is 17:00 America/New_York (ADR-021), which does not align with
-// Stooq's own midnight-UTC daily bars at all. So ClassifyInterval can
-// report a Gap across a span that actually contains real, present
-// trading-day bars, not only across genuinely non-trading days — the
-// two Gaps this test locks below each straddle a mix of real trading
-// days and the holiday/weekend, which is the actual (mis)behavior
-// #296 exists to fix, not a clean "holiday days only" gap.
-//
-// This test asserts the exact current Gap shape, not merely that
-// Gaps exist, specifically so that landing #296 is forced to
-// deliberately update (or delete) this assertion rather than silently
-// changing Coverage's behavior underneath it.
-func TestStooqCoverage_HolidayGapPendingEquityCalendar(t *testing.T) {
+// With USEquityCalendar now wired in (newStooqTestManager), that
+// misalignment is gone: USEquityCalendar's D1 boundary is midnight
+// UTC, the same anchor Stooq's own bars use, so every real trading day
+// in this fixture classifies as IntervalStatePresent and New Year's
+// Day 2020 classifies as IntervalStateClosed (a calendar holiday, not
+// a gap) — Coverage now reports zero Gaps for this span, exactly as
+// issue #299's own sibling test (TestStooqEndToEnd_HolidayGapReadsCorrectly)
+// already proved Bars itself was reading correctly all along.
+func TestStooqCoverage_HolidayGapCorrectlyClosedNotMissing(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
 
@@ -438,33 +499,53 @@ func TestStooqCoverage_HolidayGapPendingEquityCalendar(t *testing.T) {
 	cov, err := mgr.Coverage(ctx, query)
 	require.NoError(t, err)
 
-	// Both partitions are fully built ("current") despite the reported
-	// gaps below — the gaps are a Calendar-boundary-alignment
-	// limitation in Coverage's reporting, not a real hole in the
-	// canonical data (TestStooqEndToEnd_HolidayGapReadsCorrectly
-	// already proves Bars itself reads correctly).
 	for _, pc := range cov.Partitions {
 		assert.Equal(t, PartitionCoverageCurrent, pc.Status, "%04d-%02d", pc.Year, pc.Month)
 	}
+	assert.Empty(t, cov.Gaps,
+		"New Year's Day 2020 and the surrounding weekend must classify as calendar closures, not Gaps, now that USEquityCalendar's D1 boundary agrees with Stooq's own")
+}
 
-	newYork, err := time.LoadLocation("America/New_York")
+// TestStooqCoverage_HalfDayDoesNotStraddleError confirms a query
+// spanning a real half day (the day after Thanksgiving) never trips
+// ErrIntervalStraddlesBoundary. Session/Status now honestly report the
+// real, truncated half-day trading hours (a genuinely narrower window
+// than Bar's own midnight-to-midnight D1 span) — but ClassifyInterval
+// never actually samples Session/Status against Bar's own span for
+// USEquityCalendar at all: uniformStatus (interval_state.go) prefers
+// the optional BarSpanClassifier capability, which answers "is this
+// whole labeled UTC day an open trading day" directly, decoupled from
+// literal endpoint sampling, so the half day's shorter real session
+// window never has a chance to fail a containment check that no longer
+// applies to it. This is checked through a real Manager.Coverage call,
+// not only USEquityCalendar's own unit tests.
+func TestStooqCoverage_HalfDayDoesNotStraddleError(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	// 2020-11-25, 26, 27 (day after Thanksgiving, a half day), and 30 —
+	// a real trading week containing one half day.
+	records := []stooq.Record{
+		{Time: time.Date(2020, 11, 25, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("358.00"), High: num.MustParsePrice("360.00"), Low: num.MustParsePrice("357.00"), Close: num.MustParsePrice("359.00")},
+		{Time: time.Date(2020, 11, 27, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("359.50"), High: num.MustParsePrice("361.00"), Low: num.MustParsePrice("359.00"), Close: num.MustParsePrice("360.50")},
+		{Time: time.Date(2020, 11, 30, 0, 0, 0, 0, time.UTC), Open: num.MustParsePrice("360.00"), High: num.MustParsePrice("363.00"), Low: num.MustParsePrice("359.50"), Close: num.MustParsePrice("362.00")},
+	}
+	require.NoError(t, stooq.WritePartition(ctx, rawRoot, "SPY", 2020, time.November, records, false))
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2020, 11, 25, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 12, 1, 0, 0, 0, 0, time.UTC),
+	)
 	require.NoError(t, err)
-	wantGaps := []struct {
-		start, end time.Time
-	}{
-		{
-			time.Date(2019, 12, 30, 17, 0, 0, 0, newYork),
-			time.Date(2020, 1, 1, 17, 0, 0, 0, newYork),
-		},
-		{
-			time.Date(2020, 1, 1, 17, 0, 0, 0, newYork),
-			time.Date(2020, 1, 3, 17, 0, 0, 0, newYork),
-		},
-	}
-	require.Len(t, cov.Gaps, len(wantGaps))
-	for i, want := range wantGaps {
-		assert.Equal(t, IntervalStateMissing, cov.Gaps[i].State, "gap[%d]", i)
-		assert.True(t, cov.Gaps[i].Span.Start().Equal(want.start), "gap[%d] start = %v, want %v", i, cov.Gaps[i].Span.Start(), want.start)
-		assert.True(t, cov.Gaps[i].Span.End().Equal(want.end), "gap[%d] end = %v, want %v", i, cov.Gaps[i].Span.End(), want.end)
-	}
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+	_, err = mgr.Build(ctx, plan)
+	require.NoError(t, err)
+
+	cov, err := mgr.Coverage(ctx, query)
+	require.NoError(t, err, "a half day must never trip ErrIntervalStraddlesBoundary")
+	assert.Empty(t, cov.Gaps, "Thanksgiving (2020-11-26) is a calendar closure, not a gap; every other queried day has a real bar")
 }
