@@ -294,3 +294,103 @@ func TestEmitFillIfIncreased_NoOpWhenQuantityDidNotIncrease(t *testing.T) {
 	events, _, _ := h.broker.corr.eventsAfter(0)
 	assert.Empty(t, events)
 }
+
+func TestStatusFromWire_ReplacedIsTerminalNotPending(t *testing.T) {
+	// Regression for PR #313 review: "replaced" is a terminal Alpaca
+	// status distinct from "pending_replace" and must not map to
+	// order.StatusPendingReplace (which would also spuriously trigger
+	// wireOrderToOrder's synthesized PendingCommandID path).
+	assert.Equal(t, order.StatusCanceled, statusFromWire("replaced"))
+	assert.Equal(t, order.StatusPendingReplace, statusFromWire("pending_replace"))
+}
+
+func TestWireOrderToOrder_ReplacedDoesNotSynthesizePendingCommandID(t *testing.T) {
+	resolver := testResolver(t, testListing(t, "AAPL"))
+	accountID := id.MustParseAccountID("acc_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	orderID := id.MustParseOrderID("ord_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	wo := wireOrder{ID: "a1", ClientOrderID: orderID.String(), Symbol: "AAPL", Qty: "1", FilledQty: "0", Type: "market", Side: "buy", TimeInForce: "day", Status: "replaced"}
+	o, err := wireOrderToOrder(wo, resolver, "alpaca", accountID, testIDs(t))
+	require.NoError(t, err)
+	assert.Equal(t, order.StatusCanceled, o.Status)
+	assert.True(t, o.PendingCommandID.IsZero())
+}
+
+// TestCorrelator_AppendEventAfterCloseDoesNotPanic is a direct
+// regression for PR #313 review's Copilot-identified finding: Close
+// (correlator.close) closes c.changed once; a concurrent appendEvent
+// that acquires c.mu afterward must observe c.closed and report
+// brokerpkg.ErrClosed rather than closing the already-closed channel
+// again, which would panic.
+func TestCorrelator_AppendEventAfterCloseDoesNotPanic(t *testing.T) {
+	c := newCorrelator()
+	c.close()
+
+	assert.NotPanics(t, func() {
+		_, err := c.appendEvent(func(sequence uint64) (brokerpkg.Event, error) {
+			t.Fatal("build must not be called once the correlator is closed")
+			return brokerpkg.Event{}, nil
+		})
+		assert.ErrorIs(t, err, brokerpkg.ErrClosed)
+	})
+}
+
+// TestCorrelator_CloseRacesAppendEvent exercises the actual race PR
+// #313 review flagged: appendEvent and close called concurrently must
+// never panic, regardless of which observes the other's state first.
+// Run with -race to catch any remaining unsynchronized access.
+func TestCorrelator_CloseRacesAppendEvent(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		c := newCorrelator()
+		deps := testDeps(t, testResolver(t))
+		listing := testListing(t, "AAPL")
+		o, err := order.NewOrder(order.Order{
+			Request:          mustRequest(t, listing, id.MustParseAccountID("acc_01ARZ3NDEKTSV4RRFFQ69G5FAV")),
+			Status:           order.StatusWorking,
+			AcceptedQuantity: quantityPtr(num.MustParseQuantity("1")),
+		})
+		require.NoError(t, err)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = c.appendEvent(func(sequence uint64) (brokerpkg.Event, error) {
+				return buildOrderEvent(deps, o, id.EventID{}, sequence)
+			})
+		}()
+		assert.NotPanics(t, func() { c.close() })
+		<-done
+	}
+}
+
+// TestEventReader_CloseWakesBlockedNext is a direct regression for PR
+// #313 review's data-race/wake-up finding: a Next call already parked
+// in its blocking select must be woken by a concurrent Close, not left
+// waiting out the rest of the (here, very long) poll interval.
+func TestEventReader_CloseWakesBlockedNext(t *testing.T) {
+	server := newFakeAlpacaServer()
+	listing := testListing(t, "AAPL")
+	broker := testBroker(t, server, listing)
+	broker.deps.PollInterval = time.Hour // would never fire within the test
+	acc, err := broker.OpenAccount(context.Background(), broker.ref.AccountID)
+	require.NoError(t, err)
+
+	reader, err := acc.Events(context.Background(), "")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := reader.Next(context.Background())
+		done <- err
+	}()
+
+	// Give Next a moment to reach its blocking select before closing.
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, reader.Close())
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, brokerpkg.ErrClosed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not wake up promptly after Close")
+	}
+}

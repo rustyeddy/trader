@@ -80,9 +80,19 @@ func (c *correlator) lookupOrderID(orderID id.OrderID) (string, bool) {
 // account's event log, and wakes every blocked EventReader. The caller
 // supplies ev with Sequence left at its zero value; appendEvent fills
 // it in and returns the committed Event.
+//
+// It reports brokerpkg.ErrClosed, touching neither c.events nor
+// c.changed, if the correlator was already closed by the time this
+// call acquired c.mu — Broker.Close (see close, below) can race an
+// in-flight Submit/poll that is about to append its own event; without
+// this check, appendEvent would close(c.changed) a second time after
+// close's own close(c.changed) already ran, panicking (PR #313 review).
 func (c *correlator) appendEvent(build func(sequence uint64) (brokerpkg.Event, error)) (brokerpkg.Event, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return brokerpkg.Event{}, brokerpkg.ErrClosed
+	}
 	ev, err := build(c.nextSequence + 1)
 	if err != nil {
 		return brokerpkg.Event{}, err

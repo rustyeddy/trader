@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	brokerpkg "github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/num"
@@ -247,6 +248,7 @@ func TestEventReader_NextAfterClose(t *testing.T) {
 
 	_, err = reader.Next(context.Background())
 	require.Error(t, err)
+	assert.ErrorIs(t, err, brokerpkg.ErrClosed)
 }
 
 func TestEventReader_Poll_TranslationErrorSurfaces(t *testing.T) {

@@ -168,7 +168,9 @@ func TestEventReader_PollDetectsCancelSettlement(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, order.StatusPendingCancel, cancelResult.Status)
 
-	// Cancel's own synchronous event.
+	// Cancel itself records no event (see Cancel's own doc comment);
+	// this is the immediate poll discovering the wire status Alpaca's
+	// DELETE response already caused ("new" -> "pending_cancel").
 	ev2, err := reader.Next(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, order.StatusPendingCancel, ev2.Order.Status)

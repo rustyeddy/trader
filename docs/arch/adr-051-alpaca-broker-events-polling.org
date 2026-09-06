@@ -126,6 +126,14 @@ weakening of ADR-018's own correlation guarantee for commands =Cancel=/
   live use. A future streaming implementation is purely additive: it
   would replace this file's internals behind the same
   =broker.EventReader= contract, changing no caller.
+- =Cancel= and =Replace= do not themselves signal a waiting reader
+  (only a synthesized event — from a poll, or =Submit='s own
+  synchronous accept — does): a reader already parked waiting for the
+  next event when a caller cancels or replaces an order wakes at the
+  next poll interval, not immediately (PR #313 review). This is the
+  same =Deps.PollInterval= latency bound already accepted above, made
+  explicit here because it is easy to assume otherwise from
+  =correlator='s =changed= channel name alone.
 - =GET /v2/orders?status=all= is re-fetched in full on every poll that
   finds nothing already buffered, rather than tracked incrementally
   from a wall-clock baseline — =O(open-account-orders)= work per poll,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 
 	brokerpkg "github.com/rustyeddy/trader/broker"
 	"github.com/rustyeddy/trader/id"
@@ -22,7 +23,7 @@ func (h *accountHandle) Events(ctx context.Context, cursor brokerpkg.EventCursor
 	if h.broker.isClosed() {
 		return nil, brokerpkg.ErrClosed
 	}
-	return &eventReader{account: h, after: decodeCursor(cursor)}, nil
+	return &eventReader{account: h, after: decodeCursor(cursor), done: make(chan struct{})}, nil
 }
 
 // decodeCursor decodes an EventCursor produced by encodeCursor as the
@@ -51,20 +52,41 @@ func encodeCursor(sequence uint64) brokerpkg.EventCursor {
 // events into the shared correlator (visible to every other reader on
 // the same account too, matching adapters/broker/sim's shared-log
 // convention), and retries — blocking on either the correlator's
-// changed signal, ctx, or a poll-interval timer, never busy-polling.
+// changed signal, ctx, this reader's own Close, or a poll-interval
+// timer, never busy-polling.
+//
+// # Close concurrency
+//
+// closed and done together give Close the same "wake a blocked Next"
+// contract EventReader's own doc comment requires, and give Next a
+// safe, race-free way to observe a concurrent Close: closedMu guards
+// closed and the one-time close(done); Next reads both under closedMu
+// before checking anything else, and additionally selects on done
+// inside its blocking wait so a Next already parked in that select
+// wakes immediately rather than only on its next loop iteration
+// (Copilot/PR #313 review — a plain unsynchronized bool read/write
+// here was a real data race, and merely protecting the bool would
+// still have left a blocked Next waiting out the rest of the poll
+// interval before ever re-checking it).
 type eventReader struct {
 	account *accountHandle
 	after   uint64
 	buffer  []brokerpkg.Event
-	closed  bool
+
+	closedMu sync.Mutex
+	closed   bool
+	done     chan struct{}
 }
 
 var _ brokerpkg.EventReader = (*eventReader)(nil)
 
-// Next implements broker.EventReader.
+// Next implements broker.EventReader. It returns broker.ErrClosed, not
+// a package-specific error, once this reader has been closed — the
+// same sentinel adapters/broker/sim's own closed-broker paths use
+// throughout this package (PR #313 review).
 func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
-	if r.closed {
-		return brokerpkg.Event{}, fmt.Errorf("alpaca: event reader is closed")
+	if r.isClosed() {
+		return brokerpkg.Event{}, brokerpkg.ErrClosed
 	}
 	for {
 		if len(r.buffer) > 0 {
@@ -75,6 +97,9 @@ func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
 		}
 		if err := ctx.Err(); err != nil {
 			return brokerpkg.Event{}, err
+		}
+		if r.isClosed() {
+			return brokerpkg.Event{}, brokerpkg.ErrClosed
 		}
 
 		buffered, changed, closed := r.account.broker.corr.eventsAfter(r.after)
@@ -100,13 +125,21 @@ func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
 		}
 
 		// Nothing new after a poll: wait for either a change (another
-		// caller's Submit/Cancel/Replace against the same account) or
-		// the next poll interval, honoring ctx throughout.
+		// caller's Submit/Cancel/Replace against the same account —
+		// though see ADR-051's own note that Cancel/Replace do not
+		// themselves signal this; only a synthesized event from a poll
+		// or Submit does, so a reader waiting here after Cancel/Replace
+		// wakes at the next poll interval, not immediately), this
+		// reader's own Close, or the next poll interval, honoring ctx
+		// throughout.
 		timer := r.account.broker.deps.Clock.NewTimer(r.account.broker.deps.pollInterval())
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return brokerpkg.Event{}, ctx.Err()
+		case <-r.done:
+			timer.Stop()
+			return brokerpkg.Event{}, brokerpkg.ErrClosed
 		case <-changed:
 			timer.Stop()
 		case <-timer.C():
@@ -114,14 +147,28 @@ func (r *eventReader) Next(ctx context.Context) (brokerpkg.Event, error) {
 	}
 }
 
+func (r *eventReader) isClosed() bool {
+	r.closedMu.Lock()
+	defer r.closedMu.Unlock()
+	return r.closed
+}
+
 // Close implements broker.EventReader. It releases no resources of its
 // own (there is no background goroutine or open connection to stop —
 // polling only ever happens synchronously inside a caller's own Next
-// call), but marks the reader unusable, matching the interface's
+// call), but marks the reader unusable and wakes a Next currently
+// blocked in its own select (via done), matching the interface's
 // "Close is safe to call more than once and safe to call concurrently
-// with a blocked Next" contract vacuously: nothing here can block.
+// with a blocked Next" contract for real, not merely by having nothing
+// left to block on.
 func (r *eventReader) Close() error {
+	r.closedMu.Lock()
+	defer r.closedMu.Unlock()
+	if r.closed {
+		return nil
+	}
 	r.closed = true
+	close(r.done)
 	return nil
 }
 

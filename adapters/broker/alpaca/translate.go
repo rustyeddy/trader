@@ -109,6 +109,26 @@ func tifFromWire(s string) order.TimeInForce {
 // future — reports order.StatusUnknown, which is a legal, storable
 // value (order.Status's own zero-value convention) rather than an
 // error, so an unrecognized status is reported, not dropped.
+//
+// Alpaca's own "pending_replace" and terminal "replaced" are two
+// distinct statuses, and must not share one mapping (PR #313 review):
+// "pending_replace" means a replace request is outstanding and
+// genuinely belongs to order.StatusPendingReplace, while "replaced"
+// means this specific order is done — permanently superseded by
+// whatever new order Alpaca's replace created (see Replace's own doc
+// comment in cancel_replace.go on that new order possibly carrying a
+// different id). order.Status has no dedicated terminal "replaced"
+// value of its own; introducing one is a cross-cutting ADR-018 change
+// (order.Status's valid()/requiresAcceptance/precludesAcceptance and
+// every existing consumer) out of this adapter's own scope. Mapping
+// "replaced" back to StatusPendingReplace was the actual bug this
+// comment replaces: it made a finished lifecycle transition look
+// perpetually pending, and separately caused wireOrderToOrder to
+// synthesize a spurious PendingCommandID for it. StatusCanceled is the
+// closest existing terminal meaning — this specific order's own life
+// ended, intentionally, without filling — and is used here instead,
+// documented explicitly as an approximation pending a possible future
+// order.StatusReplaced addition.
 func statusFromWire(s string) order.Status {
 	switch s {
 	case "new", "accepted", "pending_new", "accepted_for_bidding":
@@ -119,9 +139,9 @@ func statusFromWire(s string) order.Status {
 		return order.StatusFilled
 	case "pending_cancel":
 		return order.StatusPendingCancel
-	case "canceled":
+	case "canceled", "replaced":
 		return order.StatusCanceled
-	case "pending_replace", "replaced":
+	case "pending_replace":
 		return order.StatusPendingReplace
 	case "rejected":
 		return order.StatusRejected

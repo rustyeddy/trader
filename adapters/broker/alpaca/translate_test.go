@@ -90,7 +90,7 @@ func TestStatusFromWire(t *testing.T) {
 		"pending_cancel":   order.StatusPendingCancel,
 		"canceled":         order.StatusCanceled,
 		"pending_replace":  order.StatusPendingReplace,
-		"replaced":         order.StatusPendingReplace,
+		"replaced":         order.StatusCanceled,
 		"rejected":         order.StatusRejected,
 		"expired":          order.StatusExpired,
 		"done_for_day":     order.StatusExpired,
