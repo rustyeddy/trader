@@ -5,7 +5,7 @@
 
 Accepted. Issue #294 (EQ-01) asks for the architectural and product
 boundary of Trader's first equities support to be settled before any
-provider-specific implementation begins, the same
+provider-specific implementation begins, following the same
 design-notes-then-review pattern issue #209 (M5-01) used for ADR-035
 ahead of M5.
 
@@ -72,13 +72,14 @@ equities-specific architecture:
    construction mechanism" — but the code does not yet honor that
    for anything beyond the label string, because only one provider has
    ever existed to test it against.
-2. *=AdjustmentMode= does not exist anywhere in the codebase.* The
-   architecture document sketches it (Raw/SplitAdjusted/
+2. *=AdjustmentMode= is not implemented anywhere in Trader's Go code.*
+   The architecture document sketches it (Raw/SplitAdjusted/
    TotalReturnAdjusted/BackAdjusted, selected at query time and
    recorded in the run manifest, never destructively replacing source
-   data), but no type, field, or logic implementing any part of that
-   sketch has been built. FX never needed it; equities do, because of
-   stock splits.
+   data), but that sketch is documentation only — no type, field, or
+   normalization/query logic implementing any part of it exists in
+   =marketdata= or anywhere else. FX never needed it; equities do,
+   because of stock splits.
 
 The initial reference dataset is already on disk:
 =/srv/trading/data/raw/stooq/spy_us_d.csv= (2005-02-25 through
@@ -150,8 +151,10 @@ Phase 1's reference dataset is exclusively daily (Stooq has no
 intraday history), so the equity =Calendar= this document scopes needs
 only =Status= and D1 =Session=/=Bar= correctness — U.S. market
 holidays and regular NYSE/NASDAQ trading days, in =America/New_York=
-civil time, the same =time.Date=-in-=*time.Location=- DST-correctness
-approach =FXCalendar= already established (ADR-012). Early closes
+civil time, using the same DST-correctness approach (computing
+boundaries with =time.Date= in a =*time.Location=, rather than manual
+offset arithmetic) =FXCalendar= already established (ADR-012). Early
+closes
 (half days) only matter for intraday bar boundaries and are
 deliberately out of scope until Alpaca's intraday data motivates a
 real intraday equity calendar — a D1 bar's boundary is the same
