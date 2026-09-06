@@ -158,6 +158,7 @@ the original decided, use full supersession instead.
 | 048 | Canonical equity bar adjustment semantics (in adr-048-equity-bar-adjustment-semantics.org) | Accepted |
 | 049 | US equity market calendar and trading-session semantics (in adr-049-us-equity-market-calendar.org) | Accepted |
 | 050 | Alpaca historical equity market-data provider (in adr-050-alpaca-historical-provider.org) | Accepted |
+| 051 | Alpaca paper broker adapter: REST-polling Account.Events for Phase 1 (in adr-051-alpaca-broker-events-polling.org) | Accepted |
 
 Note: ADR-005 and ADR-006 are likewise maintained in their own files
 rather than inline in this registry —
@@ -559,6 +560,28 @@ a new =alpacasmoke= build-tag-gated opt-in smoke test using local,
 uncommitted credential constants — deliberately not environment
 variables, once checked against =config/arch_test.go='s own
 mechanically-enforced "no =os.Getenv= outside config/cmd/test" rule.
+
+Note: ADR-051 is likewise maintained in its own file,
+=docs/arch/adr-051-alpaca-broker-events-polling.org=, rather than
+inline in this registry. Its own Status section is authoritative.
+Issue #301 (EQ-08) asks for the minimum Alpaca paper =broker.Broker=/
+=broker.Account= adapter needed for Phase 1, and this ADR settles the
+one genuinely open design question that work raised: whether
+=Account.Events= streams over Alpaca's real-time order-update
+websocket or polls its REST order-list endpoint. It records the
+decision to poll for Phase 1 — the first real (non-simulated)
+=Account.Events= implementation in this codebase, and the first place
+a real broker adapter's event stream needed a design call at all —
+deferring a streaming implementation to LIVE-01 (#311), plus the
+resulting consequences: adapter-owned =Sequence= assignment shared
+across every reader on one account (mirroring =adapters/broker/sim='s
+own convention), a synthesized =EventKindFill= approximated from
+cumulative =filled_avg_price= (exact for a single-execution fill, only
+approximate across multiple partial executions observed between two
+polls), and a synthesized, non-correlating =PendingCommandID= when
+translating a wire order Alpaca itself reports as
+=pending_cancel=/=pending_replace= (order.Order's own ADR-018
+invariant requires one, and Alpaca's wire shape carries none at all).
 
 * ADR-001: Modular monolith before service decomposition
 
