@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rustyeddy/trader/clock"
 	"github.com/rustyeddy/trader/instrument"
 	"github.com/rustyeddy/trader/marketdata/internal/provider/alpaca"
 	"github.com/rustyeddy/trader/num"
@@ -416,6 +417,70 @@ func TestAlpacaSync_DownloadsMissingRawPartition(t *testing.T) {
 	require.Len(t, records, 2)
 }
 
+// TestAlpacaSync_NeverRequestsThroughStillFormingTradingDay is PR
+// #312 review's third finding: every alpaca.Record is treated as a
+// fully closed, final daily bar (syncOneAlpaca's own doc comment), so
+// requesting through the current, still-forming trading day would
+// risk persisting and canonicalizing a provisional bar as settled
+// history. testClock's fixed "now" (2026-01-07T12:00:00Z) is
+// 07:00 America/New_York — a real Wednesday, well before the 9:30am
+// regular-session open — so the request's own "end" bound must be
+// clipped back to midnight UTC of that same day (2026-01-07T00:00:00Z),
+// excluding the day itself entirely, rather than sent through "now"
+// literally.
+func TestAlpacaSync_NeverRequestsThroughStillFormingTradingDay(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTest(nil)},
+	}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2026, Month: time.January, Reason: "extend",
+	}}}
+	_, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+
+	require.Len(t, doer.requests, 1)
+	end := doer.requests[0].URL.Query().Get("end")
+	parsed, err := time.Parse(time.RFC3339Nano, end)
+	require.NoError(t, err)
+	assert.True(t, parsed.Equal(time.Date(2026, time.January, 7, 0, 0, 0, 0, time.UTC)),
+		"end = %s, want exactly midnight UTC of the still-forming day, excluding it", end)
+}
+
+// TestAlpacaSync_RequestsThroughTodayOnceSessionHasClosed is the
+// control case for TestAlpacaSync_NeverRequestsThroughStillFormingTradingDay:
+// once "now" is after the trading day's real regular-session close,
+// that day's own bar is legitimately final, and the request's "end"
+// bound must include it (not clip back an extra, unnecessary day).
+func TestAlpacaSync_RequestsThroughTodayOnceSessionHasClosed(t *testing.T) {
+	rawRoot := t.TempDir()
+	doer := &fakeAlpacaDoer{responses: []fakeAlpacaResponse{
+		{status: 200, body: alpacaBarsJSONForTest(nil)},
+	}}
+	mgr := newAlpacaTestManagerWithSync(t, rawRoot, doer)
+	// 2026-01-07T22:00:00Z = 17:00 America/New_York in January (EST,
+	// UTC-5) — one hour after the regular 16:00 close.
+	afterClose := clock.NewSimulated(time.Date(2026, time.January, 7, 22, 0, 0, 0, time.UTC))
+	mgr.clock = afterClose
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+		Year: 2026, Month: time.January, Reason: "extend",
+	}}}
+	_, err := mgr.Sync(context.Background(), plan)
+	require.NoError(t, err)
+
+	require.Len(t, doer.requests, 1)
+	end := doer.requests[0].URL.Query().Get("end")
+	parsed, err := time.Parse(time.RFC3339Nano, end)
+	require.NoError(t, err)
+	assert.True(t, parsed.Equal(afterClose.Now()),
+		"end = %s, want the real current instant (%s) since the session already closed", end, afterClose.Now())
+}
+
 func TestAlpacaSync_ExtendsExistingRawPartition(t *testing.T) {
 	rawRoot := t.TempDir()
 	existing := []alpaca.Record{{
@@ -444,6 +509,37 @@ func TestAlpacaSync_ExtendsExistingRawPartition(t *testing.T) {
 	require.Len(t, records, 2)
 }
 
+// TestMergeAlpacaRecordsByTime_ResultIsSortedByTime confirms
+// mergeAlpacaRecordsByTime's output is always ordered by Time,
+// regardless of Go's own randomized map-iteration order — the real
+// bug PR #312 review found: alpaca.WritePartition deliberately
+// preserves whatever order it's given (unlike oanda.WritePartition,
+// which sorts internally), so an unsorted merge result would let Sync
+// itself write a genuinely out-of-order raw partition. existing and
+// fetched are both deliberately supplied out of order here, and
+// overlap at one Time (fetched must win that collision).
+func TestMergeAlpacaRecordsByTime_ResultIsSortedByTime(t *testing.T) {
+	mk := func(day int, closePrice string) alpaca.Record {
+		return alpaca.Record{
+			Time:  time.Date(2020, time.May, day, 0, 0, 0, 0, time.UTC),
+			Close: num.MustParsePrice(closePrice),
+		}
+	}
+	existing := []alpaca.Record{mk(4, "281"), mk(1, "280")}
+	fetched := []alpaca.Record{mk(4, "281.5"), mk(6, "283"), mk(5, "282")}
+
+	merged := mergeAlpacaRecordsByTime(existing, fetched)
+
+	require.Len(t, merged, 4)
+	for i := 1; i < len(merged); i++ {
+		assert.True(t, merged[i-1].Time.Before(merged[i].Time), "merged[%d..%d] out of order: %v, %v", i-1, i, merged[i-1].Time, merged[i].Time)
+	}
+	assert.True(t, merged[0].Time.Equal(time.Date(2020, time.May, 1, 0, 0, 0, 0, time.UTC)))
+	assert.True(t, merged[3].Time.Equal(time.Date(2020, time.May, 6, 0, 0, 0, 0, time.UTC)))
+	// fetched's own May 4 record must win the collision with existing's.
+	assert.Equal(t, "281.5", merged[1].Close.String())
+}
+
 func TestAlpacaSync_NonAlpacaDownloadActionsAreSkipped(t *testing.T) {
 	rawRoot := t.TempDir()
 	mgr := newAlpacaTestManagerWithSync(t, rawRoot, &fakeAlpacaDoer{})
@@ -462,7 +558,12 @@ func TestAlpacaSync_NonAlpacaDownloadActionsAreSkipped(t *testing.T) {
 // requireSyncClient check (sync.go) reports a clear ErrInvalidConfig
 // for each provider missing its own client — never a nil-pointer
 // dereference, and never a misleading "OANDA" message for a
-// non-OANDA-provider Manager.
+// non-OANDA-provider Manager — but only once a real ActionDownloadRaw
+// is actually about to execute (PR #312 review: the original version
+// of this test used an empty Plan, which locked in exactly the bug
+// the review found — Sync failing even when there is no download work
+// to do at all. See TestSync_NoClientRequiredWithoutDownloadActions
+// for that corrected behavior.
 func TestSync_RequiresMatchingProviderClient(t *testing.T) {
 	ctx := context.Background()
 
@@ -474,7 +575,11 @@ func TestSync_RequiresMatchingProviderClient(t *testing.T) {
 			Resolver: r, ProviderName: "alpaca", Calendar: testUSEquityCalendar(),
 		})
 		require.NoError(t, err)
-		_, err = mgr.Sync(ctx, Plan{})
+		plan := Plan{Actions: []Action{{
+			Kind: ActionDownloadRaw, Instrument: alpacaSPYID(t), Interval: D1,
+			Year: 2020, Month: time.May, Reason: "missing",
+		}}}
+		_, err = mgr.Sync(ctx, plan)
 		assert.ErrorIs(t, err, ErrInvalidConfig)
 	})
 
@@ -486,7 +591,41 @@ func TestSync_RequiresMatchingProviderClient(t *testing.T) {
 			Resolver: r, ProviderName: "stooq", Calendar: testUSEquityCalendar(),
 		})
 		require.NoError(t, err)
-		_, err = mgr.Sync(ctx, Plan{})
+		plan := Plan{Actions: []Action{{
+			Kind: ActionDownloadRaw, Instrument: spyID(t), Interval: D1,
+			Year: 2020, Month: time.May, Reason: "missing",
+		}}}
+		_, err = mgr.Sync(ctx, plan)
 		assert.ErrorIs(t, err, ErrInvalidConfig)
 	})
+}
+
+// TestSync_NoClientRequiredWithoutDownloadActions confirms the actual
+// bug PR #312 review found is fixed: Sync must not fail merely because
+// no provider acquisition client is configured when the plan has
+// nothing for one to do — an empty plan, or one containing only
+// non-download actions. This matters most for provider "stooq", which
+// never has a live acquisition client at all, yet must still be able
+// to call Sync with a download-free plan without error.
+func TestSync_NoClientRequiredWithoutDownloadActions(t *testing.T) {
+	ctx := context.Background()
+
+	r := instrument.NewMemoryResolver()
+	require.NoError(t, r.Register(spyListing(t)))
+	mgr, err := New(Config{
+		Clock: testClock(), StoreRoot: t.TempDir(), RawRoot: t.TempDir(),
+		Resolver: r, ProviderName: "stooq", Calendar: testUSEquityCalendar(),
+	})
+	require.NoError(t, err)
+
+	_, err = mgr.Sync(ctx, Plan{})
+	require.NoError(t, err)
+
+	plan := Plan{Actions: []Action{{
+		Kind: ActionNormalizeCanonical, Instrument: spyID(t), Interval: D1,
+		Year: 2020, Month: time.May, Reason: "build",
+	}}}
+	result, err := mgr.Sync(ctx, plan)
+	require.NoError(t, err)
+	require.Len(t, result.Skipped, 1)
 }

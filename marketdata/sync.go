@@ -91,15 +91,22 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 	if !m.configured() {
 		return SyncResult{}, fmt.Errorf("marketdata: sync: %w: manager is not configured", ErrInvalidConfig)
 	}
-	if err := m.requireSyncClient(); err != nil {
-		return SyncResult{}, err
-	}
 	if m.rawRoot == "" {
 		return SyncResult{}, fmt.Errorf("marketdata: sync: %w: raw root is not configured", ErrInvalidConfig)
 	}
 	if err := ctx.Err(); err != nil {
 		return SyncResult{}, err
 	}
+
+	// requireSyncClient is checked only once a real ActionDownloadRaw is
+	// about to execute, not unconditionally up front: a plan containing
+	// only normalize/build work (or no work at all) has nothing for a
+	// provider acquisition client to do, and must not fail merely
+	// because none is configured — this was a real bug (PR #312
+	// review), most visible for provider "stooq", which never has a
+	// live acquisition client at all yet legitimately calls Sync with
+	// an empty or download-free plan.
+	var clientChecked bool
 
 	var result SyncResult
 	for _, action := range plan.Actions {
@@ -112,6 +119,12 @@ func (m *Manager) Sync(ctx context.Context, plan Plan) (SyncResult, error) {
 				Reason: fmt.Sprintf("%s is not a raw download; executing it is a future, separate Manager operation", action.Kind),
 			})
 			continue
+		}
+		if !clientChecked {
+			if err := m.requireSyncClient(); err != nil {
+				return result, err
+			}
+			clientChecked = true
 		}
 		dr, err := m.syncOne(ctx, action)
 		if err != nil {
@@ -280,12 +293,30 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 	if err != nil {
 		return DownloadResult{}, err
 	}
+	cal, ok := m.calendar.(*USEquityCalendar)
+	if !ok {
+		return DownloadResult{}, fmt.Errorf(
+			"marketdata: alpaca: %w: provider \"alpaca\" requires Config.Calendar to be a *USEquityCalendar, got %T",
+			ErrInvalidConfig, m.calendar)
+	}
 
 	monthStart := time.Date(action.Year, action.Month, 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 	upper := monthEnd
 	if now := m.clock.Now(); now.Before(upper) {
 		upper = now
+	}
+	// Never request through a trading day whose regular session has
+	// not actually closed yet: every alpaca.Record is treated as a
+	// fully closed, final daily bar (see syncOneAlpaca's own doc
+	// comment), so persisting the current, still-forming trading day's
+	// bar mid-session would silently canonicalize provisional data as
+	// settled history (PR #312 review). RegularSessionEnd answers this
+	// regardless of whether upper itself falls inside or outside real
+	// trading hours, unlike Session/Status.
+	today := time.Date(upper.Year(), upper.Month(), upper.Day(), 0, 0, 0, 0, time.UTC)
+	if sessionEnd, isTradingDay := cal.RegularSessionEnd(upper); isTradingDay && upper.Before(sessionEnd) {
+		upper = today
 	}
 
 	existing, err := alpaca.ReadPartitionRecords(ctx, m.rawRoot, symbol, action.Year, action.Month)
@@ -322,8 +353,19 @@ func (m *Manager) syncOneAlpaca(ctx context.Context, action Action) (DownloadRes
 
 // mergeAlpacaRecordsByTime is mergeRecordsByTime's alpaca.Record
 // counterpart: at most one Record per distinct Time, with fetched
-// always winning a collision. The result is unsorted; WritePartition
-// sorts before writing.
+// always winning a collision. Unlike oanda.WritePartition (which
+// sorts internally, so mergeRecordsByTime's own unsorted map-iteration
+// output is harmless), alpaca.WritePartition deliberately does *not*
+// sort — it preserves the exact order it is given, the same "preserve
+// provider-native order, judge it at normalization" discipline
+// stooq.WritePartition already established (issue #303/#306's own
+// review finding: silently sorting on write would make an out-of-order
+// input undetectable at normalization). Returning here in map-iteration
+// (nondeterministic) order would therefore let Sync itself write a
+// genuinely out-of-order raw partition — not a hypothetical, a real bug
+// (PR #312 review) — so the merged result is explicitly sorted by Time
+// before being returned, guaranteeing a well-ordered partition on every
+// extend regardless of iteration order.
 func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) []alpaca.Record {
 	byTime := make(map[int64]alpaca.Record, len(existing)+len(fetched))
 	for _, r := range existing {
@@ -336,6 +378,7 @@ func mergeAlpacaRecordsByTime(existing, fetched []alpaca.Record) []alpaca.Record
 	for _, r := range byTime {
 		out = append(out, r)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
 	return out
 }
 

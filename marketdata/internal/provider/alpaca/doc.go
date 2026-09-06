@@ -14,16 +14,23 @@
 // USEquityCalendar, issue #296, which this provider's D1 data
 // validates against exactly like Stooq's).
 //
-// # An unverified API-shape assumption — read before trusting this package's request/response wiring
+// # A partially-verified API-shape assumption — read before trusting this package's request/response wiring
 //
 // Nothing in this repository, and no live network access in the
-// environment this package was written in, could verify Alpaca's real
-// Market Data API v2 wire contract. This package's request
-// construction and response parsing (see client.go and wireshape.go)
-// are built against the author's general knowledge of that API's
-// publicly documented shape — endpoint path, header names, query
-// parameters, and JSON field names — and are an explicit, named
-// design assumption, not a confirmed fact. wireshape.go isolates every
+// environment this package was originally written in, could verify
+// Alpaca's real Market Data API v2 wire contract directly. This
+// package's request construction and response parsing (see client.go
+// and wireshape.go) were built against general, publicly documented
+// knowledge of that API's shape. A subsequent code review (PR #312)
+// confirmed the core request contract this package assumes against
+// Alpaca's current official documentation directly — the single-symbol
+// bars endpoint, timeframe=1Day, start/end, limit, page_token,
+// adjustment=split, and feed=iex are all real, verified values, not
+// guesses. The response *body* shape this package decodes against
+// remains the still-unverified part: field names/types beyond what
+// review specifically checked, error-response bodies, and pagination
+// edge cases (an empty final page, a malformed token) have not been
+// exercised against a real request. wireshape.go isolates every
 // JSON-shape-specific type and parsing function into one small file
 // specifically so that correcting it against the real API (via the
 // opt-in smoke test in marketdata/internal/provider/alpaca/smoke_test.go,
@@ -34,10 +41,11 @@
 //
 // # Timestamp normalization: trading date, not literal fetched instant
 //
-// Alpaca's assumed JSON bar shape times a daily bar at the session's
-// real open instant in UTC (for example "2024-01-02T05:00:00Z" for a
-// 00:00 America/New_York session open in winter), not at literal
-// midnight UTC the way Stooq's native "YYYY-MM-DD" dates already are.
+// Alpaca's assumed JSON bar shape times a daily bar at midnight
+// America/New_York civil time, expressed in UTC (for example
+// "2024-01-02T05:00:00Z" during EST) — not the 09:30 regular-session
+// open, and not literal midnight UTC the way Stooq's native
+// "YYYY-MM-DD" dates already are.
 // Storing that literal fetched instant verbatim would make Alpaca's
 // raw partitions misaligned against USEquityCalendar's midnight-UTC D1
 // anchor (built to agree with Stooq) on every single row. This package

@@ -27,21 +27,25 @@ which was tolerable only because OANDA was Sync's sole caller-visible
 provider until now (Stooq has no live feed to sync at all, per
 ADR-047's =allowsLiveExtend= decision).
 
-** The one fact this document cannot verify: Alpaca's real wire shape
+** Alpaca's real wire shape: partially confirmed on review, some details still unverified in this implementation
 
 Nothing in this repository, and nothing this environment had network
-access to confirm at implementation time, documents Alpaca's actual
-Market Data API v2 response format. The implementation is built
-against general, publicly-known knowledge of that API's shape — base
-URL =https://data.alpaca.markets=, endpoint
-=/v2/stocks/{symbol}/bars=, auth via the =APCA-API-KEY-ID=/
-=APCA-API-SECRET-KEY= headers, query parameters
-=timeframe=/=start=/=end=/=limit=/=page_token=/=adjustment=/=feed=,
-and a response shaped
-=\{"bars": [...], "symbol": "...", "next_page_token": ...|null\}= with
-each bar carrying =t=/=o=/=h=/=l=/=c=/=v= — but this is an
-*unverified design assumption*, not a confirmed contract. This is
-flagged as prominently as the implementation can make it:
+access to confirm at implementation time, documented Alpaca's actual
+Market Data API v2 response format, so the implementation was built
+against general, publicly-known knowledge of that API's shape. PR
+#312's own review (Rusty, checking against the current official Alpaca
+API docs directly) confirmed the core contract this implementation
+assumed is correct: the single-symbol bars endpoint
+(=/v2/stocks/{symbol}/bars=), =timeframe=1Day=, =start=/=end=,
+=limit=, =page_token=, =adjustment=split=, and =feed=iex= are all real,
+verified parameters/values, not guesses. What remains genuinely
+unverified in this implementation is the exact response *body* shape
+this code decodes against — field names/types beyond what review
+specifically checked, error-response body shape, and pagination
+edge-case behavior (an empty final page, a malformed token) — since no
+real request was actually issued against the live API from this
+environment. This is flagged as prominently as the implementation can
+make it:
 
 - The =alpaca= package's own doc comment (=doc.go=) states the
   assumption and names the exact isolation strategy below.
@@ -137,15 +141,26 @@ cross-provider comparability of the same instrument. =Client= also
 requests =feed=iex=, Alpaca's free-tier market data feed, pinned as a
 Phase 1 simplification rather than exposed as a caller-selectable
 parameter; a future issue can widen this if a paid feed becomes
-necessary. Neither is configurable through any public API — both are
-implementation details of =alpaca.Client.doFetchPage=.
+necessary. IEX is one specific exchange's own data, not the
+consolidated multi-exchange SIP tape (PR #312 review) — OHLC/volume
+values from this provider are not directly comparable to a
+consolidated-feed source for the same symbol/date, and this is
+provenance a future cross-provider comparison must account for, not an
+interchangeable equivalent of Stooq's own (unspecified-source)
+history. Neither =adjustment= nor =feed= is configurable through any
+public API — both are implementation details of
+=alpaca.Client.doFetchPage=.
 
-** Timestamp re-anchoring: Alpaca's session-open instant to midnight UTC
+** Timestamp re-anchoring: Alpaca's midnight-America/New_York instant to midnight UTC
 
-Alpaca's assumed API timestamps a daily bar at its literal session-
-open instant in UTC (for example, =05:00:00Z= in winter, shifting
-with US daylight saving time), not at midnight UTC of the trading
-date. =USEquityCalendar='s D1 boundary — reused unchanged from
+Alpaca's real, now-confirmed API (see the Context section above)
+timestamps a daily bar at midnight =America/New_York= civil time,
+expressed in UTC — =04:00:00Z= during EDT, =05:00:00Z= during EST,
+shifting with US daylight saving time — not at the 09:30 regular-
+session open, and not at midnight UTC of the trading date either. An
+earlier draft of this document described this as the "session-open
+instant"; PR #312 review caught that as inaccurate and it is corrected
+here. =USEquityCalendar='s D1 boundary — reused unchanged from
 ADR-049, specifically because it already agrees with Stooq's own
 plain-date convention — is anchored at midnight UTC. Without
 correction, every real Alpaca bar would fail

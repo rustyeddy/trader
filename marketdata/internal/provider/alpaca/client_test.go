@@ -77,9 +77,10 @@ func (d *cancelAfterDoer) Do(req *http.Request) (*http.Response, error) {
 // barsJSON builds an assumed-shape bars response body for the given
 // (date, close) pairs, all sharing fixed O/H/L values and a fixed
 // volume — sufficient for pagination/parsing tests, which only care
-// about Time/Close/count. Each date is rendered as a session-open
-// instant in UTC (05:00, i.e. midnight America/New_York in winter) —
-// deliberately not midnight UTC — so tests exercise the real
+// about Time/Close/count. Each date is rendered at midnight
+// America/New_York, expressed in UTC (05:00 in winter/EST) — not the
+// 09:30 regular-session open, and deliberately not midnight UTC either
+// — so tests exercise the real
 // timestamp-normalization path (wireshape.go), not a coincidentally
 // pre-aligned fixture.
 func barsJSON(dates []string, nextPageToken string) string {

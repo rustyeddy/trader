@@ -312,7 +312,11 @@ var errNetwork = errors.New("alpaca: network error")
 // ADR-050 for why "split," matching Stooq's own AdjustmentSplitAdjusted
 // choice, was picked over "raw"/"dividend"/"all"), feed=iex (Phase 1
 // deliberately pins the free-tier IEX feed rather than exposing feed
-// selection — see the package doc comment), and page_token when
+// selection — see the package doc comment; IEX is one specific
+// exchange's own data, not the consolidated multi-exchange SIP tape,
+// so OHLC/volume values from this provider are not directly comparable
+// to a consolidated-feed source for the same symbol/date — PR #312
+// review), and page_token when
 // continuing a prior page. Auth is two headers, APCA-API-KEY-ID and
 // APCA-API-SECRET-KEY — never a single bearer token the way OANDA
 // uses.

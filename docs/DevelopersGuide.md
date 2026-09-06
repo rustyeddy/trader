@@ -189,10 +189,13 @@ client), `stooq` (equities, single-price OHLCV, an offline CSV
 importer — issue #303, ADR-047), and `alpaca` (equities, single-price
 OHLCV, a live sync client — issue #297, ADR-050), dispatched internally
 by `Config.ProviderName`; `Manager`'s own public surface never differs
-between them. Alpaca's response shape is an unverified design
-assumption (isolated to one file,
-`marketdata/internal/provider/alpaca/wireshape.go`) since this
-environment had no network access to confirm it — see ADR-050.
+between them. Alpaca's request contract (endpoint, parameters,
+`adjustment=split`, `feed=iex`) was confirmed against Alpaca's own
+official docs on review; its exact response *body* shape remains a
+partially-verified design assumption (isolated to one file,
+`marketdata/internal/provider/alpaca/wireshape.go`) since no real
+request has been issued against the live API from this environment —
+see ADR-050.
 
 ```go
 mgr, err := marketdata.New(marketdata.Config{

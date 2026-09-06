@@ -192,6 +192,39 @@ func (c *USEquityCalendar) Session(t time.Time) (TimeRange, bool) {
 	return window, true
 }
 
+// RegularSessionEnd returns the real regular-session close instant for
+// the trading day containing t (its own America/New_York calendar
+// date), and whether that date is a trading day at all. Unlike
+// Session, RegularSessionEnd answers this regardless of what clock
+// time t itself falls at — it is the close-time lookup a live-fetch
+// provider (Alpaca, issue #297) needs to determine whether a given
+// trading day's own daily bar has actually finished forming yet,
+// which Session cannot answer directly: Session(t) reports ok=false
+// for any out-of-session t, including midnight UTC — the very instant
+// a caller most needs to ask "has today's session ended?" from (PR
+// #312 review: syncOneAlpaca previously assumed every bar Alpaca could
+// return for the current calendar day was already complete, with
+// nothing checking whether that day's regular session had actually
+// closed yet).
+func (c *USEquityCalendar) RegularSessionEnd(t time.Time) (closeAt time.Time, isTradingDay bool) {
+	nyT := t.In(newYorkLocation)
+	switch nyT.Weekday() {
+	case time.Saturday, time.Sunday:
+		return time.Time{}, false
+	}
+	key := literalDateKey(nyT)
+	if _, holiday := c.holidays[key]; holiday {
+		return time.Time{}, false
+	}
+	y, m, d := nyT.Date()
+	midnight := time.Date(y, m, d, 0, 0, 0, 0, newYorkLocation)
+	closeOffset := regularClose
+	if half, ok := c.halfDays[key]; ok {
+		closeOffset = half
+	}
+	return midnight.Add(closeOffset), true
+}
+
 // Bar implements Calendar. Only D1 is supported today — ADR-047
 // explicitly scopes Phase 1's equity Calendar need to daily bars only,
 // since Stooq (Phase 1's only equity data source) has no intraday
