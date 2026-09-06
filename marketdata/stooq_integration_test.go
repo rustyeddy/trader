@@ -391,24 +391,31 @@ func TestStooqEndToEnd_HolidayGapReadsCorrectly(t *testing.T) {
 	}
 }
 
-// TestStooqCoverage_HolidayGapNotYetCalendarAware documents a real,
-// known Phase 1 limitation issue #299 (EQ-06) asks to be tested, not
-// silently left implicit: Manager.Coverage's gap classification walks
-// bar boundaries via the configured Calendar (coverage.go), and no
-// equity-aware Calendar exists yet — ADR-047 defers a real
-// USEquityCalendar to future intraday-driven work, since Phase 1's
-// Stooq data is daily-only. The default FXCalendar has no concept of
-// a U.S. market holiday (or, for that matter, a Monday-Friday-only
-// trading week distinct from FX's own Sunday-open week), so it reports
-// every non-trading calendar day in the queried span — including the
-// ordinary weekend already present in this fixture, not just the
-// holiday — as a "missing" Gap, even though the underlying data is
-// fully built and correct.
+// TestStooqCoverage_HolidayGapPendingEquityCalendar documents and
+// precisely regression-locks a real, known Phase 1 limitation issue
+// #299 (EQ-06) asks to be tested, not silently left implicit:
+// Manager.Coverage's gap classification walks bar boundaries via the
+// configured Calendar (coverage.go), and no equity-aware Calendar
+// exists yet. This is a temporary limitation pending issue #296
+// (EQ-03, "Add market calendar and trading-session semantics"),
+// already open in this same Phase 1 milestone — not, as an earlier
+// draft of this test incorrectly claimed, work deferred beyond Phase 1.
 //
-// This test exists so that landing a real equity Calendar later is a
-// deliberate, visible change to this assertion, not a silent behavior
-// shift nobody noticed.
-func TestStooqCoverage_HolidayGapNotYetCalendarAware(t *testing.T) {
+// The actual defect is a boundary mismatch, not merely "FXCalendar
+// doesn't know about holidays": the default FXCalendar's D1 boundary
+// is 17:00 America/New_York (ADR-021), which does not align with
+// Stooq's own midnight-UTC daily bars at all. So ClassifyInterval can
+// report a Gap across a span that actually contains real, present
+// trading-day bars, not only across genuinely non-trading days — the
+// two Gaps this test locks below each straddle a mix of real trading
+// days and the holiday/weekend, which is the actual (mis)behavior
+// #296 exists to fix, not a clean "holiday days only" gap.
+//
+// This test asserts the exact current Gap shape, not merely that
+// Gaps exist, specifically so that landing #296 is forced to
+// deliberately update (or delete) this assertion rather than silently
+// changing Coverage's behavior underneath it.
+func TestStooqCoverage_HolidayGapPendingEquityCalendar(t *testing.T) {
 	ctx := context.Background()
 	rawRoot := t.TempDir()
 
@@ -432,13 +439,32 @@ func TestStooqCoverage_HolidayGapNotYetCalendarAware(t *testing.T) {
 	require.NoError(t, err)
 
 	// Both partitions are fully built ("current") despite the reported
-	// gaps below — the gaps are a Calendar-awareness limitation in
-	// Coverage's reporting, not a real hole in the canonical data
-	// (TestStooqEndToEnd_HolidayGapReadsCorrectly already proves Bars
-	// itself reads correctly).
+	// gaps below — the gaps are a Calendar-boundary-alignment
+	// limitation in Coverage's reporting, not a real hole in the
+	// canonical data (TestStooqEndToEnd_HolidayGapReadsCorrectly
+	// already proves Bars itself reads correctly).
 	for _, pc := range cov.Partitions {
 		assert.Equal(t, PartitionCoverageCurrent, pc.Status, "%04d-%02d", pc.Year, pc.Month)
 	}
-	assert.NotEmpty(t, cov.Gaps,
-		"FXCalendar-based Coverage is expected to (incorrectly) report the New Year's/weekend non-trading days as gaps until a real equity Calendar exists")
+
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	wantGaps := []struct {
+		start, end time.Time
+	}{
+		{
+			time.Date(2019, 12, 30, 17, 0, 0, 0, newYork),
+			time.Date(2020, 1, 1, 17, 0, 0, 0, newYork),
+		},
+		{
+			time.Date(2020, 1, 1, 17, 0, 0, 0, newYork),
+			time.Date(2020, 1, 3, 17, 0, 0, 0, newYork),
+		},
+	}
+	require.Len(t, cov.Gaps, len(wantGaps))
+	for i, want := range wantGaps {
+		assert.Equal(t, IntervalStateMissing, cov.Gaps[i].State, "gap[%d]", i)
+		assert.True(t, cov.Gaps[i].Span.Start().Equal(want.start), "gap[%d] start = %v, want %v", i, cov.Gaps[i].Span.Start(), want.start)
+		assert.True(t, cov.Gaps[i].Span.End().Equal(want.end), "gap[%d] end = %v, want %v", i, cov.Gaps[i].Span.End(), want.end)
+	}
 }
