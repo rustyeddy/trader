@@ -176,3 +176,58 @@ func TestStooqEndToEnd_RejectsCorruptRawData(t *testing.T) {
 	_, err = mgr.Bars(ctx, query)
 	assert.ErrorIs(t, err, ErrDataUnavailable)
 }
+
+// TestStooqEndToEnd_RejectsOutOfOrderRawData confirms an out-of-order
+// same-month raw Stooq partition aborts the canonical build with
+// errRecordOutOfOrder — the real regression PR #306's review asked
+// for. stooq.WritePartition no longer sorts records before writing
+// (see its own doc comment), so this test is the actual proof that an
+// out-of-order raw source reaches normalizeStooqSequence's ordering
+// check instead of being silently pre-sorted into something the
+// checker can never see.
+func TestStooqEndToEnd_RejectsOutOfOrderRawData(t *testing.T) {
+	ctx := context.Background()
+	rawRoot := t.TempDir()
+
+	// Two records for the same month, written in descending
+	// (out-of-order) Time — WritePartition must preserve this order
+	// verbatim for the test to mean anything.
+	later := stooq.Record{
+		Time: time.Date(2020, 5, 4, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("280.34"), High: num.MustParsePrice("286.44"),
+		Low: num.MustParsePrice("278.83"), Close: num.MustParsePrice("285.34"),
+	}
+	earlier := stooq.Record{
+		Time: time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		Open: num.MustParsePrice("282.80"), High: num.MustParsePrice("283.19"),
+		Low: num.MustParsePrice("278.85"), Close: num.MustParsePrice("282.79"),
+	}
+	require.NoError(t, stooq.WritePartition(ctx, rawRoot, "SPY", 2020, time.May,
+		[]stooq.Record{later, earlier}, false))
+
+	mgr := newStooqTestManager(t, rawRoot)
+	span, err := NewTimeRange(
+		time.Date(2020, 5, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	query := BarQuery{Instrument: spyID(t), Interval: D1, Range: span}
+
+	plan, err := mgr.Plan(ctx, query)
+	require.NoError(t, err)
+
+	// firstBadOutcomeError (build_normalize.go) itemizes every bad
+	// record's message via %v, not %w, so errRecordOutOfOrder itself
+	// is not reachable through errors.Is here — matching
+	// TestStooqEndToEnd_RejectsCorruptRawData's own identical
+	// generic-error assertion above. The message text is checked
+	// instead, to actually confirm this is the out-of-order rejection
+	// and not some other failure.
+	_, err = mgr.Build(ctx, plan)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), errRecordOutOfOrder.Error())
+
+	// No canonical partition was published for the aborted month.
+	_, err = mgr.Bars(ctx, query)
+	assert.ErrorIs(t, err, ErrDataUnavailable)
+}

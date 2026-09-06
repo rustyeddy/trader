@@ -199,10 +199,17 @@ func inspectFile(ctx context.Context, root, path string) (Partition, bool, error
 			p.Err = err
 			return p, false, nil
 		}
-		if rowCount == 0 {
+		// Computed as an actual min/max over every row, not scan
+		// order — matching oanda.Inspect's identical convention — so
+		// a partition whose own records are out of order (WritePartition
+		// no longer sorts them; see its own doc comment) still reports
+		// an honest span rather than a scan-order artifact.
+		if rowCount == 0 || rec.Time.Before(first) {
 			first = rec.Time
 		}
-		last = rec.Time
+		if rowCount == 0 || rec.Time.After(last) {
+			last = rec.Time
+		}
 		rowCount++
 	}
 

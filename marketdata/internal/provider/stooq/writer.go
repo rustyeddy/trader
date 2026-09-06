@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 )
 
@@ -20,8 +19,23 @@ var ErrPartitionAlreadyExists = errors.New("stooq: raw partition already exists"
 
 // WritePartition atomically writes records as a raw-v1 partition file
 // for (symbol, year, month) under root: a schema comment, the raw-v1
-// column header, then one row per record in ascending Time order.
-// records need not already be sorted.
+// column header, then one row per record in exactly the order given.
+//
+// Unlike oanda.WritePartition, records is deliberately *not* sorted
+// before writing. oanda's own raw records always arrive already
+// ordered (a live network fetch delivers ascending candles by
+// construction), so sorting there is a harmless no-op safety net. A
+// bulk Stooq CSV export carries no such guarantee, and this package's
+// whole "preserve provider-native data, judge it at normalization"
+// split (see Import's own doc comment, mirroring ADR-020's identical
+// split for oanda) only holds if the raw partition on disk actually
+// preserves whatever order the source delivered — silently sorting
+// here would let a genuinely out-of-order Stooq export reach
+// normalizeStooqSequence pre-ordered, making its out-of-order
+// rejection unreachable for the exact input it exists to catch (PR
+// #306 review). Import (import.go) is responsible for grouping
+// records into the right monthly partition; ordering within a month
+// is whatever the source file's own row order was.
 //
 // mustNotExist, when true, rejects (ErrPartitionAlreadyExists) writing
 // over a path that already has a file. When false, an existing file at
@@ -40,9 +54,6 @@ func WritePartition(ctx context.Context, root, symbol string, year int, month ti
 		return err
 	}
 	path := partitionPath(root, symbol, year, month)
-
-	sorted := append([]Record(nil), records...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Time.Before(sorted[j].Time) })
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -63,7 +74,7 @@ func WritePartition(ctx context.Context, root, symbol string, year int, month ti
 	}()
 
 	bw := bufio.NewWriter(tmp)
-	if err := encodeRawPartition(ctx, bw, symbol, year, month, sorted); err != nil {
+	if err := encodeRawPartition(ctx, bw, symbol, year, month, records); err != nil {
 		return fmt.Errorf("stooq: write partition: %w", err)
 	}
 	if err := bw.Flush(); err != nil {
