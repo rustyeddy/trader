@@ -94,11 +94,13 @@ like OANDA's bid/ask raw schema.
 ** Instrument identity: reuse as-is
 
 =instrument.KindEquity=/=KindETF=, exchange+ticker identity, and
-=instrument.Spec= require no change for Phase 1. A Phase 1
-=instrument.Resolver= registration for SPY/AAPL/QQQ on a =NYSE=/
-=NASDAQ= exchange string and a =stooq=/=alpaca= provider/venue is
-implementation, not design — the existing =MemoryResolver=
-(=ResolveSymbol=/=ResolveInstrument=, ADR-016) already handles it.
+=instrument.Spec= require no change for Phase 1. Since exchange is
+part of an equity's canonical identity, Phase 1's three reference
+instruments register on their actual listing exchange, not a generic
+placeholder: SPY on NYSE Arca, and AAPL and QQQ on Nasdaq. Registering
+these against a =stooq=/=alpaca= provider/venue is implementation, not
+design — the existing =MemoryResolver= (=ResolveSymbol=/
+=ResolveInstrument=, ADR-016) already handles it.
 
 ** Provider boundary: introduce a real internal provider seam now, not a second hardcoded branch
 
@@ -176,23 +178,39 @@ ADR-035's own "portfolio deferred" and "synthetic instruments deferred"
 precedents).
 
 Phase 1's minimum obligation is honesty, not adjustment: canonical
-equity bars are stored exactly as the source provider delivers them,
-and the run/build manifest records which provider and convention
-produced them (the same provenance discipline ADR-020 already applies
-to raw OANDA partitions). Whether Stooq's own SPY/QQQ daily closes are
-already split-adjusted, dividend-adjusted, both, or neither is *not
-yet verified* — the raw CSV carries no adjusted-close column at all,
-so this must be checked (against Stooq's own documented convention,
-or by finding a known historical split and inspecting the data around
-it) before AAPL is relied on as the split-exercising instrument #294
-itself proposes. If Stooq's data turns out to already be
-split-adjusted in place, AAPL is usable for Phase 1's "exercise a
-split" goal without any adjustment code being written at all; if it
-is raw, that goal is deferred until real adjustment logic exists.
-Either way, no =AdjustmentMode= type is introduced by Phase 1 — a
-single implicit "whatever the provider gave us" convention, recorded
-in the manifest, is sufficient until a second differently-adjusted
-source or a real multi-mode consumer exists.
+equity bars are stored exactly as the source provider delivers them.
+That obligation is not satisfied by mentioning the convention in prose
+alone, though — per issue #298 (EQ-05), which owns the concrete
+implementation of this requirement, the provider's adjustment
+convention must be *explicit, reproducible dataset/build metadata*
+(the same provenance discipline ADR-020 already applies to raw OANDA
+partitions) and must *participate in canonical dataset/cache
+identity*. Concretely: two datasets that differ only in adjustment
+convention (for example a raw-price Stooq history and a
+split-adjusted Alpaca history for the same instrument/interval/range)
+must not be able to silently collide in canonical storage or cache
+lookup as if they were the same data — the same kind of identity
+collision =backtest.Manifest.ConfigDigest= already exists to prevent
+for other reproducibility-relevant inputs. This is the precise, narrow
+requirement that satisfies EQ-05's own acceptance criteria without
+requiring a query-time selectable =AdjustmentMode= or a
+corporate-action event engine.
+
+Whether Stooq's own SPY/QQQ daily closes are already split-adjusted,
+dividend-adjusted, both, or neither is *not yet verified* — the raw
+CSV carries no adjusted-close column at all, so this must be checked
+(against Stooq's own documented convention, or by finding a known
+historical split and inspecting the data around it) before AAPL is
+relied on as the split-exercising instrument #294 itself proposes. If
+Stooq's data turns out to already be split-adjusted in place, AAPL is
+usable for Phase 1's "exercise a split" goal without any adjustment
+*computation* being written at all — only the identity/metadata
+requirement above still applies; if it is raw, that goal is deferred
+until EQ-05's adjustment-aware logic exists. Either way, no
+query-time-selectable =AdjustmentMode= type is introduced by Phase 1 —
+one recorded, identity-bearing convention per dataset is sufficient
+until a second differently-adjusted source or a real multi-mode
+consumer exists.
 
 ** Quantity and price semantics
 
@@ -201,8 +219,10 @@ of =1=) and cent tick size (=TickSize= =0.01=) for Phase 1 — matching
 every US equity/ETF this phase targets. Fractional-share trading
 (an increment below 1, an Alpaca-specific capability) is not needed
 by anything in Phase 1's target (SPY/QQQ/AAPL backtesting and paper
-trading round-lot orders) and is deferred rather than built
-speculatively. No lot-size concept (in the futures-contract sense) is
+trading whole-share orders — Alpaca paper smoke testing can reasonably
+use single-share orders, not a 100-share round lot) and is deferred
+rather than built speculatively. No lot-size concept (in the
+futures-contract sense) is
 needed for equities.
 
 ** Short-selling and margin: already representable, no new domain types
@@ -245,15 +265,22 @@ a second copy of an already-generic package.
   seam (acquisition/inventory/normalization) as part of adding Stooq,
   not after, and migrate =oanda= behind it rather than leaving two
   divergent code shapes (one seam-based, one hardcoded) side by side.
-- A new =NYSECalendar= (or equivalently named) =Calendar=
+- A new =USEquityCalendar= (or equivalently named) =Calendar=
   implementation is needed before Phase 1's D1 backtests can run
-  against real session boundaries; =FXCalendar= is not reused or
+  against real session boundaries — named for the shared U.S. market
+  holiday calendar it covers, not a single exchange, since Phase 1's
+  reference instruments span both NYSE Arca and Nasdaq. =FXCalendar=
+  is not reused or
   extended for this.
-- No =AdjustmentMode= type exists after Phase 1 either — this remains
-  a deliberate, named gap for a future phase (or an Alpaca-driven
-  corporate-actions issue) once a concrete need (a second
-  differently-adjusted provider, or a strategy that needs to select
-  raw vs. adjusted) actually exists.
+- No query-time-selectable =AdjustmentMode= type exists after Phase 1
+  either — that remains a deliberate, named gap for a future phase
+  once a concrete need (a second differently-adjusted provider, or a
+  strategy that needs to select raw vs. adjusted at query time)
+  actually exists. EQ-05 (#298) still must make the single recorded
+  adjustment convention explicit, reproducible metadata that
+  participates in canonical dataset/cache identity, so this deferral
+  is scoped precisely and does not silently reopen a reproducibility
+  gap.
 - Equity bars' zero =AvgSpread=/=MaxSpread= is a known, documented
   limitation that must be called out explicitly in any Phase 1
   backtest/report output that surfaces spread-derived figures, so it
