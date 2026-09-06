@@ -1,0 +1,216 @@
+#+TITLE: US Equity Market Calendar and Trading-Session Semantics ADR-049
+#+STARTUP: overview indent
+
+* Status
+
+Accepted. Issue #296 (EQ-03) asks for equity market sessions to be
+represented explicitly, so Trader stops applying FX-style
+continuous-market assumptions to US equities — a gap prior Equities
+Phase 1 work (ADR-047, ADR-048, issues #294/#295/#303/#298/#299/#300)
+deliberately left open for this issue.
+
+* Context
+
+=marketdata.Manager= had exactly one =Calendar= implementation,
+=FXCalendar=, used by default regardless of provider — including
+Stooq/equity Managers. This was real, currently-shipped,
+regression-locked (not silently broken) misbehavior, precisely
+characterized by issue #299 (EQ-06)'s own
+=TestStooqCoverage_HolidayGapPendingEquityCalendar=: =FXCalendar='s D1
+boundary is the FX daily rollover (17:00 America/New_York, ADR-021),
+which does not align with Stooq's own daily bars at all — those are
+parsed via =time.Parse("2006-01-02", ...)= in
+=marketdata/internal/provider/stooq/reader.go=, which Go's =time.Parse=
+resolves to *midnight UTC* with no location conversion. So
+=Manager.Coverage='s gap classification
+(=ClassifyInterval=/=interval_state.go=) reported spurious "missing"
+Gaps straddling real trading days, not only genuine closures.
+
+Two design constraints, discovered by reading =interval_state.go='s
+=uniformStatus= helper and =normalize_stooq.go='s own already-honest
+doc comment (quoted below), shaped this decision:
+
+- =ClassifyInterval= requires, whenever =cal.Status(span.Start()) ==
+  StatusOpen=, that =cal.Session(span.Start())= *fully contains* span
+  (the D1 =cal.Bar(...)= span being classified) — otherwise it returns
+  =ErrIntervalStraddlesBoundary=. A =Session= returning only real
+  9:30-16:00 America/New_York clock hours (6.5h) could never contain a
+  full day-length D1 bar span (~24h): every D1 classification would
+  fail outright, which is worse than the bug this issue fixes.
+- =normalize_stooq.go= already stated the intended fix precisely:
+  "Once a real equity Calendar exists, adding the identical alignment
+  check =normalizeOANDASequence= already performs is the natural
+  follow-up, not a redesign of this function's shape."
+
+* Decision
+
+** A new =USEquityCalendar=, anchored to midnight UTC, not exchange-local time
+
+=USEquityCalendar= (=marketdata/usequitycalendar.go=) is a second
+=Calendar= implementation: open Monday-Friday except a configured
+holiday, closed on weekends and holidays. Its D1 =Bar= boundary is
+*midnight UTC* — a deliberate choice, not an oversight, and a different
+anchor from =FXCalendar='s own 17:00-America/New_York rollover. This
+calendar exists specifically to serve Stooq-sourced canonical equity
+data, and Stooq's own bars carry no timezone information at all in
+their native "YYYY-MM-DD" dates — there is no requirement that a day
+boundary be timezone-authentic when the entire point, for now, is
+agreeing with what is actually stored. =FXCalendar= itself is
+unchanged; =USEquityCalendar= is purely additive.
+
+** Session equals the whole day, not real trading-session clock hours
+
+=Session(t)= for an open day returns the identical =[midnight UTC, next
+midnight UTC)= span =Bar(t, D1)= does, not the real 9:30-16:00
+America/New_York regular session. This satisfies =ClassifyInterval='s
+containment requirement by construction (a span always contains
+itself) rather than by coincidence. "Session," at this calendar's
+current D1-only granularity, means "the trading day as a whole," not
+"opening bell to closing bell." Real intraday session-hours accuracy
+(9:30 open, 16:00 close, a truncated close on a half day) is a named,
+deferred refinement for when equity M1/H1 support (Alpaca-driven)
+actually needs to distinguish pre-market, regular, and after-hours data
+at sub-day granularity — consistent with ADR-047's own "D1-only,
+intraday deferred" scoping and with issue #296's own "extended-hours
+trading remains deferred" acceptance criterion. =Bar= itself supports
+only =D1= today for the identical reason; other units return an error.
+
+** Half days are tracked as data, not yet acted on
+
+=HalfDay= (a date plus a local close-time offset, mirroring
+=FXCalendar='s own =PartialClosure= shape) and =USEquityCalendar.IsHalfDay=
+expose which dates close early — =StandardUSEquityHolidays= configures
+the day after Thanksgiving as Trader's one shipped, unconditional half
+day — without =Status= or =Session= changing behavior for one yet, per
+the D1-granularity simplification above. This satisfies issue #296's
+"early-close/half-day behavior" and "at least representative early-close
+dates are tested" requirements honestly: half days are distinguishable
+from both ordinary trading days and full closures, even though nothing
+downstream consumes that distinction until intraday support needs it.
+Christmas Eve and July 3rd early closes are a named, deferred
+refinement — their historical application has varied by year, unlike
+the day after Thanksgiving's unconditional rule.
+
+** A real, dated US holiday rule set
+
+=StandardUSEquityHolidays= (=marketdata/usequityholidays.go=) computes
+the ten standard NYSE/Nasdaq full-closure holidays for a given set of
+years — New Year's Day, Martin Luther King Jr. Day, Washington's
+Birthday, Good Friday (via the standard Meeus/Jones/Butcher Gregorian
+Easter algorithm), Memorial Day, Juneteenth National Independence Day,
+Independence Day, Labor Day, Thanksgiving Day, and Christmas Day — each
+shifted by the standard weekend-observed rule (Saturday shifts to the
+preceding Friday, Sunday to the following Monday). Juneteenth is
+included only for years 2022 and later, the first year NYSE actually
+observed it; it is not backdated. =USEquityCalendar= itself carries no
+built-in holiday data (mirroring =FXCalendar=/=StandardFXHolidays='s own
+split) — a caller needing a different or extended rule set can build
+=USEquityCalendarParams= directly.
+
+** Wiring: explicit at every call site, not provider-aware inside Manager
+
+Every Stooq-provider =Manager= construction now passes
+=Config.Calendar: NewUSEquityCalendar(...)= explicitly, rather than
+=Manager= branching on =m.providerName= to select a Calendar internally.
+This follows ADR-020's "opaque provider name" precedent: =Manager=
+already does not, and should not, make decisions by inspecting the
+provider-name string. The mechanical cost is three call sites (two
+=marketdata= test helpers, one =service/backtest= equity test
+composition) explicitly configuring =Calendar= — small, and it keeps
+=Manager= itself unaware that "stooq" means "use this specific
+Calendar."
+
+** Real calendar-alignment validation, replacing a documented, honest gap
+
+=normalize_stooq.go='s own doc comment already named the deferred fix
+precisely; this decision implements it verbatim. =normalizeStooqSequence=
+now takes a =Calendar= parameter and rejects (=recordOutcomeRejected=,
+the existing =errRecordMisaligned= sentinel — the identical outcome and
+error =normalizeOANDASequence= already uses for the same check) any
+record whose =Time= does not fall exactly on
+=cal.Bar(rec.Time, D1).Start()=. =calendarVersionStooqV1='s honest-but-
+negative "stooq-unaligned-v1" name is retired in favor of
+=calendarVersionUSEquityV1= ("usequitycalendar-v1"), naming the
+Calendar a Stooq-sourced dataset was actually validated against, the
+same way =calendarVersionCurrent= names =FXCalendar='s own version for
+oanda-sourced datasets.
+
+** The regression test this issue exists to flip
+
+Issue #299 (EQ-06)'s own
+=TestStooqCoverage_HolidayGapPendingEquityCalendar= — which
+deliberately regression-locked the *bug* — is replaced by
+=TestStooqCoverage_HolidayGapCorrectlyClosedNotMissing=, asserting the
+fixed behavior against the identical fixture: zero Coverage Gaps for a
+span containing New Year's Day 2020 and its surrounding weekend, since
+every real trading day now classifies as =IntervalStatePresent= and the
+holiday classifies as =IntervalStateClosed=. A second new test,
+=TestStooqCoverage_HalfDayDoesNotStraddleError=, confirms a real half
+day (day after Thanksgiving) never trips
+=ErrIntervalStraddlesBoundary= through a real =Manager.Coverage= call,
+not only through =USEquityCalendar='s own unit tests.
+
+* Consequences
+
+- =FXCalendar= is entirely unchanged; every existing FX calendar test
+  passes unmodified. This is a purely additive second =Calendar=
+  implementation.
+- Real full-history validation: both the complete local SPY (2005-2026,
+  5,415 rows) and AAPL (1984-2026, 10,580 rows) Stooq archives import,
+  build, and read with zero calendar-alignment rejections and zero
+  false Coverage gaps, across every real US holiday and DST transition
+  in that span — confirmed by manually running the existing
+  =fullarchive=-tagged tests against the real local files (reverted
+  before commit, per this codebase's own established convention).
+- =service/backtest='s equity backtest test
+  (=TestService_Run_SPYEquityBacktest=, issue #300/EQ-07) and every
+  =marketdata= Stooq end-to-end test now construct their =Manager= with
+  an explicit =USEquityCalendar= — outcomes (bar counts, fill prices,
+  PnL) are unaffected, since =backtest.NewReplay= was already proven
+  (issue #212, reconfirmed by EQ-07's own research note) to depend only
+  on =Manager.Bars=, never =Manager.Coverage=; only Coverage's own
+  gap-reporting accuracy changes.
+- Extended-hours (pre-market/after-hours) trading remains entirely
+  unaddressed, per this issue's own acceptance criterion — nothing here
+  represents, permits, or tests it.
+- A real M1/H1 equity session-hours implementation (true 9:30-16:00
+  open/close, half-day truncation actually changing =Session=) remains
+  future, Alpaca-driven work; =USEquityCalendar.Bar= rejects any unit
+  other than =D1= today rather than guessing at one.
+
+* Alternatives Considered
+
+- *Anchor =USEquityCalendar='s D1 boundary to real exchange-local
+  midnight or session open (America/New_York) instead of midnight UTC.*
+  Rejected: Stooq's own bars carry no timezone information and are, in
+  effect, already midnight-UTC-anchored by how =time.Parse= resolves
+  them; a "more authentic" exchange-local anchor would make every real
+  Stooq bar misaligned by construction, reproducing the exact bug this
+  issue exists to fix.
+- *Make =Session= return real 9:30-16:00 America/New_York trading
+  hours now.* Rejected: this would violate =ClassifyInterval='s own
+  containment requirement for every D1 span (a ~6.5h session cannot
+  contain a ~24h bar), turning every single D1 coverage classification
+  into an =ErrIntervalStraddlesBoundary= error — strictly worse than
+  the bug being fixed. Deferred until intraday equity support actually
+  needs sub-day session boundaries.
+- *Make =Manager= provider-aware, defaulting to =USEquityCalendar= when
+  =ProviderName= names a known equity provider.* Rejected: violates
+  ADR-020's "opaque provider name" precedent, under which =Manager=
+  itself never branches on the provider-name string to make behavioral
+  decisions. Three explicit call sites is an acceptable, small
+  mechanical cost for keeping that invariant intact.
+- *Implement Christmas Eve/July 3rd early closes as additional fixed
+  half-day rules now.* Rejected: unlike the day after Thanksgiving,
+  NYSE's application of these has varied by year and is not a clean,
+  unconditional rule; shipping an incorrect rule would be worse than
+  naming the gap and deferring it.
+- *Leave =normalize_stooq.go='s calendar-alignment check unimplemented,
+  since Phase 1's real archives already happen to be well-formed.*
+  Rejected: that doc comment already named this exact, concrete follow-up
+  as the natural next step once a real Calendar existed; leaving it
+  undone once the blocker was gone would let a future malformed or
+  misaligned Stooq record (or a future second equity provider with a
+  different date convention) reach canonical storage silently
+  unchecked, exactly the class of bug =normalizeOANDASequence='s own
+  identical check exists to prevent for FX.

@@ -206,11 +206,16 @@ reader, err := mgr.Bars(ctx, query) // Reader[Bar]: Next(ctx)/Close()
 `Interval` is built from a typed unit and count, never parsed from a
 provider string, with five predefined values
 (`marketdata.M1/H1/H4/D1/W1`). `Calendar` aligns a `time.Time` to sessions
-and bar boundaries; minute and hour bars align to the daily FX rollover
-(not UTC midnight — see ADR-021 in [the ADR registry](arch/adr-decisions.org)),
-while day and week bars align to the Sunday 17:00 New York session open,
-with `time.Date`-based arithmetic so daylight-saving transitions resolve
-correctly. See [ADR-012](arch/adr-decisions.org),
+and bar boundaries, and has two implementations: `FXCalendar`, where
+minute and hour bars align to the daily FX rollover (not UTC midnight
+— see ADR-021 in [the ADR registry](arch/adr-decisions.org)), while day
+and week bars align to the Sunday 17:00 New York session open, with
+`time.Date`-based arithmetic so daylight-saving transitions resolve
+correctly; and `USEquityCalendar` (D1 only, anchored to midnight UTC
+to agree with Stooq's own equity bars, with `Session` deliberately
+equal to the whole day — see
+[ADR-049](arch/adr-049-us-equity-market-calendar.org)). See
+[ADR-012](arch/adr-decisions.org),
 [ADR-020](arch/adr-020-historic-data.org), and the
 [package doc comment](../marketdata/doc.go) for the full half-open range
 convention and coverage/gap model. (The architecture document sketches a
