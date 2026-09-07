@@ -49,11 +49,15 @@ package eq09
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/rustyeddy/trader/adapters/broker/alpaca"
 	brokerpkg "github.com/rustyeddy/trader/broker"
@@ -70,13 +74,68 @@ import (
 	mdsvc "github.com/rustyeddy/trader/service/marketdata"
 )
 
-// alpacaEQ09KeyID/SecretKey name the real Alpaca paper-account
-// credential pair this test uses. They ship empty for the same reason
-// every other "alpacasmoke" file's constants do: an operator wanting
-// to run this test edits these locally. The test skips whenever either
-// is empty, which is always true for a fresh checkout.
+// alpacaEQ09CredentialFile names a local YAML file this test reads its
+// credential pair from at run time — api_key/secret_key fields, the
+// same names Alpaca's own tooling commonly uses for a profile file —
+// rather than requiring an operator to paste a real secret into this
+// tracked source file at all. This is the safer alternative the other
+// "alpacasmoke" files' own doc comments considered and set aside only
+// because config/arch_test.go's TestDomainPackagesDoNotReadEnvOrFlags
+// forbids os.Getenv/os.LookupEnv/os.Environ specifically — it does not
+// restrict reading an explicit local file path, so no architectural
+// exemption is needed here. "~/" is expanded against the current
+// user's home directory. Point this at your own local profile path (or
+// clear it) without ever committing that edit; a missing file is not
+// an error — see loadAlpacaEQ09Credentials.
+const alpacaEQ09CredentialFile = "~/.config/alpaca/profiles/paper.yaml"
+
+// alpacaEQ09KeyID/SecretKey are the fallback credential pair, used only
+// when alpacaEQ09CredentialFile is empty or does not resolve to both
+// fields — the same "edit locally, never commit" constants every other
+// "alpacasmoke" file already establishes.
 const alpacaEQ09KeyID = ""
 const alpacaEQ09SecretKey = ""
+
+// alpacaYAMLCredential is alpacaEQ09CredentialFile's expected shape.
+// Fields beyond these two (for example an OAuth access_token, a
+// different auth mechanism this adapter does not implement) are
+// ignored, not an error.
+type alpacaYAMLCredential struct {
+	APIKey    string `yaml:"api_key"`
+	SecretKey string `yaml:"secret_key"`
+}
+
+// loadAlpacaEQ09Credentials resolves this test's credential pair: from
+// alpacaEQ09CredentialFile if it exists and supplies both fields,
+// otherwise from the alpacaEQ09KeyID/SecretKey constants. ok is false
+// (with no error) when neither source supplies a complete pair, which
+// is the expected, common case for a fresh checkout.
+func loadAlpacaEQ09Credentials(t *testing.T) (keyID, secretKey string, ok bool) {
+	t.Helper()
+	if alpacaEQ09CredentialFile != "" {
+		path := alpacaEQ09CredentialFile
+		if rest, cut := strings.CutPrefix(path, "~/"); cut {
+			home, err := os.UserHomeDir()
+			require.NoError(t, err)
+			path = filepath.Join(home, rest)
+		}
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			var cred alpacaYAMLCredential
+			require.NoError(t, yaml.Unmarshal(data, &cred), "parse %s", path)
+			if cred.APIKey != "" && cred.SecretKey != "" {
+				return cred.APIKey, cred.SecretKey, true
+			}
+		case !os.IsNotExist(err):
+			t.Fatalf("read %s: %v", path, err)
+		}
+	}
+	if alpacaEQ09KeyID != "" && alpacaEQ09SecretKey != "" {
+		return alpacaEQ09KeyID, alpacaEQ09SecretKey, true
+	}
+	return "", "", false
+}
 
 // alpacaEQ09AccountID is Trader's own, fixed identity for the one
 // Alpaca paper account this test addresses (alpaca.AccountConfig's own
@@ -96,8 +155,9 @@ var alpacaEQ09AccountID = id.MustParseAccountID("acc_01M1WJBKGPYKFCX4ATF8QQD0TZ"
 var maxSmokeQuantity = num.MustParseQuantity("2")
 
 func TestSmokeSPYPaperRoundTrip(t *testing.T) {
-	if alpacaEQ09KeyID == "" || alpacaEQ09SecretKey == "" {
-		t.Skip("alpacaEQ09KeyID/alpacaEQ09SecretKey are empty; edit the constants in this file to point at a real Alpaca paper credential pair to run this test")
+	keyID, secretKey, ok := loadAlpacaEQ09Credentials(t)
+	if !ok {
+		t.Skipf("no Alpaca paper credentials configured: neither %s nor alpacaEQ09KeyID/SecretKey supplied a complete pair; point one at a real Alpaca paper credential pair to run this test", alpacaEQ09CredentialFile)
 	}
 	ctx := context.Background()
 	c := clock.Real{}
@@ -123,7 +183,7 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	spyListing, err := resolver.ResolveSymbol("alpaca", "", "SPY")
 	require.NoError(t, err)
 
-	credential := alpaca.StaticCredential{KeyID: alpacaEQ09KeyID, SecretKey: alpacaEQ09SecretKey}
+	credential := alpaca.StaticCredential{KeyID: keyID, SecretKey: secretKey}
 
 	// --- Step: is the market open right now? ---
 	//
