@@ -132,8 +132,17 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	// data is available regardless of the current session state) — see
 	// the package/file doc comments for why this test skips rather
 	// than attempting a live order outside regular hours.
-	cal := marketdata.NewUSEquityCalendar(marketdata.USEquityCalendarParams{})
+	//
+	// A bare USEquityCalendarParams{} has no holiday data at all (its
+	// own doc comment: "no built-in holiday data"), which would
+	// misreport StatusOpen on a real NYSE holiday that falls on a
+	// weekday — exactly the queued-order/hung-test failure mode this
+	// gate exists to prevent (PR #314 review). StandardUSEquityHolidays
+	// supplies the real, documented holiday/half-day set for the
+	// current and next calendar year, so a run spanning a year
+	// boundary is still covered.
 	now := c.Now()
+	cal := marketdata.NewUSEquityCalendar(marketdata.StandardUSEquityHolidays(now.Year(), now.Year()+1))
 	if cal.Status(now) != marketdata.StatusOpen {
 		t.Skip("NYSE regular session is not currently open; this smoke test only runs live during real market hours")
 	}
@@ -247,7 +256,10 @@ func TestSmokeSPYPaperRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, enterResp.Decision.Allowed, "risk declined the enter intent: %+v", enterResp.Decision.Violations)
 	require.NotNil(t, enterResp.Order.AcceptedQuantity)
-	assert.True(t, enterResp.Order.AcceptedQuantity.Cmp(num.MustParseQuantity("0")) > 0, "expected a positive whole-share quantity")
+	assert.True(t, enterResp.Order.AcceptedQuantity.Cmp(num.MustParseQuantity("0")) > 0, "expected a positive quantity")
+	divisible, err := enterResp.Order.AcceptedQuantity.DivisibleBy(spyListing.Spec().QuantityIncrement())
+	require.NoError(t, err)
+	assert.True(t, divisible, "expected a whole-share quantity (a multiple of the listing's own quantity increment), got %s", enterResp.Order.AcceptedQuantity)
 	assert.True(t, enterResp.Order.AcceptedQuantity.Cmp(maxSmokeQuantity) <= 0, "risk.MaxPositionQuantityRule should have capped the sized quantity")
 	enterOrderID := enterResp.Order.Request.OrderID
 	t.Logf("submitted enter order %s for %s shares of SPY, status %s", enterResp.Order.BrokerOrderID, enterResp.Order.AcceptedQuantity, enterResp.Order.Status)

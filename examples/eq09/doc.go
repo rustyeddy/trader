@@ -36,11 +36,15 @@
 //
 // # Running it
 //
-// This package's only test is opt-in, gated behind the "alpacasmoke"
-// build tag already established by the Alpaca market-data provider
-// (issue #297) and the Alpaca broker adapter (issue #301) — reused
-// here rather than inventing a fourth opt-in mechanism for the same
-// "real Alpaca credentials, never committed" purpose. See
+// Only the live smoke test itself (smoke_test.go) is opt-in, gated
+// behind the "alpacasmoke" build tag already established by the Alpaca
+// market-data provider (issue #297) and the Alpaca broker adapter
+// (issue #301) — reused here rather than inventing a fourth opt-in
+// mechanism for the same "real Alpaca credentials, never committed"
+// purpose. The pure logic that test depends on (isFlatSPY, waitForFill)
+// lives in untagged _test.go files instead, specifically so it keeps
+// getting real, always-run unit test coverage rather than living
+// entirely behind a tag that almost never runs. See
 // smoke_test.go's own doc comment for exact prerequisites (an Alpaca
 // paper account, an API key/secret pair, and a real NYSE regular
 // trading session) and docs/research/eq-09-spy-paper-smoke.org for the

@@ -77,7 +77,10 @@ the same =pipeline.Pipeline= the enter order used —
 account's current position automatically, so the test itself never
 computes or submits a manual opposite-side order. The test also
 flattens defensively at its own start (=flattenSPYIfOpen=, in
-=helpers_test.go=), so a position left over from an interrupted prior
+=smoke_test.go= — it composes the live =service/execution.Service= and
+=broker.Account= directly, so it lives alongside the live test itself
+rather than in the untagged, network-free =helpers_test.go=), so a
+position left over from an interrupted prior
 manual run is cleaned up before the run's own scenario begins, rather
 than silently accumulating real paper exposure across repeated
 invocations against the one fixed, hardcoded test =AccountID=.

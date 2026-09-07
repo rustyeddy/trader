@@ -10,6 +10,7 @@ package eq09
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -47,6 +48,13 @@ func assertFlatSPYPosition(t *testing.T, snap account.Snapshot, spyListing instr
 // intervening event (including other orders' events replayed from the
 // same correlator, and this adapter's own poll-interval cadence) via
 // one shared context, not a fresh full-length allowance per Next call.
+//
+// Only waitCtx's own deadline expiring is treated as "still working,
+// just slow" (returns false). Any other error — broker.EventReader's
+// own io.EOF once its producer has ended (Broker.Close), or any other
+// failure — is a real stream/broker failure, not a benign timeout, and
+// is reported via t.Fatalf so it cannot be silently masked as an
+// environment/timing skip (PR #314 review).
 func waitForFill(t *testing.T, ctx context.Context, reader brokerpkg.EventReader, orderID id.OrderID, timeout time.Duration) bool {
 	t.Helper()
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -54,7 +62,11 @@ func waitForFill(t *testing.T, ctx context.Context, reader brokerpkg.EventReader
 	for {
 		ev, err := reader.Next(waitCtx)
 		if err != nil {
-			return false // overall timeout elapsed, or the reader/broker closed
+			if errors.Is(err, context.DeadlineExceeded) {
+				return false
+			}
+			t.Fatalf("event reader failed while waiting for order %s: %v", orderID, err)
+			return false
 		}
 		if ev.Kind != brokerpkg.EventKindOrder || ev.Order == nil || ev.Order.Request.OrderID != orderID {
 			continue
