@@ -1,0 +1,568 @@
+#+TITLE: EQR-01 Equity Pullback / Mean-Reversion Research Protocol
+#+STARTUP: overview indent
+
+* Status
+
+Frozen canonical specification for issue #315 (EQR-01A), the first
+issue of the "EQR-01: Short-term equity pullback / mean-reversion
+hypothesis" milestone.
+
+This document defines Trader's first equity pullback/mean-reversion
+research protocol before implementing, tuning, or examining the
+result of any experiment. It mirrors the discipline
+=docs/research/mr-01-experiment-definition.org= already established
+for FX mean-reversion research (MR-01 through MR-08): freeze the
+hypothesis, partitions, observables, buckets, and decision rules
+first; measure second; decide third.
+
+This document defines a *phenomenon* research protocol. It does not
+define a trading strategy, and no strategy exists yet.
+
+* Research Hypothesis
+
+Large-cap US equities in a positive long-term trend exhibit
+short-term mean reversion after unusually sharp pullbacks.
+
+Precisely:
+
+- *Regime*: an instrument is in a positive long-term regime at bar
+  =t= when =Close[t] > EMA(200)[t]=. This is a binary classification,
+  computed only from information available at =t=, using indicator
+  primitives (EMA) that already exist in this codebase
+  (=indicator.EMA=) with no lookahead.
+- *Pullback*: a short-term oversold condition, measured primarily by
+  =RSI(2)[t]= (a 2-period Relative Strength Index) falling into one
+  of the buckets defined below. =close relative to EMA(200)= is
+  itself the regime signal, not the pullback signal — the two are
+  deliberately different measurements of different things (long-term
+  trend vs. short-term extension), matching the hypothesis's own
+  "in a positive long-term trend" (regime) + "after unusually sharp
+  pullbacks" (short-term extension) structure.
+- *Predicted effect*: conditional on Regime[t] = Positive, lower
+  RSI(2) buckets (deeper short-term oversold) predict higher forward
+  returns over the horizons below, on average, with a clear ordered
+  tendency toward higher forward returns as RSI(2) decreases,
+  particularly pronounced at the extreme oversold buckets (B1, B2).
+  This is deliberately not a claim that every bucket must outperform
+  every less-extreme bucket in strict pairwise order — see the
+  Continue/Reject gate's own note on why strict monotonicity across
+  all six buckets is a stronger, and less appropriate, bar than the
+  hypothesis itself requires.
+
+This hypothesis does *not* claim that RSI(2), EMA(200), or any
+particular bucket boundary or threshold is profitable, optimal, or
+tradeable. Those are candidate observables and predeclared buckets to
+test, not conclusions. A failure to observe the predicted pattern —
+no effect, an effect with the wrong sign, or an effect too weak or
+inconsistent to distinguish from noise — is a valid, complete research
+result (see Interpretation, below), exactly as MR-01 through MR-08
+already established for the FX case.
+
+Initial instrument: *SPY*.
+
+Initial timeframe: *D1*.
+
+** Falsifiability
+
+This hypothesis is false, or at minimum not supported by this
+protocol's own evidence bar, if any of the following hold across the
+development and validation partitions:
+
+- forward returns conditional on Regime = Positive do not show higher
+  mean/median return in the extreme oversold buckets (B1, B2) than in
+  the non-extreme buckets (B5, B6), at economically/statistically
+  meaningful horizons;
+- there is no clear ordered tendency toward higher forward returns as
+  RSI(2) decreases — for example, a non-extreme bucket outperforms a
+  more extreme one by a wide, consistent margin, rather than the
+  ordinary noise a middle bucket (B3/B4) may show without contradicting
+  an otherwise-real extreme-pullback effect;
+- the effect appears in only one of the two partitions (development
+  without validation, or vice versa);
+- the effect is not distinguishable from zero once dispersion/
+  confidence-interval width is accounted for (see Required
+  Measurements).
+
+* Data Partitions
+
+Non-overlapping, chronological, frozen before any measurement:
+
+| Partition       | Start        | End                                     |
+|-----------------+--------------+------------------------------------------|
+| Development      | 2005-02-25   | 2018-12-31                               |
+| Validation        | 2019-01-01   | 2022-12-31                               |
+| Final holdout     | 2023-01-01   | 2026-09-04 (frozen at protocol-freeze date) |
+
+** Development start: 2005-01-01 is not available
+
+The protocol issue specifies a nominal development start of
+2005-01-01, with an explicit instruction to use the first available
+complete session as the effective start if canonical history begins
+later. SPY's canonical raw archive
+(=/srv/trading/data/raw/stooq/spy_us_d.csv=, Stooq, the same source
+ADR-047/ADR-048 already document) begins *2005-02-25*, not
+2005-01-01. Development therefore starts 2005-02-25, recorded here per
+the issue's own rule, not silently assumed.
+
+** Final holdout end: frozen now, subject to canonical-coverage confirmation
+
+The protocol issue specifies the final holdout's end as "the latest
+complete canonical session available when the protocol is frozen." As
+of this document's freeze date, the raw Stooq SPY archive's latest row
+is *2026-09-04*. That date is recorded here as the frozen holdout end
+— a fixed boundary, not a moving "whatever is available later" target
+— but it must be reconfirmed against Trader's own *built canonical
+store* (via =marketdata.Manager.Coverage=/=trader data coverage=, not
+just the raw provider archive) before any later EQR-01 issue reads
+this boundary to build the holdout dataset. The raw archive and
+Trader's canonical store are not guaranteed to already agree; if
+canonical coverage lags behind the raw archive's own latest date, the
+earlier (canonical) date governs, and that discrepancy must be
+recorded rather than silently resolved by re-syncing further and
+moving the boundary.
+
+** Provider and adjustment consistency across all three partitions
+
+*All three partitions use the same provider (Stooq) and the same
+adjustment mode (split-adjusted, =AdjustmentSplitAdjusted=, ADR-048)*.
+Switching providers or adjustment modes between development/validation
+and the final holdout would introduce a confound (different vendors'
+OHLC values, or different corporate-action handling, are not
+guaranteed to agree exactly) that could not be distinguished from a
+genuine partition-to-partition difference in the phenomenon itself.
+This is a protocol decision made explicitly here — the issue itself
+did not pin a specific provider — rather than left to be decided
+per-partition later.
+
+One consequence, recorded honestly as a known limitation: Stooq's SPY
+data is split-adjusted only, with no dividend/total-return
+reinvestment (ADR-048's own confirmed finding). SPY has paid regular
+dividends throughout the full 2005-2026 span. This has a small effect
+on measured close-to-close returns at the 1-10 trading-day horizons
+this protocol measures (an ex-dividend-day drop of roughly a
+dividend's worth is a real but small fraction of typical daily
+volatility), but it means measured forward returns are price returns,
+not total returns. This must be stated alongside any reported result,
+not silently treated as total return.
+
+** Trading-day and session provenance
+
+"Trading day" and forward-return horizons measured in trading days use
+Trader's =marketdata.USEquityCalendar= (ADR-049) as the sole authority
+for which calendar dates are real NYSE/Nasdaq trading sessions.
+=USEquityCalendar= itself carries no built-in holiday data (ADR-049's
+own doc comment) — it must be explicitly configured with
+=StandardUSEquityHolidays= for the full set of calendar years this
+protocol's partitions span (2005 through the frozen holdout end year),
+including that function's own half-day set (currently the day after
+Thanksgiving), for a reproducible result. Any later EQR-01 issue that
+constructs a =USEquityCalendar= for this protocol must record that it
+used =StandardUSEquityHolidays= with that exact year range as part of
+its own run provenance — a differently configured calendar (a narrower
+year range, or a bare unconfigured =USEquityCalendar{}= with no
+holiday data at all) would misclassify real NYSE holidays as trading
+days and is not an equivalent, reproducible substitute. A forward-return
+horizon of "5 trading days" means 5 real session-labeled D1 bars
+forward, per =USEquityCalendar.Bar=/=Session=, never 5 calendar days or
+a naive
+weekday count.
+
+* Holdout Access Policy
+
+The final holdout partition (2023-01-01 through the frozen end date
+above) is *not available* for:
+
+- iterative hypothesis development,
+- threshold or bucket-boundary selection,
+- parameter tuning of any kind,
+- feature selection,
+- repeated agent-driven or human-driven experimentation of any form.
+
+It may be opened only after all of the following have occurred, in
+order:
+
+1. the hypothesis and any candidate strategy rules derived from it are
+   frozen (this document, plus any later EQR-01 strategy-definition
+   issue, if one is reached);
+2. development-partition work is complete and its results are
+   recorded as a durable research artifact under =docs/research/=;
+3. validation-partition results have been produced and reviewed
+   against the Continue/Reject criteria below;
+4. an explicit Continue decision — recorded in a durable document, not
+   only asserted in conversation or a PR description — states that a
+   final holdout test is warranted.
+
+Once opened, the holdout result is *evidence*, not a new optimization
+dataset. No bucket boundary, threshold, horizon, or observable may be
+changed after the holdout is opened. If the holdout result disagrees
+with development/validation, that disagreement itself is the
+reported finding — it is not grounds to revise the protocol
+retroactively and re-run.
+
+No code, prompt, or agent instruction — in this issue or any later
+EQR-01 issue — may read, query, or compute against data inside the
+final holdout range before that explicit Continue decision exists.
+
+* Candidate Observables
+
+Predeclared for the first experiment. Not a broad parameter
+optimizer — exactly the set below, no sweep across additional
+lookbacks, smoothing methods, or indicator variants.
+
+** RSI(2)
+
+A 2-period Relative Strength Index, computed on D1 closes. RSI(2)
+does not yet exist in this codebase's =indicator= package (confirmed:
+only =indicator.SMA=, =RollingStdDev=, =ZScore=, and =EMA= exist as of
+this protocol's freeze). Implementing it is explicit *out of scope*
+for this issue (see Out of Scope) and is the natural next EQR-01
+issue.
+
+RSI(2) is undefined during warmup (fewer than 2 prior bars available,
+plus whatever additional warmup RSI's own smoothing method requires)
+and is excluded from observations during that period — the same
+"no observation until the rolling window is ready" discipline MR-01
+already established for its own rolling Z-score.
+
+** Regime: Close vs. EMA(200)
+
+=indicator.EMA= already exists. Regime[t] = Positive iff
+=Close[t] > EMA(200)[t]=; otherwise Non-Positive. EMA(200) is
+undefined during its own warmup and excluded from observations during
+that period, matching RSI(2)'s own rule.
+
+** Optional: N-day simple return
+
+The issue names a simple N-day return as an *optional* second,
+independently interpretable pullback measure. This protocol does not
+pin a specific N: doing so would invent a parameter value the issue
+itself left open ("optionally"), rather than leaving it to the
+implementing issue's own explicit, predeclared choice. If a later
+EQR-01 issue adds this observable, it must predeclare its own N and
+bucket definition in its own frozen specification (or an amendment to
+this one) before any measurement — not silently after seeing RSI(2)
+results.
+
+* Buckets and Horizons
+
+** RSI(2) buckets
+
+Six predeclared buckets, each inclusive at its lower bound and
+exclusive at its upper bound, except B6, which additionally includes
+100 (RSI is bounded to [0, 100], so 100 must belong to some bucket):
+
+| Bucket | Range         |
+|--------+---------------|
+| B1      | [0, 5)        |
+| B2      | [5, 10)       |
+| B3      | [10, 20)      |
+| B4      | [20, 30)      |
+| B5      | [30, 50)      |
+| B6      | [50, 100]     |
+
+The issue's own bucket list ("0-5, 5-10, ...") did not state whether
+edges are inclusive or exclusive. This protocol resolves that
+explicitly — inclusive lower bound, exclusive upper bound, B6 closed
+at 100 — matching MR-01's own explicit-inequality precedent
+(=-2.0 <= Z < -1.0=, etc.) rather than leaving an ambiguous edge case
+to be decided ad hoc during implementation.
+
+Bucket boundaries are frozen. They may be changed later only as a
+documented new experiment with its own frozen specification — never
+silently after inspecting EQR-01's own results.
+
+** Forward-return horizons
+
+Measured in real trading days (=USEquityCalendar=-defined sessions),
+close-to-close:
+
+- 1 trading day
+- 2 trading days
+- 3 trading days
+- 5 trading days
+- 10 trading days
+
+For an observation at bar =t= with =N= trading days available forward
+within the same partition:
+
+  R[N] = (Close[t+N] - Close[t]) / Close[t]
+
+An observation whose horizon would extend past the end of its own
+partition (in particular, near a partition boundary) is excluded for
+that horizon rather than reaching across partitions for its label —
+this is what keeps development, validation, and holdout genuinely
+non-overlapping at the label level, not only at the observation-time
+level.
+
+* Required Measurements
+
+For every (Regime, RSI(2) bucket, horizon) combination, computed
+separately per partition (development and validation; holdout only
+after it is opened per the access policy above), record at least:
+
+- observation count;
+- mean forward return;
+- median forward return;
+- positive-return percentage (fraction of observations with
+  =R[N] > 0=);
+- standard deviation of forward return (explicit dispersion measure);
+- a 95% confidence interval or bootstrap estimate of the mean forward
+  return, where practical — the predeclared default method is a
+  nonparametric bootstrap of the mean (2,000 resamples with
+  replacement, 95% percentile interval), used unless a later issue
+  documents and freezes a different method before results are
+  examined;
+- enough provenance to reproduce the calculation: instrument, provider
+  ("stooq"), adjustment mode ("split-adjusted"), calendar
+  (=USEquityCalendar= configured with the specific
+  =StandardUSEquityHolidays= year range used — see Trading-day and
+  session provenance, above), interval (D1), partition name and exact
+  date range, RSI/EMA parameters, and
+  bucket/horizon definitions — mirroring the provenance discipline
+  =analysis.EventStudyConfig= already established for MR-01
+  (instrument/interval/parameters as required, validated fields, not
+  merely documented).
+
+The unconditional (all-regime, not filtered to Regime = Positive)
+version of the same table is also computed and reported as a secondary,
+exploratory comparison — see Research Hypothesis's own note that the
+primary confirmatory test is conditioned on Regime = Positive. The two
+must never be blended into one number.
+
+** Minimum evidence requirement
+
+No conclusion is drawn from a (Regime, bucket, horizon) cell with
+fewer than 30 observations, matching MR-01's own precedent exactly.
+Counts below that threshold are reported as insufficient evidence, not
+as positive or negative evidence, and are still shown in the results
+table rather than omitted.
+
+* Continue / Reject Gate
+
+This gate must be evaluated after validation-partition results exist
+and before any final holdout access is even considered.
+
+** Why an ordered tendency, not strict pairwise monotonicity
+
+An earlier draft of this gate required mean/median forward return to
+be monotonically higher in every lower RSI(2) bucket than in every
+higher bucket — B1 > B2 > B3 > B4 > B5 > B6, strictly, pairwise. That
+bar is stronger than the hypothesis itself needs and could reject a
+genuine, economically meaningful extreme-pullback effect for the wrong
+reason: a real effect concentrated in the most extreme buckets (B1,
+B2) is still meaningful evidence for short-term mean reversion after
+sharp pullbacks even if the middle buckets (B3/B4/B5, which by
+construction capture progressively milder, less "unusually sharp"
+pullbacks the hypothesis is not centrally about) are noisy or
+unordered among themselves. This decision is recorded here, before any
+SPY measurement has been produced or examined, precisely so it cannot
+be read as loosening the bar after seeing a result.
+
+** Continue (proceed to backtestable strategy design, and only then consider a final holdout test)
+
+All of the following:
+
+- under Regime = Positive, mean and median forward return are clearly
+  higher in the extreme oversold buckets (B1 and B2) than in the
+  non-extreme buckets (B5 and B6), at least at one or more of the
+  1/2/3-trading-day horizons, in *both* the development and validation
+  partitions independently — an ordered tendency toward higher forward
+  returns as RSI(2) decreases, not a requirement that every bucket
+  strictly outperform every less-extreme bucket in pairwise order (see
+  above); ordinary noise among the middle buckets (B3/B4) does not by
+  itself defeat this criterion, but a middle or high bucket
+  substantially and consistently outperforming a more extreme bucket
+  does;
+- the relevant extreme-oversold buckets (B1, B2) meet the minimum
+  observation-count threshold in both partitions;
+- the effect's bootstrap/confidence interval excludes zero for at
+  least the most extreme bucket (B1) at the horizon(s) showing the
+  effect, in both partitions;
+- the unconditional (all-regime) comparison is weaker or absent,
+  supporting that the regime condition is doing real work rather than
+  the effect being a generic RSI(2) pattern unrelated to trend.
+
+** Reject (record as a negative result; do not proceed to strategy implementation)
+
+Any of:
+
+- no ordered tendency toward higher forward returns as RSI(2)
+  decreases in either partition (in particular, the extreme oversold
+  buckets do not outperform the non-extreme buckets);
+- a pattern present in one partition but absent or reversed in the
+  other;
+- effect sizes statistically indistinguishable from zero at the
+  relevant buckets/horizons in either partition;
+- insufficient observation counts throughout the relevant buckets in
+  either partition.
+
+A Reject outcome is a complete, valid, and required research
+deliverable — recorded with the same rigor as a Continue outcome, per
+the Research Guardrails below. It does not trigger a parameter search
+for a bucket/horizon combination that does happen to look positive;
+MR-08's own precedent (closing MR-05 through MR-07 unimplemented after
+MR-04's own Weak/Inconclusive result) is the model to follow here.
+
+** Interpretation classes
+
+Mirroring MR-01/MR-04's own three-way classification:
+
+- *Supported*: meets the Continue bar above.
+- *Weak / Inconclusive*: some expected behavior present but
+  inconsistent across partitions, horizons, or the extreme-bucket
+  ordering above, or sample counts too small in some cells — treated
+  as Reject for the
+  purpose of proceeding to strategy work, but recorded distinctly from
+  a clean Reject.
+- *Not Supported*: no consistent tendency, or a pattern with the wrong
+  sign, or continuation (momentum) often enough to contradict the
+  stated hypothesis outright.
+
+"Not Supported" and "Weak / Inconclusive" are both successful,
+complete research results. Neither triggers threshold or bucket
+re-optimization against the same data.
+
+* Research Guardrails
+
+- Hypothesis before test — this document exists before any RSI(2)
+  computation is implemented or run.
+- Development data before validation; validation before any
+  Continue/Reject decision; that decision before any final holdout
+  access.
+- Final holdout remains untouched until the explicit final decision
+  point defined above.
+- No parameter mining against the holdout, and no parameter mining
+  against development or validation either, beyond the single
+  predeclared bucket/horizon grid above — this is an event-study
+  measurement, not an optimizer.
+- No silent changes to bucket or horizon definitions after seeing
+  results; a change requires a new, separately frozen specification.
+- Negative and inconclusive results are recorded as first-class
+  research output, not omitted or downplayed.
+- Exploratory findings (for example, an interesting pattern noticed
+  outside the predeclared grid) are labeled exploratory and are never
+  presented as confirmatory evidence for the frozen hypothesis.
+- Exact dataset/provider/adjustment/calendar provenance is preserved
+  and reported with every measurement (see Required Measurements).
+- Trader's own deterministic calculations (canonical bar data,
+  indicator primitives, the event-study/statistics computation) are
+  the source of evidence. An LLM may propose follow-up hypotheses,
+  summarize machine-produced results, or critique methodology, but
+  must never manufacture, estimate, or substitute a numeric result in
+  place of an actual Trader computation.
+
+* AI / Agent Research Rules
+
+This milestone is the first trial of an agent-assisted Trader research
+workflow (per issue #315's own framing). These rules are binding on
+any agent (or human) working on EQR-01 issues.
+
+** Agents may
+
+- propose follow-up hypotheses and bounded experiment designs;
+- implement bounded, predeclared experiments (indicator/analysis
+  primitives, event-study runners) strictly within an already-frozen
+  specification;
+- run deterministic Trader research/backtest commands against
+  development and (once unlocked) validation data;
+- summarize machine-produced, reproducible results;
+- challenge assumptions and identify leakage, survivorship,
+  timestamp, fill, or statistical problems in the protocol or its
+  implementation.
+
+** Agents must not
+
+- access, query, or compute against the final holdout partition during
+  development or validation work, under any framing (including
+  "just checking coverage" or "just confirming the date range" beyond
+  what this document's own provenance-confirmation step requires,
+  which touches only coverage metadata, never holdout bar values or
+  computed statistics);
+- silently change the hypothesis, buckets, horizons, or partitions
+  after observing any result;
+- treat generated narrative, summary prose, or an LLM's own estimate
+  as evidence in place of a Trader-computed statistic;
+- sit in, or be invoked from within, the deterministic trading/risk/
+  execution path — this research workflow produces evidence and
+  documents, never live or backtested order flow, by construction (no
+  strategy exists yet to place such a workflow inside).
+
+** Adversarial review requirement
+
+A separate review pass — not the same agent or person who ran the
+development/validation measurement — must act as an adversarial
+research critic (checking for lookahead, multiple-comparison
+inflation, partition leakage, and misclassified Continue/Reject
+outcomes) before any Continue decision is accepted and before the
+final holdout is opened.
+
+* Out of Scope for This Issue (#315 / EQR-01A)
+
+- Implementing RSI(2) itself.
+- Running the EQR-01 phenomenon experiment (development or
+  validation).
+- Selecting or tuning optimal thresholds.
+- Implementing any equity trading strategy.
+- Reading, querying, or computing against validation or final holdout
+  data.
+
+These are explicitly deferred to later EQR-01 issues, each of which
+must reference this document as its frozen specification rather than
+restating or silently varying it.
+
+* Relationship to Later Issues
+
+Following the MR-01-through-MR-08 pattern this protocol mirrors, the
+expected (not yet numbered) sequence is:
+
+1. An analytical-primitives issue implementing RSI(2) in the
+   =indicator= package (mirroring =indicator.EMA='s existing shape),
+   with its own unit tests and no dependency on this protocol's
+   buckets/horizons.
+2. An event-study/measurement issue implementing the (Regime, RSI(2)
+   bucket, horizon) forward-return computation in the =analysis=
+   package — a new capability, not a reuse of the existing
+   =analysis.EventStudy=/=Bucket= types, which are hardcoded to MR-01's
+   five Z-score buckets and H1-hour horizons and are not generic
+   across observables (confirmed by reading =analysis/bucket.go='s own
+   doc comment: "Bucket identifies one of the five fixed Z-score
+   buckets... not a tunable configuration value"). The architectural
+   pattern (indicator computes a value; analysis derives a bucketed,
+   provenance-carrying observation; nothing decides to trade) is
+   reused; the concrete types are not.
+3. A development-partition execution issue running the frozen protocol
+   against 2005-02-25 through 2018-12-31 and recording results under
+   =docs/research/=.
+4. A validation-partition execution issue running the identical,
+   unmodified protocol against 2019-01-01 through 2022-12-31 and
+   evaluating the Continue/Reject gate.
+5. Conditional on Continue: a final-holdout issue, gated by the
+   explicit decision process above, plus (only after that) a
+   backtestable-strategy design issue.
+
+Exact issue numbers are assigned when each is created; this document
+is the frozen reference every one of them must cite rather than
+re-deriving or silently varying.
+
+* Completion Criteria for Issue #315
+
+Issue #315 is complete when:
+
+- this specification is committed under =docs/research/= and
+  referenced from issue #315;
+- the hypothesis is written explicitly and is falsifiable;
+- development, validation, and final holdout ranges are frozen and
+  documented, including the resolution of the 2005-01-01 and
+  "latest complete session" ambiguities the source issue itself
+  flagged;
+- the final-holdout access policy is explicit;
+- initial SPY D1 phenomenon measurements (RSI(2) buckets, regime
+  filter, forward-return horizons) are predeclared;
+- required statistical outputs are defined;
+- dataset/provider/adjustment/session provenance requirements are
+  defined;
+- AI/agent permissions and prohibitions are documented;
+- a Continue/Reject gate is defined before any strategy implementation
+  begins;
+- no RSI implementation, experiment execution, threshold selection, or
+  strategy implementation has been introduced.
